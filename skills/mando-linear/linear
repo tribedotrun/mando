@@ -1,0 +1,370 @@
+#!/bin/bash
+# Linear CLI wrapper - reduces context window usage vs MCP plugin
+# Usage: linear <command> [args]
+#
+# Setup:
+#   1. Get API key: Linear Settings > Account > API
+#   2. Add to ~/.zshrc: export LINEAR_API_KEY="lin_api_..."
+#   3. Mando app installs this automatically to ~/.claude/skills/mando-linear/
+
+set -e
+
+API_URL="https://api.linear.app/graphql"
+
+gql() {
+  curl -s -X POST "$API_URL" \
+    -H "Authorization: $LINEAR_API_KEY" \
+    -H "Content-Type: application/json" \
+    -d "{\"query\": \"$1\"}" | jq -r "$2"
+}
+
+gql_raw() {
+  curl -s -X POST "$API_URL" \
+    -H "Authorization: $LINEAR_API_KEY" \
+    -H "Content-Type: application/json" \
+    -d "{\"query\": \"$1\"}"
+}
+
+# gql_json - send a pre-built JSON payload (for complex mutations with special chars)
+gql_json() {
+  curl -s -X POST "$API_URL" \
+    -H "Authorization: $LINEAR_API_KEY" \
+    -H "Content-Type: application/json" \
+    -d @-
+}
+
+get_issue_data() {
+  # Parse ABR-123 into team=ABR, number=123
+  local id="$1"
+  local team="${id%-*}"
+  local num="${id##*-}"
+  gql_raw "{ issues(filter: { number: { eq: $num }, team: { key: { eq: \\\"$team\\\" } } }, first: 1) { nodes { id identifier title state { name } assignee { name } labels { nodes { name } } description priority } } }"
+}
+
+resolve_id() {
+  # ABR-123 → UUID for GraphQL mutations
+  local id="$1"
+  local uuid
+  uuid=$(get_issue_data "$id" | jq -r '.data.issues.nodes[0].id')
+  if [ -z "$uuid" ] || [ "$uuid" = "null" ]; then
+    echo "Issue '$id' not found" >&2
+    exit 1
+  fi
+  echo "$uuid"
+}
+
+case "$1" in
+  get)
+    # linear get ABR-123
+    get_issue_data "$2" | jq '.data.issues.nodes[0] | {
+      id: .id,
+      identifier: .identifier,
+      title: .title,
+      state: .state.name,
+      priority: .priority,
+      assignee: .assignee.name,
+      labels: [.labels.nodes[].name],
+      description: .description
+    }'
+    ;;
+
+  get-by-id)
+    # linear get-by-id <uuid>
+    id="$2"
+    gql_raw "{ issue(id: \\\"$id\\\") { id identifier title state { name } assignee { name } labels { nodes { name } } description } }" | jq '{
+      id: .data.issue.id,
+      identifier: .data.issue.identifier,
+      title: .data.issue.title,
+      state: .data.issue.state.name,
+      assignee: .data.issue.assignee.name,
+      labels: [.data.issue.labels.nodes[].name],
+      description: .data.issue.description
+    }'
+    ;;
+
+  search)
+    # linear search "query" - search in title/description
+    query="$2"
+    jq -n --arg q "$query" '{
+      query: "query($q: String!) { issues(filter: { or: [ { title: { containsIgnoreCase: $q } }, { description: { containsIgnoreCase: $q } } ] }, first: 10) { nodes { identifier title state { name } } } }",
+      variables: { q: $q }
+    }' | gql_json | jq '.data.issues.nodes[] | "\(.identifier): \(.title) [\(.state.name)]"' -r
+    ;;
+
+  my)
+    # linear my - list my issues
+    gql_raw "{ viewer { assignedIssues(first: 20, filter: { state: { type: { nin: [\\\"completed\\\", \\\"canceled\\\"] } } }) { nodes { identifier title state { name } priority } } } }" | jq '.data.viewer.assignedIssues.nodes[] | "\(.identifier): \(.title) [\(.state.name)]"' -r
+    ;;
+
+  create)
+    # linear create <team> "title" [-d "desc"] [-l "label"] [-p 1-4]
+    shift  # remove 'create'
+    team="$1"
+    title="$2"
+    shift 2  # remove team and title
+
+    desc=""
+    labels=()
+    priority=3  # default: medium (0=none, 1=urgent, 2=high, 3=medium, 4=low)
+    parent=""
+
+    # Parse flags
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        -d|--description) desc="$2"; shift 2 ;;
+        -l|--label) labels+=("$2"); shift 2 ;;
+        -p|--priority) priority="$2"; shift 2 ;;
+        --parent) parent="$2"; shift 2 ;;
+        *) shift ;;
+      esac
+    done
+
+    # Get team ID
+    team_id=$(gql_raw "{ teams(filter: { key: { eq: \\\"$team\\\" } }) { nodes { id } } }" | jq -r '.data.teams.nodes[0].id')
+    if [ -z "$team_id" ] || [ "$team_id" = "null" ]; then
+      echo "Team '$team' not found"
+      exit 1
+    fi
+
+    # Resolve label IDs
+    label_ids=()
+    for label_name in "${labels[@]}"; do
+      label_id=$(jq -n --arg name "$label_name" '{
+        query: "query($name: String!) { issueLabels(filter: { name: { eqIgnoreCase: $name } }) { nodes { id } } }",
+        variables: { name: $name }
+      }' | gql_json | jq -r '.data.issueLabels.nodes[0].id')
+      if [ -z "$label_id" ] || [ "$label_id" = "null" ]; then
+        echo "Warning: Label '$label_name' not found, skipping"
+      else
+        label_ids+=("$label_id")
+      fi
+    done
+
+    # Build label IDs array for GraphQL
+    label_ids_json="[]"
+    if [ ${#label_ids[@]} -gt 0 ]; then
+      label_ids_json=$(printf '%s\n' "${label_ids[@]}" | jq -R . | jq -s .)
+    fi
+
+    # Resolve parent ID if specified (e.g., ABR-123 -> UUID)
+    parent_id=""
+    if [ -n "$parent" ]; then
+      # Validate parent format (TEAM-123)
+      if ! [[ "$parent" =~ ^[A-Za-z]+-[0-9]+$ ]]; then
+        echo "Error: Invalid parent format '$parent'. Expected format: ABR-123"
+        exit 1
+      fi
+      parent_team="${parent%-*}"
+      parent_num="${parent##*-}"
+      parent_id=$(gql_raw "{ issues(filter: { number: { eq: $parent_num }, team: { key: { eq: \\\"$parent_team\\\" } } }, first: 1) { nodes { id } } }" | jq -r '.data.issues.nodes[0].id')
+      if [ -z "$parent_id" ] || [ "$parent_id" = "null" ]; then
+        echo "Warning: Parent '$parent' not found, skipping"
+        parent_id=""
+      fi
+    fi
+
+    # Create issue - single mutation handles all optional fields
+    # parentId is nullable in GraphQL, so we always include it (null when not specified)
+    parent_id_json="null"
+    if [ -n "$parent_id" ]; then
+      parent_id_json="\"$parent_id\""
+    fi
+
+    # desc can be empty string (GraphQL accepts null/empty for optional String)
+    jq -n --arg teamId "$team_id" --arg title "$title" --arg desc "$desc" \
+      --argjson labelIds "$label_ids_json" --argjson priority "$priority" \
+      --argjson parentId "$parent_id_json" \
+      '{
+        query: "mutation($teamId: String!, $title: String!, $desc: String, $labelIds: [String!], $priority: Int, $parentId: String) { issueCreate(input: { teamId: $teamId, title: $title, description: $desc, labelIds: $labelIds, priority: $priority, parentId: $parentId }) { success issue { identifier title url } } }",
+        variables: { teamId: $teamId, title: $title, desc: $desc, labelIds: $labelIds, priority: $priority, parentId: $parentId }
+      }' | gql_json | jq '.data.issueCreate.issue | "\(.identifier): \(.title)\n\(.url)"' -r
+    ;;
+
+  update)
+    # linear update ABR-123 "field=value" (title, priority)
+    # linear update ABR-123 description <<< "multi-line desc" (reads from stdin)
+    id=$(resolve_id "$2")
+    field_value="$3"
+    field="${field_value%%=*}"
+    value="${field_value#*=}"
+
+    case "$field" in
+      title)
+        jq -n --arg id "$id" --arg title "$value" '{
+          query: "mutation($id: String!, $title: String!) { issueUpdate(id: $id, input: { title: $title }) { success issue { identifier title } } }",
+          variables: { id: $id, title: $title }
+        }' | gql_json | jq '.data.issueUpdate.issue | "\(.identifier): \(.title)"' -r
+        ;;
+      description)
+        # Read from stdin if available, otherwise use value after =
+        if [ ! -t 0 ]; then
+          value=$(cat)
+        fi
+        jq -n --arg id "$id" --arg desc "$value" '{
+          query: "mutation($id: String!, $desc: String!) { issueUpdate(id: $id, input: { description: $desc }) { success issue { identifier title } } }",
+          variables: { id: $id, desc: $desc }
+        }' | gql_json | jq '.data.issueUpdate.issue | "\(.identifier): updated description"' -r
+        ;;
+      priority)
+        jq -n --arg id "$id" --argjson priority "$value" '{
+          query: "mutation($id: String!, $priority: Int!) { issueUpdate(id: $id, input: { priority: $priority }) { success issue { identifier priority } } }",
+          variables: { id: $id, priority: $priority }
+        }' | gql_json | jq '.data.issueUpdate.issue | "\(.identifier): priority=\(.priority)"' -r
+        ;;
+      *)
+        echo "Unknown field: $field (supported: title, description, priority)"
+        exit 1
+        ;;
+    esac
+    ;;
+
+  status)
+    # linear status ABR-123 "In Progress"
+    id=$(resolve_id "$2")
+    state="$3"
+    team="${2%-*}"
+
+    # Resolve state name → stateId via team
+    states_data=$(gql_raw "{ teams(filter: { key: { eq: \\\"$team\\\" } }) { nodes { states { nodes { id name } } } } }")
+    state_id=$(echo "$states_data" | jq -r ".data.teams.nodes[0].states.nodes[] | select(.name == \"$state\") | .id")
+
+    if [ -z "$state_id" ] || [ "$state_id" = "null" ]; then
+      echo "State '$state' not found. Available states:"
+      echo "$states_data" | jq -r '.data.teams.nodes[0].states.nodes[].name'
+      exit 1
+    fi
+
+    jq -n --arg id "$id" --arg stateId "$state_id" '{
+      query: "mutation($id: String!, $stateId: String!) { issueUpdate(id: $id, input: { stateId: $stateId }) { success issue { identifier title state { name } } } }",
+      variables: { id: $id, stateId: $stateId }
+    }' | gql_json | jq '.data.issueUpdate.issue | "\(.identifier): \(.title) -> \(.state.name)"' -r
+    ;;
+
+  comment)
+    # linear comment ABR-123 "comment text"
+    id=$(resolve_id "$2")
+    body="$3"
+    jq -n --arg id "$id" --arg body "$body" '{
+      query: "mutation($id: String!, $body: String!) { commentCreate(input: { issueId: $id, body: $body }) { success comment { id } } }",
+      variables: { id: $id, body: $body }
+    }' | gql_json | jq -r '.data.commentCreate | "success=\(.success) id=\(.comment.id)"'
+    ;;
+
+  comment-list)
+    # linear comment-list ABR-123 — list comments (id + body preview)
+    id=$(resolve_id "$2")
+    jq -n --arg id "$id" '{
+      query: "query($id: String!) { issue(id: $id) { comments { nodes { id body createdAt user { name } } } } }",
+      variables: { id: $id }
+    }' | gql_json | jq -r '.data.issue.comments.nodes[] | "\(.id)\t\(.user.name // "?")\t\(.body[0:80] | gsub("\n"; " "))"'
+    ;;
+
+  comment-update)
+    # linear comment-update <comment-uuid> "new body"
+    comment_id="$2"
+    body="$3"
+    jq -n --arg id "$comment_id" --arg body "$body" '{
+      query: "mutation($id: String!, $body: String!) { commentUpdate(id: $id, input: { body: $body }) { success comment { id } } }",
+      variables: { id: $id, body: $body }
+    }' | gql_json | jq -r '.data.commentUpdate.success'
+    ;;
+
+  comment-delete)
+    # linear comment-delete <comment-uuid>
+    comment_id="$2"
+    jq -n --arg id "$comment_id" '{
+      query: "mutation($id: String!) { commentDelete(id: $id) { success } }",
+      variables: { id: $id }
+    }' | gql_json | jq -r '.data.commentDelete.success'
+    ;;
+
+  label)
+    # linear label ABR-123 "label-name" — ADDS label (does not replace existing)
+    id=$(resolve_id "$2")
+    label_name="$3"
+    label_id=$(jq -n --arg name "$label_name" '{
+      query: "query($name: String!) { issueLabels(filter: { name: { eq: $name } }) { nodes { id name } } }",
+      variables: { name: $name }
+    }' | gql_json | jq -r '.data.issueLabels.nodes[0].id')
+    if [ -z "$label_id" ] || [ "$label_id" = "null" ]; then
+      echo "Label '$label_name' not found"
+      exit 1
+    fi
+    jq -n --arg id "$id" --arg labelId "$label_id" '{
+      query: "mutation($id: String!, $labelId: [String!]!) { issueUpdate(id: $id, input: { addedLabelIds: $labelId }) { success issue { identifier labels { nodes { name } } } } }",
+      variables: { id: $id, labelId: [$labelId] }
+    }' | gql_json | jq '.data.issueUpdate.issue | "\(.identifier): labels=\([.labels.nodes[].name])"' -r
+    ;;
+
+  unlabel)
+    # linear unlabel ABR-123 "label-name" — REMOVES label
+    id=$(resolve_id "$2")
+    label_name="$3"
+    label_id=$(jq -n --arg name "$label_name" '{
+      query: "query($name: String!) { issueLabels(filter: { name: { eq: $name } }) { nodes { id name } } }",
+      variables: { name: $name }
+    }' | gql_json | jq -r '.data.issueLabels.nodes[0].id')
+    if [ -z "$label_id" ] || [ "$label_id" = "null" ]; then
+      echo "Label '$label_name' not found"
+      exit 1
+    fi
+    jq -n --arg id "$id" --arg labelId "$label_id" '{
+      query: "mutation($id: String!, $labelId: [String!]!) { issueUpdate(id: $id, input: { removedLabelIds: $labelId }) { success issue { identifier labels { nodes { name } } } } }",
+      variables: { id: $id, labelId: [$labelId] }
+    }' | gql_json | jq '.data.issueUpdate.issue | "\(.identifier): labels=\([.labels.nodes[].name])"' -r
+    ;;
+
+  delete)
+    # linear delete ABR-123
+    id=$(resolve_id "$2")
+    jq -n --arg id "$id" '{
+      query: "mutation($id: String!) { issueDelete(id: $id) { success } }",
+      variables: { id: $id }
+    }' | gql_json | jq -r --arg id "$id" 'if .data.issueDelete.success then "Deleted \($id)" else "Failed to delete" end'
+    ;;
+
+  states)
+    # linear states <team> - list available states for a team
+    team="$2"
+    gql_raw "{ teams(filter: { key: { eq: \\\"$team\\\" } }) { nodes { states { nodes { name type } } } } }" | jq -r '.data.teams.nodes[0].states.nodes[] | "\(.name) (\(.type))"'
+    ;;
+
+  teams)
+    # linear teams - list teams
+    gql_raw "{ teams { nodes { id name key } } }" | jq -r '.data.teams.nodes[] | "\(.key): \(.name)"'
+    ;;
+
+  *)
+    echo "Usage: linear <command> [args]"
+    echo ""
+    echo "Commands:"
+    echo "  get <ABR-123>                  Get issue by identifier"
+    echo "  get-by-id <uuid>               Get issue by UUID"
+    echo "  search \"query\"                 Search issues"
+    echo "  my                             List my open issues"
+    echo "  create <team> \"title\" [opts]   Create issue (-d, -l, -p)"
+    echo "  update <ABR-123> \"field=val\"   Update issue (title, priority)"
+    echo "  update <ABR-123> description   Update desc (pipe to stdin)"
+    echo "  status <ABR-123> \"State\"       Update issue state"
+    echo "  comment <ABR-123> \"text\"       Add comment to issue"
+    echo "  comment-list <ABR-123>         List comments on issue"
+    echo "  comment-update <uuid> \"text\"   Update comment by ID"
+    echo "  comment-delete <uuid>            Delete comment by ID"
+    echo "  label <ABR-123> \"label\"        Add label to issue"
+    echo "  unlabel <ABR-123> \"label\"      Remove label from issue"
+    echo "  delete <ABR-123>               Delete issue"
+    echo "  states <team>                  List states for a team"
+    echo "  teams                          List teams"
+    echo ""
+    echo "Create flags:"
+    echo "  -d \"desc\"       Description"
+    echo "  -l \"label\"      Label (repeatable)"
+    echo "  -p 1-4          Priority: 1=urgent, 2=high, 3=medium (default), 4=low"
+    echo "  --parent ABR-X  Parent issue (for sub-issues)"
+    echo ""
+    echo "Examples:"
+    echo "  linear create ABR \"fix bug\" -d \"Description\" -l \"mando\""
+    echo "  linear create ABR \"urgent\" -l \"Bug\" -p 1"
+    echo "  linear create ABR \"sub-task\" --parent ABR-123"
+    ;;
+esac

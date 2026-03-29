@@ -1,0 +1,127 @@
+//! Generic picker callbacks (input/reopen/rework/handoff).
+
+use anyhow::Result;
+
+use crate::bot::TelegramBot;
+
+pub(crate) async fn handle_picker(
+    bot: &mut TelegramBot,
+    kind: &str,
+    parts: &[&str],
+    cb_id: &str,
+    cid: &str,
+    mid: i64,
+) -> Result<()> {
+    let action = parts.get(1).copied().unwrap_or("");
+    let aid = parts.get(2).copied().unwrap_or("");
+
+    if action == "cancel" {
+        take_picker_by_kind(bot, kind, aid);
+        bot.api()
+            .answer_callback_query(cb_id, Some("Cancelled"))
+            .await?;
+        let _ = bot.edit_message(cid, mid, "\u{23ed} Cancelled").await;
+        return Ok(());
+    }
+    if action != "pick" {
+        bot.api().answer_callback_query(cb_id, None).await?;
+        return Ok(());
+    }
+    let idx: usize = parts
+        .get(3)
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(usize::MAX);
+    let picker = take_picker_by_kind(bot, kind, aid);
+
+    match picker {
+        Some(p) if idx < p.items.len() => {
+            let item = &p.items[idx];
+            let item_id = &item.id;
+            let raw_title = &item.title;
+            let title = mando_shared::escape_html(raw_title);
+            bot.api()
+                .answer_callback_query(cb_id, Some("Processing\u{2026}"))
+                .await?;
+
+            if kind == "input" {
+                bot.open_input_session(cid, raw_title);
+                let msg = if let Some(ref questions) = item.clarifier_questions {
+                    format!(
+                        "\u{2753} <b>{title}</b>\n\n\
+                         {}\n\n\
+                         Reply with your answers, or send /input cancel to exit.",
+                        mando_shared::escape_html(questions),
+                    )
+                } else {
+                    format!(
+                        "\u{1f9ed} Input: {title}\n\n\
+                         Type extra context for this item, or send /input cancel to exit."
+                    )
+                };
+                let _ = bot.edit_message(cid, mid, &msg).await;
+            } else if kind == "reopen" {
+                bot.pending_reopen.insert(
+                    cid.to_string(),
+                    (item_id.to_string(), raw_title.to_string()),
+                );
+                let _ = bot
+                    .edit_message(
+                        cid,
+                        mid,
+                        &format!(
+                            "\u{1f504} Reopen: {title}\n\n\
+                             Type your feedback \u{2014} what changes are needed?"
+                        ),
+                    )
+                    .await;
+            } else {
+                let _ = bot
+                    .edit_message(cid, mid, &format!("\u{23f3} {kind}: {title}\u{2026}"))
+                    .await;
+                execute_picker_action(bot, kind, cid, item_id, raw_title).await?;
+            }
+        }
+        Some(_) => {
+            bot.api()
+                .answer_callback_query(cb_id, Some("Out of range"))
+                .await?;
+        }
+        None => {
+            bot.api()
+                .answer_callback_query(cb_id, Some("Picker expired"))
+                .await?;
+        }
+    }
+    Ok(())
+}
+
+fn take_picker_by_kind(
+    bot: &mut TelegramBot,
+    kind: &str,
+    aid: &str,
+) -> Option<crate::bot::PickerState> {
+    match kind {
+        "input" => bot.take_input_picker(aid),
+        "reopen" => bot.take_reopen_picker(aid),
+        "rework" => bot.take_rework_picker(aid),
+        "handoff" => bot.take_handoff_picker(aid),
+        _ => None,
+    }
+}
+
+async fn execute_picker_action(
+    bot: &TelegramBot,
+    kind: &str,
+    cid: &str,
+    item_id: &str,
+    title: &str,
+) -> Result<()> {
+    use crate::callback_actions;
+    match kind {
+        "reopen" => Ok(()),
+        "rework" => callback_actions::rework(bot, cid, item_id, title).await,
+        "handoff" => callback_actions::handoff(bot, cid, item_id, title).await,
+        "input" => Ok(()),
+        _ => Ok(()),
+    }
+}

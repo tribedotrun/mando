@@ -1,0 +1,29 @@
+[package]
+name = "mando-captain"
+version = "0.1.0"
+edition = "2021"
+description = "Autonomous agent orchestrator — task lifecycle, reviews, and interventions"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+
+[dependencies]
+mando-types.workspace = true
+mando-config.workspace = true
+mando-shared.workspace = true
+mando-uuid.workspace = true
+mando-cc.workspace = true
+time.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml.workspace = true
+tokio.workspace = true
+reqwest.workspace = true
+tracing.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+regex = { workspace = true }
+mando-db.workspace = true
+sqlx.workspace = true
+futures = "0.3"
+libc = "0.2"

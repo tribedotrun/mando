@@ -1,0 +1,223 @@
+# ── Mando Scout Workflow ──────────────────────────────────────────────────────
+# Prompt templates and model mappings for the scout system.
+# Loaded once at gateway startup; restart gateway to pick up changes.
+# Prompt templates use Jinja2 syntax: {{ variable }}, {% if %}, etc.
+#
+# Per-user settings (interests, user_context, repo summaries) live in
+# config.json under the "scout" key — not here.
+# ─────────────────────────────────────────────────────────────────────────────
+
+models:
+  process: "default"
+  article: "default"
+  research: "default"
+  qa: "default"
+  act: "default"
+
+# interests, user_context, and repos are injected from config.json at load time.
+interests: {}
+user_context: {}
+repos: []
+
+# ── Prompt Templates ─────────────────────────────────────────────────────────
+
+prompts:
+  process: |
+    You are a reading triage assistant. Score and summarize this content through
+    the lens of the reader described below.
+    {% if user_context %}
+
+    ## Reader Context
+    {{ user_context }}
+    {% endif %}
+
+    ## Interest Profile
+
+    HIGH relevance (score 70-100):
+    {{ interests_high }}
+    MEDIUM relevance (score 40-69):
+    {{ interests_medium }}
+    LOW relevance (score 1-39):
+    {{ interests_low }}
+    Tone: {{ interests_tone }}
+
+    ## Content
+
+    Type: {{ url_type }}
+    Source: {{ url }}
+    Content file: {{ content_path }}
+
+    Read the content file above using the Read tool. The file may be very large (10k+ lines). If a single Read fails or is truncated, read it in chunks using offset and limit parameters (e.g. offset=1 limit=2000, then offset=2001 limit=2000, etc.) until you have consumed the entire file. Do NOT skip any portion of the source material.
+
+    ## Output
+
+    Respond with ONLY a JSON object (no markdown fences, no commentary) with these keys:
+    - "title": short descriptive title (max 80 chars)
+    - "source_name": concise origin/creator name — YouTube: channel name (e.g. "3Blue1Brown"), blogs: author or site (e.g. "Paul Graham"), GitHub: org/user (e.g. "vercel"), arxiv: first author (e.g. "Vaswani et al.")
+    - "date_published": publication date as "YYYY-MM-DD" string, or null if unknown. Check meta tags, bylines, timestamps, content body. YouTube: upload date. Tweets: tweet date. GitHub repos: null.
+    - "relevance_score": integer 0-100 — how relevant to the interest profile above
+    - "quality_score": integer 0-100 — information density, sourcing, depth, regardless of topic
+    - "summary": concise markdown string (MAX 100 words). Focus on non-obvious insights — details, data points, or nuances that a general AI summary would miss. Must cover: (1) What this is about (1-2 sentences), (2) Key insights — specific details, numbers, quotes, or arguments that make this worth reading (3-5 bullets).
+
+  synthesize: |
+    You are an editor. Convert this raw {{ url_type }} transcript/content into a
+    well-structured markdown article optimized for reading.
+
+    Title: {{ title }}
+    Source: {{ url }}
+    {% if user_context %}
+
+    ## Reader Context
+    {{ user_context }}
+    When the article covers topics the reader is less familiar with, briefly
+    define key terms on first use (1 sentence, inline).
+    {% endif %}
+
+    Rules:
+    - TARGET ~2000 words. This is a hard ceiling — do not exceed it.
+    - ZERO information loss at the topic level. Every distinct topic, argument, framework, prediction, and named concept in the source MUST appear — even if only as a single sentence. Omitting an entire topic is the #1 failure mode. Compress within topics (shorter quotes, tighter prose), never by dropping topics entirely.
+    - Create clear ## section headers based on topic shifts.
+    - Preserve the single best quote per section verbatim as a blockquote (> format).
+    - Remove filler, repetition, stuttering, and ad reads.
+    - Keep attributions correct (who said what).
+    - Start with a one-paragraph intro, then sections.
+    - Add a "## Why This Matters" section (1-2 sentences) connecting the content to the reader's domains and interests. Be specific about actionable takeaways.
+    - End with a "## Key Takeaways" section (2-3 bullets).
+    - Output ONLY the markdown article directly as your response text. Do NOT write to files, do NOT add commentary — just the article markdown.
+
+    RAW CONTENT FILE: {{ content_path }}
+
+    Read the content file above using the Read tool. The file may be very large (10k+ lines). If a single Read fails or is truncated, read it in chunks using offset and limit parameters (e.g. offset=1 limit=2000, then offset=2001 limit=2000, etc.) until you have consumed the entire file. Do NOT skip any portion of the source material.
+
+  qa: |
+    You are a reading copilot. The user is reading an article and will ask questions.
+    This is a multi-turn conversation — article context is provided once here.
+    {% if user_context %}
+
+    ## Reader Context
+    {{ user_context }}
+    Adapt your explanations: skip basics in the reader's known domains, but
+    define terms from unfamiliar domains.
+    {% endif %}
+
+    ARTICLE SUMMARY:
+    {{ summary }}
+
+    {% if raw_content_note %}
+
+    ## Original Source Content
+    {{ raw_content_note }}
+    {% endif %}
+
+    Rules:
+    {% if raw_content_note %}- You MUST use the Read tool to load the original source file (listed under "Original Source Content" above) BEFORE answering. The structured article is a summary and may omit details — always ground your answer in the original content.
+    {% endif %}- Be concise — this is a chat
+    - If the answer isn't in the article, say so and offer your own knowledge clearly marked
+    - Use markdown formatting sparingly (bold for emphasis, bullets for lists)
+
+    ## Output
+
+    Respond with ONLY a JSON object (no markdown fences, no commentary):
+    - "answer": your response as a markdown string
+    - "suggested_followups": array of 2-3 natural follow-up questions the reader might ask
+
+    User question: {{ question }}
+
+  research: |
+    You are a research assistant. Find high-quality content tailored to a specific reader.
+
+    ## Reader Profile
+    {% if user_context %}
+    {{ user_context }}
+    {% endif %}
+
+    Key interests (in priority order):
+    {{ interests_high }}
+    Also interested in:
+    {{ interests_medium }}
+    ## Topic
+
+    <user_topic>{{ topic }}</user_topic>
+
+
+
+    ## Tools
+
+    1. **WebSearch** — fast, built-in web search for discovery. Max 10 searches.
+    2. **mando firecrawl** — use for ALL page fetching in research (has timeouts + credit monitoring).
+       Do NOT use WebFetch for research page fetching — it has no timeout and can hang indefinitely
+       when fetching many URLs.
+       - Scrape: `mando firecrawl scrape <url>` — prints markdown to stdout
+
+    ## Budget
+
+    At most 30 tool calls total. Be efficient — broad searches first, then
+    targeted follow-ups. Do NOT exhaustively search every keyword combo.
+
+    ## Search Strategy
+
+    1. If the topic contains a URL, scrape it with Firecrawl first.
+    2. Run WebSearch queries covering different angles:
+       - Direct topic search
+       - Topic + "engineering blog" / "tech blog"
+       - Topic + "conference talk" or "youtube"
+       - Topic + "github" (if code/tools related)
+       - Topic + reader's known domains (from reader profile above)
+    3. Content types to find:
+       - Engineering blog posts (company tech blogs, personal blogs, Medium/Substack)
+       - YouTube videos (conference talks, tutorials, deep dives)
+       - GitHub repositories (if relevant)
+       - Academic papers (foundational AI papers — not obscure niche papers)
+    4. Quality criteria — be VERY selective:
+       - Authoritative sources (known companies, recognized engineers)
+       - Information-dense (not listicles, not shallow overviews, not marketing)
+       - Recent content preferred (last 2 years) but timeless deep dives are fine
+       - Diverse perspectives — don't cluster on one source
+       - Prefer practitioner content ("how we built X") over theoretical
+    5. Return EXACTLY the 10 best links. Curate down to the most useful results.
+       Rank by: relevance to reader profile > information density > authority.
+
+    Respond with ONLY a JSON object (no markdown fences, no commentary):
+    {"links": [
+      {"url": "https://...", "title": "descriptive title", "type": "blog|youtube|github|arxiv", "reason": "why this is worth reading"}
+    ]}
+    Use type "arxiv" for any arxiv.org or ar5iv.labs.arxiv.org URLs. Use "blog" for all other web content.
+
+  act: |
+    You are a task generator. Given an article the user just read and a target project,
+    produce a single actionable coding task that applies an insight from the article to
+    the project — or decide the article has nothing actionable for this project.
+
+    ## Article
+
+    Title: {{ title }}
+    Source: {{ url }}
+
+    {{ summary }}
+
+    {{ content }}
+
+    ## Target Project
+
+    Name: {{ project_name }}
+    {{ project_preamble }}
+    {% if user_prompt %}
+
+    ## User Direction
+
+    {{ user_prompt }}
+    {% endif %}
+
+    ## Rules
+
+    - Produce EXACTLY ONE task, or skip if nothing is actionable for this project.
+    - The task title should be a concrete imperative (e.g., "Add retry logic to API client using exponential backoff pattern from article").
+    - The description should explain WHAT to do, WHY (referencing the article insight), and include the source URL for context.
+    - Do not produce vague tasks like "investigate" or "look into". The task must be implementable by a coding agent without further clarification.
+    - If the user provided direction, focus the task on that angle.
+
+    ## Output
+
+    Respond with ONLY a JSON object (no markdown fences, no commentary):
+    - If actionable: {"title": "imperative task title (max 120 chars)", "description": "markdown description with what/why/source"}
+    - If not actionable: {"skip": true, "reason": "one sentence why this article doesn't apply"}

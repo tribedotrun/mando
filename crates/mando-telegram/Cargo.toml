@@ -1,0 +1,28 @@
+[package]
+name = "mando-telegram"
+version = "0.1.0"
+edition = "2021"
+description = "Telegram bot for task notifications and remote commands"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+
+[[bin]]
+name = "mando-tg"
+path = "src/main.rs"
+
+[dependencies]
+mando-types.workspace = true
+mando-config.workspace = true
+mando-shared.workspace = true
+mando-uuid.workspace = true
+clap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+reqwest.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+tracing-appender.workspace = true
+anyhow.workspace = true
+time.workspace = true

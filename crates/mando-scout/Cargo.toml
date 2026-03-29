@@ -1,0 +1,29 @@
+[package]
+name = "mando-scout"
+version = "0.1.0"
+edition = "2021"
+description = "GitHub integration — PRs, repo scanning, and webhook processing"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+
+[dependencies]
+mando-types.workspace = true
+mando-uuid.workspace = true
+mando-config.workspace = true
+mando-captain.workspace = true
+mando-shared.workspace = true
+mando-db.workspace = true
+sqlx.workspace = true
+time.workspace = true
+mando-readability.workspace = true
+mando-cc.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+reqwest.workspace = true
+tracing.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+urlencoding = "2"
+sha2 = { workspace = true }

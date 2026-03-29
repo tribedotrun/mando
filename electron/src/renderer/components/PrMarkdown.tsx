@@ -1,0 +1,383 @@
+import React from 'react';
+
+/**
+ * Render GitHub-flavored markdown for PR descriptions.
+ * Supports: headings, bold, italic, code (inline + blocks), lists (ordered/unordered),
+ * checkboxes, images, links, blockquotes, horizontal rules.
+ */
+export function PrMarkdown({ text }: { text: string }): React.ReactElement {
+  // Pre-process: strip HTML comments and clean up
+  const cleaned = text
+    .replace(/<!--[\s\S]*?-->/g, '') // strip HTML comments
+    .replace(/\n{3,}/g, '\n\n'); // collapse excessive blank lines
+  const lines = cleaned.split('\n');
+  const elements: React.ReactNode[] = [];
+  let i = 0;
+
+  while (i < lines.length) {
+    const line = lines[i];
+
+    // Fenced code block
+    if (line.trimStart().startsWith('```')) {
+      const codeLines: string[] = [];
+      i++;
+      let foundClose = false;
+      while (i < lines.length) {
+        if (lines[i].trimStart().startsWith('```')) {
+          foundClose = true;
+          i++; // skip closing ```
+          break;
+        }
+        codeLines.push(lines[i]);
+        i++;
+      }
+      if (!foundClose && codeLines.length === 0) {
+        // Lone ``` with no closing — treat as regular text
+        elements.push(
+          <div
+            key={elements.length}
+            className="py-0.5 text-[12px]"
+            style={{ color: 'var(--color-text-1)' }}
+          >
+            {line}
+          </div>,
+        );
+        continue;
+      }
+      elements.push(
+        <pre
+          key={elements.length}
+          className="my-2 overflow-x-auto rounded p-3 text-[11px] leading-relaxed"
+          style={{
+            background: 'var(--color-surface-2)',
+            border: '1px solid var(--color-border-subtle)',
+            fontFamily: 'var(--font-mono)',
+            color: 'var(--color-text-1)',
+          }}
+        >
+          {codeLines.join('\n')}
+        </pre>,
+      );
+      continue;
+    }
+
+    // Horizontal rule
+    if (/^---+$|^\*\*\*+$|^___+$/.test(line.trim())) {
+      elements.push(
+        <hr
+          key={elements.length}
+          className="my-3"
+          style={{ border: 'none', borderTop: '1px solid var(--color-border-subtle)' }}
+        />,
+      );
+      i++;
+      continue;
+    }
+
+    // Headings
+    if (line.startsWith('#### ')) {
+      elements.push(
+        <div
+          key={elements.length}
+          className="mt-3 mb-1 text-[12px] font-semibold"
+          style={{ color: 'var(--color-text-1)' }}
+        >
+          {renderInline(line.slice(5))}
+        </div>,
+      );
+      i++;
+      continue;
+    }
+    if (line.startsWith('### ')) {
+      elements.push(
+        <div
+          key={elements.length}
+          className="mt-3 mb-1 text-[13px] font-semibold"
+          style={{ color: 'var(--color-text-1)' }}
+        >
+          {renderInline(line.slice(4))}
+        </div>,
+      );
+      i++;
+      continue;
+    }
+    if (line.startsWith('## ')) {
+      elements.push(
+        <div
+          key={elements.length}
+          className="mt-4 mb-1.5 text-[14px] font-semibold"
+          style={{ color: 'var(--color-text-1)' }}
+        >
+          {renderInline(line.slice(3))}
+        </div>,
+      );
+      i++;
+      continue;
+    }
+    if (line.startsWith('# ')) {
+      elements.push(
+        <div
+          key={elements.length}
+          className="mt-4 mb-2 text-[16px] font-bold"
+          style={{ color: 'var(--color-text-1)' }}
+        >
+          {renderInline(line.slice(2))}
+        </div>,
+      );
+      i++;
+      continue;
+    }
+
+    // Blockquote (including GitHub admonitions)
+    if (line.startsWith('> ')) {
+      const content = line.slice(2);
+      const admonition = content.match(/^\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]/);
+      if (admonition) {
+        const type = admonition[1];
+        const admonitionColors: Record<string, string> = {
+          NOTE: 'var(--color-accent)',
+          TIP: 'var(--color-success)',
+          IMPORTANT: 'var(--color-accent)',
+          WARNING: 'var(--color-stale)',
+          CAUTION: 'var(--color-error)',
+        };
+        const color = admonitionColors[type] ?? 'var(--color-border)';
+        // Collect continuation lines
+        const bodyLines: string[] = [];
+        const afterTag = content.slice(admonition[0].length).trim();
+        if (afterTag) bodyLines.push(afterTag);
+        i++;
+        while (i < lines.length && lines[i].startsWith('> ')) {
+          bodyLines.push(lines[i].slice(2));
+          i++;
+        }
+        elements.push(
+          <div
+            key={elements.length}
+            className="my-2 rounded px-3 py-2 text-[12px]"
+            style={{
+              background: `color-mix(in srgb, ${color} 8%, transparent)`,
+              border: `1px solid color-mix(in srgb, ${color} 25%, transparent)`,
+            }}
+          >
+            <div className="mb-1 text-[10px] font-semibold uppercase" style={{ color }}>
+              {type}
+            </div>
+            {bodyLines.map((bl, bi) => (
+              <div key={bi} style={{ color: 'var(--color-text-2)' }}>
+                {renderInline(bl)}
+              </div>
+            ))}
+          </div>,
+        );
+        continue;
+      }
+      // Collect consecutive blockquote lines
+      const bqLines = [content];
+      i++;
+      while (i < lines.length && lines[i].startsWith('> ')) {
+        bqLines.push(lines[i].slice(2));
+        i++;
+      }
+      elements.push(
+        <div
+          key={elements.length}
+          className="my-1 pl-3 text-[12px] italic"
+          style={{
+            borderLeft: '2px solid var(--color-border)',
+            color: 'var(--color-text-3)',
+          }}
+        >
+          {bqLines.map((bl, bi) => (
+            <div key={bi}>{renderInline(bl)}</div>
+          ))}
+        </div>,
+      );
+      continue;
+    }
+
+    // Checkbox list item
+    const checkMatch = line.match(/^(\s*)[-*]\s+\[([ xX])\]\s+(.*)/);
+    if (checkMatch) {
+      const checked = checkMatch[2] !== ' ';
+      elements.push(
+        <div key={elements.length} className="flex items-start gap-1.5 py-0.5 pl-1 text-[12px]">
+          <span
+            className="mt-0.5 inline-block h-3.5 w-3.5 shrink-0 rounded-sm text-center text-[10px] leading-[14px]"
+            style={{
+              border: '1px solid var(--color-border)',
+              background: checked ? 'var(--color-accent)' : 'transparent',
+              color: checked ? 'var(--color-bg)' : 'transparent',
+            }}
+          >
+            {checked ? '✓' : ''}
+          </span>
+          <span style={{ color: 'var(--color-text-1)' }}>{renderInline(checkMatch[3])}</span>
+        </div>,
+      );
+      i++;
+      continue;
+    }
+
+    // Unordered list
+    const ulMatch = line.match(/^(\s*)[-*]\s+(.*)/);
+    if (ulMatch) {
+      elements.push(
+        <div key={elements.length} className="flex gap-1.5 py-0.5 pl-2 text-[12px]">
+          <span style={{ color: 'var(--color-text-3)' }}>&bull;</span>
+          <span style={{ color: 'var(--color-text-1)' }}>{renderInline(ulMatch[2])}</span>
+        </div>,
+      );
+      i++;
+      continue;
+    }
+
+    // Ordered list
+    const olMatch = line.match(/^(\s*)\d+\.\s+(.*)/);
+    if (olMatch) {
+      const num = line.match(/^(\s*)(\d+)\./)?.[2] ?? '1';
+      elements.push(
+        <div key={elements.length} className="flex gap-1.5 py-0.5 pl-2 text-[12px]">
+          <span className="w-4 shrink-0 text-right" style={{ color: 'var(--color-text-3)' }}>
+            {num}.
+          </span>
+          <span style={{ color: 'var(--color-text-1)' }}>{renderInline(olMatch[2])}</span>
+        </div>,
+      );
+      i++;
+      continue;
+    }
+
+    // Empty line
+    if (line.trim() === '') {
+      elements.push(<div key={elements.length} className="h-2" />);
+      i++;
+      continue;
+    }
+
+    // Regular paragraph
+    elements.push(
+      <div
+        key={elements.length}
+        className="py-0.5 text-[12px] leading-relaxed"
+        style={{ color: 'var(--color-text-1)' }}
+      >
+        {renderInline(line)}
+      </div>,
+    );
+    i++;
+  }
+
+  return <div>{elements}</div>;
+}
+
+/** Render inline markdown: **bold**, *italic*, `code`, [links](url), ![images](url), HTML tags. */
+function renderInline(text: string): React.ReactNode {
+  // Strip remaining inline HTML comments
+  const cleaned = text.replace(/<!--.*?-->/g, '');
+  const parts: React.ReactNode[] = [];
+  // Match: images, links, bold, italic, inline code, strikethrough, HTML tags
+  const regex =
+    /!\[([^\]]*)\]\(([^)]+)\)|\[([^\]]*)\]\(([^)]+)\)|\*\*(.+?)\*\*|\*(.+?)\*|`(.+?)`|~~(.+?)~~|<(sup|sub|strong|em|b|i)>(.*?)<\/\9>|<a\s+href="([^"]*)"[^>]*>(.*?)<\/a>|<img\s+[^>]*src="([^"]*)"[^>]*\/?>/g;
+  let last = 0;
+  let key = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = regex.exec(cleaned)) !== null) {
+    if (match.index > last) {
+      parts.push(cleaned.slice(last, match.index));
+    }
+    if (match[1] !== undefined) {
+      // Image: ![alt](url)
+      parts.push(
+        <img
+          key={key++}
+          src={match[2]}
+          alt={match[1]}
+          className="my-1 max-w-full rounded"
+          style={{ maxHeight: 300, border: '1px solid var(--color-border-subtle)' }}
+        />,
+      );
+    } else if (match[3] !== undefined) {
+      // Link: [text](url)
+      parts.push(
+        <a
+          key={key++}
+          href={match[4]}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="hover:underline"
+          style={{ color: 'var(--color-accent)' }}
+        >
+          {match[3]}
+        </a>,
+      );
+    } else if (match[5]) {
+      // Bold
+      parts.push(
+        <strong key={key++} style={{ fontWeight: 600, color: 'var(--color-text-1)' }}>
+          {match[5]}
+        </strong>,
+      );
+    } else if (match[6]) {
+      // Italic
+      parts.push(<em key={key++}>{match[6]}</em>);
+    } else if (match[7]) {
+      // Inline code
+      parts.push(
+        <code
+          key={key++}
+          className="rounded px-1 py-0.5 text-[11px]"
+          style={{ background: 'var(--color-surface-3)', fontFamily: 'var(--font-mono)' }}
+        >
+          {match[7]}
+        </code>,
+      );
+    } else if (match[8]) {
+      // Strikethrough
+      parts.push(
+        <del key={key++} style={{ color: 'var(--color-text-3)' }}>
+          {match[8]}
+        </del>,
+      );
+    } else if (match[9]) {
+      // HTML inline tags: <sup>, <sub>, <strong>, <em>, <b>, <i>
+      const tag = match[9];
+      const content = match[10];
+      const Tag = ({ sup: 'sup', sub: 'sub', strong: 'strong', em: 'em', b: 'strong', i: 'em' }[
+        tag
+      ] ?? 'span') as keyof React.JSX.IntrinsicElements;
+      parts.push(<Tag key={key++}>{content}</Tag>);
+    } else if (match[11] !== undefined) {
+      // HTML <a> tag
+      parts.push(
+        <a
+          key={key++}
+          href={match[11]}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="hover:underline"
+          style={{ color: 'var(--color-accent)' }}
+        >
+          {match[12]}
+        </a>,
+      );
+    } else if (match[13] !== undefined) {
+      // HTML <img> tag
+      parts.push(
+        <img
+          key={key++}
+          src={match[13]}
+          alt=""
+          className="my-1 max-w-full rounded"
+          style={{ maxHeight: 300, border: '1px solid var(--color-border-subtle)' }}
+        />,
+      );
+    }
+    last = match.index + match[0].length;
+  }
+  if (last < cleaned.length) {
+    parts.push(cleaned.slice(last));
+  }
+  return parts.length === 1 ? parts[0] : <>{parts}</>;
+}

@@ -1,0 +1,286 @@
+@import 'tailwindcss';
+
+/* ── Geist variable fonts ── */
+@font-face {
+  font-family: 'Geist';
+  src: url('./fonts/Geist-Variable.woff2') format('woff2');
+  font-weight: 100 900;
+  font-display: swap;
+  font-style: normal;
+}
+
+@font-face {
+  font-family: 'Geist Mono';
+  src: url('./fonts/GeistMono-Variable.woff2') format('woff2');
+  font-weight: 100 900;
+  font-display: swap;
+  font-style: normal;
+}
+
+/* ── Tailwind v4 theme ── */
+@theme {
+  /* Surfaces */
+  --color-bg: #0c0b10;
+  --color-surface-1: #141320;
+  --color-surface-2: #1c1a28;
+  --color-surface-3: #252332;
+
+  /* Borders */
+  --color-border: #302d40;
+  --color-border-subtle: #28253a;
+
+  /* Text */
+  --color-text-1: #e4e0f0;
+  --color-text-2: #9b94b8;
+  --color-text-3: #6a6380;
+  --color-text-4: #4a4560;
+
+  /* Accent */
+  --color-accent: #8a63d2;
+  --color-accent-hover: #a382e0;
+  --color-accent-pressed: #6a5ad4;
+  --color-accent-wash: #8a63d214;
+
+  /* Semantics */
+  --color-success: #4caf6a;
+  --color-error: #cf5b4b;
+  --color-stale: #d4a017;
+  --color-needs-human: #ea580c;
+  --color-review: #8a63d2;
+
+  /* Semantic badges (12% opacity backgrounds) */
+  --color-success-bg: #4caf6a1f;
+  --color-error-bg: #cf5b4b1f;
+  --color-stale-bg: #d4a0171f;
+  --color-needs-human-bg: #ea580c1f;
+  --color-review-bg: #8a63d21f;
+  --color-merged-bg: #9b94b814;
+
+  /* Destructive button border */
+  --color-border-destructive: #402d30;
+
+  /* Spacing (4pt grid) */
+  --spacing-1: 4px;
+  --spacing-2: 8px;
+  --spacing-3: 12px;
+  --spacing-4: 16px;
+  --spacing-5: 24px;
+  --spacing-6: 32px;
+
+  /* Radius */
+  --radius-row: 4px;
+  --radius-panel: 8px;
+  --radius-hero: 10px;
+  --radius-button: 6px;
+
+  /* Fonts */
+  --font-sans: 'Geist', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: 'Geist Mono', ui-monospace, monospace;
+}
+
+/* ── Base ── */
+:root {
+  color-scheme: dark;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 22px;
+  background: var(--color-bg);
+  color: var(--color-text-1);
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+#root {
+  height: 100vh;
+}
+
+/* ── Typography utility classes ── */
+.text-display {
+  font-size: 32px;
+  font-weight: 700;
+  line-height: 40px;
+  letter-spacing: -0.02em;
+}
+
+.text-heading {
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 28px;
+}
+
+.text-subheading {
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 20px;
+}
+
+.text-body {
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 22px;
+}
+
+.text-caption {
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 16px;
+}
+
+.text-label {
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 14px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.text-code {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 18px;
+}
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-4);
+}
+
+/* ── Focus ring ── */
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* ── Selection ── */
+::selection {
+  background: var(--color-accent-wash);
+}
+
+/* ── Scout markdown prose ── */
+.prose-scout h1,
+.prose-scout h2,
+.prose-scout h3 {
+  color: var(--color-text-1);
+  font-weight: 600;
+  margin-top: 1.5em;
+  margin-bottom: 0.5em;
+}
+.prose-scout h1 {
+  font-size: 20px;
+  font-weight: 700;
+}
+.prose-scout h2 {
+  font-size: 16px;
+  font-weight: 600;
+}
+.prose-scout h3 {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.prose-scout p {
+  color: var(--color-text-2);
+  margin-bottom: 0.75em;
+}
+
+.prose-scout strong {
+  color: var(--color-text-1);
+  font-weight: 600;
+}
+
+.prose-scout em {
+  color: var(--color-text-2);
+}
+
+.prose-scout ul,
+.prose-scout ol {
+  padding-left: 1.25em;
+  margin-bottom: 0.75em;
+  color: var(--color-text-2);
+}
+
+.prose-scout li {
+  margin-bottom: 0.25em;
+}
+
+.prose-scout ul li {
+  list-style-type: disc;
+}
+.prose-scout ol li {
+  list-style-type: decimal;
+}
+
+.prose-scout blockquote {
+  border-left: 2px solid var(--color-border);
+  padding-left: 0.75em;
+  color: var(--color-text-3);
+  margin: 0.75em 0;
+}
+
+.prose-scout code {
+  font-family: var(--font-mono);
+  background: var(--color-surface-2);
+  padding: 0.15em 0.35em;
+  border-radius: 3px;
+  font-size: 13px;
+}
+
+.prose-scout pre {
+  background: var(--color-surface-1);
+  padding: 0.75em;
+  border-radius: var(--radius-panel);
+  overflow-x: auto;
+  margin-bottom: 0.75em;
+  border: 1px solid var(--color-border-subtle);
+}
+
+.prose-scout pre code {
+  background: none;
+  padding: 0;
+}
+
+.prose-scout a {
+  color: var(--color-accent);
+  text-decoration: none;
+}
+.prose-scout a:hover {
+  color: var(--color-accent-hover);
+  text-decoration: underline;
+}
+
+.prose-scout hr {
+  border-color: var(--color-border);
+  margin: 1.25em 0;
+}
+
+/* ── Status icon tooltip ── */
+.status-icon-wrapper:hover .status-tooltip {
+  opacity: 1 !important;
+  transition-delay: 400ms;
+}
+
+/* ── Transition defaults ── */
+.transition-colors {
+  transition-property: color, background-color, border-color;
+  transition-duration: 150ms;
+  transition-timing-function: ease;
+}

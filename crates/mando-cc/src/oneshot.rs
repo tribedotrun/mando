@@ -1,0 +1,76 @@
+//! `CcOneShot` — single-turn CC invocation.
+//!
+//! Sends prompt via stdin, waits for result, closes stdin.
+//! Hooks still work (stdin open until result arrives).
+
+use anyhow::Result;
+use tracing::{info, warn};
+
+use crate::config::CcConfig;
+use crate::CcResult;
+
+/// Single-turn CC invocation.
+pub struct CcOneShot;
+
+impl CcOneShot {
+    /// Run a one-shot CC invocation with structured output.
+    ///
+    /// Sends prompt via stdin (not `-p`), waits for result, returns typed output.
+    /// Hooks work because stdin stays open until the result message arrives.
+    pub async fn run(prompt: &str, config: CcConfig) -> Result<CcResult> {
+        let timeout = config.timeout;
+        let caller = config.caller.clone();
+
+        let mut session = crate::CcSession::spawn(config).await?;
+
+        // Send the prompt.
+        session.send_message(prompt).await?;
+
+        // Wait for result with timeout.
+        let result = match tokio::time::timeout(timeout, session.recv_result()).await {
+            Ok(Ok(result)) => result,
+            Ok(Err(e)) => {
+                crate::update_stream_meta_status(session.session_id(), "failed", None);
+                // Close cleanly before propagating.
+                let _ = session.close().await;
+                return Err(e);
+            }
+            Err(_) => {
+                // Timeout — kill and bail.
+                let session_id = session.session_id().to_string();
+                let stream_path = session.stream_path().to_path_buf();
+                crate::update_stream_meta_status(&session_id, "timeout", None);
+
+                warn!(
+                    module = "mando-cc",
+                    caller = %caller,
+                    session_id = %session_id,
+                    timeout_s = timeout.as_secs(),
+                    "oneshot timed out"
+                );
+
+                crate::process::kill_process(session.pid()).await?;
+
+                anyhow::bail!(
+                    "oneshot timed out after {}s (session={}, stream={})",
+                    timeout.as_secs(),
+                    session_id,
+                    stream_path.display()
+                );
+            }
+        };
+
+        info!(
+            module = "mando-cc",
+            caller = %caller,
+            session_id = %result.session_id,
+            cost_usd = result.cost_usd.unwrap_or(0.0),
+            "oneshot complete"
+        );
+
+        // Close stdin and wait for process exit.
+        let _ = session.close().await;
+
+        Ok(result)
+    }
+}
