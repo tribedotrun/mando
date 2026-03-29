@@ -1,0 +1,87 @@
+//! Command handlers — one module per Telegram command.
+
+pub mod adopt;
+pub mod answer;
+pub mod ask;
+pub mod cancel;
+pub mod captain;
+pub mod cron;
+pub mod delete;
+pub mod handoff;
+pub mod health;
+pub mod help;
+pub mod history;
+pub mod input;
+pub mod knowledge;
+pub mod ops;
+pub mod picker;
+pub mod pr_summary;
+pub mod reopen;
+pub mod retry;
+pub mod rework;
+pub mod sessions;
+pub mod status;
+pub mod timeline;
+pub mod todo;
+pub mod triage;
+
+// ── Shared helpers ───────────────────────────────────────────────────
+
+/// Load and parse tasks via the gateway HTTP API.
+pub(crate) async fn load_tasks(
+    gw: &crate::http::GatewayClient,
+) -> anyhow::Result<Vec<mando_types::Task>> {
+    load_tasks_with_path(gw, "/api/tasks").await
+}
+
+/// Load tasks from a specific API path (supports query params).
+pub(crate) async fn load_tasks_with_path(
+    gw: &crate::http::GatewayClient,
+    path: &str,
+) -> anyhow::Result<Vec<mando_types::Task>> {
+    let resp = gw.get(path).await?;
+    let items =
+        serde_json::from_value::<Vec<mando_types::Task>>(resp["items"].clone()).map_err(|e| {
+            tracing::error!(module = "commands", error = %e, "failed to deserialize task items");
+            e
+        })?;
+    Ok(items)
+}
+
+/// Load tasks with user-visible error handling. Returns `None` (and sends an
+/// error message to the chat) when the gateway call fails, preventing orphaned
+/// loading placeholders.
+pub(crate) async fn load_tasks_or_notify(
+    bot: &crate::bot::TelegramBot,
+    chat_id: &str,
+) -> Option<Vec<mando_types::Task>> {
+    match load_tasks(bot.gw()).await {
+        Ok(items) => Some(items),
+        Err(e) => {
+            let _ = bot
+                .send_html(
+                    chat_id,
+                    &format!(
+                        "\u{274c} Failed to load tasks: {}",
+                        mando_shared::telegram_format::escape_html(&e.to_string())
+                    ),
+                )
+                .await;
+            None
+        }
+    }
+}
+
+/// Generate a short (8 hex char) unique ID for action tracking.
+pub(crate) fn short_uuid() -> String {
+    let id = mando_uuid::Uuid::v4().to_string();
+    id.replace('-', "")[..8].to_string()
+}
+
+/// Extract `result_text` from a gateway ops/ask response.
+pub(crate) fn extract_result_text(resp: &serde_json::Value) -> String {
+    resp.get("result_text")
+        .and_then(|v| v.as_str())
+        .unwrap_or("(no response)")
+        .to_string()
+}

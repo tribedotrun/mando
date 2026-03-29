@@ -1,0 +1,71 @@
+{
+  "name": "mando",
+  "version": "0.1.5",
+  "description": "Desktop app for managing AI coding agents",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/tribedotrun/mando-private.git"
+  },
+  "homepage": "https://mando.build",
+  "main": ".vite/build/index.js",
+  "scripts": {
+    "prebuild": "cd .. && cargo build -p mando-gateway --release",
+    "start": "npm run build:test && npx electron --no-sandbox .test-build/main/index.js",
+    "start:forge": "electron-forge start",
+    "package": "electron-forge package",
+    "make": "electron-forge make",
+    "build:test": "node scripts/build-test.mjs",
+    "build:dev": "node scripts/build-test.mjs --dev",
+    "dev:renderer": "npx vite dev src/renderer -c vite.renderer.config.mts --port 5173 --strictPort",
+    "pretest": "npm run build:test",
+    "test": "npx playwright test",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src/ tests/",
+    "format": "prettier --write 'src/**/*.{ts,tsx}' 'tests/**/*.ts' '*.{ts,mjs,mts}'",
+    "format:check": "prettier --check 'src/**/*.{ts,tsx}' 'tests/**/*.ts' '*.{ts,mjs,mts}'"
+  },
+  "devDependencies": {
+    "@electron-forge/cli": "^7.6.0",
+    "@electron-forge/maker-dmg": "^7.6.0",
+    "@electron-forge/maker-zip": "^7.11.1",
+    "@electron-forge/plugin-vite": "^7.6.0",
+    "@electron-forge/publisher-github": "^7.11.1",
+    "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.50.0",
+    "@tailwindcss/vite": "^4.1.0",
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "electron": "^41.0.3",
+    "eslint": "^10.0.3",
+    "prettier": "^3.8.1",
+    "tailwindcss": "^4.1.0",
+    "typescript": "^5.7.0",
+    "typescript-eslint": "^8.57.1",
+    "vite": "^6.0.0"
+  },
+  "imports": {
+    "#renderer/*": "./src/renderer/*",
+    "#main/*": "./src/main/*"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "dependencies": {
+    "@tanstack/react-query": "^5.95.2",
+    "electron-log": "^5.4.3",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-markdown": "^10.1.0",
+    "zustand": "^5.0.0"
+  },
+  "optionalDependencies": {
+    "appdmg": "^0.6.6"
+  },
+  "overrides": {
+    "tar": "^7.5.12",
+    "tmp": "^0.2.5",
+    "@tootallnate/once": "^3.0.1"
+  }
+}

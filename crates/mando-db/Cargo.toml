@@ -1,0 +1,22 @@
+[package]
+name = "mando-db"
+version = "0.1.0"
+edition = "2021"
+description = "SQLite database schema, migrations, and query layer"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+
+[dependencies]
+mando-types.workspace = true
+mando-config.workspace = true
+mando-uuid.workspace = true
+sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite"] }
+anyhow.workspace = true
+tracing.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+time.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt", "macros"] }

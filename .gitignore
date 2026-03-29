@@ -1,0 +1,46 @@
+# Rust
+target/
+Cargo.lock.bk
+
+# Electron
+electron/node_modules/
+electron/.vite/
+electron/.test-build/
+electron/test-results/
+electron/out/
+dist/
+electron/mando-napi.node
+
+# Dev runtime state (PIDs, logs, slot)
+.dev/
+
+# AI artifacts
+.ai/local/
+.ai/evidence/
+.ai/plans/
+.claude/worktrees/
+.cursor/
+.playwright-mcp/
+
+# Worktrees
+.worktrees/
+
+# Python
+__pycache__/
+
+# OS
+.DS_Store
+*.swp
+
+# Environment
+.env
+*.env.local
+
+claude.local.md
+ralph-loop.local.md
+.claude/ralph-loop.local.md
+electron/.ai/
+.claude/settings.local.json
+.superset/
+.vercel
+.env*.local

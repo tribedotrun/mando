@@ -1,0 +1,16 @@
+[package]
+name = "mando-config"
+version = "0.1.0"
+edition = "2021"
+description = "Configuration loading, validation, and workflow templates"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+
+[dependencies]
+mando-types.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml.workspace = true
+minijinja.workspace = true
+tracing.workspace = true

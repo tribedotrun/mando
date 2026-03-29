@@ -1,0 +1,441 @@
+//! /api/scout/* route handlers.
+
+use axum::extract::{Path, Query, State};
+use axum::http::StatusCode;
+use axum::Json;
+use serde::Deserialize;
+use serde_json::{json, Value};
+
+use crate::response::error_response;
+use crate::AppState;
+
+// ---------------------------------------------------------------
+// Query params
+// ---------------------------------------------------------------
+
+#[derive(Deserialize, Default)]
+pub(crate) struct ScoutQuery {
+    pub status: Option<String>,
+    pub q: Option<String>,
+    #[serde(rename = "type")]
+    pub item_type: Option<String>,
+    pub page: Option<usize>,
+    pub per_page: Option<usize>,
+}
+
+// ---------------------------------------------------------------
+// GET endpoints
+// ---------------------------------------------------------------
+
+/// GET /api/scout/items?status=pending
+pub(crate) async fn get_scout_items(
+    State(state): State<AppState>,
+    Query(params): Query<ScoutQuery>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let pool = state.db.pool();
+    match mando_scout::list_scout_items(
+        pool,
+        params.status.as_deref(),
+        params.q.as_deref(),
+        params.item_type.as_deref(),
+        params.page,
+        params.per_page,
+    )
+    .await
+    {
+        Ok(val) => Ok(Json(val)),
+        Err(e) => Err(error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            &e.to_string(),
+        )),
+    }
+}
+
+/// GET /api/scout/items/{id}
+pub(crate) async fn get_scout_item(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let pool = state.db.pool();
+    match mando_scout::get_scout_item(pool, id).await {
+        Ok(val) => Ok(Json(val)),
+        Err(e) => {
+            let msg = e.to_string();
+            if msg.contains("not found") {
+                Err(error_response(StatusCode::NOT_FOUND, &msg))
+            } else {
+                Err(error_response(StatusCode::INTERNAL_SERVER_ERROR, &msg))
+            }
+        }
+    }
+}
+
+/// GET /api/scout/items/{id}/article
+pub(crate) async fn get_scout_article(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let pool = state.db.pool();
+    match mando_scout::get_scout_article(pool, id).await {
+        Ok(val) => Ok(Json(val)),
+        Err(e) => {
+            let msg = e.to_string();
+            if msg.contains("not found") {
+                Err(error_response(StatusCode::NOT_FOUND, &msg))
+            } else {
+                Err(error_response(StatusCode::INTERNAL_SERVER_ERROR, &msg))
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------
+// POST endpoints
+// ---------------------------------------------------------------
+
+#[derive(Deserialize)]
+pub(crate) struct AddScoutBody {
+    pub url: String,
+    pub title: Option<String>,
+}
+
+/// POST /api/scout/items
+pub(crate) async fn post_scout_items(
+    State(state): State<AppState>,
+    Json(body): Json<AddScoutBody>,
+) -> Result<(StatusCode, Json<Value>), (StatusCode, Json<Value>)> {
+    if !body.url.starts_with("http://") && !body.url.starts_with("https://") {
+        return Err(error_response(
+            StatusCode::BAD_REQUEST,
+            "URL must start with http:// or https://",
+        ));
+    }
+    let pool = state.db.pool();
+    match mando_scout::add_scout_item(pool, &body.url, body.title.as_deref()).await {
+        Ok(val) => {
+            state
+                .bus
+                .send(mando_types::BusEvent::Scout, Some(json!({"action": "add"})));
+            Ok((StatusCode::CREATED, Json(val)))
+        }
+        Err(e) => Err(error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            &e.to_string(),
+        )),
+    }
+}
+
+#[derive(Deserialize)]
+pub(crate) struct ProcessBody {
+    pub id: Option<i64>,
+}
+
+/// POST /api/scout/process
+pub(crate) async fn post_scout_process(
+    State(state): State<AppState>,
+    Json(body): Json<ProcessBody>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let config = state.config.load_full();
+    let workflow = state.scout_workflow.load_full();
+    let pool = state.db.pool();
+
+    let val = mando_scout::process_scout(&config, pool, body.id, &workflow)
+        .await
+        .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?;
+
+    state.bus.send(
+        mando_types::BusEvent::Scout,
+        Some(json!({"action": "process"})),
+    );
+    Ok(Json(val))
+}
+
+#[derive(Deserialize)]
+pub(crate) struct ResearchBody {
+    pub topic: String,
+    pub process: Option<bool>,
+}
+
+/// POST /api/scout/research
+pub(crate) async fn post_scout_research(
+    State(state): State<AppState>,
+    Json(body): Json<ResearchBody>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let config = state.config.load_full();
+    let workflow = state.scout_workflow.load_full();
+    let pool = state.db.pool().clone();
+    let process = body.process.unwrap_or(false);
+
+    let result = async move {
+        let research = mando_scout::runtime::research::run_research(&body.topic, &workflow)
+            .await
+            .map_err(|e| e.to_string())?;
+
+        let mut added = 0u64;
+        let mut processed_count = 0u64;
+        for link in &research.links {
+            if let Ok(val) = mando_scout::add_scout_item(&pool, &link.url, Some(&link.title)).await
+            {
+                if val["added"].as_bool() == Some(true) {
+                    added += 1;
+                    if process {
+                        if let Some(id) = val["id"].as_i64() {
+                            if mando_scout::process_scout(&config, &pool, Some(id), &workflow)
+                                .await
+                                .is_ok()
+                            {
+                                processed_count += 1;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        let links_json: Vec<Value> = research
+            .links
+            .iter()
+            .map(|l| {
+                json!({
+                    "url": l.url,
+                    "title": l.title,
+                    "type": l.link_type,
+                    "reason": l.reason,
+                })
+            })
+            .collect();
+
+        Ok::<_, String>(json!({
+            "ok": true,
+            "links": links_json,
+            "added": added,
+            "processed": processed_count,
+        }))
+    }
+    .await
+    .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e))?;
+
+    Ok(Json(result))
+}
+
+#[derive(Deserialize)]
+pub(crate) struct ScoutAskBody {
+    pub id: i64,
+    pub question: String,
+    /// Pass back from previous response to resume the same CC session.
+    pub session_id: Option<String>,
+}
+
+/// POST /api/scout/ask
+///
+/// Item/article lookup runs on a blocking thread (SQLite is `!Send`).
+/// The persistent Q&A session runs on the main tokio runtime (CC processes
+/// need the primary event loop, not a nested current-thread runtime).
+pub(crate) async fn post_scout_ask(
+    State(state): State<AppState>,
+    Json(body): Json<ScoutAskBody>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let workflow = state.scout_workflow.load_full();
+    let qa_mgr = state.qa_session_mgr.clone();
+    let pool = state.db.pool();
+    let id = body.id;
+    let question = body.question;
+    let session_key = body.session_id;
+
+    let item = mando_scout::get_scout_item(pool, id)
+        .await
+        .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?;
+    let article_data = mando_scout::get_scout_article(pool, id)
+        .await
+        .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?;
+
+    let summary = item["summary"]
+        .as_str()
+        .unwrap_or("(no summary)")
+        .to_string();
+    let article = article_data["article"]
+        .as_str()
+        .unwrap_or("(no article content)")
+        .to_string();
+
+    let raw_path = mando_scout::content_path(id);
+    let raw_note = if raw_path.exists() {
+        Some(format!(
+            "The original source content is saved at `{}`. Read it for full detail.",
+            raw_path.display()
+        ))
+    } else {
+        None
+    };
+
+    let qa_result = qa_mgr
+        .ask(
+            &question,
+            &summary,
+            &article,
+            raw_note.as_deref(),
+            &workflow,
+            session_key.as_deref(),
+        )
+        .await
+        .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?;
+
+    Ok(Json(json!({
+        "ok": true,
+        "id": id,
+        "answer": qa_result.answer,
+        "session_id": qa_result.session_id,
+        "suggested_followups": qa_result.suggested_followups,
+        "session_reset": qa_result.session_reset,
+    })))
+}
+
+#[derive(Deserialize)]
+pub(crate) struct ActBody {
+    pub project: String,
+    pub prompt: Option<String>,
+}
+
+/// POST /api/scout/items/{id}/act — generate a task from a scout item.
+pub(crate) async fn post_scout_act(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+    Json(body): Json<ActBody>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let config = state.config.load_full();
+    let workflow = state.scout_workflow.load_full();
+    let pool = state.db.pool();
+
+    let ai_result = mando_scout::act_on_scout_item(
+        &config,
+        pool,
+        id,
+        &body.project,
+        body.prompt.as_deref(),
+        &workflow,
+    )
+    .await
+    .map_err(|e| {
+        let msg = e.to_string();
+        if msg.contains("unknown project") {
+            error_response(StatusCode::BAD_REQUEST, &msg)
+        } else if msg.contains("not found") {
+            error_response(StatusCode::NOT_FOUND, &msg)
+        } else {
+            error_response(StatusCode::INTERNAL_SERVER_ERROR, &msg)
+        }
+    })?;
+
+    if ai_result["skipped"].as_bool() == Some(true) {
+        return Ok(Json(ai_result));
+    }
+
+    let task_title = ai_result["task_title"].as_str().ok_or_else(|| {
+        error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "AI response missing task_title",
+        )
+    })?;
+    let task_description = ai_result["task_description"].as_str();
+    let project_name = ai_result["project"].as_str();
+
+    let config = state.config.load_full();
+    let store = state.task_store.read().await;
+    let val = mando_captain::runtime::dashboard::add_task_with_context(
+        &config,
+        &store,
+        task_title,
+        project_name,
+        task_description,
+    )
+    .await
+    .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?;
+
+    state.bus.send(
+        mando_types::BusEvent::Tasks,
+        Some(serde_json::json!({"action": "add"})),
+    );
+
+    Ok(Json(serde_json::json!({
+        "ok": true,
+        "task_id": val["id"],
+        "title": val["title"],
+    })))
+}
+
+// ---------------------------------------------------------------
+// PATCH endpoint
+// ---------------------------------------------------------------
+
+#[derive(Deserialize)]
+pub(crate) struct PatchScoutBody {
+    pub status: String,
+}
+
+/// PATCH /api/scout/items/{id}
+pub(crate) async fn patch_scout_item(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+    Json(body): Json<PatchScoutBody>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let pool = state.db.pool();
+    match mando_scout::update_scout_status(pool, id, &body.status).await {
+        Ok(()) => {
+            state.bus.send(
+                mando_types::BusEvent::Scout,
+                Some(json!({"action": "update", "id": id})),
+            );
+            Ok(Json(json!({"ok": true})))
+        }
+        Err(e) => {
+            let msg = e.to_string();
+            let status = if msg.contains("invalid status") {
+                StatusCode::BAD_REQUEST
+            } else {
+                StatusCode::INTERNAL_SERVER_ERROR
+            };
+            Err(error_response(status, &msg))
+        }
+    }
+}
+
+// ---------------------------------------------------------------
+// DELETE endpoint
+// ---------------------------------------------------------------
+
+/// DELETE /api/scout/items/{id}
+pub(crate) async fn delete_scout_item(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let pool = state.db.pool();
+    match mando_scout::delete_scout_item(pool, id).await {
+        Ok(val) => {
+            state.bus.send(
+                mando_types::BusEvent::Scout,
+                Some(json!({"action": "delete", "id": id})),
+            );
+            Ok(Json(val))
+        }
+        Err(e) => {
+            let msg = e.to_string();
+            if msg.contains("not found") {
+                Err(error_response(StatusCode::NOT_FOUND, &msg))
+            } else {
+                Err(error_response(StatusCode::INTERNAL_SERVER_ERROR, &msg))
+            }
+        }
+    }
+}
+
+/// GET /api/scout/items/{id}/sessions — list CC sessions for a scout item.
+pub(crate) async fn get_scout_item_sessions(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let pool = state.db.pool();
+    let sessions = mando_db::queries::sessions::list_sessions_for_scout_item(pool, id)
+        .await
+        .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?;
+    Ok(Json(json!(sessions)))
+}

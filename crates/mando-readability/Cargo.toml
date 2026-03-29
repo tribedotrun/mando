@@ -1,0 +1,11 @@
+[package]
+name = "mando-readability"
+version = "0.1.0"
+edition = "2021"
+description = "HTML content extraction and article readability processing"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+
+[dependencies]
+html5ever.workspace = true

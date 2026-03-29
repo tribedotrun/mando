@@ -1,0 +1,318 @@
+//! Dashboard API handlers for scout operations.
+//!
+//! Each handler receives a pool, wraps it in ScoutDb, performs the operation, and returns JSON.
+
+use std::collections::HashMap;
+
+use anyhow::{bail, Context, Result};
+use mando_config::workflow::ScoutWorkflow;
+use mando_config::Config;
+use serde_json::{json, Value};
+use sqlx::SqlitePool;
+use tracing::{info, warn};
+
+use crate::biz::formatting::slugify_title;
+use crate::biz::url_detect::classify_url;
+use crate::io::db::{ListQuery, ScoutDb};
+use crate::io::file_store;
+
+/// Valid user-settable statuses.
+const USER_SETTABLE: &[&str] = &["pending", "processed", "saved", "archived"];
+
+/// List scout items with optional search, status/type filter, and pagination.
+pub async fn list_scout_items(
+    pool: &SqlitePool,
+    status: Option<&str>,
+    search: Option<&str>,
+    item_type: Option<&str>,
+    page: Option<usize>,
+    per_page: Option<usize>,
+) -> Result<Value> {
+    let db = ScoutDb::new(pool.clone());
+    let q = ListQuery {
+        search: search.filter(|s| !s.is_empty()).map(String::from),
+        status: status.map(String::from),
+        item_type: item_type.filter(|s| !s.is_empty()).map(String::from),
+        page: page.unwrap_or(0),
+        per_page: match per_page {
+            Some(0) | None => 50,
+            Some(n) => n,
+        },
+    };
+    let result = db.query_items(&q).await?;
+    let status_counts = db.count_by_status(&q).await?;
+    let total_pages = result.total.div_ceil(q.per_page.max(1));
+
+    let items_json: Vec<Value> = result
+        .items
+        .iter()
+        .map(|item| serde_json::to_value(item).unwrap_or(Value::Null))
+        .collect();
+
+    Ok(json!({
+        "items": items_json,
+        "count": result.items.len(),
+        "total": result.total,
+        "page": q.page,
+        "pages": total_pages,
+        "per_page": q.per_page,
+        "filter": status,
+        "status_counts": status_counts,
+    }))
+}
+
+/// Get a single scout item with its summary.
+pub async fn get_scout_item(pool: &SqlitePool, id: i64) -> Result<Value> {
+    let db = ScoutDb::new(pool.clone());
+    let item = db
+        .get_item(id)
+        .await?
+        .with_context(|| format!("item #{id} not found"))?;
+
+    let slug = slugify_title(item.title.as_deref().unwrap_or("untitled"));
+    let summary = file_store::read_summary(id, &slug);
+
+    let mut val = serde_json::to_value(&item)?;
+    if let Some(s) = summary {
+        val["summary"] = Value::String(s);
+    }
+    if let Some(tg_url) = crate::io::telegraph::get_cached_url(id) {
+        val["telegraphUrl"] = Value::String(tg_url);
+    }
+    Ok(val)
+}
+
+/// Get the full article content for a scout item.
+pub async fn get_scout_article(pool: &SqlitePool, id: i64) -> Result<Value> {
+    let db = ScoutDb::new(pool.clone());
+    let item = db
+        .get_item(id)
+        .await?
+        .with_context(|| format!("item #{id} not found"))?;
+
+    let article = file_store::read_article(id);
+
+    let mut val = json!({
+        "id": id,
+        "title": item.title,
+        "article": article,
+    });
+    if let Some(tg_url) = crate::io::telegraph::get_cached_url(id) {
+        val["telegraphUrl"] = Value::String(tg_url);
+    }
+    Ok(val)
+}
+
+/// Add a URL to scout.
+pub async fn add_scout_item(pool: &SqlitePool, url: &str, title: Option<&str>) -> Result<Value> {
+    let db = ScoutDb::new(pool.clone());
+    let url_type = classify_url(url);
+    let (item, is_new) = db.add_item(url, url_type.as_str(), None).await?;
+
+    if is_new {
+        if let Some(t) = title {
+            if item.title.is_none() {
+                db.set_title(item.id, t).await?;
+            }
+        }
+    }
+
+    Ok(json!({
+        "added": is_new,
+        "id": item.id,
+        "url": item.url,
+        "type": item.item_type,
+        "status": item.status.as_str(),
+    }))
+}
+
+/// Delete a scout item, its cached files, and linked sessions.
+pub async fn delete_scout_item(pool: &SqlitePool, id: i64) -> Result<Value> {
+    let db = ScoutDb::new(pool.clone());
+    let item = db.get_item(id).await?;
+    let slug = item
+        .as_ref()
+        .and_then(|i| i.title.as_deref())
+        .map(slugify_title);
+    let existed = db.delete_item(id).await?;
+    if !existed {
+        anyhow::bail!("item #{id} not found");
+    }
+    file_store::delete_item_files(id, slug.as_deref());
+    Ok(json!({
+        "removed": true,
+        "id": id,
+    }))
+}
+
+/// Update item status.
+pub async fn update_scout_status(pool: &SqlitePool, id: i64, status: &str) -> Result<()> {
+    if !USER_SETTABLE.contains(&status) {
+        anyhow::bail!(
+            "invalid status '{status}', must be one of: {}",
+            USER_SETTABLE.join(", ")
+        );
+    }
+    let db = ScoutDb::new(pool.clone());
+    db.update_status(id, status).await?;
+    Ok(())
+}
+
+/// Process items — single item or all pending.
+pub async fn process_scout(
+    config: &Config,
+    pool: &SqlitePool,
+    id: Option<i64>,
+    workflow: &ScoutWorkflow,
+) -> Result<Value> {
+    let db = ScoutDb::new(pool.clone());
+
+    match id {
+        Some(item_id) => {
+            crate::runtime::process::process_item(config, &db, item_id, workflow).await?;
+            Ok(json!({ "ok": true, "processed": 1 }))
+        }
+        None => {
+            let count = crate::runtime::process::process_all(config, &db, workflow).await?;
+            Ok(json!({ "ok": true, "processed": count }))
+        }
+    }
+}
+
+/// Generate a task from a scout item using AI.
+pub async fn act_on_scout_item(
+    config: &Config,
+    pool: &SqlitePool,
+    id: i64,
+    project: &str,
+    user_prompt: Option<&str>,
+    workflow: &ScoutWorkflow,
+) -> Result<Value> {
+    let (_, project_config) = mando_config::resolve_project_config(Some(project), config)
+        .with_context(|| format!("unknown project '{project}'"))?;
+    let project_name = project_config.name.clone();
+    let project_preamble = project_config.worker_preamble.clone();
+
+    let db = ScoutDb::new(pool.clone());
+    let item = db
+        .get_item(id)
+        .await?
+        .with_context(|| format!("item #{id} not found"))?;
+
+    let title = item.title.clone().unwrap_or_else(|| "Untitled".into());
+    let slug = slugify_title(item.title.as_deref().unwrap_or("untitled"));
+    let summary = file_store::read_summary(id, &slug).unwrap_or_default();
+    let content = file_store::read_content(id)
+        .filter(|c| !c.is_empty())
+        .with_context(|| format!("item #{id} has no content — process it first"))?;
+    let end = (0..=content.len().min(8000))
+        .rev()
+        .find(|&i| content.is_char_boundary(i))
+        .unwrap_or(0);
+    let truncated = &content[..end];
+
+    let user_prompt_str = user_prompt.unwrap_or("");
+    let mut vars = HashMap::new();
+    vars.insert("title", title.as_str());
+    vars.insert("url", item.url.as_str());
+    vars.insert("summary", summary.as_str());
+    vars.insert("content", truncated);
+    vars.insert("project_name", project_name.as_str());
+    vars.insert("project_preamble", project_preamble.as_str());
+    vars.insert("user_prompt", user_prompt_str);
+
+    let prompt = mando_config::render_prompt("act", &workflow.prompts, &vars)
+        .map_err(|e| anyhow::anyhow!(e))?;
+
+    info!(id, %project_name, "act: calling AI");
+
+    let model = workflow.models.get("act").cloned().unwrap_or_else(|| {
+        tracing::warn!(
+            module = "scout",
+            "missing 'act' model in workflow config, using empty default"
+        );
+        String::new()
+    });
+    let result = mando_cc::CcOneShot::run(
+        &prompt,
+        mando_cc::CcConfig::builder()
+            .model(model)
+            .timeout(std::time::Duration::from_secs(60))
+            .caller("scout-act")
+            .json_schema(serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "title": { "type": "string" },
+                    "description": { "type": "string" },
+                    "skip": { "type": "boolean" },
+                    "reason": { "type": "string" }
+                },
+                "required": ["skip"]
+            }))
+            .build(),
+    )
+    .await
+    .with_context(|| format!("AI act call failed for #{id}"))?;
+
+    if let Err(e) = db
+        .record_session(
+            id,
+            &result.session_id,
+            "scout-act",
+            result.cost_usd,
+            result.duration_ms,
+        )
+        .await
+    {
+        warn!(id, error = %e, "act: failed to record session — cost tracking gap");
+    }
+
+    let parsed = result
+        .structured
+        .unwrap_or_else(|| mando_captain::biz::json_parse::parse_llm_json(&result.text));
+    if parsed.as_object().is_none_or(|o| o.is_empty()) {
+        bail!("AI returned unparseable response for #{id}");
+    }
+
+    if parsed["skip"].as_bool() == Some(true) {
+        let reason = parsed["reason"]
+            .as_str()
+            .unwrap_or("not actionable for this project")
+            .to_string();
+        info!(id, %reason, "act: skipped");
+        return Ok(json!({ "skipped": true, "reason": reason }));
+    }
+
+    let task_title = parsed["title"]
+        .as_str()
+        .with_context(|| "AI response missing title")?
+        .to_string();
+    let task_description = parsed["description"]
+        .as_str()
+        .with_context(|| "AI response missing description")?
+        .to_string();
+
+    info!(id, %task_title, "act: creating task");
+
+    Ok(json!({
+        "task_title": task_title,
+        "task_description": task_description,
+        "project": project_name,
+        "scout_item_id": id,
+    }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn user_settable_statuses() {
+        assert!(USER_SETTABLE.contains(&"pending"));
+        assert!(USER_SETTABLE.contains(&"processed"));
+        assert!(USER_SETTABLE.contains(&"saved"));
+        assert!(USER_SETTABLE.contains(&"archived"));
+        assert!(!USER_SETTABLE.contains(&"error"));
+        assert!(!USER_SETTABLE.contains(&"fetched"));
+    }
+}
