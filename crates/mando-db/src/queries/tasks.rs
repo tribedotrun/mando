@@ -57,21 +57,23 @@ pub async fn routing(pool: &SqlitePool) -> Result<Vec<TaskRouting>> {
 const INSERT_COLS: &str = "title, status, project, worker, linear_id, resource, context,
     original_prompt, created_at, worktree, branch, pr, worker_started_at,
     intervention_count, captain_review_trigger, session_ids,
-    clarifier_questions, last_activity_at, plan, no_pr, worker_seq, reopen_seq,
-    reopen_source, images, retry_count, escalation_report, source, archived_at";
+    last_activity_at, plan, no_pr, worker_seq, reopen_seq,
+    reopen_source, images, review_fail_count, clarifier_fail_count, spawn_fail_count,
+    merge_fail_count, escalation_report, source, archived_at, github_repo";
 
 const INSERT_PLACEHOLDERS: &str =
-    "?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28";
+    "?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31";
 
 const INSERT_WITH_ID_PLACEHOLDERS: &str =
-    "?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29";
+    "?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31,?32";
 
 const UPDATE_SET: &str = "title=?1, status=?2, project=?3, worker=?4, linear_id=?5, resource=?6,
     context=?7, original_prompt=?8, created_at=?9, worktree=?10, branch=?11, pr=?12,
     worker_started_at=?13, intervention_count=?14, captain_review_trigger=?15,
-    session_ids=?16, clarifier_questions=?17, last_activity_at=?18, plan=?19,
-    no_pr=?20, worker_seq=?21, reopen_seq=?22, reopen_source=?23, images=?24, retry_count=?25,
-    escalation_report=?26, source=?27, archived_at=?28";
+    session_ids=?16, last_activity_at=?17, plan=?18,
+    no_pr=?19, worker_seq=?20, reopen_seq=?21, reopen_source=?22, images=?23,
+    review_fail_count=?24, clarifier_fail_count=?25, spawn_fail_count=?26, merge_fail_count=?27,
+    escalation_report=?28, source=?29, archived_at=?30, github_repo=?31";
 fn insert_task_sql() -> &'static str {
     static SQL: OnceLock<String> = OnceLock::new();
     SQL.get_or_init(|| format!("INSERT INTO tasks ({INSERT_COLS}) VALUES ({INSERT_PLACEHOLDERS})"))
@@ -88,7 +90,7 @@ fn insert_task_with_id_sql() -> &'static str {
 
 fn update_task_sql() -> &'static str {
     static SQL: OnceLock<String> = OnceLock::new();
-    SQL.get_or_init(|| format!("UPDATE tasks SET {UPDATE_SET} WHERE id=?29"))
+    SQL.get_or_init(|| format!("UPDATE tasks SET {UPDATE_SET} WHERE id=?32"))
         .as_str()
 }
 
@@ -114,7 +116,6 @@ fn bind_task_write_fields<'q>(query: SqliteQuery<'q>, task: &'q Task) -> SqliteQ
         .bind(task.intervention_count)
         .bind(trigger_str)
         .bind(task.session_ids.to_json())
-        .bind(&task.clarifier_questions)
         .bind(&task.last_activity_at)
         .bind(&task.plan)
         .bind(task.no_pr as i64)
@@ -122,10 +123,14 @@ fn bind_task_write_fields<'q>(query: SqliteQuery<'q>, task: &'q Task) -> SqliteQ
         .bind(task.reopen_seq)
         .bind(&task.reopen_source)
         .bind(&task.images)
-        .bind(task.retry_count)
+        .bind(task.review_fail_count)
+        .bind(task.clarifier_fail_count)
+        .bind(task.spawn_fail_count)
+        .bind(task.merge_fail_count)
         .bind(&task.escalation_report)
         .bind(&task.source)
         .bind(&task.archived_at)
+        .bind(&task.github_repo)
 }
 
 /// Insert a new task (auto-ID).
@@ -136,13 +141,6 @@ pub async fn insert_task(pool: &SqlitePool, task: &Task) -> Result<i64> {
     Ok(result.last_insert_rowid())
 }
 
-/// Insert a task with an explicit ID.
-pub async fn insert_task_with_id(pool: &SqlitePool, task: &Task) -> Result<()> {
-    bind_task_write_fields(sqlx::query(insert_task_with_id_sql()).bind(task.id), task)
-        .execute(pool)
-        .await?;
-    Ok(())
-}
 /// Update a full task row.
 pub async fn update_task(pool: &SqlitePool, task: &Task) -> Result<bool> {
     update_task_exec(pool, task).await
@@ -224,6 +222,17 @@ pub async fn merge_changed_items(
                 );
                 continue;
             };
+            // Terminal-status guard: if a human cancelled/merged the task
+            // while the tick was in-flight, don't overwrite it.
+            if current.status.is_finalized() {
+                tracing::info!(
+                    module = "task-store",
+                    id = changed.id,
+                    status = %current.status.as_str(),
+                    "skipping tick merge for finalized task"
+                );
+                continue;
+            }
             let merged = merge_fn(base_snapshot, changed, &current)?;
             update_task_exec(&mut *tx, &merged).await?;
             continue;

@@ -1,8 +1,10 @@
 import type { ForgeConfig } from '@electron-forge/shared-types';
+import { FusesPlugin } from '@electron-forge/plugin-fuses';
 import { VitePlugin } from '@electron-forge/plugin-vite';
 import { MakerDMG } from '@electron-forge/maker-dmg';
 import { MakerZIP } from '@electron-forge/maker-zip';
 import { PublisherGithub } from '@electron-forge/publisher-github';
+import { FuseV1Options, FuseVersion } from '@electron/fuses';
 
 const VALID_MODES = ['production', 'dev', 'sandbox'] as const;
 const rawMode = process.env.MANDO_APP_MODE || 'production';
@@ -26,6 +28,7 @@ const config: ForgeConfig = {
     name: appName,
     executableName: appName,
     icon: './assets/icon',
+    asar: true,
     appBundleId: bundleId,
     darwinDarkModeSupport: true,
     extendInfo: {
@@ -79,6 +82,15 @@ const config: ForgeConfig = {
           config: 'vite.renderer.config.mts',
         },
       ],
+    }),
+    new FusesPlugin({
+      version: FuseVersion.V1,
+      [FuseV1Options.RunAsNode]: false,
+      [FuseV1Options.EnableCookieEncryption]: true,
+      [FuseV1Options.EnableNodeOptionsEnvironmentVariable]: false,
+      [FuseV1Options.EnableNodeCliInspectArguments]: false,
+      [FuseV1Options.EnableEmbeddedAsarIntegrityValidation]: true,
+      [FuseV1Options.OnlyLoadAppFromAsar]: true,
     }),
   ],
 };

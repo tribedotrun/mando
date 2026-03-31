@@ -6,7 +6,11 @@ use std::path::Path;
 pub(crate) fn read_tail(path: &Path, n: usize) -> Vec<String> {
     let content = match std::fs::read_to_string(path) {
         Ok(c) => c,
-        Err(_) => return Vec::new(),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Vec::new(),
+        Err(e) => {
+            tracing::warn!(path = %path.display(), error = %e, "failed to read transcript");
+            return Vec::new();
+        }
     };
     let lines: Vec<&str> = content.lines().collect();
     let start = if lines.len() > n { lines.len() - n } else { 0 };

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { fetchWorkers } from '#renderer/api';
 import type { WorkerDetail } from '#renderer/types';
@@ -15,13 +15,28 @@ function formatRuntime(startedAt?: string): string {
   return h > 0 ? `${h}h ${m}m` : `${m}m`;
 }
 
-function WorkerRow({ worker, stale }: { worker: WorkerDetail; stale: boolean }) {
+function WorkerRow({
+  worker,
+  stale,
+  onNudge,
+  onStop,
+}: {
+  worker: WorkerDetail;
+  stale: boolean;
+  onNudge?: (worker: WorkerDetail) => void;
+  onStop?: (worker: WorkerDetail) => void;
+}) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const btnRef = useRef<HTMLButtonElement>(null);
   const dotColor = stale ? 'var(--color-stale)' : 'var(--color-success)';
   const textColor = stale ? 'var(--color-stale)' : 'var(--color-text-2)';
   const durationColor = stale ? 'var(--color-stale)' : 'var(--color-text-3)';
 
   return (
-    <div className="flex items-center" style={{ padding: '5px 14px', gap: 10, minHeight: 26 }}>
+    <div
+      className="group relative flex items-center"
+      style={{ padding: '5px 14px', gap: 10, minHeight: 26 }}
+    >
       {/* Status dot */}
       <span
         aria-hidden="true"
@@ -82,11 +97,96 @@ function WorkerRow({ worker, stale }: { worker: WorkerDetail; stale: boolean }) 
           stale
         </span>
       )}
+
+      {/* Overflow menu trigger */}
+      <button
+        ref={btnRef}
+        onClick={() => setMenuOpen((v) => !v)}
+        aria-label="Worker actions"
+        className="shrink-0 rounded opacity-0 transition-opacity group-hover:opacity-100"
+        style={{
+          width: 20,
+          height: 20,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          background: 'transparent',
+          border: 'none',
+          color: 'var(--color-text-2)',
+          cursor: 'pointer',
+          ...(menuOpen ? { opacity: 1 } : {}),
+        }}
+      >
+        <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
+          <circle cx="8" cy="3" r="1.5" />
+          <circle cx="8" cy="8" r="1.5" />
+          <circle cx="8" cy="13" r="1.5" />
+        </svg>
+      </button>
+
+      {/* Dropdown menu — fixed positioning to escape overflow:hidden parent */}
+      {menuOpen && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setMenuOpen(false)} />
+          <div
+            className="fixed z-50 rounded border py-1"
+            style={{
+              top: btnRef.current ? btnRef.current.getBoundingClientRect().bottom + 4 : 0,
+              left: btnRef.current ? btnRef.current.getBoundingClientRect().right - 100 : 0,
+              background: 'var(--color-surface-2)',
+              borderColor: 'var(--color-border)',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+              minWidth: 100,
+            }}
+          >
+            {onNudge && (
+              <button
+                onClick={() => {
+                  setMenuOpen(false);
+                  onNudge(worker);
+                }}
+                className="flex w-full items-center px-3 py-1.5 text-left text-xs"
+                style={{
+                  color: 'var(--color-text-2)',
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                }}
+              >
+                Nudge
+              </button>
+            )}
+            {onStop && (
+              <button
+                onClick={() => {
+                  setMenuOpen(false);
+                  onStop(worker);
+                }}
+                className="flex w-full items-center px-3 py-1.5 text-left text-xs"
+                style={{
+                  color: 'var(--color-error)',
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                }}
+              >
+                Stop
+              </button>
+            )}
+          </div>
+        </>
+      )}
     </div>
   );
 }
 
-export function MetricsRow(): React.ReactElement {
+export function MetricsRow({
+  onNudge,
+  onStopWorker,
+}: {
+  onNudge?: (worker: WorkerDetail) => void;
+  onStopWorker?: (worker: WorkerDetail) => void;
+} = {}): React.ReactElement {
   const [expanded, setExpanded] = useState(true);
 
   const { data: workersData } = useQuery({
@@ -166,12 +266,18 @@ export function MetricsRow(): React.ReactElement {
 
           {/* Active workers */}
           {activeWorkers.map((w) => (
-            <WorkerRow key={w.id} worker={w} stale={false} />
+            <WorkerRow
+              key={w.id}
+              worker={w}
+              stale={false}
+              onNudge={onNudge}
+              onStop={onStopWorker}
+            />
           ))}
 
           {/* Stale workers */}
           {staleWorkers.map((w) => (
-            <WorkerRow key={w.id} worker={w} stale={true} />
+            <WorkerRow key={w.id} worker={w} stale={true} onNudge={onNudge} onStop={onStopWorker} />
           ))}
 
           {/* Bottom padding */}

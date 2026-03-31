@@ -8,7 +8,7 @@ use mando_shared::telegram_format::escape_html;
 pub async fn handle(bot: &TelegramBot, chat_id: &str, args: &str) -> Result<()> {
     let item_id = args.trim();
     if item_id.is_empty() {
-        bot.send_html(chat_id, "Usage: /history &lt;item_id&gt;")
+        bot.send_html(chat_id, "Usage: /history &lt;task_id&gt;")
             .await?;
         return Ok(());
     }

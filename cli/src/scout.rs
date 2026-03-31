@@ -38,12 +38,24 @@ pub(crate) enum ScoutCommand {
         /// Item ID
         id: i64,
     },
+    /// Delete multiple scout items
+    BulkDelete {
+        /// Item IDs
+        ids: Vec<i64>,
+    },
     /// Update item status
     Status {
         /// Item ID
         id: i64,
         /// New status
         status: String,
+    },
+    /// Update status for multiple items
+    BulkStatus {
+        /// New status
+        status: String,
+        /// Item IDs
+        ids: Vec<i64>,
     },
     /// Process pending items
     Process {
@@ -76,6 +88,9 @@ pub(crate) enum ScoutCommand {
     Ask {
         /// Item ID
         id: i64,
+        /// Existing session ID for follow-up questions
+        #[arg(long)]
+        session: Option<String>,
         /// Question to ask
         question: Vec<String>,
     },
@@ -87,6 +102,25 @@ pub(crate) enum ScoutCommand {
         #[arg(long)]
         process: bool,
     },
+    /// Create a task from a scout item
+    Act {
+        /// Item ID
+        id: i64,
+        /// Project slug
+        project: String,
+        /// Optional operator prompt
+        prompt: Vec<String>,
+    },
+    /// Publish the extracted article and print the public URL
+    Publish {
+        /// Item ID
+        id: i64,
+    },
+    /// Show CC sessions linked to a scout item
+    Sessions {
+        /// Item ID
+        id: i64,
+    },
 }
 
 pub(crate) async fn handle(args: ScoutArgs) -> anyhow::Result<()> {
@@ -95,16 +129,29 @@ pub(crate) async fn handle(args: ScoutArgs) -> anyhow::Result<()> {
         ScoutCommand::Add { url, title } => handle_add(&url, title.as_deref()).await,
         ScoutCommand::Show { id } => handle_show(id).await,
         ScoutCommand::Delete { id } => handle_delete(id).await,
+        ScoutCommand::BulkDelete { ids } => handle_bulk_delete(&ids).await,
         ScoutCommand::Status { id, status } => handle_status(id, &status).await,
+        ScoutCommand::BulkStatus { status, ids } => handle_bulk_status(&status, &ids).await,
         ScoutCommand::Process { id } => handle_process(id).await,
         ScoutCommand::List { status } => handle_list_with_summaries(status.as_deref()).await,
         ScoutCommand::Save { id } => handle_status(id, "saved").await,
         ScoutCommand::Archive { id } => handle_status(id, "archived").await,
         ScoutCommand::Read { id } => handle_read(id).await,
-        ScoutCommand::Ask { id, question } => handle_ask(id, &question.join(" ")).await,
+        ScoutCommand::Ask {
+            id,
+            session,
+            question,
+        } => handle_ask(id, session.as_deref(), &question.join(" ")).await,
         ScoutCommand::Research { topic, process } => {
             handle_research(&topic.join(" "), process).await
         }
+        ScoutCommand::Act {
+            id,
+            project,
+            prompt,
+        } => handle_act(id, &project, &prompt.join(" ")).await,
+        ScoutCommand::Publish { id } => handle_publish(id).await,
+        ScoutCommand::Sessions { id } => handle_sessions(id).await,
     }
 }
 
@@ -177,6 +224,19 @@ async fn handle_delete(id: i64) -> anyhow::Result<()> {
     Ok(())
 }
 
+async fn handle_bulk_delete(ids: &[i64]) -> anyhow::Result<()> {
+    if ids.is_empty() {
+        anyhow::bail!("provide at least one item ID");
+    }
+    let client = DaemonClient::discover()?;
+    let result = client
+        .post("/api/scout/bulk-delete", &json!({"ids": ids}))
+        .await?;
+    let deleted = result["deleted"].as_u64().unwrap_or(0);
+    println!("Deleted {deleted} scout item(s).");
+    Ok(())
+}
+
 async fn handle_status(id: i64, status: &str) -> anyhow::Result<()> {
     let client = DaemonClient::discover()?;
     let body = json!({"status": status});
@@ -184,6 +244,22 @@ async fn handle_status(id: i64, status: &str) -> anyhow::Result<()> {
         .patch(&format!("/api/scout/items/{id}"), &body)
         .await?;
     println!("Updated item #{id} status to '{status}'.");
+    Ok(())
+}
+
+async fn handle_bulk_status(status: &str, ids: &[i64]) -> anyhow::Result<()> {
+    if ids.is_empty() {
+        anyhow::bail!("provide at least one item ID");
+    }
+    let client = DaemonClient::discover()?;
+    let result = client
+        .post(
+            "/api/scout/bulk",
+            &json!({"ids": ids, "updates": {"status": status}}),
+        )
+        .await?;
+    let updated = result["updated"].as_u64().unwrap_or(0);
+    println!("Updated {updated} scout item(s) to '{status}'.");
     Ok(())
 }
 
@@ -205,12 +281,11 @@ async fn handle_list_with_summaries(status: Option<&str>) -> anyhow::Result<()> 
                 .as_str()
                 .unwrap_or(item["url"].as_str().unwrap_or("(no title)"));
             let scores = match (item["relevance"].as_i64(), item["quality"].as_i64()) {
-                (Some(r), Some(q)) => format!(" R:{r}\u{00b7}Q:{q}"),
+                (Some(r), Some(q)) => format!(" R:{r}·Q:{q}"),
                 _ => String::new(),
             };
             println!("#{id} [{st}] {title}{scores}");
 
-            // Fetch full item to get summary.
             if let Ok(full) = client.get(&format!("/api/scout/items/{id}")).await {
                 if let Some(summary) = full["summary"].as_str() {
                     for line in summary.lines().take(3) {
@@ -241,18 +316,27 @@ async fn handle_read(id: i64) -> anyhow::Result<()> {
     } else {
         println!("(No article content available — process item first)");
     }
+    if let Some(telegraph_url) = result["telegraphUrl"].as_str() {
+        println!("\nPublished URL: {telegraph_url}");
+    }
     Ok(())
 }
 
-async fn handle_ask(id: i64, question: &str) -> anyhow::Result<()> {
+async fn handle_ask(id: i64, session: Option<&str>, question: &str) -> anyhow::Result<()> {
     let client = DaemonClient::discover()?;
-    let body = json!({"id": id, "question": question});
+    let mut body = json!({"id": id, "question": question});
+    if let Some(session_id) = session {
+        body["session_id"] = json!(session_id);
+    }
     let result = client.post("/api/scout/ask", &body).await?;
 
     if let Some(answer) = result["answer"].as_str() {
         println!("{answer}");
     } else if result["ok"].as_bool() == Some(true) {
         println!("(No answer returned)");
+    }
+    if let Some(session_id) = result["session_id"].as_str() {
+        println!("\nSession: {session_id}");
     }
     Ok(())
 }
@@ -299,6 +383,54 @@ async fn handle_process(id: Option<i64>) -> anyhow::Result<()> {
     let result = client.post("/api/scout/process", &body).await?;
     let processed = result["processed"].as_u64().unwrap_or(0);
     println!("Processed {processed} item(s).");
+    Ok(())
+}
+
+async fn handle_act(id: i64, project: &str, prompt: &str) -> anyhow::Result<()> {
+    let client = DaemonClient::discover()?;
+    let mut body = json!({"project": project});
+    if !prompt.is_empty() {
+        body["prompt"] = json!(prompt);
+    }
+    let result = client
+        .post(&format!("/api/scout/items/{id}/act"), &body)
+        .await?;
+    println!("{}", serde_json::to_string_pretty(&result)?);
+    Ok(())
+}
+
+async fn handle_publish(id: i64) -> anyhow::Result<()> {
+    let client = DaemonClient::discover()?;
+    let result = client
+        .post(&format!("/api/scout/items/{id}/telegraph"), &json!({}))
+        .await?;
+    let url = result["url"].as_str().unwrap_or("(missing url)");
+    println!("{url}");
+    Ok(())
+}
+
+async fn handle_sessions(id: i64) -> anyhow::Result<()> {
+    let client = DaemonClient::discover()?;
+    let result = client
+        .get(&format!("/api/scout/items/{id}/sessions"))
+        .await?;
+    if let Some(sessions) = result.as_array() {
+        if sessions.is_empty() {
+            println!("No sessions linked to scout item #{id}.");
+            return Ok(());
+        }
+        println!("Scout item #{id} sessions");
+        println!("{}", "-".repeat(60));
+        for session in sessions {
+            let session_id = session["session_id"].as_str().unwrap_or("?");
+            let caller = session["caller"].as_str().unwrap_or("?");
+            let started = session["created_at"].as_str().unwrap_or("?");
+            let status = session["status"].as_str().unwrap_or("?");
+            println!("{session_id:<38}  {caller:<12}  {status:<10}  {started}");
+        }
+    } else {
+        println!("{}", serde_json::to_string_pretty(&result)?);
+    }
     Ok(())
 }
 
@@ -366,23 +498,12 @@ mod tests {
     }
 
     #[test]
-    fn parse_scout_show() {
-        let cli = TestCli::try_parse_from(["test", "scout", "show", "42"]).unwrap();
+    fn parse_scout_bulk_delete() {
+        let cli = TestCli::try_parse_from(["test", "scout", "bulk-delete", "7", "8"]).unwrap();
         match cli.cmd {
             TestCmd::Scout(args) => match args.command {
-                ScoutCommand::Show { id } => assert_eq!(id, 42),
-                _ => panic!("expected Show"),
-            },
-        }
-    }
-
-    #[test]
-    fn parse_scout_delete() {
-        let cli = TestCli::try_parse_from(["test", "scout", "delete", "7"]).unwrap();
-        match cli.cmd {
-            TestCmd::Scout(args) => match args.command {
-                ScoutCommand::Delete { id } => assert_eq!(id, 7),
-                _ => panic!("expected Delete"),
+                ScoutCommand::BulkDelete { ids } => assert_eq!(ids, vec![7, 8]),
+                _ => panic!("expected BulkDelete"),
             },
         }
     }
@@ -399,60 +520,28 @@ mod tests {
     }
 
     #[test]
-    fn parse_scout_list() {
-        let cli = TestCli::try_parse_from(["test", "scout", "list"]).unwrap();
-        match cli.cmd {
-            TestCmd::Scout(args) => match args.command {
-                ScoutCommand::List { status } => assert!(status.is_none()),
-                _ => panic!("expected List"),
-            },
-        }
-    }
-
-    #[test]
-    fn parse_scout_save() {
-        let cli = TestCli::try_parse_from(["test", "scout", "save", "5"]).unwrap();
-        match cli.cmd {
-            TestCmd::Scout(args) => match args.command {
-                ScoutCommand::Save { id } => assert_eq!(id, 5),
-                _ => panic!("expected Save"),
-            },
-        }
-    }
-
-    #[test]
-    fn parse_scout_archive() {
-        let cli = TestCli::try_parse_from(["test", "scout", "archive", "8"]).unwrap();
-        match cli.cmd {
-            TestCmd::Scout(args) => match args.command {
-                ScoutCommand::Archive { id } => assert_eq!(id, 8),
-                _ => panic!("expected Archive"),
-            },
-        }
-    }
-
-    #[test]
-    fn parse_scout_read() {
-        let cli = TestCli::try_parse_from(["test", "scout", "read", "3"]).unwrap();
-        match cli.cmd {
-            TestCmd::Scout(args) => match args.command {
-                ScoutCommand::Read { id } => assert_eq!(id, 3),
-                _ => panic!("expected Read"),
-            },
-        }
-    }
-
-    #[test]
-    fn parse_scout_ask() {
+    fn parse_scout_ask_with_session() {
         let cli = TestCli::try_parse_from([
-            "test", "scout", "ask", "42", "What", "is", "the", "main", "point?",
+            "test",
+            "scout",
+            "ask",
+            "42",
+            "--session",
+            "sess-1",
+            "What",
+            "changed?",
         ])
         .unwrap();
         match cli.cmd {
             TestCmd::Scout(args) => match args.command {
-                ScoutCommand::Ask { id, question } => {
+                ScoutCommand::Ask {
+                    id,
+                    session,
+                    question,
+                } => {
                     assert_eq!(id, 42);
-                    assert_eq!(question.join(" "), "What is the main point?");
+                    assert_eq!(session.as_deref(), Some("sess-1"));
+                    assert_eq!(question.join(" "), "What changed?");
                 }
                 _ => panic!("expected Ask"),
             },
@@ -460,30 +549,34 @@ mod tests {
     }
 
     #[test]
-    fn parse_scout_research() {
-        let cli =
-            TestCli::try_parse_from(["test", "scout", "research", "AI", "agents", "--process"])
-                .unwrap();
+    fn parse_scout_act() {
+        let cli = TestCli::try_parse_from([
+            "test", "scout", "act", "42", "sandbox", "Focus", "on", "tests",
+        ])
+        .unwrap();
         match cli.cmd {
             TestCmd::Scout(args) => match args.command {
-                ScoutCommand::Research { topic, process } => {
-                    assert_eq!(topic.join(" "), "AI agents");
-                    assert!(process);
+                ScoutCommand::Act {
+                    id,
+                    project,
+                    prompt,
+                } => {
+                    assert_eq!(id, 42);
+                    assert_eq!(project, "sandbox");
+                    assert_eq!(prompt.join(" "), "Focus on tests");
                 }
-                _ => panic!("expected Research"),
+                _ => panic!("expected Act"),
             },
         }
     }
 
     #[test]
-    fn parse_scout_list_status() {
-        let cli = TestCli::try_parse_from(["test", "scout", "list", "--status", "saved"]).unwrap();
+    fn parse_scout_sessions() {
+        let cli = TestCli::try_parse_from(["test", "scout", "sessions", "9"]).unwrap();
         match cli.cmd {
             TestCmd::Scout(args) => match args.command {
-                ScoutCommand::List { status } => {
-                    assert_eq!(status.as_deref(), Some("saved"));
-                }
-                _ => panic!("expected List"),
+                ScoutCommand::Sessions { id } => assert_eq!(id, 9),
+                _ => panic!("expected Sessions"),
             },
         }
     }

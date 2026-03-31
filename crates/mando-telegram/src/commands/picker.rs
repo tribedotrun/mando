@@ -57,7 +57,10 @@ pub async fn show_single(
         let pr_label = if cfg.show_pr {
             item.pr
                 .as_deref()
-                .map(|p| format!(" ({p})"))
+                .map(|p| {
+                    let label = mando_shared::helpers::pr_short_label(p);
+                    format!(" ({label})")
+                })
                 .unwrap_or_default()
         } else {
             String::new()

@@ -1,4 +1,4 @@
-//! Clarification flow — single-turn and multi-turn stateful sessions.
+//! Clarification flow — single-turn and multi-turn via unified endpoint.
 
 use std::collections::HashMap;
 use std::time::Duration;
@@ -10,12 +10,11 @@ use tracing::{info, warn};
 
 use mando_cc::{CcConfig, CcOneShot};
 
-pub use super::clarifier_session::ClarifierSessionManager;
 use super::clarifier_validate::{build_clarifier_schema, check_repo, retry_with_correction};
 use super::task_notes::append_labeled_prompt;
 use crate::biz::json_parse::parse_llm_json;
 
-// ── Single-turn (legacy captain tick path) ──────────────────────────
+// ── Single-turn (captain tick auto-clarification) ───────────────────
 
 /// Run the clarification flow for a new task (single-turn).
 pub(crate) async fn run_clarification(
@@ -220,6 +219,7 @@ pub(crate) fn build_interactive_clarifier_turn_prompt(
     item: &Task,
     workflow: &CaptainWorkflow,
     human_input: Option<&str>,
+    outstanding_questions_text: Option<&str>,
 ) -> anyhow::Result<String> {
     let system_prompt =
         mando_config::render_prompt("interactive_clarifier", &workflow.prompts, &HashMap::new())
@@ -229,7 +229,7 @@ pub(crate) fn build_interactive_clarifier_turn_prompt(
         .as_deref()
         .unwrap_or(item.context.as_deref().unwrap_or("(none)"));
     let current_context = item.context.as_deref().unwrap_or("(none)");
-    let outstanding_questions = item.clarifier_questions.as_deref().unwrap_or("(none)");
+    let outstanding_questions = outstanding_questions_text.unwrap_or("(none)");
     let human_response = human_input.unwrap_or("(none)").trim();
 
     Ok(format!(
@@ -247,123 +247,123 @@ pub(crate) fn build_interactive_clarifier_turn_prompt(
     ))
 }
 
-pub(crate) async fn run_deep_clarification(
+/// Unified clarification answer: appends human answer to context, runs the
+/// interactive clarifier LLM inline, and returns the result. Resumes an
+/// existing CC session when `task.session_ids.clarifier` is set.
+pub async fn answer_and_reclarify(
     item: &Task,
+    answer: &str,
     workflow: &CaptainWorkflow,
     config: &mando_config::Config,
     pool: &sqlx::SqlitePool,
-    initial: ClarifierResult,
-) -> ClarifierResult {
-    let questions = initial.questions.as_deref().unwrap_or("").trim();
-    let Some(session_id) = initial.session_id.as_deref() else {
-        return initial;
-    };
-    if questions.is_empty() {
-        return initial;
+) -> Result<ClarifierResult> {
+    let questions =
+        match mando_db::queries::timeline::latest_clarifier_questions(pool, item.id).await {
+            Ok(q) => q,
+            Err(e) => {
+                warn!(
+                    module = "clarifier",
+                    task_id = item.id,
+                    error = %e,
+                    "failed to fetch outstanding questions from timeline"
+                );
+                None
+            }
+        };
+    let prompt = build_interactive_clarifier_turn_prompt(
+        item,
+        workflow,
+        Some(answer),
+        questions.as_deref(),
+    )?;
+    let cwd = resolve_clarifier_cwd(item, config);
+    let task_id = item.best_id();
+    let timeout = Duration::from_secs(workflow.agent.clarifier_timeout_s);
+
+    let mut builder = CcConfig::builder()
+        .model(&workflow.models.clarifier)
+        .timeout(timeout)
+        .caller("clarifier")
+        .task_id(&task_id)
+        .cwd(cwd.clone())
+        .allowed_tools(vec!["Read".into(), "Glob".into(), "Grep".into()])
+        .json_schema(serde_json::json!({
+            "type": "object",
+            "properties": {
+                "status": { "type": "string", "enum": ["understood", "ready", "clarifying", "escalate"] },
+                "context": { "type": "string" },
+                "questions": { "type": ["string", "null"] }
+            },
+            "required": ["status", "context"]
+        }));
+
+    if let Some(ref sid) = item.session_ids.clarifier {
+        builder = builder.resume(sid.clone());
     }
 
-    let cwd = resolve_clarifier_cwd(item, config);
-    let mut vars = HashMap::new();
-    vars.insert("questions", questions);
-    vars.insert("context", initial.context.as_str());
+    let result = CcOneShot::run(&prompt, builder.build()).await?;
 
-    let prompt = match mando_config::render_prompt("deep_clarifier", &workflow.prompts, &vars) {
-        Ok(prompt) => prompt,
-        Err(e) => {
-            warn!(module = "clarifier", error = %e, "failed to render deep clarifier prompt");
-            return ClarifierResult {
-                deep_failed: true,
-                ..initial
-            };
-        }
-    };
-
-    match CcOneShot::run(
-        &prompt,
-        CcConfig::builder()
-            .model(&workflow.models.clarifier)
-            .timeout(Duration::from_secs(workflow.agent.clarifier_timeout_s))
-            .caller("deep-clarifier")
-            .task_id(item.best_id())
-            .cwd(cwd.clone())
-            .resume(session_id.to_string())
-            .allowed_tools(vec!["Read".into(), "Glob".into(), "Grep".into()])
-            .json_schema(serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "status": { "type": "string", "enum": ["understood", "escalate"] },
-                    "context": { "type": "string" },
-                    "questions": { "type": ["string", "null"] }
-                },
-                "required": ["status", "context"]
-            }))
-            .build(),
+    let resumed = item.session_ids.clarifier.is_some();
+    crate::io::headless_cc::log_cc_session(
+        pool,
+        &crate::io::headless_cc::SessionLogEntry {
+            session_id: &result.session_id,
+            cwd: &cwd,
+            model: &workflow.models.clarifier,
+            caller: "clarifier",
+            cost_usd: result.cost_usd,
+            duration_ms: result.duration_ms,
+            resumed,
+            task_id: &task_id,
+            status: mando_types::SessionStatus::Stopped,
+            worker_name: "",
+        },
     )
-    .await
-    {
-        Ok(result) => {
-            crate::io::headless_cc::log_cc_session(
-                pool,
-                &crate::io::headless_cc::SessionLogEntry {
-                    session_id: &result.session_id,
-                    cwd: &cwd,
-                    model: &workflow.models.clarifier,
-                    caller: "deep-clarifier",
-                    cost_usd: result.cost_usd,
-                    duration_ms: result.duration_ms,
-                    resumed: true,
-                    task_id: &item.best_id(),
-                    status: mando_types::SessionStatus::Stopped,
-                    worker_name: "",
-                },
-            )
-            .await;
-            let text = result
-                .structured
-                .as_ref()
-                .map(|v| v.to_string())
-                .unwrap_or_else(|| result.text.clone());
-            let mut parsed = parse_clarifier_response(&text, &item.title);
-            parsed.session_id = Some(result.session_id);
-            // Deep clarifier answers questions — it doesn't reassign project.
-            // Carry forward the validated values from the initial clarification.
-            parsed.repo = initial.repo;
-            parsed.no_pr = initial.no_pr.or(parsed.no_pr);
-            parsed.resource = initial.resource.or(parsed.resource);
-            parsed
-        }
-        Err(e) => {
-            warn!(module = "clarifier", error = %e, "deep clarifier failed — using shallow result");
-            ClarifierResult {
-                deep_failed: true,
-                ..initial
-            }
-        }
+    .await;
+
+    let text = result
+        .structured
+        .as_ref()
+        .map(|v| v.to_string())
+        .unwrap_or_else(|| result.text.clone());
+    let mut parsed = parse_clarifier_response(&text, &item.title);
+    parsed.session_id = Some(result.session_id);
+
+    info!(
+        module = "clarifier",
+        title = %&item.title[..item.title.len().min(60)],
+        status = ?parsed.status,
+        "answer_and_reclarify complete"
+    );
+    Ok(parsed)
+}
+
+fn escalate(title: &str, reason: &str) -> ClarifierResult {
+    ClarifierResult {
+        status: ClarifierStatus::Escalate,
+        context: title.to_string(),
+        questions: Some(reason.into()),
+        generated_title: None,
+        repo: None,
+        no_pr: None,
+        resource: None,
+        session_id: None,
+        deep_failed: false,
     }
 }
 
 pub(crate) fn parse_clarifier_response(text: &str, item_title: &str) -> ClarifierResult {
-    let parsed = parse_llm_json(text);
+    let parsed = match parse_llm_json(text) {
+        Ok(v) => v,
+        Err(e) => {
+            warn!(module = "clarifier", error = %e, "unparseable response — escalating");
+            return escalate(item_title, "Clarifier returned unparseable response");
+        }
+    };
 
-    // If we couldn't parse JSON at all, fail closed — escalate rather than
-    // sending an unprepared task to a worker.
-    let has_valid_status = parsed["status"].is_string();
-    if !has_valid_status {
-        warn!(
-            module = "clarifier",
-            "clarifier returned unparseable response — escalating (fail-closed)"
-        );
-        return ClarifierResult {
-            status: ClarifierStatus::Escalate,
-            context: item_title.to_string(),
-            questions: Some("Clarifier returned unparseable response".into()),
-            generated_title: None,
-            repo: None,
-            no_pr: None,
-            resource: None,
-            session_id: None,
-            deep_failed: false,
-        };
+    if !parsed["status"].is_string() {
+        warn!(module = "clarifier", "missing status field — escalating");
+        return escalate(item_title, "Clarifier returned JSON without status field");
     }
 
     // has_valid_status guarantees is_string(), so as_str() always succeeds here.
@@ -498,13 +498,6 @@ mod tests {
             build_clarifier_prompt(&item, Some("it's in the login page"), &workflow, &projects)
                 .unwrap();
         assert!(prompt.contains("Human provided additional details: it's in the login page"));
-    }
-
-    #[tokio::test]
-    async fn session_manager_new() {
-        let db = mando_db::Db::open_in_memory().await.unwrap();
-        let mgr = ClarifierSessionManager::new("sonnet", db.pool().clone());
-        assert!(!mgr.has_session("nonexistent"));
     }
 
     #[test]

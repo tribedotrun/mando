@@ -7,10 +7,6 @@ use mando_types::AskHistoryEntry;
 
 #[derive(sqlx::FromRow)]
 struct AskHistoryRow {
-    #[allow(dead_code)]
-    id: i64,
-    #[allow(dead_code)]
-    task_id: i64,
     role: String,
     content: String,
     timestamp: String,
@@ -43,11 +39,12 @@ pub async fn append(pool: &SqlitePool, task_id: i64, entry: &AskHistoryEntry) ->
 
 /// Load all ask history for a task, ordered chronologically.
 pub async fn load(pool: &SqlitePool, task_id: i64) -> Result<Vec<AskHistoryEntry>> {
-    let rows: Vec<AskHistoryRow> =
-        sqlx::query_as("SELECT * FROM ask_history WHERE task_id = ? ORDER BY timestamp ASC")
-            .bind(task_id)
-            .fetch_all(pool)
-            .await?;
+    let rows: Vec<AskHistoryRow> = sqlx::query_as(
+        "SELECT role, content, timestamp FROM ask_history WHERE task_id = ? ORDER BY timestamp ASC",
+    )
+    .bind(task_id)
+    .fetch_all(pool)
+    .await?;
     Ok(rows.into_iter().map(|r| r.into_entry()).collect())
 }
 

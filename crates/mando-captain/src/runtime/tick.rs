@@ -15,14 +15,14 @@ use tracing::Instrument;
 use mando_config::settings::Config;
 use mando_config::workflow::CaptainWorkflow;
 use mando_shared::EventBus;
-use mando_types::captain::TickResult;
+use mando_types::captain::{TickMode, TickResult};
 use mando_types::task::ItemStatus;
 use tokio::sync::RwLock;
 
 use crate::io::{health_store, task_store, task_store::TaskStore};
-use crate::runtime::{captain_review, mergeability, review_phase, spawn_phase};
+use crate::runtime::{mergeability, review_phase, spawn_phase};
 
-use super::tick_guard::{TickGuard, TICK_RUNNING};
+use super::tick_guard::{acquire_tick_guard, TICK_RUNNING};
 use super::tick_spawn::default_tick_result;
 pub use super::tick_spawn::{spawn_worker_for_item, ItemSpawnResult};
 
@@ -45,13 +45,37 @@ pub(crate) async fn run_captain_tick(
     if TICK_RUNNING.swap(true, std::sync::atomic::Ordering::AcqRel) {
         tracing::warn!(module = "captain", tick_id = %tick_id, "tick already in progress, skipping");
         return Ok(TickResult {
-            mode: "skipped".into(),
+            mode: TickMode::Skipped,
             tick_id: Some(tick_id),
             error: Some("tick already in progress".into()),
             ..default_tick_result()
         });
     }
-    let _guard = TickGuard;
+    let _guard = match acquire_tick_guard() {
+        Ok(guard) => guard,
+        Err(e) => {
+            TICK_RUNNING.store(false, std::sync::atomic::Ordering::Release);
+            tracing::warn!(module = "captain", tick_id = %tick_id, error = %e, "captain tick lock held elsewhere, skipping");
+            return Ok(TickResult {
+                mode: TickMode::Skipped,
+                tick_id: Some(tick_id),
+                error: Some(e.to_string()),
+                ..default_tick_result()
+            });
+        }
+    };
+    let _file_lock = match crate::io::captain_lock::try_acquire() {
+        Ok(lock) => lock,
+        Err(e) => {
+            tracing::warn!(module = "captain", tick_id = %tick_id, error = %e, "captain file lock held, skipping");
+            return Ok(TickResult {
+                mode: TickMode::Skipped,
+                tick_id: Some(tick_id),
+                error: Some(e.to_string()),
+                ..default_tick_result()
+            });
+        }
+    };
 
     let mut result = run_captain_tick_inner(
         config,
@@ -76,7 +100,11 @@ async fn run_captain_tick_inner(
     emit_notifications: bool,
     store_lock: &Arc<RwLock<TaskStore>>,
 ) -> Result<TickResult> {
-    let mode = if dry_run { "dry-run" } else { "live" };
+    let mode = if dry_run {
+        TickMode::DryRun
+    } else {
+        TickMode::Live
+    };
     tracing::info!(module = "captain", mode = %mode, "tick start");
 
     let captain = &config.captain;
@@ -117,7 +145,7 @@ async fn run_captain_tick_inner(
     // Snapshot item IDs + serialized state so we only write back items the tick changed.
     let pre_tick_snapshot: std::collections::HashMap<i64, serde_json::Value> = items
         .iter()
-        .map(|it| (it.id, task_store::task_snapshot(it)))
+        .filter_map(|it| task_store::task_snapshot(it).ok().map(|s| (it.id, s)))
         .collect();
     let mut health_state = health_store::load_health_state(&health_path);
 
@@ -126,7 +154,8 @@ async fn run_captain_tick_inner(
 
     // Kill orphan workers — processes tracked in health state with no matching in-progress item.
     if !dry_run {
-        super::tick_action_loop::kill_orphan_workers(&indices_snapshot, &mut health_state).await;
+        super::tick_action_loop::kill_orphan_workers(&indices_snapshot, &mut health_state, &pool)
+            .await;
     }
 
     // Linear sync: import "Todo" issues into tasks.
@@ -143,7 +172,7 @@ async fn run_captain_tick_inner(
                     items.extend(filtered);
                 }
             }
-            Err(e) => tracing::debug!(module = "captain", error = %e, "linear sync skipped"),
+            Err(e) => tracing::warn!(module = "captain", error = %e, "linear sync failed"),
         }
     }
 
@@ -223,79 +252,8 @@ async fn run_captain_tick_inner(
 
     // CaptainReviewing — poll for review verdicts from async CC sessions.
     if !dry_run {
-        let review_timeout_s = workflow.agent.captain_review_timeout_s;
-        for item in items
-            .iter_mut()
-            .filter(|it| it.status == ItemStatus::CaptainReviewing)
-        {
-            // If item has no review session, spawn one (handles retry path
-            // and items that entered CaptainReviewing without a session).
-            let has_session = item
-                .session_ids
-                .review
-                .as_deref()
-                .is_some_and(|s| !s.is_empty());
-            if !has_session {
-                let trigger = item
-                    .captain_review_trigger
-                    .unwrap_or(mando_types::task::ReviewTrigger::Retry);
-                item.last_activity_at = Some(mando_types::now_rfc3339());
-                if let Err(e) = captain_review::spawn_review(
-                    item,
-                    trigger.as_str(),
-                    config,
-                    workflow,
-                    &notifier,
-                    &pool,
-                )
-                .await
-                {
-                    tracing::warn!(module = "captain", item_id = item.id, error = %e, "spawn_review failed");
-                }
-                continue;
-            }
-
-            if let Some(verdict) = captain_review::check_review(item) {
-                if let Err(e) =
-                    captain_review::apply_verdict(item, &verdict, &notifier, &pool).await
-                {
-                    tracing::warn!(module = "captain", item_id = item.id, error = %e, "apply_verdict failed");
-                }
-            } else {
-                // No verdict yet — check timeout. If the item has been in
-                // CaptainReviewing longer than captain_review_timeout_s,
-                // treat the session as dead.
-                let is_timed_out = item
-                    .last_activity_at
-                    .as_deref()
-                    .and_then(|ts| {
-                        time::OffsetDateTime::parse(
-                            ts,
-                            &time::format_description::well_known::Rfc3339,
-                        )
-                        .ok()
-                    })
-                    .map(|entered| {
-                        let elapsed = time::OffsetDateTime::now_utc() - entered;
-                        elapsed.whole_seconds() as u64 > review_timeout_s
-                    })
-                    .unwrap_or(true); // No timestamp = treat as timed out.
-
-                if is_timed_out {
-                    let mut fail_count = item.retry_count as u32;
-                    captain_review::handle_review_error(
-                        item,
-                        "review session timed out without producing a verdict",
-                        &mut fail_count,
-                        workflow,
-                        &notifier,
-                        &pool,
-                    )
-                    .await;
-                    item.retry_count = fail_count as i64;
-                }
-            }
-        }
+        super::tick_review::poll_reviewing_items(&mut items, config, workflow, &notifier, &pool)
+            .await;
     }
 
     // CaptainMerging — poll for merge session results from async CC sessions.
@@ -407,10 +365,12 @@ async fn run_captain_tick_inner(
             let changed_items: Vec<mando_types::Task> = items
                 .iter()
                 .filter(|item| {
-                    let current_snapshot = task_store::task_snapshot(item);
-                    match pre_tick_snapshot.get(&item.id) {
-                        Some(old_snapshot) => *old_snapshot != current_snapshot,
-                        None => true,
+                    match task_store::task_snapshot(item) {
+                        Ok(current_snapshot) => match pre_tick_snapshot.get(&item.id) {
+                            Some(old_snapshot) => *old_snapshot != current_snapshot,
+                            None => true,
+                        },
+                        Err(_) => true, // can't snapshot — treat as changed
                     }
                 })
                 .cloned()
@@ -456,7 +416,11 @@ async fn run_captain_tick_inner(
     // Reconcile stale "running" sessions against stream ground truth.
     if !dry_run {
         let store = store_lock.read().await;
-        super::session_reconcile::reconcile_running_sessions(store.pool()).await;
+        super::session_reconcile::reconcile_running_sessions(
+            store.pool(),
+            workflow.agent.stale_threshold_s,
+        )
+        .await;
     }
 
     let status_counts = {
@@ -470,7 +434,7 @@ async fn run_captain_tick_inner(
     super::tick_post::log_tick_summary(&status_counts, active_workers, alerts.len());
 
     Ok(TickResult {
-        mode: mode.into(),
+        mode,
         tick_id: None, // set by caller (run_captain_tick)
         max_workers,
         active_workers,
@@ -482,96 +446,5 @@ async fn run_captain_tick_inner(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn test_workflow() -> CaptainWorkflow {
-        CaptainWorkflow::compiled_default()
-    }
-
-    async fn test_store_lock(_dir: &std::path::Path) -> Arc<RwLock<TaskStore>> {
-        let db = mando_db::Db::open_in_memory().await.unwrap();
-        let store = TaskStore::new(db.pool().clone());
-        Arc::new(RwLock::new(store))
-    }
-
-    #[tokio::test]
-    async fn tick_no_tasks() {
-        let dir = std::env::temp_dir().join("mando-tick-test-none");
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        let store_lock = test_store_lock(&dir).await;
-        let config = Config::default();
-        let wf = test_workflow();
-        let result = run_captain_tick_inner(&config, &wf, true, None, true, &store_lock)
-            .await
-            .unwrap();
-        assert_eq!(result.mode, "dry-run");
-        std::fs::remove_dir_all(&dir).ok();
-    }
-
-    #[tokio::test]
-    async fn tick_dry_run_does_not_mutate() {
-        let dir = std::env::temp_dir().join("mando-tick-test-dry");
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        let store_lock = test_store_lock(&dir).await;
-        {
-            let store = store_lock.write().await;
-            let mut t = mando_types::Task::new("Test task");
-            t.status = ItemStatus::New;
-            store.add(t).await.unwrap();
-        }
-        let config = Config::default();
-        let wf = test_workflow();
-        let result = run_captain_tick_inner(&config, &wf, true, None, true, &store_lock)
-            .await
-            .unwrap();
-        assert_eq!(result.mode, "dry-run");
-        assert!(result.error.is_none());
-        assert_eq!(result.tasks.get("new"), Some(&1));
-        std::fs::remove_dir_all(&dir).ok();
-    }
-
-    #[tokio::test]
-    async fn tick_live_retries_clarifier_on_failure() {
-        let dir = std::env::temp_dir().join("mando-tick-test-live");
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        let store_lock = test_store_lock(&dir).await;
-        {
-            let store = store_lock.write().await;
-            let mut t = mando_types::Task::new("Lifecycle test item");
-            t.status = ItemStatus::New;
-            t.project = Some("acme/widgets".into());
-            store.add(t).await.unwrap();
-        }
-        let config = Config::default();
-        let wf = test_workflow();
-
-        // Hide the claude binary so the clarifier fails.
-        let orig_path = std::env::var("PATH").unwrap_or_default();
-        let orig_home = std::env::var("HOME").unwrap_or_default();
-        std::env::set_var("PATH", "/nonexistent");
-        std::env::set_var("HOME", "/nonexistent");
-
-        let result = run_captain_tick_inner(&config, &wf, false, None, true, &store_lock)
-            .await
-            .unwrap();
-
-        std::env::set_var("PATH", &orig_path);
-        std::env::set_var("HOME", &orig_home);
-
-        assert_eq!(result.mode, "live");
-        assert!(result.error.is_none());
-        // Task stays New (retryable), not auto-promoted to Ready.
-        assert_eq!(result.tasks.get("new"), Some(&1));
-        assert_eq!(result.tasks.get("ready"), None);
-
-        // Verify spawn_fail_count incremented.
-        let store = store_lock.read().await;
-        let task = store.find_by_id(1).await.unwrap().unwrap();
-        assert_eq!(task.retry_count, 1);
-        std::fs::remove_dir_all(&dir).ok();
-    }
-}
+#[path = "tick_tests.rs"]
+mod tests;

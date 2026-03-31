@@ -35,6 +35,7 @@ pub struct CaptainVerdict {
 fn is_verdict_allowed(trigger: &str, action: &str) -> bool {
     match trigger {
         "gates_pass" => matches!(action, "ship" | "nudge" | "escalate"),
+        "degraded_context" => matches!(action, "ship" | "nudge" | "escalate"),
         "timeout" => matches!(action, "nudge" | "escalate"),
         "broken_session" => matches!(action, "respawn" | "escalate"),
         "budget_exhausted" => matches!(action, "escalate"),
@@ -103,11 +104,17 @@ pub(crate) async fn spawn_review(
             )
         })?;
 
+    // Pre-validate the prompt template exists before committing side effects.
+    // Full render happens inside tokio::spawn (needs async evidence/knowledge data),
+    // but catching a missing template here prevents stuck CaptainReviewing state.
+    if !workflow.prompts.contains_key("captain_review") {
+        anyhow::bail!("captain_review prompt template missing from workflow");
+    }
+
     // All fallible operations succeeded — now commit state changes.
     item.status = ItemStatus::CaptainReviewing;
     item.captain_review_trigger = trigger.parse().ok();
     item.last_activity_at = Some(mando_types::now_rfc3339());
-    item.retry_count = 0;
 
     // --- Gather worker context (PR data, stream tail, process status) ---
     let (ctx, worker_contexts_text) = review_phase::build_single_context(item, config).await;
@@ -177,6 +184,11 @@ pub(crate) async fn spawn_review(
         } else {
             ""
         };
+        let is_degraded_context = if trigger_str == "degraded_context" {
+            "true"
+        } else {
+            ""
+        };
         let is_timeout = if trigger_str == "timeout" { "true" } else { "" };
         let is_broken_session = if trigger_str == "broken_session" {
             "true"
@@ -213,6 +225,7 @@ pub(crate) async fn spawn_review(
         vars.insert("evidence_images", evidence_listing.as_str());
         vars.insert("intervention_count", intervention_count_str.as_str());
         vars.insert("is_gates_pass", is_gates_pass);
+        vars.insert("is_degraded_context", is_degraded_context);
         vars.insert("is_timeout", is_timeout);
         vars.insert("is_broken_session", is_broken_session);
         vars.insert("is_budget_exhausted", is_budget_exhausted);
@@ -239,9 +252,27 @@ pub(crate) async fn spawn_review(
             .json_schema(verdict_json_schema())
             .build();
 
-        match mando_cc::CcOneShot::run(&prompt, config).await {
+        // Log "running" session entry so cancel can find it immediately.
+        crate::io::headless_cc::log_running_session(
+            &pool,
+            &session_id,
+            &cwd,
+            "captain-review-async",
+            "",
+            &task_id,
+            false,
+        )
+        .await;
+
+        let sid_for_hook = session_id.clone();
+        match mando_cc::CcOneShot::run_with_pid_hook(&prompt, config, |pid| {
+            crate::io::pid_registry::register(&sid_for_hook, pid);
+        })
+        .await
+        {
             Ok(result) => {
                 info!(module = "captain", %session_id, "captain review CC completed");
+                crate::io::pid_registry::unregister(&session_id);
                 review_notifier.check_rate_limit(&result).await;
                 crate::io::headless_cc::log_cc_result(
                     &pool,
@@ -254,6 +285,7 @@ pub(crate) async fn spawn_review(
             }
             Err(e) => {
                 warn!(module = "captain", %session_id, %e, "captain review CC failed");
+                crate::io::pid_registry::unregister(&session_id);
                 crate::io::headless_cc::log_cc_failure(
                     &pool,
                     &session_id,
@@ -367,238 +399,5 @@ fn validate_verdict(verdict: CaptainVerdict, item: &Task) -> CaptainVerdict {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_verdict_schema_is_valid_json() {
-        let schema = verdict_json_schema();
-        assert_eq!(schema["type"], "object");
-        assert!(schema["properties"]["action"].is_object());
-        assert!(schema["properties"]["feedback"].is_object());
-        assert!(schema["properties"]["report"].is_object());
-        let required = schema["required"].as_array().unwrap();
-        assert!(required.contains(&serde_json::json!("action")));
-        assert!(required.contains(&serde_json::json!("feedback")));
-        // Action field must have enum constraint.
-        let action_enum = schema["properties"]["action"]["enum"].as_array().unwrap();
-        assert!(action_enum.contains(&serde_json::json!("ship")));
-        assert!(action_enum.contains(&serde_json::json!("nudge")));
-        assert!(action_enum.contains(&serde_json::json!("escalate")));
-        assert!(action_enum.contains(&serde_json::json!("respawn")));
-        assert!(action_enum.contains(&serde_json::json!("retry_clarifier")));
-    }
-
-    #[test]
-    fn test_template_renders_gates_pass_verdicts() {
-        let workflow = mando_config::workflow::CaptainWorkflow::compiled_default();
-        let mut vars = std::collections::HashMap::new();
-        vars.insert("trigger", "gates_pass");
-        vars.insert("title", "Test task");
-        vars.insert("item_id", "42");
-        vars.insert(
-            "worker_contexts",
-            "### Worker: test-worker\n- Status: in-progress",
-        );
-        vars.insert("knowledge_base", "");
-        vars.insert("evidence_images", "");
-        vars.insert("intervention_count", "3");
-        vars.insert("is_gates_pass", "true");
-        vars.insert("is_timeout", "");
-        vars.insert("is_broken_session", "");
-        vars.insert("is_budget_exhausted", "");
-        vars.insert("is_clarifier_fail", "");
-        vars.insert("is_rebase_fail", "");
-
-        let rendered =
-            mando_config::render_prompt("captain_review", &workflow.prompts, &vars).unwrap();
-
-        // Worker context is populated.
-        assert!(
-            rendered.contains("test-worker"),
-            "should contain worker context"
-        );
-        // Allowed verdicts for gates_pass are present.
-        assert!(rendered.contains("**ship**"), "should have ship verdict");
-        assert!(rendered.contains("**nudge**"), "should have nudge verdict");
-        assert!(
-            rendered.contains("**escalate**"),
-            "should have escalate verdict"
-        );
-        // Other trigger verdicts should NOT be present.
-        assert!(
-            !rendered.contains("**respawn**"),
-            "no respawn for gates_pass"
-        );
-        assert!(
-            !rendered.contains("**retry_clarifier**"),
-            "no retry_clarifier for gates_pass"
-        );
-    }
-
-    #[test]
-    fn test_template_renders_timeout_verdicts() {
-        let workflow = mando_config::workflow::CaptainWorkflow::compiled_default();
-        let mut vars = std::collections::HashMap::new();
-        vars.insert("trigger", "timeout");
-        vars.insert("title", "Test");
-        vars.insert("item_id", "1");
-        vars.insert("worker_contexts", "");
-        vars.insert("knowledge_base", "");
-        vars.insert("evidence_images", "");
-        vars.insert("intervention_count", "0");
-        vars.insert("is_gates_pass", "");
-        vars.insert("is_timeout", "true");
-        vars.insert("is_broken_session", "");
-        vars.insert("is_budget_exhausted", "");
-        vars.insert("is_clarifier_fail", "");
-        vars.insert("is_rebase_fail", "");
-
-        let rendered =
-            mando_config::render_prompt("captain_review", &workflow.prompts, &vars).unwrap();
-
-        assert!(rendered.contains("**nudge**"), "timeout should have nudge");
-        assert!(
-            rendered.contains("**escalate**"),
-            "timeout should have escalate"
-        );
-        assert!(
-            !rendered.contains("**ship**"),
-            "timeout should not have ship"
-        );
-    }
-
-    #[test]
-    fn test_check_review_parses_structured_output() {
-        use std::io::Write;
-
-        let session_id = "test-check-review-structured";
-        let stream_path = mando_config::stream_path_for_session(session_id);
-        std::fs::create_dir_all(stream_path.parent().unwrap()).unwrap();
-
-        let mut f = std::fs::File::create(&stream_path).unwrap();
-        writeln!(
-            f,
-            r#"{{"type":"system","subtype":"init","session_id":"{session_id}"}}"#
-        )
-        .unwrap();
-        writeln!(
-            f,
-            r#"{{"type":"result","subtype":"success","result":"","structured_output":{{"action":"ship","feedback":"looks good"}}}}"#
-        )
-        .unwrap();
-
-        let item = Task {
-            session_ids: mando_types::SessionIds {
-                review: Some(session_id.to_string()),
-                ..Default::default()
-            },
-            captain_review_trigger: Some(mando_types::task::ReviewTrigger::GatesPass),
-            ..Task::new("test")
-        };
-
-        let verdict = check_review(&item).unwrap();
-        assert_eq!(verdict.action, "ship");
-        assert_eq!(verdict.feedback, "looks good");
-
-        std::fs::remove_file(&stream_path).ok();
-    }
-
-    #[test]
-    fn test_check_review_falls_back_to_assistant_text() {
-        use std::io::Write;
-
-        let session_id = "test-check-review-fallback";
-        let stream_path = mando_config::stream_path_for_session(session_id);
-        std::fs::create_dir_all(stream_path.parent().unwrap()).unwrap();
-
-        let mut f = std::fs::File::create(&stream_path).unwrap();
-        writeln!(
-            f,
-            r#"{{"type":"system","subtype":"init","session_id":"{session_id}"}}"#
-        )
-        .unwrap();
-        writeln!(
-            f,
-            r#"{{"type":"assistant","message":{{"role":"assistant","content":[{{"type":"text","text":"{{\"action\":\"nudge\",\"feedback\":\"add tests\"}}"}}]}}}}"#
-        )
-        .unwrap();
-        writeln!(
-            f,
-            r#"{{"type":"result","subtype":"success","result":"","structured_output":null}}"#
-        )
-        .unwrap();
-
-        let item = Task {
-            session_ids: mando_types::SessionIds {
-                review: Some(session_id.to_string()),
-                ..Default::default()
-            },
-            captain_review_trigger: Some(mando_types::task::ReviewTrigger::GatesPass),
-            ..Task::new("test")
-        };
-
-        let verdict = check_review(&item).unwrap();
-        assert_eq!(verdict.action, "nudge");
-        assert_eq!(verdict.feedback, "add tests");
-
-        std::fs::remove_file(&stream_path).ok();
-    }
-
-    #[test]
-    fn test_check_review_escalates_when_all_paths_empty() {
-        use std::io::Write;
-
-        let session_id = "test-check-review-all-empty";
-        let stream_path = mando_config::stream_path_for_session(session_id);
-        std::fs::create_dir_all(stream_path.parent().unwrap()).unwrap();
-
-        // Session completed but no structured_output, no result text, no assistant text.
-        let mut f = std::fs::File::create(&stream_path).unwrap();
-        writeln!(
-            f,
-            r#"{{"type":"system","subtype":"init","session_id":"{session_id}"}}"#
-        )
-        .unwrap();
-        writeln!(
-            f,
-            r#"{{"type":"result","subtype":"success","result":"","structured_output":null}}"#
-        )
-        .unwrap();
-
-        let item = Task {
-            session_ids: mando_types::SessionIds {
-                review: Some(session_id.to_string()),
-                ..Default::default()
-            },
-            captain_review_trigger: Some(mando_types::task::ReviewTrigger::GatesPass),
-            ..Task::new("test")
-        };
-
-        let verdict = check_review(&item).unwrap();
-        assert_eq!(verdict.action, "escalate");
-        assert!(verdict.feedback.contains("no extractable verdict"));
-        assert!(
-            verdict.report.is_some(),
-            "escalation must have a CTO report"
-        );
-
-        std::fs::remove_file(&stream_path).ok();
-    }
-
-    #[test]
-    fn test_validate_verdict_rejects_invalid_action() {
-        let item = Task {
-            captain_review_trigger: Some(mando_types::task::ReviewTrigger::GatesPass),
-            ..Task::new("test")
-        };
-        let verdict = CaptainVerdict {
-            action: "approve".into(),
-            feedback: "looks good".into(),
-            report: None,
-        };
-        let result = validate_verdict(verdict, &item);
-        assert_eq!(result.action, "escalate");
-        assert!(result.feedback.contains("approve"));
-    }
-}
+#[path = "captain_review_tests.rs"]
+mod tests;

@@ -1,14 +1,14 @@
-//! `/prsummary <item_id>` — display PR description for a task.
+//! `/prsummary <task_id>` — display PR description for a task.
 
 use crate::bot::TelegramBot;
 use anyhow::Result;
 use mando_shared::telegram_format::escape_html;
 
-/// Handle `/prsummary <item_id>`.
+/// Handle `/prsummary <task_id>`.
 pub async fn handle(bot: &TelegramBot, chat_id: &str, args: &str) -> Result<()> {
     let item_id = args.trim();
     if item_id.is_empty() {
-        bot.send_html(chat_id, "Usage: /prsummary &lt;item_id&gt;")
+        bot.send_html(chat_id, "Usage: /prsummary &lt;task_id&gt;")
             .await?;
         return Ok(());
     }
@@ -24,7 +24,7 @@ pub async fn handle(bot: &TelegramBot, chat_id: &str, args: &str) -> Result<()> 
         None => {
             bot.send_html(
                 chat_id,
-                &format!("\u{26a0}\u{fe0f} Item #{} not found.", escape_html(item_id)),
+                &format!("\u{26a0}\u{fe0f} Task #{} not found.", escape_html(item_id)),
             )
             .await?;
         }

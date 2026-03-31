@@ -39,6 +39,7 @@ export interface TaskItem {
   title: string;
   status: ItemStatus;
   project?: string;
+  github_repo?: string;
   branch?: string;
   pr?: string;
   linear_id?: string;
@@ -46,7 +47,6 @@ export interface TaskItem {
   session_ids?: { worker?: string; review?: string; clarifier?: string };
   intervention_count: number;
   captain_review_trigger?: string;
-  clarifier_questions?: string;
   escalation_report?: string;
   context?: string;
   original_prompt?: string;
@@ -58,7 +58,10 @@ export interface TaskItem {
   created_at?: string;
   last_activity_at?: string;
   worker_started_at?: string;
-  retry_count: number;
+  review_fail_count: number;
+  clarifier_fail_count: number;
+  spawn_fail_count: number;
+  merge_fail_count: number;
   archived_at?: string;
 }
 
@@ -78,11 +81,17 @@ export interface HealthResponse {
   dataDir: string;
   configPath: string;
   taskDbPath: string;
+  workerHealthPath: string;
+  lockfilePath: string;
+  configuredTaskDbPath: string;
+  configuredWorkerHealthPath: string;
+  configuredLockfilePath: string;
+  restartRequired: boolean;
   linear_workspace_slug?: string;
 }
 
 export interface WorkerDetail {
-  id: string;
+  id: number;
   title: string;
   project: string;
   github_repo?: string;
@@ -136,6 +145,7 @@ export interface ScoutItem {
   date_added?: string;
   source_name?: string;
   date_published?: string;
+  telegraphUrl?: string;
 }
 
 export interface ScoutResponse {
@@ -244,6 +254,8 @@ export interface AskResponse {
 
 export interface ScoutArticleResponse {
   article: string;
+  title?: string;
+  telegraphUrl?: string;
 }
 
 export interface ScoutProcessResponse {
@@ -279,7 +291,6 @@ type NotificationKind =
   | { type: 'ClarifierNeeded'; item_id: string }
   | { type: 'RebaseFailed'; item_id: string; pr_number: number }
   | { type: 'WorkerEscalated'; item_id: string }
-  | { type: 'CaptainReviewStarted'; item_id: string }
   | { type: 'CaptainReviewVerdict'; item_id: string; verdict: string; feedback?: string }
   | { type: 'Escalated'; item_id: string; summary?: string }
   | { type: 'Errored'; item_id: string; error?: string }
@@ -371,6 +382,44 @@ export interface DistillerResponse {
   summary: string;
   patterns_found: number;
   patterns: Pattern[];
+}
+
+export interface KnowledgeLesson {
+  id: string;
+  title?: string;
+  source?: string;
+  status?: string;
+}
+
+export interface KnowledgePendingResponse {
+  pending: KnowledgeLesson[];
+  count: number;
+}
+
+export interface ScoutItemSession {
+  session_id: string;
+  caller: string;
+  status: string;
+  created_at: string;
+  model?: string;
+  duration_ms?: number | null;
+  cost_usd?: number | null;
+}
+
+export interface CaptainTriageItem {
+  repo?: string;
+  pr_number?: number;
+  title?: string;
+  merge_readiness_score?: number;
+  fast_track?: boolean;
+  fetch_failed?: boolean;
+  file_count?: number;
+  cursor_risk?: string;
+}
+
+export interface CaptainTriageResponse {
+  items?: CaptainTriageItem[];
+  message?: string;
 }
 
 // Window augmentation for preload API

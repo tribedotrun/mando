@@ -239,6 +239,9 @@ export function VoiceInput(): React.ReactElement {
       .then(() => setInitialized(true))
       .catch((err) => {
         log.error('[VoiceInput] init failed:', err);
+        setInitialized(true);
+        setVoiceState('error');
+        setErrorMsg('Voice unavailable');
       });
   });
 

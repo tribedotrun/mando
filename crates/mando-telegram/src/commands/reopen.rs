@@ -5,8 +5,8 @@ use crate::bot::TelegramBot;
 use anyhow::Result;
 
 const PICKER: SinglePicker = SinglePicker {
-    header: "Pick a done item to reopen:",
-    empty_msg: "\u{2705} No reopenable items.",
+    header: "Pick a done task to reopen:",
+    empty_msg: "\u{2705} No reopenable tasks.",
     callback_prefix: "reopen",
     limit: 8,
     show_pr: true,

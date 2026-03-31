@@ -185,30 +185,25 @@ pub(crate) async fn is_pr_branch_ahead(repo: &str, pr_number: &str) -> Result<bo
     .await
 }
 
-/// Post a comment on a PR.
-#[allow(dead_code)]
-pub(crate) async fn comment_on_pr(repo: &str, pr_number: &str, body: &str) -> Result<()> {
+/// Close an open PR without merging.
+pub(crate) async fn close_pr(repo: &str, pr_number: &str) -> Result<()> {
     let repo = repo.to_string();
     let pr_number = pr_number.to_string();
-    let body = body.to_string();
     retry_on_transient(
         &gh_retry_config(),
         |e: &anyhow::Error| classify_cli_error(&e.to_string()),
         || {
             let repo = repo.clone();
             let pr_number = pr_number.clone();
-            let body = body.clone();
             async move {
                 let output = tokio::process::Command::new("gh")
-                    .args([
-                        "pr", "comment", &pr_number, "--repo", &repo, "--body", &body,
-                    ])
+                    .args(["pr", "close", &pr_number, "--repo", &repo])
                     .output()
                     .await
-                    .context("gh pr comment")?;
+                    .context("gh pr close")?;
                 if !output.status.success() {
                     let stderr = String::from_utf8_lossy(&output.stderr);
-                    anyhow::bail!("gh pr comment failed: {}", stderr);
+                    anyhow::bail!("gh pr close failed: {}", stderr);
                 }
                 Ok(())
             }
@@ -237,5 +232,5 @@ pub(crate) async fn discover_pr_for_branch(repo: &str, branch: &str) -> Option<S
     let arr: Vec<serde_json::Value> = serde_json::from_str(&text).ok()?;
     arr.first()
         .and_then(|v| v["url"].as_str())
-        .map(|s| s.to_string())
+        .and_then(mando_types::task::normalize_pr)
 }

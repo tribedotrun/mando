@@ -93,6 +93,6 @@ pub async fn run_research(topic: &str, workflow: &ScoutWorkflow) -> Result<Resea
         });
         return Ok(parsed);
     }
-    let parsed: ResearchResult = mando_captain::biz::json_parse::parse_llm_json_as(&result.text);
+    let parsed: ResearchResult = mando_captain::biz::json_parse::parse_llm_json_as(&result.text)?;
     Ok(parsed)
 }

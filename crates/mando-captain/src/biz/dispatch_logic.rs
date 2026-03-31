@@ -90,6 +90,16 @@ pub(crate) fn new_items(items: &[Task]) -> Vec<usize> {
         .collect()
 }
 
+/// Find items in Clarifying status — human answered, needs re-clarification.
+pub(crate) fn clarifying_items(items: &[Task]) -> Vec<usize> {
+    items
+        .iter()
+        .enumerate()
+        .filter(|(_, it)| it.status == ItemStatus::Clarifying)
+        .map(|(i, _)| i)
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

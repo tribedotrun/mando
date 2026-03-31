@@ -27,12 +27,9 @@ export interface FeaturesConfig {
 export interface TelegramConfig {
   enabled?: boolean;
   owner?: string;
-  allowFrom?: string[];
-  replyToMessage?: boolean;
 }
 
 interface DashboardConfig {
-  enabled?: boolean;
   host?: string;
   port?: number;
 }
@@ -47,6 +44,8 @@ export interface CaptainConfig {
   autoSchedule?: boolean;
   tickIntervalS?: number;
   taskDbPath?: string;
+  lockfilePath?: string;
+  workerHealthPath?: string;
   notifyChatId?: string;
   linearTeam?: string;
   projects?: Record<string, ProjectConfig>;
@@ -66,7 +65,6 @@ export interface VoiceConfig {
 }
 
 interface ChannelsConfig {
-  sendProgress?: boolean;
   telegram?: TelegramConfig;
 }
 
@@ -95,7 +93,6 @@ interface SettingsStore {
   loading: boolean;
   loaded: boolean;
   saving: boolean;
-  dirty: boolean;
   error: string | null;
   saveSuccess: boolean;
 
@@ -111,7 +108,6 @@ interface SettingsStore {
   ) => void;
   updateEnv: (key: string, value: string) => void;
   updateTelegram: (patch: Partial<TelegramConfig>) => void;
-  clearError: () => void;
 }
 
 export const useSettingsStore = create<SettingsStore>((set, get) => ({
@@ -119,7 +115,6 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
   loading: false,
   loaded: false,
   saving: false,
-  dirty: false,
   error: null,
   saveSuccess: false,
 
@@ -135,7 +130,7 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
       if (window.mandoAPI?.readConfig) {
         const raw = await window.mandoAPI.readConfig();
         const parsed = raw ? JSON.parse(raw) : {};
-        set({ config: parsed, loading: false, loaded: true, dirty: false });
+        set({ config: parsed, loading: false, loaded: true });
       } else {
         set({ loading: false, loaded: true });
       }
@@ -161,7 +156,7 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
     try {
       if (window.mandoAPI?.saveConfig) {
         await window.mandoAPI.saveConfig(JSON.stringify(config, null, 2));
-        set({ saving: false, dirty: false, saveSuccess: true });
+        set({ saving: false, saveSuccess: true });
         setTimeout(() => set({ saveSuccess: false }), 2000);
       } else {
         set({ saving: false, error: 'Config API not available' });
@@ -183,7 +178,7 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
   },
 
   update: (patch) => {
-    set((s) => ({ config: { ...s.config, ...patch }, dirty: true }));
+    set((s) => ({ config: { ...s.config, ...patch } }));
   },
 
   updateProject: (pathKey, project) => {
@@ -245,6 +240,4 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
       dirty: true,
     }));
   },
-
-  clearError: () => set({ error: null }),
 }));

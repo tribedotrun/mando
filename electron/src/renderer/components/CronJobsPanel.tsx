@@ -224,7 +224,11 @@ function JobRow({ job, variant }: { job: CronJob; variant: Variant }): React.Rea
           {running ? '...' : 'Run'}
         </button>
         <button
-          onClick={() => toggle(job.id, !job.enabled).catch(() => {})}
+          onClick={() =>
+            toggle(job.id, !job.enabled).catch(() =>
+              useToastStore.getState().add('error', 'Failed to toggle cron job'),
+            )
+          }
           className="text-[13px] transition-colors"
           style={{
             padding: '4px 12px',

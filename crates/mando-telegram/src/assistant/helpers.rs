@@ -3,7 +3,6 @@
 use serde_json::Value;
 use tracing::warn;
 
-pub(super) use crate::message_helpers::is_group_chat;
 use anyhow::Result;
 use mando_shared::escape_html;
 
@@ -76,33 +75,25 @@ pub(crate) async fn handle_implicit_addlink(
 
     if added_ids.is_empty() {
         if !lines.is_empty() {
-            let _ = bot
+            if let Err(e) = bot
                 .api
                 .edit_message_text(chat_id, message_id, &lines.join("\n"), Some("HTML"), None)
-                .await;
+                .await
+            {
+                tracing::warn!(module = "telegram", error = %e, "message send failed");
+            }
         }
     } else if added_ids.len() == 1 {
-        super::commands::auto_process_single(
-            bot,
-            chat_id,
-            message_id,
-            added_ids[0],
-            is_group_chat(message),
-        )
-        .await;
+        super::commands::auto_process_single(bot, chat_id, message_id, added_ids[0]).await;
     } else {
-        let _ = bot
+        if let Err(e) = bot
             .api
             .edit_message_text(chat_id, message_id, &lines.join("\n"), Some("HTML"), None)
-            .await;
-        super::commands::auto_process_batch(
-            bot,
-            chat_id,
-            message_id,
-            &added_ids,
-            is_group_chat(message),
-        )
-        .await;
+            .await
+        {
+            tracing::warn!(module = "telegram", error = %e, "message send failed");
+        }
+        super::commands::auto_process_batch(bot, chat_id, message_id, &added_ids).await;
     }
     Ok(())
 }

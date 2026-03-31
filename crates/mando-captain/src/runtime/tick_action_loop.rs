@@ -9,9 +9,11 @@ use mando_types::task::ItemStatus;
 use crate::io::health_store;
 
 /// Kill workers tracked in health state that have no matching in-progress task.
+/// Also terminates associated sessions via `terminate_session`.
 pub(super) async fn kill_orphan_workers(
     items: &[mando_types::TaskRouting],
     health_state: &mut health_store::HealthState,
+    pool: &sqlx::SqlitePool,
 ) {
     let active_workers: std::collections::HashSet<&str> = items
         .iter()
@@ -29,19 +31,45 @@ pub(super) async fn kill_orphan_workers(
         .collect();
 
     for worker_name in orphan_keys {
-        let pid = health_store::get_health_u32(health_state, &worker_name, "pid");
-        if pid > 0 && mando_cc::is_process_alive(pid) {
-            tracing::warn!(
-                module = "captain",
-                worker = %worker_name,
-                pid = pid,
-                "killing orphan worker"
-            );
-            if let Err(e) = mando_cc::kill_process(pid).await {
-                tracing::warn!(module = "captain", worker = %worker_name, pid = pid, error = %e, "failed to kill orphan worker");
+        // Find the running session for this worker and terminate it.
+        match mando_db::queries::sessions::list_running_sessions(pool).await {
+            Ok(rows) => {
+                if let Some(row) = rows
+                    .iter()
+                    .find(|r| r.worker_name.as_deref() == Some(&worker_name))
+                {
+                    tracing::warn!(
+                        module = "captain",
+                        worker = %worker_name,
+                        session_id = %row.session_id,
+                        "terminating orphan worker session"
+                    );
+                    crate::io::session_terminate::terminate_session(
+                        pool,
+                        &row.session_id,
+                        mando_types::SessionStatus::Stopped,
+                        Some(health_state),
+                    )
+                    .await;
+                    continue;
+                }
+                // No matching session — safe to clean health state.
+                health_state.remove(&worker_name);
+                tracing::info!(
+                    module = "captain",
+                    worker = %worker_name,
+                    "removed orphan health entry (no session)"
+                );
+            }
+            Err(e) => {
+                // DB error — skip this orphan, retry on next tick.
+                tracing::warn!(
+                    module = "captain",
+                    worker = %worker_name,
+                    error = %e,
+                    "failed to query sessions for orphan — skipping, will retry next tick"
+                );
             }
         }
-        health_state.remove(&worker_name);
-        tracing::info!(module = "captain", worker = %worker_name, "removed orphan health entry");
     }
 }

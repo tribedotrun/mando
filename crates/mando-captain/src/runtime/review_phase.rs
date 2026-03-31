@@ -5,7 +5,7 @@ use mando_types::Task;
 use mando_types::WorkerContext;
 
 use crate::biz::review_marshal;
-use crate::io::{github, github_pr, health_store};
+use crate::io::{github, github_pr, health_store, pid_registry};
 
 /// Gather WorkerContext for each in-progress item with a worker.
 ///
@@ -36,7 +36,8 @@ pub(crate) async fn gather_worker_contexts(
             .map(mando_config::stream_path_for_session)
             .unwrap_or_default();
 
-        let pid = health_store::get_health_u32(health_state, worker_name.as_str(), "pid");
+        let cc_sid = item.session_ids.worker.as_deref().unwrap_or("");
+        let pid = pid_registry::get_pid(cc_sid).unwrap_or(0);
         let process_alive = pid > 0 && mando_cc::is_process_alive(pid);
         let stream_tail = crate::io::transcript::extract_stream_tail(&stream_path, 50);
         let stream_stale_s = mando_cc::stream_stale_seconds(&stream_path);
@@ -257,8 +258,8 @@ pub(crate) async fn fetch_pr_data(item: &Task) -> PrData {
         let repo = format!("{}/{}", parts[parts.len() - 4], parts[parts.len() - 3]);
         let num = parts[parts.len() - 1];
         (repo, num.to_string())
-    } else if let Some(num) = pr_url.strip_prefix('#') {
-        // Short ref like "#12" — resolve using task.project.
+    } else if let Some(num) = mando_types::task::extract_pr_number(pr_url) {
+        // Short ref (bare number or "#12") — resolve using task.project.
         if let Some(project) = &item.project {
             (project.clone(), num.to_string())
         } else {

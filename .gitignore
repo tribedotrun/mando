@@ -17,7 +17,6 @@ electron/mando-napi.node
 # AI artifacts
 .ai/local/
 .ai/evidence/
-.ai/plans/
 .claude/worktrees/
 .cursor/
 .playwright-mcp/
@@ -41,6 +40,8 @@ ralph-loop.local.md
 .claude/ralph-loop.local.md
 electron/.ai/
 .claude/settings.local.json
+.claude/scheduled_tasks.lock
+.claude/scheduled-tasks/
 .superset/
 .vercel
 .env*.local

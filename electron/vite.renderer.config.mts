@@ -25,10 +25,12 @@ export default defineConfig({
     alias: {
       '#renderer': fileURLToPath(new URL('src/renderer', import.meta.url)),
       '#main': fileURLToPath(new URL('src/main', import.meta.url)),
+      '#contracts': fileURLToPath(new URL('../contracts', import.meta.url)),
     },
   },
   base: './',
   server: {
+    host: '127.0.0.1',
     port: 5173,
     strictPort: true,
   },

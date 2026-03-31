@@ -51,6 +51,10 @@ impl TaskStore {
         tasks::insert_task(&self.pool, &task).await
     }
 
+    pub async fn write_task(&self, task: &Task) -> Result<bool> {
+        tasks::update_task(&self.pool, task).await
+    }
+
     pub async fn remove(&self, id: i64) -> Result<bool> {
         tasks::remove(&self.pool, id).await
     }
@@ -239,7 +243,7 @@ async fn hydrate_rebase_state(pool: &SqlitePool, tasks: &mut [Task]) {
     let states = match rebase::all(pool).await {
         Ok(s) => s,
         Err(e) => {
-            warn!(error = %e, "failed to load rebase state for hydration");
+            tracing::warn!(module = "task_store", error = %e, "failed to load rebase state — tasks will lack rebase fields");
             return;
         }
     };
@@ -256,8 +260,8 @@ async fn hydrate_rebase_state(pool: &SqlitePool, tasks: &mut [Task]) {
     }
 }
 
-pub(crate) fn task_snapshot(task: &Task) -> serde_json::Value {
-    serde_json::to_value(task).expect("Task serialization cannot fail")
+pub(crate) fn task_snapshot(task: &Task) -> Result<serde_json::Value> {
+    serde_json::to_value(task).map_err(|e| anyhow::anyhow!("task serialization failed: {e}"))
 }
 
 fn merge_task_changes(
@@ -268,13 +272,15 @@ fn merge_task_changes(
     let base_obj = base_snapshot
         .as_object()
         .ok_or_else(|| anyhow::anyhow!("task snapshot must be a JSON object"))?;
-    let changed_snapshot = task_snapshot(changed);
-    let changed_obj = changed_snapshot.as_object().expect("Task is a struct");
+    let changed_snapshot = task_snapshot(changed)?;
+    let changed_obj = changed_snapshot
+        .as_object()
+        .ok_or_else(|| anyhow::anyhow!("changed task snapshot must be a JSON object"))?;
 
-    let mut merged_obj = task_snapshot(current)
+    let mut merged_obj = task_snapshot(current)?
         .as_object()
         .cloned()
-        .expect("Task is a struct");
+        .ok_or_else(|| anyhow::anyhow!("current task snapshot must be a JSON object"))?;
 
     for (key, changed_value) in changed_obj {
         if base_obj.get(key) != Some(changed_value) {
@@ -401,7 +407,7 @@ mod tests {
         let store = test_store().await;
         let id = store.add(Task::new("Concurrent edit")).await.unwrap();
         let original = store.find_by_id(id).await.unwrap().unwrap();
-        let snapshots = HashMap::from([(id, task_snapshot(&original))]);
+        let snapshots = HashMap::from([(id, task_snapshot(&original).unwrap())]);
 
         let mut tick_copy = original.clone();
         tick_copy.status = ItemStatus::Queued;

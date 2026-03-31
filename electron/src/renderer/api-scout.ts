@@ -5,6 +5,7 @@ import type {
   ScoutArticleResponse,
   ScoutProcessResponse,
   ActResponse,
+  ScoutItemSession,
 } from '#renderer/types';
 import { apiGet, apiPost, apiPatch, apiDel } from '#renderer/api';
 
@@ -43,3 +44,12 @@ export const askScout = (id: number, question: string, sessionId?: string) =>
   apiPost<AskResponse>('/api/scout/ask', { id, question, session_id: sessionId });
 export const actOnScoutItem = (id: number, project: string, prompt?: string) =>
   apiPost<ActResponse>(`/api/scout/items/${id}/act`, { project, prompt });
+export const researchScout = (topic: string, process = true) =>
+  apiPost<{ links?: unknown[]; added?: number; processed?: number }>('/api/scout/research', {
+    topic,
+    process,
+  });
+export const publishScoutTelegraph = (id: number) =>
+  apiPost<{ ok: boolean; url: string }>(`/api/scout/items/${id}/telegraph`);
+export const fetchScoutItemSessions = (id: number) =>
+  apiGet<ScoutItemSession[]>(`/api/scout/items/${id}/sessions`);

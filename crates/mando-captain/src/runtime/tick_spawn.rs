@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use anyhow::Result;
 use mando_config::settings::Config;
 use mando_config::workflow::CaptainWorkflow;
-use mando_types::captain::TickResult;
+use mando_types::captain::{TickMode, TickResult};
 
 pub struct ItemSpawnResult {
     pub session_name: String,
@@ -63,7 +63,7 @@ pub async fn spawn_worker_for_item(
 
 pub(crate) fn default_tick_result() -> TickResult {
     TickResult {
-        mode: String::new(),
+        mode: TickMode::Skipped,
         tick_id: None,
         max_workers: 0,
         active_workers: 0,

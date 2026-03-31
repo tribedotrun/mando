@@ -13,6 +13,9 @@ pub const TASKS_RETRY: &str = "/api/tasks/retry";
 pub const TASKS_REWORK: &str = "/api/tasks/rework";
 pub const CAPTAIN_ADOPT: &str = "/api/captain/adopt";
 pub const CAPTAIN_MERGE: &str = "/api/captain/merge";
+pub const CAPTAIN_NUDGE: &str = "/api/captain/nudge";
+pub const CAPTAIN_STOP: &str = "/api/captain/stop";
+pub const CAPTAIN_TRIAGE: &str = "/api/captain/triage";
 pub const KNOWLEDGE_APPROVE: &str = "/api/knowledge/approve";
 pub const SCOUT_ASK: &str = "/api/scout/ask";
 pub const SCOUT_ITEMS: &str = "/api/scout/items";
@@ -41,6 +44,10 @@ pub fn scout_telegraph(id: impl Display) -> String {
 
 pub fn scout_act(id: impl Display) -> String {
     format!("{SCOUT_ITEMS}/{id}/act")
+}
+
+pub fn scout_sessions(id: impl Display) -> String {
+    format!("{SCOUT_ITEMS}/{id}/sessions")
 }
 
 pub fn scout_items_with_status(status: Option<&str>, per_page: usize) -> String {

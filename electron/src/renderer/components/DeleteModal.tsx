@@ -1,11 +1,11 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import type { TaskItem } from '#renderer/types';
 
 interface Props {
   items: TaskItem[];
   deleting: boolean;
   error: string | null;
-  onConfirm: () => void;
+  onConfirm: (opts: { close_pr: boolean; cancel_linear: boolean }) => void;
   onCancel: () => void;
 }
 
@@ -19,6 +19,12 @@ export function DeleteModal({
   const inProgress = useMemo(() => items.filter((b) => b.status === 'in-progress'), [items]);
   const safe = useMemo(() => items.filter((b) => b.status !== 'in-progress'), [items]);
   const canDelete = safe.length > 0;
+
+  const hasPr = useMemo(() => safe.some((b) => b.pr), [safe]);
+  const hasLinear = useMemo(() => safe.some((b) => b.linear_id), [safe]);
+
+  const [closePr, setClosePr] = useState(false);
+  const [cancelLinear, setCancelLinear] = useState(false);
 
   return (
     <div
@@ -61,6 +67,36 @@ export function DeleteModal({
           ))}
         </ul>
 
+        {(hasPr || hasLinear) && (
+          <div
+            className="mb-3 flex flex-col gap-2 rounded-md px-3 py-2.5"
+            style={{ background: 'var(--color-surface-3)' }}
+          >
+            {hasPr && (
+              <label className="flex cursor-pointer items-center gap-2 text-[13px]">
+                <input
+                  type="checkbox"
+                  checked={closePr}
+                  onChange={(e) => setClosePr(e.target.checked)}
+                  style={{ accentColor: 'var(--color-accent)' }}
+                />
+                <span style={{ color: 'var(--color-text-2)' }}>Close associated PRs</span>
+              </label>
+            )}
+            {hasLinear && (
+              <label className="flex cursor-pointer items-center gap-2 text-[13px]">
+                <input
+                  type="checkbox"
+                  checked={cancelLinear}
+                  onChange={(e) => setCancelLinear(e.target.checked)}
+                  style={{ accentColor: 'var(--color-accent)' }}
+                />
+                <span style={{ color: 'var(--color-text-2)' }}>Cancel Linear issues</span>
+              </label>
+            )}
+          </div>
+        )}
+
         {error && (
           <p
             className="mb-2 rounded-md px-3 py-2 text-[13px]"
@@ -79,7 +115,7 @@ export function DeleteModal({
             Cancel
           </button>
           <button
-            onClick={() => onConfirm()}
+            onClick={() => onConfirm({ close_pr: closePr, cancel_linear: cancelLinear })}
             disabled={!canDelete || deleting}
             className="rounded-md px-4 py-1.5 text-[13px] font-semibold disabled:opacity-50"
             style={{ background: 'var(--color-error)', color: 'white' }}

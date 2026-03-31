@@ -99,20 +99,10 @@ pub struct ScoutConfig {
 // Channels
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct ChannelsConfig {
-    pub send_progress: bool,
     pub telegram: TelegramConfig,
-}
-
-impl Default for ChannelsConfig {
-    fn default() -> Self {
-        Self {
-            send_progress: true,
-            telegram: TelegramConfig::default(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -123,9 +113,6 @@ pub struct TelegramConfig {
     #[serde(skip)]
     pub token: String,
     pub owner: String,
-    pub allow_from: Vec<String>,
-    pub proxy: Option<String>,
-    pub reply_to_message: bool,
     pub api_base_url: Option<String>,
 }
 
@@ -154,7 +141,6 @@ impl Default for GatewayConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct DashboardConfig {
-    pub enabled: bool,
     pub host: String,
     pub port: u16,
 }
@@ -162,7 +148,6 @@ pub struct DashboardConfig {
 impl Default for DashboardConfig {
     fn default() -> Self {
         Self {
-            enabled: true,
             host: "127.0.0.1".into(),
             port: 18791,
         }
@@ -223,7 +208,7 @@ impl Default for CaptainConfig {
             projects: HashMap::new(),
             task_db_path: "~/.mando/mando.db".into(),
             lockfile_path: "~/.mando/captain.lock".into(),
-            worker_health_path: "~/.mando/state/captain-worker-health.json".into(),
+            worker_health_path: "~/.mando/state/worker-health.json".into(),
             notify_chat_id: None,
             linear_team: String::new(),
             linear_cli_path: String::new(),
@@ -264,41 +249,7 @@ pub struct ClassifyRule {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct ToolsConfig {
-    pub web: WebToolsConfig,
-    pub exec: ExecToolConfig,
-    pub restrict_to_workspace: bool,
-    pub mcp_servers: HashMap<String, serde_json::Value>,
     pub cc_self_improve: CCSelfImproveConfig,
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
-pub struct WebToolsConfig {
-    pub search: WebSearchConfig,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
-pub struct WebSearchConfig {
-    pub max_results: u32,
-}
-
-impl Default for WebSearchConfig {
-    fn default() -> Self {
-        Self { max_results: 5 }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
-pub struct ExecToolConfig {
-    pub timeout: u64,
-}
-
-impl Default for ExecToolConfig {
-    fn default() -> Self {
-        Self { timeout: 60 }
-    }
 }
 
 // ---------------------------------------------------------------------------

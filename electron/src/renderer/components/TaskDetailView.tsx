@@ -158,9 +158,9 @@ export function TaskDetailView({
                   {shortRepo(item.project)}
                 </span>
               )}
-              {item.pr && item.project && (
+              {item.pr && (item.github_repo || item.project) && (
                 <a
-                  href={prHref(item.pr, item.project)}
+                  href={prHref(item.pr, (item.github_repo ?? item.project)!)}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="text-[11px] no-underline hover:underline"
@@ -213,7 +213,7 @@ export function TaskDetailView({
           )}
 
           {/* Timeline */}
-          <DetailSection label={`Timeline (${events.length})`}>
+          <DetailSection label={`Timeline (${events.length})`} collapsible>
             <TaskTimeline events={events} onTranscriptClick={handleTranscriptClick} />
           </DetailSection>
 
@@ -308,19 +308,37 @@ function ActionButton({
 function DetailSection({
   label,
   children,
+  collapsible = false,
+  defaultOpen = true,
 }: {
   label: string;
   children: React.ReactNode;
+  collapsible?: boolean;
+  defaultOpen?: boolean;
 }): React.ReactElement {
+  const [open, setOpen] = useState(defaultOpen);
+
   return (
     <div className="mb-5">
       <div
-        className="mb-2 text-[10px] font-medium uppercase tracking-widest"
+        className={`mb-2 text-[10px] font-medium uppercase tracking-widest${collapsible ? ' flex cursor-pointer select-none items-center gap-1' : ''}`}
         style={{ color: 'var(--color-text-4)' }}
+        onClick={collapsible ? () => setOpen((v) => !v) : undefined}
       >
+        {collapsible && (
+          <svg
+            width="10"
+            height="10"
+            viewBox="0 0 10 10"
+            className="shrink-0 transition-transform"
+            style={{ transform: open ? 'rotate(90deg)' : 'rotate(0deg)' }}
+          >
+            <path d="M3 1l4 4-4 4" fill="none" stroke="currentColor" strokeWidth="1.5" />
+          </svg>
+        )}
         {label}
       </div>
-      {children}
+      {(!collapsible || open) && children}
     </div>
   );
 }
@@ -329,7 +347,7 @@ function DetailOverflowMenu({ item }: { item: TaskItem }): React.ReactElement {
   const [open, setOpen] = useState(false);
 
   const copyAndClose = (text: string) => {
-    navigator.clipboard.writeText(text).catch(() => {});
+    navigator.clipboard.writeText(text).catch(() => console.warn('clipboard write failed'));
     setOpen(false);
   };
 
@@ -337,10 +355,7 @@ function DetailOverflowMenu({ item }: { item: TaskItem }): React.ReactElement {
   if (item.branch) entries.push({ label: 'Copy branch', value: item.branch });
   if (item.worktree) entries.push({ label: 'Copy working directory', value: item.worktree });
   if (item.plan) {
-    const planLabel = item.plan.endsWith('adopt-handoff.md')
-      ? 'Copy adopt path'
-      : 'Copy brief path';
-    entries.push({ label: planLabel, value: item.plan });
+    entries.push({ label: 'Copy brief path', value: item.plan });
   }
 
   return (

@@ -6,7 +6,7 @@ use axum::Json;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use crate::response::error_response;
+use crate::response::{error_response, internal_error};
 use crate::AppState;
 
 // ---------------------------------------------------------------
@@ -76,7 +76,8 @@ pub(crate) async fn get_scout_article(
     Path(id): Path<i64>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let pool = state.db.pool();
-    match mando_scout::get_scout_article(pool, id).await {
+    let workflow = state.scout_workflow.load_full();
+    match mando_scout::ensure_scout_article(pool, id, &workflow).await {
         Ok(val) => Ok(Json(val)),
         Err(e) => {
             let msg = e.to_string();
@@ -141,7 +142,7 @@ pub(crate) async fn post_scout_process(
 
     let val = mando_scout::process_scout(&config, pool, body.id, &workflow)
         .await
-        .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?;
+        .map_err(internal_error)?;
 
     state.bus.send(
         mando_types::BusEvent::Scout,
@@ -213,7 +214,7 @@ pub(crate) async fn post_scout_research(
         }))
     }
     .await
-    .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e))?;
+    .map_err(internal_error)?;
 
     Ok(Json(result))
 }
@@ -244,10 +245,10 @@ pub(crate) async fn post_scout_ask(
 
     let item = mando_scout::get_scout_item(pool, id)
         .await
-        .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?;
-    let article_data = mando_scout::get_scout_article(pool, id)
+        .map_err(internal_error)?;
+    let article_data = mando_scout::ensure_scout_article(pool, id, &workflow)
         .await
-        .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?;
+        .map_err(internal_error)?;
 
     let summary = item["summary"]
         .as_str()
@@ -278,7 +279,7 @@ pub(crate) async fn post_scout_ask(
             session_key.as_deref(),
         )
         .await
-        .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?;
+        .map_err(internal_error)?;
 
     Ok(Json(json!({
         "ok": true,
@@ -349,7 +350,7 @@ pub(crate) async fn post_scout_act(
         task_description,
     )
     .await
-    .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?;
+    .map_err(internal_error)?;
 
     state.bus.send(
         mando_types::BusEvent::Tasks,
@@ -436,6 +437,6 @@ pub(crate) async fn get_scout_item_sessions(
     let pool = state.db.pool();
     let sessions = mando_db::queries::sessions::list_sessions_for_scout_item(pool, id)
         .await
-        .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?;
+        .map_err(internal_error)?;
     Ok(Json(json!(sessions)))
 }

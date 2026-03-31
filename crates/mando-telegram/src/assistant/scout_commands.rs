@@ -1,10 +1,7 @@
 //! Scout-related command handlers for the assistant bot.
 
-use std::sync::Arc;
-
 use anyhow::Result;
 use serde_json::Value;
-use tracing::warn;
 
 use mando_shared::telegram_format::escape_html;
 
@@ -145,7 +142,7 @@ pub async fn edit_list_page(
 ) -> Result<()> {
     match render_summary_list(bot, status_filter, page).await? {
         Some((text, kb)) => {
-            let _ = bot
+            if let Err(e) = bot
                 .api
                 .edit_message_text(
                     chat_id,
@@ -154,7 +151,10 @@ pub async fn edit_list_page(
                     Some("HTML"),
                     if kb.is_null() { None } else { Some(kb) },
                 )
-                .await;
+                .await
+            {
+                tracing::warn!(module = "telegram", error = %e, "message send failed");
+            }
         }
         None => {
             let msg = if status_filter.is_empty() {
@@ -165,10 +165,13 @@ pub async fn edit_list_page(
                     escape_html(status_filter)
                 )
             };
-            let _ = bot
+            if let Err(e) = bot
                 .api
                 .edit_message_text(chat_id, message_id, &msg, Some("HTML"), None)
-                .await;
+                .await
+            {
+                tracing::warn!(module = "telegram", error = %e, "message send failed");
+            }
         }
     }
     Ok(())
@@ -176,13 +179,13 @@ pub async fn edit_list_page(
 
 // ── /scout (swipe flow only) ────────────────────────────────────────
 
-pub async fn cmd_scout(bot: &mut TelegramBot, chat_id: &str, is_group: bool) -> Result<()> {
-    swipe_start(bot, chat_id, is_group).await
+pub async fn cmd_scout(bot: &mut TelegramBot, chat_id: &str) -> Result<()> {
+    swipe_start(bot, chat_id).await
 }
 
 // ── Swipe flow ──────────────────────────────────────────────────────
 
-async fn swipe_start(bot: &TelegramBot, chat_id: &str, is_group: bool) -> Result<()> {
+async fn swipe_start(bot: &TelegramBot, chat_id: &str) -> Result<()> {
     let result = match bot.gw().get(&paths::processed_scout_items(10000)).await {
         Ok(r) => r,
         Err(e) => {
@@ -203,7 +206,7 @@ async fn swipe_start(bot: &TelegramBot, chat_id: &str, is_group: bool) -> Result
     match first {
         Some(item) => {
             let id = item["id"].as_i64().unwrap_or(0);
-            show_card(bot, chat_id, id, is_group).await
+            show_card(bot, chat_id, id).await
         }
         None => {
             send_html(
@@ -217,14 +220,12 @@ async fn swipe_start(bot: &TelegramBot, chat_id: &str, is_group: bool) -> Result
     }
 }
 
-pub async fn show_card(bot: &TelegramBot, chat_id: &str, id: i64, is_group: bool) -> Result<()> {
+pub async fn show_card(bot: &TelegramBot, chat_id: &str, id: i64) -> Result<()> {
     let item = bot.gw().get(&paths::scout_item(id)).await?;
     let summary = item["summary"].as_str();
     let text = format_swipe_card(&item, summary);
     let tg_url = item["telegraphUrl"].as_str();
-    let item_type = item["item_type"].as_str();
-    let orig_url = item["url"].as_str();
-    let kb = swipe_card_kb(id, is_group, tg_url, item_type, orig_url);
+    let kb = swipe_card_kb(id, tg_url);
 
     bot.api
         .send_message(chat_id, &text, Some("HTML"), Some(kb), true)
@@ -277,15 +278,18 @@ pub async fn cmd_research(bot: &mut TelegramBot, chat_id: &str, args: &str) -> R
                 }
             }
             if message_id > 0 {
-                let _ = bot
+                if let Err(e) = bot
                     .api
                     .edit_message_text(chat_id, message_id, &text, Some("HTML"), None)
-                    .await;
+                    .await
+                {
+                    tracing::warn!(module = "telegram", error = %e, "message send failed");
+                }
             }
         }
         Err(e) => {
             if message_id > 0 {
-                let _ = bot
+                if let Err(e) = bot
                     .api
                     .edit_message_text(
                         chat_id,
@@ -294,178 +298,12 @@ pub async fn cmd_research(bot: &mut TelegramBot, chat_id: &str, args: &str) -> R
                         Some("HTML"),
                         None,
                     )
-                    .await;
+                    .await
+                {
+                    tracing::warn!(module = "telegram", error = %e, "message send failed");
+                }
             }
         }
     }
     Ok(())
-}
-
-// ── Auto-process ────────────────────────────────────────────────────
-
-/// Process a single item, editing `message_id` in place with progress then the final card.
-pub async fn auto_process_single(
-    bot: &TelegramBot,
-    chat_id: &str,
-    message_id: i64,
-    id: i64,
-    is_group: bool,
-) {
-    let _ = bot
-        .api
-        .edit_message_text(
-            chat_id,
-            message_id,
-            "\u{23f3} Processing\u{2026}",
-            None,
-            None,
-        )
-        .await;
-
-    let body = serde_json::json!({"id": id});
-    match bot.gw().post(paths::SCOUT_PROCESS, &body).await {
-        Ok(_) => match bot.gw().get(&paths::scout_item(id)).await {
-            Ok(item) => {
-                let summary = item["summary"].as_str();
-                let text = format_swipe_card(&item, summary);
-                let tg_url = item["telegraphUrl"].as_str();
-                let item_type = item["item_type"].as_str();
-                let orig_url = item["url"].as_str();
-                let kb = swipe_card_kb(id, is_group, tg_url, item_type, orig_url);
-                let _ = bot
-                    .api
-                    .edit_message_text(chat_id, message_id, &text, Some("HTML"), Some(kb))
-                    .await;
-            }
-            Err(_) => {
-                let _ = bot
-                    .api
-                    .edit_message_text(
-                        chat_id,
-                        message_id,
-                        &format!("\u{2705} #{id} processed (couldn\u{2019}t load card)"),
-                        None,
-                        None,
-                    )
-                    .await;
-            }
-        },
-        Err(e) => {
-            warn!(item_id = id, error = %e, "auto-process failed");
-            let _ = bot
-                .api
-                .edit_message_text(
-                    chat_id,
-                    message_id,
-                    &format!(
-                        "\u{274c} #{id} processing failed: {}",
-                        escape_html(&e.to_string())
-                    ),
-                    Some("HTML"),
-                    None,
-                )
-                .await;
-        }
-    }
-}
-
-/// Process multiple items concurrently, editing `message_id` with a final summary.
-/// Settles into the first successfully processed item's swipe card.
-pub async fn auto_process_batch(
-    bot: &TelegramBot,
-    chat_id: &str,
-    message_id: i64,
-    ids: &[i64],
-    is_group: bool,
-) {
-    use std::sync::atomic::{AtomicI64, AtomicU32, Ordering};
-    use tokio::task::JoinSet;
-
-    let total = ids.len();
-    let _ = bot
-        .api
-        .edit_message_text(
-            chat_id,
-            message_id,
-            &format!("\u{23f3} Processing {total} items\u{2026}"),
-            None,
-            None,
-        )
-        .await;
-
-    let fail = Arc::new(AtomicU32::new(0));
-    let first_ok_id = Arc::new(AtomicI64::new(-1));
-    let mut tasks = JoinSet::new();
-
-    for &id in ids {
-        let gw = bot.gw().clone();
-        let fail = Arc::clone(&fail);
-        let first_ok_id = Arc::clone(&first_ok_id);
-        tasks.spawn(async move {
-            let body = serde_json::json!({"id": id});
-            match gw.post(paths::SCOUT_PROCESS, &body).await {
-                Ok(_) => {
-                    // CAS: only set if no previous success
-                    let _ =
-                        first_ok_id.compare_exchange(-1, id, Ordering::AcqRel, Ordering::Relaxed);
-                }
-                Err(e) => {
-                    fail.fetch_add(1, Ordering::Relaxed);
-                    warn!(item_id = id, error = %e, "auto-process failed");
-                }
-            }
-        });
-    }
-
-    // Wait for all tasks
-    while let Some(result) = tasks.join_next().await {
-        if let Err(e) = result {
-            warn!(error = %e, "batch process task panicked");
-            fail.fetch_add(1, Ordering::Relaxed);
-        }
-    }
-
-    let fail = fail.load(Ordering::Relaxed);
-    let ok_id = first_ok_id.load(Ordering::Relaxed);
-
-    // Settle into the first processed item's swipe card, or a summary if all failed
-    let ok_count = total as u32 - fail;
-    if ok_id >= 0 {
-        match bot.gw().get(&paths::scout_item(ok_id)).await {
-            Ok(item) => {
-                let summary = item["summary"].as_str();
-                let mut text = format_swipe_card(&item, summary);
-                if fail > 0 {
-                    text.push_str(&format!("\n\n\u{274c} {fail}/{total} failed"));
-                }
-                let tg_url = item["telegraphUrl"].as_str();
-                let item_type = item["item_type"].as_str();
-                let orig_url = item["url"].as_str();
-                let kb = swipe_card_kb(ok_id, is_group, tg_url, item_type, orig_url);
-                let _ = bot
-                    .api
-                    .edit_message_text(chat_id, message_id, &text, Some("HTML"), Some(kb))
-                    .await;
-            }
-            Err(_) => {
-                let msg =
-                    format!("\u{2705} {ok_count}/{total} processed (couldn\u{2019}t load card)");
-                let _ = bot
-                    .api
-                    .edit_message_text(chat_id, message_id, &msg, None, None)
-                    .await;
-            }
-        }
-    } else {
-        let _ = bot
-            .api
-            .edit_message_text(
-                chat_id,
-                message_id,
-                &format!("\u{274c} All {total} items failed to process"),
-                None,
-                None,
-            )
-            .await;
-    }
 }

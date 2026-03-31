@@ -5,8 +5,8 @@ use std::collections::HashMap;
 use crate::task::{FINALIZED, REOPENABLE, REWORKABLE};
 use crate::{
     Action, ActionKind, AskHistoryEntry, BusEvent, CronJob, CronPayload, CronSchedule, CronState,
-    ItemStatus, NotifyLevel, ScoutItem, ScoutStatus, SessionEntry, Task, TickResult, TimelineEvent,
-    TimelineEventType, WorkerContext,
+    ItemStatus, JobType, NotifyLevel, PayloadKind, ScheduleKind, ScoutItem, ScoutStatus,
+    SessionEntry, Task, TickMode, TickResult, TimelineEvent, TimelineEventType, WorkerContext,
 };
 
 // -----------------------------------------------------------------------
@@ -69,7 +69,7 @@ fn construct_cron_job() {
         name: "daily-scout".into(),
         enabled: true,
         schedule: CronSchedule {
-            kind: "cron".into(),
+            kind: ScheduleKind::Cron,
             expr: Some("0 9 * * *".into()),
             ..CronSchedule::default()
         },
@@ -78,7 +78,7 @@ fn construct_cron_job() {
         created_at_ms: 1000,
         updated_at_ms: 2000,
         delete_after_run: false,
-        job_type: "system".into(),
+        job_type: JobType::System,
         cwd: None,
         timeout_s: 1200,
     };
@@ -149,7 +149,7 @@ fn construct_tick_result() {
     tasks.insert("queued".into(), 5);
 
     let result = TickResult {
-        mode: "live".into(),
+        mode: TickMode::Live,
         tick_id: Some("abc12345".into()),
         max_workers: 10,
         active_workers: 3,
@@ -163,7 +163,7 @@ fn construct_tick_result() {
         }],
         error: None,
     };
-    assert_eq!(result.mode, "live");
+    assert_eq!(result.mode, TickMode::Live);
     assert_eq!(result.active_workers, 3);
 }
 
@@ -343,13 +343,13 @@ fn serde_cron_job_round_trip() {
         name: "morning-report".into(),
         enabled: true,
         schedule: CronSchedule {
-            kind: "cron".into(),
+            kind: ScheduleKind::Cron,
             expr: Some("0 9 * * *".into()),
             tz: Some("America/New_York".into()),
             ..CronSchedule::default()
         },
         payload: CronPayload {
-            kind: "agent_turn".into(),
+            kind: PayloadKind::AgentTurn,
             message: "Good morning".into(),
             deliver: true,
             channel: Some("telegram".into()),
@@ -364,7 +364,7 @@ fn serde_cron_job_round_trip() {
         created_at_ms: 1000,
         updated_at_ms: 2000,
         delete_after_run: false,
-        job_type: "system".into(),
+        job_type: JobType::System,
         cwd: None,
         timeout_s: 600,
     };

@@ -1,5 +1,6 @@
 import React from 'react';
 import { useSettingsStore } from '#renderer/stores/settingsStore';
+import { useToastStore } from '#renderer/stores/toastStore';
 import type { TelegramConfig } from '#renderer/stores/settingsStore';
 import { ToggleSwitch } from '#renderer/components/ToggleSwitch';
 
@@ -62,7 +63,10 @@ export function SettingsTelegram(): React.ReactElement {
                 const enabling = !telegram.enabled;
                 updateTelegram({ enabled: enabling });
                 save();
-                if (enabling) window.mandoAPI.launchd.reinstall().catch(() => {});
+                if (enabling)
+                  window.mandoAPI.launchd.reinstall().catch(() => {
+                    useToastStore.getState().add('error', 'Failed to install Telegram service');
+                  });
               }}
             />
           </div>
@@ -108,55 +112,6 @@ export function SettingsTelegram(): React.ReactElement {
                   scheduleSave();
                 }}
                 placeholder="Auto-detected on first /start"
-              />
-            </div>
-          </div>
-        </div>
-
-        {/* Behaviour */}
-        <div style={cardStyle}>
-          <h3 className="mb-4 text-sm font-medium" style={{ color: 'var(--color-text-2)' }}>
-            Behaviour
-          </h3>
-          <div className="space-y-4">
-            <div>
-              <label className={labelCls} style={labelStyle}>
-                Allow From (comma-separated IDs)
-              </label>
-              <input
-                data-testid="telegram-allow-from"
-                className={inputCls}
-                style={inputStyle}
-                value={(telegram.allowFrom || []).join(', ')}
-                onChange={(e) => {
-                  updateTelegram({
-                    allowFrom: e.target.value
-                      .split(',')
-                      .map((s) => s.trim())
-                      .filter(Boolean),
-                  });
-                  scheduleSave();
-                }}
-                placeholder="1234567890, 9876543210"
-              />
-            </div>
-
-            <div className="flex items-center justify-between">
-              <div>
-                <h4 className="text-sm" style={{ color: 'var(--color-text-2)' }}>
-                  Reply to Message
-                </h4>
-                <p className="text-xs" style={{ color: 'var(--color-text-3)' }}>
-                  Reply in-thread to the original message.
-                </p>
-              </div>
-              <ToggleSwitch
-                testId="telegram-reply-to"
-                checked={!!telegram.replyToMessage}
-                onChange={() => {
-                  updateTelegram({ replyToMessage: !telegram.replyToMessage });
-                  save();
-                }}
               />
             </div>
           </div>

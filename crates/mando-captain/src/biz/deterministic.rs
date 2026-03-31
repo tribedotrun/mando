@@ -55,9 +55,6 @@ pub(crate) fn classify_worker(
     let stream_stale = ctx.stream_stale_s.unwrap_or(f64::MAX);
 
     // ── Rule 3: CC REVIEW — gates pass / broken / budget ──
-    if quality_gates_pass(ctx, is_no_pr, stream_result_clean) {
-        return Some(action(ctx, ActionKind::CaptainReview, "", "gates_pass"));
-    }
     let is_broken = has_broken_session
         || (stream_result_clean.is_none() && !ctx.process_alive && stream_stale > 30.0);
     if is_broken {
@@ -70,6 +67,17 @@ pub(crate) fn classify_worker(
             "",
             "budget_exhausted",
         ));
+    }
+    if ctx.degraded && ctx.pr.is_some() && stream_result_clean == Some(true) {
+        return Some(action(
+            ctx,
+            ActionKind::CaptainReview,
+            "",
+            "degraded_context",
+        ));
+    }
+    if quality_gates_pass(ctx, is_no_pr, stream_result_clean) {
+        return Some(action(ctx, ActionKind::CaptainReview, "", "gates_pass"));
     }
 
     // ── Rule 4: NUDGE — worker needs a push ──
@@ -141,7 +149,8 @@ fn missing_gate_nudge(
     let vars = HashMap::new();
 
     // Threads.
-    if ctx.pr.is_some()
+    if !ctx.degraded
+        && ctx.pr.is_some()
         && (ctx.unresolved_threads > 0
             || ctx.unreplied_threads > 0
             || ctx.unaddressed_issue_comments > 0)
@@ -149,7 +158,7 @@ fn missing_gate_nudge(
         return Some(classify_unresolved_threads(ctx, nudges));
     }
     // Diagram.
-    if ctx.pr.is_some() && !has_summary_diagram(ctx) {
+    if !ctx.degraded && ctx.pr.is_some() && !has_summary_diagram(ctx) {
         let msg = render_nudge(nudges, "missing_diagram", &vars);
         return Some(action(
             ctx,
@@ -159,12 +168,12 @@ fn missing_gate_nudge(
         ));
     }
     // Evidence.
-    if ctx.pr.is_some() && has_no_evidence(&ctx.pr_body) {
+    if !ctx.degraded && ctx.pr.is_some() && has_no_evidence(&ctx.pr_body) {
         let msg = render_nudge(nudges, "missing_evidence", &vars);
         return Some(action(ctx, ActionKind::Nudge, &msg, "PR missing evidence"));
     }
     // Reopen ack.
-    if ctx.pr.is_some() && !ctx.has_reopen_ack && ctx.reopen_seq > 0 {
+    if !ctx.degraded && ctx.pr.is_some() && !ctx.has_reopen_ack && ctx.reopen_seq > 0 {
         let source = ctx.reopen_source.as_deref();
         let (ack_prefix, context_file, source_label) = match source {
             Some("review") => (

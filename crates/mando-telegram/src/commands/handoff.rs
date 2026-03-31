@@ -1,4 +1,4 @@
-//! `/handoff [id]` — hand off done/in-progress item to human.
+//! `/handoff [id]` — hand off a done or in-progress task to human.
 
 use super::picker::{self, SinglePicker};
 use crate::bot::TelegramBot;
@@ -9,8 +9,8 @@ use mando_types::ItemStatus;
 use serde_json::json;
 
 const PICKER: SinglePicker = SinglePicker {
-    header: "Pick an item to hand off to human:",
-    empty_msg: "\u{2705} No done/in-progress items to hand off.",
+    header: "Pick a task to hand off to human:",
+    empty_msg: "\u{2705} No done or in-progress tasks to hand off.",
     callback_prefix: "handoff",
     limit: 8,
     show_pr: false,
@@ -42,7 +42,7 @@ pub async fn handle(bot: &mut TelegramBot, chat_id: &str, args: &str) -> Result<
                 bot.send_html(
                     chat_id,
                     &format!(
-                        "\u{26a0}\u{fe0f} Item #{} not found.",
+                        "\u{26a0}\u{fe0f} Task #{} not found.",
                         escape_html(target_id)
                     ),
                 )
@@ -52,7 +52,7 @@ pub async fn handle(bot: &mut TelegramBot, chat_id: &str, args: &str) -> Result<
                 bot.send_html(
                     chat_id,
                     &format!(
-                        "\u{26a0}\u{fe0f} Item #{} \u{2014} only done/in-progress items can be handed off.",
+                        "\u{26a0}\u{fe0f} Task #{} \u{2014} only done or in-progress tasks can be handed off.",
                         escape_html(target_id),
                     ),
                 )

@@ -275,7 +275,10 @@ async fn handle_pr_summary(item_id: &str) -> anyhow::Result<()> {
         .ok_or_else(|| anyhow::anyhow!("item #{item_id} not found"))?;
 
     match item["pr"].as_str() {
-        Some(pr) => println!("PR for item #{item_id}: {pr}"),
+        Some(pr) => {
+            let num = pr.trim_start_matches('#');
+            println!("PR for item #{item_id}: #{num}");
+        }
         None => println!("No PR linked to item #{item_id}."),
     }
     Ok(())
@@ -362,19 +365,38 @@ async fn handle_input(item_id: &str, message: &str) -> anyhow::Result<()> {
             client.post("/api/tasks/reopen", &body).await?;
             println!("Reopened item #{item_id} with feedback.");
         }
+        "needs-clarification" => {
+            // Use unified clarify endpoint.
+            let result = client
+                .post(
+                    &format!("/api/tasks/{item_id}/clarify"),
+                    &json!({"answer": message}),
+                )
+                .await?;
+            let status = result["status"].as_str().unwrap_or("");
+            match status {
+                "ready" => println!("Clarified — item queued for work."),
+                "clarifying" => {
+                    let questions = result["questions"].as_str().unwrap_or("");
+                    println!("Needs more info: {questions}");
+                }
+                "escalate" => println!("Escalated to captain review."),
+                "needs-clarification" => {
+                    let error = result["error"].as_str().unwrap_or("unknown");
+                    println!(
+                        "Answer saved, but re-clarification failed ({error}). Captain will retry."
+                    );
+                }
+                _ => println!("Answer saved."),
+            }
+        }
         "new" | "clarifying" | "queued" => {
-            // Start a clarifier session with the input message.
-            let start_body = json!({
-                "key": item_id,
-                "item_id": item_id,
-                "message": message,
-            });
-            let result = client.post("/api/clarifier/start", &start_body).await?;
-            let reply = result
-                .get("result")
-                .and_then(|r| r["context"].as_str())
-                .unwrap_or("Session started.");
-            println!("{reply}");
+            // Append context directly.
+            let body = json!({"context": format!("[Human input] {message}")});
+            client
+                .patch(&format!("/api/tasks/{item_id}"), &body)
+                .await?;
+            println!("Appended input to item #{item_id}.");
         }
         _ => {
             // Fallback: append as context via patch.

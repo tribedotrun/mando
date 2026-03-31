@@ -17,7 +17,7 @@ agent:
   stale_threshold_s: 1200
   captain_review_timeout_s: 1200
   captain_merge_timeout_s: 1800
-  max_review_retries: 3
+  max_review_retries: 5
   max_clarifier_retries: 3
   max_rebase_retries: 5
   rebase_base_delay_s: 30
@@ -329,6 +329,11 @@ prompts:
     - GOOD: terminal output, screenshots, recordings showing runtime behavior.
     - BAD: AI-drawn diagrams, test-only results, empty evidence sections.
     {% endif %}
+    {% if is_degraded_context %}
+    - **ship** — The work is complete and the available evidence is enough despite degraded GitHub context.
+    - **nudge** — The work likely needs changes and you can state them concretely.
+    - **escalate** — GitHub context is too degraded to make a safe decision automatically.
+    {% endif %}
     {% if is_timeout %}
     - **nudge** — You can identify the blocker and provide specific instructions to unblock.
     - **escalate** — Worker is fundamentally stuck, human must intervene.
@@ -566,6 +571,65 @@ prompts:
     Please address the following on your PR:
     {{ issues }}
 
+  captain_merge: |
+    You are the Captain handling the merge process for PR {{ pr_url }}.
+
+    **Task:** "{{ title }}"
+    **Repo:** {{ repo }}
+    **PR:** #{{ pr_number }}
+
+    Your job is to make this PR mergeable and merge it. Follow these steps:
+
+    ## Step 1: Check CI Status
+
+    Run `gh pr checks {{ pr_number }} --repo {{ repo }} --required` to inspect the
+    required GitHub checks for this PR. Required checks are the only CI signal that
+    decides whether this PR may merge.
+
+    ## Step 2: Handle CI State
+
+    **If all required checks pass:** Proceed to Step 3.
+
+    **If required checks are failing:**
+    - Read the CI failure logs: `gh run view <run_id> --repo {{ repo }} --log-failed`
+    - Analyze the root cause
+    - If it's a code issue you can fix (lint, format, type errors, simple test failures):
+      fix it, commit, and push. Then re-check CI.
+    - If it's a complex code issue: return `{"action": "escalate", "feedback": "..."}`
+      with details about what failed and why.
+    - If it's an infrastructure issue (flaky test, CI config): return escalate.
+
+    **If required checks are pending or running:**
+    - Wait using `gh pr checks {{ pr_number }} --repo {{ repo }} --required --watch --fail-fast`
+    - Do not guess how to trigger CI manually. Do not use `/ci`, comments, workflow dispatch,
+      or generic sleep loops.
+    - Keep waiting while the required checks are making progress.
+    - If the required checks have shown no movement for 15 minutes, treat CI as stalled and
+      proceed to Step 3 using the admin fallback.
+
+    ## Step 3: Merge
+
+    If required checks are passing, run:
+
+    `gh pr merge {{ pr_number }} --repo {{ repo }} --squash`
+
+    If required checks have shown no movement for 15 minutes, run:
+
+    `gh pr merge {{ pr_number }} --repo {{ repo }} --squash --admin`
+
+    If merge fails, analyze the error:
+    - If merge conflict: escalate with the specific error.
+    - If branch protection issue while required checks are still unresolved and the 15-minute
+      no-movement window has NOT elapsed: return to Step 2 and keep waiting.
+    - If branch protection issue after the 15-minute no-movement window: use the admin merge.
+    - If other error: escalate with details.
+
+    ## Output
+
+    Return a JSON object:
+    - `{"action": "merged", "feedback": "summary of what was done"}`
+    - `{"action": "escalate", "feedback": "what went wrong and why human is needed"}`
+
 # ── Nudge Templates ──────────────────────────────────────────────────────────
 # Deterministic nudge messages sent by tick.py when captain detects specific states.
 # These use Jinja2 syntax like prompts above.
@@ -617,53 +681,6 @@ nudges:
     of meaningful output (findings, conclusions, or deliverables).
   nudge_default: >
     Continue working. Resume from current state and focus on remaining work.
-
-  captain_merge: |
-    You are the Captain handling the merge process for PR {{ pr_url }}.
-
-    **Task:** "{{ title }}"
-    **Repo:** {{ repo }}
-    **PR:** #{{ pr_number }}
-
-    Your job is to make this PR mergeable and merge it. Follow these steps:
-
-    ## Step 1: Check CI Status
-
-    Run `gh pr checks {{ pr_number }} --repo {{ repo }}` to see all CI checks.
-
-    ## Step 2: Handle CI State
-
-    **If all checks pass:** Proceed to Step 3.
-
-    **If checks are failing:**
-    - Read the CI failure logs: `gh run view <run_id> --repo {{ repo }} --log-failed`
-    - Analyze the root cause
-    - If it's a code issue you can fix (lint, format, type errors, simple test failures):
-      fix it, commit, and push. Then re-check CI.
-    - If it's a complex code issue: return `{"action": "escalate", "feedback": "..."}`
-      with details about what failed and why.
-    - If it's an infrastructure issue (flaky test, CI config): return escalate.
-
-    **If no checks exist or checks are pending:**
-    - Read `.github/workflows/` to understand how CI is triggered for this repo.
-    - Take the appropriate action to trigger CI (comment, push, workflow dispatch).
-    - Wait for CI to complete: poll `gh pr checks` every 30 seconds.
-    - If CI doesn't start within 5 minutes, escalate.
-
-    ## Step 3: Merge
-
-    Run `gh pr merge {{ pr_number }} --repo {{ repo }} --squash`
-
-    If merge fails, analyze the error:
-    - If merge conflict: try `gh pr merge --squash --admin` or escalate.
-    - If branch protection issue: escalate with the specific error.
-    - If other error: escalate with details.
-
-    ## Output
-
-    Return a JSON object:
-    - `{"action": "merged", "feedback": "summary of what was done"}`
-    - `{"action": "escalate", "feedback": "what went wrong and why human is needed"}`
 
 # ── Initial Prompt Templates ────────────────────────────────────────────────
 # The first message sent to a worker process via claude -p.

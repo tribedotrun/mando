@@ -113,9 +113,12 @@ async fn handle_todo_confirm(
                 bot.api()
                     .answer_callback_query(cb_id, Some("Writing\u{2026}"))
                     .await?;
-                let _ = bot
+                if let Err(e) = bot
                     .edit_message(cid, mid, "\u{23f3} Writing to task list\u{2026}")
-                    .await;
+                    .await
+                {
+                    tracing::warn!(module = "telegram", error = %e, "message send failed");
+                }
                 crate::callback_actions::add_todo_items(bot, cid, &state.items).await?;
             } else {
                 bot.api()
@@ -127,16 +130,21 @@ async fn handle_todo_confirm(
             bot.api()
                 .answer_callback_query(cb_id, Some("Send your edits"))
                 .await?;
-            let _ = bot
+            if let Err(e) = bot
                 .edit_message(cid, mid, "\u{270f}\u{fe0f} Send your edit instructions:")
-                .await;
+                .await
+            {
+                tracing::warn!(module = "telegram", error = %e, "message send failed");
+            }
         }
         "cancel" => {
             bot.take_todo_confirm(aid);
             bot.api()
                 .answer_callback_query(cb_id, Some("Cancelled"))
                 .await?;
-            let _ = bot.edit_message(cid, mid, "\u{23ed} Cancelled").await;
+            if let Err(e) = bot.edit_message(cid, mid, "\u{23ed} Cancelled").await {
+                tracing::warn!(module = "telegram", error = %e, "message send failed");
+            }
         }
         _ => {
             bot.api().answer_callback_query(cb_id, None).await?;
@@ -161,7 +169,9 @@ async fn handle_todo_project(
         bot.api()
             .answer_callback_query(cb_id, Some("Cancelled"))
             .await?;
-        let _ = bot.edit_message(cid, mid, "\u{23ed} Cancelled").await;
+        if let Err(e) = bot.edit_message(cid, mid, "\u{23ed} Cancelled").await {
+            tracing::warn!(module = "telegram", error = %e, "message send failed");
+        }
         return Ok(());
     }
     if let Some(mut state) = bot.take_todo_confirm(aid) {
@@ -181,7 +191,7 @@ async fn handle_todo_project(
             }
         }
         bot.api().answer_callback_query(cb_id, Some(&name)).await?;
-        let _ = bot
+        if let Err(e) = bot
             .edit_message(
                 cid,
                 mid,
@@ -190,7 +200,10 @@ async fn handle_todo_project(
                     mando_shared::escape_html(&name)
                 ),
             )
-            .await;
+            .await
+        {
+            tracing::warn!(module = "telegram", error = %e, "message send failed");
+        }
         crate::callback_actions::add_todo_items(bot, cid, &state.items).await?;
     } else {
         bot.api()
@@ -291,9 +304,12 @@ async fn handle_multi_select(
             bot.api()
                 .answer_callback_query(cb_id, Some("Processing\u{2026}"))
                 .await?;
-            let _ = bot
+            if let Err(e) = bot
                 .edit_message(cid, mid, "\u{23f3} Processing\u{2026}")
-                .await;
+                .await
+            {
+                tracing::warn!(module = "telegram", error = %e, "message send failed");
+            }
 
             use crate::callback_actions;
             match prefix {
@@ -312,7 +328,9 @@ async fn handle_multi_select(
             bot.api()
                 .answer_callback_query(cb_id, Some("Dismissed"))
                 .await?;
-            let _ = bot.edit_message(cid, mid, "\u{23ed} Dismissed").await;
+            if let Err(e) = bot.edit_message(cid, mid, "\u{23ed} Dismissed").await {
+                tracing::warn!(module = "telegram", error = %e, "message send failed");
+            }
         }
         _ => {
             bot.api().answer_callback_query(cb_id, None).await?;
@@ -335,12 +353,16 @@ async fn handle_cron_act(
         bot.api()
             .answer_callback_query(cb_id, Some("Skipped"))
             .await?;
-        let _ = bot.edit_message(cid, mid, "\u{23ed} Skipped").await;
+        if let Err(e) = bot.edit_message(cid, mid, "\u{23ed} Skipped").await {
+            tracing::warn!(module = "telegram", error = %e, "message send failed");
+        }
     } else if let Some(pid_str) = action.strip_prefix("kill_") {
         bot.api()
             .answer_callback_query(cb_id, Some("Killing\u{2026}"))
             .await?;
-        let _ = bot.edit_message(cid, mid, "\u{23f3} Killing\u{2026}").await;
+        if let Err(e) = bot.edit_message(cid, mid, "\u{23f3} Killing\u{2026}").await {
+            tracing::warn!(module = "telegram", error = %e, "message send failed");
+        }
         crate::callback_actions::kill_worker(bot, cid, mid, pid_str).await?;
     } else {
         bot.api().answer_callback_query(cb_id, None).await?;

@@ -233,7 +233,7 @@ async fn try_readability(url: &str) -> Result<String> {
     match mando_readability::extract(&html) {
         Ok(article) if article.text_content.len() >= MIN_CONTENT_CHARS => Ok(article.text_content),
         Ok(article) => {
-            warn!(
+            info!(
                 url,
                 chars = article.text_content.len(),
                 "readability extraction short, returning as-is"

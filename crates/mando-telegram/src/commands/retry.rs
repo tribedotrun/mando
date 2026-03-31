@@ -12,8 +12,8 @@ pub async fn handle(bot: &TelegramBot, chat_id: &str, args: &str) -> Result<()> 
     if item_id.is_empty() {
         bot.send_html(
             chat_id,
-            "Usage: /retry &lt;item_id&gt;\n\n\
-             Retries captain review for an item in Errored state.\n\n\
+            "Usage: /retry &lt;task_id&gt;\n\n\
+             Retries captain review for a task in Errored state.\n\n\
              Example: /retry 42",
         )
         .await?;
@@ -25,7 +25,7 @@ pub async fn handle(bot: &TelegramBot, chat_id: &str, args: &str) -> Result<()> 
         Err(_) => {
             bot.send_html(
                 chat_id,
-                &format!("\u{26a0}\u{fe0f} Invalid item ID: {}", escape_html(item_id)),
+                &format!("\u{26a0}\u{fe0f} Invalid task ID: {}", escape_html(item_id)),
             )
             .await?;
             return Ok(());

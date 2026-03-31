@@ -33,12 +33,15 @@ pub fn resolve_claude_binary() -> PathBuf {
         }
     }
 
-    let home = std::env::var("HOME").unwrap_or_default();
-    let candidates = [
-        format!("{home}/.npm-global/bin/claude"),
-        format!("{home}/.local/bin/claude"),
-        "/usr/local/bin/claude".to_string(),
-    ];
+    let candidates: Vec<String> = if let Ok(home) = std::env::var("HOME") {
+        vec![
+            format!("{home}/.npm-global/bin/claude"),
+            format!("{home}/.local/bin/claude"),
+            "/usr/local/bin/claude".to_string(),
+        ]
+    } else {
+        vec!["/usr/local/bin/claude".to_string()]
+    };
     for c in &candidates {
         if Path::new(c).exists() {
             return PathBuf::from(c);

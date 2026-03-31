@@ -54,6 +54,7 @@ export function DevInfoBar(): React.ReactElement | null {
         window.mandoAPI.devGitInfo(),
       ]);
       if (mode === 'production') return;
+      if (!gatewayUrl) return;
       const port = new URL(gatewayUrl).port;
       setInfo({
         mode: mode.toUpperCase(),

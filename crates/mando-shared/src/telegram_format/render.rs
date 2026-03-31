@@ -193,9 +193,7 @@ fn last_incomplete_marker_start(text: &str) -> Option<usize> {
 }
 
 fn toggle_stack(stack: &mut Vec<usize>, byte: usize) {
-    if stack.last().is_some() {
-        stack.pop();
-    } else {
+    if stack.pop().is_none() {
         stack.push(byte);
     }
 }

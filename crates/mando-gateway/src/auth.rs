@@ -88,24 +88,9 @@ fn has_valid_bearer_token(req: &axum::http::Request<axum::body::Body>, expected:
         .is_some_and(|val| val.strip_prefix("Bearer ").map(|t| t.trim()) == Some(expected))
 }
 
-fn has_valid_query_token(req: &axum::http::Request<axum::body::Body>, expected: &str) -> bool {
-    let Some(query) = req.uri().query() else {
-        return false;
-    };
-    for pair in query.split('&') {
-        if let Some(val) = pair.strip_prefix("token=") {
-            if val == expected {
-                return true;
-            }
-        }
-    }
-    false
-}
-
 #[allow(clippy::result_large_err)]
 fn authorize_request(
     req: &axum::http::Request<axum::body::Body>,
-    allow_query_token: bool,
 ) -> Result<(), axum::response::Response> {
     let expected = expected_token()?;
 
@@ -113,32 +98,15 @@ fn authorize_request(
         return Ok(());
     }
 
-    if allow_query_token && has_valid_query_token(req, &expected) {
-        return Ok(());
-    }
-
     Err(unauthorized_response())
 }
 
-/// Axum middleware: require `Authorization: Bearer <token>`.
+/// Axum middleware: require daemon bearer token.
 pub(crate) async fn require_auth(
     req: axum::http::Request<axum::body::Body>,
     next: axum::middleware::Next,
 ) -> axum::response::Response {
-    if let Err(response) = authorize_request(&req, false) {
-        return response;
-    }
-    next.run(req).await
-}
-
-/// Axum middleware for SSE endpoints that still need `?token=...` support.
-///
-/// This must only be attached to explicit SSE routes such as `/api/events`.
-pub(crate) async fn require_sse_auth(
-    req: axum::http::Request<axum::body::Body>,
-    next: axum::middleware::Next,
-) -> axum::response::Response {
-    if let Err(response) = authorize_request(&req, true) {
+    if let Err(response) = authorize_request(&req) {
         return response;
     }
     next.run(req).await

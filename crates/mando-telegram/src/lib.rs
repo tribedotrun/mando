@@ -63,7 +63,7 @@ pub async fn start_bot(config: Arc<RwLock<Config>>, gw: Option<http::GatewayClie
     };
 
     if let Some(url) = &base_url {
-        tracing::warn!("Telegram bot using custom API base URL: {url}");
+        tracing::info!("Telegram bot using custom API base URL: {url}");
     }
     let gw = match gw {
         Some(g) => g,

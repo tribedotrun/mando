@@ -142,7 +142,9 @@ export function SessionsCard({ refreshTrigger = 0 }: Props): React.ReactElement 
           const s = sessions[clampedFocusedIndex];
           if (s) {
             e.preventDefault();
-            navigator.clipboard.writeText(resumeCmd(s)).catch(() => {});
+            navigator.clipboard
+              .writeText(resumeCmd(s))
+              .catch(() => console.warn('clipboard write failed'));
           }
           break;
         }

@@ -6,8 +6,8 @@ use anyhow::Result;
 
 const PICKER: SinglePicker = SinglePicker {
     header:
-        "\u{26a0}\u{fe0f} Rework tears down current worker + PR and starts fresh.\nPick an item:",
-    empty_msg: "\u{2705} No items to rework.",
+        "\u{26a0}\u{fe0f} Rework tears down current worker + PR and starts fresh.\nPick a task:",
+    empty_msg: "\u{2705} No tasks to rework.",
     callback_prefix: "rework",
     limit: 8,
     show_pr: true,

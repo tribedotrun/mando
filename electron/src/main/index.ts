@@ -4,19 +4,20 @@
  * No napi loading. All data operations go through HTTP to the daemon.
  * Daemon lifecycle managed via launchd (prod) or direct spawn (dev).
  */
-import { app, BrowserWindow, Tray, Menu, globalShortcut, ipcMain, dialog, shell } from 'electron';
+import { app, BrowserWindow, Tray, Menu, globalShortcut, dialog, shell } from 'electron';
 import path from 'path';
 import fs from 'fs';
-import { execSync } from 'child_process';
 import http from 'http';
 import log from '#main/logger';
 import { installCliAndPlists, getDaemonStatus, removeLegacyAppPlist } from '#main/launchd';
 import { registerSetupValidationHandlers } from '#main/setup-validation';
+import { getDevGitInfo } from '#main/dev-git-info';
+import { installTrustedGatewayAuth } from '#main/gateway-auth';
+import { handleTrusted, setTrustedRendererOrigins } from '#main/ipc-security';
 import {
   getDataDir,
   getConfigPath,
   readPort,
-  readToken,
   daemonFetch,
   ensureDaemon,
   startHealthMonitor,
@@ -41,6 +42,13 @@ let tray: Tray | null = null;
 let rendererServer: http.Server | null = null;
 let rendererPort = 0;
 let isQuitting = false;
+
+class DaemonConfigHttpError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'DaemonConfigHttpError';
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Window management
@@ -70,7 +78,7 @@ function createWindow(): void {
       preload: resolvePreload(),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false,
+      sandbox: true,
       webSecurity: true,
     },
   });
@@ -181,6 +189,18 @@ function voiceRendererUrl(): string {
     : `http://127.0.0.1:${rendererPort}/index.html?voice=1`;
 }
 
+function trustedRendererOrigins(): string[] {
+  const origins = new Set<string>();
+  if (MAIN_WINDOW_VITE_DEV_SERVER_URL) {
+    origins.add(new URL(MAIN_WINDOW_VITE_DEV_SERVER_URL).origin);
+  }
+  if (rendererPort > 0) {
+    origins.add(`http://127.0.0.1:${rendererPort}`);
+    origins.add(`http://localhost:${rendererPort}`);
+  }
+  return Array.from(origins);
+}
+
 function registerShortcuts(): void {
   globalShortcut.register('CommandOrControl+N', () => {
     mainWindow?.webContents.send('shortcut', 'add-task');
@@ -215,68 +235,45 @@ function registerShortcuts(): void {
 // IPC handlers — config operations via daemon HTTP
 // ---------------------------------------------------------------------------
 
-ipcMain.handle('get-gateway-url', async () => {
+handleTrusted('get-gateway-url', async () => {
   const port =
     process.env.MANDO_GATEWAY_PORT ||
     (await readPort().catch((err: unknown) => {
-      log.warn('get-gateway-url: failed to read daemon port, falling back to 18893:', err);
-      return '18893';
+      log.error('get-gateway-url: failed to read daemon port — daemon may not be running:', err);
+      return null;
     }));
+  if (!port) return null;
   return `http://127.0.0.1:${port}`;
 });
 
-ipcMain.handle('get-auth-token', async () => {
-  return (
-    process.env.MANDO_AUTH_TOKEN ||
-    (await readToken().catch((err: unknown) => {
-      log.warn('get-auth-token: failed to read auth token, API calls will fail auth:', err);
-      return '';
-    }))
-  );
-});
+handleTrusted('get-app-info', getAppInfo);
 
-ipcMain.handle('get-app-info', getAppInfo);
-
-ipcMain.handle('get-data-dir', () => getDataDir());
-ipcMain.handle('get-config-path', () => getConfigPath());
-ipcMain.handle('get-connection-state', () => getConnectionState());
-ipcMain.handle('get-app-mode', () => getAppMode());
-ipcMain.handle('select-directory', async () => {
+handleTrusted('get-data-dir', () => getDataDir());
+handleTrusted('get-config-path', () => getConfigPath());
+handleTrusted('get-connection-state', () => getConnectionState());
+handleTrusted('get-app-mode', () => getAppMode());
+handleTrusted('select-directory', async () => {
   const opts = { properties: ['openDirectory' as const], message: 'Select a project folder' };
   const win = BrowserWindow.getFocusedWindow();
   const result = win ? await dialog.showOpenDialog(win, opts) : await dialog.showOpenDialog(opts);
   return result.canceled ? null : (result.filePaths[0] ?? null);
 });
-ipcMain.handle('set-login-item', (_: unknown, enabled: boolean) => {
+handleTrusted('set-login-item', (_: unknown, enabled: boolean) => {
   if (app.isPackaged) {
     app.setLoginItemSettings({ openAtLogin: enabled, openAsHidden: true });
   }
 });
 
-ipcMain.handle('toggle-devtools', () => {
+handleTrusted('toggle-devtools', () => {
   mainWindow?.webContents.toggleDevTools();
 });
 
-ipcMain.handle('get-dev-git-info', () => {
-  try {
-    const branch = execSync('git rev-parse --abbrev-ref HEAD', { encoding: 'utf-8' }).trim();
-    const toplevel = execSync('git rev-parse --show-toplevel', { encoding: 'utf-8' }).trim();
-    const dirName = path.basename(toplevel);
-    const parentName = path.basename(path.dirname(toplevel));
-    const worktree = parentName === 'worktrees' ? dirName : null;
-    const slotFile = path.join(toplevel, '.dev', 'slot');
-    const slot = fs.existsSync(slotFile) ? fs.readFileSync(slotFile, 'utf-8').trim() : null;
-    return { branch, worktree, slot };
-  } catch (e: unknown) {
-    log.debug('[get-dev-git-info] git info failed:', e);
-    return { branch: 'unknown', worktree: null, slot: null };
-  }
-});
+handleTrusted('get-dev-git-info', getDevGitInfo);
 
 // Setup validation handlers (Claude Code, Telegram, Linear) — see setup-validation.ts
 registerSetupValidationHandlers();
 
-ipcMain.handle('has-config', async () => {
+handleTrusted('has-config', async () => {
   try {
     const resp = await daemonFetch('/api/config/status');
     if (resp.ok) {
@@ -297,7 +294,7 @@ ipcMain.handle('has-config', async () => {
   }
 });
 
-ipcMain.handle('read-config', async () => {
+handleTrusted('read-config', async () => {
   try {
     const resp = await daemonFetch('/api/config');
     if (resp.ok) return await resp.text();
@@ -312,19 +309,35 @@ ipcMain.handle('read-config', async () => {
   }
 });
 
-ipcMain.handle('save-config', async (_: unknown, configJson: string) => {
+handleTrusted('save-config', async (_: unknown, configJson: string) => {
   try {
     const resp = await daemonFetch('/api/config', {
       method: 'PUT',
       body: configJson,
     });
     if (resp.ok) return true;
-    const err = await resp.json().catch(() => ({}));
+    const err = await resp.json().catch(() => ({ error: resp.statusText }));
     log.error('save-config via daemon failed:', err);
+    throw new DaemonConfigHttpError(err.error || `HTTP ${resp.status}`);
   } catch (e: unknown) {
-    log.error('save-config fetch failed:', e instanceof Error ? e.message : e);
+    if (e instanceof DaemonConfigHttpError) {
+      throw e;
+    }
+
+    const message = e instanceof Error ? e.message : String(e);
+    const networkFallback =
+      message.includes('fetch failed') ||
+      message.includes('ECONNREFUSED') ||
+      message.includes('ENOTFOUND') ||
+      message.includes('timed out');
+
+    if (!networkFallback) {
+      throw e;
+    }
+
+    log.error('save-config fetch failed:', message);
   }
-  // Fallback: write locally.
+  // Fallback: write locally so config isn't lost.
   log.warn('save-config: daemon unreachable, falling back to local file write');
   const configPath = getConfigPath();
   fs.mkdirSync(path.dirname(configPath), { recursive: true });
@@ -332,7 +345,7 @@ ipcMain.handle('save-config', async (_: unknown, configJson: string) => {
   return true;
 });
 
-ipcMain.handle('setup-complete', async (_: unknown, configJson: string) => {
+handleTrusted('setup-complete', async (_: unknown, configJson: string) => {
   const dataDir = getDataDir();
 
   // Create directory structure (needed before daemon can start).
@@ -363,7 +376,9 @@ ipcMain.handle('setup-complete', async (_: unknown, configJson: string) => {
     }
   }
   if (!setupNotified) {
-    log.error('setup-complete: failed to notify daemon after 5 attempts — captain may not start');
+    log.error(
+      'setup-complete: failed to notify daemon after 5 attempts — daemon will pick up config on next restart, but captain may not start until then',
+    );
   }
 
   // Install CLI binary and launchd plists.
@@ -376,11 +391,11 @@ ipcMain.handle('setup-complete', async (_: unknown, configJson: string) => {
 });
 
 // -- Launchd IPC handlers (Electron-native) --
-ipcMain.handle('launchd:reinstall', () => {
+handleTrusted('launchd:reinstall', () => {
   installCliAndPlists(getDataDir());
   return true;
 });
-ipcMain.handle('launchd:daemon-status', () => getDaemonStatus());
+handleTrusted('launchd:daemon-status', () => getDaemonStatus());
 
 // ---------------------------------------------------------------------------
 // App lifecycle
@@ -405,6 +420,12 @@ app.whenReady().then(async () => {
     const result = await startRendererServer(rendererDir);
     rendererPort = result.port;
     rendererServer = result.server;
+  }
+  setTrustedRendererOrigins(trustedRendererOrigins());
+  installTrustedGatewayAuth();
+
+  if (process.platform === 'darwin' && isHeadless()) {
+    app.setActivationPolicy('accessory');
   }
 
   if (process.platform === 'darwin' && app.dock) {
@@ -449,6 +470,9 @@ app.whenReady().then(async () => {
   }
 
   app.on('activate', () => {
+    if (isHeadless()) {
+      return;
+    }
     if (BrowserWindow.getAllWindows().length === 0) {
       createWindow();
     } else {

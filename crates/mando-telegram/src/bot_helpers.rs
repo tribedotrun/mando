@@ -3,9 +3,7 @@
 use serde_json::Value;
 
 use crate::bot::{PickerItem, PickerState};
-pub(crate) use crate::message_helpers::{
-    bc, extract_chat_id, extract_user_id, is_group_chat, parse_command,
-};
+pub(crate) use crate::message_helpers::{bc, extract_chat_id, extract_user_id, parse_command};
 
 pub(crate) fn to_picker_state(chat_id: &str, items: &[&mando_types::Task]) -> PickerState {
     PickerState {
@@ -15,7 +13,6 @@ pub(crate) fn to_picker_state(chat_id: &str, items: &[&mando_types::Task]) -> Pi
             .map(|it| PickerItem {
                 id: it.id.to_string(),
                 title: it.title.clone(),
-                clarifier_questions: it.clarifier_questions.clone(),
                 status: Some(
                     serde_json::to_value(it.status)
                         .ok()
@@ -49,7 +46,7 @@ pub(crate) fn extract_photo_todo(message: &Value) -> Option<String> {
 pub(crate) fn dm_reply_keyboard() -> Value {
     serde_json::json!({
         "keyboard": [
-            ["/status", "/captain", "/cron"],
+            ["/tasks", "/captain", "/cron"],
             ["/todo", "/sessions", "/triage"],
         ],
         "resize_keyboard": true,
@@ -63,8 +60,8 @@ mod tests {
 
     #[test]
     fn parse_command_simple() {
-        let (cmd, args) = parse_command("/status all");
-        assert_eq!(cmd, "status");
+        let (cmd, args) = parse_command("/tasks all");
+        assert_eq!(cmd, "tasks");
         assert_eq!(args, "all");
     }
 
@@ -77,8 +74,8 @@ mod tests {
 
     #[test]
     fn parse_command_with_bot_mention() {
-        let (cmd, args) = parse_command("/status@mando_bot all");
-        assert_eq!(cmd, "status");
+        let (cmd, args) = parse_command("/tasks@mando_bot all");
+        assert_eq!(cmd, "tasks");
         assert_eq!(args, "all");
     }
 
@@ -91,8 +88,8 @@ mod tests {
 
     #[test]
     fn parse_command_uppercase() {
-        let (cmd, _) = parse_command("/STATUS");
-        assert_eq!(cmd, "status");
+        let (cmd, _) = parse_command("/TASKS");
+        assert_eq!(cmd, "tasks");
     }
 
     #[test]
@@ -111,17 +108,5 @@ mod tests {
     fn extract_user_id_numeric_only_when_no_username() {
         let msg = serde_json::json!({"from": {"id": 12345}});
         assert_eq!(extract_user_id(&msg), "12345");
-    }
-
-    #[test]
-    fn is_group_chat_private() {
-        let msg = serde_json::json!({"chat": {"id": 1, "type": "private"}});
-        assert!(!is_group_chat(&msg));
-    }
-
-    #[test]
-    fn is_group_chat_supergroup() {
-        let msg = serde_json::json!({"chat": {"id": 1, "type": "supergroup"}});
-        assert!(is_group_chat(&msg));
     }
 }

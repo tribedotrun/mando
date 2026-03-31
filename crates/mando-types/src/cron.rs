@@ -1,12 +1,35 @@
 //! Cron job domain types.
 
+use std::fmt;
+
 use serde::{Deserialize, Serialize};
 
+/// The kind of schedule for a cron job.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ScheduleKind {
+    #[default]
+    Every,
+    At,
+    Cron,
+}
+
+impl fmt::Display for ScheduleKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Every => write!(f, "every"),
+            Self::At => write!(f, "at"),
+            Self::Cron => write!(f, "cron"),
+        }
+    }
+}
+
 /// Schedule definition for a cron job.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CronSchedule {
-    pub kind: String,
+    #[serde(default)]
+    pub kind: ScheduleKind,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub at_ms: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -17,24 +40,20 @@ pub struct CronSchedule {
     pub tz: Option<String>,
 }
 
-impl Default for CronSchedule {
-    fn default() -> Self {
-        Self {
-            kind: "every".into(),
-            at_ms: None,
-            every_ms: None,
-            expr: None,
-            tz: None,
-        }
-    }
+/// The kind of payload for a cron job.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PayloadKind {
+    #[default]
+    AgentTurn,
 }
 
 /// What to do when the cron job runs.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CronPayload {
-    #[serde(default = "default_payload_kind")]
-    pub kind: String,
+    #[serde(default)]
+    pub kind: PayloadKind,
     #[serde(default)]
     pub message: String,
     #[serde(default)]
@@ -43,22 +62,6 @@ pub struct CronPayload {
     pub channel: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub to: Option<String>,
-}
-
-fn default_payload_kind() -> String {
-    "agent_turn".into()
-}
-
-impl Default for CronPayload {
-    fn default() -> Self {
-        Self {
-            kind: default_payload_kind(),
-            message: String::new(),
-            deliver: false,
-            channel: None,
-            to: None,
-        }
-    }
 }
 
 /// Runtime state of a cron job.
@@ -73,6 +76,24 @@ pub struct CronState {
     pub last_status: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_error: Option<String>,
+}
+
+/// The type of a cron job.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum JobType {
+    #[default]
+    System,
+    User,
+}
+
+impl fmt::Display for JobType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::System => write!(f, "system"),
+            Self::User => write!(f, "user"),
+        }
+    }
 }
 
 /// A scheduled cron job.
@@ -95,8 +116,8 @@ pub struct CronJob {
     pub updated_at_ms: i64,
     #[serde(default)]
     pub delete_after_run: bool,
-    #[serde(rename = "type", default = "default_job_type")]
-    pub job_type: String,
+    #[serde(rename = "type", default)]
+    pub job_type: JobType,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cwd: Option<String>,
     #[serde(default = "default_timeout")]
@@ -105,10 +126,6 @@ pub struct CronJob {
 
 fn default_true() -> bool {
     true
-}
-
-fn default_job_type() -> String {
-    "system".into()
 }
 
 fn default_timeout() -> i64 {

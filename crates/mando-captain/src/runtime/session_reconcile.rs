@@ -1,18 +1,19 @@
 //! Session status reconciliation — safety net for stale "running" sessions.
 //!
-//! On each tick, queries the DB for sessions marked "running" and checks the
-//! stream file for a result event. If the stream has a result but the DB still
-//! says "running", updates the DB to "stopped" or "failed".
+//! Three-layer detection on each tick (PID-first to prevent resume race):
+//! L1: PID liveness — alive = skip, dead = terminate
+//! L2: Stream result — found after last init = terminate
+//! L3: Stream staleness — stale beyond threshold = terminate
 
 use mando_types::SessionStatus;
 use sqlx::SqlitePool;
 
-/// Reconcile all sessions currently marked "running" against stream ground truth.
-pub(crate) async fn reconcile_running_sessions(pool: &SqlitePool) {
+/// Reconcile all sessions currently marked "running" against PID + stream truth.
+pub(crate) async fn reconcile_running_sessions(pool: &SqlitePool, stale_threshold_s: f64) {
     let running = match mando_db::queries::sessions::list_running_sessions(pool).await {
         Ok(rows) => rows,
         Err(e) => {
-            tracing::warn!(module = "captain", error = %e, "session reconciliation: failed to query running sessions");
+            tracing::warn!(module = "captain", error = %e, "session reconciliation: failed to query");
             return;
         }
     };
@@ -23,29 +24,53 @@ pub(crate) async fn reconcile_running_sessions(pool: &SqlitePool) {
 
     let mut reconciled = 0u32;
     for row in &running {
-        let stream_path = mando_config::stream_path_for_session(&row.session_id);
-        let Some(result) = mando_cc::get_stream_result(&stream_path) else {
-            continue; // No result yet — session is genuinely still running (or has no stream file).
-        };
+        let sid = &row.session_id;
 
-        let new_status = if mando_cc::is_clean_result(&result) {
-            SessionStatus::Stopped
-        } else {
-            SessionStatus::Failed
-        };
+        // L1: PID liveness
+        if let Some(pid) = crate::io::pid_registry::get_pid(sid) {
+            if pid > 0 {
+                if mando_cc::is_process_alive(pid) {
+                    continue; // genuinely running
+                }
+                // Dead PID — terminate
+                crate::io::session_terminate::terminate_session(
+                    pool,
+                    sid,
+                    SessionStatus::Stopped,
+                    None,
+                )
+                .await;
+                reconciled += 1;
+                continue;
+            }
+        }
 
-        if let Err(e) =
-            mando_db::queries::sessions::update_session_status(pool, &row.session_id, new_status)
-                .await
-        {
-            tracing::warn!(
-                module = "captain",
-                session_id = %row.session_id,
-                error = %e,
-                "session reconciliation: failed to update status"
-            );
-        } else {
+        // L2: Stream result
+        let stream_path = mando_config::stream_path_for_session(sid);
+        if let Some(result) = mando_cc::get_stream_result(&stream_path) {
+            let status = if mando_cc::is_clean_result(&result) {
+                SessionStatus::Stopped
+            } else {
+                SessionStatus::Failed
+            };
+            crate::io::session_terminate::terminate_session(pool, sid, status, None).await;
             reconciled += 1;
+            continue;
+        }
+
+        // L3: Stream staleness
+        if let Some(stale_secs) = mando_cc::stream_stale_seconds(&stream_path) {
+            if stale_secs > stale_threshold_s {
+                crate::io::session_terminate::terminate_session(
+                    pool,
+                    sid,
+                    SessionStatus::Stopped,
+                    None,
+                )
+                .await;
+                reconciled += 1;
+                continue;
+            }
         }
     }
 

@@ -1,6 +1,7 @@
 //! Captain domain types — worker context, tick results, and actions.
 
 use std::collections::HashMap;
+use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
@@ -84,10 +85,29 @@ pub struct Action {
     pub reason: Option<String>,
 }
 
+/// The execution mode of a captain tick.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum TickMode {
+    Live,
+    DryRun,
+    Skipped,
+}
+
+impl fmt::Display for TickMode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Live => write!(f, "live"),
+            Self::DryRun => write!(f, "dry-run"),
+            Self::Skipped => write!(f, "skipped"),
+        }
+    }
+}
+
 /// Structured result from a captain tick.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TickResult {
-    pub mode: String,
+    pub mode: TickMode,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tick_id: Option<String>,
     #[serde(default)]

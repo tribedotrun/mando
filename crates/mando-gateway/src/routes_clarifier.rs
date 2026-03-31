@@ -1,123 +1,210 @@
-//! /api/clarifier/* route handlers — multi-turn clarifier sessions via HTTP.
+//! POST /api/tasks/{id}/clarify — unified clarification answer endpoint.
 
-use axum::extract::State;
+use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::Json;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use crate::response::error_response;
+use mando_captain::runtime::clarifier::ClarifierStatus;
+
+use crate::response::{error_response, internal_error};
 use crate::AppState;
 
-fn clarifier_result_json(r: &mando_captain::runtime::clarifier::ClarifierResult) -> Value {
-    json!({
-        "status": format!("{:?}", r.status),
-        "context": r.context,
-        "questions": r.questions,
-        "generated_title": r.generated_title,
-        "repo": r.repo,
-        "no_pr": r.no_pr,
-        "resource": r.resource,
-    })
-}
-
 #[derive(Deserialize)]
-pub(crate) struct ClarifierStartBody {
-    pub key: String,
-    pub item_id: String,
-    pub message: String,
+pub(crate) struct ClarifyBody {
+    pub answer: String,
 }
 
-/// POST /api/clarifier/start — start a new multi-turn clarifier session.
-pub(crate) async fn post_clarifier_start(
+/// POST /api/tasks/{id}/clarify — provide human answer and re-clarify inline.
+pub(crate) async fn post_task_clarify(
     State(state): State<AppState>,
-    Json(body): Json<ClarifierStartBody>,
+    Path(id): Path<i64>,
+    Json(body): Json<ClarifyBody>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    // Load the task item by ID from the TaskStore.
-    let store = state.task_store.read().await;
-    let item = store
-        .find_by_id(body.item_id.parse::<i64>().map_err(|_| {
-            error_response(
-                StatusCode::BAD_REQUEST,
-                &format!("invalid id: {}", body.item_id),
-            )
-        })?)
-        .await
-        .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?
-        .ok_or_else(|| {
-            error_response(
-                StatusCode::NOT_FOUND,
-                &format!("task '{}' not found", body.item_id),
-            )
-        })?;
-    drop(store);
+    let answer = body.answer.trim().to_string();
+    if answer.is_empty() {
+        return Err(error_response(
+            StatusCode::BAD_REQUEST,
+            "answer text must not be empty",
+        ));
+    }
 
-    let mut mgr = state.clarifier_mgr.write().await;
+    // Load the task and validate status.
+    let (item, pool) = {
+        let store = state.task_store.read().await;
+        let item = store
+            .find_by_id(id)
+            .await
+            .map_err(internal_error)?
+            .ok_or_else(|| {
+                error_response(StatusCode::NOT_FOUND, &format!("task {id} not found"))
+            })?;
+
+        if item.status != mando_types::task::ItemStatus::NeedsClarification {
+            return Err(error_response(
+                StatusCode::CONFLICT,
+                &format!("task must be in needs-clarification, got {:?}", item.status),
+            ));
+        }
+
+        // Append human answer to context.
+        let new_context = mando_captain::runtime::task_notes::append_tagged_note(
+            item.context.as_deref(),
+            "Human answer",
+            &answer,
+        )
+        .expect("validated answer should always produce a note");
+        store
+            .update(id, |t| {
+                t.context = Some(new_context.clone());
+            })
+            .await
+            .map_err(internal_error)?;
+
+        let mut updated = item;
+        updated.context = Some(new_context);
+        let pool = store.pool().clone();
+        (updated, pool)
+    };
+
+    // Emit HumanAnswered timeline event.
+    mando_captain::runtime::timeline_emit::emit_for_task(
+        &item,
+        mando_types::timeline::TimelineEventType::HumanAnswered,
+        &format!("Human answered: {answer}"),
+        json!({"answer": &answer}),
+        &pool,
+    )
+    .await;
+
+    // Run inline re-clarification.
     let wf = state.captain_workflow.load_full();
     let cfg = state.config.load_full();
-    match mgr.start(&body.key, &item, &body.message, &wf, &cfg).await {
-        Ok(result) => Ok(Json(json!({
-            "ok": true,
-            "result": clarifier_result_json(&result),
-        }))),
-        Err(e) => Err(error_response(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            &e.to_string(),
-        )),
+    match mando_captain::runtime::clarifier::answer_and_reclarify(&item, &answer, &wf, &cfg, &pool)
+        .await
+    {
+        Ok(result) => {
+            // Build session_ids JSON preserving existing fields, updating clarifier.
+            let sids = json!({
+                "worker": item.session_ids.worker,
+                "review": item.session_ids.review,
+                "clarifier": result.session_id.as_deref().or(item.session_ids.clarifier.as_deref()),
+                "merge": item.session_ids.merge,
+            });
+
+            let store = state.task_store.read().await;
+            let status_str = match result.status {
+                ClarifierStatus::Ready => {
+                    mando_captain::runtime::dashboard::force_update_task(
+                        &store,
+                        id,
+                        &json!({
+                            "status": "queued",
+                            "context": result.context,
+                            "session_ids": sids,
+                        }),
+                    )
+                    .await
+                    .map_err(internal_error)?;
+
+                    mando_captain::runtime::timeline_emit::emit_for_task(
+                        &item,
+                        mando_types::timeline::TimelineEventType::ClarifyResolved,
+                        "Clarification complete, ready for work",
+                        json!({"session_id": result.session_id}),
+                        &pool,
+                    )
+                    .await;
+                    "ready"
+                }
+                ClarifierStatus::Clarifying => {
+                    mando_captain::runtime::dashboard::force_update_task(
+                        &store,
+                        id,
+                        &json!({
+                            "status": "needs-clarification",
+                            "context": result.context,
+                            "session_ids": sids,
+                        }),
+                    )
+                    .await
+                    .map_err(internal_error)?;
+
+                    mando_captain::runtime::timeline_emit::emit_for_task(
+                        &item,
+                        mando_types::timeline::TimelineEventType::ClarifyQuestion,
+                        "Still needs clarification",
+                        json!({"session_id": result.session_id, "questions": result.questions}),
+                        &pool,
+                    )
+                    .await;
+                    "clarifying"
+                }
+                ClarifierStatus::Escalate => {
+                    mando_captain::runtime::dashboard::force_update_task(
+                        &store,
+                        id,
+                        &json!({
+                            "status": "captain-reviewing",
+                            "context": result.context,
+                            "captain_review_trigger": "clarifier_fail",
+                            "session_ids": sids,
+                        }),
+                    )
+                    .await
+                    .map_err(internal_error)?;
+                    "escalate"
+                }
+            };
+
+            state.bus.send(
+                mando_types::BusEvent::Tasks,
+                Some(json!({"action": "clarify", "id": id})),
+            );
+
+            Ok(Json(json!({
+                "ok": true,
+                "status": status_str,
+                "context": result.context,
+                "questions": result.questions,
+                "session_id": result.session_id,
+            })))
+        }
+        Err(e) => {
+            // LLM failed — keep the human's answer in context but stay in
+            // needs-clarification so the human can retry or captain can
+            // pick it up on next tick.
+            tracing::warn!(
+                module = "clarifier",
+                task_id = id,
+                error = %e,
+                "inline re-clarification failed — answer saved, status unchanged"
+            );
+            state.bus.send(
+                mando_types::BusEvent::Tasks,
+                Some(json!({"action": "answer", "id": id})),
+            );
+            let questions =
+                match mando_db::queries::timeline::latest_clarifier_questions(&pool, id).await {
+                    Ok(q) => q,
+                    Err(tl_err) => {
+                        tracing::warn!(
+                            module = "clarifier",
+                            task_id = id,
+                            error = %tl_err,
+                            "failed to fetch questions for error response"
+                        );
+                        None
+                    }
+                };
+            Ok(Json(json!({
+                "ok": true,
+                "status": "needs-clarification",
+                "context": item.context,
+                "questions": questions,
+                "error": e.to_string(),
+            })))
+        }
     }
-}
-
-#[derive(Deserialize)]
-pub(crate) struct ClarifierMessageBody {
-    pub key: String,
-    pub message: String,
-}
-
-/// POST /api/clarifier/message — send a follow-up message to an active session.
-pub(crate) async fn post_clarifier_message(
-    State(state): State<AppState>,
-    Json(body): Json<ClarifierMessageBody>,
-) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    let mut mgr = state.clarifier_mgr.write().await;
-
-    if !mgr.has_session(&body.key) {
-        return Err(error_response(
-            StatusCode::NOT_FOUND,
-            &format!("no active clarifier session for '{}'", body.key),
-        ));
-    }
-
-    match mgr.follow_up(&body.key, &body.message).await {
-        Ok(result) => Ok(Json(json!({
-            "ok": true,
-            "result": clarifier_result_json(&result),
-        }))),
-        Err(e) => Err(error_response(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            &e.to_string(),
-        )),
-    }
-}
-
-#[derive(Deserialize)]
-pub(crate) struct ClarifierCancelBody {
-    pub key: String,
-}
-
-/// POST /api/clarifier/cancel — cancel an active clarifier session.
-pub(crate) async fn post_clarifier_cancel(
-    State(state): State<AppState>,
-    Json(body): Json<ClarifierCancelBody>,
-) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    let mut mgr = state.clarifier_mgr.write().await;
-
-    if !mgr.has_session(&body.key) {
-        return Err(error_response(
-            StatusCode::NOT_FOUND,
-            &format!("no active clarifier session for '{}'", body.key),
-        ));
-    }
-
-    mgr.close(&body.key);
-    Ok(Json(json!({"ok": true, "cancelled": body.key})))
 }

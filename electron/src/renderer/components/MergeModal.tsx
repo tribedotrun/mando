@@ -63,7 +63,7 @@ export function MergeModal({
           </div>
         ) : (
           <p className="text-caption mb-4" style={{ color: 'var(--color-text-3)' }}>
-            Squash and merge
+            Captain will check CI and squash merge
           </p>
         )}
 
@@ -84,7 +84,7 @@ export function MergeModal({
                 className="rounded-[6px] px-5 py-2 text-[13px] font-semibold disabled:opacity-50"
                 style={{ background: 'var(--color-accent)', color: 'var(--color-bg)' }}
               >
-                {pending ? 'Merging...' : 'Merge'}
+                {pending ? 'Starting...' : 'Merge'}
               </button>
             </>
           )}

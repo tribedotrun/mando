@@ -23,7 +23,7 @@ pub(crate) async fn check_done_mergeability(
     workflow: &CaptainWorkflow,
     notifier: &Notifier,
     alerts: &mut Vec<String>,
-    health_state: &HealthState,
+    _health_state: &HealthState,
     pool: &sqlx::SqlitePool,
 ) -> Result<()> {
     // Discover PRs for pending-review and handed-off items — parallel discovery.
@@ -67,7 +67,7 @@ pub(crate) async fn check_done_mergeability(
 
     // Reap dead rebase workers. If the process exited, detect whether it
     // succeeded (SHA changed) before clearing `rebase_worker`.
-    reap_dead_rebase_workers(items, health_state).await;
+    reap_dead_rebase_workers(items).await;
 
     let candidates = merge_logic::items_needing_rebase_check(items);
 

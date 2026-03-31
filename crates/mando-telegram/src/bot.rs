@@ -18,8 +18,7 @@ use crate::http::GatewayClient;
 
 use crate::api::TelegramApi;
 use crate::bot_helpers::{
-    extract_chat_id, extract_photo_todo, extract_user_id, is_group_chat, parse_command,
-    to_picker_state,
+    extract_chat_id, extract_photo_todo, extract_user_id, parse_command, to_picker_state,
 };
 use crate::callbacks;
 use crate::commands;
@@ -63,9 +62,6 @@ pub struct PickerState {
 pub struct PickerItem {
     pub id: String,
     pub title: String,
-    /// Clarifier questions (populated for NeedsClarification items).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub clarifier_questions: Option<String>,
     /// Item status string (e.g. "needs-clarification").
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<String>,
@@ -120,6 +116,7 @@ pub struct TelegramBot {
     pub(crate) ask_sessions: HashMap<String, Session>,
     pub(crate) input_sessions: HashMap<String, String>,
     pub(crate) pending_reopen: HashMap<String, (String, String)>,
+    pub(crate) pending_rework: HashMap<String, (String, String)>,
     pub(crate) qa_sessions: HashMap<String, QaSession>,
     pub(crate) act_sessions: HashMap<String, ActSession>,
     todo_confirm: HashMap<String, TodoConfirmState>,
@@ -156,6 +153,7 @@ impl TelegramBot {
             ask_sessions: HashMap::new(),
             input_sessions: HashMap::new(),
             pending_reopen: HashMap::new(),
+            pending_rework: HashMap::new(),
             qa_sessions: HashMap::new(),
             act_sessions: HashMap::new(),
             todo_confirm: HashMap::new(),
@@ -219,7 +217,16 @@ impl TelegramBot {
     async fn handle_message(&mut self, message: &Value) -> Result<()> {
         let chat_id = extract_chat_id(message);
         let user_id = extract_user_id(message);
-        let is_group = is_group_chat(message);
+
+        // DM-only: silently ignore group chats
+        let chat_type = message
+            .get("chat")
+            .and_then(|c| c.get("type"))
+            .and_then(|t| t.as_str())
+            .unwrap_or("private");
+        if chat_type == "group" || chat_type == "supergroup" {
+            return Ok(());
+        }
 
         let tg_config = self.config.read().await.channels.telegram.clone();
 
@@ -231,15 +238,7 @@ impl TelegramBot {
                 .unwrap_or("");
             let (command, args) = parse_command(caption);
             if command == "todo" && !args.is_empty() {
-                // Access control
-                if is_group {
-                    if !permissions::is_group_safe("todo") {
-                        return Ok(());
-                    }
-                    if !permissions::is_allowed(&tg_config, &user_id) {
-                        return Ok(());
-                    }
-                } else if !permissions::is_owner(&tg_config, &user_id) {
+                if !permissions::is_owner(&tg_config, &user_id) {
                     return Ok(());
                 }
                 self.pending_todo.remove(&chat_id);
@@ -253,33 +252,7 @@ impl TelegramBot {
             }
         }
 
-        // Access control: DM = owner-only; group = allowlist + group-safe commands
-        if is_group {
-            let text = message.get("text").and_then(|t| t.as_str()).unwrap_or("");
-            if text.starts_with('/') {
-                let (command, args) = parse_command(text);
-                if !permissions::is_group_safe(&command) {
-                    return Ok(()); // Not a group-safe command
-                }
-                if !permissions::is_allowed(&tg_config, &user_id) {
-                    return Ok(()); // Not on allowlist
-                }
-                if command != "todo" {
-                    self.pending_todo.remove(&chat_id);
-                }
-                return self
-                    .dispatch_command(&chat_id, &command, args, is_group)
-                    .await;
-            }
-            // Non-command text in groups: try implicit URL detection
-            if permissions::is_allowed(&tg_config, &user_id) {
-                return crate::assistant::helpers::handle_implicit_addlink(self, &chat_id, message)
-                    .await;
-            }
-            return Ok(());
-        }
-
-        // DM: owner-only (auto-register on first /start when no owner configured)
+        // Owner-only (auto-register on first /start when no owner configured)
         if tg_config.owner.is_empty() {
             let text = message.get("text").and_then(|t| t.as_str()).unwrap_or("");
             if text.starts_with("/start") {
@@ -299,10 +272,9 @@ impl TelegramBot {
                 self.pending_todo.remove(&chat_id);
             }
             self.pending_reopen.remove(&chat_id);
+            self.pending_rework.remove(&chat_id);
             self.act_sessions.remove(&chat_id);
-            return self
-                .dispatch_command(&chat_id, &command, args, is_group)
-                .await;
+            return self.dispatch_command(&chat_id, &command, args).await;
         }
 
         self.handle_plain_text(&chat_id, text, message).await

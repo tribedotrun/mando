@@ -14,7 +14,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use mando_config::workflow::ScoutWorkflow;
 use tokio::sync::Mutex;
 use tracing::{info, warn};
@@ -88,62 +88,86 @@ impl QaSessionManager {
                 live.last_active = Instant::now();
                 let session_id = live.session_id.clone();
 
-                let cc = live
-                    .cc
-                    .as_mut()
-                    .ok_or_else(|| anyhow::anyhow!("Q&A session {session_id} CC already closed"))?;
+                let cc = match live.cc.as_mut() {
+                    Some(cc) => cc,
+                    None => {
+                        warn!(module = "scout-qa", %session_id, "live session already closed, falling back to resume");
+                        drop(live);
+                        self.sessions.lock().await.remove(key);
+                        return self.ask_via_resume(question, key, workflow).await;
+                    }
+                };
 
                 if let Err(e) = cc.send_message(question).await {
-                    warn!(module = "scout-qa", %session_id, error = %e, "send failed, removing broken session");
+                    warn!(module = "scout-qa", %session_id, error = %e, "send failed, removing broken session and falling back to resume");
+                    let send_err = e.to_string();
                     drop(live);
                     self.sessions.lock().await.remove(key);
-                    return Err(e.context("Q&A follow-up send failed"));
+                    return self.ask_via_resume(question, key, workflow).await.map_err(
+                        |resume_err| {
+                            resume_err.context(format!(
+                                "Q&A follow-up send failed ({send_err}); resume fallback failed"
+                            ))
+                        },
+                    );
                 }
 
                 let timeout = Duration::from_secs(120);
                 let result = match tokio::time::timeout(timeout, cc.recv_result()).await {
                     Ok(Ok(r)) => r,
                     Ok(Err(e)) => {
-                        warn!(module = "scout-qa", %session_id, error = %e, "recv failed, removing session");
+                        warn!(module = "scout-qa", %session_id, error = %e, "recv failed, removing session and falling back to resume");
+                        let recv_err = e.to_string();
                         drop(live);
                         self.sessions.lock().await.remove(key);
-                        return Err(e.context("Q&A follow-up failed"));
+                        return self.ask_via_resume(question, key, workflow).await.map_err(
+                            |resume_err| {
+                                resume_err.context(format!(
+                                    "Q&A follow-up failed ({recv_err}); resume fallback failed"
+                                ))
+                            },
+                        );
                     }
                     Err(_) => {
-                        warn!(module = "scout-qa", %session_id, "recv timed out, removing session");
+                        warn!(module = "scout-qa", %session_id, "recv timed out, removing session and falling back to resume");
                         drop(live);
                         self.sessions.lock().await.remove(key);
-                        anyhow::bail!("Q&A follow-up timed out after {timeout:?}");
+                        return self
+                            .ask_via_resume(question, key, workflow)
+                            .await
+                            .map_err(|resume_err| {
+                                resume_err.context(format!(
+                                    "Q&A follow-up timed out after {timeout:?}; resume fallback failed"
+                                ))
+                            });
                     }
                 };
 
+                let keep_live = mando_cc::is_process_alive(cc.pid());
                 let mut r = parse_qa_result(&result, &session_id);
                 r.session_reset = false;
+                drop(live);
+                if !keep_live {
+                    info!(module = "scout-qa", %session_id, "Q&A process exited after response; future follow-ups will use resume");
+                    self.sessions.lock().await.remove(key);
+                }
                 return Ok(r);
             }
 
-            warn!(module = "scout-qa", key = %key, "session expired, creating new");
+            warn!(module = "scout-qa", key = %key, "live session missing, trying resume");
+            match self.ask_via_resume(question, key, workflow).await {
+                Ok(result) => return Ok(result),
+                Err(e) => {
+                    warn!(module = "scout-qa", key = %key, error = %e, "resume failed, creating fresh session");
+                }
+            }
         }
 
         // Create new session with full article context.
         let prompt =
             render_first_turn_prompt(question, summary, article, raw_content_note, workflow)?;
 
-        let model = workflow.models.get("qa").cloned().unwrap_or_else(|| {
-            tracing::warn!(
-                module = "scout",
-                "missing 'qa' model in workflow config, using empty default"
-            );
-            String::new()
-        });
-        let config = mando_cc::CcConfig::builder()
-            .model(model)
-            .timeout(Duration::from_secs(120))
-            .caller("scout-qa")
-            .json_schema(qa_json_schema())
-            .build();
-
-        let mut cc = mando_cc::CcSession::spawn(config).await?;
+        let mut cc = mando_cc::CcSession::spawn(qa_cc_config(workflow, None)).await?;
         let session_id = cc.session_id().to_string();
 
         cc.send_message(&prompt).await?;
@@ -165,6 +189,7 @@ impl QaSessionManager {
             }
         };
 
+        let keep_live = mando_cc::is_process_alive(cc.pid());
         let mut qa_result = parse_qa_result(&result, &session_id);
         // Use result session_id (CC may reassign) for the map key.
         let key = qa_result
@@ -173,15 +198,34 @@ impl QaSessionManager {
             .unwrap_or_else(|| session_id.clone());
         qa_result.session_reset = session_key.is_some();
 
-        self.sessions.lock().await.insert(
-            key,
-            Arc::new(Mutex::new(LiveSession {
-                cc: Some(cc),
-                session_id,
-                last_active: Instant::now(),
-            })),
-        );
+        if keep_live {
+            self.sessions.lock().await.insert(
+                key,
+                Arc::new(Mutex::new(LiveSession {
+                    cc: Some(cc),
+                    session_id,
+                    last_active: Instant::now(),
+                })),
+            );
+        } else {
+            info!(module = "scout-qa", session_id = %session_id, "Q&A process exited after first turn; future follow-ups will use resume");
+        }
 
+        Ok(qa_result)
+    }
+
+    async fn ask_via_resume(
+        &self,
+        question: &str,
+        session_key: &str,
+        workflow: &ScoutWorkflow,
+    ) -> Result<QaResult> {
+        let result = mando_cc::CcOneShot::run(question, qa_cc_config(workflow, Some(session_key)))
+            .await
+            .with_context(|| format!("resume Q&A session {session_key}"))?;
+
+        let mut qa_result = parse_qa_result(&result, session_key);
+        qa_result.session_reset = false;
         Ok(qa_result)
     }
 
@@ -250,6 +294,25 @@ pub fn default_session_manager() -> Arc<QaSessionManager> {
     Arc::new(QaSessionManager::new(Duration::from_secs(600)))
 }
 
+fn qa_cc_config(workflow: &ScoutWorkflow, resume_session: Option<&str>) -> mando_cc::CcConfig {
+    let model = workflow.models.get("qa").cloned().unwrap_or_else(|| {
+        tracing::warn!(
+            module = "scout",
+            "missing 'qa' model in workflow config, using empty default"
+        );
+        String::new()
+    });
+    let mut builder = mando_cc::CcConfig::builder()
+        .model(model)
+        .timeout(Duration::from_secs(120))
+        .caller("scout-qa")
+        .json_schema(qa_json_schema());
+    if let Some(session_id) = resume_session {
+        builder = builder.resume(session_id);
+    }
+    builder.build()
+}
+
 // ---------------------------------------------------------------------------
 // Internal
 // ---------------------------------------------------------------------------
@@ -300,7 +363,13 @@ fn parse_qa_result(result: &mando_cc::CcResult, ctx_sid: &str) -> QaResult {
     }
 
     warn!(module = "scout-qa", session_id = %ctx_sid, "no structured output, trying text JSON extraction");
-    let parsed = mando_captain::biz::json_parse::parse_llm_json(&result.text);
+    let parsed = match mando_captain::biz::json_parse::parse_llm_json(&result.text) {
+        Ok(v) => v,
+        Err(e) => {
+            warn!(module = "scout-qa", error = %e, "JSON extraction failed, using raw text");
+            serde_json::json!({})
+        }
+    };
     if let Some(answer) = parsed["answer"].as_str() {
         let followups = parsed["suggested_followups"]
             .as_array()
@@ -324,5 +393,104 @@ fn parse_qa_result(result: &mando_cc::CcResult, ctx_sid: &str) -> QaResult {
         session_id: Some(result.session_id.clone()),
         suggested_followups: Vec::new(),
         session_reset: false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    fn workspace_root() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .to_path_buf()
+    }
+
+    fn cc_mock_binary() -> String {
+        let workspace_root = workspace_root();
+        let debug = workspace_root.join("target/debug/mando-cc-mock");
+        if debug.exists() {
+            return debug.to_string_lossy().into_owned();
+        }
+        let release = workspace_root.join("target/release/mando-cc-mock");
+        if release.exists() {
+            return release.to_string_lossy().into_owned();
+        }
+
+        let status = std::process::Command::new("cargo")
+            .args(["build", "-p", "dev-cc-mock", "--bin", "mando-cc-mock"])
+            .current_dir(&workspace_root)
+            .status()
+            .expect("failed to invoke cargo build for dev-cc-mock");
+        assert!(
+            status.success(),
+            "cargo build -p dev-cc-mock failed with status {status}"
+        );
+        assert!(
+            debug.exists(),
+            "mando-cc-mock still missing after cargo build"
+        );
+        debug.to_string_lossy().into_owned()
+    }
+
+    #[tokio::test]
+    async fn follow_up_can_resume_after_live_session_is_closed() {
+        let temp =
+            std::env::temp_dir().join(format!("mando-scout-qa-test-{}", mando_uuid::Uuid::v4()));
+        std::fs::create_dir_all(&temp).unwrap();
+        let old_bin = std::env::var("MANDO_CC_CLAUDE_BIN").ok();
+        let old_data = std::env::var("MANDO_DATA_DIR").ok();
+        std::env::set_var("MANDO_CC_CLAUDE_BIN", cc_mock_binary());
+        std::env::set_var("MANDO_DATA_DIR", &temp);
+
+        let workflow = ScoutWorkflow::compiled_default();
+        let mgr = QaSessionManager::new(Duration::from_secs(600));
+
+        let first = mgr
+            .ask(
+                "What is this?",
+                "Short summary",
+                "Article body",
+                None,
+                &workflow,
+                None,
+            )
+            .await
+            .unwrap();
+        let session_id = first.session_id.clone().unwrap();
+        assert!(!first.answer.is_empty());
+
+        mgr.close(&session_id).await;
+
+        let second = mgr
+            .ask(
+                "Is it useful?",
+                "Short summary",
+                "Article body",
+                None,
+                &workflow,
+                Some(&session_id),
+            )
+            .await
+            .unwrap();
+        assert_eq!(second.session_id.as_deref(), Some(session_id.as_str()));
+        assert!(!second.answer.is_empty());
+        assert!(!second.session_reset);
+
+        if let Some(val) = old_bin {
+            std::env::set_var("MANDO_CC_CLAUDE_BIN", val);
+        } else {
+            std::env::remove_var("MANDO_CC_CLAUDE_BIN");
+        }
+        if let Some(val) = old_data {
+            std::env::set_var("MANDO_DATA_DIR", val);
+        } else {
+            std::env::remove_var("MANDO_DATA_DIR");
+        }
+        let _ = std::fs::remove_dir_all(&temp);
     }
 }

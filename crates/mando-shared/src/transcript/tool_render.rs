@@ -21,7 +21,7 @@ pub(super) fn render_tool_use(name: &str, input: &Value, path_prefix: &str) -> S
             format!("**Bash**{bg}  {label}\n```bash\n{cmd}\n```")
         }
         "Read" => {
-            let fp = short_path(&input_str(input, "file_path"), path_prefix);
+            let fp = short_path(input_str(input, "file_path"), path_prefix);
             let mut extra = String::new();
             if let Some(off) = input.get("offset").and_then(|v| v.as_i64()) {
                 extra.push_str(&format!(" L{off}"));
@@ -32,13 +32,13 @@ pub(super) fn render_tool_use(name: &str, input: &Value, path_prefix: &str) -> S
             format!("**Read**  `{fp}`{extra}")
         }
         "Write" => {
-            let fp = short_path(&input_str(input, "file_path"), path_prefix);
+            let fp = short_path(input_str(input, "file_path"), path_prefix);
             let content = input_str(input, "content");
             let lines = content.matches('\n').count() + 1;
             format!("**Write**  `{fp}` ({lines} lines)")
         }
         "Edit" => {
-            let fp = short_path(&input_str(input, "file_path"), path_prefix);
+            let fp = short_path(input_str(input, "file_path"), path_prefix);
             let old = input_str(input, "old_string");
             let new = input_str(input, "new_string");
             let ra = if input.get("replace_all").and_then(|v| v.as_bool()) == Some(true) {
@@ -58,7 +58,7 @@ pub(super) fn render_tool_use(name: &str, input: &Value, path_prefix: &str) -> S
         }
         "Grep" => {
             let pattern = input_str(input, "pattern");
-            let path = short_path(&input_str(input, "path"), path_prefix);
+            let path = short_path(input_str(input, "path"), path_prefix);
             let glob = input_str(input, "glob");
             let mode = input_str(input, "output_mode");
             let mut extra = String::new();
@@ -75,7 +75,7 @@ pub(super) fn render_tool_use(name: &str, input: &Value, path_prefix: &str) -> S
         }
         "Glob" => {
             let pattern = input_str(input, "pattern");
-            let path = short_path(&input_str(input, "path"), path_prefix);
+            let path = short_path(input_str(input, "path"), path_prefix);
             let path_part = if path.is_empty() {
                 String::new()
             } else {
@@ -97,7 +97,7 @@ pub(super) fn render_tool_use(name: &str, input: &Value, path_prefix: &str) -> S
             } else {
                 format!("  type={subtype}")
             };
-            let prompt_display = truncate_str(&prompt, 500);
+            let prompt_display = truncate_str(prompt, 500);
             format!("**Agent**{bg}{meta}  *{desc}*\n```\n{prompt_display}\n```")
         }
         "Skill" => {
@@ -167,12 +167,8 @@ pub(super) fn detect_path_prefix(messages: &[Value]) -> String {
         .unwrap_or_default()
 }
 
-pub(super) fn input_str(input: &Value, key: &str) -> String {
-    input
-        .get(key)
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string()
+pub(super) fn input_str<'a>(input: &'a Value, key: &str) -> &'a str {
+    input.get(key).and_then(|v| v.as_str()).unwrap_or("")
 }
 
 fn short_path(fp: &str, prefix: &str) -> String {

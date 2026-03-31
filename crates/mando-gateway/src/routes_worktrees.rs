@@ -11,7 +11,7 @@ use time::OffsetDateTime;
 
 use mando_captain::io::git;
 
-use crate::response::error_response;
+use crate::response::{error_response, internal_error};
 use crate::AppState;
 
 /// Resolve a project from config by name or alias (case-insensitive).
@@ -100,11 +100,11 @@ pub(crate) async fn post_worktrees(
 
     git::fetch_origin(&project_path)
         .await
-        .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?;
+        .map_err(internal_error)?;
 
     let default_br = git::default_branch(&project_path)
         .await
-        .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?;
+        .map_err(internal_error)?;
 
     // Clean up stale worktree/branch if they exist.
     if wt_path.exists() {
@@ -137,7 +137,7 @@ pub(crate) async fn post_worktrees(
 
     git::create_worktree(&project_path, &branch, &wt_path, &default_br)
         .await
-        .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?;
+        .map_err(internal_error)?;
 
     Ok(Json(json!({
         "ok": true,
@@ -240,7 +240,7 @@ pub(crate) async fn post_worktrees_remove(
 
     git::remove_worktree(&repo_path, &wt_path)
         .await
-        .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?;
+        .map_err(internal_error)?;
 
     Ok(Json(json!({ "ok": true })))
 }

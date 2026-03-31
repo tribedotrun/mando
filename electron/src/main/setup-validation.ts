@@ -4,10 +4,10 @@
  * In sandbox mode, all external calls are replaced with mock responses
  * to keep the sandbox fully isolated from production services.
  */
-import { ipcMain } from 'electron';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { getAppMode } from '#main/daemon';
+import { handleTrusted } from '#main/ipc-security';
 import log from '#main/logger';
 
 const execFileAsync = promisify(execFile);
@@ -28,7 +28,7 @@ async function run(
 }
 
 export function registerSetupValidationHandlers(): void {
-  ipcMain.handle(
+  handleTrusted(
     'check-claude-code',
     async (): Promise<{ installed: boolean; version: string | null; works: boolean }> => {
       if (getAppMode() === 'sandbox') {
@@ -41,19 +41,13 @@ export function registerSetupValidationHandlers(): void {
       const ver = await run('claude', ['--version'], 10_000);
       if (ver) version = ver.stdout.trim();
 
-      let works = false;
-      const test = await run(
-        'claude',
-        ['-p', 'respond with ok', '--max-turns', '1', '--no-user-turn'],
-        30_000,
-      );
-      if (test) works = test.stdout.toLowerCase().includes('ok');
-
-      return { installed: true, version, works };
+      // Version check is sufficient — Mando provides its own API key to CC
+      // workers via config, so CC doesn't need to be independently authenticated.
+      return { installed: true, version, works: !!version };
     },
   );
 
-  ipcMain.handle('validate-telegram-token', async (_e, token: string) => {
+  handleTrusted('validate-telegram-token', async (_e, token: string) => {
     if (getAppMode() === 'sandbox') {
       return { valid: true, botName: 'SandboxBot', botUsername: 'mando_sandbox_bot' };
     }
@@ -77,7 +71,7 @@ export function registerSetupValidationHandlers(): void {
     }
   });
 
-  ipcMain.handle('validate-linear-key', async (_e, apiKey: string) => {
+  handleTrusted('validate-linear-key', async (_e, apiKey: string) => {
     if (getAppMode() === 'sandbox') {
       return {
         valid: true,

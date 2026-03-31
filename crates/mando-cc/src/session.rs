@@ -136,7 +136,9 @@ impl CcSession {
 
             // Tee to stream file.
             use std::io::Write;
-            writeln!(self.stream_file, "{trimmed}").ok();
+            if let Err(e) = writeln!(self.stream_file, "{trimmed}") {
+                tracing::warn!(error = %e, "stream tee-write failed — transcript may be incomplete");
+            }
 
             // Parse message.
             let val: serde_json::Value = match serde_json::from_str(trimmed) {
@@ -246,6 +248,7 @@ impl CcSession {
                 envelope: serde_json::Value::Null,
                 stream_path: self.stream_path.clone(),
                 rate_limit: self.last_rate_limit.clone(),
+                pid: self.pid,
             });
         }
 
@@ -288,6 +291,7 @@ impl CcSession {
             envelope: result.raw,
             stream_path: self.stream_path.clone(),
             rate_limit: self.last_rate_limit.clone(),
+            pid: self.pid,
         }
     }
 

@@ -8,7 +8,7 @@ use axum::Json;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use crate::response::error_response;
+use crate::response::{error_response, internal_error};
 use crate::AppState;
 
 #[derive(Deserialize, Default)]
@@ -39,29 +39,41 @@ fn task_update_error_status(err: &anyhow::Error) -> StatusCode {
 pub(crate) async fn get_tasks(
     State(state): State<AppState>,
     Query(query): Query<TaskListQuery>,
-) -> Json<Value> {
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let config = state.config.load_full();
     let store = state.task_store.read().await;
     let items = if query.include_archived.unwrap_or(false) {
-        store.load_all_with_archived().await.unwrap_or_default()
+        store
+            .load_all_with_archived()
+            .await
+            .map_err(internal_error)?
     } else {
-        store.load_all().await.unwrap_or_default()
+        store.load_all().await.map_err(internal_error)?
     };
     let count = items.len();
     let mut items_json: Vec<Value> = items
         .iter()
-        .map(|item| serde_json::to_value(item).unwrap_or(json!({})))
-        .collect();
+        .map(serde_json::to_value)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| {
+            error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                &format!("serialization failed: {e}"),
+            )
+        })?;
+    // Backfill github_repo from config for tasks created before the column was added
     for (i, item) in items.iter().enumerate() {
-        let github_repo = crate::resolve_github_repo(item.project.as_deref(), &config);
-        if let Some(obj) = items_json[i].as_object_mut() {
-            obj.insert("github_repo".to_string(), json!(github_repo));
+        if item.github_repo.is_none() {
+            let github_repo = crate::resolve_github_repo(item.project.as_deref(), &config);
+            if let Some(obj) = items_json[i].as_object_mut() {
+                obj.insert("github_repo".to_string(), json!(github_repo));
+            }
         }
     }
-    Json(json!({
+    Ok(Json(json!({
         "items": items_json,
         "count": count,
-    }))
+    })))
 }
 
 // ---------------------------------------------------------------
@@ -183,7 +195,7 @@ pub(crate) async fn post_task_add(
             repo.as_deref(),
         )
         .await
-        .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?;
+        .map_err(internal_error)?;
 
         if !saved_images.is_empty()
             || context.is_some()
@@ -244,7 +256,10 @@ pub(crate) async fn post_task_bulk(
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let ids = &body.ids;
     let store = state.task_store.read().await;
-    match mando_captain::runtime::dashboard::bulk_update_tasks(&store, ids, body.updates).await {
+    let pool = state.db.pool();
+    match mando_captain::runtime::dashboard::bulk_update_tasks(&store, ids, body.updates, pool)
+        .await
+    {
         Ok(()) => {
             state.bus.send(
                 mando_types::BusEvent::Tasks,
@@ -262,6 +277,10 @@ pub(crate) async fn post_task_bulk(
 #[derive(Deserialize)]
 pub(crate) struct DeleteBody {
     pub ids: Vec<i64>,
+    #[serde(default)]
+    pub close_pr: bool,
+    #[serde(default)]
+    pub cancel_linear: bool,
 }
 
 /// POST /api/tasks/delete
@@ -271,14 +290,22 @@ pub(crate) async fn post_task_delete(
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let config = state.config.load_full();
     let ids = &body.ids;
+    let opts = mando_captain::io::task_cleanup::CleanupOptions {
+        close_pr: body.close_pr,
+        cancel_linear: body.cancel_linear,
+    };
     let store = state.task_store.read().await;
-    match mando_captain::runtime::dashboard::delete_tasks(&config, &store, ids).await {
-        Ok(()) => {
+    match mando_captain::runtime::dashboard::delete_tasks(&config, &store, ids, &opts).await {
+        Ok(warnings) => {
             state.bus.send(
                 mando_types::BusEvent::Tasks,
                 Some(json!({"action": "delete"})),
             );
-            Ok(Json(json!({"ok": true, "deleted": ids.len()})))
+            let mut resp = json!({"ok": true, "deleted": ids.len()});
+            if !warnings.is_empty() {
+                resp["warnings"] = json!(warnings);
+            }
+            Ok(Json(resp))
         }
         Err(e) => Err(error_response(
             StatusCode::INTERNAL_SERVER_ERROR,

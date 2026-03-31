@@ -69,7 +69,7 @@ mod tests {
     fn make_pr_item(status: ItemStatus) -> Task {
         let mut item = Task::new("Test");
         item.status = status;
-        item.pr = Some("#42".into());
+        item.pr = Some("42".into());
         item
     }
 

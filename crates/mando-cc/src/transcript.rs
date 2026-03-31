@@ -75,7 +75,10 @@ pub fn parse_messages(
     for line in &lines[last_init_idx..] {
         let val: serde_json::Value = match serde_json::from_str(line) {
             Ok(v) => v,
-            Err(_) => continue,
+            Err(e) => {
+                tracing::debug!(error = %e, "skipping malformed JSONL line in transcript");
+                continue;
+            }
         };
 
         let msg_type = val.get("type").and_then(|t| t.as_str()).unwrap_or("");
@@ -162,7 +165,10 @@ pub fn tool_usage(stream_path: &Path) -> Vec<ToolUsageSummary> {
     for line in &lines[last_init_idx..] {
         let val: serde_json::Value = match serde_json::from_str(line) {
             Ok(v) => v,
-            Err(_) => continue,
+            Err(e) => {
+                tracing::debug!(error = %e, "skipping malformed JSONL line in tool stats");
+                continue;
+            }
         };
 
         let msg_type = val.get("type").and_then(|t| t.as_str()).unwrap_or("");
@@ -255,7 +261,10 @@ pub fn session_cost(stream_path: &Path) -> SessionCost {
     for line in &lines[last_init_idx..] {
         let val: serde_json::Value = match serde_json::from_str(line) {
             Ok(v) => v,
-            Err(_) => continue,
+            Err(e) => {
+                tracing::debug!(error = %e, "skipping malformed JSONL line in cost parse");
+                continue;
+            }
         };
 
         let msg_type = val.get("type").and_then(|t| t.as_str()).unwrap_or("");

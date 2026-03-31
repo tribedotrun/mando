@@ -99,7 +99,10 @@ pub(crate) fn clean_stale_locks() {
     let lock_dir = lock_dir();
     let entries = match fs::read_dir(&lock_dir) {
         Ok(e) => e,
-        Err(_) => return,
+        Err(e) => {
+            tracing::debug!(module = "item-lock", error = %e, path = %lock_dir.display(), "cannot read lock dir");
+            return;
+        }
     };
 
     for entry in entries.flatten() {
@@ -109,11 +112,17 @@ pub(crate) fn clean_stale_locks() {
         }
         let content = match fs::read_to_string(&path) {
             Ok(c) => c,
-            Err(_) => continue,
+            Err(e) => {
+                tracing::debug!(module = "item-lock", error = %e, path = %path.display(), "cannot read lock file");
+                continue;
+            }
         };
         let holder: LockHolder = match serde_json::from_str(&content) {
             Ok(h) => h,
-            Err(_) => continue,
+            Err(e) => {
+                tracing::debug!(module = "item-lock", error = %e, path = %path.display(), "lock file JSON invalid");
+                continue;
+            }
         };
         if !is_pid_alive(holder.pid) {
             tracing::info!(

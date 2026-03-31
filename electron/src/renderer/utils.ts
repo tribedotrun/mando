@@ -1,3 +1,6 @@
+import type { TaskItem } from '#renderer/types';
+import { FINALIZED_STATUSES } from '#renderer/types';
+
 /** Extract the last path segment from a GitHub `owner/repo` string. */
 export function shortRepo(project?: string): string {
   if (!project) return '\u2014';
@@ -14,16 +17,58 @@ export function prLabel(pr: string): string {
   return pr.startsWith('#') ? pr : `#${pr}`;
 }
 
-/** Build a GitHub PR href from either a full URL or `#N` + GitHub repo. */
-export function prHref(pr: string, project: string): string {
-  if (pr.startsWith('http')) return pr;
-  const num = pr.replace('#', '');
-  return `https://github.com/${project}/pull/${num}`;
+/** Build a GitHub PR href from a PR ref + GitHub repo slug. Always reconstructs
+ *  the URL from the slug so stale full URLs (e.g. after a repo rename) are corrected. */
+export function prHref(pr: string, githubRepo: string): string {
+  const m = pr.match(PR_URL_RE);
+  const num = m ? m[1] : pr.replace('#', '');
+  return `https://github.com/${githubRepo}/pull/${num}`;
+}
+
+/* ── Task status predicates ── */
+
+/** Whether a task can be merged (has PR + project, awaiting review). */
+export function canMerge(t: TaskItem): boolean {
+  return !!t.pr && !!t.project && t.status === 'awaiting-review';
+}
+
+/** Whether a task can be reopened (terminal or review states). */
+export function canReopen(t: TaskItem): boolean {
+  return ['awaiting-review', 'escalated', 'errored', 'handed-off', 'completed-no-pr'].includes(
+    t.status,
+  );
+}
+
+/** Whether a task can be reworked (fresh worktree + new worker). */
+export function canRework(t: TaskItem): boolean {
+  return ['awaiting-review', 'handed-off', 'escalated', 'errored'].includes(t.status);
+}
+
+/** Whether a task can be asked a question. */
+export function canAsk(t: TaskItem): boolean {
+  return ['awaiting-review', 'escalated'].includes(t.status);
+}
+
+/** Whether a task can be restarted (broader than rework — includes merged/canceled). */
+export function canRestart(t: TaskItem): boolean {
+  return [
+    'awaiting-review',
+    'merged',
+    'completed-no-pr',
+    'canceled',
+    'escalated',
+    'errored',
+  ].includes(t.status);
+}
+
+/** Derive PR icon state from task status. */
+export function prState(status: string): 'open' | 'merged' | 'closed' {
+  if (status === 'merged') return 'merged';
+  if (status === 'canceled') return 'closed';
+  return 'open';
 }
 
 /* ── Task sort ── */
-import type { TaskItem } from '#renderer/types';
-import { FINALIZED_STATUSES } from '#renderer/types';
 
 /** Canonical sort: non-finalized first, then descending by last activity. */
 export function sortTaskItems(items: TaskItem[]): TaskItem[] {

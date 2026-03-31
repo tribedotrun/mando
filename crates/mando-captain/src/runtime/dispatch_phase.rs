@@ -29,7 +29,9 @@ pub(crate) async fn dispatch_new_work(
     resource_limits: &HashMap<String, usize>,
     pool: &sqlx::SqlitePool,
 ) -> Result<usize> {
-    let resource_counts = dispatch_logic::count_resources(items);
+    let mut resource_counts = dispatch_logic::count_resources(items);
+    let max_clarifier_retries = workflow.agent.max_clarifier_retries as i64;
+    const MAX_SPAWN_FAILS: i64 = 3;
 
     // Dispatch ready/rework items.
     let dispatchable = dispatch_logic::dispatchable_items(items);
@@ -51,6 +53,8 @@ pub(crate) async fn dispatch_new_work(
                         &item.title[..item.title.len().min(60)]
                     ));
                     active_workers += 1;
+                    let resource = item.resource.as_deref().unwrap_or("cc").to_string();
+                    *resource_counts.entry(resource).or_insert(0) += 1;
                 } else {
                     items[idx].worker_seq += 1;
                     match super::tick::spawn_worker_for_item(config, &items[idx], workflow, pool)
@@ -64,7 +68,10 @@ pub(crate) async fn dispatch_new_work(
                             item.worktree = Some(spawn_result.worktree);
                             item.worker_started_at = Some(spawn_result.started_at);
                             item.session_ids.worker = Some(spawn_result.session_id);
+                            item.spawn_fail_count = 0;
                             active_workers += 1;
+                            let resource = item.resource.as_deref().unwrap_or("cc").to_string();
+                            *resource_counts.entry(resource).or_insert(0) += 1;
 
                             // Emit timeline event with session_id.
                             super::timeline_emit::emit_for_task(
@@ -102,13 +109,14 @@ pub(crate) async fn dispatch_new_work(
                         Err(e) => {
                             let item = &mut items[idx];
                             item.worker_seq -= 1; // Roll back — no worker was spawned.
-                            let count = item.retry_count + 1;
-                            item.retry_count = count;
+                            let count = item.spawn_fail_count + 1;
+                            item.spawn_fail_count = count;
 
-                            if count >= 3 {
-                                item.status = ItemStatus::CaptainReviewing;
-                                item.captain_review_trigger =
-                                    Some(mando_types::task::ReviewTrigger::ClarifierFail);
+                            if count >= MAX_SPAWN_FAILS {
+                                super::action_contract::reset_review_retry(
+                                    item,
+                                    mando_types::task::ReviewTrigger::ClarifierFail,
+                                );
                                 let msg = format!(
                                     "Spawn failed {} times for '{}', escalated to captain review: {}",
                                     count,
@@ -164,14 +172,23 @@ pub(crate) async fn dispatch_new_work(
                     result.status,
                     ClarifierStatus::Clarifying | ClarifierStatus::Escalate
                 ) {
-                    clarifier::run_deep_clarification(&items[idx], workflow, config, pool, result)
-                        .await
+                    super::clarifier_deep::run_deep_clarification(
+                        &items[idx],
+                        workflow,
+                        config,
+                        pool,
+                        result,
+                    )
+                    .await
                 } else {
                     result
                 };
                 let item = &mut items[idx];
                 match result.status {
                     ClarifierStatus::Ready => {
+                        if let Some(ref sid) = result.session_id {
+                            item.session_ids.clarifier = Some(sid.clone());
+                        }
                         // Quality gate: validate clarifier output is substantive (≥20 chars).
                         let context_trimmed: String = result
                             .context
@@ -185,9 +202,10 @@ pub(crate) async fn dispatch_new_work(
                                 context_len = context_trimmed.len(),
                                 "clarifier returned trivial context (<20 chars), escalating to captain review"
                             );
-                            item.status = ItemStatus::CaptainReviewing;
-                            item.captain_review_trigger =
-                                Some(mando_types::task::ReviewTrigger::ClarifierFail);
+                            super::action_contract::reset_review_retry(
+                                item,
+                                mando_types::task::ReviewTrigger::ClarifierFail,
+                            );
                             item.context = Some(result.context);
                             let msg = format!(
                                 "\u{26a0}\u{fe0f} Clarifier returned trivial output for <b>{}</b> — needs human input",
@@ -196,7 +214,7 @@ pub(crate) async fn dispatch_new_work(
                             notifier.high(&msg).await;
                         } else {
                             item.status = ItemStatus::Queued;
-                            item.retry_count = 0;
+                            item.clarifier_fail_count = 0;
                             item.context = Some(result.context);
                             if let Some(title) = result.generated_title {
                                 if !title.is_empty() {
@@ -254,7 +272,9 @@ pub(crate) async fn dispatch_new_work(
                     ClarifierStatus::Clarifying => {
                         item.status = ItemStatus::NeedsClarification;
                         item.context = Some(result.context);
-                        item.clarifier_questions = result.questions.clone();
+                        if let Some(ref sid) = result.session_id {
+                            item.session_ids.clarifier = Some(sid.clone());
+                        }
 
                         // Emit clarify-question timeline event.
                         super::timeline_emit::emit_for_task(
@@ -286,10 +306,14 @@ pub(crate) async fn dispatch_new_work(
                         }
                     }
                     ClarifierStatus::Escalate => {
-                        item.status = ItemStatus::CaptainReviewing;
-                        item.captain_review_trigger =
-                            Some(mando_types::task::ReviewTrigger::ClarifierFail);
+                        super::action_contract::reset_review_retry(
+                            item,
+                            mando_types::task::ReviewTrigger::ClarifierFail,
+                        );
                         item.context = Some(result.context);
+                        if let Some(ref sid) = result.session_id {
+                            item.session_ids.clarifier = Some(sid.clone());
+                        }
 
                         if result.deep_failed {
                             tracing::warn!(
@@ -336,13 +360,14 @@ pub(crate) async fn dispatch_new_work(
             }
             Err(e) => {
                 let item = &mut items[idx];
-                let count = item.retry_count + 1;
-                item.retry_count = count;
+                let count = item.clarifier_fail_count + 1;
+                item.clarifier_fail_count = count;
 
-                if count >= 3 {
-                    item.status = ItemStatus::CaptainReviewing;
-                    item.captain_review_trigger =
-                        Some(mando_types::task::ReviewTrigger::ClarifierFail);
+                if count >= max_clarifier_retries {
+                    super::action_contract::reset_review_retry(
+                        item,
+                        mando_types::task::ReviewTrigger::ClarifierFail,
+                    );
                     let msg = format!(
                         "Clarifier failed {} times for '{}', escalated to captain review: {}",
                         count,
@@ -371,83 +396,21 @@ pub(crate) async fn dispatch_new_work(
         }
     }
 
+    super::dispatch_reclarify::reclarify_items(
+        items,
+        config,
+        workflow,
+        dry_run,
+        dry_actions,
+        alerts,
+        max_clarifier_retries,
+        pool,
+    )
+    .await;
+
     Ok(active_workers)
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    async fn test_pool() -> sqlx::SqlitePool {
-        let db = mando_db::Db::open_in_memory().await.unwrap();
-        db.pool().clone()
-    }
-
-    #[tokio::test]
-    async fn dispatch_dry_run() {
-        let pool = test_pool().await;
-        let mut item = Task::new("Test dispatch");
-        item.status = ItemStatus::Queued;
-        item.id = 1;
-
-        let config = Config::default();
-        let workflow = CaptainWorkflow::compiled_default();
-        let notifier = Notifier::new(std::sync::Arc::new(mando_shared::EventBus::new()));
-        let mut items = vec![item];
-        let mut dry = Vec::new();
-        let mut alerts = Vec::new();
-
-        let result = dispatch_new_work(
-            &mut items,
-            &config,
-            0,
-            10,
-            &workflow,
-            &notifier,
-            true,
-            &mut dry,
-            &mut alerts,
-            &HashMap::new(),
-            &pool,
-        )
-        .await
-        .unwrap();
-
-        assert_eq!(result, 1);
-        assert_eq!(dry.len(), 1);
-        assert!(dry[0].contains("spawn"));
-    }
-
-    #[tokio::test]
-    async fn dispatch_full_slots() {
-        let pool = test_pool().await;
-        let mut item = Task::new("Blocked");
-        item.status = ItemStatus::Queued;
-
-        let config = Config::default();
-        let workflow = CaptainWorkflow::compiled_default();
-        let notifier = Notifier::new(std::sync::Arc::new(mando_shared::EventBus::new()));
-        let mut items = vec![item];
-        let mut dry = Vec::new();
-        let mut alerts = Vec::new();
-
-        let result = dispatch_new_work(
-            &mut items,
-            &config,
-            10,
-            10,
-            &workflow,
-            &notifier,
-            true,
-            &mut dry,
-            &mut alerts,
-            &HashMap::new(),
-            &pool,
-        )
-        .await
-        .unwrap();
-
-        assert_eq!(result, 10);
-        assert!(dry.is_empty());
-    }
-}
+#[path = "dispatch_phase_tests.rs"]
+mod tests;

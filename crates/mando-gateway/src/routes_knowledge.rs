@@ -25,7 +25,10 @@ pub(crate) async fn get_knowledge(State(_state): State<AppState>) -> Json<Value>
             );
             Vec::new()
         }),
-        Err(_) => Vec::new(),
+        Err(e) => {
+            tracing::warn!(module = "knowledge", path = %knowledge_path.display(), error = %e, "cannot read approved knowledge file");
+            Vec::new()
+        }
     };
     let count = approved.len();
     Json(json!({
@@ -123,7 +126,10 @@ pub(crate) async fn post_knowledge_approve(
             );
             Vec::new()
         }),
-        Err(_) => Vec::new(),
+        Err(e) => {
+            tracing::warn!(module = "knowledge", path = %approved_path.display(), error = %e, "cannot read approved knowledge file");
+            Vec::new()
+        }
     };
     approved.extend(body.lessons.iter().cloned());
 

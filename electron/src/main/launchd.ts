@@ -93,8 +93,11 @@ export function removeLegacyAppPlist(): void {
   if (!fs.existsSync(plist)) return;
   try {
     execSync(`launchctl unload -w "${plist}" 2>/dev/null`);
-  } catch {
-    /* ok if not loaded */
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (!msg.includes('not loaded') && !msg.includes('could not find service')) {
+      log.warn('[launchd] legacy plist unload failed:', msg);
+    }
   }
   try {
     fs.unlinkSync(plist);
@@ -177,8 +180,11 @@ function generateTgPlist(dataDir: string): string {
 function launchctlLoad(plistPath: string): void {
   try {
     execSync(`launchctl unload -w "${plistPath}" 2>/dev/null`);
-  } catch {
-    // Expected if plist is not currently loaded
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (!msg.includes('not loaded') && !msg.includes('could not find service')) {
+      log.warn('[launchd] pre-load unload failed:', msg);
+    }
   }
   execSync(`launchctl load -w "${plistPath}"`);
 }
@@ -197,13 +203,19 @@ function launchctlBootstrap(plistPath: string): void {
   const domain = `gui/${uid}`;
   try {
     execSync(`launchctl bootout ${domain}/${DAEMON_LABEL} 2>/dev/null`);
-  } catch {
-    /* ok if not loaded */
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (!msg.includes('not loaded') && !msg.includes('could not find service')) {
+      log.warn('[launchd] pre-bootstrap bootout failed:', msg);
+    }
   }
   try {
     execSync(`launchctl bootstrap ${domain} "${plistPath}"`);
-  } catch {
-    // Fallback to legacy load for older macOS
+  } catch (e: unknown) {
+    log.warn(
+      '[launchd] bootstrap failed, falling back to legacy load:',
+      e instanceof Error ? e.message : e,
+    );
     launchctlLoad(plistPath);
   }
 }
@@ -214,7 +226,11 @@ function launchctlBootoutLabel(label: string, plist: string): void {
   const domain = `gui/${uid}`;
   try {
     execSync(`launchctl bootout ${domain}/${label}`);
-  } catch {
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (!msg.includes('not loaded') && !msg.includes('could not find service')) {
+      log.warn('[launchd] bootout failed, falling back to legacy unload:', msg);
+    }
     if (fs.existsSync(plist)) {
       launchctlUnload(plist);
     }
@@ -388,7 +404,11 @@ export function getDaemonStatus(): DaemonStatus {
       running: pidMatch !== null && pidMatch[1] !== '0',
       pid: pidMatch ? parseInt(pidMatch[1], 10) : null,
     };
-  } catch {
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (!msg.includes('not loaded') && !msg.includes('could not find service')) {
+      log.warn('[launchd] daemon status check failed:', msg);
+    }
     return { loaded: false, running: false, pid: null };
   }
 }
@@ -446,8 +466,11 @@ export function installCliAndPlists(dataDir: string): void {
   if (fs.existsSync(legacyCaptainPlist)) {
     try {
       execSync(`launchctl unload -w "${legacyCaptainPlist}" 2>/dev/null`);
-    } catch {
-      /* ok if not loaded */
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (!msg.includes('not loaded') && !msg.includes('could not find service')) {
+        log.warn('[launchd] legacy captain plist unload failed:', msg);
+      }
     }
     fs.unlinkSync(legacyCaptainPlist);
     log.info('removed legacy captain cron plist');

@@ -19,7 +19,6 @@ export interface MandoAPI {
   }>;
   // Config & setup (proxied through main process to daemon HTTP)
   gatewayUrl: () => Promise<string>;
-  authToken: () => Promise<string>;
   appInfo: () => Promise<{
     appVersion: string;
     stack: Array<{ name: string; version: string }>;
@@ -79,7 +78,6 @@ contextBridge.exposeInMainWorld('mandoAPI', {
   validateLinearKey: (apiKey: string) => ipcRenderer.invoke('validate-linear-key', apiKey),
   // Config & setup
   gatewayUrl: () => ipcRenderer.invoke('get-gateway-url'),
-  authToken: () => ipcRenderer.invoke('get-auth-token'),
   appInfo: () => ipcRenderer.invoke('get-app-info'),
   dataDir: () => ipcRenderer.invoke('get-data-dir'),
   hasConfig: () => ipcRenderer.invoke('has-config'),

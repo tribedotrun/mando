@@ -17,7 +17,6 @@ pub enum TaskUpdateError {
     },
     UnknownField(String),
     FieldCannotBeNull(String),
-    FieldCannotBePatched(String),
     TerminalStatusTransition(String),
     NotAnObject,
 }
@@ -35,9 +34,6 @@ impl fmt::Display for TaskUpdateError {
             }
             Self::UnknownField(s) => write!(f, "unknown field: {s}"),
             Self::FieldCannotBeNull(s) => write!(f, "field {s} cannot be null"),
-            Self::FieldCannotBePatched(s) => {
-                write!(f, "field {s} is derived and cannot be patched")
-            }
             Self::TerminalStatusTransition(s) => {
                 write!(f, "cannot transition from terminal status {s}")
             }

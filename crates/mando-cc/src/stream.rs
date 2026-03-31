@@ -2,21 +2,23 @@
 
 use std::path::Path;
 
+/// Check if a JSONL line is a session init event (`{"type":"system","subtype":"init"}`).
+fn is_init_event(line: &str) -> bool {
+    serde_json::from_str::<serde_json::Value>(line)
+        .ok()
+        .is_some_and(|v| {
+            v.get("type").and_then(|t| t.as_str()) == Some("system")
+                && v.get("subtype").and_then(|s| s.as_str()) == Some("init")
+        })
+}
+
 /// Read a stream file and return content + index of last session's init event.
 pub fn current_session_lines(stream_path: &Path) -> Option<(String, usize)> {
     let content = std::fs::read_to_string(stream_path).ok()?;
     let lines: Vec<&str> = content.lines().collect();
     let last_init_idx = lines
         .iter()
-        .rposition(|line| {
-            serde_json::from_str::<serde_json::Value>(line)
-                .ok()
-                .map(|v| {
-                    v.get("type").and_then(|t| t.as_str()) == Some("system")
-                        && v.get("subtype").and_then(|s| s.as_str()) == Some("init")
-                })
-                .unwrap_or(false)
-        })
+        .rposition(|line| is_init_event(line))
         .unwrap_or(0);
     Some((content, last_init_idx))
 }
@@ -81,15 +83,7 @@ pub fn stream_has_broken_session(stream_path: &Path) -> bool {
         Ok(c) if !c.trim().is_empty() => c,
         _ => return false,
     };
-    !content.lines().any(|line| {
-        serde_json::from_str::<serde_json::Value>(line)
-            .ok()
-            .map(|v| {
-                v.get("type").and_then(|t| t.as_str()) == Some("system")
-                    && v.get("subtype").and_then(|s| s.as_str()) == Some("init")
-            })
-            .unwrap_or(false)
-    })
+    !content.lines().any(is_init_event)
 }
 
 /// Get the last stream event type from the current session.

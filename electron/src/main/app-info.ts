@@ -1,7 +1,5 @@
 import { app } from 'electron';
-import fs from 'fs';
-import path from 'path';
-import log from '#main/logger';
+import { readAppPackageJson } from '#main/app-package';
 
 interface AppStackItem {
   name: string;
@@ -11,25 +9,6 @@ interface AppStackItem {
 interface AppInfo {
   appVersion: string;
   stack: AppStackItem[];
-}
-
-function readElectronPackageJson(): Record<string, unknown> {
-  const candidatePaths = [
-    path.join(app.getAppPath(), 'package.json'),
-    path.resolve(app.getAppPath(), '..', 'package.json'),
-    path.resolve(__dirname, '../../package.json'),
-  ];
-  for (const candidate of candidatePaths) {
-    try {
-      if (!fs.existsSync(candidate)) continue;
-      return JSON.parse(fs.readFileSync(candidate, 'utf-8')) as Record<string, unknown>;
-    } catch (e) {
-      log.warn(`Failed to read package.json from ${candidate}:`, e);
-      continue;
-    }
-  }
-  log.warn('No readable package.json found in any candidate path');
-  return {};
 }
 
 function dependencyVersion(pkg: Record<string, unknown>, key: string): string {
@@ -44,7 +23,7 @@ function dependencyVersion(pkg: Record<string, unknown>, key: string): string {
 }
 
 export function getAppInfo(): AppInfo {
-  const pkg = readElectronPackageJson();
+  const pkg = readAppPackageJson();
   return {
     appVersion: app.getVersion(),
     stack: [

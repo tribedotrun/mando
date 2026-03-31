@@ -69,7 +69,18 @@ async fn reconcile_orphaned_worktrees(config: &Config, pool: &sqlx::SqlitePool) 
 
     let mut tracked: std::collections::HashSet<std::path::PathBuf> =
         std::collections::HashSet::new();
-    for task in store.load_all().await.unwrap_or_default() {
+    let tasks = match store.load_all().await {
+        Ok(tasks) => tasks,
+        Err(e) => {
+            tracing::error!(
+                module = "reconciler",
+                error = %e,
+                "failed to load tasks — skipping orphan worktree cleanup to avoid destroying work"
+            );
+            return;
+        }
+    };
+    for task in tasks {
         if let Some(ref wt) = task.worktree {
             tracked.insert(mando_config::expand_tilde(wt));
         }
@@ -245,13 +256,31 @@ async fn reconcile_merge(
         };
         let match_id = match match_id {
             Some(id) => Some(id),
-            None => store
-                .load_all()
-                .await
-                .unwrap_or_default()
-                .iter()
-                .find(|t| t.pr.as_deref() == Some(pr))
-                .map(|t| t.id),
+            None => match store.load_all().await {
+                Ok(tasks) => {
+                    let pr_num = match mando_types::task::extract_pr_number(pr) {
+                        Some(n) => n,
+                        None => {
+                            tracing::warn!(module = "reconciler", pr = %pr, "unparseable PR ref in merge WAL — abandoning");
+                            ops_log::abandon_op(log, op_id, "unparseable PR ref");
+                            return Ok(());
+                        }
+                    };
+                    tasks
+                        .iter()
+                        .find(|t| {
+                            t.pr.as_deref().is_some_and(|stored| {
+                                mando_types::task::extract_pr_number(stored) == Some(pr_num)
+                            })
+                        })
+                        .map(|t| t.id)
+                }
+
+                Err(e) => {
+                    tracing::warn!(module = "reconciler", error = %e, "failed to load tasks for PR lookup");
+                    None
+                }
+            },
         };
         if let Some(id) = match_id {
             if let Err(e) = store

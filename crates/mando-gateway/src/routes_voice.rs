@@ -13,7 +13,7 @@ use serde_json::{json, Value};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
-use crate::response::error_response;
+use crate::response::{error_response, internal_error};
 use crate::voice;
 use crate::AppState;
 
@@ -85,13 +85,13 @@ pub(crate) async fn get_voice_usage(
     let summary = db
         .get_usage_summary(params.days)
         .await
-        .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?;
+        .map_err(internal_error)?;
     let mut val = serde_json::to_value(&summary).unwrap_or(json!({}));
     if params.detail {
         let records = db
             .get_usage_detail(100, params.days)
             .await
-            .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?;
+            .map_err(internal_error)?;
         val["records"] = serde_json::to_value(&records).unwrap_or(json!([]));
     }
     Ok(Json(val))
@@ -112,10 +112,7 @@ pub(crate) async fn get_voice_messages(
     }
 
     let db = voice::db::VoiceDb::new(state.db.pool().clone());
-    let messages = db
-        .get_messages(&session_id)
-        .await
-        .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?;
+    let messages = db.get_messages(&session_id).await.map_err(internal_error)?;
     Ok(Json(
         json!({ "messages": serde_json::to_value(&messages).unwrap_or(json!([])) }),
     ))
@@ -140,7 +137,7 @@ pub(crate) async fn get_voice_sessions(
     let pruned = db
         .prune_expired(expiry_hours)
         .await
-        .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?;
+        .map_err(internal_error)?;
     if pruned > 0 {
         tracing::debug!(
             module = "voice",
@@ -154,7 +151,7 @@ pub(crate) async fn get_voice_sessions(
     let pool = state.db.pool();
     let sessions = mando_db::queries::voice::list_conversation_sessions(pool, 50)
         .await
-        .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?;
+        .map_err(internal_error)?;
 
     // Enrich with voice-specific title (first user message).
     let mut session_values = Vec::with_capacity(sessions.len());

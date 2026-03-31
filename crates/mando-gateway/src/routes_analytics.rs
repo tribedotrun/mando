@@ -5,7 +5,7 @@ use axum::http::StatusCode;
 use axum::Json;
 use serde_json::Value;
 
-use crate::response::error_response;
+use crate::response::{error_response, internal_error};
 use crate::AppState;
 
 /// GET /api/analytics — aggregated cost, throughput, and success metrics.
@@ -21,12 +21,8 @@ pub(crate) async fn get_analytics(
 
     let data = mando_db::queries::analytics::fetch_analytics(state.db.pool())
         .await
-        .map_err(|e| {
-            error_response(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                &format!("analytics query failed: {e}"),
-            )
-        })?;
+        .map_err(internal_error)?;
 
-    Ok(Json(serde_json::to_value(data).unwrap()))
+    let value = serde_json::to_value(data).map_err(internal_error)?;
+    Ok(Json(value))
 }

@@ -15,7 +15,8 @@ export function CopyBtn({ text, label, className }: Props): React.ReactElement {
         setTimeout(() => setCopied(false), 1200);
       },
       () => {
-        // Clipboard access denied or unavailable
+        setCopied(false);
+        console.warn('Clipboard write failed — access denied or unavailable');
       },
     );
   };

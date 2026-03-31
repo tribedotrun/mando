@@ -1,4 +1,4 @@
-//! `/status [all]` — task overview grouped by repo → status, with merge/accept buttons.
+//! `/tasks [all]` — task overview grouped by repo → workflow state, with merge/accept buttons.
 
 use crate::bot::TelegramBot;
 use anyhow::Result;
@@ -14,7 +14,7 @@ fn truncate_char_boundary(s: &str, max: usize) -> &str {
     }
 }
 
-/// Status display order.
+/// Workflow state display order.
 const STATUS_ORDER: &[ItemStatus] = &[
     ItemStatus::New,
     ItemStatus::Clarifying,
@@ -53,7 +53,7 @@ fn status_label(s: &ItemStatus) -> &'static str {
     }
 }
 
-/// Handle `/status [all]`.
+/// Handle `/tasks [all]`.
 pub async fn handle(bot: &TelegramBot, chat_id: &str, args: &str) -> Result<()> {
     let show_all = args.trim().eq_ignore_ascii_case("all");
     // When show_all, fetch including archived items from the gateway.
@@ -65,7 +65,7 @@ pub async fn handle(bot: &TelegramBot, chat_id: &str, args: &str) -> Result<()> 
     let items = match super::load_tasks_with_path(bot.gw(), api_path).await {
         Ok(items) => items,
         Err(e) => {
-            let _ = bot
+            if let Err(e) = bot
                 .send_html(
                     chat_id,
                     &format!(
@@ -73,7 +73,10 @@ pub async fn handle(bot: &TelegramBot, chat_id: &str, args: &str) -> Result<()> 
                         escape_html(&e.to_string())
                     ),
                 )
-                .await;
+                .await
+            {
+                tracing::warn!(module = "telegram", error = %e, "message send failed");
+            }
             return Ok(());
         }
     };

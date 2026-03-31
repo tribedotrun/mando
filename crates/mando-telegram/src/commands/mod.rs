@@ -1,5 +1,6 @@
 //! Command handlers — one module per Telegram command.
 
+pub mod accept;
 pub mod adopt;
 pub mod answer;
 pub mod ask;
@@ -12,8 +13,11 @@ pub mod health;
 pub mod help;
 pub mod history;
 pub mod input;
+pub mod journal;
 pub mod knowledge;
+pub mod nudge;
 pub mod ops;
+pub mod patterns;
 pub mod picker;
 pub mod pr_summary;
 pub mod reopen;
@@ -21,9 +25,11 @@ pub mod retry;
 pub mod rework;
 pub mod sessions;
 pub mod status;
+pub mod stop;
 pub mod timeline;
 pub mod todo;
 pub mod triage;
+pub mod workers;
 
 // ── Shared helpers ───────────────────────────────────────────────────
 
@@ -58,7 +64,7 @@ pub(crate) async fn load_tasks_or_notify(
     match load_tasks(bot.gw()).await {
         Ok(items) => Some(items),
         Err(e) => {
-            let _ = bot
+            if let Err(e) = bot
                 .send_html(
                     chat_id,
                     &format!(
@@ -66,7 +72,10 @@ pub(crate) async fn load_tasks_or_notify(
                         mando_shared::telegram_format::escape_html(&e.to_string())
                     ),
                 )
-                .await;
+                .await
+            {
+                tracing::warn!(module = "telegram", error = %e, "message send failed");
+            }
             None
         }
     }

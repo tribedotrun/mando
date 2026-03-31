@@ -37,6 +37,10 @@ pub(crate) async fn trigger_captain_review(
     else {
         return;
     };
+    let trigger_enum = trigger
+        .parse()
+        .unwrap_or(mando_types::task::ReviewTrigger::CaptainDecision);
+    super::action_contract::reset_review_retry(it, trigger_enum);
 
     if let Err(e) =
         super::captain_review::spawn_review(it, trigger, config, workflow, notifier, pool).await

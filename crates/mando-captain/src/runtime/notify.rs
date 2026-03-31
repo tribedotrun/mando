@@ -187,11 +187,6 @@ impl Notifier {
         );
     }
 
-    /// Convenience: send a LOW-level notification.
-    pub async fn low(&self, msg: &str) {
-        self.notify(msg, NotifyLevel::Low).await;
-    }
-
     /// Convenience: send a NORMAL-level notification.
     pub async fn normal(&self, msg: &str) {
         self.notify(msg, NotifyLevel::Normal).await;

@@ -17,7 +17,7 @@
  *   5a. User clicks "Update" → swap .app bundle, relaunch
  *   5b. User ignores → next app launch detects staged update, swaps, relaunches
  */
-import { app, ipcMain, BrowserWindow } from 'electron';
+import { app, BrowserWindow } from 'electron';
 import {
   readFileSync,
   writeFileSync,
@@ -31,6 +31,7 @@ import { createWriteStream } from 'fs';
 import path from 'path';
 import https from 'https';
 import { execSync } from 'child_process';
+import { handleTrusted } from '#main/ipc-security';
 import log from '#main/logger';
 
 const UPDATE_CHECK_INTERVAL_MS = 30 * 60 * 1000;
@@ -435,13 +436,11 @@ async function checkAndDownload(): Promise<void> {
 // ---------------------------------------------------------------------------
 
 export function setupAutoUpdate(): void {
-  if (!app.isPackaged) {
-    log.info('auto-update: skipping in dev mode');
-    return;
-  }
-
-  // IPC handlers (same interface as before — preload doesn't change)
-  ipcMain.handle('updates:install', () => {
+  handleTrusted('updates:install', () => {
+    if (!app.isPackaged) {
+      log.info('auto-update: install requested in dev mode — ignoring');
+      return;
+    }
     if (!pendingUpdate) {
       log.warn('auto-update: install requested but no update pending');
       return;
@@ -459,24 +458,34 @@ export function setupAutoUpdate(): void {
     }
   });
 
-  ipcMain.handle('updates:check', () => {
+  handleTrusted('updates:check', () => {
+    if (!app.isPackaged) {
+      log.info('auto-update: manual check requested in dev mode — ignoring');
+      return;
+    }
     log.info('auto-update: manual check triggered');
     return checkAndDownload();
   });
 
-  ipcMain.handle('updates:app-version', () => app.getVersion());
-  ipcMain.handle('updates:get-channel', () => readChannel());
+  handleTrusted('updates:app-version', () => app.getVersion());
+  handleTrusted('updates:get-channel', () => readChannel());
 
-  ipcMain.handle('updates:set-channel', (_: unknown, channel: string) => {
+  handleTrusted('updates:set-channel', (_: unknown, channel: string) => {
     if (channel !== 'stable' && channel !== 'beta') return;
     writeChannel(channel);
     log.info(`auto-update: channel changed to ${channel}`);
+    if (!app.isPackaged) return;
     if (pendingUpdate && !downloading) {
       cleanupAfterUpdate();
       pendingUpdate = null;
     }
     return checkAndDownload();
   });
+
+  if (!app.isPackaged) {
+    log.info('auto-update: skipping background updater in dev mode');
+    return;
+  }
 
   // Schedule periodic checks
   setTimeout(() => checkAndDownload(), INITIAL_CHECK_DELAY_MS);

@@ -21,16 +21,16 @@ pub(crate) async fn run_post_phase(
     bus: Option<&EventBus>,
 ) -> Result<()> {
     if !dry_run {
-        // Reload from disk and merge: persist_worker_pid writes PID to disk
-        // during the execute phase, so the in-memory health_state is stale for
-        // PID fields. Reload, then overlay our in-memory cpu/stale updates.
+        // Reload from disk and merge: PIDs are now in pid_registry, but
+        // stream_size_at_spawn is still written during §4. Reload, then
+        // overlay our in-memory cpu/stale updates.
         let mut fresh = health_store::load_health_state(health_path);
         for (worker, entry) in health_state {
             if let Some(obj) = entry.as_object() {
                 for (k, v) in obj {
                     // Skip fields written to disk during §4 — the in-memory
                     // values are stale (from §1 load).
-                    if k == "pid" || k == "stream_size_at_spawn" {
+                    if k == "stream_size_at_spawn" {
                         continue;
                     }
                     health_store::set_health_field(&mut fresh, worker, k, v.clone());

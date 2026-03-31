@@ -45,8 +45,8 @@ fn parse_field(token: &str, min: u8, max: u8) -> Result<Vec<u8>, CronParseError>
 
         if let Some((base, step_str)) = part.split_once('/') {
             // Step expression: */N or M-N/S
-            let step: u8 = step_str.parse().map_err(|_| CronParseError {
-                message: format!("invalid step value '{step_str}' in '{token}'"),
+            let step: u8 = step_str.parse().map_err(|e| CronParseError {
+                message: format!("invalid step value '{step_str}' in '{token}': {e}"),
             })?;
             if step == 0 {
                 return Err(CronParseError {
@@ -57,16 +57,16 @@ fn parse_field(token: &str, min: u8, max: u8) -> Result<Vec<u8>, CronParseError>
             let (range_min, range_max) = if base == "*" {
                 (min, max)
             } else if let Some((lo, hi)) = base.split_once('-') {
-                let lo: u8 = lo.parse().map_err(|_| CronParseError {
-                    message: format!("invalid range start '{lo}' in '{token}'"),
+                let lo: u8 = lo.parse().map_err(|e| CronParseError {
+                    message: format!("invalid range start '{lo}' in '{token}': {e}"),
                 })?;
-                let hi: u8 = hi.parse().map_err(|_| CronParseError {
-                    message: format!("invalid range end '{hi}' in '{token}'"),
+                let hi: u8 = hi.parse().map_err(|e| CronParseError {
+                    message: format!("invalid range end '{hi}' in '{token}': {e}"),
                 })?;
                 (lo, hi)
             } else {
-                let start: u8 = base.parse().map_err(|_| CronParseError {
-                    message: format!("invalid base '{base}' in '{token}'"),
+                let start: u8 = base.parse().map_err(|e| CronParseError {
+                    message: format!("invalid base '{base}' in '{token}': {e}"),
                 })?;
                 (start, max)
             };
@@ -108,8 +108,8 @@ fn parse_field(token: &str, min: u8, max: u8) -> Result<Vec<u8>, CronParseError>
             }
         } else {
             // Single value.
-            let v: u8 = part.parse().map_err(|_| CronParseError {
-                message: format!("invalid value '{part}' in '{token}'"),
+            let v: u8 = part.parse().map_err(|e| CronParseError {
+                message: format!("invalid value '{part}' in '{token}': {e}"),
             })?;
             if v < min || v > max {
                 return Err(CronParseError {
@@ -207,8 +207,7 @@ fn epoch_to_fields(epoch: i64) -> (u8, u8, u8, u8, u8) {
     let wday = ((days % 7 + 4 + 7) % 7) as u8; // 0=Sunday
 
     // Convert days to year/month/day.
-    let (year, month, mday) = days_to_ymd(days);
-    let _ = year; // unused but computed
+    let (_, month, mday) = days_to_ymd(days);
 
     (minute, hour, mday as u8, month as u8, wday)
 }

@@ -71,14 +71,31 @@ pub(crate) async fn spawn_merge(
             )
         })?;
 
-    let pr_url = item
+    let pr_ref = item
         .pr
         .as_deref()
-        .ok_or_else(|| anyhow::anyhow!("cannot merge item without a PR"))?
+        .ok_or_else(|| anyhow::anyhow!("cannot merge item without a PR"))?;
+
+    let pr_number = mando_types::task::extract_pr_number(pr_ref)
+        .ok_or_else(|| anyhow::anyhow!("cannot extract PR number from: {}", pr_ref))?
         .to_string();
 
-    let (repo, pr_number) = super::ci_gate::parse_pr_url(&pr_url)
-        .ok_or_else(|| anyhow::anyhow!("cannot parse PR URL: {}", pr_url))?;
+    let repo =
+        mando_config::resolve_github_repo(item.project.as_deref(), config).ok_or_else(|| {
+            anyhow::anyhow!("no github_repo configured for project {:?}", item.project)
+        })?;
+
+    let pr_url = format!("https://github.com/{repo}/pull/{pr_number}");
+
+    // Render prompt before any side effects so failures propagate as Err
+    // rather than dying silently inside tokio::spawn.
+    let mut vars = std::collections::HashMap::new();
+    vars.insert("pr_url", pr_url.as_str());
+    vars.insert("repo", repo.as_str());
+    vars.insert("pr_number", pr_number.as_str());
+    vars.insert("title", item.title.as_str());
+    let prompt = mando_config::render_prompt("captain_merge", &workflow.prompts, &vars)
+        .map_err(|e| anyhow::anyhow!("render captain_merge prompt: {e}"))?;
 
     item.status = ItemStatus::CaptainMerging;
     item.last_activity_at = Some(mando_types::now_rfc3339());
@@ -104,26 +121,10 @@ pub(crate) async fn spawn_merge(
 
     let captain_model = workflow.models.captain.clone();
     let timeout_s = workflow.agent.captain_merge_timeout_s;
-    let prompts = workflow.prompts.clone();
     let pool = pool.clone();
     let merge_notifier = notifier.fork();
-    let item_title = item.title.clone();
 
     tokio::spawn(async move {
-        let mut vars = std::collections::HashMap::new();
-        vars.insert("pr_url", pr_url.as_str());
-        vars.insert("repo", repo.as_str());
-        vars.insert("pr_number", pr_number.as_str());
-        vars.insert("title", item_title.as_str());
-
-        let prompt = match mando_config::render_prompt("captain_merge", &prompts, &vars) {
-            Ok(p) => p,
-            Err(e) => {
-                warn!(module = "captain", %session_id, %e, "failed to render captain_merge prompt");
-                return;
-            }
-        };
-
         let config = mando_cc::CcConfig::builder()
             .model(&captain_model)
             .timeout(std::time::Duration::from_secs(timeout_s))
@@ -142,9 +143,27 @@ pub(crate) async fn spawn_merge(
             .json_schema(merge_json_schema())
             .build();
 
-        match mando_cc::CcOneShot::run(&prompt, config).await {
+        // Log "running" session entry so cancel can find it immediately.
+        crate::io::headless_cc::log_running_session(
+            &pool,
+            &session_id,
+            &cwd,
+            "captain-merge-async",
+            "",
+            &task_id,
+            false,
+        )
+        .await;
+
+        let sid_for_hook = session_id.clone();
+        match mando_cc::CcOneShot::run_with_pid_hook(&prompt, config, |pid| {
+            crate::io::pid_registry::register(&sid_for_hook, pid);
+        })
+        .await
+        {
             Ok(result) => {
                 info!(module = "captain", %session_id, "captain merge CC completed");
+                crate::io::pid_registry::unregister(&session_id);
                 merge_notifier.check_rate_limit(&result).await;
                 crate::io::headless_cc::log_cc_result(
                     &pool,
@@ -157,6 +176,7 @@ pub(crate) async fn spawn_merge(
             }
             Err(e) => {
                 warn!(module = "captain", %session_id, %e, "captain merge CC failed");
+                crate::io::pid_registry::unregister(&session_id);
                 crate::io::headless_cc::log_cc_failure(
                     &pool,
                     &session_id,
@@ -233,6 +253,7 @@ pub(crate) async fn apply_merge_result(
     match result.action.as_str() {
         "merged" => {
             item.status = ItemStatus::Merged;
+            item.merge_fail_count = 0;
             timeline_emit::emit_for_task(
                 item,
                 TimelineEventType::Merged,
@@ -252,6 +273,7 @@ pub(crate) async fn apply_merge_result(
         _ => {
             // escalate or unknown → Escalated
             item.status = ItemStatus::Escalated;
+            item.merge_fail_count = 0;
             item.escalation_report = Some(result.feedback.clone());
             timeline_emit::emit_for_task(
                 item,
@@ -348,8 +370,8 @@ pub(crate) async fn handle_merge_error(
     pool: &sqlx::SqlitePool,
 ) {
     item.session_ids.merge = None;
-    item.retry_count += 1;
-    let fail_count = item.retry_count as u32;
+    item.merge_fail_count += 1;
+    let fail_count = item.merge_fail_count as u32;
     let title = mando_shared::telegram_format::escape_html(&item.title);
     let err_data = serde_json::json!({ "error": error, "fail_count": fail_count });
 

@@ -4,6 +4,8 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 
+use crate::pr_evidence::{evidence_sections, html_img_src_urls};
+
 /// Media extensions we recognize as evidence.
 const IMAGE_EXTS: &[&str] = &[".png", ".jpg", ".jpeg", ".gif"];
 const VIDEO_EXTS: &[&str] = &[".mp4", ".mov", ".webm"];
@@ -13,8 +15,9 @@ const MAX_EVIDENCE_URLS: usize = 3;
 
 /// Extract evidence image/video URLs from a PR body.
 ///
-/// Finds markdown images `![...](url)` and raw `https://` URLs ending in
-/// known media extensions. Caps at `MAX_EVIDENCE_URLS`.
+/// Finds markdown images `![...](url)`, HTML `<img src="...">` tags, and raw
+/// `https://` URLs ending in known media extensions. Caps at
+/// `MAX_EVIDENCE_URLS`.
 pub(crate) fn extract_evidence_urls(pr_body: &str) -> Vec<String> {
     let mut urls: Vec<String> = Vec::new();
     let all_exts: Vec<&str> = IMAGE_EXTS
@@ -23,33 +26,43 @@ pub(crate) fn extract_evidence_urls(pr_body: &str) -> Vec<String> {
         .copied()
         .collect();
 
-    for line in pr_body.lines() {
-        // Markdown images: ![alt](url)
-        let mut rest = line;
-        while let Some(start) = rest.find("![") {
-            rest = &rest[start + 2..];
-            if let Some(paren_start) = rest.find("](") {
-                let url_start = paren_start + 2;
-                if let Some(paren_end) = rest[url_start..].find(')') {
-                    let url = rest[url_start..url_start + paren_end].trim();
-                    if url.starts_with("http") {
-                        urls.push(url.to_string());
+    for section in evidence_sections(pr_body) {
+        for line in section.lines() {
+            // Markdown images: ![alt](url)
+            let mut rest = line;
+            while let Some(start) = rest.find("![") {
+                rest = &rest[start + 2..];
+                if let Some(paren_start) = rest.find("](") {
+                    let url_start = paren_start + 2;
+                    if let Some(paren_end) = rest[url_start..].find(')') {
+                        let url = rest[url_start..url_start + paren_end].trim();
+                        push_http_url(&mut urls, url);
+                        rest = &rest[url_start + paren_end..];
                     }
-                    rest = &rest[url_start + paren_end..];
                 }
+            }
+
+            // Raw URLs with media extensions (strip query params for ext check)
+            for word in line.split_whitespace() {
+                let cleaned =
+                    word.trim_matches(|c: char| c == '(' || c == ')' || c == '<' || c == '>');
+                if cleaned.starts_with("http") {
+                    let path_lower = url_without_query(cleaned).to_lowercase();
+                    if all_exts.iter().any(|ext| path_lower.ends_with(ext)) {
+                        push_http_url(&mut urls, cleaned);
+                    }
+                }
+            }
+
+            if urls.len() >= MAX_EVIDENCE_URLS {
+                break;
             }
         }
 
-        // Raw URLs with media extensions (strip query params for ext check)
-        for word in line.split_whitespace() {
-            let cleaned = word.trim_matches(|c: char| c == '(' || c == ')' || c == '<' || c == '>');
-            if cleaned.starts_with("http") {
-                let path_lower = url_without_query(cleaned).to_lowercase();
-                if all_exts.iter().any(|ext| path_lower.ends_with(ext))
-                    && !urls.contains(&cleaned.to_string())
-                {
-                    urls.push(cleaned.to_string());
-                }
+        for url in html_img_src_urls(section) {
+            push_http_url(&mut urls, url);
+            if urls.len() >= MAX_EVIDENCE_URLS {
+                break;
             }
         }
 
@@ -60,6 +73,12 @@ pub(crate) fn extract_evidence_urls(pr_body: &str) -> Vec<String> {
 
     urls.truncate(MAX_EVIDENCE_URLS);
     urls
+}
+
+fn push_http_url(urls: &mut Vec<String>, url: &str) {
+    if url.starts_with("http") && !urls.iter().any(|existing| existing == url) {
+        urls.push(url.to_string());
+    }
 }
 
 /// Strip query parameters from a URL for extension checking.
@@ -219,8 +238,40 @@ mod tests {
     }
 
     #[test]
+    fn extract_github_attachment_markdown_without_extension() {
+        let body = "### After\n![fix](https://github.com/user-attachments/assets/1234abcd)";
+        let urls = extract_evidence_urls(body);
+        assert_eq!(
+            urls,
+            vec!["https://github.com/user-attachments/assets/1234abcd"]
+        );
+    }
+
+    #[test]
+    fn extract_html_img_without_extension() {
+        let body = r#"## Evidence
+<img src="https://github.com/user-attachments/assets/abcd-1234" alt="proof" />"#;
+        let urls = extract_evidence_urls(body);
+        assert_eq!(
+            urls,
+            vec!["https://github.com/user-attachments/assets/abcd-1234"]
+        );
+    }
+
+    #[test]
+    fn extract_uppercase_html_img_without_extension() {
+        let body = r#"## Evidence
+<IMG SRC="https://github.com/user-attachments/assets/abcd-1234" alt="proof" />"#;
+        let urls = extract_evidence_urls(body);
+        assert_eq!(
+            urls,
+            vec!["https://github.com/user-attachments/assets/abcd-1234"]
+        );
+    }
+
+    #[test]
     fn caps_at_max() {
-        let body = "![a](https://a.com/1.png)\n![b](https://b.com/2.png)\n![c](https://c.com/3.png)\n![d](https://d.com/4.png)";
+        let body = "## Evidence\n![a](https://a.com/1.png)\n![b](https://b.com/2.png)\n![c](https://c.com/3.png)\n![d](https://d.com/4.png)";
         let urls = extract_evidence_urls(body);
         assert_eq!(urls.len(), 3);
     }
@@ -233,9 +284,30 @@ mod tests {
 
     #[test]
     fn deduplicates() {
-        let body = "![a](https://a.com/1.png) https://a.com/1.png";
+        let body = "## Evidence\n![a](https://a.com/1.png) https://a.com/1.png";
         let urls = extract_evidence_urls(body);
         assert_eq!(urls.len(), 1);
+    }
+
+    #[test]
+    fn ignores_html_images_outside_evidence_section() {
+        let body = r#"## Evidence
+Just text
+
+## Footer
+<img src="https://example.com/badge.png" alt="badge" />
+"#;
+        let urls = extract_evidence_urls(body);
+        assert!(urls.is_empty());
+    }
+
+    #[test]
+    fn html_img_prefers_actual_src_over_data_src() {
+        let body = r#"## Evidence
+<img data-src="https://wrong.example.com/wrong.png" src="https://right.example.com/right.png">
+"#;
+        let urls = extract_evidence_urls(body);
+        assert_eq!(urls, vec!["https://right.example.com/right.png"]);
     }
 
     #[test]

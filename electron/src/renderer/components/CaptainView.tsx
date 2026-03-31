@@ -11,14 +11,8 @@ import { MergeModal } from '#renderer/components/MergeModal';
 import { FeedbackModal } from '#renderer/components/FeedbackModal';
 import { TaskAsk } from '#renderer/components/TaskAsk';
 import type { TaskItem } from '#renderer/types';
-
-const canMerge = (b: TaskItem) => !!b.pr && !!b.project && b.status === 'awaiting-review';
-const canRestart = (b: TaskItem) =>
-  ['awaiting-review', 'merged', 'completed-no-pr', 'canceled', 'escalated', 'errored'].includes(
-    b.status,
-  );
-const canRework = (b: TaskItem) =>
-  ['awaiting-review', 'handed-off', 'escalated', 'errored'].includes(b.status);
+import type { WorkerDetail } from '#renderer/types';
+import { canMerge, canRestart, canRework } from '#renderer/utils';
 
 interface Props {
   projectFilter: string | null;
@@ -44,9 +38,19 @@ export function CaptainView({
   const handleRetryItem = (item: TaskItem) => {
     actions.handleRetry(item.id);
   };
+  const handleAcceptItem = (item: TaskItem) => {
+    actions.handleAccept(item.id);
+  };
   const handleAnswerItem = (item: TaskItem) => {
     const answer = window.prompt(`Answer for "${item.title}":`);
     if (answer) actions.handleAnswer(item.id, answer);
+  };
+  const handleNudgeWorker = (worker: WorkerDetail) => {
+    const message = window.prompt(
+      `Nudge message for "${worker.title}"`,
+      'Keep going. Ship the next concrete step.',
+    );
+    if (message) actions.handleNudge(worker.id, message);
   };
 
   const visibleItems = useFilteredTasks(projectFilter);
@@ -140,7 +144,10 @@ export function CaptainView({
 
   return (
     <div className="flex flex-col" style={{ height: '100%' }}>
-      <MetricsRow />
+      <MetricsRow
+        onNudge={handleNudgeWorker}
+        onStopWorker={(worker) => actions.handleStatusChange(worker.id, 'canceled')}
+      />
       <StatusFilter />
 
       <div className="min-h-0 flex-1" style={{ paddingTop: 4 }}>
@@ -152,6 +159,7 @@ export function CaptainView({
           onReopen={actions.setReopenItem}
           onRework={actions.setReworkItem}
           onAsk={setAskItem}
+          onAccept={handleAcceptItem}
           onHandoff={handleHandoffItem}
           onCancel={handleCancelItem}
           onRetry={handleRetryItem}

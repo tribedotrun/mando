@@ -5,7 +5,8 @@
  * shows native macOS notifications, and routes click actions
  * back to the renderer.
  */
-import { Notification, ipcMain, shell, BrowserWindow } from 'electron';
+import { Notification, shell, BrowserWindow } from 'electron';
+import { onTrusted } from '#main/ipc-security';
 
 /** Notification payload shape (matches Rust NotificationPayload). */
 interface NotificationPayload {
@@ -21,12 +22,21 @@ type NotificationKind =
   | { type: 'ClarifierNeeded'; item_id: string }
   | { type: 'RebaseFailed'; item_id: string; pr_number: number }
   | { type: 'WorkerEscalated'; item_id: string }
-  | { type: 'CaptainReviewStarted'; item_id: string }
   | { type: 'CaptainReviewVerdict'; item_id: string; verdict: string; feedback?: string }
   | { type: 'Escalated'; item_id: string; summary?: string }
   | { type: 'Errored'; item_id: string; error?: string }
   | { type: 'NeedsClarification'; item_id: string; questions?: string }
   | { type: 'CronAlert'; action_id: string }
+  | {
+      type: 'RateLimited';
+      status: string;
+      utilization?: number;
+      resets_at?: number;
+      rate_limit_type?: string;
+      overage_status?: string;
+      overage_resets_at?: number;
+      overage_disabled_reason?: string;
+    }
   | { type: 'Generic' };
 
 /** Map notification kind to a human-readable title. */
@@ -40,8 +50,6 @@ function titleForKind(kind: NotificationKind): string {
       return 'Rebase Failed';
     case 'WorkerEscalated':
       return 'Worker Escalated';
-    case 'CaptainReviewStarted':
-      return 'Captain Review Started';
     case 'CaptainReviewVerdict':
       return 'Captain Review Verdict';
     case 'Escalated':
@@ -52,6 +60,8 @@ function titleForKind(kind: NotificationKind): string {
       return 'Clarification Needed';
     case 'CronAlert':
       return 'Cron Alert';
+    case 'RateLimited':
+      return 'Rate Limited';
     case 'Generic':
       return 'Mando';
   }
@@ -85,7 +95,7 @@ function extractUrl(payload: NotificationPayload): string | null {
  * Call once during app startup.
  */
 export function registerNotificationHandlers(getMainWindow: () => BrowserWindow | null): void {
-  ipcMain.on('show-notification', (_event, payload: NotificationPayload) => {
+  onTrusted('show-notification', (_event, payload: NotificationPayload) => {
     if (!Notification.isSupported()) return;
 
     const title = titleForKind(payload.kind);

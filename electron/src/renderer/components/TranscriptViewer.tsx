@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import type { SessionEntry } from '#renderer/types';
 import { CopyBtn } from '#renderer/components/CopyBtn';
-import { MarkdownText } from '#renderer/components/MarkdownText';
+import { PrMarkdown } from '#renderer/components/PrMarkdown';
 import { sessionTitle, sessionSubtitle } from '#renderer/components/SessionsHelpers';
 
 // ── Types ──
@@ -339,7 +339,7 @@ export function TranscriptViewer({ markdown }: Props): React.ReactElement {
                       className="text-[12px] leading-relaxed py-0.5"
                       style={{ color: 'var(--color-text-1)' }}
                     >
-                      <MarkdownText text={block.content} />
+                      <PrMarkdown text={block.content} />
                     </div>
                   );
                 }

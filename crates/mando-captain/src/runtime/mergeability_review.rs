@@ -10,7 +10,6 @@ use crate::runtime::notify::Notifier;
 /// Check pending-review items for unaddressed review comments and CI failures.
 ///
 /// For each pending-review item with a PR and a worker (i.e. can be reopened):
-/// - Ensure `/ci` has been triggered on the PR
 /// - Fetch PR data (comments, CI status)
 /// - If unaddressed comments → set reopen_source="review", execute ReviewReopen
 /// - If CI failure on a required check → set reopen_source="ci", execute ReviewReopen
@@ -39,7 +38,15 @@ pub(crate) async fn check_done_review_threads(
             continue;
         }
 
-        let pr_data = super::review_phase::fetch_pr_data(&items[idx]).await;
+        // Build a stub with the resolved github_repo slug so fetch_pr_data
+        // can resolve short PR refs like "#334" to the correct repo.
+        let github_repo = mando_config::resolve_github_repo(items[idx].project.as_deref(), config);
+        let stub = Task {
+            pr: items[idx].pr.clone(),
+            project: github_repo,
+            ..Task::new("")
+        };
+        let pr_data = super::review_phase::fetch_pr_data(&stub).await;
 
         // CI failure → CaptainReviewing with ci_failure trigger.
         // Captain reads CI logs and decides how to proceed (precise reopen or escalate).
@@ -52,10 +59,10 @@ pub(crate) async fn check_done_review_threads(
                 title = %item.title,
                 "CI failure detected on pending-review item — spawning captain review"
             );
-            item.status = ItemStatus::CaptainReviewing;
-            item.captain_review_trigger = Some(mando_types::task::ReviewTrigger::CiFailure);
-            item.last_activity_at = Some(mando_types::now_rfc3339());
-            item.retry_count = 0;
+            super::action_contract::reset_review_retry(
+                item,
+                mando_types::task::ReviewTrigger::CiFailure,
+            );
 
             super::timeline_emit::emit_for_task(
                 item,
@@ -106,7 +113,6 @@ pub(crate) async fn check_done_review_threads(
 
         let item = &mut items[idx];
         let worker_name = item.worker.clone().unwrap_or_default();
-        item.reopen_source = Some(reopen_source.to_string());
 
         tracing::info!(
             module = "captain",
@@ -120,24 +126,21 @@ pub(crate) async fn check_done_review_threads(
             "review-reopening pending-review item"
         );
 
-        let mut item_clone = item.clone();
-        match super::spawner_lifecycle::reopen_worker(
-            &mut item_clone,
-            config,
+        match super::action_contract::reopen_item(
+            item,
+            &reopen_source,
             &message,
+            config,
             workflow,
+            notifier,
             pool,
+            false,
         )
         .await
         {
-            Ok(result) => {
+            Ok(super::action_contract::ReopenOutcome::Reopened) => {
                 let it = &mut items[idx];
-                let seq = it.reopen_seq + 1;
-                it.reopen_seq = seq;
-                it.worker_seq = item_clone.worker_seq;
-                it.status = ItemStatus::InProgress;
-                it.worker = Some(result.session_name);
-                it.session_ids.worker = Some(result.session_id);
+                let seq = it.reopen_seq;
 
                 let msg = format!(
                     "\u{1f504} {}-reopened (seq={}): <b>{}</b>\n{}",
@@ -165,6 +168,13 @@ pub(crate) async fn check_done_review_threads(
                     tracing::warn!(module = "captain", %e, "Linear workpad upsert failed");
                 }
             }
+            Ok(super::action_contract::ReopenOutcome::CaptainReviewing) => {}
+            Ok(super::action_contract::ReopenOutcome::QueuedFallback) => {
+                alerts.push(format!(
+                    "Review-reopen for {} fell back to queued unexpectedly",
+                    worker_name
+                ));
+            }
             Err(e) => {
                 alerts.push(format!("Review-reopen failed for {}: {}", worker_name, e));
             }
@@ -178,14 +188,13 @@ pub(crate) async fn check_done_review_threads(
 /// before this function is called. This only handles review comments and
 /// missing evidence.
 pub(crate) fn classify_review_state(
-    ci_status: Option<&str>,
+    _ci_status: Option<&str>,
     unresolved: i64,
     unreplied: i64,
     unaddressed: i64,
     pr_body: &str,
     workflow: &CaptainWorkflow,
 ) -> Option<(String, String)> {
-    let _ = ci_status; // CI failures handled upstream, kept for signature stability.
     let has_comments = unresolved > 0 || unreplied > 0 || unaddressed > 0;
 
     // Check for missing evidence using the same logic as deterministic classifier.

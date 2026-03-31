@@ -62,8 +62,6 @@ pub struct Task {
     #[serde(default)]
     pub session_ids: SessionIds,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub clarifier_questions: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_activity_at: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plan: Option<String>,
@@ -78,19 +76,51 @@ pub struct Task {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub images: Option<String>,
     #[serde(default)]
-    pub retry_count: i64,
+    pub review_fail_count: i64,
+    #[serde(default)]
+    pub clarifier_fail_count: i64,
+    #[serde(default)]
+    pub spawn_fail_count: i64,
+    #[serde(default)]
+    pub merge_fail_count: i64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub escalation_report: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub archived_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub github_repo: Option<String>,
     #[serde(skip)]
     pub rebase_worker: Option<String>,
     #[serde(skip)]
     pub rebase_retries: i64,
     #[serde(skip)]
     pub rebase_head_sha: Option<String>,
+}
+
+/// Extract the bare PR number from any format: full URL, `#N`, or bare `N`.
+/// Returns `None` for empty/unparseable input.
+pub fn extract_pr_number(pr: &str) -> Option<&str> {
+    // Full URL: …/pull/123
+    if let Some(idx) = pr.rfind("/pull/") {
+        let after = &pr[idx + 6..];
+        let num = after.trim_end_matches('/');
+        if !num.is_empty() && num.chars().all(|c| c.is_ascii_digit()) {
+            return Some(num);
+        }
+    }
+    // #N or bare N
+    let stripped = pr.trim_start_matches('#');
+    if !stripped.is_empty() && stripped.chars().all(|c| c.is_ascii_digit()) {
+        return Some(stripped);
+    }
+    None
+}
+
+/// Normalize a PR reference to a bare number string from any input (full URL, `#N`, bare `N`).
+pub fn normalize_pr(pr: &str) -> Option<String> {
+    extract_pr_number(pr).map(|n| n.to_string())
 }
 
 impl Task {
@@ -114,7 +144,6 @@ impl Task {
             intervention_count: 0,
             captain_review_trigger: None,
             session_ids: SessionIds::default(),
-            clarifier_questions: None,
             last_activity_at: None,
             plan: None,
             no_pr: false,
@@ -122,10 +151,14 @@ impl Task {
             reopen_seq: 0,
             reopen_source: None,
             images: None,
-            retry_count: 0,
+            review_fail_count: 0,
+            clarifier_fail_count: 0,
+            spawn_fail_count: 0,
+            merge_fail_count: 0,
             escalation_report: None,
             source: None,
             archived_at: None,
+            github_repo: None,
             rebase_worker: None,
             rebase_retries: 0,
             rebase_head_sha: None,
@@ -135,8 +168,7 @@ impl Task {
     /// Best identifier for logging: linear_id > numeric id.
     pub fn best_id(&self) -> String {
         self.linear_id
-            .as_deref()
-            .map(String::from)
+            .clone()
             .unwrap_or_else(|| self.id.to_string())
     }
 
@@ -180,7 +212,10 @@ impl Task {
             "created_at" => self.created_at = Some(expect_string_field(key, value)?.to_string()),
             "worktree" => self.worktree = Some(expect_string_field(key, value)?.to_string()),
             "branch" => self.branch = Some(expect_string_field(key, value)?.to_string()),
-            "pr" => self.pr = Some(expect_string_field(key, value)?.to_string()),
+            "pr" => {
+                let raw = expect_string_field(key, value)?;
+                self.pr = Some(normalize_pr(raw).unwrap_or_else(|| raw.to_string()));
+            }
             "worker_started_at" => {
                 self.worker_started_at = Some(expect_string_field(key, value)?.to_string())
             }
@@ -194,9 +229,6 @@ impl Task {
                     })?;
                 self.captain_review_trigger = Some(trigger);
             }
-            "clarifier_questions" => {
-                self.clarifier_questions = Some(expect_string_field(key, value)?.to_string())
-            }
             "last_activity_at" => {
                 self.last_activity_at = Some(expect_string_field(key, value)?.to_string())
             }
@@ -208,11 +240,22 @@ impl Task {
                 self.reopen_source = Some(expect_string_field(key, value)?.to_string())
             }
             "images" => self.images = Some(expect_string_field(key, value)?.to_string()),
-            "retry_count" => self.retry_count = expect_i64_field(key, value)?,
+            "review_fail_count" => self.review_fail_count = expect_i64_field(key, value)?,
+            "clarifier_fail_count" => self.clarifier_fail_count = expect_i64_field(key, value)?,
+            "spawn_fail_count" => self.spawn_fail_count = expect_i64_field(key, value)?,
+            "merge_fail_count" => self.merge_fail_count = expect_i64_field(key, value)?,
             "escalation_report" => {
                 self.escalation_report = Some(expect_string_field(key, value)?.to_string())
             }
             "source" => self.source = Some(expect_string_field(key, value)?.to_string()),
+            "session_ids" => {
+                self.session_ids = serde_json::from_value(value.clone()).map_err(|_| {
+                    TaskUpdateError::InvalidFieldType {
+                        field: key.into(),
+                        expected: "session_ids object",
+                    }
+                })?;
+            }
             _ => return Err(TaskUpdateError::UnknownField(key.into())),
         }
         Ok(())
@@ -234,7 +277,6 @@ impl Task {
             "worker_started_at" => self.worker_started_at = None,
             "intervention_count" => self.intervention_count = 0,
             "captain_review_trigger" => self.captain_review_trigger = None,
-            "clarifier_questions" => self.clarifier_questions = None,
             "last_activity_at" => self.last_activity_at = None,
             "plan" => self.plan = None,
             "no_pr" => self.no_pr = false,
@@ -242,12 +284,72 @@ impl Task {
             "reopen_seq" => self.reopen_seq = 0,
             "reopen_source" => self.reopen_source = None,
             "images" => self.images = None,
-            "retry_count" => self.retry_count = 0,
+            "review_fail_count" => self.review_fail_count = 0,
+            "clarifier_fail_count" => self.clarifier_fail_count = 0,
+            "spawn_fail_count" => self.spawn_fail_count = 0,
+            "merge_fail_count" => self.merge_fail_count = 0,
             "escalation_report" => self.escalation_report = None,
             "source" => self.source = None,
+            "session_ids" => self.session_ids = SessionIds::default(),
             "title" | "status" => return Err(TaskUpdateError::FieldCannotBeNull(key.into())),
             _ => return Err(TaskUpdateError::UnknownField(key.into())),
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extract_pr_number_full_url() {
+        assert_eq!(
+            extract_pr_number("https://github.com/acme/widgets/pull/116"),
+            Some("116")
+        );
+    }
+
+    #[test]
+    fn extract_pr_number_trailing_slash() {
+        assert_eq!(
+            extract_pr_number("https://github.com/acme/widgets/pull/42/"),
+            Some("42")
+        );
+    }
+
+    #[test]
+    fn extract_pr_number_short_ref() {
+        assert_eq!(extract_pr_number("#334"), Some("334"));
+    }
+
+    #[test]
+    fn extract_pr_number_bare_number() {
+        assert_eq!(extract_pr_number("99"), Some("99"));
+    }
+
+    #[test]
+    fn extract_pr_number_invalid() {
+        assert_eq!(extract_pr_number(""), None);
+        assert_eq!(extract_pr_number("#"), None);
+        assert_eq!(extract_pr_number("not-a-number"), None);
+    }
+
+    #[test]
+    fn normalize_pr_from_url() {
+        assert_eq!(
+            normalize_pr("https://github.com/acme/widgets/pull/42"),
+            Some("42".into())
+        );
+    }
+
+    #[test]
+    fn normalize_pr_already_short() {
+        assert_eq!(normalize_pr("#7"), Some("7".into()));
+    }
+
+    #[test]
+    fn normalize_pr_bare_number() {
+        assert_eq!(normalize_pr("363"), Some("363".into()));
     }
 }

@@ -63,6 +63,7 @@ export function App(): React.ReactElement {
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [detailItem, setDetailItem] = useState<TaskItem | null>(null);
   const [setupActive, setSetupActive] = useState(false);
+  const [scoutProcessRequest, setScoutProcessRequest] = useState(0);
 
   const { sseStatus, sessionsRefresh } = useDataContext();
 
@@ -139,6 +140,7 @@ export function App(): React.ReactElement {
         break;
       case 'act-process':
         setActiveTab('scout');
+        setScoutProcessRequest((value) => value + 1);
         break;
     }
   }, []);
@@ -275,7 +277,12 @@ export function App(): React.ReactElement {
                 onOpenDetail={setDetailItem}
               />
             )}
-            {activeTab === 'scout' && <ScoutPage />}
+            {activeTab === 'scout' && (
+              <ScoutPage
+                key={`scout-${scoutProcessRequest}`}
+                processOnMount={scoutProcessRequest > 0}
+              />
+            )}
             {activeTab === 'sessions' && <SessionsCard refreshTrigger={sessionsRefresh} />}
             {activeTab === 'cron' && <CronJobsPanel variant="page" testId="cron-page" />}
             {activeTab === 'analytics' && <AnalyticsPage />}

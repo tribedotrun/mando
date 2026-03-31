@@ -45,7 +45,7 @@ fn timeline_icon(kind: &str) -> &'static str {
 pub async fn handle(bot: &TelegramBot, chat_id: &str, args: &str) -> Result<()> {
     let parts: Vec<&str> = args.split_whitespace().collect();
     if parts.is_empty() {
-        bot.send_html(chat_id, "Usage: /timeline &lt;item_id&gt; [chat]")
+        bot.send_html(chat_id, "Usage: /timeline &lt;task_id&gt; [chat]")
             .await?;
         return Ok(());
     }
