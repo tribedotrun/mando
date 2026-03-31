@@ -27,19 +27,6 @@ impl TelegramBot {
         self.input_sessions.remove(cid);
     }
 
-    /// Close local input session AND cancel the server-side clarifier session.
-    pub async fn close_input_session_with_cancel(&mut self, cid: &str) {
-        self.input_sessions.remove(cid);
-        // Fire-and-forget cancel — ignore errors (session may not exist server-side).
-        let gw = self.gw.clone();
-        let key = cid.to_string();
-        tokio::spawn(async move {
-            gw.post("/api/clarifier/cancel", &serde_json::json!({"key": key}))
-                .await
-                .ok();
-        });
-    }
-
     // ── Ops sessions ─────────────────────────────────────────────────
 
     pub fn has_ops_session(&self, cid: &str) -> bool {

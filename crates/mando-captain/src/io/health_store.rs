@@ -47,7 +47,7 @@ pub(crate) fn get_health_f64(state: &HealthState, worker: &str, field: &str) -> 
 }
 
 /// Get the PID for a worker from the persisted health state.
-pub(crate) fn get_pid_for_worker(worker: &str) -> u32 {
+pub fn get_pid_for_worker(worker: &str) -> u32 {
     let health_path = mando_config::worker_health_path();
     let state = load_health_state(&health_path);
     get_health_u32(&state, worker, "pid")

@@ -20,7 +20,9 @@ pub(crate) async fn handle_picker(
         bot.api()
             .answer_callback_query(cb_id, Some("Cancelled"))
             .await?;
-        let _ = bot.edit_message(cid, mid, "\u{23ed} Cancelled").await;
+        if let Err(e) = bot.edit_message(cid, mid, "\u{23ed} Cancelled").await {
+            tracing::warn!(module = "telegram", error = %e, "message send failed");
+        }
         return Ok(());
     }
     if action != "pick" {
@@ -45,7 +47,8 @@ pub(crate) async fn handle_picker(
 
             if kind == "input" {
                 bot.open_input_session(cid, raw_title);
-                let msg = if let Some(ref questions) = item.clarifier_questions {
+                let questions = fetch_clarifier_questions(bot, item_id).await;
+                let msg = if let Some(ref questions) = questions {
                     format!(
                         "\u{2753} <b>{title}</b>\n\n\
                          {}\n\n\
@@ -58,13 +61,15 @@ pub(crate) async fn handle_picker(
                          Type extra context for this item, or send /input cancel to exit."
                     )
                 };
-                let _ = bot.edit_message(cid, mid, &msg).await;
+                if let Err(e) = bot.edit_message(cid, mid, &msg).await {
+                    tracing::warn!(module = "telegram", error = %e, "message send failed");
+                }
             } else if kind == "reopen" {
                 bot.pending_reopen.insert(
                     cid.to_string(),
                     (item_id.to_string(), raw_title.to_string()),
                 );
-                let _ = bot
+                if let Err(e) = bot
                     .edit_message(
                         cid,
                         mid,
@@ -73,11 +78,35 @@ pub(crate) async fn handle_picker(
                              Type your feedback \u{2014} what changes are needed?"
                         ),
                     )
-                    .await;
+                    .await
+                {
+                    tracing::warn!(module = "telegram", error = %e, "message send failed");
+                }
+            } else if kind == "rework" {
+                bot.pending_rework.insert(
+                    cid.to_string(),
+                    (item_id.to_string(), raw_title.to_string()),
+                );
+                if let Err(e) = bot
+                    .edit_message(
+                        cid,
+                        mid,
+                        &format!(
+                            "🔁 Rework: {title}\n\n\
+                             Type the new instructions for Captain."
+                        ),
+                    )
+                    .await
+                {
+                    tracing::warn!(module = "telegram", error = %e, "message send failed");
+                }
             } else {
-                let _ = bot
+                if let Err(e) = bot
                     .edit_message(cid, mid, &format!("\u{23f3} {kind}: {title}\u{2026}"))
-                    .await;
+                    .await
+                {
+                    tracing::warn!(module = "telegram", error = %e, "message send failed");
+                }
                 execute_picker_action(bot, kind, cid, item_id, raw_title).await?;
             }
         }
@@ -107,6 +136,29 @@ fn take_picker_by_kind(
         "handoff" => bot.take_handoff_picker(aid),
         _ => None,
     }
+}
+
+/// Fetch the latest clarifier questions for a task from the gateway timeline.
+async fn fetch_clarifier_questions(bot: &TelegramBot, item_id: &str) -> Option<String> {
+    let path = format!("/api/tasks/{item_id}/timeline");
+    let val = match bot.gw().get(&path).await {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::warn!(
+                module = "telegram",
+                item_id,
+                error = %e,
+                "failed to fetch timeline for clarifier questions"
+            );
+            return None;
+        }
+    };
+    let events = val["events"].as_array()?;
+    events
+        .iter()
+        .rev()
+        .find(|e| e["event_type"].as_str() == Some("clarify_question"))
+        .and_then(|e| e["data"]["questions"].as_str().map(String::from))
 }
 
 async fn execute_picker_action(

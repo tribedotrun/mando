@@ -1,0 +1,249 @@
+{
+  "captain": {
+    "tasks": {
+      "meaning": "Show the task list and task detail workflow",
+      "route": "GET /api/tasks",
+      "surfaces": [
+        "cli",
+        "telegram",
+        "electron"
+      ]
+    },
+    "workers": {
+      "meaning": "Show active workers",
+      "route": "GET /api/workers",
+      "surfaces": [
+        "cli",
+        "telegram",
+        "electron"
+      ]
+    },
+    "triage": {
+      "meaning": "Rank review-ready tasks by merge readiness",
+      "route": "POST /api/captain/triage",
+      "surfaces": [
+        "cli",
+        "telegram",
+        "electron"
+      ]
+    },
+    "reopen": {
+      "meaning": "Reopen a completed or failed task with feedback",
+      "route": "POST /api/tasks/reopen",
+      "surfaces": [
+        "cli",
+        "telegram",
+        "electron"
+      ]
+    },
+    "rework": {
+      "meaning": "Restart a task with fresh instructions",
+      "route": "POST /api/tasks/rework",
+      "surfaces": [
+        "cli",
+        "telegram",
+        "electron"
+      ]
+    },
+    "retry": {
+      "meaning": "Retry an errored captain review",
+      "route": "POST /api/tasks/retry",
+      "surfaces": [
+        "cli",
+        "telegram",
+        "electron"
+      ]
+    },
+    "accept": {
+      "meaning": "Complete a no-PR task",
+      "route": "POST /api/tasks/accept",
+      "surfaces": [
+        "cli",
+        "telegram",
+        "electron"
+      ]
+    },
+    "handoff": {
+      "meaning": "Hand a task from Captain to a human",
+      "route": "POST /api/tasks/handoff",
+      "surfaces": [
+        "cli",
+        "telegram",
+        "electron"
+      ]
+    },
+    "adopt": {
+      "meaning": "Adopt a human worktree into Captain",
+      "route": "POST /api/captain/adopt",
+      "surfaces": [
+        "cli",
+        "telegram",
+        "electron"
+      ]
+    },
+    "nudge": {
+      "meaning": "Resume a stuck worker with an operator message",
+      "route": "POST /api/captain/nudge",
+      "surfaces": [
+        "cli",
+        "telegram",
+        "electron"
+      ]
+    },
+    "stop": {
+      "meaning": "Stop all active workers",
+      "route": "POST /api/captain/stop",
+      "surfaces": [
+        "cli",
+        "telegram",
+        "electron"
+      ]
+    },
+    "knowledge_review": {
+      "meaning": "Review and approve pending knowledge lessons",
+      "route": "GET /api/knowledge/pending + POST /api/knowledge/approve",
+      "surfaces": [
+        "cli",
+        "telegram",
+        "electron"
+      ]
+    },
+    "journal": {
+      "meaning": "Inspect the captain decision journal",
+      "route": "GET /api/journal",
+      "surfaces": [
+        "cli",
+        "telegram",
+        "electron"
+      ]
+    },
+    "patterns": {
+      "meaning": "Review and update learned patterns",
+      "route": "GET /api/patterns + POST /api/patterns/update",
+      "surfaces": [
+        "cli",
+        "telegram",
+        "electron"
+      ]
+    }
+  },
+  "scout": {
+    "add": {
+      "meaning": "Add a URL to Scout",
+      "route": "POST /api/scout/items",
+      "surfaces": [
+        "cli",
+        "telegram",
+        "electron"
+      ]
+    },
+    "research": {
+      "meaning": "Discover links for a topic",
+      "route": "POST /api/scout/research",
+      "surfaces": [
+        "cli",
+        "telegram",
+        "electron"
+      ]
+    },
+    "process": {
+      "meaning": "Process pending Scout items",
+      "route": "POST /api/scout/process",
+      "surfaces": [
+        "cli",
+        "telegram",
+        "electron"
+      ]
+    },
+    "read": {
+      "meaning": "Open the extracted article",
+      "route": "GET /api/scout/items/{id}/article",
+      "surfaces": [
+        "cli",
+        "telegram",
+        "electron"
+      ]
+    },
+    "ask": {
+      "meaning": "Ask follow-up questions on a Scout article",
+      "route": "POST /api/scout/ask",
+      "surfaces": [
+        "cli",
+        "telegram",
+        "electron"
+      ]
+    },
+    "act": {
+      "meaning": "Create a task from a Scout item",
+      "route": "POST /api/scout/items/{id}/act",
+      "surfaces": [
+        "cli",
+        "telegram",
+        "electron"
+      ]
+    },
+    "save": {
+      "meaning": "Mark a Scout item as saved",
+      "route": "PATCH /api/scout/items/{id}",
+      "surfaces": [
+        "cli",
+        "telegram",
+        "electron"
+      ]
+    },
+    "archive": {
+      "meaning": "Archive a Scout item",
+      "route": "PATCH /api/scout/items/{id}",
+      "surfaces": [
+        "cli",
+        "telegram",
+        "electron"
+      ]
+    },
+    "delete": {
+      "meaning": "Delete a Scout item",
+      "route": "DELETE /api/scout/items/{id}",
+      "surfaces": [
+        "cli",
+        "telegram",
+        "electron"
+      ]
+    },
+    "bulk_update": {
+      "meaning": "Update multiple Scout items",
+      "route": "POST /api/scout/bulk",
+      "surfaces": [
+        "cli",
+        "telegram",
+        "electron"
+      ]
+    },
+    "bulk_delete": {
+      "meaning": "Delete multiple Scout items",
+      "route": "POST /api/scout/bulk-delete",
+      "surfaces": [
+        "cli",
+        "telegram",
+        "electron"
+      ]
+    },
+    "publish_article": {
+      "meaning": "Publish the extracted article",
+      "route": "POST /api/scout/items/{id}/telegraph",
+      "surfaces": [
+        "cli",
+        "telegram",
+        "electron"
+      ]
+    },
+    "item_sessions": {
+      "meaning": "Inspect sessions linked to a Scout item",
+      "route": "GET /api/scout/items/{id}/sessions",
+      "surfaces": [
+        "cli",
+        "telegram",
+        "electron"
+      ]
+    }
+  }
+}

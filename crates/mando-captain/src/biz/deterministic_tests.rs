@@ -16,7 +16,7 @@ fn base_ctx() -> WorkerContext {
         item_title: "Test".into(),
         status: "in-progress".into(),
         branch: Some("feat/x".into()),
-        pr: Some("#1".into()),
+        pr: Some("1".into()),
         pr_ci_status: Some("success".into()),
         pr_comments: 0,
         unresolved_threads: 0,
@@ -172,6 +172,25 @@ fn budget_exhausted_captain_review() {
     let a = classify(&ctx, &base_item(), None);
     assert_eq!(a.action, ActionKind::CaptainReview);
     assert_eq!(a.reason.as_deref(), Some("budget_exhausted"));
+}
+
+#[test]
+fn degraded_clean_pr_routes_to_conservative_review() {
+    let mut ctx = base_ctx();
+    ctx.degraded = true;
+    let a = classify(&ctx, &base_item(), Some(true));
+    assert_eq!(a.action, ActionKind::CaptainReview);
+    assert_eq!(a.reason.as_deref(), Some("degraded_context"));
+}
+
+#[test]
+fn degraded_pr_does_not_fire_missing_evidence_nudge() {
+    let mut ctx = base_ctx();
+    ctx.degraded = true;
+    ctx.pr_body.clear();
+    let a = classify(&ctx, &base_item(), Some(true));
+    assert_eq!(a.action, ActionKind::CaptainReview);
+    assert_eq!(a.reason.as_deref(), Some("degraded_context"));
 }
 
 // ── Rule 4: NUDGE ──

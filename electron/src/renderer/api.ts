@@ -15,6 +15,8 @@ import type {
   JournalResponse,
   PatternsResponse,
   DistillerResponse,
+  KnowledgePendingResponse,
+  CaptainTriageResponse,
 } from '#renderer/types';
 import log from '#renderer/logger';
 import { getErrorMessage } from '#renderer/utils';
@@ -33,17 +35,18 @@ export {
   processScout,
   askScout,
   actOnScoutItem,
+  researchScout,
+  publishScoutTelegraph,
+  fetchScoutItemSessions,
 } from '#renderer/api-scout';
 
 export { postVoice, transcribeAudio } from '#renderer/api-voice';
 
 let BASE_URL = 'http://127.0.0.1:18893';
-let AUTH_TOKEN = '';
-
 export async function initBaseUrl(): Promise<void> {
   if (window.mandoAPI) {
-    BASE_URL = await window.mandoAPI.gatewayUrl();
-    AUTH_TOKEN = await window.mandoAPI.authToken();
+    const url = await window.mandoAPI.gatewayUrl();
+    if (url) BASE_URL = url;
   }
 }
 
@@ -53,13 +56,6 @@ export function getBaseUrl(): string {
 
 export function buildUrl(path: string): string {
   return `${BASE_URL}${path}`;
-}
-
-/** Build auth headers for daemon requests. */
-export function buildAuthHeaders(extra?: Record<string, string>): Record<string, string> {
-  const headers: Record<string, string> = { ...extra };
-  if (AUTH_TOKEN) headers['Authorization'] = `Bearer ${AUTH_TOKEN}`;
-  return headers;
 }
 
 // ---------------------------------------------------------------------------
@@ -116,7 +112,7 @@ async function flushErrors(): Promise<void> {
   try {
     await fetch(`${BASE_URL}/api/client-logs`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...buildAuthHeaders() },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ entries }),
     });
     flushFailures = 0;
@@ -148,9 +144,7 @@ async function flushErrors(): Promise<void> {
 async function apiRequest<T>(method: string, apiPath: string, body?: unknown): Promise<T> {
   const start = performance.now();
   const hasBody = method !== 'GET' && method !== 'DELETE';
-  const headers = hasBody
-    ? buildAuthHeaders({ 'Content-Type': 'application/json' })
-    : buildAuthHeaders();
+  const headers = hasBody ? { 'Content-Type': 'application/json' } : undefined;
 
   try {
     const res = await fetch(buildUrl(apiPath), {
@@ -210,14 +204,6 @@ export interface AddTaskInput {
   images?: File[];
 }
 
-export interface CaptainAdoptInput {
-  path: string;
-  title: string;
-  project?: string;
-  branch?: string;
-  note?: string;
-}
-
 export async function addTask(input: AddTaskInput): Promise<TaskItem> {
   const form = new FormData();
   form.append('title', input.title);
@@ -233,7 +219,6 @@ export async function addTask(input: AddTaskInput): Promise<TaskItem> {
   }
   const res = await fetch(buildUrl('/api/tasks/add'), {
     method: 'POST',
-    headers: buildAuthHeaders(),
     body: form,
   });
   if (!res.ok) {
@@ -242,7 +227,14 @@ export async function addTask(input: AddTaskInput): Promise<TaskItem> {
   }
   return res.json() as Promise<TaskItem>;
 }
-export const deleteItems = (ids: number[]) => apiPost<void>('/api/tasks/delete', { ids });
+export const deleteItems = (
+  ids: number[],
+  opts?: { close_pr?: boolean; cancel_linear?: boolean },
+) =>
+  apiPost<{ ok: boolean; deleted: number; warnings?: string[] }>('/api/tasks/delete', {
+    ids,
+    ...opts,
+  });
 export const updateItem = (id: number, fields: Partial<TaskItem>) =>
   apiPatch<TaskItem>(`/api/tasks/${id}`, fields);
 export const bulkUpdate = (ids: number[], updates: Partial<TaskItem>) =>
@@ -260,24 +252,35 @@ export const fetchItemSessions = (id: number) =>
 export const archiveItem = (id: number) => apiPost<{ ok: boolean }>(`/api/tasks/${id}/archive`);
 export const unarchiveItem = (id: number) => apiPost<{ ok: boolean }>(`/api/tasks/${id}/unarchive`);
 
-// Retry / Answer
+// Retry / Clarify
 export const retryItem = (id: number) => apiPost<{ ok: boolean }>('/api/tasks/retry', { id });
+
+export interface ClarifyResponse {
+  ok: boolean;
+  status: string;
+  context?: string;
+  questions?: string;
+  session_id?: string;
+  error?: string;
+}
 export const answerClarification = (id: number, answer: string) =>
-  apiPost<{ ok: boolean }>('/api/tasks/answer', { id, answer });
+  apiPost<ClarifyResponse>(`/api/tasks/${id}/clarify`, { answer });
 
 // Captain
 export const triggerTick = (dryRun = false) =>
   apiPost<TickResult>('/api/captain/tick', { dry_run: dryRun });
+export const triggerCaptainTriage = (itemId?: string) =>
+  apiPost<CaptainTriageResponse>('/api/captain/triage', itemId ? { item_id: itemId } : {});
+export const stopCaptain = () => apiPost<{ killed: number }>('/api/captain/stop');
+export const nudgeWorker = (itemId: number, message: string) =>
+  apiPost<{ worker?: string; pid?: number }>('/api/captain/nudge', {
+    item_id: String(itemId),
+    message,
+  });
 export const handoffItem = (id: number) => apiPost<{ ok: boolean }>('/api/tasks/handoff', { id });
-export const adoptTask = (body: CaptainAdoptInput) => apiPost<TaskItem>('/api/captain/adopt', body);
 
 // Workers
 export const fetchWorkers = () => apiGet<WorkersResponse>('/api/workers');
-export const nudgeWorker = (itemId: string, message: string) =>
-  apiPost<{ ok: boolean; worker: string; pid: number }>('/api/captain/nudge', {
-    item_id: itemId,
-    message,
-  });
 
 // Cron
 export const fetchCron = () => apiGet<CronResponse>('/api/cron');
@@ -333,17 +336,19 @@ export const updatePatternStatus = (id: number, status: 'approved' | 'dismissed'
   apiPost<{ ok: boolean }>('/api/patterns/update', { id, status });
 
 export const runDistiller = () => apiPost<DistillerResponse>('/api/knowledge/learn');
+export const fetchKnowledgePending = () =>
+  apiGet<KnowledgePendingResponse>('/api/knowledge/pending');
+export const approveKnowledgeLesson = (lesson: { id: string }) =>
+  apiPost<{ ok: boolean; added: number; total: number }>('/api/knowledge/approve', {
+    lessons: [lesson],
+  });
 
 // SSE
 export function connectSSE(
   onEvent: (event: { event: string; ts: number; data?: unknown }) => void,
   onStatusChange?: (status: SSEConnectionStatus) => void,
 ): EventSource {
-  // EventSource cannot set custom headers, so pass auth token as query param.
-  const sseUrl = AUTH_TOKEN
-    ? buildUrl(`/api/events?token=${encodeURIComponent(AUTH_TOKEN)}`)
-    : buildUrl('/api/events');
-  const source = new EventSource(sseUrl);
+  const source = new EventSource(buildUrl('/api/events'));
 
   // Deduplicate status changes — EventSource reconnect loops can flood setState
   let lastStatus: SSEConnectionStatus | null = null;
@@ -384,8 +389,8 @@ export function connectSSE(
   };
 
   source.onerror = () => {
+    log.warn('[SSE] connection error — will auto-reconnect');
     emitStatus('disconnected');
-    // EventSource auto-reconnects
   };
 
   return source;

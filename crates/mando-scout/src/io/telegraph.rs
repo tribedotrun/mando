@@ -7,6 +7,7 @@ use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 
 use super::file_store;
 
@@ -22,13 +23,33 @@ fn cache_path(id: i64) -> PathBuf {
 
 /// Return cached Telegraph URL for an item, or None.
 pub fn get_cached_url(id: i64) -> Option<String> {
+    read_cache(id).map(|cache| cache.url)
+}
+
+/// Return cached Telegraph URL only if it still matches the current article.
+pub fn get_cached_url_if_fresh(id: i64, title: &str, article_md: &str) -> Option<String> {
+    let cache = read_cache(id)?;
+    cached_url_if_fresh(&cache, title, article_md)
+}
+
+/// Best-effort cache invalidation.
+pub fn invalidate_cache(id: i64) {
+    let path = cache_path(id);
+    if let Err(e) = std::fs::remove_file(&path) {
+        if e.kind() != std::io::ErrorKind::NotFound {
+            tracing::warn!(id, %e, path = %path.display(), "telegraph: failed to invalidate cache");
+        }
+    }
+}
+
+fn read_cache(id: i64) -> Option<TelegraphCache> {
     let path = cache_path(id);
     let text = match std::fs::read_to_string(&path) {
         Ok(t) => t,
         Err(_) => return None,
     };
-    match serde_json::from_str::<Value>(&text) {
-        Ok(data) => data["url"].as_str().map(|s| s.to_string()),
+    match serde_json::from_str::<TelegraphCache>(&text) {
+        Ok(cache) => Some(cache),
         Err(e) => {
             tracing::warn!(id, %e, "telegraph: corrupt cache file, ignoring");
             None
@@ -38,9 +59,10 @@ pub fn get_cached_url(id: i64) -> Option<String> {
 
 /// Publish article to Telegraph. Returns URL. Idempotent (returns cache if exists).
 pub async fn publish_article(id: i64, title: &str, article_md: &str) -> Result<String> {
-    if let Some(cached) = get_cached_url(id) {
+    if let Some(cached) = get_cached_url_if_fresh(id, title, article_md) {
         return Ok(cached);
     }
+    invalidate_cache(id);
 
     let token = ensure_token().await?;
     let html = markdown_to_telegraph_html(article_md);
@@ -57,11 +79,48 @@ pub async fn publish_article(id: i64, title: &str, article_md: &str) -> Result<S
         std::fs::create_dir_all(parent)
             .with_context(|| format!("telegraph: create cache dir {}", parent.display()))?;
     }
-    std::fs::write(&cache, serde_json::to_string(&result)?)
+    let cache_payload = TelegraphCache {
+        url: url.clone(),
+        title: Some(title.to_string()),
+        article_sha256: Some(article_sha256(article_md)),
+        raw: Some(result),
+    };
+    std::fs::write(&cache, serde_json::to_string(&cache_payload)?)
         .with_context(|| format!("telegraph: write cache for #{id}"))?;
 
     tracing::info!(id, %url, "telegraph: published");
     Ok(url)
+}
+
+fn article_sha256(article_md: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(article_md.as_bytes());
+    format!("{:x}", hasher.finalize())
+}
+
+fn cached_url_if_fresh(cache: &TelegraphCache, title: &str, article_md: &str) -> Option<String> {
+    if cache.title.as_deref() != Some(title) {
+        return None;
+    }
+    if cache.article_sha256.as_deref() != Some(&article_sha256(article_md)) {
+        return None;
+    }
+    Some(cache.url.clone())
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct TelegraphCache {
+    url: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    title: Option<String>,
+    #[serde(
+        default,
+        rename = "articleSha256",
+        skip_serializing_if = "Option::is_none"
+    )]
+    article_sha256: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    raw: Option<Value>,
 }
 
 async fn ensure_token() -> Result<String> {
@@ -321,5 +380,28 @@ mod tests {
     fn blockquote_conversion() {
         let html = markdown_to_telegraph_html("> quoted text");
         assert!(html.contains("<blockquote>quoted text</blockquote>"));
+    }
+
+    #[test]
+    fn fresh_cache_requires_title_and_body_match() {
+        let cache = TelegraphCache {
+            url: "https://telegra.ph/test".into(),
+            title: Some("Correct Title".into()),
+            article_sha256: Some(article_sha256("# Correct Title\n\nBody")),
+            raw: None,
+        };
+
+        assert_eq!(
+            cached_url_if_fresh(&cache, "Correct Title", "# Correct Title\n\nBody"),
+            Some("https://telegra.ph/test".into())
+        );
+        assert_eq!(
+            cached_url_if_fresh(&cache, "Wrong Title", "# Correct Title\n\nBody"),
+            None
+        );
+        assert_eq!(
+            cached_url_if_fresh(&cache, "Correct Title", "# Correct Title\n\nChanged"),
+            None
+        );
     }
 }

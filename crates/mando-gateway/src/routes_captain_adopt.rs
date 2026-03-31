@@ -9,7 +9,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use tokio::process::Command;
 
-use crate::response::error_response;
+use crate::response::{error_response, internal_error};
 use crate::AppState;
 
 fn resolve_adopt_project(
@@ -181,7 +181,7 @@ pub(crate) async fn post_captain_adopt(
             Some(&ctx),
         )
         .await
-        .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?;
+        .map_err(internal_error)?;
 
         let id = val["id"].as_i64().ok_or_else(|| {
             error_response(

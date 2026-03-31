@@ -6,7 +6,7 @@ use axum::Json;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use crate::response::error_response;
+use crate::response::{error_response, internal_error};
 use crate::AppState;
 
 #[derive(Deserialize, Default)]
@@ -284,7 +284,8 @@ pub(crate) async fn get_session_cost(
         ));
     }
     let cost = mando_cc::transcript::session_cost(&stream);
-    Ok(Json(serde_json::to_value(&cost).unwrap_or(Value::Null)))
+    let val = serde_json::to_value(&cost).map_err(internal_error)?;
+    Ok(Json(val))
 }
 
 /// Look up the CWD from stream meta sidecar (fallback when DB has no entry).

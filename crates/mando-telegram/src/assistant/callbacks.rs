@@ -1,7 +1,7 @@
 //! Callback query handlers for the assistant bot's inline keyboards.
 //!
 //! Callback data pattern: `dg:{action}:{item_id}`
-//! Actions: show, read, next, save, archive, rm
+//! Actions: show, read, sessions, next, save, archive, rm
 
 use anyhow::{Context, Result};
 use serde_json::Value;
@@ -20,6 +20,18 @@ pub async fn handle_callback(bot: &mut TelegramBot, cb: &Value) -> Result<()> {
 
     let data = cb.get("data").and_then(|v| v.as_str()).unwrap_or_default();
 
+    // DM-only: silently ignore callbacks from group chats.
+    let chat_type = cb
+        .get("message")
+        .and_then(|m| m.get("chat"))
+        .and_then(|c| c.get("type"))
+        .and_then(|t| t.as_str())
+        .unwrap_or("private");
+    if chat_type == "group" || chat_type == "supergroup" {
+        bot.api.answer_callback_query(cb_id, None).await?;
+        return Ok(());
+    }
+
     let chat_id = cb
         .get("message")
         .and_then(|m| m.get("chat"))
@@ -33,14 +45,6 @@ pub async fn handle_callback(bot: &mut TelegramBot, cb: &Value) -> Result<()> {
         .and_then(|m| m.get("message_id"))
         .and_then(|v| v.as_i64())
         .unwrap_or(0);
-
-    let is_group = cb
-        .get("message")
-        .and_then(|m| m.get("chat"))
-        .and_then(|c| c.get("type"))
-        .and_then(|t| t.as_str())
-        .map(|t| t == "group" || t == "supergroup")
-        .unwrap_or(false);
 
     let user_id = {
         let from = cb.get("from");
@@ -61,7 +65,7 @@ pub async fn handle_callback(bot: &mut TelegramBot, cb: &Value) -> Result<()> {
     };
 
     let tg_config = &config.channels.telegram;
-    if !permissions::is_allowed(tg_config, &user_id) {
+    if !permissions::is_owner(tg_config, &user_id) {
         bot.api.answer_callback_query(cb_id, None).await?;
         return Ok(());
     }
@@ -167,16 +171,17 @@ pub async fn handle_callback(bot: &mut TelegramBot, cb: &Value) -> Result<()> {
     debug!(action = %action, item_id = id, "callback received");
 
     match action {
-        "show" => cb_show(bot, cb_id, &chat_id, message_id, id, is_group).await,
-        "read" => cb_read(bot, cb_id, &chat_id, id, is_group).await,
-        "next" => cb_next(bot, cb_id, &chat_id, message_id, id, is_group).await,
+        "show" => cb_show(bot, cb_id, &chat_id, message_id, id).await,
+        "read" => cb_read(bot, cb_id, &chat_id, id).await,
+        "sessions" => cb_sessions(bot, cb_id, &chat_id, id).await,
+        "next" => cb_next(bot, cb_id, &chat_id, message_id, id).await,
         "save" => {
             bot.api
                 .answer_callback_query(cb_id, Some("Saving\u{2026}"))
                 .await?;
             let body = serde_json::json!({"status": "saved"});
             bot.gw().patch(&paths::scout_item(id), &body).await?;
-            swipe_next(bot, &chat_id, message_id, id, is_group).await
+            swipe_next(bot, &chat_id, message_id, id).await
         }
         "archive" => {
             bot.api
@@ -184,14 +189,14 @@ pub async fn handle_callback(bot: &mut TelegramBot, cb: &Value) -> Result<()> {
                 .await?;
             let body = serde_json::json!({"status": "archived"});
             bot.gw().patch(&paths::scout_item(id), &body).await?;
-            swipe_next(bot, &chat_id, message_id, id, is_group).await
+            swipe_next(bot, &chat_id, message_id, id).await
         }
         "rm" => {
             bot.api
                 .answer_callback_query(cb_id, Some("Removing\u{2026}"))
                 .await?;
             bot.gw().delete(&paths::scout_item(id)).await?;
-            swipe_next(bot, &chat_id, message_id, id, is_group).await
+            swipe_next(bot, &chat_id, message_id, id).await
         }
         "ask" => {
             bot.api
@@ -226,9 +231,7 @@ pub async fn handle_callback(bot: &mut TelegramBot, cb: &Value) -> Result<()> {
             let summary = item["summary"].as_str();
             let text = format_swipe_card(&item, summary);
             let tg_url = item["telegraphUrl"].as_str();
-            let item_type = item["item_type"].as_str();
-            let orig_url = item["url"].as_str();
-            let kb = swipe_card_kb(id, is_group, tg_url, item_type, orig_url);
+            let kb = swipe_card_kb(id, tg_url);
             bot.api
                 .send_message(&chat_id, &text, Some("HTML"), Some(kb), true)
                 .await?;
@@ -248,16 +251,13 @@ async fn cb_show(
     chat_id: &str,
     message_id: i64,
     id: i64,
-    is_group: bool,
 ) -> Result<()> {
     bot.api.answer_callback_query(cb_id, None).await?;
     let item = bot.gw().get(&paths::scout_item(id)).await?;
     let summary = item["summary"].as_str();
     let text = format_swipe_card(&item, summary);
     let tg_url = item["telegraphUrl"].as_str();
-    let item_type = item["item_type"].as_str();
-    let orig_url = item["url"].as_str();
-    let kb = swipe_card_kb(id, is_group, tg_url, item_type, orig_url);
+    let kb = swipe_card_kb(id, tg_url);
     if let Err(e) = bot
         .api
         .edit_message_text(chat_id, message_id, &text, Some("HTML"), Some(kb.clone()))
@@ -271,38 +271,14 @@ async fn cb_show(
     Ok(())
 }
 
-/// Read article — YouTube: open Telegraph link (publish on demand if needed).
-/// Non-YouTube: link to original URL.
-async fn cb_read(
-    bot: &TelegramBot,
-    cb_id: &str,
-    chat_id: &str,
-    id: i64,
-    is_group: bool,
-) -> Result<()> {
+/// Read article — always open the extracted Telegraph article.
+async fn cb_read(bot: &TelegramBot, cb_id: &str, chat_id: &str, id: i64) -> Result<()> {
     bot.api
         .answer_callback_query(cb_id, Some("Loading\u{2026}"))
         .await?;
 
     let item = bot.gw().get(&paths::scout_item(id)).await?;
     let title = item["title"].as_str().unwrap_or("Untitled");
-    let item_type = item["item_type"].as_str().unwrap_or("other");
-
-    // Non-YouTube: link directly to the original URL.
-    if item_type != "youtube" {
-        let url = item["url"].as_str().unwrap_or("");
-        let msg = format!(
-            "\u{1f4d6} <a href=\"{}\">{}</a>",
-            mando_shared::telegram_format::escape_html(url),
-            mando_shared::telegram_format::escape_html(title),
-        );
-        bot.api
-            .send_message(chat_id, &msg, Some("HTML"), None, true)
-            .await?;
-        return Ok(());
-    }
-
-    // YouTube: use Telegraph article.
     let article = bot.gw().get(&paths::scout_article(id)).await?;
 
     let telegraph_url = match article["telegraphUrl"].as_str() {
@@ -320,7 +296,7 @@ async fn cb_read(
         }
     };
 
-    let kb = telegraph_read_kb(id, &telegraph_url, is_group);
+    let kb = telegraph_read_kb(id, &telegraph_url);
     let msg = format!(
         "\u{1f4d6} <a href=\"{}\">{}</a>",
         mando_shared::telegram_format::escape_html(&telegraph_url),
@@ -332,6 +308,45 @@ async fn cb_read(
     Ok(())
 }
 
+async fn cb_sessions(bot: &TelegramBot, cb_id: &str, chat_id: &str, id: i64) -> Result<()> {
+    bot.api
+        .answer_callback_query(cb_id, Some("Loading sessions\u{2026}"))
+        .await?;
+
+    let sessions = bot.gw().get(&paths::scout_sessions(id)).await?;
+    let rows = sessions.as_array().cloned().unwrap_or_default();
+    if rows.is_empty() {
+        bot.api
+            .send_message(
+                chat_id,
+                &format!("\u{1f9f5} No sessions linked to Scout item #{id}."),
+                None,
+                None,
+                true,
+            )
+            .await?;
+        return Ok(());
+    }
+
+    let mut lines = vec![format!("\u{1f9f5} <b>Scout item #{id} sessions</b>")];
+    for session in rows.into_iter().take(10) {
+        let session_id = session["session_id"].as_str().unwrap_or("?");
+        let caller = session["caller"].as_str().unwrap_or("?");
+        let status = session["status"].as_str().unwrap_or("?");
+        lines.push(format!(
+            "\n\u{2022} <code>{}</code> {} \u{00b7} {}",
+            mando_shared::telegram_format::escape_html(session_id),
+            mando_shared::telegram_format::escape_html(caller),
+            mando_shared::telegram_format::escape_html(status),
+        ));
+    }
+
+    bot.api
+        .send_message(chat_id, &lines.join("\n"), Some("HTML"), None, true)
+        .await?;
+    Ok(())
+}
+
 /// Next button — advance to next processed item.
 async fn cb_next(
     bot: &TelegramBot,
@@ -339,10 +354,9 @@ async fn cb_next(
     chat_id: &str,
     message_id: i64,
     current_id: i64,
-    is_group: bool,
 ) -> Result<()> {
     bot.api.answer_callback_query(cb_id, None).await?;
-    swipe_next(bot, chat_id, message_id, current_id, is_group).await
+    swipe_next(bot, chat_id, message_id, current_id).await
 }
 
 /// Advance to the next processed item after the given ID.
@@ -353,7 +367,6 @@ async fn swipe_next(
     chat_id: &str,
     message_id: i64,
     after_id: i64,
-    is_group: bool,
 ) -> Result<()> {
     let result = bot.gw().get(&paths::processed_scout_items(10000)).await?;
 
@@ -371,9 +384,7 @@ async fn swipe_next(
             let summary = full_item["summary"].as_str();
             let text = format_swipe_card(&full_item, summary);
             let tg_url = full_item["telegraphUrl"].as_str();
-            let item_type = full_item["item_type"].as_str();
-            let orig_url = full_item["url"].as_str();
-            let kb = swipe_card_kb(id, is_group, tg_url, item_type, orig_url);
+            let kb = swipe_card_kb(id, tg_url);
 
             if let Err(e) = bot
                 .api

@@ -8,7 +8,9 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
-use mando_types::{CronJob, CronPayload, CronSchedule, CronState};
+use mando_types::{
+    CronJob, CronPayload, CronSchedule, CronState, JobType, PayloadKind, ScheduleKind,
+};
 use sqlx::SqlitePool;
 use tokio::task::JoinHandle;
 use tracing::{error, info};
@@ -130,7 +132,7 @@ impl CronService {
             enabled: true,
             schedule,
             payload: CronPayload {
-                kind: "agent_turn".into(),
+                kind: PayloadKind::AgentTurn,
                 message,
                 deliver: false,
                 channel: None,
@@ -145,7 +147,7 @@ impl CronService {
             created_at_ms: now_ms,
             updated_at_ms: now_ms,
             delete_after_run: false,
-            job_type: "system".into(),
+            job_type: JobType::System,
             cwd: None,
             timeout_s: 1200,
         };
@@ -222,7 +224,7 @@ impl CronService {
     fn get_next_wake_ms(&self) -> Option<i64> {
         self.jobs
             .iter()
-            .filter(|j| j.enabled && j.state.next_run_at_ms.is_some())
+            .filter(|j| j.enabled)
             .filter_map(|j| j.state.next_run_at_ms)
             .min()
     }
@@ -276,7 +278,7 @@ impl CronService {
                         job.state.last_error = Some(e.clone());
                     }
                 }
-                if job.schedule.kind == "at" {
+                if job.schedule.kind == ScheduleKind::At {
                     job.enabled = false;
                     job.state.next_run_at_ms = None;
                 } else {
@@ -315,7 +317,7 @@ impl CronService {
             stored.state.last_run_at_ms = Some(start);
             stored.updated_at_ms = now_ms();
 
-            if stored.schedule.kind == "at" {
+            if stored.schedule.kind == ScheduleKind::At {
                 if stored.delete_after_run {
                     let id = stored.id.clone();
                     self.jobs.retain(|j| j.id != id);
@@ -360,7 +362,7 @@ mod tests {
         svc.start().await;
 
         let schedule = CronSchedule {
-            kind: "every".into(),
+            kind: ScheduleKind::Every,
             every_ms: Some(60_000),
             ..CronSchedule::default()
         };
@@ -389,7 +391,7 @@ mod tests {
         svc.start().await;
 
         let schedule = CronSchedule {
-            kind: "every".into(),
+            kind: ScheduleKind::Every,
             every_ms: Some(60_000),
             ..CronSchedule::default()
         };
@@ -417,7 +419,7 @@ mod tests {
         svc.start().await;
 
         let schedule = CronSchedule {
-            kind: "every".into(),
+            kind: ScheduleKind::Every,
             every_ms: Some(60_000),
             ..CronSchedule::default()
         };

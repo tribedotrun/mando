@@ -63,8 +63,12 @@ pub fn write_port_file(port: u16, dev: bool) {
 
 /// Remove PID and port files on shutdown.
 pub fn cleanup_files(dev: bool) {
-    fs::remove_file(pid_path()).ok();
-    fs::remove_file(port_path(dev)).ok();
+    if let Err(e) = fs::remove_file(pid_path()) {
+        tracing::debug!(error = %e, "failed to remove PID file on shutdown");
+    }
+    if let Err(e) = fs::remove_file(port_path(dev)) {
+        tracing::debug!(error = %e, "failed to remove port file on shutdown");
+    }
 }
 
 /// Check if a process with the given PID is still alive.

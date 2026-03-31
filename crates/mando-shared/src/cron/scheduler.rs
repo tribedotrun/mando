@@ -2,18 +2,18 @@
 //!
 //! No I/O, no async — pure functions only.
 
-use mando_types::CronSchedule;
+use mando_types::{CronSchedule, ScheduleKind};
 
 use super::parser::CronExpr;
 
 /// Compute the next run time in milliseconds for a given schedule.
 ///
-/// - `"every"`: `now_ms + every_ms`
-/// - `"at"`: `at_ms` if in the future, else `None`
-/// - `"cron"`: parse expression, walk forward from `now_ms`
+/// - `Every`: `now_ms + every_ms`
+/// - `At`: `at_ms` if in the future, else `None`
+/// - `Cron`: parse expression, walk forward from `now_ms`
 pub fn compute_next_run(schedule: &CronSchedule, now_ms: i64) -> Option<i64> {
-    match schedule.kind.as_str() {
-        "at" => {
+    match schedule.kind {
+        ScheduleKind::At => {
             let at = schedule.at_ms?;
             if at > now_ms {
                 Some(at)
@@ -21,50 +21,46 @@ pub fn compute_next_run(schedule: &CronSchedule, now_ms: i64) -> Option<i64> {
                 None
             }
         }
-        "every" => {
+        ScheduleKind::Every => {
             let every = schedule.every_ms?;
             if every <= 0 {
                 return None;
             }
             Some(now_ms + every)
         }
-        "cron" => {
+        ScheduleKind::Cron => {
             let expr_str = schedule.expr.as_deref()?;
             let parsed = CronExpr::parse(expr_str).ok()?;
             let now_secs = now_ms / 1000;
             let next_secs = parsed.next_after(now_secs)?;
             Some(next_secs * 1000)
         }
-        _ => None,
     }
 }
 
 /// Validate a schedule for adding a new cron job.
 pub fn validate_schedule(schedule: &CronSchedule) -> Result<(), String> {
-    match schedule.kind.as_str() {
-        "at" => {
+    match schedule.kind {
+        ScheduleKind::At => {
             if schedule.at_ms.is_none() {
                 return Err("'at' schedule requires at_ms".into());
             }
         }
-        "every" => match schedule.every_ms {
+        ScheduleKind::Every => match schedule.every_ms {
             Some(ms) if ms > 0 => {}
             _ => return Err("'every' schedule requires positive every_ms".into()),
         },
-        "cron" => {
+        ScheduleKind::Cron => {
             let expr_str = schedule
                 .expr
                 .as_deref()
                 .ok_or("'cron' schedule requires expr")?;
             CronExpr::parse(expr_str).map_err(|e| format!("invalid cron expression: {e}"))?;
         }
-        other => {
-            return Err(format!("unknown schedule kind: '{other}'"));
-        }
     }
 
     // tz only valid for cron kind
-    if schedule.tz.is_some() && schedule.kind != "cron" {
+    if schedule.tz.is_some() && schedule.kind != ScheduleKind::Cron {
         return Err("tz can only be used with cron schedules".into());
     }
 
@@ -77,7 +73,7 @@ mod tests {
 
     fn make_every(ms: i64) -> CronSchedule {
         CronSchedule {
-            kind: "every".into(),
+            kind: ScheduleKind::Every,
             every_ms: Some(ms),
             ..CronSchedule::default()
         }
@@ -85,7 +81,7 @@ mod tests {
 
     fn make_at(ms: i64) -> CronSchedule {
         CronSchedule {
-            kind: "at".into(),
+            kind: ScheduleKind::At,
             at_ms: Some(ms),
             ..CronSchedule::default()
         }
@@ -93,7 +89,7 @@ mod tests {
 
     fn make_cron(expr: &str) -> CronSchedule {
         CronSchedule {
-            kind: "cron".into(),
+            kind: ScheduleKind::Cron,
             expr: Some(expr.into()),
             ..CronSchedule::default()
         }
@@ -160,14 +156,5 @@ mod tests {
     #[test]
     fn validate_cron_ok() {
         assert!(validate_schedule(&make_cron("*/5 * * * *")).is_ok());
-    }
-
-    #[test]
-    fn validate_unknown_kind() {
-        let s = CronSchedule {
-            kind: "bogus".into(),
-            ..CronSchedule::default()
-        };
-        assert!(validate_schedule(&s).is_err());
     }
 }

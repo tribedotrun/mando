@@ -132,19 +132,21 @@ export function Sidebar({
     return [...names].sort();
   }, [projectCounts, configProjects]);
 
+  const homeActive = activeTab === 'captain' && !projectFilter;
+
   return (
     <aside
       className="flex w-[200px] shrink-0 flex-col"
       style={{
         background: 'var(--color-surface-1)',
         borderRight: '1px solid var(--color-border-subtle)',
-        paddingTop: 38,
+        paddingTop: 48,
         paddingBottom: 16,
         paddingLeft: 12,
         paddingRight: 12,
       }}
     >
-      {/* New task — primary action at top */}
+      {/* New task — primary action */}
       <button
         onClick={onNewTask}
         className="flex w-full items-center text-[13px] transition-colors"
@@ -162,7 +164,7 @@ export function Sidebar({
       </button>
 
       {/* Nav items */}
-      <nav className="flex flex-col" style={{ paddingTop: 16, gap: 1 }}>
+      <nav className="flex flex-col" style={{ paddingTop: 16, gap: 4 }}>
         {visibleNav.map(({ id, label, Icon }) => {
           const active = activeTab === id && !projectFilter;
           return (
@@ -194,13 +196,25 @@ export function Sidebar({
       {/* Projects section */}
       {projects.length > 0 && (
         <div className="flex-1 overflow-auto" style={{ paddingTop: 24 }}>
-          <div
-            className="text-label flex items-center justify-between"
-            style={{ color: 'var(--color-text-3)', padding: '0 10px', marginBottom: 8 }}
+          <button
+            data-testid="home-tab"
+            onClick={() => {
+              onTabChange('captain');
+              onProjectFilter(null);
+            }}
+            className="text-label flex w-full items-center justify-between transition-colors"
+            style={{
+              color: homeActive ? 'var(--color-text-2)' : 'var(--color-text-3)',
+              padding: '0 10px',
+              marginBottom: 8,
+              background: 'transparent',
+              border: 'none',
+              cursor: 'pointer',
+            }}
           >
             <span>Projects</span>
-          </div>
-          <div className="flex flex-col" style={{ gap: 2 }}>
+          </button>
+          <div className="flex flex-col" style={{ gap: 4 }}>
             {projects.map((name) => {
               const active = projectFilter === name;
               return (

@@ -61,17 +61,15 @@ pub(super) async fn check_pr_mergeable(pr: &str, repo: &str) -> Result<MergeStat
 
 /// Reap dead rebase workers and detect success via SHA comparison.
 ///
-/// Uses the tick-level health state to avoid re-reading from disk per worker.
-pub(super) async fn reap_dead_rebase_workers(
-    items: &mut [Task],
-    health_state: &crate::io::health_store::HealthState,
-) {
+/// Uses pid_registry for PID lookup.
+pub(super) async fn reap_dead_rebase_workers(items: &mut [Task]) {
     for item in items.iter_mut() {
         let rw = match &item.rebase_worker {
             Some(rw) if rw != "failed" => rw.clone(),
             _ => continue,
         };
-        let pid = crate::io::health_store::get_health_u32(health_state, &rw, "pid");
+        // Look up rebase worker PID from pid_registry (registered by session_name).
+        let pid = crate::io::pid_registry::get_pid(&rw).unwrap_or(0);
         if pid != 0 && mando_cc::is_process_alive(pid) {
             continue; // still running
         }
@@ -116,6 +114,8 @@ pub(super) async fn reap_dead_rebase_workers(
             );
         }
 
+        // Unregister PID for the worker_name key (registered at spawn time).
+        crate::io::pid_registry::unregister(&rw);
         item.rebase_worker = None;
     }
 }
@@ -224,9 +224,9 @@ pub(super) async fn handle_conflict(
         .unwrap_or(&default_branch_raw)
         .to_string();
     let branch = item.branch.as_deref().unwrap_or("");
-    let pr_num = super::ci_gate::parse_pr_url(pr)
-        .map(|(_, n)| n)
-        .unwrap_or_else(|| pr.trim_start_matches('#').to_string());
+    let pr_num = mando_types::task::extract_pr_number(pr)
+        .unwrap_or(pr.trim_start_matches('#'))
+        .to_string();
 
     tracing::info!(
         module = "captain",
@@ -317,7 +317,9 @@ pub(super) async fn handle_conflict(
     .await
     {
         Ok((pid, _)) => {
-            crate::io::health_store::persist_worker_pid(&session_name, pid);
+            // Register by session_name (not session_id) — reap_dead_rebase_workers
+            // looks up by worker name and unregisters it on completion.
+            crate::io::pid_registry::register(&session_name, pid);
             let item = &mut items[idx];
             item.rebase_worker = Some(session_name.clone());
             item.rebase_retries = merge_logic::next_rebase_retry(item) as i64;

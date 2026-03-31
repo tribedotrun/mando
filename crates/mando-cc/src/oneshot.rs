@@ -18,10 +18,23 @@ impl CcOneShot {
     /// Sends prompt via stdin (not `-p`), waits for result, returns typed output.
     /// Hooks work because stdin stays open until the result message arrives.
     pub async fn run(prompt: &str, config: CcConfig) -> Result<CcResult> {
+        Self::run_with_pid_hook(prompt, config, |_| {}).await
+    }
+
+    /// Run with a callback fired immediately after the CC process spawns.
+    ///
+    /// Use this when you need to register the PID before waiting for the result
+    /// (e.g., for liveness tracking in a PID registry).
+    pub async fn run_with_pid_hook(
+        prompt: &str,
+        config: CcConfig,
+        on_spawn: impl FnOnce(u32),
+    ) -> Result<CcResult> {
         let timeout = config.timeout;
         let caller = config.caller.clone();
 
         let mut session = crate::CcSession::spawn(config).await?;
+        on_spawn(session.pid());
 
         // Send the prompt.
         session.send_message(prompt).await?;

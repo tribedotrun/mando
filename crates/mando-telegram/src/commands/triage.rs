@@ -6,6 +6,7 @@ use serde_json::json;
 use mando_shared::telegram_format::escape_html;
 
 use crate::bot::TelegramBot;
+use crate::gateway_paths as paths;
 
 /// Handle `/triage`.
 pub async fn handle(bot: &TelegramBot, chat_id: &str, _args: &str) -> Result<()> {
@@ -14,7 +15,7 @@ pub async fn handle(bot: &TelegramBot, chat_id: &str, _args: &str) -> Result<()>
         .await?;
     let ack_mid = ack.get("message_id").and_then(|v| v.as_i64()).unwrap_or(0);
 
-    match bot.gw().post("/api/captain/triage", &json!({})).await {
+    match bot.gw().post(paths::CAPTAIN_TRIAGE, &json!({})).await {
         Ok(resp) => {
             let items = resp["items"].as_array().cloned().unwrap_or_default();
             if items.is_empty() {
@@ -27,7 +28,7 @@ pub async fn handle(bot: &TelegramBot, chat_id: &str, _args: &str) -> Result<()>
 
             // Format triage results for Telegram
             let mut lines = Vec::new();
-            lines.push(format!("<b>{} Pending-Review Items</b>\n", items.len()));
+            lines.push(format!("<b>{} Pending-Review Tasks</b>\n", items.len()));
 
             for (i, item) in items.iter().enumerate() {
                 let repo = item["repo"].as_str().unwrap_or("?");

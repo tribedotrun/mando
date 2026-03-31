@@ -5,43 +5,9 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 
-/// Resolve the `claude` binary path.
-///
-/// Checks `MANDO_CC_CLAUDE_BIN` first (integration tests use `mando-cc-mock`),
-/// then PATH, then known install locations.
+/// Resolve the `claude` binary path — delegates to `mando_cc`.
 pub fn resolve_claude_binary() -> PathBuf {
-    // 0. MANDO_CC_CLAUDE_BIN override (integration tests).
-    if let Ok(p) = std::env::var("MANDO_CC_CLAUDE_BIN") {
-        let pb = PathBuf::from(&p);
-        if !pb.as_os_str().is_empty() && (pb.is_absolute() || pb.exists()) {
-            return pb;
-        }
-    }
-
-    // 1. Check PATH via which.
-    if let Ok(output) = std::process::Command::new("which").arg("claude").output() {
-        if output.status.success() {
-            let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            if !path.is_empty() {
-                return PathBuf::from(path);
-            }
-        }
-    }
-
-    // 2. Check known locations.
-    let home = std::env::var("HOME").unwrap_or_default();
-    let candidates = [
-        format!("{}/.npm-global/bin/claude", home),
-        format!("{}/.local/bin/claude", home),
-        "/usr/local/bin/claude".to_string(),
-    ];
-    for c in &candidates {
-        if Path::new(c).exists() {
-            return PathBuf::from(c);
-        }
-    }
-
-    PathBuf::from("claude")
+    mando_cc::resolve_claude_binary()
 }
 
 /// Spawn a long-lived worker CC process with stream-json output.

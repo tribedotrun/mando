@@ -20,21 +20,15 @@ fn parse_full_config() {
             "analytics": true
         },
         "channels": {
-            "sendProgress": false,
-            "sendToolHints": true,
             "telegram": {
                 "enabled": true,
-                "owner": "bill",
-                "allowFrom": ["u1", "u2"],
-                "proxy": "socks5://proxy",
-                "replyToMessage": true
+                "owner": "bill"
             }
         },
         "gateway": {
             "host": "127.0.0.1",
             "port": 9090,
             "dashboard": {
-                "enabled": false,
                 "host": "0.0.0.0",
                 "port": 8080
             }
@@ -56,14 +50,6 @@ fn parse_full_config() {
             "linearTeam": "XYZ"
         },
         "tools": {
-            "restrictToWorkspace": true,
-            "web": {
-                "search": { "maxResults": 10 }
-            },
-            "exec": { "timeout": 120 },
-            "mcpServers": {
-                "test-mcp": { "command": "npx", "args": ["serve"] }
-            },
             "ccSelfImprove": {
                 "pollIntervalS": 5.0,
                 "cooldownS": 600,
@@ -92,20 +78,12 @@ fn parse_full_config() {
     assert!(cfg.features.analytics);
 
     // Channels
-    assert!(!cfg.channels.send_progress);
     assert!(cfg.channels.telegram.enabled);
     assert_eq!(cfg.channels.telegram.token, "tok-123");
     assert_eq!(cfg.channels.telegram.owner, "bill");
-    assert_eq!(cfg.channels.telegram.allow_from, vec!["u1", "u2"]);
-    assert_eq!(
-        cfg.channels.telegram.proxy,
-        Some("socks5://proxy".to_string())
-    );
-    assert!(cfg.channels.telegram.reply_to_message);
     // Gateway
     assert_eq!(cfg.gateway.host, "127.0.0.1");
     assert_eq!(cfg.gateway.port, 9090);
-    assert!(!cfg.gateway.dashboard.enabled);
     assert_eq!(cfg.gateway.dashboard.host, "0.0.0.0");
     assert_eq!(cfg.gateway.dashboard.port, 8080);
 
@@ -121,12 +99,6 @@ fn parse_full_config() {
     assert_eq!(project.aliases, vec!["rp", "repo"]);
     assert_eq!(project.hooks.get("pre_spawn").unwrap(), "echo hi");
     assert_eq!(project.worker_preamble, "be careful");
-
-    // Tools
-    assert!(cfg.tools.restrict_to_workspace);
-    assert_eq!(cfg.tools.web.search.max_results, 10);
-    assert_eq!(cfg.tools.exec.timeout, 120);
-    assert!(cfg.tools.mcp_servers.contains_key("test-mcp"));
 
     // Self-improve
     assert_eq!(cfg.tools.cc_self_improve.poll_interval_s, 5.0);
@@ -154,12 +126,10 @@ fn parse_minimal_config_uses_defaults() {
     assert!(!cfg.features.linear);
     assert!(!cfg.features.dev_mode);
     assert!(!cfg.features.analytics);
-    assert!(cfg.channels.send_progress);
     assert!(!cfg.channels.telegram.enabled);
     assert_eq!(cfg.channels.telegram.token, "");
     assert_eq!(cfg.gateway.host, "0.0.0.0");
     assert_eq!(cfg.gateway.port, 18790);
-    assert!(cfg.gateway.dashboard.enabled);
     assert_eq!(cfg.gateway.dashboard.port, 18791);
     assert!(!cfg.captain.auto_schedule);
     assert_eq!(cfg.captain.tick_interval_s, 30);

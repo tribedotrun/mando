@@ -269,6 +269,31 @@ pub async fn update_session_status(
     Ok(())
 }
 
+/// Get a single session by ID.
+pub async fn session_by_id(pool: &SqlitePool, session_id: &str) -> Result<Option<SessionRow>> {
+    let row: Option<SessionRow> = sqlx::query_as(
+        "SELECT session_id, created_at, caller, cwd, model, status,
+                cost_usd, duration_ms, resumed, turn_count,
+                task_id, scout_item_id, worker_name
+         FROM cc_sessions WHERE session_id = ?",
+    )
+    .bind(session_id)
+    .fetch_optional(pool)
+    .await?;
+    Ok(row)
+}
+
+/// Check if a specific session is currently running (single-row query).
+pub async fn is_session_running(pool: &SqlitePool, session_id: &str) -> Result<bool> {
+    let count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM cc_sessions WHERE session_id = ? AND status = 'running'",
+    )
+    .bind(session_id)
+    .fetch_one(pool)
+    .await?;
+    Ok(count > 0)
+}
+
 /// List all sessions currently marked as running (for tick reconciliation).
 pub async fn list_running_sessions(pool: &SqlitePool) -> Result<Vec<SessionRow>> {
     let rows: Vec<SessionRow> = sqlx::query_as(
@@ -277,6 +302,23 @@ pub async fn list_running_sessions(pool: &SqlitePool) -> Result<Vec<SessionRow>>
                 task_id, scout_item_id, worker_name
          FROM cc_sessions WHERE status = 'running'",
     )
+    .fetch_all(pool)
+    .await?;
+    Ok(rows)
+}
+
+/// List running sessions for a specific task (for cancel cleanup).
+pub async fn list_running_sessions_for_task(
+    pool: &SqlitePool,
+    task_id: &str,
+) -> Result<Vec<SessionRow>> {
+    let rows: Vec<SessionRow> = sqlx::query_as(
+        "SELECT session_id, created_at, caller, cwd, model, status,
+                cost_usd, duration_ms, resumed, turn_count,
+                task_id, scout_item_id, worker_name
+         FROM cc_sessions WHERE task_id = ? AND status = 'running'",
+    )
+    .bind(task_id)
     .fetch_all(pool)
     .await?;
     Ok(rows)

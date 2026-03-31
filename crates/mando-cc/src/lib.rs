@@ -58,6 +58,8 @@ pub struct CcResult<T = serde_json::Value> {
     pub stream_path: std::path::PathBuf,
     /// Most recent rate limit event observed during the session (if any).
     pub rate_limit: Option<RateLimitEvent>,
+    /// PID of the CC process (0 if unknown / already exited).
+    pub pid: u32,
 }
 
 /// Metadata for session logging.

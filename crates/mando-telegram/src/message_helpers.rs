@@ -43,14 +43,6 @@ pub(crate) fn extract_user_id(msg: &Value) -> String {
     }
 }
 
-pub(crate) fn is_group_chat(msg: &Value) -> bool {
-    msg.get("chat")
-        .and_then(|c| c.get("type"))
-        .and_then(|t| t.as_str())
-        .map(|t| t == "group" || t == "supergroup")
-        .unwrap_or(false)
-}
-
 pub(crate) fn bc(command: &str, description: &str) -> BotCommand {
     BotCommand {
         command: command.into(),

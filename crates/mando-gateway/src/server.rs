@@ -7,7 +7,7 @@ use axum::http::{header, Method};
 use axum::routing::{delete, get, patch, post, put};
 use axum::{middleware, Router};
 use tokio::sync::{Mutex, RwLock};
-use tower_http::cors::CorsLayer;
+use tower_http::cors::{AllowOrigin, CorsLayer};
 use tracing::info;
 
 use crate::auth;
@@ -39,7 +39,11 @@ use crate::AppState;
 /// Build the full axum router with all routes and middleware.
 pub fn build_router(state: AppState) -> Router {
     let cors = CorsLayer::new()
-        .allow_origin(tower_http::cors::Any)
+        .allow_origin(AllowOrigin::predicate(|origin, _| {
+            origin.to_str().ok().is_some_and(|value| {
+                value.starts_with("http://127.0.0.1:") || value.starts_with("http://localhost:")
+            })
+        }))
         .allow_methods([
             Method::GET,
             Method::POST,
@@ -54,7 +58,7 @@ pub fn build_router(state: AppState) -> Router {
         .merge(
             Router::new()
                 .route("/api/events", get(sse::sse_events))
-                .route_layer(middleware::from_fn(auth::require_sse_auth)),
+                .route_layer(middleware::from_fn(auth::require_auth)),
         )
         .merge(protected_routes())
         .layer(middleware::from_fn(request_id::inject_request_id))
@@ -73,7 +77,6 @@ fn protected_routes() -> Router<AppState> {
         .merge(cron_routes())
         .merge(session_routes())
         .merge(knowledge_routes())
-        .merge(clarifier_routes())
         .merge(ops_routes())
         .merge(config_routes())
         .merge(channel_routes())
@@ -141,8 +144,8 @@ fn task_routes() -> Router<AppState> {
             post(routes_task_actions::post_task_retry),
         )
         .route(
-            "/api/tasks/answer",
-            post(routes_task_actions::post_task_answer),
+            "/api/tasks/{id}/clarify",
+            post(routes_clarifier::post_task_clarify),
         )
         .route(
             "/api/tasks/{id}/archive",
@@ -285,22 +288,6 @@ fn knowledge_routes() -> Router<AppState> {
         )
 }
 
-fn clarifier_routes() -> Router<AppState> {
-    Router::new()
-        .route(
-            "/api/clarifier/start",
-            post(routes_clarifier::post_clarifier_start),
-        )
-        .route(
-            "/api/clarifier/message",
-            post(routes_clarifier::post_clarifier_message),
-        )
-        .route(
-            "/api/clarifier/cancel",
-            post(routes_clarifier::post_clarifier_cancel),
-        )
-}
-
 fn ops_routes() -> Router<AppState> {
     Router::new()
         .route("/api/ops/start", post(routes_ops::post_ops_start))
@@ -385,12 +372,13 @@ pub async fn start_server(
 ) -> anyhow::Result<()> {
     let host = config.gateway.dashboard.host.clone();
     let port = config.gateway.dashboard.port;
+    let runtime_paths = mando_config::resolve_captain_runtime_paths(&config);
+    mando_config::set_active_captain_runtime_paths(runtime_paths.clone());
 
     let bus_arc = Arc::new(bus);
 
     // Unified DB pool — shared across all subsystems.
-    let db_path = mando_config::data_dir().join("mando.db");
-    let db = mando_db::Db::open(&db_path).await?;
+    let db = mando_db::Db::open(&runtime_paths.task_db_path).await?;
     let db = Arc::new(db);
     let task_store = mando_captain::io::task_store::TaskStore::new(db.pool().clone());
     let task_store_arc = Arc::new(RwLock::new(task_store));
@@ -409,6 +397,9 @@ pub async fn start_server(
     let tick_interval_s = config.captain.tick_interval_s.max(10);
     let learn_cron_expr = config.captain.learn_cron_expr.clone();
 
+    // Clean dead PIDs first so reconciliation sees accurate liveness state.
+    mando_captain::io::pid_registry::cleanup_dead();
+
     // Reconcile incomplete operations from previous run (WAL recovery).
     if let Err(e) =
         mando_captain::runtime::reconciler::reconcile_on_startup(&config, db.pool()).await
@@ -420,11 +411,6 @@ pub async fn start_server(
     let scout_wf = mando_config::load_scout_workflow(&mando_config::scout_workflow_path(), &config);
     let voice_wf = mando_config::load_voice_workflow(&mando_config::voice_workflow_path());
 
-    let mut clarifier_mgr = mando_captain::runtime::clarifier::ClarifierSessionManager::new(
-        &captain_wf.models.clarifier,
-        db.pool().clone(),
-    );
-    clarifier_mgr.recover();
     let cc_state_dir = mando_config::state_dir().join("ops_sessions").join("cc");
     let mut cc_session_mgr = mando_captain::io::cc_session::CcSessionManager::new(
         cc_state_dir,
@@ -435,13 +421,13 @@ pub async fn start_server(
 
     let state = AppState {
         config: config_arc,
+        runtime_paths,
         captain_workflow: Arc::new(ArcSwap::from_pointee(captain_wf)),
         scout_workflow: Arc::new(ArcSwap::from_pointee(scout_wf)),
         voice_workflow: Arc::new(ArcSwap::from_pointee(voice_wf)),
         config_write_mu: Arc::new(Mutex::new(())),
         bus: bus_arc.clone(),
         cron_service: Arc::new(RwLock::new(cron_service)),
-        clarifier_mgr: Arc::new(RwLock::new(clarifier_mgr)),
         cc_session_mgr: Arc::new(RwLock::new(cc_session_mgr)),
         task_store: task_store_arc,
         db,
@@ -481,17 +467,13 @@ mod tests {
 
     async fn test_state() -> AppState {
         let config = mando_config::Config::default();
+        let runtime_paths = mando_config::resolve_captain_runtime_paths(&config);
+        mando_config::set_active_captain_runtime_paths(runtime_paths.clone());
         let bus = mando_shared::EventBus::new();
         let db = mando_db::Db::open_in_memory().await.unwrap();
         let db = Arc::new(db);
         let cron_service = mando_shared::CronService::new(db.pool().clone());
 
-        let clarifier_mgr = mando_captain::runtime::clarifier::ClarifierSessionManager::new(
-            &mando_config::CaptainWorkflow::compiled_default()
-                .models
-                .clarifier,
-            db.pool().clone(),
-        );
         let cc_state_dir = std::env::temp_dir().join(format!(
             "mando-gw-test-cc-sessions-{:?}",
             std::thread::current().id()
@@ -505,6 +487,7 @@ mod tests {
 
         AppState {
             config: Arc::new(ArcSwap::from_pointee(config)),
+            runtime_paths,
             captain_workflow: Arc::new(ArcSwap::from_pointee(
                 mando_config::CaptainWorkflow::compiled_default(),
             )),
@@ -517,7 +500,6 @@ mod tests {
             config_write_mu: Arc::new(Mutex::new(())),
             bus: Arc::new(bus),
             cron_service: Arc::new(RwLock::new(cron_service)),
-            clarifier_mgr: Arc::new(RwLock::new(clarifier_mgr)),
             cc_session_mgr: Arc::new(RwLock::new(cc_session_mgr)),
             task_store: Arc::new(RwLock::new(task_store)),
             db,
@@ -565,8 +547,10 @@ mod tests {
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
         let client = reqwest::Client::new();
+        let origin = "http://127.0.0.1:5173";
         let resp = client
             .get(format!("http://{addr}/api/health"))
+            .header(reqwest::header::ORIGIN, origin)
             .send()
             .await
             .unwrap();
@@ -575,6 +559,9 @@ mod tests {
             .headers()
             .get("access-control-allow-origin")
             .map(|v| v.to_str().unwrap_or(""));
-        assert_eq!(cors, Some("*"));
+        assert_eq!(cors, Some(origin));
+
+        let credentials = resp.headers().get("access-control-allow-credentials");
+        assert_eq!(credentials, None);
     }
 }

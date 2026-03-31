@@ -1,5 +1,6 @@
 import React, { useState, useCallback, useRef } from 'react';
 import { useSettingsStore } from '#renderer/stores/settingsStore';
+import { useToastStore } from '#renderer/stores/toastStore';
 import { useMountEffect } from '#renderer/hooks/useMountEffect';
 
 const inputCls =
@@ -106,7 +107,9 @@ export function TelegramContent(): React.ReactElement {
         updateTelegram({ enabled: true });
         save();
         // Install TG launchd plist now that Telegram is configured
-        window.mandoAPI.launchd.reinstall().catch(() => {});
+        window.mandoAPI.launchd.reinstall().catch(() => {
+          useToastStore.getState().add('error', 'Failed to install Telegram service');
+        });
       } else {
         setResult({ error: res.error ?? 'Invalid token' });
       }

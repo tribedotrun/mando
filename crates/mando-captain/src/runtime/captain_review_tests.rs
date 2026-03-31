@@ -1,0 +1,343 @@
+use super::*;
+
+#[test]
+fn test_verdict_schema_is_valid_json() {
+    let schema = verdict_json_schema();
+    assert_eq!(schema["type"], "object");
+    assert!(schema["properties"]["action"].is_object());
+    assert!(schema["properties"]["feedback"].is_object());
+    assert!(schema["properties"]["report"].is_object());
+    let required = schema["required"].as_array().unwrap();
+    assert!(required.contains(&serde_json::json!("action")));
+    assert!(required.contains(&serde_json::json!("feedback")));
+    // Action field must have enum constraint.
+    let action_enum = schema["properties"]["action"]["enum"].as_array().unwrap();
+    assert!(action_enum.contains(&serde_json::json!("ship")));
+    assert!(action_enum.contains(&serde_json::json!("nudge")));
+    assert!(action_enum.contains(&serde_json::json!("escalate")));
+    assert!(action_enum.contains(&serde_json::json!("respawn")));
+    assert!(action_enum.contains(&serde_json::json!("retry_clarifier")));
+}
+
+#[test]
+fn test_template_renders_gates_pass_verdicts() {
+    let workflow = mando_config::workflow::CaptainWorkflow::compiled_default();
+    let mut vars = std::collections::HashMap::new();
+    vars.insert("trigger", "gates_pass");
+    vars.insert("title", "Test task");
+    vars.insert("item_id", "42");
+    vars.insert(
+        "worker_contexts",
+        "### Worker: test-worker\n- Status: in-progress",
+    );
+    vars.insert("knowledge_base", "");
+    vars.insert("evidence_images", "");
+    vars.insert("intervention_count", "3");
+    vars.insert("is_gates_pass", "true");
+    vars.insert("is_timeout", "");
+    vars.insert("is_broken_session", "");
+    vars.insert("is_budget_exhausted", "");
+    vars.insert("is_clarifier_fail", "");
+    vars.insert("is_rebase_fail", "");
+
+    let rendered = mando_config::render_prompt("captain_review", &workflow.prompts, &vars).unwrap();
+
+    // Worker context is populated.
+    assert!(
+        rendered.contains("test-worker"),
+        "should contain worker context"
+    );
+    // Allowed verdicts for gates_pass are present.
+    assert!(rendered.contains("**ship**"), "should have ship verdict");
+    assert!(rendered.contains("**nudge**"), "should have nudge verdict");
+    assert!(
+        rendered.contains("**escalate**"),
+        "should have escalate verdict"
+    );
+    // Other trigger verdicts should NOT be present.
+    assert!(
+        !rendered.contains("**respawn**"),
+        "no respawn for gates_pass"
+    );
+    assert!(
+        !rendered.contains("**retry_clarifier**"),
+        "no retry_clarifier for gates_pass"
+    );
+}
+
+#[test]
+fn test_template_renders_timeout_verdicts() {
+    let workflow = mando_config::workflow::CaptainWorkflow::compiled_default();
+    let mut vars = std::collections::HashMap::new();
+    vars.insert("trigger", "timeout");
+    vars.insert("title", "Test");
+    vars.insert("item_id", "1");
+    vars.insert("worker_contexts", "");
+    vars.insert("knowledge_base", "");
+    vars.insert("evidence_images", "");
+    vars.insert("intervention_count", "0");
+    vars.insert("is_gates_pass", "");
+    vars.insert("is_timeout", "true");
+    vars.insert("is_broken_session", "");
+    vars.insert("is_budget_exhausted", "");
+    vars.insert("is_clarifier_fail", "");
+    vars.insert("is_rebase_fail", "");
+
+    let rendered = mando_config::render_prompt("captain_review", &workflow.prompts, &vars).unwrap();
+
+    assert!(rendered.contains("**nudge**"), "timeout should have nudge");
+    assert!(
+        rendered.contains("**escalate**"),
+        "timeout should have escalate"
+    );
+    assert!(
+        !rendered.contains("**ship**"),
+        "timeout should not have ship"
+    );
+}
+
+#[test]
+fn test_check_review_parses_structured_output() {
+    use std::io::Write;
+
+    let session_id = "test-check-review-structured";
+    let stream_path = mando_config::stream_path_for_session(session_id);
+    std::fs::create_dir_all(stream_path.parent().unwrap()).unwrap();
+
+    let mut f = std::fs::File::create(&stream_path).unwrap();
+    writeln!(
+        f,
+        r#"{{"type":"system","subtype":"init","session_id":"{session_id}"}}"#
+    )
+    .unwrap();
+    writeln!(
+            f,
+            r#"{{"type":"result","subtype":"success","result":"","structured_output":{{"action":"ship","feedback":"looks good"}}}}"#
+        )
+        .unwrap();
+
+    let item = Task {
+        session_ids: mando_types::SessionIds {
+            review: Some(session_id.to_string()),
+            ..Default::default()
+        },
+        captain_review_trigger: Some(mando_types::task::ReviewTrigger::GatesPass),
+        ..Task::new("test")
+    };
+
+    let verdict = check_review(&item).unwrap();
+    assert_eq!(verdict.action, "ship");
+    assert_eq!(verdict.feedback, "looks good");
+
+    std::fs::remove_file(&stream_path).ok();
+}
+
+#[test]
+fn test_check_review_falls_back_to_assistant_text() {
+    use std::io::Write;
+
+    let session_id = "test-check-review-fallback";
+    let stream_path = mando_config::stream_path_for_session(session_id);
+    std::fs::create_dir_all(stream_path.parent().unwrap()).unwrap();
+
+    let mut f = std::fs::File::create(&stream_path).unwrap();
+    writeln!(
+        f,
+        r#"{{"type":"system","subtype":"init","session_id":"{session_id}"}}"#
+    )
+    .unwrap();
+    writeln!(
+            f,
+            r#"{{"type":"assistant","message":{{"role":"assistant","content":[{{"type":"text","text":"{{\"action\":\"nudge\",\"feedback\":\"add tests\"}}"}}]}}}}"#
+        )
+        .unwrap();
+    writeln!(
+        f,
+        r#"{{"type":"result","subtype":"success","result":"","structured_output":null}}"#
+    )
+    .unwrap();
+
+    let item = Task {
+        session_ids: mando_types::SessionIds {
+            review: Some(session_id.to_string()),
+            ..Default::default()
+        },
+        captain_review_trigger: Some(mando_types::task::ReviewTrigger::GatesPass),
+        ..Task::new("test")
+    };
+
+    let verdict = check_review(&item).unwrap();
+    assert_eq!(verdict.action, "nudge");
+    assert_eq!(verdict.feedback, "add tests");
+
+    std::fs::remove_file(&stream_path).ok();
+}
+
+#[test]
+fn test_check_review_escalates_when_all_paths_empty() {
+    use std::io::Write;
+
+    let session_id = "test-check-review-all-empty";
+    let stream_path = mando_config::stream_path_for_session(session_id);
+    std::fs::create_dir_all(stream_path.parent().unwrap()).unwrap();
+
+    // Session completed but no structured_output, no result text, no assistant text.
+    let mut f = std::fs::File::create(&stream_path).unwrap();
+    writeln!(
+        f,
+        r#"{{"type":"system","subtype":"init","session_id":"{session_id}"}}"#
+    )
+    .unwrap();
+    writeln!(
+        f,
+        r#"{{"type":"result","subtype":"success","result":"","structured_output":null}}"#
+    )
+    .unwrap();
+
+    let item = Task {
+        session_ids: mando_types::SessionIds {
+            review: Some(session_id.to_string()),
+            ..Default::default()
+        },
+        captain_review_trigger: Some(mando_types::task::ReviewTrigger::GatesPass),
+        ..Task::new("test")
+    };
+
+    let verdict = check_review(&item).unwrap();
+    assert_eq!(verdict.action, "escalate");
+    assert!(verdict.feedback.contains("no extractable verdict"));
+    assert!(
+        verdict.report.is_some(),
+        "escalation must have a CTO report"
+    );
+
+    std::fs::remove_file(&stream_path).ok();
+}
+
+#[test]
+fn test_validate_verdict_rejects_invalid_action() {
+    let item = Task {
+        captain_review_trigger: Some(mando_types::task::ReviewTrigger::GatesPass),
+        ..Task::new("test")
+    };
+    let verdict = CaptainVerdict {
+        action: "approve".into(),
+        feedback: "looks good".into(),
+        report: None,
+    };
+    let result = validate_verdict(verdict, &item);
+    assert_eq!(result.action, "escalate");
+    assert!(result.feedback.contains("approve"));
+}
+
+#[test]
+fn test_reset_review_retry_starts_fresh_cycle() {
+    let mut item = Task::new("test");
+    item.status = mando_types::task::ItemStatus::Errored;
+    item.review_fail_count = 4;
+    item.session_ids.review = Some("old-review".into());
+
+    crate::runtime::action_contract::reset_review_retry(
+        &mut item,
+        mando_types::task::ReviewTrigger::Retry,
+    );
+
+    assert_eq!(item.status, mando_types::task::ItemStatus::CaptainReviewing);
+    assert_eq!(item.review_fail_count, 0);
+    assert!(item.session_ids.review.is_none());
+    assert_eq!(
+        item.captain_review_trigger,
+        Some(mando_types::task::ReviewTrigger::Retry)
+    );
+    assert!(item.last_activity_at.is_some());
+}
+
+#[tokio::test]
+async fn test_spawn_review_preserves_existing_review_fail_count() {
+    let db = mando_db::Db::open_in_memory().await.unwrap();
+    let pool = db.pool().clone();
+    let notifier =
+        crate::runtime::notify::Notifier::new(std::sync::Arc::new(mando_shared::EventBus::new()));
+    let workflow = mando_config::workflow::CaptainWorkflow::compiled_default();
+
+    let worktree =
+        std::env::temp_dir().join(format!("mando-captain-review-test-{}", std::process::id()));
+    std::fs::create_dir_all(&worktree).unwrap();
+
+    let mut item = Task::new("test");
+    item.status = mando_types::task::ItemStatus::CaptainReviewing;
+    item.review_fail_count = 4;
+    item.worktree = Some(worktree.to_string_lossy().to_string());
+
+    spawn_review(
+        &mut item,
+        "retry",
+        &mando_config::Config::default(),
+        &workflow,
+        &notifier,
+        &pool,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(item.review_fail_count, 4);
+    assert!(item.session_ids.review.is_some());
+}
+
+#[tokio::test]
+async fn test_review_failure_budget_moves_item_to_errored_on_fifth_attempt() {
+    let db = mando_db::Db::open_in_memory().await.unwrap();
+    let pool = db.pool().clone();
+    let notifier =
+        crate::runtime::notify::Notifier::new(std::sync::Arc::new(mando_shared::EventBus::new()));
+    let workflow = mando_config::workflow::CaptainWorkflow::compiled_default();
+
+    let mut item = Task::new("test");
+    item.status = mando_types::task::ItemStatus::CaptainReviewing;
+    item.review_fail_count = 4;
+    item.captain_review_trigger = Some(mando_types::task::ReviewTrigger::Retry);
+    item.session_ids.review = Some("review-session".into());
+
+    let mut fail_count = item.review_fail_count as u32;
+    handle_review_error(
+        &mut item,
+        "review session timed out without producing a verdict",
+        &mut fail_count,
+        &workflow,
+        &notifier,
+        &pool,
+    )
+    .await;
+
+    assert_eq!(fail_count, 5);
+    assert_eq!(item.status, mando_types::task::ItemStatus::Errored);
+    assert!(item.session_ids.review.is_none());
+    assert!(item.captain_review_trigger.is_none());
+}
+
+#[tokio::test]
+async fn test_apply_verdict_resets_review_fail_count() {
+    let db = mando_db::Db::open_in_memory().await.unwrap();
+    let pool = db.pool().clone();
+    let notifier =
+        crate::runtime::notify::Notifier::new(std::sync::Arc::new(mando_shared::EventBus::new()));
+
+    let mut item = Task::new("test");
+    item.status = mando_types::task::ItemStatus::CaptainReviewing;
+    item.review_fail_count = 4;
+    item.session_ids.review = Some("review-session".into());
+
+    let verdict = CaptainVerdict {
+        action: "nudge".into(),
+        feedback: "try again".into(),
+        report: None,
+    };
+    apply_verdict(&mut item, &verdict, &notifier, &pool)
+        .await
+        .unwrap();
+
+    assert_eq!(item.status, mando_types::task::ItemStatus::InProgress);
+    assert_eq!(item.review_fail_count, 0);
+    assert!(item.session_ids.review.is_none());
+    assert!(item.captain_review_trigger.is_none());
+}

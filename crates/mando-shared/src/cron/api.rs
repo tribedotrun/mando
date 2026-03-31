@@ -3,7 +3,7 @@
 //! These are pure functions that operate on a `CronService` reference,
 //! returning JSON values for the transport layer.
 
-use mando_types::CronSchedule;
+use mando_types::{CronSchedule, ScheduleKind};
 use serde_json::{json, Value};
 
 use super::service::CronService;
@@ -76,20 +76,20 @@ pub fn parse_schedule(kind: &str, value: &str) -> Result<CronSchedule, String> {
                 _ => return Err(format!("unknown unit '{unit}' (use s/m/h/d)")),
             };
             Ok(CronSchedule {
-                kind: "every".into(),
+                kind: ScheduleKind::Every,
                 every_ms: Some(num * multiplier),
                 ..CronSchedule::default()
             })
         }
         "cron" => Ok(CronSchedule {
-            kind: "cron".into(),
+            kind: ScheduleKind::Cron,
             expr: Some(value.trim().to_string()),
             ..CronSchedule::default()
         }),
         "at" => {
             let ms = parse_iso_to_ms(value.trim())?;
             Ok(CronSchedule {
-                kind: "at".into(),
+                kind: ScheduleKind::At,
                 at_ms: Some(ms),
                 ..CronSchedule::default()
             })
@@ -217,7 +217,7 @@ mod tests {
     #[test]
     fn parse_every_30m() {
         let s = parse_schedule("every", "30m").unwrap();
-        assert_eq!(s.kind, "every");
+        assert_eq!(s.kind, ScheduleKind::Every);
         assert_eq!(s.every_ms, Some(30 * 60_000));
     }
 
@@ -242,14 +242,14 @@ mod tests {
     #[test]
     fn parse_cron_expr() {
         let s = parse_schedule("cron", "*/5 * * * *").unwrap();
-        assert_eq!(s.kind, "cron");
+        assert_eq!(s.kind, ScheduleKind::Cron);
         assert_eq!(s.expr.as_deref(), Some("*/5 * * * *"));
     }
 
     #[test]
     fn parse_at_iso() {
         let s = parse_schedule("at", "2024-01-15T10:00:00Z").unwrap();
-        assert_eq!(s.kind, "at");
+        assert_eq!(s.kind, ScheduleKind::At);
         // 2024-01-15T10:00:00Z = 1705312800 seconds
         assert_eq!(s.at_ms, Some(1_705_312_800_000));
     }

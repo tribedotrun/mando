@@ -8,19 +8,15 @@ use serde_json::{json, Value};
 use crate::response::error_response;
 use crate::AppState;
 
-/// Parse a full GitHub PR URL into (repo, pr_number).
-fn parse_pr_url(url: &str) -> Option<(String, u32)> {
-    // Full URL: https://github.com/owner/repo/pull/123
-    if let Some(rest) = url.strip_prefix("https://github.com/") {
-        let parts: Vec<&str> = rest.split('/').collect();
-        if parts.len() >= 4 && parts[2] == "pull" {
-            if let Ok(num) = parts[3].parse::<u32>() {
-                let repo = format!("{}/{}", parts[0], parts[1]);
-                return Some((repo, num));
-            }
-        }
-    }
-    None
+/// Resolve (repo, pr_number) from a PR ref + project name via config.
+fn resolve_pr(
+    pr: &str,
+    project: Option<&str>,
+    config: &mando_config::Config,
+) -> Option<(String, u32)> {
+    let num: u32 = mando_types::task::extract_pr_number(pr)?.parse().ok()?;
+    let repo = crate::resolve_github_repo(project, config)?;
+    Some((repo, num))
 }
 
 /// Resolve a string ID to a numeric task ID: parse as i64, or look up by linear_id.
@@ -144,7 +140,7 @@ pub(crate) async fn get_task_pr_summary(
     Path(id): Path<String>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     // Read store, extract what we need, then drop the guard before network I/O.
-    let (pr_url, found) = {
+    let (pr_ref, project, found) = {
         let store = state.task_store.read().await;
         let id_num: i64 = resolve_task_id(&id, &store).await;
         if id_num == 0 {
@@ -154,8 +150,8 @@ pub(crate) async fn get_task_pr_summary(
             ));
         }
         match store.find_by_id(id_num).await.unwrap_or(None) {
-            Some(it) => (it.pr.clone().unwrap_or_default(), true),
-            None => (String::new(), false),
+            Some(it) => (it.pr.clone().unwrap_or_default(), it.project.clone(), true),
+            None => (String::new(), None, false),
         }
     };
 
@@ -167,14 +163,15 @@ pub(crate) async fn get_task_pr_summary(
     }
 
     // Fetch PR body outside the read lock.
-    let summary = if let Some((repo, num)) = parse_pr_url(&pr_url) {
+    let config = state.config.load();
+    let summary = if let Some((repo, num)) = resolve_pr(&pr_ref, project.as_deref(), &config) {
         match mando_captain::io::github_pr::get_pr_body(&repo, num).await {
             Ok(body) if !body.is_empty() => Some(body),
             Ok(_) => None,
             Err(e) => {
                 tracing::warn!(
                     task_id = %id,
-                    pr = %pr_url,
+                    pr = %pr_ref,
                     error = %e,
                     "failed to fetch PR body from GitHub"
                 );
@@ -182,15 +179,15 @@ pub(crate) async fn get_task_pr_summary(
             }
         }
     } else {
-        if !pr_url.is_empty() {
-            tracing::debug!(pr = %pr_url, "unparseable PR URL, skipping body fetch");
+        if !pr_ref.is_empty() {
+            tracing::debug!(pr = %pr_ref, "cannot resolve PR repo, skipping body fetch");
         }
         None
     };
 
     Ok(Json(json!({
         "id": id,
-        "pr": pr_url,
+        "pr": pr_ref,
         "summary": summary,
     })))
 }

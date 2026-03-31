@@ -15,6 +15,7 @@ import {
   handoffItem,
   retryItem,
   answerClarification,
+  nudgeWorker,
 } from '#renderer/api';
 import type { TaskItem, ItemStatus } from '#renderer/types';
 import { getErrorMessage } from '#renderer/utils';
@@ -40,10 +41,10 @@ export function useTaskActions() {
   const handleMerge = async (itemId: number, pr: string, project: string) => {
     setMergePending(true);
     setMergeResult(null);
-    optimisticUpdate(itemId, { status: 'merged' });
+    optimisticUpdate(itemId, { status: 'captain-merging' as ItemStatus });
     try {
       await mergePr(pr, project);
-      setMergeResult({ ok: true, message: 'PR merged and branch deleted' });
+      setMergeResult({ ok: true, message: 'Captain will check CI and merge' });
       triggerTick().catch((err) => {
         log.warn('[tasks] post-merge tick trigger failed:', err);
       });
@@ -155,7 +156,7 @@ export function useTaskActions() {
     }
   };
 
-  const handleBulkDelete = async () => {
+  const handleBulkDelete = async (opts?: { close_pr?: boolean; cancel_linear?: boolean }) => {
     setDeleting(true);
     setDeleteError(null);
     try {
@@ -163,10 +164,15 @@ export function useTaskActions() {
         const item = taskItems.find((b) => b.id === id);
         return item && item.status !== 'in-progress';
       });
-      await deleteItems(ids);
+      const result = await deleteItems(ids, opts);
       clearSelection();
       taskFetch();
       setDeleteModalOpen(false);
+      if (result.warnings?.length) {
+        for (const w of result.warnings) {
+          useToastStore.getState().add('error', w);
+        }
+      }
     } catch (err) {
       setDeleteError(getErrorMessage(err, 'Delete failed'));
     } finally {
@@ -187,14 +193,31 @@ export function useTaskActions() {
   };
 
   const handleAnswer = async (id: number, answer: string) => {
-    optimisticUpdate(id, { status: 'clarifying' as ItemStatus });
     try {
-      await answerClarification(id, answer);
+      const result = await answerClarification(id, answer);
       taskFetch();
-      useToastStore.getState().add('success', 'Answer submitted');
+      if (result.status === 'ready') {
+        useToastStore.getState().add('success', 'Clarified — task queued');
+      } else if (result.status === 'clarifying') {
+        useToastStore.getState().add('info', 'Still needs more info');
+      } else if (result.status === 'escalate') {
+        useToastStore.getState().add('info', 'Escalated to captain review');
+      } else {
+        useToastStore.getState().add('success', 'Answer saved');
+      }
     } catch (err) {
       taskFetch();
       useToastStore.getState().add('error', getErrorMessage(err, 'Answer failed'));
+    }
+  };
+
+  const handleNudge = async (id: number, message: string) => {
+    try {
+      await nudgeWorker(id, message);
+      taskFetch();
+      useToastStore.getState().add('success', `Nudged task #${id}`);
+    } catch (err) {
+      useToastStore.getState().add('error', getErrorMessage(err, 'Nudge failed'));
     }
   };
 
@@ -230,5 +253,6 @@ export function useTaskActions() {
     handleBulkDelete,
     handleRetry,
     handleAnswer,
+    handleNudge,
   };
 }

@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import log from '#renderer/logger';
+import { fetchHealth } from '#renderer/api';
 import {
   getNotificationsEnabled,
   setNotificationsEnabled,
@@ -80,6 +81,11 @@ export function SettingsGeneral(): React.ReactElement {
         connectionState: currentConnectionState as ConnectionState,
       };
     },
+  });
+  const { data: health } = useQuery({
+    queryKey: ['settings', 'general', 'health'],
+    queryFn: fetchHealth,
+    retry: false,
   });
 
   useMountEffect(() => {
@@ -207,6 +213,24 @@ export function SettingsGeneral(): React.ReactElement {
         </span>
       </SettingsRow>
 
+      <SettingsRow label="Task database">
+        <span className="text-code" style={{ color: 'var(--color-text-2)' }}>
+          {health?.taskDbPath || '~/.mando/mando.db'}
+        </span>
+      </SettingsRow>
+
+      <SettingsRow label="Worker health">
+        <span className="text-code" style={{ color: 'var(--color-text-2)' }}>
+          {health?.workerHealthPath || '~/.mando/state/worker-health.json'}
+        </span>
+      </SettingsRow>
+
+      <SettingsRow label="Captain lock">
+        <span className="text-code" style={{ color: 'var(--color-text-2)' }}>
+          {health?.lockfilePath || '~/.mando/captain.lock'}
+        </span>
+      </SettingsRow>
+
       <SettingsRow label="Gateway">
         <span className="flex items-center gap-2">
           <span
@@ -226,6 +250,13 @@ export function SettingsGeneral(): React.ReactElement {
           </span>
         </span>
       </SettingsRow>
+
+      {health?.restartRequired ? (
+        <p className="text-caption" style={{ color: 'var(--color-stale)', marginTop: 8 }}>
+          Path changes are saved, but the daemon will keep using the active runtime paths until it
+          restarts.
+        </p>
+      ) : null}
     </div>
   );
 }

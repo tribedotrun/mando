@@ -182,12 +182,25 @@ struct WireEvent {
 }
 
 fn parse_event_json(json: &Value) -> Option<SseEvent> {
-    let wire: WireEvent = serde_json::from_value(json.clone()).ok()?;
+    let wire: WireEvent = match serde_json::from_value(json.clone()) {
+        Ok(w) => w,
+        Err(e) => {
+            tracing::warn!(module = "sse", error = %e, "failed to parse SSE wire event");
+            return None;
+        }
+    };
 
     match wire.event.as_str() {
         "snapshot" => Some(SseEvent::Snapshot(wire.data.unwrap_or(Value::Null))),
         "notification" => {
-            let payload: NotificationPayload = serde_json::from_value(wire.data?).ok()?;
+            let data = wire.data?;
+            let payload: NotificationPayload = match serde_json::from_value(data) {
+                Ok(p) => p,
+                Err(e) => {
+                    tracing::warn!(module = "sse", error = %e, "failed to parse notification payload");
+                    return None;
+                }
+            };
             Some(SseEvent::Notification(payload))
         }
         "tasks" => Some(SseEvent::Tasks(wire.data)),

@@ -109,7 +109,7 @@ export function SettingsPage({ onBack }: SettingsPageProps): React.ReactElement 
         style={{
           borderRight: '1px solid var(--color-border-subtle)',
           background: 'var(--color-surface-1)',
-          paddingTop: 20,
+          paddingTop: 38,
           paddingBottom: 16,
           paddingLeft: 12,
           paddingRight: 12,
@@ -182,7 +182,7 @@ export function SettingsPage({ onBack }: SettingsPageProps): React.ReactElement 
         )}
       </aside>
 
-      <main className="flex-1 overflow-y-auto" style={{ padding: '24px 32px' }}>
+      <main className="flex-1 overflow-y-auto" style={{ padding: '38px 32px 24px' }}>
         <div style={{ maxWidth: 720 }}>
           <ErrorBoundary key={section} fallbackLabel={section}>
             <SettingsPanel section={section} />

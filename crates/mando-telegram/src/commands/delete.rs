@@ -7,7 +7,7 @@ use mando_shared::telegram_format::escape_html;
 use serde_json::json;
 
 const PICKER: MultiPicker = MultiPicker {
-    header: "\u{26a0}\u{fe0f} Select items to permanently delete:",
+    header: "\u{26a0}\u{fe0f} Select tasks to permanently delete:",
     empty_msg: "\u{2705} Task list is empty \u{2014} nothing to delete.",
     callback_prefix: "ms_delete",
     confirm_label: "Delete Selected",
@@ -32,7 +32,7 @@ pub async fn handle(bot: &mut TelegramBot, chat_id: &str, args: &str) -> Result<
                 bot.send_html(
                     chat_id,
                     &format!(
-                        "\u{26a0}\u{fe0f} Item #{} not found.",
+                        "\u{26a0}\u{fe0f} Task #{} not found.",
                         escape_html(target_id)
                     ),
                 )

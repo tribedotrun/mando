@@ -54,14 +54,18 @@ description: Commit, push, create PR, and tag AI reviewers. Use when ready to op
 
 7. **Update PR summary**: Run `/mando-pr-summary`
 
-8. **Trigger CI gate + external AI reviews** (idempotent — skip if already triggered):
+   `/mando-pr-summary` is responsible for the hosting decision:
+   - bucket present → keep the GCS flow
+   - bucket missing → preserve existing GitHub attachment evidence or leave the pending GitHub-web-upload note for any local-only visuals
+   - never use raw branch/blob URLs as screenshot evidence
+
+8. **Trigger external AI reviews** (idempotent — skip if already triggered):
 
    ```bash
    # Only post trigger comments if they don't already exist
    PR_NUM=$(gh pr view --json number -q .number)
    EXISTING=$(gh pr view "$PR_NUM" --json comments -q '.comments[].body' 2>/dev/null || true)
 
-   echo "$EXISTING" | grep -qF "/ci" || gh pr comment -b "/ci"  # informational, not required to merge
    echo "$EXISTING" | grep -qF "@codex review" || gh pr comment -b "@codex review this PR"
    echo "$EXISTING" | grep -qF "cursor review" || gh pr comment -b "cursor review"
    ```
@@ -118,14 +122,6 @@ description: Commit, push, create PR, and tag AI reviewers. Use when ready to op
       - `UNADDRESSED COMMENTS` → fix ALL issues, reply to EACH comment (see below), commit & push, re-trigger CI (see below), re-check
       - `[WAIT]` CI or reviewers pending → sleep 10s, re-check
       - `ALL CLEAR` → proceed to step 10
-
-      **Re-trigger CI after pushing fixes** (required after every commit & push in this loop):
-
-      ```bash
-      gh pr comment $PR_NUM -b "/ci"
-      ```
-
-      Unlike step 8's idempotent guard, this ALWAYS posts a new `/ci` comment because the HEAD has changed and CI needs to run against the new code.
 
    d. **Consolidate** remaining issues into a table with Reviewer, Issue, and Location columns. Fix all in ONE commit with `git add . && git commit -m "..." && git push`.
 

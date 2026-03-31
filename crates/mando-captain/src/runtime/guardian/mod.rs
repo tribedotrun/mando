@@ -61,7 +61,10 @@ impl SelfImproveGuardian {
                 );
                 CooldownState::default()
             }),
-            Err(_) => CooldownState::default(),
+            Err(e) => {
+                tracing::debug!(module = "guardian", error = %e, "cooldown file unreadable — using defaults");
+                CooldownState::default()
+            }
         };
 
         Self {
@@ -127,7 +130,10 @@ impl SelfImproveGuardian {
             let path = mando_config::expand_tilde(log_path);
             let content = match std::fs::read_to_string(&path) {
                 Ok(c) => c,
-                Err(_) => continue,
+                Err(e) => {
+                    tracing::debug!(module = "guardian", error = %e, path = %path.display(), "cannot read log file");
+                    continue;
+                }
             };
             let lines: Vec<&str> = content.lines().rev().take(100).collect();
             for line in &lines {

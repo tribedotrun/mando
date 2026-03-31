@@ -312,8 +312,8 @@ mod tests {
         item.status = ItemStatus::InProgress;
         item.id = 12;
         item.worker = Some("mando-w-12".into());
-        item.pr = Some("https://github.com/acme/widgets/pull/396".into());
-        let line = format_item_line(&item, false);
+        item.pr = Some("396".into());
+        let line = super::format_item_line_with_repo(&item, false, Some("acme/widgets"));
         assert!(line.contains("mando-w-12"), "should include worker name");
         assert!(line.contains("PR #396"), "should include PR number");
         assert!(

@@ -36,6 +36,8 @@ async fn main() {
 
     // Load config.
     let config = mando_config::load_config(None);
+    let runtime_paths = mando_config::resolve_captain_runtime_paths(&config);
+    mando_config::set_active_captain_runtime_paths(runtime_paths.clone());
 
     // Inject env vars from config into process environment.
     for (k, v) in &config.env {
@@ -58,7 +60,7 @@ async fn main() {
     let bus = Arc::new(mando_shared::EventBus::new());
 
     // Unified DB pool — shared across all subsystems.
-    let db_path = mando_config::data_dir().join("mando.db");
+    let db_path = runtime_paths.task_db_path.clone();
     let db = mando_db::Db::open(&db_path).await.unwrap_or_else(|e| {
         eprintln!("fatal: cannot open database at {}: {e}", db_path.display());
         std::process::exit(1);
@@ -90,10 +92,6 @@ async fn main() {
     let scout_wf = mando_config::load_scout_workflow(&mando_config::scout_workflow_path(), &config);
     let voice_wf = mando_config::load_voice_workflow(&mando_config::voice_workflow_path());
 
-    let mut clarifier_mgr = mando_captain::runtime::clarifier::ClarifierSessionManager::new(
-        &captain_wf.models.clarifier,
-        db.pool().clone(),
-    );
     let cc_state_dir = mando_config::state_dir().join("ops_sessions").join("cc");
     let mut cc_session_mgr = mando_captain::io::cc_session::CcSessionManager::new(
         cc_state_dir,
@@ -101,25 +99,20 @@ async fn main() {
         db.pool().clone(),
     );
 
-    let clarifier_recovered = clarifier_mgr.recover();
     let cc_recovered = cc_session_mgr.recover();
-    if clarifier_recovered + cc_recovered > 0 {
-        info!(
-            clarifier = clarifier_recovered,
-            cc = cc_recovered,
-            "recovered sessions from disk"
-        );
+    if cc_recovered > 0 {
+        info!(cc = cc_recovered, "recovered sessions from disk");
     }
 
     let state = mando_gateway::AppState {
         config: config_arc.clone(),
+        runtime_paths,
         captain_workflow: Arc::new(ArcSwap::from_pointee(captain_wf)),
         scout_workflow: Arc::new(ArcSwap::from_pointee(scout_wf)),
         voice_workflow: Arc::new(ArcSwap::from_pointee(voice_wf)),
         config_write_mu: Arc::new(tokio::sync::Mutex::new(())),
         bus: bus.clone(),
         cron_service: Arc::new(RwLock::new(cron_service)),
-        clarifier_mgr: Arc::new(RwLock::new(clarifier_mgr)),
         cc_session_mgr: Arc::new(RwLock::new(cc_session_mgr)),
         task_store: task_store_arc,
         db,

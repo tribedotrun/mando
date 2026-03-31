@@ -1,21 +1,25 @@
 import React, { useCallback, useRef, useState } from 'react';
+import { useMountEffect } from '#renderer/hooks/useMountEffect';
 import { useScoutStore } from '#renderer/stores/scoutStore';
 import { useViewKeyHandler } from '#renderer/hooks/useKeyboardShortcuts';
 import { useSelection } from '#renderer/hooks/useSelection';
 import { ScoutTable } from '#renderer/components/ScoutTable';
 import { AddUrlForm } from '#renderer/components/AddUrlForm';
 import { ScoutStatusTabs } from '#renderer/components/ScoutStatusTabs';
-import { ScoutActions } from '#renderer/components/ScoutActions';
 import { ScoutReader } from '#renderer/components/ScoutReader';
 import { ScoutQA } from '#renderer/components/ScoutQA';
 import { BulkBar } from '#renderer/components/BulkBar';
-import { bulkUpdateScout, bulkDeleteScout } from '#renderer/api';
+import { bulkUpdateScout, bulkDeleteScout, processScout, researchScout } from '#renderer/api';
 import { useToastStore } from '#renderer/stores/toastStore';
 
 const USER_SETTABLE = ['pending', 'processed', 'saved', 'archived'];
 const TYPES = ['all', 'github', 'youtube', 'arxiv', 'other'] as const;
 
-export function ScoutPage(): React.ReactElement {
+interface ScoutPageProps {
+  processOnMount?: boolean;
+}
+
+export function ScoutPage({ processOnMount = false }: ScoutPageProps): React.ReactElement {
   const {
     query,
     setQuery,
@@ -41,6 +45,36 @@ export function ScoutPage(): React.ReactElement {
     focusedIndex >= items.length ? (items.length > 0 ? items.length - 1 : -1) : focusedIndex;
 
   const inListView = view === '' && !activeItemId;
+
+  const handleProcessAll = useCallback(async () => {
+    try {
+      await processScout();
+      await scoutFetch();
+      useToastStore.getState().add('success', 'Processed pending Scout items');
+    } catch (err) {
+      useToastStore
+        .getState()
+        .add('error', `Process failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }, [scoutFetch]);
+
+  const handleResearch = useCallback(async () => {
+    const topic = window.prompt('Scout research topic');
+    if (!topic) return;
+    try {
+      const result = await researchScout(topic, true);
+      await scoutFetch();
+      const added = result.added ?? 0;
+      const processed = result.processed ?? 0;
+      useToastStore
+        .getState()
+        .add('success', `Research added ${added} link(s) and processed ${processed}`);
+    } catch (err) {
+      useToastStore
+        .getState()
+        .add('error', `Research failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }, [scoutFetch]);
 
   const handleKey = useCallback(
     (key: string, e: KeyboardEvent) => {
@@ -71,9 +105,7 @@ export function ScoutPage(): React.ReactElement {
         }
         case 't':
           e.preventDefault();
-          // ScoutActions "Process" button triggers processScout on pending items
-          // Navigate to pending by setting status filter
-          setQuery({ status: 'pending', page: 0 });
+          handleProcessAll();
           break;
         case '/':
           e.preventDefault();
@@ -87,7 +119,7 @@ export function ScoutPage(): React.ReactElement {
           break;
       }
     },
-    [inListView, items, clampedFocusedIndex, setQuery],
+    [inListView, items, clampedFocusedIndex, handleProcessAll],
   );
 
   useViewKeyHandler(handleKey);
@@ -133,7 +165,7 @@ export function ScoutPage(): React.ReactElement {
     try {
       await bulkUpdateScout(ids, { status });
       clearSelection();
-      scoutFetch();
+      await scoutFetch();
     } catch (err) {
       useToastStore
         .getState()
@@ -147,7 +179,7 @@ export function ScoutPage(): React.ReactElement {
     try {
       await bulkDeleteScout(ids);
       clearSelection();
-      scoutFetch();
+      await scoutFetch();
     } catch (err) {
       useToastStore
         .getState()
@@ -165,6 +197,12 @@ export function ScoutPage(): React.ReactElement {
     setQaOpen(false);
     setQaEverOpened(false);
   };
+
+  useMountEffect(() => {
+    if (processOnMount) {
+      void handleProcessAll();
+    }
+  });
 
   if (view === 'read' && activeItemId) {
     return (
@@ -208,12 +246,41 @@ export function ScoutPage(): React.ReactElement {
             {total} items
           </span>
         </div>
-        <AddUrlForm />
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => {
+              void handleProcessAll();
+            }}
+            className="rounded-md px-3 py-1.5 text-[12px] font-medium"
+            style={{
+              background: 'var(--color-surface-2)',
+              color: 'var(--color-text-2)',
+              border: '1px solid var(--color-border)',
+              cursor: 'pointer',
+            }}
+          >
+            Process pending
+          </button>
+          <button
+            onClick={() => {
+              void handleResearch();
+            }}
+            className="rounded-md px-3 py-1.5 text-[12px] font-medium"
+            style={{
+              background: 'var(--color-surface-2)',
+              color: 'var(--color-text-2)',
+              border: '1px solid var(--color-border)',
+              cursor: 'pointer',
+            }}
+          >
+            Research
+          </button>
+          <AddUrlForm />
+        </div>
       </div>
 
-      {/* Row 2: Process CTA + search */}
+      {/* Row 2: Search */}
       <div className="flex items-center gap-3">
-        <ScoutActions onDone={() => scoutFetch()} />
         <div className="flex flex-1 items-center gap-2" style={{ position: 'relative' }}>
           <svg
             width="14"

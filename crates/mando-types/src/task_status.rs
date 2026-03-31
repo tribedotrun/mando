@@ -155,6 +155,7 @@ pub enum ReviewTrigger {
     ClarifierFail,
     RebaseFail,
     CiFailure,
+    DegradedContext,
     Retry,
     CaptainDecision,
 }
@@ -169,6 +170,7 @@ impl ReviewTrigger {
             Self::ClarifierFail => "clarifier_fail",
             Self::RebaseFail => "rebase_fail",
             Self::CiFailure => "ci_failure",
+            Self::DegradedContext => "degraded_context",
             Self::Retry => "retry",
             Self::CaptainDecision => "captain_decision",
         }
@@ -193,6 +195,7 @@ impl FromStr for ReviewTrigger {
             "clarifier_fail" => Ok(Self::ClarifierFail),
             "rebase_fail" => Ok(Self::RebaseFail),
             "ci_failure" => Ok(Self::CiFailure),
+            "degraded_context" => Ok(Self::DegradedContext),
             "retry" => Ok(Self::Retry),
             "captain_decision" => Ok(Self::CaptainDecision),
             _ => Err(format!("unknown review trigger: {s}")),

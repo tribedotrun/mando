@@ -1,7 +1,14 @@
 import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import Markdown from 'react-markdown';
-import { fetchScoutItem, fetchScoutArticle, actOnScoutItem, fetchHealth } from '#renderer/api';
+import {
+  fetchScoutItem,
+  fetchScoutArticle,
+  actOnScoutItem,
+  fetchHealth,
+  publishScoutTelegraph,
+  fetchScoutItemSessions,
+} from '#renderer/api';
 import type { ScoutItem } from '#renderer/types';
 import { getErrorMessage } from '#renderer/utils';
 
@@ -20,6 +27,9 @@ export function ScoutReader({ itemId, onBack, onAsk, qaOpen }: Props): React.Rea
   const [actPrompt, setActPrompt] = useState('');
   const [acting, setActing] = useState(false);
   const [actResult, setActResult] = useState<string | null>(null);
+  const [publishing, setPublishing] = useState(false);
+  const [publishedUrl, setPublishedUrl] = useState<string | null>(null);
+  const [sessionsOpen, setSessionsOpen] = useState(false);
 
   const projectsQuery = useQuery({
     queryKey: ['status', 'projects'],
@@ -49,7 +59,14 @@ export function ScoutReader({ itemId, onBack, onAsk, qaOpen }: Props): React.Rea
   const loading = itemQuery.isLoading;
   const error = itemQuery.error ? getErrorMessage(itemQuery.error, 'Failed') : null;
   const article = articleQuery.data?.article ?? null;
+  const telegraphUrl =
+    publishedUrl ?? articleQuery.data?.telegraphUrl ?? item?.telegraphUrl ?? null;
   const articleLoading = articleQuery.isLoading;
+  const sessionsQuery = useQuery({
+    queryKey: ['scout', 'sessions', itemId],
+    queryFn: () => fetchScoutItemSessions(itemId),
+    enabled: sessionsOpen,
+  });
 
   const handleAct = async () => {
     if (!effectiveActProject) return;
@@ -66,6 +83,23 @@ export function ScoutReader({ itemId, onBack, onAsk, qaOpen }: Props): React.Rea
       setActResult(`Error: ${getErrorMessage(e, 'unknown')}`);
     } finally {
       setActing(false);
+    }
+  };
+
+  const handlePublish = async () => {
+    if (telegraphUrl) {
+      window.open(telegraphUrl, '_blank', 'noopener,noreferrer');
+      return;
+    }
+    setPublishing(true);
+    try {
+      const res = await publishScoutTelegraph(itemId);
+      setPublishedUrl(res.url);
+      window.open(res.url, '_blank', 'noopener,noreferrer');
+    } catch (e) {
+      setActResult(`Publish error: ${getErrorMessage(e, 'unknown')}`);
+    } finally {
+      setPublishing(false);
     }
   };
 
@@ -152,6 +186,25 @@ export function ScoutReader({ itemId, onBack, onAsk, qaOpen }: Props): React.Rea
               Act
             </button>
           )}
+          <button
+            onClick={handlePublish}
+            className="rounded px-3 py-1 text-xs"
+            disabled={publishing}
+            style={{ color: 'var(--color-text-2)' }}
+          >
+            {publishing ? 'Publishing…' : telegraphUrl ? 'Open article' : 'Publish'}
+          </button>
+          <button
+            onClick={() => setSessionsOpen((value) => !value)}
+            className="rounded px-3 py-1 text-xs"
+            style={
+              sessionsOpen
+                ? { background: 'var(--color-accent-wash)', color: 'var(--color-accent)' }
+                : { color: 'var(--color-text-2)' }
+            }
+          >
+            Sessions
+          </button>
           <a
             href={item.url}
             target="_blank"
@@ -163,6 +216,79 @@ export function ScoutReader({ itemId, onBack, onAsk, qaOpen }: Props): React.Rea
           </a>
         </div>
       </div>
+
+      {/* Act form — directly below nav bar */}
+      {actOpen && (
+        <ScoutActForm
+          projects={projects}
+          projectsError={projectsError}
+          actProject={effectiveActProject}
+          setActProject={setActProject}
+          actPrompt={actPrompt}
+          setActPrompt={setActPrompt}
+          acting={acting}
+          actResult={actResult}
+          onAct={handleAct}
+        />
+      )}
+
+      {sessionsOpen && (
+        <div
+          className="mb-5 rounded-lg border p-3"
+          style={{
+            borderColor: 'var(--color-border)',
+            background: 'var(--color-surface-1)',
+          }}
+        >
+          <div
+            className="mb-2 text-[11px] font-semibold uppercase tracking-wider"
+            style={{ color: 'var(--color-text-4)' }}
+          >
+            Scout sessions
+          </div>
+          {sessionsQuery.isLoading ? (
+            <div className="text-xs" style={{ color: 'var(--color-text-4)' }}>
+              Loading sessions…
+            </div>
+          ) : sessionsQuery.error ? (
+            <div className="text-xs" style={{ color: 'var(--color-error)' }}>
+              {getErrorMessage(sessionsQuery.error, 'Failed to load sessions')}
+            </div>
+          ) : (sessionsQuery.data?.length ?? 0) === 0 ? (
+            <div className="text-xs" style={{ color: 'var(--color-text-4)' }}>
+              No linked sessions.
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {sessionsQuery.data?.map((session) => (
+                <div
+                  key={session.session_id}
+                  className="flex items-center justify-between gap-3 rounded border px-3 py-2"
+                  style={{
+                    borderColor: 'var(--color-border-subtle)',
+                    background: 'var(--color-surface-2)',
+                  }}
+                >
+                  <div className="min-w-0 flex-1">
+                    <div
+                      className="truncate text-xs font-medium"
+                      style={{ color: 'var(--color-text-2)' }}
+                    >
+                      {session.session_id}
+                    </div>
+                    <div className="text-[11px]" style={{ color: 'var(--color-text-4)' }}>
+                      {session.caller} · {session.status}
+                    </div>
+                  </div>
+                  <div className="text-[11px]" style={{ color: 'var(--color-text-4)' }}>
+                    {session.created_at}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Title block */}
       <div className="mb-5">
@@ -198,21 +324,6 @@ export function ScoutReader({ itemId, onBack, onAsk, qaOpen }: Props): React.Rea
           summary={item.summary}
           summaryOpen={summaryOpen}
           onToggle={() => setSummaryOpen(!summaryOpen)}
-        />
-      )}
-
-      {/* Act form */}
-      {actOpen && (
-        <ScoutActForm
-          projects={projects}
-          projectsError={projectsError}
-          actProject={effectiveActProject}
-          setActProject={setActProject}
-          actPrompt={actPrompt}
-          setActPrompt={setActPrompt}
-          acting={acting}
-          actResult={actResult}
-          onAct={handleAct}
         />
       )}
 
@@ -298,60 +409,74 @@ function ScoutActForm({
 }): React.ReactElement {
   return (
     <div
-      className="mb-5 rounded border p-3"
-      style={{
-        borderColor: 'color-mix(in srgb, var(--color-accent) 30%, transparent)',
-        background: 'color-mix(in srgb, var(--color-surface-1) 50%, transparent)',
-      }}
+      className="mb-5 rounded-lg p-4"
+      style={{ background: 'var(--color-surface-2)', border: '1px solid var(--color-border)' }}
     >
       {projectsError ? (
         <div className="text-xs" style={{ color: 'var(--color-error)' }}>
           {projectsError}
         </div>
       ) : (
-        <div className="flex items-center gap-2">
-          <select
-            value={actProject}
-            onChange={(e) => setActProject(e.target.value)}
-            className="rounded border px-2 py-1 text-xs"
-            style={{
-              borderColor: 'var(--color-border)',
-              background: 'var(--color-surface-2)',
-              color: 'var(--color-text-1)',
-            }}
-          >
-            <option value="">Select project...</option>
-            {projects.map((p) => (
-              <option key={p} value={p}>
-                {p}
-              </option>
-            ))}
-          </select>
-          <input
-            type="text"
-            value={actPrompt}
-            onChange={(e) => setActPrompt(e.target.value)}
-            placeholder="Focus on... (optional)"
-            className="flex-1 rounded border px-2 py-1 text-xs focus:outline-none"
-            style={{
-              borderColor: 'var(--color-border)',
-              background: 'var(--color-surface-2)',
-              color: 'var(--color-text-1)',
-            }}
-          />
-          <button
-            onClick={onAct}
-            disabled={!actProject || acting}
-            className="rounded px-3 py-1 text-xs font-medium text-white disabled:opacity-40"
-            style={{ background: 'var(--color-accent)' }}
-          >
-            {acting ? 'Creating...' : 'Create Task'}
-          </button>
-        </div>
-      )}
-      {actResult && (
-        <div className="mt-2 text-xs" style={{ color: 'var(--color-text-2)' }}>
-          {actResult}
+        <div className="flex flex-col gap-3">
+          <div className="flex items-center gap-2">
+            {projects.length > 1 && (
+              <select
+                value={actProject}
+                onChange={(e) => setActProject(e.target.value)}
+                className="shrink-0 rounded-md px-2.5 py-1.5 text-xs"
+                style={{
+                  border: '1px solid var(--color-border)',
+                  background: 'var(--color-surface-3)',
+                  color: 'var(--color-text-1)',
+                }}
+              >
+                <option value="">Select project...</option>
+                {projects.map((p) => (
+                  <option key={p} value={p}>
+                    {p}
+                  </option>
+                ))}
+              </select>
+            )}
+            {projects.length === 1 && (
+              <span
+                className="shrink-0 rounded-md px-2.5 py-1.5 text-xs font-medium"
+                style={{ color: 'var(--color-text-2)', background: 'var(--color-surface-3)' }}
+              >
+                {projects[0]}
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              value={actPrompt}
+              onChange={(e) => setActPrompt(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && actProject && !acting) onAct();
+              }}
+              placeholder="What should the task focus on? (optional)"
+              className="min-w-0 flex-1 rounded-md px-2.5 py-1.5 text-xs focus:outline-none"
+              style={{
+                border: '1px solid var(--color-border)',
+                background: 'var(--color-surface-3)',
+                color: 'var(--color-text-1)',
+              }}
+            />
+            <button
+              onClick={onAct}
+              disabled={!actProject || acting}
+              className="shrink-0 rounded-md px-4 py-1.5 text-xs font-medium text-white disabled:opacity-40"
+              style={{ background: 'var(--color-accent)' }}
+            >
+              {acting ? 'Creating...' : 'Create Task'}
+            </button>
+          </div>
+          {actResult && (
+            <div className="text-xs" style={{ color: 'var(--color-text-2)' }}>
+              {actResult}
+            </div>
+          )}
         </div>
       )}
     </div>

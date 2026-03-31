@@ -7,6 +7,7 @@ import path from 'path';
 import fs from 'fs';
 import os from 'os';
 import log from '#main/logger';
+import { readAppPackageVersion } from '#main/app-package';
 import {
   stageDaemonBinary,
   installDaemonPlist,
@@ -95,6 +96,19 @@ export async function readToken(): Promise<string> {
   const content = await fs.promises.readFile(tokenFile, 'utf-8');
   cachedToken = content.trim();
   return cachedToken;
+}
+
+async function hasExternalGatewayToken(dataDir: string): Promise<boolean> {
+  const envToken = process.env.MANDO_AUTH_TOKEN?.trim();
+  if (envToken) return true;
+
+  try {
+    const tokenFile = path.join(dataDir, 'auth-token');
+    const content = await fs.promises.readFile(tokenFile, 'utf-8');
+    return content.trim().length > 0;
+  } catch {
+    return false;
+  }
 }
 
 /** Invalidate cached port/token (e.g., after daemon restart). */
@@ -262,16 +276,7 @@ async function checkVersionAndUpdate(dataDir: string): Promise<void> {
 }
 
 function getBundledVersion(): string | null {
-  try {
-    const pkgPath = app.isPackaged
-      ? path.join(process.resourcesPath!, 'app', 'package.json')
-      : path.resolve(__dirname, '../../package.json');
-    const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
-    return pkg.version || null;
-  } catch (err) {
-    log.warn('[daemon] failed to read bundled version:', err);
-    return null;
-  }
+  return readAppPackageVersion();
 }
 
 // ---------------------------------------------------------------------------
@@ -330,6 +335,12 @@ async function killDaemonByPid(pid: number, dataDir: string): Promise<boolean> {
 export async function ensureDaemon(dataDir: string): Promise<boolean> {
   // MANDO_EXTERNAL_GATEWAY: skip daemon management entirely (for testing).
   if (process.env.MANDO_EXTERNAL_GATEWAY) {
+    if (!(await hasExternalGatewayToken(dataDir))) {
+      setConnectionState('disconnected');
+      scheduleReconnect();
+      return false;
+    }
+
     const ready = await waitForDaemon(10000);
     if (!ready) {
       setConnectionState('disconnected');

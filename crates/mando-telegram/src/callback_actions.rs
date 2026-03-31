@@ -151,6 +151,24 @@ pub(crate) async fn reopen_with_feedback(
 
 /// Request rework on a task.
 pub(crate) async fn rework(bot: &TelegramBot, cid: &str, item_id: &str, title: &str) -> Result<()> {
+    rework_with_feedback(
+        bot,
+        cid,
+        item_id,
+        title,
+        "Restart cleanly and fix the outstanding issues.",
+    )
+    .await
+}
+
+/// Request rework on a task with explicit operator feedback.
+pub(crate) async fn rework_with_feedback(
+    bot: &TelegramBot,
+    cid: &str,
+    item_id: &str,
+    title: &str,
+    feedback: &str,
+) -> Result<()> {
     let esc = mando_shared::escape_html(title);
     let id_num: i64 = item_id
         .parse()
@@ -158,7 +176,10 @@ pub(crate) async fn rework(bot: &TelegramBot, cid: &str, item_id: &str, title: &
 
     match bot
         .gw()
-        .post(paths::TASKS_REWORK, &json!({"id": id_num, "feedback": ""}))
+        .post(
+            paths::TASKS_REWORK,
+            &json!({"id": id_num, "feedback": feedback}),
+        )
         .await
     {
         Ok(_) => {
@@ -299,17 +320,23 @@ pub(crate) async fn add_todo_items(
                     }
                     Err(e) => {
                         error!("photo download failed: {e}");
-                        let _ = bot
+                        if let Err(e) = bot
                             .send_html(cid, &format!("\u{26a0}\u{fe0f} Photo download failed: {e}"))
-                            .await;
+                            .await
+                        {
+                            tracing::warn!(module = "telegram", error = %e, "message send failed");
+                        }
                         None
                     }
                 },
                 Err(e) => {
                     error!("getFile failed: {e}");
-                    let _ = bot
+                    if let Err(e) = bot
                         .send_html(cid, &format!("\u{26a0}\u{fe0f} Photo fetch failed: {e}"))
-                        .await;
+                        .await
+                    {
+                        tracing::warn!(module = "telegram", error = %e, "message send failed");
+                    }
                     None
                 }
             }
@@ -336,14 +363,17 @@ pub(crate) async fn add_todo_items(
                     let updates = serde_json::json!({"original_prompt": item.title});
                     if let Err(e) = bot.gw().patch(&paths::task_item(&id), &updates).await {
                         error!("todo: failed to set metadata for #{id}: {e}");
-                        let _ = bot
+                        if let Err(e) = bot
                             .send_html(
                                 cid,
                                 &format!(
                                     "\u{26a0}\u{fe0f} Item #{id} added but metadata failed: {e}"
                                 ),
                             )
-                            .await;
+                            .await
+                        {
+                            tracing::warn!(module = "telegram", error = %e, "message send failed");
+                        }
                     }
                 } else {
                     error!("todo: POST succeeded but response missing 'id': {result}");
@@ -351,7 +381,7 @@ pub(crate) async fn add_todo_items(
             }
             Err(e) => {
                 error!("todo: failed to add '{}': {e}", item.title);
-                let _ = bot
+                if let Err(e) = bot
                     .send_html(
                         cid,
                         &format!(
@@ -359,7 +389,10 @@ pub(crate) async fn add_todo_items(
                             mando_shared::escape_html(&item.title),
                         ),
                     )
-                    .await;
+                    .await
+                {
+                    tracing::warn!(module = "telegram", error = %e, "message send failed");
+                }
             }
         }
     }
@@ -445,15 +478,21 @@ pub(crate) async fn kill_worker(
     {
         Ok(_) => {
             info!("cron_act: killed worker pid={pid}");
-            let _ = bot
+            if let Err(e) = bot
                 .edit_message(cid, mid, &format!("\u{1f480} Killed worker (pid {pid})."))
-                .await;
+                .await
+            {
+                tracing::warn!(module = "telegram", error = %e, "message send failed");
+            }
         }
         Err(e) => {
             error!("cron_act: kill failed for pid={pid}: {e}");
-            let _ = bot
+            if let Err(e) = bot
                 .edit_message(cid, mid, &format!("\u{274c} Kill failed: {e}"))
-                .await;
+                .await
+            {
+                tracing::warn!(module = "telegram", error = %e, "message send failed");
+            }
         }
     }
     Ok(())

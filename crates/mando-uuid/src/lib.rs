@@ -5,6 +5,7 @@ use std::fmt;
 pub struct Uuid([u8; 16]);
 
 /// Errors that can occur when parsing a UUID string.
+#[cfg(test)]
 #[derive(Debug)]
 pub enum UuidError {
     InvalidLength,
@@ -12,6 +13,7 @@ pub enum UuidError {
     InvalidHex,
 }
 
+#[cfg(test)]
 impl fmt::Display for UuidError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -22,6 +24,7 @@ impl fmt::Display for UuidError {
     }
 }
 
+#[cfg(test)]
 impl std::error::Error for UuidError {}
 
 impl Uuid {
@@ -40,6 +43,7 @@ impl Uuid {
     }
 
     /// Parse a UUID from the standard `8-4-4-4-12` hex string.
+    #[cfg(test)]
     pub fn parse(s: &str) -> Result<Uuid, UuidError> {
         // Expected: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx (36 chars)
         if s.len() != 36 {

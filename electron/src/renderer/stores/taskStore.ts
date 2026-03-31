@@ -1,13 +1,6 @@
 import { create } from 'zustand';
 import type { TaskItem, ItemStatus } from '#renderer/types';
-import {
-  fetchTasks,
-  addTask,
-  adoptTask,
-  deleteItems,
-  type AddTaskInput,
-  type CaptainAdoptInput,
-} from '#renderer/api';
+import { fetchTasks, addTask, deleteItems, type AddTaskInput } from '#renderer/api';
 import { getErrorMessage } from '#renderer/utils';
 
 const SHOW_ARCHIVED_KEY = 'mando:showArchived';
@@ -21,7 +14,6 @@ interface TaskStore {
   error: string | null;
   fetch: () => Promise<void>;
   add: (input: AddTaskInput) => Promise<void>;
-  adopt: (input: CaptainAdoptInput) => Promise<void>;
   remove: (ids: number[]) => Promise<void>;
   setFilter: (status: ItemStatus | 'action-needed' | 'in-progress-group' | null) => void;
   setShowArchived: (show: boolean) => void;
@@ -57,18 +49,6 @@ export const useTaskStore = create<TaskStore>((set, getState) => ({
     } catch (err) {
       set({
         error: getErrorMessage(err, 'Failed to add task'),
-      });
-      throw err;
-    }
-  },
-
-  adopt: async (input: CaptainAdoptInput) => {
-    try {
-      await adoptTask(input);
-      await getState().fetch();
-    } catch (err) {
-      set({
-        error: getErrorMessage(err, 'Failed to hand worktree to captain'),
       });
       throw err;
     }

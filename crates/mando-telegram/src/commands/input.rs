@@ -13,20 +13,12 @@ pub async fn handle(bot: &mut TelegramBot, chat_id: &str, args: &str) -> Result<
 
     if subcmd == "cancel" {
         if bot.has_input_session(chat_id) {
-            // Cancel server-side clarifier session.
-            bot.gw()
-                .post("/api/clarifier/cancel", &json!({"key": chat_id}))
-                .await
-                .ok();
             bot.close_input_session(chat_id);
-            bot.send_html(chat_id, "\u{2705} Clarifier session cancelled.")
+            bot.send_html(chat_id, "\u{2705} Input session cancelled.")
                 .await?;
         } else {
-            bot.send_html(
-                chat_id,
-                "No active clarifier session. Send /input to start.",
-            )
-            .await?;
+            bot.send_html(chat_id, "No active input session. Send /input to start.")
+                .await?;
         }
         return Ok(());
     }
@@ -35,7 +27,7 @@ pub async fn handle(bot: &mut TelegramBot, chat_id: &str, args: &str) -> Result<
     if bot.has_input_session(chat_id) {
         let title = bot.input_session_title(chat_id).unwrap_or_default();
         let msg = format!(
-            "\u{1f9ed} Clarifier session already active for:\n\u{2022} {}\n\n\
+            "\u{1f9ed} Input session already active for:\n\u{2022} {}\n\n\
              Reply with details here, or send /input cancel to exit.",
             escape_html(&title)
         );
@@ -62,14 +54,14 @@ pub async fn handle(bot: &mut TelegramBot, chat_id: &str, args: &str) -> Result<
         .collect();
 
     if inputable.is_empty() {
-        bot.send_html(chat_id, "\u{2705} No items awaiting input.")
+        bot.send_html(chat_id, "\u{2705} No tasks awaiting input.")
             .await?;
         return Ok(());
     }
 
     // Show picker
     let action_id = super::short_uuid();
-    let mut lines = vec!["Pick an item to clarify:".to_string()];
+    let mut lines = vec!["Pick a task to clarify:".to_string()];
     let mut buttons: Vec<serde_json::Value> = Vec::new();
 
     for (idx, item) in inputable.iter().enumerate() {
@@ -107,7 +99,8 @@ pub async fn handle(bot: &mut TelegramBot, chat_id: &str, args: &str) -> Result<
 }
 
 /// Handle plain-text messages routed to an active input session.
-/// Routes through HTTP clarifier endpoints. Returns `true` if consumed.
+/// Uses the unified POST /api/tasks/{id}/clarify endpoint.
+/// Returns `true` if consumed.
 pub async fn handle_text(bot: &mut TelegramBot, chat_id: &str, text: &str) -> Result<bool> {
     let item_title = match bot.input_session_title(chat_id) {
         Some(t) => t,
@@ -134,29 +127,29 @@ pub async fn handle_text(bot: &mut TelegramBot, chat_id: &str, text: &str) -> Re
     let item = match item {
         Some(it) => it,
         None => {
-            bot.close_input_session_with_cancel(chat_id).await;
+            bot.close_input_session(chat_id);
             bot.send_html(
                 chat_id,
-                "\u{26a0}\u{fe0f} Item no longer exists in task list.",
+                "\u{26a0}\u{fe0f} Task no longer exists in the task list.",
             )
             .await?;
             return Ok(true);
         }
     };
 
-    // Only accept input for pre-work statuses
+    // Only accept input for pre-work statuses.
     match item.status {
         ItemStatus::New
         | ItemStatus::Clarifying
         | ItemStatus::NeedsClarification
         | ItemStatus::Queued => {}
         _ => {
-            bot.close_input_session_with_cancel(chat_id).await;
+            bot.close_input_session(chat_id);
             let status = format!("{:?}", item.status);
             bot.send_html(
                 chat_id,
                 &format!(
-                    "\u{2139}\u{fe0f} Item status changed to {status}. Send /input to start over."
+                    "\u{2139}\u{fe0f} Task state changed to {status}. Send /input to start over."
                 ),
             )
             .await?;
@@ -164,64 +157,53 @@ pub async fn handle_text(bot: &mut TelegramBot, chat_id: &str, text: &str) -> Re
         }
     }
 
-    let item_id = item.id.to_string();
+    let item_id = item.id;
 
     let ack = bot
         .send_html(chat_id, "\u{1f9ed} Clarifying\u{2026}")
         .await?;
     let ack_mid = ack.get("message_id").and_then(|v| v.as_i64()).unwrap_or(0);
 
-    // Try follow-up on existing session; if none exists, start fresh.
-    let result = match bot
-        .gw()
-        .post(
-            "/api/clarifier/message",
-            &json!({"key": chat_id, "message": text}),
-        )
-        .await
-    {
-        Ok(resp) => resp,
-        Err(_) => {
-            // No existing session — start a new one.
-            match bot
-                .gw()
-                .post(
-                    "/api/clarifier/start",
-                    &json!({"key": chat_id, "item_id": item_id, "message": text}),
-                )
-                .await
-            {
-                Ok(resp) => resp,
-                Err(e) => {
-                    info!("[input] clarifier CC failed for '{}': {}", item_title, e);
-                    // Fallback: append context directly via PATCH.
-                    append_context_fallback(bot, chat_id, ack_mid, &item_title, &item_id, text)
-                        .await;
-                    return Ok(true);
-                }
+    if item.status == ItemStatus::NeedsClarification {
+        // Use unified clarify endpoint.
+        match bot
+            .gw()
+            .post(
+                &format!("/api/tasks/{item_id}/clarify"),
+                &json!({"answer": text}),
+            )
+            .await
+        {
+            Ok(resp) => {
+                handle_clarify_response(bot, chat_id, ack_mid, &item_title, &resp).await;
+            }
+            Err(e) => {
+                info!("[input] clarify failed for '{}': {}", item_title, e);
+                append_context_fallback(bot, chat_id, ack_mid, &item_title, item_id, text).await;
             }
         }
-    };
+    } else {
+        // For New/Clarifying/Queued — append context directly.
+        append_context_fallback(bot, chat_id, ack_mid, &item_title, item_id, text).await;
+    }
 
-    handle_clarifier_response(bot, chat_id, ack_mid, &item_title, &result).await;
     Ok(true)
 }
 
-/// Process clarifier response from the gateway.
-async fn handle_clarifier_response(
+/// Process response from the unified /api/tasks/{id}/clarify endpoint.
+async fn handle_clarify_response(
     bot: &mut TelegramBot,
     chat_id: &str,
     message_id: i64,
     item_title: &str,
     resp: &serde_json::Value,
 ) {
-    let result = resp.get("result").unwrap_or(resp);
-    let status = result.get("status").and_then(|v| v.as_str()).unwrap_or("");
+    let status = resp.get("status").and_then(|v| v.as_str()).unwrap_or("");
 
     match status {
-        "Ready" => {
-            bot.close_input_session_with_cancel(chat_id).await;
-            let _ = bot
+        "ready" => {
+            bot.close_input_session(chat_id);
+            if let Err(e) = bot
                 .edit_message(
                     chat_id,
                     message_id,
@@ -230,14 +212,17 @@ async fn handle_clarifier_response(
                         escape_html(item_title)
                     ),
                 )
-                .await;
+                .await
+            {
+                tracing::warn!(module = "telegram", error = %e, "message send failed");
+            }
         }
-        "Clarifying" | "Escalate" => {
-            let questions = result
+        "clarifying" | "escalate" => {
+            let questions = resp
                 .get("questions")
                 .and_then(|v| v.as_str())
                 .unwrap_or("Can you provide more details?");
-            let _ = bot
+            if let Err(e) = bot
                 .edit_message(
                     chat_id,
                     message_id,
@@ -246,27 +231,55 @@ async fn handle_clarifier_response(
                         escape_html(questions)
                     ),
                 )
-                .await;
+                .await
+            {
+                tracing::warn!(module = "telegram", error = %e, "message send failed");
+            }
+        }
+        "needs-clarification" => {
+            // Inline re-clarification failed — answer saved, show error hint.
+            let error = resp
+                .get("error")
+                .and_then(|v| v.as_str())
+                .unwrap_or("LLM unavailable");
+            let questions = resp.get("questions").and_then(|v| v.as_str()).unwrap_or("");
+            let msg = if questions.is_empty() {
+                format!(
+                    "\u{26a0}\u{fe0f} Answer saved for <b>{}</b>, but re-clarification failed ({}).\nCaptain will retry on next tick.",
+                    escape_html(item_title),
+                    escape_html(error),
+                )
+            } else {
+                format!(
+                    "\u{26a0}\u{fe0f} Answer saved for <b>{}</b>, but re-clarification failed.\n\n{}\n\nReply here, or /input cancel to exit.",
+                    escape_html(item_title),
+                    escape_html(questions),
+                )
+            };
+            let _ = bot.edit_message(chat_id, message_id, &msg).await;
         }
         _ => {
-            let _ = bot
+            if let Err(e) = bot
                 .edit_message(
                     chat_id,
                     message_id,
                     &format!("\u{2705} Updated <b>{}</b>.", escape_html(item_title)),
                 )
-                .await;
+                .await
+            {
+                tracing::warn!(module = "telegram", error = %e, "message send failed");
+            }
         }
     }
 }
 
-/// Fallback when CC is unavailable: append human text to context via PATCH.
+/// Fallback: append human text to context via PATCH.
 async fn append_context_fallback(
     bot: &mut TelegramBot,
     chat_id: &str,
     message_id: i64,
     item_title: &str,
-    item_id: &str,
+    item_id: i64,
     text: &str,
 ) {
     // Fetch existing context from task list.
@@ -278,7 +291,7 @@ async fn append_context_fallback(
         .and_then(|resp| {
             let items = resp.get("items")?.as_array()?;
             items.iter().find_map(|v| {
-                let v_id = v.get("id")?.as_i64()?.to_string();
+                let v_id = v.get("id")?.as_i64()?;
                 if v_id == item_id {
                     v.get("context").and_then(|c| c.as_str()).map(String::from)
                 } else {
@@ -307,23 +320,26 @@ async fn append_context_fallback(
                 "Input session: appended context for '{}' (fallback)",
                 item_title
             );
-            let _ = bot
+            if let Err(e) = bot
                 .edit_message(
                     chat_id,
                     message_id,
                     &format!(
-                        "\u{2705} Context appended to <b>{}</b> (CC unavailable).",
+                        "\u{2705} Context appended to <b>{}</b>.",
                         escape_html(item_title)
                     ),
                 )
-                .await;
+                .await
+            {
+                tracing::warn!(module = "telegram", error = %e, "message send failed");
+            }
         }
         Err(e) => {
             warn!(
                 "Input session: failed to append context for '{}': {e}",
                 item_title
             );
-            let _ = bot
+            if let Err(e) = bot
                 .edit_message(
                     chat_id,
                     message_id,
@@ -332,7 +348,10 @@ async fn append_context_fallback(
                         escape_html(item_title)
                     ),
                 )
-                .await;
+                .await
+            {
+                tracing::warn!(module = "telegram", error = %e, "message send failed");
+            }
         }
     }
     bot.close_input_session(chat_id);

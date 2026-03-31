@@ -45,6 +45,7 @@ use tokio::sync::{Mutex, RwLock};
 #[derive(Clone)]
 pub struct AppState {
     pub config: Arc<ArcSwap<mando_config::Config>>,
+    pub runtime_paths: mando_config::CaptainRuntimePaths,
     pub captain_workflow: Arc<ArcSwap<mando_config::CaptainWorkflow>>,
     pub scout_workflow: Arc<ArcSwap<mando_config::ScoutWorkflow>>,
     pub voice_workflow: Arc<ArcSwap<mando_config::VoiceWorkflow>>,
@@ -54,7 +55,6 @@ pub struct AppState {
     pub config_write_mu: Arc<Mutex<()>>,
     pub bus: Arc<mando_shared::EventBus>,
     pub cron_service: Arc<RwLock<mando_shared::CronService>>,
-    pub clarifier_mgr: Arc<RwLock<mando_captain::runtime::clarifier::ClarifierSessionManager>>,
     pub cc_session_mgr: Arc<RwLock<mando_captain::io::cc_session::CcSessionManager>>,
     pub task_store: Arc<RwLock<mando_captain::io::task_store::TaskStore>>,
     pub db: Arc<mando_db::Db>,
@@ -69,6 +69,26 @@ pub(crate) fn resolve_github_repo(
     config: &mando_config::Config,
 ) -> Option<String> {
     mando_config::resolve_github_repo(project, config)
+}
+
+pub(crate) fn captain_notifier(
+    state: &AppState,
+    config: &mando_config::Config,
+) -> mando_captain::runtime::notify::Notifier {
+    let default_slug = if config.captain.projects.len() == 1 {
+        config
+            .captain
+            .projects
+            .values()
+            .next()
+            .and_then(|pc| pc.github_repo.clone())
+    } else {
+        None
+    };
+
+    mando_captain::runtime::notify::Notifier::new(state.bus.clone())
+        .with_repo_slug(default_slug)
+        .with_notifications_enabled(true)
 }
 
 /// Fetch the Linear workspace `urlKey` from the GraphQL API.

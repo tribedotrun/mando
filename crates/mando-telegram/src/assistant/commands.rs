@@ -12,19 +12,19 @@ use crate::bot::TelegramBot;
 use crate::gateway_paths as paths;
 
 // Re-export scout commands used by the dispatcher.
-pub use super::scout_commands::{
-    auto_process_batch, auto_process_single, cmd_list, cmd_research, cmd_scout, edit_list_page,
-    show_card,
-};
+pub use super::scout_commands::{cmd_list, cmd_research, cmd_scout, edit_list_page, show_card};
+pub use super::scout_processing::{auto_process_batch, auto_process_single, cmd_process};
+
+fn parse_id_list(raw: &str) -> Vec<i64> {
+    raw.split(|ch: char| ch.is_whitespace() || ch == ',')
+        .filter(|part| !part.is_empty())
+        .filter_map(|part| part.trim_start_matches('#').parse::<i64>().ok())
+        .collect()
+}
 
 // ── /addlink ────────────────────────────────────────────────────────
 
-pub async fn cmd_addlink(
-    bot: &mut TelegramBot,
-    chat_id: &str,
-    args: &str,
-    is_group: bool,
-) -> Result<()> {
+pub async fn cmd_addlink(bot: &mut TelegramBot, chat_id: &str, args: &str) -> Result<()> {
     let args = args.trim();
     if args.is_empty() {
         send_html(
@@ -44,7 +44,7 @@ pub async fn cmd_addlink(
         .collect();
 
     if urls.len() > 1 && urls.len() == parts.len() {
-        return addlink_batch(bot, chat_id, &urls, is_group).await;
+        return addlink_batch(bot, chat_id, &urls).await;
     }
 
     let url = parts[0];
@@ -70,7 +70,7 @@ pub async fn cmd_addlink(
         Ok(r) => r,
         Err(e) => {
             if message_id > 0 {
-                let _ = bot
+                if let Err(e) = bot
                     .api
                     .edit_message_text(
                         chat_id,
@@ -79,7 +79,10 @@ pub async fn cmd_addlink(
                         Some("HTML"),
                         None,
                     )
-                    .await;
+                    .await
+                {
+                    tracing::warn!(module = "telegram", error = %e, "message send failed");
+                }
             }
             return Ok(());
         }
@@ -94,15 +97,18 @@ pub async fn cmd_addlink(
             escape_html(url),
         );
         if message_id > 0 {
-            let _ = bot
+            if let Err(e) = bot
                 .api
                 .edit_message_text(chat_id, message_id, &msg, Some("HTML"), None)
-                .await;
-            auto_process_single(bot, chat_id, message_id, id, is_group).await;
+                .await
+            {
+                tracing::warn!(module = "telegram", error = %e, "message send failed");
+            }
+            auto_process_single(bot, chat_id, message_id, id).await;
         }
     } else {
         if message_id > 0 {
-            let _ = bot
+            if let Err(e) = bot
                 .api
                 .edit_message_text(
                     chat_id,
@@ -114,18 +120,16 @@ pub async fn cmd_addlink(
                     Some("HTML"),
                     None,
                 )
-                .await;
+                .await
+            {
+                tracing::warn!(module = "telegram", error = %e, "message send failed");
+            }
         }
     }
     Ok(())
 }
 
-async fn addlink_batch(
-    bot: &mut TelegramBot,
-    chat_id: &str,
-    urls: &[&str],
-    is_group: bool,
-) -> Result<()> {
+async fn addlink_batch(bot: &mut TelegramBot, chat_id: &str, urls: &[&str]) -> Result<()> {
     let sent = send_html(
         bot,
         chat_id,
@@ -159,17 +163,23 @@ async fn addlink_batch(
 
     if added_ids.is_empty() {
         // Nothing new — just show the status
-        let _ = bot
+        if let Err(e) = bot
             .api
             .edit_message_text(chat_id, message_id, &lines.join("\n"), Some("HTML"), None)
-            .await;
+            .await
+        {
+            tracing::warn!(module = "telegram", error = %e, "message send failed");
+        }
     } else {
         // Edit to show what was added, then process in place
-        let _ = bot
+        if let Err(e) = bot
             .api
             .edit_message_text(chat_id, message_id, &lines.join("\n"), Some("HTML"), None)
-            .await;
-        auto_process_batch(bot, chat_id, message_id, &added_ids, is_group).await;
+            .await
+        {
+            tracing::warn!(module = "telegram", error = %e, "message send failed");
+        }
+        auto_process_batch(bot, chat_id, message_id, &added_ids).await;
     }
     Ok(())
 }
@@ -327,7 +337,7 @@ pub async fn edit_simplelist_page(
         5,
         start,
     );
-    let _ = bot
+    if let Err(e) = bot
         .api
         .edit_message_text(
             chat_id,
@@ -336,7 +346,128 @@ pub async fn edit_simplelist_page(
             Some("HTML"),
             if kb.is_null() { None } else { Some(kb) },
         )
-        .await;
+        .await
+    {
+        tracing::warn!(module = "telegram", error = %e, "message send failed");
+    }
+    Ok(())
+}
+
+// ── /bulkstatus ─────────────────────────────────────────────────────
+
+pub async fn cmd_bulk_status(bot: &mut TelegramBot, chat_id: &str, args: &str) -> Result<()> {
+    let mut parts = args.split_whitespace();
+    let Some(status) = parts.next() else {
+        send_html(
+            bot,
+            chat_id,
+            "Usage: /bulkstatus <pending|processed|saved|archived> <id...>\nExample: /bulkstatus archived 12 14 18",
+        )
+        .await?;
+        return Ok(());
+    };
+
+    let ids = parse_id_list(&parts.collect::<Vec<_>>().join(" "));
+    if ids.is_empty() {
+        send_html(bot, chat_id, "Provide at least one Scout item ID.").await?;
+        return Ok(());
+    }
+    let count = ids.len();
+
+    bot.gw()
+        .post(
+            "/api/scout/bulk",
+            &serde_json::json!({"ids": ids, "updates": {"status": status}}),
+        )
+        .await?;
+
+    send_html(
+        bot,
+        chat_id,
+        &format!(
+            "✅ Updated {} Scout item(s) to <b>{}</b>.",
+            count,
+            escape_html(status)
+        ),
+    )
+    .await?;
+    Ok(())
+}
+
+// ── /bulkdelete ─────────────────────────────────────────────────────
+
+pub async fn cmd_bulk_delete(bot: &mut TelegramBot, chat_id: &str, args: &str) -> Result<()> {
+    let ids = parse_id_list(args);
+    if ids.is_empty() {
+        send_html(
+            bot,
+            chat_id,
+            "Usage: /bulkdelete <id...>\nExample: /bulkdelete 12 14 18",
+        )
+        .await?;
+        return Ok(());
+    }
+    let count = ids.len();
+
+    bot.gw()
+        .post("/api/scout/bulk-delete", &serde_json::json!({"ids": ids}))
+        .await?;
+
+    send_html(
+        bot,
+        chat_id,
+        &format!("🗑️ Deleted {} Scout item(s).", count),
+    )
+    .await?;
+    Ok(())
+}
+
+// ── /publish ───────────────────────────────────────────────────────
+
+pub async fn cmd_publish(bot: &mut TelegramBot, chat_id: &str, args: &str) -> Result<()> {
+    let id = args.trim().trim_start_matches('#');
+    if id.is_empty() {
+        send_html(bot, chat_id, "Usage: /publish <id>\nExample: /publish 42").await?;
+        return Ok(());
+    }
+
+    let id_num = match id.parse::<i64>() {
+        Ok(id_num) => id_num,
+        Err(_) => {
+            send_html(
+                bot,
+                chat_id,
+                &format!("⚠️ Invalid Scout item ID: {}", escape_html(id)),
+            )
+            .await?;
+            return Ok(());
+        }
+    };
+
+    let result = bot
+        .gw()
+        .post(&paths::scout_telegraph(id_num), &serde_json::json!({}))
+        .await?;
+    let url = result["url"].as_str().unwrap_or_default();
+    if url.is_empty() {
+        send_html(
+            bot,
+            chat_id,
+            "❌ Publish failed: daemon returned no article URL.",
+        )
+        .await?;
+        return Ok(());
+    }
+
+    send_html(
+        bot,
+        chat_id,
+        &format!(
+            "📚 Published Scout article for #{id_num}: <a href=\"{}\">open article</a>",
+            escape_html(url)
+        ),
+    )
+    .await?;
     Ok(())
 }
 

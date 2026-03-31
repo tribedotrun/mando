@@ -6,6 +6,7 @@ pub mod commands;
 pub mod formatting;
 pub(crate) mod helpers;
 pub mod scout_commands;
+pub mod scout_processing;
 
 #[cfg(test)]
 mod tests {

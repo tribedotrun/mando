@@ -14,6 +14,9 @@ use crate::biz::url_detect::classify_url;
 use crate::io::content_fetch::fetch_content;
 use crate::io::db::ScoutDb;
 use crate::io::file_store;
+use crate::runtime::article::{
+    build_article_from_summary, build_local_article_if_short, normalize_article_markdown,
+};
 
 /// Maximum retries for the summarize step.
 const MAX_PROCESS_RETRIES: usize = 3;
@@ -148,9 +151,11 @@ pub async fn process_item(
         warn!(id, error = %e, "process: failed to record session — cost tracking gap");
     }
 
-    let parsed = result
-        .structured
-        .unwrap_or_else(|| mando_captain::biz::json_parse::parse_llm_json(&result.text));
+    let parsed = match result.structured {
+        Some(v) => v,
+        None => mando_captain::biz::json_parse::parse_llm_json(&result.text)
+            .map_err(|e| anyhow::anyhow!("AI returned unparseable response for #{id}: {e}"))?,
+    };
 
     let relevance = parsed["relevance_score"].as_i64().with_context(|| {
         warn!(id, raw = %result.text, "process: missing relevance_score");
@@ -183,7 +188,86 @@ pub async fn process_item(
         .map(|s| s.to_string())
         .unwrap_or(source);
 
-    // Phase 3: Update DB with process results — fail fast if blocked
+    // Phase 3: Build files first while the item remains non-processed. This
+    // keeps "processed" synonymous with "readable" across CLI/TG/Electron.
+    let slug = slugify_title(&ai_title);
+
+    let date_line = date_published
+        .as_deref()
+        .map(|d| format!("**Published**: {d}\n"))
+        .unwrap_or_default();
+    let summary = format!(
+        "# {ai_title}\n\n\
+         **Source**: {source}\n\
+         **Type**: {}\n\
+         {date_line}\
+         **Relevance**: {relevance}/100 | **Quality**: {quality}/100\n\n\
+         {summary_text}\n",
+        url_type.as_str(),
+    );
+    file_store::write_summary(id, &slug, &summary)
+        .with_context(|| format!("write summary for #{id}"))?;
+
+    // Phase 4: Article generation + Telegraph publish for every processed item.
+    let article_md =
+        if let Some(local_article) = build_local_article_if_short(&ai_title, &item.url, &content) {
+            info!(
+                id,
+                chars = content.len(),
+                "process: short source, using local article"
+            );
+            local_article
+        } else {
+            match crate::runtime::article::generate_article(
+                &ai_title,
+                &item.url,
+                url_type.as_str(),
+                &content_path_str,
+                workflow,
+            )
+            .await
+            {
+                Ok(article_result) => {
+                    if let Err(e) = db
+                        .record_session(
+                            id,
+                            &article_result.session_id,
+                            "scout-article",
+                            article_result.cost_usd,
+                            article_result.duration_ms,
+                        )
+                        .await
+                    {
+                        warn!(
+                            id,
+                            error = %e,
+                            "process: failed to record article session — cost tracking gap"
+                        );
+                    }
+                    normalize_article_markdown(&ai_title, &article_result.text)
+                }
+                Err(e) => {
+                    warn!(
+                        id,
+                        error = %e,
+                        "process: article generation failed, falling back to summary article"
+                    );
+                    build_article_from_summary(&ai_title, &summary)
+                        .unwrap_or_else(|| normalize_article_markdown(&ai_title, &summary))
+                }
+            }
+        };
+    file_store::write_article(id, &article_md)
+        .with_context(|| format!("write article for #{id}"))?;
+    match crate::io::telegraph::publish_article(id, &ai_title, &article_md).await {
+        Ok(url) => info!(id, %url, "process: published to Telegraph"),
+        Err(e) => {
+            warn!(id, %e, "process: Telegraph publish failed (non-fatal)")
+        }
+    }
+
+    // Phase 5: Mark the item processed only after the summary/article files
+    // exist. If another worker raced us, clean up the staged files and fail.
     let updated = db
         .update_processed(
             id,
@@ -195,89 +279,11 @@ pub async fn process_item(
         )
         .await?;
     if !updated {
+        file_store::delete_item_files(id, Some(&slug));
         bail!("item #{id} already processed (status guard)");
     }
-
-    // Save files using the AI-generated title slug (matches what get_scout_item reads).
-    // If file writes fail, roll back DB status so the item can be retried.
-    let slug = slugify_title(&ai_title);
-
-    let write_result = (|| -> Result<()> {
-        let date_line = date_published
-            .as_deref()
-            .map(|d| format!("**Published**: {d}\n"))
-            .unwrap_or_default();
-        let summary = format!(
-            "# {ai_title}\n\n\
-             **Source**: {source}\n\
-             **Type**: {}\n\
-             {date_line}\
-             **Relevance**: {relevance}/100 | **Quality**: {quality}/100\n\n\
-             {summary_text}\n",
-            url_type.as_str(),
-        );
-        file_store::write_summary(id, &slug, &summary)
-            .with_context(|| format!("write summary for #{id}"))?;
-
-        Ok(())
-    })();
-
-    if let Err(e) = write_result {
-        warn!(id, %e, "process: file write failed, restoring pre-process metadata and pending status");
-        if let Err(rb_err) = db.rollback_processed(&item).await {
-            tracing::error!(id, rollback_error = %rb_err, original_error = %e, "process: rollback_processed failed — row may have stale AI metadata with no summary file");
-        }
-        return Err(e);
-    }
-
-    // Phase 4: Article generation + Telegraph publish (YouTube only —
-    // blogs/arxiv/repos are already readable; synthesis only adds value for
-    // transcripts and audio-derived content).
-    if url_type == crate::biz::url_detect::UrlType::YouTube {
-        match crate::runtime::article::generate_article(
-            &ai_title,
-            &item.url,
-            url_type.as_str(),
-            &content_path_str,
-            workflow,
-        )
-        .await
-        {
-            Ok(article_result) => {
-                if let Err(e) = db
-                    .record_session(
-                        id,
-                        &article_result.session_id,
-                        "scout-article",
-                        article_result.cost_usd,
-                        article_result.duration_ms,
-                    )
-                    .await
-                {
-                    warn!(id, error = %e, "process: failed to record article session — cost tracking gap");
-                }
-                let article_md = &article_result.text;
-                if let Err(e) = file_store::write_article(id, article_md)
-                    .with_context(|| format!("write article for #{id}"))
-                {
-                    warn!(id, %e, "process: article file write failed, skipping publish");
-                } else {
-                    match crate::io::telegraph::publish_article(id, &ai_title, article_md).await {
-                        Ok(url) => info!(id, %url, "process: published to Telegraph"),
-                        Err(e) => {
-                            warn!(id, %e, "process: Telegraph publish failed (non-fatal)")
-                        }
-                    }
-                }
-            }
-            Err(e) => warn!(id, %e, "process: article generation failed (non-fatal)"),
-        }
-    } else {
-        info!(
-            id,
-            url_type = url_type.as_str(),
-            "process: skipping article generation (not YouTube)"
-        );
+    if let Err(e) = file_store::delete_stale_summaries(id, &slug) {
+        warn!(id, %e, "process: failed to delete stale summary files");
     }
 
     info!(id, title = %ai_title, "process: complete");

@@ -39,10 +39,6 @@ impl CcSessionManager {
         }
     }
 
-    pub fn set_default_model(&mut self, default_model: &str) {
-        self.default_model = default_model.to_string();
-    }
-
     /// Start a new CC session. Returns the first response.
     pub async fn start(
         &mut self,

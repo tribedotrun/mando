@@ -7,8 +7,8 @@ use mando_shared::telegram_format::escape_html;
 use serde_json::json;
 
 const PICKER: MultiPicker = MultiPicker {
-    header: "Select items to cancel:",
-    empty_msg: "\u{2705} No cancellable items.",
+    header: "Select tasks to cancel:",
+    empty_msg: "\u{2705} No cancellable tasks.",
     callback_prefix: "ms_cancel",
     confirm_label: "Cancel Selected",
     limit: 10,
@@ -32,7 +32,7 @@ pub async fn handle(bot: &mut TelegramBot, chat_id: &str, args: &str) -> Result<
                 bot.send_html(
                     chat_id,
                     &format!(
-                        "\u{26a0}\u{fe0f} Item #{} not found.",
+                        "\u{26a0}\u{fe0f} Task #{} not found.",
                         escape_html(target_id)
                     ),
                 )
@@ -42,7 +42,7 @@ pub async fn handle(bot: &mut TelegramBot, chat_id: &str, args: &str) -> Result<
                 bot.send_html(
                     chat_id,
                     &format!(
-                        "\u{26a0}\u{fe0f} Item #{} is already finalized.",
+                        "\u{26a0}\u{fe0f} Task #{} is already finalized.",
                         escape_html(target_id)
                     ),
                 )

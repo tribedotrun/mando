@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS cc_sessions (
     caller          TEXT    NOT NULL,
     cwd             TEXT    NOT NULL DEFAULT '',
     model           TEXT    NOT NULL DEFAULT '',
-    status          TEXT    NOT NULL DEFAULT 'done',
+    status          TEXT    NOT NULL DEFAULT 'stopped',
     cost_usd        REAL,
     duration_ms     INTEGER,
     resumed         INTEGER NOT NULL DEFAULT 0,
@@ -54,7 +54,9 @@ CREATE TABLE IF NOT EXISTS tasks (
     retry_count                INTEGER NOT NULL DEFAULT 0,
     escalation_report          TEXT,
     source                     TEXT,
-    archived_at                TEXT
+    archived_at                TEXT,
+    worker_seq                 INTEGER NOT NULL DEFAULT 0,
+    github_repo                TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_tasks_status    ON tasks(status);

@@ -92,7 +92,7 @@ impl Default for AgentConfig {
             stale_threshold_s: 1200.0,
             captain_review_timeout_s: 1200,
             captain_merge_timeout_s: 1800,
-            max_review_retries: 3,
+            max_review_retries: 5,
             max_clarifier_retries: 3,
             max_rebase_retries: 5,
             rebase_base_delay_s: 30,
@@ -462,6 +462,34 @@ mod tests {
         println!("{rendered}");
         assert!(rendered.contains("attempt 2/5"));
         assert!(rendered.contains("prior rebase attempt failed"));
+    }
+
+    #[test]
+    fn render_captain_merge_prompt_for_blocking_ci() {
+        let wf = CaptainWorkflow::compiled_default();
+        let mut vars = HashMap::new();
+        vars.insert(
+            "pr_url",
+            "https://github.com/tribedotrun/mando-private/pull/334",
+        );
+        vars.insert("repo", "tribedotrun/mando-private");
+        vars.insert("pr_number", "334");
+        vars.insert("title", "Remove Triage all pending button from Scout page");
+
+        let rendered = render_prompt("captain_merge", &wf.prompts, &vars).unwrap();
+
+        assert!(rendered.contains("gh pr checks 334 --repo tribedotrun/mando-private --required"));
+        assert!(rendered.contains("--required --watch --fail-fast"));
+        assert!(rendered.contains("15 minutes"));
+        assert!(rendered.contains("gh pr merge 334 --repo tribedotrun/mando-private --squash"));
+        assert!(
+            rendered.contains("gh pr merge 334 --repo tribedotrun/mando-private --squash --admin")
+        );
+        assert!(rendered.contains("Do not use `/ci`"));
+
+        assert!(!rendered.contains("Read `.github/workflows/` to understand how CI is triggered"));
+        assert!(!rendered.contains("Take the appropriate action to trigger CI"));
+        assert!(!rendered.contains("every 30 seconds"));
     }
 
     #[test]

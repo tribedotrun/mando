@@ -2,7 +2,6 @@ import React, { useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { fetchHealth } from '#renderer/api';
 import {
-  AdoptTaskFields,
   MODE_COPY,
   ModeCard,
   PlannedTaskFields,
@@ -37,9 +36,6 @@ function AddTaskFormInner({ onClose }: { onClose: () => void }): React.ReactElem
   const [linearId, setLinearId] = useState('');
   const [planPath, setPlanPath] = useState('');
   const [noPr, setNoPr] = useState(false);
-  const [worktreePath, setWorktreePath] = useState('');
-  const [branch, setBranch] = useState('');
-  const [note, setNote] = useState('');
   const [image, setImage] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -48,7 +44,6 @@ function AddTaskFormInner({ onClose }: { onClose: () => void }): React.ReactElem
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const add = useTaskStore((s) => s.add);
-  const adopt = useTaskStore((s) => s.adopt);
 
   const { data: projects = [] } = useQuery({
     queryKey: ['projects'],
@@ -62,10 +57,8 @@ function AddTaskFormInner({ onClose }: { onClose: () => void }): React.ReactElem
   const savedProject = project && projects.includes(project) ? project : '';
   const effectiveProject = savedProject || (projects.length === 1 ? projects[0] : '');
   const projectRequired = projects.length > 1;
-  const attachEnabled = mode !== 'adopt';
   const trimmedTitle = title.trim();
   const trimmedPlanPath = planPath.trim();
-  const trimmedWorktreePath = worktreePath.trim();
 
   useMountEffect(() => {
     setTimeout(() => inputRef.current?.focus(), 50);
@@ -86,9 +79,6 @@ function AddTaskFormInner({ onClose }: { onClose: () => void }): React.ReactElem
     setLinearId('');
     setPlanPath('');
     setNoPr(false);
-    setWorktreePath('');
-    setBranch('');
-    setNote('');
     setSubmitError(null);
     if (preview) URL.revokeObjectURL(preview);
     setImage(null);
@@ -117,8 +107,7 @@ function AddTaskFormInner({ onClose }: { onClose: () => void }): React.ReactElem
     !submitting &&
     !!trimmedTitle &&
     (!projectRequired || !!effectiveProject) &&
-    (mode !== 'planned' || !!trimmedPlanPath) &&
-    (mode !== 'adopt' || !!trimmedWorktreePath);
+    (mode !== 'planned' || !!trimmedPlanPath);
 
   const handleSubmit = async () => {
     if (!trimmedTitle) return;
@@ -130,34 +119,20 @@ function AddTaskFormInner({ onClose }: { onClose: () => void }): React.ReactElem
       setSubmitError('Planned task needs the brief or plan path.');
       return;
     }
-    if (mode === 'adopt' && !trimmedWorktreePath) {
-      setSubmitError('Adopting a task needs the existing worktree path.');
-      return;
-    }
 
     setSubmitting(true);
     setSubmitError(null);
     try {
       if (effectiveProject) localStorage.setItem(LAST_PROJECT_KEY, effectiveProject);
-      if (mode === 'adopt') {
-        await adopt({
-          path: trimmedWorktreePath,
-          title: trimmedTitle,
-          project: effectiveProject || undefined,
-          branch: branch.trim() || undefined,
-          note: note.trim() || undefined,
-        });
-      } else {
-        await add({
-          title: trimmedTitle,
-          project: effectiveProject || undefined,
-          context: mode === 'planned' && context.trim() ? context.trim() : undefined,
-          linearId: mode === 'planned' && linearId.trim() ? linearId.trim() : undefined,
-          plan: mode === 'planned' ? trimmedPlanPath : undefined,
-          noPr: mode === 'planned' && noPr,
-          images: attachEnabled && image ? [image] : undefined,
-        });
-      }
+      await add({
+        title: trimmedTitle,
+        project: effectiveProject || undefined,
+        context: mode === 'planned' && context.trim() ? context.trim() : undefined,
+        linearId: mode === 'planned' && linearId.trim() ? linearId.trim() : undefined,
+        plan: mode === 'planned' ? trimmedPlanPath : undefined,
+        noPr: mode === 'planned' && noPr,
+        images: image ? [image] : undefined,
+      });
       resetForm();
       onClose();
     } catch (err) {
@@ -176,7 +151,6 @@ function AddTaskFormInner({ onClose }: { onClose: () => void }): React.ReactElem
   };
 
   const handlePaste = (e: React.ClipboardEvent) => {
-    if (!attachEnabled) return;
     for (const item of e.clipboardData.items) {
       if (!item.type.startsWith('image/')) continue;
       e.preventDefault();
@@ -214,13 +188,9 @@ function AddTaskFormInner({ onClose }: { onClose: () => void }): React.ReactElem
           <div className="text-[18px] font-semibold" style={{ color: 'var(--color-text-1)' }}>
             New task
           </div>
-          <div className="mt-1 text-[13px] leading-[20px]" style={{ color: 'var(--color-text-3)' }}>
-            {copy.summary}
-          </div>
-          <div className="mt-4 grid gap-2 md:grid-cols-3">
+          <div className="mt-4 grid gap-2 md:grid-cols-2">
             <ModeCard mode="quick" selected={mode === 'quick'} onSelect={setMode} />
             <ModeCard mode="planned" selected={mode === 'planned'} onSelect={setMode} />
-            <ModeCard mode="adopt" selected={mode === 'adopt'} onSelect={setMode} />
           </div>
         </div>
 
@@ -252,12 +222,8 @@ function AddTaskFormInner({ onClose }: { onClose: () => void }): React.ReactElem
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
                 onPaste={handlePaste}
-                placeholder={
-                  mode === 'adopt'
-                    ? 'What should Captain finish in this worktree?'
-                    : 'What needs to be done?'
-                }
-                rows={mode === 'adopt' ? 2 : 3}
+                placeholder="What needs to be done?"
+                rows={3}
                 className={titleInputCls}
                 style={{ ...titleInputStyle, caretColor: 'var(--color-accent)' }}
               />
@@ -276,18 +242,7 @@ function AddTaskFormInner({ onClose }: { onClose: () => void }): React.ReactElem
               />
             )}
 
-            {mode === 'adopt' && (
-              <AdoptTaskFields
-                worktreePath={worktreePath}
-                onWorktreePathChange={setWorktreePath}
-                branch={branch}
-                onBranchChange={setBranch}
-                note={note}
-                onNoteChange={setNote}
-              />
-            )}
-
-            {preview && image && attachEnabled && (
+            {preview && image && (
               <div
                 className="rounded-xl border p-3"
                 style={{ borderColor: 'var(--color-border-subtle)' }}
@@ -354,42 +309,38 @@ function AddTaskFormInner({ onClose }: { onClose: () => void }): React.ReactElem
               </select>
             )}
 
-            {attachEnabled && (
-              <>
-                <input
-                  ref={fileRef}
-                  type="file"
-                  accept="image/*"
-                  className="hidden"
-                  onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    if (file) setImageFile(file);
-                    e.target.value = '';
-                  }}
-                />
-                <button
-                  type="button"
-                  onClick={() => fileRef.current?.click()}
-                  className="flex h-9 w-9 items-center justify-center rounded-md transition-colors hover:bg-[var(--color-surface-3)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--color-accent)]"
-                  style={{ color: 'var(--color-text-3)' }}
-                  aria-label="Attach image"
-                  title="Attach image (or paste)"
-                >
-                  <svg
-                    width="15"
-                    height="15"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.5"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" />
-                  </svg>
-                </button>
-              </>
-            )}
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) setImageFile(file);
+                e.target.value = '';
+              }}
+            />
+            <button
+              type="button"
+              onClick={() => fileRef.current?.click()}
+              className="flex h-9 w-9 items-center justify-center rounded-md transition-colors hover:bg-[var(--color-surface-3)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--color-accent)]"
+              style={{ color: 'var(--color-text-3)' }}
+              aria-label="Attach image"
+              title="Attach image (or paste)"
+            >
+              <svg
+                width="15"
+                height="15"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" />
+              </svg>
+            </button>
 
             {projectRequired && !effectiveProject && (
               <span className="text-[12px]" style={{ color: 'var(--color-stale)' }}>

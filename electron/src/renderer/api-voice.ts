@@ -1,11 +1,16 @@
-import { buildUrl, buildAuthHeaders } from '#renderer/api';
+import { buildUrl } from '#renderer/api';
+import log from '#renderer/logger';
 
 export async function postVoice(text: string, sessionId?: string): Promise<Response> {
-  return fetch(buildUrl('/api/voice'), {
+  const res = await fetch(buildUrl('/api/voice'), {
     method: 'POST',
-    headers: buildAuthHeaders({ 'Content-Type': 'application/json' }),
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ text, session_id: sessionId }),
   });
+  if (!res.ok) {
+    log.warn(`[voice] POST /api/voice failed with status ${res.status}`);
+  }
+  return res;
 }
 
 export async function transcribeAudio(audioBlob: Blob): Promise<{ text: string }> {
@@ -13,7 +18,6 @@ export async function transcribeAudio(audioBlob: Blob): Promise<{ text: string }
   formData.append('file', audioBlob, 'audio.webm');
   const res = await fetch(buildUrl('/api/voice/transcribe'), {
     method: 'POST',
-    headers: buildAuthHeaders(),
     body: formData,
   });
   if (!res.ok) {

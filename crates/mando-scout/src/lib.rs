@@ -17,7 +17,7 @@ pub use io::file_store::{
     telegraph_cache_path, write_article, write_content, write_summary,
 };
 pub use runtime::dashboard::{
-    act_on_scout_item, add_scout_item, delete_scout_item, get_scout_article, get_scout_item,
-    list_scout_items, process_scout, update_scout_status,
+    act_on_scout_item, add_scout_item, delete_scout_item, ensure_scout_article, get_scout_article,
+    get_scout_item, list_scout_items, process_scout, update_scout_status,
 };
 pub use runtime::process::process_item;

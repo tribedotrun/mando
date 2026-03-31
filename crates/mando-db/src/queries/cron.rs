@@ -3,7 +3,7 @@
 use anyhow::Result;
 use sqlx::SqlitePool;
 
-use mando_types::cron::CronJob;
+use mando_types::cron::{CronJob, JobType};
 
 #[derive(sqlx::FromRow)]
 struct CronRow {
@@ -23,17 +23,33 @@ struct CronRow {
 
 impl CronRow {
     fn into_job(self) -> CronJob {
+        let schedule = serde_json::from_str(&self.schedule_json).unwrap_or_else(|e| {
+            tracing::warn!(module = "cron", field = "schedule", id = %self.id, error = %e, "cron row JSON deserialization failed — using default");
+            Default::default()
+        });
+        let payload = serde_json::from_str(&self.payload_json).unwrap_or_else(|e| {
+            tracing::warn!(module = "cron", field = "payload", id = %self.id, error = %e, "cron row JSON deserialization failed — using default");
+            Default::default()
+        });
+        let state = serde_json::from_str(&self.state_json).unwrap_or_else(|e| {
+            tracing::warn!(module = "cron", field = "state", id = %self.id, error = %e, "cron row JSON deserialization failed — using default");
+            Default::default()
+        });
+        let job_type = match self.job_type.as_str() {
+            "user" => JobType::User,
+            _ => JobType::System,
+        };
         CronJob {
             id: self.id,
             name: self.name,
             enabled: self.enabled != 0,
-            schedule: serde_json::from_str(&self.schedule_json).unwrap_or_default(),
-            payload: serde_json::from_str(&self.payload_json).unwrap_or_default(),
-            state: serde_json::from_str(&self.state_json).unwrap_or_default(),
+            schedule,
+            payload,
+            state,
             created_at_ms: self.created_at_ms,
             updated_at_ms: self.updated_at_ms,
             delete_after_run: self.delete_after_run != 0,
-            job_type: self.job_type,
+            job_type,
             cwd: self.cwd,
             timeout_s: self.timeout_s,
         }
@@ -81,7 +97,7 @@ pub async fn upsert(pool: &SqlitePool, job: &CronJob) -> Result<()> {
     .bind(job.created_at_ms)
     .bind(job.updated_at_ms)
     .bind(job.delete_after_run as i64)
-    .bind(&job.job_type)
+    .bind(job.job_type.to_string())
     .bind(&job.cwd)
     .bind(job.timeout_s)
     .execute(pool)
@@ -122,7 +138,7 @@ pub async fn replace_all(pool: &SqlitePool, jobs: &[CronJob]) -> Result<()> {
         .bind(job.created_at_ms)
         .bind(job.updated_at_ms)
         .bind(job.delete_after_run as i64)
-        .bind(&job.job_type)
+        .bind(job.job_type.to_string())
         .bind(&job.cwd)
         .bind(job.timeout_s)
         .execute(&mut *tx)

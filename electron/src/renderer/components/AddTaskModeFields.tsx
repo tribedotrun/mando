@@ -1,23 +1,16 @@
 import React from 'react';
 import { ToggleSwitch } from '#renderer/components/ToggleSwitch';
 
-export type TaskMode = 'quick' | 'planned' | 'adopt';
+export type TaskMode = 'quick' | 'planned';
 
-export const MODE_COPY: Record<TaskMode, { title: string; summary: string; submit: string }> = {
+export const MODE_COPY: Record<TaskMode, { title: string; submit: string }> = {
   quick: {
     title: 'Quick task',
-    summary: 'Captain clarifies from scratch, then spawns the normal worker flow.',
     submit: 'Create',
   },
   planned: {
     title: 'Planned task',
-    summary: 'Human already planned the work. Mando skips clarifier and starts worker_briefed.',
     submit: 'Create',
-  },
-  adopt: {
-    title: 'Adopt worktree',
-    summary: 'Reuse an existing branch and worktree. Captain resumes with worker_continue.',
-    submit: 'Adopt',
   },
 };
 
@@ -64,9 +57,6 @@ export function ModeCard({
     >
       <div className="text-[13px] font-semibold" style={{ color: 'var(--color-text-1)' }}>
         {copy.title}
-      </div>
-      <div className="mt-1 text-[12px] leading-[17px]" style={{ color: 'var(--color-text-3)' }}>
-        {copy.summary}
       </div>
     </button>
   );
@@ -154,68 +144,6 @@ export function PlannedTaskFields({
           checked={noPr}
           onChange={() => onNoPrChange(!noPr)}
         />
-      </div>
-    </>
-  );
-}
-
-interface AdoptTaskFieldsProps {
-  worktreePath: string;
-  onWorktreePathChange: (value: string) => void;
-  branch: string;
-  onBranchChange: (value: string) => void;
-  note: string;
-  onNoteChange: (value: string) => void;
-}
-
-export function AdoptTaskFields({
-  worktreePath,
-  onWorktreePathChange,
-  branch,
-  onBranchChange,
-  note,
-  onNoteChange,
-}: AdoptTaskFieldsProps): React.ReactElement {
-  return (
-    <>
-      <div>
-        <FieldLabel>Existing worktree path</FieldLabel>
-        <input
-          data-testid="task-worktree-input"
-          className={inputCls}
-          style={inputStyle}
-          value={worktreePath}
-          onChange={(e) => onWorktreePathChange(e.target.value)}
-          placeholder="/absolute/path/to/worktree"
-        />
-      </div>
-
-      <div className="grid gap-4 md:grid-cols-2">
-        <div>
-          <FieldLabel>Branch (optional)</FieldLabel>
-          <input
-            data-testid="task-branch-input"
-            className={inputCls}
-            style={inputStyle}
-            value={branch}
-            onChange={(e) => onBranchChange(e.target.value)}
-            placeholder="feature/my-branch"
-          />
-          <div className="mt-1 text-[12px]" style={{ color: 'var(--color-text-4)' }}>
-            Leave blank to auto-detect from the checked-out branch.
-          </div>
-        </div>
-        <div>
-          <FieldLabel>Adopt note (optional)</FieldLabel>
-          <input
-            data-testid="task-note-input"
-            className={inputCls}
-            style={inputStyle}
-            value={note}
-            onChange={(e) => onNoteChange(e.target.value)}
-            placeholder="What is done, what is risky, what remains"
-          />
-        </div>
       </div>
     </>
   );

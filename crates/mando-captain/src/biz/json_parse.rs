@@ -12,52 +12,69 @@ static TRAILING_COMMA_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r",\s*([
 
 /// Parse LLM output as JSON with progressive fallback.
 ///
-/// Returns the parsed `serde_json::Value` or a default empty object `{}` if all
-/// strategies fail.
-pub fn parse_llm_json(raw: &str) -> serde_json::Value {
+/// Returns the parsed `serde_json::Value` or an error if all strategies fail.
+/// Callers decide whether to use a default or propagate the error.
+pub fn parse_llm_json(raw: &str) -> Result<serde_json::Value, LlmJsonParseError> {
     // Step 1: strict parse.
     if let Ok(v) = serde_json::from_str(raw) {
-        return v;
+        return Ok(v);
     }
 
     // Step 2: regex-extract first JSON block.
     if let Some(extracted) = extract_json_block(raw) {
         if let Ok(v) = serde_json::from_str(&extracted) {
-            return v;
+            return Ok(v);
         }
 
         // Step 3: apply fixups to extracted block.
         let fixed = apply_fixups(&extracted);
         if let Ok(v) = serde_json::from_str(&fixed) {
-            return v;
+            return Ok(v);
         }
     }
 
     // Step 3b: apply fixups to raw input.
     let fixed = apply_fixups(raw);
     if let Ok(v) = serde_json::from_str(&fixed) {
-        return v;
+        return Ok(v);
     }
 
-    // Step 4: empty default.
-    tracing::warn!(
-        module = "json-parse",
-        "all strategies failed, returning empty object"
-    );
-    serde_json::json!({})
+    // All strategies failed.
+    let end = raw.len().min(200);
+    let end = (0..=end)
+        .rev()
+        .find(|&i| raw.is_char_boundary(i))
+        .unwrap_or(0);
+    let preview = &raw[..end];
+    Err(LlmJsonParseError {
+        preview: preview.to_string(),
+    })
 }
 
-/// Parse LLM output, expecting a specific shape. Falls back to default on failure.
-pub fn parse_llm_json_as<T: serde::de::DeserializeOwned + Default>(raw: &str) -> T {
-    let value = parse_llm_json(raw);
-    serde_json::from_value(value).unwrap_or_else(|e| {
-        tracing::warn!(
-            module = "json-parse",
-            error = %e,
-            "failed to deserialize LLM JSON into target type — returning default"
-        );
-        T::default()
-    })
+/// Error returned when all JSON parse strategies fail.
+#[derive(Debug)]
+pub struct LlmJsonParseError {
+    pub preview: String,
+}
+
+impl std::fmt::Display for LlmJsonParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "all JSON parse strategies failed; input preview: {}",
+            self.preview
+        )
+    }
+}
+
+impl std::error::Error for LlmJsonParseError {}
+
+/// Parse LLM output, expecting a specific shape.
+///
+/// Returns `Ok(T)` on success, or `Err` if parsing or deserialization fails.
+pub fn parse_llm_json_as<T: serde::de::DeserializeOwned>(raw: &str) -> anyhow::Result<T> {
+    let value = parse_llm_json(raw).map_err(|e| anyhow::anyhow!("{e}"))?;
+    Ok(serde_json::from_value(value)?)
 }
 
 /// Extract the first `{...}` or `[...]` block from text (handles nesting).
@@ -150,7 +167,7 @@ mod tests {
 
     #[test]
     fn strict_parse() {
-        let v = parse_llm_json(r#"{"status": "ready"}"#);
+        let v = parse_llm_json(r#"{"status": "ready"}"#).unwrap();
         assert_eq!(v["status"], "ready");
     }
 
@@ -160,39 +177,39 @@ mod tests {
 ```json
 {"status": "ready", "context": "test"}
 ```"#;
-        let v = parse_llm_json(raw);
+        let v = parse_llm_json(raw).unwrap();
         assert_eq!(v["status"], "ready");
     }
 
     #[test]
     fn trailing_comma() {
-        let v = parse_llm_json(r#"{"status": "ready",}"#);
+        let v = parse_llm_json(r#"{"status": "ready",}"#).unwrap();
         assert_eq!(v["status"], "ready");
     }
 
     #[test]
     fn single_quotes() {
-        let v = parse_llm_json("{'status': 'ready'}");
+        let v = parse_llm_json("{'status': 'ready'}").unwrap();
         assert_eq!(v["status"], "ready");
     }
 
     #[test]
-    fn fallback_to_empty() {
-        let v = parse_llm_json("this is not json at all");
-        assert_eq!(v, serde_json::json!({}));
+    fn failure_returns_error() {
+        let result = parse_llm_json("this is not json at all");
+        assert!(result.is_err());
     }
 
     #[test]
     fn nested_extraction() {
         let raw = r#"Some text before {"items": [{"title": "foo"}, {"title": "bar"}]} and after"#;
-        let v = parse_llm_json(raw);
+        let v = parse_llm_json(raw).unwrap();
         assert_eq!(v["items"][0]["title"], "foo");
     }
 
     #[test]
     fn array_extraction() {
         let raw = r#"[{"worker": "w1", "action": "skip"}]"#;
-        let v = parse_llm_json(raw);
+        let v = parse_llm_json(raw).unwrap();
         assert!(v.is_array());
         assert_eq!(v[0]["action"], "skip");
     }

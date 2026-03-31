@@ -15,11 +15,7 @@ fn parse_table_row(line: &str) -> Option<Vec<String>> {
     if !stripped.contains('|') {
         return None;
     }
-    let inner = stripped
-        .strip_prefix('|')
-        .unwrap_or(stripped)
-        .strip_suffix('|')
-        .unwrap_or(stripped.strip_prefix('|').unwrap_or(stripped));
+    let inner = stripped.trim_matches('|');
     let cells: Vec<String> = inner.split('|').map(|c| c.trim().to_string()).collect();
     Some(cells)
 }

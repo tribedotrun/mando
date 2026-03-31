@@ -2,6 +2,8 @@
 
 use mando_types::WorkerContext;
 
+use crate::pr_evidence::{evidence_sections, html_img_src_urls};
+
 /// Check if PR body contains a PR Summary section.
 ///
 /// After a reopen, the diagram must be fresh (SHA marker matches HEAD).
@@ -47,18 +49,11 @@ pub(crate) fn has_no_evidence(pr_body: &str) -> bool {
     if pr_body.is_empty() {
         return false;
     }
-    let lower = pr_body.to_lowercase();
-    let has_heading = lower.contains("### after")
-        || lower.contains("## after")
-        || lower.contains("visual evidence")
-        || lower.contains("## evidence")
-        || lower.contains("before / after")
-        || lower.contains("before/after");
-    if !has_heading {
+    let sections = evidence_sections(pr_body);
+    if sections.is_empty() {
         return true;
     }
-    // Heading exists — verify substantive content (image/video URL or code block).
-    !has_substantive_evidence(pr_body)
+    !sections.into_iter().any(section_has_substantive_evidence)
 }
 
 /// Check if PR body has substantive evidence content (not just a heading).
@@ -66,8 +61,8 @@ pub(crate) fn has_no_evidence(pr_body: &str) -> bool {
 /// Looks for image/video URLs or code blocks that indicate actual runtime output.
 /// Media detection is scoped to URL-like contexts to avoid false positives on
 /// filenames mentioned in prose.
-fn has_substantive_evidence(body: &str) -> bool {
-    let lower = body.to_lowercase();
+fn section_has_substantive_evidence(section: &str) -> bool {
+    let lower = section.to_lowercase();
     let media_exts = [".png", ".jpg", ".jpeg", ".gif", ".mp4", ".mov", ".webm"];
 
     // Check for markdown images with non-empty URLs: ![...](http...)
@@ -83,6 +78,13 @@ fn has_substantive_evidence(body: &str) -> bool {
         }
     }
 
+    // Check for HTML <img src="http..."> tags.
+    for url in html_img_src_urls(section) {
+        if url.starts_with("http") {
+            return true;
+        }
+    }
+
     // Check for media extension in URL-like words (http...)
     for line in lower.lines() {
         for word in line.split_whitespace() {
@@ -92,23 +94,11 @@ fn has_substantive_evidence(body: &str) -> bool {
         }
     }
 
-    // Code blocks under evidence headings indicate terminal output
-    let evidence_markers = [
-        "### after",
-        "## after",
-        "visual evidence",
-        "## evidence",
-        "before / after",
-        "before/after",
-    ];
-    for marker in &evidence_markers {
-        if let Some(pos) = lower.find(marker) {
-            let after_heading = &lower[pos..];
-            if after_heading.contains("```") {
-                return true;
-            }
-        }
+    // Code blocks under evidence headings indicate terminal output.
+    if section.contains("```") {
+        return true;
     }
+
     false
 }
 
@@ -254,9 +244,43 @@ mod tests {
     }
 
     #[test]
+    fn evidence_present_github_attachment_markdown_without_extension() {
+        assert!(!has_no_evidence(
+            "## Evidence\n![fix](https://github.com/user-attachments/assets/1234abcd)"
+        ));
+    }
+
+    #[test]
+    fn evidence_present_html_image_without_extension() {
+        assert!(!has_no_evidence(
+            r#"## Evidence
+<img src="https://github.com/user-attachments/assets/abcd-1234" alt="proof" />"#
+        ));
+    }
+
+    #[test]
+    fn evidence_present_uppercase_html_image() {
+        assert!(!has_no_evidence(
+            r#"## Evidence
+<IMG SRC="https://github.com/user-attachments/assets/abcd-1234" alt="proof" />"#
+        ));
+    }
+
+    #[test]
     fn evidence_heading_only_no_content() {
         assert!(has_no_evidence(
             "## Summary\n### After\nJust some text, no images or code blocks"
+        ));
+    }
+
+    #[test]
+    fn ignores_badges_outside_evidence_section() {
+        assert!(has_no_evidence(
+            r#"## Evidence
+Just some text, no screenshots yet.
+
+## Footer
+<img src="https://example.com/badge.png" alt="badge" />"#
         ));
     }
 

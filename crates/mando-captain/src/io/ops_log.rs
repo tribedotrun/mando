@@ -49,7 +49,16 @@ pub(crate) fn load_ops_log(path: &Path) -> OpsLog {
             );
             OpsLog::default()
         }),
-        Err(_) => OpsLog::default(),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => OpsLog::default(),
+        Err(e) => {
+            tracing::error!(
+                module = "wal",
+                path = %path.display(),
+                error = %e,
+                "WAL file unreadable — in-flight operations may be lost"
+            );
+            OpsLog::default()
+        }
     }
 }
 
@@ -176,7 +185,7 @@ mod tests {
     #[test]
     fn begin_mark_complete() {
         let mut log = OpsLog::default();
-        let id = begin_op(&mut log, "merge", serde_json::json!({"pr": "#123"}));
+        let id = begin_op(&mut log, "merge", serde_json::json!({"pr": "123"}));
         assert_eq!(log.entries.len(), 1);
 
         mark_step(&mut log, &id, "check_ci");
@@ -194,7 +203,7 @@ mod tests {
     #[test]
     fn abandon_removes_entry() {
         let mut log = OpsLog::default();
-        let id = begin_op(&mut log, "merge", serde_json::json!({"pr": "#42"}));
+        let id = begin_op(&mut log, "merge", serde_json::json!({"pr": "42"}));
         mark_step(&mut log, &id, "check_merged");
         assert_eq!(log.entries.len(), 1);
 
@@ -210,7 +219,7 @@ mod tests {
         let id = begin_op(
             &mut log,
             "merge",
-            serde_json::json!({"pr": "#334", "repo": "owner/repo", "item_id": "2"}),
+            serde_json::json!({"pr": "334", "repo": "owner/repo", "item_id": "2"}),
         );
 
         // Step 1 done: we checked GitHub and PR was NOT merged.
@@ -233,7 +242,7 @@ mod tests {
         let id = begin_op(
             &mut log,
             "merge",
-            serde_json::json!({"pr": "#334", "repo": "owner/repo", "item_id": "2"}),
+            serde_json::json!({"pr": "334", "repo": "owner/repo", "item_id": "2"}),
         );
 
         // Step 1 done: we checked GitHub and PR WAS merged.

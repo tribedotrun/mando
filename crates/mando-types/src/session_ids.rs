@@ -1,6 +1,7 @@
 //! Session ID container — stores worker, review, and clarifier CC session IDs as JSON.
 
 use serde::{Deserialize, Serialize};
+use tracing::warn;
 
 /// Session IDs for the four types of CC sessions a task can have.
 /// Stored as a JSON TEXT column in SQLite.
@@ -25,7 +26,7 @@ impl SessionIds {
         match serde_json::from_str(s) {
             Ok(v) => v,
             Err(e) => {
-                eprintln!("[WARN] SessionIds::from_json failed to parse {s:?}: {e}");
+                warn!(input = %s, error = %e, "SessionIds::from_json failed to parse");
                 Self::default()
             }
         }

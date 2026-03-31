@@ -4,6 +4,7 @@
 //! Only worktree management runs locally (git commands).
 
 mod captain;
+mod captain_review;
 mod cron;
 mod gateway;
 mod http;
@@ -61,10 +62,10 @@ enum Commands {
     Notify(NotifyArgs),
     /// Firecrawl web scraping
     Firecrawl(FirecrawlArgs),
-    /// Triage pending-review items
+    /// Triage pending-review tasks
     Triage(TriageArgs),
-    /// Show task overview grouped by repo and status
-    Status(StatusArgs),
+    /// Show task overview grouped by repo and workflow state
+    Tasks(TasksArgs),
     /// Show system health (daemon, workers, config)
     Health(HealthArgs),
 }
@@ -108,12 +109,12 @@ enum FirecrawlCommand {
 
 #[derive(Args)]
 struct TriageArgs {
-    /// Specific item ID to triage
+    /// Specific task ID to triage
     item_id: Option<String>,
 }
 
 #[derive(Args)]
-struct StatusArgs {
+struct TasksArgs {
     /// Include archived/merged items
     #[arg(long)]
     all: bool,
@@ -150,7 +151,7 @@ async fn main() {
         Commands::Notify(args) => handle_notify(args).await,
         Commands::Firecrawl(args) => handle_firecrawl(args).await,
         Commands::Triage(args) => handle_triage(args).await,
-        Commands::Status(args) => handle_status(args).await,
+        Commands::Tasks(args) => handle_tasks(args).await,
         Commands::Health(_) => handle_health().await,
     };
 
@@ -209,7 +210,7 @@ async fn handle_firecrawl(args: FirecrawlArgs) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn handle_status(args: StatusArgs) -> anyhow::Result<()> {
+async fn handle_tasks(args: TasksArgs) -> anyhow::Result<()> {
     let client = DaemonClient::discover()?;
 
     let api_path = if args.all {
@@ -364,6 +365,8 @@ async fn handle_triage(args: TriageArgs) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use clap::CommandFactory;
+    use serde_json::Value;
 
     #[test]
     fn cli_parse_todo_list() {
@@ -438,14 +441,94 @@ mod tests {
     }
 
     #[test]
-    fn cli_parse_status() {
-        let cli = Cli::try_parse_from(["mando", "status"]).unwrap();
-        assert!(matches!(cli.command, Commands::Status(_)));
+    fn cli_parse_tasks() {
+        let cli = Cli::try_parse_from(["mando", "tasks"]).unwrap();
+        assert!(matches!(cli.command, Commands::Tasks(_)));
     }
 
     #[test]
     fn cli_parse_health() {
         let cli = Cli::try_parse_from(["mando", "health"]).unwrap();
         assert!(matches!(cli.command, Commands::Health(_)));
+    }
+
+    #[test]
+    fn capability_contract_matches_cli_captain_and_scout_surfaces() {
+        let contract: Value =
+            serde_json::from_str(include_str!("../../contracts/capabilities.json")).unwrap();
+
+        let root = Cli::command();
+        let root_names: std::collections::HashSet<String> = root
+            .get_subcommands()
+            .map(|subcommand: &clap::Command| subcommand.get_name().to_string())
+            .collect();
+        assert!(
+            contract["captain"].get("tasks").is_some(),
+            "missing captain tasks in contract"
+        );
+        assert!(
+            root_names.contains("tasks"),
+            "missing top-level tasks command"
+        );
+
+        let captain = root.find_subcommand("captain").unwrap();
+        let captain_names: std::collections::HashSet<String> = captain
+            .get_subcommands()
+            .map(|subcommand: &clap::Command| subcommand.get_name().to_string())
+            .collect();
+        for (expected, command_name) in [
+            ("workers", "workers"),
+            ("triage", "triage"),
+            ("reopen", "reopen"),
+            ("rework", "rework"),
+            ("retry", "retry"),
+            ("accept", "accept"),
+            ("handoff", "handoff"),
+            ("adopt", "adopt"),
+            ("nudge", "nudge"),
+            ("stop", "stop"),
+            ("knowledge_review", "knowledge"),
+            ("journal", "journal"),
+            ("patterns", "patterns"),
+        ] {
+            assert!(
+                contract["captain"].get(expected).is_some(),
+                "missing {expected} in contract"
+            );
+            assert!(
+                captain_names.contains(command_name),
+                "missing captain {command_name}"
+            );
+        }
+
+        let scout = root.find_subcommand("scout").unwrap();
+        let scout_names: std::collections::HashSet<String> = scout
+            .get_subcommands()
+            .map(|subcommand: &clap::Command| subcommand.get_name().to_string())
+            .collect();
+        for (expected, command_name) in [
+            ("add", "add"),
+            ("research", "research"),
+            ("process", "process"),
+            ("read", "read"),
+            ("ask", "ask"),
+            ("act", "act"),
+            ("save", "save"),
+            ("archive", "archive"),
+            ("delete", "delete"),
+            ("bulk_update", "bulk-status"),
+            ("bulk_delete", "bulk-delete"),
+            ("publish_article", "publish"),
+            ("item_sessions", "sessions"),
+        ] {
+            assert!(
+                contract["scout"].get(expected).is_some(),
+                "missing {expected} in contract"
+            );
+            assert!(
+                scout_names.contains(command_name),
+                "missing scout {command_name}"
+            );
+        }
     }
 }

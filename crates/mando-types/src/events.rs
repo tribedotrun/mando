@@ -57,8 +57,6 @@ pub enum NotificationKind {
     RebaseFailed { item_id: String, pr_number: u32 },
     /// Worker crashed and exhausted retries — escalated to human.
     WorkerEscalated { item_id: String },
-    /// Captain started reviewing a completed item.
-    CaptainReviewStarted { item_id: String },
     /// Captain review verdict rendered (approve/rework/escalate).
     CaptainReviewVerdict {
         item_id: String,

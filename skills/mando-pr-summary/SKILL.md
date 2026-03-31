@@ -103,7 +103,25 @@ Resolve the plan folder (same as x-task-log):
 1. `git branch --show-current | grep -oE 'ABR-[0-9]+'` → `.ai/plans/ABR-{id}/`
 2. Fallback: `.ai/plans/pr-$PR_NUM/`
 
-Check for `before-*.{png,mp4}` or `evidence-*.{png,mp4}` in the resolved plan folder. If found, add an Evidence section to the PR description (embed images, link videos). If none exist, skip this section.
+Then inspect both:
+- the current PR body (to see whether `## Evidence` already contains hosted evidence or runtime output)
+- the resolved plan folder for `before-*.{png,mp4}` or `evidence-*.{png,mp4}`
+
+Apply this hosting decision:
+- **Bucket present**: keep the current GCS flow and generate a fresh hosted Evidence section from the local files.
+- **Bucket missing**:
+  - preserve existing GitHub attachment-backed evidence and substantive runtime output
+  - if new local visual files exist but no hosted attachment URL exists yet, leave this note in `## Evidence` and list the pending filenames instead of silently dropping the visuals:
+
+```markdown
+> **Action required**
+> Local PR evidence is ready, but this checkout has no `MANDO_DEV_GCS_BUCKET`.
+> Upload the pending file(s) to the PR description with GitHub’s web editor, then rerun `/mando-pr-summary`.
+> Pending files: `<file1>`, `<file2>`
+```
+
+  - never substitute raw branch/blob URLs
+- **No local visuals and no existing substantive evidence**: omit `## Evidence`.
 
 ### Step 8 — Flag missing e2e verification
 
@@ -122,7 +140,12 @@ Get the HEAD SHA for the freshness marker:
 SHORT_SHA=$(git rev-parse --short HEAD)
 ```
 
-Combine into a single markdown body. **Preserve all existing PR content that is NOT part of `## PR Summary` / `### Reviewer Checklist` / `## Evidence` sections** — this includes `## Problem`, `## Testing & Verification`, and third-party integration blocks (e.g., "Open in Devin", review badges, deploy previews).
+Combine into a single markdown body. **Preserve all existing PR content that is NOT part of `## PR Summary` / `### Reviewer Checklist` sections** — this includes `## Problem`, `## Testing & Verification`, and third-party integration blocks (e.g., "Open in Devin", review badges, deploy previews).
+
+For `## Evidence`, follow the Step 7 hosting decision exactly:
+- replace it only when you have fresh hosted evidence for the current code state
+- preserve existing substantive hosted evidence when no bucket is configured
+- if local visuals are pending manual GitHub upload, write the Step 7 **Action required** note instead of deleting the section
 
 Format:
 
@@ -143,7 +166,7 @@ Format:
 
 ## Evidence
 
-<screenshots, recordings, log output — or omit if none>
+<GCS-hosted visuals, preserved GitHub attachment visuals, runtime output, or the pending-upload note — or omit if none>
 
 ### Reviewer Checklist
 

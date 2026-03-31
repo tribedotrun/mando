@@ -1,6 +1,7 @@
 import React, { useState, useRef, useMemo, useCallback } from 'react';
 import { useMountEffect } from '#renderer/hooks/useMountEffect';
 import { useScrollIntoViewRef } from '#renderer/hooks/useScrollIntoViewRef';
+import { SCOUT_PROCESS_LABEL } from '#renderer/capabilityContract';
 
 interface Props {
   open: boolean;
@@ -204,7 +205,7 @@ const ACTION_COMMANDS: Command[] = [
   },
   {
     id: 'act-process',
-    name: 'Process scout items',
+    name: SCOUT_PROCESS_LABEL,
     shortcut: 'T',
     section: 'actions',
     icon: <ListIcon />,

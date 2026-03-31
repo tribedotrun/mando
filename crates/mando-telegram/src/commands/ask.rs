@@ -1,4 +1,4 @@
-//! `/ask [end|message]` — read-only Q&A on completed items.
+//! `/ask [end|message]` — read-only Q&A on completed tasks.
 
 use crate::bot::TelegramBot;
 use anyhow::Result;
@@ -29,7 +29,7 @@ pub async fn handle(bot: &mut TelegramBot, chat_id: &str, args: &str) -> Result<
         bot.close_ask_session(chat_id);
         let summary = format!(
             "Ask session ended ({rounds} turns).\n\n\
-             Use /ask to start a new session on another item."
+             Use /ask to start a new session on another task."
         );
         bot.send_html(chat_id, &summary).await?;
         return Ok(());
@@ -78,13 +78,13 @@ async fn show_picker(bot: &mut TelegramBot, chat_id: &str) -> Result<()> {
         .collect();
 
     if askable.is_empty() {
-        bot.send_html(chat_id, "No completed items to ask about.")
+        bot.send_html(chat_id, "No completed tasks to ask about.")
             .await?;
         return Ok(());
     }
 
     let action_id = super::short_uuid();
-    let mut lines = vec!["Pick a completed item to ask about:".to_string()];
+    let mut lines = vec!["Pick a completed task to ask about:".to_string()];
     let mut buttons: Vec<serde_json::Value> = Vec::new();
 
     for (idx, item) in askable.iter().enumerate() {

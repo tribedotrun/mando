@@ -5,7 +5,7 @@ use mando_types::captain::TickResult;
 /// Format a TickResult for CLI display with per-action breakdown.
 #[cfg(test)]
 pub(crate) fn format_tick_result(result: &TickResult) -> String {
-    use mando_types::captain::ActionKind;
+    use mando_types::captain::{ActionKind, TickMode};
     let mut lines = Vec::new();
 
     lines.push(format!(
@@ -15,7 +15,7 @@ pub(crate) fn format_tick_result(result: &TickResult) -> String {
 
     // Per-action breakdown (show each action, not summary stats)
     if !result.dry_actions.is_empty() {
-        let label = if result.mode == "dry-run" {
+        let label = if result.mode == TickMode::DryRun {
             "Dry-run actions:"
         } else {
             "Actions:"
@@ -71,12 +71,13 @@ pub(crate) fn tick_result_to_json(result: &TickResult) -> serde_json::Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use mando_types::captain::TickMode;
     use std::collections::HashMap;
 
     #[test]
     fn format_basic() {
         let result = TickResult {
-            mode: "live".into(),
+            mode: TickMode::Live,
             tick_id: None,
             max_workers: 10,
             active_workers: 3,
@@ -101,7 +102,7 @@ mod tests {
     fn format_dry_run() {
         use mando_types::captain::{Action, ActionKind};
         let result = TickResult {
-            mode: "dry-run".into(),
+            mode: TickMode::DryRun,
             tick_id: None,
             max_workers: 10,
             active_workers: 0,
@@ -123,7 +124,7 @@ mod tests {
     #[test]
     fn format_error() {
         let result = TickResult {
-            mode: "live".into(),
+            mode: TickMode::Live,
             tick_id: None,
             max_workers: 0,
             active_workers: 0,
@@ -140,7 +141,7 @@ mod tests {
     fn format_per_action_breakdown() {
         use mando_types::captain::{Action, ActionKind};
         let result = TickResult {
-            mode: "live".into(),
+            mode: TickMode::Live,
             tick_id: None,
             max_workers: 5,
             active_workers: 3,
@@ -189,7 +190,7 @@ mod tests {
     #[test]
     fn to_json_round_trip() {
         let result = TickResult {
-            mode: "live".into(),
+            mode: TickMode::Live,
             tick_id: Some("abc12345".into()),
             max_workers: 10,
             active_workers: 3,

@@ -6,7 +6,7 @@ use axum::Json;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use crate::response::error_response;
+use crate::response::{error_response, internal_error};
 use crate::AppState;
 
 #[derive(Deserialize)]
@@ -56,7 +56,8 @@ pub(crate) async fn post_task_cancel(
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let id = body.id;
     let store = state.task_store.read().await;
-    match mando_captain::runtime::dashboard::cancel_item(&store, id).await {
+    let pool = state.db.pool();
+    match mando_captain::runtime::dashboard::cancel_item(&store, id, pool).await {
         Ok(()) => {
             state.bus.send(
                 mando_types::BusEvent::Tasks,
@@ -77,59 +78,87 @@ pub(crate) async fn post_task_reopen(
     Json(body): Json<FeedbackBody>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let id = body.id;
-    let item = {
-        let store = state.task_store.read().await;
-        mando_captain::runtime::dashboard::reopen_item(&store, id, &body.feedback)
-            .await
-            .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?;
-        store.find_by_id(id).await.unwrap_or(None)
-    };
+    let config = state.config.load_full();
+    let workflow = state.captain_workflow.load_full();
+    let notifier = crate::captain_notifier(&state, &config);
+    let store = state.task_store.read().await;
+    let mut item = store
+        .find_by_id(id)
+        .await
+        .map_err(internal_error)?
+        .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "item not found"))?;
+    let outcome = mando_captain::runtime::action_contract::reopen_item(
+        &mut item,
+        "human",
+        &body.feedback,
+        &config,
+        &workflow,
+        &notifier,
+        store.pool(),
+        true,
+    )
+    .await
+    .map_err(internal_error)?;
+    store.write_task(&item).await.map_err(internal_error)?;
 
     state.bus.send(
         mando_types::BusEvent::Tasks,
         Some(json!({"action": "reopen"})),
     );
 
-    if let Some(item) = item {
-        let summary = if body.feedback.is_empty() {
-            "Reopened".to_string()
-        } else {
-            format!("Reopened: {}", body.feedback)
-        };
-        let workflow = state.captain_workflow.load_full();
-        let pool = state.task_store.read().await.pool().clone();
-        mando_captain::runtime::timeline_emit::emit_for_task(
-            &item,
-            mando_types::timeline::TimelineEventType::HumanReopen,
-            &summary,
-            json!({
-                "content": &body.feedback,
-                "worker": item.worker,
-                "session_id": item.session_ids.worker,
-            }),
-            &pool,
-        )
-        .await;
-        if let Err(e) = mando_captain::runtime::dashboard::resume_reopened_worker(
-            &item,
-            &body.feedback,
-            &workflow,
-            &pool,
-        )
-        .await
-        {
-            tracing::error!(module = "captain", error = %e, item_id = id, "reopen resume failed — reverting to queued");
-            let store = state.task_store.read().await;
-            if let Err(e2) = mando_captain::runtime::dashboard::force_update_task(
-                &store,
-                id,
-                &json!({"status": "queued"}),
-            )
-            .await
-            {
-                tracing::error!(module = "captain", error = %e2, item_id = id, "failed to revert item to queued after resume failure");
+    let summary = match outcome {
+        mando_captain::runtime::action_contract::ReopenOutcome::QueuedFallback => {
+            if body.feedback.is_empty() {
+                "Reopened — queued for fresh work".to_string()
+            } else {
+                format!("Reopened — queued for fresh work: {}", body.feedback)
             }
         }
+        mando_captain::runtime::action_contract::ReopenOutcome::CaptainReviewing => {
+            if body.feedback.is_empty() {
+                "Reopen routed to captain review".to_string()
+            } else {
+                format!("Reopen routed to captain review: {}", body.feedback)
+            }
+        }
+        _ => {
+            if body.feedback.is_empty() {
+                "Reopened".to_string()
+            } else {
+                format!("Reopened: {}", body.feedback)
+            }
+        }
+    };
+    mando_captain::runtime::timeline_emit::emit_for_task(
+        &item,
+        mando_types::timeline::TimelineEventType::HumanReopen,
+        &summary,
+        json!({
+            "content": &body.feedback,
+            "worker": item.worker,
+            "session_id": item.session_ids.worker,
+        }),
+        store.pool(),
+    )
+    .await;
+
+    if matches!(
+        outcome,
+        mando_captain::runtime::action_contract::ReopenOutcome::Reopened
+    ) {
+        let msg = if body.feedback.is_empty() {
+            format!(
+                "\u{1f504} Reopened <b>{}</b>",
+                mando_shared::telegram_format::escape_html(&item.title)
+            )
+        } else {
+            format!(
+                "\u{1f504} Reopened <b>{}</b>: {}",
+                mando_shared::telegram_format::escape_html(&item.title),
+                mando_shared::telegram_format::escape_html(&body.feedback)
+            )
+        };
+        notifier.normal(&msg).await;
     }
 
     Ok(Json(json!({"ok": true})))
@@ -219,12 +248,6 @@ pub(crate) async fn post_task_ask(
     }
 }
 
-#[derive(Deserialize)]
-pub(crate) struct AnswerBody {
-    pub id: i64,
-    pub answer: String,
-}
-
 /// POST /api/tasks/retry — re-trigger CaptainReviewing for Errored items.
 pub(crate) async fn post_task_retry(
     State(state): State<AppState>,
@@ -247,38 +270,6 @@ pub(crate) async fn post_task_retry(
             state.bus.send(
                 mando_types::BusEvent::Tasks,
                 Some(json!({"action": "retry"})),
-            );
-            Ok(Json(json!({"ok": true})))
-        }
-        Err(e) => Err(error_response(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            &e.to_string(),
-        )),
-    }
-}
-
-/// POST /api/tasks/answer — provide human answer for NeedsClarification items.
-pub(crate) async fn post_task_answer(
-    State(state): State<AppState>,
-    Json(body): Json<AnswerBody>,
-) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    let id = body.id;
-    let store = state.task_store.read().await;
-    match mando_captain::runtime::dashboard::answer_clarification(&store, id, &body.answer).await {
-        Ok(()) => {
-            if let Some(item) = store.find_by_id(id).await.unwrap_or(None) {
-                mando_captain::runtime::timeline_emit::emit_for_task(
-                    &item,
-                    mando_types::timeline::TimelineEventType::HumanAnswered,
-                    &format!("Human answered: {}", body.answer),
-                    json!({"answer": &body.answer}),
-                    store.pool(),
-                )
-                .await;
-            }
-            state.bus.send(
-                mando_types::BusEvent::Tasks,
-                Some(json!({"action": "answer"})),
             );
             Ok(Json(json!({"ok": true})))
         }
@@ -348,7 +339,8 @@ pub(crate) async fn post_task_handoff(
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let id = body.id;
     let store = state.task_store.read().await;
-    match mando_captain::runtime::dashboard::handoff_item(&store, id).await {
+    let pool = state.db.pool();
+    match mando_captain::runtime::dashboard::handoff_item(&store, id, pool).await {
         Ok(()) => {
             state.bus.send(
                 mando_types::BusEvent::Tasks,

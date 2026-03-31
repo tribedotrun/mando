@@ -23,7 +23,7 @@ pub fn jsonl_to_markdown(jsonl_content: &str) -> String {
         .filter_map(|line| serde_json::from_str::<Value>(line).ok())
         .filter(|msg: &Value| {
             let t = msg_str(msg, "type");
-            !SKIP_TYPES.contains(&t.as_str())
+            !SKIP_TYPES.contains(&t)
         })
         .collect();
 
@@ -47,7 +47,7 @@ pub fn jsonl_to_markdown(jsonl_content: &str) -> String {
             if !content.is_empty() {
                 parts.push(format!("```\n{content}\n```\n"));
                 if op == "enqueue" {
-                    last_enqueue = content;
+                    last_enqueue = content.to_owned();
                 }
             }
             i += 1;
@@ -242,11 +242,8 @@ fn consume_turn(
 
 // ── Helpers ──
 
-fn msg_str(msg: &Value, key: &str) -> String {
-    msg.get(key)
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string()
+fn msg_str<'a>(msg: &'a Value, key: &str) -> &'a str {
+    msg.get(key).and_then(|v| v.as_str()).unwrap_or("")
 }
 
 fn is_tool_result_msg(msg: &Value) -> bool {

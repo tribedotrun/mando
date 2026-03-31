@@ -6,7 +6,8 @@
  *   ⌥Space again → stop recording, transcribe, submit.
  *   Audio plays → pill auto-hides.
  */
-import { BrowserWindow, ipcMain, screen } from 'electron';
+import { BrowserWindow, screen } from 'electron';
+import { onTrusted } from '#main/ipc-security';
 
 let voiceWindow: BrowserWindow | null = null;
 let isRecording = false;
@@ -39,7 +40,7 @@ export function createVoiceWindow(resolvePreload: () => string, rendererUrl: str
       preload: resolvePreload(),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false,
+      sandbox: true,
       webSecurity: true,
     },
   });
@@ -83,7 +84,7 @@ export function onVoiceHotkeyDown(resolvePreload: () => string, rendererUrl: str
   }
 }
 
-ipcMain.on('hide-voice-window', () => {
+onTrusted('hide-voice-window', () => {
   voiceWindow?.hide();
   isRecording = false;
 });

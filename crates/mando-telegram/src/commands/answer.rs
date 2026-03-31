@@ -12,8 +12,8 @@ pub async fn handle(bot: &TelegramBot, chat_id: &str, args: &str) -> Result<()> 
     if parts.len() < 2 || parts[0].trim().is_empty() || parts[1].trim().is_empty() {
         bot.send_html(
             chat_id,
-            "Usage: /answer &lt;item_id&gt; &lt;text&gt;\n\n\
-             Answers the clarifier questions for an item in NeedsClarification state.\n\n\
+            "Usage: /answer &lt;task_id&gt; &lt;text&gt;\n\n\
+             Answers the clarifier questions for a task in NeedsClarification state.\n\n\
              Example: /answer 42 Use the new auth module instead",
         )
         .await?;
@@ -28,7 +28,7 @@ pub async fn handle(bot: &TelegramBot, chat_id: &str, args: &str) -> Result<()> 
         Err(_) => {
             bot.send_html(
                 chat_id,
-                &format!("\u{26a0}\u{fe0f} Invalid item ID: {}", escape_html(item_id)),
+                &format!("\u{26a0}\u{fe0f} Invalid task ID: {}", escape_html(item_id)),
             )
             .await?;
             return Ok(());
@@ -38,21 +38,37 @@ pub async fn handle(bot: &TelegramBot, chat_id: &str, args: &str) -> Result<()> 
     match bot
         .gw()
         .post(
-            "/api/tasks/answer",
-            &json!({"id": id_num, "answer": answer_text}),
+            &format!("/api/tasks/{id_num}/clarify"),
+            &json!({"answer": answer_text}),
         )
         .await
     {
-        Ok(_) => {
-            bot.send_html(
-                chat_id,
-                &format!(
+        Ok(resp) => {
+            let status = resp["status"].as_str().unwrap_or("unknown");
+            let msg = match status {
+                "ready" => format!(
+                    "\u{2705} Clarified #{} — queued for work.\n<i>{}</i>",
+                    escape_html(item_id),
+                    escape_html(answer_text),
+                ),
+                "clarifying" => {
+                    let questions = resp["questions"]
+                        .as_str()
+                        .unwrap_or("Can you provide more details?");
+                    format!(
+                        "\u{1f9ed} #{} still needs more info:\n{}\n\n<i>Your answer: {}</i>",
+                        escape_html(item_id),
+                        escape_html(questions),
+                        escape_html(answer_text),
+                    )
+                }
+                _ => format!(
                     "\u{2705} Answer sent for #{}\n<i>{}</i>",
                     escape_html(item_id),
                     escape_html(answer_text),
                 ),
-            )
-            .await?;
+            };
+            bot.send_html(chat_id, &msg).await?;
         }
         Err(e) => {
             bot.send_html(

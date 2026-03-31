@@ -16,8 +16,8 @@ pub mod timeline;
 
 // Re-exports for convenience.
 pub use ask_history::AskHistoryEntry;
-pub use captain::{Action, ActionKind, TickResult, WorkerContext};
-pub use cron::{CronJob, CronPayload, CronSchedule, CronState};
+pub use captain::{Action, ActionKind, TickMode, TickResult, WorkerContext};
+pub use cron::{CronJob, CronPayload, CronSchedule, CronState, JobType, PayloadKind, ScheduleKind};
 pub use events::{BusEvent, NotificationKind, NotificationPayload};
 pub use notify::NotifyLevel;
 pub use rebase_state::{RebaseState, RebaseStatus};
@@ -31,16 +31,16 @@ pub use timeline::{TimelineEvent, TimelineEventType};
 pub fn now_rfc3339() -> String {
     time::OffsetDateTime::now_utc()
         .format(&time::format_description::well_known::Rfc3339)
-        .unwrap()
+        .expect("UTC RFC 3339 format is infallible")
 }
 
 // ── Shared path helpers ──────────────────────────────────────────────
 
-/// User home directory via `$HOME` (falls back to `/tmp`).
+/// User home directory via `$HOME`. Panics if `$HOME` is unset.
 pub fn home_dir() -> std::path::PathBuf {
     std::env::var("HOME")
         .map(std::path::PathBuf::from)
-        .unwrap_or_else(|_| std::path::PathBuf::from("/tmp"))
+        .expect("$HOME environment variable must be set")
 }
 
 /// Expand a leading `~` to the user's home directory.

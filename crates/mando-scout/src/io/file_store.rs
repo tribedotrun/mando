@@ -53,6 +53,37 @@ pub fn write_summary(id: i64, slug: &str, content: &str) -> std::io::Result<()> 
     std::fs::write(&path, content)
 }
 
+/// Delete all summary files for an item except the current slug.
+pub fn delete_stale_summaries(id: i64, keep_slug: &str) -> std::io::Result<()> {
+    let dir = summaries_dir();
+    let prefix = format!("{id:03}-");
+    let keep_name = format!("{prefix}{keep_slug}.md");
+
+    let entries = match std::fs::read_dir(&dir) {
+        Ok(entries) => entries,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(e),
+    };
+
+    for entry in entries {
+        let entry = entry?;
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else {
+            continue;
+        };
+        if name.starts_with(&prefix) && name != keep_name {
+            let path = entry.path();
+            if let Err(e) = std::fs::remove_file(&path) {
+                if e.kind() != std::io::ErrorKind::NotFound {
+                    return Err(e);
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
 /// Read a content/article file, returning None if it doesn't exist.
 pub fn read_content(id: i64) -> Option<String> {
     let path = content_path(id);

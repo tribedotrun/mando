@@ -272,6 +272,18 @@ body {
   margin: 1.25em 0;
 }
 
+/* ── Task row actions: absolute overlay, visible on hover ── */
+[data-testid='task-row'] .action-zone {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 100ms;
+}
+[data-testid='task-row']:hover .action-zone,
+[data-testid='task-row'] .action-zone[data-menu-open] {
+  opacity: 1;
+  pointer-events: auto;
+}
+
 /* ── Status icon tooltip ── */
 .status-icon-wrapper:hover .status-tooltip {
   opacity: 1 !important;

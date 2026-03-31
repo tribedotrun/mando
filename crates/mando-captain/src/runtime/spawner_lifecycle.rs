@@ -8,7 +8,7 @@ use mando_config::settings::{Config, ProjectConfig};
 use mando_config::workflow::CaptainWorkflow;
 use mando_types::Task;
 
-use crate::io::{git, health_store, process_manager};
+use crate::io::{git, pid_registry, process_manager};
 use crate::runtime::spawner;
 
 /// Result of a lifecycle operation (restart/rework/reopen).
@@ -83,7 +83,7 @@ pub(crate) async fn reopen_worker(
         .ok_or_else(|| anyhow::anyhow!("no branch for reopen"))?;
 
     // Kill existing worker.
-    let pid = crate::io::health_store::get_pid_for_worker(&session_name);
+    let pid = pid_registry::get_pid(&cc_sid).unwrap_or(0);
     if pid > 0 {
         if let Err(e) = mando_cc::kill_process(pid).await {
             tracing::warn!(module = "captain", pid = pid, error = %e, "failed to kill existing worker for reopen");
@@ -149,21 +149,18 @@ pub(crate) async fn reopen_worker(
     .await
     {
         Ok((new_pid, _)) => {
+            // Register PID in the session registry.
+            pid_registry::register(&cc_sid, new_pid);
+
             let health_path = mando_config::worker_health_path();
-            let mut state = health_store::load_health_state(&health_path);
-            health_store::set_health_field(
-                &mut state,
-                &session_name,
-                "pid",
-                serde_json::json!(new_pid),
-            );
-            health_store::set_health_field(
+            let mut state = crate::io::health_store::load_health_state(&health_path);
+            crate::io::health_store::set_health_field(
                 &mut state,
                 &session_name,
                 "stream_size_at_spawn",
                 serde_json::json!(stream_size_before),
             );
-            if let Err(e) = health_store::save_health_state(&health_path, &state) {
+            if let Err(e) = crate::io::health_store::save_health_state(&health_path, &state) {
                 tracing::error!(
                     module = "captain",
                     worker = %session_name,

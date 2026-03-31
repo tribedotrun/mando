@@ -6,7 +6,7 @@ use axum::Json;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use crate::response::error_response;
+use crate::response::{error_response, internal_error};
 use crate::AppState;
 
 /// GET /api/health — lightweight liveness probe (public, no auth).
@@ -23,6 +23,8 @@ pub(crate) async fn get_health(State(state): State<AppState>) -> Json<Value> {
 /// GET /api/health/system — full system info (protected, auth required).
 pub(crate) async fn get_health_system(State(state): State<AppState>) -> Json<Value> {
     let config = state.config.load_full();
+    let active_paths = state.runtime_paths.clone();
+    let configured_paths = mando_config::resolve_captain_runtime_paths(&config);
     let store = state.task_store.read().await;
     let mut healthy = true;
     let active = store.active_worker_count().await.unwrap_or_else(|e| {
@@ -51,8 +53,14 @@ pub(crate) async fn get_health_system(State(state): State<AppState>) -> Json<Val
         "total_items": total,
         "projects": config.captain.projects.values().map(|pc| &pc.name).collect::<Vec<_>>(),
         "dataDir": data_dir.to_string_lossy(),
-        "configPath": data_dir.join("config.json").to_string_lossy(),
-        "taskDbPath": mando_config::expand_tilde(&config.captain.task_db_path).to_string_lossy(),
+        "configPath": mando_config::get_config_path().to_string_lossy(),
+        "taskDbPath": active_paths.task_db_path.to_string_lossy(),
+        "workerHealthPath": active_paths.worker_health_path.to_string_lossy(),
+        "lockfilePath": active_paths.lockfile_path.to_string_lossy(),
+        "configuredTaskDbPath": configured_paths.task_db_path.to_string_lossy(),
+        "configuredWorkerHealthPath": configured_paths.worker_health_path.to_string_lossy(),
+        "configuredLockfilePath": configured_paths.lockfile_path.to_string_lossy(),
+        "restartRequired": active_paths != configured_paths,
         "linear_workspace_slug": linear_slug,
     }))
 }
@@ -167,7 +175,8 @@ pub(crate) async fn post_captain_stop(
     State(state): State<AppState>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let store = state.task_store.read().await;
-    match mando_captain::runtime::dashboard::stop_all_workers(&store).await {
+    let pool = state.db.pool();
+    match mando_captain::runtime::dashboard::stop_all_workers(&store, pool).await {
         Ok(killed) => Ok(Json(json!({"killed": killed}))),
         Err(e) => Err(error_response(
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -187,68 +196,59 @@ pub(crate) async fn post_captain_nudge(
     State(state): State<AppState>,
     Json(body): Json<NudgeBody>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let id = body.item_id.parse::<i64>().map_err(|_| {
+        error_response(
+            StatusCode::BAD_REQUEST,
+            &format!("invalid id: {}", body.item_id),
+        )
+    })?;
+    let config = state.config.load_full();
+    let workflow = state.captain_workflow.load_full();
+    let notifier = crate::captain_notifier(&state, &config);
     let store = state.task_store.read().await;
-
-    let item = store
-        .find_by_id(body.item_id.parse::<i64>().map_err(|_| {
-            error_response(
-                StatusCode::BAD_REQUEST,
-                &format!("invalid id: {}", body.item_id),
-            )
-        })?)
+    let mut item = store
+        .find_by_id(id)
         .await
-        .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?
+        .map_err(internal_error)?
         .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "item not found"))?;
-
     let worker_name = item
         .worker
-        .as_deref()
+        .clone()
         .ok_or_else(|| error_response(StatusCode::BAD_REQUEST, "item has no worker"))?;
-    let cc_session_id = item
-        .session_ids
-        .worker
-        .as_deref()
-        .ok_or_else(|| error_response(StatusCode::BAD_REQUEST, "item has no cc_session_id"))?;
-    let worktree = item
-        .worktree
-        .as_deref()
-        .ok_or_else(|| error_response(StatusCode::BAD_REQUEST, "item has no worktree"))?;
+    let mut alerts = Vec::new();
 
-    let wt_path = mando_config::expand_tilde(worktree);
-    let env = std::collections::HashMap::new();
-    let workflow = state.captain_workflow.load_full();
-    let model = &workflow.models.worker;
-
-    match mando_captain::io::process_manager::resume_worker_process(
-        worker_name,
-        &body.message,
-        &wt_path,
-        model,
-        cc_session_id,
-        &env,
-        workflow.models.fallback.as_deref(),
+    mando_captain::runtime::action_contract::nudge_item(
+        &mut item,
+        Some(&body.message),
+        &config,
+        &workflow,
+        &notifier,
+        &mut alerts,
+        store.pool(),
     )
     .await
-    {
-        Ok((pid, _)) => {
-            mando_captain::io::health_store::persist_worker_pid(worker_name, pid);
-            tracing::info!(
-                module = "captain",
-                worker = %worker_name,
-                pid = pid,
-                "nudged worker"
-            );
-            Ok(Json(json!({
-                "ok": true,
-                "worker": worker_name,
-                "pid": pid,
-            })))
-        }
-        Err(e) => Err(error_response(
+    .map_err(|e| {
+        error_response(
             StatusCode::INTERNAL_SERVER_ERROR,
             &format!("nudge failed: {e}"),
-        )),
-    }
+        )
+    })?;
+
+    store.write_task(&item).await.map_err(internal_error)?;
+    state.bus.send(
+        mando_types::BusEvent::Tasks,
+        Some(json!({"action": "nudge", "id": id})),
+    );
+    let cc_sid = item.session_ids.worker.as_deref().unwrap_or("");
+    let pid = mando_captain::io::pid_lookup::resolve_pid(cc_sid, &worker_name);
+
+    Ok(Json(json!({
+        "ok": true,
+        "worker": worker_name,
+        "pid": pid,
+        "status": item.status.as_str(),
+        "alerts": alerts,
+    })))
 }
 
 #[derive(Deserialize)]
@@ -305,11 +305,8 @@ pub(crate) async fn get_workers(State(state): State<AppState>) -> Json<Value> {
                 worker_name,
                 "nudge_count",
             );
-            let pid: Option<u32> = health
-                .get(worker_name)
-                .and_then(|v| v.get("pid"))
-                .and_then(|v| v.as_u64())
-                .and_then(|v| if v > 0 { Some(v as u32) } else { None });
+            let cc_sid = task.session_ids.worker.as_deref().unwrap_or("");
+            let pid = mando_captain::io::pid_lookup::resolve_pid(cc_sid, worker_name);
             let last_action = health
                 .get(worker_name)
                 .and_then(|v| v.get("last_action"))

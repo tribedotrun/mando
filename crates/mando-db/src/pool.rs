@@ -98,11 +98,11 @@ impl Db {
 /// Embedded migrations. Each tuple: (version, SQL).
 const MIGRATIONS: &[(i64, &str)] = &[
     (1, include_str!("../migrations/001_initial.sql")),
+    (5, include_str!("../migrations/005_pr_bare_number.sql")),
     (
-        2,
-        include_str!("../migrations/002_session_status_rename.sql"),
+        6,
+        include_str!("../migrations/006_captain_fail_counters.sql"),
     ),
-    (3, include_str!("../migrations/003_add_worker_seq.sql")),
 ];
 
 #[cfg(test)]

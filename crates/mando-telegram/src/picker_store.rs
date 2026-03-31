@@ -53,8 +53,15 @@ pub(crate) struct PickerMaps {
 /// Save picker state to disk.
 pub(crate) fn save(json: &serde_json::Value) {
     let path = mando_config::state_dir().join("picker-state.json");
-    if let Ok(text) = serde_json::to_string_pretty(json) {
-        std::fs::write(path, text).ok();
+    match serde_json::to_string_pretty(json) {
+        Ok(text) => {
+            if let Err(e) = std::fs::write(&path, text) {
+                tracing::warn!(module = "picker", path = %path.display(), error = %e, "failed to persist picker state");
+            }
+        }
+        Err(e) => {
+            tracing::warn!(module = "picker", error = %e, "failed to serialize picker state");
+        }
     }
 }
 

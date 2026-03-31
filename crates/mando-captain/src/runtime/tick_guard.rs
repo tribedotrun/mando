@@ -1,4 +1,4 @@
-//! Tick-level concurrency guard — prevents overlapping captain ticks.
+//! Tick-level in-process concurrency guard — prevents overlapping captain ticks.
 
 /// Tick-level guard — prevents concurrent ticks from overlapping.
 pub(super) static TICK_RUNNING: std::sync::atomic::AtomicBool =
@@ -6,6 +6,10 @@ pub(super) static TICK_RUNNING: std::sync::atomic::AtomicBool =
 
 /// RAII guard that clears the TICK_RUNNING flag on drop.
 pub(super) struct TickGuard;
+
+pub(super) fn acquire_tick_guard() -> anyhow::Result<TickGuard> {
+    Ok(TickGuard)
+}
 
 impl Drop for TickGuard {
     fn drop(&mut self) {

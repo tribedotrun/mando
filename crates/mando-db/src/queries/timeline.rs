@@ -7,10 +7,6 @@ use mando_types::timeline::{TimelineEvent, TimelineEventType};
 
 #[derive(sqlx::FromRow)]
 struct TimelineRow {
-    #[allow(dead_code)]
-    id: i64,
-    #[allow(dead_code)]
-    task_id: i64,
     event_type: String,
     timestamp: String,
     actor: String,
@@ -20,11 +16,9 @@ struct TimelineRow {
 
 impl TimelineRow {
     fn into_event(self) -> TimelineEvent {
-        let event_type: TimelineEventType =
-            serde_json::from_value(serde_json::Value::String(self.event_type.clone()))
-                .unwrap_or(TimelineEventType::StatusChanged);
-        let data: serde_json::Value =
-            serde_json::from_str(&self.data).unwrap_or(serde_json::Value::Null);
+        let event_type = serde_json::from_value(serde_json::Value::String(self.event_type))
+            .unwrap_or(TimelineEventType::StatusChanged);
+        let data = serde_json::from_str(&self.data).unwrap_or(serde_json::Value::Null);
         TimelineEvent {
             event_type,
             timestamp: self.timestamp,
@@ -35,12 +29,17 @@ impl TimelineRow {
     }
 }
 
-/// Append an event to a task's timeline.
-pub async fn append(pool: &SqlitePool, task_id: i64, event: &TimelineEvent) -> Result<()> {
-    let event_type_str = serde_json::to_value(event.event_type)?
+/// Serialize a `TimelineEventType` to its string representation for DB storage.
+fn event_type_to_string(et: TimelineEventType) -> Result<String> {
+    Ok(serde_json::to_value(et)?
         .as_str()
         .unwrap_or("status_changed")
-        .to_string();
+        .to_string())
+}
+
+/// Append an event to a task's timeline.
+pub async fn append(pool: &SqlitePool, task_id: i64, event: &TimelineEvent) -> Result<()> {
+    let event_type_str = event_type_to_string(event.event_type)?;
     let data_str = serde_json::to_string(&event.data)?;
     sqlx::query(
         "INSERT INTO timeline_events (task_id, event_type, timestamp, actor, summary, data)
@@ -60,7 +59,7 @@ pub async fn append(pool: &SqlitePool, task_id: i64, event: &TimelineEvent) -> R
 /// Load all timeline events for a task, ordered chronologically.
 pub async fn load(pool: &SqlitePool, task_id: i64) -> Result<Vec<TimelineEvent>> {
     let rows: Vec<TimelineRow> =
-        sqlx::query_as("SELECT * FROM timeline_events WHERE task_id = ? ORDER BY timestamp ASC")
+        sqlx::query_as("SELECT event_type, timestamp, actor, summary, data FROM timeline_events WHERE task_id = ? ORDER BY timestamp ASC")
             .bind(task_id)
             .fetch_all(pool)
             .await?;
@@ -70,8 +69,8 @@ pub async fn load(pool: &SqlitePool, task_id: i64) -> Result<Vec<TimelineEvent>>
 /// Load the last N timeline events for a task.
 pub async fn load_last_n(pool: &SqlitePool, task_id: i64, n: i64) -> Result<Vec<TimelineEvent>> {
     let rows: Vec<TimelineRow> = sqlx::query_as(
-        "SELECT * FROM (
-            SELECT * FROM timeline_events WHERE task_id = ? ORDER BY timestamp DESC LIMIT ?
+        "SELECT event_type, timestamp, actor, summary, data FROM (
+            SELECT event_type, timestamp, actor, summary, data FROM timeline_events WHERE task_id = ? ORDER BY timestamp DESC LIMIT ?
          ) ORDER BY timestamp ASC",
     )
     .bind(task_id)
@@ -110,14 +109,41 @@ pub async fn delete_all(pool: &SqlitePool, task_id: i64) -> Result<()> {
     Ok(())
 }
 
+/// Fetch the latest clarifier questions from the most recent ClarifyQuestion event.
+pub async fn latest_clarifier_questions(pool: &SqlitePool, task_id: i64) -> Result<Option<String>> {
+    let event_type_str = event_type_to_string(TimelineEventType::ClarifyQuestion)?;
+    let row: Option<(String,)> = sqlx::query_as(
+        "SELECT data FROM timeline_events
+         WHERE task_id = ? AND event_type = ?
+         ORDER BY timestamp DESC LIMIT 1",
+    )
+    .bind(task_id)
+    .bind(&event_type_str)
+    .fetch_optional(pool)
+    .await?;
+    let questions =
+        row.and_then(
+            |(data,)| match serde_json::from_str::<serde_json::Value>(&data) {
+                Ok(val) => val["questions"].as_str().map(String::from),
+                Err(e) => {
+                    tracing::warn!(
+                        module = "timeline",
+                        task_id,
+                        error = %e,
+                        "corrupt ClarifyQuestion event data"
+                    );
+                    None
+                }
+            },
+        );
+    Ok(questions)
+}
+
 /// Bulk insert events (for backfill).
 pub async fn bulk_insert(pool: &SqlitePool, task_id: i64, events: &[TimelineEvent]) -> Result<()> {
     let mut tx = pool.begin().await?;
     for event in events {
-        let event_type_str = serde_json::to_value(event.event_type)?
-            .as_str()
-            .unwrap_or("status_changed")
-            .to_string();
+        let event_type_str = event_type_to_string(event.event_type)?;
         let data_str = serde_json::to_string(&event.data)?;
         sqlx::query(
             "INSERT INTO timeline_events (task_id, event_type, timestamp, actor, summary, data)

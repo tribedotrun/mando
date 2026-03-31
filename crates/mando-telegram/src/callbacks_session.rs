@@ -18,29 +18,36 @@ pub(crate) async fn handle_ops_callback(
             bot.api().answer_callback_query(cb_id, None).await?;
             // End any existing server-side session before starting fresh.
             let key = format!("ops:{cid}");
-            bot.gw()
-                .post("/api/ops/end", &json!({"key": key}))
-                .await
-                .ok();
+            if let Err(e) = bot.gw().post("/api/ops/end", &json!({"key": key})).await {
+                tracing::warn!(module = "telegram", error = %e, "failed to end server-side ops session");
+            }
             bot.close_ops_session(cid);
             bot.open_ops_session(cid);
             // Preserve previous message content — just strip the keyboard.
-            let _ = bot.remove_keyboard(cid, mid).await;
-            let _ = bot
+            if let Err(e) = bot.remove_keyboard(cid, mid).await {
+                tracing::warn!(module = "telegram", error = %e, "message send failed");
+            }
+            if let Err(e) = bot
                 .send_html(cid, "\u{1f527} New ops session. What do you need?")
-                .await;
+                .await
+            {
+                tracing::warn!(module = "telegram", error = %e, "message send failed");
+            }
         }
         "end" => {
             bot.api().answer_callback_query(cb_id, None).await?;
             let key = format!("ops:{cid}");
-            bot.gw()
-                .post("/api/ops/end", &json!({"key": key}))
-                .await
-                .ok();
+            if let Err(e) = bot.gw().post("/api/ops/end", &json!({"key": key})).await {
+                tracing::warn!(module = "telegram", error = %e, "failed to end server-side ops session");
+            }
             bot.close_ops_session(cid);
             // Preserve previous message content — just strip the keyboard.
-            let _ = bot.remove_keyboard(cid, mid).await;
-            let _ = bot.send_html(cid, "\u{1f527} Ops session ended.").await;
+            if let Err(e) = bot.remove_keyboard(cid, mid).await {
+                tracing::warn!(module = "telegram", error = %e, "message send failed");
+            }
+            if let Err(e) = bot.send_html(cid, "\u{1f527} Ops session ended.").await {
+                tracing::warn!(module = "telegram", error = %e, "message send failed");
+            }
         }
         _ => {
             bot.api().answer_callback_query(cb_id, None).await?;
@@ -63,14 +70,17 @@ pub(crate) async fn handle_ask_callback(
                 .answer_callback_query(cb_id, Some("Session ended"))
                 .await?;
             let key = format!("ask:{cid}");
-            bot.gw()
-                .post("/api/ops/end", &json!({"key": key}))
-                .await
-                .ok();
+            if let Err(e) = bot.gw().post("/api/ops/end", &json!({"key": key})).await {
+                tracing::warn!(module = "telegram", error = %e, "failed to end server-side ops session");
+            }
             bot.close_ask_session(cid);
             // Preserve previous message content — just strip the keyboard.
-            let _ = bot.remove_keyboard(cid, mid).await;
-            let _ = bot.send_html(cid, "Ask session ended.").await;
+            if let Err(e) = bot.remove_keyboard(cid, mid).await {
+                tracing::warn!(module = "telegram", error = %e, "message send failed");
+            }
+            if let Err(e) = bot.send_html(cid, "Ask session ended.").await {
+                tracing::warn!(module = "telegram", error = %e, "message send failed");
+            }
         }
         "cancel" => {
             let aid = parts.get(2).copied().unwrap_or("");
@@ -78,7 +88,9 @@ pub(crate) async fn handle_ask_callback(
             bot.api()
                 .answer_callback_query(cb_id, Some("Cancelled"))
                 .await?;
-            let _ = bot.edit_message(cid, mid, "Cancelled").await;
+            if let Err(e) = bot.edit_message(cid, mid, "Cancelled").await {
+                tracing::warn!(module = "telegram", error = %e, "message send failed");
+            }
         }
         "pick" => {
             let aid = parts.get(2).copied().unwrap_or("");
@@ -95,16 +107,19 @@ pub(crate) async fn handle_ask_callback(
                     bot.api()
                         .answer_callback_query(cb_id, Some("Starting\u{2026}"))
                         .await?;
-                    let _ = bot
+                    if let Err(e) = bot
                         .edit_message(cid, mid, &format!("Ask: {title}\n\nType your question."))
-                        .await;
+                        .await
+                    {
+                        tracing::warn!(module = "telegram", error = %e, "message send failed");
+                    }
 
                     // Prime the Claude session with item context so follow-up
                     // questions know which item the user is asking about.
                     let context = format!("Item ID: {}\nTitle: {}", item.id, item.title,);
                     if let Err(e) = crate::commands::ask::prime_session(bot, cid, &context).await {
                         bot.close_ask_session(cid);
-                        let _ = bot
+                        if let Err(e) = bot
                             .edit_message(
                                 cid,
                                 mid,
@@ -113,7 +128,10 @@ pub(crate) async fn handle_ask_callback(
                                     mando_shared::escape_html(&e.to_string()),
                                 ),
                             )
-                            .await;
+                            .await
+                        {
+                            tracing::warn!(module = "telegram", error = %e, "message send failed");
+                        }
                         return Ok(());
                     }
                 } else {
@@ -150,17 +168,23 @@ pub(crate) async fn handle_knowledge_callback(
                 .answer_callback_query(cb_id, Some("Approving\u{2026}"))
                 .await?;
             crate::callback_actions::approve_knowledge(bot, cid, lesson_id).await?;
-            let _ = bot
+            if let Err(e) = bot
                 .edit_message(cid, mid, "\u{2705} Lesson approved.")
-                .await;
+                .await
+            {
+                tracing::warn!(module = "telegram", error = %e, "message send failed");
+            }
         }
         "reject" => {
             bot.api()
                 .answer_callback_query(cb_id, Some("Rejected"))
                 .await?;
-            let _ = bot
+            if let Err(e) = bot
                 .edit_message(cid, mid, "\u{274c} Lesson rejected.")
-                .await;
+                .await
+            {
+                tracing::warn!(module = "telegram", error = %e, "message send failed");
+            }
         }
         _ => {
             bot.api().answer_callback_query(cb_id, None).await?;

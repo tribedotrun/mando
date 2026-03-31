@@ -56,9 +56,9 @@ export function TaskAsk({ item, onBack }: Props): React.ReactElement {
       <span className="ml-1 font-mono text-[0.6rem]" style={{ color: 'var(--color-text-4)' }}>
         [{item.status}]
       </span>
-      {item.pr && item.project && (
+      {item.pr && (item.github_repo || item.project) && (
         <a
-          href={prHref(item.pr, item.project)}
+          href={prHref(item.pr, (item.github_repo ?? item.project)!)}
           target="_blank"
           rel="noopener noreferrer"
           className="ml-auto font-mono text-xs no-underline hover:underline"

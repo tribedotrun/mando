@@ -38,9 +38,12 @@ pub async fn add_task(
         }
     };
 
+    let github_repo = mando_config::resolve_github_repo(resolved_project.as_deref(), config);
+
     let mut new_task = mando_types::Task::new(&clean_title);
     new_task.status = ItemStatus::New;
     new_task.project = resolved_project;
+    new_task.github_repo = github_repo;
     new_task.original_prompt = Some(title.to_string());
     new_task.created_at = Some(mando_types::now_rfc3339());
 
@@ -56,18 +59,24 @@ pub async fn update_task(store: &TaskStore, id: i64, updates: &serde_json::Value
     store.update_fields(id, updates).await
 }
 
-pub async fn delete_tasks(config: &Config, store: &TaskStore, ids: &[i64]) -> Result<()> {
+pub async fn delete_tasks(
+    config: &Config,
+    store: &TaskStore,
+    ids: &[i64],
+    opts: &crate::io::task_cleanup::CleanupOptions,
+) -> Result<Vec<String>> {
     let mut to_delete = Vec::new();
     for id in ids {
         if let Some(task) = store.find_by_id(*id).await? {
             to_delete.push(task);
         }
     }
-    crate::io::task_cleanup::cleanup_tasks(&to_delete, config, store.pool()).await;
+    let warnings =
+        crate::io::task_cleanup::cleanup_tasks(&to_delete, config, store.pool(), opts).await;
     for id in ids {
         store.remove(*id).await?;
     }
-    Ok(())
+    Ok(warnings)
 }
 
 #[tracing::instrument(skip_all, fields(module = "captain"))]
@@ -111,7 +120,42 @@ pub async fn accept_item(store: &TaskStore, id: i64) -> Result<()> {
     update_task(store, id, &serde_json::json!({"status": "merged"})).await
 }
 
-pub async fn cancel_item(store: &TaskStore, id: i64) -> Result<()> {
+pub async fn cancel_item(store: &TaskStore, id: i64, pool: &sqlx::SqlitePool) -> Result<()> {
+    // Terminate ALL running sessions for this task. Sessions are stored with
+    // best_id() (linear_id when present, else numeric id), so query both.
+    let task = store.find_by_id(id).await?;
+    let numeric_id = id.to_string();
+    let best_id = task.as_ref().map(|t| t.best_id()).unwrap_or_default();
+    let task_ids: Vec<&str> = [numeric_id.as_str(), best_id.as_str()]
+        .into_iter()
+        .filter(|s| !s.is_empty())
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect();
+
+    for tid in &task_ids {
+        match mando_db::queries::sessions::list_running_sessions_for_task(pool, tid).await {
+            Ok(running) => {
+                for row in &running {
+                    crate::io::session_terminate::terminate_session(
+                        pool,
+                        &row.session_id,
+                        mando_types::SessionStatus::Stopped,
+                        None,
+                    )
+                    .await;
+                }
+            }
+            Err(e) => {
+                tracing::error!(
+                    module = "captain",
+                    task_id = %tid,
+                    error = %e,
+                    "failed to query running sessions for cancel — processes may still be running"
+                );
+            }
+        }
+    }
     update_task(store, id, &serde_json::json!({"status": "canceled"})).await
 }
 
@@ -164,7 +208,7 @@ pub async fn resume_reopened_worker(
         "item missing worker/session/worktree — cannot resume"
     );
 
-    let old_pid = crate::io::health_store::get_pid_for_worker(worker);
+    let old_pid = crate::io::pid_registry::get_pid(cc_sid).unwrap_or(0);
     if old_pid > 0 {
         if let Err(e) = mando_cc::kill_process(old_pid).await {
             tracing::warn!(
@@ -222,9 +266,11 @@ pub async fn resume_reopened_worker(
     )
     .await?;
 
+    // Register PID in the session registry.
+    crate::io::pid_registry::register(cc_sid, pid);
+
     let health_path = mando_config::worker_health_path();
     let mut hstate = crate::io::health_store::load_health_state(&health_path);
-    crate::io::health_store::set_health_field(&mut hstate, worker, "pid", serde_json::json!(pid));
     crate::io::health_store::set_health_field(
         &mut hstate,
         worker,
@@ -284,27 +330,27 @@ pub async fn rework_item(store: &TaskStore, id: i64, feedback: &str) -> Result<(
     update_task(store, id, &serde_json::json!({"status": "rework"})).await
 }
 
-pub async fn handoff_item(store: &TaskStore, id: i64) -> Result<()> {
+pub async fn handoff_item(store: &TaskStore, id: i64, pool: &sqlx::SqlitePool) -> Result<()> {
     let id_str = id.to_string();
     let _lock = crate::io::item_lock::acquire_item_lock(&id_str, "handoff")?;
 
     if let Some(full) = store.find_by_id(id).await? {
-        if let Some(ref worker) = full.worker {
-            let health_path = mando_config::worker_health_path();
-            let health_state = crate::io::health_store::load_health_state(&health_path);
-            let pid = crate::io::health_store::get_health_u32(&health_state, worker, "pid");
-            if pid > 0 && mando_cc::is_process_alive(pid) {
-                if let Err(e) = mando_cc::kill_process(pid).await {
-                    tracing::warn!(module = "captain", worker = %worker, pid = pid, error = %e, "failed to kill worker");
-                }
-            }
+        let cc_sid = full.session_ids.worker.as_deref().unwrap_or("");
+        if !cc_sid.is_empty() {
+            crate::io::session_terminate::terminate_session(
+                pool,
+                cc_sid,
+                mando_types::SessionStatus::Stopped,
+                None,
+            )
+            .await;
         }
     }
     update_task(store, id, &serde_json::json!({"status": "handed-off"})).await
 }
 
 pub async fn retry_item(store: &TaskStore, id: i64) -> Result<()> {
-    let task = store
+    let mut task = store
         .find_by_id(id)
         .await?
         .ok_or_else(|| anyhow::anyhow!("task not found: {}", id))?;
@@ -316,54 +362,30 @@ pub async fn retry_item(store: &TaskStore, id: i64) -> Result<()> {
     let trigger = task
         .captain_review_trigger
         .unwrap_or(mando_types::task::ReviewTrigger::Retry);
-    force_update_task(
-        store,
-        id,
-        &serde_json::json!({
-            "status": "captain-reviewing",
-            "captain_review_trigger": trigger,
-        }),
-    )
-    .await
+    super::action_contract::reset_review_retry(&mut task, trigger);
+    store.write_task(&task).await?;
+    Ok(())
 }
 
-pub async fn answer_clarification(store: &TaskStore, id: i64, answer: &str) -> Result<()> {
-    let task = store
-        .find_by_id(id)
-        .await?
-        .ok_or_else(|| anyhow::anyhow!("task not found: {}", id))?;
-    anyhow::ensure!(
-        task.status == ItemStatus::NeedsClarification,
-        "answer requires status needs-clarification, got {:?}",
-        task.status
-    );
-    let answer = answer.trim();
-    anyhow::ensure!(!answer.is_empty(), "answer text must not be empty");
-    let new_context = append_tagged_note(task.context.as_deref(), "Human answer", answer)
-        .expect("validated answer should always produce a note");
-    store
-        .update(id, |t| {
-            t.context = Some(new_context.clone());
-        })
-        .await?;
-    force_update_task(store, id, &serde_json::json!({"status": "clarifying"})).await
-}
-
-pub async fn stop_all_workers(store: &TaskStore) -> Result<u32> {
-    let health_path = mando_config::worker_health_path();
-    let health_state = crate::io::health_store::load_health_state(&health_path);
-
+pub async fn stop_all_workers(store: &TaskStore, pool: &sqlx::SqlitePool) -> Result<u32> {
     let mut killed = 0u32;
-    for rt in store.routing().await? {
-        if rt.status != ItemStatus::InProgress {
+    for item in store.load_all().await? {
+        if item.status != ItemStatus::InProgress {
             continue;
         }
-        if let Some(ref worker) = rt.worker {
-            let pid = crate::io::health_store::get_health_u32(&health_state, worker, "pid");
-            if pid > 0
-                && mando_cc::is_process_alive(pid)
-                && mando_cc::kill_process(pid).await.is_ok()
-            {
+        let cc_sid = item.session_ids.worker.as_deref().unwrap_or("");
+        if !cc_sid.is_empty() {
+            // Only count as killed if the process was actually alive.
+            let was_alive = crate::io::pid_registry::get_pid(cc_sid)
+                .is_some_and(|pid| pid > 0 && mando_cc::is_process_alive(pid));
+            crate::io::session_terminate::terminate_session(
+                pool,
+                cc_sid,
+                mando_types::SessionStatus::Stopped,
+                None,
+            )
+            .await;
+            if was_alive {
                 killed += 1;
             }
         }
@@ -374,17 +396,19 @@ pub async fn stop_all_workers(store: &TaskStore) -> Result<u32> {
 /// Transition an item to CaptainMerging. The captain tick will spawn an AI
 /// session to check CI, trigger it if needed, and merge when green.
 pub async fn merge_pr(store: &TaskStore, pr_number: &str, repo: &str) -> Result<serde_json::Value> {
-    // Find the item whose PR URL matches this repo and PR number.
-    let pr_suffix = format!("/pull/{pr_number}");
+    // Normalize any input format (#N, bare N, full URL) to a bare number string.
+    let num = mando_types::task::extract_pr_number(pr_number)
+        .ok_or_else(|| anyhow::anyhow!("invalid PR reference: {pr_number}"))?;
+    let url_suffix = format!("/pull/{num}");
     let items = store.load_all().await?;
     let item = items
         .iter()
         .find(|it| {
             it.pr
                 .as_deref()
-                .is_some_and(|url| url.contains(repo) && url.ends_with(&pr_suffix))
+                .is_some_and(|pr| pr == num || (pr.contains(repo) && pr.ends_with(&url_suffix)))
         })
-        .ok_or_else(|| anyhow::anyhow!("no task found for PR #{pr_number} in {repo}"))?;
+        .ok_or_else(|| anyhow::anyhow!("no task found for PR #{num} in {repo}"))?;
 
     anyhow::ensure!(
         item.status == ItemStatus::AwaitingReview || item.status == ItemStatus::HandedOff,
@@ -404,7 +428,7 @@ pub async fn merge_pr(store: &TaskStore, pr_number: &str, repo: &str) -> Result<
                     "clarifier": item.session_ids.clarifier,
                     "merge": null,
                 },
-                "retry_count": 0,
+                "merge_fail_count": 0,
             }),
         )
         .await?;
@@ -427,57 +451,16 @@ pub async fn bulk_update_tasks(
     store: &TaskStore,
     ids: &[i64],
     updates: serde_json::Value,
+    pool: &sqlx::SqlitePool,
 ) -> Result<()> {
+    let is_cancel = updates.get("status").and_then(|v| v.as_str()) == Some("canceled");
+
     for id in ids {
-        update_task(store, *id, &updates).await?;
+        if is_cancel {
+            cancel_item(store, *id, pool).await?;
+        } else {
+            update_task(store, *id, &updates).await?;
+        }
     }
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::answer_clarification;
-    use crate::io::task_store::TaskStore;
-    use mando_types::task::{ItemStatus, Task};
-
-    async fn test_store() -> TaskStore {
-        let db = mando_db::Db::open_in_memory().await.unwrap();
-        TaskStore::new(db.pool().clone())
-    }
-
-    #[tokio::test]
-    async fn answer_clarification_trims_and_persists_human_answer() {
-        let store = test_store().await;
-        let mut task = Task::new("Needs help");
-        task.status = ItemStatus::NeedsClarification;
-        task.context = Some("Existing context".into());
-        let id = store.add(task).await.unwrap();
-
-        answer_clarification(&store, id, "  Need more logs  ")
-            .await
-            .unwrap();
-
-        let updated = store.find_by_id(id).await.unwrap().unwrap();
-        assert_eq!(updated.status, ItemStatus::Clarifying);
-        assert_eq!(
-            updated.context.as_deref(),
-            Some("Existing context\n\n[Human answer] Need more logs")
-        );
-    }
-
-    #[tokio::test]
-    async fn answer_clarification_rejects_whitespace_only_answers() {
-        let store = test_store().await;
-        let mut task = Task::new("Needs help");
-        task.status = ItemStatus::NeedsClarification;
-        task.context = Some("Existing context".into());
-        let id = store.add(task).await.unwrap();
-
-        let err = answer_clarification(&store, id, "   ").await.unwrap_err();
-        assert!(err.to_string().contains("answer text must not be empty"));
-
-        let unchanged = store.find_by_id(id).await.unwrap().unwrap();
-        assert_eq!(unchanged.status, ItemStatus::NeedsClarification);
-        assert_eq!(unchanged.context.as_deref(), Some("Existing context"));
-    }
 }

@@ -27,6 +27,7 @@ pub async fn apply_verdict(
 ) -> Result<()> {
     item.captain_review_trigger = None;
     item.session_ids.review = None;
+    item.review_fail_count = 0;
 
     // Capture worker info before any arm clears it (respawn sets these to None).
     let worker_session_id = item.session_ids.worker.clone();

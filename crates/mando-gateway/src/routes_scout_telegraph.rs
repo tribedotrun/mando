@@ -5,7 +5,7 @@ use axum::http::StatusCode;
 use axum::Json;
 use serde_json::Value;
 
-use crate::response::error_response;
+use crate::response::{error_response, internal_error};
 use crate::AppState;
 
 /// POST /api/scout/items/{id}/telegraph — publish article to Telegraph, return URL.
@@ -14,7 +14,8 @@ pub(crate) async fn publish_telegraph(
     Path(id): Path<i64>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let pool = state.db.pool();
-    let article = mando_scout::get_scout_article(pool, id)
+    let workflow = state.scout_workflow.load_full();
+    let article = mando_scout::ensure_scout_article(pool, id, &workflow)
         .await
         .map_err(|e| {
             let msg = e.to_string();
@@ -35,7 +36,7 @@ pub(crate) async fn publish_telegraph(
 
     let url = mando_scout::io::telegraph::publish_article(id, title, article_md)
         .await
-        .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?;
+        .map_err(internal_error)?;
 
     Ok(Json(serde_json::json!({"ok": true, "url": url})))
 }

@@ -8,7 +8,7 @@ use mando_config::settings::{CaptainConfig, ProjectConfig};
 use mando_config::workflow::CaptainWorkflow;
 use mando_types::Task;
 
-use crate::io::{git, health_store, hooks};
+use crate::io::{git, hooks, pid_registry};
 
 /// Spawn a new worker for a task.
 ///
@@ -58,7 +58,9 @@ pub(crate) async fn spawn_worker(
             let branch = format!("mando/{}", slug);
             let wt = git::worktree_path(&repo_path, &slug);
             let default_branch = git::default_branch(&repo_path).await?;
-            git::delete_local_branch(&repo_path, &branch).await.ok();
+            if let Err(e) = git::delete_local_branch(&repo_path, &branch).await {
+                tracing::warn!(module = "spawner", branch = %branch, error = %e, "failed to delete stale local branch");
+            }
             git::create_worktree(&repo_path, &branch, &wt, &default_branch).await?;
             (branch, wt)
         }
@@ -67,7 +69,9 @@ pub(crate) async fn spawn_worker(
         let branch = format!("mando/{}", slug);
         let wt = git::worktree_path(&repo_path, &slug);
         let default_branch = git::default_branch(&repo_path).await?;
-        git::delete_local_branch(&repo_path, &branch).await.ok();
+        if let Err(e) = git::delete_local_branch(&repo_path, &branch).await {
+            tracing::warn!(module = "spawner", branch = %branch, error = %e, "failed to delete stale local branch");
+        }
         git::create_worktree(&repo_path, &branch, &wt, &default_branch).await?;
         (branch, wt)
     };
@@ -113,8 +117,8 @@ pub(crate) async fn spawn_worker(
         "running",
     );
 
-    // Persist PID in health state so the review phase can check liveness.
-    health_store::persist_worker_pid(&session_name, pid);
+    // Register PID in the session registry for liveness tracking.
+    pid_registry::register(&session_id, pid);
 
     // Log "running" session entry so the UI shows it immediately.
     crate::io::headless_cc::log_running_session(
