@@ -26,15 +26,9 @@ export function PatternsList() {
     fetchPatterns();
   });
 
-  const handleApprove = async (id: number) => {
+  const handleAction = async (id: number, action: (id: number) => Promise<void>) => {
     setActioningId(id);
-    await approvePattern(id);
-    setActioningId(null);
-  };
-
-  const handleDismiss = async (id: number) => {
-    setActioningId(id);
-    await dismissPattern(id);
+    await action(id);
     setActioningId(null);
   };
 
@@ -114,7 +108,7 @@ export function PatternsList() {
                 {p.status === 'pending' && (
                   <div className="flex gap-1">
                     <button
-                      onClick={() => handleApprove(p.id)}
+                      onClick={() => handleAction(p.id, approvePattern)}
                       disabled={actioningId === p.id}
                       className="rounded px-2 py-0.5 text-[0.65rem] disabled:opacity-50"
                       style={{
@@ -125,7 +119,7 @@ export function PatternsList() {
                       Approve
                     </button>
                     <button
-                      onClick={() => handleDismiss(p.id)}
+                      onClick={() => handleAction(p.id, dismissPattern)}
                       disabled={actioningId === p.id}
                       className="rounded px-2 py-0.5 text-[0.65rem] disabled:opacity-50"
                       style={{

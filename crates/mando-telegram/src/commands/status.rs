@@ -6,14 +6,6 @@ use mando_shared::telegram_format::{escape_html, split_message, status_icon};
 use mando_types::ItemStatus;
 use serde_json::json;
 
-fn truncate_char_boundary(s: &str, max: usize) -> &str {
-    if s.len() <= max {
-        s
-    } else {
-        &s[..s.floor_char_boundary(max)]
-    }
-}
-
 /// Workflow state display order.
 const STATUS_ORDER: &[ItemStatus] = &[
     ItemStatus::New,
@@ -174,12 +166,12 @@ pub async fn handle(bot: &TelegramBot, chat_id: &str, args: &str) -> Result<()> 
                 lines.push(format!("  \u{2022} {id_str}{title}{worker}{pr_part}"));
 
                 let id = item.id;
-                let title_short = truncate_char_boundary(&item.title, 30);
+                let title_short = super::truncate(&item.title, 30);
                 match status {
                     ItemStatus::AwaitingReview => {
                         if let Some(ref pr) = item.pr {
                             let pr_num = pr.trim_start_matches('#');
-                            let ts = truncate_char_boundary(&item.title, 22);
+                            let ts = super::truncate(&item.title, 22);
                             merge_buttons.push(json!([{
                                 "text": format!("\u{1f500} Merge PR #{pr_num} \u{2014} {ts}"),
                                 "callback_data": format!("merge:{id}"),

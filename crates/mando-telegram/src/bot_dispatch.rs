@@ -19,6 +19,7 @@ pub(crate) const REGISTERED_COMMANDS: &[(&str, &str)] = &[
     ("adopt", "Adopt human's worktree"),
     ("input", "Clarify tasks"),
     ("captain", "Run captain tick"),
+    ("status", "Show task list"),
     ("tasks", "Show task list"),
     ("workers", "Show active workers"),
     ("nudge", "Nudge a stuck worker"),
@@ -64,7 +65,7 @@ impl TelegramBot {
         match command {
             "start" | "help" => commands::help::handle(self, chat_id, args).await,
             "todo" => commands::todo::handle(self, chat_id, args).await,
-            "tasks" => commands::status::handle(self, chat_id, args).await,
+            "status" | "tasks" => commands::status::handle(self, chat_id, args).await,
             "captain" => commands::captain::handle(self, chat_id, args).await,
             "input" => commands::input::handle(self, chat_id, args).await,
             "reopen" => commands::reopen::handle(self, chat_id, args).await,
@@ -121,7 +122,7 @@ impl TelegramBot {
         text: &str,
         message: &Value,
     ) -> Result<()> {
-        if self.pending_todo.remove(chat_id).is_some() {
+        if self.pending_todo.remove(chat_id) {
             return commands::todo::execute_todo(self, chat_id, text).await;
         }
         if let Some((item_id, title)) = self.pending_reopen.remove(chat_id) {

@@ -12,6 +12,16 @@ const LEGACY_APP_LABEL = 'run.tribe.mando';
 const DAEMON_LABEL = 'run.tribe.mando-daemon';
 const TG_LABEL = 'run.tribe.mando-tg';
 
+/** Extract message string from an unknown error. */
+function errorMsg(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
+}
+
+/** Whether a launchctl error message indicates the service simply isn't loaded (benign). */
+function isNotLoadedError(msg: string): boolean {
+  return msg.includes('not loaded') || msg.includes('could not find service');
+}
+
 function homeDir(): string {
   return app.getPath('home');
 }
@@ -94,8 +104,8 @@ export function removeLegacyAppPlist(): void {
   try {
     execSync(`launchctl unload -w "${plist}" 2>/dev/null`);
   } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : String(e);
-    if (!msg.includes('not loaded') && !msg.includes('could not find service')) {
+    const msg = errorMsg(e);
+    if (!isNotLoadedError(msg)) {
       log.warn('[launchd] legacy plist unload failed:', msg);
     }
   }
@@ -181,8 +191,8 @@ function launchctlLoad(plistPath: string): void {
   try {
     execSync(`launchctl unload -w "${plistPath}" 2>/dev/null`);
   } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : String(e);
-    if (!msg.includes('not loaded') && !msg.includes('could not find service')) {
+    const msg = errorMsg(e);
+    if (!isNotLoadedError(msg)) {
       log.warn('[launchd] pre-load unload failed:', msg);
     }
   }
@@ -193,29 +203,18 @@ function launchctlUnload(plistPath: string): void {
   try {
     execSync(`launchctl unload -w "${plistPath}"`);
   } catch (e: unknown) {
-    log.warn(`launchctl unload failed for ${plistPath}: ${e instanceof Error ? e.message : e}`);
+    log.warn(`launchctl unload failed for ${plistPath}: ${errorMsg(e)}`);
   }
 }
 
-/** Bootstrap daemon via launchctl (modern API with fallback). */
+/** Bootstrap a launchd service via modern API with legacy fallback. */
 function launchctlBootstrap(plistPath: string): void {
   const uid = process.getuid?.() ?? 501;
   const domain = `gui/${uid}`;
   try {
-    execSync(`launchctl bootout ${domain}/${DAEMON_LABEL} 2>/dev/null`);
-  } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : String(e);
-    if (!msg.includes('not loaded') && !msg.includes('could not find service')) {
-      log.warn('[launchd] pre-bootstrap bootout failed:', msg);
-    }
-  }
-  try {
     execSync(`launchctl bootstrap ${domain} "${plistPath}"`);
   } catch (e: unknown) {
-    log.warn(
-      '[launchd] bootstrap failed, falling back to legacy load:',
-      e instanceof Error ? e.message : e,
-    );
+    log.warn('[launchd] bootstrap failed, falling back to legacy load:', errorMsg(e));
     launchctlLoad(plistPath);
   }
 }
@@ -227,24 +226,14 @@ function launchctlBootoutLabel(label: string, plist: string): void {
   try {
     execSync(`launchctl bootout ${domain}/${label}`);
   } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : String(e);
-    if (!msg.includes('not loaded') && !msg.includes('could not find service')) {
+    const msg = errorMsg(e);
+    if (!isNotLoadedError(msg)) {
       log.warn('[launchd] bootout failed, falling back to legacy unload:', msg);
     }
     if (fs.existsSync(plist)) {
       launchctlUnload(plist);
     }
   }
-}
-
-/** Bootout daemon via launchctl (modern API with fallback). */
-function launchctlBootout(): void {
-  launchctlBootoutLabel(DAEMON_LABEL, daemonPlistPath());
-}
-
-/** Bootout TG bot via launchctl (modern API with fallback). */
-function launchctlBootoutTg(): void {
-  launchctlBootoutLabel(TG_LABEL, tgPlistPath());
 }
 
 // ---------------------------------------------------------------------------
@@ -284,9 +273,11 @@ function ensureLaunchdDirs(dataDir: string): void {
 /** Install and load the daemon LaunchAgent plist. */
 export function installDaemonPlist(dataDir: string): void {
   ensureLaunchdDirs(dataDir);
-  const plist = generateDaemonPlist(dataDir);
-  fs.writeFileSync(daemonPlistPath(), plist, 'utf-8');
-  launchctlBootstrap(daemonPlistPath());
+  const plistContent = generateDaemonPlist(dataDir);
+  const plistFile = daemonPlistPath();
+  fs.writeFileSync(plistFile, plistContent, 'utf-8');
+  launchctlBootoutLabel(DAEMON_LABEL, plistFile);
+  launchctlBootstrap(plistFile);
 }
 
 /** Install and load the TG bot LaunchAgent plist — skips if Telegram is not configured. */
@@ -312,21 +303,11 @@ export function installTgPlist(dataDir: string): void {
   }
 
   ensureLaunchdDirs(dataDir);
-  const plist = generateTgPlist(dataDir);
-  fs.writeFileSync(tgPlistPath(), plist, 'utf-8');
-
-  const uid = process.getuid?.() ?? 501;
-  const domain = `gui/${uid}`;
-  try {
-    execSync(`launchctl bootout ${domain}/${TG_LABEL} 2>/dev/null`);
-  } catch {
-    /* ok if not loaded */
-  }
-  try {
-    execSync(`launchctl bootstrap ${domain} "${tgPlistPath()}"`);
-  } catch {
-    launchctlLoad(tgPlistPath());
-  }
+  const plistContent = generateTgPlist(dataDir);
+  const plistFile = tgPlistPath();
+  fs.writeFileSync(plistFile, plistContent, 'utf-8');
+  launchctlBootoutLabel(TG_LABEL, plistFile);
+  launchctlBootstrap(plistFile);
 }
 
 /** Update daemon binary: bootout, replace binary, bootstrap. */
@@ -335,8 +316,8 @@ export function updateDaemonBinary(dataDir: string): boolean {
   const prev = `${dest}.prev`;
 
   // Bootout current daemon and TG bot (graceful SIGTERM).
-  launchctlBootoutTg();
-  launchctlBootout();
+  launchctlBootoutLabel(TG_LABEL, tgPlistPath());
+  launchctlBootoutLabel(DAEMON_LABEL, daemonPlistPath());
 
   // Rename current binary to .prev for rollback.
   if (fs.existsSync(dest)) {
@@ -375,8 +356,8 @@ export function rollbackDaemonBinary(dataDir: string): boolean {
   const prev = `${dest}.prev`;
   if (!fs.existsSync(prev)) return false;
 
-  launchctlBootoutTg();
-  launchctlBootout();
+  launchctlBootoutLabel(TG_LABEL, tgPlistPath());
+  launchctlBootoutLabel(DAEMON_LABEL, daemonPlistPath());
   try {
     fs.renameSync(prev, dest);
   } catch (err) {
@@ -405,8 +386,8 @@ export function getDaemonStatus(): DaemonStatus {
       pid: pidMatch ? parseInt(pidMatch[1], 10) : null,
     };
   } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : String(e);
-    if (!msg.includes('not loaded') && !msg.includes('could not find service')) {
+    const msg = errorMsg(e);
+    if (!isNotLoadedError(msg)) {
       log.warn('[launchd] daemon status check failed:', msg);
     }
     return { loaded: false, running: false, pid: null };
@@ -467,8 +448,8 @@ export function installCliAndPlists(dataDir: string): void {
     try {
       execSync(`launchctl unload -w "${legacyCaptainPlist}" 2>/dev/null`);
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : String(e);
-      if (!msg.includes('not loaded') && !msg.includes('could not find service')) {
+      const msg = errorMsg(e);
+      if (!isNotLoadedError(msg)) {
         log.warn('[launchd] legacy captain plist unload failed:', msg);
       }
     }

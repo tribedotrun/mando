@@ -61,6 +61,8 @@ export interface MandoAPI {
   setLoginItem: (enabled: boolean) => Promise<void>;
   // DevTools
   toggleDevTools: () => Promise<void>;
+  // Logs
+  openLogsFolder: () => void;
   // Launchd (macOS)
   launchd: {
     reinstall: () => Promise<boolean>;
@@ -141,6 +143,8 @@ contextBridge.exposeInMainWorld('mandoAPI', {
   setLoginItem: (enabled: boolean) => ipcRenderer.invoke('set-login-item', enabled),
   // DevTools
   toggleDevTools: () => ipcRenderer.invoke('toggle-devtools'),
+  // Logs
+  openLogsFolder: () => ipcRenderer.invoke('open-logs-folder'),
   // Launchd (macOS)
   launchd: {
     reinstall: () => ipcRenderer.invoke('launchd:reinstall'),

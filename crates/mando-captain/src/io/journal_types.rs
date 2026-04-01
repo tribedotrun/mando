@@ -145,3 +145,31 @@ pub struct ActionRuleStats {
     pub failures: i64,
     pub success_rate: f64,
 }
+
+impl From<mando_db::queries::journal::ActionRuleStats> for ActionRuleStats {
+    fn from(s: mando_db::queries::journal::ActionRuleStats) -> Self {
+        Self {
+            action: s.action,
+            rule: s.rule,
+            total: s.total,
+            successes: s.successes,
+            failures: s.failures,
+            success_rate: s.success_rate,
+        }
+    }
+}
+
+impl From<mando_db::queries::journal::PatternRow> for Pattern {
+    fn from(r: mando_db::queries::journal::PatternRow) -> Self {
+        Self {
+            id: r.id,
+            pattern: r.pattern,
+            signal: r.signal,
+            recommendation: r.recommendation,
+            confidence: r.confidence,
+            sample_size: r.sample_size,
+            status: r.status,
+            created_at: r.created_at,
+        }
+    }
+}

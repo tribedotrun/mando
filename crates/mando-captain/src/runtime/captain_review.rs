@@ -42,6 +42,7 @@ fn is_verdict_allowed(trigger: &str, action: &str) -> bool {
         "clarifier_fail" => matches!(action, "retry_clarifier" | "escalate"),
         "rebase_fail" => matches!(action, "nudge" | "escalate"),
         "ci_failure" => matches!(action, "nudge" | "escalate"),
+        "merge_fail" => matches!(action, "nudge" | "escalate"),
         _ => false,
     }
 }
@@ -179,42 +180,7 @@ pub(crate) async fn spawn_review(
 
         // Build template variables.
         let intervention_count_str = intervention_count_val.to_string();
-        let is_gates_pass = if trigger_str == "gates_pass" {
-            "true"
-        } else {
-            ""
-        };
-        let is_degraded_context = if trigger_str == "degraded_context" {
-            "true"
-        } else {
-            ""
-        };
-        let is_timeout = if trigger_str == "timeout" { "true" } else { "" };
-        let is_broken_session = if trigger_str == "broken_session" {
-            "true"
-        } else {
-            ""
-        };
-        let is_budget_exhausted = if trigger_str == "budget_exhausted" {
-            "true"
-        } else {
-            ""
-        };
-        let is_clarifier_fail = if trigger_str == "clarifier_fail" {
-            "true"
-        } else {
-            ""
-        };
-        let is_rebase_fail = if trigger_str == "rebase_fail" {
-            "true"
-        } else {
-            ""
-        };
-        let is_ci_failure = if trigger_str == "ci_failure" {
-            "true"
-        } else {
-            ""
-        };
+        let trigger_flag = |name: &str| if trigger_str == name { "true" } else { "" };
 
         let mut vars = std::collections::HashMap::new();
         vars.insert("trigger", trigger_str.as_str());
@@ -224,19 +190,25 @@ pub(crate) async fn spawn_review(
         vars.insert("knowledge_base", knowledge_base.as_str());
         vars.insert("evidence_images", evidence_listing.as_str());
         vars.insert("intervention_count", intervention_count_str.as_str());
-        vars.insert("is_gates_pass", is_gates_pass);
-        vars.insert("is_degraded_context", is_degraded_context);
-        vars.insert("is_timeout", is_timeout);
-        vars.insert("is_broken_session", is_broken_session);
-        vars.insert("is_budget_exhausted", is_budget_exhausted);
-        vars.insert("is_clarifier_fail", is_clarifier_fail);
-        vars.insert("is_rebase_fail", is_rebase_fail);
-        vars.insert("is_ci_failure", is_ci_failure);
+        vars.insert("is_gates_pass", trigger_flag("gates_pass"));
+        vars.insert("is_degraded_context", trigger_flag("degraded_context"));
+        vars.insert("is_timeout", trigger_flag("timeout"));
+        vars.insert("is_broken_session", trigger_flag("broken_session"));
+        vars.insert("is_budget_exhausted", trigger_flag("budget_exhausted"));
+        vars.insert("is_clarifier_fail", trigger_flag("clarifier_fail"));
+        vars.insert("is_rebase_fail", trigger_flag("rebase_fail"));
+        vars.insert("is_ci_failure", trigger_flag("ci_failure"));
+        vars.insert("is_merge_fail", trigger_flag("merge_fail"));
 
         let prompt = match mando_config::render_prompt("captain_review", &prompts, &vars) {
             Ok(p) => p,
             Err(e) => {
                 warn!(module = "captain", %session_id, %e, "failed to render captain review prompt");
+                let stream_path = mando_config::stream_path_for_session(&session_id);
+                mando_cc::write_error_result(
+                    &stream_path,
+                    &format!("failed to render captain review prompt: {e}"),
+                );
                 return;
             }
         };
@@ -286,6 +258,13 @@ pub(crate) async fn spawn_review(
             Err(e) => {
                 warn!(module = "captain", %session_id, %e, "captain review CC failed");
                 crate::io::pid_registry::unregister(&session_id);
+                // Write a synthetic error result so check_review() finds it on
+                // the next tick instead of waiting for the full timeout.
+                let stream_path = mando_config::stream_path_for_session(&session_id);
+                mando_cc::write_error_result(
+                    &stream_path,
+                    &format!("captain review CC process failed: {e}"),
+                );
                 crate::io::headless_cc::log_cc_failure(
                     &pool,
                     &session_id,
@@ -306,6 +285,11 @@ pub(crate) fn check_review(item: &Task) -> Option<CaptainVerdict> {
     let session_id = item.session_ids.review.as_deref()?;
     let stream_path = mando_config::stream_path_for_session(session_id);
     let result = mando_cc::get_stream_result(&stream_path)?;
+
+    // Skip error results — handled separately by check_review_failed().
+    if result.get("is_error").and_then(|v| v.as_bool()) == Some(true) {
+        return None;
+    }
 
     // Try structured_output first (populated when --json-schema was used).
     if let Some(so) = result.get("structured_output").filter(|v| !v.is_null()) {
@@ -368,6 +352,25 @@ pub(crate) fn check_review(item: &Task) -> Option<CaptainVerdict> {
             })
         }
     }
+}
+
+/// Check if the async CC task wrote an error result to the stream file.
+///
+/// Returns the error message if a failure marker is present.
+pub(crate) fn check_review_failed(item: &Task) -> Option<String> {
+    let session_id = item.session_ids.review.as_deref()?;
+    let stream_path = mando_config::stream_path_for_session(session_id);
+    let result = mando_cc::get_stream_result(&stream_path)?;
+    if result.get("is_error").and_then(|v| v.as_bool()) != Some(true) {
+        return None;
+    }
+    let msg = result
+        .get("error")
+        .and_then(|v| v.as_str())
+        .unwrap_or("CC process failed")
+        .to_string();
+    warn!(module = "captain", %session_id, %msg, "captain review async task failed");
+    Some(msg)
 }
 
 /// Validate a parsed verdict against the trigger's allowed actions.

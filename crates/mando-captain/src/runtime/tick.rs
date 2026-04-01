@@ -256,6 +256,14 @@ async fn run_captain_tick_inner(
             .await;
     }
 
+    // NeedsClarification timeout — escalate items waiting too long for human answers.
+    if !dry_run {
+        super::tick_clarify_timeout::check_clarifier_timeouts(
+            &mut items, workflow, &notifier, &pool,
+        )
+        .await;
+    }
+
     // CaptainMerging — poll for merge session results from async CC sessions.
     if !dry_run {
         super::captain_merge::poll_merging_items(&mut items, config, workflow, &notifier, &pool)
@@ -376,7 +384,21 @@ async fn run_captain_tick_inner(
                 .cloned()
                 .collect();
             if !changed_items.is_empty() {
-                let store = store_lock.write().await;
+                let store = match tokio::time::timeout(
+                    std::time::Duration::from_secs(30),
+                    store_lock.write(),
+                )
+                .await
+                {
+                    Ok(guard) => guard,
+                    Err(_) => {
+                        tracing::error!(
+                            module = "captain",
+                            "tick write-lock timed out after 30s — aborting merge"
+                        );
+                        return Err(anyhow::anyhow!("tick write-lock timed out after 30s"));
+                    }
+                };
                 store
                     .merge_changed_items(&pre_tick_snapshot, &changed_items)
                     .await?;

@@ -164,7 +164,11 @@ export function Sidebar({
       </button>
 
       {/* Nav items */}
-      <nav className="flex flex-col" style={{ paddingTop: 16, gap: 4 }}>
+      <nav
+        className="flex flex-col"
+        aria-label="Main navigation"
+        style={{ paddingTop: 16, gap: 4 }}
+      >
         {visibleNav.map(({ id, label, Icon }) => {
           const active = activeTab === id && !projectFilter;
           return (
@@ -333,6 +337,8 @@ function SetupTrigger({
       <button
         data-testid="setup-trigger"
         onClick={onToggle}
+        aria-label={`${active ? 'Hide' : 'Show'} setup checklist, ${pct}% complete`}
+        aria-expanded={active}
         className="flex w-full items-center transition-colors"
         style={{
           padding: '8px 10px',

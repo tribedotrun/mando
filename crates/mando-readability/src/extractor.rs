@@ -88,13 +88,17 @@ fn render_subtree(dom: &Dom, id: NodeId, buf: &mut String) {
                     | "li"
             );
             if is_block {
-                buf.push_str(&format!("<{tag}>"));
+                buf.push('<');
+                buf.push_str(tag);
+                buf.push('>');
             }
             for &child in &node.children {
                 render_subtree(dom, child, buf);
             }
             if is_block {
-                buf.push_str(&format!("</{tag}>"));
+                buf.push_str("</");
+                buf.push_str(tag);
+                buf.push('>');
             }
         }
         _ => {

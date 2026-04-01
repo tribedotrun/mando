@@ -41,7 +41,7 @@ export function ScoutStatusTabs({
               padding: '6px 12px',
               border: 'none',
               borderBottomWidth: 2,
-              borderBottomStyle: 'solid' as const,
+              borderBottomStyle: 'solid',
               borderBottomColor: active ? 'var(--color-accent)' : 'transparent',
               cursor: 'pointer',
               marginBottom: -1,

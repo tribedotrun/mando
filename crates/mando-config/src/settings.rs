@@ -113,7 +113,6 @@ pub struct TelegramConfig {
     #[serde(skip)]
     pub token: String,
     pub owner: String,
-    pub api_base_url: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -190,10 +189,12 @@ pub struct CaptainConfig {
     pub learn_cron_expr: String,
     pub tz: String,
     pub projects: HashMap<String, ProjectConfig>,
+    #[serde(skip)]
     pub task_db_path: String,
+    #[serde(skip)]
     pub lockfile_path: String,
+    #[serde(skip)]
     pub worker_health_path: String,
-    pub notify_chat_id: Option<String>,
     pub linear_team: String,
     pub linear_cli_path: String,
 }
@@ -204,12 +205,20 @@ impl Default for CaptainConfig {
             auto_schedule: false,
             tick_interval_s: 30,
             learn_cron_expr: "0 9 * * *".into(),
-            tz: "America/Mexico_City".into(),
+            tz: iana_time_zone::get_timezone().unwrap_or_else(|_| "UTC".into()),
             projects: HashMap::new(),
-            task_db_path: "~/.mando/mando.db".into(),
-            lockfile_path: "~/.mando/captain.lock".into(),
-            worker_health_path: "~/.mando/state/worker-health.json".into(),
-            notify_chat_id: None,
+            task_db_path: crate::paths::data_dir()
+                .join("mando.db")
+                .to_string_lossy()
+                .into_owned(),
+            lockfile_path: crate::paths::data_dir()
+                .join("captain.lock")
+                .to_string_lossy()
+                .into_owned(),
+            worker_health_path: crate::paths::state_dir()
+                .join("worker-health.json")
+                .to_string_lossy()
+                .into_owned(),
             linear_team: String::new(),
             linear_cli_path: String::new(),
         }
@@ -249,6 +258,7 @@ pub struct ClassifyRule {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct ToolsConfig {
+    #[serde(skip_serializing)]
     pub cc_self_improve: CCSelfImproveConfig,
 }
 

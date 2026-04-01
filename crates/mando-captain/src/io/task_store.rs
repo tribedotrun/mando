@@ -182,17 +182,9 @@ impl TaskStore {
                 cost_usd: entry.cost_usd,
                 duration_ms: entry.duration_ms,
                 resumed: entry.resumed,
-                task_id: if entry.task_id.is_empty() {
-                    None
-                } else {
-                    Some(entry.task_id.as_str())
-                },
+                task_id: (!entry.task_id.is_empty()).then_some(entry.task_id.as_str()),
                 scout_item_id: None,
-                worker_name: if entry.worker_name.is_empty() {
-                    None
-                } else {
-                    Some(entry.worker_name.as_str())
-                },
+                worker_name: (!entry.worker_name.is_empty()).then_some(entry.worker_name.as_str()),
             },
         )
         .await

@@ -17,12 +17,10 @@ import type { NotificationPayload, SSEConnectionStatus } from '#renderer/types';
 
 interface DataContextValue {
   sseStatus: SSEConnectionStatus;
-  sessionsRefresh: number;
 }
 
 const DataContext = createContext<DataContextValue>({
   sseStatus: 'disconnected',
-  sessionsRefresh: 0,
 });
 
 export function useDataContext(): DataContextValue {
@@ -38,9 +36,11 @@ export function DataProvider({ children }: { children: React.ReactNode }): React
   const [initError, setInitError] = useState<string | null>(null);
   const [needsOnboarding, setNeedsOnboarding] = useState(false);
   const [sseStatus, setSseStatus] = useState<SSEConnectionStatus>('disconnected');
-  const [sessionsRefresh, setSessionsRefresh] = useState(0);
   const sseRef = useRef<EventSource | null>(null);
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Start as 'connected' so the first SSE connect doesn't trigger a redundant
+  // refetchAll — the init sequence already seeds all stores before connecting.
+  const prevSseStatusRef = useRef<SSEConnectionStatus>('connected');
 
   const taskFetch = useTaskStore((s) => s.fetch);
   const scoutFetch = useScoutStore((s) => s.fetch);
@@ -51,7 +51,7 @@ export function DataProvider({ children }: { children: React.ReactNode }): React
     if (pollingRef.current) return;
     pollingRef.current = setInterval(() => {
       taskFetch();
-      setSessionsRefresh((n) => n + 1);
+      queryClient.invalidateQueries({ queryKey: ['sessions'] });
     }, 30_000);
   }, [taskFetch]);
 
@@ -61,6 +61,14 @@ export function DataProvider({ children }: { children: React.ReactNode }): React
       pollingRef.current = null;
     }
   }, []);
+
+  /** Refetch all stores — used on SSE reconnect to clear stale data. */
+  const refetchAll = useCallback(() => {
+    taskFetch();
+    scoutFetch();
+    cronFetch();
+    queryClient.invalidateQueries();
+  }, [taskFetch, scoutFetch, cronFetch]);
 
   useMountEffect(() => {
     const init = async () => {
@@ -78,48 +86,51 @@ export function DataProvider({ children }: { children: React.ReactNode }): React
         await Promise.allSettled([taskFetch(), scoutFetch(), cronFetch()]);
         sseRef.current = connectSSE(
           (event) => {
-            if (event.event === 'tasks') {
-              taskFetch();
-              queryClient.invalidateQueries({ queryKey: ['metrics-workers'] });
-            }
-            if (event.event === 'scout') {
-              scoutFetch();
-              queryClient.invalidateQueries({ queryKey: ['scout'] });
-            }
-            if (event.event === 'cron') {
-              cronFetch();
-            }
-            if (event.event === 'status') {
-              taskFetch();
-              queryClient.invalidateQueries({ queryKey: ['status'] });
-              queryClient.invalidateQueries({ queryKey: ['metrics-workers'] });
-            }
-            if (event.event === 'sessions') {
-              queryClient.invalidateQueries({ queryKey: ['sessions'] });
-              setSessionsRefresh((n) => n + 1);
-            }
-            // Surface rate limit events as in-app toasts.
-            if (event.event === 'notification' && event.data) {
-              if (
-                typeof event.data !== 'object' ||
-                event.data === null ||
-                !('message' in event.data)
-              ) {
-                log.warn('[DataProvider] unexpected notification shape:', event.data);
-                return;
-              }
-              const payload = event.data as unknown as NotificationPayload;
-              if (payload.kind?.type === 'RateLimited') {
-                const variant = payload.kind.status === 'rejected' ? 'error' : 'info';
-                useToastStore.getState().add(variant, payload.message);
-              }
+            switch (event.event) {
+              case 'tasks':
+                taskFetch();
+                queryClient.invalidateQueries({ queryKey: ['metrics-workers'] });
+                break;
+              case 'scout':
+                scoutFetch();
+                queryClient.invalidateQueries({ queryKey: ['scout'] });
+                break;
+              case 'cron':
+                cronFetch();
+                break;
+              case 'status':
+                taskFetch();
+                queryClient.invalidateQueries({ queryKey: ['status'] });
+                queryClient.invalidateQueries({ queryKey: ['metrics-workers'] });
+                break;
+              case 'sessions':
+                queryClient.invalidateQueries({ queryKey: ['sessions'] });
+                break;
+              case 'notification':
+                if (event.data && typeof event.data === 'object' && 'message' in event.data) {
+                  const payload = event.data as unknown as NotificationPayload;
+                  if (payload.kind?.type === 'RateLimited') {
+                    const variant = payload.kind.status === 'rejected' ? 'error' : 'info';
+                    useToastStore.getState().add(variant, payload.message);
+                  }
+                } else if (event.data) {
+                  log.warn('[DataProvider] unexpected notification shape:', event.data);
+                }
+                break;
             }
             processNotification(event);
           },
           (status) => {
+            const wasDisconnected = prevSseStatusRef.current === 'disconnected';
+            prevSseStatusRef.current = status;
             setSseStatus(status);
-            if (status === 'disconnected') startPolling();
-            else if (status === 'connected') stopPolling();
+            if (status === 'disconnected') {
+              startPolling();
+            } else if (status === 'connected') {
+              stopPolling();
+              // Reconnected after disconnect — refetch everything to clear stale data
+              if (wasDisconnected) refetchAll();
+            }
           },
         );
         setInitialized(true);
@@ -136,10 +147,7 @@ export function DataProvider({ children }: { children: React.ReactNode }): React
     };
   });
 
-  const contextValue = useMemo(
-    () => ({ sseStatus, sessionsRefresh }),
-    [sseStatus, sessionsRefresh],
-  );
+  const contextValue = useMemo(() => ({ sseStatus }), [sseStatus]);
 
   if (!initialized) {
     return (

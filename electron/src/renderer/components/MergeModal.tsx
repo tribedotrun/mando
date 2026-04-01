@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useCallback } from 'react';
+import { useFocusTrap } from '#renderer/hooks/useFocusTrap';
 import type { TaskItem } from '#renderer/types';
 import { prLabel } from '#renderer/utils';
 
@@ -18,13 +19,23 @@ export function MergeModal({
   result,
 }: Props): React.ReactElement {
   const isDone = result?.ok;
+  const guardedCancel = useCallback(() => {
+    if (!pending) onCancel();
+  }, [onCancel, pending]);
+  const { ref: dialogRef, handleKeyDown } = useFocusTrap(guardedCancel);
+
   return (
     <div
       data-testid="merge-modal"
+      role="dialog"
+      aria-modal="true"
+      aria-label={`Merge ${item.project?.split('/').pop()} PR ${prLabel(item.pr ?? '')}`}
       className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60"
       onClick={(e) => e.target === e.currentTarget && !pending && onCancel()}
+      onKeyDown={handleKeyDown}
     >
       <div
+        ref={dialogRef}
         className="w-[440px] max-w-[90vw] rounded-[8px] p-5"
         style={{ background: 'var(--color-surface-2)', border: '1px solid var(--color-border)' }}
       >

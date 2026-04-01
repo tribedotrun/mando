@@ -141,6 +141,5 @@ async fn download_and_verify() -> Result<()> {
 fn hex_sha256(data: &[u8]) -> String {
     let mut hasher = Sha256::new();
     hasher.update(data);
-    let result = hasher.finalize();
-    result.iter().map(|b| format!("{b:02x}")).collect()
+    format!("{:x}", hasher.finalize())
 }

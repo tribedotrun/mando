@@ -1,33 +1,42 @@
 import React from 'react';
+import { inputStyle, labelStyle, inputCls, labelCls } from '#renderer/styles';
 import { useSettingsStore } from '#renderer/stores/settingsStore';
 import type { VoiceConfig, FeaturesConfig } from '#renderer/stores/settingsStore';
 import { ToggleSwitch } from '#renderer/components/ToggleSwitch';
+import { SettingsScout } from '#renderer/components/SettingsScout';
 
 const EMPTY_VOICE: VoiceConfig = {};
 const EMPTY_FEATURES: FeaturesConfig = {};
 
 const MODEL_OPTIONS = ['eleven_flash_v2_5', 'eleven_multilingual_v2', 'eleven_turbo_v2_5'];
 
-const inputStyle: React.CSSProperties = {
-  border: '1px solid var(--color-border)',
-  background: 'var(--color-surface-2)',
-  color: 'var(--color-text-1)',
-};
-
-const labelStyle: React.CSSProperties = { color: 'var(--color-text-3)' };
-
-const inputCls =
-  'w-full rounded-md px-3 py-2 text-sm placeholder-[var(--color-text-3)] focus:outline-none focus:ring-1';
-const labelCls = 'mb-1 block text-xs font-medium uppercase tracking-wider';
-
 function VoiceSettings() {
   const voice = useSettingsStore((s) => s.config.voice ?? EMPTY_VOICE);
+  const elevenLabsKey = useSettingsStore((s) => s.config.env?.ELEVENLABS_API_KEY ?? '');
   const updateSection = useSettingsStore((s) => s.updateSection);
+  const updateEnv = useSettingsStore((s) => s.updateEnv);
   const save = useSettingsStore((s) => s.save);
   const scheduleSave = useSettingsStore((s) => s.scheduleSave);
 
   return (
     <div className="grid gap-3 sm:grid-cols-2">
+      <div className="sm:col-span-2">
+        <label className={labelCls} style={labelStyle}>
+          ElevenLabs API Key
+        </label>
+        <input
+          data-testid="voice-elevenlabs-key"
+          type="password"
+          className={inputCls}
+          style={inputStyle}
+          value={elevenLabsKey}
+          onChange={(e) => {
+            updateEnv('ELEVENLABS_API_KEY', e.target.value);
+            scheduleSave();
+          }}
+          placeholder="sk_..."
+        />
+      </div>
       <div>
         <label className={labelCls} style={labelStyle}>
           Voice ID
@@ -260,6 +269,23 @@ export function SettingsExperimental(): React.ReactElement {
             </div>
           );
         })}
+      </div>
+
+      <h2 className="text-lg font-semibold" style={{ color: 'var(--color-text-1)', marginTop: 32 }}>
+        Scout
+      </h2>
+      <p className="mt-1 text-sm" style={{ color: 'var(--color-text-3)', marginBottom: 16 }}>
+        Personalize how Scout selects and explains content.
+      </p>
+      <div
+        style={{
+          borderRadius: 'var(--radius-panel)',
+          border: '1px solid var(--color-border)',
+          background: 'var(--color-surface-1)',
+          padding: 20,
+        }}
+      >
+        <SettingsScout />
       </div>
     </div>
   );

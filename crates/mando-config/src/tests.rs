@@ -46,7 +46,6 @@ fn parse_full_config() {
                     "workerPreamble": "be careful"
                 }
             },
-            "notifyChatId": "123",
             "linearTeam": "XYZ"
         },
         "tools": {
@@ -90,7 +89,6 @@ fn parse_full_config() {
     // Captain
     assert!(cfg.captain.auto_schedule);
     assert_eq!(cfg.captain.tick_interval_s, 60);
-    assert_eq!(cfg.captain.notify_chat_id, Some("123".to_string()));
     assert_eq!(cfg.captain.linear_team, "XYZ");
     let project = cfg.captain.projects.get("/code/repo").unwrap();
     assert_eq!(project.name, "repo");

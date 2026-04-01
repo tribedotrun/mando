@@ -1,5 +1,6 @@
-import React, { useMemo, useState } from 'react';
+import React, { useState } from 'react';
 import type { TaskItem } from '#renderer/types';
+import { useFocusTrap } from '#renderer/hooks/useFocusTrap';
 
 interface Props {
   items: TaskItem[];
@@ -16,23 +17,28 @@ export function DeleteModal({
   onConfirm,
   onCancel,
 }: Props): React.ReactElement {
-  const inProgress = useMemo(() => items.filter((b) => b.status === 'in-progress'), [items]);
-  const safe = useMemo(() => items.filter((b) => b.status !== 'in-progress'), [items]);
+  const inProgress = items.filter((b) => b.status === 'in-progress');
+  const safe = items.filter((b) => b.status !== 'in-progress');
   const canDelete = safe.length > 0;
-
-  const hasPr = useMemo(() => safe.some((b) => b.pr), [safe]);
-  const hasLinear = useMemo(() => safe.some((b) => b.linear_id), [safe]);
+  const hasPr = safe.some((b) => b.pr);
+  const hasLinear = safe.some((b) => b.linear_id);
 
   const [closePr, setClosePr] = useState(false);
   const [cancelLinear, setCancelLinear] = useState(false);
+  const { ref: dialogRef, handleKeyDown } = useFocusTrap(onCancel);
 
   return (
     <div
       data-testid="delete-modal"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Delete Items"
       className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60"
       onClick={(e) => e.target === e.currentTarget && onCancel()}
+      onKeyDown={handleKeyDown}
     >
       <div
+        ref={dialogRef}
         className="max-h-[80vh] w-[440px] max-w-[90vw] overflow-y-auto rounded-lg p-5"
         style={{ background: 'var(--color-surface-2)', border: '1px solid var(--color-border)' }}
       >

@@ -95,30 +95,29 @@ pub fn derive_source_label(url: &str, url_type: &str) -> String {
 // Internal helpers
 // ---------------------------------------------------------------------------
 
+/// Strip the URL scheme, returning everything after `://`.
+fn after_scheme(url: &str) -> &str {
+    url.find("://").map_or(url, |pos| &url[pos + 3..])
+}
+
 /// Extract lowercase hostname from a URL.
 fn extract_host(url: &str) -> String {
-    // Skip scheme
-    let after_scheme = if let Some(pos) = url.find("://") {
-        &url[pos + 3..]
-    } else {
-        url
-    };
-    // Take up to first / or ?
-    let host_part = after_scheme
+    let after = after_scheme(url);
+    // Take up to first / or ? or #
+    let host_part = after
         .split('/')
         .next()
-        .unwrap_or(after_scheme)
+        .unwrap_or(after)
         .split('?')
         .next()
-        .unwrap_or(after_scheme)
+        .unwrap_or(after)
         .split('#')
         .next()
-        .unwrap_or(after_scheme);
+        .unwrap_or(after);
     // Strip port
     let host = if let Some(pos) = host_part.rfind(':') {
-        // Only strip if what follows looks like a port number
-        let after = &host_part[pos + 1..];
-        if after.chars().all(|c| c.is_ascii_digit()) {
+        let port_candidate = &host_part[pos + 1..];
+        if port_candidate.chars().all(|c| c.is_ascii_digit()) {
             &host_part[..pos]
         } else {
             host_part
@@ -127,29 +126,20 @@ fn extract_host(url: &str) -> String {
         host_part
     };
     // Strip userinfo (user@host)
-    let host = if let Some(pos) = host.find('@') {
-        &host[pos + 1..]
-    } else {
-        host
-    };
+    let host = host.find('@').map_or(host, |pos| &host[pos + 1..]);
     host.to_lowercase()
 }
 
 /// Extract path portion of a URL.
 fn extract_path(url: &str) -> String {
-    let after_scheme = if let Some(pos) = url.find("://") {
-        &url[pos + 3..]
-    } else {
-        url
-    };
-    if let Some(slash_pos) = after_scheme.find('/') {
-        let path_and_rest = &after_scheme[slash_pos..];
-        // Strip query and fragment
-        let path = path_and_rest.split('?').next().unwrap_or(path_and_rest);
-        let path = path.split('#').next().unwrap_or(path);
-        path.to_string()
-    } else {
-        "/".into()
+    let after = after_scheme(url);
+    match after.find('/') {
+        Some(slash_pos) => {
+            let path_and_rest = &after[slash_pos..];
+            let path = path_and_rest.split('?').next().unwrap_or(path_and_rest);
+            path.split('#').next().unwrap_or(path).to_string()
+        }
+        None => "/".into(),
     }
 }
 

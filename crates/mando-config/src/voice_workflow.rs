@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct VoiceWorkflow {
     pub prompts: HashMap<String, String>,
@@ -18,20 +18,8 @@ impl VoiceWorkflow {
     pub fn compiled_default() -> Self {
         serde_yaml::from_str(DEFAULT_VOICE_WORKFLOW).unwrap_or_else(|e| {
             tracing::error!("failed to parse compiled voice-workflow.yaml: {e}");
-            Self::fallback()
+            Self::default()
         })
-    }
-
-    pub(crate) fn fallback() -> Self {
-        Self {
-            prompts: HashMap::new(),
-        }
-    }
-}
-
-impl Default for VoiceWorkflow {
-    fn default() -> Self {
-        Self::fallback()
     }
 }
 
@@ -44,7 +32,7 @@ const DEFAULT_VOICE_WORKFLOW: &str = include_str!("../assets/voice-workflow.yaml
 fn parse_voice_workflow(yaml: &str) -> VoiceWorkflow {
     serde_yaml::from_str(yaml).unwrap_or_else(|e| {
         tracing::error!("failed to parse voice workflow.yaml: {e}");
-        VoiceWorkflow::fallback()
+        VoiceWorkflow::default()
     })
 }
 

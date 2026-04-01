@@ -56,6 +56,7 @@ export function BulkBar({
           e.target.value = '';
         }}
         defaultValue=""
+        aria-label="Set status for selected items"
         className="rounded-md px-2 py-1 text-[12px]"
         style={{
           background: 'var(--color-surface-3)',

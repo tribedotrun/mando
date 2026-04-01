@@ -304,7 +304,7 @@ function HeaderContent({
           fontSize: 10,
           fontWeight: 600,
           color: 'var(--color-text-3)',
-          textTransform: 'uppercase' as const,
+          textTransform: 'uppercase',
           letterSpacing: '0.06em',
           lineHeight: '14px',
         }}

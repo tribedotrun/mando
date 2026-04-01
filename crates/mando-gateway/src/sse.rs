@@ -90,13 +90,15 @@ async fn build_snapshot(state: &AppState) -> serde_json::Value {
         let health = mando_captain::io::health_store::load_health_state(&health_path);
         let nudge_budget = workflow.agent.max_interventions;
 
-        let list: Vec<serde_json::Value> = all_items
+        all_items
             .iter()
             .filter(|t| {
-                (t.status == mando_types::task::ItemStatus::InProgress
-                    || t.status == mando_types::task::ItemStatus::CaptainReviewing
-                    || t.status == mando_types::task::ItemStatus::CaptainMerging)
-                    && t.worker.is_some()
+                matches!(
+                    t.status,
+                    mando_types::task::ItemStatus::InProgress
+                        | mando_types::task::ItemStatus::CaptainReviewing
+                        | mando_types::task::ItemStatus::CaptainMerging
+                ) && t.worker.is_some()
             })
             .map(|task| {
                 let worker_name = task.worker.as_deref().unwrap_or("");
@@ -127,8 +129,7 @@ async fn build_snapshot(state: &AppState) -> serde_json::Value {
                     "last_action": last_action,
                 })
             })
-            .collect();
-        list
+            .collect::<Vec<_>>()
     };
 
     // Cron jobs.

@@ -88,7 +88,10 @@ async fn main() {
         tracing::error!(module = "startup", error = %e, "reconciliation failed");
     }
 
-    let captain_wf = mando_config::load_captain_workflow(&mando_config::captain_workflow_path());
+    let captain_wf = mando_config::load_captain_workflow(
+        &mando_config::captain_workflow_path(),
+        config.captain.tick_interval_s,
+    );
     let scout_wf = mando_config::load_scout_workflow(&mando_config::scout_workflow_path(), &config);
     let voice_wf = mando_config::load_voice_workflow(&mando_config::voice_workflow_path());
 

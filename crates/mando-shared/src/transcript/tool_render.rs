@@ -148,7 +148,7 @@ pub(super) fn detect_path_prefix(messages: &[Value]) -> String {
         return String::new();
     }
 
-    let mut counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    let mut counts = std::collections::HashMap::<String, usize>::new();
     for p in &paths {
         let parts: Vec<&str> = p.split('/').collect();
         for depth in 3..parts.len().min(10) {
@@ -158,12 +158,11 @@ pub(super) fn detect_path_prefix(messages: &[Value]) -> String {
     }
 
     let threshold = (paths.len() as f64 * 0.8) as usize;
-    let mut candidates: Vec<(&String, &usize)> =
-        counts.iter().filter(|(_, &c)| c >= threshold).collect();
-    candidates.sort_by_key(|(p, _)| p.len());
-    candidates
-        .last()
-        .map(|(p, _)| (*p).clone())
+    counts
+        .iter()
+        .filter(|(_, &c)| c >= threshold)
+        .max_by_key(|(p, _)| p.len())
+        .map(|(p, _)| p.clone())
         .unwrap_or_default()
 }
 
@@ -179,15 +178,11 @@ fn short_path(fp: &str, prefix: &str) -> String {
     }
 }
 
-/// Truncate a string at a char boundary, appending "…" if truncated.
+/// Truncate a string at a char boundary, appending an ellipsis if truncated.
 pub(super) fn truncate_str(s: &str, max_bytes: usize) -> String {
     if s.len() <= max_bytes {
         return s.to_string();
     }
-    // Find last char boundary at or before max_bytes
-    let mut end = max_bytes;
-    while end > 0 && !s.is_char_boundary(end) {
-        end -= 1;
-    }
-    format!("{}…", &s[..end])
+    let end = s.floor_char_boundary(max_bytes);
+    format!("{}\u{2026}", &s[..end])
 }

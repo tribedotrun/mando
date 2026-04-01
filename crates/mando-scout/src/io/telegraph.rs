@@ -227,7 +227,7 @@ fn html_to_telegraph_nodes(html: &str) -> Vec<Value> {
         };
 
         // Strip all HTML tags to get plain text.
-        let text = strip_html_tags(segment);
+        let text = super::strip_html_tags(segment);
         let trimmed = text.trim();
         if !trimmed.is_empty() {
             nodes.push(json!({"tag": tg_tag, "children": [trimmed]}));
@@ -235,24 +235,9 @@ fn html_to_telegraph_nodes(html: &str) -> Vec<Value> {
     }
 
     if nodes.is_empty() {
-        nodes.push(json!({"tag": "p", "children": [strip_html_tags(html).trim()]}));
+        nodes.push(json!({"tag": "p", "children": [super::strip_html_tags(html).trim()]}));
     }
     nodes
-}
-
-fn strip_html_tags(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    let mut in_tag = false;
-    for ch in s.chars() {
-        if ch == '<' {
-            in_tag = true;
-        } else if ch == '>' {
-            in_tag = false;
-        } else if !in_tag {
-            out.push(ch);
-        }
-    }
-    out
 }
 
 /// Convert markdown to Telegraph-compatible HTML.

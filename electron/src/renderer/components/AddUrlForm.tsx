@@ -1,6 +1,12 @@
 import React, { useState } from 'react';
 import { useScoutStore } from '#renderer/stores/scoutStore';
 
+const inputStyle: React.CSSProperties = {
+  borderColor: 'var(--color-border)',
+  background: 'var(--color-surface-2)',
+  color: 'var(--color-text-1)',
+};
+
 export function AddUrlForm(): React.ReactElement {
   const [isOpen, setIsOpen] = useState(false);
   const [url, setUrl] = useState('');
@@ -42,11 +48,7 @@ export function AddUrlForm(): React.ReactElement {
         value={url}
         onChange={(e) => setUrl(e.target.value)}
         className="rounded border px-3 py-2 text-sm focus:outline-none"
-        style={{
-          borderColor: 'var(--color-border)',
-          background: 'var(--color-surface-2)',
-          color: 'var(--color-text-1)',
-        }}
+        style={inputStyle}
       />
       <input
         type="text"
@@ -54,11 +56,7 @@ export function AddUrlForm(): React.ReactElement {
         value={title}
         onChange={(e) => setTitle(e.target.value)}
         className="rounded border px-3 py-2 text-sm focus:outline-none"
-        style={{
-          borderColor: 'var(--color-border)',
-          background: 'var(--color-surface-2)',
-          color: 'var(--color-text-1)',
-        }}
+        style={inputStyle}
       />
       <button
         data-testid="submit-url-btn"

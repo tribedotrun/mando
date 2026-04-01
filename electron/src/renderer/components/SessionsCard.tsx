@@ -31,11 +31,7 @@ const STATUS_COLOR: Record<string, string> = {
   failed: 'var(--color-error)',
 };
 
-interface Props {
-  refreshTrigger?: number;
-}
-
-export function SessionsCard({ refreshTrigger = 0 }: Props): React.ReactElement {
+export function SessionsCard(): React.ReactElement {
   const [page, setPage] = useState(1);
   const [filterCategory, setFilterCategory] = useState('');
   const [filterStatus, setFilterStatus] = useState<string>('all');
@@ -59,7 +55,7 @@ export function SessionsCard({ refreshTrigger = 0 }: Props): React.ReactElement 
     isLoading: loading,
     error: sessionsError,
   } = useQuery({
-    queryKey: ['sessions', page, filterCategory, refreshTrigger],
+    queryKey: ['sessions', page, filterCategory],
     queryFn: () => fetchSessions(page, PER_PAGE, filterCategory || undefined),
   });
 
@@ -198,6 +194,7 @@ export function SessionsCard({ refreshTrigger = 0 }: Props): React.ReactElement 
           <div className="flex items-center" style={{ gap: 4 }}>
             <button
               onClick={() => handleCatClick('')}
+              aria-label="Show all session categories"
               className="text-[12px] font-medium transition-colors"
               style={{
                 background: !filterCategory ? 'var(--color-accent)' : 'var(--color-surface-2)',
@@ -214,6 +211,7 @@ export function SessionsCard({ refreshTrigger = 0 }: Props): React.ReactElement 
               <button
                 key={cat}
                 onClick={() => handleCatClick(cat)}
+                aria-label={`Filter by ${cat}`}
                 className="text-[12px] font-medium transition-colors"
                 style={{
                   background:
@@ -247,6 +245,7 @@ export function SessionsCard({ refreshTrigger = 0 }: Props): React.ReactElement 
               gap: 4,
             }}
             title="Filter by status"
+            aria-label="Filter by status"
           >
             <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
               <path
@@ -297,6 +296,7 @@ export function SessionsCard({ refreshTrigger = 0 }: Props): React.ReactElement 
           <button
             onClick={() => setPage((p) => Math.max(1, p - 1))}
             disabled={page <= 1}
+            aria-label="Previous page"
             className="rounded-md px-2.5 py-1 text-[13px] disabled:opacity-30"
             style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-2)' }}
           >
@@ -308,6 +308,7 @@ export function SessionsCard({ refreshTrigger = 0 }: Props): React.ReactElement 
           <button
             onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
             disabled={page >= totalPages}
+            aria-label="Next page"
             className="rounded-md px-2.5 py-1 text-[13px] disabled:opacity-30"
             style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-2)' }}
           >
@@ -361,6 +362,8 @@ function SessionsList({
             ref={idx === focusedIndex ? scrollRef : undefined}
             key={s.session_id}
             data-focused={idx === focusedIndex || undefined}
+            role="button"
+            aria-label={`Open session ${title}`}
             className="flex cursor-pointer items-center"
             style={{
               paddingBlock: 9,

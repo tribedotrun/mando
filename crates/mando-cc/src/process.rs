@@ -60,6 +60,9 @@ pub(crate) async fn spawn_process(
 
     // Environment.
     cmd.env("CLAUDE_CODE_EXIT_AFTER_STOP_DELAY", "5000");
+    // Enable CC's streaming watchdog — aborts hung API connections (not tool
+    // execution). Without this, a silently-dropped SSE connection hangs forever.
+    cmd.env("CLAUDE_ENABLE_STREAM_WATCHDOG", "1");
     cmd.env_remove("CLAUDECODE");
     if config.caller.starts_with("scout-") {
         cmd.env("DISABLE_LANG_GUARD", "1");
@@ -169,6 +172,7 @@ pub async fn spawn_detached(
 
     // Environment.
     cmd.env("CLAUDE_CODE_EXIT_AFTER_STOP_DELAY", "5000");
+    cmd.env("CLAUDE_ENABLE_STREAM_WATCHDOG", "1");
     cmd.env_remove("CLAUDECODE");
     if config.caller.starts_with("scout-") {
         cmd.env("DISABLE_LANG_GUARD", "1");
@@ -211,11 +215,9 @@ pub async fn kill_process(pid: u32) -> Result<()> {
         return Ok(());
     }
 
-    let signed_pid = i32::try_from(pid).context("PID exceeds i32::MAX, cannot send signal")?;
-
     #[cfg(unix)]
     unsafe {
-        libc::kill(-signed_pid, libc::SIGTERM);
+        libc::kill(-(pid as i32), libc::SIGTERM);
     }
 
     for _ in 0..50 {
@@ -227,7 +229,7 @@ pub async fn kill_process(pid: u32) -> Result<()> {
 
     #[cfg(unix)]
     unsafe {
-        libc::kill(-signed_pid, libc::SIGKILL);
+        libc::kill(-(pid as i32), libc::SIGKILL);
     }
     Ok(())
 }
@@ -239,10 +241,7 @@ pub fn is_process_alive(pid: u32) -> bool {
     }
     #[cfg(unix)]
     {
-        let Ok(signed) = i32::try_from(pid) else {
-            return false;
-        };
-        unsafe { libc::kill(signed, 0) == 0 }
+        unsafe { libc::kill(pid as i32, 0) == 0 }
     }
     #[cfg(not(unix))]
     {

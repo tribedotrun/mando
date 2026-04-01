@@ -5,6 +5,8 @@ import { getErrorMessage } from '#renderer/utils';
 
 const SHOW_ARCHIVED_KEY = 'mando:showArchived';
 
+let fetchGeneration = 0;
+
 interface TaskStore {
   items: TaskItem[];
   count: number;
@@ -20,65 +22,54 @@ interface TaskStore {
   optimisticUpdate: (id: number, patch: Partial<TaskItem>) => void;
 }
 
-export const useTaskStore = create<TaskStore>((set, getState) => ({
-  items: [],
-  count: 0,
-  statusFilter: null,
-  showArchived: localStorage.getItem(SHOW_ARCHIVED_KEY) === 'true',
-  loading: false,
-  error: null,
-
-  fetch: async () => {
-    set({ loading: true, error: null });
+export const useTaskStore = create<TaskStore>((set, getState) => {
+  /** Run a mutation, re-fetch on success, set error + rethrow on failure. */
+  async function mutate(fn: () => Promise<unknown>, errLabel: string): Promise<void> {
     try {
-      const showArchived = getState().showArchived;
-      const data = await fetchTasks(showArchived);
-      set({ items: data.items, count: data.count, loading: false });
-    } catch (err) {
-      set({
-        loading: false,
-        error: getErrorMessage(err, 'Failed to fetch tasks'),
-      });
-    }
-  },
-
-  add: async (input: AddTaskInput) => {
-    try {
-      await addTask(input);
+      await fn();
       await getState().fetch();
     } catch (err) {
-      set({
-        error: getErrorMessage(err, 'Failed to add task'),
-      });
+      set({ error: getErrorMessage(err, errLabel) });
       throw err;
     }
-  },
+  }
 
-  remove: async (ids: number[]) => {
-    try {
-      await deleteItems(ids);
-      await getState().fetch();
-    } catch (err) {
-      set({
-        error: getErrorMessage(err, 'Failed to delete items'),
-      });
-      throw err;
-    }
-  },
+  return {
+    items: [],
+    count: 0,
+    statusFilter: null,
+    showArchived: localStorage.getItem(SHOW_ARCHIVED_KEY) === 'true',
+    loading: false,
+    error: null,
 
-  optimisticUpdate: (id: number, patch: Partial<TaskItem>) => {
-    set((state) => ({
-      items: state.items.map((item) => (item.id === id ? { ...item, ...patch } : item)),
-    }));
-  },
+    fetch: async () => {
+      const gen = ++fetchGeneration;
+      set({ loading: true, error: null });
+      try {
+        const data = await fetchTasks(getState().showArchived);
+        if (gen !== fetchGeneration) return; // stale response
+        set({ items: data.items, count: data.count, loading: false });
+      } catch (err) {
+        if (gen !== fetchGeneration) return;
+        set({ loading: false, error: getErrorMessage(err, 'Failed to fetch tasks') });
+      }
+    },
 
-  setFilter: (status: ItemStatus | 'action-needed' | 'in-progress-group' | null) =>
-    set({ statusFilter: status }),
+    add: (input) => mutate(() => addTask(input), 'Failed to add task'),
+    remove: (ids) => mutate(() => deleteItems(ids), 'Failed to delete items'),
 
-  setShowArchived: (show: boolean) => {
-    localStorage.setItem(SHOW_ARCHIVED_KEY, String(show));
-    set({ showArchived: show });
-    // Re-fetch with updated include_archived param
-    getState().fetch();
-  },
-}));
+    optimisticUpdate: (id, patch) => {
+      set((state) => ({
+        items: state.items.map((item) => (item.id === id ? { ...item, ...patch } : item)),
+      }));
+    },
+
+    setFilter: (status) => set({ statusFilter: status }),
+
+    setShowArchived: (show) => {
+      localStorage.setItem(SHOW_ARCHIVED_KEY, String(show));
+      set({ showArchived: show });
+      getState().fetch();
+    },
+  };
+});

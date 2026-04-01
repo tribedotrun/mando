@@ -90,12 +90,18 @@ pub(crate) fn new_items(items: &[Task]) -> Vec<usize> {
         .collect()
 }
 
-/// Find items in Clarifying status — human answered, needs re-clarification.
+/// Find items that need (re-)clarification — both `Clarifying` (legacy/retry)
+/// and `NeedsClarification` (human answered, awaiting re-run).
 pub(crate) fn clarifying_items(items: &[Task]) -> Vec<usize> {
     items
         .iter()
         .enumerate()
-        .filter(|(_, it)| it.status == ItemStatus::Clarifying)
+        .filter(|(_, it)| {
+            matches!(
+                it.status,
+                ItemStatus::Clarifying | ItemStatus::NeedsClarification
+            )
+        })
         .map(|(i, _)| i)
         .collect()
 }
@@ -193,5 +199,20 @@ mod tests {
 
         let result = new_items(&[a, b, c]);
         assert_eq!(result, vec![0, 2]);
+    }
+
+    #[test]
+    fn clarifying_items_includes_both_statuses() {
+        let mut a = Task::new("A");
+        a.status = ItemStatus::Clarifying;
+        let mut b = Task::new("B");
+        b.status = ItemStatus::NeedsClarification;
+        let mut c = Task::new("C");
+        c.status = ItemStatus::Queued;
+        let mut d = Task::new("D");
+        d.status = ItemStatus::NeedsClarification;
+
+        let result = clarifying_items(&[a, b, c, d]);
+        assert_eq!(result, vec![0, 1, 3]);
     }
 }

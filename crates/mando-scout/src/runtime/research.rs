@@ -24,20 +24,8 @@ pub struct ResearchLink {
 
 /// Run research for a topic, returning discovered links.
 pub async fn run_research(topic: &str, workflow: &ScoutWorkflow) -> Result<ResearchResult> {
-    let interests_high = workflow
-        .interests
-        .high
-        .iter()
-        .map(|s| format!("- {s}"))
-        .collect::<Vec<_>>()
-        .join("\n");
-    let interests_medium = workflow
-        .interests
-        .medium
-        .iter()
-        .map(|s| format!("- {s}"))
-        .collect::<Vec<_>>()
-        .join("\n");
+    let interests_high = crate::biz::formatting::bullet_list(&workflow.interests.high);
+    let interests_medium = crate::biz::formatting::bullet_list(&workflow.interests.medium);
 
     let user_context_rendered = workflow.user_context.render();
 

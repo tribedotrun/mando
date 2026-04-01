@@ -10,6 +10,19 @@ use serde_json::{json, Value};
 
 use crate::AppState;
 
+/// Reload captain + scout workflows from disk into daemon state.
+fn reload_workflows(state: &AppState) {
+    let cfg = state.config.load_full();
+    let new_cwf = mando_config::load_captain_workflow(
+        &mando_config::captain_workflow_path(),
+        cfg.captain.tick_interval_s,
+    );
+    state.captain_workflow.store(Arc::new(new_cwf));
+
+    let new_dwf = mando_config::load_scout_workflow(&mando_config::scout_workflow_path(), &cfg);
+    state.scout_workflow.store(Arc::new(new_dwf));
+}
+
 /// GET /api/config — read current config.
 pub(crate) async fn get_config(State(state): State<AppState>) -> Json<Value> {
     let config = state.config.load_full();
@@ -40,7 +53,17 @@ pub(crate) async fn put_config(
     // Populate runtime fields (e.g. Telegram tokens from env section).
     new_config.populate_runtime_fields();
 
-    // Save to disk.
+    // Validate workflow config before persisting anything.
+    {
+        let tick_s = new_config.captain.tick_interval_s;
+        if let Err(msg) =
+            mando_config::try_load_captain_workflow(&mando_config::captain_workflow_path(), tick_s)
+        {
+            return (StatusCode::BAD_REQUEST, Json(json!({"error": msg}))).into_response();
+        }
+    }
+
+    // Save to disk (validation passed).
     if let Err(e) = mando_config::save_config(&new_config, None) {
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -52,16 +75,7 @@ pub(crate) async fn put_config(
     // Hot-reload into daemon state.
     state.config.store(Arc::new(new_config));
 
-    // Also reload workflows.
-    {
-        let new_cwf = mando_config::load_captain_workflow(&mando_config::captain_workflow_path());
-        state.captain_workflow.store(Arc::new(new_cwf));
-    }
-    {
-        let cfg = state.config.load_full();
-        let new_dwf = mando_config::load_scout_workflow(&mando_config::scout_workflow_path(), &cfg);
-        state.scout_workflow.store(Arc::new(new_dwf));
-    }
+    reload_workflows(&state);
 
     // Notify SSE clients.
     state.bus.send(mando_types::BusEvent::Status, None);
@@ -135,6 +149,18 @@ pub(crate) async fn post_config_setup(
 
         let _write_guard = state.config_write_mu.lock().await;
         new_config.populate_runtime_fields();
+
+        // Validate before persisting.
+        {
+            let tick_s = new_config.captain.tick_interval_s;
+            if let Err(msg) = mando_config::try_load_captain_workflow(
+                &mando_config::captain_workflow_path(),
+                tick_s,
+            ) {
+                return (StatusCode::BAD_REQUEST, Json(json!({"error": msg}))).into_response();
+            }
+        }
+
         if let Err(e) = mando_config::save_config(&new_config, None) {
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -142,20 +168,9 @@ pub(crate) async fn post_config_setup(
             )
                 .into_response();
         }
-        state.config.store(Arc::new(new_config));
 
-        // Reload workflows so scout picks up new config values.
-        {
-            let new_cwf =
-                mando_config::load_captain_workflow(&mando_config::captain_workflow_path());
-            state.captain_workflow.store(Arc::new(new_cwf));
-        }
-        {
-            let cfg = state.config.load_full();
-            let new_dwf =
-                mando_config::load_scout_workflow(&mando_config::scout_workflow_path(), &cfg);
-            state.scout_workflow.store(Arc::new(new_dwf));
-        }
+        state.config.store(Arc::new(new_config));
+        reload_workflows(&state);
     }
 
     Json(json!({"ok": true})).into_response()

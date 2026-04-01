@@ -17,6 +17,17 @@ use crate::response::{error_response, internal_error};
 use crate::voice;
 use crate::AppState;
 
+/// Gate: return 503 if the voice feature is disabled.
+fn require_voice(state: &AppState) -> Result<(), (StatusCode, Json<Value>)> {
+    if !state.config.load().features.voice {
+        return Err(error_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "voice is disabled",
+        ));
+    }
+    Ok(())
+}
+
 // ── POST /api/voice ─────────────────────────────────────────────────────────
 
 #[derive(Deserialize)]
@@ -30,12 +41,7 @@ pub(crate) async fn post_voice(
     State(state): State<AppState>,
     Json(body): Json<VoiceBody>,
 ) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, (StatusCode, Json<Value>)> {
-    if !state.config.load().features.voice {
-        return Err(error_response(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "voice is disabled",
-        ));
-    }
+    require_voice(&state)?;
 
     let (tx, rx) = mpsc::channel::<Result<Event, Infallible>>(32);
 
@@ -59,14 +65,9 @@ pub(crate) async fn post_voice(
 
 #[derive(Deserialize, Default)]
 pub(crate) struct UsageQuery {
-    #[serde(default = "default_days")]
-    pub days: u32,
+    pub days: Option<u32>,
     #[serde(default)]
     pub detail: bool,
-}
-
-fn default_days() -> u32 {
-    30
 }
 
 /// GET /api/voice/usage — TTS usage summary and optionally detailed records.
@@ -74,22 +75,15 @@ pub(crate) async fn get_voice_usage(
     State(state): State<AppState>,
     Query(params): Query<UsageQuery>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    if !state.config.load().features.voice {
-        return Err(error_response(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "voice is disabled",
-        ));
-    }
+    require_voice(&state)?;
 
     let db = voice::db::VoiceDb::new(state.db.pool().clone());
-    let summary = db
-        .get_usage_summary(params.days)
-        .await
-        .map_err(internal_error)?;
+    let days = params.days.unwrap_or(30);
+    let summary = db.get_usage_summary(days).await.map_err(internal_error)?;
     let mut val = serde_json::to_value(&summary).unwrap_or(json!({}));
     if params.detail {
         let records = db
-            .get_usage_detail(100, params.days)
+            .get_usage_detail(100, days)
             .await
             .map_err(internal_error)?;
         val["records"] = serde_json::to_value(&records).unwrap_or(json!([]));
@@ -104,12 +98,7 @@ pub(crate) async fn get_voice_messages(
     State(state): State<AppState>,
     axum::extract::Path(session_id): axum::extract::Path<String>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    if !state.config.load().features.voice {
-        return Err(error_response(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "voice is disabled",
-        ));
-    }
+    require_voice(&state)?;
 
     let db = voice::db::VoiceDb::new(state.db.pool().clone());
     let messages = db.get_messages(&session_id).await.map_err(internal_error)?;
@@ -124,12 +113,7 @@ pub(crate) async fn get_voice_messages(
 pub(crate) async fn get_voice_sessions(
     State(state): State<AppState>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    if !state.config.load().features.voice {
-        return Err(error_response(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "voice is disabled",
-        ));
-    }
+    require_voice(&state)?;
 
     let db = voice::db::VoiceDb::new(state.db.pool().clone());
     let expiry_hours = state.config.load().voice.session_expiry_days as u64 * 24;
@@ -183,12 +167,7 @@ pub(crate) async fn post_voice_transcribe(
     State(state): State<AppState>,
     mut multipart: Multipart,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    if !state.config.load().features.voice {
-        return Err(error_response(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "voice is disabled",
-        ));
-    }
+    require_voice(&state)?;
 
     let mut audio_bytes: Option<Vec<u8>> = None;
 

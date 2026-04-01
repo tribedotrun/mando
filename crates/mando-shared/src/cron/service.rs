@@ -176,8 +176,7 @@ impl CronService {
         id: &str,
         enabled: bool,
     ) -> Result<Option<&CronJob>, String> {
-        let found = self.jobs.iter_mut().find(|j| j.id == id);
-        let job = match found {
+        let job = match self.jobs.iter_mut().find(|j| j.id == id) {
             Some(j) => j,
             None => return Ok(None),
         };
@@ -197,11 +196,12 @@ impl CronService {
 
     /// Manually run a job by ID.
     pub async fn run_job(&mut self, id: &str) -> Result<bool, String> {
-        let job = self.jobs.iter().find(|j| j.id == id).cloned();
-        let job = match job {
-            Some(j) => j,
-            None => return Err(format!("job not found: {id}")),
-        };
+        let job = self
+            .jobs
+            .iter()
+            .find(|j| j.id == id)
+            .cloned()
+            .ok_or_else(|| format!("job not found: {id}"))?;
         self.execute_job(&job).await;
         self.save().await?;
         self.arm_timer();

@@ -55,14 +55,14 @@ pub async fn handle(bot: &TelegramBot, chat_id: &str, args: &str) -> Result<()> 
         let role = entry["role"].as_str().unwrap_or("?");
         let text = entry["text"].as_str().unwrap_or("");
         let ts = entry["ts"].as_str().unwrap_or("");
-        let short_ts = &ts[..ts.floor_char_boundary(16)];
+        let short_ts = super::truncate(ts, 16);
         let icon = if role == "human" {
             "\u{1f464}"
         } else {
             "\u{1f916}"
         };
 
-        let truncated = &text[..text.floor_char_boundary(200)];
+        let truncated = super::truncate(text, 200);
         lines.push(format!(
             "{} <code>{}</code>\n{}",
             icon,

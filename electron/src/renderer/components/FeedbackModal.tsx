@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useFocusTrap } from '#renderer/hooks/useFocusTrap';
 
 interface FeedbackModalProps {
   testId: string;
@@ -28,13 +29,20 @@ export function FeedbackModal({
   onCancel,
 }: FeedbackModalProps): React.ReactElement {
   const [feedback, setFeedback] = useState('');
+  const { ref: dialogRef, handleKeyDown } = useFocusTrap(onCancel);
+
   return (
     <div
       data-testid={testId}
+      role="dialog"
+      aria-modal="true"
+      aria-label={title}
       className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60"
       onClick={(e) => e.target === e.currentTarget && onCancel()}
+      onKeyDown={handleKeyDown}
     >
       <div
+        ref={dialogRef}
         className="w-[440px] max-w-[90vw] rounded-lg p-5"
         style={{ background: 'var(--color-surface-2)', border: '1px solid var(--color-border)' }}
       >

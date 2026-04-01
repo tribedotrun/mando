@@ -111,26 +111,30 @@ fn backoff_with_jitter(attempt: u32, config: &RetryConfig) -> Duration {
     Duration::from_millis(delay_ms + jitter_ms)
 }
 
+/// Substrings that indicate a transient (retryable) CLI error.
+const TRANSIENT_PATTERNS: &[&str] = &[
+    "rate limit",
+    "api rate",
+    "secondary rate",
+    "502",
+    "503",
+    "504",
+    "timeout",
+    "timed out",
+    "connection reset",
+    "connection refused",
+    "network",
+    "temporarily unavailable",
+    "try again",
+    "econnreset",
+    "econnrefused",
+    "etimedout",
+];
+
 /// Classify a CLI command failure as transient or permanent based on stderr.
 pub fn classify_cli_error(stderr: &str) -> RetryVerdict {
     let lower = stderr.to_lowercase();
-    if lower.contains("rate limit")
-        || lower.contains("api rate")
-        || lower.contains("secondary rate")
-        || lower.contains("502")
-        || lower.contains("503")
-        || lower.contains("504")
-        || lower.contains("timeout")
-        || lower.contains("timed out")
-        || lower.contains("connection reset")
-        || lower.contains("connection refused")
-        || lower.contains("network")
-        || lower.contains("temporarily unavailable")
-        || lower.contains("try again")
-        || lower.contains("econnreset")
-        || lower.contains("econnrefused")
-        || lower.contains("etimedout")
-    {
+    if TRANSIENT_PATTERNS.iter().any(|p| lower.contains(p)) {
         RetryVerdict::Transient
     } else {
         RetryVerdict::Permanent

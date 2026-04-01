@@ -55,31 +55,7 @@ pub async fn handle_callback(bot: &mut TelegramBot, callback: &Value) -> Result<
             handle_multi_select(bot, prefix, &parts, cb_id, &chat_id, mid).await
         }
         "cron_act" => handle_cron_act(bot, &parts, cb_id, &chat_id, mid).await,
-        "captain_learn" => {
-            bot.api()
-                .answer_callback_query(cb_id, Some("Running learn cycle\u{2026}"))
-                .await?;
-            match bot
-                .gw()
-                .post("/api/knowledge/learn", &serde_json::json!({}))
-                .await
-            {
-                Ok(resp) => {
-                    let summary = resp
-                        .get("summary")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("done");
-                    let esc = mando_shared::escape_html(summary);
-                    bot.send_html(&chat_id, &format!("\u{2705} Learn complete:\n{esc}"))
-                        .await?;
-                }
-                Err(e) => {
-                    bot.send_html(&chat_id, &format!("\u{274c} Learn failed: {e}"))
-                        .await?;
-                }
-            }
-            Ok(())
-        }
+        "captain_learn" => handle_captain_learn(bot, cb_id, &chat_id).await,
         "knowledge" => {
             callbacks_session::handle_knowledge_callback(bot, &parts, cb_id, &chat_id, mid).await
         }
@@ -319,11 +295,14 @@ async fn handle_multi_select(
             }
         }
         "cancel" => {
-            if prefix == "ms_cancel" {
-                bot.take_cancel_picker(aid);
-            }
-            if prefix == "ms_delete" {
-                bot.take_delete_picker(aid);
+            match prefix {
+                "ms_cancel" => {
+                    bot.take_cancel_picker(aid);
+                }
+                "ms_delete" => {
+                    bot.take_delete_picker(aid);
+                }
+                _ => {}
             }
             bot.api()
                 .answer_callback_query(cb_id, Some("Dismissed"))
@@ -366,6 +345,34 @@ async fn handle_cron_act(
         crate::callback_actions::kill_worker(bot, cid, mid, pid_str).await?;
     } else {
         bot.api().answer_callback_query(cb_id, None).await?;
+    }
+    Ok(())
+}
+
+// ── Captain learn ───────────────────────────────────────────────────
+
+async fn handle_captain_learn(bot: &TelegramBot, cb_id: &str, cid: &str) -> Result<()> {
+    bot.api()
+        .answer_callback_query(cb_id, Some("Running learn cycle\u{2026}"))
+        .await?;
+    match bot
+        .gw()
+        .post("/api/knowledge/learn", &serde_json::json!({}))
+        .await
+    {
+        Ok(resp) => {
+            let summary = resp
+                .get("summary")
+                .and_then(|v| v.as_str())
+                .unwrap_or("done");
+            let esc = mando_shared::escape_html(summary);
+            bot.send_html(cid, &format!("\u{2705} Learn complete:\n{esc}"))
+                .await?;
+        }
+        Err(e) => {
+            bot.send_html(cid, &format!("\u{274c} Learn failed: {e}"))
+                .await?;
+        }
     }
     Ok(())
 }

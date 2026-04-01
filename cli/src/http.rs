@@ -78,8 +78,7 @@ impl DaemonClient {
         }
         let resp = req.send().await.context("daemon request failed")?;
         let status = resp.status();
-        let elapsed_ms = start.elapsed().as_millis();
-        debug!(method = %method, path = path, status = %status, elapsed_ms = elapsed_ms, "daemon request");
+        debug!(method = %method, path = path, status = %status, elapsed_ms = start.elapsed().as_millis(), "daemon request");
         if !status.is_success() {
             let text = resp.text().await.unwrap_or_default();
             bail!("daemon returned {status}: {text}");
@@ -114,36 +113,39 @@ impl DaemonClient {
         form: reqwest::multipart::Form,
     ) -> Result<Value> {
         let start = Instant::now();
-        let mut req = self
-            .client
-            .post(format!("{}{path}", self.base_url))
-            .multipart(form);
+        let url = format!("{}{path}", self.base_url);
+        let mut req = self.client.post(&url).multipart(form);
         if let Some(t) = &self.token {
             req = req.bearer_auth(t);
         }
         let resp = req.send().await.context("daemon request failed")?;
         let status = resp.status();
-        let elapsed_ms = start.elapsed().as_millis();
-        debug!(method = "POST", path = path, status = %status, elapsed_ms = elapsed_ms, "daemon multipart request");
+        debug!(method = "POST", path = path, status = %status, elapsed_ms = start.elapsed().as_millis(), "daemon multipart request");
         if !status.is_success() {
-            let body = resp.text().await.unwrap_or_default();
-            bail!("daemon returned {status}: {body}");
+            let text = resp.text().await.unwrap_or_default();
+            bail!("daemon returned {status}: {text}");
         }
         resp.json().await.context("invalid JSON response")
     }
 
-    /// Health check (no auth needed).
+    /// Health check (no auth needed — uses unauthenticated GET).
     pub(crate) async fn health(&self) -> Result<Value> {
         let start = Instant::now();
+        let url = format!("{}/api/health", self.base_url);
         let resp = self
             .client
-            .get(format!("{}/api/health", self.base_url))
+            .get(&url)
             .send()
             .await
             .context("daemon not reachable")?;
         let status = resp.status();
-        let elapsed_ms = start.elapsed().as_millis();
-        debug!(method = "GET", path = "/api/health", status = %status, elapsed_ms = elapsed_ms, "daemon health check");
+        debug!(method = "GET", path = "/api/health", status = %status, elapsed_ms = start.elapsed().as_millis(), "daemon health check");
         resp.json().await.context("invalid JSON response")
     }
+}
+
+/// Parse a string ID to i64 (shared by captain and todo modules).
+pub(crate) fn parse_id(id: &str, label: &str) -> Result<i64> {
+    id.parse()
+        .map_err(|_| anyhow::anyhow!("invalid {label} ID: {id}"))
 }

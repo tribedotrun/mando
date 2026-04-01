@@ -288,29 +288,46 @@ function renderInline(text: string): React.ReactNode {
       parts.push(cleaned.slice(last, match.index));
     }
     if (match[1] !== undefined) {
-      // Image: ![alt](url)
-      parts.push(
-        <img
-          key={key++}
-          src={match[2]}
-          alt={match[1]}
-          className="my-1 max-w-full rounded"
-          style={{ maxHeight: 300, border: '1px solid var(--color-border-subtle)' }}
-        />,
-      );
+      // Image: ![alt](url) — only allow https:// to prevent resource loading exploits
+      const imgUrl = match[2] ?? '';
+      if (imgUrl.startsWith('https://')) {
+        parts.push(
+          <img
+            key={key++}
+            src={imgUrl}
+            alt={match[1]}
+            className="my-1 max-w-full rounded"
+            style={{ maxHeight: 300, border: '1px solid var(--color-border-subtle)' }}
+          />,
+        );
+      } else {
+        parts.push(
+          <span key={key++} style={{ color: 'var(--color-text-3)', fontStyle: 'italic' }}>
+            [{match[1] || 'image'}]
+          </span>,
+        );
+      }
     } else if (match[3] !== undefined) {
-      // Link: [text](url)
+      // Link: [text](url) — only allow https:// to prevent local navigation exploits
+      const linkUrl = match[4] ?? '';
+      const isSafe = linkUrl.startsWith('https://');
       parts.push(
-        <a
-          key={key++}
-          href={match[4]}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="hover:underline"
-          style={{ color: 'var(--color-accent)' }}
-        >
-          {match[3]}
-        </a>,
+        isSafe ? (
+          <a
+            key={key++}
+            href={linkUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="hover:underline"
+            style={{ color: 'var(--color-accent)' }}
+          >
+            {match[3]}
+          </a>
+        ) : (
+          <span key={key++} style={{ color: 'var(--color-accent)' }}>
+            {match[3]}
+          </span>
+        ),
       );
     } else if (match[5]) {
       // Bold
@@ -349,29 +366,44 @@ function renderInline(text: string): React.ReactNode {
       ] ?? 'span') as keyof React.JSX.IntrinsicElements;
       parts.push(<Tag key={key++}>{content}</Tag>);
     } else if (match[11] !== undefined) {
-      // HTML <a> tag
+      // HTML <a> tag — same https-only sanitization as markdown links
+      const aHref = match[11] ?? '';
+      const aIsSafe = aHref.startsWith('https://');
       parts.push(
-        <a
-          key={key++}
-          href={match[11]}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="hover:underline"
-          style={{ color: 'var(--color-accent)' }}
-        >
-          {match[12]}
-        </a>,
+        aIsSafe ? (
+          <a
+            key={key++}
+            href={aHref}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="hover:underline"
+            style={{ color: 'var(--color-accent)' }}
+          >
+            {match[12]}
+          </a>
+        ) : (
+          <span key={key++} style={{ color: 'var(--color-accent)' }}>
+            {match[12]}
+          </span>
+        ),
       );
     } else if (match[13] !== undefined) {
-      // HTML <img> tag
+      // HTML <img> tag — same https-only sanitization as markdown images
+      const imgSrc = match[13] ?? '';
       parts.push(
-        <img
-          key={key++}
-          src={match[13]}
-          alt=""
-          className="my-1 max-w-full rounded"
-          style={{ maxHeight: 300, border: '1px solid var(--color-border-subtle)' }}
-        />,
+        imgSrc.startsWith('https://') ? (
+          <img
+            key={key++}
+            src={imgSrc}
+            alt=""
+            className="my-1 max-w-full rounded"
+            style={{ maxHeight: 300, border: '1px solid var(--color-border-subtle)' }}
+          />
+        ) : (
+          <span key={key++} style={{ color: 'var(--color-text-3)', fontStyle: 'italic' }}>
+            [image]
+          </span>
+        ),
       );
     }
     last = match.index + match[0].length;

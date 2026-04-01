@@ -1,25 +1,11 @@
 import React from 'react';
+import { cardStyle, inputStyle, labelStyle, inputCls, labelCls } from '#renderer/styles';
 import { useSettingsStore } from '#renderer/stores/settingsStore';
 import { useToastStore } from '#renderer/stores/toastStore';
 import type { TelegramConfig } from '#renderer/stores/settingsStore';
 import { ToggleSwitch } from '#renderer/components/ToggleSwitch';
 
 const EMPTY_TELEGRAM: TelegramConfig = {};
-
-const cardStyle = {
-  borderRadius: 'var(--radius-panel)',
-  border: '1px solid var(--color-border)',
-  background: 'var(--color-surface-1)',
-  padding: '20px',
-};
-
-const inputStyle: React.CSSProperties = {
-  border: '1px solid var(--color-border)',
-  background: 'var(--color-surface-2)',
-  color: 'var(--color-text-1)',
-};
-
-const labelStyle = { color: 'var(--color-text-3)' };
 
 export function SettingsTelegram(): React.ReactElement {
   const telegram = useSettingsStore((s) => s.config.channels?.telegram ?? EMPTY_TELEGRAM);
@@ -28,10 +14,6 @@ export function SettingsTelegram(): React.ReactElement {
   const updateEnv = useSettingsStore((s) => s.updateEnv);
   const save = useSettingsStore((s) => s.save);
   const scheduleSave = useSettingsStore((s) => s.scheduleSave);
-
-  const inputCls =
-    'w-full rounded-md px-3 py-2 text-sm placeholder-[var(--color-text-3)] focus:outline-none focus:ring-1';
-  const labelCls = 'mb-1 block text-xs font-medium uppercase tracking-wider';
 
   return (
     <div data-testid="settings-telegram" className="space-y-8">

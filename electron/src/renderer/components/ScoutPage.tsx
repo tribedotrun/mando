@@ -159,11 +159,11 @@ export function ScoutPage({ processOnMount = false }: ScoutPageProps): React.Rea
     [setQuery],
   );
 
-  const handleBulkStatus = async (status: string) => {
+  const runBulkAction = async (action: (ids: number[]) => Promise<unknown>) => {
     const ids = [...selectedIds];
     if (!ids.length) return;
     try {
-      await bulkUpdateScout(ids, { status });
+      await action(ids);
       clearSelection();
       await scoutFetch();
     } catch (err) {
@@ -173,19 +173,10 @@ export function ScoutPage({ processOnMount = false }: ScoutPageProps): React.Rea
     }
   };
 
-  const handleBulkDelete = async () => {
-    const ids = [...selectedIds];
-    if (!ids.length) return;
-    try {
-      await bulkDeleteScout(ids);
-      clearSelection();
-      await scoutFetch();
-    } catch (err) {
-      useToastStore
-        .getState()
-        .add('error', `Failed: ${err instanceof Error ? err.message : String(err)}`);
-    }
-  };
+  const handleBulkStatus = (status: string) =>
+    runBulkAction((ids) => bulkUpdateScout(ids, { status }));
+
+  const handleBulkDelete = () => runBulkAction(bulkDeleteScout);
 
   const openReader = (id: number) => {
     setActiveItemId(id);

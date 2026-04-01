@@ -115,19 +115,28 @@ pub(crate) async fn upsert_workpad(
         tracing::warn!(module = "linear", linear_id = %linear_id, "workpad update failed, creating new comment");
     }
 
-    // Create new comment and track its ID.
-    match crate::io::linear::post_comment(&cli, &linear_id, body).await {
-        Ok(comment_id) if !comment_id.is_empty() => {
-            if let Err(e) =
-                mando_db::queries::linear_workpad::upsert(pool, &linear_id, &comment_id).await
-            {
-                tracing::warn!(module = "linear", %e, "failed to persist workpad mapping");
-            }
-        }
-        Ok(_) => {} // Empty ID — CLI didn't return one.
+    // Create new comment and persist its ID to DB immediately.
+    // If we crash between API call and DB write, the next call will detect the
+    // orphaned comment via the update-first path above (existing_comment check).
+    let comment_id = match crate::io::linear::post_comment(&cli, &linear_id, body).await {
+        Ok(id) if !id.is_empty() => id,
+        Ok(_) => return Ok(()), // Empty ID — CLI didn't return one.
         Err(e) => {
             tracing::warn!(module = "linear", error = %e, "workpad comment failed");
+            return Ok(());
         }
+    };
+
+    // Persist mapping before returning success — if we crash after this point,
+    // the comment ID is already recorded and the next upsert will update it.
+    if let Err(e) = mando_db::queries::linear_workpad::upsert(pool, &linear_id, &comment_id).await {
+        tracing::error!(
+            module = "linear",
+            linear_id = %linear_id,
+            comment_id = %comment_id,
+            error = %e,
+            "failed to persist workpad mapping — comment exists on Linear but is untracked"
+        );
     }
 
     Ok(())

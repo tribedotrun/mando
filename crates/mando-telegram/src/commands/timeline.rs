@@ -5,14 +5,6 @@ use anyhow::Result;
 use mando_shared::telegram_format::escape_html;
 use tracing::warn;
 
-/// Truncate a string at a UTF-8 char boundary.
-fn safe_truncate(s: &str, max: usize) -> &str {
-    if s.len() <= max {
-        return s;
-    }
-    &s[..s.floor_char_boundary(max)]
-}
-
 /// Map timeline event kind to an emoji icon.
 fn timeline_icon(kind: &str) -> &'static str {
     match kind {
@@ -86,14 +78,14 @@ pub async fn handle(bot: &TelegramBot, chat_id: &str, args: &str) -> Result<()> 
                     let ts = event["ts"].as_str().unwrap_or("");
                     let kind = event["kind"].as_str().unwrap_or("event");
                     let detail = event["detail"].as_str().unwrap_or("");
-                    let short_ts = safe_truncate(ts, 16);
+                    let short_ts = super::truncate(ts, 16);
                     let icon = timeline_icon(kind);
                     lines.push(format!(
                         "<code>{}</code> {} <b>{}</b> {}",
                         escape_html(short_ts),
                         icon,
                         escape_html(kind),
-                        escape_html(safe_truncate(detail, 80)),
+                        escape_html(super::truncate(detail, 80)),
                     ));
                 }
 
@@ -114,8 +106,8 @@ pub async fn handle(bot: &TelegramBot, chat_id: &str, args: &str) -> Result<()> 
                             let detail = event["detail"].as_str().unwrap_or("");
                             plain_lines.push(format!(
                                 "{} | {kind} {}",
-                                safe_truncate(ts, 16),
-                                safe_truncate(detail, 80),
+                                super::truncate(ts, 16),
+                                super::truncate(detail, 80),
                             ));
                         }
                         bot.api()

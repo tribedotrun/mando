@@ -10,6 +10,17 @@ use serde_json::{json, Value};
 use crate::response::error_response;
 use crate::AppState;
 
+/// Gate: return 503 if the decision journal feature is disabled.
+fn require_journal(state: &AppState) -> Result<(), (StatusCode, Json<Value>)> {
+    if !state.config.load().features.decision_journal {
+        return Err(error_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "decision journal is disabled",
+        ));
+    }
+    Ok(())
+}
+
 /// GET /api/knowledge
 pub(crate) async fn get_knowledge(State(_state): State<AppState>) -> Json<Value> {
     let knowledge_path = mando_config::state_dir()
@@ -154,12 +165,7 @@ pub(crate) async fn post_knowledge_approve(
 pub(crate) async fn post_knowledge_learn(
     State(state): State<AppState>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    if !state.config.load().features.decision_journal {
-        return Err(error_response(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "decision journal is disabled",
-        ));
-    }
+    require_journal(&state)?;
 
     let config = state.config.load_full();
     let workflow = state.captain_workflow.load_full();
@@ -220,12 +226,7 @@ pub(crate) async fn get_journal(
     State(state): State<AppState>,
     axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    if !state.config.load().features.decision_journal {
-        return Err(error_response(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "decision journal is disabled",
-        ));
-    }
+    require_journal(&state)?;
 
     let jdb = mando_captain::io::journal::JournalDb::new(state.db.pool().clone());
 
@@ -266,12 +267,7 @@ pub(crate) async fn get_patterns(
     State(state): State<AppState>,
     axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    if !state.config.load().features.decision_journal {
-        return Err(error_response(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "decision journal is disabled",
-        ));
-    }
+    require_journal(&state)?;
 
     let jdb = mando_captain::io::journal::JournalDb::new(state.db.pool().clone());
 
@@ -300,12 +296,7 @@ pub(crate) async fn post_pattern_update(
     State(state): State<AppState>,
     Json(body): Json<PatternActionBody>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    if !state.config.load().features.decision_journal {
-        return Err(error_response(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "decision journal is disabled",
-        ));
-    }
+    require_journal(&state)?;
 
     if body.status != "approved" && body.status != "dismissed" {
         return Err(error_response(

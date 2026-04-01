@@ -4,14 +4,53 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use anyhow::Result;
-use mando_shared::{load_json_file, save_json_file};
+use mando_shared::save_json_file;
 
 /// Worker health entry.
 pub type HealthState = HashMap<String, serde_json::Value>;
 
 /// Load worker health state from disk.
+///
+/// On corruption: logs at ERROR, renames file to `.corrupt.bak` for debugging,
+/// returns empty state. On missing file: returns empty state silently.
 pub fn load_health_state(path: &Path) -> HealthState {
-    load_json_file(path, "health_store")
+    let text = match std::fs::read_to_string(path) {
+        Ok(t) => t,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return HealthState::new(),
+        Err(e) => {
+            tracing::error!(
+                module = "health_store",
+                path = %path.display(),
+                error = %e,
+                "failed to read health state — crash detection will be blind until next save"
+            );
+            return HealthState::new();
+        }
+    };
+
+    match serde_json::from_str(&text) {
+        Ok(state) => state,
+        Err(e) => {
+            tracing::error!(
+                module = "health_store",
+                path = %path.display(),
+                error = %e,
+                "health state corrupt — crash detection will be blind until next save"
+            );
+            // Preserve corrupt file for debugging.
+            let bak = path.with_extension("corrupt.bak");
+            if let Err(re) = std::fs::rename(path, &bak) {
+                tracing::error!(
+                    module = "health_store",
+                    path = %path.display(),
+                    backup = %bak.display(),
+                    error = %re,
+                    "failed to rename corrupt health state file"
+                );
+            }
+            HealthState::new()
+        }
+    }
 }
 
 /// Save worker health state to disk.
@@ -53,36 +92,34 @@ pub fn get_pid_for_worker(worker: &str) -> u32 {
     get_health_u32(&state, worker, "pid")
 }
 
-/// Persist a worker's PID to the health state file (load → set → save).
-pub fn persist_worker_pid(worker: &str, pid: u32) {
+/// Load health state, set a field, and save back. Logs on failure.
+fn persist_health_field(worker: &str, field: &str, value: serde_json::Value, err_msg: &str) {
     let health_path = mando_config::worker_health_path();
     let mut state = load_health_state(&health_path);
-    set_health_field(&mut state, worker, "pid", serde_json::json!(pid));
+    set_health_field(&mut state, worker, field, value);
     if let Err(e) = save_health_state(&health_path, &state) {
-        tracing::error!(
-            module = "health_store",
-            worker = %worker,
-            pid = pid,
-            error = %e,
-            "failed to persist worker PID — process liveness checks will fail"
-        );
+        tracing::error!(module = "health_store", worker = %worker, error = %e, "{err_msg}");
     }
+}
+
+/// Persist a worker's PID to the health state file (load → set → save).
+pub fn persist_worker_pid(worker: &str, pid: u32) {
+    persist_health_field(
+        worker,
+        "pid",
+        serde_json::json!(pid),
+        "failed to persist worker PID — process liveness checks will fail",
+    );
 }
 
 /// Persist a worker's nudge count to the health state file (load → set → save).
 pub(crate) fn persist_nudge_count(worker: &str, count: u32) {
-    let health_path = mando_config::worker_health_path();
-    let mut state = load_health_state(&health_path);
-    set_health_field(&mut state, worker, "nudge_count", serde_json::json!(count));
-    if let Err(e) = save_health_state(&health_path, &state) {
-        tracing::error!(
-            module = "health_store",
-            worker = %worker,
-            count = count,
-            error = %e,
-            "failed to persist nudge count — escalation threshold may reset on restart"
-        );
-    }
+    persist_health_field(
+        worker,
+        "nudge_count",
+        serde_json::json!(count),
+        "failed to persist nudge count — escalation threshold may reset on restart",
+    );
 }
 
 /// Update a health entry field.
@@ -143,5 +180,34 @@ mod tests {
         assert_eq!(get_health_f64(&loaded, "w", "cpu"), Some(42.5));
 
         std::fs::remove_file(&tmp).ok();
+    }
+
+    #[test]
+    fn missing_file_returns_empty() {
+        let tmp = std::env::temp_dir().join("mando-test-health-missing.json");
+        let _ = std::fs::remove_file(&tmp); // ensure absent
+        let state = load_health_state(&tmp);
+        assert!(state.is_empty());
+    }
+
+    #[test]
+    fn corrupt_file_returns_empty_and_renames() {
+        let tmp = std::env::temp_dir().join("mando-test-health-corrupt.json");
+        let bak = tmp.with_extension("corrupt.bak");
+        // Clean up any leftovers from previous runs.
+        let _ = std::fs::remove_file(&tmp);
+        let _ = std::fs::remove_file(&bak);
+
+        std::fs::write(&tmp, "NOT VALID JSON {{{").unwrap();
+        let state = load_health_state(&tmp);
+        assert!(state.is_empty());
+        // Original should be gone, backup should exist.
+        assert!(!tmp.exists(), "corrupt file should have been renamed");
+        assert!(bak.exists(), "backup file should exist");
+        // Backup contains the corrupt content.
+        let content = std::fs::read_to_string(&bak).unwrap();
+        assert_eq!(content, "NOT VALID JSON {{{");
+
+        let _ = std::fs::remove_file(&bak);
     }
 }

@@ -95,11 +95,6 @@ pub(crate) async fn fetch_pr_status(repo: &str, pr_number: &str) -> Result<PrSta
         .map(|a| a.len() as i64)
         .unwrap_or(0);
 
-    // Thread counts come from get_pr_review_threads (GraphQL) in fetch_pr_data,
-    // not from gh pr view. Set to zero here — the caller overrides with hygiene data.
-    let unresolved = 0i64;
-    let unreplied = 0i64;
-
     let changed_files = val["files"]
         .as_array()
         .map(|arr| {
@@ -109,13 +104,15 @@ pub(crate) async fn fetch_pr_status(repo: &str, pr_number: &str) -> Result<PrSta
         })
         .unwrap_or_default();
 
+    // Thread counts come from get_pr_review_threads (GraphQL) in fetch_pr_data,
+    // not from gh pr view. Set to zero here — the caller overrides with hygiene data.
     Ok(PrStatus {
         number: pr_number,
         author,
         ci_status,
         comments,
-        unresolved_threads: unresolved,
-        unreplied_threads: unreplied,
+        unresolved_threads: 0,
+        unreplied_threads: 0,
         unaddressed_issue_comments: 0,
         body,
         head_sha,

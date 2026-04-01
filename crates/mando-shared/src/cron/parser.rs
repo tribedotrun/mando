@@ -212,49 +212,7 @@ fn epoch_to_fields(epoch: i64) -> (u8, u8, u8, u8, u8) {
     (minute, hour, mday as u8, month as u8, wday)
 }
 
-/// Convert days since 1970-01-01 to (year, month 1-12, day 1-31).
-fn days_to_ymd(mut days: i64) -> (i32, i32, i32) {
-    let mut y = 1970;
-
-    // Walk year-by-year (correct, simple).
-    loop {
-        let yd = days_in_year(y);
-        if days < yd {
-            break;
-        }
-        days -= yd;
-        y += 1;
-    }
-
-    // Now `days` is day-of-year (0-based).
-    let leap = is_leap(y);
-    let month_days: [i64; 12] = if leap {
-        [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
-    } else {
-        [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
-    };
-
-    let mut month = 0;
-    for (i, &md) in month_days.iter().enumerate() {
-        if days < md {
-            month = i as i32 + 1;
-            break;
-        }
-        days -= md;
-    }
-
-    (y, month, days as i32 + 1)
-}
-
-use super::is_leap;
-
-fn days_in_year(y: i32) -> i64 {
-    if is_leap(y) {
-        366
-    } else {
-        365
-    }
-}
+use super::days_to_ymd;
 
 #[cfg(test)]
 mod tests {

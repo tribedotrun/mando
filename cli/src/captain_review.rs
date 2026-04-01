@@ -115,19 +115,13 @@ async fn handle_knowledge_approve(ids: Vec<String>, all: bool) -> anyhow::Result
 
     let selected = if all {
         lessons
+    } else if ids.is_empty() {
+        anyhow::bail!("provide lesson IDs or use --all");
     } else {
-        if ids.is_empty() {
-            anyhow::bail!("provide lesson IDs or use --all");
-        }
         let wanted: std::collections::HashSet<_> = ids.into_iter().collect();
         let filtered: Vec<Value> = lessons
             .into_iter()
-            .filter(|lesson| {
-                lesson["id"]
-                    .as_str()
-                    .map(|id| wanted.contains(id))
-                    .unwrap_or(false)
-            })
+            .filter(|lesson| lesson["id"].as_str().is_some_and(|id| wanted.contains(id)))
             .collect();
         if filtered.is_empty() {
             anyhow::bail!("none of the requested lesson IDs are pending");
@@ -143,7 +137,8 @@ async fn handle_knowledge_approve(ids: Vec<String>, all: bool) -> anyhow::Result
 }
 
 fn print_lessons(value: &Value, label: &str) -> anyhow::Result<()> {
-    let lessons = value.as_array().cloned().unwrap_or_default();
+    let empty = vec![];
+    let lessons = value.as_array().unwrap_or(&empty);
     println!("{label}");
     println!("{}", "-".repeat(label.len()));
     if lessons.is_empty() {

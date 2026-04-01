@@ -20,70 +20,37 @@ interface CronStore {
   remove: (id: string) => Promise<void>;
 }
 
-export const useCronStore = create<CronStore>((set, getState) => ({
-  jobs: [],
-  count: 0,
-  loading: false,
-  error: null,
-
-  fetch: async () => {
-    set({ loading: true, error: null });
+export const useCronStore = create<CronStore>((set, getState) => {
+  /** Run a mutation, re-fetch on success, set error + rethrow on failure. */
+  async function mutate(fn: () => Promise<unknown>, errLabel: string): Promise<void> {
     try {
-      const data = await fetchCron();
-      set({ jobs: data.jobs, count: data.count, loading: false });
-    } catch (err) {
-      set({
-        loading: false,
-        error: getErrorMessage(err, 'Failed to fetch cron jobs'),
-      });
-    }
-  },
-
-  add: async (job) => {
-    try {
-      await addCronJob(job);
+      await fn();
       await getState().fetch();
     } catch (err) {
-      set({
-        error: getErrorMessage(err, 'Failed to add cron job'),
-      });
+      set({ error: getErrorMessage(err, errLabel) });
       throw err;
     }
-  },
+  }
 
-  runNow: async (id: string) => {
-    try {
-      await runCronJob(id);
-      await getState().fetch();
-    } catch (err) {
-      set({
-        error: getErrorMessage(err, 'Failed to run cron job'),
-      });
-      throw err;
-    }
-  },
+  return {
+    jobs: [],
+    count: 0,
+    loading: false,
+    error: null,
 
-  toggle: async (id: string, enabled: boolean) => {
-    try {
-      await toggleCronJob(id, enabled);
-      await getState().fetch();
-    } catch (err) {
-      set({
-        error: getErrorMessage(err, 'Failed to toggle cron job'),
-      });
-      throw err;
-    }
-  },
+    fetch: async () => {
+      set({ loading: true, error: null });
+      try {
+        const data = await fetchCron();
+        set({ jobs: data.jobs, count: data.count, loading: false });
+      } catch (err) {
+        set({ loading: false, error: getErrorMessage(err, 'Failed to fetch cron jobs') });
+      }
+    },
 
-  remove: async (id: string) => {
-    try {
-      await removeCronJob(id);
-      await getState().fetch();
-    } catch (err) {
-      set({
-        error: getErrorMessage(err, 'Failed to remove cron job'),
-      });
-      throw err;
-    }
-  },
-}));
+    add: (job) => mutate(() => addCronJob(job), 'Failed to add cron job'),
+    runNow: (id) => mutate(() => runCronJob(id), 'Failed to run cron job'),
+    toggle: (id, enabled) => mutate(() => toggleCronJob(id, enabled), 'Failed to toggle cron job'),
+    remove: (id) => mutate(() => removeCronJob(id), 'Failed to remove cron job'),
+  };
+});

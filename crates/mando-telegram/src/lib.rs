@@ -33,12 +33,10 @@ use mando_config::settings::Config;
 pub use api::{BotCommand, TelegramApi};
 pub use bot::TelegramBot;
 
-/// Resolve API base URL: env var `TG_API_BASE_URL` takes priority, then config field.
-pub fn resolve_api_base_url(config_url: &Option<String>) -> Option<String> {
+/// Override Telegram API base URL via `TG_API_BASE_URL` env var (dev/test only).
+pub fn resolve_api_base_url() -> Option<String> {
     std::env::var("TG_API_BASE_URL")
         .ok()
-        .filter(|s| !s.is_empty())
-        .or_else(|| config_url.clone())
         .filter(|s| !s.is_empty())
 }
 
@@ -58,7 +56,7 @@ pub async fn start_bot(config: Arc<RwLock<Config>>, gw: Option<http::GatewayClie
             tracing::warn!("Telegram bot token not configured");
             return Ok(());
         }
-        let base_url = resolve_api_base_url(&tg.api_base_url);
+        let base_url = resolve_api_base_url();
         (tg.token.clone(), base_url)
     };
 

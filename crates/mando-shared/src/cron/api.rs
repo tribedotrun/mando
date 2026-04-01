@@ -176,25 +176,7 @@ fn parse_iso_to_ms(s: &str) -> Result<i64, String> {
     Ok(epoch_secs * 1000)
 }
 
-/// Convert (year, month 1-12, day 1-31) to days since 1970-01-01.
-fn ymd_to_days(year: i32, month: u32, day: u32) -> i64 {
-    let mut days: i64 = 0;
-    for y in 1970..year {
-        days += if is_leap(y) { 366 } else { 365 };
-    }
-    let month_days: [u32; 12] = if is_leap(year) {
-        [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
-    } else {
-        [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
-    };
-    for d in month_days.iter().take(month as usize - 1) {
-        days += *d as i64;
-    }
-    days += day as i64 - 1;
-    days
-}
-
-use super::is_leap;
+use super::ymd_to_days;
 
 fn job_to_json(job: &mando_types::CronJob) -> Value {
     json!({

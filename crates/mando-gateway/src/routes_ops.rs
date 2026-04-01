@@ -11,8 +11,19 @@ use serde_json::{json, Value};
 use crate::response::error_response;
 use crate::AppState;
 
+/// Gate: return 503 if dev mode is disabled.
+fn require_dev_mode(state: &AppState) -> Result<(), (StatusCode, Json<Value>)> {
+    if !state.config.load().features.dev_mode {
+        return Err(error_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "dev mode is disabled",
+        ));
+    }
+    Ok(())
+}
+
 /// Resolve the working directory from config (first project path).
-async fn resolve_cwd(state: &AppState) -> std::path::PathBuf {
+fn resolve_cwd(state: &AppState) -> std::path::PathBuf {
     let cfg = state.config.load_full();
     mando_config::paths::first_project_path(&cfg)
         .map(|p| mando_config::paths::expand_tilde(&p))
@@ -32,14 +43,8 @@ pub(crate) async fn post_ops_start(
     State(state): State<AppState>,
     Json(body): Json<OpsStartBody>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    if !state.config.load().features.dev_mode {
-        return Err(error_response(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "dev mode is disabled",
-        ));
-    }
-
-    let cwd = resolve_cwd(&state).await;
+    require_dev_mode(&state)?;
+    let cwd = resolve_cwd(&state);
 
     let prompt = format!(
         "You are an ops copilot for a software development team. \
@@ -90,14 +95,8 @@ pub(crate) async fn post_ops_message(
     State(state): State<AppState>,
     Json(body): Json<OpsMessageBody>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    if !state.config.load().features.dev_mode {
-        return Err(error_response(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "dev mode is disabled",
-        ));
-    }
-
-    let cwd = resolve_cwd(&state).await;
+    require_dev_mode(&state)?;
+    let cwd = resolve_cwd(&state);
     let mut mgr = state.cc_session_mgr.write().await;
 
     if !mgr.has_session(&body.key) {
@@ -132,12 +131,7 @@ pub(crate) async fn post_ops_end(
     State(state): State<AppState>,
     Json(body): Json<OpsEndBody>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    if !state.config.load().features.dev_mode {
-        return Err(error_response(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "dev mode is disabled",
-        ));
-    }
+    require_dev_mode(&state)?;
 
     let mut mgr = state.cc_session_mgr.write().await;
 

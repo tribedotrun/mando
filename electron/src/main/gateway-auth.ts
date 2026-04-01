@@ -6,12 +6,8 @@ import { readPort, readToken } from '#main/daemon';
 
 let authHookInstalled = false;
 
-function callbackHeaders(details: OnBeforeSendHeadersListenerDetails): {
-  requestHeaders: Record<string, string | string[]>;
-} {
-  return {
-    requestHeaders: details.requestHeaders,
-  };
+function passthrough(details: OnBeforeSendHeadersListenerDetails) {
+  return { requestHeaders: details.requestHeaders };
 }
 
 function sourceUrl(details: OnBeforeSendHeadersListenerDetails): string {
@@ -24,34 +20,28 @@ async function attachGatewayAuth(
 ): Promise<void> {
   try {
     const requestUrl = new URL(details.url);
-    if (requestUrl.protocol !== 'http:') {
-      callback(callbackHeaders(details));
-      return;
-    }
-    if (requestUrl.pathname === '/api/health') {
-      callback(callbackHeaders(details));
-      return;
-    }
-    if (!requestUrl.pathname.startsWith('/api/')) {
-      callback(callbackHeaders(details));
-      return;
-    }
 
-    const frameUrl = sourceUrl(details);
-    if (!isTrustedRendererUrl(frameUrl)) {
-      callback(callbackHeaders(details));
+    // Only inject auth for trusted renderer requests to gateway /api/ (excluding /api/health).
+    const needsAuth =
+      requestUrl.protocol === 'http:' &&
+      requestUrl.pathname.startsWith('/api/') &&
+      requestUrl.pathname !== '/api/health' &&
+      isTrustedRendererUrl(sourceUrl(details));
+
+    if (!needsAuth) {
+      callback(passthrough(details));
       return;
     }
 
     const gatewayPort = process.env.MANDO_GATEWAY_PORT || (await readPort().catch(() => ''));
     if (!gatewayPort || requestUrl.port !== gatewayPort) {
-      callback(callbackHeaders(details));
+      callback(passthrough(details));
       return;
     }
 
     const token = process.env.MANDO_AUTH_TOKEN || (await readToken().catch(() => null));
     if (!token) {
-      callback(callbackHeaders(details));
+      callback(passthrough(details));
       return;
     }
 
@@ -63,7 +53,7 @@ async function attachGatewayAuth(
     });
   } catch (err) {
     log.warn('[gateway-auth] failed to attach daemon auth header:', err);
-    callback(callbackHeaders(details));
+    callback(passthrough(details));
   }
 }
 

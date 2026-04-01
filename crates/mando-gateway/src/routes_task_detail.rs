@@ -14,9 +14,8 @@ fn resolve_pr(
     project: Option<&str>,
     config: &mando_config::Config,
 ) -> Option<(String, u32)> {
-    let num: u32 = mando_types::task::extract_pr_number(pr)?.parse().ok()?;
-    let repo = crate::resolve_github_repo(project, config)?;
-    Some((repo, num))
+    let num = mando_types::task::extract_pr_number(pr)?.parse().ok()?;
+    Some((crate::resolve_github_repo(project, config)?, num))
 }
 
 /// Resolve a string ID to a numeric task ID: parse as i64, or look up by linear_id.

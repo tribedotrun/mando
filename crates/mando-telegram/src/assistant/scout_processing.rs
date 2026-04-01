@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use anyhow::Result;
 use tracing::warn;
 
@@ -141,6 +139,7 @@ pub async fn auto_process_single(bot: &TelegramBot, chat_id: &str, message_id: i
 /// Settles into the first successfully processed item's swipe card.
 pub async fn auto_process_batch(bot: &TelegramBot, chat_id: &str, message_id: i64, ids: &[i64]) {
     use std::sync::atomic::{AtomicI64, AtomicU32, Ordering};
+    use std::sync::Arc;
     use tokio::task::JoinSet;
 
     let total = ids.len();

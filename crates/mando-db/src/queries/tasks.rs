@@ -253,6 +253,28 @@ pub async fn merge_changed_items(
     Ok(())
 }
 
+/// Immediately persist critical worker fields after spawn.
+///
+/// Writes critical worker fields so the DB reflects the running worker
+/// even if captain crashes before tick-end merge.
+pub async fn persist_spawn(pool: &SqlitePool, task: &Task) -> Result<()> {
+    sqlx::query(
+        "UPDATE tasks SET status=?, worker=?, session_ids=?, worker_started_at=?, \
+         branch=?, worktree=? \
+         WHERE id=? AND status NOT IN ('merged','completed-no-pr','canceled')",
+    )
+    .bind(task.status.as_str())
+    .bind(&task.worker)
+    .bind(task.session_ids.to_json())
+    .bind(&task.worker_started_at)
+    .bind(&task.branch)
+    .bind(&task.worktree)
+    .bind(task.id)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
 /// Archive terminal tasks older than `grace_secs`.
 pub async fn archive_terminal(pool: &SqlitePool, grace_secs: u64) -> Result<usize> {
     let cutoff = time::OffsetDateTime::now_utc() - time::Duration::seconds(grace_secs as i64);

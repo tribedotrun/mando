@@ -14,3 +14,4 @@ serde_json.workspace = true
 serde_yaml.workspace = true
 minijinja.workspace = true
 tracing.workspace = true
+iana-time-zone = "0.1"

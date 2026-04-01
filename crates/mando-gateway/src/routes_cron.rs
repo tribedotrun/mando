@@ -9,16 +9,22 @@ use serde_json::{json, Value};
 use crate::response::error_response;
 use crate::AppState;
 
-/// GET /api/cron
-pub(crate) async fn get_cron(
-    State(state): State<AppState>,
-) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+/// Gate: return 503 if the cron feature is disabled.
+fn require_cron(state: &AppState) -> Result<(), (StatusCode, Json<Value>)> {
     if !state.config.load().features.cron {
         return Err(error_response(
             StatusCode::SERVICE_UNAVAILABLE,
             "cron is disabled",
         ));
     }
+    Ok(())
+}
+
+/// GET /api/cron
+pub(crate) async fn get_cron(
+    State(state): State<AppState>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    require_cron(&state)?;
 
     let svc = state.cron_service.read().await;
     Ok(Json(mando_shared::list_cron_jobs(&svc, true)))
@@ -37,12 +43,7 @@ pub(crate) async fn post_cron_add(
     State(state): State<AppState>,
     Json(body): Json<AddCronBody>,
 ) -> Result<(StatusCode, Json<Value>), (StatusCode, Json<Value>)> {
-    if !state.config.load().features.cron {
-        return Err(error_response(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "cron is disabled",
-        ));
-    }
+    require_cron(&state)?;
 
     let schedule = mando_shared::parse_schedule(&body.schedule_kind, &body.schedule_value)
         .map_err(|e| error_response(StatusCode::BAD_REQUEST, &e))?;
@@ -73,12 +74,7 @@ pub(crate) async fn post_cron_remove(
     State(state): State<AppState>,
     Json(body): Json<CronIdBody>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    if !state.config.load().features.cron {
-        return Err(error_response(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "cron is disabled",
-        ));
-    }
+    require_cron(&state)?;
 
     let mut svc = state.cron_service.write().await;
     match mando_shared::remove_cron_job(&mut svc, &body.id).await {
@@ -104,12 +100,7 @@ pub(crate) async fn post_cron_toggle(
     State(state): State<AppState>,
     Json(body): Json<ToggleBody>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    if !state.config.load().features.cron {
-        return Err(error_response(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "cron is disabled",
-        ));
-    }
+    require_cron(&state)?;
 
     let mut svc = state.cron_service.write().await;
     match mando_shared::toggle_cron_job(&mut svc, &body.id, body.enabled).await {
@@ -129,12 +120,7 @@ pub(crate) async fn post_cron_run(
     State(state): State<AppState>,
     Json(body): Json<CronIdBody>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    if !state.config.load().features.cron {
-        return Err(error_response(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "cron is disabled",
-        ));
-    }
+    require_cron(&state)?;
 
     let mut svc = state.cron_service.write().await;
     match svc.run_job(&body.id).await {
@@ -149,7 +135,4 @@ pub(crate) async fn post_cron_run(
     }
 }
 
-/// Current epoch milliseconds (re-export from shared cron service).
-fn now_ms() -> i64 {
-    mando_shared::cron::service::now_ms()
-}
+use mando_shared::cron::service::now_ms;

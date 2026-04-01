@@ -56,8 +56,9 @@ pub async fn handle(bot: &TelegramBot, chat_id: &str, _args: &str) -> Result<()>
                 } else {
                     file_count.to_string()
                 };
-                let display_title = if title.len() > 45 {
-                    format!("{}\u{2026}", &title[..title.floor_char_boundary(45)])
+                let truncated = super::truncate(title, 45);
+                let display_title = if truncated.len() < title.len() {
+                    format!("{truncated}\u{2026}")
                 } else {
                     title.to_string()
                 };

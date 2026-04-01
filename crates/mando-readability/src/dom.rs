@@ -391,15 +391,7 @@ impl TreeSink for Dom {
     }
 
     fn remove_from_parent(&self, &target: &NodeId) {
-        let parent_id = {
-            let nodes = self.nodes.borrow();
-            nodes[target].parent
-        };
-        if let Some(pid) = parent_id {
-            let mut nodes = self.nodes.borrow_mut();
-            nodes[pid].children.retain(|&c| c != target);
-            nodes[target].parent = None;
-        }
+        self.detach(target);
     }
 
     fn reparent_children(&self, &node: &NodeId, &new_parent: &NodeId) {

@@ -30,17 +30,13 @@ function SectionDivider() {
   return <div style={{ height: 1, background: 'var(--color-border-subtle)', margin: '8px 0' }} />;
 }
 
-function gatewayDot(state: ConnectionState): string {
-  if (state === 'connected') return 'var(--color-success)';
-  if (state === 'connecting') return 'var(--color-stale)';
-  return 'var(--color-error)';
-}
-
-function gatewayLabel(state: ConnectionState): string {
-  if (state === 'connected') return 'Connected';
-  if (state === 'connecting') return 'Connecting';
-  return 'Disconnected';
-}
+const GATEWAY_STATE: Record<string, { dot: string; label: string }> = {
+  connected: { dot: 'var(--color-success)', label: 'Connected' },
+  connecting: { dot: 'var(--color-stale)', label: 'Connecting' },
+  disconnected: { dot: 'var(--color-error)', label: 'Disconnected' },
+  updating: { dot: 'var(--color-stale)', label: 'Updating' },
+};
+const GATEWAY_FALLBACK = GATEWAY_STATE.disconnected;
 
 export function SettingsGeneral(): React.ReactElement {
   const [channelOverride, setChannelOverride] = useState<string | null>(null);
@@ -238,7 +234,7 @@ export function SettingsGeneral(): React.ReactElement {
               width: 6,
               height: 6,
               borderRadius: 3,
-              background: gatewayDot(connectionState),
+              background: (GATEWAY_STATE[connectionState] ?? GATEWAY_FALLBACK).dot,
               flexShrink: 0,
             }}
           />
@@ -246,7 +242,7 @@ export function SettingsGeneral(): React.ReactElement {
             {gatewayDisplay}
           </span>
           <span className="text-caption" style={{ color: 'var(--color-text-3)' }}>
-            {gatewayLabel(connectionState)}
+            {(GATEWAY_STATE[connectionState] ?? GATEWAY_FALLBACK).label}
           </span>
         </span>
       </SettingsRow>

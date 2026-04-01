@@ -8,6 +8,13 @@ import { relativeTime } from '#renderer/utils';
 
 type Variant = 'card' | 'settings' | 'page';
 
+const smallBtnBase: React.CSSProperties = {
+  padding: '4px 12px',
+  borderRadius: 'var(--radius-button)',
+  border: 'none',
+  cursor: 'pointer',
+};
+
 interface Props {
   variant: Variant;
   testId: string;
@@ -53,8 +60,10 @@ function AddJobForm({
       setScheduleValue('');
       setMessage('');
       onDone();
-    } catch {
-      // Error already set in cronStore
+    } catch (err) {
+      useToastStore
+        .getState()
+        .add('error', err instanceof Error ? err.message : 'Failed to add job');
     } finally {
       setSubmitting(false);
     }
@@ -142,7 +151,13 @@ function AddJobForm({
   );
 }
 
-function JobRow({ job, variant }: { job: CronJob; variant: Variant }): React.ReactElement {
+const JobRow = React.memo(function JobRow({
+  job,
+  variant,
+}: {
+  job: CronJob;
+  variant: Variant;
+}): React.ReactElement {
   const toggle = useCronStore((s) => s.toggle);
   const runNow = useCronStore((s) => s.runNow);
   const remove = useCronStore((s) => s.remove);
@@ -153,8 +168,10 @@ function JobRow({ job, variant }: { job: CronJob; variant: Variant }): React.Rea
     setRunning(true);
     try {
       await runNow(job.id);
-    } catch {
-      // Error already set in cronStore
+    } catch (err) {
+      useToastStore
+        .getState()
+        .add('error', err instanceof Error ? err.message : 'Failed to run job');
     } finally {
       setRunning(false);
     }
@@ -211,15 +228,9 @@ function JobRow({ job, variant }: { job: CronJob; variant: Variant }): React.Rea
         <button
           onClick={handleRun}
           disabled={running}
+          aria-label={`Run ${job.name} now`}
           className="text-[13px] font-medium text-white disabled:opacity-50"
-          style={{
-            padding: '4px 12px',
-            borderRadius: 'var(--radius-button)',
-            background: 'var(--color-accent)',
-            color: 'var(--color-bg)',
-            border: 'none',
-            cursor: 'pointer',
-          }}
+          style={{ ...smallBtnBase, background: 'var(--color-accent)', color: 'var(--color-bg)' }}
         >
           {running ? '...' : 'Run'}
         </button>
@@ -229,15 +240,13 @@ function JobRow({ job, variant }: { job: CronJob; variant: Variant }): React.Rea
               useToastStore.getState().add('error', 'Failed to toggle cron job'),
             )
           }
+          aria-label={`${job.enabled ? 'Disable' : 'Enable'} ${job.name}`}
           className="text-[13px] transition-colors"
           style={{
-            padding: '4px 12px',
-            borderRadius: 'var(--radius-button)',
+            ...smallBtnBase,
             background: job.enabled ? 'var(--color-success-bg)' : 'var(--color-surface-3)',
             color: job.enabled ? 'var(--color-success)' : 'var(--color-text-2)',
             fontWeight: 500,
-            border: 'none',
-            cursor: 'pointer',
           }}
         >
           {job.enabled ? 'ON' : 'OFF'}
@@ -246,15 +255,13 @@ function JobRow({ job, variant }: { job: CronJob; variant: Variant }): React.Rea
           <>
             <button
               onClick={handleRemove}
+              aria-label={`Confirm delete ${job.name}`}
               className="text-[13px]"
               style={{
-                padding: '4px 12px',
-                borderRadius: 'var(--radius-button)',
+                ...smallBtnBase,
                 background: 'var(--color-error)',
                 color: '#fff',
                 fontWeight: 500,
-                border: 'none',
-                cursor: 'pointer',
               }}
             >
               Confirm
@@ -275,15 +282,13 @@ function JobRow({ job, variant }: { job: CronJob; variant: Variant }): React.Rea
         ) : (
           <button
             onClick={() => setConfirming(true)}
+            aria-label={`Delete ${job.name}`}
             className="text-[13px]"
             style={{
-              padding: '4px 12px',
-              borderRadius: 'var(--radius-button)',
+              ...smallBtnBase,
               background: 'var(--color-surface-3)',
               color: 'var(--color-error)',
               fontWeight: 500,
-              border: 'none',
-              cursor: 'pointer',
             }}
           >
             Del
@@ -292,7 +297,7 @@ function JobRow({ job, variant }: { job: CronJob; variant: Variant }): React.Rea
       </div>
     </div>
   );
-}
+});
 
 export function CronJobsPanel({ variant, testId }: Props): React.ReactElement {
   const { jobs, count, loading, error, fetch } = useCronStore();

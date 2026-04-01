@@ -70,36 +70,31 @@ async fn main() -> Result<()> {
 
     let mut set = tokio::task::JoinSet::new();
 
-    // Spawn SSE notification listener (uses notify_chat_id for alerts, falls back to owner).
-    // Skipped when no chat target is configured — owner may be auto-registered later via /start.
-    if config.channels.telegram.enabled && !config.channels.telegram.token.is_empty() {
-        let tg = &config.channels.telegram;
-        let chat_id = config.captain.notify_chat_id.clone().or_else(|| {
-            if tg.owner.is_empty() {
-                None
-            } else {
-                Some(tg.owner.clone())
-            }
-        });
+    let tg = &config.channels.telegram;
+    let tg_enabled = tg.enabled && !tg.token.is_empty();
 
-        if let Some(chat_id) = chat_id {
+    // Spawn SSE notification listener — sends alerts to telegram.owner.
+    // Skipped when no owner is configured — may be auto-registered later via /start.
+    if tg_enabled {
+        if tg.owner.is_empty() {
+            info!("No notification target configured — SSE listener skipped until owner registers via /start");
+        } else {
             let base_url = gw.base_url().to_string();
             let gw_token = gw.token().map(String::from);
-            let api_base_url = resolve_api_base_url(&tg.api_base_url);
+            let api_base_url = resolve_api_base_url();
             let api = match &api_base_url {
                 Some(url) => TelegramApi::with_base_url(&tg.token, url)?,
                 None => TelegramApi::new(&tg.token),
             };
+            let chat_id = tg.owner.clone();
             set.spawn(async move {
                 run_notification_listener(base_url, gw_token, api, chat_id).await;
             });
-        } else {
-            info!("No notification target configured — SSE listener skipped until owner registers via /start");
         }
     }
 
     // Spawn main bot.
-    if config.channels.telegram.enabled && !config.channels.telegram.token.is_empty() {
+    if tg_enabled {
         let cfg = Arc::new(RwLock::new(config.clone()));
         let bot_gw = gw.clone();
         set.spawn(async move {

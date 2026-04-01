@@ -165,9 +165,7 @@ async def get_check_runs(owner: str, repo: str, sha: str) -> list[dict]:
     try:
         raw = await run_gh(
             "api",
-            f"repos/{owner}/{repo}/commits/{sha}/check-runs",
-            "-f",
-            "per_page=100",
+            f"repos/{owner}/{repo}/commits/{sha}/check-runs?per_page=100",
         )
     except RuntimeError as exc:
         if "404" in str(exc):

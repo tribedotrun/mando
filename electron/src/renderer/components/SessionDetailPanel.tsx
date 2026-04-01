@@ -2,7 +2,7 @@ import React, { useRef } from 'react';
 import type { SessionEntry } from '#renderer/types';
 import { TranscriptViewer } from '#renderer/components/TranscriptViewer';
 import { fmtDuration } from '#renderer/utils';
-import { formatCallerLabel } from '#renderer/components/SessionsHelpers';
+import { sessionTitle } from '#renderer/components/SessionsHelpers';
 
 interface Props {
   session: SessionEntry;
@@ -13,12 +13,6 @@ interface Props {
   resumeCmd: string;
   linearSlug?: string;
   sequenceNum?: number;
-}
-
-function formatCallerLabelWithSeq(caller: string, seq?: number): string {
-  const label = formatCallerLabel(caller);
-  const capitalized = label.charAt(0).toUpperCase() + label.slice(1);
-  return seq ? `${capitalized} #${seq}` : capitalized;
 }
 
 function formatTimestamp(ts: string): string {
@@ -47,7 +41,8 @@ export function SessionDetailPanel({
   const copyRef = useRef<HTMLButtonElement>(null);
 
   const durationSec = session.duration_ms != null ? session.duration_ms / 1000 : undefined;
-  const title = formatCallerLabelWithSeq(session.caller, sequenceNum);
+  const baseTitle = sessionTitle(session);
+  const title = sequenceNum ? `${baseTitle} #${sequenceNum}` : baseTitle;
 
   const copyResume = () => {
     navigator.clipboard.writeText(resumeCmd).then(

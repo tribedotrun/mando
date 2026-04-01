@@ -73,6 +73,20 @@ pub(crate) async fn dispatch_new_work(
                             let resource = item.resource.as_deref().unwrap_or("cc").to_string();
                             *resource_counts.entry(resource).or_insert(0) += 1;
 
+                            // Persist worker fields immediately so the DB
+                            // reflects the running worker even if captain
+                            // crashes before tick-end merge.
+                            if let Err(e) =
+                                mando_db::queries::tasks::persist_spawn(pool, item).await
+                            {
+                                tracing::error!(
+                                    module = "captain",
+                                    id = item.id,
+                                    error = %e,
+                                    "failed to persist spawn — orphan risk"
+                                );
+                            }
+
                             // Emit timeline event with session_id.
                             super::timeline_emit::emit_for_task(
                                 item,
@@ -271,6 +285,7 @@ pub(crate) async fn dispatch_new_work(
                     }
                     ClarifierStatus::Clarifying => {
                         item.status = ItemStatus::NeedsClarification;
+                        item.last_activity_at = Some(mando_types::now_rfc3339());
                         item.context = Some(result.context);
                         if let Some(ref sid) = result.session_id {
                             item.session_ids.clarifier = Some(sid.clone());

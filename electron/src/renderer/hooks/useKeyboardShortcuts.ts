@@ -134,7 +134,7 @@ export function useGlobalKeyboard(config: GlobalKeyboardConfig): void {
       // ── ? opens shortcut overlay ──
       if (e.key === '?') {
         e.preventDefault();
-        s.onToggleShortcuts?.();
+        s.onToggleShortcuts();
         return;
       }
 

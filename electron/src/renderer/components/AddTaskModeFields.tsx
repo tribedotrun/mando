@@ -1,4 +1,5 @@
 import React from 'react';
+import { inputStyle, labelStyle, inputCls, labelCls } from '#renderer/styles';
 import { ToggleSwitch } from '#renderer/components/ToggleSwitch';
 
 export type TaskMode = 'quick' | 'planned';
@@ -14,15 +15,6 @@ export const MODE_COPY: Record<TaskMode, { title: string; submit: string }> = {
   },
 };
 
-const inputCls =
-  'w-full rounded-md px-3 py-2 text-sm placeholder-[var(--color-text-3)] focus:outline-none focus:ring-1';
-const inputStyle: React.CSSProperties = {
-  border: '1px solid var(--color-border)',
-  background: 'var(--color-surface-2)',
-  color: 'var(--color-text-1)',
-};
-const labelCls = 'mb-1 block text-xs font-medium uppercase tracking-wider';
-const labelStyle: React.CSSProperties = { color: 'var(--color-text-3)' };
 const modeCardBase =
   'rounded-xl border px-3 py-3 text-left transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--color-accent)]';
 

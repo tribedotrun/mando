@@ -117,33 +117,22 @@ pub fn jsonl_to_markdown(jsonl_content: &str) -> String {
             // Tool results summary
             if !tool_results.is_empty() {
                 let ok = tool_results.iter().filter(|r| !r.is_error).count();
-                let fail = tool_results.iter().filter(|r| r.is_error).count();
-                let mut summary = if ok > 0 {
-                    format!("{ok} ok")
-                } else {
-                    String::new()
+                let fail = tool_results.len() - ok;
+                let summary = match (ok, fail) {
+                    (0, f) => format!("{f} failed"),
+                    (o, 0) => format!("{o} ok"),
+                    (o, f) => format!("{o} ok, {f} failed"),
                 };
-                if fail > 0 {
-                    if !summary.is_empty() {
-                        summary.push_str(", ");
-                    }
-                    summary.push_str(&format!("{fail} failed"));
-                }
 
-                let mut show_parts: Vec<String> = Vec::new();
+                parts.push(format!("\n*results: {summary}*\n"));
                 let mut shown_initial = false;
                 for r in &tool_results {
                     if r.is_error {
-                        show_parts.push(format!("**Error:**\n```\n{}\n```\n", r.text));
+                        parts.push(format!("**Error:**\n```\n{}\n```\n", r.text));
                     } else if turn_num == 1 && !shown_initial && !r.text.trim().is_empty() {
                         shown_initial = true;
-                        show_parts.push(format!("**Initial context:**\n```\n{}\n```\n", r.text));
+                        parts.push(format!("**Initial context:**\n```\n{}\n```\n", r.text));
                     }
-                }
-
-                parts.push(format!("\n*results: {summary}*\n"));
-                for sp in show_parts {
-                    parts.push(sp);
                 }
             }
             continue;

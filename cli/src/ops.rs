@@ -22,30 +22,24 @@ pub(crate) async fn handle(args: OpsArgs) -> anyhow::Result<()> {
         let client = DaemonClient::discover()?;
         client.post("/api/ops/end", &json!({})).await?;
         println!("Ops session ended.");
-        return Ok(());
-    }
-    if args.new {
+    } else if args.new {
         let client = DaemonClient::discover()?;
         client.post("/api/ops/new", &json!({})).await?;
         println!("Starting new ops session...");
-        return Ok(());
-    }
-    match &args.message {
-        Some(msg) => {
-            let client = DaemonClient::discover()?;
-            let body = json!({"message": msg});
-            let result = client.post("/api/ops/message", &body).await?;
-            let reply = result["reply"]
-                .as_str()
-                .map(String::from)
-                .unwrap_or_else(|| serde_json::to_string_pretty(&result).unwrap_or_default());
-            println!("{reply}");
-        }
-        None => {
-            println!("Usage: mando ops \"your message\"");
-            println!("       mando ops --new    # start new session");
-            println!("       mando ops --end    # end session");
-        }
+    } else if let Some(msg) = &args.message {
+        let client = DaemonClient::discover()?;
+        let result = client
+            .post("/api/ops/message", &json!({"message": msg}))
+            .await?;
+        let reply = result["reply"]
+            .as_str()
+            .map(String::from)
+            .unwrap_or_else(|| serde_json::to_string_pretty(&result).unwrap_or_default());
+        println!("{reply}");
+    } else {
+        println!("Usage: mando ops \"your message\"");
+        println!("       mando ops --new    # start new session");
+        println!("       mando ops --end    # end session");
     }
     Ok(())
 }
