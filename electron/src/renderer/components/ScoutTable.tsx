@@ -133,6 +133,7 @@ export function ScoutTable({
           type="checkbox"
           checked={allSelected}
           onChange={onToggleSelectAll}
+          aria-label="Select all items"
           style={{
             width: 14,
             height: 14,
@@ -181,6 +182,8 @@ export function ScoutTable({
               ref={isFocused ? scrollRef : undefined}
               data-testid="scout-row"
               data-focused={isFocused || undefined}
+              role="button"
+              aria-label={`Scout item: ${item.title || 'Untitled'}`}
               className="group flex cursor-pointer items-center"
               style={{
                 paddingBlock: 9,
@@ -198,6 +201,7 @@ export function ScoutTable({
                 checked={sel}
                 onChange={() => onToggleSelect(item.id)}
                 onClick={(e) => e.stopPropagation()}
+                aria-label={`Select ${item.title || 'Untitled'}`}
                 style={{
                   width: 14,
                   height: 14,
@@ -288,6 +292,7 @@ export function ScoutTable({
                       borderRadius: 3,
                     }}
                     onClick={() => setEditingId(item.id)}
+                    aria-label={`Change status, currently ${item.status}`}
                   >
                     {item.status}
                   </button>

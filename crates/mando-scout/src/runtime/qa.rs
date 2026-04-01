@@ -84,74 +84,16 @@ impl QaSessionManager {
             let session_arc = { self.sessions.lock().await.get(key).cloned() };
 
             if let Some(session_arc) = session_arc {
-                let mut live = session_arc.lock().await;
-                live.last_active = Instant::now();
-                let session_id = live.session_id.clone();
-
-                let cc = match live.cc.as_mut() {
-                    Some(cc) => cc,
-                    None => {
-                        warn!(module = "scout-qa", %session_id, "live session already closed, falling back to resume");
-                        drop(live);
-                        self.sessions.lock().await.remove(key);
-                        return self.ask_via_resume(question, key, workflow).await;
-                    }
-                };
-
-                if let Err(e) = cc.send_message(question).await {
-                    warn!(module = "scout-qa", %session_id, error = %e, "send failed, removing broken session and falling back to resume");
-                    let send_err = e.to_string();
-                    drop(live);
-                    self.sessions.lock().await.remove(key);
-                    return self.ask_via_resume(question, key, workflow).await.map_err(
-                        |resume_err| {
-                            resume_err.context(format!(
-                                "Q&A follow-up send failed ({send_err}); resume fallback failed"
-                            ))
-                        },
-                    );
-                }
-
-                let timeout = Duration::from_secs(120);
-                let result = match tokio::time::timeout(timeout, cc.recv_result()).await {
-                    Ok(Ok(r)) => r,
-                    Ok(Err(e)) => {
-                        warn!(module = "scout-qa", %session_id, error = %e, "recv failed, removing session and falling back to resume");
-                        let recv_err = e.to_string();
-                        drop(live);
-                        self.sessions.lock().await.remove(key);
-                        return self.ask_via_resume(question, key, workflow).await.map_err(
-                            |resume_err| {
-                                resume_err.context(format!(
-                                    "Q&A follow-up failed ({recv_err}); resume fallback failed"
-                                ))
-                            },
-                        );
-                    }
-                    Err(_) => {
-                        warn!(module = "scout-qa", %session_id, "recv timed out, removing session and falling back to resume");
-                        drop(live);
-                        self.sessions.lock().await.remove(key);
+                match self.try_live_followup(&session_arc, key, question).await {
+                    Ok(r) => return Ok(r),
+                    Err(reason) => {
+                        warn!(module = "scout-qa", key = %key, %reason, "live follow-up failed, falling back to resume");
                         return self
                             .ask_via_resume(question, key, workflow)
                             .await
-                            .map_err(|resume_err| {
-                                resume_err.context(format!(
-                                    "Q&A follow-up timed out after {timeout:?}; resume fallback failed"
-                                ))
-                            });
+                            .map_err(|e| e.context(format!("{reason}; resume fallback failed")));
                     }
-                };
-
-                let keep_live = mando_cc::is_process_alive(cc.pid());
-                let mut r = parse_qa_result(&result, &session_id);
-                r.session_reset = false;
-                drop(live);
-                if !keep_live {
-                    info!(module = "scout-qa", %session_id, "Q&A process exited after response; future follow-ups will use resume");
-                    self.sessions.lock().await.remove(key);
                 }
-                return Ok(r);
             }
 
             warn!(module = "scout-qa", key = %key, "live session missing, trying resume");
@@ -212,6 +154,61 @@ impl QaSessionManager {
         }
 
         Ok(qa_result)
+    }
+
+    /// Attempt a follow-up on a live session. Returns the QaResult on
+    /// success, or a reason string on failure (session already removed from map).
+    async fn try_live_followup(
+        &self,
+        session_arc: &Arc<Mutex<LiveSession>>,
+        key: &str,
+        question: &str,
+    ) -> Result<QaResult, String> {
+        let mut live = session_arc.lock().await;
+        live.last_active = Instant::now();
+        let session_id = live.session_id.clone();
+
+        let cc = match live.cc.as_mut() {
+            Some(cc) => cc,
+            None => {
+                drop(live);
+                self.sessions.lock().await.remove(key);
+                return Err("live session already closed".into());
+            }
+        };
+
+        if let Err(e) = cc.send_message(question).await {
+            let msg = format!("send failed: {e}");
+            drop(live);
+            self.sessions.lock().await.remove(key);
+            return Err(msg);
+        }
+
+        let timeout = Duration::from_secs(120);
+        let result = match tokio::time::timeout(timeout, cc.recv_result()).await {
+            Ok(Ok(r)) => r,
+            Ok(Err(e)) => {
+                let msg = format!("recv failed: {e}");
+                drop(live);
+                self.sessions.lock().await.remove(key);
+                return Err(msg);
+            }
+            Err(_) => {
+                drop(live);
+                self.sessions.lock().await.remove(key);
+                return Err(format!("recv timed out after {timeout:?}"));
+            }
+        };
+
+        let keep_live = mando_cc::is_process_alive(cc.pid());
+        let mut r = parse_qa_result(&result, &session_id);
+        r.session_reset = false;
+        drop(live);
+        if !keep_live {
+            info!(module = "scout-qa", %session_id, "Q&A process exited after response; future follow-ups will use resume");
+            self.sessions.lock().await.remove(key);
+        }
+        Ok(r)
     }
 
     async fn ask_via_resume(
@@ -337,29 +334,34 @@ fn render_first_turn_prompt(
     mando_config::render_prompt("qa", &workflow.prompts, &vars).map_err(|e| anyhow::anyhow!(e))
 }
 
+fn extract_followups(val: &serde_json::Value) -> Vec<String> {
+    val["suggested_followups"]
+        .as_array()
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 fn parse_qa_result(result: &mando_cc::CcResult, ctx_sid: &str) -> QaResult {
+    let make = |answer: String, followups: Vec<String>| QaResult {
+        answer,
+        session_id: Some(result.session_id.clone()),
+        suggested_followups: followups,
+        session_reset: false,
+    };
+
     if let Some(ref structured) = result.structured {
-        let answer = match structured["answer"].as_str() {
-            Some(a) => a.to_string(),
-            None => {
+        let answer = structured["answer"]
+            .as_str()
+            .map(String::from)
+            .unwrap_or_else(|| {
                 warn!(module = "scout-qa", session_id = %ctx_sid, "structured output has no 'answer', falling back to text");
                 result.text.clone()
-            }
-        };
-        let followups = structured["suggested_followups"]
-            .as_array()
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(|v| v.as_str().map(String::from))
-                    .collect()
-            })
-            .unwrap_or_default();
-        return QaResult {
-            answer,
-            session_id: Some(result.session_id.clone()),
-            suggested_followups: followups,
-            session_reset: false,
-        };
+            });
+        return make(answer, extract_followups(structured));
     }
 
     warn!(module = "scout-qa", session_id = %ctx_sid, "no structured output, trying text JSON extraction");
@@ -367,33 +369,15 @@ fn parse_qa_result(result: &mando_cc::CcResult, ctx_sid: &str) -> QaResult {
         Ok(v) => v,
         Err(e) => {
             warn!(module = "scout-qa", error = %e, "JSON extraction failed, using raw text");
-            serde_json::json!({})
+            return make(result.text.clone(), Vec::new());
         }
     };
     if let Some(answer) = parsed["answer"].as_str() {
-        let followups = parsed["suggested_followups"]
-            .as_array()
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(|v| v.as_str().map(String::from))
-                    .collect()
-            })
-            .unwrap_or_default();
-        return QaResult {
-            answer: answer.to_string(),
-            session_id: Some(result.session_id.clone()),
-            suggested_followups: followups,
-            session_reset: false,
-        };
+        return make(answer.to_string(), extract_followups(&parsed));
     }
 
     warn!(module = "scout-qa", session_id = %ctx_sid, "JSON extraction failed, using raw text as answer");
-    QaResult {
-        answer: result.text.clone(),
-        session_id: Some(result.session_id.clone()),
-        suggested_followups: Vec::new(),
-        session_reset: false,
-    }
+    make(result.text.clone(), Vec::new())
 }
 
 #[cfg(test)]

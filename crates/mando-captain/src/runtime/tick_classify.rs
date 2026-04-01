@@ -83,11 +83,7 @@ pub(super) fn classify_and_update_health(
         }
 
         // Persist worker CWD from the item's worktree field.
-        let item_wt = items
-            .iter()
-            .find(|it| it.worker.as_deref() == Some(&ctx.session_name))
-            .and_then(|it| it.worktree.as_deref());
-        if let Some(wt) = item_wt {
+        if let Some(wt) = item_ref.and_then(|it| it.worktree.as_deref()) {
             health_store::set_health_field(
                 health_state,
                 &ctx.session_name,

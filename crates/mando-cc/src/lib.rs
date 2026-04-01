@@ -31,7 +31,7 @@ pub use session::CcSession;
 pub use stream::{
     current_session_lines, get_last_assistant_text, get_last_stream_event_type,
     get_stream_file_size, get_stream_result, is_clean_result, stream_has_broken_session,
-    stream_stale_seconds,
+    stream_stale_seconds, write_error_result,
 };
 
 /// Result from a CC invocation with optional structured output.

@@ -51,9 +51,8 @@ export function formatCallerLabel(caller: string): string {
  * Sequence number (e.g. "#2") is handled separately in the row renderer.
  */
 export function sessionTitle(s: SessionEntry): string {
-  const label = CALLER_LABELS[s.caller];
-  if (label) return label.charAt(0).toUpperCase() + label.slice(1);
-  return s.caller;
+  const label = formatCallerLabel(s.caller);
+  return label.charAt(0).toUpperCase() + label.slice(1);
 }
 
 /**

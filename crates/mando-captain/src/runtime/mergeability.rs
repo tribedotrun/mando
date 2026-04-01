@@ -9,7 +9,7 @@ use crate::biz::merge_logic;
 use crate::io::health_store::HealthState;
 use crate::runtime::linear_integration;
 use crate::runtime::mergeability_rebase::{
-    check_pr_mergeable, handle_conflict, reap_dead_rebase_workers, resolve_github_repo, MergeStatus,
+    check_pr_mergeable, handle_conflict, reap_dead_rebase_workers, MergeStatus,
 };
 use crate::runtime::notify::Notifier;
 
@@ -39,7 +39,7 @@ pub(crate) async fn check_done_mergeability(
             })
             .filter_map(|(i, it)| {
                 let branch = it.branch.clone()?;
-                let repo = resolve_github_repo(it.project.as_deref(), config)?;
+                let repo = mando_config::resolve_github_repo(it.project.as_deref(), config)?;
                 Some((i, repo, branch))
             })
             .collect();
@@ -77,15 +77,17 @@ pub(crate) async fn check_done_mergeability(
         .filter_map(|&idx| {
             let item = &items[idx];
             let pr = item.pr.clone()?;
-            let repo = resolve_github_repo(item.project.as_deref(), config).or_else(|| {
-                tracing::debug!(
-                    module = "captain",
-                    title = %item.title,
-                    project = ?item.project,
-                    "skipping mergeability check — no github_repo configured"
-                );
-                None
-            })?;
+            let repo = mando_config::resolve_github_repo(item.project.as_deref(), config).or_else(
+                || {
+                    tracing::debug!(
+                        module = "captain",
+                        title = %item.title,
+                        project = ?item.project,
+                        "skipping mergeability check — no github_repo configured"
+                    );
+                    None
+                },
+            )?;
             Some((idx, pr, repo))
         })
         .collect();
@@ -102,59 +104,10 @@ pub(crate) async fn check_done_mergeability(
         let idx = *idx;
         match result {
             Ok(MergeStatus::Merged) => {
-                let item = &mut items[idx];
-                item.status = mando_types::task::ItemStatus::Merged;
-                let msg = format!(
-                    "\u{1f389} Merged (PR {}): <b>{}</b>",
-                    pr,
-                    mando_shared::telegram_format::escape_html(&item.title)
-                );
-                notifier.high(&msg).await;
-                tracing::info!(module = "captain", title = %item.title, pr = %pr, "item merged");
-                super::timeline_emit::emit_for_task(
-                    item,
-                    mando_types::timeline::TimelineEventType::Merged,
-                    &format!("PR {pr} merged on GitHub"),
-                    serde_json::json!({ "pr": pr }),
-                    pool,
-                )
-                .await;
-
-                if let Err(e) = linear_integration::writeback_status(item, config).await {
-                    tracing::warn!(module = "captain", %e, "Linear status writeback failed");
-                }
-                if let Err(e) = linear_integration::upsert_workpad(
-                    item,
-                    config,
-                    &format!("PR merged ({})", pr),
-                    pool,
-                )
-                .await
-                {
-                    tracing::warn!(module = "captain", %e, "Linear workpad upsert failed");
-                }
+                apply_merged(&mut items[idx], pr, config, notifier, pool).await;
             }
             Ok(MergeStatus::Closed) => {
-                let item = &mut items[idx];
-                item.status = mando_types::task::ItemStatus::Canceled;
-                let msg = format!(
-                    "\u{26d4} PR closed ({}): <b>{}</b>",
-                    pr,
-                    mando_shared::telegram_format::escape_html(&item.title)
-                );
-                notifier.high(&msg).await;
-                super::timeline_emit::emit_for_task(
-                    item,
-                    mando_types::timeline::TimelineEventType::Canceled,
-                    &format!("PR {pr} closed on GitHub"),
-                    serde_json::json!({ "pr": pr }),
-                    pool,
-                )
-                .await;
-
-                if let Err(e) = linear_integration::writeback_status(item, config).await {
-                    tracing::warn!(module = "captain", %e, "Linear status writeback failed");
-                }
+                apply_closed(&mut items[idx], pr, config, notifier, pool).await;
             }
             Ok(MergeStatus::Mergeable) => {
                 tracing::debug!(module = "captain", pr = %pr, "PR is mergeable, awaiting human");
@@ -178,7 +131,7 @@ pub(crate) async fn check_done_mergeability(
         .filter_map(|&idx| {
             let item = &items[idx];
             let pr = item.pr.clone()?;
-            let repo = resolve_github_repo(item.project.as_deref(), config)?;
+            let repo = mando_config::resolve_github_repo(item.project.as_deref(), config)?;
             Some((idx, pr, repo))
         })
         .collect();
@@ -194,59 +147,10 @@ pub(crate) async fn check_done_mergeability(
         let idx = *idx;
         match result {
             Ok(MergeStatus::Merged) => {
-                let item = &mut items[idx];
-                item.status = mando_types::task::ItemStatus::Merged;
-                let msg = format!(
-                    "\u{1f389} Merged (PR {}): <b>{}</b>",
-                    pr,
-                    mando_shared::telegram_format::escape_html(&item.title)
-                );
-                notifier.high(&msg).await;
-                tracing::info!(module = "captain", title = %item.title, pr = %pr, "handed-off item merged");
-                super::timeline_emit::emit_for_task(
-                    item,
-                    mando_types::timeline::TimelineEventType::Merged,
-                    &format!("PR {pr} merged on GitHub (handed-off)"),
-                    serde_json::json!({ "pr": pr }),
-                    pool,
-                )
-                .await;
-
-                if let Err(e) = linear_integration::writeback_status(item, config).await {
-                    tracing::warn!(module = "captain", %e, "Linear status writeback failed");
-                }
-                if let Err(e) = linear_integration::upsert_workpad(
-                    item,
-                    config,
-                    &format!("PR merged ({})", pr),
-                    pool,
-                )
-                .await
-                {
-                    tracing::warn!(module = "captain", %e, "Linear workpad upsert failed");
-                }
+                apply_merged(&mut items[idx], pr, config, notifier, pool).await;
             }
             Ok(MergeStatus::Closed) => {
-                let item = &mut items[idx];
-                item.status = mando_types::task::ItemStatus::Canceled;
-                let msg = format!(
-                    "\u{26d4} PR closed ({}): <b>{}</b>",
-                    pr,
-                    mando_shared::telegram_format::escape_html(&item.title)
-                );
-                notifier.high(&msg).await;
-                super::timeline_emit::emit_for_task(
-                    item,
-                    mando_types::timeline::TimelineEventType::Canceled,
-                    &format!("PR {pr} closed on GitHub (handed-off)"),
-                    serde_json::json!({ "pr": pr }),
-                    pool,
-                )
-                .await;
-
-                if let Err(e) = linear_integration::writeback_status(item, config).await {
-                    tracing::warn!(module = "captain", %e, "Linear status writeback failed");
-                }
+                apply_closed(&mut items[idx], pr, config, notifier, pool).await;
             }
             Ok(_) => {} // Mergeable, Conflicted, Unknown — human owns it, no action
             Err(e) => {
@@ -277,4 +181,66 @@ pub(crate) async fn check_done_mergeability(
     .await;
 
     Ok(())
+}
+
+async fn apply_merged(
+    item: &mut Task,
+    pr: &str,
+    config: &Config,
+    notifier: &Notifier,
+    pool: &sqlx::SqlitePool,
+) {
+    item.status = mando_types::task::ItemStatus::Merged;
+    let msg = format!(
+        "\u{1f389} Merged (PR {}): <b>{}</b>",
+        pr,
+        mando_shared::telegram_format::escape_html(&item.title)
+    );
+    notifier.high(&msg).await;
+    tracing::info!(module = "captain", title = %item.title, pr = %pr, "item merged");
+    super::timeline_emit::emit_for_task(
+        item,
+        mando_types::timeline::TimelineEventType::Merged,
+        &format!("PR {pr} merged on GitHub"),
+        serde_json::json!({ "pr": pr }),
+        pool,
+    )
+    .await;
+
+    if let Err(e) = linear_integration::writeback_status(item, config).await {
+        tracing::warn!(module = "captain", %e, "Linear status writeback failed");
+    }
+    if let Err(e) =
+        linear_integration::upsert_workpad(item, config, &format!("PR merged ({})", pr), pool).await
+    {
+        tracing::warn!(module = "captain", %e, "Linear workpad upsert failed");
+    }
+}
+
+async fn apply_closed(
+    item: &mut Task,
+    pr: &str,
+    config: &Config,
+    notifier: &Notifier,
+    pool: &sqlx::SqlitePool,
+) {
+    item.status = mando_types::task::ItemStatus::Canceled;
+    let msg = format!(
+        "\u{26d4} PR closed ({}): <b>{}</b>",
+        pr,
+        mando_shared::telegram_format::escape_html(&item.title)
+    );
+    notifier.high(&msg).await;
+    super::timeline_emit::emit_for_task(
+        item,
+        mando_types::timeline::TimelineEventType::Canceled,
+        &format!("PR {pr} closed on GitHub"),
+        serde_json::json!({ "pr": pr }),
+        pool,
+    )
+    .await;
+
+    if let Err(e) = linear_integration::writeback_status(item, config).await {
+        tracing::warn!(module = "captain", %e, "Linear status writeback failed");
+    }
 }

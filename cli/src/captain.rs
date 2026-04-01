@@ -6,7 +6,7 @@ use serde_json::json;
 use crate::captain_review::{
     handle_journal, handle_knowledge, handle_patterns, KnowledgeCommand, PatternsCommand,
 };
-use crate::http::DaemonClient;
+use crate::http::{parse_id, DaemonClient};
 
 #[derive(Args)]
 pub(crate) struct CaptainArgs {
@@ -21,9 +21,6 @@ pub(crate) enum CaptainCommand {
         /// Dry-run mode (no mutations)
         #[arg(long)]
         dry_run: bool,
-        /// Telegram chat ID for notifications
-        #[arg(long)]
-        notify_chat_id: Option<String>,
     },
     /// Show active workers table
     Workers {
@@ -122,15 +119,12 @@ pub(crate) enum CaptainCommand {
 
 pub(crate) async fn handle(args: CaptainArgs) -> anyhow::Result<()> {
     match args.command {
-        CaptainCommand::Tick {
-            dry_run,
-            notify_chat_id,
-        } => handle_tick(dry_run, notify_chat_id).await,
+        CaptainCommand::Tick { dry_run } => handle_tick(dry_run).await,
         CaptainCommand::Workers { watch, interval } => handle_workers(watch, interval).await,
         CaptainCommand::Merge { pr_num, project } => {
             handle_merge_pr(&pr_num, project.as_deref()).await
         }
-        CaptainCommand::Triage { item_id } => handle_triage(item_id.as_deref()).await,
+        CaptainCommand::Triage { item_id } => handle_triage_cmd(item_id.as_deref()).await,
         CaptainCommand::Reopen { id, feedback } => handle_reopen(&id, &feedback).await,
         CaptainCommand::Rework { id, feedback } => handle_rework(&id, &feedback).await,
         CaptainCommand::Retry { id } => handle_retry(&id).await,
@@ -160,12 +154,9 @@ pub(crate) async fn handle(args: CaptainArgs) -> anyhow::Result<()> {
     }
 }
 
-async fn handle_tick(dry_run: bool, notify_chat_id: Option<String>) -> anyhow::Result<()> {
+async fn handle_tick(dry_run: bool) -> anyhow::Result<()> {
     let client = DaemonClient::discover()?;
-    let mut body = json!({"dry_run": dry_run});
-    if let Some(chat_id) = notify_chat_id {
-        body["notify_chat_id"] = json!(chat_id);
-    }
+    let body = json!({"dry_run": dry_run});
     let result = client.post("/api/captain/tick", &body).await?;
     println!("{}", serde_json::to_string_pretty(&result)?);
     Ok(())
@@ -207,7 +198,7 @@ async fn handle_workers(watch: bool, interval: Option<u64>) -> anyhow::Result<()
     Ok(())
 }
 
-async fn handle_triage(item_id: Option<&str>) -> anyhow::Result<()> {
+pub(crate) async fn handle_triage_cmd(item_id: Option<&str>) -> anyhow::Result<()> {
     let client = DaemonClient::discover()?;
     let mut body = json!({});
     if let Some(id) = item_id {
@@ -219,55 +210,40 @@ async fn handle_triage(item_id: Option<&str>) -> anyhow::Result<()> {
 }
 
 async fn handle_reopen(id: &str, feedback: &str) -> anyhow::Result<()> {
-    let id_num: i64 = id
-        .parse()
-        .map_err(|_| anyhow::anyhow!("invalid task ID: {id}"))?;
     let client = DaemonClient::discover()?;
-    let body = json!({"id": id_num, "feedback": feedback});
+    let body = json!({"id": parse_id(id, "task")?, "feedback": feedback});
     client.post("/api/tasks/reopen", &body).await?;
     println!("Reopened task {id}");
     Ok(())
 }
 
 async fn handle_rework(id: &str, feedback: &str) -> anyhow::Result<()> {
-    let id_num: i64 = id
-        .parse()
-        .map_err(|_| anyhow::anyhow!("invalid task ID: {id}"))?;
     let client = DaemonClient::discover()?;
-    let body = json!({"id": id_num, "feedback": feedback});
+    let body = json!({"id": parse_id(id, "task")?, "feedback": feedback});
     client.post("/api/tasks/rework", &body).await?;
     println!("Rework requested for task {id}");
     Ok(())
 }
 
 async fn handle_retry(id: &str) -> anyhow::Result<()> {
-    let id_num: i64 = id
-        .parse()
-        .map_err(|_| anyhow::anyhow!("invalid task ID: {id}"))?;
     let client = DaemonClient::discover()?;
-    let body = json!({"id": id_num});
+    let body = json!({"id": parse_id(id, "task")?});
     client.post("/api/tasks/retry", &body).await?;
     println!("Retried task {id} — re-entering captain review");
     Ok(())
 }
 
 async fn handle_accept(id: &str) -> anyhow::Result<()> {
-    let id_num: i64 = id
-        .parse()
-        .map_err(|_| anyhow::anyhow!("invalid task ID: {id}"))?;
     let client = DaemonClient::discover()?;
-    let body = json!({"id": id_num});
+    let body = json!({"id": parse_id(id, "task")?});
     client.post("/api/tasks/accept", &body).await?;
     println!("Accepted task {id}");
     Ok(())
 }
 
 async fn handle_handoff(id: &str) -> anyhow::Result<()> {
-    let id_num: i64 = id
-        .parse()
-        .map_err(|_| anyhow::anyhow!("invalid task ID: {id}"))?;
     let client = DaemonClient::discover()?;
-    let body = json!({"id": id_num});
+    let body = json!({"id": parse_id(id, "task")?});
     client.post("/api/tasks/handoff", &body).await?;
     println!("Handed off task {id} to human");
     Ok(())

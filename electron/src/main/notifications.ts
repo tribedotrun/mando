@@ -110,24 +110,17 @@ export function registerNotificationHandlers(getMainWindow: () => BrowserWindow 
     });
 
     notification.on('click', () => {
-      // If there's a URL, open it in the browser.
-      if (clickUrl) {
-        shell.openExternal(clickUrl);
-      }
+      if (clickUrl) shell.openExternal(clickUrl);
 
-      // Bring the app window to focus.
       const win = getMainWindow();
       if (win) {
         win.show();
         win.focus();
+        win.webContents.send('notification-click', {
+          kind: payload.kind,
+          item_id: 'item_id' in payload.kind ? payload.kind.item_id : undefined,
+        });
       }
-
-      // Notify renderer about the click (for UI navigation).
-      const win2 = getMainWindow();
-      win2?.webContents.send('notification-click', {
-        kind: payload.kind,
-        item_id: 'item_id' in payload.kind ? payload.kind.item_id : undefined,
-      });
     });
 
     notification.show();

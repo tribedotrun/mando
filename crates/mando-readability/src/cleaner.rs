@@ -27,25 +27,17 @@ pub(crate) fn clean(dom: &Dom) {
 /// Recursively collect node ids whose subtrees should be removed.
 fn collect_removable(dom: &Dom, id: usize) -> Vec<usize> {
     let mut result = Vec::new();
-    let children = dom.children(id);
-    for child in children {
-        if should_remove(dom, child) {
+    for child in dom.children(id) {
+        let strip = dom.tag_name(child).is_some_and(|tag| {
+            STRIP_TAGS.contains(&tag.as_str()) || BOILERPLATE_TAGS.contains(&tag.as_str())
+        });
+        if strip {
             result.push(child);
         } else {
             result.extend(collect_removable(dom, child));
         }
     }
     result
-}
-
-fn should_remove(dom: &Dom, id: usize) -> bool {
-    if let Some(tag) = dom.tag_name(id) {
-        let tag = tag.as_str();
-        if STRIP_TAGS.contains(&tag) || BOILERPLATE_TAGS.contains(&tag) {
-            return true;
-        }
-    }
-    false
 }
 
 #[cfg(test)]

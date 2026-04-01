@@ -90,7 +90,7 @@ struct MergeArgs {
 struct NotifyArgs {
     /// Message to send
     message: String,
-    /// Chat ID (defaults to configured notify_chat_id)
+    /// Chat ID (defaults to configured telegram.owner)
     #[arg(long)]
     chat_id: Option<String>,
 }
@@ -211,6 +211,8 @@ async fn handle_firecrawl(args: FirecrawlArgs) -> anyhow::Result<()> {
 }
 
 async fn handle_tasks(args: TasksArgs) -> anyhow::Result<()> {
+    use std::collections::{BTreeMap, HashMap};
+
     let client = DaemonClient::discover()?;
 
     let api_path = if args.all {
@@ -220,8 +222,7 @@ async fn handle_tasks(args: TasksArgs) -> anyhow::Result<()> {
     };
 
     let result = client.get(api_path).await?;
-    let items = result["items"].as_array();
-    let items = match items {
+    let items = match result["items"].as_array() {
         Some(arr) if !arr.is_empty() => arr,
         _ => {
             println!("No tasks.");
@@ -249,8 +250,7 @@ async fn handle_tasks(args: TasksArgs) -> anyhow::Result<()> {
     ];
 
     // Count by status.
-    let mut status_counts: std::collections::HashMap<&str, usize> =
-        std::collections::HashMap::new();
+    let mut status_counts: HashMap<&str, usize> = HashMap::new();
     for item in items {
         let s = item["status"].as_str().unwrap_or("unknown");
         *status_counts.entry(s).or_default() += 1;
@@ -264,8 +264,7 @@ async fn handle_tasks(args: TasksArgs) -> anyhow::Result<()> {
     println!("{}", summary.join(" "));
 
     // Group by project.
-    let mut by_project: std::collections::BTreeMap<String, Vec<&serde_json::Value>> =
-        std::collections::BTreeMap::new();
+    let mut by_project: BTreeMap<String, Vec<&serde_json::Value>> = BTreeMap::new();
     for item in items {
         let project = item["project"].as_str().unwrap_or("unknown").to_string();
         by_project.entry(project).or_default().push(item);
@@ -348,14 +347,7 @@ async fn handle_health() -> anyhow::Result<()> {
 }
 
 async fn handle_triage(args: TriageArgs) -> anyhow::Result<()> {
-    let client = DaemonClient::discover()?;
-    let mut body = json!({});
-    if let Some(id) = args.item_id {
-        body["item_id"] = json!(id);
-    }
-    let result = client.post("/api/captain/triage", &body).await?;
-    println!("{}", serde_json::to_string_pretty(&result)?);
-    Ok(())
+    captain::handle_triage_cmd(args.item_id.as_deref()).await
 }
 
 // -----------------------------------------------------------------------

@@ -1,12 +1,13 @@
 /**
  * IPC handlers for onboarding validation: Claude Code, Telegram, Linear.
  *
- * In sandbox mode, all external calls are replaced with mock responses
- * to keep the sandbox fully isolated from production services.
+ * All validations hit real APIs even in sandbox mode — they are read-only
+ * checks (Telegram getMe, Linear GraphQL query, `which claude`) with no
+ * side effects. Sandbox isolation only applies to message sending, not
+ * token/key validation.
  */
 import { execFile } from 'child_process';
 import { promisify } from 'util';
-import { getAppMode } from '#main/daemon';
 import { handleTrusted } from '#main/ipc-security';
 import log from '#main/logger';
 
@@ -31,9 +32,6 @@ export function registerSetupValidationHandlers(): void {
   handleTrusted(
     'check-claude-code',
     async (): Promise<{ installed: boolean; version: string | null; works: boolean }> => {
-      if (getAppMode() === 'sandbox') {
-        return { installed: true, version: '1.0.0 (sandbox)', works: true };
-      }
       const which = await run('which', ['claude'], 5_000);
       if (!which) return { installed: false, version: null, works: false };
 
@@ -48,9 +46,6 @@ export function registerSetupValidationHandlers(): void {
   );
 
   handleTrusted('validate-telegram-token', async (_e, token: string) => {
-    if (getAppMode() === 'sandbox') {
-      return { valid: true, botName: 'SandboxBot', botUsername: 'mando_sandbox_bot' };
-    }
     try {
       const resp = await fetch(`https://api.telegram.org/bot${token}/getMe`);
       if (!resp.ok) {
@@ -72,12 +67,6 @@ export function registerSetupValidationHandlers(): void {
   });
 
   handleTrusted('validate-linear-key', async (_e, apiKey: string) => {
-    if (getAppMode() === 'sandbox') {
-      return {
-        valid: true,
-        teams: [{ id: 'mock-team', key: 'TST', name: 'Test Team' }],
-      };
-    }
     try {
       const resp = await fetch('https://api.linear.app/graphql', {
         method: 'POST',

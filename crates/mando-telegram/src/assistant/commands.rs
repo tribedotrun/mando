@@ -30,7 +30,7 @@ pub async fn cmd_addlink(bot: &mut TelegramBot, chat_id: &str, args: &str) -> Re
         send_html(
             bot,
             chat_id,
-            "Usage: /addlink <url> [title]\nMultiple: /addlink <url1> <url2> ...",
+            "Usage: /addlink &lt;url&gt; [title]\nMultiple: /addlink &lt;url1&gt; &lt;url2&gt; ...",
         )
         .await?;
         return Ok(());
@@ -52,7 +52,7 @@ pub async fn cmd_addlink(bot: &mut TelegramBot, chat_id: &str, args: &str) -> Re
         send_html(
             bot,
             chat_id,
-            "\u{274c} Not a valid URL. Usage: /addlink <url> [title]",
+            "\u{274c} Not a valid URL. Usage: /addlink &lt;url&gt; [title]",
         )
         .await?;
         return Ok(());
@@ -161,24 +161,14 @@ async fn addlink_batch(bot: &mut TelegramBot, chat_id: &str, urls: &[&str]) -> R
         }
     }
 
-    if added_ids.is_empty() {
-        // Nothing new — just show the status
-        if let Err(e) = bot
-            .api
-            .edit_message_text(chat_id, message_id, &lines.join("\n"), Some("HTML"), None)
-            .await
-        {
-            tracing::warn!(module = "telegram", error = %e, "message send failed");
-        }
-    } else {
-        // Edit to show what was added, then process in place
-        if let Err(e) = bot
-            .api
-            .edit_message_text(chat_id, message_id, &lines.join("\n"), Some("HTML"), None)
-            .await
-        {
-            tracing::warn!(module = "telegram", error = %e, "message send failed");
-        }
+    if let Err(e) = bot
+        .api
+        .edit_message_text(chat_id, message_id, &lines.join("\n"), Some("HTML"), None)
+        .await
+    {
+        tracing::warn!(module = "telegram", error = %e, "message send failed");
+    }
+    if !added_ids.is_empty() {
         auto_process_batch(bot, chat_id, message_id, &added_ids).await;
     }
     Ok(())
@@ -201,13 +191,13 @@ pub async fn cmd_simplelist(bot: &mut TelegramBot, chat_id: &str, args: &str) ->
 /// Items per page for compact list.
 const COMPACT_PER_PAGE: usize = 10;
 
-/// Render a paginated compact list page.
-pub async fn send_simplelist_page(
+/// Shared renderer for the compact (simple) list: fetches data from the gateway,
+/// builds HTML text and keyboard. Returns `None` when the list is empty.
+async fn render_compact_list(
     bot: &TelegramBot,
-    chat_id: &str,
     status_filter: &str,
     page: usize,
-) -> Result<()> {
+) -> Result<Option<(String, Value)>> {
     let result = bot
         .gw()
         .get(&paths::scout_items_with_status(Some(status_filter), 10000))
@@ -216,16 +206,7 @@ pub async fn send_simplelist_page(
     let total = result["total"].as_u64().map(|t| t as usize).unwrap_or(0);
 
     if total == 0 {
-        let msg = if status_filter.is_empty() {
-            "\u{1f4f0} No scout items.".into()
-        } else {
-            format!(
-                "\u{1f4f0} No items with status <b>{}</b>.",
-                escape_html(status_filter)
-            )
-        };
-        send_html(bot, chat_id, &msg).await?;
-        return Ok(());
+        return Ok(None);
     }
 
     let total_pages = total.div_ceil(COMPACT_PER_PAGE);
@@ -270,12 +251,36 @@ pub async fn send_simplelist_page(
         5,
         start,
     );
-    if kb.is_null() {
-        send_html(bot, chat_id, &text).await?;
-    } else {
-        bot.api
-            .send_message(chat_id, &text, Some("HTML"), Some(kb), true)
-            .await?;
+    Ok(Some((text, kb)))
+}
+
+/// Render a paginated compact list page.
+pub async fn send_simplelist_page(
+    bot: &TelegramBot,
+    chat_id: &str,
+    status_filter: &str,
+    page: usize,
+) -> Result<()> {
+    match render_compact_list(bot, status_filter, page).await? {
+        Some((text, kb)) if !kb.is_null() => {
+            bot.api
+                .send_message(chat_id, &text, Some("HTML"), Some(kb), true)
+                .await?;
+        }
+        Some((text, _)) => {
+            send_html(bot, chat_id, &text).await?;
+        }
+        None => {
+            let msg = if status_filter.is_empty() {
+                "\u{1f4f0} No scout items.".into()
+            } else {
+                format!(
+                    "\u{1f4f0} No items with status <b>{}</b>.",
+                    escape_html(status_filter)
+                )
+            };
+            send_html(bot, chat_id, &msg).await?;
+        }
     }
     Ok(())
 }
@@ -288,67 +293,39 @@ pub async fn edit_simplelist_page(
     status_filter: &str,
     page: usize,
 ) -> Result<()> {
-    let result = bot
-        .gw()
-        .get(&paths::scout_items_with_status(Some(status_filter), 10000))
-        .await?;
-    let items = result["items"].as_array();
-    let total = result["total"].as_u64().map(|t| t as usize).unwrap_or(0);
-    let total_pages = total.div_ceil(COMPACT_PER_PAGE);
-    let page = page.min(total_pages.saturating_sub(1));
-    let start = page * COMPACT_PER_PAGE;
-    let status_label = if status_filter.is_empty() {
-        "all"
-    } else {
-        status_filter
-    };
-
-    let mut text = format!(
-        "\u{1f4f0} <b>Scout</b> \u{2014} {} ({total} items)\n",
-        escape_html(status_label),
-    );
-
-    let mut page_ids = Vec::new();
-    if let Some(items) = items {
-        for (i, item) in items.iter().skip(start).take(COMPACT_PER_PAGE).enumerate() {
-            let id = item["id"].as_i64().unwrap_or(0);
-            page_ids.push(id);
-            let pos = start + i + 1;
-            let title = item["title"].as_str().unwrap_or("Untitled");
-            let url = item["url"].as_str().unwrap_or("");
-            let scores = match (item["relevance"].as_i64(), item["quality"].as_i64()) {
-                (Some(r), Some(q)) => format!(" R:{r}\u{00b7}Q:{q}"),
-                _ => String::new(),
-            };
-            text.push_str(&format!(
-                "<b>{pos}.</b> <a href=\"{}\">{}</a>{scores}\n",
-                escape_html(url),
-                escape_html(title),
-            ));
+    match render_compact_list(bot, status_filter, page).await? {
+        Some((text, kb)) => {
+            if let Err(e) = bot
+                .api
+                .edit_message_text(
+                    chat_id,
+                    message_id,
+                    &text,
+                    Some("HTML"),
+                    if kb.is_null() { None } else { Some(kb) },
+                )
+                .await
+            {
+                tracing::warn!(module = "telegram", error = %e, "message send failed");
+            }
         }
-    }
-
-    let kb = super::formatting::list_kb(
-        &page_ids,
-        page,
-        total_pages,
-        status_label,
-        "dg:cpage",
-        5,
-        start,
-    );
-    if let Err(e) = bot
-        .api
-        .edit_message_text(
-            chat_id,
-            message_id,
-            &text,
-            Some("HTML"),
-            if kb.is_null() { None } else { Some(kb) },
-        )
-        .await
-    {
-        tracing::warn!(module = "telegram", error = %e, "message send failed");
+        None => {
+            let msg = if status_filter.is_empty() {
+                "\u{1f4f0} No scout items.".into()
+            } else {
+                format!(
+                    "\u{1f4f0} No items with status <b>{}</b>.",
+                    escape_html(status_filter)
+                )
+            };
+            if let Err(e) = bot
+                .api
+                .edit_message_text(chat_id, message_id, &msg, Some("HTML"), None)
+                .await
+            {
+                tracing::warn!(module = "telegram", error = %e, "message send failed");
+            }
+        }
     }
     Ok(())
 }
@@ -361,7 +338,7 @@ pub async fn cmd_bulk_status(bot: &mut TelegramBot, chat_id: &str, args: &str) -
         send_html(
             bot,
             chat_id,
-            "Usage: /bulkstatus <pending|processed|saved|archived> <id...>\nExample: /bulkstatus archived 12 14 18",
+            "Usage: /bulkstatus &lt;pending|processed|saved|archived&gt; &lt;id...&gt;\nExample: /bulkstatus archived 12 14 18",
         )
         .await?;
         return Ok(());
@@ -402,7 +379,7 @@ pub async fn cmd_bulk_delete(bot: &mut TelegramBot, chat_id: &str, args: &str) -
         send_html(
             bot,
             chat_id,
-            "Usage: /bulkdelete <id...>\nExample: /bulkdelete 12 14 18",
+            "Usage: /bulkdelete &lt;id...&gt;\nExample: /bulkdelete 12 14 18",
         )
         .await?;
         return Ok(());
@@ -427,7 +404,12 @@ pub async fn cmd_bulk_delete(bot: &mut TelegramBot, chat_id: &str, args: &str) -
 pub async fn cmd_publish(bot: &mut TelegramBot, chat_id: &str, args: &str) -> Result<()> {
     let id = args.trim().trim_start_matches('#');
     if id.is_empty() {
-        send_html(bot, chat_id, "Usage: /publish <id>\nExample: /publish 42").await?;
+        send_html(
+            bot,
+            chat_id,
+            "Usage: /publish &lt;id&gt;\nExample: /publish 42",
+        )
+        .await?;
         return Ok(());
     }
 

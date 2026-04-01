@@ -1,75 +1,59 @@
 import React, { useState, useCallback } from 'react';
 import type { MandoConfig } from '#renderer/stores/settingsStore';
-import { PreviewPane, type Feature } from '#renderer/components/OnboardingPreview';
+import heroImg from '#renderer/assets/hero.png';
 import {
-  INPUT_CLS,
-  INPUT_STYLE,
   CenteredCard,
-  StatusCard,
-  CheckRow,
+  StepDots,
   GhostButton,
   OutlineButton,
   PrimaryButton,
 } from '#renderer/components/OnboardingPrimitives';
+import { TelegramScreen, LinearScreen } from '#renderer/components/OnboardingSteps';
 import { getErrorMessage } from '#renderer/utils';
 
-type Step = 'welcome' | 'claude-check' | 'telegram' | 'finishing';
+type Step = 'welcome' | 'claude-check' | 'telegram' | 'linear' | 'finishing';
 
 type CCResult = { installed: boolean; version: string | null; works: boolean } | null;
-type TGResult = { botUsername?: string; error?: string } | null;
 
-const FEATURES: { id: Feature; label: string; desc: string }[] = [
-  {
-    id: 'captain',
-    label: 'CAPTAIN',
-    desc: 'Your AI dev team. Add tasks, agents code and merge PRs autonomously.',
-  },
-  {
-    id: 'scout',
-    label: 'SCOUT',
-    desc: 'Curated learning. AI processes articles and repos you care about.',
-  },
-  {
-    id: 'sessions',
-    label: 'SESSIONS',
-    desc: 'Full audit trail. Every agent action, cost, and transcript.',
-  },
+const BULLETS = [
+  'Captain runs your backlog autonomously, nudges workers, escalates blockers, delivers reviewable PRs with visual evidence.',
+  'Parallel projects and worktrees in full isolation. All Claude Code sessions managed in real time.',
+  'Turns tech blogs, podcasts, and repos into actionable tasks tailored to your project.',
 ];
 
 export function OnboardingWizard(): React.ReactElement {
   const [step, setStep] = useState<Step>('welcome');
-  const [selectedFeature, setSelectedFeature] = useState<Feature>('captain');
   const [error, setError] = useState<string | null>(null);
   const [tgToken, setTgToken] = useState('');
+  const [linearKey, setLinearKey] = useState('');
+  const [linearTeam, setLinearTeam] = useState('');
 
-  const finishSetup = useCallback(
-    async (includeTg: boolean) => {
-      setError(null);
-      setStep('finishing');
-      try {
-        const config: MandoConfig = { features: { claudeCodeVerified: true } };
-        if (includeTg && tgToken.trim()) {
-          config.channels = { telegram: { enabled: true } };
-          config.env = { TELEGRAM_MANDO_BOT_TOKEN: tgToken.trim() };
-        }
-        await window.mandoAPI.setupComplete(JSON.stringify(config, null, 2));
-        window.location.reload();
-      } catch (err) {
-        setError(getErrorMessage(err, 'Failed to save configuration'));
-        setStep('telegram');
+  const finishSetup = useCallback(async () => {
+    setError(null);
+    setStep('finishing');
+    try {
+      const config: MandoConfig = { features: { claudeCodeVerified: true } };
+      const env: Record<string, string> = {};
+      if (tgToken.trim()) {
+        config.channels = { telegram: { enabled: true } };
+        env.TELEGRAM_MANDO_BOT_TOKEN = tgToken.trim();
       }
-    },
-    [tgToken],
-  );
+      if (linearKey.trim() && linearTeam) {
+        config.features!.linear = true;
+        config.captain = { linearTeam };
+        env.LINEAR_API_KEY = linearKey.trim();
+      }
+      if (Object.keys(env).length > 0) config.env = env;
+      await window.mandoAPI.setupComplete(JSON.stringify(config, null, 2));
+      window.location.reload();
+    } catch (err) {
+      setError(getErrorMessage(err, 'Failed to save configuration'));
+      setStep('linear');
+    }
+  }, [tgToken, linearKey, linearTeam]);
 
   if (step === 'welcome') {
-    return (
-      <WelcomeScreen
-        selected={selectedFeature}
-        onSelect={setSelectedFeature}
-        onStart={() => setStep('claude-check')}
-      />
-    );
+    return <WelcomeScreen onStart={() => setStep('claude-check')} />;
   }
 
   if (step === 'claude-check') {
@@ -78,13 +62,29 @@ export function OnboardingWizard(): React.ReactElement {
     );
   }
 
+  if (step === 'telegram') {
+    return (
+      <TelegramScreen
+        token={tgToken}
+        onTokenChange={setTgToken}
+        onBack={() => setStep('claude-check')}
+        onNext={() => setStep('linear')}
+        onSkip={() => {
+          setTgToken('');
+          setStep('linear');
+        }}
+      />
+    );
+  }
+
   return (
-    <TelegramScreen
-      token={tgToken}
-      onTokenChange={setTgToken}
-      onBack={() => setStep('claude-check')}
-      onSkip={() => finishSetup(false)}
-      onFinish={() => finishSetup(true)}
+    <LinearScreen
+      apiKey={linearKey}
+      onApiKeyChange={setLinearKey}
+      selectedTeam={linearTeam}
+      onTeamChange={setLinearTeam}
+      onBack={() => setStep('telegram')}
+      onFinish={finishSetup}
       error={error}
       finishing={step === 'finishing'}
     />
@@ -93,77 +93,54 @@ export function OnboardingWizard(): React.ReactElement {
 
 // ---- Welcome screen ----
 
-function WelcomeScreen({
-  selected,
-  onSelect,
-  onStart,
-}: {
-  selected: Feature;
-  onSelect: (f: Feature) => void;
-  onStart: () => void;
-}): React.ReactElement {
+function WelcomeScreen({ onStart }: { onStart: () => void }): React.ReactElement {
   return (
     <div
       data-testid="onboarding-wizard"
       className="flex h-full"
       style={{ background: 'var(--color-bg)' }}
     >
-      <div className="flex flex-col" style={{ width: 420, padding: '48px 40px', flexShrink: 0 }}>
-        <div style={{ marginBottom: 40 }}>
+      <div
+        className="flex flex-col"
+        style={{ width: 460, padding: 48, paddingTop: '28vh', flexShrink: 0 }}
+      >
+        <div style={{ marginBottom: 24 }}>
           <h1 className="text-display" style={{ color: 'var(--color-text-1)' }}>
             Mando
           </h1>
-          <p className="text-body" style={{ color: 'var(--color-text-2)', marginTop: 4 }}>
-            AI agents that ship your code
+          <p
+            className="text-subheading"
+            style={{ color: 'var(--color-text-2)', marginTop: 8, letterSpacing: '0.01em' }}
+          >
+            Manage tasks, not agents.
           </p>
         </div>
-        <div className="flex flex-col" style={{ gap: 12 }}>
-          {FEATURES.map((f) => {
-            const on = selected === f.id;
-            return (
-              <button
-                key={f.id}
-                onClick={() => onSelect(f.id)}
-                className="flex flex-col transition-colors"
+        <ul className="flex flex-col" style={{ gap: 24, listStyle: 'none', padding: 0, margin: 0 }}>
+          {BULLETS.map((text, i) => (
+            <li key={i} className="flex" style={{ gap: 12 }}>
+              <span
                 style={{
-                  padding: '16px 20px',
-                  borderRadius: 'var(--radius-panel)',
-                  border: `1px solid ${on ? 'var(--color-border)' : 'var(--color-border-subtle)'}`,
-                  background: 'var(--color-surface-1)',
-                  cursor: 'pointer',
-                  textAlign: 'left',
+                  width: 6,
+                  height: 6,
+                  borderRadius: 3,
+                  background: 'var(--color-accent)',
+                  flexShrink: 0,
+                  marginTop: 6,
                 }}
-              >
-                <div className="flex items-center" style={{ gap: 8, marginBottom: 8 }}>
-                  <span
-                    style={{
-                      width: 8,
-                      height: 8,
-                      borderRadius: 4,
-                      flexShrink: 0,
-                      background: on ? 'var(--color-accent)' : 'transparent',
-                      border: on ? 'none' : '1.5px solid var(--color-border)',
-                    }}
-                  />
-                  <span className="text-label" style={{ color: 'var(--color-text-2)' }}>
-                    {f.label}
-                  </span>
-                </div>
-                <p className="text-body" style={{ color: 'var(--color-text-3)' }}>
-                  {f.desc}
-                </p>
-              </button>
-            );
-          })}
-        </div>
-        <div className="flex-1" />
-        <div className="flex justify-center" style={{ paddingTop: 32 }}>
+              />
+              <span className="text-body" style={{ color: 'var(--color-text-1)', lineHeight: 1.5 }}>
+                {text}
+              </span>
+            </li>
+          ))}
+        </ul>
+        <div style={{ paddingTop: 40 }}>
           <button
             data-testid="onboarding-next"
             onClick={onStart}
-            className="text-[13px] font-semibold"
+            className="text-[13px] font-semibold transition-colors hover:brightness-110 active:brightness-90"
             style={{
-              padding: '10px 32px',
+              padding: '8px 20px',
               borderRadius: 'var(--radius-button)',
               background: 'var(--color-accent)',
               color: 'var(--color-bg)',
@@ -176,15 +153,27 @@ function WelcomeScreen({
         </div>
       </div>
       <div
-        className="flex flex-1 items-start justify-center"
+        className="flex flex-1 items-center justify-center"
         style={{
-          background: 'var(--color-surface-1)',
-          borderLeft: '1px solid var(--color-border-subtle)',
-          padding: 24,
-          overflow: 'auto',
+          padding: 48,
+          overflow: 'hidden',
+          background:
+            'radial-gradient(ellipse at center, rgba(138, 99, 210, 0.04) 0%, transparent 70%)',
         }}
       >
-        <PreviewPane feature={selected} />
+        <img
+          src={heroImg}
+          alt="Mando captain view"
+          style={{
+            width: '100%',
+            height: 'auto',
+            maxHeight: '70vh',
+            objectFit: 'contain',
+            borderRadius: 'var(--radius-panel)',
+            border: '1px solid var(--color-border-subtle)',
+            boxShadow: '0 4px 24px rgba(0, 0, 0, 0.25)',
+          }}
+        />
       </div>
     </div>
   );
@@ -224,47 +213,60 @@ function ClaudeCheckScreen({
 
   return (
     <CenteredCard data-testid="onboarding-wizard">
-      <h2 className="text-heading" style={{ color: 'var(--color-text-1)', marginBottom: 8 }}>
+      <StepDots total={3} current={0} />
+      <h2 className="text-subheading" style={{ color: 'var(--color-text-1)', marginBottom: 8 }}>
         Claude Code
       </h2>
-      <p className="text-body" style={{ color: 'var(--color-text-2)', marginBottom: 24 }}>
-        Mando uses Claude Code to run AI agents. Let&apos;s make sure it&apos;s working.
+      <p className="text-body" style={{ color: 'var(--color-text-3)', marginBottom: 24 }}>
+        Required to run Mando.
       </p>
 
-      <StatusCard>
+      <div
+        className="flex flex-col"
+        style={{
+          gap: 12,
+          marginBottom: 24,
+          padding: '16px 20px',
+          borderRadius: 'var(--radius-panel)',
+          background: 'rgba(255, 255, 255, 0.02)',
+        }}
+      >
         {checking && (
-          <span className="text-body" style={{ color: 'var(--color-text-3)' }}>
-            Checking…
-          </span>
+          <div className="flex items-center" style={{ gap: 10 }}>
+            <span
+              className="animate-spin"
+              style={{
+                width: 14,
+                height: 14,
+                borderRadius: 7,
+                border: '2px solid var(--color-accent)',
+                borderTopColor: 'transparent',
+                flexShrink: 0,
+              }}
+            />
+            <span className="text-body" style={{ color: 'var(--color-text-3)' }}>
+              Checking…
+            </span>
+          </div>
         )}
         {result && !checking && (
           <>
-            <CheckRow ok={result.installed} label="Installed" />
-            {result.version && (
-              <span
-                className="text-caption"
-                style={{ color: 'var(--color-text-3)', paddingLeft: 24 }}
-              >
-                {result.version}
-              </span>
-            )}
+            <StatusCheck ok={result.installed} label="Installed" detail={result.version} />
             {result.installed && (
-              <CheckRow
+              <StatusCheck
                 ok={result.works}
-                label={
-                  result.works ? 'Responding' : 'Not responding — check your Anthropic API key'
-                }
+                label={result.works ? 'Responding' : 'Not responding, check your API key'}
               />
             )}
           </>
         )}
-      </StatusCard>
+      </div>
 
       {result && !result.installed && !checking && (
-        <p className="text-body" style={{ color: 'var(--color-text-2)', marginBottom: 16 }}>
+        <p className="text-body" style={{ color: 'var(--color-text-2)', marginBottom: 24 }}>
           Install Claude Code from{' '}
           <a
-            href="https://docs.anthropic.com/en/docs/claude-code/overview"
+            href="https://code.claude.com/docs/en/overview"
             target="_blank"
             rel="noopener noreferrer"
             style={{ color: 'var(--color-accent)' }}
@@ -275,14 +277,14 @@ function ClaudeCheckScreen({
         </p>
       )}
 
-      <div className="flex items-center" style={{ gap: 8 }}>
+      <div className="flex items-center justify-center" style={{ gap: 12 }}>
         <GhostButton onClick={onBack}>Back</GhostButton>
         {!passed && (
           <OutlineButton onClick={runCheck} disabled={checking}>
             {checking ? 'Checking…' : 'Re-check'}
           </OutlineButton>
         )}
-        <PrimaryButton onClick={onPass} disabled={!passed} variant="success">
+        <PrimaryButton onClick={onPass} disabled={!passed}>
           Continue
         </PrimaryButton>
       </div>
@@ -290,106 +292,45 @@ function ClaudeCheckScreen({
   );
 }
 
-// ---- Telegram setup (skippable) ----
-
-function TelegramScreen({
-  token,
-  onTokenChange,
-  onBack,
-  onSkip,
-  onFinish,
-  error,
-  finishing,
+function StatusCheck({
+  ok,
+  label,
+  detail,
 }: {
-  token: string;
-  onTokenChange: (v: string) => void;
-  onBack: () => void;
-  onSkip: () => void;
-  onFinish: () => void;
-  error: string | null;
-  finishing: boolean;
+  ok: boolean;
+  label: string;
+  detail?: string | null;
 }): React.ReactElement {
-  const [validating, setValidating] = useState(false);
-  const [tgResult, setTgResult] = useState<TGResult>(null);
-
-  const validate = useCallback(async () => {
-    setValidating(true);
-    setTgResult(null);
-    try {
-      const res = await window.mandoAPI.validateTelegramToken(token.trim());
-      setTgResult(
-        res.valid ? { botUsername: res.botUsername } : { error: res.error ?? 'Invalid token' },
-      );
-    } catch {
-      setTgResult({ error: 'Validation failed' });
-    } finally {
-      setValidating(false);
-    }
-  }, [token]);
-
-  const tokenValid = !!tgResult?.botUsername;
-  const canFinish = tokenValid && !finishing;
-
   return (
-    <CenteredCard data-testid="onboarding-wizard">
-      <h2 className="text-heading" style={{ color: 'var(--color-text-1)', marginBottom: 8 }}>
-        Telegram
-      </h2>
-      <p className="text-body" style={{ color: 'var(--color-text-2)', marginBottom: 24 }}>
-        Control Mando from your phone. Create a bot via{' '}
-        <a
-          href="https://t.me/BotFather"
-          target="_blank"
-          rel="noopener noreferrer"
-          style={{ color: 'var(--color-accent)' }}
-        >
-          @BotFather
-        </a>{' '}
-        and paste the token below.
-      </p>
-
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 20 }}>
-        <div className="flex" style={{ gap: 8 }}>
-          <input
-            className={INPUT_CLS}
-            style={INPUT_STYLE}
-            value={token}
-            onChange={(e) => {
-              onTokenChange(e.target.value);
-              setTgResult(null);
-            }}
-            placeholder="Bot token"
-          />
-          <OutlineButton onClick={validate} disabled={!token.trim() || validating}>
-            {validating ? 'Checking…' : 'Verify'}
-          </OutlineButton>
-        </div>
-        {tgResult?.botUsername && <CheckRow ok label={`@${tgResult.botUsername}`} />}
-        {tgResult?.error && <CheckRow ok={false} label={tgResult.error} />}
-      </div>
-
-      {error && (
-        <div
-          className="text-body"
-          style={{
-            marginBottom: 16,
-            padding: '8px 16px',
-            borderRadius: 'var(--radius-button)',
-            background: 'var(--color-error-bg)',
-            color: 'var(--color-error)',
-          }}
-        >
-          {error}
-        </div>
+    <div className="flex items-center" style={{ gap: 10 }}>
+      <span
+        style={{
+          width: 16,
+          height: 16,
+          borderRadius: 8,
+          background: ok ? 'rgba(74, 180, 100, 0.85)' : 'var(--color-danger)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          flexShrink: 0,
+          fontSize: 10,
+          color: '#fff',
+          fontWeight: 700,
+        }}
+      >
+        {ok ? '✓' : '✗'}
+      </span>
+      <span
+        className="text-body"
+        style={{ color: ok ? 'var(--color-text-1)' : 'var(--color-danger)' }}
+      >
+        {label}
+      </span>
+      {detail && (
+        <span className="text-caption" style={{ color: 'var(--color-text-3)' }}>
+          {detail}
+        </span>
       )}
-
-      <div className="flex items-center" style={{ gap: 8 }}>
-        <GhostButton onClick={onBack}>Back</GhostButton>
-        <GhostButton onClick={onSkip}>Skip</GhostButton>
-        <PrimaryButton onClick={onFinish} disabled={!canFinish} variant="success">
-          {finishing ? 'Setting up…' : 'Finish Setup'}
-        </PrimaryButton>
-      </div>
-    </CenteredCard>
+    </div>
   );
 }

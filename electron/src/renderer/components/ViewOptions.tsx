@@ -1,4 +1,4 @@
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { useTaskStore } from '#renderer/stores/taskStore';
 import { useMountEffect } from '#renderer/hooks/useMountEffect';
 import { ToggleSwitch } from '#renderer/components/ToggleSwitch';
@@ -83,13 +83,13 @@ export function ViewOptions(): React.ReactElement {
 
   const [pos, setPos] = useState({ top: 0, left: 0 });
 
-  const openPopover = useCallback(() => {
+  const openPopover = () => {
     if (btnRef.current) {
       const rect = btnRef.current.getBoundingClientRect();
       setPos({ top: rect.bottom + 4, left: rect.right - 200 });
     }
     setOpen(true);
-  }, []);
+  };
 
   return (
     <>

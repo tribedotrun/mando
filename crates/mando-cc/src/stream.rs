@@ -23,6 +23,34 @@ pub fn current_session_lines(stream_path: &Path) -> Option<(String, usize)> {
     Some((content, last_init_idx))
 }
 
+/// Write a synthetic error result to a stream file so `get_stream_result` picks it up.
+///
+/// Used when an async CC task crashes before the CC process writes its own result event.
+pub fn write_error_result(stream_path: &Path, error: &str) {
+    use std::io::Write;
+    let line = serde_json::json!({
+        "type": "result",
+        "subtype": "error",
+        "is_error": true,
+        "error": error,
+    });
+    if let Some(parent) = stream_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let mut file = match std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(stream_path)
+    {
+        Ok(f) => f,
+        Err(e) => {
+            tracing::warn!(%e, "failed to write error result to stream");
+            return;
+        }
+    };
+    let _ = writeln!(file, "{}", line);
+}
+
 /// Get the result event from the current session in a JSONL stream log.
 pub fn get_stream_result(stream_path: &Path) -> Option<serde_json::Value> {
     let (content, last_init_idx) = current_session_lines(stream_path)?;

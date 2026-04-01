@@ -6,7 +6,7 @@ use axum::Json;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use crate::response::{error_response, internal_error};
+use crate::response::{error_response, internal_error, not_found_or_internal};
 use crate::AppState;
 
 // ---------------------------------------------------------------
@@ -57,17 +57,10 @@ pub(crate) async fn get_scout_item(
     Path(id): Path<i64>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let pool = state.db.pool();
-    match mando_scout::get_scout_item(pool, id).await {
-        Ok(val) => Ok(Json(val)),
-        Err(e) => {
-            let msg = e.to_string();
-            if msg.contains("not found") {
-                Err(error_response(StatusCode::NOT_FOUND, &msg))
-            } else {
-                Err(error_response(StatusCode::INTERNAL_SERVER_ERROR, &msg))
-            }
-        }
-    }
+    mando_scout::get_scout_item(pool, id)
+        .await
+        .map(Json)
+        .map_err(not_found_or_internal)
 }
 
 /// GET /api/scout/items/{id}/article
@@ -77,17 +70,10 @@ pub(crate) async fn get_scout_article(
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let pool = state.db.pool();
     let workflow = state.scout_workflow.load_full();
-    match mando_scout::ensure_scout_article(pool, id, &workflow).await {
-        Ok(val) => Ok(Json(val)),
-        Err(e) => {
-            let msg = e.to_string();
-            if msg.contains("not found") {
-                Err(error_response(StatusCode::NOT_FOUND, &msg))
-            } else {
-                Err(error_response(StatusCode::INTERNAL_SERVER_ERROR, &msg))
-            }
-        }
-    }
+    mando_scout::ensure_scout_article(pool, id, &workflow)
+        .await
+        .map(Json)
+        .map_err(not_found_or_internal)
 }
 
 // ---------------------------------------------------------------
@@ -380,24 +366,22 @@ pub(crate) async fn patch_scout_item(
     Json(body): Json<PatchScoutBody>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let pool = state.db.pool();
-    match mando_scout::update_scout_status(pool, id, &body.status).await {
-        Ok(()) => {
-            state.bus.send(
-                mando_types::BusEvent::Scout,
-                Some(json!({"action": "update", "id": id})),
-            );
-            Ok(Json(json!({"ok": true})))
-        }
-        Err(e) => {
+    mando_scout::update_scout_status(pool, id, &body.status)
+        .await
+        .map_err(|e| {
             let msg = e.to_string();
             let status = if msg.contains("invalid status") {
                 StatusCode::BAD_REQUEST
             } else {
                 StatusCode::INTERNAL_SERVER_ERROR
             };
-            Err(error_response(status, &msg))
-        }
-    }
+            error_response(status, &msg)
+        })?;
+    state.bus.send(
+        mando_types::BusEvent::Scout,
+        Some(json!({"action": "update", "id": id})),
+    );
+    Ok(Json(json!({"ok": true})))
 }
 
 // ---------------------------------------------------------------
@@ -410,23 +394,14 @@ pub(crate) async fn delete_scout_item(
     Path(id): Path<i64>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let pool = state.db.pool();
-    match mando_scout::delete_scout_item(pool, id).await {
-        Ok(val) => {
-            state.bus.send(
-                mando_types::BusEvent::Scout,
-                Some(json!({"action": "delete", "id": id})),
-            );
-            Ok(Json(val))
-        }
-        Err(e) => {
-            let msg = e.to_string();
-            if msg.contains("not found") {
-                Err(error_response(StatusCode::NOT_FOUND, &msg))
-            } else {
-                Err(error_response(StatusCode::INTERNAL_SERVER_ERROR, &msg))
-            }
-        }
-    }
+    let val = mando_scout::delete_scout_item(pool, id)
+        .await
+        .map_err(not_found_or_internal)?;
+    state.bus.send(
+        mando_types::BusEvent::Scout,
+        Some(json!({"action": "delete", "id": id})),
+    );
+    Ok(Json(val))
 }
 
 /// GET /api/scout/items/{id}/sessions — list CC sessions for a scout item.

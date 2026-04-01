@@ -168,12 +168,9 @@ async fn execute_picker_action(
     item_id: &str,
     title: &str,
 ) -> Result<()> {
-    use crate::callback_actions;
     match kind {
-        "reopen" => Ok(()),
-        "rework" => callback_actions::rework(bot, cid, item_id, title).await,
-        "handoff" => callback_actions::handoff(bot, cid, item_id, title).await,
-        "input" => Ok(()),
+        "rework" => crate::callback_actions::rework(bot, cid, item_id, title).await,
+        "handoff" => crate::callback_actions::handoff(bot, cid, item_id, title).await,
         _ => Ok(()),
     }
 }

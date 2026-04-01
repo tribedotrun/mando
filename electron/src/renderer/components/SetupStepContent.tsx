@@ -66,7 +66,7 @@ export function ClaudeCodeContent({
 
       <div className="flex items-center" style={{ gap: 6 }}>
         <a
-          href="https://docs.anthropic.com/en/docs/claude-code/overview"
+          href="https://code.claude.com/docs/en/overview"
           target="_blank"
           rel="noopener noreferrer"
           className={btnCls}

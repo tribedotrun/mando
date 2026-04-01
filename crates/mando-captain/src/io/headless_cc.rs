@@ -19,18 +19,16 @@ pub struct SessionLogEntry<'a> {
     pub worker_name: &'a str,
 }
 
-pub async fn log_cc_session(pool: &SqlitePool, entry: &SessionLogEntry<'_>) {
-    let task_id = if entry.task_id.is_empty() {
+/// Convert empty string to None, non-empty to Some.
+fn non_empty(s: &str) -> Option<&str> {
+    if s.is_empty() {
         None
     } else {
-        Some(entry.task_id)
-    };
-    let worker_name = if entry.worker_name.is_empty() {
-        None
-    } else {
-        Some(entry.worker_name)
-    };
+        Some(s)
+    }
+}
 
+pub async fn log_cc_session(pool: &SqlitePool, entry: &SessionLogEntry<'_>) {
     if let Err(e) = mando_db::queries::sessions::upsert_session(
         pool,
         &mando_db::queries::sessions::SessionUpsert {
@@ -43,9 +41,9 @@ pub async fn log_cc_session(pool: &SqlitePool, entry: &SessionLogEntry<'_>) {
             cost_usd: entry.cost_usd,
             duration_ms: entry.duration_ms.map(|d| d as i64),
             resumed: entry.resumed,
-            task_id,
+            task_id: non_empty(entry.task_id),
             scout_item_id: None,
-            worker_name,
+            worker_name: non_empty(entry.worker_name),
         },
     )
     .await

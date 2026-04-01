@@ -64,24 +64,18 @@ pub fn get_pid(session_id: &str) -> Option<u32> {
 
 /// Remove entries for dead processes. Call on daemon startup.
 pub fn cleanup_dead() {
-    let map = load();
-    let mut cleaned: PidMap = HashMap::new();
-    let mut removed = 0u32;
-    for (sid, pid) in &map {
-        if mando_cc::is_process_alive(*pid) {
-            cleaned.insert(sid.clone(), *pid);
-        } else {
-            removed += 1;
-        }
-    }
+    let mut map = load();
+    let before = map.len();
+    map.retain(|_, pid| mando_cc::is_process_alive(*pid));
+    let removed = before - map.len();
     if removed > 0 {
         tracing::info!(
             module = "pid_registry",
             removed,
-            remaining = cleaned.len(),
+            remaining = map.len(),
             "startup: cleaned dead PIDs"
         );
-        save(&cleaned);
+        save(&map);
     }
 }
 

@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import React, { useMemo } from 'react';
 import { useMountEffect } from '#renderer/hooks/useMountEffect';
 import { useMemoryStore } from '#renderer/stores/memoryStore';
 
@@ -6,6 +6,12 @@ const OUTCOME_COLORS: Record<string, string> = {
   success: 'var(--color-success)',
   failure: 'var(--color-error)',
   terminal: 'var(--color-text-4)',
+};
+
+const filterSelectStyle: React.CSSProperties = {
+  borderColor: 'var(--color-border)',
+  backgroundColor: 'var(--color-surface-2)',
+  color: 'var(--color-text-2)',
 };
 
 const ACTION_COLORS: Record<string, string> = {
@@ -113,11 +119,7 @@ export function JournalTable() {
           value={workerFilter}
           onChange={(e) => setWorkerFilter(e.target.value)}
           className="rounded border px-2 py-1 text-xs"
-          style={{
-            borderColor: 'var(--color-border)',
-            backgroundColor: 'var(--color-surface-2)',
-            color: 'var(--color-text-2)',
-          }}
+          style={filterSelectStyle}
         >
           <option value="">All workers</option>
           {workers.map((w) => (
@@ -130,11 +132,7 @@ export function JournalTable() {
           value={actionFilter}
           onChange={(e) => setActionFilter(e.target.value)}
           className="rounded border px-2 py-1 text-xs"
-          style={{
-            borderColor: 'var(--color-border)',
-            backgroundColor: 'var(--color-surface-2)',
-            color: 'var(--color-text-2)',
-          }}
+          style={filterSelectStyle}
         >
           <option value="">All actions</option>
           {actions.map((a) => (
@@ -147,11 +145,7 @@ export function JournalTable() {
           value={outcomeFilter}
           onChange={(e) => setOutcomeFilter(e.target.value)}
           className="rounded border px-2 py-1 text-xs"
-          style={{
-            borderColor: 'var(--color-border)',
-            backgroundColor: 'var(--color-surface-2)',
-            color: 'var(--color-text-2)',
-          }}
+          style={filterSelectStyle}
         >
           <option value="">All outcomes</option>
           <option value="success">success</option>

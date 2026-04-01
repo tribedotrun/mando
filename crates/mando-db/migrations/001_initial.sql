@@ -44,7 +44,6 @@ CREATE TABLE IF NOT EXISTS tasks (
     intervention_count         INTEGER NOT NULL DEFAULT 0,
     captain_review_trigger     TEXT,
     session_ids                TEXT    NOT NULL DEFAULT '{}',
-    clarifier_questions        TEXT,
     last_activity_at           TEXT,
     plan                       TEXT,
     no_pr                      INTEGER NOT NULL DEFAULT 0,
@@ -52,6 +51,10 @@ CREATE TABLE IF NOT EXISTS tasks (
     reopen_source              TEXT,
     images                     TEXT,
     retry_count                INTEGER NOT NULL DEFAULT 0,
+    review_fail_count          INTEGER NOT NULL DEFAULT 0,
+    clarifier_fail_count       INTEGER NOT NULL DEFAULT 0,
+    spawn_fail_count           INTEGER NOT NULL DEFAULT 0,
+    merge_fail_count           INTEGER NOT NULL DEFAULT 0,
     escalation_report          TEXT,
     source                     TEXT,
     archived_at                TEXT,
@@ -86,8 +89,9 @@ CREATE TABLE IF NOT EXISTS timeline_events (
     data       TEXT    NOT NULL DEFAULT '{}'
 );
 
-CREATE INDEX IF NOT EXISTS idx_timeline_task_ts   ON timeline_events(task_id, timestamp);
-CREATE INDEX IF NOT EXISTS idx_timeline_type      ON timeline_events(event_type);
+CREATE INDEX IF NOT EXISTS idx_timeline_task_ts      ON timeline_events(task_id, timestamp);
+CREATE INDEX IF NOT EXISTS idx_timeline_type         ON timeline_events(event_type);
+CREATE INDEX IF NOT EXISTS idx_timeline_task_type_ts  ON timeline_events(task_id, event_type, timestamp DESC);
 
 -- ── Ask history ─────────────────────────────────────────────────────────────
 

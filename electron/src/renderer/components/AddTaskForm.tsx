@@ -1,6 +1,7 @@
 import React, { useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { fetchHealth } from '#renderer/api';
+import { inputStyle, inputCls } from '#renderer/styles';
 import {
   MODE_COPY,
   ModeCard,
@@ -11,13 +12,7 @@ import { useMountEffect } from '#renderer/hooks/useMountEffect';
 import { useTaskStore } from '#renderer/stores/taskStore';
 
 const LAST_PROJECT_KEY = 'mando:lastProject';
-const titleInputCls =
-  'w-full rounded-md px-3 py-2 text-sm placeholder-[var(--color-text-3)] focus:outline-none focus:ring-1 resize-none';
-const titleInputStyle: React.CSSProperties = {
-  border: '1px solid var(--color-border)',
-  background: 'var(--color-surface-2)',
-  color: 'var(--color-text-1)',
-};
+const titleInputCls = `${inputCls} resize-none`;
 const projectSelectCls =
   'rounded-md px-3 py-2 text-[12px] font-medium uppercase tracking-[0.06em] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--color-accent)]';
 const footerButtonCls =
@@ -225,7 +220,7 @@ function AddTaskFormInner({ onClose }: { onClose: () => void }): React.ReactElem
                 placeholder="What needs to be done?"
                 rows={3}
                 className={titleInputCls}
-                style={{ ...titleInputStyle, caretColor: 'var(--color-accent)' }}
+                style={{ ...inputStyle, caretColor: 'var(--color-accent)' }}
               />
             </div>
 

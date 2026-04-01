@@ -43,25 +43,30 @@ pub async fn terminate_session(
         }
     }
 
-    // 3. Update cc_sessions status.
-    if let Err(e) =
-        mando_db::queries::sessions::update_session_status(pool, session_id, new_status).await
+    // 3. Update cc_sessions status. DB failure must not block local cleanup —
+    //    a stale DB row is recoverable via reconciliation, but a leaked PID or
+    //    health entry is not.
+    let db_ok = match mando_db::queries::sessions::update_session_status(
+        pool, session_id, new_status,
+    )
+    .await
     {
-        tracing::error!(
-            module = "session_terminate",
-            session_id,
-            error = %e,
-            "failed to update session status — session may appear stale until next reconciliation"
-        );
-        // Don't strip tracking data if DB update failed — let reconciliation
-        // retry the full cleanup on the next tick.
-        return;
-    }
+        Ok(()) => true,
+        Err(e) => {
+            tracing::error!(
+                module = "session_terminate",
+                session_id,
+                error = %e,
+                "failed to update session status — session may appear stale until next reconciliation"
+            );
+            false
+        }
+    };
 
     // 4. Update stream meta.
     mando_cc::update_stream_meta_status(session_id, "stopped", None);
 
-    // 5. Unregister PID.
+    // 5. Unregister PID — always, even if DB update failed.
     super::pid_registry::unregister(session_id);
 
     // 6. Remove health entry by worker_name if health_state provided.
@@ -73,10 +78,19 @@ pub async fn terminate_session(
         }
     }
 
-    tracing::info!(
-        module = "session_terminate",
-        session_id,
-        status = %new_status.as_str(),
-        "session terminated"
-    );
+    if db_ok {
+        tracing::info!(
+            module = "session_terminate",
+            session_id,
+            status = %new_status.as_str(),
+            "session terminated"
+        );
+    } else {
+        tracing::warn!(
+            module = "session_terminate",
+            session_id,
+            status = %new_status.as_str(),
+            "session terminated (PID + health cleaned, DB update failed)"
+        );
+    }
 }

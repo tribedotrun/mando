@@ -44,10 +44,29 @@ pub(super) async fn poll_reviewing_items(
             continue;
         }
 
+        // Detect async CC task crash before checking for a verdict.
+        if let Some(error_msg) = captain_review::check_review_failed(item) {
+            let mut fail_count = item.review_fail_count as u32;
+            captain_review::handle_review_error(
+                item,
+                &error_msg,
+                &mut fail_count,
+                workflow,
+                notifier,
+                pool,
+            )
+            .await;
+            item.review_fail_count = fail_count as i64;
+            continue;
+        }
+
         if let Some(verdict) = captain_review::check_review(item) {
             if let Err(e) = captain_review::apply_verdict(item, &verdict, notifier, pool).await {
-                tracing::warn!(module = "captain", item_id = item.id, error = %e, "apply_verdict failed");
+                tracing::warn!(module = "captain", item_id = item.id, error = %e,
+                    "apply_verdict failed, will retry next tick");
             }
+            // On success, apply_verdict clears review fields — item moves on.
+            // On failure, review fields are preserved — next tick retries.
             continue;
         }
 

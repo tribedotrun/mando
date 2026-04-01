@@ -12,6 +12,22 @@ fn tg_retry_config() -> RetryConfig {
     RetryConfig::default()
 }
 
+fn classify_tg_error(e: &anyhow::Error) -> RetryVerdict {
+    let msg = e.to_string();
+    if msg.contains("Too Many Requests")
+        || msg.contains("retry after")
+        || msg.contains("502")
+        || msg.contains("503")
+        || msg.contains("504")
+        || msg.contains("connection")
+        || msg.contains("timeout")
+    {
+        RetryVerdict::Transient
+    } else {
+        RetryVerdict::Permanent
+    }
+}
+
 /// A single bot command descriptor for `setMyCommands`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BotCommand {
@@ -22,7 +38,7 @@ pub struct BotCommand {
 /// Raw HTTP client for the Telegram Bot API.
 #[derive(Clone)]
 pub struct TelegramApi {
-    #[allow(dead_code)]
+    #[cfg_attr(not(test), allow(dead_code))]
     token: String,
     client: reqwest::Client,
     base_url: String,
@@ -58,44 +74,26 @@ impl TelegramApi {
     /// POST JSON to a Telegram API method with automatic retry on transient errors.
     async fn post_with_retry(&self, method: &str, body: &Value) -> Result<Value> {
         let url = self.url(method);
-        let method_name = method.to_string();
+        let method = method.to_string();
         let body = body.clone();
-        retry_on_transient(
-            &tg_retry_config(),
-            |e: &anyhow::Error| {
-                let msg = e.to_string();
-                if msg.contains("Too Many Requests")
-                    || msg.contains("retry after")
-                    || msg.contains("502")
-                    || msg.contains("503")
-                    || msg.contains("504")
-                    || msg.contains("connection")
-                    || msg.contains("timeout")
-                {
-                    RetryVerdict::Transient
-                } else {
-                    RetryVerdict::Permanent
-                }
-            },
-            || {
-                let url = url.clone();
-                let method_name = method_name.clone();
-                let body = body.clone();
-                let client = self.client.clone();
-                async move {
-                    let resp: ApiResponse = client
-                        .post(&url)
-                        .json(&body)
-                        .send()
-                        .await
-                        .context(format!("{method_name} request failed"))?
-                        .json()
-                        .await
-                        .context(format!("{method_name} response parse failed"))?;
-                    resp.into_result(&method_name)
-                }
-            },
-        )
+        retry_on_transient(&tg_retry_config(), classify_tg_error, || {
+            let url = url.clone();
+            let method = method.clone();
+            let body = body.clone();
+            let client = self.client.clone();
+            async move {
+                let resp: ApiResponse = client
+                    .post(&url)
+                    .json(&body)
+                    .send()
+                    .await
+                    .context(format!("{method} request failed"))?
+                    .json()
+                    .await
+                    .context(format!("{method} response parse failed"))?;
+                resp.into_result(&method)
+            }
+        })
         .await
     }
 

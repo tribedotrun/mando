@@ -16,11 +16,6 @@ pub(super) enum MergeStatus {
     Unknown,
 }
 
-/// Resolve the GitHub repo slug from a project name via config lookup.
-pub(super) fn resolve_github_repo(project_name: Option<&str>, config: &Config) -> Option<String> {
-    mando_config::resolve_github_repo(project_name, config)
-}
-
 /// Check PR mergeable status via `gh pr view`.
 pub(super) async fn check_pr_mergeable(pr: &str, repo: &str) -> Result<MergeStatus> {
     let pr_num = pr.trim_start_matches('#');
@@ -139,19 +134,20 @@ pub(super) async fn handle_conflict(
     if rebase_retries >= max_rebase_retries {
         let item = &mut items[idx];
         item.rebase_worker = Some("failed".into());
-        let msg = format!(
-            "\u{274c} Rebase failed (PR {}, {} retries): <b>{}</b> — needs manual intervention",
-            pr,
-            max_rebase_retries,
-            mando_shared::telegram_format::escape_html(&item.title),
+        let title = mando_shared::telegram_format::escape_html(&item.title);
+
+        // Route through CaptainReviewing (rebase_fail trigger) instead of
+        // escalating directly — invariant 1: Escalated only via CaptainReviewing verdict.
+        super::action_contract::reset_review_retry(
+            item,
+            mando_types::task::ReviewTrigger::RebaseFail,
         );
-        alerts.push(msg.clone());
-        notifier.critical(&msg).await;
+
         super::timeline_emit::emit_for_task(
             item,
-            mando_types::timeline::TimelineEventType::Escalated,
+            mando_types::timeline::TimelineEventType::CaptainReviewStarted,
             &format!(
-                "Rebase failed after {} retries (PR {})",
+                "Rebase failed after {} retries (PR {}) — captain reviewing",
                 max_rebase_retries, pr
             ),
             serde_json::json!({
@@ -162,6 +158,13 @@ pub(super) async fn handle_conflict(
             pool,
         )
         .await;
+
+        let msg = format!(
+            "\u{274c} Rebase failed (PR {}, {} retries): <b>{}</b> — captain reviewing",
+            pr, max_rebase_retries, title,
+        );
+        alerts.push(msg.clone());
+        notifier.critical(&msg).await;
         return;
     }
 

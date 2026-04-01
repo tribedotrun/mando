@@ -31,10 +31,9 @@ pub fn content_path(id: i64) -> PathBuf {
     content_dir().join(format!("{id:03}.txt"))
 }
 
-/// Read a summary file, returning None if it doesn't exist.
-pub fn read_summary(id: i64, slug: &str) -> Option<String> {
-    let path = summary_path(id, slug);
-    match std::fs::read_to_string(&path) {
+/// Read a file, returning None if missing. Logs a warning on other errors.
+fn read_optional(path: &std::path::Path) -> Option<String> {
+    match std::fs::read_to_string(path) {
         Ok(s) => Some(s),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
         Err(e) => {
@@ -42,6 +41,11 @@ pub fn read_summary(id: i64, slug: &str) -> Option<String> {
             None
         }
     }
+}
+
+/// Read a summary file, returning None if it doesn't exist.
+pub fn read_summary(id: i64, slug: &str) -> Option<String> {
+    read_optional(&summary_path(id, slug))
 }
 
 /// Write a summary file, creating directories as needed.
@@ -86,28 +90,12 @@ pub fn delete_stale_summaries(id: i64, keep_slug: &str) -> std::io::Result<()> {
 
 /// Read a content/article file, returning None if it doesn't exist.
 pub fn read_content(id: i64) -> Option<String> {
-    let path = content_path(id);
-    match std::fs::read_to_string(&path) {
-        Ok(s) => Some(s),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
-        Err(e) => {
-            tracing::warn!("failed to read {}: {e}", path.display());
-            None
-        }
-    }
+    read_optional(&content_path(id))
 }
 
 /// Read the synthesized article markdown, returning None if it doesn't exist.
 pub fn read_article(id: i64) -> Option<String> {
-    let path = article_path(id);
-    match std::fs::read_to_string(&path) {
-        Ok(s) => Some(s),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
-        Err(e) => {
-            tracing::warn!("failed to read {}: {e}", path.display());
-            None
-        }
-    }
+    read_optional(&article_path(id))
 }
 
 /// Path for the synthesized article: `{id:03d}-article.md`.

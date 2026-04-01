@@ -23,7 +23,6 @@ import { getErrorMessage } from '#renderer/utils';
 export function useTaskActions() {
   const taskFetch = useTaskStore((s) => s.fetch);
   const taskItems = useTaskStore((s) => s.items);
-
   const optimisticUpdate = useTaskStore((s) => s.optimisticUpdate);
 
   const [mergeItem, setMergeItem] = useState<TaskItem | null>(null);
@@ -37,6 +36,27 @@ export function useTaskActions() {
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const { selectedIds, toggleSelect, toggleSelectAll, clearSelection } = useSelection();
+
+  const toast = useToastStore.getState;
+
+  /** Optimistic update + API call + refresh; toast on error. */
+  async function optimisticAction(
+    id: number,
+    optimisticStatus: ItemStatus,
+    fn: () => Promise<unknown>,
+    errLabel: string,
+    successMsg?: string,
+  ): Promise<void> {
+    optimisticUpdate(id, { status: optimisticStatus });
+    try {
+      await fn();
+      taskFetch();
+      if (successMsg) toast().add('success', successMsg);
+    } catch (err) {
+      taskFetch();
+      toast().add('error', getErrorMessage(err, errLabel));
+    }
+  }
 
   const handleMerge = async (itemId: number, pr: string, project: string) => {
     setMergePending(true);
@@ -62,83 +82,58 @@ export function useTaskActions() {
     }
   };
 
-  const handleAccept = async (id: number) => {
-    optimisticUpdate(id, { status: 'completed-no-pr' });
-    try {
-      await acceptItem(id);
-      taskFetch();
-    } catch (err) {
-      taskFetch();
-      useToastStore.getState().add('error', getErrorMessage(err, 'Accept failed'));
-    }
-  };
+  const handleAccept = (id: number) =>
+    optimisticAction(id, 'completed-no-pr', () => acceptItem(id), 'Accept failed');
 
   const handleReopen = async (id: number, feedback: string) => {
     setReopenPending(true);
-    optimisticUpdate(id, { status: 'new' });
-    try {
-      await reopenItem(id, feedback);
-      taskFetch();
-      useToastStore.getState().add('success', 'Task reopened');
-    } catch (err) {
-      taskFetch();
-      useToastStore.getState().add('error', getErrorMessage(err, 'Reopen failed'));
-    } finally {
-      setReopenPending(false);
-      setReopenItem(null);
-    }
+    await optimisticAction(
+      id,
+      'new',
+      () => reopenItem(id, feedback),
+      'Reopen failed',
+      'Task reopened',
+    );
+    setReopenPending(false);
+    setReopenItem(null);
   };
 
   const handleRework = async (id: number, feedback: string) => {
     setReworkPending(true);
-    optimisticUpdate(id, { status: 'rework' });
-    try {
-      await reworkItem(id, feedback);
-      taskFetch();
-      useToastStore.getState().add('success', 'Rework requested');
-    } catch (err) {
-      taskFetch();
-      useToastStore.getState().add('error', getErrorMessage(err, 'Rework failed'));
-    } finally {
-      setReworkPending(false);
-      setReworkItem(null);
-    }
+    await optimisticAction(
+      id,
+      'rework',
+      () => reworkItem(id, feedback),
+      'Rework failed',
+      'Rework requested',
+    );
+    setReworkPending(false);
+    setReworkItem(null);
   };
 
-  const handleStatusChange = async (id: number, status: ItemStatus) => {
-    optimisticUpdate(id, { status });
-    try {
-      await updateItem(id, { status });
-      taskFetch();
-    } catch (err) {
-      taskFetch();
-      useToastStore.getState().add('error', getErrorMessage(err, 'Status change failed'));
-    }
-  };
+  const handleStatusChange = (id: number, status: ItemStatus) =>
+    optimisticAction(id, status, () => updateItem(id, { status }), 'Status change failed');
 
   const handleHandoff = async (id: number) => {
     try {
       await handoffItem(id);
       taskFetch();
-      const item = taskItems.find((b) => b.id === id);
-      const wt = item?.worktree;
+      const wt = taskItems.find((b) => b.id === id)?.worktree;
       if (wt) {
         try {
           await navigator.clipboard.writeText(wt);
-          useToastStore
-            .getState()
-            .add(
-              'success',
-              'Handed off — worktree path copied. Open a terminal and run Claude there.',
-            );
+          toast().add(
+            'success',
+            'Handed off — worktree path copied. Open a terminal and run Claude there.',
+          );
         } catch {
-          useToastStore.getState().add('success', 'Task handed off');
+          toast().add('success', 'Task handed off');
         }
       } else {
-        useToastStore.getState().add('success', 'Task handed off');
+        toast().add('success', 'Task handed off');
       }
     } catch (err) {
-      useToastStore.getState().add('error', getErrorMessage(err, 'Handoff failed'));
+      toast().add('error', getErrorMessage(err, 'Handoff failed'));
     }
   };
 
@@ -152,7 +147,7 @@ export function useTaskActions() {
       taskFetch();
     } catch (err) {
       taskFetch();
-      useToastStore.getState().add('error', getErrorMessage(err, 'Bulk update failed'));
+      toast().add('error', getErrorMessage(err, 'Bulk update failed'));
     }
   };
 
@@ -170,7 +165,7 @@ export function useTaskActions() {
       setDeleteModalOpen(false);
       if (result.warnings?.length) {
         for (const w of result.warnings) {
-          useToastStore.getState().add('error', w);
+          toast().add('error', w);
         }
       }
     } catch (err) {
@@ -180,34 +175,29 @@ export function useTaskActions() {
     }
   };
 
-  const handleRetry = async (id: number) => {
-    optimisticUpdate(id, { status: 'captain-reviewing' as ItemStatus });
-    try {
-      await retryItem(id);
-      taskFetch();
-      useToastStore.getState().add('success', 'Retry triggered');
-    } catch (err) {
-      taskFetch();
-      useToastStore.getState().add('error', getErrorMessage(err, 'Retry failed'));
-    }
-  };
+  const handleRetry = (id: number) =>
+    optimisticAction(
+      id,
+      'captain-reviewing' as ItemStatus,
+      () => retryItem(id),
+      'Retry failed',
+      'Retry triggered',
+    );
 
   const handleAnswer = async (id: number, answer: string) => {
     try {
       const result = await answerClarification(id, answer);
       taskFetch();
-      if (result.status === 'ready') {
-        useToastStore.getState().add('success', 'Clarified — task queued');
-      } else if (result.status === 'clarifying') {
-        useToastStore.getState().add('info', 'Still needs more info');
-      } else if (result.status === 'escalate') {
-        useToastStore.getState().add('info', 'Escalated to captain review');
-      } else {
-        useToastStore.getState().add('success', 'Answer saved');
-      }
+      const msgs: Record<string, [variant: 'success' | 'info', msg: string]> = {
+        ready: ['success', 'Clarified — task queued'],
+        clarifying: ['info', 'Still needs more info'],
+        escalate: ['info', 'Escalated to captain review'],
+      };
+      const [variant, msg] = msgs[result.status] ?? ['success', 'Answer saved'];
+      toast().add(variant, msg);
     } catch (err) {
       taskFetch();
-      useToastStore.getState().add('error', getErrorMessage(err, 'Answer failed'));
+      toast().add('error', getErrorMessage(err, 'Answer failed'));
     }
   };
 
@@ -215,9 +205,9 @@ export function useTaskActions() {
     try {
       await nudgeWorker(id, message);
       taskFetch();
-      useToastStore.getState().add('success', `Nudged task #${id}`);
+      toast().add('success', `Nudged task #${id}`);
     } catch (err) {
-      useToastStore.getState().add('error', getErrorMessage(err, 'Nudge failed'));
+      toast().add('error', getErrorMessage(err, 'Nudge failed'));
     }
   };
 

@@ -58,6 +58,8 @@ export function ScoutReader({ itemId, onBack, onAsk, qaOpen }: Props): React.Rea
   const item: ScoutItem | null = itemQuery.data ?? null;
   const loading = itemQuery.isLoading;
   const error = itemQuery.error ? getErrorMessage(itemQuery.error, 'Failed') : null;
+  const displayTitle =
+    item?.title || (item?.status === 'pending' ? 'Pending processing\u2026' : 'Untitled');
   const article = articleQuery.data?.article ?? null;
   const telegraphUrl =
     publishedUrl ?? articleQuery.data?.telegraphUrl ?? item?.telegraphUrl ?? null;
@@ -148,7 +150,7 @@ export function ScoutReader({ itemId, onBack, onAsk, qaOpen }: Props): React.Rea
           &larr; Back
         </button>
         <span className="text-xs truncate max-w-[300px]" style={{ color: 'var(--color-text-3)' }}>
-          {item.title || (item.status === 'pending' ? 'Pending processing\u2026' : 'Untitled')}
+          {displayTitle}
         </span>
         <div className="ml-auto flex items-center gap-1">
           <button
@@ -296,7 +298,7 @@ export function ScoutReader({ itemId, onBack, onAsk, qaOpen }: Props): React.Rea
           className="text-lg font-semibold leading-snug mb-2"
           style={{ color: 'var(--color-text-1)' }}
         >
-          {item.title || (item.status === 'pending' ? 'Pending processing\u2026' : 'Untitled')}
+          {displayTitle}
         </h1>
         <div
           className="flex items-center gap-3 font-mono text-xs"

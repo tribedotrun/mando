@@ -59,6 +59,11 @@ pub(crate) async fn reclarify_items(
                         );
                     }
                     ClarifierStatus::Clarifying => {
+                        // Only stamp last_activity_at on the initial transition
+                        // so the timeout clock doesn't reset every tick.
+                        if item.status != ItemStatus::NeedsClarification {
+                            item.last_activity_at = Some(mando_types::now_rfc3339());
+                        }
                         item.status = ItemStatus::NeedsClarification;
                         item.context = Some(result.context);
                         if let Some(ref sid) = result.session_id {

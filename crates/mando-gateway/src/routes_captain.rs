@@ -294,9 +294,11 @@ pub(crate) async fn get_workers(State(state): State<AppState>) -> Json<Value> {
     let workers: Vec<Value> = all_items
         .iter()
         .filter(|task| {
-            (task.status == mando_types::task::ItemStatus::InProgress
-                || task.status == mando_types::task::ItemStatus::CaptainReviewing)
-                && task.worker.is_some()
+            matches!(
+                task.status,
+                mando_types::task::ItemStatus::InProgress
+                    | mando_types::task::ItemStatus::CaptainReviewing
+            ) && task.worker.is_some()
         })
         .map(|task| {
             let worker_name = task.worker.as_deref().unwrap_or("");

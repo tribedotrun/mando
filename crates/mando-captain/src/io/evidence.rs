@@ -7,8 +7,8 @@ use anyhow::Result;
 use crate::pr_evidence::{evidence_sections, html_img_src_urls};
 
 /// Media extensions we recognize as evidence.
-const IMAGE_EXTS: &[&str] = &[".png", ".jpg", ".jpeg", ".gif"];
 const VIDEO_EXTS: &[&str] = &[".mp4", ".mov", ".webm"];
+const ALL_MEDIA_EXTS: &[&str] = &[".png", ".jpg", ".jpeg", ".gif", ".mp4", ".mov", ".webm"];
 
 /// Max evidence URLs to process per PR (keeps review fast).
 const MAX_EVIDENCE_URLS: usize = 3;
@@ -20,11 +20,6 @@ const MAX_EVIDENCE_URLS: usize = 3;
 /// `MAX_EVIDENCE_URLS`.
 pub(crate) fn extract_evidence_urls(pr_body: &str) -> Vec<String> {
     let mut urls: Vec<String> = Vec::new();
-    let all_exts: Vec<&str> = IMAGE_EXTS
-        .iter()
-        .chain(VIDEO_EXTS.iter())
-        .copied()
-        .collect();
 
     for section in evidence_sections(pr_body) {
         for line in section.lines() {
@@ -48,7 +43,7 @@ pub(crate) fn extract_evidence_urls(pr_body: &str) -> Vec<String> {
                     word.trim_matches(|c: char| c == '(' || c == ')' || c == '<' || c == '>');
                 if cleaned.starts_with("http") {
                     let path_lower = url_without_query(cleaned).to_lowercase();
-                    if all_exts.iter().any(|ext| path_lower.ends_with(ext)) {
+                    if ALL_MEDIA_EXTS.iter().any(|ext| path_lower.ends_with(ext)) {
                         push_http_url(&mut urls, cleaned);
                     }
                 }

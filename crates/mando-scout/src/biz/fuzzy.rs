@@ -92,10 +92,7 @@ fn word_similarity(a: &str, b: &str) -> f64 {
 fn levenshtein(a: &str, b: &str) -> usize {
     let a: Vec<char> = a.chars().collect();
     let b: Vec<char> = b.chars().collect();
-    let mut dp = vec![0usize; b.len() + 1];
-    for (j, slot) in dp.iter_mut().enumerate().take(b.len() + 1) {
-        *slot = j;
-    }
+    let mut dp: Vec<usize> = (0..=b.len()).collect();
     for i in 1..=a.len() {
         let mut prev = dp[0];
         dp[0] = i;

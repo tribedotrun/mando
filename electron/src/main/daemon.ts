@@ -252,7 +252,7 @@ async function checkVersionAndUpdate(dataDir: string): Promise<void> {
   const result = await healthCheck();
   if (!result.healthy || !result.version) return;
 
-  const bundledVersion = getBundledVersion();
+  const bundledVersion = readAppPackageVersion();
   if (!bundledVersion || result.version === bundledVersion) return;
 
   log.info(`Version mismatch: daemon=${result.version}, bundled=${bundledVersion}. Updating...`);
@@ -273,10 +273,6 @@ async function checkVersionAndUpdate(dataDir: string): Promise<void> {
     invalidateDiscoveryCache();
     await waitForDaemon(10000);
   }
-}
-
-function getBundledVersion(): string | null {
-  return readAppPackageVersion();
 }
 
 // ---------------------------------------------------------------------------

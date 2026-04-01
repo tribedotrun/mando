@@ -7,7 +7,7 @@
 import { app, BrowserWindow, Tray, Menu, globalShortcut, dialog, shell } from 'electron';
 import path from 'path';
 import fs from 'fs';
-import http from 'http';
+import type http from 'http';
 import log from '#main/logger';
 import { installCliAndPlists, getDaemonStatus, removeLegacyAppPlist } from '#main/launchd';
 import { registerSetupValidationHandlers } from '#main/setup-validation';
@@ -381,11 +381,13 @@ handleTrusted('setup-complete', async (_: unknown, configJson: string) => {
     );
   }
 
-  // Install CLI binary and launchd plists.
-  try {
-    installCliAndPlists(dataDir);
-  } catch (e: unknown) {
-    log.warn('launchd setup failed:', e instanceof Error ? e.message : e);
+  // Install CLI binary and launchd plists (skip in sandbox — sandbox manages its own processes).
+  if (getAppMode() !== 'sandbox') {
+    try {
+      installCliAndPlists(dataDir);
+    } catch (e: unknown) {
+      log.warn('launchd setup failed:', e instanceof Error ? e.message : e);
+    }
   }
   return true;
 });
@@ -396,6 +398,7 @@ handleTrusted('launchd:reinstall', () => {
   return true;
 });
 handleTrusted('launchd:daemon-status', () => getDaemonStatus());
+handleTrusted('open-logs-folder', () => shell.openPath(path.join(getDataDir(), 'logs')));
 
 // ---------------------------------------------------------------------------
 // App lifecycle

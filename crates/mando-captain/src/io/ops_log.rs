@@ -120,8 +120,8 @@ pub(crate) fn abandon_op(log: &mut OpsLog, op_id: &str, reason: &str) {
 }
 
 /// Get all incomplete operations.
-pub(crate) fn incomplete_ops(log: &OpsLog) -> Vec<&OpEntry> {
-    log.entries.iter().collect()
+pub(crate) fn incomplete_ops(log: &OpsLog) -> &[OpEntry] {
+    &log.entries
 }
 
 /// Prune entries older than `max_age_secs`.
@@ -143,8 +143,7 @@ pub(crate) fn is_step_done(log: &OpsLog, op_id: &str, step: &str) -> bool {
     log.entries
         .iter()
         .find(|e| e.op_id == op_id)
-        .map(|e| e.steps_completed.contains(&step.to_string()))
-        .unwrap_or(false)
+        .is_some_and(|e| e.steps_completed.iter().any(|s| s == step))
 }
 
 /// Wrap an async operation with WAL begin/complete. On success the entry is

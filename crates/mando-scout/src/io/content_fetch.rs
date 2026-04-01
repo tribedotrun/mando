@@ -78,21 +78,17 @@ fn is_youtube_url(url: &str) -> bool {
         || lower.contains("youtube.com/shorts/")
 }
 
-fn is_twitter_url_lower(lower: &str) -> bool {
+fn is_twitter_url(url: &str) -> bool {
+    let lower = url.to_lowercase();
     lower.contains("://x.com/")
         || lower.contains("://www.x.com/")
         || lower.contains("://twitter.com/")
         || lower.contains("://www.twitter.com/")
 }
 
-fn is_twitter_url(url: &str) -> bool {
-    is_twitter_url_lower(&url.to_lowercase())
-}
-
 /// True for tweet/status URLs only — NOT for x.com articles or other content.
 fn is_tweet_status_url(url: &str) -> bool {
-    let lower = url.to_lowercase();
-    is_twitter_url_lower(&lower) && lower.contains("/status/")
+    is_twitter_url(url) && url.to_lowercase().contains("/status/")
 }
 
 /// Fetch tweet via oEmbed, resolve embedded links, fetch linked content.
@@ -175,23 +171,8 @@ async fn try_fetch_linked(url: &str) -> Result<String> {
 
 /// Extract readable text from Twitter blockquote HTML.
 fn extract_tweet_text(html: &str) -> String {
-    let mut text = String::new();
-    let mut in_tag = false;
-
-    for ch in html.chars() {
-        match ch {
-            '<' => in_tag = true,
-            '>' => in_tag = false,
-            _ if !in_tag => text.push(ch),
-            _ => {}
-        }
-    }
-
-    text.split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-        .trim()
-        .to_string()
+    let text = super::strip_html_tags(html);
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 /// Extract t.co links from HTML.
@@ -230,18 +211,16 @@ async fn resolve_tco(tco_url: &str) -> Result<String> {
 /// Try readability-based extraction (fast path).
 async fn try_readability(url: &str) -> Result<String> {
     let html = fetch_raw(url).await?;
-    match mando_readability::extract(&html) {
-        Ok(article) if article.text_content.len() >= MIN_CONTENT_CHARS => Ok(article.text_content),
-        Ok(article) => {
-            info!(
-                url,
-                chars = article.text_content.len(),
-                "readability extraction short, returning as-is"
-            );
-            Ok(article.text_content)
-        }
-        Err(e) => Err(anyhow::anyhow!("readability extraction failed: {e}")),
+    let article = mando_readability::extract(&html)
+        .map_err(|e| anyhow::anyhow!("readability extraction failed: {e}"))?;
+    if article.text_content.len() < MIN_CONTENT_CHARS {
+        info!(
+            url,
+            chars = article.text_content.len(),
+            "readability extraction short, returning as-is"
+        );
     }
+    Ok(article.text_content)
 }
 
 /// Firecrawl fallback for JS-rendered pages.

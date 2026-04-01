@@ -65,7 +65,7 @@ export function App(): React.ReactElement {
   const [setupActive, setSetupActive] = useState(false);
   const [scoutProcessRequest, setScoutProcessRequest] = useState(0);
 
-  const { sseStatus, sessionsRefresh } = useDataContext();
+  const { sseStatus } = useDataContext();
 
   // Load config on mount.
   const settingsLoad = useSettingsStore((s) => s.load);
@@ -235,9 +235,7 @@ export function App(): React.ReactElement {
                 cursor: 'pointer',
                 padding: 0,
               }}
-              onClick={() => {
-                // TODO: implement openLogsFolder in preload API
-              }}
+              onClick={() => window.mandoAPI.openLogsFolder()}
             >
               View logs
             </button>
@@ -283,7 +281,7 @@ export function App(): React.ReactElement {
                 processOnMount={scoutProcessRequest > 0}
               />
             )}
-            {activeTab === 'sessions' && <SessionsCard refreshTrigger={sessionsRefresh} />}
+            {activeTab === 'sessions' && <SessionsCard />}
             {activeTab === 'cron' && <CronJobsPanel variant="page" testId="cron-page" />}
             {activeTab === 'analytics' && <AnalyticsPage />}
           </main>

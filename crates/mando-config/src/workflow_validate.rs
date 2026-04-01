@@ -2,7 +2,7 @@
 //!
 //! Ensures all required prompt/nudge keys exist at gateway startup.
 
-use super::workflow::{CaptainWorkflow, ScoutWorkflow};
+use super::workflow::{AgentConfig, CaptainWorkflow, ScoutWorkflow};
 
 /// Required prompt keys for captain workflow.
 const REQUIRED_CAPTAIN_PROMPTS: &[&str] = &[
@@ -42,28 +42,38 @@ const REQUIRED_CAPTAIN_INITIAL_PROMPTS: &[&str] = &["worker", "adopted"];
 /// Required prompt keys for scout workflow.
 const REQUIRED_SCOUT_PROMPTS: &[&str] = &["process", "synthesize", "qa", "research", "act"];
 
+/// Check required keys exist in a template map and collect syntax errors.
+fn validate_template_map(
+    scope: &str,
+    required: &[&str],
+    templates: &std::collections::HashMap<String, String>,
+    errors: &mut Vec<String>,
+) {
+    for key in required {
+        if !templates.contains_key(*key) {
+            errors.push(format!("missing: {scope}.{key}"));
+        }
+    }
+    collect_template_errors(scope, templates, errors);
+}
+
 /// Validate that a captain workflow has all required template keys and valid syntax.
 /// Panics on any errors — call at startup to fail fast.
 pub fn validate_captain_workflow(wf: &CaptainWorkflow) {
     let mut errors = Vec::new();
-    for key in REQUIRED_CAPTAIN_PROMPTS {
-        if !wf.prompts.contains_key(*key) {
-            errors.push(format!("missing: prompts.{key}"));
-        }
-    }
-    for key in REQUIRED_CAPTAIN_NUDGES {
-        if !wf.nudges.contains_key(*key) {
-            errors.push(format!("missing: nudges.{key}"));
-        }
-    }
-    for key in REQUIRED_CAPTAIN_INITIAL_PROMPTS {
-        if !wf.initial_prompts.contains_key(*key) {
-            errors.push(format!("missing: initial_prompts.{key}"));
-        }
-    }
-    collect_template_errors("captain.prompts", &wf.prompts, &mut errors);
-    collect_template_errors("captain.nudges", &wf.nudges, &mut errors);
-    collect_template_errors("captain.initial_prompts", &wf.initial_prompts, &mut errors);
+    validate_template_map(
+        "prompts",
+        REQUIRED_CAPTAIN_PROMPTS,
+        &wf.prompts,
+        &mut errors,
+    );
+    validate_template_map("nudges", REQUIRED_CAPTAIN_NUDGES, &wf.nudges, &mut errors);
+    validate_template_map(
+        "initial_prompts",
+        REQUIRED_CAPTAIN_INITIAL_PROMPTS,
+        &wf.initial_prompts,
+        &mut errors,
+    );
     if !errors.is_empty() {
         panic!(
             "captain workflow missing required template keys: {}",
@@ -76,17 +86,69 @@ pub fn validate_captain_workflow(wf: &CaptainWorkflow) {
 /// Panics on any errors — call at startup to fail fast.
 pub fn validate_scout_workflow(wf: &ScoutWorkflow) {
     let mut errors = Vec::new();
-    for key in REQUIRED_SCOUT_PROMPTS {
-        if !wf.prompts.contains_key(*key) {
-            errors.push(format!("missing: prompts.{key}"));
-        }
-    }
-    collect_template_errors("scout.prompts", &wf.prompts, &mut errors);
+    validate_template_map("prompts", REQUIRED_SCOUT_PROMPTS, &wf.prompts, &mut errors);
     if !errors.is_empty() {
         panic!(
             "scout workflow missing required template keys: {}",
             errors.join(", ")
         );
+    }
+}
+
+/// Validate timing invariants and positive-value constraints on `AgentConfig`.
+/// Returns `Err` with a human-readable message listing all violations.
+pub fn try_validate_agent_config(agent: &AgentConfig, tick_interval_s: u64) -> Result<(), String> {
+    let mut errors = Vec::new();
+
+    if agent.max_concurrent == 0 {
+        errors.push("max_concurrent must be > 0".into());
+    }
+    if agent.max_interventions == 0 {
+        errors.push("max_interventions must be > 0".into());
+    }
+    if agent.stale_threshold_s <= 0.0 {
+        errors.push("stale_threshold_s must be > 0".into());
+    }
+    if agent.worker_timeout_s <= 0.0 {
+        errors.push("worker_timeout_s must be > 0".into());
+    }
+    if agent.captain_review_timeout_s == 0 {
+        errors.push("captain_review_timeout_s must be > 0".into());
+    }
+
+    // Relative checks only when individual values are positive.
+    if agent.worker_timeout_s > 0.0
+        && agent.stale_threshold_s > 0.0
+        && agent.worker_timeout_s <= agent.stale_threshold_s
+    {
+        errors.push(format!(
+            "worker_timeout_s ({}) must be > stale_threshold_s ({})",
+            agent.worker_timeout_s, agent.stale_threshold_s
+        ));
+    }
+
+    let min_stale = 2.0 * tick_interval_s as f64;
+    if agent.stale_threshold_s > 0.0 && agent.stale_threshold_s < min_stale {
+        errors.push(format!(
+            "stale_threshold_s ({}) must be >= 2 * tick_interval_s ({})",
+            agent.stale_threshold_s, min_stale
+        ));
+    }
+
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(format!(
+            "agent config validation failed: {}",
+            errors.join(", ")
+        ))
+    }
+}
+
+/// Panicking wrapper for startup — delegates to `try_validate_agent_config`.
+pub fn validate_agent_config(agent: &AgentConfig, tick_interval_s: u64) {
+    if let Err(msg) = try_validate_agent_config(agent, tick_interval_s) {
+        panic!("{msg}");
     }
 }
 
@@ -99,5 +161,74 @@ fn collect_template_errors(
         if let Err(err) = super::workflow::validate_template_syntax(template) {
             errors.push(format!("syntax: {scope}.{name}: {err}"));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn default_agent() -> AgentConfig {
+        AgentConfig::default()
+    }
+
+    #[test]
+    fn default_agent_config_is_valid() {
+        // Default tick_interval_s = 30, default stale_threshold_s = 1200 → 1200 >= 60 ✓
+        validate_agent_config(&default_agent(), 30);
+    }
+
+    #[test]
+    #[should_panic(expected = "max_concurrent must be > 0")]
+    fn zero_max_concurrent_panics() {
+        let mut ac = default_agent();
+        ac.max_concurrent = 0;
+        validate_agent_config(&ac, 30);
+    }
+
+    #[test]
+    #[should_panic(expected = "max_interventions must be > 0")]
+    fn zero_max_interventions_panics() {
+        let mut ac = default_agent();
+        ac.max_interventions = 0;
+        validate_agent_config(&ac, 30);
+    }
+
+    #[test]
+    #[should_panic(expected = "worker_timeout_s")]
+    fn worker_timeout_not_greater_than_stale_panics() {
+        let mut ac = default_agent();
+        ac.worker_timeout_s = 100.0;
+        ac.stale_threshold_s = 100.0; // equal, not greater
+        validate_agent_config(&ac, 30);
+    }
+
+    #[test]
+    #[should_panic(expected = "stale_threshold_s")]
+    fn stale_threshold_below_2x_tick_panics() {
+        let mut ac = default_agent();
+        ac.stale_threshold_s = 50.0; // < 2 * 30 = 60
+        ac.worker_timeout_s = 21600.0;
+        validate_agent_config(&ac, 30);
+    }
+
+    #[test]
+    #[should_panic(expected = "captain_review_timeout_s must be > 0")]
+    fn zero_captain_review_timeout_panics() {
+        let mut ac = default_agent();
+        ac.captain_review_timeout_s = 0;
+        validate_agent_config(&ac, 30);
+    }
+
+    #[test]
+    fn multiple_errors_reported_together() {
+        let mut ac = default_agent();
+        ac.max_concurrent = 0;
+        ac.max_interventions = 0;
+        let result = std::panic::catch_unwind(|| validate_agent_config(&ac, 30));
+        let err = result.unwrap_err();
+        let msg = err.downcast_ref::<String>().unwrap();
+        assert!(msg.contains("max_concurrent"));
+        assert!(msg.contains("max_interventions"));
     }
 }

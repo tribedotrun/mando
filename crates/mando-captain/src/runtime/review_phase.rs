@@ -7,6 +7,18 @@ use mando_types::WorkerContext;
 use crate::biz::review_marshal;
 use crate::io::{github, github_pr, health_store, pid_registry};
 
+/// Compute seconds since a worker started from an RFC 3339 timestamp.
+fn seconds_since(started_at: Option<&str>) -> f64 {
+    started_at
+        .and_then(|ts| {
+            time::OffsetDateTime::parse(ts, &time::format_description::well_known::Rfc3339)
+                .map_err(|e| tracing::warn!(module = "captain", timestamp = %ts, error = %e, "unparseable started_at"))
+                .ok()
+        })
+        .map(|started| (time::OffsetDateTime::now_utc() - started).as_seconds_f64())
+        .unwrap_or(0.0)
+}
+
 /// Gather WorkerContext for each in-progress item with a worker.
 ///
 /// Phase 1 (sync): collect local data (PID, stream, health) per item.
@@ -44,16 +56,7 @@ pub(crate) async fn gather_worker_contexts(
         let prev_cpu_time_s =
             health_store::get_health_f64(health_state, worker_name.as_str(), "cpu_time_s");
 
-        let seconds_active = item
-            .worker_started_at
-            .as_deref()
-            .and_then(|ts| {
-                time::OffsetDateTime::parse(ts, &time::format_description::well_known::Rfc3339)
-                    .map_err(|e| tracing::warn!(module = "captain", timestamp = %ts, error = %e, "unparseable started_at"))
-                    .ok()
-            })
-            .map(|started| (time::OffsetDateTime::now_utc() - started).as_seconds_f64())
-            .unwrap_or(0.0);
+        let seconds_active = seconds_since(item.worker_started_at.as_deref());
 
         // Build PR discovery args if needed.
         let discover_pr = if item.pr.is_none() {
@@ -378,14 +381,7 @@ pub(crate) async fn build_single_context(
     let stream_tail = crate::io::transcript::extract_stream_tail(&stream_path, 50);
     let stream_stale_s = process_manager::stream_stale_seconds(&stream_path);
 
-    let seconds_active = item
-        .worker_started_at
-        .as_deref()
-        .and_then(|ts| {
-            time::OffsetDateTime::parse(ts, &time::format_description::well_known::Rfc3339).ok()
-        })
-        .map(|started| (time::OffsetDateTime::now_utc() - started).as_seconds_f64())
-        .unwrap_or(0.0);
+    let seconds_active = seconds_since(item.worker_started_at.as_deref());
 
     // Resolve github repo slug for short PR ref resolution.
     let github_repo = mando_config::resolve_github_repo(item.project.as_deref(), config);

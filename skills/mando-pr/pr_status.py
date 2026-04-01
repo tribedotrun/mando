@@ -96,15 +96,23 @@ def detect_triggered_reviewers(data: dict) -> list[str]:
 
 
 def check_reviewer_status(name: str, data: dict) -> str:
-    """Returns 'real', 'error', or 'none'."""
+    """Returns 'real', 'error', or 'none' based on the reviewer's latest response."""
     login = REVIEWERS[name]["login"]
+    latest_item = None
+    latest_ts = ""
     for item in data["reviews"] + data["review_comments"] + data["comments"]:
-        if item.get("user", {}).get("login") == login:
-            body = item.get("body", "")
-            if body and _is_error_response(body):
-                return "error"
-            return "real"
-    return "none"
+        if item.get("user", {}).get("login") != login:
+            continue
+        ts = item.get("submitted_at") or item.get("updated_at") or item.get("created_at") or ""
+        if ts >= latest_ts:
+            latest_ts = ts
+            latest_item = item
+    if latest_item is None:
+        return "none"
+    body = latest_item.get("body", "")
+    if body and _is_error_response(body):
+        return "error"
+    return "real"
 
 
 async def check_status(

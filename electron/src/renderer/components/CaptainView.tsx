@@ -10,8 +10,7 @@ import { DeleteModal } from '#renderer/components/DeleteModal';
 import { MergeModal } from '#renderer/components/MergeModal';
 import { FeedbackModal } from '#renderer/components/FeedbackModal';
 import { TaskAsk } from '#renderer/components/TaskAsk';
-import type { TaskItem } from '#renderer/types';
-import type { WorkerDetail } from '#renderer/types';
+import type { TaskItem, WorkerDetail } from '#renderer/types';
 import { canMerge, canRestart, canRework } from '#renderer/utils';
 
 interface Props {
@@ -29,22 +28,16 @@ export function CaptainView({
   const [focusedIndex, setFocusedIndex] = useState(-1);
   const actions = useTaskActions();
 
-  const handleHandoffItem = (item: TaskItem) => {
-    actions.handleHandoff(item.id);
-  };
-  const handleCancelItem = (item: TaskItem) => {
-    actions.handleStatusChange(item.id, 'canceled');
-  };
-  const handleRetryItem = (item: TaskItem) => {
-    actions.handleRetry(item.id);
-  };
-  const handleAcceptItem = (item: TaskItem) => {
-    actions.handleAccept(item.id);
-  };
+  const handleHandoffItem = (item: TaskItem) => actions.handleHandoff(item.id);
+  const handleCancelItem = (item: TaskItem) => actions.handleStatusChange(item.id, 'canceled');
+  const handleRetryItem = (item: TaskItem) => actions.handleRetry(item.id);
+  const handleAcceptItem = (item: TaskItem) => actions.handleAccept(item.id);
+
   const handleAnswerItem = (item: TaskItem) => {
     const answer = window.prompt(`Answer for "${item.title}":`);
     if (answer) actions.handleAnswer(item.id, answer);
   };
+
   const handleNudgeWorker = (worker: WorkerDetail) => {
     const message = window.prompt(
       `Nudge message for "${worker.title}"`,

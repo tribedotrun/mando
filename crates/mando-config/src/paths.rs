@@ -135,41 +135,23 @@ pub fn expand_tilde(p: &str) -> PathBuf {
 /// hyphens, collapsed, trimmed, and truncated to `max_len`.
 pub fn slugify(title: &str, max_len: usize) -> String {
     let mut slug = String::with_capacity(title.len());
+    let mut prev_hyphen = true; // true to suppress leading hyphens
     for ch in title.chars() {
         if ch.is_ascii_alphanumeric() {
             slug.push(ch.to_ascii_lowercase());
-        } else {
+            prev_hyphen = false;
+        } else if !prev_hyphen {
             slug.push('-');
+            prev_hyphen = true;
         }
     }
-    // Collapse consecutive hyphens.
-    let collapsed = collapse_hyphens(&slug);
-    // Trim leading/trailing hyphens.
-    let trimmed = collapsed.trim_matches('-');
-    // Truncate to max_len, but don't break in the middle of a word if avoidable.
+    // Trim trailing hyphen.
+    let trimmed = slug.trim_end_matches('-');
+    // Truncate to max_len.
     if trimmed.len() <= max_len {
         return trimmed.to_string();
     }
-    let truncated = &trimmed[..max_len];
-    // Trim trailing hyphen from truncation.
-    truncated.trim_end_matches('-').to_string()
-}
-
-fn collapse_hyphens(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    let mut prev_hyphen = false;
-    for ch in s.chars() {
-        if ch == '-' {
-            if !prev_hyphen {
-                out.push('-');
-            }
-            prev_hyphen = true;
-        } else {
-            out.push(ch);
-            prev_hyphen = false;
-        }
-    }
-    out
+    trimmed[..max_len].trim_end_matches('-').to_string()
 }
 
 // ---------------------------------------------------------------------------
@@ -302,12 +284,10 @@ pub fn parse_github_slug(url: &str) -> Option<String> {
         }
     }
     // HTTPS: https://github.com/owner/repo.git
-    if url.contains("github.com/") {
-        if let Some(idx) = url.find("github.com/") {
-            let slug = url[idx + "github.com/".len()..].trim_end_matches(".git");
-            if slug.contains('/') && !slug.contains(' ') {
-                return Some(slug.to_string());
-            }
+    if let Some(idx) = url.find("github.com/") {
+        let slug = url[idx + "github.com/".len()..].trim_end_matches(".git");
+        if slug.contains('/') && !slug.contains(' ') {
+            return Some(slug.to_string());
         }
     }
     None

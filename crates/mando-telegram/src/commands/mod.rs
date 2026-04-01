@@ -81,6 +81,15 @@ pub(crate) async fn load_tasks_or_notify(
     }
 }
 
+/// Truncate a string at a UTF-8 char boundary.
+pub(crate) fn truncate(s: &str, max: usize) -> &str {
+    if s.len() <= max {
+        s
+    } else {
+        &s[..s.floor_char_boundary(max)]
+    }
+}
+
 /// Generate a short (8 hex char) unique ID for action tracking.
 pub(crate) fn short_uuid() -> String {
     let id = mando_uuid::Uuid::v4().to_string();

@@ -23,6 +23,7 @@ interface MemoryStore {
   // Distiller state
   distillerRunning: boolean;
   distillerResult: string | null;
+  distillerError: string | null;
 
   // Actions
   fetchJournal: () => Promise<void>;
@@ -53,6 +54,7 @@ export const useMemoryStore = create<MemoryStore>((set, getState) => ({
 
   distillerRunning: false,
   distillerResult: null,
+  distillerError: null,
 
   fetchJournal: async () => {
     const { workerFilter, journalLimit } = getState();
@@ -115,16 +117,21 @@ export const useMemoryStore = create<MemoryStore>((set, getState) => ({
   },
 
   runDistiller: async () => {
-    set({ distillerRunning: true, distillerResult: null });
+    set({ distillerRunning: true, distillerResult: null, distillerError: null });
     try {
       const result = await runDistiller();
       set({ distillerRunning: false, distillerResult: result.summary });
-      await getState().fetchPatterns();
-      await getState().fetchJournal();
+      // Refresh dependent data — errors here don't affect distiller result
+      await getState()
+        .fetchPatterns()
+        .catch(() => {});
+      await getState()
+        .fetchJournal()
+        .catch(() => {});
     } catch (err) {
       set({
         distillerRunning: false,
-        distillerResult: getErrorMessage(err, 'Distiller failed'),
+        distillerError: getErrorMessage(err, 'Distiller failed'),
       });
     }
   },

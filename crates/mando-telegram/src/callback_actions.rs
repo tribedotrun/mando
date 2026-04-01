@@ -11,6 +11,19 @@ use crate::bot::TelegramBot;
 use crate::gateway_paths as paths;
 use crate::http::GatewayClient;
 
+fn parse_item_id(item_id: &str) -> Result<i64> {
+    item_id
+        .parse()
+        .map_err(|_| anyhow::anyhow!("invalid item ID: {item_id}"))
+}
+
+fn parse_item_ids(ids: &[String]) -> Result<Vec<i64>> {
+    ids.iter()
+        .map(|s| s.parse())
+        .collect::<std::result::Result<_, _>>()
+        .map_err(|_| anyhow::anyhow!("invalid item IDs"))
+}
+
 /// Look up a task by ID via the gateway HTTP API.
 async fn find_task(gw: &GatewayClient, id: &str) -> Option<mando_types::Task> {
     let id_num: i64 = id.parse().ok()?;
@@ -30,9 +43,7 @@ async fn find_task(gw: &GatewayClient, id: &str) -> Option<mando_types::Task> {
 /// Merge a PR for the given task, then mark item as merged.
 pub(crate) async fn merge(bot: &TelegramBot, cid: &str, item_id: &str) -> Result<()> {
     let esc = mando_shared::escape_html(item_id);
-    let id_num: i64 = item_id
-        .parse()
-        .map_err(|_| anyhow::anyhow!("invalid item ID: {item_id}"))?;
+    let id_num = parse_item_id(item_id)?;
     let gw = bot.gw();
 
     let item = find_task(gw, item_id)
@@ -87,9 +98,7 @@ pub(crate) async fn merge(bot: &TelegramBot, cid: &str, item_id: &str) -> Result
 /// Accept (mark as merged) a task without triggering a PR merge.
 pub(crate) async fn accept(bot: &TelegramBot, cid: &str, item_id: &str) -> Result<()> {
     let esc = mando_shared::escape_html(item_id);
-    let id_num: i64 = item_id
-        .parse()
-        .map_err(|_| anyhow::anyhow!("invalid item ID: {item_id}"))?;
+    let id_num = parse_item_id(item_id)?;
 
     match bot
         .gw()
@@ -121,9 +130,7 @@ pub(crate) async fn reopen_with_feedback(
     feedback: &str,
 ) -> Result<()> {
     let esc = mando_shared::escape_html(title);
-    let id_num: i64 = item_id
-        .parse()
-        .map_err(|_| anyhow::anyhow!("invalid item ID: {item_id}"))?;
+    let id_num = parse_item_id(item_id)?;
 
     match bot
         .gw()
@@ -170,9 +177,7 @@ pub(crate) async fn rework_with_feedback(
     feedback: &str,
 ) -> Result<()> {
     let esc = mando_shared::escape_html(title);
-    let id_num: i64 = item_id
-        .parse()
-        .map_err(|_| anyhow::anyhow!("invalid item ID: {item_id}"))?;
+    let id_num = parse_item_id(item_id)?;
 
     match bot
         .gw()
@@ -206,9 +211,7 @@ pub(crate) async fn handoff(
     title: &str,
 ) -> Result<()> {
     let esc = mando_shared::escape_html(title);
-    let id_num: i64 = item_id
-        .parse()
-        .map_err(|_| anyhow::anyhow!("invalid item ID: {item_id}"))?;
+    let id_num = parse_item_id(item_id)?;
 
     match bot
         .gw()
@@ -234,11 +237,7 @@ pub(crate) async fn handoff(
 /// Cancel all items from a multi-select picker.
 pub(crate) async fn cancel_items(bot: &TelegramBot, cid: &str, ids: &[String]) -> Result<()> {
     let count = ids.len();
-    let id_nums: Vec<i64> = ids
-        .iter()
-        .map(|s| s.parse())
-        .collect::<std::result::Result<_, _>>()
-        .map_err(|_| anyhow::anyhow!("invalid item IDs"))?;
+    let id_nums = parse_item_ids(ids)?;
 
     match bot
         .gw()
@@ -267,11 +266,7 @@ pub(crate) async fn cancel_items(bot: &TelegramBot, cid: &str, ids: &[String]) -
 /// Delete all items from a multi-select picker.
 pub(crate) async fn delete_items(bot: &TelegramBot, cid: &str, ids: &[String]) -> Result<()> {
     let count = ids.len();
-    let id_nums: Vec<i64> = ids
-        .iter()
-        .map(|s| s.parse())
-        .collect::<std::result::Result<_, _>>()
-        .map_err(|_| anyhow::anyhow!("invalid item IDs"))?;
+    let id_nums = parse_item_ids(ids)?;
 
     match bot
         .gw()
@@ -304,10 +299,8 @@ pub(crate) async fn add_todo_items(
 
     for item in items {
         let mut fields = vec![("title", item.title.as_str())];
-        let project_val;
         if let Some(ref p) = item.project {
-            project_val = p.clone();
-            fields.push(("project", &project_val));
+            fields.push(("project", p.as_str()));
         }
 
         // Download photo from Telegram if present
@@ -412,9 +405,7 @@ pub(crate) async fn add_todo_items(
 /// Retry captain review for an errored task.
 pub(crate) async fn retry_item(bot: &TelegramBot, cid: &str, item_id: &str) -> Result<()> {
     let esc = mando_shared::escape_html(item_id);
-    let id_num: i64 = item_id
-        .parse()
-        .map_err(|_| anyhow::anyhow!("invalid item ID: {item_id}"))?;
+    let id_num = parse_item_id(item_id)?;
 
     match bot
         .gw()

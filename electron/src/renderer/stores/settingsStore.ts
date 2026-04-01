@@ -11,6 +11,7 @@ export interface ProjectConfig {
   aliases?: string[];
   hooks?: Record<string, string>;
   workerPreamble?: string;
+  scoutSummary?: string;
 }
 
 export interface FeaturesConfig {
@@ -43,11 +44,10 @@ interface GatewayConfig {
 export interface CaptainConfig {
   autoSchedule?: boolean;
   tickIntervalS?: number;
-  taskDbPath?: string;
-  lockfilePath?: string;
-  workerHealthPath?: string;
-  notifyChatId?: string;
+  learnCronExpr?: string;
+  tz?: string;
   linearTeam?: string;
+  linearCliPath?: string;
   projects?: Record<string, ProjectConfig>;
 }
 
@@ -72,6 +72,24 @@ interface ToolsConfig {
   ccSelfImprove?: CCSelfImproveConfig;
 }
 
+export interface ScoutInterests {
+  high?: string[];
+  medium?: string[];
+  low?: string[];
+  tone?: string;
+}
+
+export interface ScoutUserContext {
+  role?: string;
+  knownDomains?: string[];
+  explainDomains?: string[];
+}
+
+export interface ScoutConfig {
+  interests?: ScoutInterests;
+  userContext?: ScoutUserContext;
+}
+
 export interface MandoConfig {
   workspace?: string;
   startAtLogin?: boolean;
@@ -80,6 +98,7 @@ export interface MandoConfig {
   gateway?: GatewayConfig;
   captain?: CaptainConfig;
   voice?: VoiceConfig;
+  scout?: ScoutConfig;
   tools?: ToolsConfig;
   env?: Record<string, string>;
 }
@@ -190,7 +209,6 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
           projects: { ...(s.config.captain?.projects || {}), [pathKey]: project },
         },
       },
-      dirty: true,
     }));
   },
 
@@ -203,7 +221,6 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
           ...s.config,
           captain: { ...(s.config.captain || {}), projects },
         },
-        dirty: true,
       };
     });
   },
@@ -214,7 +231,6 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
         ...s.config,
         [key]: { ...((s.config[key] as Record<string, unknown>) || {}), ...patch },
       },
-      dirty: true,
     }));
   },
 
@@ -224,7 +240,6 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
         ...s.config,
         env: { ...(s.config.env || {}), [key]: value },
       },
-      dirty: true,
     }));
   },
 
@@ -237,7 +252,6 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
           telegram: { ...(s.config.channels?.telegram || {}), ...patch },
         },
       },
-      dirty: true,
     }));
   },
 }));

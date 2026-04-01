@@ -10,6 +10,7 @@ use anyhow::Result;
 use tracing::{info, warn};
 
 use mando_cc::{CcConfig, CcOneShot, CcResult};
+use mando_types::now_rfc3339;
 
 /// A persistent multi-turn CC session.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -252,8 +253,6 @@ impl CcSessionManager {
         Ok(())
     }
 }
-
-use mando_types::now_rfc3339;
 
 impl Drop for CcSessionManager {
     fn drop(&mut self) {

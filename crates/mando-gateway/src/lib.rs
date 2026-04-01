@@ -64,12 +64,7 @@ pub struct AppState {
 }
 
 /// Resolve a project display-name to its `github_repo` slug from config.
-pub(crate) fn resolve_github_repo(
-    project: Option<&str>,
-    config: &mando_config::Config,
-) -> Option<String> {
-    mando_config::resolve_github_repo(project, config)
-}
+pub(crate) use mando_config::resolve_github_repo;
 
 pub(crate) fn captain_notifier(
     state: &AppState,

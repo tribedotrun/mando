@@ -42,6 +42,7 @@ mando-db.workspace = true
 sqlx.workspace = true
 base64 = "0.22"
 bytes = "1"
+toml = "0.8"
 
 [features]
 default = ["otlp"]

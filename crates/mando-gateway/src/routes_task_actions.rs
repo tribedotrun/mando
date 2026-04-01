@@ -81,7 +81,7 @@ pub(crate) async fn post_task_reopen(
     let config = state.config.load_full();
     let workflow = state.captain_workflow.load_full();
     let notifier = crate::captain_notifier(&state, &config);
-    let store = state.task_store.read().await;
+    let store = state.task_store.write().await;
     let mut item = store
         .find_by_id(id)
         .await
@@ -170,7 +170,7 @@ pub(crate) async fn post_task_rework(
     Json(body): Json<FeedbackBody>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let id = body.id;
-    let store = state.task_store.read().await;
+    let store = state.task_store.write().await;
     match mando_captain::runtime::dashboard::rework_item(&store, id, &body.feedback).await {
         Ok(()) => {
             let summary = if body.feedback.is_empty() {
@@ -210,18 +210,10 @@ pub(crate) async fn post_task_ask(
     let config = state.config.load_full();
     let (item, pool) = {
         let store = state.task_store.read().await;
-        let item = store.find_by_id(id).await.unwrap_or(None);
-        let pool = store.pool().clone();
-        (item, pool)
-    };
-    let item = match item {
-        Some(it) => it,
-        None => {
-            return Err(error_response(
-                StatusCode::NOT_FOUND,
-                &format!("item {} not found", body.id),
-            ))
-        }
+        let item = store.find_by_id(id).await.unwrap_or(None).ok_or_else(|| {
+            error_response(StatusCode::NOT_FOUND, &format!("item {id} not found"))
+        })?;
+        (item, store.pool().clone())
     };
     let workflow = state.captain_workflow.load_full();
     match mando_captain::runtime::task_ask::ask_task_with(
@@ -280,18 +272,19 @@ pub(crate) async fn post_task_retry(
     }
 }
 
-/// POST /api/tasks/{id}/archive
-pub(crate) async fn post_task_archive(
-    State(state): State<AppState>,
-    axum::extract::Path(id): axum::extract::Path<i64>,
+/// Shared logic for archive/unarchive: call a DB function returning `Result<bool>`,
+/// emit a bus event on success, and map the result to JSON.
+async fn archive_toggle(
+    state: &AppState,
+    id: i64,
+    action: &str,
+    db_fn: impl std::future::Future<Output = anyhow::Result<bool>>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    let store = state.task_store.read().await;
-    let pool = store.pool();
-    match mando_db::queries::tasks::archive_by_id(pool, id).await {
+    match db_fn.await {
         Ok(true) => {
             state.bus.send(
                 mando_types::BusEvent::Tasks,
-                Some(json!({"action": "archive", "id": id})),
+                Some(json!({"action": action, "id": id})),
             );
             Ok(Json(json!({"ok": true})))
         }
@@ -306,30 +299,34 @@ pub(crate) async fn post_task_archive(
     }
 }
 
+/// POST /api/tasks/{id}/archive
+pub(crate) async fn post_task_archive(
+    State(state): State<AppState>,
+    axum::extract::Path(id): axum::extract::Path<i64>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let pool = state.task_store.write().await.pool().clone();
+    archive_toggle(
+        &state,
+        id,
+        "archive",
+        mando_db::queries::tasks::archive_by_id(&pool, id),
+    )
+    .await
+}
+
 /// POST /api/tasks/{id}/unarchive
 pub(crate) async fn post_task_unarchive(
     State(state): State<AppState>,
     axum::extract::Path(id): axum::extract::Path<i64>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    let store = state.task_store.read().await;
-    let pool = store.pool();
-    match mando_db::queries::tasks::unarchive(pool, id).await {
-        Ok(true) => {
-            state.bus.send(
-                mando_types::BusEvent::Tasks,
-                Some(json!({"action": "unarchive", "id": id})),
-            );
-            Ok(Json(json!({"ok": true})))
-        }
-        Ok(false) => Err(error_response(
-            StatusCode::NOT_FOUND,
-            &format!("item {id} not found"),
-        )),
-        Err(e) => Err(error_response(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            &e.to_string(),
-        )),
-    }
+    let pool = state.task_store.write().await.pool().clone();
+    archive_toggle(
+        &state,
+        id,
+        "unarchive",
+        mando_db::queries::tasks::unarchive(&pool, id),
+    )
+    .await
 }
 
 /// POST /api/tasks/handoff

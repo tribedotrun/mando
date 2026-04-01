@@ -165,6 +165,17 @@ pub async fn reopen_item(store: &TaskStore, id: i64, feedback: &str) -> Result<(
         .await?
         .ok_or_else(|| anyhow::anyhow!("task not found: {}", id))?;
 
+    anyhow::ensure!(
+        task.status != ItemStatus::CaptainReviewing && task.status != ItemStatus::CaptainMerging,
+        "cannot reopen item {}: captain {} is in progress",
+        id,
+        if task.status == ItemStatus::CaptainReviewing {
+            "review"
+        } else {
+            "merge"
+        }
+    );
+
     if let Some(new_context) =
         append_tagged_note(task.context.as_deref(), "Reopen feedback", feedback)
     {
@@ -318,6 +329,17 @@ pub async fn rework_item(store: &TaskStore, id: i64, feedback: &str) -> Result<(
             .find_by_id(id)
             .await?
             .ok_or_else(|| anyhow::anyhow!("task not found: {}", id))?;
+        anyhow::ensure!(
+            task.status != ItemStatus::CaptainReviewing
+                && task.status != ItemStatus::CaptainMerging,
+            "cannot rework item {}: captain {} is in progress",
+            id,
+            if task.status == ItemStatus::CaptainReviewing {
+                "review"
+            } else {
+                "merge"
+            }
+        );
         append_tagged_note(task.context.as_deref(), "Rework feedback", feedback)
     } {
         store

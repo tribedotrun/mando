@@ -131,7 +131,7 @@ async fn connect_and_stream(
         // Process complete lines (SSE protocol: events separated by blank lines).
         while let Some(pos) = buf.find("\n\n") {
             let block = buf[..pos].to_string();
-            buf = buf[pos + 2..].to_string();
+            buf.replace_range(..pos + 2, "");
 
             if let Some(event) = parse_sse_block(&block) {
                 if tx.send(event).await.is_err() {

@@ -57,6 +57,8 @@ export function StatusFilter({ projectFilter }: Props): React.ReactElement {
   return (
     <div
       data-testid="status-filter"
+      role="tablist"
+      aria-label="Filter tasks by status"
       className="flex items-center"
       style={{ borderBottom: '1px solid var(--color-border-subtle)', gap: 0 }}
     >
@@ -69,6 +71,8 @@ export function StatusFilter({ projectFilter }: Props): React.ReactElement {
           <button
             key={label}
             onClick={() => setFilter(key)}
+            role="tab"
+            aria-selected={active}
             className="text-[14px] transition-colors"
             style={{
               whiteSpace: 'nowrap',

@@ -39,10 +39,10 @@ pub async fn handle(bot: &TelegramBot, chat_id: &str, _args: &str) -> Result<()>
 
     for s in &sessions {
         let sid = s["session_id"].as_str().unwrap_or("?");
-        let short_id = &sid[..sid.floor_char_boundary(8)];
+        let short_id = super::truncate(sid, 8);
         let caller = s["caller"].as_str().unwrap_or("?");
         let ts = s["started_at"].as_str().unwrap_or("");
-        let short_ts = &ts[..ts.floor_char_boundary(16)];
+        let short_ts = super::truncate(ts, 16);
         let cost = s["cost_usd"].as_f64();
         let dur = s["duration_ms"].as_u64();
         let resumed = s["resumed"].as_bool() == Some(true);

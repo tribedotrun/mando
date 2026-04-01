@@ -15,30 +15,36 @@ export function CenteredCard({
 }: React.HTMLAttributes<HTMLDivElement>): React.ReactElement {
   return (
     <div
-      className="flex h-full items-center justify-center"
-      style={{ background: 'var(--color-bg)' }}
+      className="flex h-full flex-col justify-start"
+      style={{ background: 'var(--color-bg)', paddingTop: '30vh' }}
       {...rest}
     >
-      <div style={{ width: '100%', maxWidth: 440, padding: 32 }}>{children}</div>
+      <div style={{ width: '100%', maxWidth: 560, padding: 32, margin: '0 auto' }}>{children}</div>
     </div>
   );
 }
 
-export function StatusCard({ children }: { children: React.ReactNode }): React.ReactElement {
+export function StepDots({
+  total,
+  current,
+}: {
+  total: number;
+  current: number;
+}): React.ReactElement {
   return (
-    <div
-      style={{
-        padding: '16px 20px',
-        borderRadius: 'var(--radius-panel)',
-        background: 'var(--color-surface-1)',
-        border: '1px solid var(--color-border-subtle)',
-        marginBottom: 20,
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 8,
-      }}
-    >
-      {children}
+    <div className="flex items-center justify-center" style={{ gap: 10, marginBottom: 24 }}>
+      {Array.from({ length: total }, (_, i) => (
+        <span
+          key={i}
+          style={{
+            width: i === current ? 8 : 7,
+            height: i === current ? 8 : 7,
+            borderRadius: '50%',
+            background: i === current ? 'var(--color-accent)' : 'var(--color-border)',
+            transition: 'all 0.2s',
+          }}
+        />
+      ))}
     </div>
   );
 }
@@ -115,12 +121,10 @@ export function OutlineButton({
 export function PrimaryButton({
   onClick,
   disabled,
-  variant,
   children,
 }: {
   onClick: () => void;
   disabled?: boolean;
-  variant?: 'success';
   children: React.ReactNode;
 }): React.ReactElement {
   return (
@@ -131,7 +135,7 @@ export function PrimaryButton({
       style={{
         padding: '8px 20px',
         borderRadius: 'var(--radius-button)',
-        background: variant === 'success' ? 'var(--color-success)' : 'var(--color-accent)',
+        background: 'var(--color-accent)',
         color: 'var(--color-bg)',
         border: 'none',
         cursor: disabled ? 'default' : 'pointer',

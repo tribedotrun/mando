@@ -41,29 +41,21 @@ pub(crate) async fn spawn_worker(
     git::fetch_origin(&repo_path).await?;
 
     // Reuse existing worktree/branch if present (e.g. reopened item), otherwise create new.
-    let (branch, wt_path) = if let (Some(existing_wt), Some(existing_branch)) =
-        (item.worktree.as_deref(), item.branch.as_deref())
+    let existing_wt = item
+        .worktree
+        .as_deref()
+        .map(mando_config::expand_tilde)
+        .filter(|p| p.exists());
+    let (branch, wt_path) = if let (Some(wt), Some(existing_branch)) =
+        (existing_wt, item.branch.as_deref())
     {
-        let wt = mando_config::expand_tilde(existing_wt);
-        if wt.exists() {
-            tracing::info!(
-                module = "spawner",
-                worktree = %wt.display(),
-                branch = existing_branch,
-                "reusing existing worktree for reopened item"
-            );
-            (existing_branch.to_string(), wt)
-        } else {
-            let slug = new_slug(item, slot);
-            let branch = format!("mando/{}", slug);
-            let wt = git::worktree_path(&repo_path, &slug);
-            let default_branch = git::default_branch(&repo_path).await?;
-            if let Err(e) = git::delete_local_branch(&repo_path, &branch).await {
-                tracing::warn!(module = "spawner", branch = %branch, error = %e, "failed to delete stale local branch");
-            }
-            git::create_worktree(&repo_path, &branch, &wt, &default_branch).await?;
-            (branch, wt)
-        }
+        tracing::info!(
+            module = "spawner",
+            worktree = %wt.display(),
+            branch = existing_branch,
+            "reusing existing worktree for reopened item"
+        );
+        (existing_branch.to_string(), wt)
     } else {
         let slug = new_slug(item, slot);
         let branch = format!("mando/{}", slug);
@@ -222,6 +214,17 @@ fn copy_plan_briefs(item: &Task, wt_path: &std::path::Path) {
 
     let briefs_dir = wt_path.join(".ai").join("briefs");
 
+    // Eagerly create the briefs directory — all strategies need it.
+    if let Err(e) = std::fs::create_dir_all(&briefs_dir) {
+        tracing::error!(
+            module = "spawner",
+            path = %briefs_dir.display(),
+            error = %e,
+            "failed to create briefs directory — worker will start without plan files"
+        );
+        return;
+    }
+
     // Strategy 1: If item has a linear_id, look for a folder named after it.
     if let Some(ref lid) = item.linear_id {
         let clean_lid = sanitize_linear_id(lid);
@@ -233,69 +236,52 @@ fn copy_plan_briefs(item: &Task, wt_path: &std::path::Path) {
             if !plan_folder.is_dir() {
                 continue;
             }
-            if let Ok(entries) = std::fs::read_dir(&plan_folder) {
-                if let Err(e) = std::fs::create_dir_all(&briefs_dir) {
+            let Ok(entries) = std::fs::read_dir(&plan_folder) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                let src = entry.path();
+                if !src.is_file() {
+                    continue;
+                }
+                let filename = entry.file_name();
+                let dst = briefs_dir.join(&filename);
+                if dst.exists() {
+                    continue;
+                }
+                if let Err(e) = std::fs::copy(&src, &dst) {
                     tracing::error!(
                         module = "spawner",
-                        path = %briefs_dir.display(),
+                        src = %src.display(),
+                        dst = %dst.display(),
                         error = %e,
-                        "failed to create briefs directory — worker will start without plan files"
+                        "failed to copy plan brief — worker may start without this file"
                     );
-                    return;
-                }
-                for entry in entries.flatten() {
-                    let src = entry.path();
-                    if src.is_file() {
-                        let filename = entry.file_name();
-                        let dst = briefs_dir.join(&filename);
-                        if !dst.exists() {
-                            if let Err(e) = std::fs::copy(&src, &dst) {
-                                tracing::error!(
-                                    module = "spawner",
-                                    src = %src.display(),
-                                    dst = %dst.display(),
-                                    error = %e,
-                                    "failed to copy plan brief — worker may start without this file"
-                                );
-                            } else {
-                                tracing::info!(
-                                    module = "spawner",
-                                    file = %filename.to_string_lossy(),
-                                    "copied plan brief to worktree"
-                                );
-                            }
-                        }
-                    }
+                } else {
+                    tracing::info!(
+                        module = "spawner",
+                        file = %filename.to_string_lossy(),
+                        "copied plan brief to worktree"
+                    );
                 }
             }
         }
     }
 
     // Strategy 2: Look for a generic brief file matching the item ID.
-    {
-        let id = &item.id.to_string();
-        let brief_file = plans_dir.join(format!("item-{id}.md"));
-        if brief_file.is_file() {
-            if let Err(e) = std::fs::create_dir_all(&briefs_dir) {
+    let id = &item.id.to_string();
+    let brief_file = plans_dir.join(format!("item-{id}.md"));
+    if brief_file.is_file() {
+        let dst = briefs_dir.join(format!("item-{id}.md"));
+        if !dst.exists() {
+            if let Err(e) = std::fs::copy(&brief_file, &dst) {
                 tracing::error!(
                     module = "spawner",
-                    path = %briefs_dir.display(),
+                    src = %brief_file.display(),
+                    dst = %dst.display(),
                     error = %e,
-                    "failed to create briefs directory"
+                    "failed to copy item brief"
                 );
-                return;
-            }
-            let dst = briefs_dir.join(format!("item-{id}.md"));
-            if !dst.exists() {
-                if let Err(e) = std::fs::copy(&brief_file, &dst) {
-                    tracing::error!(
-                        module = "spawner",
-                        src = %brief_file.display(),
-                        dst = %dst.display(),
-                        error = %e,
-                        "failed to copy item brief"
-                    );
-                }
             }
         }
     }

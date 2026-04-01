@@ -70,17 +70,7 @@ impl JournalDb {
         days: i64,
     ) -> Result<Vec<super::journal_types::ActionRuleStats>> {
         let db_stats = jq::stats_by_action_rule(&self.pool, days).await?;
-        Ok(db_stats
-            .into_iter()
-            .map(|s| super::journal_types::ActionRuleStats {
-                action: s.action,
-                rule: s.rule,
-                total: s.total,
-                successes: s.successes,
-                failures: s.failures,
-                success_rate: s.success_rate,
-            })
-            .collect())
+        Ok(db_stats.into_iter().map(Into::into).collect())
     }
 
     pub(crate) async fn escalation_stats(&self, days: i64) -> Result<Vec<(String, String, i64)>> {
@@ -120,19 +110,7 @@ impl JournalDb {
 
     pub async fn list_patterns(&self, status: Option<&str>) -> Result<Vec<Pattern>> {
         let rows = jq::list_patterns(&self.pool, status).await?;
-        Ok(rows
-            .into_iter()
-            .map(|r| Pattern {
-                id: r.id,
-                pattern: r.pattern,
-                signal: r.signal,
-                recommendation: r.recommendation,
-                confidence: r.confidence,
-                sample_size: r.sample_size,
-                status: r.status,
-                created_at: r.created_at,
-            })
-            .collect())
+        Ok(rows.into_iter().map(Into::into).collect())
     }
 
     pub async fn update_pattern_status(&self, id: i64, status: &str) -> Result<()> {

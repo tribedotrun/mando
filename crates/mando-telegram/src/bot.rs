@@ -3,7 +3,7 @@
 //! `TelegramBot` wraps the raw API, holds session state, and dispatches
 //! incoming updates to the correct command/callback handler.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
@@ -111,7 +111,7 @@ pub struct TelegramBot {
     pub(crate) api: TelegramApi,
     config: Arc<RwLock<Config>>,
     pub(crate) gw: GatewayClient,
-    pub(crate) pending_todo: HashMap<String, bool>,
+    pub(crate) pending_todo: HashSet<String>,
     pub(crate) ops_sessions: HashMap<String, Session>,
     pub(crate) ask_sessions: HashMap<String, Session>,
     pub(crate) input_sessions: HashMap<String, String>,
@@ -148,7 +148,7 @@ impl TelegramBot {
             api,
             config,
             gw,
-            pending_todo: HashMap::new(),
+            pending_todo: HashSet::new(),
             ops_sessions: HashMap::new(),
             ask_sessions: HashMap::new(),
             input_sessions: HashMap::new(),
@@ -359,7 +359,7 @@ impl TelegramBot {
     // ── Pending todo ─────────────────────────────────────────────────
 
     pub fn set_pending_todo(&mut self, chat_id: &str) {
-        self.pending_todo.insert(chat_id.to_string(), true);
+        self.pending_todo.insert(chat_id.to_string());
     }
     pub fn clear_pending_todo(&mut self, chat_id: &str) {
         self.pending_todo.remove(chat_id);

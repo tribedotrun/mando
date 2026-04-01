@@ -1,4 +1,4 @@
-import React, { useCallback } from 'react';
+import React from 'react';
 import { useMountEffect } from '#renderer/hooks/useMountEffect';
 import { useToastStore } from '#renderer/stores/toastStore';
 import type { Toast } from '#renderer/stores/toastStore';
@@ -152,7 +152,6 @@ function ToastItem({
 export function ToastContainer(): React.ReactElement {
   const toasts = useToastStore((s) => s.toasts);
   const dismiss = useToastStore((s) => s.dismiss);
-  const stableDismiss = useCallback((id: string) => dismiss(id), [dismiss]);
 
   return (
     <>
@@ -168,7 +167,7 @@ export function ToastContainer(): React.ReactElement {
       >
         {toasts.map((toast) => (
           <div key={toast.id} style={{ pointerEvents: 'auto' }}>
-            <ToastItem toast={toast} onDismiss={() => stableDismiss(toast.id)} />
+            <ToastItem toast={toast} onDismiss={() => dismiss(toast.id)} />
           </div>
         ))}
       </div>

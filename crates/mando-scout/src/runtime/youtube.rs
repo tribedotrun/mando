@@ -103,18 +103,7 @@ fn parse_vtt(vtt: &str) -> String {
 }
 
 fn strip_vtt_tags(text: &str) -> String {
-    let mut result = String::new();
-    let mut in_tag = false;
-    for ch in text.chars() {
-        if ch == '<' {
-            in_tag = true;
-        } else if ch == '>' {
-            in_tag = false;
-        } else if !in_tag {
-            result.push(ch);
-        }
-    }
-    result.trim().to_string()
+    crate::io::strip_html_tags(text).trim().to_string()
 }
 
 #[cfg(test)]

@@ -37,22 +37,28 @@ export function TaskDetailView({
   transcriptFullScreenRef.current = transcriptFullScreen;
   const transcriptSessionRef = React.useRef(transcriptSession);
   transcriptSessionRef.current = transcriptSession;
+  const onBackRef = React.useRef(onBack);
+  onBackRef.current = onBack;
 
   // Escape key: close full-screen transcript, then close sidebar, then go back.
-  // Skip if an overlay (modal, command palette, shortcut sheet) is open.
+  // Skip if another overlay (modal, command palette) is open.
   useMountEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
+      // Don't handle if a modal, command palette, or shortcut overlay is open.
       if (
-        document.querySelector('[role="dialog"], [data-command-palette], [data-shortcut-overlay]')
+        document.querySelector('[role="dialog"]') ||
+        document.querySelector('[data-command-palette]') ||
+        document.querySelector('[data-shortcut-overlay]')
       )
         return;
+      e.stopPropagation();
       if (transcriptFullScreenRef.current) {
         setTranscriptFullScreen(false);
       } else if (transcriptSessionRef.current) {
         setTranscriptSession(null);
       } else {
-        onBack();
+        onBackRef.current();
       }
     };
     document.addEventListener('keydown', onKey);
@@ -108,7 +114,7 @@ export function TaskDetailView({
   };
 
   return (
-    <div className="relative flex h-full flex-col">
+    <div className="flex h-full flex-col">
       {/* Header */}
       <div className="shrink-0 border-b pb-4" style={{ borderColor: 'var(--color-border-subtle)' }}>
         <button
@@ -145,11 +151,6 @@ export function TaskDetailView({
                   {item.linear_id}
                 </span>
               )}
-              {(item.branch || item.worktree || item.plan) && (
-                <span className="ml-1 inline-flex items-center align-middle">
-                  <DetailOverflowMenu item={item} />
-                </span>
-              )}
             </h1>
             <div className="mt-2 flex flex-wrap items-center gap-2">
               <StatusIcon status={item.status} />
@@ -158,9 +159,9 @@ export function TaskDetailView({
                   {shortRepo(item.project)}
                 </span>
               )}
-              {item.pr && (item.github_repo || item.project) && (
+              {item.pr && item.project && (
                 <a
-                  href={prHref(item.pr, (item.github_repo ?? item.project)!)}
+                  href={prHref(item.pr, item.project)}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="text-[11px] no-underline hover:underline"
@@ -182,6 +183,7 @@ export function TaskDetailView({
             )}
             {onReopen && <ActionButton label="Reopen" onClick={onReopen} />}
             {onRework && <ActionButton label="Rework" onClick={onRework} />}
+            {(item.branch || item.worktree || item.plan) && <DetailOverflowMenu item={item} />}
           </div>
         </div>
       </div>
@@ -212,11 +214,6 @@ export function TaskDetailView({
             </div>
           )}
 
-          {/* Timeline */}
-          <DetailSection label={`Timeline (${events.length})`} collapsible>
-            <TaskTimeline events={events} onTranscriptClick={handleTranscriptClick} />
-          </DetailSection>
-
           {/* PR Summary */}
           {prBody?.summary && (
             <DetailSection label="PR Summary">
@@ -239,19 +236,22 @@ export function TaskDetailView({
               </pre>
             </DetailSection>
           )}
-        </div>
-      </div>
 
-      {/* Right: transcript sidebar — full height overlay */}
-      {transcriptSession && !transcriptFullScreen && (
-        <div className="absolute right-0 top-0 bottom-0 z-50">
+          {/* Timeline */}
+          <DetailSection label={`Timeline (${events.length})`}>
+            <TaskTimeline events={events} onTranscriptClick={handleTranscriptClick} />
+          </DetailSection>
+        </div>
+
+        {/* Right: transcript sidebar */}
+        {transcriptSession && !transcriptFullScreen && (
           <TranscriptSidebar
             session={transcriptSession}
             onClose={() => setTranscriptSession(null)}
             onExpand={() => setTranscriptFullScreen(true)}
           />
-        </div>
-      )}
+        )}
+      </div>
 
       {/* Full-screen transcript overlay */}
       {transcriptSession && transcriptFullScreen && (
@@ -308,37 +308,19 @@ function ActionButton({
 function DetailSection({
   label,
   children,
-  collapsible = false,
-  defaultOpen = true,
 }: {
   label: string;
   children: React.ReactNode;
-  collapsible?: boolean;
-  defaultOpen?: boolean;
 }): React.ReactElement {
-  const [open, setOpen] = useState(defaultOpen);
-
   return (
     <div className="mb-5">
       <div
-        className={`mb-2 text-[10px] font-medium uppercase tracking-widest${collapsible ? ' flex cursor-pointer select-none items-center gap-1' : ''}`}
+        className="mb-2 text-[10px] font-medium uppercase tracking-widest"
         style={{ color: 'var(--color-text-4)' }}
-        onClick={collapsible ? () => setOpen((v) => !v) : undefined}
       >
-        {collapsible && (
-          <svg
-            width="10"
-            height="10"
-            viewBox="0 0 10 10"
-            className="shrink-0 transition-transform"
-            style={{ transform: open ? 'rotate(90deg)' : 'rotate(0deg)' }}
-          >
-            <path d="M3 1l4 4-4 4" fill="none" stroke="currentColor" strokeWidth="1.5" />
-          </svg>
-        )}
         {label}
       </div>
-      {(!collapsible || open) && children}
+      {children}
     </div>
   );
 }
@@ -347,7 +329,7 @@ function DetailOverflowMenu({ item }: { item: TaskItem }): React.ReactElement {
   const [open, setOpen] = useState(false);
 
   const copyAndClose = (text: string) => {
-    navigator.clipboard.writeText(text).catch(() => console.warn('clipboard write failed'));
+    navigator.clipboard.writeText(text).catch(() => {});
     setOpen(false);
   };
 
@@ -355,7 +337,10 @@ function DetailOverflowMenu({ item }: { item: TaskItem }): React.ReactElement {
   if (item.branch) entries.push({ label: 'Copy branch', value: item.branch });
   if (item.worktree) entries.push({ label: 'Copy working directory', value: item.worktree });
   if (item.plan) {
-    entries.push({ label: 'Copy brief path', value: item.plan });
+    const planLabel = item.plan.endsWith('adopt-handoff.md')
+      ? 'Copy handoff path'
+      : 'Copy brief path';
+    entries.push({ label: planLabel, value: item.plan });
   }
 
   return (
@@ -372,16 +357,15 @@ function DetailOverflowMenu({ item }: { item: TaskItem }): React.ReactElement {
         style={{
           width: 28,
           height: 28,
-          background: 'none',
-          color: 'var(--color-text-3)',
-          border: 'none',
+          background: 'transparent',
+          color: 'var(--color-text-2)',
+          border: '1px solid var(--color-border)',
           cursor: 'pointer',
-          fontSize: 16,
-          lineHeight: 1,
+          fontSize: 14,
           borderRadius: 6,
         }}
       >
-        ···
+        &hellip;
       </button>
       {open && (
         <div
@@ -455,10 +439,7 @@ function ContextToggle({ context }: { context: string }): React.ReactElement {
         Context
       </button>
       {open && (
-        <p
-          className="whitespace-pre-wrap text-[11px] leading-relaxed"
-          style={{ color: 'var(--color-text-3)' }}
-        >
+        <p className="text-[11px] leading-relaxed" style={{ color: 'var(--color-text-3)' }}>
           {context}
         </p>
       )}

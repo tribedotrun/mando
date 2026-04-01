@@ -271,10 +271,23 @@ pub(crate) async fn apply_merge_result(
             }
         }
         _ => {
-            // escalate or unknown → Escalated
+            // escalate or unknown → Escalated (from CaptainMerging verdict — captain-managed)
+            let pr_ref = item.pr.as_deref().unwrap_or("unknown");
+            let has_conflicts = item.rebase_worker.as_deref().is_some_and(|w| w == "failed");
+            let fail_count = item.merge_fail_count;
+            let report = format!(
+                "## Merge escalation report\n\
+                 \n\
+                 - **PR:** {pr_ref}\n\
+                 - **Reason:** {}\n\
+                 - **Conflicts detected:** {has_conflicts}\n\
+                 - **Prior merge failures:** {fail_count}",
+                result.feedback,
+            );
+
             item.status = ItemStatus::Escalated;
             item.merge_fail_count = 0;
-            item.escalation_report = Some(result.feedback.clone());
+            item.escalation_report = Some(report);
             timeline_emit::emit_for_task(
                 item,
                 TimelineEventType::Escalated,
@@ -360,8 +373,10 @@ pub(crate) async fn poll_merging_items(
 
 /// Handle merge session error (CC crashed/timed out).
 ///
-/// Retries up to `max_review_retries` before escalating — transient failures
-/// (GitHub API blips, CC timeouts) are common during merge operations.
+/// Retries up to `max_review_retries` before routing to CaptainReviewing —
+/// transient failures (GitHub API blips, CC timeouts) are common during merge
+/// operations. When retries are exhausted, routes through CaptainReviewing
+/// with a merge_fail trigger (invariant 1: Escalated only via CaptainReviewing).
 pub(crate) async fn handle_merge_error(
     item: &mut Task,
     error: &str,
@@ -376,12 +391,31 @@ pub(crate) async fn handle_merge_error(
     let err_data = serde_json::json!({ "error": error, "fail_count": fail_count });
 
     if fail_count >= max_retries {
-        item.status = ItemStatus::Escalated;
-        item.escalation_report = Some(format!("Merge failed {fail_count}/{max_retries}: {error}"));
+        // Build enriched report with actionable context.
+        let pr_ref = item.pr.as_deref().unwrap_or("unknown");
+        let has_conflicts = item.rebase_worker.as_deref().is_some_and(|w| w == "failed");
+        let report = format!(
+            "## Merge failure report\n\
+             \n\
+             - **PR:** {pr_ref}\n\
+             - **Error:** {error}\n\
+             - **Attempts:** {fail_count}/{max_retries}\n\
+             - **Conflicts detected:** {has_conflicts}\n\
+             - **Merge fail count:** {fail_count}",
+        );
+
+        // Route through CaptainReviewing (merge_fail trigger) instead of
+        // escalating directly — invariant 1.
+        super::action_contract::reset_review_retry(
+            item,
+            mando_types::task::ReviewTrigger::MergeFail,
+        );
+        item.escalation_report = Some(report);
+
         timeline_emit::emit_for_task(
             item,
-            TimelineEventType::Escalated,
-            &format!("Merge failed {fail_count}/{max_retries}: {error}"),
+            TimelineEventType::CaptainReviewStarted,
+            &format!("Merge failed {fail_count}/{max_retries} — captain reviewing: {error}"),
             err_data,
             pool,
         )
@@ -389,7 +423,7 @@ pub(crate) async fn handle_merge_error(
         let escaped_error = mando_shared::telegram_format::escape_html(error);
         notifier
             .critical(&format!(
-                "\u{1f6a8} Merge failed for <b>{title}</b>: {escaped_error}"
+                "\u{1f6a8} Merge failed for <b>{title}</b>: {escaped_error} — captain reviewing"
             ))
             .await;
     } else {

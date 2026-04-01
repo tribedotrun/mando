@@ -29,125 +29,62 @@ pub(crate) fn resolve_cli_path(configured: &str) -> Result<String> {
     Ok(path)
 }
 
-/// Update Linear issue status.
-pub(crate) async fn update_status(cli_path: &str, issue_id: &str, status: &str) -> Result<()> {
+/// Run a Linear CLI command with retry. Returns stdout on success.
+async fn run_linear_cli(cli_path: &str, args: &[&str]) -> Result<String> {
     let cli_path = cli_path.to_string();
-    let issue_id = issue_id.to_string();
-    let status = status.to_string();
+    let args: Vec<String> = args.iter().map(|s| s.to_string()).collect();
+    let label = args.first().cloned().unwrap_or_default();
     retry_on_transient(
         &linear_retry_config(),
         |e: &anyhow::Error| classify_cli_error(&e.to_string()),
         || {
             let cli_path = cli_path.clone();
-            let issue_id = issue_id.clone();
-            let status = status.clone();
+            let args = args.clone();
+            let label = label.clone();
             async move {
+                let str_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
                 let output = tokio::process::Command::new(&cli_path)
-                    .args(["status", &issue_id, &status])
+                    .args(&str_refs)
                     .output()
                     .await
-                    .context("linear status")?;
+                    .with_context(|| format!("linear {label}"))?;
                 if !output.status.success() {
                     let stderr = String::from_utf8_lossy(&output.stderr);
-                    anyhow::bail!("linear status failed: {}", stderr);
+                    anyhow::bail!("linear {label} failed: {stderr}");
                 }
-                Ok(())
+                Ok(String::from_utf8_lossy(&output.stdout).to_string())
             }
         },
     )
     .await
+}
+
+/// Update Linear issue status.
+pub(crate) async fn update_status(cli_path: &str, issue_id: &str, status: &str) -> Result<()> {
+    run_linear_cli(cli_path, &["status", issue_id, status]).await?;
+    Ok(())
 }
 
 /// Post a comment on a Linear issue, returning the comment UUID.
 pub(crate) async fn post_comment(cli_path: &str, issue_id: &str, body: &str) -> Result<String> {
-    let cli_path = cli_path.to_string();
-    let issue_id = issue_id.to_string();
-    let body = body.to_string();
-    retry_on_transient(
-        &linear_retry_config(),
-        |e: &anyhow::Error| classify_cli_error(&e.to_string()),
-        || {
-            let cli_path = cli_path.clone();
-            let issue_id = issue_id.clone();
-            let body = body.clone();
-            async move {
-                let output = tokio::process::Command::new(&cli_path)
-                    .args(["comment", &issue_id, &body])
-                    .output()
-                    .await
-                    .context("linear comment")?;
-                if !output.status.success() {
-                    let stderr = String::from_utf8_lossy(&output.stderr);
-                    anyhow::bail!("linear comment failed: {}", stderr);
-                }
-                let text = String::from_utf8_lossy(&output.stdout);
-                let comment_id = text
-                    .split("id=")
-                    .nth(1)
-                    .map(|s| s.trim().to_string())
-                    .unwrap_or_default();
-                Ok(comment_id)
-            }
-        },
-    )
-    .await
+    let text = run_linear_cli(cli_path, &["comment", issue_id, body]).await?;
+    Ok(text
+        .split("id=")
+        .nth(1)
+        .map(|s| s.trim().to_string())
+        .unwrap_or_default())
 }
 
 /// Update an existing comment by UUID.
 pub(crate) async fn update_comment(cli_path: &str, comment_id: &str, body: &str) -> Result<()> {
-    let cli_path = cli_path.to_string();
-    let comment_id = comment_id.to_string();
-    let body = body.to_string();
-    retry_on_transient(
-        &linear_retry_config(),
-        |e: &anyhow::Error| classify_cli_error(&e.to_string()),
-        || {
-            let cli_path = cli_path.clone();
-            let comment_id = comment_id.clone();
-            let body = body.clone();
-            async move {
-                let output = tokio::process::Command::new(&cli_path)
-                    .args(["comment-update", &comment_id, &body])
-                    .output()
-                    .await
-                    .context("linear comment-update")?;
-                if !output.status.success() {
-                    let stderr = String::from_utf8_lossy(&output.stderr);
-                    anyhow::bail!("linear comment-update failed: {}", stderr);
-                }
-                Ok(())
-            }
-        },
-    )
-    .await
+    run_linear_cli(cli_path, &["comment-update", comment_id, body]).await?;
+    Ok(())
 }
 
 /// Search Linear issues by title.
 pub(crate) async fn search_issues(cli_path: &str, query: &str) -> Result<Vec<String>> {
-    let cli_path = cli_path.to_string();
-    let query = query.to_string();
-    retry_on_transient(
-        &linear_retry_config(),
-        |e: &anyhow::Error| classify_cli_error(&e.to_string()),
-        || {
-            let cli_path = cli_path.clone();
-            let query = query.clone();
-            async move {
-                let output = tokio::process::Command::new(&cli_path)
-                    .args(["search", &query])
-                    .output()
-                    .await
-                    .context("linear search")?;
-                if !output.status.success() {
-                    let stderr = String::from_utf8_lossy(&output.stderr);
-                    anyhow::bail!("linear search failed: {}", stderr);
-                }
-                let text = String::from_utf8_lossy(&output.stdout);
-                Ok(text.lines().map(String::from).collect())
-            }
-        },
-    )
-    .await
+    let text = run_linear_cli(cli_path, &["search", query]).await?;
+    Ok(text.lines().map(String::from).collect())
 }
 
 /// Create a Linear issue.
@@ -158,37 +95,15 @@ pub(crate) async fn create_issue(
     description: Option<&str>,
     labels: &[String],
 ) -> Result<String> {
-    let cli_path = cli_path.to_string();
-    let mut args = vec!["create".to_string(), team.to_string(), title.to_string()];
+    let mut owned_args: Vec<String> = vec!["create".into(), team.into(), title.into()];
     if let Some(desc) = description {
-        args.push("-d".to_string());
-        args.push(desc.to_string());
+        owned_args.push("-d".into());
+        owned_args.push(desc.into());
     }
     for label in labels {
-        args.push("-l".to_string());
-        args.push(label.clone());
+        owned_args.push("-l".into());
+        owned_args.push(label.clone());
     }
-
-    retry_on_transient(
-        &linear_retry_config(),
-        |e: &anyhow::Error| classify_cli_error(&e.to_string()),
-        || {
-            let cli_path = cli_path.clone();
-            let args = args.clone();
-            async move {
-                let str_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
-                let output = tokio::process::Command::new(&cli_path)
-                    .args(&str_refs)
-                    .output()
-                    .await
-                    .context("linear create")?;
-                if !output.status.success() {
-                    let stderr = String::from_utf8_lossy(&output.stderr);
-                    anyhow::bail!("linear create failed: {}", stderr);
-                }
-                Ok(String::from_utf8_lossy(&output.stdout).to_string())
-            }
-        },
-    )
-    .await
+    let args: Vec<&str> = owned_args.iter().map(|s| s.as_str()).collect();
+    run_linear_cli(cli_path, &args).await
 }

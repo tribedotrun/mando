@@ -241,7 +241,7 @@ pub async fn cmd_research(bot: &mut TelegramBot, chat_id: &str, args: &str) -> R
         send_html(
             bot,
             chat_id,
-            "Usage: /research <topic>\nExample: /research Rust async patterns",
+            "Usage: /research &lt;topic&gt;\nExample: /research Rust async patterns",
         )
         .await?;
         return Ok(());

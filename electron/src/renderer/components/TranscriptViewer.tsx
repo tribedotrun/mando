@@ -384,6 +384,7 @@ export function TranscriptSidebar({
   const resumeCmd = s.cwd
     ? `cd ${s.cwd} && claude --resume ${s.session_id}`
     : `claude --resume ${s.session_id}`;
+  const subtitle = sessionSubtitle(s);
 
   return (
     <div
@@ -402,10 +403,7 @@ export function TranscriptSidebar({
             {sessionTitle(s)}
           </div>
           <div className="flex gap-2 text-[10px]" style={{ color: 'var(--color-text-3)' }}>
-            {(() => {
-              const sub = sessionSubtitle(s);
-              return sub && <span>{sub}</span>;
-            })()}
+            {subtitle && <span>{subtitle}</span>}
             {s.model && <span>{s.model}</span>}
             {s.duration_ms != null && s.duration_ms > 0 && (
               <span>

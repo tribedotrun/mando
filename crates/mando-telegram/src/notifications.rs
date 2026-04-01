@@ -108,10 +108,7 @@ impl NotificationHandler {
             .api
             .send_message(&self.chat_id, text, Some("HTML"), reply_markup, true)
             .await?;
-
-        let msg_id = result["message_id"].as_i64().unwrap_or(0);
-
-        Ok(msg_id)
+        Ok(result["message_id"].as_i64().unwrap_or(0))
     }
 
     async fn edit_message(

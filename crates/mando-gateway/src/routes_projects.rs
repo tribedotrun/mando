@@ -127,11 +127,15 @@ pub(crate) async fn post_projects(
     // Auto-detect GitHub repo.
     let github_repo = mando_config::detect_github_repo(&abs_path_str);
 
+    // Auto-generate scout summary from project metadata.
+    let scout_summary = detect_project_summary(&abs_path);
+
     let pc = mando_config::settings::ProjectConfig {
         name: name.clone(),
         path: abs_path_str.clone(),
         github_repo: github_repo.clone(),
         aliases: body.aliases,
+        scout_summary,
         ..Default::default()
     };
 
@@ -154,6 +158,7 @@ pub(crate) struct EditProjectBody {
     pub aliases: Option<Vec<String>>,
     pub preamble: Option<String>,
     pub check_command: Option<String>,
+    pub scout_summary: Option<String>,
 }
 
 /// PATCH /api/projects/{name} — edit a project.
@@ -202,6 +207,9 @@ pub(crate) async fn patch_project(
     if let Some(check_cmd) = body.check_command {
         pc.check_command = check_cmd;
     }
+    if let Some(summary) = body.scout_summary {
+        pc.scout_summary = summary;
+    }
 
     save_and_reload(&state, &config).await?;
     Ok(Json(json!({ "ok": true })))
@@ -218,4 +226,52 @@ pub(crate) async fn delete_project(
     config.captain.projects.remove(&key);
     save_and_reload(&state, &config).await?;
     Ok(Json(json!({ "ok": true })))
+}
+
+/// Auto-detect a project summary from Cargo.toml, package.json, or README.
+fn detect_project_summary(project_path: &std::path::Path) -> String {
+    // Try Cargo.toml [package].description via JSON deserialization.
+    if let Ok(content) = std::fs::read_to_string(project_path.join("Cargo.toml")) {
+        if let Ok(toml) = content.parse::<toml::Table>() {
+            if let Some(desc) = toml
+                .get("package")
+                .and_then(|p| p.get("description"))
+                .and_then(|d| d.as_str())
+            {
+                let desc = desc.trim();
+                if !desc.is_empty() {
+                    return desc.to_string();
+                }
+            }
+        }
+    }
+
+    // Try package.json description.
+    if let Ok(content) = std::fs::read_to_string(project_path.join("package.json")) {
+        if let Ok(pkg) = serde_json::from_str::<Value>(&content) {
+            if let Some(desc) = pkg.get("description").and_then(|d| d.as_str()) {
+                let desc = desc.trim();
+                if !desc.is_empty() {
+                    return desc.to_string();
+                }
+            }
+        }
+    }
+
+    // Try first meaningful line of README.md (skip headings and blank lines).
+    if let Ok(content) = std::fs::read_to_string(project_path.join("README.md")) {
+        for line in content.lines() {
+            let trimmed = line.trim();
+            if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with("![") {
+                continue;
+            }
+            let summary: String = trimmed.chars().take(200).collect();
+            if summary.len() < trimmed.len() {
+                return format!("{summary}…");
+            }
+            return summary;
+        }
+    }
+
+    String::new()
 }

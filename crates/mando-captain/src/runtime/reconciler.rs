@@ -29,7 +29,7 @@ pub async fn reconcile_on_startup(config: &Config, pool: &sqlx::SqlitePool) -> R
 
     // Collect into owned tuples — one pass instead of three separate Vecs.
     let entries: Vec<(String, String, serde_json::Value)> = incomplete
-        .into_iter()
+        .iter()
         .map(|e| (e.op_id.clone(), e.op_type.clone(), e.params.clone()))
         .collect();
 

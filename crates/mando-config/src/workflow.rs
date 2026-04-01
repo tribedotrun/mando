@@ -80,6 +80,10 @@ pub struct AgentConfig {
     pub rebase_base_delay_s: u64,
     pub worker_timeout_s: f64,
     pub clarifier_timeout_s: u64,
+    /// How long an item can sit in NeedsClarification (waiting for human) before
+    /// escalating to CaptainReviewing. Much larger than clarifier_timeout_s
+    /// because humans respond in hours/days, not seconds.
+    pub needs_clarification_timeout_s: u64,
     pub archive_grace_secs: u64,
 }
 
@@ -98,6 +102,7 @@ impl Default for AgentConfig {
             rebase_base_delay_s: 30,
             worker_timeout_s: 21600.0,
             clarifier_timeout_s: 300,
+            needs_clarification_timeout_s: 86400, // 24 hours
             archive_grace_secs: 604800,
         }
     }
@@ -124,9 +129,39 @@ fn parse_scout_workflow(yaml: &str) -> ScoutWorkflow {
 }
 
 /// Load captain workflow: user override at `path` if it exists, else compiled-in default.
-/// Panics if required template keys are missing (fail-fast at startup).
-pub fn load_captain_workflow(override_path: &Path) -> CaptainWorkflow {
-    let wf = if override_path.exists() {
+/// `tick_interval_s` comes from `CaptainConfig` for timing-invariant validation.
+/// Panics if required template keys are missing or agent config is invalid (fail-fast at startup).
+pub fn load_captain_workflow(override_path: &Path, tick_interval_s: u64) -> CaptainWorkflow {
+    let wf = load_captain_workflow_inner(override_path);
+    crate::workflow_validate::validate_captain_workflow(&wf);
+    crate::workflow_validate::validate_agent_config(&wf.agent, tick_interval_s);
+    wf
+}
+
+/// Non-panicking variant for use in HTTP handlers.
+/// Returns `Err` with a user-facing message if agent config validation fails.
+pub fn try_load_captain_workflow(
+    override_path: &Path,
+    tick_interval_s: u64,
+) -> Result<CaptainWorkflow, String> {
+    let wf = load_captain_workflow_inner(override_path);
+    // validate_captain_workflow panics on missing template keys — catch it.
+    if let Err(e) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        crate::workflow_validate::validate_captain_workflow(&wf);
+    })) {
+        let msg = e
+            .downcast_ref::<String>()
+            .map(|s| s.as_str())
+            .or_else(|| e.downcast_ref::<&str>().copied())
+            .unwrap_or("workflow validation failed");
+        return Err(msg.to_string());
+    }
+    crate::workflow_validate::try_validate_agent_config(&wf.agent, tick_interval_s)?;
+    Ok(wf)
+}
+
+fn load_captain_workflow_inner(override_path: &Path) -> CaptainWorkflow {
+    if override_path.exists() {
         match std::fs::read_to_string(override_path) {
             Ok(contents) => {
                 tracing::info!("loaded captain workflow from {}", override_path.display());
@@ -142,9 +177,7 @@ pub fn load_captain_workflow(override_path: &Path) -> CaptainWorkflow {
         }
     } else {
         CaptainWorkflow::compiled_default()
-    };
-    crate::workflow_validate::validate_captain_workflow(&wf);
-    wf
+    }
 }
 
 /// Load scout workflow: user override at `path` if it exists, else compiled-in default.
@@ -208,16 +241,26 @@ pub fn render_template(template: &str, vars: &HashMap<&str, &str>) -> Result<Str
     render_template_value_map(template, &coerce_template_vars(vars))
 }
 
+/// Look up a named template from a map and render it with the given variables.
+fn render_named(
+    kind: &str,
+    template_name: &str,
+    templates: &HashMap<String, String>,
+    vars: &HashMap<&str, &str>,
+) -> Result<String, String> {
+    let raw = templates
+        .get(template_name)
+        .ok_or_else(|| format!("unknown {kind} template: {template_name:?}"))?;
+    render_template_value_map(raw, &coerce_template_vars(vars))
+}
+
 /// Render a named prompt from a workflow's prompt map.
 pub fn render_prompt(
     template_name: &str,
     prompts: &HashMap<String, String>,
     vars: &HashMap<&str, &str>,
 ) -> Result<String, String> {
-    let raw = prompts
-        .get(template_name)
-        .ok_or_else(|| format!("unknown prompt template: {template_name:?}"))?;
-    render_template_value_map(raw, &coerce_template_vars(vars))
+    render_named("prompt", template_name, prompts, vars)
 }
 
 /// Render a named nudge from a workflow's nudge map.
@@ -226,10 +269,7 @@ pub fn render_nudge(
     nudges: &HashMap<String, String>,
     vars: &HashMap<&str, &str>,
 ) -> Result<String, String> {
-    let raw = nudges
-        .get(template_name)
-        .ok_or_else(|| format!("unknown nudge template: {template_name:?}"))?;
-    Ok(render_template_value_map(raw, &coerce_template_vars(vars))?
+    Ok(render_named("nudge", template_name, nudges, vars)?
         .trim()
         .to_string())
 }
@@ -240,10 +280,7 @@ pub fn render_initial_prompt(
     prompts: &HashMap<String, String>,
     vars: &HashMap<&str, &str>,
 ) -> Result<String, String> {
-    let raw = prompts
-        .get(template_name)
-        .ok_or_else(|| format!("unknown initial prompt template: {template_name:?}"))?;
-    render_template_value_map(raw, &coerce_template_vars(vars))
+    render_named("initial prompt", template_name, prompts, vars)
 }
 
 pub fn validate_template_syntax(template: &str) -> Result<(), String> {

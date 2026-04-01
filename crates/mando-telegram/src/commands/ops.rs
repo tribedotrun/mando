@@ -59,7 +59,7 @@ pub async fn handle(bot: &mut TelegramBot, chat_id: &str, args: &str) -> Result<
         } else {
             bot.send_html(
                 chat_id,
-                "\u{1f527} No active ops session. Use /ops <message> to start one.",
+                "\u{1f527} No active ops session. Use /ops &lt;message&gt; to start one.",
             )
             .await?;
         }

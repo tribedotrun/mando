@@ -205,6 +205,22 @@ pub async fn reopen_item(
     pool: &sqlx::SqlitePool,
     allow_queue_fallback: bool,
 ) -> Result<ReopenOutcome> {
+    // Reject reopens on items being actively managed by captain.
+    if reopen_source == "human"
+        && (item.status == ItemStatus::CaptainReviewing
+            || item.status == ItemStatus::CaptainMerging)
+    {
+        anyhow::bail!(
+            "cannot reopen item {}: captain {} is in progress",
+            item.id,
+            if item.status == ItemStatus::CaptainReviewing {
+                "review"
+            } else {
+                "merge"
+            }
+        );
+    }
+
     let item_id = item.id.to_string();
     let _lock = crate::io::item_lock::acquire_item_lock(&item_id, "reopen")?;
 
@@ -251,21 +267,41 @@ pub async fn reopen_item(
         bail!("item missing worker/session/worktree — cannot reopen");
     }
 
-    let result = spawner_lifecycle::reopen_worker(item, config, feedback, workflow, pool).await?;
-    item.intervention_count = new_count as i64;
-    item.reopen_seq += 1;
-    item.status = ItemStatus::InProgress;
-    item.worker = Some(result.session_name);
-    item.session_ids.worker = Some(result.session_id);
-    item.branch = Some(result.branch);
-    item.worktree = Some(result.worktree);
-    item.last_activity_at = Some(mando_types::now_rfc3339());
+    match spawner_lifecycle::reopen_worker(item, config, feedback, workflow, pool).await {
+        Ok(result) => {
+            item.intervention_count = new_count as i64;
+            item.reopen_seq += 1;
+            item.status = ItemStatus::InProgress;
+            item.worker = Some(result.session_name);
+            item.session_ids.worker = Some(result.session_id);
+            item.branch = Some(result.branch);
+            item.worktree = Some(result.worktree);
+            item.last_activity_at = Some(mando_types::now_rfc3339());
 
-    if let Err(e) = linear_integration::writeback_status(item, config).await {
-        tracing::warn!(module = "captain", %e, "Linear status writeback failed");
+            if let Err(e) = linear_integration::writeback_status(item, config).await {
+                tracing::warn!(module = "captain", %e, "Linear status writeback failed");
+            }
+
+            Ok(ReopenOutcome::Reopened)
+        }
+        Err(e) => {
+            tracing::warn!(
+                module = "captain",
+                item_id = item.id,
+                error = %e,
+                "reopen_worker failed — falling back to queue"
+            );
+            if allow_queue_fallback {
+                item.intervention_count = new_count as i64;
+                item.reopen_seq += 1;
+                item.status = ItemStatus::Queued;
+                item.last_activity_at = Some(mando_types::now_rfc3339());
+                Ok(ReopenOutcome::QueuedFallback)
+            } else {
+                Err(e)
+            }
+        }
     }
-
-    Ok(ReopenOutcome::Reopened)
 }
 
 pub(crate) fn reset_review_retry(item: &mut Task, trigger: ReviewTrigger) {

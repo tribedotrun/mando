@@ -29,6 +29,7 @@ const EVENT_ICONS: Record<string, string> = {
 
 const DOT_COLORS: Record<string, string> = {
   created: 'var(--color-text-4)',
+  worker_spawned: 'var(--color-accent)',
   worker_completed: 'var(--color-success)',
   merged: 'var(--color-success)',
   human_answered: 'var(--color-needs-human)',
@@ -57,23 +58,13 @@ export function TaskTimeline({
     );
   }
 
-  const DOT_SIZE = 8;
-  const RAIL_LEFT = DOT_SIZE / 2; // center of dot in container coords
-
   return (
-    <div className="relative" style={{ paddingLeft: 20 }}>
-      {/* Vertical line — from first dot center to last dot center */}
-      {events.length > 1 && (
-        <div
-          className="absolute w-px"
-          style={{
-            left: RAIL_LEFT,
-            top: 10, // approximate first dot center
-            bottom: 14, // approximate last dot center
-            background: 'var(--color-border-subtle)',
-          }}
-        />
-      )}
+    <div className="relative pl-5">
+      {/* Vertical line */}
+      <div
+        className="absolute left-[7px] top-1 bottom-1 w-px"
+        style={{ background: 'var(--color-border-subtle)' }}
+      />
       {events.map((event, i) => {
         const icon = EVENT_ICONS[event.event_type] ?? '\u00B7';
         const dotColor = DOT_COLORS[event.event_type] ?? 'var(--color-border)';
@@ -81,28 +72,22 @@ export function TaskTimeline({
         const showTranscript = sessionId && !shownSessionIds.has(sessionId);
         if (sessionId) shownSessionIds.add(sessionId);
         const isExpanded = expandedIdx === i;
-        const isHollow = dotColor === 'var(--color-text-4)';
         const hasVisibleData =
-          event.data &&
-          Object.entries(event.data).some(([k]) => k !== 'session_id' && k !== 'source');
+          event.data && Object.keys(event.data).some((k) => k !== 'session_id' && k !== 'source');
 
         return (
           <div key={`${event.timestamp}-${i}`} className="relative mb-2">
-            {/* Dot — centered on the rail */}
+            {/* Dot */}
             <div
-              className="absolute rounded-full"
+              className="absolute -left-5 top-[5px] h-[10px] w-[10px] rounded-full border-2"
               style={{
-                width: DOT_SIZE,
-                height: DOT_SIZE,
-                left: -20 + RAIL_LEFT - DOT_SIZE / 2,
-                top: 6,
-                border: isHollow ? `2px solid ${dotColor}` : 'none',
-                background: isHollow ? 'transparent' : dotColor,
+                borderColor: dotColor,
+                background: dotColor === 'var(--color-text-4)' ? 'transparent' : dotColor,
               }}
             />
             <div
               className={`flex items-center gap-2 rounded px-1 py-0.5${hasVisibleData ? ' cursor-pointer' : ''}`}
-              onClick={hasVisibleData ? () => setExpandedIdx(isExpanded ? null : i) : undefined}
+              onClick={() => hasVisibleData && setExpandedIdx(isExpanded ? null : i)}
             >
               <span className="w-4 shrink-0 text-center text-[11px]">{icon}</span>
               <span className="text-[12px] font-medium" style={{ color: 'var(--color-text-1)' }}>
@@ -120,21 +105,15 @@ export function TaskTimeline({
                     e.stopPropagation();
                     onTranscriptClick(sessionId, event);
                   }}
-                  className="shrink-0"
-                  title="View transcript"
+                  className="shrink-0 text-[10px] font-mono"
                   style={{
                     color: 'var(--color-accent)',
                     background: 'none',
                     border: 'none',
                     cursor: 'pointer',
-                    padding: 2,
-                    display: 'flex',
-                    alignItems: 'center',
                   }}
                 >
-                  <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
-                    <path d="M1.75 1h8.5c.966 0 1.75.784 1.75 1.75v5.5A1.75 1.75 0 0 1 10.25 10H7.061l-2.574 2.573A1.458 1.458 0 0 1 2 11.543V10h-.25A1.75 1.75 0 0 1 0 8.25v-5.5C0 1.784.784 1 1.75 1ZM1.5 2.75v5.5c0 .138.112.25.25.25h1a.75.75 0 0 1 .75.75v2.19l2.72-2.72a.749.749 0 0 1 .53-.22h3.5a.25.25 0 0 0 .25-.25v-5.5a.25.25 0 0 0-.25-.25h-8.5a.25.25 0 0 0-.25.25Zm13 2a.25.25 0 0 0-.25-.25h-.5a.75.75 0 0 1 0-1.5h.5c.966 0 1.75.784 1.75 1.75v5.5A1.75 1.75 0 0 1 14.25 12H14v1.543a1.458 1.458 0 0 1-2.487 1.03L9.22 12.28a.749.749 0 0 1 .326-1.275.749.749 0 0 1 .734.215l2.22 2.22v-2.19a.75.75 0 0 1 .75-.75h1a.25.25 0 0 0 .25-.25Z" />
-                  </svg>
+                  transcript
                 </button>
               )}
               <span className="shrink-0 text-[10px]" style={{ color: 'var(--color-text-4)' }}>

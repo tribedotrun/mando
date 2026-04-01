@@ -84,11 +84,11 @@ impl ItemStatus {
     }
 
     pub fn is_reworkable(self) -> bool {
-        REWORKABLE.contains(&self)
+        ACTIONABLE_TERMINAL.contains(&self)
     }
 
     pub fn is_reopenable(self) -> bool {
-        REOPENABLE.contains(&self)
+        ACTIONABLE_TERMINAL.contains(&self)
     }
 
     /// The serde string representation (kebab-case).
@@ -158,6 +158,7 @@ pub enum ReviewTrigger {
     DegradedContext,
     Retry,
     CaptainDecision,
+    MergeFail,
 }
 
 impl ReviewTrigger {
@@ -173,6 +174,7 @@ impl ReviewTrigger {
             Self::DegradedContext => "degraded_context",
             Self::Retry => "retry",
             Self::CaptainDecision => "captain_decision",
+            Self::MergeFail => "merge_fail",
         }
     }
 }
@@ -198,6 +200,7 @@ impl FromStr for ReviewTrigger {
             "degraded_context" => Ok(Self::DegradedContext),
             "retry" => Ok(Self::Retry),
             "captain_decision" => Ok(Self::CaptainDecision),
+            "merge_fail" => Ok(Self::MergeFail),
             _ => Err(format!("unknown review trigger: {s}")),
         }
     }

@@ -3,7 +3,7 @@
 use clap::{Args, Subcommand};
 use serde_json::json;
 
-use crate::http::DaemonClient;
+use crate::http::{parse_id, DaemonClient};
 
 #[derive(Args)]
 pub(crate) struct TodoArgs {
@@ -197,12 +197,12 @@ async fn handle_bulk(
 }
 
 async fn handle_delete(item_id: &str) -> anyhow::Result<()> {
-    let id_num: i64 = item_id
-        .parse()
-        .map_err(|_| anyhow::anyhow!("invalid item ID: {item_id}"))?;
     let client = DaemonClient::discover()?;
     client
-        .post("/api/tasks/delete", &json!({"ids": [id_num]}))
+        .post(
+            "/api/tasks/delete",
+            &json!({"ids": [parse_id(item_id, "item")?]}),
+        )
         .await?;
     println!("Deleted item #{item_id}.");
     Ok(())
@@ -267,9 +267,7 @@ async fn handle_pr_summary(item_id: &str) -> anyhow::Result<()> {
         .and_then(|v| v.as_array())
         .or_else(|| resp.as_array());
 
-    let id_num: i64 = item_id
-        .parse()
-        .map_err(|_| anyhow::anyhow!("invalid item ID: {item_id}"))?;
+    let id_num = parse_id(item_id, "item")?;
     let item = arr
         .and_then(|a| a.iter().find(|it| it["id"].as_i64() == Some(id_num)))
         .ok_or_else(|| anyhow::anyhow!("item #{item_id} not found"))?;
@@ -296,11 +294,8 @@ async fn handle_ask(item_id: &str, message: Option<&str>, end: bool) -> anyhow::
     }
     match message {
         Some(msg) => {
-            let id_num: i64 = item_id
-                .parse()
-                .map_err(|_| anyhow::anyhow!("invalid item ID: {item_id}"))?;
             let client = DaemonClient::discover()?;
-            let body = json!({"id": id_num, "question": msg});
+            let body = json!({"id": parse_id(item_id, "item")?, "question": msg});
             let result = client.post("/api/tasks/ask", &body).await?;
             let reply = result["reply"].as_str().unwrap_or("(no reply)");
             println!("{reply}");
@@ -336,9 +331,7 @@ async fn handle_timeline(item_id: &str, last: Option<usize>) -> anyhow::Result<(
 }
 
 async fn handle_input(item_id: &str, message: &str) -> anyhow::Result<()> {
-    let id_num: i64 = item_id
-        .parse()
-        .map_err(|_| anyhow::anyhow!("invalid item ID: {item_id}"))?;
+    let id_num = parse_id(item_id, "item")?;
     let client = DaemonClient::discover()?;
 
     // Fetch current item status.
@@ -390,16 +383,8 @@ async fn handle_input(item_id: &str, message: &str) -> anyhow::Result<()> {
                 _ => println!("Answer saved."),
             }
         }
-        "new" | "clarifying" | "queued" => {
-            // Append context directly.
-            let body = json!({"context": format!("[Human input] {message}")});
-            client
-                .patch(&format!("/api/tasks/{item_id}"), &body)
-                .await?;
-            println!("Appended input to item #{item_id}.");
-        }
         _ => {
-            // Fallback: append as context via patch.
+            // Append context via patch.
             let body = json!({"context": format!("[Human input] {message}")});
             client
                 .patch(&format!("/api/tasks/{item_id}"), &body)

@@ -9,7 +9,7 @@ use mando_config::workflow::ScoutWorkflow;
 use mando_config::Config;
 use tracing::{info, warn};
 
-use crate::biz::formatting::slugify_title;
+use crate::biz::formatting::{bullet_list, slugify_title};
 use crate::biz::url_detect::classify_url;
 use crate::io::content_fetch::fetch_content;
 use crate::io::db::ScoutDb;
@@ -69,27 +69,9 @@ pub async fn process_item(
     let source = crate::biz::url_detect::derive_source_label(&item.url, url_type.as_str());
 
     // Build scoring prompt from workflow template.
-    let interests_high = workflow
-        .interests
-        .high
-        .iter()
-        .map(|s| format!("- {s}"))
-        .collect::<Vec<_>>()
-        .join("\n");
-    let interests_medium = workflow
-        .interests
-        .medium
-        .iter()
-        .map(|s| format!("- {s}"))
-        .collect::<Vec<_>>()
-        .join("\n");
-    let interests_low = workflow
-        .interests
-        .low
-        .iter()
-        .map(|s| format!("- {s}"))
-        .collect::<Vec<_>>()
-        .join("\n");
+    let interests_high = bullet_list(&workflow.interests.high);
+    let interests_medium = bullet_list(&workflow.interests.medium);
+    let interests_low = bullet_list(&workflow.interests.low);
 
     let user_context_rendered = workflow.user_context.render();
 

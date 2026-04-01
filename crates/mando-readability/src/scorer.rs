@@ -69,19 +69,18 @@ pub(crate) fn score(dom: &Dom) -> HashMap<NodeId, f64> {
         if class_id.is_empty() {
             continue;
         }
-        let mut modifier = 0.0_f64;
-        for pat in NEGATIVE_PATTERNS {
-            if class_id.contains(pat) {
-                modifier -= 25.0;
-            }
-        }
-        for pat in POSITIVE_PATTERNS {
-            if class_id.contains(pat) {
-                modifier += 25.0;
-            }
-        }
+        let neg = NEGATIVE_PATTERNS
+            .iter()
+            .filter(|p| class_id.contains(*p))
+            .count() as f64;
+        let pos = POSITIVE_PATTERNS
+            .iter()
+            .filter(|p| class_id.contains(*p))
+            .count() as f64;
+        let modifier = pos * 25.0 - neg * 25.0;
         if modifier != 0.0 {
-            *scores.entry(id).or_default() += modifier;
+            // Safe: id comes from scored_ids which was collected from scores.keys().
+            *scores.get_mut(&id).unwrap() += modifier;
         }
     }
 

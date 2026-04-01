@@ -26,8 +26,8 @@ import {
   renameSync,
   rmSync,
   readdirSync,
+  createWriteStream,
 } from 'fs';
-import { createWriteStream } from 'fs';
 import path from 'path';
 import https from 'https';
 import { execSync } from 'child_process';
@@ -56,6 +56,11 @@ interface PendingUpdate {
 
 let pendingUpdate: PendingUpdate | null = null;
 let downloading = false;
+
+/** Extract Node.js error code (e.g. 'ENOENT') or empty string. */
+function errCode(err: unknown): string {
+  return err instanceof Error && 'code' in err ? ((err as NodeJS.ErrnoException).code ?? '') : '';
+}
 
 // ---------------------------------------------------------------------------
 // Paths
@@ -91,7 +96,7 @@ function readChannel(): UpdateChannel {
     const parsed = JSON.parse(raw) as { channel?: string };
     if (parsed.channel === 'alpha' || parsed.channel === 'beta') return parsed.channel;
   } catch (err) {
-    const code = err instanceof Error && 'code' in err ? (err as NodeJS.ErrnoException).code : '';
+    const code = errCode(err);
     if (code !== 'ENOENT') {
       log.warn('auto-update: failed to read channel config, defaulting to stable', err);
     }
@@ -285,7 +290,7 @@ function applyUpdate(newAppPath: string): void {
       throw innerErr;
     }
   } catch (err: unknown) {
-    const code = err instanceof Error && 'code' in err ? (err as NodeJS.ErrnoException).code : '';
+    const code = errCode(err);
     if (code !== 'EPERM' && code !== 'EACCES') throw err;
 
     // App is root-owned (ShipIt damage from a previous Squirrel update).
@@ -348,7 +353,7 @@ function readPending(): PendingUpdate | null {
     const raw = readFileSync(pendingPath, 'utf-8');
     return JSON.parse(raw) as PendingUpdate;
   } catch (err) {
-    const code = err instanceof Error && 'code' in err ? (err as NodeJS.ErrnoException).code : '';
+    const code = errCode(err);
     if (code !== 'ENOENT') {
       log.warn('auto-update: failed to read pending update marker', err);
     }

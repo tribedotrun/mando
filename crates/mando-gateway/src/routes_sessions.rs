@@ -11,18 +11,9 @@ use crate::AppState;
 
 #[derive(Deserialize, Default)]
 pub(crate) struct SessionsQuery {
-    #[serde(default = "default_page")]
-    pub page: u32,
-    #[serde(default = "default_per_page")]
-    pub per_page: u32,
+    pub page: Option<u32>,
+    pub per_page: Option<u32>,
     pub category: Option<String>,
-}
-
-fn default_page() -> u32 {
-    1
-}
-fn default_per_page() -> u32 {
-    50
 }
 
 /// GET /api/sessions?page=1&per_page=50&category=worker
@@ -33,8 +24,8 @@ pub(crate) async fn get_sessions(
     let config = state.config.load_full();
     let store = state.task_store.read().await;
 
-    let page = params.page.max(1) as usize;
-    let per_page = params.per_page.max(1) as usize;
+    let page = params.page.unwrap_or(1).max(1) as usize;
+    let per_page = params.per_page.unwrap_or(50).max(1) as usize;
 
     let (entries, total) = store
         .list_sessions(page, per_page, params.category.as_deref())

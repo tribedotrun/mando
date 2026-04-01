@@ -1,5 +1,14 @@
 //! Summary formatting and slug generation for scout items.
 
+/// Format a list of strings as a markdown bullet list (one `- ` per item).
+pub fn bullet_list(items: &[String]) -> String {
+    items
+        .iter()
+        .map(|s| format!("- {s}"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 /// Generate a filesystem-safe slug from a title.
 ///
 /// Matches the Python `slugify` function: lowercase, strip non-word chars,

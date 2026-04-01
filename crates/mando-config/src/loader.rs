@@ -20,27 +20,16 @@ pub fn load_config(path: Option<&Path>) -> Config {
     let path = path.map(PathBuf::from).unwrap_or_else(get_config_path);
 
     let mut config = if path.exists() {
-        match std::fs::read_to_string(&path) {
-            Ok(content) => match serde_json::from_str::<Config>(&content) {
-                Ok(cfg) => cfg,
-                Err(e) => {
-                    eprintln!(
-                        "Warning: Failed to parse config from {}: {}",
-                        path.display(),
-                        e,
-                    );
-                    Config::default()
-                }
-            },
-            Err(e) => {
-                eprintln!(
-                    "Warning: Failed to read config from {}: {}",
-                    path.display(),
-                    e,
-                );
+        std::fs::read_to_string(&path)
+            .map_err(|e| format!("Failed to read config from {}: {e}", path.display()))
+            .and_then(|content| {
+                serde_json::from_str::<Config>(&content)
+                    .map_err(|e| format!("Failed to parse config from {}: {e}", path.display()))
+            })
+            .unwrap_or_else(|e| {
+                eprintln!("Warning: {e}");
                 Config::default()
-            }
-        }
+            })
     } else {
         Config::default()
     };

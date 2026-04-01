@@ -48,20 +48,15 @@ pub(crate) enum SessionsCommand {
 }
 
 pub(crate) async fn handle(args: SessionsArgs) -> anyhow::Result<()> {
-    match &args.command {
-        Some(SessionsCommand::Transcript { session_id }) => {
-            return handle_transcript(session_id).await;
-        }
-        Some(SessionsCommand::Messages { session_id, last }) => {
-            return handle_messages(session_id, *last).await;
-        }
-        Some(SessionsCommand::Tools { session_id }) => {
-            return handle_tools(session_id).await;
-        }
-        Some(SessionsCommand::Cost { session_id }) => {
-            return handle_cost(session_id).await;
-        }
-        None => {}
+    if let Some(cmd) = &args.command {
+        return match cmd {
+            SessionsCommand::Transcript { session_id } => handle_transcript(session_id).await,
+            SessionsCommand::Messages { session_id, last } => {
+                handle_messages(session_id, *last).await
+            }
+            SessionsCommand::Tools { session_id } => handle_tools(session_id).await,
+            SessionsCommand::Cost { session_id } => handle_cost(session_id).await,
+        };
     }
 
     let client = DaemonClient::discover()?;

@@ -59,9 +59,10 @@ fn best_truncated_candidate(markdown: &str, truncated_budget: usize) -> Option<S
 }
 
 fn char_boundaries(text: &str) -> Vec<usize> {
-    let mut boundaries = text.char_indices().map(|(idx, _)| idx).collect::<Vec<_>>();
-    boundaries.push(text.len());
-    boundaries
+    text.char_indices()
+        .map(|(idx, _)| idx)
+        .chain(std::iter::once(text.len()))
+        .collect()
 }
 
 fn sanitize_truncated_markdown(text: &str) -> String {
@@ -151,7 +152,11 @@ fn last_incomplete_marker_start(text: &str) -> Option<usize> {
         }
 
         if rest.starts_with('`') {
-            inline_code = toggle_option(inline_code, byte);
+            inline_code = if inline_code.is_some() {
+                None
+            } else {
+                Some(byte)
+            };
             byte += 1;
             continue;
         }
@@ -195,14 +200,6 @@ fn last_incomplete_marker_start(text: &str) -> Option<usize> {
 fn toggle_stack(stack: &mut Vec<usize>, byte: usize) {
     if stack.pop().is_none() {
         stack.push(byte);
-    }
-}
-
-fn toggle_option(current: Option<usize>, byte: usize) -> Option<usize> {
-    if current.is_some() {
-        None
-    } else {
-        Some(byte)
     }
 }
 
