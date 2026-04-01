@@ -15,6 +15,9 @@ import { ToastContainer } from '#renderer/components/ToastContainer';
 import { CreateTaskModal } from '#renderer/components/AddTaskForm';
 import { ShortcutOverlay } from '#renderer/components/ShortcutOverlay';
 import { TaskDetailView } from '#renderer/components/TaskDetailView';
+import { MergeModal } from '#renderer/components/MergeModal';
+import { FeedbackModal } from '#renderer/components/FeedbackModal';
+import { useTaskActions } from '#renderer/hooks/useTaskActions';
 import { useSettingsStore } from '#renderer/stores/settingsStore';
 import type { TaskItem } from '#renderer/types';
 
@@ -62,6 +65,7 @@ export function App(): React.ReactElement {
   const [createTaskOpen, setCreateTaskOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [detailItem, setDetailItem] = useState<TaskItem | null>(null);
+  const detailActions = useTaskActions();
   const [setupActive, setSetupActive] = useState(false);
 
   const { sseStatus } = useDataContext();
@@ -152,8 +156,53 @@ export function App(): React.ReactElement {
       <div className="flex h-screen flex-col" style={{ background: 'var(--color-bg)' }}>
         <div className="h-8 shrink-0" style={{ WebkitAppRegion: 'drag' } as React.CSSProperties} />
         <div className="flex-1 overflow-hidden px-8 py-4">
-          <TaskDetailView item={detailItem} onBack={() => setDetailItem(null)} />
+          <TaskDetailView
+            item={detailItem}
+            onBack={() => setDetailItem(null)}
+            onMerge={() => detailActions.setMergeItem(detailItem)}
+            onReopen={() => detailActions.setReopenItem(detailItem)}
+            onRework={() => detailActions.setReworkItem(detailItem)}
+            onAnswer={(answer) => detailActions.handleAnswer(detailItem.id, answer)}
+            onReopenWithFeedback={(fb) => detailActions.handleReopen(detailItem.id, fb)}
+            onReworkWithFeedback={(fb) => detailActions.handleRework(detailItem.id, fb)}
+          />
         </div>
+        {detailActions.mergeItem && (
+          <MergeModal
+            item={detailActions.mergeItem}
+            onConfirm={detailActions.handleMerge}
+            onCancel={() => detailActions.setMergeItem(null)}
+            pending={detailActions.mergePending}
+            result={detailActions.mergeResult}
+          />
+        )}
+        {detailActions.reopenItem && (
+          <FeedbackModal
+            testId="reopen-modal"
+            title="Reopen"
+            subtitle={detailActions.reopenItem.title}
+            placeholder="What changes are needed?"
+            buttonLabel="Reopen"
+            pendingLabel="Reopening..."
+            isPending={detailActions.reopenPending}
+            onSubmit={(fb) => detailActions.handleReopen(detailActions.reopenItem!.id, fb)}
+            onCancel={() => detailActions.setReopenItem(null)}
+          />
+        )}
+        {detailActions.reworkItem && (
+          <FeedbackModal
+            testId="rework-modal"
+            title="Rework this task"
+            subtitle={detailActions.reworkItem.title}
+            label="INSTRUCTIONS (OPTIONAL)"
+            placeholder="What should the agent do differently?"
+            buttonLabel="Rework"
+            pendingLabel="Reworking..."
+            isPending={detailActions.reworkPending}
+            onSubmit={(fb) => detailActions.handleRework(detailActions.reworkItem!.id, fb)}
+            onCancel={() => detailActions.setReworkItem(null)}
+          />
+        )}
         <DevInfoBar />
         <CommandPalette
           open={paletteOpen}

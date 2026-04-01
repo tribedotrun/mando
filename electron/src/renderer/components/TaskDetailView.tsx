@@ -16,6 +16,9 @@ interface Props {
   onMerge?: () => void;
   onReopen?: () => void;
   onRework?: () => void;
+  onAnswer?: (answer: string) => void;
+  onReopenWithFeedback?: (feedback: string) => void;
+  onReworkWithFeedback?: (feedback: string) => void;
 }
 
 export function TaskDetailView({
@@ -24,6 +27,9 @@ export function TaskDetailView({
   onMerge,
   onReopen,
   onRework,
+  onAnswer,
+  onReopenWithFeedback,
+  onReworkWithFeedback,
 }: Props): React.ReactElement {
   const [transcriptSession, setTranscriptSession] = useState<{
     entry: SessionEntry;
@@ -192,6 +198,18 @@ export function TaskDetailView({
       <div className="flex min-h-0 flex-1 gap-0">
         {/* Left: details + timeline */}
         <div className="min-h-0 flex-1 overflow-auto pr-4 pt-4">
+          {/* Inline feedback for action-needed statuses */}
+          {(item.status === 'awaiting-review' ||
+            item.status === 'escalated' ||
+            item.status === 'needs-clarification') && (
+            <InlineFeedbackInput
+              item={item}
+              onReopen={onReopenWithFeedback}
+              onRework={onReworkWithFeedback}
+              onAnswer={onAnswer}
+            />
+          )}
+
           {/* Original prompt */}
           {item.original_prompt && (
             <DetailSection label="Request">
@@ -214,12 +232,8 @@ export function TaskDetailView({
             </div>
           )}
 
-          {/* PR Summary */}
-          {prBody?.summary && (
-            <DetailSection label="PR Summary">
-              <PrMarkdown text={prBody.summary} />
-            </DetailSection>
-          )}
+          {/* PR Summary — sectioned */}
+          {prBody?.summary && <PrSections body={prBody.summary} />}
 
           {/* Escalation / Error */}
           {item.escalation_report && (
@@ -405,6 +419,309 @@ function DetailOverflowMenu({ item }: { item: TaskItem }): React.ReactElement {
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+// ── PR section parsing ──
+
+interface PrSection {
+  heading: string;
+  content: string;
+  level: number;
+}
+
+/** Classify a heading into a bucket: 'overview', 'evidence', or 'details'. */
+function classifySection(heading: string): 'overview' | 'evidence' | 'details' {
+  const h = heading.toLowerCase();
+  if (
+    /summary|overview|description|problem|what|why|changes|background|tl;?dr/.test(h) &&
+    !/diagram/.test(h)
+  ) {
+    return 'overview';
+  }
+  if (
+    /evidence|screenshot|verification|before.*after|after|demo|visual|test.*plan|test.*result/.test(
+      h,
+    )
+  ) {
+    return 'evidence';
+  }
+  // PR Summary with diagram goes to overview
+  if (/pr summary|summary diagram/.test(h)) {
+    return 'overview';
+  }
+  return 'details';
+}
+
+/** Split PR body by top-level (##) headings into sections. */
+function parsePrSections(body: string): PrSection[] {
+  const lines = body.split('\n');
+  const sections: PrSection[] = [];
+  let currentHeading = '';
+  let currentLevel = 0;
+  let currentLines: string[] = [];
+
+  for (const line of lines) {
+    const headingMatch = line.match(/^(#{1,4})\s+(.*)/);
+    if (headingMatch) {
+      // Flush previous section
+      if (currentHeading || currentLines.length > 0) {
+        sections.push({
+          heading: currentHeading,
+          content: currentLines.join('\n').trim(),
+          level: currentLevel,
+        });
+      }
+      currentHeading = headingMatch[2].trim();
+      currentLevel = headingMatch[1].length;
+      currentLines = [];
+    } else {
+      currentLines.push(line);
+    }
+  }
+  // Flush last section
+  if (currentHeading || currentLines.length > 0) {
+    sections.push({
+      heading: currentHeading,
+      content: currentLines.join('\n').trim(),
+      level: currentLevel,
+    });
+  }
+  return sections;
+}
+
+function PrSections({ body }: { body: string }): React.ReactElement {
+  const sections = parsePrSections(body);
+
+  // Group into buckets
+  const overview: PrSection[] = [];
+  const evidence: PrSection[] = [];
+  const details: PrSection[] = [];
+
+  for (const s of sections) {
+    if (!s.heading) {
+      // Preamble text before any heading — treat as overview
+      if (s.content) overview.push(s);
+      continue;
+    }
+    const bucket = classifySection(s.heading);
+    if (bucket === 'overview') overview.push(s);
+    else if (bucket === 'evidence') evidence.push(s);
+    else details.push(s);
+  }
+
+  return (
+    <>
+      {/* Overview / Problem Statement */}
+      {overview.length > 0 && (
+        <DetailSection label="Overview">
+          {overview.map((s, i) => (
+            <div key={i}>
+              {s.heading && (
+                <div
+                  className="mt-2 mb-1 text-[12px] font-semibold"
+                  style={{ color: 'var(--color-text-1)' }}
+                >
+                  {s.heading}
+                </div>
+              )}
+              {s.content && <PrMarkdown text={s.content} />}
+            </div>
+          ))}
+        </DetailSection>
+      )}
+
+      {/* Evidence / Verification */}
+      {evidence.length > 0 && (
+        <DetailSection label="Verification">
+          {evidence.map((s, i) => (
+            <div key={i}>
+              {s.heading && (
+                <div
+                  className="mt-2 mb-1 text-[12px] font-semibold"
+                  style={{ color: 'var(--color-text-1)' }}
+                >
+                  {s.heading}
+                </div>
+              )}
+              {s.content && <PrMarkdown text={s.content} />}
+            </div>
+          ))}
+        </DetailSection>
+      )}
+
+      {/* Details (collapsed by default) */}
+      {details.length > 0 && <PrDetailsToggle sections={details} />}
+    </>
+  );
+}
+
+function PrDetailsToggle({ sections }: { sections: PrSection[] }): React.ReactElement {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="mb-5">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="mb-2 flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-widest"
+        style={{
+          color: 'var(--color-text-4)',
+          background: 'none',
+          border: 'none',
+          cursor: 'pointer',
+          padding: 0,
+        }}
+      >
+        <svg
+          width="8"
+          height="8"
+          viewBox="0 0 8 8"
+          fill="currentColor"
+          style={{
+            transition: 'transform 150ms',
+            transform: open ? 'rotate(90deg)' : 'none',
+          }}
+        >
+          <path d="M2 1l4 3-4 3V1z" />
+        </svg>
+        Details ({sections.length})
+      </button>
+      {open &&
+        sections.map((s, i) => (
+          <div key={i}>
+            {s.heading && (
+              <div
+                className="mt-2 mb-1 text-[12px] font-semibold"
+                style={{ color: 'var(--color-text-1)' }}
+              >
+                {s.heading}
+              </div>
+            )}
+            {s.content && <PrMarkdown text={s.content} />}
+          </div>
+        ))}
+    </div>
+  );
+}
+
+// ── Inline feedback input ──
+
+function InlineFeedbackInput({
+  item,
+  onReopen,
+  onRework,
+  onAnswer,
+}: {
+  item: TaskItem;
+  onReopen?: (feedback: string) => void;
+  onRework?: (feedback: string) => void;
+  onAnswer?: (answer: string) => void;
+}): React.ReactElement {
+  const [text, setText] = useState('');
+
+  const isNeedsClarification = item.status === 'needs-clarification';
+  const isAwaitingReview = item.status === 'awaiting-review';
+
+  const placeholder = isNeedsClarification
+    ? 'Provide the answer or clarification...'
+    : 'Provide feedback or instructions...';
+
+  const handleSubmit = (action: 'reopen' | 'rework' | 'answer') => {
+    const value = text.trim();
+    if (!value) return;
+    if (action === 'answer' && onAnswer) {
+      onAnswer(value);
+    } else if (action === 'reopen' && onReopen) {
+      onReopen(value);
+    } else if (action === 'rework' && onRework) {
+      onRework(value);
+    }
+    setText('');
+  };
+
+  const statusLabel = isNeedsClarification
+    ? 'Needs your input'
+    : isAwaitingReview
+      ? 'Ready for your review'
+      : 'Escalated — needs attention';
+
+  const statusColor = isNeedsClarification
+    ? 'var(--color-needs-human)'
+    : isAwaitingReview
+      ? 'var(--color-success)'
+      : 'var(--color-error)';
+
+  return (
+    <div
+      className="mb-5 rounded-lg p-3"
+      style={{
+        background: `color-mix(in srgb, ${statusColor} 6%, transparent)`,
+        border: `1px solid color-mix(in srgb, ${statusColor} 20%, transparent)`,
+      }}
+    >
+      <div className="mb-2 text-[11px] font-medium" style={{ color: statusColor }}>
+        {statusLabel}
+      </div>
+      <textarea
+        className="mb-2 w-full rounded-md px-3 py-2 text-[13px] focus:outline-none"
+        style={{
+          background: 'var(--color-surface-1)',
+          color: 'var(--color-text-1)',
+          border: '1px solid var(--color-border-subtle)',
+          resize: 'vertical',
+        }}
+        rows={2}
+        placeholder={placeholder}
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+      />
+      <div className="flex gap-2">
+        {isNeedsClarification && onAnswer && (
+          <button
+            onClick={() => handleSubmit('answer')}
+            disabled={!text.trim()}
+            className="rounded-md px-3 py-1 text-[12px] font-medium disabled:opacity-40"
+            style={{
+              background: 'var(--color-accent)',
+              color: 'var(--color-bg)',
+              border: 'none',
+              cursor: text.trim() ? 'pointer' : 'default',
+            }}
+          >
+            Answer
+          </button>
+        )}
+        {!isNeedsClarification && onReopen && (
+          <button
+            onClick={() => handleSubmit('reopen')}
+            disabled={!text.trim()}
+            className="rounded-md px-3 py-1 text-[12px] font-medium disabled:opacity-40"
+            style={{
+              background: 'var(--color-accent)',
+              color: 'var(--color-bg)',
+              border: 'none',
+              cursor: text.trim() ? 'pointer' : 'default',
+            }}
+          >
+            Reopen with feedback
+          </button>
+        )}
+        {!isNeedsClarification && onRework && (
+          <button
+            onClick={() => handleSubmit('rework')}
+            disabled={!text.trim()}
+            className="rounded-md px-3 py-1 text-[12px] font-medium disabled:opacity-40"
+            style={{
+              background: 'transparent',
+              color: 'var(--color-text-2)',
+              border: '1px solid var(--color-border)',
+              cursor: text.trim() ? 'pointer' : 'default',
+            }}
+          >
+            Rework
+          </button>
+        )}
+      </div>
     </div>
   );
 }
