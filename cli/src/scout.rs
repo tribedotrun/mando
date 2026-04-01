@@ -57,12 +57,6 @@ pub(crate) enum ScoutCommand {
         /// Item IDs
         ids: Vec<i64>,
     },
-    /// Process pending items
-    Process {
-        /// Specific item ID (omit for all pending)
-        #[arg(long)]
-        id: Option<i64>,
-    },
     /// List items with inline summaries
     List {
         /// Filter by status (pending, processed, saved, archived)
@@ -132,7 +126,6 @@ pub(crate) async fn handle(args: ScoutArgs) -> anyhow::Result<()> {
         ScoutCommand::BulkDelete { ids } => handle_bulk_delete(&ids).await,
         ScoutCommand::Status { id, status } => handle_status(id, &status).await,
         ScoutCommand::BulkStatus { status, ids } => handle_bulk_status(&status, &ids).await,
-        ScoutCommand::Process { id } => handle_process(id).await,
         ScoutCommand::List { status } => handle_list_with_summaries(status.as_deref()).await,
         ScoutCommand::Save { id } => handle_status(id, "saved").await,
         ScoutCommand::Archive { id } => handle_status(id, "archived").await,
@@ -374,18 +367,6 @@ async fn handle_research(topic: &str, process: bool) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn handle_process(id: Option<i64>) -> anyhow::Result<()> {
-    let client = DaemonClient::discover()?;
-    let mut body = json!({});
-    if let Some(i) = id {
-        body["id"] = json!(i);
-    }
-    let result = client.post("/api/scout/process", &body).await?;
-    let processed = result["processed"].as_u64().unwrap_or(0);
-    println!("Processed {processed} item(s).");
-    Ok(())
-}
-
 async fn handle_act(id: i64, project: &str, prompt: &str) -> anyhow::Result<()> {
     let client = DaemonClient::discover()?;
     let mut body = json!({"project": project});
@@ -504,17 +485,6 @@ mod tests {
             TestCmd::Scout(args) => match args.command {
                 ScoutCommand::BulkDelete { ids } => assert_eq!(ids, vec![7, 8]),
                 _ => panic!("expected BulkDelete"),
-            },
-        }
-    }
-
-    #[test]
-    fn parse_scout_process() {
-        let cli = TestCli::try_parse_from(["test", "scout", "process"]).unwrap();
-        match cli.cmd {
-            TestCmd::Scout(args) => match args.command {
-                ScoutCommand::Process { id } => assert!(id.is_none()),
-                _ => panic!("expected Process"),
             },
         }
     }

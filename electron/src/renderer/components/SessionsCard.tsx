@@ -188,87 +188,89 @@ export function SessionsCard(): React.ReactElement {
         </h2>
       </div>
 
-      {/* Filters — category pills + status filter */}
-      <div className="flex items-center justify-between">
-        {sortedCats.length > 0 && (
-          <div className="flex items-center" style={{ gap: 4 }}>
-            <button
-              onClick={() => handleCatClick('')}
-              aria-label="Show all session categories"
-              className="text-[12px] font-medium transition-colors"
-              style={{
-                background: !filterCategory ? 'var(--color-accent)' : 'var(--color-surface-2)',
-                color: !filterCategory ? 'var(--color-bg)' : 'var(--color-text-3)',
-                padding: '4px 10px',
-                borderRadius: 6,
-                border: 'none',
-                cursor: 'pointer',
-              }}
-            >
-              all <span className="ml-0.5 opacity-60">{allTotal}</span>
-            </button>
-            {sortedCats.map((cat) => (
+      {/* Filters — category pills + status filter (hidden when no sessions) */}
+      {allTotal > 0 && (
+        <div className="flex items-center justify-between">
+          {sortedCats.length > 0 && (
+            <div className="flex items-center" style={{ gap: 4 }}>
               <button
-                key={cat}
-                onClick={() => handleCatClick(cat)}
-                aria-label={`Filter by ${cat}`}
+                onClick={() => handleCatClick('')}
+                aria-label="Show all session categories"
                 className="text-[12px] font-medium transition-colors"
                 style={{
-                  background:
-                    filterCategory === cat ? 'var(--color-accent)' : 'var(--color-surface-2)',
-                  color: filterCategory === cat ? 'var(--color-bg)' : 'var(--color-text-3)',
+                  background: !filterCategory ? 'var(--color-accent)' : 'var(--color-surface-2)',
+                  color: !filterCategory ? 'var(--color-bg)' : 'var(--color-text-3)',
                   padding: '4px 10px',
                   borderRadius: 6,
                   border: 'none',
                   cursor: 'pointer',
                 }}
               >
-                {cat}
-                <span className="ml-0.5 opacity-60">{categories[cat]}</span>
+                all <span className="ml-0.5 opacity-60">{allTotal}</span>
               </button>
-            ))}
-          </div>
-        )}
-
-        <div style={{ position: 'relative' }}>
-          <button
-            ref={filterBtnRef}
-            onClick={() => setShowFilterMenu((v) => !v)}
-            className="flex items-center transition-colors"
-            style={{
-              padding: '4px 6px',
-              borderRadius: 6,
-              border: 'none',
-              cursor: 'pointer',
-              background: isFiltered ? 'var(--color-surface-3)' : 'transparent',
-              color: isFiltered ? 'var(--color-text-1)' : 'var(--color-text-4)',
-              gap: 4,
-            }}
-            title="Filter by status"
-            aria-label="Filter by status"
-          >
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-              <path
-                d="M2 4h12M4 8h8M6 12h4"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                strokeLinecap="round"
-              />
-            </svg>
-            {isFiltered && <span style={{ fontSize: 11 }}>{filterStatus}</span>}
-          </button>
-          {showFilterMenu && (
-            <StatusFilterMenu
-              value={filterStatus}
-              onChange={(v) => {
-                setFilterStatus(v);
-                setShowFilterMenu(false);
-              }}
-              onClose={() => setShowFilterMenu(false)}
-            />
+              {sortedCats.map((cat) => (
+                <button
+                  key={cat}
+                  onClick={() => handleCatClick(cat)}
+                  aria-label={`Filter by ${cat}`}
+                  className="text-[12px] font-medium transition-colors"
+                  style={{
+                    background:
+                      filterCategory === cat ? 'var(--color-accent)' : 'var(--color-surface-2)',
+                    color: filterCategory === cat ? 'var(--color-bg)' : 'var(--color-text-3)',
+                    padding: '4px 10px',
+                    borderRadius: 6,
+                    border: 'none',
+                    cursor: 'pointer',
+                  }}
+                >
+                  {cat}
+                  <span className="ml-0.5 opacity-60">{categories[cat]}</span>
+                </button>
+              ))}
+            </div>
           )}
+
+          <div style={{ position: 'relative' }}>
+            <button
+              ref={filterBtnRef}
+              onClick={() => setShowFilterMenu((v) => !v)}
+              className="flex items-center transition-colors"
+              style={{
+                padding: '4px 6px',
+                borderRadius: 6,
+                border: 'none',
+                cursor: 'pointer',
+                background: isFiltered ? 'var(--color-surface-3)' : 'transparent',
+                color: isFiltered ? 'var(--color-text-1)' : 'var(--color-text-4)',
+                gap: 4,
+              }}
+              title="Filter by status"
+              aria-label="Filter by status"
+            >
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                <path
+                  d="M2 4h12M4 8h8M6 12h4"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                />
+              </svg>
+              {isFiltered && <span style={{ fontSize: 11 }}>{filterStatus}</span>}
+            </button>
+            {showFilterMenu && (
+              <StatusFilterMenu
+                value={filterStatus}
+                onChange={(v) => {
+                  setFilterStatus(v);
+                  setShowFilterMenu(false);
+                }}
+                onClose={() => setShowFilterMenu(false)}
+              />
+            )}
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Content */}
       {loading && sessions.length === 0 ? (

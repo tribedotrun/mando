@@ -2,8 +2,8 @@ import React, { useState, useCallback } from 'react';
 import type { MandoConfig } from '#renderer/stores/settingsStore';
 import heroImg from '#renderer/assets/hero.png';
 import {
-  CenteredCard,
-  StepDots,
+  SetupLayout,
+  CheckRow,
   GhostButton,
   OutlineButton,
   PrimaryButton,
@@ -11,14 +11,14 @@ import {
 import { TelegramScreen, LinearScreen } from '#renderer/components/OnboardingSteps';
 import { getErrorMessage } from '#renderer/utils';
 
-type Step = 'welcome' | 'claude-check' | 'telegram' | 'linear' | 'finishing';
+type Step = 'welcome' | 'claude-check' | 'telegram' | 'linear' | 'finishing' | 'done';
 
 type CCResult = { installed: boolean; version: string | null; works: boolean } | null;
 
 const BULLETS = [
-  'Captain runs your backlog autonomously, nudges workers, escalates blockers, delivers reviewable PRs with visual evidence.',
-  'Parallel projects and worktrees in full isolation. All Claude Code sessions managed in real time.',
-  'Turns tech blogs, podcasts, and repos into actionable tasks tailored to your project.',
+  'Your backlog runs itself — tasks get picked up, reviewed, and delivered as pull requests with visual evidence.',
+  'Run tasks across multiple projects at once. Each gets its own isolated workspace.',
+  'Stay current — relevant articles, repos, and podcasts become actionable tasks tailored to your stack.',
 ];
 
 export function OnboardingWizard(): React.ReactElement {
@@ -45,7 +45,7 @@ export function OnboardingWizard(): React.ReactElement {
       }
       if (Object.keys(env).length > 0) config.env = env;
       await window.mandoAPI.setupComplete(JSON.stringify(config, null, 2));
-      window.location.reload();
+      setStep('done');
     } catch (err) {
       setError(getErrorMessage(err, 'Failed to save configuration'));
       setStep('linear');
@@ -77,6 +77,12 @@ export function OnboardingWizard(): React.ReactElement {
     );
   }
 
+  if (step === 'done') {
+    return (
+      <DoneScreen hasTelegram={!!tgToken.trim()} hasLinear={!!linearKey.trim() && !!linearTeam} />
+    );
+  }
+
   return (
     <LinearScreen
       apiKey={linearKey}
@@ -97,12 +103,16 @@ function WelcomeScreen({ onStart }: { onStart: () => void }): React.ReactElement
   return (
     <div
       data-testid="onboarding-wizard"
-      className="flex h-full"
+      className="relative flex h-full"
       style={{ background: 'var(--color-bg)' }}
     >
       <div
-        className="flex flex-col"
-        style={{ width: 460, padding: 48, paddingTop: '28vh', flexShrink: 0 }}
+        className="absolute inset-x-0 top-0 z-10 h-8"
+        style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
+      />
+      <div
+        className="flex flex-col justify-center"
+        style={{ width: 460, padding: 48, flexShrink: 0 }}
       >
         <div style={{ marginBottom: 24 }}>
           <h1 className="text-display" style={{ color: 'var(--color-text-1)' }}>
@@ -154,12 +164,7 @@ function WelcomeScreen({ onStart }: { onStart: () => void }): React.ReactElement
       </div>
       <div
         className="flex flex-1 items-center justify-center"
-        style={{
-          padding: 48,
-          overflow: 'hidden',
-          background:
-            'radial-gradient(ellipse at center, rgba(138, 99, 210, 0.04) 0%, transparent 70%)',
-        }}
+        style={{ overflow: 'hidden', padding: '24px 24px 24px 0' }}
       >
         <img
           src={heroImg}
@@ -167,11 +172,10 @@ function WelcomeScreen({ onStart }: { onStart: () => void }): React.ReactElement
           style={{
             width: '100%',
             height: 'auto',
-            maxHeight: '70vh',
             objectFit: 'contain',
             borderRadius: 'var(--radius-panel)',
             border: '1px solid var(--color-border-subtle)',
-            boxShadow: '0 4px 24px rgba(0, 0, 0, 0.25)',
+            boxShadow: '0 8px 32px rgba(0, 0, 0, 0.35)',
           }}
         />
       </div>
@@ -212,23 +216,23 @@ function ClaudeCheckScreen({
   const passed = result?.installed === true && result.works === true;
 
   return (
-    <CenteredCard data-testid="onboarding-wizard">
-      <StepDots total={3} current={0} />
-      <h2 className="text-subheading" style={{ color: 'var(--color-text-1)', marginBottom: 8 }}>
-        Claude Code
-      </h2>
-      <p className="text-body" style={{ color: 'var(--color-text-3)', marginBottom: 24 }}>
-        Required to run Mando.
-      </p>
-
+    <SetupLayout
+      data-testid="onboarding-wizard"
+      step={1}
+      total={3}
+      title="Claude Code"
+      subtitle="Required to run Mando."
+    >
       <div
         className="flex flex-col"
         style={{
           gap: 12,
-          marginBottom: 24,
-          padding: '16px 20px',
+          padding: '28px 28px',
           borderRadius: 'var(--radius-panel)',
-          background: 'rgba(255, 255, 255, 0.02)',
+          background: 'var(--color-surface-2)',
+          border: '1px solid var(--color-border-subtle)',
+          boxShadow: '0 1px 4px rgba(0, 0, 0, 0.2)',
+          marginBottom: 40,
         }}
       >
         {checking && (
@@ -277,18 +281,57 @@ function ClaudeCheckScreen({
         </p>
       )}
 
-      <div className="flex items-center justify-center" style={{ gap: 12 }}>
-        <GhostButton onClick={onBack}>Back</GhostButton>
-        {!passed && (
-          <OutlineButton onClick={runCheck} disabled={checking}>
-            {checking ? 'Checking…' : 'Re-check'}
-          </OutlineButton>
-        )}
+      <div className="flex items-center" style={{ justifyContent: 'space-between' }}>
+        <div className="flex items-center" style={{ gap: 12 }}>
+          <GhostButton onClick={onBack}>Back</GhostButton>
+          {!passed && (
+            <OutlineButton onClick={runCheck} disabled={checking}>
+              {checking ? 'Checking…' : 'Re-check'}
+            </OutlineButton>
+          )}
+        </div>
         <PrimaryButton onClick={onPass} disabled={!passed}>
           Continue
         </PrimaryButton>
       </div>
-    </CenteredCard>
+    </SetupLayout>
+  );
+}
+
+// ---- Done screen ----
+
+function DoneScreen({
+  hasTelegram,
+  hasLinear,
+}: {
+  hasTelegram: boolean;
+  hasLinear: boolean;
+}): React.ReactElement {
+  return (
+    <SetupLayout
+      data-testid="onboarding-wizard"
+      title="You're all set"
+      subtitle="Mando is ready. Add a project and create your first task."
+    >
+      <div
+        className="flex flex-col"
+        style={{
+          gap: 8,
+          marginBottom: 40,
+          padding: '28px 28px',
+          borderRadius: 'var(--radius-panel)',
+          background: 'var(--color-surface-2)',
+          border: '1px solid var(--color-border-subtle)',
+          boxShadow: '0 1px 4px rgba(0, 0, 0, 0.2)',
+        }}
+      >
+        <CheckRow ok label="Claude Code" />
+        <CheckRow ok={hasTelegram} label={hasTelegram ? 'Telegram' : 'Telegram — skipped'} />
+        <CheckRow ok={hasLinear} label={hasLinear ? 'Linear' : 'Linear — skipped'} />
+      </div>
+
+      <PrimaryButton onClick={() => window.location.reload()}>Open Mando</PrimaryButton>
+    </SetupLayout>
   );
 }
 

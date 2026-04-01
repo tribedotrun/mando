@@ -24,7 +24,7 @@ pub(crate) async fn emit(
 ) {
     let event = TimelineEvent {
         event_type,
-        timestamp: now_iso(),
+        timestamp: mando_types::now_rfc3339(),
         actor: actor.to_string(),
         summary: summary.to_string(),
         data,
@@ -73,8 +73,4 @@ pub async fn emit_for_task(
     pool: &SqlitePool,
 ) {
     emit(pool, item.id, event_type, "captain", summary, data).await;
-}
-
-fn now_iso() -> String {
-    mando_types::now_rfc3339()
 }

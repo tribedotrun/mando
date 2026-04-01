@@ -365,7 +365,7 @@ async fn prune_and_log(jdb: &crate::io::journal::JournalDb) {
     }
 }
 
-/// Approve a pending knowledge lesson by ID (backward compat with old learn.rs).
+/// Approve a pending knowledge lesson by ID.
 pub async fn approve_knowledge(id: &str) -> Result<()> {
     anyhow::ensure!(
         !id.contains('/') && !id.contains('\\') && !id.contains(".."),

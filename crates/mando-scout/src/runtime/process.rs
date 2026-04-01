@@ -261,7 +261,8 @@ pub async fn process_item(
         )
         .await?;
     if !updated {
-        file_store::delete_item_files(id, Some(&slug));
+        // Another concurrent run already processed this item — its files are
+        // valid and must not be deleted.
         bail!("item #{id} already processed (status guard)");
     }
     if let Err(e) = file_store::delete_stale_summaries(id, &slug) {

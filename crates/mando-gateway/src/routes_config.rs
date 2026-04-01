@@ -24,10 +24,13 @@ fn reload_workflows(state: &AppState) {
 }
 
 /// GET /api/config — read current config.
-pub(crate) async fn get_config(State(state): State<AppState>) -> Json<Value> {
+pub(crate) async fn get_config(State(state): State<AppState>) -> Result<Json<Value>, StatusCode> {
     let config = state.config.load_full();
-    let val = serde_json::to_value(&*config).unwrap_or(json!({}));
-    Json(val)
+    let val = serde_json::to_value(&*config).map_err(|e| {
+        tracing::error!(error = %e, "failed to serialize config");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+    Ok(Json(val))
 }
 
 /// PUT /api/config — write config.json, hot-reload into daemon.

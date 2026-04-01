@@ -1,8 +1,6 @@
 import React, { useState, useRef, useMemo, useCallback } from 'react';
 import { useMountEffect } from '#renderer/hooks/useMountEffect';
 import { useScrollIntoViewRef } from '#renderer/hooks/useScrollIntoViewRef';
-import { SCOUT_PROCESS_LABEL } from '#renderer/capabilityContract';
-
 interface Props {
   open: boolean;
   onClose: () => void;
@@ -118,19 +116,6 @@ function GearIcon(): React.ReactElement {
   );
 }
 
-function ListIcon(): React.ReactElement {
-  return (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-      <path
-        d="M5 4H13M5 8H13M5 12H13M3 4H3.01M3 8H3.01M3 12H3.01"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        strokeLinecap="round"
-      />
-    </svg>
-  );
-}
-
 /* ── Command definitions ── */
 
 const RECENT_COMMANDS: Command[] = [
@@ -202,13 +187,6 @@ const ACTION_COMMANDS: Command[] = [
     shortcut: '\u2318,',
     section: 'actions',
     icon: <GearIcon />,
-  },
-  {
-    id: 'act-process',
-    name: SCOUT_PROCESS_LABEL,
-    shortcut: 'T',
-    section: 'actions',
-    icon: <ListIcon />,
   },
 ];
 

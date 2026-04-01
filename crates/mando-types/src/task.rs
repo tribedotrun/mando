@@ -102,11 +102,14 @@ pub struct Task {
 /// Extract the bare PR number from any format: full URL, `#N`, or bare `N`.
 /// Returns `None` for empty/unparseable input.
 pub fn extract_pr_number(pr: &str) -> Option<&str> {
-    // Full URL: …/pull/123
+    // Full URL: …/pull/123 or …/pull/123/files
     if let Some(idx) = pr.rfind("/pull/") {
         let after = &pr[idx + 6..];
-        let num = after.trim_end_matches('/');
-        if !num.is_empty() && num.chars().all(|c| c.is_ascii_digit()) {
+        let num_end = after
+            .find(|c: char| !c.is_ascii_digit())
+            .unwrap_or(after.len());
+        let num = &after[..num_end];
+        if !num.is_empty() {
             return Some(num);
         }
     }
@@ -315,6 +318,18 @@ mod tests {
         assert_eq!(
             extract_pr_number("https://github.com/acme/widgets/pull/42/"),
             Some("42")
+        );
+    }
+
+    #[test]
+    fn extract_pr_number_trailing_path() {
+        assert_eq!(
+            extract_pr_number("https://github.com/acme/widgets/pull/123/files"),
+            Some("123")
+        );
+        assert_eq!(
+            extract_pr_number("https://github.com/acme/widgets/pull/99/commits"),
+            Some("99")
         );
     }
 

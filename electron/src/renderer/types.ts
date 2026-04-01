@@ -258,14 +258,6 @@ export interface ScoutArticleResponse {
   telegraphUrl?: string;
 }
 
-export interface ScoutProcessResponse {
-  ok: boolean;
-  processed?: number;
-  total?: number;
-  message?: string;
-  error?: string;
-}
-
 export interface ActResponse {
   ok?: boolean;
   task_id?: string;
@@ -404,22 +396,6 @@ export interface ScoutItemSession {
   model?: string;
   duration_ms?: number | null;
   cost_usd?: number | null;
-}
-
-export interface CaptainTriageItem {
-  repo?: string;
-  pr_number?: number;
-  title?: string;
-  merge_readiness_score?: number;
-  fast_track?: boolean;
-  fetch_failed?: boolean;
-  file_count?: number;
-  cursor_risk?: string;
-}
-
-export interface CaptainTriageResponse {
-  items?: CaptainTriageItem[];
-  message?: string;
 }
 
 // Window augmentation for preload API

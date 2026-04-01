@@ -1,6 +1,20 @@
-import React from 'react';
+import React, { useCallback } from 'react';
+import { useSettingsStore } from '#renderer/stores/settingsStore';
 
 export function TaskEmptyState(): React.ReactElement {
+  const projects = useSettingsStore((s) => s.config.captain?.projects);
+  const updateProject = useSettingsStore((s) => s.updateProject);
+  const save = useSettingsStore((s) => s.save);
+  const hasProjects = projects && Object.keys(projects).length > 0;
+
+  const handleAddProject = useCallback(async () => {
+    const dir = await window.mandoAPI.selectDirectory();
+    if (!dir) return;
+    const name = dir.split('/').pop() ?? dir;
+    updateProject(dir, { name, path: dir });
+    save();
+  }, [updateProject, save]);
+
   return (
     <div className="flex flex-col items-center justify-center py-16">
       <svg width="48" height="48" viewBox="0 0 48 48" fill="none" className="mb-4">
@@ -22,11 +36,29 @@ export function TaskEmptyState(): React.ReactElement {
         />
       </svg>
       <span className="text-subheading mb-1" style={{ color: 'var(--color-text-2)' }}>
-        No tasks yet
+        {hasProjects ? 'No tasks yet' : 'Add a project to get started'}
       </span>
-      <span className="text-body" style={{ color: 'var(--color-text-3)' }}>
-        Create a task and Captain will pick it up automatically.
+      <span className="text-body mb-4" style={{ color: 'var(--color-text-3)' }}>
+        {hasProjects
+          ? 'Create a task and Captain will pick it up automatically.'
+          : 'Mando needs a project folder to manage tasks.'}
       </span>
+      {!hasProjects && (
+        <button
+          onClick={handleAddProject}
+          className="text-[13px] font-semibold transition-colors hover:brightness-110 active:brightness-90"
+          style={{
+            padding: '8px 20px',
+            borderRadius: 'var(--radius-button)',
+            background: 'var(--color-accent)',
+            color: 'var(--color-bg)',
+            border: 'none',
+            cursor: 'pointer',
+          }}
+        >
+          Add project
+        </button>
+      )}
     </div>
   );
 }

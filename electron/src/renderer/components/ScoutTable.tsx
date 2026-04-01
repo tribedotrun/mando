@@ -1,7 +1,7 @@
 import React, { useCallback, useRef, useState } from 'react';
 import Markdown from 'react-markdown';
 import type { ScoutItem } from '#renderer/types';
-import { fetchScoutItem, updateScoutStatus, processScout } from '#renderer/api';
+import { fetchScoutItem, updateScoutStatus } from '#renderer/api';
 import { useScrollIntoViewRef } from '#renderer/hooks/useScrollIntoViewRef';
 import { useToastStore } from '#renderer/stores/toastStore';
 
@@ -46,7 +46,6 @@ export function ScoutTable({
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [summaryCache, setSummaryCache] = useState<Record<number, string>>({});
   const [editingId, setEditingId] = useState<number | null>(null);
-  const [processingId, setProcessingId] = useState<number | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
   // Scroll focused row into view via ref callback
@@ -66,15 +65,6 @@ export function ScoutTable({
     [expandedId, summaryCache],
   );
 
-  const handleProcess = async (id: number) => {
-    setProcessingId(id);
-    try {
-      await processScout(id);
-      onRefresh();
-    } finally {
-      setProcessingId(null);
-    }
-  };
   const handleStatusChange = async (id: number, status: string) => {
     try {
       await updateScoutStatus(id, status);
@@ -320,14 +310,6 @@ export function ScoutTable({
               >
                 {['processed', 'saved', 'archived'].includes(item.status) && (
                   <Btn label="Read" color="var(--color-text-2)" onClick={() => onSelect(item.id)} />
-                )}
-                {(item.status === 'pending' || item.status === 'fetched') && (
-                  <Btn
-                    label={processingId === item.id ? '...' : 'Process'}
-                    color="var(--color-accent)"
-                    primary
-                    onClick={() => handleProcess(item.id)}
-                  />
                 )}
               </div>
             </div>

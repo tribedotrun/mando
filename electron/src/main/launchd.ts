@@ -8,9 +8,8 @@ import fs from 'fs';
 import { execSync, spawn } from 'child_process';
 import log from '#main/logger';
 
-const LEGACY_APP_LABEL = 'run.tribe.mando';
-const DAEMON_LABEL = 'run.tribe.mando-daemon';
-const TG_LABEL = 'run.tribe.mando-tg';
+const DAEMON_LABEL = 'run.tribe.mando.daemon';
+const TG_LABEL = 'run.tribe.mando.telegram';
 
 /** Extract message string from an unknown error. */
 function errorMsg(e: unknown): string {
@@ -28,10 +27,6 @@ function homeDir(): string {
 
 function launchAgentsDir(): string {
   return path.join(homeDir(), 'Library', 'LaunchAgents');
-}
-
-function legacyAppPlistPath(): string {
-  return path.join(launchAgentsDir(), `${LEGACY_APP_LABEL}.plist`);
 }
 
 function daemonPlistPath(): string {
@@ -55,7 +50,7 @@ function cliSourcePath(): string {
 
 /** Staged daemon binary path in Application Support. */
 function daemonInstallPath(): string {
-  return path.join(homeDir(), 'Library', 'Application Support', 'Mando', 'bin', 'mando-gw');
+  return path.join(homeDir(), 'Library', 'Application Support', 'Mando', 'bin', 'Mando Daemon');
 }
 
 /** Source daemon binary: app bundle or cargo build output. */
@@ -68,7 +63,7 @@ function daemonSourcePath(): string {
 
 /** Staged TG bot binary path in Application Support. */
 function tgInstallPath(): string {
-  return path.join(homeDir(), 'Library', 'Application Support', 'Mando', 'bin', 'mando-tg');
+  return path.join(homeDir(), 'Library', 'Application Support', 'Mando', 'bin', 'Mando Telegram');
 }
 
 /** Source TG bot binary: app bundle or cargo build output. */
@@ -95,26 +90,6 @@ function currentPath(): string {
   const nvmNode = process.env.NVM_BIN;
   if (nvmNode) base.splice(1, 0, nvmNode);
   return base.join(':');
-}
-
-/** Remove legacy app LaunchAgent plist. Login item is now managed by Electron's native API. */
-export function removeLegacyAppPlist(): void {
-  const plist = legacyAppPlistPath();
-  if (!fs.existsSync(plist)) return;
-  try {
-    execSync(`launchctl unload -w "${plist}" 2>/dev/null`);
-  } catch (e: unknown) {
-    const msg = errorMsg(e);
-    if (!isNotLoadedError(msg)) {
-      log.warn('[launchd] legacy plist unload failed:', msg);
-    }
-  }
-  try {
-    fs.unlinkSync(plist);
-    log.info('removed legacy app login plist — now using native Login Items');
-  } catch (err) {
-    log.warn('[launchd] failed to remove legacy app plist:', err);
-  }
 }
 
 function generateDaemonPlist(dataDir: string): string {
@@ -187,40 +162,15 @@ function generateTgPlist(dataDir: string): string {
 </plist>`;
 }
 
-function launchctlLoad(plistPath: string): void {
-  try {
-    execSync(`launchctl unload -w "${plistPath}" 2>/dev/null`);
-  } catch (e: unknown) {
-    const msg = errorMsg(e);
-    if (!isNotLoadedError(msg)) {
-      log.warn('[launchd] pre-load unload failed:', msg);
-    }
-  }
-  execSync(`launchctl load -w "${plistPath}"`);
-}
-
-function launchctlUnload(plistPath: string): void {
-  try {
-    execSync(`launchctl unload -w "${plistPath}"`);
-  } catch (e: unknown) {
-    log.warn(`launchctl unload failed for ${plistPath}: ${errorMsg(e)}`);
-  }
-}
-
-/** Bootstrap a launchd service via modern API with legacy fallback. */
+/** Bootstrap a launchd service. */
 function launchctlBootstrap(plistPath: string): void {
   const uid = process.getuid?.() ?? 501;
   const domain = `gui/${uid}`;
-  try {
-    execSync(`launchctl bootstrap ${domain} "${plistPath}"`);
-  } catch (e: unknown) {
-    log.warn('[launchd] bootstrap failed, falling back to legacy load:', errorMsg(e));
-    launchctlLoad(plistPath);
-  }
+  execSync(`launchctl bootstrap ${domain} "${plistPath}"`);
 }
 
-/** Bootout a launchd service by label (modern API with fallback). */
-function launchctlBootoutLabel(label: string, plist: string): void {
+/** Bootout a launchd service by label. */
+function launchctlBootoutLabel(label: string): void {
   const uid = process.getuid?.() ?? 501;
   const domain = `gui/${uid}`;
   try {
@@ -228,10 +178,7 @@ function launchctlBootoutLabel(label: string, plist: string): void {
   } catch (e: unknown) {
     const msg = errorMsg(e);
     if (!isNotLoadedError(msg)) {
-      log.warn('[launchd] bootout failed, falling back to legacy unload:', msg);
-    }
-    if (fs.existsSync(plist)) {
-      launchctlUnload(plist);
+      throw e;
     }
   }
 }
@@ -276,7 +223,7 @@ export function installDaemonPlist(dataDir: string): void {
   const plistContent = generateDaemonPlist(dataDir);
   const plistFile = daemonPlistPath();
   fs.writeFileSync(plistFile, plistContent, 'utf-8');
-  launchctlBootoutLabel(DAEMON_LABEL, plistFile);
+  launchctlBootoutLabel(DAEMON_LABEL);
   launchctlBootstrap(plistFile);
 }
 
@@ -306,7 +253,7 @@ export function installTgPlist(dataDir: string): void {
   const plistContent = generateTgPlist(dataDir);
   const plistFile = tgPlistPath();
   fs.writeFileSync(plistFile, plistContent, 'utf-8');
-  launchctlBootoutLabel(TG_LABEL, plistFile);
+  launchctlBootoutLabel(TG_LABEL);
   launchctlBootstrap(plistFile);
 }
 
@@ -316,8 +263,8 @@ export function updateDaemonBinary(dataDir: string): boolean {
   const prev = `${dest}.prev`;
 
   // Bootout current daemon and TG bot (graceful SIGTERM).
-  launchctlBootoutLabel(TG_LABEL, tgPlistPath());
-  launchctlBootoutLabel(DAEMON_LABEL, daemonPlistPath());
+  launchctlBootoutLabel(TG_LABEL);
+  launchctlBootoutLabel(DAEMON_LABEL);
 
   // Rename current binary to .prev for rollback.
   if (fs.existsSync(dest)) {
@@ -356,8 +303,8 @@ export function rollbackDaemonBinary(dataDir: string): boolean {
   const prev = `${dest}.prev`;
   if (!fs.existsSync(prev)) return false;
 
-  launchctlBootoutLabel(TG_LABEL, tgPlistPath());
-  launchctlBootoutLabel(DAEMON_LABEL, daemonPlistPath());
+  launchctlBootoutLabel(TG_LABEL);
+  launchctlBootoutLabel(DAEMON_LABEL);
   try {
     fs.renameSync(prev, dest);
   } catch (err) {
@@ -441,22 +388,6 @@ export function installCliAndPlists(dataDir: string): void {
   // 2. Ensure dirs exist
   fs.mkdirSync(path.join(dataDir, 'logs'), { recursive: true });
   fs.mkdirSync(launchAgentsDir(), { recursive: true });
-
-  // 2b. Remove legacy plists (captain cron + app login — both replaced by in-process mechanisms).
-  const legacyCaptainPlist = path.join(launchAgentsDir(), 'run.tribe.mando-captain.plist');
-  if (fs.existsSync(legacyCaptainPlist)) {
-    try {
-      execSync(`launchctl unload -w "${legacyCaptainPlist}" 2>/dev/null`);
-    } catch (e: unknown) {
-      const msg = errorMsg(e);
-      if (!isNotLoadedError(msg)) {
-        log.warn('[launchd] legacy captain plist unload failed:', msg);
-      }
-    }
-    fs.unlinkSync(legacyCaptainPlist);
-    log.info('removed legacy captain cron plist');
-  }
-  removeLegacyAppPlist();
 
   // 3. Stage daemon binary + install daemon plist
   stageDaemonBinary();

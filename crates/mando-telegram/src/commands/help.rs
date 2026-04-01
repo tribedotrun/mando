@@ -33,7 +33,6 @@ const HELP: &str = "\u{1f99e} <b>Tasks</b>\n\
 \u{1f50d} <b>Research</b>\n\
 /addlink &lt;url&gt; \u{2014} Add URL to Scout\n\
 /research &lt;topic&gt; \u{2014} AI-powered link discovery\n\
-/process [id] \u{2014} Process Scout items\n\
 /bulkstatus &lt;status&gt; &lt;ids&gt; \u{2014} Bulk-update Scout items\n\
 /bulkdelete &lt;ids&gt; \u{2014} Bulk-delete Scout items\n\
 /publish &lt;id&gt; \u{2014} Publish extracted Scout article\n\

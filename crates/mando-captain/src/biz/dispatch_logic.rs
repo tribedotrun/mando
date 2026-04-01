@@ -90,7 +90,7 @@ pub(crate) fn new_items(items: &[Task]) -> Vec<usize> {
         .collect()
 }
 
-/// Find items that need (re-)clarification — both `Clarifying` (legacy/retry)
+/// Find items that need (re-)clarification — both `Clarifying` (retry)
 /// and `NeedsClarification` (human answered, awaiting re-run).
 pub(crate) fn clarifying_items(items: &[Task]) -> Vec<usize> {
     items

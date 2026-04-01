@@ -38,8 +38,6 @@ pub struct BotCommand {
 /// Raw HTTP client for the Telegram Bot API.
 #[derive(Clone)]
 pub struct TelegramApi {
-    #[cfg_attr(not(test), allow(dead_code))]
-    token: String,
     client: reqwest::Client,
     base_url: String,
 }
@@ -48,7 +46,6 @@ impl TelegramApi {
     /// Create a new API client for the given bot token.
     pub fn new(token: &str) -> Self {
         Self {
-            token: token.to_string(),
             client: reqwest::Client::new(),
             base_url: format!("https://api.telegram.org/bot{token}"),
         }
@@ -61,7 +58,6 @@ impl TelegramApi {
             "api_base_url must start with http:// or https://, got: {base_url}"
         );
         Ok(Self {
-            token: token.to_string(),
             client: reqwest::Client::new(),
             base_url: format!("{base_url}/bot{token}"),
         })
@@ -266,12 +262,6 @@ impl TelegramApi {
         let body = serde_json::json!({ "commands": commands });
         self.post_with_retry("setMyCommands", &body).await?;
         Ok(())
-    }
-
-    /// Return the token (needed for tests / debug only).
-    #[cfg(test)]
-    pub fn token(&self) -> &str {
-        &self.token
     }
 }
 

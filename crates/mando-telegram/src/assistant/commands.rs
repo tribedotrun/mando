@@ -13,8 +13,6 @@ use crate::gateway_paths as paths;
 
 // Re-export scout commands used by the dispatcher.
 pub use super::scout_commands::{cmd_list, cmd_research, cmd_scout, edit_list_page, show_card};
-pub use super::scout_processing::{auto_process_batch, auto_process_single, cmd_process};
-
 fn parse_id_list(raw: &str) -> Vec<i64> {
     raw.split(|ch: char| ch.is_whitespace() || ch == ',')
         .filter(|part| !part.is_empty())
@@ -104,7 +102,6 @@ pub async fn cmd_addlink(bot: &mut TelegramBot, chat_id: &str, args: &str) -> Re
             {
                 tracing::warn!(module = "telegram", error = %e, "message send failed");
             }
-            auto_process_single(bot, chat_id, message_id, id).await;
         }
     } else {
         if message_id > 0 {
@@ -139,7 +136,6 @@ async fn addlink_batch(bot: &mut TelegramBot, chat_id: &str, urls: &[&str]) -> R
     let message_id = sent["message_id"].as_i64().unwrap_or(0);
 
     let mut lines = Vec::new();
-    let mut added_ids = Vec::new();
     for url in urls {
         let body = serde_json::json!({"url": url});
         match bot.gw().post(paths::SCOUT_ITEMS, &body).await {
@@ -152,7 +148,6 @@ async fn addlink_batch(bot: &mut TelegramBot, chat_id: &str, urls: &[&str]) -> R
                         "\u{1f4e5} #{id}: <a href=\"{}\">{item_type}</a>",
                         escape_html(url),
                     ));
-                    added_ids.push(id);
                 } else {
                     lines.push(format!("#{id} already exists"));
                 }
@@ -167,9 +162,6 @@ async fn addlink_batch(bot: &mut TelegramBot, chat_id: &str, urls: &[&str]) -> R
         .await
     {
         tracing::warn!(module = "telegram", error = %e, "message send failed");
-    }
-    if !added_ids.is_empty() {
-        auto_process_batch(bot, chat_id, message_id, &added_ids).await;
     }
     Ok(())
 }

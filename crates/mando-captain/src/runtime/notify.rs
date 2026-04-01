@@ -98,7 +98,7 @@ impl Notifier {
             return;
         }
 
-        let quiet = self.quiet_mode || mando_shared::quiet_mode::is_active();
+        let quiet = self.quiet_mode;
         if quiet && level < NotifyLevel::High {
             tracing::debug!(module = "notify", message = %message, "suppressed (quiet mode)");
             return;
@@ -118,8 +118,11 @@ impl Notifier {
         // Batch LOW/NORMAL notifications (no task_key, no buttons) for tick-end summary.
         if level < NotifyLevel::High && task_key.is_none() && reply_markup.is_none() {
             tracing::info!("[notify] batching {:?} notification: {}", level, message);
-            if let Ok(mut batch) = self.batch.lock() {
-                batch.push(final_message);
+            match self.batch.lock() {
+                Ok(mut batch) => batch.push(final_message),
+                Err(e) => {
+                    tracing::error!("batch mutex poisoned, notification dropped: {e}");
+                }
             }
             return;
         }
@@ -150,7 +153,10 @@ impl Notifier {
         let messages: Vec<String> = {
             let mut batch = match self.batch.lock() {
                 Ok(b) => b,
-                Err(_) => return,
+                Err(e) => {
+                    tracing::error!("batch mutex poisoned during flush: {e}");
+                    return;
+                }
             };
             std::mem::take(&mut *batch)
         };

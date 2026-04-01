@@ -1,6 +1,4 @@
 import React from 'react';
-import { SCOUT_PROCESS_LABEL } from '#renderer/capabilityContract';
-
 interface ShortcutEntry {
   keys: string[];
   label: string;
@@ -30,7 +28,6 @@ const ACTIONS: ShortcutEntry[] = [
   { keys: ['M'], label: 'Merge PR' },
   { keys: ['S'], label: 'Change status' },
   { keys: ['R'], label: 'Restart / rework' },
-  { keys: ['T'], label: SCOUT_PROCESS_LABEL },
   { keys: ['⌘', 'Enter'], label: 'Submit form' },
 ];
 

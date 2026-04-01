@@ -5,16 +5,11 @@
 mod markdown;
 mod render;
 
-pub use markdown::{
-    auto_link_urls, markdown_to_telegram_html, markdown_to_telegram_plain_text,
-    normalize_llm_newlines,
-};
+pub use markdown::{markdown_to_telegram_html, markdown_to_telegram_plain_text};
 pub use render::{render_markdown_reply_html, TELEGRAM_TEXT_MAX_LEN};
 
 use regex::Regex;
 use std::sync::LazyLock;
-
-use mando_types::Task;
 
 // Re-export table conversion from dedicated module.
 pub use crate::telegram_tables::convert_md_tables;
@@ -141,6 +136,9 @@ pub fn hyperlink(label: &str, url: &str) -> String {
     )
 }
 
+#[cfg(test)]
+use mando_types::Task;
+
 /// Format a task as a single Telegram line.
 ///
 /// Includes Worker and PR columns.
@@ -148,12 +146,14 @@ pub fn hyperlink(label: &str, url: &str) -> String {
 ///
 /// `github_repo`: optional GitHub slug (e.g. "owner/repo") for constructing
 /// PR links when the PR reference is not a full URL. Pass `None` if unknown.
-pub fn format_item_line(item: &Task, include_repo: bool) -> String {
+#[cfg(test)]
+fn format_item_line(item: &Task, include_repo: bool) -> String {
     format_item_line_with_repo(item, include_repo, None)
 }
 
 /// Format a task with an explicit GitHub repo for PR link construction.
-pub fn format_item_line_with_repo(
+#[cfg(test)]
+fn format_item_line_with_repo(
     item: &Task,
     include_repo: bool,
     github_repo: Option<&str>,
