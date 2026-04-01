@@ -102,11 +102,6 @@ pub fn worker_health_path() -> PathBuf {
     active_captain_runtime_paths().worker_health_path
 }
 
-/// `~/.mando/state/cron/jobs.json`
-pub fn cron_store_path() -> PathBuf {
-    state_dir().join("cron").join("jobs.json")
-}
-
 /// `~/.mando/state/cc-streams/` — unified stream output for all CC invocations.
 pub fn cc_streams_dir() -> PathBuf {
     state_dir().join("cc-streams")

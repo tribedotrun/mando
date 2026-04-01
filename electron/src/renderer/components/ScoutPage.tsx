@@ -1,5 +1,4 @@
 import React, { useCallback, useRef, useState } from 'react';
-import { useMountEffect } from '#renderer/hooks/useMountEffect';
 import { useScoutStore } from '#renderer/stores/scoutStore';
 import { useViewKeyHandler } from '#renderer/hooks/useKeyboardShortcuts';
 import { useSelection } from '#renderer/hooks/useSelection';
@@ -9,17 +8,13 @@ import { ScoutStatusTabs } from '#renderer/components/ScoutStatusTabs';
 import { ScoutReader } from '#renderer/components/ScoutReader';
 import { ScoutQA } from '#renderer/components/ScoutQA';
 import { BulkBar } from '#renderer/components/BulkBar';
-import { bulkUpdateScout, bulkDeleteScout, processScout, researchScout } from '#renderer/api';
+import { bulkUpdateScout, bulkDeleteScout, researchScout } from '#renderer/api';
 import { useToastStore } from '#renderer/stores/toastStore';
 
 const USER_SETTABLE = ['pending', 'processed', 'saved', 'archived'];
 const TYPES = ['all', 'github', 'youtube', 'arxiv', 'other'] as const;
 
-interface ScoutPageProps {
-  processOnMount?: boolean;
-}
-
-export function ScoutPage({ processOnMount = false }: ScoutPageProps): React.ReactElement {
+export function ScoutPage(): React.ReactElement {
   const {
     query,
     setQuery,
@@ -45,18 +40,6 @@ export function ScoutPage({ processOnMount = false }: ScoutPageProps): React.Rea
     focusedIndex >= items.length ? (items.length > 0 ? items.length - 1 : -1) : focusedIndex;
 
   const inListView = view === '' && !activeItemId;
-
-  const handleProcessAll = useCallback(async () => {
-    try {
-      await processScout();
-      await scoutFetch();
-      useToastStore.getState().add('success', 'Processed pending Scout items');
-    } catch (err) {
-      useToastStore
-        .getState()
-        .add('error', `Process failed: ${err instanceof Error ? err.message : String(err)}`);
-    }
-  }, [scoutFetch]);
 
   const handleResearch = useCallback(async () => {
     const topic = window.prompt('Scout research topic');
@@ -103,10 +86,6 @@ export function ScoutPage({ processOnMount = false }: ScoutPageProps): React.Rea
           }
           break;
         }
-        case 't':
-          e.preventDefault();
-          handleProcessAll();
-          break;
         case '/':
           e.preventDefault();
           searchRef.current?.focus();
@@ -119,7 +98,7 @@ export function ScoutPage({ processOnMount = false }: ScoutPageProps): React.Rea
           break;
       }
     },
-    [inListView, items, clampedFocusedIndex, handleProcessAll],
+    [inListView, items, clampedFocusedIndex],
   );
 
   useViewKeyHandler(handleKey);
@@ -189,12 +168,6 @@ export function ScoutPage({ processOnMount = false }: ScoutPageProps): React.Rea
     setQaEverOpened(false);
   };
 
-  useMountEffect(() => {
-    if (processOnMount) {
-      void handleProcessAll();
-    }
-  });
-
   if (view === 'read' && activeItemId) {
     return (
       <div className="-mx-5 -mb-4 flex" style={{ height: 'calc(100% + 1rem)' }}>
@@ -238,20 +211,6 @@ export function ScoutPage({ processOnMount = false }: ScoutPageProps): React.Rea
           </span>
         </div>
         <div className="flex items-center gap-2">
-          <button
-            onClick={() => {
-              void handleProcessAll();
-            }}
-            className="rounded-md px-3 py-1.5 text-[12px] font-medium"
-            style={{
-              background: 'var(--color-surface-2)',
-              color: 'var(--color-text-2)',
-              border: '1px solid var(--color-border)',
-              cursor: 'pointer',
-            }}
-          >
-            Process pending
-          </button>
           <button
             onClick={() => {
               void handleResearch();

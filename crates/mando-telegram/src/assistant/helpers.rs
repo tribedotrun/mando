@@ -40,7 +40,6 @@ pub(crate) async fn handle_implicit_addlink(
     let message_id = sent["message_id"].as_i64().unwrap_or(0);
 
     let mut lines = Vec::new();
-    let mut added_ids = Vec::new();
 
     for url in &urls {
         let body = serde_json::json!({"url": url});
@@ -54,7 +53,6 @@ pub(crate) async fn handle_implicit_addlink(
                         "\u{1f4e5} #{id}: <a href=\"{}\">{item_type}</a>",
                         escape_html(url),
                     ));
-                    added_ids.push(id);
                 } else {
                     lines.push(format!(
                         "#{id} already exists (<a href=\"{}\">{item_type}</a>)",
@@ -73,25 +71,12 @@ pub(crate) async fn handle_implicit_addlink(
         }
     }
 
-    if added_ids.is_empty() {
-        if let Err(e) = bot
-            .api
-            .edit_message_text(chat_id, message_id, &lines.join("\n"), Some("HTML"), None)
-            .await
-        {
-            tracing::warn!(module = "telegram", error = %e, "message send failed");
-        }
-    } else if added_ids.len() == 1 {
-        super::commands::auto_process_single(bot, chat_id, message_id, added_ids[0]).await;
-    } else {
-        if let Err(e) = bot
-            .api
-            .edit_message_text(chat_id, message_id, &lines.join("\n"), Some("HTML"), None)
-            .await
-        {
-            tracing::warn!(module = "telegram", error = %e, "message send failed");
-        }
-        super::commands::auto_process_batch(bot, chat_id, message_id, &added_ids).await;
+    if let Err(e) = bot
+        .api
+        .edit_message_text(chat_id, message_id, &lines.join("\n"), Some("HTML"), None)
+        .await
+    {
+        tracing::warn!(module = "telegram", error = %e, "message send failed");
     }
     Ok(())
 }

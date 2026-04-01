@@ -47,8 +47,6 @@ impl FromStr for SessionStatus {
         match s {
             "running" => Ok(Self::Running),
             "stopped" => Ok(Self::Stopped),
-            // Accept legacy "done" as Stopped.
-            "done" => Ok(Self::Stopped),
             "failed" => Ok(Self::Failed),
             _ => Err(format!("unknown session status: {s}")),
         }

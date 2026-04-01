@@ -206,7 +206,7 @@ fn toggle_stack(stack: &mut Vec<usize>, byte: usize) {
 #[cfg(test)]
 mod tests {
     use super::render_markdown_reply_html;
-    use crate::{markdown_to_telegram_html, markdown_to_telegram_plain_text};
+    use super::{markdown_to_telegram_html, markdown_to_telegram_plain_text};
 
     #[test]
     fn render_reply_preserves_markdown_formatting() {

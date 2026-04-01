@@ -9,7 +9,7 @@ import path from 'path';
 import fs from 'fs';
 import type http from 'http';
 import log from '#main/logger';
-import { installCliAndPlists, getDaemonStatus, removeLegacyAppPlist } from '#main/launchd';
+import { installCliAndPlists, getDaemonStatus } from '#main/launchd';
 import { registerSetupValidationHandlers } from '#main/setup-validation';
 import { getDevGitInfo } from '#main/dev-git-info';
 import { installTrustedGatewayAuth } from '#main/gateway-auth';
@@ -220,7 +220,7 @@ function registerShortcuts(): void {
         onVoiceHotkeyDown(resolvePreload, voiceRendererUrl());
       })
     ) {
-      console.log(`[voice] Global shortcut registered: ${accel}`);
+      log.info(`[voice] Global shortcut registered: ${accel}`);
       voiceRegistered = true;
       break;
     }
@@ -457,7 +457,6 @@ app.whenReady().then(async () => {
   setupAutoUpdate();
 
   if (app.isPackaged) {
-    removeLegacyAppPlist();
     let openAtLogin = true;
     try {
       const raw = fs.readFileSync(getConfigPath(), 'utf-8');

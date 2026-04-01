@@ -43,9 +43,6 @@ impl CronService {
     }
 
     /// Load jobs from DB, recompute next runs, arm timer.
-    ///
-    /// On first run after upgrade, imports any legacy file-based jobs from
-    /// `~/.mando/state/cron/jobs.json` into the DB, then renames the file.
     pub async fn start(&mut self) {
         self.running = true;
         self.jobs = match mando_db::queries::cron::load_all(&self.pool).await {
@@ -55,32 +52,6 @@ impl CronService {
                 Vec::new()
             }
         };
-
-        // One-time migration: import legacy file-based cron jobs into DB.
-        if self.jobs.is_empty() {
-            let legacy_path = mando_config::cron_store_path();
-            if legacy_path.exists() {
-                let legacy = super::store::load_store(&legacy_path);
-                if !legacy.jobs.is_empty() {
-                    info!(
-                        "cron: migrating {} legacy jobs from {}",
-                        legacy.jobs.len(),
-                        legacy_path.display()
-                    );
-                    self.jobs = legacy.jobs;
-                    if let Err(e) = self.save().await {
-                        error!("cron: failed to persist migrated legacy jobs: {e}");
-                    } else {
-                        let backup = legacy_path.with_extension("json.migrated");
-                        if let Err(e) = std::fs::rename(&legacy_path, &backup) {
-                            error!("cron: failed to rename legacy file: {e}");
-                        } else {
-                            info!("cron: legacy store renamed to {}", backup.display());
-                        }
-                    }
-                }
-            }
-        }
 
         self.recompute_next_runs();
         if let Err(e) = self.save().await {

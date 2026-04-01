@@ -3,7 +3,6 @@ import type {
   ScoutItem,
   AskResponse,
   ScoutArticleResponse,
-  ScoutProcessResponse,
   ActResponse,
   ScoutItemSession,
 } from '#renderer/types';
@@ -38,8 +37,6 @@ export const updateScoutStatus = (id: number, status: string) =>
 export const bulkUpdateScout = (ids: number[], updates: { status: string }) =>
   apiPost<void>('/api/scout/bulk', { ids, updates });
 export const bulkDeleteScout = (ids: number[]) => apiPost<void>('/api/scout/bulk-delete', { ids });
-export const processScout = (id?: number) =>
-  apiPost<ScoutProcessResponse>('/api/scout/process', id != null ? { id } : {});
 export const askScout = (id: number, question: string, sessionId?: string) =>
   apiPost<AskResponse>('/api/scout/ask', { id, question, session_id: sessionId });
 export const actOnScoutItem = (id: number, project: string, prompt?: string) =>

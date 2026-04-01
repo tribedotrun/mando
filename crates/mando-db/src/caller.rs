@@ -66,7 +66,7 @@ impl SessionCaller {
             "captain-review-async" => Some(Self::CaptainReviewAsync),
             "captain-distiller" => Some(Self::CaptainDistiller),
             "exhaustion-report" => Some(Self::ExhaustionReport),
-            "task-ask" | "dashboard-ask" => Some(Self::TaskAsk),
+            "task-ask" => Some(Self::TaskAsk),
             "scout-process" => Some(Self::ScoutProcess),
             "scout-article" => Some(Self::ScoutArticle),
             "scout-qa" => Some(Self::ScoutQa),
@@ -169,14 +169,6 @@ mod tests {
             });
             assert_eq!(*caller, parsed);
         }
-    }
-
-    #[test]
-    fn legacy_dashboard_ask_parses_to_task_ask() {
-        assert_eq!(
-            SessionCaller::parse("dashboard-ask"),
-            Some(SessionCaller::TaskAsk)
-        );
     }
 
     #[test]

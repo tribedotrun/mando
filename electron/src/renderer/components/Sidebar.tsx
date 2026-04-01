@@ -79,8 +79,8 @@ function AnalyticsIcon() {
 }
 
 const NAV_ITEMS: { id: Tab; label: string; Icon: React.FC; featureFlag?: string }[] = [
-  { id: 'scout', label: 'Scout', Icon: ScoutIcon },
   { id: 'sessions', label: 'Sessions', Icon: SessionsIcon },
+  { id: 'scout', label: 'Scout', Icon: ScoutIcon },
   { id: 'cron', label: 'Cron', Icon: CronIcon },
   { id: 'analytics', label: 'Analytics', Icon: AnalyticsIcon, featureFlag: 'analytics' },
 ];

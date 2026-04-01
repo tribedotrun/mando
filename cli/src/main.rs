@@ -501,7 +501,6 @@ mod tests {
         for (expected, command_name) in [
             ("add", "add"),
             ("research", "research"),
-            ("process", "process"),
             ("read", "read"),
             ("ask", "ask"),
             ("act", "act"),

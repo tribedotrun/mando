@@ -146,15 +146,6 @@
         "electron"
       ]
     },
-    "process": {
-      "meaning": "Process pending Scout items",
-      "route": "POST /api/scout/process",
-      "surfaces": [
-        "cli",
-        "telegram",
-        "electron"
-      ]
-    },
     "read": {
       "meaning": "Open the extracted article",
       "route": "GET /api/scout/items/{id}/article",

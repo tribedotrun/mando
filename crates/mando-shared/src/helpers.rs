@@ -6,23 +6,10 @@
 /// Accepts either a full GitHub URL (`https://github.com/.../pull/123`)
 /// or a short reference (`#123`, `123`). Always returns `#N`.
 pub fn pr_short_label(pr: &str) -> String {
-    // Full URL: extract the number after /pull/
-    if let Some(idx) = pr.find("/pull/") {
-        let after = &pr[idx + 6..];
-        let num: String = after.chars().take_while(|c| c.is_ascii_digit()).collect();
-        if !num.is_empty() {
-            return format!("#{num}");
-        }
+    match mando_types::task::extract_pr_number(pr) {
+        Some(n) => format!("#{n}"),
+        None => pr.to_string(),
     }
-    // Already #N
-    if pr.starts_with('#') {
-        return pr.to_string();
-    }
-    // Bare number
-    if pr.chars().all(|c| c.is_ascii_digit()) {
-        return format!("#{pr}");
-    }
-    pr.to_string()
 }
 
 /// Sanitize an ID for safe use in file paths (prevent path traversal).

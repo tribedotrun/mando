@@ -19,7 +19,6 @@ pub const CAPTAIN_TRIAGE: &str = "/api/captain/triage";
 pub const KNOWLEDGE_APPROVE: &str = "/api/knowledge/approve";
 pub const SCOUT_ASK: &str = "/api/scout/ask";
 pub const SCOUT_ITEMS: &str = "/api/scout/items";
-pub const SCOUT_PROCESS: &str = "/api/scout/process";
 pub const SCOUT_RESEARCH: &str = "/api/scout/research";
 
 pub fn task_item(id: impl Display) -> String {

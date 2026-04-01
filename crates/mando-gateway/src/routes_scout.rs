@@ -103,6 +103,34 @@ pub(crate) async fn post_scout_items(
             state
                 .bus
                 .send(mando_types::BusEvent::Scout, Some(json!({"action": "add"})));
+
+            // Auto-process newly added items in the background.
+            if val["added"].as_bool() == Some(true) {
+                if let Some(id) = val["id"].as_i64() {
+                    let config = state.config.load_full();
+                    let workflow = state.scout_workflow.load_full();
+                    let pool = state.db.pool().clone();
+                    let bus = state.bus.clone();
+                    let handle = tokio::spawn(async move {
+                        if let Err(e) =
+                            mando_scout::process_scout(&config, &pool, Some(id), &workflow).await
+                        {
+                            tracing::warn!(scout_id = id, error = %e, "auto-process failed");
+                            return;
+                        }
+                        bus.send(
+                            mando_types::BusEvent::Scout,
+                            Some(json!({"action": "process"})),
+                        );
+                    });
+                    tokio::spawn(async move {
+                        if let Err(e) = handle.await {
+                            tracing::error!(scout_id = id, error = %e, "auto-process panicked");
+                        }
+                    });
+                }
+            }
+
             Ok((StatusCode::CREATED, Json(val)))
         }
         Err(e) => Err(error_response(

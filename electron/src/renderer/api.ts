@@ -16,7 +16,6 @@ import type {
   PatternsResponse,
   DistillerResponse,
   KnowledgePendingResponse,
-  CaptainTriageResponse,
 } from '#renderer/types';
 import log from '#renderer/logger';
 import { getErrorMessage } from '#renderer/utils';
@@ -32,7 +31,6 @@ export {
   updateScoutStatus,
   bulkUpdateScout,
   bulkDeleteScout,
-  processScout,
   askScout,
   actOnScoutItem,
   researchScout,
@@ -48,10 +46,6 @@ export async function initBaseUrl(): Promise<void> {
     const url = await window.mandoAPI.gatewayUrl();
     if (url) BASE_URL = url;
   }
-}
-
-export function getBaseUrl(): string {
-  return BASE_URL;
 }
 
 export function buildUrl(path: string): string {
@@ -269,9 +263,6 @@ export const answerClarification = (id: number, answer: string) =>
 // Captain
 export const triggerTick = (dryRun = false) =>
   apiPost<TickResult>('/api/captain/tick', { dry_run: dryRun });
-export const triggerCaptainTriage = (itemId?: string) =>
-  apiPost<CaptainTriageResponse>('/api/captain/triage', itemId ? { item_id: itemId } : {});
-export const stopCaptain = () => apiPost<{ killed: number }>('/api/captain/stop');
 export const nudgeWorker = (itemId: number, message: string) =>
   apiPost<{ worker?: string; pid?: number }>('/api/captain/nudge', {
     item_id: String(itemId),

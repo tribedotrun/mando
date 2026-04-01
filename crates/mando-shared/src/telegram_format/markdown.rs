@@ -129,7 +129,8 @@ fn replace_bare_urls(text: &str, fmt: fn(&str, &str) -> String) -> String {
 }
 
 /// Detect bare URLs in text and wrap them in `<a>` tags with smart labels.
-pub fn auto_link_urls(text: &str) -> String {
+#[cfg(test)]
+fn auto_link_urls(text: &str) -> String {
     replace_bare_urls(text, |label, url| format!("<a href=\"{url}\">{label}</a>"))
 }
 
@@ -192,7 +193,7 @@ fn apply_italic(text: &str) -> String {
 /// string values.  After JSON parsing, these survive as the literal
 /// characters `\` + `n` rather than a real newline.  This function
 /// normalizes them so downstream rendering works correctly.
-pub fn normalize_llm_newlines(text: &str) -> String {
+fn normalize_llm_newlines(text: &str) -> String {
     text.replace("\\n", "\n")
 }
 

@@ -48,6 +48,9 @@ pub(crate) async fn post_cron_add(
     let schedule = mando_shared::parse_schedule(&body.schedule_kind, &body.schedule_value)
         .map_err(|e| error_response(StatusCode::BAD_REQUEST, &e))?;
 
+    mando_shared::cron::scheduler::validate_schedule(&schedule)
+        .map_err(|e| error_response(StatusCode::BAD_REQUEST, &e))?;
+
     let id = format!("cron-{}", now_ms());
 
     let mut svc = state.cron_service.write().await;

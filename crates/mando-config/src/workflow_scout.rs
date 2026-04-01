@@ -25,7 +25,7 @@ impl ScoutWorkflow {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct InterestsConfig {
     pub high: Vec<String>,
@@ -34,31 +34,8 @@ pub struct InterestsConfig {
     pub tone: String,
 }
 
-impl Default for InterestsConfig {
-    fn default() -> Self {
-        Self {
-            high: vec![
-                "AI coding tools and workflows (Claude Code, Cursor, Copilot, Windsurf)".into(),
-                "AI agent frameworks and tool-use patterns".into(),
-                "How teams ship software with AI — case studies and practitioner reports".into(),
-                "AI prompt engineering, eval patterns, and benchmarking".into(),
-            ],
-            medium: vec![
-                "AI training, fine-tuning, and inference optimization".into(),
-                "Software architecture and system design".into(),
-                "Developer tooling, CI/CD, and workflow automation".into(),
-            ],
-            low: vec![
-                "Marketing, growth hacking, startup advice".into(),
-                "Shallow listicles, clickbait, marketing fluff".into(),
-            ],
-            tone: "Practitioner deep-dives preferred.".into(),
-        }
-    }
-}
-
 /// User context for scout prompts — adapts explanations to the reader's background.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct UserContextConfig {
     /// Reader's role/background.
@@ -67,16 +44,6 @@ pub struct UserContextConfig {
     pub known_domains: Vec<String>,
     /// Domains outside the reader's expertise — terms here should be explained.
     pub explain_domains: Vec<String>,
-}
-
-impl Default for UserContextConfig {
-    fn default() -> Self {
-        Self {
-            role: "Software developer who builds with AI coding agents".into(),
-            known_domains: vec!["Software engineering".into(), "AI tools".into()],
-            explain_domains: Vec::new(),
-        }
-    }
 }
 
 impl UserContextConfig {

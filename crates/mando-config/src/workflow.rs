@@ -421,10 +421,9 @@ mod tests {
     fn load_default_scout_workflow() {
         let wf = ScoutWorkflow::compiled_default();
         assert!(!wf.prompts.is_empty(), "should have prompts");
-        // interests/user_context get struct defaults even from compiled yaml
-        // (serde default kicks in for `interests: {}`).
-        assert!(!wf.interests.high.is_empty());
-        assert!(!wf.user_context.role.is_empty());
+        // interests/user_context default to empty — user fills them in via settings.
+        assert!(wf.interests.high.is_empty());
+        assert!(wf.user_context.role.is_empty());
     }
 
     #[test]

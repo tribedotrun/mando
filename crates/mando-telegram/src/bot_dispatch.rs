@@ -43,7 +43,6 @@ pub(crate) const REGISTERED_COMMANDS: &[(&str, &str)] = &[
     ("history", "Show ask history for a task"),
     ("addlink", "Add URL to Scout"),
     ("research", "AI-powered link discovery on a topic"),
-    ("process", "Process Scout items"),
     ("bulkstatus", "Bulk-update Scout items"),
     ("bulkdelete", "Bulk-delete Scout items"),
     ("publish", "Publish a Scout article"),
@@ -95,7 +94,6 @@ impl TelegramBot {
             // Scout commands
             "addlink" => crate::assistant::commands::cmd_addlink(self, chat_id, args).await,
             "research" => crate::assistant::commands::cmd_research(self, chat_id, args).await,
-            "process" => crate::assistant::commands::cmd_process(self, chat_id, args).await,
             "bulkstatus" => crate::assistant::commands::cmd_bulk_status(self, chat_id, args).await,
             "bulkdelete" => crate::assistant::commands::cmd_bulk_delete(self, chat_id, args).await,
             "publish" => crate::assistant::commands::cmd_publish(self, chat_id, args).await,
@@ -210,7 +208,6 @@ mod tests {
         for command in [
             "addlink",
             "research",
-            "process",
             "bulkstatus",
             "bulkdelete",
             "publish",
