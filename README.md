@@ -49,3 +49,11 @@ cargo nextest run --workspace --lib      # Run unit tests
 ## License
 
 Apache 2.0 — see [LICENSE](LICENSE).
+
+<!-- hypertribe:sponsors:start -->
+## Sponsors
+
+[![mando Sponsors](https://api.tribe.run/solana/dex/tokens/by-mint/tLSdmcjM9dXdm6ZZZmBwJPFtvJA3b8b3fSzvRzq4co5/sponsors.svg)](https://tribe.run/token/tLSdmcjM9dXdm6ZZZmBwJPFtvJA3b8b3fSzvRzq4co5)
+
+Become a sponsor on [tribe.run](https://tribe.run/token/tLSdmcjM9dXdm6ZZZmBwJPFtvJA3b8b3fSzvRzq4co5).
+<!-- hypertribe:sponsors:end -->
