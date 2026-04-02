@@ -47,12 +47,3 @@ pub async fn load(pool: &SqlitePool, task_id: i64) -> Result<Vec<AskHistoryEntry
     .await?;
     Ok(rows.into_iter().map(|r| r.into_entry()).collect())
 }
-
-/// Delete all ask history for a task.
-pub async fn delete_all(pool: &SqlitePool, task_id: i64) -> Result<()> {
-    sqlx::query("DELETE FROM ask_history WHERE task_id = ?")
-        .bind(task_id)
-        .execute(pool)
-        .await?;
-    Ok(())
-}

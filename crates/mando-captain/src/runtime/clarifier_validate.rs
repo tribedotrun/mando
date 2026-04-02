@@ -20,7 +20,18 @@ pub(crate) fn build_clarifier_schema(valid_names: &[String]) -> serde_json::Valu
         "properties": {
             "status": { "type": "string", "enum": ["ready", "clarifying", "escalate", "answered"] },
             "context": { "type": "string" },
-            "questions": { "type": ["string", "null"] },
+            "questions": {
+                "type": ["array", "null"],
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "question": { "type": "string" },
+                        "answer": { "type": ["string", "null"] },
+                        "self_answered": { "type": "boolean" }
+                    },
+                    "required": ["question", "self_answered"]
+                }
+            },
             "title": { "type": ["string", "null"] },
             "repo": { "enum": repo_enum },
             "no_pr": { "type": ["boolean", "null"] },
@@ -166,7 +177,6 @@ mod tests {
             no_pr: None,
             resource: None,
             session_id: None,
-            deep_failed: false,
         };
         assert!(check_repo(&result, &names).is_none());
 

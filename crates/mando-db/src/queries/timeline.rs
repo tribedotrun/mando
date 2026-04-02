@@ -80,15 +80,6 @@ pub async fn load_last_n(pool: &SqlitePool, task_id: i64, n: i64) -> Result<Vec<
     Ok(rows.into_iter().map(|r| r.into_event()).collect())
 }
 
-/// Count events for a task.
-pub async fn count(pool: &SqlitePool, task_id: i64) -> Result<usize> {
-    let c: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM timeline_events WHERE task_id = ?")
-        .bind(task_id)
-        .fetch_one(pool)
-        .await?;
-    Ok(c as usize)
-}
-
 /// Check if a backfill marker exists for a task.
 pub async fn has_backfill_marker(pool: &SqlitePool, task_id: i64) -> Result<bool> {
     let exists: bool = sqlx::query_scalar(
@@ -100,17 +91,12 @@ pub async fn has_backfill_marker(pool: &SqlitePool, task_id: i64) -> Result<bool
     Ok(exists)
 }
 
-/// Delete all timeline events for a task (used during backfill rewrite).
-pub async fn delete_all(pool: &SqlitePool, task_id: i64) -> Result<()> {
-    sqlx::query("DELETE FROM timeline_events WHERE task_id = ?")
-        .bind(task_id)
-        .execute(pool)
-        .await?;
-    Ok(())
-}
-
 /// Fetch the latest clarifier questions from the most recent ClarifyQuestion event.
-pub async fn latest_clarifier_questions(pool: &SqlitePool, task_id: i64) -> Result<Option<String>> {
+/// Returns the raw JSON value of the `questions` field (structured array or legacy string).
+pub async fn latest_clarifier_questions(
+    pool: &SqlitePool,
+    task_id: i64,
+) -> Result<Option<serde_json::Value>> {
     let event_type_str = event_type_to_string(TimelineEventType::ClarifyQuestion)?;
     let row: Option<(String,)> = sqlx::query_as(
         "SELECT data FROM timeline_events
@@ -124,7 +110,14 @@ pub async fn latest_clarifier_questions(pool: &SqlitePool, task_id: i64) -> Resu
     let questions =
         row.and_then(
             |(data,)| match serde_json::from_str::<serde_json::Value>(&data) {
-                Ok(val) => val["questions"].as_str().map(String::from),
+                Ok(val) => {
+                    let q = &val["questions"];
+                    if q.is_null() {
+                        None
+                    } else {
+                        Some(q.clone())
+                    }
+                }
                 Err(e) => {
                     tracing::warn!(
                         module = "timeline",

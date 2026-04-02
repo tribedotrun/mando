@@ -137,10 +137,12 @@ impl Notifier {
 
         tracing::info!("[notify] emitting {:?} notification: {}", level, message);
 
-        self.bus.send(
-            BusEvent::Notification,
-            Some(serde_json::to_value(&payload).unwrap_or_default()),
-        );
+        match serde_json::to_value(&payload) {
+            Ok(val) => self.bus.send(BusEvent::Notification, Some(val)),
+            Err(e) => {
+                tracing::warn!(module = "notify", error = %e, "failed to serialize notification payload")
+            }
+        }
     }
 
     /// Flush batched LOW/NORMAL notifications as a single "Captain summary" message.
@@ -187,10 +189,12 @@ impl Notifier {
 
         tracing::info!("[notify] flushing {} batched notifications", count);
 
-        self.bus.send(
-            BusEvent::Notification,
-            Some(serde_json::to_value(&payload).unwrap_or_default()),
-        );
+        match serde_json::to_value(&payload) {
+            Ok(val) => self.bus.send(BusEvent::Notification, Some(val)),
+            Err(e) => {
+                tracing::warn!(module = "notify", error = %e, "failed to serialize batch notification payload")
+            }
+        }
     }
 
     /// Convenience: send a NORMAL-level notification.

@@ -85,6 +85,8 @@ pub struct AgentConfig {
     /// because humans respond in hours/days, not seconds.
     pub needs_clarification_timeout_s: u64,
     pub archive_grace_secs: u64,
+    pub evidence_download_timeout_s: u64,
+    pub evidence_ffmpeg_timeout_s: u64,
 }
 
 impl Default for AgentConfig {
@@ -104,6 +106,8 @@ impl Default for AgentConfig {
             clarifier_timeout_s: 300,
             needs_clarification_timeout_s: 86400, // 24 hours
             archive_grace_secs: 604800,
+            evidence_download_timeout_s: 30,
+            evidence_ffmpeg_timeout_s: 30,
         }
     }
 }

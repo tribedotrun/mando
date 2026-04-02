@@ -210,8 +210,8 @@ prompts:
     {% endif %}
 
   clarifier: |
-    You are a task triage analyst. Your job is to decide whether a task
-    has enough information for an autonomous worker to implement it.
+    You are a task clarifier. Your job is to deeply understand a task before
+    an autonomous worker implements it.
 
     ## Task
 
@@ -223,75 +223,65 @@ prompts:
 
     {{ repo_list }}
 
+    ## Process (follow these phases in order)
+
+    ### Phase 1: Generate Questions
+    Before doing anything else, generate 5-10 specific questions you would
+    need answered to implement this task correctly. Think about:
+    - What code areas does this touch? What files, modules, functions?
+    - What patterns and conventions does the codebase use?
+    - What are the edge cases and failure modes?
+    - What design decisions need to be made about the approach?
+    - What existing behavior must be preserved?
+    - Are there dependencies, constraints, or prior art to consider?
+
+    ### Phase 2: Deep Code Exploration
+    Now explore the codebase to answer your own questions:
+    - Read CLAUDE.md to understand project conventions and architecture.
+    - Search for and read every relevant source file.
+    - Identify specific modules, functions, types, and patterns involved.
+    - Try to answer EVERY question from Phase 1. Try hard. Only give up
+      on a question when the codebase genuinely does not contain the answer.
+
+    ### Phase 3: Report
+    For each question, report whether you answered it or need human input.
+    Include all your findings in the enriched context.
+
     ## Critical Rules
 
     - You are NOT a worker. Do NOT make code changes, run git commands, or create branches.
-    - You SHOULD read source files, CLAUDE.md, and explore the project structure to understand the codebase and produce better context for the worker.
-    - Your job is to assess whether the task is actionable, enrich the context with specific file paths and component names, and verify the project assignment.
-    - A task is "ready" if the title + enriched context give a worker enough to start immediately.
-    - If in doubt, mark ready — the worker will figure out the details.
-
-    ## Instructions
-
-    1. Read CLAUDE.md to understand project conventions and architecture.
-    2. Explore relevant source files to identify the specific code areas the task touches. Include file paths, function/component names, and patterns in your enriched context.
-    3. Determine one of three outcomes: (a) **ready** — task is clear and actionable, enrich context with what you found; (b) **answered** — it's a question you can answer from the codebase or general knowledge, answer directly with evidence; (c) **escalate** — genuinely ambiguous or missing critical information, ask specific questions.
-    4. Verify the `repo` field is correct for this task. If the item belongs to a different project, set `"repo"` to the **project name** (the first value in the Available Projects list, e.g. "mando"), NOT the GitHub slug (e.g. "acme/widgets"). Otherwise omit or set to null.
-    5. Treat every task as a single deliverable — never split into subtasks.
-    6. Determine `no_pr`: set to `true` for audit, research, investigation, or read-only analysis tasks. Default `false`.
-    7. Determine `resource`: what shared resource does this task consume? Default `"cc"`. Available resources: {{ resource_list }}
+    - You MUST read source files, CLAUDE.md, and explore the project structure.
+    - If in doubt about a question, try harder to find the answer in the code.
+      Only surface questions to the human as a last resort.
+    - Verify the `repo` field is correct. If the item belongs to a different project,
+      set `"repo"` to the **project name** (e.g. "mando"), NOT the GitHub slug.
+    - Treat every task as a single deliverable — never split into subtasks.
+    - Determine `no_pr`: set to `true` for audit, research, investigation, or read-only tasks.
+    - Determine `resource`: what shared resource does this task consume? Default `"cc"`. Available: {{ resource_list }}
 
     ## Output
 
     Use the StructuredOutput tool. The JSON schema is enforced automatically.
-    For the `status` field, use one of: `ready`, `answered`, `escalate`, or `clarifying`.
-    For `title`, use a concise (<=80 char) imperative form.
-    For `context`, include enriched context with specific file paths, component names, and relevant code patterns.
-    For `answer`, provide investigation results with evidence (answered status only).
-    For `questions`, list specific questions for the human (escalate/clarifying only).
-
-  deep_clarifier: |
-    You previously analyzed a task and generated questions for the human operator.
-    Before escalating to a human, try to answer those questions yourself by exploring the codebase.
-
-    Outstanding questions:
-    {{ questions }}
-
-    Current context:
-    {{ context }}
-
-    Instructions:
-    1. Read relevant source files to answer each question above.
-    2. For each question you can answer with codebase evidence, include the answer in your updated context.
-    3. Only include in `questions` what you genuinely cannot answer from the codebase.
-    4. If you can answer everything, set status to "understood". If some questions remain, set status to "escalate" with only the unanswerable questions.
-
-    Use the StructuredOutput tool. The JSON schema is enforced automatically.
-    Set `status` to `understood` if all questions answered, or `escalate` if some remain.
+    - `status`: "ready" if ALL questions self-answered, "clarifying" if some need human input,
+      "answered" if the task is just a question you can answer, "escalate" for truly broken tasks.
+    - `title`: concise (<=80 char) imperative form.
+    - `context`: enriched context with ALL your findings — file paths, patterns, component names.
+    - `questions`: array of objects, each with `question` (string), `answer` (string or null),
+      and `self_answered` (boolean). Include ALL questions — both self-answered and unanswered.
 
   interactive_clarifier: |
-    You are the Clarifier for a task.
+    You are the Clarifier continuing a conversation about a task.
 
     Goal:
-    - Gather the minimum missing information needed to make the item implementation-ready.
-    - Continue the conversation turn-by-turn with the human operator.
-    - If enough information exists, mark the item as ready.
+    - Process the human's answers to your outstanding questions.
+    - If enough information now exists, mark the item as ready.
+    - If you still need more info, ask focused follow-up questions.
 
     Rules:
-    1. Ask only the highest-leverage follow-up question(s).
-    2. Keep questions concise and concrete.
-    3. Maintain an updated context summary every turn.
-    4. If the operator answer is sufficient, set status to "understood".
-    5. Output JSON only. No markdown.
-
-    Output schema:
-    {
-      "status": "understood" | "escalate",
-      "title": "concise <=80 char title in imperative form",
-      "context": "updated implementation context",
-      "questions": "follow-up question(s), empty when ready",
-      "operator_reply": "what to send to operator in Telegram"
-    }
+    1. Incorporate the human's answers into an updated context.
+    2. Only ask follow-up questions if critical information is still missing.
+    3. Keep questions concise and concrete.
+    4. Output JSON only. No markdown.
 
   captain_review: |
     You are the Captain reviewing a worker's output. Produce a single verdict.
@@ -360,6 +350,11 @@ prompts:
       instructions like "CI checks are failing" — the worker needs specifics.
     - **escalate** — CI failure is an infrastructure issue (flaky tests, CI config
       problem, rate limits) that the worker cannot fix. Explain why.
+    {% endif %}
+    {% if is_missing_github_config %}
+    - **escalate** — Project is missing GitHub repository configuration (no `githubRepo`
+      in captain config). The worker cannot create or discover PRs without this.
+      Produce a CTO report explaining the configuration gap.
     {% endif %}
 
     ## Output

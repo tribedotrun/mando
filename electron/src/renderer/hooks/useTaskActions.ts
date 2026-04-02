@@ -14,7 +14,7 @@ import {
   updateItem,
   handoffItem,
   retryItem,
-  answerClarification,
+  answerClarificationText,
   nudgeWorker,
 } from '#renderer/api';
 import type { TaskItem, ItemStatus } from '#renderer/types';
@@ -186,7 +186,7 @@ export function useTaskActions() {
 
   const handleAnswer = async (id: number, answer: string) => {
     try {
-      const result = await answerClarification(id, answer);
+      const result = await answerClarificationText(id, answer);
       taskFetch();
       const msgs: Record<string, [variant: 'success' | 'info', msg: string]> = {
         ready: ['success', 'Clarified — task queued'],

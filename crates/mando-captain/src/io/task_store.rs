@@ -203,28 +203,43 @@ impl TaskStore {
         &self,
         task_id: &str,
     ) -> Vec<mando_db::queries::sessions::SessionRow> {
-        sessions::list_sessions_for_task(&self.pool, task_id)
-            .await
-            .unwrap_or_default()
+        match sessions::list_sessions_for_task(&self.pool, task_id).await {
+            Ok(rows) => rows,
+            Err(e) => {
+                tracing::warn!(module = "task_store", task_id = %task_id, error = %e, "failed to list sessions for task");
+                Vec::new()
+            }
+        }
     }
 
     pub async fn session_cwd(&self, session_id: &str) -> Option<String> {
-        sessions::session_cwd(&self.pool, session_id)
-            .await
-            .ok()
-            .flatten()
+        match sessions::session_cwd(&self.pool, session_id).await {
+            Ok(cwd) => cwd,
+            Err(e) => {
+                tracing::warn!(module = "task_store", session_id = %session_id, error = %e, "failed to fetch session cwd");
+                None
+            }
+        }
     }
 
     pub async fn total_session_cost(&self) -> f64 {
-        sessions::total_session_cost(&self.pool)
-            .await
-            .unwrap_or(0.0)
+        match sessions::total_session_cost(&self.pool).await {
+            Ok(cost) => cost,
+            Err(e) => {
+                tracing::warn!(module = "task_store", error = %e, "failed to fetch total session cost");
+                0.0
+            }
+        }
     }
 
     pub async fn category_counts(&self) -> HashMap<String, usize> {
-        sessions::category_counts(&self.pool)
-            .await
-            .unwrap_or_default()
+        match sessions::category_counts(&self.pool).await {
+            Ok(counts) => counts,
+            Err(e) => {
+                tracing::warn!(module = "task_store", error = %e, "failed to fetch category counts");
+                HashMap::new()
+            }
+        }
     }
 }
 

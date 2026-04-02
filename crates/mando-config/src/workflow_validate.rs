@@ -10,7 +10,6 @@ const REQUIRED_CAPTAIN_PROMPTS: &[&str] = &[
     "worker_briefed",
     "worker_continue",
     "clarifier",
-    "deep_clarifier",
     "interactive_clarifier",
     "captain_review",
     "rebase_worker",

@@ -74,10 +74,10 @@ async fn main() -> Result<()> {
     let tg_enabled = tg.enabled && !tg.token.is_empty();
 
     // Spawn SSE notification listener — sends alerts to telegram.owner.
-    // Skipped when no owner is configured — may be auto-registered later via /start.
+    // Skipped when no owner is configured — may be auto-registered later via first message.
     if tg_enabled {
         if tg.owner.is_empty() {
-            info!("No notification target configured — SSE listener skipped until owner registers via /start");
+            info!("No notification target configured — SSE listener skipped until owner registers via first message");
         } else {
             let base_url = gw.base_url().to_string();
             let gw_token = gw.token().map(String::from);

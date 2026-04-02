@@ -7,7 +7,6 @@ pub mod captain_merge;
 pub mod captain_review;
 mod captain_review_verdict;
 pub mod clarifier;
-mod clarifier_deep;
 mod clarifier_validate;
 pub mod dashboard;
 pub mod dashboard_timeline;

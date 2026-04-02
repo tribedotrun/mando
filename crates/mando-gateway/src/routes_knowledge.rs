@@ -220,10 +220,12 @@ pub(crate) fn notify_patterns(
             task_key: None,
             reply_markup: None,
         };
-        bus.send(
-            BusEvent::Notification,
-            Some(serde_json::to_value(&payload).unwrap_or_default()),
-        );
+        match serde_json::to_value(&payload) {
+            Ok(val) => bus.send(BusEvent::Notification, Some(val)),
+            Err(e) => {
+                tracing::warn!(module = "knowledge", error = %e, "failed to serialize notification payload")
+            }
+        }
     }
 }
 

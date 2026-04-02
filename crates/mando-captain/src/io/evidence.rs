@@ -104,11 +104,15 @@ pub(crate) async fn download_image(
     url: &str,
     images_dir: &Path,
     filename: &str,
+    timeout_s: u64,
 ) -> Result<PathBuf> {
     tokio::fs::create_dir_all(images_dir).await?;
     let dest = images_dir.join(filename);
 
-    let resp = reqwest::get(url).await?.error_for_status()?;
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(timeout_s))
+        .build()?;
+    let resp = client.get(url).send().await?.error_for_status()?;
     let bytes = resp.bytes().await?;
     tokio::fs::write(&dest, &bytes).await?;
 
@@ -120,14 +124,30 @@ pub(crate) async fn extract_frame(
     video_path: &Path,
     output_path: &Path,
     timestamp: &str,
+    timeout_s: u64,
 ) -> Result<()> {
-    let output = tokio::process::Command::new("ffmpeg")
+    let child = tokio::process::Command::new("ffmpeg")
         .args(["-y", "-i"])
         .arg(video_path)
         .args(["-ss", timestamp, "-frames:v", "1"])
         .arg(output_path)
-        .output()
-        .await?;
+        .kill_on_drop(true)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()?;
+
+    let output = match tokio::time::timeout(
+        std::time::Duration::from_secs(timeout_s),
+        child.wait_with_output(),
+    )
+    .await
+    {
+        Ok(result) => result?,
+        Err(_) => {
+            // Timeout — kill_on_drop handles cleanup when `child` is dropped.
+            anyhow::bail!("ffmpeg extract frame timed out after {timeout_s}s");
+        }
+    };
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -140,7 +160,12 @@ pub(crate) async fn extract_frame(
 ///
 /// Returns a list of local file paths that captain can read.
 /// Cleans up old evidence before downloading fresh copies.
-pub(crate) async fn download_evidence(pr_body: &str, work_dir: &Path) -> Vec<PathBuf> {
+pub(crate) async fn download_evidence(
+    pr_body: &str,
+    work_dir: &Path,
+    download_timeout_s: u64,
+    ffmpeg_timeout_s: u64,
+) -> Vec<PathBuf> {
     let urls = extract_evidence_urls(pr_body);
     if urls.is_empty() {
         return Vec::new();
@@ -148,7 +173,11 @@ pub(crate) async fn download_evidence(pr_body: &str, work_dir: &Path) -> Vec<Pat
 
     let images_dir = work_dir.join("evidence");
     // Clean stale evidence from prior ticks.
-    tokio::fs::remove_dir_all(&images_dir).await.ok();
+    if let Err(e) = tokio::fs::remove_dir_all(&images_dir).await {
+        if e.kind() != std::io::ErrorKind::NotFound {
+            tracing::warn!(module = "evidence", dir = %images_dir.display(), error = %e, "failed to clean stale evidence directory");
+        }
+    }
 
     let mut paths = Vec::new();
     let mut download_failures = 0usize;
@@ -157,14 +186,14 @@ pub(crate) async fn download_evidence(pr_body: &str, work_dir: &Path) -> Vec<Pat
         let ext = url_extension(url);
         let filename = format!("evidence_{}.{}", i, ext);
 
-        match download_image(url, &images_dir, &filename).await {
+        match download_image(url, &images_dir, &filename, download_timeout_s).await {
             Ok(path) => {
                 if is_video_url(url) {
                     let mut frames_ok = 0usize;
                     for (j, ts) in ["00:00:01", "00:00:05", "00:00:10"].iter().enumerate() {
                         let frame_name = format!("evidence_{}_frame_{}.png", i, j);
                         let frame_path = images_dir.join(&frame_name);
-                        match extract_frame(&path, &frame_path, ts).await {
+                        match extract_frame(&path, &frame_path, ts, ffmpeg_timeout_s).await {
                             Ok(()) => {
                                 frames_ok += 1;
                                 paths.push(frame_path);

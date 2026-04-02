@@ -62,7 +62,7 @@ export function TaskTimeline({
     <div className="relative pl-5">
       {/* Vertical line */}
       <div
-        className="absolute left-[7px] top-1 bottom-1 w-px"
+        className="absolute left-[4px] top-1 bottom-1 w-px"
         style={{ background: 'var(--color-border-subtle)' }}
       />
       {events.map((event, i) => {
@@ -105,13 +105,7 @@ export function TaskTimeline({
                     e.stopPropagation();
                     onTranscriptClick(sessionId, event);
                   }}
-                  className="shrink-0 text-[10px] font-mono"
-                  style={{
-                    color: 'var(--color-accent)',
-                    background: 'none',
-                    border: 'none',
-                    cursor: 'pointer',
-                  }}
+                  className="shrink-0 cursor-pointer rounded border-none bg-transparent px-1.5 py-0.5 text-[10px] font-mono text-[var(--color-accent)] hover:bg-[var(--color-accent-wash)]"
                 >
                   transcript
                 </button>

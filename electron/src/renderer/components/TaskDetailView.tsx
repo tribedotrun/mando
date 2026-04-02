@@ -2,7 +2,13 @@ import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useMountEffect } from '#renderer/hooks/useMountEffect';
 import { fetchTimeline, fetchItemSessions, fetchTranscript, fetchPrSummary } from '#renderer/api';
-import type { TaskItem, SessionEntry, SessionSummary, TimelineEvent } from '#renderer/types';
+import type {
+  TaskItem,
+  SessionEntry,
+  SessionSummary,
+  TimelineEvent,
+  ClarifierQuestion,
+} from '#renderer/types';
 import { FINALIZED_STATUSES } from '#renderer/types';
 import { fmtDuration, shortRepo, prLabel, prHref } from '#renderer/utils';
 import { StatusIcon } from '#renderer/components/TaskActions';
@@ -11,6 +17,7 @@ import { SessionDetailPanel } from '#renderer/components/SessionDetailPanel';
 import { PrSections } from '#renderer/components/PrSections';
 import { TaskActionBar } from '#renderer/components/TaskActionBar';
 import { TaskTimeline } from '#renderer/components/TaskTimeline';
+import { ClarificationSection } from '#renderer/components/ClarificationSection';
 
 interface Props {
   item: TaskItem;
@@ -89,6 +96,18 @@ export function TaskDetailView({
 
   const totalDuration = sessions.reduce((sum, s) => sum + (s.duration_ms ?? 0), 0);
 
+  // Extract structured questions from the latest clarify_question timeline event.
+  const clarifierQuestions: ClarifierQuestion[] | null = (() => {
+    if (item.status !== 'needs-clarification') return null;
+    for (let i = events.length - 1; i >= 0; i--) {
+      const e = events[i];
+      if (e.event_type !== 'clarify_question') continue;
+      const q = e.data?.questions;
+      if (Array.isArray(q)) return q as ClarifierQuestion[];
+    }
+    return null;
+  })();
+
   const handleTranscriptClick = async (sessionId: string, event: TimelineEvent) => {
     const summary = sessionMap[sessionId];
     const stub: SessionEntry = {
@@ -117,89 +136,92 @@ export function TaskDetailView({
 
   return (
     <div className="flex h-full flex-col">
-      {/* Header */}
-      <div className="shrink-0 border-b pb-4" style={{ borderColor: 'var(--color-border-subtle)' }}>
-        <button
-          onClick={onBack}
-          className="mb-3 flex items-center gap-1.5 text-[12px]"
-          style={{
-            color: 'var(--color-text-3)',
-            background: 'none',
-            border: 'none',
-            cursor: 'pointer',
-          }}
-        >
-          &larr; Back to list
-        </button>
-        <div className="flex items-start gap-3">
-          <div className="min-w-0 flex-1">
-            <h1
-              className="text-[18px] font-semibold leading-snug"
-              style={{ color: 'var(--color-text-1)' }}
+      {/* Main row: left column (header + content) + sidebar */}
+      <div className="flex min-h-0 flex-1">
+        {/* Left column */}
+        <div className="flex min-h-0 flex-1 flex-col">
+          {/* Header */}
+          <div
+            className="shrink-0 border-b pb-4"
+            style={{ borderColor: 'var(--color-border-subtle)' }}
+          >
+            <button
+              onClick={onBack}
+              className="mb-3 flex items-center gap-1.5 text-[12px]"
+              style={{
+                color: 'var(--color-text-3)',
+                background: 'none',
+                border: 'none',
+                cursor: 'pointer',
+              }}
             >
-              {item.title}
-              {item.linear_id && (
-                <span
-                  className="ml-2 inline-flex items-center align-middle font-mono"
-                  style={{
-                    fontSize: 11,
-                    fontWeight: 400,
-                    color: 'var(--color-text-3)',
-                    background: 'var(--color-surface-3)',
-                    padding: '2px 6px',
-                    borderRadius: 3,
-                  }}
+              &larr; Back to list
+            </button>
+            <div className="flex items-start gap-3">
+              <div className="min-w-0 flex-1">
+                <h1
+                  className="text-[18px] font-semibold leading-snug"
+                  style={{ color: 'var(--color-text-1)' }}
                 >
-                  {item.linear_id}
-                </span>
-              )}
-            </h1>
-            <div className="mt-2 flex flex-wrap items-center gap-2">
-              <StatusIcon status={item.status} />
-              {item.project && (
-                <span className="text-[11px]" style={{ color: 'var(--color-text-2)' }}>
-                  {shortRepo(item.project)}
-                </span>
-              )}
-              {item.pr && item.project && (
-                <a
-                  href={prHref(item.pr, item.project)}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-[11px] no-underline hover:underline"
-                  style={{ color: 'var(--color-accent)' }}
-                >
-                  {prLabel(item.pr)}
-                </a>
-              )}
-              {sessions.length > 0 && (
-                <span className="text-[11px]" style={{ color: 'var(--color-text-3)' }}>
-                  {sessions.length} sessions &middot; {fmtDuration(totalDuration / 1000)}
-                </span>
-              )}
+                  {item.title}
+                  {item.linear_id && (
+                    <span
+                      className="ml-2 inline-flex items-center align-middle font-mono"
+                      style={{
+                        fontSize: 11,
+                        fontWeight: 400,
+                        color: 'var(--color-text-3)',
+                        background: 'var(--color-surface-3)',
+                        padding: '2px 6px',
+                        borderRadius: 3,
+                      }}
+                    >
+                      {item.linear_id}
+                    </span>
+                  )}
+                </h1>
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <StatusIcon status={item.status} />
+                  {item.project && (
+                    <span className="text-[11px]" style={{ color: 'var(--color-text-2)' }}>
+                      {shortRepo(item.project)}
+                    </span>
+                  )}
+                  {item.pr && item.project && (
+                    <a
+                      href={prHref(item.pr, item.project)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-[11px] no-underline hover:underline"
+                      style={{ color: 'var(--color-accent)' }}
+                    >
+                      {prLabel(item.pr)}
+                    </a>
+                  )}
+                  {sessions.length > 0 && (
+                    <span className="text-[11px]" style={{ color: 'var(--color-text-3)' }}>
+                      {sessions.length} sessions &middot; {fmtDuration(totalDuration / 1000)}
+                    </span>
+                  )}
+                </div>
+              </div>
+              <div className="flex shrink-0 items-center gap-2">
+                {onMerge && item.pr && item.status === 'awaiting-review' && (
+                  <ActionButton label="Merge" onClick={onMerge} accent />
+                )}
+                {onReopen && FINALIZED_STATUSES.includes(item.status) && (
+                  <ActionButton label="Reopen" onClick={onReopen} />
+                )}
+                {onRework && FINALIZED_STATUSES.includes(item.status) && (
+                  <ActionButton label="Rework" onClick={onRework} />
+                )}
+                {(item.branch || item.worktree || item.plan) && <DetailOverflowMenu item={item} />}
+              </div>
             </div>
           </div>
-          <div className="flex shrink-0 items-center gap-2">
-            {onMerge && item.pr && item.status === 'awaiting-review' && (
-              <ActionButton label="Merge" onClick={onMerge} accent />
-            )}
-            {onReopen && FINALIZED_STATUSES.includes(item.status) && (
-              <ActionButton label="Reopen" onClick={onReopen} />
-            )}
-            {onRework && FINALIZED_STATUSES.includes(item.status) && (
-              <ActionButton label="Rework" onClick={onRework} />
-            )}
-            {(item.branch || item.worktree || item.plan) && <DetailOverflowMenu item={item} />}
-          </div>
-        </div>
-      </div>
 
-      {/* Body: two columns */}
-      <div className="flex min-h-0 flex-1 gap-0">
-        {/* Left: details + bottom action bar */}
-        <div className="flex min-h-0 flex-1 flex-col">
+          {/* Scrollable details */}
           <div className="min-h-0 flex-1 overflow-auto pr-4 pt-4">
-            {/* Original prompt */}
             {item.original_prompt && (
               <DetailSection label="Request">
                 <p className="text-[13px] italic" style={{ color: 'var(--color-text-2)' }}>
@@ -208,10 +230,12 @@ export function TaskDetailView({
               </DetailSection>
             )}
 
-            {/* Context — hidden by default */}
-            {item.context && <ContextToggle context={item.context} />}
+            {/* Clarification questions — prominent when needs-clarification */}
+            {clarifierQuestions && clarifierQuestions.length > 0 && (
+              <ClarificationSection key={item.id} taskId={item.id} questions={clarifierQuestions} />
+            )}
 
-            {/* Metadata — no_pr delivery note shown inline, rest behind overflow */}
+            {item.context && <ContextToggle context={item.context} />}
             {item.no_pr && (
               <div
                 className="mb-3 text-[12px]"
@@ -220,15 +244,11 @@ export function TaskDetailView({
                 Findings only — no PR
               </div>
             )}
-
-            {/* PR Description — sectioned */}
             {prBody?.summary && (
               <DetailSection label="PR">
                 <PrSections text={prBody.summary} />
               </DetailSection>
             )}
-
-            {/* Escalation / Error */}
             {item.escalation_report && (
               <DetailSection label="Escalation Report">
                 <pre
@@ -243,18 +263,13 @@ export function TaskDetailView({
                 </pre>
               </DetailSection>
             )}
-
-            {/* Timeline */}
             <DetailSection label={`Timeline (${events.length})`}>
               <TaskTimeline events={events} onTranscriptClick={handleTranscriptClick} />
             </DetailSection>
           </div>
-
-          {/* Bottom action bar — pinned below scroll area */}
-          <TaskActionBar item={item} />
         </div>
 
-        {/* Right: transcript sidebar */}
+        {/* Sidebar — spans full height from top to bottom */}
         {transcriptSession && !transcriptFullScreen && (
           <TranscriptSidebar
             session={transcriptSession}
@@ -263,6 +278,9 @@ export function TaskDetailView({
           />
         )}
       </div>
+
+      {/* Action bar — pinned at bottom, full width */}
+      <TaskActionBar item={item} />
 
       {/* Full-screen transcript overlay */}
       {transcriptSession && transcriptFullScreen && (

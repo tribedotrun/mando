@@ -158,7 +158,27 @@ async fn fetch_clarifier_questions(bot: &TelegramBot, item_id: &str) -> Option<S
         .iter()
         .rev()
         .find(|e| e["event_type"].as_str() == Some("clarify_question"))
-        .and_then(|e| e["data"]["questions"].as_str().map(String::from))
+        .and_then(|e| {
+            let q = &e["data"]["questions"];
+            // Structured questions array: format into readable text.
+            if let Some(arr) = q.as_array() {
+                let lines: Vec<String> = arr
+                    .iter()
+                    .filter(|item| !item["self_answered"].as_bool().unwrap_or(false))
+                    .enumerate()
+                    .map(|(i, item)| {
+                        format!("{}. {}", i + 1, item["question"].as_str().unwrap_or("?"))
+                    })
+                    .collect();
+                if lines.is_empty() {
+                    None
+                } else {
+                    Some(lines.join("\n"))
+                }
+            } else {
+                q.as_str().map(String::from)
+            }
+        })
 }
 
 async fn execute_picker_action(

@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import type { ScoutItem } from '#renderer/types';
 import { fetchScoutItems, addScoutUrl, deleteScoutItem } from '#renderer/api';
-import { getErrorMessage } from '#renderer/utils';
+import { createMutate, getErrorMessage } from '#renderer/utils';
 import type { ScoutQueryParams } from '#renderer/api';
 
 interface ScoutStore {
@@ -25,16 +25,7 @@ const DEFAULT_PER_PAGE = 25;
 let fetchGeneration = 0;
 
 export const useScoutStore = create<ScoutStore>((set, getState) => {
-  /** Run a mutation, re-fetch on success, set error + rethrow on failure. */
-  async function mutate(fn: () => Promise<unknown>, errLabel: string): Promise<void> {
-    try {
-      await fn();
-      await getState().fetch();
-    } catch (err) {
-      set({ error: getErrorMessage(err, errLabel) });
-      throw err;
-    }
-  }
+  const mutate = createMutate(getState, set);
 
   return {
     items: [],
