@@ -164,7 +164,11 @@ impl CcSessionManager {
     pub fn close(&mut self, key: &str) {
         if self.sessions.remove(key).is_some() {
             let path = self.session_path(key);
-            std::fs::remove_file(&path).ok();
+            if let Err(e) = std::fs::remove_file(&path) {
+                if e.kind() != std::io::ErrorKind::NotFound {
+                    warn!(module = "cc-session", key = %key, error = %e, "failed to remove session file on close");
+                }
+            }
             info!(module = "cc-session", key = %key, "closed session");
         }
     }
@@ -196,7 +200,11 @@ impl CcSessionManager {
         let count = expired_keys.len();
         for key in &expired_keys {
             let path = self.session_path(key);
-            std::fs::remove_file(&path).ok();
+            if let Err(e) = std::fs::remove_file(&path) {
+                if e.kind() != std::io::ErrorKind::NotFound {
+                    warn!(module = "cc-session", key = %key, error = %e, "failed to remove expired session file");
+                }
+            }
             self.sessions.remove(key);
             info!(module = "cc-session", key = %key, "expired session cleaned up");
         }
@@ -210,25 +218,47 @@ impl CcSessionManager {
             return 0;
         }
         let mut count = 0;
-        if let Ok(entries) = std::fs::read_dir(dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.extension().and_then(|e| e.to_str()) != Some("json") {
-                    continue;
-                }
-                if let Ok(data) = std::fs::read_to_string(&path) {
-                    if let Ok(session) = serde_json::from_str::<CcSession>(&data) {
-                        let key = path
-                            .file_stem()
-                            .and_then(|s| s.to_str())
-                            .unwrap_or("")
-                            .to_string();
-                        if !key.is_empty() {
-                            self.sessions.insert(key, session);
-                            count += 1;
+        match std::fs::read_dir(dir) {
+            Ok(entries) => {
+                for entry in entries {
+                    let entry = match entry {
+                        Ok(e) => e,
+                        Err(e) => {
+                            warn!(module = "cc-session", error = %e, "failed to read directory entry during recovery");
+                            continue;
+                        }
+                    };
+                    let path = entry.path();
+                    if path.extension().and_then(|e| e.to_str()) != Some("json") {
+                        continue;
+                    }
+                    let data = match std::fs::read_to_string(&path) {
+                        Ok(d) => d,
+                        Err(e) => {
+                            warn!(module = "cc-session", path = %path.display(), error = %e, "failed to read session file during recovery");
+                            continue;
+                        }
+                    };
+                    match serde_json::from_str::<CcSession>(&data) {
+                        Ok(session) => {
+                            let key = path
+                                .file_stem()
+                                .and_then(|s| s.to_str())
+                                .unwrap_or("")
+                                .to_string();
+                            if !key.is_empty() {
+                                self.sessions.insert(key, session);
+                                count += 1;
+                            }
+                        }
+                        Err(e) => {
+                            warn!(module = "cc-session", path = %path.display(), error = %e, "corrupt session file during recovery");
                         }
                     }
                 }
+            }
+            Err(e) => {
+                warn!(module = "cc-session", dir = %dir.display(), error = %e, "failed to read session directory during recovery");
             }
         }
         if count > 0 {

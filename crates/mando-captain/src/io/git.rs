@@ -95,6 +95,11 @@ pub async fn default_branch(repo_path: &Path) -> Result<String> {
 
     let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
     if text.is_empty() {
+        tracing::debug!(
+            module = "git",
+            path = %repo_path.display(),
+            "symbolic-ref returned empty, falling back to origin/main"
+        );
         Ok("origin/main".to_string())
     } else {
         Ok(text)

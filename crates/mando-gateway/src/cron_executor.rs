@@ -122,10 +122,12 @@ pub fn make_cron_callback(
                 task_key: Some(format!("cron:{}", job.id)),
                 reply_markup: None,
             };
-            bus.send(
-                mando_types::BusEvent::Notification,
-                Some(serde_json::to_value(&payload).unwrap_or_default()),
-            );
+            match serde_json::to_value(&payload) {
+                Ok(val) => bus.send(mando_types::BusEvent::Notification, Some(val)),
+                Err(e) => {
+                    tracing::warn!(module = "cron-executor", error = %e, "failed to serialize notification payload")
+                }
+            }
 
             Ok(())
         })

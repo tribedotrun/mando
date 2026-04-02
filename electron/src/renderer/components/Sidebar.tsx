@@ -148,15 +148,31 @@ export function Sidebar({
 
   const configProjects = useSettingsStore((s) => s.config.captain?.projects);
 
+  // Map config project paths → display names, so task.project (a path) resolves
+  // to the human-readable name from config.
+  const pathToName = React.useMemo(() => {
+    const map: Record<string, string> = {};
+    if (configProjects) {
+      for (const [key, proj] of Object.entries(configProjects)) {
+        if (proj.name) {
+          map[key] = proj.name;
+          if (proj.path && proj.path !== key) map[proj.path] = proj.name;
+        }
+      }
+    }
+    return map;
+  }, [configProjects]);
+
   const projectCounts = React.useMemo(() => {
     const counts: Record<string, number> = {};
     for (const item of items) {
       if (item.project) {
-        counts[item.project] = (counts[item.project] || 0) + 1;
+        const name = pathToName[item.project] ?? item.project;
+        counts[name] = (counts[name] || 0) + 1;
       }
     }
     return counts;
-  }, [items]);
+  }, [items, pathToName]);
 
   const projects = React.useMemo(() => {
     const names = new Set(Object.keys(projectCounts));
@@ -321,7 +337,7 @@ export function Sidebar({
                       marginLeft: 4,
                     }}
                   >
-                    {projectCounts[name]}
+                    {projectCounts[name] ?? 0}
                   </span>
                 </button>
               );

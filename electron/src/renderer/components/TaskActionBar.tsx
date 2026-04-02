@@ -1,13 +1,13 @@
 import React, { useState, useCallback } from 'react';
 import log from '#renderer/logger';
-import { reopenItem, reworkItem, answerClarification, askTask } from '#renderer/api';
+import { reopenItem, reworkItem, askTask } from '#renderer/api';
 import { useTaskStore } from '#renderer/stores/taskStore';
 import { useToastStore } from '#renderer/stores/toastStore';
 import type { TaskItem } from '#renderer/types';
 import { FINALIZED_STATUSES } from '#renderer/types';
 import { canReopen, canRework, canAsk, getErrorMessage } from '#renderer/utils';
 
-type Action = 'reopen' | 'rework' | 'answer' | 'ask';
+type Action = 'reopen' | 'rework' | 'ask';
 
 const STATUS_HINT: Record<string, { label: string; color: string }> = {
   'awaiting-review': { label: 'Ready for review', color: 'var(--color-success)' },
@@ -32,7 +32,6 @@ export function TaskActionBar({ item }: Props): React.ReactElement | null {
   const showReopen = canReopen(item);
   const showRework = canRework(item);
   const showAsk = canAsk(item);
-  const showAnswer = isClarification;
   const hint = STATUS_HINT[item.status];
 
   const handleAction = useCallback(
@@ -49,20 +48,6 @@ export function TaskActionBar({ item }: Props): React.ReactElement | null {
         }
         if (action === 'reopen') await reopenItem(item.id, text);
         else if (action === 'rework') await reworkItem(item.id, text);
-        else {
-          const result = await answerClarification(item.id, text);
-          taskFetch();
-          const msgs: Record<string, [variant: 'success' | 'info', msg: string]> = {
-            ready: ['success', 'Clarified — task queued'],
-            clarifying: ['info', 'Still needs more info'],
-            escalate: ['info', 'Escalated to captain review'],
-          };
-          const [variant, msg] = msgs[result.status] ?? ['success', 'Answer saved'];
-          toast().add(variant, msg);
-          if (result.status !== 'clarifying') setCompleted(msg);
-          else setText('');
-          return;
-        }
         taskFetch();
         const msg = action === 'reopen' ? 'Task reopened' : 'Rework requested';
         toast().add('success', msg);
@@ -87,17 +72,19 @@ export function TaskActionBar({ item }: Props): React.ReactElement | null {
     (e: React.KeyboardEvent) => {
       if (e.key === 'Enter' && e.metaKey && text.trim()) {
         e.preventDefault();
-        if (showAnswer) handleAction('answer');
-        else if (showReopen) handleAction('reopen');
+        if (showReopen) handleAction('reopen');
         else handleAction('ask');
       }
     },
-    [text, showAnswer, showReopen, handleAction],
+    [text, showReopen, handleAction],
   );
 
   // ── Early returns AFTER all hooks ──
 
   if (isFinalized) return null;
+
+  // NeedsClarification is handled by ClarificationSection in the detail view.
+  if (isClarification) return null;
 
   if (completed) {
     return (
@@ -110,15 +97,11 @@ export function TaskActionBar({ item }: Props): React.ReactElement | null {
     );
   }
 
-  let placeholder = 'Ask about this task...';
-  if (showAnswer) placeholder = 'Provide your answer...';
-  else if (showReopen || showRework) placeholder = 'Feedback or question...';
+  const placeholder =
+    showReopen || showRework ? 'Feedback or question...' : 'Ask about this task...';
 
   return (
-    <div
-      className="shrink-0 pr-4 pt-3 pb-2"
-      style={{ borderTop: '1px solid var(--color-border-subtle)' }}
-    >
+    <div className="shrink-0 pr-4 pt-3 pb-2">
       {/* Ask history */}
       {askHistory.length > 0 && (
         <div className="mb-2 max-h-[200px] overflow-auto">
@@ -165,15 +148,6 @@ export function TaskActionBar({ item }: Props): React.ReactElement | null {
           disabled={!!pendingAction}
         />
         <div className="flex shrink-0 items-center gap-1.5">
-          {showAnswer && (
-            <ActionBtn
-              label="Answer"
-              onClick={() => handleAction('answer')}
-              disabled={!text.trim() || !!pendingAction}
-              pending={pendingAction === 'answer'}
-              accent
-            />
-          )}
           {showRework && (
             <ActionBtn
               label="Rework"
@@ -191,7 +165,7 @@ export function TaskActionBar({ item }: Props): React.ReactElement | null {
               accent
             />
           )}
-          {(showAsk || (!showAnswer && !showReopen && !showRework)) && (
+          {(showAsk || (!showReopen && !showRework)) && (
             <ActionBtn
               label="Ask"
               onClick={() => handleAction('ask')}

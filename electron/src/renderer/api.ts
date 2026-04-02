@@ -252,11 +252,16 @@ export interface ClarifyResponse {
   ok: boolean;
   status: string;
   context?: string;
-  questions?: string;
+  questions?: { question: string; answer?: string | null; self_answered: boolean }[];
   session_id?: string;
   error?: string;
 }
-export const answerClarification = (id: number, answer: string) =>
+
+export const answerClarification = (id: number, answers: { question: string; answer: string }[]) =>
+  apiPost<ClarifyResponse>(`/api/tasks/${id}/clarify`, { answers });
+
+/** Flat-text answer for Telegram-style input */
+export const answerClarificationText = (id: number, answer: string) =>
   apiPost<ClarifyResponse>(`/api/tasks/${id}/clarify`, { answer });
 
 // Captain

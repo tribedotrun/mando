@@ -87,6 +87,22 @@ export function getErrorMessage(err: unknown, fallback: string): string {
   return err instanceof Error ? err.message : fallback;
 }
 
+/** Create a store mutation helper that re-fetches on success and sets error on failure. */
+export function createMutate(
+  getState: () => { fetch: () => Promise<void> },
+  set: (partial: { error: string }) => void,
+): (fn: () => Promise<unknown>, errLabel: string) => Promise<void> {
+  return async (fn, errLabel) => {
+    try {
+      await fn();
+      await getState().fetch();
+    } catch (err) {
+      set({ error: getErrorMessage(err, errLabel) });
+      throw err;
+    }
+  };
+}
+
 /** Human-readable relative time from an ISO timestamp (e.g. "3m ago", "in 2h"). */
 export function relativeTime(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();

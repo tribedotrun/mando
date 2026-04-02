@@ -64,8 +64,10 @@ pub(crate) fn format_tick_result(result: &TickResult) -> String {
 
 /// Format TickResult as JSON value for API responses.
 pub(crate) fn tick_result_to_json(result: &TickResult) -> serde_json::Value {
-    serde_json::to_value(result)
-        .unwrap_or_else(|_| serde_json::json!({"error": "serialize failed"}))
+    serde_json::to_value(result).unwrap_or_else(|e| {
+        tracing::warn!(module = "tick_summary", error = %e, "failed to serialize tick result");
+        serde_json::json!({"error": format!("serialize failed: {e}")})
+    })
 }
 
 #[cfg(test)]

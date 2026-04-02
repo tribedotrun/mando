@@ -48,7 +48,9 @@ pub fn write_error_result(stream_path: &Path, error: &str) {
             return;
         }
     };
-    let _ = writeln!(file, "{}", line);
+    if let Err(e) = writeln!(file, "{}", line) {
+        tracing::warn!(%e, path = %stream_path.display(), "failed to write error result line to stream");
+    }
 }
 
 /// Get the result event from the current session in a JSONL stream log.

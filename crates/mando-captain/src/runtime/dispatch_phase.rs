@@ -182,21 +182,6 @@ pub(crate) async fn dispatch_new_work(
         let linear_cli = &config.captain.linear_cli_path;
         match clarifier::run_clarification(&items[idx], linear_cli, workflow, config, pool).await {
             Ok(result) => {
-                let result = if matches!(
-                    result.status,
-                    ClarifierStatus::Clarifying | ClarifierStatus::Escalate
-                ) {
-                    super::clarifier_deep::run_deep_clarification(
-                        &items[idx],
-                        workflow,
-                        config,
-                        pool,
-                        result,
-                    )
-                    .await
-                } else {
-                    result
-                };
                 let item = &mut items[idx];
                 match result.status {
                     ClarifierStatus::Ready => {
@@ -291,7 +276,7 @@ pub(crate) async fn dispatch_new_work(
                             item.session_ids.clarifier = Some(sid.clone());
                         }
 
-                        // Emit clarify-question timeline event.
+                        // Emit clarify-question timeline event with structured questions.
                         super::timeline_emit::emit_for_task(
                             item,
                             mando_types::timeline::TimelineEventType::ClarifyQuestion,
@@ -302,10 +287,11 @@ pub(crate) async fn dispatch_new_work(
                         .await;
 
                         if let Some(ref questions) = result.questions {
+                            let text = clarifier::format_questions_text(questions);
                             let msg = format!(
                                 "\u{2753} Needs clarification: <b>{}</b>\n{}",
                                 mando_shared::telegram_format::escape_html(&item.title),
-                                mando_shared::telegram_format::escape_html(questions),
+                                mando_shared::telegram_format::escape_html(&text),
                             );
                             notifier
                                 .notify_typed(
@@ -313,7 +299,7 @@ pub(crate) async fn dispatch_new_work(
                                     mando_types::notify::NotifyLevel::High,
                                     mando_types::events::NotificationKind::NeedsClarification {
                                         item_id: item.id.to_string(),
-                                        questions: result.questions.clone(),
+                                        questions: Some(text),
                                     },
                                     Some(&item.id.to_string()),
                                 )
@@ -330,33 +316,22 @@ pub(crate) async fn dispatch_new_work(
                             item.session_ids.clarifier = Some(sid.clone());
                         }
 
-                        if result.deep_failed {
-                            tracing::warn!(
-                                module = "captain",
-                                title = %&item.title[..item.title.len().min(60)],
-                                "escalating after deep clarifier failure — shallow result only"
-                            );
-                        }
-
                         // Emit clarify-question timeline event.
                         super::timeline_emit::emit_for_task(
                             item,
                             mando_types::timeline::TimelineEventType::ClarifyQuestion,
-                            if result.deep_failed {
-                                "Needs human input (deep clarifier failed)"
-                            } else {
-                                "Needs human input"
-                            },
-                            serde_json::json!({"session_id": result.session_id, "questions": result.questions, "deep_failed": result.deep_failed}),
+                            "Needs human input",
+                            serde_json::json!({"session_id": result.session_id, "questions": result.questions}),
                             pool,
                         )
                         .await;
 
                         if let Some(ref questions) = result.questions {
+                            let text = clarifier::format_questions_text(questions);
                             let msg = format!(
                                 "\u{2753} Needs human input: <b>{}</b>\n{}",
                                 mando_shared::telegram_format::escape_html(&item.title),
-                                mando_shared::telegram_format::escape_html(questions),
+                                mando_shared::telegram_format::escape_html(&text),
                             );
                             notifier
                                 .notify_typed(
@@ -364,7 +339,7 @@ pub(crate) async fn dispatch_new_work(
                                     mando_types::notify::NotifyLevel::High,
                                     mando_types::events::NotificationKind::Escalated {
                                         item_id: item.id.to_string(),
-                                        summary: result.questions.clone(),
+                                        summary: Some(text),
                                     },
                                     Some(&item.id.to_string()),
                                 )

@@ -51,10 +51,6 @@ pub fn active_captain_runtime_paths() -> CaptainRuntimePaths {
     read_runtime_paths().unwrap_or_else(default_captain_runtime_paths)
 }
 
-pub fn captain_paths_restart_required(config: &Config) -> bool {
-    active_captain_runtime_paths() != resolve_captain_runtime_paths(config)
-}
-
 #[cfg(test)]
 pub fn clear_active_captain_runtime_paths_for_test() {
     *captain_runtime_paths_cell()

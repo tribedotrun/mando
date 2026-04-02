@@ -230,66 +230,72 @@ impl TelegramBot {
 
         let tg_config = self.config.read().await.channels.telegram.clone();
 
+        // Owner-only (auto-register on first message when no owner configured)
+        let just_registered = if tg_config.owner.is_empty() {
+            self.auto_register_owner(&user_id, &chat_id).await?;
+            true
+        } else {
+            if !permissions::is_owner(&tg_config, &user_id) {
+                return Ok(());
+            }
+            false
+        };
+
         // Photo + /todo caption — extract before text-only dispatch
-        if let Some(photo_fid) = extract_photo_todo(message) {
+        let result = if let Some(photo_fid) = extract_photo_todo(message) {
             let caption = message
                 .get("caption")
                 .and_then(|c| c.as_str())
                 .unwrap_or("");
             let (command, args) = parse_command(caption);
             if command == "todo" && !args.is_empty() {
-                if !permissions::is_owner(&tg_config, &user_id) {
-                    return Ok(());
-                }
                 self.pending_todo.remove(&chat_id);
-                return commands::todo::execute_todo_with_photo(
-                    self,
-                    &chat_id,
-                    args,
-                    Some(photo_fid),
-                )
-                .await;
-            }
-        }
-
-        // Owner-only (auto-register on first /start when no owner configured)
-        if tg_config.owner.is_empty() {
-            let text = message.get("text").and_then(|t| t.as_str()).unwrap_or("");
-            if text.starts_with("/start") {
-                self.auto_register_owner(&user_id, &chat_id).await?;
+                commands::todo::execute_todo_with_photo(self, &chat_id, args, Some(photo_fid)).await
             } else {
-                return Ok(());
+                self.dispatch_text(message, &chat_id).await
             }
-        } else if !permissions::is_owner(&tg_config, &user_id) {
-            return Ok(());
+        } else {
+            self.dispatch_text(message, &chat_id).await
+        };
+
+        // Restart after the command completes so the SSE listener picks up
+        // the new owner. Launchd KeepAlive restarts us automatically.
+        if just_registered {
+            info!("Restarting to enable notifications for new owner");
+            std::process::exit(0);
         }
 
+        result
+    }
+
+    /// Dispatch a text message to the appropriate command handler.
+    async fn dispatch_text(&mut self, message: &serde_json::Value, chat_id: &str) -> Result<()> {
         let text = message.get("text").and_then(|t| t.as_str()).unwrap_or("");
 
         if text.starts_with('/') {
             let (command, args) = parse_command(text);
             if command != "todo" {
-                self.pending_todo.remove(&chat_id);
+                self.pending_todo.remove(chat_id);
             }
-            self.pending_reopen.remove(&chat_id);
-            self.pending_rework.remove(&chat_id);
-            self.act_sessions.remove(&chat_id);
-            return self.dispatch_command(&chat_id, &command, args).await;
+            self.pending_reopen.remove(chat_id);
+            self.pending_rework.remove(chat_id);
+            self.act_sessions.remove(chat_id);
+            return self.dispatch_command(chat_id, &command, args).await;
         }
 
-        self.handle_plain_text(&chat_id, text, message).await
+        self.handle_plain_text(chat_id, text, message).await
     }
 
     // dispatch_command, handle_plain_text, register_commands are in bot_dispatch.rs
 
     // ── Owner auto-registration ────────────────────────────────────────
 
-    /// Auto-register the first DM `/start` sender as the bot owner.
+    /// Auto-register the first DM sender as the bot owner.
     ///
     /// Called when `config.channels.telegram.owner` is empty and a user
-    /// sends `/start` in a direct message. Persists the owner to config.json
-    /// and schedules a process restart so the SSE notification listener
-    /// picks up the new owner.
+    /// sends any message in a direct chat. Persists the owner to config.json.
+    /// The caller is responsible for restarting the process after the current
+    /// command finishes so the SSE notification listener picks up the new owner.
     async fn auto_register_owner(&mut self, user_id: &str, chat_id: &str) -> Result<()> {
         info!(user_id, chat_id, "Auto-registering bot owner");
         {
@@ -299,13 +305,6 @@ impl TelegramBot {
                 error!("Failed to persist owner to config: {e}");
             }
         }
-        // Schedule a restart so the SSE notification listener starts with the new owner.
-        // Launchd (KeepAlive) will restart us automatically.
-        tokio::spawn(async {
-            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-            info!("Restarting to enable notifications for new owner");
-            std::process::exit(0);
-        });
         Ok(())
     }
 

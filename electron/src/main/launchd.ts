@@ -45,7 +45,7 @@ function cliSourcePath(): string {
 
 /** Staged daemon binary path in Application Support. */
 function daemonInstallPath(): string {
-  return path.join(homeDir(), 'Library', 'Application Support', 'Mando', 'bin', 'Mando Daemon');
+  return path.join(homeDir(), 'Library', 'Application Support', 'Mando', 'bin', 'mando-daemon');
 }
 
 /** Source daemon binary: app bundle or cargo build output. */
@@ -58,7 +58,7 @@ function daemonSourcePath(): string {
 
 /** Staged TG bot binary path in Application Support. */
 function tgInstallPath(): string {
-  return path.join(homeDir(), 'Library', 'Application Support', 'Mando', 'bin', 'Mando Telegram');
+  return path.join(homeDir(), 'Library', 'Application Support', 'Mando', 'bin', 'mando-telegram');
 }
 
 /** Source TG bot binary: app bundle or cargo build output. */
@@ -203,8 +203,27 @@ function stageBinary(src: string, dest: string, label: string): boolean {
   return true;
 }
 
+/** Remove old-named binaries from before the space-to-dash rename. */
+function cleanupLegacyBinaries(): void {
+  const binDir = path.join(homeDir(), 'Library', 'Application Support', 'Mando', 'bin');
+  for (const old of [
+    'Mando Daemon',
+    'Mando Telegram',
+    'Mando Daemon.prev',
+    'Mando Telegram.prev',
+  ]) {
+    const p = path.join(binDir, old);
+    try {
+      if (fs.existsSync(p)) fs.unlinkSync(p);
+    } catch {
+      /* best-effort cleanup */
+    }
+  }
+}
+
 /** Stage the daemon binary from app bundle to Application Support. */
 export function stageDaemonBinary(): boolean {
+  cleanupLegacyBinaries();
   return stageBinary(daemonSourcePath(), daemonInstallPath(), 'daemon');
 }
 

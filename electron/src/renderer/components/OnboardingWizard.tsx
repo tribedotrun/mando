@@ -4,7 +4,6 @@ import type { MandoConfig } from '#renderer/stores/settingsStore';
 import heroImg from '#renderer/assets/hero.png';
 import {
   SetupLayout,
-  CheckRow,
   GhostButton,
   OutlineButton,
   PrimaryButton,
@@ -12,7 +11,7 @@ import {
 import { TelegramScreen, LinearScreen } from '#renderer/components/OnboardingSteps';
 import { getErrorMessage } from '#renderer/utils';
 
-type Step = 'welcome' | 'claude-check' | 'telegram' | 'linear' | 'finishing' | 'done';
+type Step = 'welcome' | 'claude-check' | 'telegram' | 'linear' | 'finishing';
 
 type CCResult = { installed: boolean; version: string | null; works: boolean } | null;
 
@@ -76,7 +75,7 @@ export function OnboardingWizard(): React.ReactElement {
       }
       if (Object.keys(env).length > 0) config.env = env;
       await window.mandoAPI.setupComplete(JSON.stringify(config, null, 2));
-      setStep('done');
+      window.location.reload();
     } catch (err) {
       setError(getErrorMessage(err, 'Failed to save configuration'));
       setStep('linear');
@@ -108,12 +107,6 @@ export function OnboardingWizard(): React.ReactElement {
           setStep('linear');
         }}
       />
-    );
-  }
-
-  if (step === 'done') {
-    return (
-      <DoneScreen hasTelegram={!!tgToken.trim()} hasLinear={!!linearKey.trim() && !!linearTeam} />
     );
   }
 
@@ -329,43 +322,6 @@ function ClaudeCheckScreen({
           Continue
         </PrimaryButton>
       </div>
-    </SetupLayout>
-  );
-}
-
-// ---- Done screen ----
-
-function DoneScreen({
-  hasTelegram,
-  hasLinear,
-}: {
-  hasTelegram: boolean;
-  hasLinear: boolean;
-}): React.ReactElement {
-  return (
-    <SetupLayout
-      data-testid="onboarding-wizard"
-      title="You're all set"
-      subtitle="Mando is ready. Add a project and create your first task."
-    >
-      <div
-        className="flex flex-col"
-        style={{
-          gap: 8,
-          marginBottom: 40,
-          padding: '28px 28px',
-          borderRadius: 'var(--radius-panel)',
-          background: 'var(--color-surface-2)',
-          border: '1px solid var(--color-border-subtle)',
-          boxShadow: '0 1px 4px rgba(0, 0, 0, 0.2)',
-        }}
-      >
-        <CheckRow ok label="Claude Code" />
-        <CheckRow ok={hasTelegram} label={hasTelegram ? 'Telegram' : 'Telegram — skipped'} />
-        <CheckRow ok={hasLinear} label={hasLinear ? 'Linear' : 'Linear — skipped'} />
-      </div>
-
-      <PrimaryButton onClick={() => window.location.reload()}>Open Mando</PrimaryButton>
     </SetupLayout>
   );
 }

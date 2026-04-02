@@ -170,10 +170,8 @@ pub(crate) async fn is_pr_branch_ahead(repo: &str, pr_number: &str) -> Result<bo
                     anyhow::bail!("gh pr view commits failed: {}", stderr);
                 }
                 let text = String::from_utf8_lossy(&output.stdout);
-                let val: serde_json::Value = serde_json::from_str(&text).unwrap_or_else(|e| {
-                    tracing::warn!(error = %e, "failed to parse gh pr view commits JSON");
-                    serde_json::Value::default()
-                });
+                let val: serde_json::Value =
+                    serde_json::from_str(&text).context("parse gh pr view commits JSON")?;
                 let commits = val["commits"].as_array().map(|a| a.len()).unwrap_or(0);
                 Ok(commits > 0)
             }
@@ -211,22 +209,36 @@ pub(crate) async fn close_pr(repo: &str, pr_number: &str) -> Result<()> {
 
 /// Discover an open PR for a branch. Returns the PR URL if found.
 pub(crate) async fn discover_pr_for_branch(repo: &str, branch: &str) -> Option<String> {
-    let output = tokio::process::Command::new("gh")
+    let output = match tokio::process::Command::new("gh")
         .args([
             "pr", "list", "--repo", repo, "--head", branch, "--state", "open", "--json", "url",
             "--limit", "1",
         ])
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        .stderr(Stdio::piped())
         .output()
         .await
-        .ok()?;
+    {
+        Ok(o) => o,
+        Err(e) => {
+            tracing::warn!(module = "github", repo = %repo, branch = %branch, error = %e, "failed to execute gh pr list");
+            return None;
+        }
+    };
 
     if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        tracing::warn!(module = "github", repo = %repo, branch = %branch, stderr = %stderr, "gh pr list failed");
         return None;
     }
     let text = String::from_utf8_lossy(&output.stdout);
-    let arr: Vec<serde_json::Value> = serde_json::from_str(&text).ok()?;
+    let arr: Vec<serde_json::Value> = match serde_json::from_str(&text) {
+        Ok(a) => a,
+        Err(e) => {
+            tracing::warn!(module = "github", repo = %repo, branch = %branch, error = %e, "failed to parse gh pr list JSON");
+            return None;
+        }
+    };
     arr.first()
         .and_then(|v| v["url"].as_str())
         .and_then(mando_types::task::normalize_pr)

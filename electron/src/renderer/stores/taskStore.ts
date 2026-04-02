@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import type { TaskItem, ItemStatus } from '#renderer/types';
 import { fetchTasks, addTask, deleteItems, type AddTaskInput } from '#renderer/api';
-import { getErrorMessage } from '#renderer/utils';
+import { createMutate, getErrorMessage } from '#renderer/utils';
 
 const SHOW_ARCHIVED_KEY = 'mando:showArchived';
 
@@ -23,16 +23,7 @@ interface TaskStore {
 }
 
 export const useTaskStore = create<TaskStore>((set, getState) => {
-  /** Run a mutation, re-fetch on success, set error + rethrow on failure. */
-  async function mutate(fn: () => Promise<unknown>, errLabel: string): Promise<void> {
-    try {
-      await fn();
-      await getState().fetch();
-    } catch (err) {
-      set({ error: getErrorMessage(err, errLabel) });
-      throw err;
-    }
-  }
+  const mutate = createMutate(getState, set);
 
   return {
     items: [],

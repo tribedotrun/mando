@@ -20,7 +20,13 @@ pub(crate) async fn reclarify_items(
     max_clarifier_retries: i64,
     pool: &sqlx::SqlitePool,
 ) {
-    let clarifying = dispatch_logic::clarifying_items(items);
+    // Only re-clarify items in Clarifying status (human answered but inline
+    // call failed). NeedsClarification items are waiting for human input —
+    // don't re-run the clarifier and produce events that strip self-answered context.
+    let clarifying: Vec<usize> = dispatch_logic::clarifying_items(items)
+        .into_iter()
+        .filter(|&idx| items[idx].status == mando_types::task::ItemStatus::Clarifying)
+        .collect();
     for idx in clarifying {
         if dry_run {
             dry_actions.push(format!(

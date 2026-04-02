@@ -219,6 +219,12 @@ export interface ItemSessionsResponse {
   count: number;
 }
 
+export interface ClarifierQuestion {
+  question: string;
+  answer?: string | null;
+  self_answered: boolean;
+}
+
 export interface TimelineEvent {
   event_type: string;
   timestamp: string;
@@ -374,18 +380,6 @@ export interface DistillerResponse {
   summary: string;
   patterns_found: number;
   patterns: Pattern[];
-}
-
-export interface KnowledgeLesson {
-  id: string;
-  title?: string;
-  source?: string;
-  status?: string;
-}
-
-export interface KnowledgePendingResponse {
-  pending: KnowledgeLesson[];
-  count: number;
 }
 
 export interface ScoutItemSession {

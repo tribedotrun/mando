@@ -12,8 +12,19 @@ use crate::response::{error_response, internal_error};
 use crate::AppState;
 
 #[derive(Deserialize)]
+pub(crate) struct QuestionAnswer {
+    question: String,
+    answer: String,
+}
+
+#[derive(Deserialize)]
 pub(crate) struct ClarifyBody {
-    pub answer: String,
+    /// Structured per-question answers (from Electron UI).
+    #[serde(default)]
+    pub answers: Option<Vec<QuestionAnswer>>,
+    /// Flat text answer (from Telegram / CLI).
+    #[serde(default)]
+    pub answer: Option<String>,
 }
 
 /// POST /api/tasks/{id}/clarify — provide human answer and re-clarify inline.
@@ -22,13 +33,34 @@ pub(crate) async fn post_task_clarify(
     Path(id): Path<i64>,
     Json(body): Json<ClarifyBody>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    let answer = body.answer.trim().to_string();
-    if answer.is_empty() {
+    let answer = if let Some(answers) = body.answers {
+        if answers.is_empty() {
+            return Err(error_response(
+                StatusCode::BAD_REQUEST,
+                "answers array must not be empty",
+            ));
+        }
+        answers
+            .iter()
+            .enumerate()
+            .map(|(i, a)| format!("Q{}: {}\nA{}: {}", i + 1, a.question, i + 1, a.answer))
+            .collect::<Vec<_>>()
+            .join("\n\n")
+    } else if let Some(text) = body.answer {
+        let trimmed = text.trim().to_string();
+        if trimmed.is_empty() {
+            return Err(error_response(
+                StatusCode::BAD_REQUEST,
+                "answer text must not be empty",
+            ));
+        }
+        trimmed
+    } else {
         return Err(error_response(
             StatusCode::BAD_REQUEST,
-            "answer text must not be empty",
+            "either 'answer' or 'answers' is required",
         ));
-    }
+    };
 
     // Load the task and validate status.
     let (item, pool) = {
@@ -185,7 +217,7 @@ pub(crate) async fn post_task_clarify(
                 mando_types::BusEvent::Tasks,
                 Some(json!({"action": "answer", "id": id})),
             );
-            let questions =
+            let questions: Option<serde_json::Value> =
                 match mando_db::queries::timeline::latest_clarifier_questions(&pool, id).await {
                     Ok(q) => q,
                     Err(tl_err) => {

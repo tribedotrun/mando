@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import type { CronJob } from '#renderer/types';
 import { fetchCron, addCronJob, runCronJob, toggleCronJob, removeCronJob } from '#renderer/api';
-import { getErrorMessage } from '#renderer/utils';
+import { createMutate, getErrorMessage } from '#renderer/utils';
 
 interface CronStore {
   jobs: CronJob[];
@@ -21,16 +21,7 @@ interface CronStore {
 }
 
 export const useCronStore = create<CronStore>((set, getState) => {
-  /** Run a mutation, re-fetch on success, set error + rethrow on failure. */
-  async function mutate(fn: () => Promise<unknown>, errLabel: string): Promise<void> {
-    try {
-      await fn();
-      await getState().fetch();
-    } catch (err) {
-      set({ error: getErrorMessage(err, errLabel) });
-      throw err;
-    }
-  }
+  const mutate = createMutate(getState, set);
 
   return {
     jobs: [],

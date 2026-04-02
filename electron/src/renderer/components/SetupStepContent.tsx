@@ -168,21 +168,27 @@ export function TelegramContent(): React.ReactElement {
 // ---------------------------------------------------------------------------
 
 export function ProjectContent(): React.ReactElement {
-  const updateProject = useSettingsStore((s) => s.updateProject);
-  const save = useSettingsStore((s) => s.save);
+  const addProject = useSettingsStore((s) => s.addProject);
+  const [adding, setAdding] = useState(false);
 
   const handlePick = useCallback(async () => {
     const dir = await window.mandoAPI.selectDirectory();
     if (!dir) return;
-    const name = dir.split('/').pop() ?? dir;
-    updateProject(dir, { name, path: dir });
-    save();
-  }, [updateProject, save]);
+    setAdding(true);
+    try {
+      await addProject({ name: '', path: dir });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to add project';
+      useToastStore.getState().add('error', msg);
+    } finally {
+      setAdding(false);
+    }
+  }, [addProject]);
 
   return (
     <div>
-      <button onClick={handlePick} className={btnCls} style={primaryBtn}>
-        Choose folder
+      <button onClick={handlePick} disabled={adding} className={btnCls} style={primaryBtn}>
+        {adding ? 'Adding…' : 'Choose folder'}
       </button>
     </div>
   );

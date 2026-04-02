@@ -43,6 +43,7 @@ fn is_verdict_allowed(trigger: &str, action: &str) -> bool {
         "rebase_fail" => matches!(action, "nudge" | "escalate"),
         "ci_failure" => matches!(action, "nudge" | "escalate"),
         "merge_fail" => matches!(action, "nudge" | "escalate"),
+        "missing_github_config" => matches!(action, "escalate"),
         _ => false,
     }
 }
@@ -147,6 +148,8 @@ pub(crate) async fn spawn_review(
     let item_id = item.best_id();
     let intervention_count_val = item.intervention_count;
     let timeout_s = workflow.agent.captain_review_timeout_s;
+    let evidence_dl_timeout = workflow.agent.evidence_download_timeout_s;
+    let evidence_ff_timeout = workflow.agent.evidence_ffmpeg_timeout_s;
     let prompts = workflow.prompts.clone();
     let captain_model = workflow.models.captain.clone();
     let pool = pool.clone();
@@ -156,7 +159,13 @@ pub(crate) async fn spawn_review(
         // Download evidence images from PR body.
         let work_dir = mando_config::state_dir().join("captain-evidence");
         let worker_dir = work_dir.join(&worker_name_owned);
-        let evidence_paths = evidence::download_evidence(&pr_body_for_evidence, &worker_dir).await;
+        let evidence_paths = evidence::download_evidence(
+            &pr_body_for_evidence,
+            &worker_dir,
+            evidence_dl_timeout,
+            evidence_ff_timeout,
+        )
+        .await;
         let evidence_listing = if evidence_paths.is_empty() {
             String::new()
         } else {
@@ -199,6 +208,10 @@ pub(crate) async fn spawn_review(
         vars.insert("is_rebase_fail", trigger_flag("rebase_fail"));
         vars.insert("is_ci_failure", trigger_flag("ci_failure"));
         vars.insert("is_merge_fail", trigger_flag("merge_fail"));
+        vars.insert(
+            "is_missing_github_config",
+            trigger_flag("missing_github_config"),
+        );
 
         let prompt = match mando_config::render_prompt("captain_review", &prompts, &vars) {
             Ok(p) => p,

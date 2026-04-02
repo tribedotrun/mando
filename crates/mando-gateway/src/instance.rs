@@ -118,7 +118,7 @@ fn kill_process(pid: u32) {
     }
 }
 
-/// Check if a PID belongs to a mando-gw process (or "Mando Daemon" in prod).
+/// Check if a PID belongs to a mando-gw process (or "mando-daemon" in prod).
 fn is_mando_process(pid: u32) -> bool {
     let output = std::process::Command::new("ps")
         .args(["-o", "comm=", "-p", &pid.to_string()])
@@ -129,7 +129,9 @@ fn is_mando_process(pid: u32) -> bool {
         Ok(o) => {
             let comm = String::from_utf8_lossy(&o.stdout);
             let name = comm.trim();
-            name.contains("mando-gw") || name.contains("Mando Daemon")
+            name.contains("mando-gw")
+                || name.contains("mando-daemon")
+                || name.contains("Mando Daemon")
         }
         Err(_) => false,
     }

@@ -131,7 +131,9 @@ pub(crate) fn clean_stale_locks() {
                 pid = holder.pid,
                 "removing stale lock, PID dead"
             );
-            fs::remove_file(&path).ok();
+            if let Err(e) = fs::remove_file(&path) {
+                tracing::warn!(module = "item-lock", path = %path.display(), error = %e, "failed to remove stale lock file");
+            }
         }
     }
 }

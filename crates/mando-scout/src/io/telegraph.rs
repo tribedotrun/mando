@@ -21,11 +21,6 @@ fn cache_path(id: i64) -> PathBuf {
     file_store::telegraph_cache_path(id)
 }
 
-/// Return cached Telegraph URL for an item, or None.
-pub fn get_cached_url(id: i64) -> Option<String> {
-    read_cache(id).map(|cache| cache.url)
-}
-
 /// Return cached Telegraph URL only if it still matches the current article.
 pub fn get_cached_url_if_fresh(id: i64, title: &str, article_md: &str) -> Option<String> {
     let cache = read_cache(id)?;
