@@ -38,6 +38,7 @@ fn base_ctx() -> WorkerContext {
         stream_stale_s: None,
         pr_head_sha: "abc123".into(),
         degraded: false,
+        github_repo_configured: true,
     }
 }
 
@@ -206,7 +207,7 @@ fn alive_stale_nudge() {
 }
 
 #[test]
-fn dead_no_gates_nudge() {
+fn dead_no_gates_nudge_has_diagnosis() {
     let mut ctx = base_ctx();
     ctx.process_alive = false;
     ctx.pr = None;
@@ -214,7 +215,20 @@ fn dead_no_gates_nudge() {
     ctx.stream_stale_s = Some(5.0); // recently active, not broken
     let a = classify(&ctx, &base_item(), None);
     assert_eq!(a.action, ActionKind::Nudge);
-    assert_eq!(a.reason.as_deref(), Some("continue working"));
+    let reason = a.reason.as_deref().unwrap();
+    assert!(reason.starts_with("gates incomplete:"), "got: {reason}");
+    assert!(reason.contains("no clean stream result"), "got: {reason}");
+    assert!(reason.contains("no PR discovered"), "got: {reason}");
+    // Message should also contain the diagnosis (not empty/default).
+    assert!(a.message.is_some(), "nudge message should not be empty");
+    assert!(
+        a.message
+            .as_deref()
+            .unwrap()
+            .contains("Quality gates incomplete"),
+        "got: {:?}",
+        a.message
+    );
 }
 
 #[test]
@@ -312,18 +326,52 @@ fn broken_session_with_error_result_triggers_review() {
     assert_eq!(a.reason.as_deref(), Some("broken_session"));
 }
 
+// ── Missing config escalation ──
+
+#[test]
+fn missing_github_config_escalates_immediately() {
+    // Project has no githubRepo → captain can't discover PRs → escalate,
+    // don't nudge. This prevents the infinite nudge loop from ABR-1005.
+    let mut ctx = base_ctx();
+    ctx.process_alive = false;
+    ctx.pr = None;
+    ctx.github_repo_configured = false;
+    ctx.stream_stale_s = Some(5.0);
+    let a = classify(&ctx, &base_item(), Some(true));
+    assert_eq!(a.action, ActionKind::CaptainReview);
+    assert_eq!(a.reason.as_deref(), Some("missing_github_config"));
+}
+
+#[test]
+fn missing_github_config_skipped_for_no_pr_task() {
+    // no_pr tasks don't need GitHub — missing config should not escalate.
+    let mut ctx = base_ctx();
+    ctx.pr = None;
+    ctx.no_pr = true;
+    ctx.github_repo_configured = false;
+    ctx.seconds_active = 360.0;
+    ctx.stream_tail = "Research complete. Found 3 relevant patterns.".into();
+    let mut item = base_item();
+    item.no_pr = true;
+    let a = classify(&ctx, &item, Some(true));
+    assert_eq!(a.action, ActionKind::CaptainReview);
+    assert_eq!(a.reason.as_deref(), Some("gates_pass"));
+}
+
 // ── Edge cases ──
 
 #[test]
-fn dead_recently_active_no_stream_nudge() {
+fn dead_recently_active_no_stream_has_diagnosis() {
     // Dead, stream recently active (< 30s), no stream result → not broken
-    // Budget not exhausted → falls through to nudge "continue working"
+    // Budget not exhausted → falls through to diagnostic nudge
     let mut ctx = base_ctx();
     ctx.process_alive = false;
     ctx.stream_stale_s = Some(10.0);
     let a = classify(&ctx, &base_item(), None);
     assert_eq!(a.action, ActionKind::Nudge);
-    assert_eq!(a.reason.as_deref(), Some("continue working"));
+    let reason = a.reason.as_deref().unwrap();
+    assert!(reason.starts_with("gates incomplete:"), "got: {reason}");
+    assert!(reason.contains("no clean stream result"), "got: {reason}");
 }
 
 #[test]

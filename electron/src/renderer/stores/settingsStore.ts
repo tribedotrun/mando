@@ -72,14 +72,14 @@ interface ToolsConfig {
   ccSelfImprove?: CCSelfImproveConfig;
 }
 
-export interface ScoutInterests {
+interface ScoutInterests {
   high?: string[];
   medium?: string[];
   low?: string[];
   tone?: string;
 }
 
-export interface ScoutUserContext {
+interface ScoutUserContext {
   role?: string;
   knownDomains?: string[];
   explainDomains?: string[];
@@ -107,6 +107,13 @@ export interface MandoConfig {
 
 let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
+interface AddProjectResult {
+  ok: boolean;
+  name: string;
+  path: string;
+  githubRepo: string;
+}
+
 interface SettingsStore {
   config: MandoConfig;
   loading: boolean;
@@ -119,6 +126,7 @@ interface SettingsStore {
   save: () => Promise<void>;
   scheduleSave: () => void;
   update: (patch: Partial<MandoConfig>) => void;
+  addProject: (project: ProjectConfig) => Promise<AddProjectResult>;
   updateProject: (pathKey: string, project: ProjectConfig) => void;
   removeProject: (pathKey: string) => void;
   updateSection: <K extends keyof MandoConfig>(
@@ -198,6 +206,33 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
 
   update: (patch) => {
     set((s) => ({ config: { ...s.config, ...patch } }));
+  },
+
+  addProject: async (project) => {
+    // Flush any pending debounced save so reload() doesn't overwrite unsaved edits.
+    if (debounceTimer) {
+      clearTimeout(debounceTimer);
+      debounceTimer = null;
+      await get().save();
+    }
+    set({ saving: true, error: null });
+    try {
+      const result = await window.mandoAPI.addProject(
+        JSON.stringify({
+          path: project.path,
+          name: project.name || undefined,
+          aliases: project.aliases?.length ? project.aliases : undefined,
+        }),
+      );
+      // Reload config from daemon to pick up auto-detected fields.
+      await get().load();
+      set({ saving: false, saveSuccess: true });
+      setTimeout(() => set({ saveSuccess: false }), 2000);
+      return result;
+    } catch (err) {
+      set({ saving: false, error: getErrorMessage(err, 'Failed to add project') });
+      throw err;
+    }
   },
 
   updateProject: (pathKey, project) => {

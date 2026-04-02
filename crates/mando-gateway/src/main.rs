@@ -47,7 +47,7 @@ async fn main() {
 
     let port = args.port.unwrap_or(config.gateway.dashboard.port);
 
-    if let Err(e) = mando_gateway::instance::check_and_write_pid() {
+    if let Err(e) = mando_gateway::instance::check_and_write_pid(port) {
         eprintln!("error: {e}");
         std::process::exit(1);
     }

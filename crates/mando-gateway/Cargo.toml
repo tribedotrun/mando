@@ -1,6 +1,6 @@
 [package]
 name = "mando-gateway"
-version = "0.1.5"
+version = "0.1.3"
 edition = "2021"
 description = "HTTP/SSE daemon — API server, captain tick loop, and event streaming"
 license.workspace = true

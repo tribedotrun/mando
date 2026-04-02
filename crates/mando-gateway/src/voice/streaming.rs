@@ -84,9 +84,9 @@ pub(crate) async fn run_voice_pipeline(
     // 7. Get daemon URL + auth token for Claude to use.
     let daemon_port = std::fs::read_to_string(mando_config::data_dir().join("daemon.port"))
         .inspect_err(|e| {
-            warn!(module = "voice", error = %e, "failed to read daemon.port — falling back to 18700");
+            warn!(module = "voice", error = %e, "failed to read daemon.port — falling back to 18600");
         })
-        .unwrap_or_else(|_| "18700".into())
+        .unwrap_or_else(|_| "18600".into())
         .trim()
         .to_string();
     let daemon_url = format!("http://127.0.0.1:{daemon_port}");

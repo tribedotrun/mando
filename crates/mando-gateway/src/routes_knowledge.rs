@@ -144,10 +144,16 @@ pub(crate) async fn post_knowledge_approve(
     };
     approved.extend(body.lessons.iter().cloned());
 
-    if let Err(e) = std::fs::write(
-        &approved_path,
-        serde_json::to_string_pretty(&approved).unwrap_or_default(),
-    ) {
+    let json = match serde_json::to_string_pretty(&approved) {
+        Ok(j) => j,
+        Err(e) => {
+            return Err(error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                &format!("failed to serialize lessons: {e}"),
+            ));
+        }
+    };
+    if let Err(e) = std::fs::write(&approved_path, json) {
         return Err(error_response(
             StatusCode::INTERNAL_SERVER_ERROR,
             &e.to_string(),

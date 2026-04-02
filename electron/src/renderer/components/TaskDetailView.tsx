@@ -3,11 +3,13 @@ import { useQuery } from '@tanstack/react-query';
 import { useMountEffect } from '#renderer/hooks/useMountEffect';
 import { fetchTimeline, fetchItemSessions, fetchTranscript, fetchPrSummary } from '#renderer/api';
 import type { TaskItem, SessionEntry, SessionSummary, TimelineEvent } from '#renderer/types';
+import { FINALIZED_STATUSES } from '#renderer/types';
 import { fmtDuration, shortRepo, prLabel, prHref } from '#renderer/utils';
 import { StatusIcon } from '#renderer/components/TaskActions';
 import { TranscriptSidebar } from '#renderer/components/TranscriptViewer';
 import { SessionDetailPanel } from '#renderer/components/SessionDetailPanel';
-import { PrMarkdown } from '#renderer/components/PrMarkdown';
+import { PrSections } from '#renderer/components/PrSections';
+import { TaskActionBar } from '#renderer/components/TaskActionBar';
 import { TaskTimeline } from '#renderer/components/TaskTimeline';
 
 interface Props {
@@ -181,8 +183,12 @@ export function TaskDetailView({
             {onMerge && item.pr && item.status === 'awaiting-review' && (
               <ActionButton label="Merge" onClick={onMerge} accent />
             )}
-            {onReopen && <ActionButton label="Reopen" onClick={onReopen} />}
-            {onRework && <ActionButton label="Rework" onClick={onRework} />}
+            {onReopen && FINALIZED_STATUSES.includes(item.status) && (
+              <ActionButton label="Reopen" onClick={onReopen} />
+            )}
+            {onRework && FINALIZED_STATUSES.includes(item.status) && (
+              <ActionButton label="Rework" onClick={onRework} />
+            )}
             {(item.branch || item.worktree || item.plan) && <DetailOverflowMenu item={item} />}
           </div>
         </div>
@@ -190,57 +196,62 @@ export function TaskDetailView({
 
       {/* Body: two columns */}
       <div className="flex min-h-0 flex-1 gap-0">
-        {/* Left: details + timeline */}
-        <div className="min-h-0 flex-1 overflow-auto pr-4 pt-4">
-          {/* Original prompt */}
-          {item.original_prompt && (
-            <DetailSection label="Request">
-              <p className="text-[13px] italic" style={{ color: 'var(--color-text-2)' }}>
-                {item.original_prompt}
-              </p>
-            </DetailSection>
-          )}
+        {/* Left: details + bottom action bar */}
+        <div className="flex min-h-0 flex-1 flex-col">
+          <div className="min-h-0 flex-1 overflow-auto pr-4 pt-4">
+            {/* Original prompt */}
+            {item.original_prompt && (
+              <DetailSection label="Request">
+                <p className="text-[13px] italic" style={{ color: 'var(--color-text-2)' }}>
+                  {item.original_prompt}
+                </p>
+              </DetailSection>
+            )}
 
-          {/* Context — hidden by default */}
-          {item.context && <ContextToggle context={item.context} />}
+            {/* Context — hidden by default */}
+            {item.context && <ContextToggle context={item.context} />}
 
-          {/* Metadata — no_pr delivery note shown inline, rest behind overflow */}
-          {item.no_pr && (
-            <div
-              className="mb-3 text-[12px]"
-              style={{ color: 'var(--color-accent)', fontWeight: 500 }}
-            >
-              Findings only — no PR
-            </div>
-          )}
-
-          {/* PR Summary */}
-          {prBody?.summary && (
-            <DetailSection label="PR Summary">
-              <PrMarkdown text={prBody.summary} />
-            </DetailSection>
-          )}
-
-          {/* Escalation / Error */}
-          {item.escalation_report && (
-            <DetailSection label="Escalation Report">
-              <pre
-                className="whitespace-pre-wrap rounded p-3 text-[11px]"
-                style={{
-                  background: 'var(--color-surface-2)',
-                  color: 'var(--color-text-1)',
-                  border: '1px solid color-mix(in srgb, var(--color-error) 30%, transparent)',
-                }}
+            {/* Metadata — no_pr delivery note shown inline, rest behind overflow */}
+            {item.no_pr && (
+              <div
+                className="mb-3 text-[12px]"
+                style={{ color: 'var(--color-accent)', fontWeight: 500 }}
               >
-                {item.escalation_report}
-              </pre>
-            </DetailSection>
-          )}
+                Findings only — no PR
+              </div>
+            )}
 
-          {/* Timeline */}
-          <DetailSection label={`Timeline (${events.length})`}>
-            <TaskTimeline events={events} onTranscriptClick={handleTranscriptClick} />
-          </DetailSection>
+            {/* PR Description — sectioned */}
+            {prBody?.summary && (
+              <DetailSection label="PR">
+                <PrSections text={prBody.summary} />
+              </DetailSection>
+            )}
+
+            {/* Escalation / Error */}
+            {item.escalation_report && (
+              <DetailSection label="Escalation Report">
+                <pre
+                  className="whitespace-pre-wrap rounded p-3 text-[11px]"
+                  style={{
+                    background: 'var(--color-surface-2)',
+                    color: 'var(--color-text-1)',
+                    border: '1px solid color-mix(in srgb, var(--color-error) 30%, transparent)',
+                  }}
+                >
+                  {item.escalation_report}
+                </pre>
+              </DetailSection>
+            )}
+
+            {/* Timeline */}
+            <DetailSection label={`Timeline (${events.length})`}>
+              <TaskTimeline events={events} onTranscriptClick={handleTranscriptClick} />
+            </DetailSection>
+          </div>
+
+          {/* Bottom action bar — pinned below scroll area */}
+          <TaskActionBar item={item} />
         </div>
 
         {/* Right: transcript sidebar */}

@@ -9,18 +9,23 @@
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { handleTrusted } from '#main/ipc-security';
+import { currentPath } from '#main/launchd';
 import log from '#main/logger';
 
 const execFileAsync = promisify(execFile);
 
-/** Run a command and return stdout, or null on failure. */
+/** Run a command with the full user PATH (packaged apps get a minimal PATH). */
 async function run(
   cmd: string,
   args: string[],
   timeoutMs: number,
 ): Promise<{ stdout: string; stderr: string } | null> {
   try {
-    return await execFileAsync(cmd, args, { encoding: 'utf-8', timeout: timeoutMs });
+    return await execFileAsync(cmd, args, {
+      encoding: 'utf-8',
+      timeout: timeoutMs,
+      env: { ...process.env, PATH: currentPath() },
+    });
   } catch (e) {
     const stderr = (e as { stderr?: string }).stderr ?? '';
     log.warn(`[setup-validation] ${cmd} ${args.join(' ')} failed: ${stderr || e}`);

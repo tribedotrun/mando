@@ -102,16 +102,6 @@ fn persist_health_field(worker: &str, field: &str, value: serde_json::Value, err
     }
 }
 
-/// Persist a worker's PID to the health state file (load → set → save).
-pub fn persist_worker_pid(worker: &str, pid: u32) {
-    persist_health_field(
-        worker,
-        "pid",
-        serde_json::json!(pid),
-        "failed to persist worker PID — process liveness checks will fail",
-    );
-}
-
 /// Persist a worker's nudge count to the health state file (load → set → save).
 pub(crate) fn persist_nudge_count(worker: &str, count: u32) {
     persist_health_field(

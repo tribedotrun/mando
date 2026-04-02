@@ -16,12 +16,7 @@ function errorMsg(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
-/** Whether a launchctl error message indicates the service simply isn't loaded (benign). */
-function isNotLoadedError(msg: string): boolean {
-  return msg.includes('not loaded') || msg.includes('could not find service');
-}
-
-function homeDir(): string {
+export function homeDir(): string {
   return app.getPath('home');
 }
 
@@ -78,7 +73,7 @@ function daemonLogDir(): string {
   return path.join(homeDir(), 'Library', 'Logs', 'Mando');
 }
 
-function currentPath(): string {
+export function currentPath(): string {
   const base = [
     path.join(homeDir(), '.local', 'bin'),
     '/opt/homebrew/bin',
@@ -162,24 +157,32 @@ function generateTgPlist(dataDir: string): string {
 </plist>`;
 }
 
-/** Bootstrap a launchd service. */
-function launchctlBootstrap(plistPath: string): void {
+/** Load a launchd service: bootout first if already loaded, then bootstrap. */
+function launchctlLoad(plistPath: string, label: string): void {
+  if (isServiceLoaded(label)) launchctlBootout(label);
   const uid = process.getuid?.() ?? 501;
-  const domain = `gui/${uid}`;
-  execSync(`launchctl bootstrap ${domain} "${plistPath}"`);
+  execSync(`launchctl bootstrap gui/${uid} "${plistPath}"`);
 }
 
-/** Bootout a launchd service by label. */
-function launchctlBootoutLabel(label: string): void {
-  const uid = process.getuid?.() ?? 501;
-  const domain = `gui/${uid}`;
+/** Check whether a launchd service is currently loaded. */
+function isServiceLoaded(label: string): boolean {
   try {
-    execSync(`launchctl bootout ${domain}/${label}`);
+    execSync(`launchctl list ${label}`, { stdio: 'pipe' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Bootout a loaded launchd service. Caller checks isServiceLoaded() first. */
+function launchctlBootout(label: string): void {
+  const uid = process.getuid?.() ?? 501;
+  try {
+    execSync(`launchctl bootout gui/${uid}/${label}`);
   } catch (e: unknown) {
-    const msg = errorMsg(e);
-    if (!isNotLoadedError(msg)) {
-      throw e;
-    }
+    // TOCTOU: service unloaded between isServiceLoaded() and bootout.
+    // Log and continue — the goal (service not loaded) is achieved.
+    log.warn(`[launchd] bootout ${label} failed (likely unloaded concurrently):`, errorMsg(e));
   }
 }
 
@@ -220,11 +223,9 @@ function ensureLaunchdDirs(dataDir: string): void {
 /** Install and load the daemon LaunchAgent plist. */
 export function installDaemonPlist(dataDir: string): void {
   ensureLaunchdDirs(dataDir);
-  const plistContent = generateDaemonPlist(dataDir);
   const plistFile = daemonPlistPath();
-  fs.writeFileSync(plistFile, plistContent, 'utf-8');
-  launchctlBootoutLabel(DAEMON_LABEL);
-  launchctlBootstrap(plistFile);
+  fs.writeFileSync(plistFile, generateDaemonPlist(dataDir), 'utf-8');
+  launchctlLoad(plistFile, DAEMON_LABEL);
 }
 
 /** Install and load the TG bot LaunchAgent plist — skips if Telegram is not configured. */
@@ -250,11 +251,9 @@ export function installTgPlist(dataDir: string): void {
   }
 
   ensureLaunchdDirs(dataDir);
-  const plistContent = generateTgPlist(dataDir);
   const plistFile = tgPlistPath();
-  fs.writeFileSync(plistFile, plistContent, 'utf-8');
-  launchctlBootoutLabel(TG_LABEL);
-  launchctlBootstrap(plistFile);
+  fs.writeFileSync(plistFile, generateTgPlist(dataDir), 'utf-8');
+  launchctlLoad(plistFile, TG_LABEL);
 }
 
 /** Update daemon binary: bootout, replace binary, bootstrap. */
@@ -262,9 +261,9 @@ export function updateDaemonBinary(dataDir: string): boolean {
   const dest = daemonInstallPath();
   const prev = `${dest}.prev`;
 
-  // Bootout current daemon and TG bot (graceful SIGTERM).
-  launchctlBootoutLabel(TG_LABEL);
-  launchctlBootoutLabel(DAEMON_LABEL);
+  // Bootout running services before replacing binaries.
+  if (isServiceLoaded(TG_LABEL)) launchctlBootout(TG_LABEL);
+  if (isServiceLoaded(DAEMON_LABEL)) launchctlBootout(DAEMON_LABEL);
 
   // Rename current binary to .prev for rollback.
   if (fs.existsSync(dest)) {
@@ -303,8 +302,8 @@ export function rollbackDaemonBinary(dataDir: string): boolean {
   const prev = `${dest}.prev`;
   if (!fs.existsSync(prev)) return false;
 
-  launchctlBootoutLabel(TG_LABEL);
-  launchctlBootoutLabel(DAEMON_LABEL);
+  if (isServiceLoaded(TG_LABEL)) launchctlBootout(TG_LABEL);
+  if (isServiceLoaded(DAEMON_LABEL)) launchctlBootout(DAEMON_LABEL);
   try {
     fs.renameSync(prev, dest);
   } catch (err) {
@@ -333,8 +332,10 @@ export function getDaemonStatus(): DaemonStatus {
       pid: pidMatch ? parseInt(pidMatch[1], 10) : null,
     };
   } catch (e: unknown) {
+    // launchctl list exits non-zero when the service isn't loaded — that's expected.
+    // Log anything else so real errors aren't silent.
     const msg = errorMsg(e);
-    if (!isNotLoadedError(msg)) {
+    if (!msg.includes('Could not find service')) {
       log.warn('[launchd] daemon status check failed:', msg);
     }
     return { loaded: false, running: false, pid: null };

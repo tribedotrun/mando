@@ -159,6 +159,7 @@ pub enum ReviewTrigger {
     Retry,
     CaptainDecision,
     MergeFail,
+    MissingGithubConfig,
 }
 
 impl ReviewTrigger {
@@ -175,6 +176,7 @@ impl ReviewTrigger {
             Self::Retry => "retry",
             Self::CaptainDecision => "captain_decision",
             Self::MergeFail => "merge_fail",
+            Self::MissingGithubConfig => "missing_github_config",
         }
     }
 }
@@ -201,6 +203,7 @@ impl FromStr for ReviewTrigger {
             "retry" => Ok(Self::Retry),
             "captain_decision" => Ok(Self::CaptainDecision),
             "merge_fail" => Ok(Self::MergeFail),
+            "missing_github_config" => Ok(Self::MissingGithubConfig),
             _ => Err(format!("unknown review trigger: {s}")),
         }
     }

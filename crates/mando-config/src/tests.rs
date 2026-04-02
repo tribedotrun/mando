@@ -26,8 +26,6 @@ fn parse_full_config() {
             }
         },
         "gateway": {
-            "host": "127.0.0.1",
-            "port": 9090,
             "dashboard": {
                 "host": "0.0.0.0",
                 "port": 8080
@@ -81,8 +79,6 @@ fn parse_full_config() {
     assert_eq!(cfg.channels.telegram.token, "tok-123");
     assert_eq!(cfg.channels.telegram.owner, "bill");
     // Gateway
-    assert_eq!(cfg.gateway.host, "127.0.0.1");
-    assert_eq!(cfg.gateway.port, 9090);
     assert_eq!(cfg.gateway.dashboard.host, "0.0.0.0");
     assert_eq!(cfg.gateway.dashboard.port, 8080);
 
@@ -126,8 +122,6 @@ fn parse_minimal_config_uses_defaults() {
     assert!(!cfg.features.analytics);
     assert!(!cfg.channels.telegram.enabled);
     assert_eq!(cfg.channels.telegram.token, "");
-    assert_eq!(cfg.gateway.host, "0.0.0.0");
-    assert_eq!(cfg.gateway.port, 18790);
     assert_eq!(cfg.gateway.dashboard.port, 18791);
     assert!(!cfg.captain.auto_schedule);
     assert_eq!(cfg.captain.tick_interval_s, 30);
@@ -146,7 +140,7 @@ fn config_roundtrip() {
     let json = serde_json::to_string(&cfg).unwrap();
     let cfg2: Config = serde_json::from_str(&json).unwrap();
     assert_eq!(cfg.workspace, cfg2.workspace);
-    assert_eq!(cfg.gateway.port, cfg2.gateway.port);
+    assert_eq!(cfg.gateway.dashboard.port, cfg2.gateway.dashboard.port);
     assert_eq!(cfg.captain.tick_interval_s, cfg2.captain.tick_interval_s);
 }
 

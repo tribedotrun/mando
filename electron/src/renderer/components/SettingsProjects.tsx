@@ -13,7 +13,6 @@ export function SettingsProjects(): React.ReactElement {
   const save = useSettingsStore((s) => s.save);
 
   const [editing, setEditing] = useState<string | null>(null);
-  const [adding, setAdding] = useState(false);
 
   const pathKeys = Object.keys(projects);
 
@@ -29,7 +28,7 @@ export function SettingsProjects(): React.ReactElement {
       </div>
 
       <div className="space-y-4">
-        {pathKeys.length === 0 && !adding && (
+        {pathKeys.length === 0 && (
           <p className="text-sm" style={{ color: 'var(--color-text-3)' }}>
             No projects configured yet.
           </p>
@@ -124,35 +123,6 @@ export function SettingsProjects(): React.ReactElement {
             </div>
           );
         })}
-
-        {adding && (
-          <ProjectEditor
-            pathKey=""
-            project={{ name: '', path: '' }}
-            existingProjects={projects}
-            isNew
-            onSave={(k, r) => {
-              updateProject(k, r);
-              save();
-              setAdding(false);
-            }}
-            onCancel={() => setAdding(false)}
-          />
-        )}
-
-        {!adding && (
-          <button
-            data-testid="add-project-btn"
-            onClick={() => setAdding(true)}
-            className="rounded-md px-4 py-3 text-sm transition-colors"
-            style={{
-              border: '1px dashed var(--color-border)',
-              color: 'var(--color-text-2)',
-            }}
-          >
-            + Add Project
-          </button>
-        )}
       </div>
     </div>
   );

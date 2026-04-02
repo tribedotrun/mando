@@ -12,7 +12,7 @@ import { SettingsAbout } from '#renderer/components/SettingsAbout';
 import { MemoryCard } from '#renderer/components/MemoryCard';
 import { SetupChecklist } from '#renderer/components/SetupChecklist';
 
-type SettingsSection =
+export type SettingsSection =
   | 'setup'
   | 'general'
   | 'projects'
@@ -73,10 +73,14 @@ function SettingsPanel({ section }: { section: SettingsSection }) {
 
 interface SettingsPageProps {
   onBack: () => void;
+  initialSection?: SettingsSection;
 }
 
-export function SettingsPage({ onBack }: SettingsPageProps): React.ReactElement {
-  const [section, setSection] = useState<SettingsSection>('general');
+export function SettingsPage({
+  onBack,
+  initialSection = 'general',
+}: SettingsPageProps): React.ReactElement {
+  const [section, setSection] = useState<SettingsSection>(initialSection);
   const load = useSettingsStore((s) => s.load);
   const loading = useSettingsStore((s) => s.loading);
   const error = useSettingsStore((s) => s.error);

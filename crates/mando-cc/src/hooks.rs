@@ -44,19 +44,17 @@ mod tests {
         Allow,
         #[allow(dead_code)]
         AllowWithInput(Value),
-        Deny(String),
+        Deny,
     }
 
     /// PreToolUse hook (test-only).
     struct PreToolUseHook {
-        matcher: Option<String>,
         evaluate: fn(&str, &Value) -> PreToolUseDecision,
     }
 
     /// PreToolUse hook: block dangerous bash commands (test-only).
     fn safety_bash_guardrail() -> PreToolUseHook {
         PreToolUseHook {
-            matcher: Some("Bash".into()),
             evaluate: |_tool_name, input| {
                 let command = input.get("command").and_then(|c| c.as_str()).unwrap_or("");
 
@@ -65,9 +63,7 @@ mod tests {
                     && !command.contains("node_modules")
                     && !command.contains("target/")
                 {
-                    return PreToolUseDecision::Deny(
-                        "Blocked: rm -rf outside tmp/node_modules/target".into(),
-                    );
+                    return PreToolUseDecision::Deny;
                 }
 
                 PreToolUseDecision::Allow
@@ -91,7 +87,7 @@ mod tests {
         let input = serde_json::json!({"command": "rm -rf /home/user/project"});
         assert!(matches!(
             (hook.evaluate)("Bash", &input),
-            PreToolUseDecision::Deny(_)
+            PreToolUseDecision::Deny
         ));
     }
 

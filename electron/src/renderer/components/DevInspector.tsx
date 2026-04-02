@@ -98,6 +98,7 @@ const SKIP_PROPS = new Set([
   'onProjectFilter',
   'onNewTask',
   'onOpenSettings',
+  'onAddProject',
   'data-testid',
 ]);
 

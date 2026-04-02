@@ -80,6 +80,17 @@ pub(crate) fn classify_worker(
         return Some(action(ctx, ActionKind::CaptainReview, "", "gates_pass"));
     }
 
+    // ── Rule 3b: Config error — project missing githubRepo → escalate ──
+    // Worker can't fix missing config. Escalate immediately instead of nudging.
+    if !is_no_pr && !ctx.github_repo_configured && ctx.pr.is_none() {
+        return Some(action(
+            ctx,
+            ActionKind::CaptainReview,
+            "",
+            "missing_github_config",
+        ));
+    }
+
     // ── Rule 4: NUDGE — worker needs a push ──
 
     // Check specific gate failures first (work done but missing something).
@@ -96,13 +107,13 @@ pub(crate) fn classify_worker(
         return Some(action(ctx, ActionKind::Nudge, &msg, "you appear stuck"));
     }
 
-    // Process dead, work not done.
-    if !ctx.process_alive {
-        return Some(action(ctx, ActionKind::Nudge, "", "continue working"));
-    }
-
-    // Fallback: alive, no stream data yet, not stale (stream_stale_s was None → MAX).
-    Some(action(ctx, ActionKind::Nudge, "", "continue working"))
+    // Process dead or alive fallback — diagnose which gates are failing.
+    let diagnosis = diagnose_failing_gates(ctx, is_no_pr, stream_result_clean);
+    let mut vars = HashMap::new();
+    vars.insert("failures", diagnosis.as_str());
+    let msg = render_nudge(nudges, "gates_incomplete", &vars);
+    let reason = format!("gates incomplete: {diagnosis}");
+    Some(action(ctx, ActionKind::Nudge, &msg, &reason))
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────
@@ -134,6 +145,62 @@ fn quality_gates_pass(
         return true;
     }
     false
+}
+
+/// List every failing quality gate for the diagnostic nudge message.
+fn diagnose_failing_gates(
+    ctx: &WorkerContext,
+    is_no_pr: bool,
+    stream_result_clean: Option<bool>,
+) -> String {
+    let mut failures: Vec<String> = Vec::new();
+
+    if stream_result_clean != Some(true) {
+        failures.push("no clean stream result".into());
+    }
+    if !is_no_pr {
+        if ctx.pr.is_none() {
+            failures.push("no PR discovered (check project githubRepo config)".into());
+        }
+        if ctx.pr.is_some() && !ctx.branch_ahead {
+            failures.push("branch not ahead of main".into());
+        }
+        if ctx.pr.is_some() && !has_summary_diagram(ctx) {
+            failures.push("missing PR summary diagram".into());
+        }
+        if ctx.pr.is_some() && has_no_evidence(&ctx.pr_body) {
+            failures.push("missing evidence in PR".into());
+        }
+        if ctx.unresolved_threads > 0 {
+            failures.push(format!("{} unresolved thread(s)", ctx.unresolved_threads));
+        }
+        if ctx.unreplied_threads > 0 {
+            failures.push(format!("{} unreplied thread(s)", ctx.unreplied_threads));
+        }
+        if ctx.unaddressed_issue_comments > 0 {
+            failures.push(format!(
+                "{} unaddressed comment(s)",
+                ctx.unaddressed_issue_comments
+            ));
+        }
+        if ctx.reopen_seq > 0 && !ctx.has_reopen_ack {
+            failures.push(format!("reopen #{} not acknowledged", ctx.reopen_seq));
+        }
+    }
+    if is_no_pr {
+        if !has_substantive_output(&ctx.stream_tail) {
+            failures.push("insufficient output (< 20 chars)".into());
+        }
+        if ctx.seconds_active < 180.0 {
+            failures.push("insufficient runtime (< 3 min)".into());
+        }
+    }
+
+    if failures.is_empty() {
+        "unknown gate failure".into()
+    } else {
+        failures.join("; ")
+    }
 }
 
 /// When work has a stream result but gates fail, produce a specific nudge.

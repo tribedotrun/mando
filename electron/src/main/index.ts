@@ -9,7 +9,7 @@ import path from 'path';
 import fs from 'fs';
 import type http from 'http';
 import log from '#main/logger';
-import { installCliAndPlists, getDaemonStatus } from '#main/launchd';
+import { registerConfigHandlers } from '#main/config-handlers';
 import { registerSetupValidationHandlers } from '#main/setup-validation';
 import { getDevGitInfo } from '#main/dev-git-info';
 import { installTrustedGatewayAuth } from '#main/gateway-auth';
@@ -18,7 +18,6 @@ import {
   getDataDir,
   getConfigPath,
   readPort,
-  daemonFetch,
   ensureDaemon,
   startHealthMonitor,
   cleanupDaemon,
@@ -42,13 +41,6 @@ let tray: Tray | null = null;
 let rendererServer: http.Server | null = null;
 let rendererPort = 0;
 let isQuitting = false;
-
-class DaemonConfigHttpError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'DaemonConfigHttpError';
-  }
-}
 
 // ---------------------------------------------------------------------------
 // Window management
@@ -273,132 +265,8 @@ handleTrusted('get-dev-git-info', getDevGitInfo);
 // Setup validation handlers (Claude Code, Telegram, Linear) — see setup-validation.ts
 registerSetupValidationHandlers();
 
-handleTrusted('has-config', async () => {
-  try {
-    const resp = await daemonFetch('/api/config/status');
-    if (resp.ok) {
-      const data = (await resp.json()) as { setupComplete: boolean };
-      return data.setupComplete;
-    }
-  } catch (e: unknown) {
-    log.debug('[has-config] daemon check failed:', e);
-  }
-  const configPath = getConfigPath();
-  if (!fs.existsSync(configPath)) return false;
-  try {
-    const raw = fs.readFileSync(configPath, 'utf-8');
-    return typeof JSON.parse(raw) === 'object';
-  } catch (e: unknown) {
-    log.warn('[has-config] local config parse failed:', e);
-    return false;
-  }
-});
-
-handleTrusted('read-config', async () => {
-  try {
-    const resp = await daemonFetch('/api/config');
-    if (resp.ok) return await resp.text();
-  } catch (err: unknown) {
-    log.debug('read-config: daemon not ready, falling back to local file:', err);
-  }
-  try {
-    return fs.readFileSync(getConfigPath(), 'utf-8');
-  } catch (err: unknown) {
-    log.error('read-config: both daemon and local file read failed:', err);
-    throw new Error('Failed to load config from daemon and local file', { cause: err });
-  }
-});
-
-handleTrusted('save-config', async (_: unknown, configJson: string) => {
-  try {
-    const resp = await daemonFetch('/api/config', {
-      method: 'PUT',
-      body: configJson,
-    });
-    if (resp.ok) return true;
-    const err = await resp.json().catch(() => ({ error: resp.statusText }));
-    log.error('save-config via daemon failed:', err);
-    throw new DaemonConfigHttpError(err.error || `HTTP ${resp.status}`);
-  } catch (e: unknown) {
-    if (e instanceof DaemonConfigHttpError) {
-      throw e;
-    }
-
-    const message = e instanceof Error ? e.message : String(e);
-    const networkFallback =
-      message.includes('fetch failed') ||
-      message.includes('ECONNREFUSED') ||
-      message.includes('ENOTFOUND') ||
-      message.includes('timed out');
-
-    if (!networkFallback) {
-      throw e;
-    }
-
-    log.error('save-config fetch failed:', message);
-  }
-  // Fallback: write locally so config isn't lost.
-  log.warn('save-config: daemon unreachable, falling back to local file write');
-  const configPath = getConfigPath();
-  fs.mkdirSync(path.dirname(configPath), { recursive: true });
-  fs.writeFileSync(configPath, configJson, 'utf-8');
-  return true;
-});
-
-handleTrusted('setup-complete', async (_: unknown, configJson: string) => {
-  const dataDir = getDataDir();
-
-  // Create directory structure (needed before daemon can start).
-  for (const sub of ['state', 'logs', 'images']) {
-    fs.mkdirSync(path.join(dataDir, sub), { recursive: true });
-  }
-  const configPath = getConfigPath();
-  fs.mkdirSync(path.dirname(configPath), { recursive: true });
-  fs.writeFileSync(configPath, configJson, 'utf-8');
-  // Start daemon (config is on disk now).
-  await ensureDaemon(dataDir);
-
-  // Notify daemon about setup completion (retry — daemon may still be starting).
-  let setupNotified = false;
-  for (let attempt = 0; attempt < 5; attempt++) {
-    try {
-      await daemonFetch('/api/config/setup', {
-        method: 'POST',
-        body: JSON.stringify({
-          config: JSON.parse(configJson),
-        }),
-      });
-      setupNotified = true;
-      break;
-    } catch (err: unknown) {
-      log.debug(`setup-complete: attempt ${attempt + 1}/5 failed:`, err);
-      await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
-    }
-  }
-  if (!setupNotified) {
-    log.error(
-      'setup-complete: failed to notify daemon after 5 attempts — daemon will pick up config on next restart, but captain may not start until then',
-    );
-  }
-
-  // Install CLI binary and launchd plists (skip in sandbox — sandbox manages its own processes).
-  if (getAppMode() !== 'sandbox') {
-    try {
-      installCliAndPlists(dataDir);
-    } catch (e: unknown) {
-      log.warn('launchd setup failed:', e instanceof Error ? e.message : e);
-    }
-  }
-  return true;
-});
-
-// -- Launchd IPC handlers (Electron-native) --
-handleTrusted('launchd:reinstall', () => {
-  installCliAndPlists(getDataDir());
-  return true;
-});
-handleTrusted('launchd:daemon-status', () => getDaemonStatus());
-handleTrusted('open-logs-folder', () => shell.openPath(path.join(getDataDir(), 'logs')));
+// Config read/write, onboarding setup-complete, launchd — see config-handlers.ts
+registerConfigHandlers();
 
 // ---------------------------------------------------------------------------
 // App lifecycle

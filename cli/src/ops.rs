@@ -17,31 +17,63 @@ pub(crate) struct OpsArgs {
     pub end: bool,
 }
 
+/// Session key used for all CLI ops sessions.
+const CLI_OPS_KEY: &str = "cli";
+
 pub(crate) async fn handle(args: OpsArgs) -> anyhow::Result<()> {
     if args.end {
         let client = DaemonClient::discover()?;
-        client.post("/api/ops/end", &json!({})).await?;
+        client
+            .post("/api/ops/end", &json!({"key": CLI_OPS_KEY}))
+            .await?;
         println!("Ops session ended.");
-    } else if args.new {
-        let client = DaemonClient::discover()?;
-        client.post("/api/ops/new", &json!({})).await?;
-        println!("Starting new ops session...");
     } else if let Some(msg) = &args.message {
         let client = DaemonClient::discover()?;
-        let result = client
-            .post("/api/ops/message", &json!({"message": msg}))
-            .await?;
-        let reply = result["reply"]
-            .as_str()
-            .map(String::from)
-            .unwrap_or_else(|| serde_json::to_string_pretty(&result).unwrap_or_default());
-        println!("{reply}");
+        if args.new {
+            // --new with a message: force-start a fresh session.
+            let result = start_session(&client, msg).await?;
+            println!("{}", extract_reply(&result));
+        } else {
+            // Try follow-up; if no session exists, start one automatically.
+            let result = match client
+                .post(
+                    "/api/ops/message",
+                    &json!({"key": CLI_OPS_KEY, "message": msg}),
+                )
+                .await
+            {
+                Ok(resp) => resp,
+                Err(_) => start_session(&client, msg).await?,
+            };
+            println!("{}", extract_reply(&result));
+        }
+    } else if args.new {
+        // --new without a message: start session with a generic prompt.
+        let client = DaemonClient::discover()?;
+        start_session(&client, "Ready for ops tasks.").await?;
+        println!("Ops session started.");
     } else {
         println!("Usage: mando ops \"your message\"");
         println!("       mando ops --new    # start new session");
         println!("       mando ops --end    # end session");
     }
     Ok(())
+}
+
+async fn start_session(client: &DaemonClient, prompt: &str) -> anyhow::Result<serde_json::Value> {
+    client
+        .post(
+            "/api/ops/start",
+            &json!({"key": CLI_OPS_KEY, "prompt": prompt}),
+        )
+        .await
+}
+
+fn extract_reply(result: &serde_json::Value) -> String {
+    result["result_text"]
+        .as_str()
+        .map(String::from)
+        .unwrap_or_else(|| serde_json::to_string_pretty(result).unwrap_or_default())
 }
 
 #[cfg(test)]

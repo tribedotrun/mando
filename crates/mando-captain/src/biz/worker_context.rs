@@ -220,6 +220,7 @@ mod tests {
             stream_stale_s: None,
             pr_head_sha: "abc123".into(),
             degraded: false,
+            github_repo_configured: true,
         }
     }
 
