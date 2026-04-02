@@ -28,7 +28,15 @@ export interface MandoAPI {
   configPath: () => Promise<string>;
   readConfig: () => Promise<string>;
   saveConfig: (config: string) => Promise<boolean>;
+  addProject: (body: string) => Promise<{
+    ok: boolean;
+    name: string;
+    path: string;
+    githubRepo: string;
+  }>;
+  saveConfigLocal: (config: string) => Promise<boolean>;
   setupComplete: (config: string) => Promise<boolean>;
+  onSetupProgress: (callback: (step: string) => void) => void;
   // Connection state
   connectionState: () => Promise<string>;
   onConnectionState: (callback: (state: string) => void) => void;
@@ -45,6 +53,7 @@ export interface MandoAPI {
     onUpdateReady: (callback: (info: { version: string; notes: string }) => void) => void;
     installUpdate: () => Promise<void>;
     checkForUpdates: () => Promise<void>;
+    getPending: () => Promise<{ version: string; notes: string } | null>;
     appVersion: () => Promise<string>;
     getChannel: () => Promise<string>;
     setChannel: (channel: string) => Promise<void>;
@@ -86,7 +95,12 @@ contextBridge.exposeInMainWorld('mandoAPI', {
   configPath: () => ipcRenderer.invoke('get-config-path'),
   readConfig: () => ipcRenderer.invoke('read-config'),
   saveConfig: (config: string) => ipcRenderer.invoke('save-config', config),
+  addProject: (body: string) => ipcRenderer.invoke('add-project', body),
+  saveConfigLocal: (config: string) => ipcRenderer.invoke('save-config-local', config),
   setupComplete: (config: string) => ipcRenderer.invoke('setup-complete', config),
+  onSetupProgress: (callback: (step: string) => void) => {
+    ipcRenderer.on('setup-progress', (_event, step: string) => callback(step));
+  },
   // Connection state
   connectionState: () => ipcRenderer.invoke('get-connection-state'),
   onConnectionState: (callback: (state: string) => void) => {
@@ -119,6 +133,8 @@ contextBridge.exposeInMainWorld('mandoAPI', {
     },
     installUpdate: () => ipcRenderer.invoke('updates:install'),
     checkForUpdates: () => ipcRenderer.invoke('updates:check'),
+    getPending: () =>
+      ipcRenderer.invoke('updates:pending') as Promise<{ version: string; notes: string } | null>,
     appVersion: () => ipcRenderer.invoke('updates:app-version'),
     getChannel: () => ipcRenderer.invoke('updates:get-channel'),
     setChannel: (channel: string) => ipcRenderer.invoke('updates:set-channel', channel),

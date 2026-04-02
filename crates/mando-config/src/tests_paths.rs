@@ -162,7 +162,7 @@ fn load_missing_config_returns_default() {
     use std::path::Path;
     let cfg = crate::loader::load_config(Some(Path::new("/nonexistent/config.json")));
     assert_eq!(cfg.workspace, "~/.mando/workspace");
-    assert_eq!(cfg.gateway.port, 18790);
+    assert_eq!(cfg.gateway.dashboard.port, 18791);
 }
 
 // ---------------------------------------------------------------------------
@@ -179,7 +179,7 @@ fn load_save_roundtrip() {
         workspace: "~/test-workspace".into(),
         ..Config::default()
     };
-    cfg.gateway.port = 9999;
+    cfg.gateway.dashboard.port = 9999;
     cfg.captain.auto_schedule = true;
 
     crate::loader::save_config(&cfg, Some(&path)).unwrap();
@@ -189,7 +189,7 @@ fn load_save_roundtrip() {
     let content = std::fs::read_to_string(&path).unwrap();
     let loaded: Config = serde_json::from_str(&content).unwrap();
     assert_eq!(loaded.workspace, "~/test-workspace");
-    assert_eq!(loaded.gateway.port, 9999);
+    assert_eq!(loaded.gateway.dashboard.port, 9999);
     assert!(loaded.captain.auto_schedule);
 
     // Cleanup.

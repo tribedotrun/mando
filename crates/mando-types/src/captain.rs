@@ -59,6 +59,11 @@ pub struct WorkerContext {
     /// Captain LLM should be conservative when degraded — prefer skip over action.
     #[serde(default)]
     pub degraded: bool,
+    /// True when the project has a githubRepo configured. When false and
+    /// the task requires a PR, captain cannot discover PRs — escalate
+    /// immediately instead of nudging.
+    #[serde(default)]
+    pub github_repo_configured: bool,
 }
 
 /// The kind of action the captain can take on a worker.

@@ -1,7 +1,8 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useTaskStore } from '#renderer/stores/taskStore';
 import { useSettingsStore } from '#renderer/stores/settingsStore';
 import { SetupChecklist } from '#renderer/components/SetupChecklist';
+import { useMountEffect } from '#renderer/hooks/useMountEffect';
 
 export type Tab = 'captain' | 'scout' | 'sessions' | 'cron' | 'analytics';
 
@@ -16,6 +17,7 @@ interface Props {
   onTabChange: (tab: Tab) => void;
   onNewTask: () => void;
   onOpenSettings: () => void;
+  onAddProject: () => void;
   onToggleSetup: () => void;
   onDismissSetup: () => void;
   projectFilter: string | null;
@@ -85,11 +87,46 @@ const NAV_ITEMS: { id: Tab; label: string; Icon: React.FC; featureFlag?: string 
   { id: 'analytics', label: 'Analytics', Icon: AnalyticsIcon, featureFlag: 'analytics' },
 ];
 
+function UpdateButton(): React.ReactElement | null {
+  const [updateReady, setUpdateReady] = useState(false);
+
+  useMountEffect(() => {
+    if (!window.mandoAPI?.updates) return;
+    window.mandoAPI.updates.onUpdateReady(() => setUpdateReady(true));
+    window.mandoAPI.updates.getPending().then((p) => {
+      if (p) setUpdateReady(true);
+    });
+    return () => window.mandoAPI.updates.removeUpdateListeners();
+  });
+
+  if (!updateReady) return null;
+
+  return (
+    <button
+      onClick={() => window.mandoAPI.updates.installUpdate()}
+      className="absolute right-3 top-3 rounded-md px-2 py-0.5 text-[11px] font-semibold"
+      style={
+        {
+          background: 'var(--color-accent)',
+          color: 'var(--color-bg)',
+          border: 'none',
+          cursor: 'pointer',
+          WebkitAppRegion: 'no-drag',
+          zIndex: 20,
+        } as React.CSSProperties
+      }
+    >
+      Update
+    </button>
+  );
+}
+
 export function Sidebar({
   activeTab,
   onTabChange,
   onNewTask,
   onOpenSettings,
+  onAddProject,
   onToggleSetup,
   onDismissSetup,
   projectFilter,
@@ -136,7 +173,7 @@ export function Sidebar({
 
   return (
     <aside
-      className="flex w-[200px] shrink-0 flex-col"
+      className="relative flex w-[200px] shrink-0 flex-col"
       style={{
         background: 'var(--color-surface-1)',
         borderRight: '1px solid var(--color-border-subtle)',
@@ -146,6 +183,8 @@ export function Sidebar({
         paddingRight: 12,
       }}
     >
+      <UpdateButton />
+
       {/* New task — primary action */}
       <button
         onClick={onNewTask}
@@ -198,26 +237,60 @@ export function Sidebar({
       </nav>
 
       {/* Projects section */}
-      {projects.length > 0 && (
-        <div className="flex-1 overflow-auto" style={{ paddingTop: 24 }}>
+      <div className="flex-1 overflow-auto" style={{ paddingTop: 24 }}>
+        <div
+          className="text-label flex w-full items-center"
+          style={{ padding: '0 0 0 10px', marginBottom: 8 }}
+        >
           <button
             data-testid="home-tab"
             onClick={() => {
               onTabChange('captain');
               onProjectFilter(null);
             }}
-            className="text-label flex w-full items-center justify-between transition-colors"
+            className="flex-1 text-left transition-colors"
             style={{
               color: homeActive ? 'var(--color-text-2)' : 'var(--color-text-3)',
-              padding: '0 10px',
-              marginBottom: 8,
               background: 'transparent',
               border: 'none',
               cursor: 'pointer',
+              padding: 0,
             }}
           >
-            <span>Projects</span>
+            Projects
           </button>
+          <button
+            data-testid="add-project-sidebar-btn"
+            onClick={onAddProject}
+            title="Add a new project"
+            className="ml-auto flex items-center justify-center text-[var(--color-text-3)] transition-colors hover:text-[var(--color-text-2)]"
+            style={{
+              width: 20,
+              height: 20,
+              background: 'transparent',
+              border: 'none',
+              cursor: 'pointer',
+              borderRadius: 4,
+              padding: 0,
+            }}
+          >
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+              <path
+                d="M2 5.5v7A1.5 1.5 0 003.5 14h9a1.5 1.5 0 001.5-1.5v-6A1.5 1.5 0 0012.5 5H8.25L6.75 3H3.5A1.5 1.5 0 002 4.5v1z"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinejoin="round"
+              />
+              <path
+                d="M8 8v4M6 10h4"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+              />
+            </svg>
+          </button>
+        </div>
+        {projects.length > 0 && (
           <div className="flex flex-col" style={{ gap: 4 }}>
             {projects.map((name) => {
               const active = projectFilter === name;
@@ -254,11 +327,8 @@ export function Sidebar({
               );
             })}
           </div>
-        </div>
-      )}
-
-      {/* Spacer */}
-      {projects.length === 0 && <div className="flex-1" />}
+        )}
+      </div>
 
       {/* Settings */}
       <div style={{ borderTop: '1px solid var(--color-border-subtle)', paddingTop: 12 }}>

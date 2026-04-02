@@ -62,9 +62,7 @@ function errCode(err: unknown): string {
   return err instanceof Error && 'code' in err ? ((err as NodeJS.ErrnoException).code ?? '') : '';
 }
 
-// ---------------------------------------------------------------------------
 // Paths
-// ---------------------------------------------------------------------------
 
 function getStagingDir(): string {
   return path.join(app.getPath('userData'), 'updates');
@@ -83,9 +81,7 @@ function getAppBundlePath(): string {
   return path.resolve(process.execPath, '..', '..', '..');
 }
 
-// ---------------------------------------------------------------------------
 // Channel persistence
-// ---------------------------------------------------------------------------
 
 function readChannel(): UpdateChannel {
   const envChannel = process.env.MANDO_UPDATE_CHANNEL;
@@ -114,9 +110,7 @@ function getAlphaToken(): string | undefined {
   return process.env.MANDO_ALPHA_TOKEN;
 }
 
-// ---------------------------------------------------------------------------
 // Feed
-// ---------------------------------------------------------------------------
 
 function buildFeedUrl(): string {
   const arch = process.arch;
@@ -177,9 +171,7 @@ function fetchFeed(): Promise<FeedResponse | null> {
   });
 }
 
-// ---------------------------------------------------------------------------
 // Download
-// ---------------------------------------------------------------------------
 
 function downloadFile(url: string, dest: string, redirectsLeft = MAX_REDIRECTS): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -223,9 +215,7 @@ function downloadFile(url: string, dest: string, redirectsLeft = MAX_REDIRECTS):
   });
 }
 
-// ---------------------------------------------------------------------------
 // Extract + stage
-// ---------------------------------------------------------------------------
 
 function extractAndStage(zipPath: string): string {
   const stagingDir = getStagingDir();
@@ -254,17 +244,13 @@ function extractAndStage(zipPath: string): string {
   throw new Error('No .app bundle found in ZIP');
 }
 
-// ---------------------------------------------------------------------------
 // Code signature verification
-// ---------------------------------------------------------------------------
 
 function verifyCodeSignature(appPath: string): void {
   execSync(`codesign --verify --deep --strict "${appPath}"`, { timeout: 30_000 });
 }
 
-// ---------------------------------------------------------------------------
 // Apply update (swap .app bundle)
-// ---------------------------------------------------------------------------
 
 function applyUpdate(newAppPath: string): void {
   const currentApp = getAppBundlePath();
@@ -334,9 +320,7 @@ function cleanupAfterUpdate(): void {
   if (existsSync(zipPath)) rmSync(zipPath);
 }
 
-// ---------------------------------------------------------------------------
 // Staged update: apply on next launch
-// ---------------------------------------------------------------------------
 
 function writePending(update: PendingUpdate): void {
   const pendingPath = getPendingPath();
@@ -386,9 +370,7 @@ export function applyPendingUpdateIfAny(): boolean {
   }
 }
 
-// ---------------------------------------------------------------------------
 // Check + download flow
-// ---------------------------------------------------------------------------
 
 async function checkAndDownload(): Promise<void> {
   if (downloading) return;
@@ -436,9 +418,7 @@ async function checkAndDownload(): Promise<void> {
   }
 }
 
-// ---------------------------------------------------------------------------
 // Public API
-// ---------------------------------------------------------------------------
 
 export function setupAutoUpdate(): void {
   handleTrusted('updates:install', () => {
@@ -473,6 +453,10 @@ export function setupAutoUpdate(): void {
   });
 
   handleTrusted('updates:app-version', () => app.getVersion());
+  handleTrusted('updates:pending', () => {
+    if (pendingUpdate) return { version: pendingUpdate.version, notes: pendingUpdate.notes };
+    return null;
+  });
   handleTrusted('updates:get-channel', () => readChannel());
 
   handleTrusted('updates:set-channel', (_: unknown, channel: string) => {

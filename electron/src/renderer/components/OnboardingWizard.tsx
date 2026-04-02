@@ -1,4 +1,5 @@
 import React, { useState, useCallback } from 'react';
+import { useMountEffect } from '#renderer/hooks/useMountEffect';
 import type { MandoConfig } from '#renderer/stores/settingsStore';
 import heroImg from '#renderer/assets/hero.png';
 import {
@@ -27,12 +28,42 @@ export function OnboardingWizard(): React.ReactElement {
   const [tgToken, setTgToken] = useState('');
   const [linearKey, setLinearKey] = useState('');
   const [linearTeam, setLinearTeam] = useState('');
+  const [progressMsg, setProgressMsg] = useState<string | null>(null);
+
+  useMountEffect(() => {
+    window.mandoAPI.onSetupProgress(setProgressMsg);
+  });
+
+  /** Persist partial config to disk so progress survives a crash or quit. */
+  const saveProgress = useCallback(
+    (extras?: { linearKey?: string; linearTeam?: string }) => {
+      const config: MandoConfig = { features: { claudeCodeVerified: true } };
+      const env: Record<string, string> = {};
+      if (tgToken.trim()) {
+        config.channels = { telegram: { enabled: true } };
+        env.TELEGRAM_MANDO_BOT_TOKEN = tgToken.trim();
+      }
+      if (extras?.linearKey?.trim() && extras.linearTeam) {
+        config.features!.linear = true;
+        config.captain = { linearTeam: extras.linearTeam };
+        env.LINEAR_API_KEY = extras.linearKey.trim();
+      }
+      if (Object.keys(env).length > 0) config.env = env;
+      window.mandoAPI
+        .saveConfigLocal(JSON.stringify(config, null, 2))
+        .catch((e) => console.error('Failed to save onboarding progress:', e));
+    },
+    [tgToken],
+  );
 
   const finishSetup = useCallback(async () => {
     setError(null);
     setStep('finishing');
     try {
-      const config: MandoConfig = { features: { claudeCodeVerified: true } };
+      const config: MandoConfig = {
+        features: { claudeCodeVerified: true },
+        captain: { autoSchedule: true },
+      };
       const env: Record<string, string> = {};
       if (tgToken.trim()) {
         config.channels = { telegram: { enabled: true } };
@@ -40,7 +71,7 @@ export function OnboardingWizard(): React.ReactElement {
       }
       if (linearKey.trim() && linearTeam) {
         config.features!.linear = true;
-        config.captain = { linearTeam };
+        config.captain!.linearTeam = linearTeam;
         env.LINEAR_API_KEY = linearKey.trim();
       }
       if (Object.keys(env).length > 0) config.env = env;
@@ -68,7 +99,10 @@ export function OnboardingWizard(): React.ReactElement {
         token={tgToken}
         onTokenChange={setTgToken}
         onBack={() => setStep('claude-check')}
-        onNext={() => setStep('linear')}
+        onNext={() => {
+          saveProgress();
+          setStep('linear');
+        }}
         onSkip={() => {
           setTgToken('');
           setStep('linear');
@@ -93,6 +127,7 @@ export function OnboardingWizard(): React.ReactElement {
       onFinish={finishSetup}
       error={error}
       finishing={step === 'finishing'}
+      progressMsg={progressMsg}
     />
   );
 }

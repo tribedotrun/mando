@@ -15,7 +15,6 @@ import type {
   JournalResponse,
   PatternsResponse,
   DistillerResponse,
-  KnowledgePendingResponse,
 } from '#renderer/types';
 import log from '#renderer/logger';
 import { getErrorMessage } from '#renderer/utils';
@@ -327,12 +326,6 @@ export const updatePatternStatus = (id: number, status: 'approved' | 'dismissed'
   apiPost<{ ok: boolean }>('/api/patterns/update', { id, status });
 
 export const runDistiller = () => apiPost<DistillerResponse>('/api/knowledge/learn');
-export const fetchKnowledgePending = () =>
-  apiGet<KnowledgePendingResponse>('/api/knowledge/pending');
-export const approveKnowledgeLesson = (lesson: { id: string }) =>
-  apiPost<{ ok: boolean; added: number; total: number }>('/api/knowledge/approve', {
-    lessons: [lesson],
-  });
 
 // SSE
 export function connectSSE(

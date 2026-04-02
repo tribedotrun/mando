@@ -119,22 +119,10 @@ pub struct TelegramConfig {
 // Gateway
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct GatewayConfig {
-    pub host: String,
-    pub port: u16,
     pub dashboard: DashboardConfig,
-}
-
-impl Default for GatewayConfig {
-    fn default() -> Self {
-        Self {
-            host: "0.0.0.0".into(),
-            port: 18790,
-            dashboard: DashboardConfig::default(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

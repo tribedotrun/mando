@@ -8,7 +8,7 @@ import { ScoutPage } from '#renderer/components/ScoutPage';
 import { SessionsCard } from '#renderer/components/SessionsCard';
 import { CronJobsPanel } from '#renderer/components/CronJobsPanel';
 import { AnalyticsPage } from '#renderer/components/AnalyticsPage';
-import { SettingsPage } from '#renderer/components/SettingsPage';
+import { SettingsPage, type SettingsSection } from '#renderer/components/SettingsPage';
 import { DevInfoBar } from '#renderer/components/DevInfoBar';
 import { CommandPalette } from '#renderer/components/CommandPalette';
 import { ToastContainer } from '#renderer/components/ToastContainer';
@@ -16,6 +16,8 @@ import { CreateTaskModal } from '#renderer/components/AddTaskForm';
 import { ShortcutOverlay } from '#renderer/components/ShortcutOverlay';
 import { TaskDetailView } from '#renderer/components/TaskDetailView';
 import { useSettingsStore } from '#renderer/stores/settingsStore';
+import { apiPost } from '#renderer/api';
+import { useToastStore } from '#renderer/stores/toastStore';
 import type { TaskItem } from '#renderer/types';
 
 const SETUP_TOTAL = 4;
@@ -57,6 +59,7 @@ function useSetupProgress(): SetupProgress | null {
 export function App(): React.ReactElement {
   const [activeTab, setActiveTab] = useState<Tab>('captain');
   const [showSettings, setShowSettings] = useState(false);
+  const [settingsSection, setSettingsSection] = useState<SettingsSection>('general');
   const [projectFilter, setProjectFilter] = useState<string | null>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [createTaskOpen, setCreateTaskOpen] = useState(false);
@@ -85,6 +88,7 @@ export function App(): React.ReactElement {
     switch (action) {
       case 'add-task':
         setShowSettings(false);
+        setSettingsSection('general');
         setActiveTab('captain');
         setCreateTaskOpen(true);
         break;
@@ -106,6 +110,7 @@ export function App(): React.ReactElement {
     onTogglePalette: useCallback(() => setPaletteOpen((v) => !v), []),
     onOpenSettings: useCallback(() => {
       setPaletteOpen(false);
+      setSettingsSection('general');
       setShowSettings(true);
     }, []),
     onToggleShortcuts: useCallback(() => setShortcutsOpen((v) => !v), []),
@@ -131,6 +136,7 @@ export function App(): React.ReactElement {
         setActiveTab('analytics');
         break;
       case 'act-settings':
+        setSettingsSection('general');
         setShowSettings(true);
         break;
       case 'act-create-task':
@@ -178,7 +184,13 @@ export function App(): React.ReactElement {
       {/* Settings — overlays the main layout without unmounting it */}
       {showSettings && (
         <div className="flex-1 overflow-hidden">
-          <SettingsPage onBack={() => setShowSettings(false)} />
+          <SettingsPage
+            onBack={() => {
+              setShowSettings(false);
+              setSettingsSection('general');
+            }}
+            initialSection={settingsSection}
+          />
         </div>
       )}
 
@@ -237,9 +249,6 @@ export function App(): React.ReactElement {
           </div>
         )}
 
-        {/* Update banner */}
-        <UpdateBanner />
-
         <div className="flex min-h-0 flex-1">
           {/* Sidebar */}
           <Sidebar
@@ -249,7 +258,21 @@ export function App(): React.ReactElement {
               setActiveTab('captain');
               setCreateTaskOpen(true);
             }}
-            onOpenSettings={() => setShowSettings(true)}
+            onOpenSettings={() => {
+              setSettingsSection('general');
+              setShowSettings(true);
+            }}
+            onAddProject={async () => {
+              const dir = await window.mandoAPI.selectDirectory();
+              if (!dir) return;
+              try {
+                await apiPost('/api/projects', { path: dir });
+                useSettingsStore.getState().load();
+              } catch (err) {
+                const msg = err instanceof Error ? err.message : 'Failed to add project';
+                useToastStore.getState().add('error', msg);
+              }
+            }}
             onToggleSetup={() => setSetupActive((v) => !v)}
             onDismissSetup={handleDismissSetup}
             projectFilter={projectFilter}
@@ -289,64 +312,6 @@ export function App(): React.ReactElement {
       <CreateTaskModal open={createTaskOpen} onClose={() => setCreateTaskOpen(false)} />
       <ShortcutOverlay open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
       <ToastContainer />
-    </div>
-  );
-}
-
-function UpdateBanner(): React.ReactElement | null {
-  const [updateReady, setUpdateReady] = useState(false);
-  const [version, setVersion] = useState('');
-  const [dismissed, setDismissed] = useState(false);
-
-  useMountEffect(() => {
-    if (!window.mandoAPI?.updates) return;
-    window.mandoAPI.updates.onUpdateReady((info) => {
-      setUpdateReady(true);
-      setVersion(info.version);
-    });
-    return () => window.mandoAPI.updates.removeUpdateListeners();
-  });
-
-  if (!updateReady || dismissed) return null;
-
-  return (
-    <div
-      className="flex shrink-0 items-center gap-3 px-4 py-1.5"
-      style={{
-        background: 'var(--color-surface-2)',
-        borderBottom: '1px solid var(--color-border-subtle)',
-      }}
-    >
-      <span className="text-[13px] font-medium" style={{ color: 'var(--color-text-1)' }}>
-        Update available{' '}
-        <span className="text-code" style={{ color: 'var(--color-text-2)' }}>
-          {version}
-        </span>
-      </span>
-      <button
-        onClick={() => window.mandoAPI.updates.installUpdate()}
-        className="rounded-md px-2.5 py-0.5 text-[12px] font-semibold"
-        style={{
-          background: 'var(--color-accent)',
-          color: 'var(--color-bg)',
-          border: 'none',
-          cursor: 'pointer',
-        }}
-      >
-        Install & Restart
-      </button>
-      <button
-        onClick={() => setDismissed(true)}
-        className="ml-auto text-[13px] opacity-60 hover:opacity-100"
-        style={{
-          color: 'var(--color-text-3)',
-          background: 'none',
-          border: 'none',
-          cursor: 'pointer',
-        }}
-      >
-        ✕
-      </button>
     </div>
   );
 }

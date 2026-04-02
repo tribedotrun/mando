@@ -240,6 +240,50 @@ pub(crate) async fn post_task_add(
     state
         .bus
         .send(mando_types::BusEvent::Tasks, Some(json!({"action": "add"})));
+
+    // Trigger an immediate captain tick so the new task gets dispatched without
+    // waiting for the next scheduled auto-tick (up to 30s away).
+    if config.captain.auto_schedule {
+        let tick_config = state.config.clone();
+        let tick_workflow = state.captain_workflow.clone();
+        let tick_bus = state.bus.clone();
+        let tick_store = state.task_store.clone();
+        let handle = tokio::spawn(async move {
+            let cfg = tick_config.load_full();
+            let wf = tick_workflow.load_full();
+            match mando_captain::runtime::dashboard::trigger_captain_tick(
+                &cfg,
+                &wf,
+                false,
+                Some(&tick_bus),
+                true,
+                &tick_store,
+            )
+            .await
+            {
+                Ok(result) => {
+                    tracing::info!(
+                        module = "captain",
+                        active_workers = result.get("active_workers").and_then(|v| v.as_u64()),
+                        "immediate tick after task add"
+                    );
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        module = "captain",
+                        error = %e,
+                        "immediate tick after task add failed"
+                    );
+                }
+            }
+        });
+        tokio::spawn(async move {
+            if let Err(e) = handle.await {
+                tracing::error!(module = "captain", error = %e, "immediate tick panicked");
+            }
+        });
+    }
+
     Ok((StatusCode::CREATED, Json(val)))
 }
 

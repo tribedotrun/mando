@@ -129,6 +129,7 @@ export function LinearScreen({
   onFinish,
   error,
   finishing,
+  progressMsg,
 }: {
   apiKey: string;
   onApiKeyChange: (v: string) => void;
@@ -138,6 +139,7 @@ export function LinearScreen({
   onFinish: () => void;
   error: string | null;
   finishing: boolean;
+  progressMsg: string | null;
 }): React.ReactElement {
   const [validating, setValidating] = useState(false);
   const [result, setResult] = useState<LinearResult>(null);
@@ -238,10 +240,17 @@ export function LinearScreen({
       )}
 
       <div className="flex items-center" style={{ justifyContent: 'space-between' }}>
-        <GhostButton onClick={onBack}>Back</GhostButton>
-        <PrimaryButton onClick={onFinish} disabled={finishing}>
-          {finishing ? 'Setting up\u2026' : 'Finish Setup'}
-        </PrimaryButton>
+        {!finishing && <GhostButton onClick={onBack}>Back</GhostButton>}
+        <div className="flex items-center" style={{ gap: 12 }}>
+          {finishing && progressMsg && (
+            <span className="text-caption" style={{ color: 'var(--color-text-3)' }}>
+              {progressMsg}
+            </span>
+          )}
+          <PrimaryButton onClick={onFinish} disabled={finishing}>
+            {finishing ? 'Setting up\u2026' : 'Finish Setup'}
+          </PrimaryButton>
+        </div>
       </div>
     </SetupLayout>
   );

@@ -679,6 +679,9 @@ nudges:
     Your task has no-PR set, but the output so far is too short to verify
     completion. Please provide substantive results — at minimum 20 characters
     of meaningful output (findings, conclusions, or deliverables).
+  gates_incomplete: >
+    Quality gates incomplete: {{ failures }}.
+    Fix every failing gate listed above before marking work as done.
   nudge_default: >
     Continue working. Resume from current state and focus on remaining work.
 

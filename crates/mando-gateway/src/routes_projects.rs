@@ -124,8 +124,34 @@ pub(crate) async fn post_projects(
         }
     }
 
-    // Auto-detect GitHub repo.
+    // Reject if directory is not a git repo.
+    let is_git = abs_path.join(".git").exists()
+        || std::process::Command::new("git")
+            .args(["rev-parse", "--git-dir"])
+            .current_dir(&abs_path)
+            .output()
+            .is_ok_and(|o| o.status.success());
+    if !is_git {
+        return Err(error_response(
+            StatusCode::BAD_REQUEST,
+            &format!(
+                "not a git repository: {}. Initialize git before adding as a project.",
+                abs_path.display()
+            ),
+        ));
+    }
+
+    // Auto-detect GitHub repo — reject if not found.
     let github_repo = mando_config::detect_github_repo(&abs_path_str);
+    if github_repo.is_none() {
+        return Err(error_response(
+            StatusCode::BAD_REQUEST,
+            &format!(
+                "no GitHub remote detected in {}. Add a GitHub remote (git remote add origin ...) before adding as a project.",
+                abs_path.display()
+            ),
+        ));
+    }
 
     // Auto-generate scout summary from project metadata.
     let scout_summary = detect_project_summary(&abs_path);

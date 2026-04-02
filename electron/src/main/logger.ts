@@ -5,7 +5,8 @@ import fs from 'fs';
 
 // Write to MANDO_LOG_DIR (dev/sandbox) or ~/.mando/logs/ (production).
 // Daily rotation matching the Rust daemon/TG bot pattern: electron.jsonl.YYYY-MM-DD
-const logDir = process.env.MANDO_LOG_DIR || path.join(os.homedir(), '.mando', 'logs');
+const dataDir = process.env.MANDO_DATA_DIR || path.join(os.homedir(), '.mando');
+const logDir = process.env.MANDO_LOG_DIR || path.join(dataDir, 'logs');
 fs.mkdirSync(logDir, { recursive: true });
 
 function todaySuffix(): string {

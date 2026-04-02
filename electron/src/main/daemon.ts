@@ -51,7 +51,10 @@ export function getConnectionState(): ConnectionState {
 // ---------------------------------------------------------------------------
 
 export function getDataDir(): string {
-  return process.env.MANDO_DATA_DIR || path.join(os.homedir(), '.mando');
+  if (process.env.MANDO_DATA_DIR) return process.env.MANDO_DATA_DIR;
+  // Dev mode uses an isolated data directory to avoid conflicts with prod.
+  if (getAppMode() === 'dev') return path.join(os.homedir(), '.mando-dev');
+  return path.join(os.homedir(), '.mando');
 }
 
 export function getConfigPath(): string {
