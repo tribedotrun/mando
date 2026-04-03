@@ -2,6 +2,7 @@ import React, { useState, useCallback } from 'react';
 import { useMountEffect } from '#renderer/hooks/useMountEffect';
 import { useDataContext } from '#renderer/DataProvider';
 import { useGlobalKeyboard } from '#renderer/hooks/useKeyboardShortcuts';
+import { useTaskActions } from '#renderer/hooks/useTaskActions';
 import { Sidebar, type Tab, type SetupProgress } from '#renderer/components/Sidebar';
 import { CaptainView } from '#renderer/components/CaptainView';
 import { ScoutPage } from '#renderer/components/ScoutPage';
@@ -13,13 +14,13 @@ import { DevInfoBar } from '#renderer/components/DevInfoBar';
 import { CommandPalette } from '#renderer/components/CommandPalette';
 import { ToastContainer } from '#renderer/components/ToastContainer';
 import { CreateTaskModal } from '#renderer/components/AddTaskForm';
+import { MergeModal } from '#renderer/components/MergeModal';
 import { ShortcutOverlay } from '#renderer/components/ShortcutOverlay';
 import { TaskDetailView } from '#renderer/components/TaskDetailView';
 import { useSettingsStore } from '#renderer/stores/settingsStore';
 import { useTaskStore } from '#renderer/stores/taskStore';
 import { apiPost } from '#renderer/api';
 import { useToastStore } from '#renderer/stores/toastStore';
-import type { TaskItem } from '#renderer/types';
 
 const SETUP_TOTAL = 4;
 
@@ -65,8 +66,16 @@ export function App(): React.ReactElement {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [createTaskOpen, setCreateTaskOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
-  const [detailItem, setDetailItem] = useState<TaskItem | null>(null);
+  const [detailItemId, setDetailItemId] = useState<number | null>(null);
   const [setupActive, setSetupActive] = useState(false);
+
+  const actions = useTaskActions();
+
+  // Derive detailItem from the store so optimistic updates (e.g. status →
+  // captain-merging after merge) are reflected immediately — no stale snapshot.
+  const detailItem = useTaskStore((s) =>
+    detailItemId !== null ? (s.items.find((t) => t.id === detailItemId) ?? null) : null,
+  );
 
   const { sseStatus } = useDataContext();
 
@@ -168,7 +177,7 @@ export function App(): React.ReactElement {
           const task = useTaskStore.getState().items.find((t) => t.id === id);
           if (task) {
             setActiveTab('captain');
-            setDetailItem(task);
+            setDetailItemId(id);
             return;
           }
         }
@@ -177,10 +186,10 @@ export function App(): React.ReactElement {
       // CronAlert → cron tab, RateLimited → captain tab (where impact is visible).
       // Clear detailItem so the tab switch is visible (detail view short-circuits render).
       if (kind?.type === 'CronAlert') {
-        setDetailItem(null);
+        setDetailItemId(null);
         setActiveTab('cron');
       } else if (kind?.type === 'RateLimited') {
-        setDetailItem(null);
+        setDetailItemId(null);
         setActiveTab('captain');
       }
       // Generic: window is already shown/focused by the main process.
@@ -193,9 +202,25 @@ export function App(): React.ReactElement {
       <div className="flex h-screen flex-col" style={{ background: 'var(--color-bg)' }}>
         <div className="h-8 shrink-0" style={{ WebkitAppRegion: 'drag' } as React.CSSProperties} />
         <div className="flex-1 overflow-hidden px-8 py-4">
-          <TaskDetailView item={detailItem} onBack={() => setDetailItem(null)} />
+          <TaskDetailView
+            item={detailItem}
+            onBack={() => {
+              actions.setMergeItem(null);
+              setDetailItemId(null);
+            }}
+            onMerge={() => actions.setMergeItem(detailItem)}
+          />
         </div>
         <DevInfoBar />
+        {actions.mergeItem && (
+          <MergeModal
+            item={actions.mergeItem}
+            onConfirm={actions.handleMerge}
+            onCancel={() => actions.setMergeItem(null)}
+            pending={actions.mergePending}
+            result={actions.mergeResult}
+          />
+        )}
         <CommandPalette
           open={paletteOpen}
           onClose={() => setPaletteOpen(false)}
@@ -331,7 +356,7 @@ export function App(): React.ReactElement {
               <CaptainView
                 projectFilter={projectFilter}
                 onCreateTask={openCreateTask}
-                onOpenDetail={setDetailItem}
+                onOpenDetail={(item) => setDetailItemId(item.id)}
               />
             )}
             {activeTab === 'scout' && <ScoutPage />}

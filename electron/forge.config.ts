@@ -46,9 +46,15 @@ const config: ForgeConfig = {
         hardenedRuntime: true,
       }),
     },
-    osxNotarize: {
-      keychainProfile: 'mando-notorize',
-    },
+    osxNotarize: process.env.CI
+      ? {
+          appleId: process.env.APPLE_ID!,
+          appleIdPassword: process.env.APPLE_ID_PASSWORD!,
+          teamId: process.env.APPLE_TEAM_ID!,
+        }
+      : {
+          keychainProfile: 'mando-notorize',
+        },
   },
   makers: [
     new MakerDMG({ name: appName, icon: './assets/icon.icns' }),

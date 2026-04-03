@@ -194,24 +194,30 @@ export function ActionBtn({
   label,
   onClick,
   testId,
+  disabled,
+  pending,
 }: {
   label: string;
   onClick: () => void;
   testId?: string;
+  disabled?: boolean;
+  pending?: boolean;
 }): React.ReactElement {
+  const isDisabled = disabled || pending;
   return (
     <button
       data-testid={testId}
       onClick={onClick}
-      className="shrink-0 rounded px-2 py-0.5 text-[11px] font-medium transition-colors"
+      disabled={isDisabled}
+      className="shrink-0 rounded px-2 py-0.5 text-[11px] font-medium transition-colors disabled:opacity-40"
       style={{
         background: 'transparent',
         color: 'var(--color-text-2)',
         border: '1px solid var(--color-border-subtle)',
-        cursor: 'pointer',
+        cursor: isDisabled ? 'default' : 'pointer',
       }}
     >
-      {label}
+      {pending ? '...' : label}
     </button>
   );
 }

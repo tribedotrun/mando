@@ -90,6 +90,8 @@ export function DataProvider({ children }: { children: React.ReactNode }): React
               case 'tasks':
                 taskFetch();
                 queryClient.invalidateQueries({ queryKey: ['metrics-workers'] });
+                queryClient.invalidateQueries({ queryKey: ['task-detail-timeline'] });
+                queryClient.invalidateQueries({ queryKey: ['task-detail-pr'] });
                 break;
               case 'scout':
                 scoutFetch();
@@ -102,9 +104,12 @@ export function DataProvider({ children }: { children: React.ReactNode }): React
                 taskFetch();
                 queryClient.invalidateQueries({ queryKey: ['status'] });
                 queryClient.invalidateQueries({ queryKey: ['metrics-workers'] });
+                queryClient.invalidateQueries({ queryKey: ['task-detail-timeline'] });
+                queryClient.invalidateQueries({ queryKey: ['task-detail-pr'] });
                 break;
               case 'sessions':
                 queryClient.invalidateQueries({ queryKey: ['sessions'] });
+                queryClient.invalidateQueries({ queryKey: ['task-detail-timeline'] });
                 break;
               case 'notification':
                 if (event.data && typeof event.data === 'object' && 'message' in event.data) {

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import log from '#renderer/logger';
 import { useToastStore } from '#renderer/stores/toastStore';
 import { useTaskStore } from '#renderer/stores/taskStore';
@@ -24,10 +25,18 @@ export function useTaskActions() {
   const taskFetch = useTaskStore((s) => s.fetch);
   const taskItems = useTaskStore((s) => s.items);
   const optimisticUpdate = useTaskStore((s) => s.optimisticUpdate);
+  const queryClient = useQueryClient();
 
-  const [mergeItem, setMergeItem] = useState<TaskItem | null>(null);
+  const [mergeItem, setMergeItemRaw] = useState<TaskItem | null>(null);
   const [mergePending, setMergePending] = useState(false);
   const [mergeResult, setMergeResult] = useState<{ ok: boolean; message: string } | null>(null);
+
+  // Clear stale mergeResult when opening a new merge modal so a previous
+  // failure doesn't permanently disable the Merge button on retry.
+  const setMergeItem = (item: TaskItem | null) => {
+    setMergeItemRaw(item);
+    if (item) setMergeResult(null);
+  };
   const [reopenItem2, setReopenItem] = useState<TaskItem | null>(null);
   const [reopenPending, setReopenPending] = useState(false);
   const [reworkItem2, setReworkItem] = useState<TaskItem | null>(null);
@@ -51,6 +60,8 @@ export function useTaskActions() {
     try {
       await fn();
       taskFetch();
+      queryClient.invalidateQueries({ queryKey: ['task-detail-timeline', id] });
+      queryClient.invalidateQueries({ queryKey: ['task-detail-pr', id] });
       if (successMsg) toast().add('success', successMsg);
     } catch (err) {
       taskFetch();
@@ -69,6 +80,8 @@ export function useTaskActions() {
         log.warn('[tasks] post-merge tick trigger failed:', err);
       });
       taskFetch();
+      queryClient.invalidateQueries({ queryKey: ['task-detail-timeline', itemId] });
+      queryClient.invalidateQueries({ queryKey: ['task-detail-pr', itemId] });
       setTimeout(() => {
         setMergeItem(null);
         setMergeResult(null);

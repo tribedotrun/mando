@@ -1,7 +1,7 @@
 import React from 'react';
 
 export const INPUT_CLS =
-  'w-full rounded px-3 py-2 text-xs placeholder-[var(--color-text-3)] focus:outline-none focus:ring-1 focus:ring-[var(--color-accent)]';
+  'w-full rounded px-3 py-2 text-xs placeholder-[var(--color-text-3)] focus:outline-none';
 export const INPUT_STYLE: React.CSSProperties = {
   border: '1px solid var(--color-border-subtle)',
   background: 'var(--color-surface-2)',

@@ -378,6 +378,7 @@ pub(crate) async fn poll_merging_items(
                         item_id = item.id,
                         "merge timeout during rate limit — not counting against retry budget"
                     );
+                    super::timeline_emit::emit_rate_limited(item, pool).await;
                     item.session_ids.merge = None;
                     continue;
                 }

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useMountEffect } from '#renderer/hooks/useMountEffect';
 import { fetchTimeline, fetchItemSessions, fetchTranscript, fetchPrSummary } from '#renderer/api';
@@ -19,6 +19,14 @@ import { PrSections } from '#renderer/components/PrSections';
 import { TaskActionBar } from '#renderer/components/TaskActionBar';
 import { TaskTimeline } from '#renderer/components/TaskTimeline';
 import { ClarificationSection } from '#renderer/components/ClarificationSection';
+import { TaskQA, type TaskQAHandle } from '#renderer/components/TaskQA';
+import { TaskQAExpanded } from '#renderer/components/TaskQAExpanded';
+import {
+  ActionButton,
+  DetailSection,
+  DetailOverflowMenu,
+  ContextToggle,
+} from '#renderer/components/TaskDetailParts';
 
 interface Props {
   item: TaskItem;
@@ -42,16 +50,21 @@ export function TaskDetailView({
     loading: boolean;
   } | null>(null);
   const [transcriptFullScreen, setTranscriptFullScreen] = useState(false);
+  const [qaExpanded, setQaExpanded] = useState(false);
+  const [qaOpen, setQaOpen] = useState(true);
+  const qaRef = useRef<TaskQAHandle | null>(null);
 
   // Refs to avoid stale closure in mount-only keydown handler
   const transcriptFullScreenRef = React.useRef(transcriptFullScreen);
   transcriptFullScreenRef.current = transcriptFullScreen;
   const transcriptSessionRef = React.useRef(transcriptSession);
   transcriptSessionRef.current = transcriptSession;
+  const qaExpandedRef = React.useRef(qaExpanded);
+  qaExpandedRef.current = qaExpanded;
   const onBackRef = React.useRef(onBack);
   onBackRef.current = onBack;
 
-  // Escape key: close full-screen transcript, then close sidebar, then go back.
+  // Escape key: close full-screen transcript, then Q&A expanded, then sidebar, then go back.
   // Skip if another overlay (modal, command palette) is open.
   useMountEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -66,6 +79,8 @@ export function TaskDetailView({
       e.stopPropagation();
       if (transcriptFullScreenRef.current) {
         setTranscriptFullScreen(false);
+      } else if (qaExpandedRef.current) {
+        setQaExpanded(false);
       } else if (transcriptSessionRef.current) {
         setTranscriptSession(null);
       } else {
@@ -75,6 +90,20 @@ export function TaskDetailView({
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
   });
+
+  const handleAskFromBar = useCallback((question: string) => {
+    setQaOpen(true);
+    // Small delay so the Q&A component mounts before receiving the ask.
+    setTimeout(() => qaRef.current?.askFromBar(question), 50);
+  }, []);
+
+  const handleQaClose = useCallback(() => {
+    setQaOpen(false);
+  }, []);
+
+  const handleQaExpand = useCallback(() => {
+    setQaExpanded(true);
+  }, []);
 
   const { data: timelineData } = useQuery({
     queryKey: ['task-detail-timeline', item.id],
@@ -227,14 +256,14 @@ export function TaskDetailView({
                 </div>
               </div>
               <div className="flex shrink-0 items-center gap-2">
-                {onMerge && item.pr && item.status === 'awaiting-review' && (
-                  <ActionButton label="Merge" onClick={onMerge} accent />
-                )}
                 {onReopen && FINALIZED_STATUSES.includes(item.status) && (
                   <ActionButton label="Reopen" onClick={onReopen} />
                 )}
                 {onRework && FINALIZED_STATUSES.includes(item.status) && (
                   <ActionButton label="Rework" onClick={onRework} />
+                )}
+                {onMerge && item.pr && item.project && item.status === 'awaiting-review' && (
+                  <ActionButton label="Merge" onClick={onMerge} accent />
                 )}
                 {(item.branch || item.worktree || item.plan) && <DetailOverflowMenu item={item} />}
               </div>
@@ -300,8 +329,19 @@ export function TaskDetailView({
         )}
       </div>
 
+      {/* Q&A section — between content and action bar */}
+      {qaOpen && (
+        <TaskQA
+          key={item.id}
+          item={item}
+          qaRef={qaRef}
+          onExpand={handleQaExpand}
+          onClose={handleQaClose}
+        />
+      )}
+
       {/* Action bar — pinned at bottom, full width */}
-      <TaskActionBar item={item} />
+      <TaskActionBar item={item} onAsk={handleAskFromBar} />
 
       {/* Full-screen transcript overlay */}
       {transcriptSession && transcriptFullScreen && (
@@ -324,174 +364,18 @@ export function TaskDetailView({
           </div>
         </div>
       )}
-    </div>
-  );
-}
 
-// ── Sub-components ──
-
-function ActionButton({
-  label,
-  onClick,
-  accent,
-}: {
-  label: string;
-  onClick: () => void;
-  accent?: boolean;
-}): React.ReactElement {
-  return (
-    <button
-      onClick={onClick}
-      className="rounded-md px-4 py-1.5 text-[13px] font-medium"
-      style={{
-        background: accent ? 'var(--color-accent)' : 'transparent',
-        color: accent ? 'var(--color-bg)' : 'var(--color-text-2)',
-        border: accent ? 'none' : '1px solid var(--color-border)',
-        cursor: 'pointer',
-      }}
-    >
-      {label}
-    </button>
-  );
-}
-
-function DetailSection({
-  label,
-  children,
-}: {
-  label: string;
-  children: React.ReactNode;
-}): React.ReactElement {
-  return (
-    <div className="mb-5">
-      <div
-        className="mb-2 text-[10px] font-medium uppercase tracking-widest"
-        style={{ color: 'var(--color-text-4)' }}
-      >
-        {label}
-      </div>
-      {children}
-    </div>
-  );
-}
-
-function DetailOverflowMenu({ item }: { item: TaskItem }): React.ReactElement {
-  const [open, setOpen] = useState(false);
-
-  const copyAndClose = (text: string) => {
-    navigator.clipboard.writeText(text).catch(() => {});
-    setOpen(false);
-  };
-
-  const entries: { label: string; value: string }[] = [];
-  if (item.branch) entries.push({ label: 'Copy branch', value: item.branch });
-  if (item.worktree) entries.push({ label: 'Copy working directory', value: item.worktree });
-  if (item.plan) {
-    const planLabel = item.plan.endsWith('adopt-handoff.md')
-      ? 'Copy handoff path'
-      : 'Copy brief path';
-    entries.push({ label: planLabel, value: item.plan });
-  }
-
-  return (
-    <div
-      className="relative"
-      onBlur={(e) => {
-        if (!e.currentTarget.contains(e.relatedTarget)) setOpen(false);
-      }}
-    >
-      <button
-        onClick={() => setOpen((v) => !v)}
-        aria-label="More info"
-        className="flex items-center justify-center rounded"
-        style={{
-          width: 28,
-          height: 28,
-          background: 'transparent',
-          color: 'var(--color-text-2)',
-          border: '1px solid var(--color-border)',
-          cursor: 'pointer',
-          fontSize: 14,
-          borderRadius: 6,
-        }}
-      >
-        &hellip;
-      </button>
-      {open && (
-        <div
-          className="absolute right-0 top-full z-50 mt-1 min-w-[220px] rounded-lg py-1"
-          style={{
-            background: 'var(--color-surface-3)',
-            border: '1px solid var(--color-border)',
-            boxShadow: '0 4px 16px rgba(0,0,0,0.3)',
+      {/* Expanded Q&A overlay */}
+      {qaExpanded && (
+        <TaskQAExpanded
+          item={item}
+          initialMessages={qaRef.current?.getMessages()}
+          onBack={() => setQaExpanded(false)}
+          onClose={() => {
+            setQaExpanded(false);
+            setQaOpen(false);
           }}
-        >
-          {entries.map(({ label, value }) => (
-            <button
-              key={label}
-              onClick={() => copyAndClose(value)}
-              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] hover:bg-[var(--color-surface-2)]"
-              style={{
-                color: 'var(--color-text-1)',
-                background: 'none',
-                border: 'none',
-                cursor: 'pointer',
-              }}
-            >
-              <svg
-                width="12"
-                height="12"
-                viewBox="0 0 12 12"
-                fill="none"
-                stroke="var(--color-text-3)"
-                strokeWidth="1.2"
-                strokeLinecap="round"
-              >
-                <rect x="4" y="4" width="7" height="7" rx="1" />
-                <path d="M8 4V2.5A1.5 1.5 0 006.5 1H2.5A1.5 1.5 0 001 2.5v4A1.5 1.5 0 002.5 8H4" />
-              </svg>
-              {label}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function ContextToggle({ context }: { context: string }): React.ReactElement {
-  const [open, setOpen] = useState(false);
-  return (
-    <div className="mb-5">
-      <button
-        onClick={() => setOpen((v) => !v)}
-        className="mb-2 flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-widest"
-        style={{
-          color: 'var(--color-text-4)',
-          background: 'none',
-          border: 'none',
-          cursor: 'pointer',
-          padding: 0,
-        }}
-      >
-        <svg
-          width="8"
-          height="8"
-          viewBox="0 0 8 8"
-          fill="currentColor"
-          style={{
-            transition: 'transform 150ms',
-            transform: open ? 'rotate(90deg)' : 'none',
-          }}
-        >
-          <path d="M2 1l4 3-4 3V1z" />
-        </svg>
-        Context
-      </button>
-      {open && (
-        <p className="text-[11px] leading-relaxed" style={{ color: 'var(--color-text-3)' }}>
-          {context}
-        </p>
+        />
       )}
     </div>
   );

@@ -425,6 +425,7 @@ pub(crate) async fn dispatch_new_work(
                     .await;
                 // Rate-limit-caused failure — activate cooldown, skip retry count.
                 if super::rate_limit_cooldown::check_and_activate_from_stream(&session_id) {
+                    super::timeline_emit::emit_rate_limited(item, pool).await;
                     continue;
                 }
                 let count = item.clarifier_fail_count + 1;
@@ -496,7 +497,6 @@ pub(crate) async fn dispatch_new_work(
 
     Ok(active_workers)
 }
-
 #[cfg(test)]
 #[path = "dispatch_phase_tests.rs"]
 mod tests;

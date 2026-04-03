@@ -5,7 +5,7 @@ use mando_config::workflow::CaptainWorkflow;
 use mando_types::task::ItemStatus;
 use mando_types::Task;
 
-use super::{captain_review, notify::Notifier, rate_limit_cooldown};
+use super::{captain_review, notify::Notifier, rate_limit_cooldown, timeline_emit};
 
 pub(super) async fn poll_reviewing_items(
     items: &mut [Task],
@@ -82,6 +82,7 @@ pub(super) async fn poll_reviewing_items(
                     item_id = item.id,
                     "review failed due to rate limit — not counting against retry budget"
                 );
+                timeline_emit::emit_rate_limited(item, pool).await;
                 item.session_ids.review = None;
                 continue;
             }
@@ -135,6 +136,7 @@ pub(super) async fn poll_reviewing_items(
                     item_id = item.id,
                     "review timeout during rate limit — not counting against retry budget"
                 );
+                timeline_emit::emit_rate_limited(item, pool).await;
                 // Clear session so a fresh one spawns after cooldown.
                 item.session_ids.review = None;
                 continue;

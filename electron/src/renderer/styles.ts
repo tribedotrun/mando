@@ -20,7 +20,7 @@ export const labelStyle: React.CSSProperties = { color: 'var(--color-text-3)' };
 
 /** Standard input class string for settings/form inputs. */
 export const inputCls =
-  'w-full rounded-md px-3 py-2 text-sm placeholder-[var(--color-text-3)] focus:outline-none focus:ring-1';
+  'w-full rounded-md px-3 py-2 text-sm placeholder-[var(--color-text-3)] focus:outline-none';
 
 /** Standard label class string for form labels. */
 export const labelCls = 'mb-1 block text-xs font-medium uppercase tracking-wider';

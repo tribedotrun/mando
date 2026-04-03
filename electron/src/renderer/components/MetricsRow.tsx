@@ -15,12 +15,11 @@ function formatRuntime(startedAt?: string): string {
   return h > 0 ? `${h}h ${m}m` : `${m}m`;
 }
 
-type WorkerPhase = 'active' | 'reviewing' | 'stale';
+type WorkerPhase = 'active' | 'reviewing' | 'merging' | 'stale';
 
 function getWorkerPhase(worker: WorkerDetail, stale: boolean): WorkerPhase {
-  if (worker.status === 'captain-reviewing' || worker.status === 'captain-merging') {
-    return 'reviewing';
-  }
+  if (worker.status === 'captain-reviewing') return 'reviewing';
+  if (worker.status === 'captain-merging') return 'merging';
   return stale ? 'stale' : 'active';
 }
 
@@ -34,6 +33,11 @@ const PHASE_COLORS: Record<WorkerPhase, { dot: string; text: string; duration: s
     dot: 'var(--color-accent)',
     text: 'var(--color-accent)',
     duration: 'var(--color-accent)',
+  },
+  merging: {
+    dot: 'var(--color-text-2)',
+    text: 'var(--color-text-2)',
+    duration: 'var(--color-text-2)',
   },
   stale: {
     dot: 'var(--color-stale)',
@@ -53,8 +57,10 @@ function WorkerRow({
   onNudge?: (worker: WorkerDetail) => void;
   onStop?: (worker: WorkerDetail) => void;
 }) {
-  const [menuOpen, setMenuOpen] = useState(false);
+  const [menuOpenRaw, setMenuOpen] = useState(false);
   const btnRef = useRef<HTMLButtonElement>(null);
+  const hasActions = !!onNudge || !!onStop;
+  const menuOpen = hasActions && menuOpenRaw;
   const phase = getWorkerPhase(worker, stale);
   const colors = PHASE_COLORS[phase];
   const dotColor = colors.dot;
@@ -135,86 +141,102 @@ function WorkerRow({
             flexShrink: 0,
           }}
         >
-          {worker.status === 'captain-merging' ? 'merging' : 'reviewing'}
+          reviewing
+        </span>
+      )}
+      {phase === 'merging' && (
+        <span
+          style={{
+            fontSize: 10,
+            color: 'var(--color-text-2)',
+            lineHeight: '14px',
+            flexShrink: 0,
+          }}
+        >
+          merging
         </span>
       )}
 
-      {/* Overflow menu trigger */}
-      <button
-        ref={btnRef}
-        onClick={() => setMenuOpen((v) => !v)}
-        aria-label="Worker actions"
-        className="shrink-0 rounded opacity-0 transition-opacity group-hover:opacity-100"
-        style={{
-          width: 20,
-          height: 20,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          background: 'transparent',
-          border: 'none',
-          color: 'var(--color-text-2)',
-          cursor: 'pointer',
-          ...(menuOpen ? { opacity: 1 } : {}),
-        }}
-      >
-        <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
-          <circle cx="8" cy="3" r="1.5" />
-          <circle cx="8" cy="8" r="1.5" />
-          <circle cx="8" cy="13" r="1.5" />
-        </svg>
-      </button>
-
-      {/* Dropdown menu — fixed positioning to escape overflow:hidden parent */}
-      {menuOpen && (
+      {hasActions && (
         <>
-          <div className="fixed inset-0 z-40" onClick={() => setMenuOpen(false)} />
-          <div
-            className="fixed z-50 rounded border py-1"
+          {/* Overflow menu trigger */}
+          <button
+            ref={btnRef}
+            onClick={() => setMenuOpen((v) => !v)}
+            aria-label="Worker actions"
+            className="shrink-0 rounded opacity-0 transition-opacity group-hover:opacity-100"
             style={{
-              top: btnRef.current ? btnRef.current.getBoundingClientRect().bottom + 4 : 0,
-              left: btnRef.current ? btnRef.current.getBoundingClientRect().right - 100 : 0,
-              background: 'var(--color-surface-2)',
-              borderColor: 'var(--color-border)',
-              boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
-              minWidth: 100,
+              width: 20,
+              height: 20,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              background: 'transparent',
+              border: 'none',
+              color: 'var(--color-text-2)',
+              cursor: 'pointer',
+              ...(menuOpen ? { opacity: 1 } : {}),
             }}
           >
-            {onNudge && (
-              <button
-                onClick={() => {
-                  setMenuOpen(false);
-                  onNudge(worker);
-                }}
-                className="flex w-full items-center px-3 py-1.5 text-left text-xs"
+            <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
+              <circle cx="8" cy="3" r="1.5" />
+              <circle cx="8" cy="8" r="1.5" />
+              <circle cx="8" cy="13" r="1.5" />
+            </svg>
+          </button>
+
+          {/* Dropdown menu — fixed positioning to escape overflow:hidden parent */}
+          {menuOpen && (
+            <>
+              <div className="fixed inset-0 z-40" onClick={() => setMenuOpen(false)} />
+              <div
+                className="fixed z-50 rounded border py-1"
                 style={{
-                  color: 'var(--color-text-2)',
-                  background: 'none',
-                  border: 'none',
-                  cursor: 'pointer',
+                  top: btnRef.current ? btnRef.current.getBoundingClientRect().bottom + 4 : 0,
+                  left: btnRef.current ? btnRef.current.getBoundingClientRect().right - 100 : 0,
+                  background: 'var(--color-surface-2)',
+                  borderColor: 'var(--color-border)',
+                  boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+                  minWidth: 100,
                 }}
               >
-                Nudge
-              </button>
-            )}
-            {onStop && (
-              <button
-                onClick={() => {
-                  setMenuOpen(false);
-                  onStop(worker);
-                }}
-                className="flex w-full items-center px-3 py-1.5 text-left text-xs"
-                style={{
-                  color: 'var(--color-error)',
-                  background: 'none',
-                  border: 'none',
-                  cursor: 'pointer',
-                }}
-              >
-                Stop
-              </button>
-            )}
-          </div>
+                {onNudge && (
+                  <button
+                    onClick={() => {
+                      setMenuOpen(false);
+                      onNudge(worker);
+                    }}
+                    className="flex w-full items-center px-3 py-1.5 text-left text-xs"
+                    style={{
+                      color: 'var(--color-text-2)',
+                      background: 'none',
+                      border: 'none',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Nudge
+                  </button>
+                )}
+                {onStop && (
+                  <button
+                    onClick={() => {
+                      setMenuOpen(false);
+                      onStop(worker);
+                    }}
+                    className="flex w-full items-center px-3 py-1.5 text-left text-xs"
+                    style={{
+                      color: 'var(--color-error)',
+                      background: 'none',
+                      border: 'none',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Stop
+                  </button>
+                )}
+              </div>
+            </>
+          )}
         </>
       )}
     </div>
@@ -237,11 +259,14 @@ export function MetricsRow({
   });
 
   const workers: WorkerDetail[] = workersData?.workers ?? [];
+  const rateLimitSecs = workersData?.rate_limit_remaining_secs ?? 0;
   const activeWorkers = workers.filter((w) => getWorkerPhase(w, !!w.is_stale) === 'active');
   const reviewingWorkers = workers.filter((w) => getWorkerPhase(w, !!w.is_stale) === 'reviewing');
+  const mergingWorkers = workers.filter((w) => getWorkerPhase(w, !!w.is_stale) === 'merging');
   const staleWorkers = workers.filter((w) => getWorkerPhase(w, !!w.is_stale) === 'stale');
   const activeCount = activeWorkers.length;
   const reviewingCount = reviewingWorkers.length;
+  const mergingCount = mergingWorkers.length;
   const staleCount = staleWorkers.length;
 
   return (
@@ -266,7 +291,9 @@ export function MetricsRow({
             <HeaderContent
               activeCount={activeCount}
               reviewingCount={reviewingCount}
+              mergingCount={mergingCount}
               staleCount={staleCount}
+              rateLimitSecs={rateLimitSecs}
               expanded={false}
             />
           </button>
@@ -282,7 +309,14 @@ export function MetricsRow({
               color: 'var(--color-text-3)',
             }}
           >
-            <HeaderContent activeCount={0} reviewingCount={0} staleCount={0} expanded={false} />
+            <HeaderContent
+              activeCount={0}
+              reviewingCount={0}
+              mergingCount={0}
+              staleCount={0}
+              rateLimitSecs={rateLimitSecs}
+              expanded={false}
+            />
           </div>
         ))}
 
@@ -312,7 +346,9 @@ export function MetricsRow({
             <HeaderContent
               activeCount={activeCount}
               reviewingCount={reviewingCount}
+              mergingCount={mergingCount}
               staleCount={staleCount}
+              rateLimitSecs={rateLimitSecs}
               expanded={true}
             />
           </button>
@@ -333,6 +369,11 @@ export function MetricsRow({
             <WorkerRow key={w.id} worker={w} stale={false} />
           ))}
 
+          {/* Merging workers — captain is merging, no user actions */}
+          {mergingWorkers.map((w) => (
+            <WorkerRow key={w.id} worker={w} stale={false} />
+          ))}
+
           {/* Stale workers */}
           {staleWorkers.map((w) => (
             <WorkerRow key={w.id} worker={w} stale={true} onNudge={onNudge} onStop={onStopWorker} />
@@ -349,12 +390,16 @@ export function MetricsRow({
 function HeaderContent({
   activeCount,
   reviewingCount,
+  mergingCount,
   staleCount,
+  rateLimitSecs,
   expanded,
 }: {
   activeCount: number;
   reviewingCount: number;
+  mergingCount: number;
   staleCount: number;
+  rateLimitSecs: number;
   expanded: boolean;
 }) {
   return (
@@ -379,6 +424,11 @@ function HeaderContent({
           {reviewingCount} reviewing
         </span>
       )}
+      {mergingCount > 0 && (
+        <span style={{ fontSize: 12, color: 'var(--color-text-2)', lineHeight: '16px' }}>
+          {mergingCount} merging
+        </span>
+      )}
       {staleCount > 0 && (
         <span
           style={{
@@ -391,8 +441,13 @@ function HeaderContent({
           {staleCount} stale
         </span>
       )}
+      {rateLimitSecs > 0 && (
+        <span style={{ fontSize: 12, color: 'var(--color-text-4)', lineHeight: '16px' }}>
+          paused ~{Math.ceil(rateLimitSecs / 60)}m
+        </span>
+      )}
       <span style={{ flex: 1 }} />
-      {(activeCount > 0 || reviewingCount > 0 || staleCount > 0) && (
+      {(activeCount > 0 || reviewingCount > 0 || mergingCount > 0 || staleCount > 0) && (
         <svg
           width="10"
           height="10"

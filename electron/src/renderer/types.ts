@@ -113,6 +113,7 @@ export interface WorkerDetail {
 
 export interface WorkersResponse {
   workers: WorkerDetail[];
+  rate_limit_remaining_secs?: number;
 }
 
 export interface CronJob {
@@ -258,6 +259,16 @@ export interface AskResponse {
   answer: string;
   session_id?: string;
   suggested_followups?: string[];
+}
+
+export interface AskHistoryEntry {
+  role: 'human' | 'assistant';
+  content: string;
+  timestamp: string;
+}
+
+export interface AskHistoryResponse {
+  history: AskHistoryEntry[];
 }
 
 export interface ScoutArticleResponse {

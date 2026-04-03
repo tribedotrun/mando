@@ -25,6 +25,7 @@ const EVENT_ICONS: Record<string, string> = {
   canceled: '\u2014',
   handed_off: '\u{1F932}',
   status_changed: '\u{1F500}',
+  rate_limited: '\u23F3',
 };
 
 const DOT_COLORS: Record<string, string> = {
@@ -38,6 +39,7 @@ const DOT_COLORS: Record<string, string> = {
   clarify_question: 'var(--color-needs-human)',
   escalated: 'var(--color-error)',
   errored: 'var(--color-error)',
+  rate_limited: 'var(--color-text-4)',
 };
 
 export function TaskTimeline({

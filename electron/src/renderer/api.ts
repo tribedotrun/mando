@@ -10,6 +10,7 @@ import type {
   TickResult,
   PrSummaryResponse,
   AskResponse,
+  AskHistoryResponse,
   SSEConnectionStatus,
   ItemSessionsResponse,
   JournalResponse,
@@ -293,6 +294,10 @@ export const toggleCronJob = (id: string, enabled: boolean) =>
 // Task Ask
 export const askTask = (id: number, question: string) =>
   apiPost<AskResponse>('/api/tasks/ask', { id, question });
+
+// Task Ask History
+export const fetchAskHistory = (id: number) =>
+  apiGet<AskHistoryResponse>(`/api/tasks/${id}/history`);
 
 // Merge PR
 export const mergePr = (pr: string, project: string) =>

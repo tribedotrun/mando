@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import log from '#renderer/logger';
 import { fetchHealth } from '#renderer/api';
@@ -38,10 +38,14 @@ const GATEWAY_STATE: Record<string, { dot: string; label: string }> = {
 };
 const GATEWAY_FALLBACK = GATEWAY_STATE.disconnected;
 
+type UpdateCheckStatus = 'idle' | 'checking' | 'up-to-date' | 'update-available' | 'error';
+
 export function SettingsGeneral(): React.ReactElement {
   const [channelOverride, setChannelOverride] = useState<string | null>(null);
   const [notificationsEnabled, setNotifState] = useState(getNotificationsEnabled);
   const [liveConnectionState, setLiveConnectionState] = useState<ConnectionState | null>(null);
+  const [updateCheckStatus, setUpdateCheckStatus] = useState<UpdateCheckStatus>('idle');
+  const clearTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const startAtLogin = useSettingsStore((s) => s.config.startAtLogin ?? false);
   const update = useSettingsStore((s) => s.update);
   const save = useSettingsStore((s) => s.save);
@@ -89,8 +93,25 @@ export function SettingsGeneral(): React.ReactElement {
     window.mandoAPI.onConnectionState((state) => {
       setLiveConnectionState(state as ConnectionState);
     });
+    window.mandoAPI.updates.onUpdateChecking(() => {
+      clearTimeout(clearTimerRef.current);
+      setUpdateCheckStatus('checking');
+    });
+    window.mandoAPI.updates.onUpdateNoUpdate(() => {
+      setUpdateCheckStatus('up-to-date');
+      clearTimerRef.current = setTimeout(() => setUpdateCheckStatus('idle'), 4000);
+    });
+    window.mandoAPI.updates.onUpdateCheckError(() => {
+      setUpdateCheckStatus('error');
+      clearTimerRef.current = setTimeout(() => setUpdateCheckStatus('idle'), 4000);
+    });
+    window.mandoAPI.updates.onUpdateCheckDone(({ found }) => {
+      if (found) setUpdateCheckStatus('update-available');
+    });
     return () => {
+      clearTimeout(clearTimerRef.current);
       window.mandoAPI.removeConnectionStateListeners();
+      window.mandoAPI.updates.removeCheckListeners();
     };
   });
 
@@ -157,8 +178,14 @@ export function SettingsGeneral(): React.ReactElement {
       </div>
 
       <SettingsRow label="Version">
-        <span className="text-code" style={{ color: 'var(--color-text-1)' }}>
-          {appVersion || '\u2014'}
+        <span className="flex items-center gap-3">
+          <span className="text-code" style={{ color: 'var(--color-text-1)' }}>
+            {appVersion || '\u2014'}
+          </span>
+          <UpdateCheckButton
+            status={updateCheckStatus}
+            onError={() => setUpdateCheckStatus('error')}
+          />
         </span>
       </SettingsRow>
 
@@ -254,6 +281,68 @@ export function SettingsGeneral(): React.ReactElement {
         </p>
       ) : null}
     </div>
+  );
+}
+
+function UpdateCheckButton({
+  status,
+  onError,
+}: {
+  status: UpdateCheckStatus;
+  onError: () => void;
+}) {
+  if (status === 'checking') {
+    return (
+      <span className="text-caption" style={{ color: 'var(--color-text-3)' }}>
+        Checking…
+      </span>
+    );
+  }
+  if (status === 'up-to-date') {
+    return (
+      <span className="text-caption" style={{ color: 'var(--color-success)' }}>
+        Up to date
+      </span>
+    );
+  }
+  if (status === 'update-available') {
+    return (
+      <span className="text-caption" style={{ color: 'var(--color-accent)' }}>
+        Update ready
+      </span>
+    );
+  }
+  if (status === 'error') {
+    return (
+      <span className="text-caption" style={{ color: 'var(--color-error)' }}>
+        Check failed
+      </span>
+    );
+  }
+  return (
+    <button
+      onClick={() => {
+        window.mandoAPI.updates.checkForUpdates().catch(onError);
+      }}
+      className="text-caption transition-colors"
+      style={{
+        color: 'var(--color-text-3)',
+        background: 'none',
+        border: 'none',
+        cursor: 'pointer',
+        padding: 0,
+        textDecoration: 'underline',
+        textUnderlineOffset: 2,
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.color = 'var(--color-text-1)';
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.color = 'var(--color-text-3)';
+      }}
+    >
+      Check for updates
+    </button>
   );
 }
 
