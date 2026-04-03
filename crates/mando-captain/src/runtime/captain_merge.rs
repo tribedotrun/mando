@@ -313,6 +313,7 @@ pub(crate) async fn poll_merging_items(
     workflow: &CaptainWorkflow,
     notifier: &Notifier,
     pool: &sqlx::SqlitePool,
+    rate_limited: bool,
 ) {
     let merge_timeout_s = workflow.agent.captain_merge_timeout_s;
     let max_merge_retries = workflow.agent.max_review_retries;
@@ -326,6 +327,15 @@ pub(crate) async fn poll_merging_items(
             .as_deref()
             .is_some_and(|s| !s.is_empty());
         if !has_session {
+            // During rate-limit cooldown, skip spawning — will retry after cooldown.
+            if rate_limited {
+                tracing::debug!(
+                    module = "captain",
+                    item_id = item.id,
+                    "skipping merge spawn during rate-limit cooldown"
+                );
+                continue;
+            }
             item.last_activity_at = Some(mando_types::now_rfc3339());
             if let Err(e) = spawn_merge(item, config, workflow, notifier, pool).await {
                 tracing::warn!(module = "captain", item_id = item.id, error = %e, "spawn_merge failed");
@@ -358,6 +368,20 @@ pub(crate) async fn poll_merging_items(
                 .unwrap_or(true);
 
             if is_timed_out {
+                // Check if the merge session was killed by rate limiting.
+                let is_rl = item.session_ids.merge.as_deref().is_some_and(|sid| {
+                    super::rate_limit_cooldown::check_and_activate_from_stream(sid)
+                });
+                if is_rl || rate_limited {
+                    tracing::info!(
+                        module = "captain",
+                        item_id = item.id,
+                        "merge timeout during rate limit — not counting against retry budget"
+                    );
+                    item.session_ids.merge = None;
+                    continue;
+                }
+
                 handle_merge_error(
                     item,
                     "merge session timed out without producing a result",

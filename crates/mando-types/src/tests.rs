@@ -163,6 +163,7 @@ fn construct_tick_result() {
             reason: Some("Stale".into()),
         }],
         error: None,
+        rate_limited: false,
     };
     assert_eq!(result.mode, TickMode::Live);
     assert_eq!(result.active_workers, 3);

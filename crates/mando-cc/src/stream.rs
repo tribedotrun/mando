@@ -107,6 +107,35 @@ pub fn is_clean_result(result: &serde_json::Value) -> bool {
     false
 }
 
+/// Check if the current session in a stream file contains a rate_limit_event
+/// with `rejected` status. Returns `resets_at` (unix timestamp) if present.
+pub fn has_rate_limit_rejection(stream_path: &Path) -> Option<u64> {
+    let (content, last_init_idx) = current_session_lines(stream_path)?;
+    let lines: Vec<&str> = content.lines().collect();
+    // Scan backwards — the most recent rate_limit_event is authoritative.
+    // If it's not rejected (e.g. allowed/allowed_warning), stop immediately
+    // rather than scanning older events which may have stale rejections.
+    for line in lines[last_init_idx..].iter().rev() {
+        let val: serde_json::Value = match serde_json::from_str(line) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        if val.get("type").and_then(|t| t.as_str()) != Some("rate_limit_event") {
+            continue;
+        }
+        let info = match val.get("rate_limit_info") {
+            Some(i) => i,
+            None => continue,
+        };
+        // Most recent rate_limit_event found — check and return.
+        if info.get("status").and_then(|s| s.as_str()) == Some("rejected") {
+            return Some(info.get("resets_at").and_then(|v| v.as_u64()).unwrap_or(0));
+        }
+        return None;
+    }
+    None
+}
+
 /// Check if a stream file has a broken session (content but zero init events).
 pub fn stream_has_broken_session(stream_path: &Path) -> bool {
     let content = match std::fs::read_to_string(stream_path) {

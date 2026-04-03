@@ -51,6 +51,15 @@ pub(crate) async fn reconcile_running_sessions(pool: &SqlitePool, stale_threshol
             let status = if mando_cc::is_clean_result(&result) {
                 SessionStatus::Stopped
             } else {
+                // Check if the failure was caused by rate limiting — activate
+                // cooldown so the captain tick pauses before retrying.
+                if super::rate_limit_cooldown::check_and_activate_from_stream(sid) {
+                    tracing::info!(
+                        module = "captain",
+                        session_id = %sid,
+                        "session reconciliation detected rate limit — cooldown activated"
+                    );
+                }
                 SessionStatus::Failed
             };
             crate::io::session_terminate::terminate_session(pool, sid, status, None).await;

@@ -299,8 +299,10 @@ impl Notifier {
                         tracing::error!("rate limit tracker mutex poisoned: {e}");
                     }
                 }
+                super::rate_limit_cooldown::clear();
             }
             mando_cc::RateLimitStatus::Rejected => {
+                super::rate_limit_cooldown::activate(rl.resets_at);
                 let msg = format!(
                     "Rate limited — request rejected (resets at {})",
                     rl.resets_at

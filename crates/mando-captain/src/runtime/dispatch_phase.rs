@@ -177,7 +177,6 @@ pub(crate) async fn dispatch_new_work(
             dispatch_logic::DispatchDecision::NotReady => {}
         }
     }
-
     // Dispatch new items to clarifier.
     let new_items = dispatch_logic::new_items(items);
     for idx in new_items {
@@ -424,6 +423,10 @@ pub(crate) async fn dispatch_new_work(
                 let item = &mut items[idx];
                 super::dispatch_redispatch::revert_clarifier_start(item, &session_id, &e, pool)
                     .await;
+                // Rate-limit-caused failure — activate cooldown, skip retry count.
+                if super::rate_limit_cooldown::check_and_activate_from_stream(&session_id) {
+                    continue;
+                }
                 let count = item.clarifier_fail_count + 1;
                 item.clarifier_fail_count = count;
 

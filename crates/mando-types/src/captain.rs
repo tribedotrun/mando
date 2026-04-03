@@ -127,4 +127,7 @@ pub struct TickResult {
     pub dry_actions: Vec<Action>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// True when the tick ran during a rate-limit cooldown (spawning was suppressed).
+    #[serde(default)]
+    pub rate_limited: bool,
 }
