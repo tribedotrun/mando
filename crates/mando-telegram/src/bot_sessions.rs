@@ -1,6 +1,6 @@
 //! Session management methods for the Telegram bot.
 //!
-//! Input, ops, ask, QA, and act sessions — extracted from bot.rs for file length.
+//! Input, ask, QA, and act sessions — extracted from bot.rs for file length.
 
 use anyhow::Result;
 use tracing::{debug, warn};
@@ -25,27 +25,6 @@ impl TelegramBot {
     }
     pub fn close_input_session(&mut self, cid: &str) {
         self.input_sessions.remove(cid);
-    }
-
-    // ── Ops sessions ─────────────────────────────────────────────────
-
-    pub fn has_ops_session(&self, cid: &str) -> bool {
-        self.ops_sessions.contains_key(cid)
-    }
-    pub fn ops_session_rounds(&self, cid: &str) -> u32 {
-        self.ops_sessions.get(cid).map(|s| s.rounds).unwrap_or(0)
-    }
-    pub fn open_ops_session(&mut self, cid: &str) {
-        self.ops_sessions
-            .insert(cid.to_string(), Session::default());
-    }
-    pub fn close_ops_session(&mut self, cid: &str) {
-        self.ops_sessions.remove(cid);
-    }
-    pub fn increment_ops_rounds(&mut self, cid: &str) {
-        if let Some(s) = self.ops_sessions.get_mut(cid) {
-            s.rounds += 1;
-        }
     }
 
     // ── Ask sessions ─────────────────────────────────────────────────

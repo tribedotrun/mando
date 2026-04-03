@@ -18,7 +18,6 @@ pub struct Config {
     pub captain: CaptainConfig,
     pub voice: VoiceConfig,
     pub scout: ScoutConfig,
-    pub tools: ToolsConfig,
     pub env: HashMap<String, String>,
 }
 
@@ -32,7 +31,6 @@ impl Default for Config {
             captain: CaptainConfig::default(),
             voice: VoiceConfig::default(),
             scout: ScoutConfig::default(),
-            tools: ToolsConfig::default(),
             env: HashMap::new(),
         }
     }
@@ -58,11 +56,7 @@ impl Config {
 #[serde(rename_all = "camelCase", default)]
 pub struct FeaturesConfig {
     pub voice: bool,
-    pub decision_journal: bool,
-    pub cron: bool,
     pub linear: bool,
-    pub dev_mode: bool,
-    pub analytics: bool,
     pub setup_dismissed: bool,
     pub claude_code_verified: bool,
 }
@@ -159,7 +153,6 @@ impl Default for VoiceConfig {
 pub struct CaptainConfig {
     pub auto_schedule: bool,
     pub tick_interval_s: u64,
-    pub learn_cron_expr: String,
     pub tz: String,
     pub projects: HashMap<String, ProjectConfig>,
     #[serde(skip)]
@@ -177,7 +170,6 @@ impl Default for CaptainConfig {
         Self {
             auto_schedule: false,
             tick_interval_s: 30,
-            learn_cron_expr: "0 9 * * *".into(),
             tz: iana_time_zone::get_timezone().unwrap_or_else(|_| "UTC".into()),
             projects: HashMap::new(),
             task_db_path: crate::paths::data_dir()
@@ -222,73 +214,6 @@ pub struct ProjectConfig {
 pub struct ClassifyRule {
     pub category: String,
     pub patterns: Vec<String>,
-}
-
-// ---------------------------------------------------------------------------
-// Tools
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
-pub struct ToolsConfig {
-    #[serde(skip_serializing)]
-    pub cc_self_improve: CCSelfImproveConfig,
-}
-
-// ---------------------------------------------------------------------------
-// CC Self-Improve (gated by features.devMode)
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
-pub struct CCSelfImproveConfig {
-    pub monitor_logs: bool,
-    pub monitor_outbound: bool,
-    pub log_paths: Vec<String>,
-    pub error_patterns: Vec<String>,
-    pub ignore_patterns: Vec<String>,
-    pub poll_interval_s: f64,
-    pub cooldown_s: u64,
-    pub max_repairs_per_hour: u32,
-    pub timeout_s: u64,
-    pub model: String,
-    pub cwd: String,
-}
-
-impl Default for CCSelfImproveConfig {
-    fn default() -> Self {
-        Self {
-            monitor_logs: true,
-            monitor_outbound: true,
-            log_paths: vec![
-                "~/.mando/logs/gateway.stderr.log".into(),
-                "~/.mando/logs/gateway.stdout.log".into(),
-            ],
-            error_patterns: vec![
-                r"\[captain\].*planner spawn failed".into(),
-                r"directory already exists".into(),
-                r"could not parse clarifier output".into(),
-                r"\| CRITICAL\b".into(),
-                r"\| ERROR\b".into(),
-            ],
-            ignore_patterns: vec![
-                r"exception happened while polling for updates".into(),
-                r"nodename nor servname provided, or not known".into(),
-                r"telegram\.error\.(NetworkError|TimedOut|RetryAfter|Forbidden|BadRequest)".into(),
-                r"httpx\.(ReadError|ConnectError|RemoteProtocolError|TimeoutException|ConnectTimeout)".into(),
-                r"httpcore\.(ReadError|ConnectError|RemoteProtocolError)".into(),
-                r"\[captain\] (action|deterministic):".into(),
-                r"\[spawner\] nudged".into(),
-                r"\[self-improve\]".into(),
-            ],
-            poll_interval_s: 2.0,
-            cooldown_s: 300,
-            max_repairs_per_hour: 3,
-            timeout_s: 900,
-            model: "default".into(),
-            cwd: ".".into(),
-        }
-    }
 }
 
 // ---------------------------------------------------------------------------

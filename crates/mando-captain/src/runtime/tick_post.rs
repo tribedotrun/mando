@@ -1,4 +1,4 @@
-//! §5 POST — persist health, prune WAL/journal, SSE, summary.
+//! §5 POST — persist health, prune WAL, SSE, summary.
 
 use std::path::Path;
 
@@ -10,13 +10,12 @@ use mando_types::BusEvent;
 use crate::biz::tick_logic;
 use crate::io::{health_store, health_store::HealthState, ops_log};
 
-/// Persist health state, prune stale WAL/journal entries, flush notifications,
+/// Persist health state, prune stale WAL entries, flush notifications,
 /// and publish SSE events. Called at the end of every non-dry-run tick.
 pub(crate) async fn run_post_phase(
     dry_run: bool,
     health_path: &Path,
     health_state: &HealthState,
-    journal_db: &Option<crate::io::journal::JournalDb>,
     notifier: &super::notify::Notifier,
     bus: Option<&EventBus>,
 ) -> Result<()> {
@@ -47,19 +46,6 @@ pub(crate) async fn run_post_phase(
         ops_log::prune_stale(&mut wal, ops_log::STALE_AGE_SECS);
         if let Err(e) = ops_log::save_ops_log(&wal, &wal_path) {
             tracing::warn!(module = "captain", error = %e, "ops log save failed — completed operations may replay on restart");
-        }
-
-        // Prune stale journal decisions (older than 90 days).
-        if let Some(ref jdb) = journal_db {
-            match jdb.prune(90).await {
-                Ok(pruned) if pruned > 0 => {
-                    tracing::info!(module = "captain", pruned, "pruned old journal decisions");
-                }
-                Err(e) => {
-                    tracing::warn!(module = "captain", error = %e, "journal prune failed — old decisions will accumulate");
-                }
-                _ => {}
-            }
         }
     }
 

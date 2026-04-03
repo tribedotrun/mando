@@ -1,4 +1,4 @@
-//! /api/ops/* route handlers — multi-turn CC ops/ask sessions via HTTP.
+//! /api/ops/* route handlers — multi-turn CC sessions (ask, etc.).
 
 use std::time::Duration;
 
@@ -10,17 +10,6 @@ use serde_json::{json, Value};
 
 use crate::response::error_response;
 use crate::AppState;
-
-/// Gate: return 503 if dev mode is disabled.
-fn require_dev_mode(state: &AppState) -> Result<(), (StatusCode, Json<Value>)> {
-    if !state.config.load().features.dev_mode {
-        return Err(error_response(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "dev mode is disabled",
-        ));
-    }
-    Ok(())
-}
 
 /// Resolve the working directory from config (first project path).
 fn resolve_cwd(state: &AppState) -> std::path::PathBuf {
@@ -43,14 +32,9 @@ pub(crate) async fn post_ops_start(
     State(state): State<AppState>,
     Json(body): Json<OpsStartBody>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    require_dev_mode(&state)?;
     let cwd = resolve_cwd(&state);
 
-    let prompt = format!(
-        "You are an ops copilot for a software development team. \
-         Help with the following request. Be concise.\n\n{}",
-        body.prompt
-    );
+    let prompt = body.prompt;
 
     let mut mgr = state.cc_session_mgr.write().await;
 
@@ -95,7 +79,6 @@ pub(crate) async fn post_ops_message(
     State(state): State<AppState>,
     Json(body): Json<OpsMessageBody>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    require_dev_mode(&state)?;
     let cwd = resolve_cwd(&state);
     let mut mgr = state.cc_session_mgr.write().await;
 
@@ -131,8 +114,6 @@ pub(crate) async fn post_ops_end(
     State(state): State<AppState>,
     Json(body): Json<OpsEndBody>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    require_dev_mode(&state)?;
-
     let mut mgr = state.cc_session_mgr.write().await;
 
     if !mgr.has_session(&body.key) {

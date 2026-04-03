@@ -5,19 +5,15 @@
 
 pub mod auth;
 pub mod background_tasks;
-pub mod cron_executor;
 pub mod instance;
 pub mod middleware;
 pub(crate) mod response;
-mod routes_analytics;
 mod routes_captain;
 mod routes_captain_adopt;
 mod routes_channels;
 mod routes_clarifier;
 mod routes_client_logs;
 mod routes_config;
-mod routes_cron;
-mod routes_knowledge;
 mod routes_ops;
 mod routes_projects;
 mod routes_scout;
@@ -55,13 +51,30 @@ pub struct AppState {
     /// concurrent config saves need this mutex to prevent lost updates.
     pub config_write_mu: Arc<Mutex<()>>,
     pub bus: Arc<mando_shared::EventBus>,
-    pub cron_service: Arc<RwLock<mando_shared::CronService>>,
     pub cc_session_mgr: Arc<RwLock<mando_captain::io::cc_session::CcSessionManager>>,
     pub task_store: Arc<RwLock<mando_captain::io::task_store::TaskStore>>,
     pub db: Arc<mando_db::Db>,
     pub linear_workspace_slug: Arc<RwLock<Option<String>>>,
     pub qa_session_mgr: Arc<mando_scout::runtime::qa::QaSessionManager>,
     pub start_time: Instant,
+    /// When true, all CC invocations use sonnet instead of the configured model.
+    pub dev_mode: bool,
+}
+
+/// Force all workflow models to sonnet (dev mode cost savings).
+pub fn apply_dev_model_overrides(
+    captain_wf: &mut mando_config::CaptainWorkflow,
+    scout_wf: &mut mando_config::ScoutWorkflow,
+) {
+    const DEV_MODEL: &str = "sonnet";
+    captain_wf.models.worker = DEV_MODEL.into();
+    captain_wf.models.captain = DEV_MODEL.into();
+    captain_wf.models.clarifier = DEV_MODEL.into();
+    captain_wf.models.fallback = None;
+    for model in scout_wf.models.values_mut() {
+        *model = DEV_MODEL.into();
+    }
+    tracing::info!("dev mode: all models forced to {DEV_MODEL}");
 }
 
 /// Resolve a project display-name to its `github_repo` slug from config.

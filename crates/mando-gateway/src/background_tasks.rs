@@ -1,7 +1,6 @@
-//! Background task spawners — captain auto-tick and distiller cron loops.
+//! Background task spawners — captain auto-tick loop.
 
 use std::panic::AssertUnwindSafe;
-use std::sync::Arc;
 
 use futures_util::FutureExt;
 use tracing::info;
@@ -9,7 +8,7 @@ use tracing::info;
 use crate::AppState;
 
 /// Spawn the captain auto-tick loop that periodically runs a captain tick
-/// and cleans up expired CC/ops sessions.
+/// and cleans up expired CC sessions.
 pub fn spawn_auto_tick(state: &AppState, tick_interval_s: u64) {
     let tick_config = state.config.clone();
     let tick_workflow = state.captain_workflow.clone();
@@ -38,7 +37,7 @@ pub fn spawn_auto_tick(state: &AppState, tick_interval_s: u64) {
             let result = AssertUnwindSafe(async move {
                 let mut consecutive_failures: u32 = 0;
                 loop {
-                    // Cleanup expired ops/ask sessions (runs regardless of auto_schedule).
+                    // Cleanup expired CC sessions (ask, etc.).
                     let expired = tick_sessions.write().await.cleanup_expired();
                     if expired > 0 {
                         info!(
@@ -109,105 +108,6 @@ pub fn spawn_auto_tick(state: &AppState, tick_interval_s: u64) {
                     panic
                 );
                 tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-            }
-        }
-    });
-}
-
-/// Spawn the distiller cron loop that runs the pattern distiller on schedule.
-pub fn spawn_distiller_cron(
-    config: Arc<arc_swap::ArcSwap<mando_config::Config>>,
-    workflow: Arc<arc_swap::ArcSwap<mando_config::CaptainWorkflow>>,
-    bus: Arc<mando_shared::EventBus>,
-    pool: sqlx::SqlitePool,
-    cron_expr: &str,
-) {
-    let parsed = match mando_shared::CronExpr::parse(cron_expr) {
-        Ok(p) => p,
-        Err(_) => {
-            tracing::warn!(
-                module = "distiller",
-                cron = %cron_expr,
-                "invalid learn_cron_expr — distiller cron disabled"
-            );
-            return;
-        }
-    };
-
-    info!(
-        module = "distiller",
-        cron = %cron_expr,
-        "distiller cron enabled"
-    );
-
-    tokio::spawn(async move {
-        // Outer loop: restart on panic so distiller never stops permanently.
-        loop {
-            let config = config.clone();
-            let workflow = workflow.clone();
-            let bus = bus.clone();
-            let pool = pool.clone();
-            let parsed = parsed.clone();
-
-            let result = AssertUnwindSafe(async move {
-                loop {
-                    let now = time::OffsetDateTime::now_utc().unix_timestamp();
-                    let next = match parsed.next_after(now) {
-                        Some(ts) => ts,
-                        None => {
-                            tracing::error!(module = "distiller", "no next cron run — stopping");
-                            break;
-                        }
-                    };
-                    let delay = (next - now).max(60) as u64;
-                    info!(
-                        module = "distiller",
-                        next_in_s = delay,
-                        "sleeping until next distiller run"
-                    );
-                    tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
-
-                    let cfg = config.load_full();
-                    if !cfg.captain.auto_schedule {
-                        continue;
-                    }
-                    let wf = workflow.load_full();
-                    match mando_captain::runtime::distiller::run_distiller(&cfg, &wf, &pool).await {
-                        Ok(result) => {
-                            crate::routes_knowledge::notify_patterns(&bus, &result.patterns);
-                            info!(
-                                module = "distiller",
-                                patterns = result.patterns_found,
-                                "cron distiller completed: {}",
-                                result.summary
-                            );
-                        }
-                        Err(e) => {
-                            tracing::warn!(
-                                module = "distiller",
-                                error = %e,
-                                "cron distiller failed"
-                            );
-                        }
-                    }
-                }
-            })
-            .catch_unwind()
-            .await;
-
-            if let Err(panic) = result {
-                tracing::error!(
-                    module = "distiller",
-                    "distiller cron loop panicked — restarting in 5s: {:?}",
-                    panic
-                );
-                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-            } else {
-                tracing::info!(
-                    module = "distiller",
-                    "distiller cron loop exited — stopping"
-                );
-                break;
             }
         }
     });

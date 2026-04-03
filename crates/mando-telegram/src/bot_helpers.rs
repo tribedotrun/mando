@@ -46,7 +46,7 @@ pub(crate) fn extract_photo_todo(message: &Value) -> Option<String> {
 pub(crate) fn dm_reply_keyboard() -> Value {
     serde_json::json!({
         "keyboard": [
-            ["/tasks", "/captain", "/cron"],
+            ["/tasks", "/captain", "/scout"],
             ["/todo", "/sessions", "/triage"],
         ],
         "resize_keyboard": true,

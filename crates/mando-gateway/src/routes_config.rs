@@ -13,13 +13,17 @@ use crate::AppState;
 /// Reload captain + scout workflows from disk into daemon state.
 fn reload_workflows(state: &AppState) {
     let cfg = state.config.load_full();
-    let new_cwf = mando_config::load_captain_workflow(
+    let mut new_cwf = mando_config::load_captain_workflow(
         &mando_config::captain_workflow_path(),
         cfg.captain.tick_interval_s,
     );
-    state.captain_workflow.store(Arc::new(new_cwf));
+    let mut new_dwf = mando_config::load_scout_workflow(&mando_config::scout_workflow_path(), &cfg);
 
-    let new_dwf = mando_config::load_scout_workflow(&mando_config::scout_workflow_path(), &cfg);
+    if state.dev_mode {
+        crate::apply_dev_model_overrides(&mut new_cwf, &mut new_dwf);
+    }
+
+    state.captain_workflow.store(Arc::new(new_cwf));
     state.scout_workflow.store(Arc::new(new_dwf));
 }
 

@@ -24,20 +24,15 @@ pub(crate) const REGISTERED_COMMANDS: &[(&str, &str)] = &[
     ("workers", "Show active workers"),
     ("nudge", "Nudge a stuck worker"),
     ("stop", "Stop all active workers"),
-    ("journal", "Show captain decision journal"),
-    ("patterns", "Review captain patterns"),
-    ("cron", "Manage cron jobs"),
     ("answer", "Answer clarifier questions"),
     ("retry", "Retry errored captain review"),
     ("cancel", "Cancel a task"),
     ("rework", "Rework task"),
     ("delete", "Delete a task"),
-    ("ops", "Ops copilot"),
     ("ask", "Q&A on completed tasks"),
     ("sessions", "List CC sessions"),
     ("timeline", "Task lifecycle timeline"),
     ("prsummary", "Show PR description"),
-    ("knowledge", "Approve knowledge lessons"),
     ("triage", "Rank pending-review PRs by merge readiness"),
     ("health", "System health (daemon, workers, config)"),
     ("history", "Show ask history for a task"),
@@ -75,21 +70,16 @@ impl TelegramBot {
             "adopt" => commands::adopt::handle(self, chat_id, args).await,
             "answer" => commands::answer::handle(self, chat_id, args).await,
             "retry" => commands::retry::handle(self, chat_id, args).await,
-            "ops" => commands::ops::handle(self, chat_id, args).await,
             "ask" => commands::ask::handle(self, chat_id, args).await,
-            "cron" => commands::cron::handle(self, chat_id, args).await,
             "sessions" => commands::sessions::handle(self, chat_id, args).await,
             "history" => commands::history::handle(self, chat_id, args).await,
             "timeline" => commands::timeline::handle(self, chat_id, args).await,
             "prsummary" => commands::pr_summary::handle(self, chat_id, args).await,
-            "knowledge" => commands::knowledge::handle(self, chat_id, args).await,
             "triage" => commands::triage::handle(self, chat_id, args).await,
             "accept" => commands::accept::handle(self, chat_id, args).await,
             "workers" => commands::workers::handle(self, chat_id, args).await,
             "nudge" => commands::nudge::handle(self, chat_id, args).await,
             "stop" => commands::stop::handle(self, chat_id, args).await,
-            "journal" => commands::journal::handle(self, chat_id, args).await,
-            "patterns" => commands::patterns::handle(self, chat_id, args).await,
             "health" => commands::health::handle(self, chat_id, args).await,
             // Scout commands
             "addlink" => crate::assistant::commands::cmd_addlink(self, chat_id, args).await,
@@ -136,9 +126,6 @@ impl TelegramBot {
             .await;
         }
         if commands::input::handle_text(self, chat_id, text).await? {
-            return Ok(());
-        }
-        if commands::ops::handle_text(self, chat_id, text).await? {
             return Ok(());
         }
         if commands::ask::handle_text(self, chat_id, text).await? {
@@ -195,9 +182,7 @@ mod tests {
         );
         assert!(names.contains("tasks"), "missing /tasks registration");
 
-        for command in [
-            "workers", "triage", "accept", "nudge", "stop", "journal", "patterns",
-        ] {
+        for command in ["workers", "triage", "accept", "nudge", "stop"] {
             assert!(
                 contract["captain"].get(command).is_some(),
                 "missing {command} in contract"

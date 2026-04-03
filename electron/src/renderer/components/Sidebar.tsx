@@ -4,7 +4,7 @@ import { useSettingsStore } from '#renderer/stores/settingsStore';
 import { SetupChecklist } from '#renderer/components/SetupChecklist';
 import { useMountEffect } from '#renderer/hooks/useMountEffect';
 
-export type Tab = 'captain' | 'scout' | 'sessions' | 'cron' | 'analytics';
+export type Tab = 'captain' | 'scout' | 'sessions';
 
 export interface SetupProgress {
   completed: number;
@@ -61,30 +61,9 @@ function SettingsIcon() {
   );
 }
 
-function CronIcon() {
-  return (
-    <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor">
-      <circle cx="8" cy="8" r="6" strokeWidth="1.5" />
-      <path d="M8 5v3l2 2" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-
-function AnalyticsIcon() {
-  return (
-    <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor">
-      <path d="M3 13V8" strokeWidth="1.5" strokeLinecap="round" />
-      <path d="M7 13V5" strokeWidth="1.5" strokeLinecap="round" />
-      <path d="M11 13V3" strokeWidth="1.5" strokeLinecap="round" />
-    </svg>
-  );
-}
-
-const NAV_ITEMS: { id: Tab; label: string; Icon: React.FC; featureFlag?: string }[] = [
+const NAV_ITEMS: { id: Tab; label: string; Icon: React.FC }[] = [
   { id: 'sessions', label: 'Sessions', Icon: SessionsIcon },
   { id: 'scout', label: 'Scout', Icon: ScoutIcon },
-  { id: 'cron', label: 'Cron', Icon: CronIcon, featureFlag: 'cron' },
-  { id: 'analytics', label: 'Analytics', Icon: AnalyticsIcon, featureFlag: 'analytics' },
 ];
 
 function UpdateButton(): React.ReactElement | null {
@@ -138,16 +117,8 @@ export function Sidebar({
   setupActive,
 }: Props): React.ReactElement {
   const items = useTaskStore((s) => s.items);
-  const features = useSettingsStore((s) => s.config.features);
 
-  const visibleNav = React.useMemo(
-    () =>
-      NAV_ITEMS.filter((item) => {
-        if (!item.featureFlag) return true;
-        return !!(features as Record<string, unknown> | undefined)?.[item.featureFlag];
-      }),
-    [features],
-  );
+  const visibleNav = NAV_ITEMS;
 
   const configProjects = useSettingsStore((s) => s.config.captain?.projects);
 

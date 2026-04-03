@@ -4,7 +4,6 @@
 //! from `begin()` to `complete()`. On crash, `incomplete()` returns
 //! operations that need to be resumed.
 
-use std::future::Future;
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
@@ -68,6 +67,7 @@ pub(crate) fn save_ops_log(log: &OpsLog, path: &Path) -> Result<()> {
 }
 
 /// Begin a new operation. Returns the op_id.
+#[cfg(test)]
 pub(crate) fn begin_op(log: &mut OpsLog, op_type: &str, params: serde_json::Value) -> String {
     let op_id = mando_uuid::Uuid::v4().to_string();
     log.entries.push(OpEntry {
@@ -75,7 +75,7 @@ pub(crate) fn begin_op(log: &mut OpsLog, op_type: &str, params: serde_json::Valu
         op_type: op_type.to_string(),
         params,
         steps_completed: Vec::new(),
-        started_at: now_rfc3339(),
+        started_at: mando_types::now_rfc3339(),
     });
     op_id
 }
@@ -136,45 +136,12 @@ pub(crate) fn prune_stale(log: &mut OpsLog, max_age_secs: u64) {
     });
 }
 
-use mando_types::now_rfc3339;
-
 /// Check if a step has been completed for an operation.
 pub(crate) fn is_step_done(log: &OpsLog, op_id: &str, step: &str) -> bool {
     log.entries
         .iter()
         .find(|e| e.op_id == op_id)
         .is_some_and(|e| e.steps_completed.iter().any(|s| s == step))
-}
-
-/// Wrap an async operation with WAL begin/complete. On success the entry is
-/// removed; on failure it stays for the reconciler to retry on next startup.
-pub(crate) async fn with_wal_op<F, Fut, T>(
-    op_type: &str,
-    params: serde_json::Value,
-    f: F,
-) -> Result<T>
-where
-    F: FnOnce() -> Fut,
-    Fut: Future<Output = Result<T>>,
-{
-    let log_path = ops_log_path();
-    let mut log = load_ops_log(&log_path);
-    let op_id = begin_op(&mut log, op_type, params);
-    save_ops_log(&log, &log_path)?;
-
-    let result = f().await;
-
-    match &result {
-        Ok(_) => {
-            complete_op(&mut log, &op_id);
-            save_ops_log(&log, &log_path)?;
-        }
-        Err(e) => {
-            tracing::warn!(module = "wal", op_type = %op_type, error = %e, "op failed, WAL entry retained");
-        }
-    }
-
-    result
 }
 
 #[cfg(test)]

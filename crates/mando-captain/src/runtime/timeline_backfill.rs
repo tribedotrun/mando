@@ -38,7 +38,9 @@ pub(crate) async fn backfill_if_needed(item: &Task, pool: &sqlx::SqlitePool) {
     let events = build_events_for_item(item, &sessions);
 
     // Deduplicate by (event_type, session_id).
-    let existing_keys: std::collections::HashSet<(String, String)> = existing
+    // SessionResumed and WorkerNudged are siblings — if either exists for a
+    // session, the backfill counterpart should be suppressed.
+    let mut existing_keys: std::collections::HashSet<(String, String)> = existing
         .iter()
         .filter_map(|e| {
             e.data
@@ -47,6 +49,21 @@ pub(crate) async fn backfill_if_needed(item: &Task, pool: &sqlx::SqlitePool) {
                 .map(|sid| (format!("{:?}", e.event_type), sid.to_string()))
         })
         .collect();
+    // Expand siblings: SessionResumed ↔ WorkerNudged.
+    let siblings: Vec<(String, String)> = existing_keys
+        .iter()
+        .filter_map(|(et, sid)| {
+            let sibling = if et == &format!("{:?}", TimelineEventType::SessionResumed) {
+                format!("{:?}", TimelineEventType::WorkerNudged)
+            } else if et == &format!("{:?}", TimelineEventType::WorkerNudged) {
+                format!("{:?}", TimelineEventType::SessionResumed)
+            } else {
+                return None;
+            };
+            Some((sibling, sid.clone()))
+        })
+        .collect();
+    existing_keys.extend(siblings);
     let has_created = existing
         .iter()
         .any(|e| e.event_type == TimelineEventType::Created);
@@ -272,6 +289,60 @@ mod tests {
             result.iter().filter(|e| e.summary == "test").count(),
             1,
             "only sess-b backfill added"
+        );
+    }
+
+    #[test]
+    fn backfill_dedup_sibling_session_resumed_vs_worker_nudged() {
+        // Real-time emitted SessionResumed for sess-c (from reopen).
+        // Backfill would generate WorkerNudged for the same session.
+        // Sibling expansion should suppress the duplicate.
+        let existing = vec![make_real_event(
+            TimelineEventType::SessionResumed,
+            Some("sess-c"),
+        )];
+
+        let backfill_events = vec![make_event(TimelineEventType::WorkerNudged, Some("sess-c"))];
+
+        let mut existing_keys: std::collections::HashSet<(String, String)> = existing
+            .iter()
+            .filter_map(|e| {
+                e.data
+                    .get("session_id")
+                    .and_then(|s| s.as_str())
+                    .map(|sid| (format!("{:?}", e.event_type), sid.to_string()))
+            })
+            .collect();
+        let siblings: Vec<(String, String)> = existing_keys
+            .iter()
+            .filter_map(|(et, sid)| {
+                let sibling = if et == &format!("{:?}", TimelineEventType::SessionResumed) {
+                    format!("{:?}", TimelineEventType::WorkerNudged)
+                } else if et == &format!("{:?}", TimelineEventType::WorkerNudged) {
+                    format!("{:?}", TimelineEventType::SessionResumed)
+                } else {
+                    return None;
+                };
+                Some((sibling, sid.clone()))
+            })
+            .collect();
+        existing_keys.extend(siblings);
+
+        let mut result = existing.clone();
+        for event in backfill_events {
+            if let Some(sid) = event.data.get("session_id").and_then(|s| s.as_str()) {
+                let key = (format!("{:?}", event.event_type), sid.to_string());
+                if existing_keys.contains(&key) {
+                    continue;
+                }
+            }
+            result.push(event);
+        }
+
+        assert_eq!(
+            result.len(),
+            1,
+            "WorkerNudged backfill suppressed by sibling SessionResumed"
         );
     }
 }

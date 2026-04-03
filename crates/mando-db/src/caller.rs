@@ -12,7 +12,6 @@ pub enum SessionCaller {
     Clarifier,
     DeepClarifier,
     CaptainReviewAsync,
-    CaptainDistiller,
     ExhaustionReport,
     TaskAsk,
     ScoutProcess,
@@ -21,7 +20,6 @@ pub enum SessionCaller {
     ScoutResearch,
     ScoutAct,
     VoiceAgent,
-    GuardianRepair,
 }
 
 /// Display group — used for UI category chips and aggregation.
@@ -33,7 +31,6 @@ pub enum CallerGroup {
     CaptainOps,
     Scout,
     Voice,
-    System,
 }
 
 impl SessionCaller {
@@ -44,7 +41,6 @@ impl SessionCaller {
             Self::Clarifier => "clarifier",
             Self::DeepClarifier => "deep-clarifier",
             Self::CaptainReviewAsync => "captain-review-async",
-            Self::CaptainDistiller => "captain-distiller",
             Self::ExhaustionReport => "exhaustion-report",
             Self::TaskAsk => "task-ask",
             Self::ScoutProcess => "scout-process",
@@ -53,7 +49,6 @@ impl SessionCaller {
             Self::ScoutResearch => "scout-research",
             Self::ScoutAct => "scout-act",
             Self::VoiceAgent => "voice-agent",
-            Self::GuardianRepair => "guardian-repair",
         }
     }
 
@@ -64,7 +59,6 @@ impl SessionCaller {
             "clarifier" => Some(Self::Clarifier),
             "deep-clarifier" => Some(Self::DeepClarifier),
             "captain-review-async" => Some(Self::CaptainReviewAsync),
-            "captain-distiller" => Some(Self::CaptainDistiller),
             "exhaustion-report" => Some(Self::ExhaustionReport),
             "task-ask" => Some(Self::TaskAsk),
             "scout-process" => Some(Self::ScoutProcess),
@@ -73,7 +67,6 @@ impl SessionCaller {
             "scout-research" => Some(Self::ScoutResearch),
             "scout-act" => Some(Self::ScoutAct),
             "voice-agent" => Some(Self::VoiceAgent),
-            "guardian-repair" => Some(Self::GuardianRepair),
             _ => None,
         }
     }
@@ -84,16 +77,13 @@ impl SessionCaller {
             Self::Worker => CallerGroup::Workers,
             Self::Clarifier | Self::DeepClarifier => CallerGroup::Clarifier,
             Self::CaptainReviewAsync => CallerGroup::CaptainReview,
-            Self::CaptainDistiller | Self::ExhaustionReport | Self::TaskAsk => {
-                CallerGroup::CaptainOps
-            }
+            Self::ExhaustionReport | Self::TaskAsk => CallerGroup::CaptainOps,
             Self::ScoutProcess
             | Self::ScoutArticle
             | Self::ScoutQa
             | Self::ScoutResearch
             | Self::ScoutAct => CallerGroup::Scout,
             Self::VoiceAgent => CallerGroup::Voice,
-            Self::GuardianRepair => CallerGroup::System,
         }
     }
 
@@ -104,7 +94,6 @@ impl SessionCaller {
             Self::Clarifier,
             Self::DeepClarifier,
             Self::CaptainReviewAsync,
-            Self::CaptainDistiller,
             Self::ExhaustionReport,
             Self::TaskAsk,
             Self::ScoutProcess,
@@ -113,7 +102,6 @@ impl SessionCaller {
             Self::ScoutResearch,
             Self::ScoutAct,
             Self::VoiceAgent,
-            Self::GuardianRepair,
         ]
     }
 
@@ -139,7 +127,6 @@ impl CallerGroup {
             Self::CaptainOps => "captain-ops",
             Self::Scout => "scout",
             Self::Voice => "voice",
-            Self::System => "system",
         }
     }
 }

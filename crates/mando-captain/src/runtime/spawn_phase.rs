@@ -57,6 +57,7 @@ async fn execute_nudge(
     super::action_contract::nudge_item(
         item,
         action.message.as_deref(),
+        action.reason.as_deref(),
         config,
         workflow,
         notifier,

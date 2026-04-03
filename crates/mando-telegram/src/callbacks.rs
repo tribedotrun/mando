@@ -54,12 +54,6 @@ pub async fn handle_callback(bot: &mut TelegramBot, callback: &Value) -> Result<
         "ms_cancel" | "ms_delete" => {
             handle_multi_select(bot, prefix, &parts, cb_id, &chat_id, mid).await
         }
-        "cron_act" => handle_cron_act(bot, &parts, cb_id, &chat_id, mid).await,
-        "captain_learn" => handle_captain_learn(bot, cb_id, &chat_id).await,
-        "knowledge" => {
-            callbacks_session::handle_knowledge_callback(bot, &parts, cb_id, &chat_id, mid).await
-        }
-        "ops" => callbacks_session::handle_ops_callback(bot, &parts, cb_id, &chat_id, mid).await,
         "ask" => callbacks_session::handle_ask_callback(bot, &parts, cb_id, &chat_id, mid).await,
         "dg" => crate::assistant::callbacks::handle_callback(bot, callback).await,
         other => {
@@ -318,65 +312,6 @@ async fn handle_multi_select(
     Ok(())
 }
 
-// ── Cron action ──────────────────────────────────────────────────────
-
-async fn handle_cron_act(
-    bot: &TelegramBot,
-    parts: &[&str],
-    cb_id: &str,
-    cid: &str,
-    mid: i64,
-) -> Result<()> {
-    let action = parts.get(1).copied().unwrap_or("");
-    if action == "skip" {
-        bot.api()
-            .answer_callback_query(cb_id, Some("Skipped"))
-            .await?;
-        if let Err(e) = bot.edit_message(cid, mid, "\u{23ed} Skipped").await {
-            tracing::warn!(module = "telegram", error = %e, "message send failed");
-        }
-    } else if let Some(pid_str) = action.strip_prefix("kill_") {
-        bot.api()
-            .answer_callback_query(cb_id, Some("Killing\u{2026}"))
-            .await?;
-        if let Err(e) = bot.edit_message(cid, mid, "\u{23f3} Killing\u{2026}").await {
-            tracing::warn!(module = "telegram", error = %e, "message send failed");
-        }
-        crate::callback_actions::kill_worker(bot, cid, mid, pid_str).await?;
-    } else {
-        bot.api().answer_callback_query(cb_id, None).await?;
-    }
-    Ok(())
-}
-
-// ── Captain learn ───────────────────────────────────────────────────
-
-async fn handle_captain_learn(bot: &TelegramBot, cb_id: &str, cid: &str) -> Result<()> {
-    bot.api()
-        .answer_callback_query(cb_id, Some("Running learn cycle\u{2026}"))
-        .await?;
-    match bot
-        .gw()
-        .post("/api/knowledge/learn", &serde_json::json!({}))
-        .await
-    {
-        Ok(resp) => {
-            let summary = resp
-                .get("summary")
-                .and_then(|v| v.as_str())
-                .unwrap_or("done");
-            let esc = mando_shared::escape_html(summary);
-            bot.send_html(cid, &format!("\u{2705} Learn complete:\n{esc}"))
-                .await?;
-        }
-        Err(e) => {
-            bot.send_html(cid, &format!("\u{274c} Learn failed: {e}"))
-                .await?;
-        }
-    }
-    Ok(())
-}
-
 // ── Answer / Retry / View callbacks ─────────────────────────────────
 
 async fn handle_answer_cb(
@@ -429,9 +364,9 @@ mod tests {
 
     #[test]
     fn callback_data_short() {
-        let data = "ops:end";
+        let data = "ask:end";
         let parts: Vec<&str> = data.split(':').collect();
-        assert_eq!(parts[0], "ops");
+        assert_eq!(parts[0], "ask");
         assert_eq!(parts[1], "end");
     }
 
@@ -451,13 +386,9 @@ mod tests {
             "ms_cancel",
             "ms_delete",
             "rework",
-            "cron_act",
-            "captain_learn",
-            "knowledge",
-            "ops",
             "ask",
             "dg",
         ];
-        assert_eq!(prefixes.len(), 19);
+        assert_eq!(prefixes.len(), 15);
     }
 }

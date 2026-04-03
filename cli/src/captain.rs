@@ -3,9 +3,6 @@
 use clap::{Args, Subcommand};
 use serde_json::json;
 
-use crate::captain_review::{
-    handle_journal, handle_knowledge, handle_patterns, KnowledgeCommand, PatternsCommand,
-};
 use crate::http::{parse_id, DaemonClient};
 
 #[derive(Args)]
@@ -96,25 +93,6 @@ pub(crate) enum CaptainCommand {
     },
     /// Graceful stop (kill all workers, drain tasks)
     Stop,
-    /// Review and approve knowledge lessons
-    Knowledge {
-        #[command(subcommand)]
-        command: Option<KnowledgeCommand>,
-    },
-    /// Query the decision journal
-    Journal {
-        /// Filter by worker name
-        #[arg(short = 'w', long)]
-        worker: Option<String>,
-        /// Number of entries to show (default 20)
-        #[arg(short = 'n', long)]
-        limit: Option<usize>,
-    },
-    /// Run the pattern distiller, list patterns, or review pattern status
-    Patterns {
-        #[command(subcommand)]
-        command: Option<PatternsCommand>,
-    },
 }
 
 pub(crate) async fn handle(args: CaptainArgs) -> anyhow::Result<()> {
@@ -146,11 +124,6 @@ pub(crate) async fn handle(args: CaptainArgs) -> anyhow::Result<()> {
         CaptainCommand::Handoff { id } => handle_handoff(&id).await,
         CaptainCommand::Nudge { id, message } => handle_nudge(&id, &message).await,
         CaptainCommand::Stop => handle_captain_stop().await,
-        CaptainCommand::Knowledge { command } => handle_knowledge(command).await,
-        CaptainCommand::Journal { worker, limit } => {
-            handle_journal(worker.as_deref(), limit.unwrap_or(20)).await
-        }
-        CaptainCommand::Patterns { command } => handle_patterns(command).await,
     }
 }
 
@@ -481,38 +454,6 @@ mod tests {
             TestCmd::Captain(args) => match args.command {
                 CaptainCommand::Accept { id } => assert_eq!(id, "42"),
                 _ => panic!("expected Accept"),
-            },
-        }
-    }
-
-    #[test]
-    fn parse_knowledge_approve_all() {
-        let cli =
-            TestCli::try_parse_from(["test", "captain", "knowledge", "approve", "--all"]).unwrap();
-        match cli.cmd {
-            TestCmd::Captain(args) => match args.command {
-                CaptainCommand::Knowledge { command } => match command {
-                    Some(KnowledgeCommand::Approve { all, ids }) => {
-                        assert!(all);
-                        assert!(ids.is_empty());
-                    }
-                    _ => panic!("expected Knowledge approve"),
-                },
-                _ => panic!("expected Knowledge"),
-            },
-        }
-    }
-
-    #[test]
-    fn parse_patterns_dismiss() {
-        let cli = TestCli::try_parse_from(["test", "captain", "patterns", "dismiss", "7"]).unwrap();
-        match cli.cmd {
-            TestCmd::Captain(args) => match args.command {
-                CaptainCommand::Patterns { command } => match command {
-                    Some(PatternsCommand::Dismiss { id }) => assert_eq!(id, 7),
-                    _ => panic!("expected Patterns dismiss"),
-                },
-                _ => panic!("expected Patterns"),
             },
         }
     }

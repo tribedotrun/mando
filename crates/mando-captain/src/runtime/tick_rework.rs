@@ -30,6 +30,7 @@ pub(super) fn transition_rework_to_queued(items: &mut [Task]) {
         item.worker = None;
         item.worktree = None;
         item.branch = None;
+        item.pr = None;
         item.worker_started_at = None;
         item.session_ids.worker = None;
         tracing::info!(

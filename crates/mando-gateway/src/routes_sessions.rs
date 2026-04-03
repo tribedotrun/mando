@@ -199,8 +199,8 @@ async fn find_cc_transcript(session_id: &str, cwd: Option<&str>) -> Option<Strin
         .or_else(|| lookup_cwd_from_meta(session_id));
     if let Some(ref cwd_val) = effective_cwd {
         if !cwd_val.is_empty() {
-            // CC sanitizes CWD by stripping the leading "/" then replacing "/" with "-".
-            let sanitized = cwd_val.trim_start_matches('/').replace('/', "-");
+            // CC sanitizes CWD by replacing "/" with "-" (absolute paths get a leading dash).
+            let sanitized = cwd_val.replace('/', "-");
             let path = projects_dir.join(&sanitized).join(&target);
             if let Ok(content) = tokio::fs::read_to_string(&path).await {
                 return Some(content);

@@ -160,6 +160,7 @@ pub enum ReviewTrigger {
     CaptainDecision,
     MergeFail,
     MissingGithubConfig,
+    RepeatedNudge,
 }
 
 impl ReviewTrigger {
@@ -177,6 +178,7 @@ impl ReviewTrigger {
             Self::CaptainDecision => "captain_decision",
             Self::MergeFail => "merge_fail",
             Self::MissingGithubConfig => "missing_github_config",
+            Self::RepeatedNudge => "repeated_nudge",
         }
     }
 }
@@ -204,6 +206,7 @@ impl FromStr for ReviewTrigger {
             "captain_decision" => Ok(Self::CaptainDecision),
             "merge_fail" => Ok(Self::MergeFail),
             "missing_github_config" => Ok(Self::MissingGithubConfig),
+            "repeated_nudge" => Ok(Self::RepeatedNudge),
             _ => Err(format!("unknown review trigger: {s}")),
         }
     }

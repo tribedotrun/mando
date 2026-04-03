@@ -4,8 +4,7 @@ use std::collections::HashMap;
 
 use crate::task::{FINALIZED, REOPENABLE, REWORKABLE};
 use crate::{
-    Action, ActionKind, AskHistoryEntry, BusEvent, CronJob, CronPayload, CronSchedule, CronState,
-    ItemStatus, JobType, NotifyLevel, PayloadKind, ScheduleKind, ScoutItem, ScoutStatus,
+    Action, ActionKind, AskHistoryEntry, BusEvent, ItemStatus, NotifyLevel, ScoutItem, ScoutStatus,
     SessionEntry, Task, TickMode, TickResult, TimelineEvent, TimelineEventType, WorkerContext,
 };
 
@@ -60,30 +59,6 @@ fn construct_scout_item() {
     };
     assert_eq!(item.id, 42);
     assert_eq!(item.status, ScoutStatus::Pending);
-}
-
-#[test]
-fn construct_cron_job() {
-    let job = CronJob {
-        id: "cron-1".into(),
-        name: "daily-scout".into(),
-        enabled: true,
-        schedule: CronSchedule {
-            kind: ScheduleKind::Cron,
-            expr: Some("0 9 * * *".into()),
-            ..CronSchedule::default()
-        },
-        payload: CronPayload::default(),
-        state: CronState::default(),
-        created_at_ms: 1000,
-        updated_at_ms: 2000,
-        delete_after_run: false,
-        job_type: JobType::System,
-        cwd: None,
-        timeout_s: 1200,
-    };
-    assert_eq!(job.id, "cron-1");
-    assert!(job.enabled);
 }
 
 #[test]
@@ -336,50 +311,6 @@ fn serde_task_round_trip() {
     assert_eq!(parsed.project, Some("acme/widgets".into()));
     assert_eq!(parsed.intervention_count, 5);
     assert!(!parsed.status.is_finalized());
-}
-
-#[test]
-fn serde_cron_job_round_trip() {
-    let job = CronJob {
-        id: "cron-42".into(),
-        name: "morning-report".into(),
-        enabled: true,
-        schedule: CronSchedule {
-            kind: ScheduleKind::Cron,
-            expr: Some("0 9 * * *".into()),
-            tz: Some("America/New_York".into()),
-            ..CronSchedule::default()
-        },
-        payload: CronPayload {
-            kind: PayloadKind::AgentTurn,
-            message: "Good morning".into(),
-            deliver: true,
-            channel: Some("telegram".into()),
-            to: None,
-        },
-        state: CronState {
-            next_run_at_ms: Some(1710000000000),
-            last_run_at_ms: None,
-            last_status: Some("ok".into()),
-            last_error: None,
-        },
-        created_at_ms: 1000,
-        updated_at_ms: 2000,
-        delete_after_run: false,
-        job_type: JobType::System,
-        cwd: None,
-        timeout_s: 600,
-    };
-
-    let json = serde_json::to_string(&job).unwrap();
-    let parsed: CronJob = serde_json::from_str(&json).unwrap();
-
-    assert_eq!(parsed.id, "cron-42");
-    assert_eq!(parsed.name, "morning-report");
-    assert!(parsed.enabled);
-    assert_eq!(parsed.schedule.expr, Some("0 9 * * *".into()));
-    assert_eq!(parsed.state.last_status, Some("ok".into()));
-    assert_eq!(parsed.timeout_s, 600);
 }
 
 #[test]

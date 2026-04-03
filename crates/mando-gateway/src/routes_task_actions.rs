@@ -87,6 +87,7 @@ pub(crate) async fn post_task_reopen(
         .await
         .map_err(internal_error)?
         .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "item not found"))?;
+    let old_session_id = item.session_ids.worker.clone();
     let outcome = mando_captain::runtime::action_contract::reopen_item(
         &mut item,
         "human",
@@ -146,6 +147,33 @@ pub(crate) async fn post_task_reopen(
         outcome,
         mando_captain::runtime::action_contract::ReopenOutcome::Reopened
     ) {
+        // Emit SessionResumed only when the session was truly resumed (same
+        // session_id). If reopen_worker fell back to clean_and_spawn_fresh the
+        // session_id changes and we emit WorkerSpawned instead.
+        let truly_resumed = old_session_id.is_some() && old_session_id == item.session_ids.worker;
+        let (evt, summary) = if truly_resumed {
+            (
+                mando_types::timeline::TimelineEventType::SessionResumed,
+                format!("Resumed {}", item.worker.as_deref().unwrap_or("worker")),
+            )
+        } else {
+            (
+                mando_types::timeline::TimelineEventType::WorkerSpawned,
+                format!("Spawned {}", item.worker.as_deref().unwrap_or("worker")),
+            )
+        };
+        mando_captain::runtime::timeline_emit::emit_for_task(
+            &item,
+            evt,
+            &summary,
+            json!({
+                "worker": item.worker,
+                "session_id": item.session_ids.worker,
+            }),
+            store.pool(),
+        )
+        .await;
+
         let msg = if body.feedback.is_empty() {
             format!(
                 "\u{1f504} Reopened <b>{}</b>",

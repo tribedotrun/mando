@@ -190,14 +190,6 @@ async fn run_captain_tick_inner(
         "tick status"
     );
 
-    // Decision journal uses the same pool.
-    let journal_db = if !dry_run {
-        Some(crate::io::journal::JournalDb::new(pool.clone()))
-    } else {
-        None
-    };
-    let tick_id = mando_uuid::Uuid::v4().to_string();
-
     // ── Rate-limit cooldown check ──────────────────────────────────────
     let rate_limited = super::rate_limit_cooldown::is_active();
     if rate_limited {
@@ -291,20 +283,6 @@ async fn run_captain_tick_inner(
             &notifier,
             &pool,
             rate_limited,
-        )
-        .await;
-    }
-
-    // Resolve outcomes + log decisions to journal.
-    if let Some(ref jdb) = journal_db {
-        super::tick_journal::resolve_outcomes(jdb, &actions_to_execute, &worker_contexts).await;
-        super::tick_journal::log_decisions(
-            jdb,
-            &tick_id,
-            &actions_to_execute,
-            &worker_contexts,
-            &items,
-            &health_state,
         )
         .await;
     }
@@ -418,15 +396,7 @@ async fn run_captain_tick_inner(
 
     // ── §5 POST — persist, SSE, prune ─────────────────────────────────
 
-    super::tick_post::run_post_phase(
-        dry_run,
-        &health_path,
-        &health_state,
-        &journal_db,
-        &notifier,
-        bus,
-    )
-    .await?;
+    super::tick_post::run_post_phase(dry_run, &health_path, &health_state, &notifier, bus).await?;
 
     // Archive terminal tasks that have been finalized longer than the grace period.
     if !dry_run {

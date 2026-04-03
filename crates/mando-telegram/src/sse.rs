@@ -28,8 +28,6 @@ pub enum SseEvent {
     Sessions,
     /// Scout changed.
     Scout,
-    /// Cron changed.
-    Cron,
     /// Reconnected after a connection drop.
     Reconnected,
 }
@@ -207,7 +205,6 @@ fn parse_event_json(json: &Value) -> Option<SseEvent> {
         "status" => Some(SseEvent::Status(wire.data)),
         "sessions" => Some(SseEvent::Sessions),
         "scout" => Some(SseEvent::Scout),
-        "cron" => Some(SseEvent::Cron),
         other => {
             tracing::debug!("unknown SSE event type: {other}");
             None

@@ -23,11 +23,7 @@ const HELP: &str = "\u{1f99e} <b>Tasks</b>\n\
 /workers \u{2014} Show active workers\n\
 /nudge &lt;id&gt; &lt;msg&gt; \u{2014} Nudge a stuck worker\n\
 /stop \u{2014} Stop all active workers\n\
-/journal [worker] [limit] \u{2014} Show captain decisions\n\
-/cron [list|add|enable|disable|delete|test] \u{2014} Manage cron\n\
 /sessions \u{2014} List recent CC sessions\n\
-/knowledge \u{2014} Approve pending knowledge lessons\n\
-/patterns [run|list|approve|dismiss] \u{2014} Review captain patterns\n\
 /triage \u{2014} Rank pending-review PRs\n\
 /health \u{2014} System health (daemon, workers, config)\n\n\
 \u{1f50d} <b>Research</b>\n\
@@ -41,7 +37,6 @@ const HELP: &str = "\u{1f99e} <b>Tasks</b>\n\
 /saved \u{2014} View saved items\n\
 /scout \u{2014} Review processed items (swipe)\n\n\
 \u{1f4ac} <b>Interactive</b>\n\
-/ops &lt;msg&gt; \u{2014} Ops copilot\n\
 /ask \u{2014} Q&A on completed tasks\n\
 /timeline [id] [chat] \u{2014} Lifecycle timeline\n\
 /prsummary &lt;id&gt; \u{2014} Show PR description\n\

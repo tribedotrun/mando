@@ -42,19 +42,24 @@ fn resolve_project<'a>(
     }
 }
 
-/// Find the project that owns a worktree path by checking the worktrees sibling dir.
+/// Find the project that owns a worktree path by checking the central worktrees dir.
+/// Uses longest-prefix-wins to handle overlapping repo names (e.g. `mando` vs `mando-private`).
 fn find_project_for_worktree(config: &mando_config::Config, wt_path: &Path) -> Option<PathBuf> {
+    let wt_dir = git::worktrees_dir();
+    if !wt_path.starts_with(&wt_dir) {
+        return None;
+    }
+    let wt_name = wt_path.file_name().and_then(|n| n.to_str())?;
+    let mut best: Option<(usize, PathBuf)> = None;
     for pc in config.captain.projects.values() {
         let project_path = mando_config::expand_tilde(&pc.path);
-        let wt_dir = project_path
-            .parent()
-            .unwrap_or(&project_path)
-            .join("worktrees");
-        if wt_path.starts_with(&wt_dir) {
-            return Some(project_path);
+        let prefix = format!("{}-", repo_dir_name(&project_path));
+        if wt_name.starts_with(&prefix) && best.as_ref().is_none_or(|(len, _)| prefix.len() > *len)
+        {
+            best = Some((prefix.len(), project_path));
         }
     }
-    None
+    best.map(|(_, path)| path)
 }
 
 /// Get the repo directory name (used as prefix filter for orphan detection).
@@ -260,82 +265,77 @@ pub(crate) async fn post_worktrees_cleanup(
     let mut orphans = Vec::new();
     let mut removed = Vec::new();
 
+    // Collect tracked worktrees from ALL projects first to avoid cross-project deletions.
+    let mut all_tracked = std::collections::HashSet::new();
+    let mut project_prefixes = Vec::new();
     for pc in config.captain.projects.values() {
         let project_path = mando_config::expand_tilde(&pc.path);
         let prefix = format!("{}-", repo_dir_name(&project_path));
 
-        // Prune first (only in non-dry-run mode — prune is itself mutating).
         if !body.dry_run {
-            let prune_ok = tokio::process::Command::new("git")
+            let _ = tokio::process::Command::new("git")
                 .args(["worktree", "prune"])
                 .current_dir(&project_path)
                 .output()
-                .await
-                .map(|o| o.status.success())
-                .unwrap_or(false);
-            if !prune_ok {
+                .await;
+        }
+
+        match git::list_worktrees(&project_path).await {
+            Ok(paths) => {
+                all_tracked.extend(paths);
+                project_prefixes.push(prefix);
+            }
+            Err(e) => {
                 tracing::warn!(
                     module = "worktrees",
                     project = %pc.name,
-                    "git worktree prune failed, skipping orphan scan"
+                    error = %e,
+                    "failed to list worktrees, skipping project in orphan scan"
                 );
-                continue;
             }
         }
+    }
 
-        // Get tracked worktree paths.
-        let tracked: std::collections::HashSet<PathBuf> =
-            match git::list_worktrees(&project_path).await {
-                Ok(paths) => paths.into_iter().collect(),
-                Err(e) => {
-                    tracing::warn!(
-                        module = "worktrees",
-                        project = %pc.name,
-                        error = %e,
-                        "failed to list worktrees, skipping orphan scan"
-                    );
-                    continue;
-                }
-            };
+    // Scan central worktrees directory once.
+    let wt_dir = git::worktrees_dir();
+    let mut entries = match tokio::fs::read_dir(&wt_dir).await {
+        Ok(e) => e,
+        Err(_) => {
+            return Ok(Json(
+                json!({"ok": true, "orphans": orphans, "removed": removed}),
+            ))
+        }
+    };
 
-        // Scan worktrees sibling directory.
-        let wt_dir = project_path
-            .parent()
-            .unwrap_or(&project_path)
-            .join("worktrees");
-        let mut entries = match tokio::fs::read_dir(&wt_dir).await {
-            Ok(e) => e,
-            Err(_) => continue,
-        };
+    while let Ok(Some(entry)) = entries.next_entry().await {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        let dir_name = entry.file_name().to_string_lossy().to_string();
+        // Only consider dirs matching a known project prefix (longest wins).
+        let owned = project_prefixes
+            .iter()
+            .filter(|pfx| dir_name.starts_with(pfx.as_str()))
+            .max_by_key(|pfx| pfx.len())
+            .is_some();
+        if !owned || all_tracked.contains(&path) {
+            continue;
+        }
 
-        while let Ok(Some(entry)) = entries.next_entry().await {
-            let path = entry.path();
-            if !path.is_dir() {
-                continue;
-            }
-            // Only consider directories belonging to this project.
-            let dir_name = entry.file_name();
-            if !dir_name.to_string_lossy().starts_with(&prefix) {
-                continue;
-            }
-            if tracked.contains(&path) {
-                continue;
-            }
+        let path_str = path.to_string_lossy().into_owned();
+        orphans.push(path_str.clone());
 
-            let path_str = path.to_string_lossy().into_owned();
-            orphans.push(path_str.clone());
-
-            if !body.dry_run {
-                if let Err(e) = tokio::fs::remove_dir_all(&path).await {
-                    tracing::warn!(
-                        module = "worktrees",
-                        path = %path.display(),
-                        error = %e,
-                        "failed to remove orphan worktree dir"
-                    );
-                } else {
-                    removed.push(path_str);
-                }
+        if !body.dry_run {
+            if let Err(e) = tokio::fs::remove_dir_all(&path).await {
+                tracing::warn!(
+                    module = "worktrees",
+                    path = %path.display(),
+                    error = %e,
+                    "failed to remove orphan worktree dir"
+                );
+            } else {
+                removed.push(path_str);
             }
         }
     }

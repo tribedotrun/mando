@@ -27,9 +27,10 @@ pub(crate) fn build_clarifier_schema(valid_names: &[String]) -> serde_json::Valu
                     "properties": {
                         "question": { "type": "string" },
                         "answer": { "type": ["string", "null"] },
-                        "self_answered": { "type": "boolean" }
+                        "self_answered": { "type": "boolean" },
+                        "category": { "type": "string", "enum": ["code", "intent"] }
                     },
-                    "required": ["question", "self_answered"]
+                    "required": ["question", "self_answered", "category"]
                 }
             },
             "title": { "type": ["string", "null"] },
@@ -163,6 +164,20 @@ mod tests {
         let enum_values = schema["properties"]["repo"]["enum"].as_array().unwrap();
         assert_eq!(enum_values.len(), 1); // only null
         assert_eq!(enum_values[0], serde_json::Value::Null);
+    }
+
+    #[test]
+    fn schema_includes_category_field() {
+        let names = vec!["mando".into()];
+        let schema = build_clarifier_schema(&names);
+        let items = &schema["properties"]["questions"]["items"];
+        let props = &items["properties"];
+        assert!(props.get("category").is_some());
+        let cat_enum = props["category"]["enum"].as_array().unwrap();
+        assert!(cat_enum.contains(&serde_json::json!("code")));
+        assert!(cat_enum.contains(&serde_json::json!("intent")));
+        let required = items["required"].as_array().unwrap();
+        assert!(required.contains(&serde_json::json!("category")));
     }
 
     #[test]

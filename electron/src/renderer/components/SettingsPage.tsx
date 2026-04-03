@@ -5,12 +5,10 @@ import { ErrorBoundary } from '#renderer/components/ErrorBoundary';
 import { SettingsGeneral } from '#renderer/components/SettingsGeneral';
 import { SettingsProjects } from '#renderer/components/SettingsProjects';
 import { SettingsCaptain } from '#renderer/components/SettingsCaptain';
-import { SettingsScheduledTasks } from '#renderer/components/SettingsScheduledTasks';
 import { SettingsTelegram } from '#renderer/components/SettingsTelegram';
 import { SettingsScout } from '#renderer/components/SettingsScout';
 import { SettingsExperimental } from '#renderer/components/SettingsExperimental';
 import { SettingsAbout } from '#renderer/components/SettingsAbout';
-import { MemoryCard } from '#renderer/components/MemoryCard';
 import { SetupChecklist } from '#renderer/components/SetupChecklist';
 
 export type SettingsSection =
@@ -18,10 +16,8 @@ export type SettingsSection =
   | 'general'
   | 'projects'
   | 'captain'
-  | 'scheduled-tasks'
   | 'telegram'
   | 'scout'
-  | 'memory'
   | 'experimental'
   | 'about';
 
@@ -35,10 +31,8 @@ const BASE_NAV_ITEMS: NavItem[] = [
   { id: 'general', label: 'General' },
   { id: 'projects', label: 'Projects' },
   { id: 'captain', label: 'Captain' },
-  { id: 'scheduled-tasks', label: 'Scheduled Tasks' },
   { id: 'telegram', label: 'Telegram' },
   { id: 'scout', label: 'Scout' },
-  { id: 'memory', label: 'Memory' },
   { id: 'experimental', label: 'Experimental' },
   { id: 'about', label: 'About' },
 ];
@@ -61,14 +55,10 @@ function SettingsPanel({ section }: { section: SettingsSection }) {
       return <SettingsProjects />;
     case 'captain':
       return <SettingsCaptain />;
-    case 'scheduled-tasks':
-      return <SettingsScheduledTasks />;
     case 'telegram':
       return <SettingsTelegram />;
     case 'scout':
       return <SettingsScout />;
-    case 'memory':
-      return <MemoryCard />;
     case 'experimental':
       return <SettingsExperimental />;
     case 'about':
@@ -90,14 +80,7 @@ export function SettingsPage({
   const loading = useSettingsStore((s) => s.loading);
   const error = useSettingsStore((s) => s.error);
   const saveSuccess = useSettingsStore((s) => s.saveSuccess);
-  const journalEnabled = useSettingsStore((s) => s.config?.features?.decisionJournal ?? false);
-  const cronEnabled = useSettingsStore((s) => s.config?.features?.cron ?? false);
-
-  const navItems = BASE_NAV_ITEMS.filter((i) => {
-    if (i.id === 'memory' && !journalEnabled) return false;
-    if (i.id === 'scheduled-tasks' && !cronEnabled) return false;
-    return true;
-  });
+  const navItems = BASE_NAV_ITEMS;
 
   useMountEffect(() => {
     load();

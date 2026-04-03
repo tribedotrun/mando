@@ -30,7 +30,6 @@ const CALLER_LABELS: Record<string, string> = {
   clarifier: 'clarifier',
   'deep-clarifier': 'deep clarifier',
   'captain-review-async': 'captain review',
-  'captain-distiller': 'distiller',
   'exhaustion-report': 'exhaustion',
   'task-ask': 'ask',
   'scout-process': 'scout',
@@ -39,7 +38,6 @@ const CALLER_LABELS: Record<string, string> = {
   'scout-research': 'research',
   'scout-act': 'act',
   'voice-agent': 'voice',
-  'guardian-repair': 'guardian',
 };
 
 export function formatCallerLabel(caller: string): string {
@@ -62,19 +60,7 @@ export function sessionTitle(s: SessionEntry): string {
 export function sessionSubtitle(s: SessionEntry): string | null {
   if (s.task_title) return s.task_title;
   if (s.scout_item_title) return s.scout_item_title;
-  if (s.caller === 'captain-distiller') {
-    return formatDistillerDate(s.created_at);
-  }
   return null;
-}
-
-function formatDistillerDate(iso: string): string {
-  try {
-    const d = new Date(iso);
-    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-  } catch {
-    return '';
-  }
 }
 
 export function SessionsEmptyState(): React.ReactElement {

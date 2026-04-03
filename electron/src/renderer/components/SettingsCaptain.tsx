@@ -91,25 +91,6 @@ export function SettingsCaptain(): React.ReactElement {
               placeholder="America/New_York"
             />
           </div>
-          <div className="sm:col-span-2">
-            <label className={labelCls} style={labelStyle}>
-              Learn Cron Expression
-            </label>
-            <input
-              data-testid="captain-learn-cron"
-              className={inputCls}
-              style={inputStyle}
-              value={captain.learnCronExpr ?? ''}
-              onChange={(e) => {
-                updateSection('captain', { learnCronExpr: e.target.value });
-                scheduleSave();
-              }}
-              placeholder="0 9 * * *"
-            />
-            <p className="mt-1 text-xs" style={{ color: 'var(--color-text-3)' }}>
-              Cron schedule for learning sessions (e.g. &quot;0 9 * * *&quot; = daily at 9am).
-            </p>
-          </div>
         </div>
       </div>
 
