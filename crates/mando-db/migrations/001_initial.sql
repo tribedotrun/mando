@@ -105,23 +105,6 @@ CREATE TABLE IF NOT EXISTS ask_history (
 
 CREATE INDEX IF NOT EXISTS idx_ask_history_task ON ask_history(task_id, timestamp);
 
--- ── Cron jobs ───────────────────────────────────────────────────────────────
-
-CREATE TABLE IF NOT EXISTS cron_jobs (
-    id              TEXT PRIMARY KEY,
-    name            TEXT    NOT NULL,
-    enabled         INTEGER NOT NULL DEFAULT 1,
-    schedule_json   TEXT    NOT NULL DEFAULT '{}',
-    payload_json    TEXT    NOT NULL DEFAULT '{}',
-    state_json      TEXT    NOT NULL DEFAULT '{}',
-    created_at_ms   INTEGER NOT NULL DEFAULT 0,
-    updated_at_ms   INTEGER NOT NULL DEFAULT 0,
-    delete_after_run INTEGER NOT NULL DEFAULT 0,
-    job_type        TEXT    NOT NULL DEFAULT 'system',
-    cwd             TEXT,
-    timeout_s       INTEGER NOT NULL DEFAULT 1200
-);
-
 -- ── Linear workpad ──────────────────────────────────────────────────────────
 
 CREATE TABLE IF NOT EXISTS linear_workpad (
@@ -145,38 +128,6 @@ CREATE TABLE IF NOT EXISTS scout_items (
     error_count    INTEGER DEFAULT 0,
     source_name    TEXT,
     date_published TEXT
-);
-
--- ── Task decisions ────────────────────────────────────────────────────────────
-
-CREATE TABLE IF NOT EXISTS task_decisions (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    tick_id     TEXT    NOT NULL,
-    worker      TEXT    NOT NULL,
-    item_id     TEXT,
-    action      TEXT    NOT NULL,
-    source      TEXT    NOT NULL,
-    rule        TEXT    NOT NULL,
-    state       TEXT    NOT NULL,
-    outcome     TEXT,
-    resolved_at TEXT,
-    created_at  TEXT    NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS idx_task_decisions_worker_outcome ON task_decisions(worker, outcome);
-CREATE INDEX IF NOT EXISTS idx_task_decisions_action_rule    ON task_decisions(action, rule, outcome);
-
--- ── Task patterns ─────────────────────────────────────────────────────────────
-
-CREATE TABLE IF NOT EXISTS task_patterns (
-    id             INTEGER PRIMARY KEY AUTOINCREMENT,
-    pattern        TEXT    NOT NULL,
-    signal         TEXT    NOT NULL,
-    recommendation TEXT    NOT NULL,
-    confidence     REAL    NOT NULL,
-    sample_size    INTEGER NOT NULL,
-    status         TEXT    NOT NULL DEFAULT 'pending',
-    created_at     TEXT    NOT NULL
 );
 
 -- ── Voice messages ────────────────────────────────────────────────────────────

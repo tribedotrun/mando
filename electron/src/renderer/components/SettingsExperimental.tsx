@@ -180,26 +180,10 @@ const FLAGS: FlagDef[] = [
     Settings: VoiceSettings,
   },
   {
-    key: 'decisionJournal',
-    label: 'Decision Journal',
-    description: 'Learning sessions, pattern recognition, and lesson approval.',
-  },
-  { key: 'cron', label: 'Cron', description: 'Scheduled cron job management.' },
-  {
     key: 'linear',
     label: 'Linear Sync',
     description: 'Import Linear "Todo" issues into captain tasks.',
     Settings: LinearSettings,
-  },
-  {
-    key: 'devMode',
-    label: 'Dev Mode',
-    description: 'Multi-turn ops sessions and knowledge-base repair.',
-  },
-  {
-    key: 'analytics',
-    label: 'Analytics',
-    description: 'Task throughput and success metrics dashboard.',
   },
 ];
 

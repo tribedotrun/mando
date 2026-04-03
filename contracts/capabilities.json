@@ -98,33 +98,6 @@
         "telegram",
         "electron"
       ]
-    },
-    "knowledge_review": {
-      "meaning": "Review and approve pending knowledge lessons",
-      "route": "GET /api/knowledge/pending + POST /api/knowledge/approve",
-      "surfaces": [
-        "cli",
-        "telegram",
-        "electron"
-      ]
-    },
-    "journal": {
-      "meaning": "Inspect the captain decision journal",
-      "route": "GET /api/journal",
-      "surfaces": [
-        "cli",
-        "telegram",
-        "electron"
-      ]
-    },
-    "patterns": {
-      "meaning": "Review and update learned patterns",
-      "route": "GET /api/patterns + POST /api/patterns/update",
-      "surfaces": [
-        "cli",
-        "telegram",
-        "electron"
-      ]
     }
   },
   "scout": {

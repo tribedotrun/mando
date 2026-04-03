@@ -87,6 +87,9 @@ pub struct AgentConfig {
     pub archive_grace_secs: u64,
     pub evidence_download_timeout_s: u64,
     pub evidence_ffmpeg_timeout_s: u64,
+    /// Circuit breaker: route to captain review after this many consecutive
+    /// nudges with the identical reason.
+    pub max_repeated_nudges: u32,
 }
 
 impl Default for AgentConfig {
@@ -108,6 +111,7 @@ impl Default for AgentConfig {
             archive_grace_secs: 604800,
             evidence_download_timeout_s: 30,
             evidence_ffmpeg_timeout_s: 30,
+            max_repeated_nudges: 10,
         }
     }
 }

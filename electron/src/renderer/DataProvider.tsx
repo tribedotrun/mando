@@ -5,7 +5,6 @@ import { initBaseUrl, connectSSE } from '#renderer/api';
 import log from '#renderer/logger';
 import { useTaskStore } from '#renderer/stores/taskStore';
 import { useScoutStore } from '#renderer/stores/scoutStore';
-import { useCronStore } from '#renderer/stores/cronStore';
 import { useDesktopNotifications } from '#renderer/hooks/useDesktopNotifications';
 import { useMountEffect } from '#renderer/hooks/useMountEffect';
 import { useToastStore } from '#renderer/stores/toastStore';
@@ -44,7 +43,6 @@ export function DataProvider({ children }: { children: React.ReactNode }): React
 
   const taskFetch = useTaskStore((s) => s.fetch);
   const scoutFetch = useScoutStore((s) => s.fetch);
-  const cronFetch = useCronStore((s) => s.fetch);
   const { processEvent: processNotification } = useDesktopNotifications();
 
   const startPolling = useCallback(() => {
@@ -66,9 +64,8 @@ export function DataProvider({ children }: { children: React.ReactNode }): React
   const refetchAll = useCallback(() => {
     taskFetch();
     scoutFetch();
-    cronFetch();
     queryClient.invalidateQueries();
-  }, [taskFetch, scoutFetch, cronFetch]);
+  }, [taskFetch, scoutFetch]);
 
   useMountEffect(() => {
     const init = async () => {
@@ -83,7 +80,7 @@ export function DataProvider({ children }: { children: React.ReactNode }): React
           }
         }
         // Seed initial data — partial failures are OK, SSE will fill gaps
-        await Promise.allSettled([taskFetch(), scoutFetch(), cronFetch()]);
+        await Promise.allSettled([taskFetch(), scoutFetch()]);
         sseRef.current = connectSSE(
           (event) => {
             switch (event.event) {
@@ -96,9 +93,6 @@ export function DataProvider({ children }: { children: React.ReactNode }): React
               case 'scout':
                 scoutFetch();
                 queryClient.invalidateQueries({ queryKey: ['scout'] });
-                break;
-              case 'cron':
-                cronFetch();
                 break;
               case 'status':
                 taskFetch();

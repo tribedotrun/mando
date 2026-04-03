@@ -153,14 +153,16 @@ fn gates_pass_nopr_captain_review() {
 }
 
 #[test]
-fn broken_session_captain_review() {
+fn dead_stale_no_result_falls_through_to_nudge() {
+    // Dead + stale > 30s + no stream result used to trigger broken_session.
+    // Now it falls through to the nudge path (broad heuristic removed).
     let mut ctx = base_ctx();
     ctx.process_alive = false;
-    ctx.stream_stale_s = Some(60.0); // stale > 30s
-                                     // No stream result + dead + stale > 30
+    ctx.stream_stale_s = Some(60.0);
     let a = classify(&ctx, &base_item(), None);
-    assert_eq!(a.action, ActionKind::CaptainReview);
-    assert_eq!(a.reason.as_deref(), Some("broken_session"));
+    assert_eq!(a.action, ActionKind::Nudge);
+    let reason = a.reason.as_deref().unwrap();
+    assert!(reason.starts_with("gates incomplete:"), "got: {reason}");
 }
 
 #[test]

@@ -73,27 +73,23 @@ async fn main() {
 
     let config_arc = Arc::new(ArcSwap::from_pointee(config.clone()));
 
-    // Cron service: wire callback before start (arm_timer skips if no callback).
-    let mut cron_service = mando_shared::CronService::new(db.pool().clone());
-    cron_service.set_on_job(mando_gateway::cron_executor::make_cron_callback(
-        config_arc.clone(),
-        task_store_arc.clone(),
-        bus.clone(),
-    ));
-    cron_service.start().await;
-
     if let Err(e) =
         mando_captain::runtime::reconciler::reconcile_on_startup(&config, db.pool()).await
     {
         tracing::error!(module = "startup", error = %e, "reconciliation failed");
     }
 
-    let captain_wf = mando_config::load_captain_workflow(
+    let mut captain_wf = mando_config::load_captain_workflow(
         &mando_config::captain_workflow_path(),
         config.captain.tick_interval_s,
     );
-    let scout_wf = mando_config::load_scout_workflow(&mando_config::scout_workflow_path(), &config);
+    let mut scout_wf =
+        mando_config::load_scout_workflow(&mando_config::scout_workflow_path(), &config);
     let voice_wf = mando_config::load_voice_workflow(&mando_config::voice_workflow_path());
+
+    if args.dev {
+        mando_gateway::apply_dev_model_overrides(&mut captain_wf, &mut scout_wf);
+    }
 
     let cc_state_dir = mando_config::state_dir().join("ops_sessions").join("cc");
     let mut cc_session_mgr = mando_captain::io::cc_session::CcSessionManager::new(
@@ -115,13 +111,13 @@ async fn main() {
         voice_workflow: Arc::new(ArcSwap::from_pointee(voice_wf)),
         config_write_mu: Arc::new(tokio::sync::Mutex::new(())),
         bus: bus.clone(),
-        cron_service: Arc::new(RwLock::new(cron_service)),
         cc_session_mgr: Arc::new(RwLock::new(cc_session_mgr)),
         task_store: task_store_arc,
         db,
         linear_workspace_slug: Arc::new(RwLock::new(None)),
         qa_session_mgr: mando_scout::runtime::qa::default_session_manager(),
         start_time,
+        dev_mode: args.dev,
     };
 
     // Fetch Linear workspace slug in background.
@@ -133,16 +129,6 @@ async fn main() {
     // Spawn captain auto-tick loop (always runs; respects auto_schedule dynamically).
     let tick_interval_s = config.captain.tick_interval_s.max(10);
     mando_gateway::background_tasks::spawn_auto_tick(&state, tick_interval_s);
-
-    // Spawn distiller cron loop (always runs; respects auto_schedule dynamically).
-    let learn_cron_expr = config.captain.learn_cron_expr.clone();
-    mando_gateway::background_tasks::spawn_distiller_cron(
-        state.config.clone(),
-        state.captain_workflow.clone(),
-        bus.clone(),
-        state.db.pool().clone(),
-        &learn_cron_expr,
-    );
 
     mando_gateway::instance::write_port_file(port, args.dev);
 

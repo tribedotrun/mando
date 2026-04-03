@@ -18,9 +18,11 @@ pub enum ReopenOutcome {
     CaptainReviewing,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn nudge_item(
     item: &mut Task,
     message: Option<&str>,
+    reason: Option<&str>,
     config: &Config,
     workflow: &CaptainWorkflow,
     notifier: &Notifier,
@@ -65,6 +67,48 @@ pub async fn nudge_item(
             return Ok(());
         }
     };
+
+    // ── Circuit breaker: repeated identical nudge reason → captain review ──
+    if let Some(reason_str) = reason {
+        let health_path = mando_config::worker_health_path();
+        let hstate = crate::io::health_store::load_health_state(&health_path);
+        let last_reason =
+            crate::io::health_store::get_health_str(&hstate, &worker, "last_nudge_reason");
+        let consecutive =
+            crate::io::health_store::get_health_u32(&hstate, &worker, "nudge_reason_consecutive");
+        let same = last_reason.as_deref() == Some(reason_str);
+        let new_consecutive = if same { consecutive + 1 } else { 1 };
+
+        if new_consecutive >= workflow.agent.max_repeated_nudges {
+            tracing::info!(
+                module = "captain",
+                worker = %worker,
+                reason = %reason_str,
+                consecutive = new_consecutive,
+                "repeated-nudge circuit breaker: routing to captain review"
+            );
+            item.intervention_count = new_count as i64;
+            trigger_review(
+                item,
+                ReviewTrigger::RepeatedNudge,
+                config,
+                workflow,
+                notifier,
+                pool,
+            )
+            .await?;
+            // Reset counter after review is started so the worker gets a
+            // fresh window. Placed after trigger_review so a failure leaves
+            // the counter at the threshold for retry on the next tick.
+            crate::io::health_store::persist_health_field(
+                &worker,
+                "nudge_reason_consecutive",
+                serde_json::json!(0),
+                "failed to reset circuit breaker counter",
+            );
+            return Ok(());
+        }
+    }
 
     let msg_owned;
     let msg = match message {
@@ -122,7 +166,7 @@ pub async fn nudge_item(
     .await
     {
         Ok((pid, _)) => {
-            persist_nudge_health(&cc_sid, &worker, pid, stream_size_before, new_count);
+            persist_nudge_health(&cc_sid, &worker, pid, stream_size_before, new_count, reason);
             crate::io::headless_cc::log_running_session(
                 pool,
                 &cc_sid,
@@ -344,6 +388,7 @@ fn persist_nudge_health(
     pid: u32,
     stream_size_before: u64,
     new_count: u32,
+    reason: Option<&str>,
 ) {
     crate::io::pid_registry::register(session_id, pid);
     let health_path = mando_config::worker_health_path();
@@ -361,6 +406,30 @@ fn persist_nudge_health(
         "nudge_count",
         serde_json::json!(new_count),
     );
+    // Track nudge reason for circuit breaker.
+    if let Some(r) = reason {
+        let last_reason =
+            crate::io::health_store::get_health_str(&hstate, worker, "last_nudge_reason");
+        let prev_consecutive =
+            crate::io::health_store::get_health_u32(&hstate, worker, "nudge_reason_consecutive");
+        let consecutive = if last_reason.as_deref() == Some(r) {
+            prev_consecutive + 1
+        } else {
+            1
+        };
+        crate::io::health_store::set_health_field(
+            &mut hstate,
+            worker,
+            "last_nudge_reason",
+            serde_json::json!(r),
+        );
+        crate::io::health_store::set_health_field(
+            &mut hstate,
+            worker,
+            "nudge_reason_consecutive",
+            serde_json::json!(consecutive),
+        );
+    }
     if let Err(e) = crate::io::health_store::save_health_state(&health_path, &hstate) {
         tracing::error!(module = "captain", worker = %worker, error = %e, "failed to persist health state");
     }

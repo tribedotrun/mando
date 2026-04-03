@@ -86,24 +86,22 @@ async fn reconcile_orphaned_worktrees(config: &Config, pool: &sqlx::SqlitePool) 
         }
     }
 
+    // Collect git-tracked worktrees from ALL projects before cleanup,
+    // so we never delete a worktree that belongs to another project.
+    let mut all_git_tracked = std::collections::HashSet::new();
+    let mut project_prefixes = Vec::new();
     for project_cfg in config.captain.projects.values() {
         let project_path = mando_config::expand_tilde(&project_cfg.path);
-        let worktrees_dir = match project_path.parent() {
-            Some(parent) => parent.join("worktrees"),
-            None => continue,
-        };
-        if !worktrees_dir.is_dir() {
-            continue;
-        }
-
         let repo_name = project_path
             .file_name()
             .and_then(|n| n.to_str())
-            .unwrap_or("repo");
-        let prefix = format!("{repo_name}-");
-
-        let git_tracked = match crate::io::git::list_worktrees(&project_path).await {
-            Ok(paths) => paths,
+            .unwrap_or("repo")
+            .to_string();
+        match crate::io::git::list_worktrees(&project_path).await {
+            Ok(paths) => {
+                all_git_tracked.extend(paths);
+                project_prefixes.push((project_path, format!("{repo_name}-")));
+            }
             Err(e) => {
                 tracing::error!(
                     module = "reconciler",
@@ -111,47 +109,56 @@ async fn reconcile_orphaned_worktrees(config: &Config, pool: &sqlx::SqlitePool) 
                     error = %e,
                     "failed to list git worktrees — skipping orphan cleanup for this project"
                 );
-                continue;
             }
-        };
+        }
+    }
 
-        let mut entries = match tokio::fs::read_dir(&worktrees_dir).await {
-            Ok(e) => e,
-            Err(e) => {
-                tracing::warn!(
-                    module = "reconciler",
-                    path = %worktrees_dir.display(),
-                    error = %e,
-                    "failed to read worktrees directory"
-                );
-                continue;
-            }
+    let worktrees_dir = crate::io::git::worktrees_dir();
+    if !worktrees_dir.is_dir() {
+        return;
+    }
+    let mut entries = match tokio::fs::read_dir(&worktrees_dir).await {
+        Ok(e) => e,
+        Err(e) => {
+            tracing::warn!(
+                module = "reconciler",
+                path = %worktrees_dir.display(),
+                error = %e,
+                "failed to read worktrees directory"
+            );
+            return;
+        }
+    };
+
+    while let Ok(Some(entry)) = entries.next_entry().await {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        let dir_name = entry.file_name().to_string_lossy().to_string();
+        // Find the owning project (longest prefix wins).
+        let owner = project_prefixes
+            .iter()
+            .filter(|(_, pfx)| dir_name.starts_with(pfx.as_str()))
+            .max_by_key(|(_, pfx)| pfx.len());
+        let Some((project_path, _)) = owner else {
+            continue;
         };
-        while let Ok(Some(entry)) = entries.next_entry().await {
-            let path = entry.path();
-            if !path.is_dir() {
-                continue;
-            }
-            let dir_name = entry.file_name();
-            if !dir_name.to_string_lossy().starts_with(&prefix) {
-                continue;
-            }
-            if tracked.contains(&path) || git_tracked.contains(&path) {
-                continue;
-            }
-            match crate::io::git::remove_worktree(&project_path, &path).await {
-                Ok(_) => tracing::info!(
-                    module = "reconciler",
-                    path = %path.display(),
-                    "removed orphaned worktree on startup"
-                ),
-                Err(e) => tracing::warn!(
-                    module = "reconciler",
-                    path = %path.display(),
-                    error = %e,
-                    "failed to remove orphaned worktree"
-                ),
-            }
+        if tracked.contains(&path) || all_git_tracked.contains(&path) {
+            continue;
+        }
+        match crate::io::git::remove_worktree(project_path, &path).await {
+            Ok(_) => tracing::info!(
+                module = "reconciler",
+                path = %path.display(),
+                "removed orphaned worktree on startup"
+            ),
+            Err(e) => tracing::warn!(
+                module = "reconciler",
+                path = %path.display(),
+                error = %e,
+                "failed to remove orphaned worktree"
+            ),
         }
     }
 }

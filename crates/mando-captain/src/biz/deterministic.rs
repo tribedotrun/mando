@@ -55,9 +55,10 @@ pub(crate) fn classify_worker(
     let stream_stale = ctx.stream_stale_s.unwrap_or(f64::MAX);
 
     // ── Rule 3: CC REVIEW — gates pass / broken / budget ──
-    let is_broken = has_broken_session
-        || (stream_result_clean.is_none() && !ctx.process_alive && stream_stale > 30.0);
-    if is_broken {
+    // Only truly broken sessions (content but no init event) route to captain
+    // review here. Dead-but-stale workers fall through to nudge, where the
+    // action layer checks for broken sessions before resuming.
+    if has_broken_session {
         return Some(action(ctx, ActionKind::CaptainReview, "", "broken_session"));
     }
     if ctx.intervention_count >= max_interventions as i64 {

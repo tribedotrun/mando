@@ -125,16 +125,18 @@ pub async fn list_worktrees(repo_path: &Path) -> Result<Vec<PathBuf>> {
     Ok(paths)
 }
 
-/// Compute worktree path from repo parent, repo name, and slug.
+/// Central worktrees directory (`~/.mando/worktrees` or `$MANDO_DATA_DIR/worktrees`).
+pub fn worktrees_dir() -> PathBuf {
+    mando_types::data_dir().join("worktrees")
+}
+
+/// Compute worktree path: `<worktrees_dir>/<repo_name>-<slug>`.
 pub fn worktree_path(repo_path: &Path, slug: &str) -> PathBuf {
-    let parent = repo_path.parent().unwrap_or(repo_path);
     let repo_name = repo_path
         .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or("repo");
-    parent
-        .join("worktrees")
-        .join(format!("{}-{}", repo_name, slug))
+    worktrees_dir().join(format!("{}-{}", repo_name, slug))
 }
 
 /// Run a git command and return stdout. Fails on non-zero exit.
@@ -157,35 +159,7 @@ pub(crate) async fn run_git(cwd: &Path, args: &[&str]) -> Result<String> {
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
-/// Check if worktree has uncommitted or unpushed changes.
-pub(crate) async fn has_changes(cwd: &Path) -> Result<bool> {
-    let status = run_git(cwd, &["status", "--porcelain"]).await?;
-    if !status.is_empty() {
-        return Ok(true);
-    }
-    match run_git(cwd, &["log", "--oneline", "HEAD", "--not", "--remotes"]).await {
-        Ok(log) => Ok(!log.is_empty()),
-        Err(_) => Ok(false),
-    }
-}
-
 /// Get the HEAD SHA of a worktree (short form).
 pub(crate) async fn head_sha(cwd: &Path) -> Result<String> {
     run_git(cwd, &["rev-parse", "--short", "HEAD"]).await
-}
-
-/// Rebase worktree on origin/main and push to main, then ff-pull on main repo.
-pub(crate) async fn rebase_and_push_to_main(wt_path: &Path, repo_path: &Path) -> Result<()> {
-    let full_ref = default_branch(repo_path).await?;
-    let branch = full_ref.strip_prefix("origin/").unwrap_or(&full_ref);
-
-    run_git(wt_path, &["fetch", "origin", branch]).await?;
-    run_git(wt_path, &["rebase", &format!("origin/{branch}")]).await?;
-    run_git(wt_path, &["push", "origin", &format!("HEAD:{branch}")]).await?;
-
-    // Best-effort pull on main repo.
-    if let Err(e) = run_git(repo_path, &["pull", "--ff-only"]).await {
-        tracing::warn!(path = %repo_path.display(), error = %e, "best-effort git pull --ff-only failed");
-    }
-    Ok(())
 }

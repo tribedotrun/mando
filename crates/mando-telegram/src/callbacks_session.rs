@@ -1,45 +1,9 @@
-//! Callback handlers for session-based interactions (ops, ask, knowledge).
+//! Callback handlers for session-based interactions (ask).
 
 use anyhow::Result;
 use serde_json::json;
 
 use crate::bot::TelegramBot;
-
-pub(crate) async fn handle_ops_callback(
-    bot: &mut TelegramBot,
-    parts: &[&str],
-    cb_id: &str,
-    cid: &str,
-    mid: i64,
-) -> Result<()> {
-    let action = parts.get(1).copied().unwrap_or("");
-    bot.api().answer_callback_query(cb_id, None).await?;
-
-    match action {
-        "new" | "end" => {
-            // End any existing server-side session.
-            let key = format!("ops:{cid}");
-            if let Err(e) = bot.gw().post("/api/ops/end", &json!({"key": key})).await {
-                tracing::warn!(module = "telegram", error = %e, "failed to end server-side ops session");
-            }
-            bot.close_ops_session(cid);
-            if let Err(e) = bot.remove_keyboard(cid, mid).await {
-                tracing::warn!(module = "telegram", error = %e, "message send failed");
-            }
-            let msg = if action == "new" {
-                bot.open_ops_session(cid);
-                "\u{1f527} New ops session. What do you need?"
-            } else {
-                "\u{1f527} Ops session ended."
-            };
-            if let Err(e) = bot.send_html(cid, msg).await {
-                tracing::warn!(module = "telegram", error = %e, "message send failed");
-            }
-        }
-        _ => {}
-    }
-    Ok(())
-}
 
 pub(crate) async fn handle_ask_callback(
     bot: &mut TelegramBot,
@@ -128,47 +92,6 @@ pub(crate) async fn handle_ask_callback(
                 bot.api()
                     .answer_callback_query(cb_id, Some("Picker expired"))
                     .await?;
-            }
-        }
-        _ => {
-            bot.api().answer_callback_query(cb_id, None).await?;
-        }
-    }
-    Ok(())
-}
-
-pub(crate) async fn handle_knowledge_callback(
-    bot: &TelegramBot,
-    parts: &[&str],
-    cb_id: &str,
-    cid: &str,
-    mid: i64,
-) -> Result<()> {
-    let action = parts.get(1).copied().unwrap_or("");
-    let lesson_id = parts.get(2).copied().unwrap_or("");
-
-    match action {
-        "approve" => {
-            bot.api()
-                .answer_callback_query(cb_id, Some("Approving\u{2026}"))
-                .await?;
-            crate::callback_actions::approve_knowledge(bot, cid, lesson_id).await?;
-            if let Err(e) = bot
-                .edit_message(cid, mid, "\u{2705} Lesson approved.")
-                .await
-            {
-                tracing::warn!(module = "telegram", error = %e, "message send failed");
-            }
-        }
-        "reject" => {
-            bot.api()
-                .answer_callback_query(cb_id, Some("Rejected"))
-                .await?;
-            if let Err(e) = bot
-                .edit_message(cid, mid, "\u{274c} Lesson rejected.")
-                .await
-            {
-                tracing::warn!(module = "telegram", error = %e, "message send failed");
             }
         }
         _ => {

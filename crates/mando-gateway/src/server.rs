@@ -12,15 +12,12 @@ use tracing::info;
 
 use crate::auth;
 use crate::middleware::request_id;
-use crate::routes_analytics;
 use crate::routes_captain;
 use crate::routes_captain_adopt;
 use crate::routes_channels;
 use crate::routes_clarifier;
 use crate::routes_client_logs;
 use crate::routes_config;
-use crate::routes_cron;
-use crate::routes_knowledge;
 use crate::routes_ops;
 use crate::routes_projects;
 use crate::routes_scout;
@@ -74,16 +71,13 @@ fn protected_routes() -> Router<AppState> {
     task_routes()
         .merge(captain_routes())
         .merge(scout_routes())
-        .merge(cron_routes())
         .merge(session_routes())
-        .merge(knowledge_routes())
         .merge(ops_routes())
         .merge(config_routes())
         .merge(channel_routes())
         .merge(voice_routes())
         .merge(worktree_routes())
         .merge(project_routes())
-        .merge(analytics_routes())
         .route("/api/health/system", get(routes_captain::get_health_system))
         .route("/api/images/{filename}", get(static_files::get_image))
         .route(
@@ -230,15 +224,6 @@ fn scout_routes() -> Router<AppState> {
         )
 }
 
-fn cron_routes() -> Router<AppState> {
-    Router::new()
-        .route("/api/cron", get(routes_cron::get_cron))
-        .route("/api/cron/add", post(routes_cron::post_cron_add))
-        .route("/api/cron/remove", post(routes_cron::post_cron_remove))
-        .route("/api/cron/toggle", post(routes_cron::post_cron_toggle))
-        .route("/api/cron/run", post(routes_cron::post_cron_run))
-}
-
 fn session_routes() -> Router<AppState> {
     Router::new()
         .route("/api/sessions", get(routes_sessions::get_sessions))
@@ -257,34 +242,6 @@ fn session_routes() -> Router<AppState> {
         .route(
             "/api/sessions/{id}/cost",
             get(routes_sessions::get_session_cost),
-        )
-}
-
-fn knowledge_routes() -> Router<AppState> {
-    Router::new()
-        .route("/api/knowledge", get(routes_knowledge::get_knowledge))
-        .route(
-            "/api/knowledge/pending",
-            get(routes_knowledge::get_knowledge_pending),
-        )
-        .route(
-            "/api/knowledge/approve",
-            post(routes_knowledge::post_knowledge_approve),
-        )
-        .route(
-            "/api/knowledge/learn",
-            post(routes_knowledge::post_knowledge_learn),
-        )
-        .route(
-            "/api/self-improve/trigger",
-            post(routes_knowledge::post_self_improve_trigger),
-        )
-        // Journal & patterns
-        .route("/api/journal", get(routes_knowledge::get_journal))
-        .route("/api/patterns", get(routes_knowledge::get_patterns))
-        .route(
-            "/api/patterns/update",
-            post(routes_knowledge::post_pattern_update),
         )
 }
 
@@ -361,10 +318,6 @@ fn project_routes() -> Router<AppState> {
         )
 }
 
-fn analytics_routes() -> Router<AppState> {
-    Router::new().route("/api/analytics", get(routes_analytics::get_analytics))
-}
-
 /// Start the gateway HTTP server.
 pub async fn start_server(
     config: mando_config::Config,
@@ -384,18 +337,8 @@ pub async fn start_server(
     let task_store_arc = Arc::new(RwLock::new(task_store));
     let config_arc = Arc::new(ArcSwap::from_pointee(config));
 
-    // Cron service: wire callback before start.
-    let mut cron_service = mando_shared::CronService::new(db.pool().clone());
-    cron_service.set_on_job(crate::cron_executor::make_cron_callback(
-        config_arc.clone(),
-        task_store_arc.clone(),
-        bus_arc.clone(),
-    ));
-    cron_service.start().await;
-
     let config = config_arc.load_full();
     let tick_interval_s = config.captain.tick_interval_s.max(10);
-    let learn_cron_expr = config.captain.learn_cron_expr.clone();
 
     // Clean dead PIDs first so reconciliation sees accurate liveness state.
     mando_captain::io::pid_registry::cleanup_dead();
@@ -430,13 +373,13 @@ pub async fn start_server(
         voice_workflow: Arc::new(ArcSwap::from_pointee(voice_wf)),
         config_write_mu: Arc::new(Mutex::new(())),
         bus: bus_arc.clone(),
-        cron_service: Arc::new(RwLock::new(cron_service)),
         cc_session_mgr: Arc::new(RwLock::new(cc_session_mgr)),
         task_store: task_store_arc,
         db,
         linear_workspace_slug: Arc::new(RwLock::new(None)),
         qa_session_mgr: mando_scout::runtime::qa::default_session_manager(),
         start_time: std::time::Instant::now(),
+        dev_mode: false,
     };
 
     // Fetch Linear workspace slug in background.
@@ -444,15 +387,6 @@ pub async fn start_server(
 
     // Spawn captain tick loop (always runs; respects auto_schedule dynamically).
     crate::background_tasks::spawn_auto_tick(&state, tick_interval_s);
-
-    // Spawn distiller cron loop (always runs; respects auto_schedule dynamically).
-    crate::background_tasks::spawn_distiller_cron(
-        state.config.clone(),
-        state.captain_workflow.clone(),
-        state.bus.clone(),
-        state.db.pool().clone(),
-        &learn_cron_expr,
-    );
 
     let app = build_router(state);
     let addr = format!("{host}:{port}");
@@ -475,7 +409,6 @@ mod tests {
         let bus = mando_shared::EventBus::new();
         let db = mando_db::Db::open_in_memory().await.unwrap();
         let db = Arc::new(db);
-        let cron_service = mando_shared::CronService::new(db.pool().clone());
 
         let cc_state_dir = std::env::temp_dir().join(format!(
             "mando-gw-test-cc-sessions-{:?}",
@@ -502,13 +435,13 @@ mod tests {
             )),
             config_write_mu: Arc::new(Mutex::new(())),
             bus: Arc::new(bus),
-            cron_service: Arc::new(RwLock::new(cron_service)),
             cc_session_mgr: Arc::new(RwLock::new(cc_session_mgr)),
             task_store: Arc::new(RwLock::new(task_store)),
             db,
             linear_workspace_slug: Arc::new(RwLock::new(None)),
             qa_session_mgr: mando_scout::runtime::qa::default_session_manager(),
             start_time: std::time::Instant::now(),
+            dev_mode: false,
         }
     }
 

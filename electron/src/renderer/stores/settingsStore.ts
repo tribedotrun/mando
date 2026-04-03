@@ -16,11 +16,7 @@ export interface ProjectConfig {
 
 export interface FeaturesConfig {
   voice?: boolean;
-  decisionJournal?: boolean;
-  cron?: boolean;
   linear?: boolean;
-  devMode?: boolean;
-  analytics?: boolean;
   setupDismissed?: boolean;
   claudeCodeVerified?: boolean;
 }
@@ -44,17 +40,10 @@ interface GatewayConfig {
 export interface CaptainConfig {
   autoSchedule?: boolean;
   tickIntervalS?: number;
-  learnCronExpr?: string;
   tz?: string;
   linearTeam?: string;
   linearCliPath?: string;
   projects?: Record<string, ProjectConfig>;
-}
-
-interface CCSelfImproveConfig {
-  cooldownS?: number;
-  maxRepairsPerHour?: number;
-  model?: string;
 }
 
 export interface VoiceConfig {
@@ -66,10 +55,6 @@ export interface VoiceConfig {
 
 interface ChannelsConfig {
   telegram?: TelegramConfig;
-}
-
-interface ToolsConfig {
-  ccSelfImprove?: CCSelfImproveConfig;
 }
 
 interface ScoutInterests {
@@ -99,7 +84,6 @@ export interface MandoConfig {
   captain?: CaptainConfig;
   voice?: VoiceConfig;
   scout?: ScoutConfig;
-  tools?: ToolsConfig;
   env?: Record<string, string>;
 }
 

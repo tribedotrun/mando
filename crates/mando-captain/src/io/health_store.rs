@@ -93,7 +93,12 @@ pub fn get_pid_for_worker(worker: &str) -> u32 {
 }
 
 /// Load health state, set a field, and save back. Logs on failure.
-fn persist_health_field(worker: &str, field: &str, value: serde_json::Value, err_msg: &str) {
+pub(crate) fn persist_health_field(
+    worker: &str,
+    field: &str,
+    value: serde_json::Value,
+    err_msg: &str,
+) {
     let health_path = mando_config::worker_health_path();
     let mut state = load_health_state(&health_path);
     set_health_field(&mut state, worker, field, value);
@@ -110,6 +115,15 @@ pub(crate) fn persist_nudge_count(worker: &str, count: u32) {
         serde_json::json!(count),
         "failed to persist nudge count — escalation threshold may reset on restart",
     );
+}
+
+/// Get a string field from a health entry.
+pub(crate) fn get_health_str(state: &HealthState, worker: &str, field: &str) -> Option<String> {
+    state
+        .get(worker)
+        .and_then(|v| v.get(field))
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
 }
 
 /// Update a health entry field.

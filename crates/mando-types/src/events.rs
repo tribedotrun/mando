@@ -11,8 +11,6 @@ pub enum BusEvent {
     Tasks,
     #[serde(rename = "scout")]
     Scout,
-    #[serde(rename = "cron")]
-    Cron,
     #[serde(rename = "status")]
     Status,
     #[serde(rename = "sessions")]
@@ -78,8 +76,6 @@ pub enum NotificationKind {
         item_id: String,
         questions: Option<String>,
     },
-    /// Cron alert with action buttons.
-    CronAlert { action_id: String },
     /// Claude API rate limit warning or rejection.
     RateLimited {
         status: String,

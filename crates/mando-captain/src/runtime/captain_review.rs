@@ -37,13 +37,14 @@ fn is_verdict_allowed(trigger: &str, action: &str) -> bool {
         "gates_pass" => matches!(action, "ship" | "nudge" | "escalate"),
         "degraded_context" => matches!(action, "ship" | "nudge" | "escalate"),
         "timeout" => matches!(action, "nudge" | "escalate"),
-        "broken_session" => matches!(action, "respawn" | "escalate"),
+        "broken_session" => matches!(action, "nudge" | "respawn" | "escalate"),
         "budget_exhausted" => matches!(action, "escalate"),
         "clarifier_fail" => matches!(action, "retry_clarifier" | "escalate"),
         "rebase_fail" => matches!(action, "nudge" | "escalate"),
         "ci_failure" => matches!(action, "nudge" | "escalate"),
         "merge_fail" => matches!(action, "nudge" | "escalate"),
         "missing_github_config" => matches!(action, "escalate"),
+        "repeated_nudge" => matches!(action, "nudge" | "respawn" | "escalate"),
         _ => false,
     }
 }
@@ -212,6 +213,7 @@ pub(crate) async fn spawn_review(
             "is_missing_github_config",
             trigger_flag("missing_github_config"),
         );
+        vars.insert("is_repeated_nudge", trigger_flag("repeated_nudge"));
 
         let prompt = match mando_config::render_prompt("captain_review", &prompts, &vars) {
             Ok(p) => p,

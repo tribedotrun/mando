@@ -13,11 +13,7 @@ fn parse_full_config() {
         "workspace": "~/my-workspace",
         "features": {
             "voice": true,
-            "decisionJournal": false,
-            "cron": true,
-            "linear": true,
-            "devMode": false,
-            "analytics": true
+            "linear": true
         },
         "channels": {
             "telegram": {
@@ -46,14 +42,6 @@ fn parse_full_config() {
             },
             "linearTeam": "XYZ"
         },
-        "tools": {
-            "ccSelfImprove": {
-                "pollIntervalS": 5.0,
-                "cooldownS": 600,
-                "maxRepairsPerHour": 5,
-                "timeoutS": 1800
-            }
-        },
         "env": {
             "TELEGRAM_MANDO_BOT_TOKEN": "tok-123",
             "ELEVENLABS_API_KEY": "el-key"
@@ -68,11 +56,7 @@ fn parse_full_config() {
 
     // Features
     assert!(cfg.features.voice);
-    assert!(!cfg.features.decision_journal);
-    assert!(cfg.features.cron);
     assert!(cfg.features.linear);
-    assert!(!cfg.features.dev_mode);
-    assert!(cfg.features.analytics);
 
     // Channels
     assert!(cfg.channels.telegram.enabled);
@@ -94,12 +78,6 @@ fn parse_full_config() {
     assert_eq!(project.hooks.get("pre_spawn").unwrap(), "echo hi");
     assert_eq!(project.worker_preamble, "be careful");
 
-    // Self-improve
-    assert_eq!(cfg.tools.cc_self_improve.poll_interval_s, 5.0);
-    assert_eq!(cfg.tools.cc_self_improve.cooldown_s, 600);
-    assert_eq!(cfg.tools.cc_self_improve.max_repairs_per_hour, 5);
-    assert_eq!(cfg.tools.cc_self_improve.timeout_s, 1800);
-
     // Env
     assert_eq!(cfg.env.get("ELEVENLABS_API_KEY").unwrap(), "el-key");
 }
@@ -115,18 +93,13 @@ fn parse_minimal_config_uses_defaults() {
 
     assert_eq!(cfg.workspace, "~/.mando/workspace");
     assert!(!cfg.features.voice);
-    assert!(!cfg.features.decision_journal);
-    assert!(!cfg.features.cron);
     assert!(!cfg.features.linear);
-    assert!(!cfg.features.dev_mode);
-    assert!(!cfg.features.analytics);
     assert!(!cfg.channels.telegram.enabled);
     assert_eq!(cfg.channels.telegram.token, "");
     assert_eq!(cfg.gateway.dashboard.port, 18791);
     assert!(!cfg.captain.auto_schedule);
     assert_eq!(cfg.captain.tick_interval_s, 30);
     assert_eq!(cfg.captain.linear_team, "");
-    assert_eq!(cfg.tools.cc_self_improve.cooldown_s, 300);
     assert!(cfg.env.is_empty());
 }
 

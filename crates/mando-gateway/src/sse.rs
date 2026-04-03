@@ -133,16 +133,6 @@ async fn build_snapshot(state: &AppState) -> serde_json::Value {
             .collect::<Vec<_>>()
     };
 
-    // Cron jobs.
-    let cron_jobs = {
-        let cs = state.cron_service.read().await;
-        let jobs = cs.list_jobs(true);
-        serde_json::to_value(&jobs).unwrap_or_else(|e| {
-            tracing::warn!(error = %e, "failed to serialize cron jobs");
-            json!([])
-        })
-    };
-
     // Daemon info.
     let uptime = state.start_time.elapsed().as_secs();
     let ts = std::time::SystemTime::now()
@@ -156,7 +146,6 @@ async fn build_snapshot(state: &AppState) -> serde_json::Value {
         "data": {
             "tasks": tasks,
             "workers": workers,
-            "cronJobs": cron_jobs,
             "daemon": {
                 "version": env!("CARGO_PKG_VERSION"),
                 "uptime": uptime,

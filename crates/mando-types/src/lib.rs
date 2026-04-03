@@ -2,7 +2,6 @@
 
 pub mod ask_history;
 pub mod captain;
-pub mod cron;
 pub mod events;
 pub mod notify;
 pub mod rebase_state;
@@ -17,7 +16,6 @@ pub mod timeline;
 // Re-exports for convenience.
 pub use ask_history::AskHistoryEntry;
 pub use captain::{Action, ActionKind, TickMode, TickResult, WorkerContext};
-pub use cron::{CronJob, CronPayload, CronSchedule, CronState, JobType, PayloadKind, ScheduleKind};
 pub use events::{BusEvent, NotificationKind, NotificationPayload};
 pub use notify::NotifyLevel;
 pub use rebase_state::{RebaseState, RebaseStatus};

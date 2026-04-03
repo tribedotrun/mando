@@ -40,7 +40,7 @@ interface GlobalKeyboardConfig {
   shortcutsOpen: boolean;
   showSettings: boolean;
   modalOpen: boolean;
-  onNavigate: (tab: 'captain' | 'scout' | 'sessions' | 'cron') => void;
+  onNavigate: (tab: 'captain' | 'scout' | 'sessions') => void;
   onTogglePalette: () => void;
   onOpenSettings: () => void;
   onToggleShortcuts: () => void;

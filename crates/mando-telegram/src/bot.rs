@@ -26,7 +26,7 @@ use crate::permissions;
 
 // ── Session state types ──────────────────────────────────────────────
 
-/// Lightweight session tracker for /ops and /ask.
+/// Lightweight session tracker for /ask.
 #[derive(Debug, Default)]
 pub struct Session {
     pub rounds: u32,
@@ -112,7 +112,6 @@ pub struct TelegramBot {
     config: Arc<RwLock<Config>>,
     pub(crate) gw: GatewayClient,
     pub(crate) pending_todo: HashSet<String>,
-    pub(crate) ops_sessions: HashMap<String, Session>,
     pub(crate) ask_sessions: HashMap<String, Session>,
     pub(crate) input_sessions: HashMap<String, String>,
     pub(crate) pending_reopen: HashMap<String, (String, String)>,
@@ -149,7 +148,6 @@ impl TelegramBot {
             config,
             gw,
             pending_todo: HashSet::new(),
-            ops_sessions: HashMap::new(),
             ask_sessions: HashMap::new(),
             input_sessions: HashMap::new(),
             pending_reopen: HashMap::new(),

@@ -4,11 +4,8 @@
 //! Only worktree management runs locally (git commands).
 
 mod captain;
-mod captain_review;
-mod cron;
 mod gateway;
 mod http;
-mod ops;
 mod project;
 mod scout;
 mod sessions;
@@ -40,10 +37,6 @@ enum Commands {
     Project(project::ProjectArgs),
     /// Captain tick loop and worker management
     Captain(captain::CaptainArgs),
-    /// Cron job management
-    Cron(cron::CronArgs),
-    /// Multi-turn ops copilot
-    Ops(ops::OpsArgs),
     /// Scout management
     Scout(scout::ScoutArgs),
     /// CC session history
@@ -139,8 +132,6 @@ async fn main() {
         Commands::Todo(args) => todo::handle(args).await,
         Commands::Project(args) => project::handle(args).await,
         Commands::Captain(args) => captain::handle(args).await,
-        Commands::Cron(args) => cron::handle(args).await,
-        Commands::Ops(args) => ops::handle(args).await,
         Commands::Scout(args) => scout::handle(args).await,
         Commands::Sessions(args) => sessions::handle(args).await,
         Commands::Voice(args) => voice::handle(args).await,
@@ -379,12 +370,6 @@ mod tests {
     }
 
     #[test]
-    fn cli_parse_cron_list() {
-        let cli = Cli::try_parse_from(["mando", "cron", "list"]).unwrap();
-        assert!(matches!(cli.command, Commands::Cron(_)));
-    }
-
-    #[test]
     fn cli_parse_daemon_start() {
         let cli = Cli::try_parse_from(["mando", "daemon", "start", "-p", "9999"]).unwrap();
         assert!(matches!(cli.command, Commands::Daemon(_)));
@@ -479,9 +464,6 @@ mod tests {
             ("adopt", "adopt"),
             ("nudge", "nudge"),
             ("stop", "stop"),
-            ("knowledge_review", "knowledge"),
-            ("journal", "journal"),
-            ("patterns", "patterns"),
         ] {
             assert!(
                 contract["captain"].get(expected).is_some(),

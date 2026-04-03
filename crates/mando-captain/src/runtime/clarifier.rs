@@ -131,6 +131,9 @@ pub struct ClarifierQuestion {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub answer: Option<String>,
     pub self_answered: bool,
+    /// "code" (answerable from the codebase) or "intent" (requires human judgment).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub category: Option<String>,
 }
 
 /// Result of a clarification turn.
@@ -335,9 +338,10 @@ pub async fn answer_and_reclarify(
                         "properties": {
                             "question": { "type": "string" },
                             "answer": { "type": ["string", "null"] },
-                            "self_answered": { "type": "boolean" }
+                            "self_answered": { "type": "boolean" },
+                            "category": { "type": "string", "enum": ["code", "intent"] }
                         },
-                        "required": ["question", "self_answered"]
+                        "required": ["question", "self_answered", "category"]
                     }
                 }
             },
@@ -393,6 +397,7 @@ fn escalate(title: &str, reason: &str) -> ClarifierResult {
             question: reason.to_string(),
             answer: None,
             self_answered: false,
+            category: Some("intent".into()),
         }]),
         generated_title: None,
         repo: None,
@@ -452,6 +457,7 @@ pub(crate) fn parse_clarifier_response(text: &str, item_title: &str) -> Clarifie
                     question: v["question"].as_str()?.to_string(),
                     answer: v["answer"].as_str().map(String::from),
                     self_answered: v["self_answered"].as_bool().unwrap_or(false),
+                    category: v["category"].as_str().map(String::from),
                 })
             })
             .collect()
@@ -495,7 +501,7 @@ mod tests {
 
     #[test]
     fn parse_structured_questions() {
-        let json = r#"{"status":"clarifying","context":"partial","questions":[{"question":"What repo?","answer":null,"self_answered":false},{"question":"Where is the code?","answer":"In src/lib.rs","self_answered":true}]}"#;
+        let json = r#"{"status":"clarifying","context":"partial","questions":[{"question":"What repo?","answer":null,"self_answered":false,"category":"intent"},{"question":"Where is the code?","answer":"In src/lib.rs","self_answered":true,"category":"code"}]}"#;
         let result = parse_clarifier_response(json, "fallback");
         assert_eq!(result.status, ClarifierStatus::Clarifying);
         let qs = result.questions.unwrap();
@@ -503,9 +509,11 @@ mod tests {
         assert_eq!(qs[0].question, "What repo?");
         assert!(!qs[0].self_answered);
         assert!(qs[0].answer.is_none());
+        assert_eq!(qs[0].category.as_deref(), Some("intent"));
         assert_eq!(qs[1].question, "Where is the code?");
         assert!(qs[1].self_answered);
         assert_eq!(qs[1].answer.as_deref(), Some("In src/lib.rs"));
+        assert_eq!(qs[1].category.as_deref(), Some("code"));
     }
 
     #[test]
@@ -542,11 +550,13 @@ mod tests {
                 question: "What DB?".into(),
                 answer: None,
                 self_answered: false,
+                category: Some("intent".into()),
             },
             ClarifierQuestion {
                 question: "What HTTP client?".into(),
                 answer: Some("reqwest".into()),
                 self_answered: true,
+                category: Some("code".into()),
             },
         ];
         let text = format_questions_text(&qs);

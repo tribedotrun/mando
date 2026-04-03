@@ -16,17 +16,12 @@ pub const CAPTAIN_MERGE: &str = "/api/captain/merge";
 pub const CAPTAIN_NUDGE: &str = "/api/captain/nudge";
 pub const CAPTAIN_STOP: &str = "/api/captain/stop";
 pub const CAPTAIN_TRIAGE: &str = "/api/captain/triage";
-pub const KNOWLEDGE_APPROVE: &str = "/api/knowledge/approve";
 pub const SCOUT_ASK: &str = "/api/scout/ask";
 pub const SCOUT_ITEMS: &str = "/api/scout/items";
 pub const SCOUT_RESEARCH: &str = "/api/scout/research";
 
 pub fn task_item(id: impl Display) -> String {
     format!("{TASKS}/{id}")
-}
-
-pub fn worker_kill(id: impl Display) -> String {
-    format!("/api/workers/{id}/kill")
 }
 
 pub fn scout_item(id: impl Display) -> String {
@@ -60,7 +55,7 @@ pub fn processed_scout_items(per_page: usize) -> String {
 mod tests {
     use super::{
         processed_scout_items, scout_act, scout_item, scout_items_with_status, scout_telegraph,
-        task_item, worker_kill, TASKS,
+        task_item, TASKS,
     };
 
     #[test]
@@ -90,10 +85,5 @@ mod tests {
             processed_scout_items(10000),
             "/api/scout/items?status=processed&per_page=10000"
         );
-    }
-
-    #[test]
-    fn builds_worker_path() {
-        assert_eq!(worker_kill("abc"), "/api/workers/abc/kill");
     }
 }

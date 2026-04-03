@@ -23,33 +23,41 @@ fn resolve_adopt_project(
             .ok_or_else(|| error_response(StatusCode::BAD_REQUEST, "unknown project"));
     }
 
+    let central_wt_dir = mando_captain::io::git::worktrees_dir();
+    let wt_name = wt_path.file_name().and_then(|n| n.to_str());
     let mut matched = config
         .captain
         .projects
         .values()
         .filter_map(|pc| {
             let project_path = mando_config::expand_tilde(&pc.path);
-            let worktrees_dir = project_path
-                .parent()
-                .unwrap_or(&project_path)
-                .join("worktrees");
-            if wt_path == project_path
-                || wt_path.starts_with(&project_path)
-                || wt_path.starts_with(&worktrees_dir)
-            {
-                Some(pc.name.clone())
-            } else {
-                None
+            if wt_path == project_path || wt_path.starts_with(&project_path) {
+                return Some((pc.name.clone(), usize::MAX));
             }
+            // Match worktrees in the central dir — longest prefix wins.
+            if wt_path.starts_with(&central_wt_dir) {
+                let repo_name = project_path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("");
+                let prefix = format!("{repo_name}-");
+                if let Some(name) = wt_name {
+                    if name.starts_with(&prefix) {
+                        return Some((pc.name.clone(), prefix.len()));
+                    }
+                }
+            }
+            None
         })
         .collect::<Vec<_>>();
 
-    matched.sort();
-    matched.dedup();
+    // Pick the longest-prefix match (most specific project).
+    matched.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+    matched.dedup_by(|a, b| a.0 == b.0);
 
-    match matched.as_slice() {
-        [project] => Ok(project.clone()),
-        [] if config.captain.projects.len() == 1 => Ok(config
+    match matched.first() {
+        Some((project, _)) => Ok(project.clone()),
+        None if config.captain.projects.len() == 1 => Ok(config
             .captain
             .projects
             .values()
@@ -57,13 +65,9 @@ fn resolve_adopt_project(
             .expect("single project should exist")
             .name
             .clone()),
-        [] => Err(error_response(
+        None => Err(error_response(
             StatusCode::BAD_REQUEST,
             "project is required when the worktree path does not match a configured project",
-        )),
-        _ => Err(error_response(
-            StatusCode::BAD_REQUEST,
-            "multiple projects match this worktree path; choose a project explicitly",
         )),
     }
 }

@@ -7,8 +7,6 @@ import { Sidebar, type Tab, type SetupProgress } from '#renderer/components/Side
 import { CaptainView } from '#renderer/components/CaptainView';
 import { ScoutPage } from '#renderer/components/ScoutPage';
 import { SessionsCard } from '#renderer/components/SessionsCard';
-import { CronJobsPanel } from '#renderer/components/CronJobsPanel';
-import { AnalyticsPage } from '#renderer/components/AnalyticsPage';
 import { SettingsPage, type SettingsSection } from '#renderer/components/SettingsPage';
 import { DevInfoBar } from '#renderer/components/DevInfoBar';
 import { CommandPalette } from '#renderer/components/CommandPalette';
@@ -139,12 +137,6 @@ export function App(): React.ReactElement {
       case 'nav-sessions':
         setActiveTab('sessions');
         break;
-      case 'nav-cron':
-        setActiveTab('cron');
-        break;
-      case 'nav-analytics':
-        setActiveTab('analytics');
-        break;
       case 'act-settings':
         setSettingsSection('general');
         setShowSettings(true);
@@ -183,12 +175,9 @@ export function App(): React.ReactElement {
         }
       }
 
-      // CronAlert → cron tab, RateLimited → captain tab (where impact is visible).
+      // RateLimited → captain tab (where impact is visible).
       // Clear detailItem so the tab switch is visible (detail view short-circuits render).
-      if (kind?.type === 'CronAlert') {
-        setDetailItemId(null);
-        setActiveTab('cron');
-      } else if (kind?.type === 'RateLimited') {
+      if (kind?.type === 'RateLimited') {
         setDetailItemId(null);
         setActiveTab('captain');
       }
@@ -361,8 +350,6 @@ export function App(): React.ReactElement {
             )}
             {activeTab === 'scout' && <ScoutPage />}
             {activeTab === 'sessions' && <SessionsCard />}
-            {activeTab === 'cron' && <CronJobsPanel variant="page" testId="cron-page" />}
-            {activeTab === 'analytics' && <AnalyticsPage />}
           </main>
         </div>
       </div>

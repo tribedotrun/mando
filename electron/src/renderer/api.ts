@@ -3,7 +3,6 @@ import type {
   TaskItem,
   HealthResponse,
   WorkersResponse,
-  CronResponse,
   SessionsResponse,
   TranscriptResponse,
   TimelineResponse,
@@ -13,9 +12,6 @@ import type {
   AskHistoryResponse,
   SSEConnectionStatus,
   ItemSessionsResponse,
-  JournalResponse,
-  PatternsResponse,
-  DistillerResponse,
 } from '#renderer/types';
 import log from '#renderer/logger';
 import { getErrorMessage } from '#renderer/utils';
@@ -253,7 +249,12 @@ export interface ClarifyResponse {
   ok: boolean;
   status: string;
   context?: string;
-  questions?: { question: string; answer?: string | null; self_answered: boolean }[];
+  questions?: {
+    question: string;
+    answer?: string | null;
+    self_answered: boolean;
+    category?: 'code' | 'intent';
+  }[];
   session_id?: string;
   error?: string;
 }
@@ -277,19 +278,6 @@ export const handoffItem = (id: number) => apiPost<{ ok: boolean }>('/api/tasks/
 
 // Workers
 export const fetchWorkers = () => apiGet<WorkersResponse>('/api/workers');
-
-// Cron
-export const fetchCron = () => apiGet<CronResponse>('/api/cron');
-export const addCronJob = (job: {
-  name: string;
-  schedule_kind: string;
-  schedule_value: string;
-  message: string;
-}) => apiPost<void>('/api/cron/add', job);
-export const removeCronJob = (id: string) => apiPost<void>('/api/cron/remove', { id });
-export const runCronJob = (id: string) => apiPost<void>('/api/cron/run', { id });
-export const toggleCronJob = (id: string, enabled: boolean) =>
-  apiPost<void>('/api/cron/toggle', { id, enabled });
 
 // Task Ask
 export const askTask = (id: number, question: string) =>
@@ -315,27 +303,6 @@ export async function fetchSessions(page = 1, perPage = 50, category?: string) {
 }
 export const fetchTranscript = (sessionId: string) =>
   apiGet<TranscriptResponse>(`/api/sessions/${sessionId}/transcript`);
-
-// Captain memory / decision journal
-export async function fetchJournal(params?: {
-  worker?: string;
-  limit?: number;
-}): Promise<JournalResponse> {
-  const qs = new URLSearchParams();
-  if (params?.worker) qs.set('worker', params.worker);
-  qs.set('limit', String(params?.limit ?? 50));
-  return apiGet<JournalResponse>(`/api/journal?${qs}`);
-}
-
-export const fetchPatterns = (status?: string) => {
-  const qs = status ? `?status=${status}` : '';
-  return apiGet<PatternsResponse>(`/api/patterns${qs}`);
-};
-
-export const updatePatternStatus = (id: number, status: 'approved' | 'dismissed') =>
-  apiPost<{ ok: boolean }>('/api/patterns/update', { id, status });
-
-export const runDistiller = () => apiPost<DistillerResponse>('/api/knowledge/learn');
 
 // SSE
 export function connectSSE(

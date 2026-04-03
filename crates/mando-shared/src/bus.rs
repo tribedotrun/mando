@@ -74,6 +74,6 @@ mod tests {
     #[tokio::test]
     async fn send_without_subscribers_does_not_panic() {
         let bus = EventBus::new();
-        bus.send(BusEvent::Cron, None); // no receivers — should not panic
+        bus.send(BusEvent::Status, None); // no receivers — should not panic
     }
 }

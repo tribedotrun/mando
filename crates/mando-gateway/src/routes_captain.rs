@@ -220,6 +220,7 @@ pub(crate) async fn post_captain_nudge(
     mando_captain::runtime::action_contract::nudge_item(
         &mut item,
         Some(&body.message),
+        None, // manual nudge — no circuit breaker reason
         &config,
         &workflow,
         &notifier,

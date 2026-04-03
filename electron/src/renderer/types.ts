@@ -116,24 +116,6 @@ export interface WorkersResponse {
   rate_limit_remaining_secs?: number;
 }
 
-export interface CronJob {
-  id: string;
-  name: string;
-  schedule_kind: 'every' | 'at' | 'cron';
-  schedule_value: string;
-  message: string;
-  enabled: boolean;
-  deliver: boolean;
-  channel?: string;
-  last_run?: string;
-  next_run?: string;
-}
-
-export interface CronResponse {
-  jobs: CronJob[];
-  count: number;
-}
-
 export interface ScoutItem {
   id: number;
   url: string;
@@ -225,6 +207,7 @@ export interface ClarifierQuestion {
   question: string;
   answer?: string | null;
   self_answered: boolean;
+  category?: 'code' | 'intent';
 }
 
 export interface TimelineEvent {
@@ -334,74 +317,6 @@ export interface NotificationPayload {
   kind: NotificationKind;
   task_key?: string;
   reply_markup?: unknown;
-}
-
-// ── Captain memory / decision journal types ──
-
-interface StateSnapshot {
-  process_alive: boolean;
-  stream_stale_s: number | null;
-  seconds_active: number;
-  intervention_count: number;
-  nudge_count: number;
-  no_pr: boolean;
-  reopen_seq: number;
-  has_reopen_ack: boolean;
-  branch_ahead: boolean;
-  unresolved_threads: number;
-  unreplied_threads: number;
-  unaddressed_issue_comments: number;
-  pr_ci_status: string | null;
-}
-
-export interface DecisionEntry {
-  id: number;
-  tick_id: string;
-  worker: string;
-  item_id: string | null;
-  action: string;
-  source: string;
-  rule: string;
-  state: StateSnapshot;
-  outcome: string | null;
-  resolved_at: string | null;
-  created_at: string;
-}
-
-export interface JournalTotals {
-  total: number;
-  successes: number;
-  failures: number;
-  unresolved: number;
-}
-
-export interface JournalResponse {
-  decisions: DecisionEntry[];
-  count: number;
-  totals: JournalTotals;
-}
-
-export interface Pattern {
-  id: number;
-  pattern: string;
-  signal: string;
-  recommendation: string;
-  confidence: number;
-  sample_size: number;
-  status: string;
-  created_at: string;
-}
-
-export interface PatternsResponse {
-  patterns: Pattern[];
-  count: number;
-}
-
-export interface DistillerResponse {
-  ok: boolean;
-  summary: string;
-  patterns_found: number;
-  patterns: Pattern[];
 }
 
 export interface ScoutItemSession {

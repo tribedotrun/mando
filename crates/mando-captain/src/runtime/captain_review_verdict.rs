@@ -99,6 +99,7 @@ pub async fn apply_verdict(
             item.worker = None;
             item.worktree = None;
             item.branch = None;
+            item.pr = None;
             timeline_emit::emit_for_task(
                 item,
                 TimelineEventType::CaptainReviewVerdict,
