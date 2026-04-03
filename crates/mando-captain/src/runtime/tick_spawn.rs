@@ -71,5 +71,6 @@ pub(crate) fn default_tick_result() -> TickResult {
         alerts: Vec::new(),
         dry_actions: Vec::new(),
         error: None,
+        rate_limited: false,
     }
 }

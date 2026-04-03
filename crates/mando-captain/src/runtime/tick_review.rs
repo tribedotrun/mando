@@ -5,7 +5,7 @@ use mando_config::workflow::CaptainWorkflow;
 use mando_types::task::ItemStatus;
 use mando_types::Task;
 
-use super::{captain_review, notify::Notifier};
+use super::{captain_review, notify::Notifier, rate_limit_cooldown};
 
 pub(super) async fn poll_reviewing_items(
     items: &mut [Task],
@@ -13,6 +13,7 @@ pub(super) async fn poll_reviewing_items(
     workflow: &CaptainWorkflow,
     notifier: &Notifier,
     pool: &sqlx::SqlitePool,
+    rate_limited: bool,
 ) {
     let review_timeout_s = workflow.agent.captain_review_timeout_s;
     for item in items
@@ -25,6 +26,15 @@ pub(super) async fn poll_reviewing_items(
             .as_deref()
             .is_some_and(|s| !s.is_empty());
         if !has_session {
+            // During rate-limit cooldown, skip spawning — will retry after cooldown.
+            if rate_limited {
+                tracing::debug!(
+                    module = "captain",
+                    item_id = item.id,
+                    "skipping review spawn during rate-limit cooldown"
+                );
+                continue;
+            }
             let trigger = item
                 .captain_review_trigger
                 .unwrap_or(mando_types::task::ReviewTrigger::Retry);
@@ -59,6 +69,23 @@ pub(super) async fn poll_reviewing_items(
 
         // Detect async CC task crash before checking for a verdict.
         if let Some(error_msg) = captain_review::check_review_failed(item) {
+            // Check if this failure was caused by rate limiting — if so,
+            // activate cooldown and don't count against the retry budget.
+            let is_rl = item
+                .session_ids
+                .review
+                .as_deref()
+                .is_some_and(rate_limit_cooldown::check_and_activate_from_stream);
+            if is_rl {
+                tracing::info!(
+                    module = "captain",
+                    item_id = item.id,
+                    "review failed due to rate limit — not counting against retry budget"
+                );
+                item.session_ids.review = None;
+                continue;
+            }
+
             let mut fail_count = item.review_fail_count as u32;
             captain_review::handle_review_error(
                 item,
@@ -96,6 +123,22 @@ pub(super) async fn poll_reviewing_items(
             .unwrap_or(true);
 
         if is_timed_out {
+            // Check if the review session was killed by rate limiting.
+            let is_rl = item
+                .session_ids
+                .review
+                .as_deref()
+                .is_some_and(rate_limit_cooldown::check_and_activate_from_stream);
+            if is_rl || rate_limited {
+                tracing::info!(
+                    module = "captain",
+                    item_id = item.id,
+                    "review timeout during rate limit — not counting against retry budget"
+                );
+                // Clear session so a fresh one spawns after cooldown.
+                item.session_ids.review = None;
+                continue;
+            }
             let mut fail_count = item.review_fail_count as u32;
             captain_review::handle_review_error(
                 item,

@@ -198,6 +198,17 @@ async fn run_captain_tick_inner(
     };
     let tick_id = mando_uuid::Uuid::v4().to_string();
 
+    // ── Rate-limit cooldown check ──────────────────────────────────────
+    let rate_limited = super::rate_limit_cooldown::is_active();
+    if rate_limited {
+        let remaining = super::rate_limit_cooldown::remaining_secs();
+        tracing::warn!(
+            module = "captain",
+            remaining_s = remaining,
+            "rate limit cooldown active — CC session spawning suppressed"
+        );
+    }
+
     // ── §2 GATHER — context for ALL non-terminal items ────────────────
 
     let worker_contexts =
@@ -252,8 +263,15 @@ async fn run_captain_tick_inner(
 
     // CaptainReviewing — poll for review verdicts from async CC sessions.
     if !dry_run {
-        super::tick_review::poll_reviewing_items(&mut items, config, workflow, &notifier, &pool)
-            .await;
+        super::tick_review::poll_reviewing_items(
+            &mut items,
+            config,
+            workflow,
+            &notifier,
+            &pool,
+            rate_limited,
+        )
+        .await;
     }
 
     // NeedsClarification timeout — escalate items waiting too long for human answers.
@@ -266,8 +284,15 @@ async fn run_captain_tick_inner(
 
     // CaptainMerging — poll for merge session results from async CC sessions.
     if !dry_run {
-        super::captain_merge::poll_merging_items(&mut items, config, workflow, &notifier, &pool)
-            .await;
+        super::captain_merge::poll_merging_items(
+            &mut items,
+            config,
+            workflow,
+            &notifier,
+            &pool,
+            rate_limited,
+        )
+        .await;
     }
 
     // Resolve outcomes + log decisions to journal.
@@ -288,6 +313,21 @@ async fn run_captain_tick_inner(
 
     if !dry_run {
         for action in &actions_to_execute {
+            // During rate-limit cooldown, skip actions that spawn CC sessions.
+            // Ship is fine (status transition only). Nudge and CaptainReview
+            // would spawn sessions that immediately fail.
+            if rate_limited {
+                use mando_types::captain::ActionKind;
+                if matches!(action.action, ActionKind::Nudge | ActionKind::CaptainReview) {
+                    tracing::debug!(
+                        module = "captain",
+                        action = ?action.action,
+                        worker = %action.worker,
+                        "skipping action during rate-limit cooldown"
+                    );
+                    continue;
+                }
+            }
             if let Err(e) = spawn_phase::execute_action(
                 action,
                 &mut items,
@@ -316,57 +356,27 @@ async fn run_captain_tick_inner(
     let mut dry_dispatch_actions: Vec<String> = Vec::new();
 
     if !dry_run {
-        // Rework → Queued: clear worker fields.
-        for item in items.iter_mut() {
-            if item.status == ItemStatus::Rework {
-                let item_id = item.id.to_string();
-                let _lock = if item.id > 0 {
-                    match crate::io::item_lock::acquire_item_lock(&item_id, "tick-rework-dispatch")
-                    {
-                        Ok(lock) => Some(lock),
-                        Err(e) => {
-                            tracing::info!(
-                                module = "captain",
-                                item_id = %item_id,
-                                error = %e,
-                                "skipping rework dispatch: item locked"
-                            );
-                            continue;
-                        }
-                    }
-                } else {
-                    None
-                };
-                item.status = ItemStatus::Queued;
-                item.worker = None;
-                item.worktree = None;
-                item.branch = None;
-                item.worker_started_at = None;
-                item.session_ids.worker = None;
-                tracing::info!(
-                    module = "captain",
-                    title = %&item.title[..item.title.len().min(60)],
-                    "dispatch: rework to queued"
-                );
-            }
-        }
+        super::tick_rework::transition_rework_to_queued(&mut items);
 
         // Dispatch Queued items to workers + New items to clarifier.
-        let resource_limits = &workflow.agent.resource_limits;
-        active_workers = super::dispatch_phase::dispatch_new_work(
-            &mut items,
-            config,
-            active_workers,
-            max_workers,
-            workflow,
-            &notifier,
-            false,
-            &mut dry_dispatch_actions,
-            &mut alerts,
-            resource_limits,
-            &pool,
-        )
-        .await?;
+        // Skip entirely during rate-limit cooldown — no CC sessions will be spawned.
+        if !rate_limited {
+            let resource_limits = &workflow.agent.resource_limits;
+            active_workers = super::dispatch_phase::dispatch_new_work(
+                &mut items,
+                config,
+                active_workers,
+                max_workers,
+                workflow,
+                &notifier,
+                false,
+                &mut dry_dispatch_actions,
+                &mut alerts,
+                resource_limits,
+                &pool,
+            )
+            .await?;
+        }
 
         // Brief write lock: only write back items the tick actually modified.
         {
@@ -464,6 +474,7 @@ async fn run_captain_tick_inner(
         alerts,
         dry_actions,
         error: None,
+        rate_limited,
     })
 }
 

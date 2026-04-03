@@ -350,15 +350,23 @@ export function applyPendingUpdateIfAny(): boolean {
 
 // Check + download flow
 
+function broadcastToWindows(channel: string, payload?: unknown): void {
+  for (const win of BrowserWindow.getAllWindows()) {
+    win.webContents.send(channel, payload);
+  }
+}
+
 async function checkAndDownload(): Promise<void> {
   if (downloading) return;
   if (pendingUpdate) return; // already have one ready
 
   downloading = true;
+  broadcastToWindows('update-checking');
 
   const feed = await fetchFeed();
   if (!feed) {
     downloading = false;
+    broadcastToWindows('update-no-update');
     return;
   }
 
@@ -391,6 +399,7 @@ async function checkAndDownload(): Promise<void> {
     if (existsSync(zipPath)) rmSync(zipPath);
     const extractDir = path.join(stagingDir, 'extract');
     if (existsSync(extractDir)) rmSync(extractDir, { recursive: true });
+    broadcastToWindows('update-check-error');
   } finally {
     downloading = false;
   }

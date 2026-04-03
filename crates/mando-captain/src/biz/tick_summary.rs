@@ -92,6 +92,7 @@ mod tests {
             alerts: vec!["Worker crashed".into()],
             dry_actions: vec![],
             error: None,
+            rate_limited: false,
         };
         let formatted = format_tick_result(&result);
         assert!(formatted.contains("Captain tick (live)"));
@@ -117,6 +118,7 @@ mod tests {
                 reason: Some("would spawn worker".into()),
             }],
             error: None,
+            rate_limited: false,
         };
         let formatted = format_tick_result(&result);
         assert!(formatted.contains("dry-run"));
@@ -134,6 +136,7 @@ mod tests {
             alerts: vec![],
             dry_actions: vec![],
             error: Some("lock held".into()),
+            rate_limited: false,
         };
         let formatted = format_tick_result(&result);
         assert!(formatted.contains("Error: lock held"));
@@ -170,6 +173,7 @@ mod tests {
                 },
             ],
             error: None,
+            rate_limited: false,
         };
         let formatted = format_tick_result(&result);
         assert!(
@@ -200,6 +204,7 @@ mod tests {
             alerts: vec![],
             dry_actions: vec![],
             error: None,
+            rate_limited: false,
         };
         let val = tick_result_to_json(&result);
         assert_eq!(val["mode"], "live");

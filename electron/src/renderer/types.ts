@@ -246,6 +246,7 @@ export interface TickResult {
   actions?: unknown[];
   tasks?: Record<string, number>;
   alerts?: string[];
+  rate_limited?: boolean;
 }
 
 export interface PrSummaryResponse {
