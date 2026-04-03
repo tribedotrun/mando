@@ -1,19 +1,23 @@
 import React, { useCallback } from 'react';
+import { apiPost } from '#renderer/api';
 import { useSettingsStore } from '#renderer/stores/settingsStore';
+import { useToastStore } from '#renderer/stores/toastStore';
 
 export function TaskEmptyState(): React.ReactElement {
   const projects = useSettingsStore((s) => s.config.captain?.projects);
-  const updateProject = useSettingsStore((s) => s.updateProject);
-  const save = useSettingsStore((s) => s.save);
   const hasProjects = projects && Object.keys(projects).length > 0;
 
   const handleAddProject = useCallback(async () => {
     const dir = await window.mandoAPI.selectDirectory();
     if (!dir) return;
-    const name = dir.split('/').pop() ?? dir;
-    updateProject(dir, { name, path: dir });
-    save();
-  }, [updateProject, save]);
+    try {
+      await apiPost('/api/projects', { path: dir });
+      useSettingsStore.getState().load();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to add project';
+      useToastStore.getState().add('error', msg);
+    }
+  }, []);
 
   return (
     <div className="flex flex-col items-center justify-center py-16">

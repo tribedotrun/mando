@@ -13,6 +13,7 @@ pub mod dashboard_timeline;
 pub mod dashboard_triage;
 pub mod dispatch_phase;
 mod dispatch_reclarify;
+mod dispatch_redispatch;
 pub mod distiller;
 pub mod guardian;
 pub mod linear_integration;

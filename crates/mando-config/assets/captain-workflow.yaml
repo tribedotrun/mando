@@ -22,7 +22,7 @@ agent:
   max_rebase_retries: 5
   rebase_base_delay_s: 30
   worker_timeout_s: 21600
-  clarifier_timeout_s: 300
+  clarifier_timeout_s: 1800
 
 # ── Prompt Templates ─────────────────────────────────────────────────────────
 

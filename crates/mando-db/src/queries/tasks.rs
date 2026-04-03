@@ -275,6 +275,21 @@ pub async fn persist_spawn(pool: &SqlitePool, task: &Task) -> Result<()> {
     Ok(())
 }
 
+/// Persist clarifier start fields immediately so the UI reflects the running
+/// clarifier while it's still in progress.
+pub async fn persist_clarify_start(pool: &SqlitePool, task: &Task) -> Result<()> {
+    sqlx::query(
+        "UPDATE tasks SET status=?, session_ids=? \
+         WHERE id=? AND status NOT IN ('merged','completed-no-pr','canceled')",
+    )
+    .bind(task.status.as_str())
+    .bind(task.session_ids.to_json())
+    .bind(task.id)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
 /// Archive terminal tasks older than `grace_secs`.
 pub async fn archive_terminal(pool: &SqlitePool, grace_secs: u64) -> Result<usize> {
     let cutoff = time::OffsetDateTime::now_utc() - time::Duration::seconds(grace_secs as i64);

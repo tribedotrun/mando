@@ -16,6 +16,7 @@ import { CreateTaskModal } from '#renderer/components/AddTaskForm';
 import { ShortcutOverlay } from '#renderer/components/ShortcutOverlay';
 import { TaskDetailView } from '#renderer/components/TaskDetailView';
 import { useSettingsStore } from '#renderer/stores/settingsStore';
+import { useTaskStore } from '#renderer/stores/taskStore';
 import { apiPost } from '#renderer/api';
 import { useToastStore } from '#renderer/stores/toastStore';
 import type { TaskItem } from '#renderer/types';
@@ -151,6 +152,40 @@ export function App(): React.ReactElement {
       window.mandoAPI.onShortcut(handleShortcut);
       return () => window.mandoAPI.removeShortcutListeners();
     }
+  });
+
+  // Navigate to the relevant view when a desktop notification is clicked.
+  useMountEffect(() => {
+    if (!window.mandoAPI) return;
+    window.mandoAPI.onNotificationClick((data) => {
+      const kind = data.kind as { type: string } | undefined;
+      setShowSettings(false);
+
+      // Task-related notifications → open task detail.
+      if (data.item_id) {
+        const id = Number(data.item_id);
+        if (!Number.isNaN(id)) {
+          const task = useTaskStore.getState().items.find((t) => t.id === id);
+          if (task) {
+            setActiveTab('captain');
+            setDetailItem(task);
+            return;
+          }
+        }
+      }
+
+      // CronAlert → cron tab, RateLimited → captain tab (where impact is visible).
+      // Clear detailItem so the tab switch is visible (detail view short-circuits render).
+      if (kind?.type === 'CronAlert') {
+        setDetailItem(null);
+        setActiveTab('cron');
+      } else if (kind?.type === 'RateLimited') {
+        setDetailItem(null);
+        setActiveTab('captain');
+      }
+      // Generic: window is already shown/focused by the main process.
+    });
+    return () => window.mandoAPI.removeNotificationClickListeners();
   });
 
   if (detailItem) {

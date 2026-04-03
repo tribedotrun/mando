@@ -23,6 +23,7 @@ pub(crate) async fn run_clarification(
     workflow: &CaptainWorkflow,
     config: &mando_config::Config,
     pool: &sqlx::SqlitePool,
+    pre_session_id: Option<&str>,
 ) -> Result<ClarifierResult> {
     let projects = &config.captain.projects;
     let prompt = build_clarifier_prompt(item, None, workflow, projects)?;
@@ -34,20 +35,18 @@ pub(crate) async fn run_clarification(
     let valid_names: Vec<String> = projects.values().map(|pc| pc.name.clone()).collect();
     let schema = build_clarifier_schema(&valid_names);
 
-    let result = match CcOneShot::run(
-        &prompt,
-        CcConfig::builder()
-            .model(&workflow.models.clarifier)
-            .timeout(Duration::from_secs(workflow.agent.clarifier_timeout_s))
-            .caller("clarifier")
-            .task_id(&task_id)
-            .cwd(cwd.clone())
-            .allowed_tools(vec!["Read".into(), "Glob".into(), "Grep".into()])
-            .json_schema(schema.clone())
-            .build(),
-    )
-    .await
-    {
+    let mut builder = CcConfig::builder()
+        .model(&workflow.models.clarifier)
+        .timeout(Duration::from_secs(workflow.agent.clarifier_timeout_s))
+        .caller("clarifier")
+        .task_id(&task_id)
+        .cwd(cwd.clone())
+        .allowed_tools(vec!["Read".into(), "Glob".into(), "Grep".into()])
+        .json_schema(schema.clone());
+    if let Some(sid) = pre_session_id {
+        builder = builder.session_id(sid);
+    }
+    let result = match CcOneShot::run(&prompt, builder.build()).await {
         Ok(result) => result,
         Err(e) => {
             warn!(module = "clarifier", title = %item.title, error = %e, "CC failed");
