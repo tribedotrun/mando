@@ -82,12 +82,24 @@ pub(crate) async fn redispatch_newly_queued(
                             if let Err(e) =
                                 mando_db::queries::tasks::persist_spawn(pool, item).await
                             {
-                                tracing::error!(
-                                    module = "captain",
-                                    id = item.id,
-                                    error = %e,
-                                    "failed to persist spawn — orphan risk"
-                                );
+                                tracing::error!(module = "captain", id = item.id, error = %e,
+                                    "failed to persist spawn — killing orphan worker");
+                                if let Some(ref cc_sid) = item.session_ids.worker {
+                                    crate::io::session_terminate::terminate_session(
+                                        pool,
+                                        cc_sid,
+                                        mando_types::SessionStatus::Failed,
+                                        None,
+                                    )
+                                    .await;
+                                }
+                                super::revert_to_queued(item);
+                                *active_workers -= 1;
+                                let resource = item.resource.as_deref().unwrap_or("cc").to_string();
+                                if let Some(c) = resource_counts.get_mut(&resource) {
+                                    *c = c.saturating_sub(1);
+                                }
+                                continue;
                             }
 
                             super::timeline_emit::emit_for_task(

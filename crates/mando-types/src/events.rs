@@ -90,6 +90,15 @@ pub enum NotificationKind {
         overage_resets_at: Option<u64>,
         overage_disabled_reason: Option<String>,
     },
+    /// Scout item finished processing.
+    ScoutProcessed {
+        scout_id: i64,
+        title: String,
+        relevance: i64,
+        quality: i64,
+        source_name: Option<String>,
+        telegraph_url: Option<String>,
+    },
     /// Generic notification (no special UI).
     Generic,
 }

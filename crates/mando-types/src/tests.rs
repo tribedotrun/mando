@@ -401,6 +401,37 @@ fn serde_bus_event_lowercase() {
 }
 
 #[test]
+fn serde_scout_processed_notification_round_trip() {
+    use crate::events::{NotificationKind, NotificationPayload};
+    let payload = NotificationPayload {
+        message: "📰 Test".into(),
+        level: NotifyLevel::Normal,
+        kind: NotificationKind::ScoutProcessed {
+            scout_id: 42,
+            title: "Test".into(),
+            relevance: 80,
+            quality: 90,
+            source_name: Some("Blog".into()),
+            telegraph_url: Some("https://telegra.ph/t".into()),
+        },
+        task_key: Some("scout:42".into()),
+        reply_markup: None,
+    };
+    let json = serde_json::to_string(&payload).unwrap();
+    let parsed: NotificationPayload = serde_json::from_str(&json).unwrap();
+    assert_eq!(parsed.message, payload.message);
+    assert!(matches!(
+        &parsed.kind,
+        NotificationKind::ScoutProcessed {
+            scout_id: 42,
+            relevance: 80,
+            quality: 90,
+            ..
+        }
+    ));
+}
+
+#[test]
 fn serde_action_kind_kebab() {
     assert_eq!(
         serde_json::to_string(&ActionKind::Ship).unwrap(),

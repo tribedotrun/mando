@@ -12,3 +12,37 @@ pub mod biz;
 pub mod io;
 pub(crate) mod pr_evidence;
 pub mod runtime;
+
+/// Signal that a worker process has exited. The gateway auto-tick loop listens
+/// on this to trigger an immediate captain tick instead of waiting for the next
+/// scheduled interval.
+pub static WORKER_EXIT_SIGNAL: tokio::sync::Notify = tokio::sync::Notify::const_new();
+
+/// Spawn a background task that awaits the child process and signals
+/// [`WORKER_EXIT_SIGNAL`] on exit so the next tick fires immediately.
+pub fn watch_worker_exit(mut child: tokio::process::Child) {
+    tokio::spawn(async move {
+        match child.wait().await {
+            Ok(status) => {
+                tracing::debug!(
+                    module = "captain",
+                    exit_code = status.code(),
+                    "worker process exited"
+                );
+            }
+            Err(e) => {
+                tracing::warn!(
+                    module = "captain",
+                    error = %e,
+                    "worker process wait failed — signaling exit anyway"
+                );
+            }
+        }
+        // notify_one stores a permit when no waiter is present, so the
+        // next select! iteration picks it up immediately. Multiple exits
+        // coalesce into one permit, which is fine — one tick evaluates all
+        // workers. (notify_waiters would silently drop the signal when the
+        // tick loop is busy processing, which is the common case.)
+        WORKER_EXIT_SIGNAL.notify_one();
+    });
+}

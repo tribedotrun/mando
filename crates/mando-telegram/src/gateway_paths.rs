@@ -45,10 +45,6 @@ pub fn scout_act(id: impl Display) -> String {
     format!("{SCOUT_ITEMS}/{id}/act")
 }
 
-pub fn scout_sessions(id: impl Display) -> String {
-    format!("{SCOUT_ITEMS}/{id}/sessions")
-}
-
 pub fn scout_items_with_status(status: Option<&str>, per_page: usize) -> String {
     match status.map(str::trim).filter(|status| !status.is_empty()) {
         Some(status) => format!("{SCOUT_ITEMS}?status={status}&per_page={per_page}"),

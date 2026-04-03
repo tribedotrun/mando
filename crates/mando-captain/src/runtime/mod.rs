@@ -42,3 +42,13 @@ mod tick_review;
 pub mod tick_spawn;
 pub mod timeline_backfill;
 pub mod timeline_emit;
+
+/// Revert a task to Queued, clearing all worker-related fields.
+pub(crate) fn revert_to_queued(item: &mut mando_types::Task) {
+    item.status = mando_types::task::ItemStatus::Queued;
+    item.worker = None;
+    item.session_ids.worker = None;
+    item.worktree = None;
+    item.branch = None;
+    item.worker_started_at = None;
+}

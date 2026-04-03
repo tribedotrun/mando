@@ -279,10 +279,13 @@ pub(crate) async fn get_workers(State(state): State<AppState>) -> Json<Value> {
     let config = state.config.load_full();
     let workflow = state.captain_workflow.load_full();
     let store = state.task_store.read().await;
-    let all_items = store.load_all().await.unwrap_or_else(|e| {
-        tracing::error!(error = %e, "failed to load tasks for workers endpoint");
-        Vec::new()
-    });
+    let all_items = match store.load_all().await {
+        Ok(items) => items,
+        Err(e) => {
+            tracing::error!(error = %e, "failed to load tasks for workers endpoint");
+            return Json(json!({"error": "database error", "workers": []}));
+        }
+    };
     drop(store);
 
     let health_path = mando_config::worker_health_path();
@@ -290,7 +293,7 @@ pub(crate) async fn get_workers(State(state): State<AppState>) -> Json<Value> {
     let nudge_budget = workflow.agent.max_interventions;
     let stale_threshold_s = workflow.agent.stale_threshold_s;
 
-    // Filter in-progress items with a worker — single load_all, no N+1 find_by_id.
+    // Filter items with an active worker — single load_all, no N+1 find_by_id.
     let workers: Vec<Value> = all_items
         .iter()
         .filter(|task| {
@@ -298,6 +301,7 @@ pub(crate) async fn get_workers(State(state): State<AppState>) -> Json<Value> {
                 task.status,
                 mando_types::task::ItemStatus::InProgress
                     | mando_types::task::ItemStatus::CaptainReviewing
+                    | mando_types::task::ItemStatus::CaptainMerging
             ) && task.worker.is_some()
         })
         .map(|task| {
@@ -322,14 +326,27 @@ pub(crate) async fn get_workers(State(state): State<AppState>) -> Json<Value> {
                 .map(mando_config::stream_path_for_session)
                 .and_then(|p| mando_cc::stream_stale_seconds(&p));
             let process_alive = pid.is_some_and(mando_cc::is_process_alive);
-            let is_stale = match (process_alive, stream_stale_s) {
-                (true, Some(s)) => s >= stale_threshold_s,
-                (true, None) => false, // just started, no stream yet
-                (false, _) => true,    // dead process = stale
+            // During CaptainReviewing/CaptainMerging the worker process has
+            // exited naturally — captain is handling the task via a separate
+            // session. A dead worker in these states is expected, not stale.
+            let in_captain_phase = matches!(
+                task.status,
+                mando_types::task::ItemStatus::CaptainReviewing
+                    | mando_types::task::ItemStatus::CaptainMerging
+            );
+            let is_stale = if in_captain_phase {
+                false
+            } else {
+                match (process_alive, stream_stale_s) {
+                    (true, Some(s)) => s >= stale_threshold_s,
+                    (true, None) => false, // just started, no stream yet
+                    (false, _) => true,    // dead process = stale
+                }
             };
             json!({
                 "id": task.id,
                 "title": task.title,
+                "status": task.status.as_str(),
                 "worker": task.worker,
                 "project": task.project,
                 "github_repo": github_repo,

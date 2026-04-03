@@ -168,6 +168,18 @@ impl NotificationHandler {
                 "View",
                 &format!("view:{item_id}"),
             )])),
+            NotificationKind::ScoutProcessed {
+                scout_id,
+                telegraph_url,
+                ..
+            } => {
+                let mut buttons = Vec::new();
+                if telegraph_url.is_some() {
+                    buttons.push(button("Read", &format!("dg:read:{scout_id}")));
+                }
+                buttons.push(button("Archive", &format!("dg:archive:{scout_id}")));
+                Some(inline_keyboard(buttons))
+            }
             _ => None,
         }
     }
@@ -263,6 +275,62 @@ mod tests {
         };
         let markup = handler.build_reply_markup(&payload);
         assert_eq!(markup.unwrap(), custom);
+    }
+
+    #[test]
+    fn scout_processed_gets_read_and_archive_buttons() {
+        let api = TelegramApi::new("fake:token");
+        let handler = NotificationHandler::new(api, "12345".into());
+        let payload = NotificationPayload {
+            message: "📰 Article Title".into(),
+            level: NotifyLevel::Normal,
+            kind: NotificationKind::ScoutProcessed {
+                scout_id: 42,
+                title: "Article Title".into(),
+                relevance: 80,
+                quality: 90,
+                source_name: Some("Example Blog".into()),
+                telegraph_url: Some("https://telegra.ph/test".into()),
+            },
+            task_key: Some("scout:42".into()),
+            reply_markup: None,
+        };
+        let markup = handler.build_reply_markup(&payload);
+        assert!(markup.is_some());
+        let kb = markup.unwrap();
+        let buttons = kb["inline_keyboard"][0].as_array().unwrap();
+        assert_eq!(buttons.len(), 2);
+        assert_eq!(buttons[0]["text"], "Read");
+        assert_eq!(buttons[0]["callback_data"], "dg:read:42");
+        assert_eq!(buttons[1]["text"], "Archive");
+        assert_eq!(buttons[1]["callback_data"], "dg:archive:42");
+    }
+
+    #[test]
+    fn scout_processed_no_telegraph_omits_read_button() {
+        let api = TelegramApi::new("fake:token");
+        let handler = NotificationHandler::new(api, "12345".into());
+        let payload = NotificationPayload {
+            message: "📰 Article Title".into(),
+            level: NotifyLevel::Normal,
+            kind: NotificationKind::ScoutProcessed {
+                scout_id: 7,
+                title: "Article Title".into(),
+                relevance: 50,
+                quality: 60,
+                source_name: None,
+                telegraph_url: None,
+            },
+            task_key: Some("scout:7".into()),
+            reply_markup: None,
+        };
+        let markup = handler.build_reply_markup(&payload);
+        assert!(markup.is_some());
+        let kb = markup.unwrap();
+        let buttons = kb["inline_keyboard"][0].as_array().unwrap();
+        assert_eq!(buttons.len(), 1);
+        assert_eq!(buttons[0]["text"], "Archive");
+        assert_eq!(buttons[0]["callback_data"], "dg:archive:7");
     }
 
     #[test]

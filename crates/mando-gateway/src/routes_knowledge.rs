@@ -128,18 +128,24 @@ pub(crate) async fn post_knowledge_approve(
 
     // Also append to approved.json for aggregate access.
     let mut approved: Vec<Value> = match std::fs::read_to_string(&approved_path) {
-        Ok(text) => serde_json::from_str(&text).unwrap_or_else(|e| {
-            tracing::warn!(
+        Ok(text) => serde_json::from_str(&text).map_err(|e| {
+            tracing::error!(
                 module = "knowledge",
                 path = %approved_path.display(),
                 error = %e,
-                "approved knowledge file corrupt — starting fresh"
+                "approved knowledge file corrupt — refusing to overwrite"
             );
-            Vec::new()
-        }),
+            error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                &format!("approved.json is corrupt and cannot be parsed: {e}"),
+            )
+        })?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Vec::new(),
         Err(e) => {
-            tracing::warn!(module = "knowledge", path = %approved_path.display(), error = %e, "cannot read approved knowledge file");
-            Vec::new()
+            return Err(error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                &format!("cannot read approved knowledge file: {e}"),
+            ));
         }
     };
     approved.extend(body.lessons.iter().cloned());

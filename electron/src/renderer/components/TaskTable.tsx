@@ -3,7 +3,8 @@ import { useScrollIntoViewRef } from '#renderer/hooks/useScrollIntoViewRef';
 import { useTaskStore } from '#renderer/stores/taskStore';
 import { useFilteredTasks } from '#renderer/hooks/useFilteredTasks';
 import type { TaskItem } from '#renderer/types';
-import { prLabel, prHref, prState, canMerge, canReopen, canAsk } from '#renderer/utils';
+import { prLabel, prHref, prState, linearHref, canMerge, canReopen, canAsk } from '#renderer/utils';
+import { useLinearSlug } from '#renderer/hooks/useLinearSlug';
 import { TaskEmptyState } from '#renderer/components/TaskDetails';
 import { MergeBtn, PrIcon, MoreIcon } from '#renderer/components/TaskIcons';
 
@@ -51,6 +52,7 @@ export function TaskTable(props: Props): React.ReactElement {
     projectFilter,
     focusedIndex = -1,
   } = props;
+  const linearSlug = useLinearSlug();
   const loading = useTaskStore((s) => s.loading);
   const error = useTaskStore((s) => s.error);
   const items = useFilteredTasks(projectFilter);
@@ -84,6 +86,7 @@ export function TaskTable(props: Props): React.ReactElement {
           selected={selectedIds.has(item.id)}
           focused={idx === focusedIndex}
           scrollRef={idx === focusedIndex ? scrollRef : undefined}
+          linearSlug={linearSlug}
           onToggleSelect={() => onToggleSelect(item.id)}
           onMerge={() => onMerge(item)}
           onReopen={() => onReopen(item)}
@@ -121,6 +124,7 @@ interface RowProps {
   selected: boolean;
   focused: boolean;
   scrollRef?: (node: HTMLElement | null) => void;
+  linearSlug?: string;
   onToggleSelect: () => void;
   onMerge: () => void;
   onReopen: () => void;
@@ -139,6 +143,7 @@ const TaskRow = React.memo(function TaskRow({
   selected,
   focused,
   scrollRef,
+  linearSlug,
   ...actions
 }: RowProps): React.ReactElement {
   const fetch = useTaskStore((s) => s.fetch);
@@ -222,38 +227,56 @@ const TaskRow = React.memo(function TaskRow({
         </span>
       </span>
 
-      {/* Col: title with optional action label prefix */}
+      {/* Col: title + badges — title truncates, badges never compress */}
       <span
-        className="min-w-0 flex-1 truncate"
+        className="flex min-w-0 flex-1 items-center"
         style={{
           fontSize: 14,
           lineHeight: '18px',
-          color: isFinalized ? 'var(--color-text-3)' : 'var(--color-text-1)',
+          gap: 6,
         }}
-        title={item.title}
       >
-        {ACTION_LABELS[item.status] && (
-          <span
-            style={{
-              fontSize: 12,
-              fontWeight: 500,
-              color: ACTION_LABELS[item.status].color,
-              marginRight: 6,
-            }}
-          >
-            {ACTION_LABELS[item.status].label}
-            {' \u00b7 '}
-          </span>
-        )}
-        {item.title}
-      </span>
-
-      {/* Col: badges (Linear + PR) — shrink-0, always visible */}
-      {(item.linear_id || (item.pr && (item.github_repo || item.project))) && (
-        <span className="flex shrink-0 items-center" style={{ gap: 6 }}>
-          {item.linear_id && (
+        <span
+          className="min-w-0 truncate"
+          style={{ color: isFinalized ? 'var(--color-text-3)' : 'var(--color-text-1)' }}
+          title={item.title}
+        >
+          {ACTION_LABELS[item.status] && (
             <span
-              className="inline-flex items-center font-mono"
+              style={{
+                fontSize: 12,
+                fontWeight: 500,
+                color: ACTION_LABELS[item.status].color,
+                marginRight: 6,
+              }}
+            >
+              {ACTION_LABELS[item.status].label}
+              {' \u00b7 '}
+            </span>
+          )}
+          {item.title}
+        </span>
+        {item.linear_id &&
+          (linearSlug ? (
+            <a
+              href={linearHref(item.linear_id, linearSlug)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex shrink-0 items-center font-mono no-underline hover:underline"
+              style={{
+                fontSize: 11,
+                color: 'var(--color-text-3)',
+                background: 'var(--color-surface-3)',
+                padding: '1px 5px',
+                borderRadius: 3,
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              {item.linear_id}
+            </a>
+          ) : (
+            <span
+              className="inline-flex shrink-0 items-center font-mono"
               style={{
                 fontSize: 11,
                 color: 'var(--color-text-3)',
@@ -264,45 +287,38 @@ const TaskRow = React.memo(function TaskRow({
             >
               {item.linear_id}
             </span>
-          )}
-          {item.pr && (item.github_repo || item.project) && (
-            <a
-              href={prHref(item.pr, (item.github_repo ?? item.project)!)}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center no-underline hover:underline"
-              style={{
-                fontFamily: 'var(--font-mono)',
-                fontSize: 11,
-                color: 'var(--color-text-3)',
-                background: 'var(--color-surface-3)',
-                padding: '1px 5px',
-                borderRadius: 3,
-                gap: 3,
-              }}
-              onClick={(e) => e.stopPropagation()}
-            >
-              <PrIcon state={prState(item.status)} />
-              {prLabel(item.pr)}
-            </a>
-          )}
-        </span>
-      )}
+          ))}
+        {item.pr && (item.github_repo || item.project) && (
+          <a
+            href={prHref(item.pr, (item.github_repo ?? item.project)!)}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex shrink-0 items-center no-underline hover:underline"
+            style={{
+              fontFamily: 'var(--font-mono)',
+              fontSize: 11,
+              color: 'var(--color-text-3)',
+              background: 'var(--color-surface-3)',
+              padding: '1px 5px',
+              borderRadius: 3,
+              gap: 3,
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <PrIcon state={prState(item.status)} />
+            {prLabel(item.pr)}
+          </a>
+        )}
+      </span>
 
-      {/* Overlay: actions — absolutely positioned, visible on hover */}
+      {/* Actions — inline flex item, hidden until hover via CSS */}
       <div
         data-actions
         data-menu-open={menuOpen || undefined}
-        className="action-zone items-center"
+        className="action-zone shrink-0 items-center"
         style={{
           display: 'flex',
           gap: 6,
-          position: 'absolute',
-          right: 12,
-          top: '50%',
-          transform: 'translateY(-50%)',
-          background: selected ? 'var(--color-accent-wash)' : 'var(--color-surface-1)',
-          paddingLeft: 8,
         }}
         onClick={(e) => e.stopPropagation()}
       >

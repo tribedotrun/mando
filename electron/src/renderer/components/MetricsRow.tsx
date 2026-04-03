@@ -15,6 +15,33 @@ function formatRuntime(startedAt?: string): string {
   return h > 0 ? `${h}h ${m}m` : `${m}m`;
 }
 
+type WorkerPhase = 'active' | 'reviewing' | 'stale';
+
+function getWorkerPhase(worker: WorkerDetail, stale: boolean): WorkerPhase {
+  if (worker.status === 'captain-reviewing' || worker.status === 'captain-merging') {
+    return 'reviewing';
+  }
+  return stale ? 'stale' : 'active';
+}
+
+const PHASE_COLORS: Record<WorkerPhase, { dot: string; text: string; duration: string }> = {
+  active: {
+    dot: 'var(--color-success)',
+    text: 'var(--color-text-2)',
+    duration: 'var(--color-text-3)',
+  },
+  reviewing: {
+    dot: 'var(--color-accent)',
+    text: 'var(--color-accent)',
+    duration: 'var(--color-accent)',
+  },
+  stale: {
+    dot: 'var(--color-stale)',
+    text: 'var(--color-stale)',
+    duration: 'var(--color-stale)',
+  },
+};
+
 function WorkerRow({
   worker,
   stale,
@@ -28,9 +55,11 @@ function WorkerRow({
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const btnRef = useRef<HTMLButtonElement>(null);
-  const dotColor = stale ? 'var(--color-stale)' : 'var(--color-success)';
-  const textColor = stale ? 'var(--color-stale)' : 'var(--color-text-2)';
-  const durationColor = stale ? 'var(--color-stale)' : 'var(--color-text-3)';
+  const phase = getWorkerPhase(worker, stale);
+  const colors = PHASE_COLORS[phase];
+  const dotColor = colors.dot;
+  const textColor = colors.text;
+  const durationColor = colors.duration;
 
   return (
     <div
@@ -84,8 +113,8 @@ function WorkerRow({
         {formatRuntime(worker.started_at)}
       </span>
 
-      {/* Stale indicator */}
-      {stale && (
+      {/* Phase indicator */}
+      {phase === 'stale' && (
         <span
           style={{
             fontSize: 10,
@@ -95,6 +124,18 @@ function WorkerRow({
           }}
         >
           stale
+        </span>
+      )}
+      {phase === 'reviewing' && (
+        <span
+          style={{
+            fontSize: 10,
+            color: 'var(--color-accent)',
+            lineHeight: '14px',
+            flexShrink: 0,
+          }}
+        >
+          {worker.status === 'captain-merging' ? 'merging' : 'reviewing'}
         </span>
       )}
 
@@ -196,9 +237,11 @@ export function MetricsRow({
   });
 
   const workers: WorkerDetail[] = workersData?.workers ?? [];
-  const activeWorkers = workers.filter((w) => !w.is_stale);
-  const staleWorkers = workers.filter((w) => w.is_stale);
+  const activeWorkers = workers.filter((w) => getWorkerPhase(w, !!w.is_stale) === 'active');
+  const reviewingWorkers = workers.filter((w) => getWorkerPhase(w, !!w.is_stale) === 'reviewing');
+  const staleWorkers = workers.filter((w) => getWorkerPhase(w, !!w.is_stale) === 'stale');
   const activeCount = activeWorkers.length;
+  const reviewingCount = reviewingWorkers.length;
   const staleCount = staleWorkers.length;
 
   return (
@@ -220,7 +263,12 @@ export function MetricsRow({
               color: 'var(--color-text-3)',
             }}
           >
-            <HeaderContent activeCount={activeCount} staleCount={staleCount} expanded={false} />
+            <HeaderContent
+              activeCount={activeCount}
+              reviewingCount={reviewingCount}
+              staleCount={staleCount}
+              expanded={false}
+            />
           </button>
         ) : (
           <div
@@ -234,7 +282,7 @@ export function MetricsRow({
               color: 'var(--color-text-3)',
             }}
           >
-            <HeaderContent activeCount={0} staleCount={0} expanded={false} />
+            <HeaderContent activeCount={0} reviewingCount={0} staleCount={0} expanded={false} />
           </div>
         ))}
 
@@ -261,7 +309,12 @@ export function MetricsRow({
               color: 'var(--color-text-3)',
             }}
           >
-            <HeaderContent activeCount={activeCount} staleCount={staleCount} expanded={true} />
+            <HeaderContent
+              activeCount={activeCount}
+              reviewingCount={reviewingCount}
+              staleCount={staleCount}
+              expanded={true}
+            />
           </button>
 
           {/* Active workers */}
@@ -273,6 +326,11 @@ export function MetricsRow({
               onNudge={onNudge}
               onStop={onStopWorker}
             />
+          ))}
+
+          {/* Reviewing workers — no nudge/stop since captain is in control */}
+          {reviewingWorkers.map((w) => (
+            <WorkerRow key={w.id} worker={w} stale={false} />
           ))}
 
           {/* Stale workers */}
@@ -290,10 +348,12 @@ export function MetricsRow({
 
 function HeaderContent({
   activeCount,
+  reviewingCount,
   staleCount,
   expanded,
 }: {
   activeCount: number;
+  reviewingCount: number;
   staleCount: number;
   expanded: boolean;
 }) {
@@ -314,6 +374,11 @@ function HeaderContent({
       <span style={{ fontSize: 12, color: 'var(--color-success)', lineHeight: '16px' }}>
         {activeCount} active
       </span>
+      {reviewingCount > 0 && (
+        <span style={{ fontSize: 12, color: 'var(--color-accent)', lineHeight: '16px' }}>
+          {reviewingCount} reviewing
+        </span>
+      )}
       {staleCount > 0 && (
         <span
           style={{
@@ -327,7 +392,7 @@ function HeaderContent({
         </span>
       )}
       <span style={{ flex: 1 }} />
-      {(activeCount > 0 || staleCount > 0) && (
+      {(activeCount > 0 || reviewingCount > 0 || staleCount > 0) && (
         <svg
           width="10"
           height="10"

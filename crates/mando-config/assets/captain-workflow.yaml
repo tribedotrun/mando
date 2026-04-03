@@ -78,7 +78,7 @@ prompts:
     - **Evidence requirements** — your PR MUST include runtime proof of your changes:
        - Evidence must be **actual runtime output** you captured, NOT diagrams, ASCII art, mockups, or sample output you write by hand. Test results prove correctness but are NOT evidence — you need both.
        - **After evidence is required.** Before evidence is optional (nice-to-have if convenient).
-       - **UI changes**: use the evidence tool for your repo (see Repo-Specific Instructions below). Screenshot for static/single-view changes, recording for multi-step or interactive changes. For **view-only/cosmetic changes**, use the **production gateway** (real data) — do NOT spin up `/mando-isolated-test` just for evidence.
+       - **UI changes**: use the evidence tool for your repo (see Repo-Specific Instructions below). Screenshot for static/single-view changes, recording for multi-step or interactive changes. **Always use an isolated/sandbox environment** for evidence capture.
        - **Non-UI changes**: run the relevant command and capture terminal output under an `### After` heading with a code fence.
        - **Self-verify**: after capturing, read the screenshot or extract frames with ffmpeg. If evidence doesn't show the fix working, fix → recapture → verify.
        - **Keep PR evidence current**: if you make code changes after capturing evidence, recapture and update the PR.
@@ -174,7 +174,7 @@ prompts:
     - [ ] **Findings** — write results to Linear workpad{% if not linear_id %} (if available){% endif %} and stop. No PR needed.
     {% else %}
     - [ ] **PR** — use `/mando-pr` to create the PR{% if linear_id %}. Update workpad with PR link.{% endif %}
-    - [ ] **Evidence** — runtime proof in the PR (after required, before optional). UI: screenshot for static, recording for interactive; use production gateway for view-only changes. Non-UI: CLI output under `### After` heading. NOT diagrams or test-only results. Self-verify: read screenshots or extract frames with ffmpeg. Recapture if code changes after evidence.
+    - [ ] **Evidence** — runtime proof in the PR (after required, before optional). UI: screenshot for static, recording for interactive; always use an isolated/sandbox environment. Non-UI: CLI output under `### After` heading. NOT diagrams or test-only results. Self-verify: read screenshots or extract frames with ffmpeg. Recapture if code changes after evidence.
     - [ ] **CI** — fix all CI failures, even informational ones. A clean CI is a quality gate, not optional.
     - [ ] **Reviews** — address any reviewer comments
     - [ ] **Diagram** — PR has summary diagram (`/mando-pr-summary`)
@@ -428,7 +428,7 @@ prompts:
     {%- if not no_pr %}
     4. **Evidence requirements** — your PR MUST include runtime proof:
        - After evidence is **required**. Before evidence is **optional**.
-       - **UI changes**: use the evidence tool for your repo (see Repo-Specific Instructions) — screenshot for static, recording for interactive/multi-step. For view-only/cosmetic changes, use the production gateway (real data).
+       - **UI changes**: use the evidence tool for your repo (see Repo-Specific Instructions) — screenshot for static, recording for interactive/multi-step. **Always use an isolated/sandbox environment** for evidence capture.
        - **Non-UI changes**: CLI output under `### After` heading with code fence. NOT diagrams, ASCII art, mockups, or test-only results.
        - **Self-verify**: read the screenshot or extract frames with ffmpeg. Fix → recapture if evidence doesn't show the fix.
        - **Keep current**: recapture and update PR if code changes after evidence.
@@ -534,7 +534,7 @@ prompts:
     Answer concisely.
 
   guardian_repair: |
-    You are the **Self-Improve Guardian** — an autonomous watchdog for the Mando repository.
+    You are the **Self-Improve Guardian** — an autonomous watchdog for this repository.
     A runtime incident was detected and you must investigate and fix it.
 
     Incident source: {{ source }}
@@ -654,7 +654,9 @@ nudges:
     Your PR has no evidence. After evidence is required (before is optional).
     For UI changes (web or mobile), use the evidence tool for your repo —
     screenshot for static changes, recording for interactive/multi-step.
-    For non-UI changes, run the relevant command and include terminal output
+    IMPORTANT: always use an isolated/sandbox environment for evidence capture.
+    See Repo-Specific Instructions for how to start one.
+    For non-UI changes, run the relevant command and capture terminal output
     under an `### After` heading with a code fence. NOT diagrams, ASCII art,
     or sample output. Test results alone are not evidence. After capturing,
     verify: read the screenshot or extract frames from the recording with

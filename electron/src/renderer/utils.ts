@@ -25,6 +25,11 @@ export function prHref(pr: string, githubRepo: string): string {
   return `https://github.com/${githubRepo}/pull/${num}`;
 }
 
+/** Build a Linear issue href from a linear_id (e.g. "ABR-1009") and workspace slug. */
+export function linearHref(linearId: string, slug: string): string {
+  return `https://linear.app/${slug}/issue/${linearId}`;
+}
+
 /* ── Task status predicates ── */
 
 /** Whether a task can be merged (has PR + project, awaiting review). */

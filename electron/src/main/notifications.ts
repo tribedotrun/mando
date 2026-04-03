@@ -37,6 +37,15 @@ type NotificationKind =
       overage_resets_at?: number;
       overage_disabled_reason?: string;
     }
+  | {
+      type: 'ScoutProcessed';
+      scout_id: number;
+      title: string;
+      relevance: number;
+      quality: number;
+      source_name?: string;
+      telegraph_url?: string;
+    }
   | { type: 'Generic' };
 
 /** Map notification kind to a human-readable title. */
@@ -62,6 +71,8 @@ function titleForKind(kind: NotificationKind): string {
       return 'Cron Alert';
     case 'RateLimited':
       return 'Rate Limited';
+    case 'ScoutProcessed':
+      return 'Scout Processed';
     case 'Generic':
       return 'Mando';
   }
@@ -95,9 +106,15 @@ export function registerNotificationHandlers(getMainWindow: () => BrowserWindow 
       if (win) {
         win.show();
         win.focus();
+        const itemId =
+          'item_id' in payload.kind
+            ? payload.kind.item_id
+            : 'scout_id' in payload.kind
+              ? String(payload.kind.scout_id)
+              : undefined;
         win.webContents.send('notification-click', {
           kind: payload.kind,
-          item_id: 'item_id' in payload.kind ? payload.kind.item_id : undefined,
+          item_id: itemId,
         });
       }
     });

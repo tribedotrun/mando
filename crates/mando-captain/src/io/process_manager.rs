@@ -34,7 +34,10 @@ pub(crate) async fn spawn_worker_process(
     for (k, v) in env_overrides {
         builder = builder.env(k, v);
     }
-    mando_cc::spawn_detached(&builder.build(), prompt, session_id).await
+    let (child, pid, stream_path) =
+        mando_cc::spawn_detached(&builder.build(), prompt, session_id).await?;
+    crate::watch_worker_exit(child);
+    Ok((pid, stream_path))
 }
 
 /// Spawn a worker with --resume instead of --session-id.
@@ -61,7 +64,10 @@ pub async fn resume_worker_process(
     for (k, v) in env_overrides {
         builder = builder.env(k, v);
     }
-    mando_cc::spawn_detached(&builder.build(), message, resume_session_id).await
+    let (child, pid, stream_path) =
+        mando_cc::spawn_detached(&builder.build(), message, resume_session_id).await?;
+    crate::watch_worker_exit(child);
+    Ok((pid, stream_path))
 }
 
 /// Kill a worker process — delegates to `mando_cc::kill_process`.

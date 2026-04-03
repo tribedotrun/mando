@@ -92,7 +92,7 @@ pub fn render_summary_preview(summary: &str) -> String {
 ///
 /// Layout:
 /// ```text
-/// [📖 Read] [💬 Ask] [🧵 Sessions] [Next ▶]
+/// [📖 Read] [💬 Ask] [Next ▶]
 /// [⭐ Save] [📦 Archive] [⚙️ Act] [🗑]
 /// ```
 pub fn swipe_card_kb(item_id: i64, telegraph_url: Option<&str>) -> Value {
@@ -104,9 +104,6 @@ pub fn swipe_card_kb(item_id: i64, telegraph_url: Option<&str>) -> Value {
             .push(json!({"text": "\u{1f4d6} Read", "callback_data": format!("dg:read:{item_id}")}));
     }
     top_row.push(json!({"text": "\u{1f4ac} Ask", "callback_data": format!("dg:ask:{item_id}")}));
-    top_row.push(
-        json!({"text": "\u{1f9f5} Sessions", "callback_data": format!("dg:sessions:{item_id}")}),
-    );
     top_row.push(json!({"text": "Next \u{25b6}", "callback_data": format!("dg:next:{item_id}")}));
 
     let action_row = json!([
@@ -235,9 +232,9 @@ mod tests {
         let kb = swipe_card_kb(42, None);
         let rows = kb["inline_keyboard"].as_array().unwrap();
         assert_eq!(rows.len(), 2);
-        // Top row: Read, Ask, Sessions, Next = 4 buttons
+        // Top row: Read, Ask, Next = 3 buttons
         let top_row = rows[0].as_array().unwrap();
-        assert_eq!(top_row.len(), 4);
+        assert_eq!(top_row.len(), 3);
         assert!(top_row[0]["callback_data"]
             .as_str()
             .unwrap()
@@ -252,7 +249,7 @@ mod tests {
         let kb = swipe_card_kb(42, Some("https://telegra.ph/Test-42"));
         let rows = kb["inline_keyboard"].as_array().unwrap();
         let top_row = rows[0].as_array().unwrap();
-        assert_eq!(top_row.len(), 4);
+        assert_eq!(top_row.len(), 3);
         assert_eq!(
             top_row[0]["url"].as_str().unwrap(),
             "https://telegra.ph/Test-42"
@@ -268,17 +265,6 @@ mod tests {
             .as_str()
             .unwrap()
             .contains("read"));
-    }
-
-    #[test]
-    fn swipe_card_kb_sessions_button_present() {
-        let kb = swipe_card_kb(42, Some("https://telegra.ph/x"));
-        let rows = kb["inline_keyboard"].as_array().unwrap();
-        let top_row = rows[0].as_array().unwrap();
-        assert!(top_row[2]["callback_data"]
-            .as_str()
-            .unwrap()
-            .contains("sessions"));
     }
 
     #[test]

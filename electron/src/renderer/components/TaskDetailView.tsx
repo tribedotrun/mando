@@ -10,7 +10,8 @@ import type {
   ClarifierQuestion,
 } from '#renderer/types';
 import { FINALIZED_STATUSES } from '#renderer/types';
-import { fmtDuration, shortRepo, prLabel, prHref } from '#renderer/utils';
+import { fmtDuration, shortRepo, prLabel, prHref, linearHref } from '#renderer/utils';
+import { useLinearSlug } from '#renderer/hooks/useLinearSlug';
 import { StatusIcon } from '#renderer/components/TaskActions';
 import { TranscriptSidebar } from '#renderer/components/TranscriptViewer';
 import { SessionDetailPanel } from '#renderer/components/SessionDetailPanel';
@@ -34,6 +35,7 @@ export function TaskDetailView({
   onReopen,
   onRework,
 }: Props): React.ReactElement {
+  const linearSlug = useLinearSlug();
   const [transcriptSession, setTranscriptSession] = useState<{
     entry: SessionEntry;
     markdown: string | null;
@@ -127,7 +129,8 @@ export function TaskDetailView({
       setTranscriptSession((p) =>
         p?.entry.session_id === sessionId ? { ...p, markdown: data.markdown, loading: false } : p,
       );
-    } catch {
+    } catch (err) {
+      console.warn('Failed to fetch transcript for session', sessionId, err);
       setTranscriptSession((p) =>
         p?.entry.session_id === sessionId ? { ...p, markdown: null, loading: false } : p,
       );
@@ -164,21 +167,39 @@ export function TaskDetailView({
                   style={{ color: 'var(--color-text-1)' }}
                 >
                   {item.title}
-                  {item.linear_id && (
-                    <span
-                      className="ml-2 inline-flex items-center align-middle font-mono"
-                      style={{
-                        fontSize: 11,
-                        fontWeight: 400,
-                        color: 'var(--color-text-3)',
-                        background: 'var(--color-surface-3)',
-                        padding: '2px 6px',
-                        borderRadius: 3,
-                      }}
-                    >
-                      {item.linear_id}
-                    </span>
-                  )}
+                  {item.linear_id &&
+                    (linearSlug ? (
+                      <a
+                        href={linearHref(item.linear_id, linearSlug)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="ml-2 inline-flex items-center align-middle font-mono no-underline hover:underline"
+                        style={{
+                          fontSize: 11,
+                          fontWeight: 400,
+                          color: 'var(--color-text-3)',
+                          background: 'var(--color-surface-3)',
+                          padding: '2px 6px',
+                          borderRadius: 3,
+                        }}
+                      >
+                        {item.linear_id}
+                      </a>
+                    ) : (
+                      <span
+                        className="ml-2 inline-flex items-center align-middle font-mono"
+                        style={{
+                          fontSize: 11,
+                          fontWeight: 400,
+                          color: 'var(--color-text-3)',
+                          background: 'var(--color-surface-3)',
+                          padding: '2px 6px',
+                          borderRadius: 3,
+                        }}
+                      >
+                        {item.linear_id}
+                      </span>
+                    ))}
                 </h1>
                 <div className="mt-2 flex flex-wrap items-center gap-2">
                   <StatusIcon status={item.status} />
@@ -187,9 +208,9 @@ export function TaskDetailView({
                       {shortRepo(item.project)}
                     </span>
                   )}
-                  {item.pr && item.project && (
+                  {item.pr && (item.github_repo || item.project) && (
                     <a
-                      href={prHref(item.pr, item.project)}
+                      href={prHref(item.pr, (item.github_repo ?? item.project)!)}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="text-[11px] no-underline hover:underline"

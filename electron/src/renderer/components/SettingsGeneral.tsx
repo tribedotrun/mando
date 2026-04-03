@@ -42,7 +42,7 @@ export function SettingsGeneral(): React.ReactElement {
   const [channelOverride, setChannelOverride] = useState<string | null>(null);
   const [notificationsEnabled, setNotifState] = useState(getNotificationsEnabled);
   const [liveConnectionState, setLiveConnectionState] = useState<ConnectionState | null>(null);
-  const startAtLogin = useSettingsStore((s) => s.config.startAtLogin ?? true);
+  const startAtLogin = useSettingsStore((s) => s.config.startAtLogin ?? false);
   const update = useSettingsStore((s) => s.update);
   const save = useSettingsStore((s) => s.save);
 
@@ -163,27 +163,7 @@ export function SettingsGeneral(): React.ReactElement {
       </SettingsRow>
 
       <SettingsRow label="Update channel">
-        {updateChannel === 'alpha' ? (
-          <span
-            className="text-code"
-            style={{
-              color: 'var(--color-accent)',
-              padding: '5px 16px',
-              borderRadius: 'var(--radius-button)',
-              border: '1px solid var(--color-border)',
-              background: 'var(--color-surface-3)',
-              fontSize: 13,
-            }}
-          >
-            Alpha
-          </span>
-        ) : (
-          <SegmentedControl
-            options={CHANNELS}
-            value={updateChannel}
-            onChange={handleChannelChange}
-          />
-        )}
+        <SegmentedControl options={CHANNELS} value={updateChannel} onChange={handleChannelChange} />
       </SettingsRow>
 
       <SettingsRow label="Start at login">

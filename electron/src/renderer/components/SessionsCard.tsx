@@ -1,8 +1,9 @@
 import React, { useState, useCallback } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { fetchSessions, fetchTranscript, fetchHealth } from '#renderer/api';
+import { fetchSessions, fetchTranscript } from '#renderer/api';
 import { useViewKeyHandler } from '#renderer/hooks/useKeyboardShortcuts';
 import { useScrollIntoViewRef } from '#renderer/hooks/useScrollIntoViewRef';
+import { useLinearSlug } from '#renderer/hooks/useLinearSlug';
 import type { SessionEntry } from '#renderer/types';
 import { getErrorMessage, relativeTime } from '#renderer/utils';
 import { SessionDetailPanel } from '#renderer/components/SessionDetailPanel';
@@ -41,14 +42,7 @@ export function SessionsCard(): React.ReactElement {
   const [transcriptError, setTranscriptError] = useState<string | null>(null);
   const [focusedIndex, setFocusedIndex] = useState(-1);
 
-  const { data: statusData } = useQuery({
-    queryKey: ['status-linear-slug'],
-    queryFn: () => fetchHealth(),
-    retry: 2,
-    retryDelay: 5000,
-    select: (s) => s.linear_workspace_slug,
-  });
-  const linearSlug = statusData;
+  const linearSlug = useLinearSlug();
 
   const {
     data: sessionsData,

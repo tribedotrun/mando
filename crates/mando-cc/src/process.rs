@@ -102,16 +102,15 @@ pub(crate) async fn spawn_process(
 /// This is the bridge pattern for long-lived workers. The worker runs autonomously;
 /// captain monitors it via the stream file and PID. Stdout/stderr go to files.
 ///
-/// Returns `(pid, stream_path)`.
+/// Returns `(child, pid, stream_path)`. The caller owns the `Child` handle and
+/// should `.wait()` on it to detect process exit (e.g. via a background watcher).
 ///
 /// NOTE: This uses `-p` (not stream-json input) because the worker is detached.
-/// Full stream-json input for workers (nudges via stdin) is planned but requires
-/// holding process handles across captain ticks.
 pub async fn spawn_detached(
     config: &CcConfig,
     prompt: &str,
     session_id: &str,
-) -> Result<(u32, PathBuf)> {
+) -> Result<(tokio::process::Child, u32, PathBuf)> {
     let claude = crate::resolve_claude_binary();
     let stream_dir = mando_config::cc_streams_dir();
     std::fs::create_dir_all(&stream_dir)?;
@@ -202,7 +201,7 @@ pub async fn spawn_detached(
         .id()
         .ok_or_else(|| anyhow::anyhow!("process exited before PID read"))?;
 
-    Ok((pid, stream_path))
+    Ok((child, pid, stream_path))
 }
 
 /// Kill a process: SIGTERM → poll 5s → SIGKILL.
