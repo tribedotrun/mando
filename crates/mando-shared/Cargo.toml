@@ -1,6 +1,6 @@
 [package]
 name = "mando-shared"
-version = "0.1.0"
+version.workspace = true
 edition = "2021"
 description = "Shared business logic, state management, and persistence layer"
 license.workspace = true
