@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { inputStyle, labelStyle, inputCls, labelCls } from '#renderer/styles';
+import { cardStyle, inputStyle, labelStyle, inputCls, labelCls } from '#renderer/styles';
 import { useSettingsStore } from '#renderer/stores/settingsStore';
 import type { ScoutConfig } from '#renderer/stores/settingsStore';
 
@@ -86,86 +86,97 @@ export function SettingsScout(): React.ReactElement {
   };
 
   return (
-    <div className="space-y-4">
-      <div>
-        <label className={labelCls} style={labelStyle}>
-          Firecrawl API Key
-        </label>
-        <input
-          data-testid="scout-firecrawl-key"
-          type="password"
-          className={inputCls}
-          style={inputStyle}
-          value={firecrawlKey}
-          onChange={(e) => {
-            updateEnv('FIRECRAWL_API_KEY', e.target.value);
-            scheduleSave();
-          }}
-          placeholder="fc-..."
-        />
-        <p className="mt-1 text-xs" style={{ color: 'var(--color-text-3)' }}>
-          Used for web scraping when processing scout items.
-        </p>
-      </div>
+    <div data-testid="settings-scout">
+      <h2 className="text-lg font-semibold" style={{ color: 'var(--color-text-1)' }}>
+        Scout
+      </h2>
+      <p className="mt-1 text-sm" style={{ color: 'var(--color-text-3)', marginBottom: 24 }}>
+        Personalize how Scout selects and explains content.
+      </p>
 
-      <div>
-        <label className={labelCls} style={labelStyle}>
-          Your Role
-        </label>
-        <input
-          data-testid="scout-role"
-          className={inputCls}
-          style={inputStyle}
-          value={userCtx.role ?? ''}
-          onChange={(e) => {
-            updateUserContext({ role: e.target.value }, true);
-          }}
-          placeholder="e.g. Software developer who builds with AI coding agents"
-        />
-      </div>
+      <div style={cardStyle}>
+        <div className="space-y-4">
+          <div>
+            <label className={labelCls} style={labelStyle}>
+              Firecrawl API Key
+            </label>
+            <input
+              data-testid="scout-firecrawl-key"
+              type="password"
+              className={inputCls}
+              style={inputStyle}
+              value={firecrawlKey}
+              onChange={(e) => {
+                updateEnv('FIRECRAWL_API_KEY', e.target.value);
+                scheduleSave();
+              }}
+              placeholder="fc-..."
+            />
+            <p className="mt-1 text-xs" style={{ color: 'var(--color-text-3)' }}>
+              Used for web scraping when processing scout items.
+            </p>
+          </div>
 
-      <TagInput
-        label="Known Domains (no explanation needed)"
-        values={userCtx.knownDomains ?? []}
-        onChange={(v) => updateUserContext({ knownDomains: v })}
-        placeholder="e.g. Software engineering"
-      />
+          <div>
+            <label className={labelCls} style={labelStyle}>
+              Your Role
+            </label>
+            <input
+              data-testid="scout-role"
+              className={inputCls}
+              style={inputStyle}
+              value={userCtx.role ?? ''}
+              onChange={(e) => {
+                updateUserContext({ role: e.target.value }, true);
+              }}
+              placeholder="e.g. Software developer who builds with AI coding agents"
+            />
+          </div>
 
-      <TagInput
-        label="High Interest Topics"
-        values={interests.high ?? []}
-        onChange={(v) => updateInterests({ high: v })}
-        placeholder="e.g. AI coding tools and workflows"
-      />
+          <TagInput
+            label="Known Domains (no explanation needed)"
+            values={userCtx.knownDomains ?? []}
+            onChange={(v) => updateUserContext({ knownDomains: v })}
+            placeholder="e.g. Software engineering"
+          />
 
-      <TagInput
-        label="Medium Interest Topics"
-        values={interests.medium ?? []}
-        onChange={(v) => updateInterests({ medium: v })}
-        placeholder="e.g. Software architecture"
-      />
+          <TagInput
+            label="High Interest Topics"
+            values={interests.high ?? []}
+            onChange={(v) => updateInterests({ high: v })}
+            placeholder="e.g. AI coding tools and workflows"
+          />
 
-      <TagInput
-        label="Low Interest Topics"
-        values={interests.low ?? []}
-        onChange={(v) => updateInterests({ low: v })}
-        placeholder="e.g. Marketing, growth hacking"
-      />
+          <TagInput
+            label="Medium Interest Topics"
+            values={interests.medium ?? []}
+            onChange={(v) => updateInterests({ medium: v })}
+            placeholder="e.g. Software architecture"
+          />
 
-      <div>
-        <label className={labelCls} style={labelStyle}>
-          Tone Preference
-        </label>
-        <input
-          data-testid="scout-tone"
-          className={inputCls}
-          style={inputStyle}
-          value={interests.tone ?? ''}
-          onChange={(e) => {
-            updateInterests({ tone: e.target.value }, true);
-          }}
-          placeholder="e.g. Practitioner deep-dives preferred."
-        />
+          <TagInput
+            label="Low Interest Topics"
+            values={interests.low ?? []}
+            onChange={(v) => updateInterests({ low: v })}
+            placeholder="e.g. Marketing, growth hacking"
+          />
+
+          <div>
+            <label className={labelCls} style={labelStyle}>
+              Tone Preference
+            </label>
+            <input
+              data-testid="scout-tone"
+              className={inputCls}
+              style={inputStyle}
+              value={interests.tone ?? ''}
+              onChange={(e) => {
+                updateInterests({ tone: e.target.value }, true);
+              }}
+              placeholder="e.g. Practitioner deep-dives preferred."
+            />
+          </div>
+        </div>
       </div>
     </div>
   );

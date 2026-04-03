@@ -7,6 +7,7 @@ import { SettingsProjects } from '#renderer/components/SettingsProjects';
 import { SettingsCaptain } from '#renderer/components/SettingsCaptain';
 import { SettingsScheduledTasks } from '#renderer/components/SettingsScheduledTasks';
 import { SettingsTelegram } from '#renderer/components/SettingsTelegram';
+import { SettingsScout } from '#renderer/components/SettingsScout';
 import { SettingsExperimental } from '#renderer/components/SettingsExperimental';
 import { SettingsAbout } from '#renderer/components/SettingsAbout';
 import { MemoryCard } from '#renderer/components/MemoryCard';
@@ -19,6 +20,7 @@ export type SettingsSection =
   | 'captain'
   | 'scheduled-tasks'
   | 'telegram'
+  | 'scout'
   | 'memory'
   | 'experimental'
   | 'about';
@@ -35,6 +37,7 @@ const BASE_NAV_ITEMS: NavItem[] = [
   { id: 'captain', label: 'Captain' },
   { id: 'scheduled-tasks', label: 'Scheduled Tasks' },
   { id: 'telegram', label: 'Telegram' },
+  { id: 'scout', label: 'Scout' },
   { id: 'memory', label: 'Memory' },
   { id: 'experimental', label: 'Experimental' },
   { id: 'about', label: 'About' },
@@ -62,6 +65,8 @@ function SettingsPanel({ section }: { section: SettingsSection }) {
       return <SettingsScheduledTasks />;
     case 'telegram':
       return <SettingsTelegram />;
+    case 'scout':
+      return <SettingsScout />;
     case 'memory':
       return <MemoryCard />;
     case 'experimental':
@@ -86,10 +91,13 @@ export function SettingsPage({
   const error = useSettingsStore((s) => s.error);
   const saveSuccess = useSettingsStore((s) => s.saveSuccess);
   const journalEnabled = useSettingsStore((s) => s.config?.features?.decisionJournal ?? false);
+  const cronEnabled = useSettingsStore((s) => s.config?.features?.cron ?? false);
 
-  const navItems = journalEnabled
-    ? BASE_NAV_ITEMS
-    : BASE_NAV_ITEMS.filter((i) => i.id !== 'memory');
+  const navItems = BASE_NAV_ITEMS.filter((i) => {
+    if (i.id === 'memory' && !journalEnabled) return false;
+    if (i.id === 'scheduled-tasks' && !cronEnabled) return false;
+    return true;
+  });
 
   useMountEffect(() => {
     load();

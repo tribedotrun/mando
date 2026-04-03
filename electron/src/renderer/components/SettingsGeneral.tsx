@@ -38,13 +38,10 @@ const GATEWAY_STATE: Record<string, { dot: string; label: string }> = {
 };
 const GATEWAY_FALLBACK = GATEWAY_STATE.disconnected;
 
-type UpdateCheckStatus = 'idle' | 'checking' | 'up-to-date' | 'update-available' | 'error';
-
 export function SettingsGeneral(): React.ReactElement {
   const [channelOverride, setChannelOverride] = useState<string | null>(null);
   const [notificationsEnabled, setNotifState] = useState(getNotificationsEnabled);
   const [liveConnectionState, setLiveConnectionState] = useState<ConnectionState | null>(null);
-  const [updateCheckStatus, setUpdateCheckStatus] = useState<UpdateCheckStatus>('idle');
   const startAtLogin = useSettingsStore((s) => s.config.startAtLogin ?? false);
   const update = useSettingsStore((s) => s.update);
   const save = useSettingsStore((s) => s.save);
@@ -92,19 +89,8 @@ export function SettingsGeneral(): React.ReactElement {
     window.mandoAPI.onConnectionState((state) => {
       setLiveConnectionState(state as ConnectionState);
     });
-    window.mandoAPI.updates.onUpdateChecking(() => setUpdateCheckStatus('checking'));
-    window.mandoAPI.updates.onUpdateNoUpdate(() => {
-      setUpdateCheckStatus('up-to-date');
-      setTimeout(() => setUpdateCheckStatus('idle'), 4000);
-    });
-    window.mandoAPI.updates.onUpdateCheckError(() => {
-      setUpdateCheckStatus('error');
-      setTimeout(() => setUpdateCheckStatus('idle'), 4000);
-    });
-    window.mandoAPI.updates.onUpdateReady(() => setUpdateCheckStatus('update-available'));
     return () => {
       window.mandoAPI.removeConnectionStateListeners();
-      window.mandoAPI.updates.removeCheckListeners();
     };
   });
 
@@ -171,11 +157,8 @@ export function SettingsGeneral(): React.ReactElement {
       </div>
 
       <SettingsRow label="Version">
-        <span className="flex items-center gap-3">
-          <span className="text-code" style={{ color: 'var(--color-text-1)' }}>
-            {appVersion || '\u2014'}
-          </span>
-          <UpdateCheckButton status={updateCheckStatus} />
+        <span className="text-code" style={{ color: 'var(--color-text-1)' }}>
+          {appVersion || '\u2014'}
         </span>
       </SettingsRow>
 
@@ -271,60 +254,6 @@ export function SettingsGeneral(): React.ReactElement {
         </p>
       ) : null}
     </div>
-  );
-}
-
-function UpdateCheckButton({ status }: { status: UpdateCheckStatus }) {
-  if (status === 'checking') {
-    return (
-      <span className="text-caption" style={{ color: 'var(--color-text-3)' }}>
-        Checking…
-      </span>
-    );
-  }
-  if (status === 'up-to-date') {
-    return (
-      <span className="text-caption" style={{ color: 'var(--color-success)' }}>
-        Up to date
-      </span>
-    );
-  }
-  if (status === 'update-available') {
-    return (
-      <span className="text-caption" style={{ color: 'var(--color-accent)' }}>
-        Update ready
-      </span>
-    );
-  }
-  if (status === 'error') {
-    return (
-      <span className="text-caption" style={{ color: 'var(--color-error)' }}>
-        Check failed
-      </span>
-    );
-  }
-  return (
-    <button
-      onClick={() => window.mandoAPI.updates.checkForUpdates()}
-      className="text-caption transition-colors"
-      style={{
-        color: 'var(--color-text-3)',
-        background: 'none',
-        border: 'none',
-        cursor: 'pointer',
-        padding: 0,
-        textDecoration: 'underline',
-        textUnderlineOffset: 2,
-      }}
-      onMouseEnter={(e) => {
-        e.currentTarget.style.color = 'var(--color-text-1)';
-      }}
-      onMouseLeave={(e) => {
-        e.currentTarget.style.color = 'var(--color-text-3)';
-      }}
-    >
-      Check for updates
-    </button>
   );
 }
 

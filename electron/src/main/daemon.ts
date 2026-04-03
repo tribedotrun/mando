@@ -13,7 +13,8 @@ import {
   installDaemonPlist,
   updateDaemonBinary,
   rollbackDaemonBinary,
-  spawnDaemonDev,
+  kickstartDaemon,
+  bootoutDevServices,
 } from '#main/launchd';
 
 // -- Connection state --
@@ -21,15 +22,14 @@ export type ConnectionState = 'connecting' | 'connected' | 'disconnected' | 'upd
 let connectionState: ConnectionState = 'connecting';
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let reconnectDelay = 1000;
+let reconnectAttempts = 0;
 const MAX_RECONNECT_DELAY = 30000;
+const KICKSTART_AFTER_ATTEMPTS = 3;
 let isQuittingRef = false;
 
 // -- Daemon discovery cache --
 let cachedPort: string | null = null;
 let cachedToken: string | null = null;
-
-// -- Dev daemon child process --
-let devDaemonChild: ReturnType<typeof spawnDaemonDev> = null;
 
 // -- Window reference for sending IPC messages --
 let mainWindowRef: BrowserWindow | null = null;
@@ -115,7 +115,7 @@ async function hasExternalGatewayToken(dataDir: string): Promise<boolean> {
 }
 
 /** Invalidate cached port/token (e.g., after daemon restart). */
-function invalidateDiscoveryCache(): void {
+export function invalidateDiscoveryCache(): void {
   cachedPort = null;
   cachedToken = null;
 }
@@ -199,6 +199,7 @@ async function waitForDaemon(timeoutMs = 15000): Promise<boolean> {
     if (result.healthy) {
       setConnectionState('connected');
       reconnectDelay = 1000;
+      reconnectAttempts = 0;
       return true;
     }
     await new Promise((r) => setTimeout(r, 200));
@@ -218,7 +219,18 @@ function scheduleReconnect(): void {
     if (result.healthy) {
       setConnectionState('connected');
       reconnectDelay = 1000;
+      reconnectAttempts = 0;
       return;
+    }
+
+    reconnectAttempts++;
+
+    // After several failed reconnects, the daemon may be stuck (launchd
+    // throttling a crash-loop, or service loaded but not running).
+    // Kickstart tells launchd to start it immediately, bypassing throttle.
+    if (reconnectAttempts === KICKSTART_AFTER_ATTEMPTS) {
+      log.info('[daemon] reconnect attempts exhausted — kickstarting via launchd');
+      kickstartDaemon();
     }
 
     reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY);
@@ -238,6 +250,7 @@ export function startHealthMonitor(): void {
       invalidateDiscoveryCache();
       setConnectionState('connected');
       reconnectDelay = 1000;
+      reconnectAttempts = 0;
     } else if (!result.healthy && connectionState === 'connected') {
       // Daemon went away — invalidate so next reconnect discovers the new port.
       invalidateDiscoveryCache();
@@ -361,28 +374,13 @@ export async function ensureDaemon(dataDir: string): Promise<boolean> {
   try {
     const pid = parseInt(fs.readFileSync(pidFile, 'utf-8').trim(), 10);
     if (!isNaN(pid) && isProcessAlive(pid)) {
-      if (app.isPackaged) {
-        // Prod startup: kill whatever daemon is running (dev or stale prod),
-        // then proceed to start fresh via launchd.
-        log.info(`Killing existing daemon (pid ${pid}) before starting prod...`);
-        const killed = await killDaemonByPid(pid, dataDir);
-        invalidateDiscoveryCache();
-        if (!killed) {
-          dialog.showErrorBox(
-            'Mando — Cannot Start',
-            `Could not stop the existing daemon (PID ${pid}).\n\nKill it manually: kill -9 ${pid}`,
-          );
-          app.quit();
-          return false;
-        }
-      } else {
-        // Dev Electron (MANDO_EXTERNAL_GATEWAY not set) — conflict.
-        log.error(`Daemon conflict: PID ${pid} is alive but health check failed`);
+      log.info(`Killing existing daemon (pid ${pid}) before starting fresh...`);
+      const killed = await killDaemonByPid(pid, dataDir);
+      invalidateDiscoveryCache();
+      if (!killed) {
         dialog.showErrorBox(
-          'Mando — Daemon Conflict',
-          `Another daemon is already running (PID ${pid}).\n\n` +
-            'Only one daemon can run at a time.\n' +
-            'Stop the existing daemon first, then relaunch Mando.',
+          'Mando — Cannot Start',
+          `Could not stop the existing daemon (PID ${pid}).\n\nKill it manually: kill -9 ${pid}`,
         );
         app.quit();
         return false;
@@ -395,23 +393,13 @@ export async function ensureDaemon(dataDir: string): Promise<boolean> {
     }
   }
 
-  // Try to start daemon.
-  if (app.isPackaged) {
-    if (!fs.existsSync(path.join(dataDir, 'config.json'))) {
-      // No config yet — daemon can't start. Will start after onboarding.
-      return false;
-    }
-    stageDaemonBinary();
-    installDaemonPlist(dataDir);
-  } else {
-    devDaemonChild = spawnDaemonDev(dataDir);
-    if (!devDaemonChild) {
-      log.warn('Could not spawn daemon in dev mode');
-      setConnectionState('disconnected');
-      scheduleReconnect();
-      return false;
-    }
+  // Try to start daemon via launchd (both dev and prod).
+  if (!fs.existsSync(path.join(dataDir, 'config.json'))) {
+    // No config yet — daemon can't start. Will start after onboarding.
+    return false;
   }
+  stageDaemonBinary();
+  installDaemonPlist(dataDir);
 
   const ready = await waitForDaemon(15000);
   if (!ready) {
@@ -421,19 +409,13 @@ export async function ensureDaemon(dataDir: string): Promise<boolean> {
   return ready;
 }
 
-/** Clean up reconnect timer and dev daemon child. */
+/** Clean up reconnect timer and stop dev daemon. */
 export function cleanupDaemon(): void {
   if (reconnectTimer) {
     clearTimeout(reconnectTimer);
     reconnectTimer = null;
   }
-
-  if (devDaemonChild) {
-    try {
-      devDaemonChild.kill('SIGTERM');
-    } catch {
-      // Expected if child already exited
-    }
-    devDaemonChild = null;
-  }
+  // In dev, stop the launchd-managed daemon on quit.
+  // In prod, the daemon persists across Electron restarts via KeepAlive.
+  bootoutDevServices();
 }

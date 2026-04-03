@@ -5,11 +5,25 @@
 import { app } from 'electron';
 import path from 'path';
 import fs from 'fs';
-import { execSync, spawn } from 'child_process';
+import { execSync } from 'child_process';
 import log from '#main/logger';
 
-const DAEMON_LABEL = 'run.tribe.mando.daemon';
-const TG_LABEL = 'run.tribe.mando.telegram';
+// ---------------------------------------------------------------------------
+// Mode-aware identifiers — dev uses `.dev` suffixed labels and separate
+// binary paths so dev and prod can coexist without collisions.
+// ---------------------------------------------------------------------------
+
+function isDev(): boolean {
+  return process.env.MANDO_APP_MODE === 'dev';
+}
+
+function daemonLabel(): string {
+  return isDev() ? 'build.mando.daemon.dev' : 'build.mando.daemon';
+}
+
+function tgLabel(): string {
+  return isDev() ? 'build.mando.telegram.dev' : 'build.mando.telegram';
+}
 
 /** Extract message string from an unknown error. */
 function errorMsg(e: unknown): string {
@@ -25,52 +39,65 @@ function launchAgentsDir(): string {
 }
 
 function daemonPlistPath(): string {
-  return path.join(launchAgentsDir(), `${DAEMON_LABEL}.plist`);
+  return path.join(launchAgentsDir(), `${daemonLabel()}.plist`);
 }
 
 function tgPlistPath(): string {
-  return path.join(launchAgentsDir(), `${TG_LABEL}.plist`);
+  return path.join(launchAgentsDir(), `${tgLabel()}.plist`);
 }
 
 function cliInstallPath(): string {
-  return path.join(homeDir(), '.local', 'bin', 'mando');
+  return path.join(homeDir(), '.local', 'bin', isDev() ? 'mando-dev' : 'mando');
+}
+
+/** Resolve cargo target dir — respects env overrides, then walks up to workspace root. */
+function cargoTargetDir(): string {
+  const override = process.env.MANDO_RUST_TARGET_DIR || process.env.CARGO_TARGET_DIR;
+  if (override) return override;
+  // Walk up from the electron dir to find the workspace Cargo.toml → target/debug.
+  // In worktrees the target dir lives at the primary repo root, not the worktree.
+  let dir = path.resolve(__dirname, '../../..');
+  for (let i = 0; i < 5; i++) {
+    if (fs.existsSync(path.join(dir, 'target', 'debug', 'mando-gw'))) {
+      return path.join(dir, 'target', 'debug');
+    }
+    dir = path.dirname(dir);
+  }
+  // Fallback: assume target is relative to the repo root (standard layout).
+  return path.resolve(__dirname, '../../../target/debug');
 }
 
 function cliSourcePath(): string {
-  if (app.isPackaged) {
-    return path.join(process.resourcesPath!, 'mando');
-  }
-  return path.resolve(__dirname, '../../../target/release/mando');
+  if (app.isPackaged) return path.join(process.resourcesPath!, 'mando');
+  return path.join(cargoTargetDir(), 'mando');
 }
 
 /** Staged daemon binary path in Application Support. */
 function daemonInstallPath(): string {
-  return path.join(homeDir(), 'Library', 'Application Support', 'Mando', 'bin', 'mando-daemon');
+  const name = isDev() ? 'mando-daemon-dev' : 'mando-daemon';
+  return path.join(homeDir(), 'Library', 'Application Support', 'Mando', 'bin', name);
 }
 
 /** Source daemon binary: app bundle or cargo build output. */
 function daemonSourcePath(): string {
-  if (app.isPackaged) {
-    return path.join(process.resourcesPath!, 'mando-gw');
-  }
-  return path.resolve(__dirname, '../../../target/release/mando-gw');
+  if (app.isPackaged) return path.join(process.resourcesPath!, 'mando-gw');
+  return path.join(cargoTargetDir(), 'mando-gw');
 }
 
 /** Staged TG bot binary path in Application Support. */
 function tgInstallPath(): string {
-  return path.join(homeDir(), 'Library', 'Application Support', 'Mando', 'bin', 'mando-telegram');
+  const name = isDev() ? 'mando-telegram-dev' : 'mando-telegram';
+  return path.join(homeDir(), 'Library', 'Application Support', 'Mando', 'bin', name);
 }
 
 /** Source TG bot binary: app bundle or cargo build output. */
 function tgSourcePath(): string {
-  if (app.isPackaged) {
-    return path.join(process.resourcesPath!, 'mando-tg');
-  }
-  return path.resolve(__dirname, '../../../target/release/mando-tg');
+  if (app.isPackaged) return path.join(process.resourcesPath!, 'mando-tg');
+  return path.join(cargoTargetDir(), 'mando-tg');
 }
 
 function daemonLogDir(): string {
-  return path.join(homeDir(), 'Library', 'Logs', 'Mando');
+  return path.join(homeDir(), 'Library', 'Logs', isDev() ? 'Mando-Dev' : 'Mando');
 }
 
 export function currentPath(): string {
@@ -91,20 +118,23 @@ function generateDaemonPlist(dataDir: string): string {
   const home = homeDir();
   const binary = daemonInstallPath();
   const logDir = daemonLogDir();
+  const devArg = isDev() ? '\n        <string>--dev</string>' : '';
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>${DAEMON_LABEL}</string>
+    <string>${daemonLabel()}</string>
     <key>ProgramArguments</key>
     <array>
-        <string>${binary}</string>
+        <string>${binary}</string>${devArg}
     </array>
     <key>WorkingDirectory</key>
     <string>${dataDir}</string>
     <key>KeepAlive</key>
     <true/>
+    <key>ThrottleInterval</key>
+    <integer>3</integer>
     <key>StandardOutPath</key>
     <string>${path.join(logDir, 'daemon.log')}</string>
     <key>StandardErrorPath</key>
@@ -131,7 +161,7 @@ function generateTgPlist(dataDir: string): string {
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>${TG_LABEL}</string>
+    <string>${tgLabel()}</string>
     <key>ProgramArguments</key>
     <array>
         <string>${binary}</string>
@@ -140,6 +170,8 @@ function generateTgPlist(dataDir: string): string {
     <string>${dataDir}</string>
     <key>KeepAlive</key>
     <true/>
+    <key>ThrottleInterval</key>
+    <integer>3</integer>
     <key>StandardOutPath</key>
     <string>${path.join(logDir, 'tg-bot.log')}</string>
     <key>StandardErrorPath</key>
@@ -159,7 +191,13 @@ function generateTgPlist(dataDir: string): string {
 
 /** Load a launchd service: bootout first if already loaded, then bootstrap. */
 function launchctlLoad(plistPath: string, label: string): void {
-  if (isServiceLoaded(label)) launchctlBootout(label);
+  if (isServiceLoaded(label)) {
+    launchctlBootout(label);
+    // bootout is async at the OS level — it returns before the process fully
+    // exits and releases resources (ports, PID files). Bootstrapping
+    // immediately would race with the dying process.
+    waitForServiceUnloaded(label);
+  }
   const uid = process.getuid?.() ?? 501;
   execSync(`launchctl bootstrap gui/${uid} "${plistPath}"`);
 }
@@ -186,6 +224,33 @@ function launchctlBootout(label: string): void {
   }
 }
 
+/** Poll until a launchd service is fully unloaded (or timeout). */
+function waitForServiceUnloaded(label: string, timeoutMs = 5000): void {
+  const deadline = Date.now() + timeoutMs;
+  while (isServiceLoaded(label) && Date.now() < deadline) {
+    execSync('sleep 0.2', { stdio: 'pipe' });
+  }
+  if (isServiceLoaded(label)) {
+    log.warn(`[launchd] ${label} still loaded after ${timeoutMs}ms — proceeding with bootstrap`);
+  }
+}
+
+/** Kickstart the daemon service — tells launchd to start it immediately,
+ *  bypassing any crash-loop throttle. No-op if the service is not loaded. */
+export function kickstartDaemon(): boolean {
+  const label = daemonLabel();
+  if (!isServiceLoaded(label)) return false;
+  const uid = process.getuid?.() ?? 501;
+  try {
+    execSync(`launchctl kickstart gui/${uid}/${label}`, { stdio: 'pipe' });
+    log.info('[launchd] daemon kickstarted');
+    return true;
+  } catch (e: unknown) {
+    log.warn('[launchd] kickstart daemon failed:', errorMsg(e));
+    return false;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Daemon binary staging + plist management
 // ---------------------------------------------------------------------------
@@ -203,27 +268,8 @@ function stageBinary(src: string, dest: string, label: string): boolean {
   return true;
 }
 
-/** Remove old-named binaries from before the space-to-dash rename. */
-function cleanupLegacyBinaries(): void {
-  const binDir = path.join(homeDir(), 'Library', 'Application Support', 'Mando', 'bin');
-  for (const old of [
-    'Mando Daemon',
-    'Mando Telegram',
-    'Mando Daemon.prev',
-    'Mando Telegram.prev',
-  ]) {
-    const p = path.join(binDir, old);
-    try {
-      if (fs.existsSync(p)) fs.unlinkSync(p);
-    } catch {
-      /* best-effort cleanup */
-    }
-  }
-}
-
 /** Stage the daemon binary from app bundle to Application Support. */
 export function stageDaemonBinary(): boolean {
-  cleanupLegacyBinaries();
   return stageBinary(daemonSourcePath(), daemonInstallPath(), 'daemon');
 }
 
@@ -239,12 +285,33 @@ function ensureLaunchdDirs(dataDir: string): void {
   fs.mkdirSync(path.join(dataDir, 'logs'), { recursive: true });
 }
 
+/** Bootout and remove legacy launchd services from before the label rename.
+ *  Safe to call repeatedly — no-ops when the old services are not loaded. */
+function migrateOldLaunchdLabels(): void {
+  const oldLabels = ['run.tribe.mando.daemon', 'run.tribe.mando.telegram'];
+  for (const label of oldLabels) {
+    if (isServiceLoaded(label)) {
+      launchctlBootout(label);
+      waitForServiceUnloaded(label);
+      log.info(`[launchd] migrated legacy service: ${label}`);
+    }
+    // Remove old plist file.
+    const plist = path.join(launchAgentsDir(), `${label}.plist`);
+    try {
+      if (fs.existsSync(plist)) fs.unlinkSync(plist);
+    } catch {
+      /* best-effort */
+    }
+  }
+}
+
 /** Install and load the daemon LaunchAgent plist. */
 export function installDaemonPlist(dataDir: string): void {
+  migrateOldLaunchdLabels();
   ensureLaunchdDirs(dataDir);
   const plistFile = daemonPlistPath();
   fs.writeFileSync(plistFile, generateDaemonPlist(dataDir), 'utf-8');
-  launchctlLoad(plistFile, DAEMON_LABEL);
+  launchctlLoad(plistFile, daemonLabel());
 }
 
 /** Install and load the TG bot LaunchAgent plist — skips if Telegram is not configured. */
@@ -272,7 +339,7 @@ export function installTgPlist(dataDir: string): void {
   ensureLaunchdDirs(dataDir);
   const plistFile = tgPlistPath();
   fs.writeFileSync(plistFile, generateTgPlist(dataDir), 'utf-8');
-  launchctlLoad(plistFile, TG_LABEL);
+  launchctlLoad(plistFile, tgLabel());
 }
 
 /** Update daemon binary: bootout, replace binary, bootstrap. */
@@ -281,8 +348,17 @@ export function updateDaemonBinary(dataDir: string): boolean {
   const prev = `${dest}.prev`;
 
   // Bootout running services before replacing binaries.
-  if (isServiceLoaded(TG_LABEL)) launchctlBootout(TG_LABEL);
-  if (isServiceLoaded(DAEMON_LABEL)) launchctlBootout(DAEMON_LABEL);
+  // Wait for each to fully unload — bootout is async at the OS level.
+  const tl = tgLabel();
+  const dl = daemonLabel();
+  if (isServiceLoaded(tl)) {
+    launchctlBootout(tl);
+    waitForServiceUnloaded(tl);
+  }
+  if (isServiceLoaded(dl)) {
+    launchctlBootout(dl);
+    waitForServiceUnloaded(dl);
+  }
 
   // Rename current binary to .prev for rollback.
   if (fs.existsSync(dest)) {
@@ -321,8 +397,16 @@ export function rollbackDaemonBinary(dataDir: string): boolean {
   const prev = `${dest}.prev`;
   if (!fs.existsSync(prev)) return false;
 
-  if (isServiceLoaded(TG_LABEL)) launchctlBootout(TG_LABEL);
-  if (isServiceLoaded(DAEMON_LABEL)) launchctlBootout(DAEMON_LABEL);
+  const tl = tgLabel();
+  const dl = daemonLabel();
+  if (isServiceLoaded(tl)) {
+    launchctlBootout(tl);
+    waitForServiceUnloaded(tl);
+  }
+  if (isServiceLoaded(dl)) {
+    launchctlBootout(dl);
+    waitForServiceUnloaded(dl);
+  }
   try {
     fs.renameSync(prev, dest);
   } catch (err) {
@@ -343,7 +427,7 @@ interface DaemonStatus {
 
 export function getDaemonStatus(): DaemonStatus {
   try {
-    const out = execSync(`launchctl list ${DAEMON_LABEL} 2>/dev/null`, { encoding: 'utf-8' });
+    const out = execSync(`launchctl list ${daemonLabel()} 2>/dev/null`, { encoding: 'utf-8' });
     const pidMatch = out.match(/"PID"\s*=\s*(\d+)/);
     return {
       loaded: true,
@@ -361,41 +445,21 @@ export function getDaemonStatus(): DaemonStatus {
   }
 }
 
-/** Spawn daemon directly (dev mode, no launchd). */
-export function spawnDaemonDev(dataDir: string): ReturnType<typeof spawn> | null {
-  const binary = daemonSourcePath();
-  if (!fs.existsSync(binary)) {
-    log.warn(`daemon binary not found at ${binary}`);
-    return null;
-  }
-
-  fs.mkdirSync(path.join(dataDir, 'logs'), { recursive: true });
-
-  const child = spawn(binary, ['--foreground', '--dev'], {
-    env: {
-      ...process.env,
-      MANDO_DATA_DIR: dataDir,
-      HOME: homeDir(),
-    },
-    stdio: ['ignore', 'pipe', 'pipe'],
-    detached: false,
-  });
-
-  child.stdout?.on('data', (data: Buffer) => {
-    process.stdout.write(`[daemon] ${data}`);
-  });
-  child.stderr?.on('data', (data: Buffer) => {
-    process.stderr.write(`[daemon] ${data}`);
-  });
-
-  return child;
+/** Bootout dev-mode launchd services on quit. No-op in prod
+ *  (prod daemon persists across Electron restarts via KeepAlive). */
+export function bootoutDevServices(): void {
+  if (!isDev()) return;
+  const dl = daemonLabel();
+  const tl = tgLabel();
+  if (isServiceLoaded(dl)) launchctlBootout(dl);
+  if (isServiceLoaded(tl)) launchctlBootout(tl);
 }
 
 // ---------------------------------------------------------------------------
 // CLI binary + daemon plist installation
 // ---------------------------------------------------------------------------
 
-export function installCliAndPlists(dataDir: string): void {
+export function installCliAndPlists(dataDir: string, opts?: { skipDaemonPlist?: boolean }): void {
   // 1. Copy CLI binary
   const src = cliSourcePath();
   const dest = cliInstallPath();
@@ -410,10 +474,14 @@ export function installCliAndPlists(dataDir: string): void {
   fs.mkdirSync(launchAgentsDir(), { recursive: true });
 
   // 3. Stage daemon binary + install daemon plist
-  stageDaemonBinary();
-  installDaemonPlist(dataDir);
+  //    When skipDaemonPlist is set, ensureDaemon already staged the binary and
+  //    bootstrapped the service — re-staging would overwrite the running binary.
+  if (!opts?.skipDaemonPlist) {
+    stageDaemonBinary();
+    installDaemonPlist(dataDir);
+  }
 
-  // 5. Stage TG bot binary + install TG plist
+  // 4. Stage TG bot binary + install TG plist
   stageTgBinary();
   installTgPlist(dataDir);
 }

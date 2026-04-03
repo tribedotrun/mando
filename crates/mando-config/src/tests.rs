@@ -116,7 +116,7 @@ fn parse_minimal_config_uses_defaults() {
     assert_eq!(cfg.workspace, "~/.mando/workspace");
     assert!(!cfg.features.voice);
     assert!(!cfg.features.decision_journal);
-    assert!(cfg.features.cron);
+    assert!(!cfg.features.cron);
     assert!(!cfg.features.linear);
     assert!(!cfg.features.dev_mode);
     assert!(!cfg.features.analytics);

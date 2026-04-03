@@ -183,7 +183,13 @@ export function DataProvider({ children }: { children: React.ReactNode }): React
             borderRadius: 6,
             cursor: 'pointer',
           }}
-          onClick={() => window.location.reload()}
+          onClick={(e) => {
+            const btn = e.currentTarget;
+            btn.textContent = 'Retrying\u2026';
+            btn.style.opacity = '0.5';
+            btn.style.pointerEvents = 'none';
+            window.mandoAPI.restartDaemon().finally(() => window.location.reload());
+          }}
         >
           Retry
         </button>

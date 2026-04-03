@@ -1,6 +1,7 @@
 import React, { useState, useRef, useMemo, useCallback } from 'react';
 import { useMountEffect } from '#renderer/hooks/useMountEffect';
 import { useScrollIntoViewRef } from '#renderer/hooks/useScrollIntoViewRef';
+import { useSettingsStore } from '#renderer/stores/settingsStore';
 interface Props {
   open: boolean;
   onClose: () => void;
@@ -13,6 +14,7 @@ interface Command {
   shortcut?: string;
   section: 'recent' | 'navigation' | 'actions';
   icon: React.ReactNode;
+  featureFlag?: string;
 }
 
 /* ── Row icons (16x16, stroke-based) ── */
@@ -157,12 +159,14 @@ const NAVIGATION_COMMANDS: Command[] = [
     name: 'Cron Jobs',
     section: 'navigation',
     icon: <CircleIcon />,
+    featureFlag: 'cron',
   },
   {
     id: 'nav-analytics',
     name: 'Analytics',
     section: 'navigation',
     icon: <CircleIcon />,
+    featureFlag: 'analytics',
   },
 ];
 
@@ -254,11 +258,21 @@ function CommandPaletteInner({
   const [query, setQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
+  const features = useSettingsStore((s) => s.config.features);
+
+  const visibleCommands = useMemo(
+    () =>
+      ALL_COMMANDS.filter((cmd) => {
+        if (!cmd.featureFlag) return true;
+        return !!(features as Record<string, unknown> | undefined)?.[cmd.featureFlag];
+      }),
+    [features],
+  );
 
   const filtered = useMemo(() => {
-    if (!query.trim()) return ALL_COMMANDS;
-    return ALL_COMMANDS.filter((cmd) => fuzzyMatch(query, cmd.name));
-  }, [query]);
+    if (!query.trim()) return visibleCommands;
+    return visibleCommands.filter((cmd) => fuzzyMatch(query, cmd.name));
+  }, [query, visibleCommands]);
 
   const grouped = useMemo(() => {
     const groups = groupBySection(filtered);
