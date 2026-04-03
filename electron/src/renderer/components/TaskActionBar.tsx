@@ -1,6 +1,7 @@
 import React, { useState, useCallback } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import log from '#renderer/logger';
-import { reopenItem, reworkItem, askTask } from '#renderer/api';
+import { reopenItem, reworkItem } from '#renderer/api';
 import { useTaskStore } from '#renderer/stores/taskStore';
 import { useToastStore } from '#renderer/stores/toastStore';
 import type { TaskItem } from '#renderer/types';
@@ -17,14 +18,16 @@ const STATUS_HINT: Record<string, { label: string; color: string }> = {
 
 interface Props {
   item: TaskItem;
+  /** When provided, Ask is routed to the Q&A section instead of inline. */
+  onAsk?: (question: string) => void;
 }
 
-export function TaskActionBar({ item }: Props): React.ReactElement | null {
+export function TaskActionBar({ item, onAsk }: Props): React.ReactElement | null {
   const [text, setText] = useState('');
   const [pendingAction, setPendingAction] = useState<Action | null>(null);
   const [completed, setCompleted] = useState<string | null>(null);
-  const [askHistory, setAskHistory] = useState<{ role: string; text: string }[]>([]);
   const taskFetch = useTaskStore((s) => s.fetch);
+  const queryClient = useQueryClient();
   const toast = useToastStore.getState;
 
   const isFinalized = FINALIZED_STATUSES.includes(item.status);
@@ -40,32 +43,27 @@ export function TaskActionBar({ item }: Props): React.ReactElement | null {
       setPendingAction(action);
       try {
         if (action === 'ask') {
-          setAskHistory((h) => [...h, { role: 'user', text }]);
-          const data = await askTask(item.id, text);
-          setAskHistory((h) => [...h, { role: 'assistant', text: data.answer }]);
+          onAsk?.(text.trim());
           setText('');
+          setPendingAction(null);
           return;
         }
         if (action === 'reopen') await reopenItem(item.id, text);
         else if (action === 'rework') await reworkItem(item.id, text);
         taskFetch();
+        queryClient.invalidateQueries({ queryKey: ['task-detail-timeline', item.id] });
+        queryClient.invalidateQueries({ queryKey: ['task-detail-pr', item.id] });
         const msg = action === 'reopen' ? 'Task reopened' : 'Rework requested';
         toast().add('success', msg);
         setCompleted(msg);
       } catch (err) {
         log.warn(`[TaskActionBar] ${action} failed for item ${item.id}:`, err);
         toast().add('error', getErrorMessage(err, `${action} failed`));
-        if (action === 'ask') {
-          setAskHistory((h) => [
-            ...h,
-            { role: 'assistant', text: `Error: ${getErrorMessage(err, 'Failed')}` },
-          ]);
-        }
       } finally {
         setPendingAction(null);
       }
     },
-    [text, item.id, taskFetch, toast],
+    [text, item.id, taskFetch, queryClient, toast, onAsk],
   );
 
   const handleKeyDown = useCallback(
@@ -102,26 +100,6 @@ export function TaskActionBar({ item }: Props): React.ReactElement | null {
 
   return (
     <div className="shrink-0 pr-4 pt-3 pb-2">
-      {/* Ask history */}
-      {askHistory.length > 0 && (
-        <div className="mb-2 max-h-[200px] overflow-auto">
-          {askHistory.map((entry, i) => (
-            <div
-              key={i}
-              className="mb-1.5 rounded px-3 py-2 text-[12px] leading-relaxed"
-              style={{
-                background:
-                  entry.role === 'user' ? 'var(--color-accent-wash)' : 'var(--color-surface-2)',
-                color: entry.role === 'user' ? 'var(--color-text-1)' : 'var(--color-text-2)',
-                whiteSpace: 'pre-wrap',
-              }}
-            >
-              {entry.text}
-            </div>
-          ))}
-        </div>
-      )}
-
       {/* Status hint */}
       {hint && (
         <div className="mb-1.5 text-[10px] font-medium" style={{ color: hint.color }}>

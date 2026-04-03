@@ -74,3 +74,20 @@ pub async fn emit_for_task(
 ) {
     emit(pool, item.id, event_type, "captain", summary, data).await;
 }
+
+/// Emit a rate-limited timeline event with computed retry-at time.
+pub async fn emit_rate_limited(item: &mando_types::Task, pool: &SqlitePool) {
+    let remaining = super::rate_limit_cooldown::remaining_secs();
+    let retry_at = time::OffsetDateTime::now_utc() + time::Duration::seconds(remaining as i64);
+    let retry_at_str = retry_at
+        .format(&time::format_description::well_known::Rfc3339)
+        .unwrap_or_default();
+    emit_for_task(
+        item,
+        TimelineEventType::RateLimited,
+        &format!("Rate limited — will retry at {retry_at_str}"),
+        serde_json::json!({ "remaining_secs": remaining, "retry_at": retry_at_str }),
+        pool,
+    )
+    .await;
+}

@@ -366,7 +366,8 @@ pub(crate) async fn get_workers(State(state): State<AppState>) -> Json<Value> {
         })
         .collect();
 
-    Json(json!({ "workers": workers }))
+    let rl_remaining = mando_captain::runtime::rate_limit_cooldown::remaining_secs();
+    Json(json!({ "workers": workers, "rate_limit_remaining_secs": rl_remaining }))
 }
 
 /// GET /api/workers/{id}

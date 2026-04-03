@@ -53,6 +53,8 @@ pub enum TimelineEventType {
     CompletedNoPr,
     #[serde(rename = "status_changed")]
     StatusChanged,
+    #[serde(rename = "rate_limited")]
+    RateLimited,
 }
 
 /// A single event in a task's timeline.

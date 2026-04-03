@@ -150,16 +150,27 @@ const TaskRow = React.memo(function TaskRow({
   const isFinalized =
     item.status === 'merged' || item.status === 'completed-no-pr' || item.status === 'canceled';
   const [menuOpen, setMenuOpen] = useState(false);
+  const [archivePending, setArchivePending] = useState(false);
   const menuTriggerRef = useRef<HTMLButtonElement>(null);
 
   const handleArchive = useCallback(async () => {
-    await archiveItem(item.id);
-    fetch();
+    setArchivePending(true);
+    try {
+      await archiveItem(item.id);
+      fetch();
+    } finally {
+      setArchivePending(false);
+    }
   }, [item.id, fetch]);
 
   const handleUnarchive = useCallback(async () => {
-    await unarchiveItem(item.id);
-    fetch();
+    setArchivePending(true);
+    try {
+      await unarchiveItem(item.id);
+      fetch();
+    } finally {
+      setArchivePending(false);
+    }
   }, [item.id, fetch]);
 
   return (
@@ -334,9 +345,19 @@ const TaskRow = React.memo(function TaskRow({
         )}
         {isFinalized &&
           (item.archived_at ? (
-            <ActionBtn label="Unarchive" onClick={handleUnarchive} testId="unarchive-btn" />
+            <ActionBtn
+              label="Unarchive"
+              onClick={handleUnarchive}
+              testId="unarchive-btn"
+              pending={archivePending}
+            />
           ) : (
-            <ActionBtn label="Archive" onClick={handleArchive} testId="archive-btn" />
+            <ActionBtn
+              label="Archive"
+              onClick={handleArchive}
+              testId="archive-btn"
+              pending={archivePending}
+            />
           ))}
         {canAsk(item) && <ActionBtn label="Ask" onClick={actions.onAsk} />}
         {!isFinalized && (

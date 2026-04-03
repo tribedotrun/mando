@@ -170,6 +170,13 @@ body {
   outline-offset: 2px;
 }
 
+input:not([type="checkbox"]):not([type="radio"]):focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: none;
+  border-color: var(--color-text-3);
+}
+
 /* ── Selection ── */
 ::selection {
   background: var(--color-accent-wash);

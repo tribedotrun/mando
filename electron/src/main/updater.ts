@@ -112,7 +112,12 @@ function buildFeedUrl(): string {
   return `${UPDATE_SERVER}/update/darwin/${arch}/${version}${channelParam}`;
 }
 
-function fetchFeed(): Promise<FeedResponse | null> {
+type FeedResult =
+  | { kind: 'update'; feed: FeedResponse }
+  | { kind: 'up-to-date' }
+  | { kind: 'error' };
+
+function fetchFeed(): Promise<FeedResult> {
   return new Promise((resolve) => {
     const url = buildFeedUrl();
     log.info(`auto-update: checking ${url}`);
@@ -120,13 +125,13 @@ function fetchFeed(): Promise<FeedResponse | null> {
     const req = https.get(url, (res) => {
       if (res.statusCode === 204) {
         log.info('auto-update: up to date');
-        resolve(null);
+        resolve({ kind: 'up-to-date' });
         return;
       }
       if (res.statusCode !== 200) {
         log.warn(`auto-update: feed returned ${res.statusCode}`);
         res.resume();
-        resolve(null);
+        resolve({ kind: 'error' });
         return;
       }
       let body = '';
@@ -135,16 +140,16 @@ function fetchFeed(): Promise<FeedResponse | null> {
       });
       res.on('end', () => {
         try {
-          resolve(JSON.parse(body) as FeedResponse);
+          resolve({ kind: 'update', feed: JSON.parse(body) as FeedResponse });
         } catch {
           log.error('auto-update: invalid feed JSON');
-          resolve(null);
+          resolve({ kind: 'error' });
         }
       });
     });
     req.on('error', (err) => {
       log.error('auto-update: feed fetch error', err.message);
-      resolve(null);
+      resolve({ kind: 'error' });
     });
   });
 }
@@ -350,18 +355,27 @@ export function applyPendingUpdateIfAny(): boolean {
 
 // Check + download flow
 
+function broadcastToWindows(channel: string, payload?: unknown): void {
+  for (const win of BrowserWindow.getAllWindows()) {
+    win.webContents.send(channel, payload);
+  }
+}
+
 async function checkAndDownload(): Promise<void> {
   if (downloading) return;
   if (pendingUpdate) return; // already have one ready
 
   downloading = true;
+  broadcastToWindows('update-checking');
 
-  const feed = await fetchFeed();
-  if (!feed) {
+  const result = await fetchFeed();
+  if (result.kind !== 'update') {
     downloading = false;
+    broadcastToWindows(result.kind === 'up-to-date' ? 'update-no-update' : 'update-check-error');
     return;
   }
 
+  const { feed } = result;
   log.info(`auto-update: update available: ${feed.name}`);
 
   const stagingDir = getStagingDir();
@@ -379,18 +393,15 @@ async function checkAndDownload(): Promise<void> {
     pendingUpdate = { version: feed.name, notes: feed.notes, appPath };
     writePending(pendingUpdate);
 
-    // Notify renderer
-    const windows = BrowserWindow.getAllWindows();
-    for (const win of windows) {
-      win.webContents.send('update-ready', { version: feed.name, notes: feed.notes });
-    }
-
+    broadcastToWindows('update-ready', { version: feed.name, notes: feed.notes });
+    broadcastToWindows('update-check-done', { found: true });
     log.info(`auto-update: v${feed.name} ready to install`);
   } catch (err) {
     log.error('auto-update: download/extract failed', err);
     if (existsSync(zipPath)) rmSync(zipPath);
     const extractDir = path.join(stagingDir, 'extract');
     if (existsSync(extractDir)) rmSync(extractDir, { recursive: true });
+    broadcastToWindows('update-check-error');
   } finally {
     downloading = false;
   }
@@ -423,7 +434,8 @@ export function setupAutoUpdate(): void {
 
   handleTrusted('updates:check', () => {
     if (!app.isPackaged) {
-      log.info('auto-update: manual check requested in dev mode — ignoring');
+      log.info('auto-update: manual check requested in dev mode');
+      broadcastToWindows('update-no-update');
       return;
     }
     log.info('auto-update: manual check triggered');

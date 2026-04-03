@@ -14,7 +14,7 @@ import { useTaskStore } from '#renderer/stores/taskStore';
 const LAST_PROJECT_KEY = 'mando:lastProject';
 const titleInputCls = `${inputCls} resize-none`;
 const projectSelectCls =
-  'rounded-md px-3 py-2 text-[12px] font-medium uppercase tracking-[0.06em] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--color-accent)]';
+  'rounded-md px-3 py-2 text-[12px] font-medium uppercase tracking-[0.06em] focus-visible:outline-none';
 const footerButtonCls =
   'px-4 py-2 text-[13px] font-semibold transition-colors hover:bg-[var(--color-accent-hover)] active:bg-[var(--color-accent-pressed)] disabled:opacity-40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-accent)]';
 

@@ -52,6 +52,10 @@ export interface MandoAPI {
   // Auto-update
   updates: {
     onUpdateReady: (callback: (info: { version: string; notes: string }) => void) => void;
+    onUpdateChecking: (callback: () => void) => void;
+    onUpdateNoUpdate: (callback: () => void) => void;
+    onUpdateCheckError: (callback: () => void) => void;
+    onUpdateCheckDone: (callback: (info: { found: boolean }) => void) => void;
     installUpdate: () => Promise<void>;
     checkForUpdates: () => Promise<void>;
     getPending: () => Promise<{ version: string; notes: string } | null>;
@@ -59,6 +63,7 @@ export interface MandoAPI {
     getChannel: () => Promise<string>;
     setChannel: (channel: string) => Promise<void>;
     removeUpdateListeners: () => void;
+    removeCheckListeners: () => void;
   };
   // Voice window
   hideVoiceWindow: () => void;
@@ -133,6 +138,18 @@ contextBridge.exposeInMainWorld('mandoAPI', {
     onUpdateReady: (callback: (info: { version: string; notes: string }) => void) => {
       ipcRenderer.on('update-ready', (_event, info) => callback(info));
     },
+    onUpdateChecking: (callback: () => void) => {
+      ipcRenderer.on('update-checking', () => callback());
+    },
+    onUpdateNoUpdate: (callback: () => void) => {
+      ipcRenderer.on('update-no-update', () => callback());
+    },
+    onUpdateCheckError: (callback: () => void) => {
+      ipcRenderer.on('update-check-error', () => callback());
+    },
+    onUpdateCheckDone: (callback: (info: { found: boolean }) => void) => {
+      ipcRenderer.on('update-check-done', (_event, info) => callback(info));
+    },
     installUpdate: () => ipcRenderer.invoke('updates:install'),
     checkForUpdates: () => ipcRenderer.invoke('updates:check'),
     getPending: () =>
@@ -142,6 +159,12 @@ contextBridge.exposeInMainWorld('mandoAPI', {
     setChannel: (channel: string) => ipcRenderer.invoke('updates:set-channel', channel),
     removeUpdateListeners: () => {
       ipcRenderer.removeAllListeners('update-ready');
+    },
+    removeCheckListeners: () => {
+      ipcRenderer.removeAllListeners('update-checking');
+      ipcRenderer.removeAllListeners('update-no-update');
+      ipcRenderer.removeAllListeners('update-check-error');
+      ipcRenderer.removeAllListeners('update-check-done');
     },
   },
   // Voice window
