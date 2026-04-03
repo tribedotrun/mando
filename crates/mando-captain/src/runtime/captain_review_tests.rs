@@ -332,7 +332,9 @@ async fn test_apply_verdict_resets_review_fail_count() {
         feedback: "try again".into(),
         report: None,
     };
-    apply_verdict(&mut item, &verdict, &notifier, &pool)
+    let config = mando_config::settings::Config::default();
+    let workflow = mando_config::workflow::CaptainWorkflow::compiled_default();
+    apply_verdict(&mut item, &verdict, &config, &workflow, &notifier, &pool)
         .await
         .unwrap();
 

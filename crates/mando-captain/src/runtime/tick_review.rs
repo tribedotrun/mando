@@ -102,7 +102,10 @@ pub(super) async fn poll_reviewing_items(
         }
 
         if let Some(verdict) = captain_review::check_review(item) {
-            if let Err(e) = captain_review::apply_verdict(item, &verdict, notifier, pool).await {
+            if let Err(e) =
+                captain_review::apply_verdict(item, &verdict, config, workflow, notifier, pool)
+                    .await
+            {
                 tracing::warn!(module = "captain", item_id = item.id, error = %e,
                     "apply_verdict failed, will retry next tick");
             }

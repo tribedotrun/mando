@@ -3,6 +3,7 @@
 use anyhow::Result;
 use tracing::warn;
 
+use mando_config::settings::Config;
 use mando_config::workflow::CaptainWorkflow;
 use mando_types::task::{ItemStatus, Task};
 use mando_types::timeline::TimelineEventType;
@@ -22,6 +23,8 @@ pub(crate) fn escaped_title(item: &Task) -> String {
 pub async fn apply_verdict(
     item: &mut Task,
     verdict: &super::captain_review::CaptainVerdict,
+    _config: &Config,
+    workflow: &CaptainWorkflow,
     notifier: &Notifier,
     pool: &SqlitePool,
 ) -> Result<()> {
@@ -64,9 +67,8 @@ pub async fn apply_verdict(
             .await;
         }
         "nudge" => {
-            // Don't update session status — worker will be resumed on next tick,
-            // which will call log_running_session.
             item.status = ItemStatus::InProgress;
+            item.intervention_count += 1;
             timeline_emit::emit_for_task(
                 item,
                 TimelineEventType::CaptainReviewVerdict,
@@ -78,6 +80,102 @@ pub async fn apply_verdict(
             notifier
                 .normal(&format!("\u{1f4ac} Captain nudge on <b>{title}</b>"))
                 .await;
+
+            // Store AI-generated feedback so the next nudge_item() call uses it
+            // instead of a generic template if the inline resume below fails.
+            if let Some(ref w) = item.worker {
+                crate::io::health_store::persist_health_field(
+                    w,
+                    "pending_ai_feedback",
+                    serde_json::json!(verdict.feedback),
+                    "failed to persist AI nudge feedback — worker will receive generic template instead",
+                );
+            }
+
+            // Resume the worker process inline so the next tick sees a live
+            // process (Rule 2 skip) instead of a dead one (Rule 3 broken).
+            if let (Some(w), Some(sid), Some(wt)) =
+                (&item.worker, &item.session_ids.worker, &item.worktree)
+            {
+                let stream_path = mando_config::stream_path_for_session(sid);
+                if mando_cc::stream_has_broken_session(&stream_path) {
+                    warn!(
+                        module = "captain", worker = %w,
+                        "nudge verdict skipped resume — stream is broken, next tick will handle"
+                    );
+                } else {
+                    let old_pid = crate::io::pid_lookup::resolve_pid(sid, w).unwrap_or(0);
+                    if old_pid > 0 {
+                        if let Err(e) = mando_cc::kill_process(old_pid).await {
+                            warn!(
+                                module = "captain", worker = %w, pid = old_pid, error = %e,
+                                "failed to kill old process before verdict resume"
+                            );
+                        }
+                    }
+                    let wt_path = mando_config::expand_tilde(wt);
+                    let stream_size_before = mando_cc::get_stream_file_size(&stream_path);
+                    let env = std::collections::HashMap::new();
+                    match crate::io::process_manager::resume_worker_process(
+                        w,
+                        &verdict.feedback,
+                        &wt_path,
+                        &workflow.models.worker,
+                        sid,
+                        &env,
+                        workflow.models.fallback.as_deref(),
+                    )
+                    .await
+                    {
+                        Ok((pid, _)) => {
+                            crate::io::pid_registry::register(sid, pid);
+                            let health_path = mando_config::worker_health_path();
+                            let mut hstate =
+                                crate::io::health_store::load_health_state(&health_path);
+                            crate::io::health_store::set_health_field(
+                                &mut hstate,
+                                w,
+                                "pid",
+                                serde_json::json!(pid),
+                            );
+                            crate::io::health_store::set_health_field(
+                                &mut hstate,
+                                w,
+                                "stream_size_at_spawn",
+                                serde_json::json!(stream_size_before),
+                            );
+                            if let Err(e) =
+                                crate::io::health_store::save_health_state(&health_path, &hstate)
+                            {
+                                warn!(module = "captain", worker = %w, error = %e,
+                                    "failed to persist health after verdict resume");
+                            }
+                            crate::io::headless_cc::log_running_session(
+                                pool,
+                                sid,
+                                &wt_path,
+                                "worker",
+                                w,
+                                &item.best_id(),
+                                true,
+                            )
+                            .await;
+                        }
+                        Err(e) => {
+                            warn!(
+                                module = "captain", worker = %w, error = %e,
+                                "nudge verdict resume failed — next tick will retry"
+                            );
+                        }
+                    }
+                }
+            } else {
+                warn!(
+                    module = "captain",
+                    item_id = item.id,
+                    "nudge verdict has no worker/session/worktree — next tick will handle"
+                );
+            }
         }
         "respawn" => {
             // Mark old worker session as stopped before clearing refs.

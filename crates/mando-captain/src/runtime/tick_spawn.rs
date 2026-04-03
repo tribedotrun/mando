@@ -30,6 +30,15 @@ pub async fn spawn_worker_for_item(
             )
         })?;
 
+    // GitHub is required for PR-based tasks. Reject upfront instead of
+    // discovering the problem mid-work in the nudge loop.
+    if !item.no_pr && project_config.github_repo.is_none() {
+        anyhow::bail!(
+            "project '{}' has no githubRepo configured — cannot process PR-based tasks",
+            slug
+        );
+    }
+
     let claude_path = crate::io::process_manager::resolve_claude_binary();
     if !claude_path.exists() && claude_path.to_str() == Some("claude") {
         let which = tokio::process::Command::new("which")

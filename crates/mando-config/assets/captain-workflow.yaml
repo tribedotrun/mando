@@ -22,7 +22,7 @@ agent:
   max_rebase_retries: 5
   rebase_base_delay_s: 30
   worker_timeout_s: 21600
-  max_repeated_nudges: 10
+  max_repeated_nudges: 3
   clarifier_timeout_s: 1800
 
 # ── Prompt Templates ─────────────────────────────────────────────────────────
@@ -376,12 +376,6 @@ prompts:
     - **escalate** — CI failure is an infrastructure issue (flaky tests, CI config
       problem, rate limits) that the worker cannot fix. Explain why.
     {% endif %}
-    {% if is_missing_github_config %}
-    - **escalate** — Project is missing GitHub repository configuration (no `githubRepo`
-      in captain config). The worker cannot create or discover PRs without this.
-      Produce a CTO report explaining the configuration gap.
-    {% endif %}
-
     ## Output
 
     Your output will be validated against a JSON schema with these fields:

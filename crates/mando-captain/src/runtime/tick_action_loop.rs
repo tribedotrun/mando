@@ -17,7 +17,9 @@ pub(super) async fn kill_orphan_workers(
 ) {
     let active_workers: std::collections::HashSet<&str> = items
         .iter()
-        .filter(|it| it.status == ItemStatus::InProgress)
+        .filter(|it| {
+            it.status == ItemStatus::InProgress || it.status == ItemStatus::CaptainReviewing
+        })
         .filter_map(|it| it.worker.as_deref())
         .collect();
 

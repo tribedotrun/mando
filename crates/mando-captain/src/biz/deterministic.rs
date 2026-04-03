@@ -81,17 +81,6 @@ pub(crate) fn classify_worker(
         return Some(action(ctx, ActionKind::CaptainReview, "", "gates_pass"));
     }
 
-    // ── Rule 3b: Config error — project missing githubRepo → escalate ──
-    // Worker can't fix missing config. Escalate immediately instead of nudging.
-    if !is_no_pr && !ctx.github_repo_configured && ctx.pr.is_none() {
-        return Some(action(
-            ctx,
-            ActionKind::CaptainReview,
-            "",
-            "missing_github_config",
-        ));
-    }
-
     // ── Rule 4: NUDGE — worker needs a push ──
 
     // Check specific gate failures first (work done but missing something).
@@ -161,7 +150,7 @@ fn diagnose_failing_gates(
     }
     if !is_no_pr {
         if ctx.pr.is_none() {
-            failures.push("no PR discovered (check project githubRepo config)".into());
+            failures.push("no PR created — push your branch and open a PR".into());
         }
         if ctx.pr.is_some() && !ctx.branch_ahead {
             failures.push("branch not ahead of main".into());

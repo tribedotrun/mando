@@ -111,7 +111,7 @@ impl Default for AgentConfig {
             archive_grace_secs: 604800,
             evidence_download_timeout_s: 30,
             evidence_ffmpeg_timeout_s: 30,
-            max_repeated_nudges: 10,
+            max_repeated_nudges: 3,
         }
     }
 }
