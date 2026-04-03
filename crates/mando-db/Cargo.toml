@@ -1,6 +1,6 @@
 [package]
 name = "mando-db"
-version = "0.1.0"
+version.workspace = true
 edition = "2021"
 description = "SQLite database schema, migrations, and query layer"
 license.workspace = true

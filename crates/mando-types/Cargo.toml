@@ -1,6 +1,6 @@
 [package]
 name = "mando-types"
-version = "0.1.0"
+version.workspace = true
 edition = "2021"
 description = "Shared domain types for tasks, sessions, and events"
 license.workspace = true

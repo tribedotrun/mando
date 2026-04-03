@@ -118,7 +118,7 @@ export function TaskTimeline({
             </div>
             {isExpanded && hasVisibleData && (
               <div
-                className="ml-6 mt-1 rounded border px-2 py-1 text-[11px]"
+                className="ml-6 mt-1 break-words rounded border px-2 py-1 text-[11px]"
                 style={{
                   background: 'var(--color-surface-2)',
                   borderColor: 'var(--color-border-subtle)',

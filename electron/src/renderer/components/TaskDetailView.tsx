@@ -171,7 +171,7 @@ export function TaskDetailView({
       {/* Main row: left column (header + content) + sidebar */}
       <div className="flex min-h-0 flex-1">
         {/* Left column */}
-        <div className="flex min-h-0 flex-1 flex-col">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           {/* Header */}
           <div
             className="shrink-0 border-b pb-4"
@@ -192,7 +192,7 @@ export function TaskDetailView({
             <div className="flex items-start gap-3">
               <div className="min-w-0 flex-1">
                 <h1
-                  className="text-[18px] font-semibold leading-snug"
+                  className="break-words text-[18px] font-semibold leading-snug"
                   style={{ color: 'var(--color-text-1)' }}
                 >
                   {item.title}
@@ -271,7 +271,7 @@ export function TaskDetailView({
           </div>
 
           {/* Scrollable details */}
-          <div className="min-h-0 flex-1 overflow-auto pr-4 pt-4">
+          <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden break-words pr-4 pt-4">
             {item.original_prompt && (
               <DetailSection label="Request">
                 <p className="text-[13px] italic" style={{ color: 'var(--color-text-2)' }}>
@@ -302,7 +302,7 @@ export function TaskDetailView({
             {item.escalation_report && (
               <DetailSection label="Escalation Report">
                 <pre
-                  className="whitespace-pre-wrap rounded p-3 text-[11px]"
+                  className="whitespace-pre-wrap break-words rounded p-3 text-[11px]"
                   style={{
                     background: 'var(--color-surface-2)',
                     color: 'var(--color-text-1)',

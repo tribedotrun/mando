@@ -87,7 +87,7 @@ export function ClarificationSection({ taskId, questions }: Props): React.ReactE
         {unanswered.map((q, i) => (
           <div key={i}>
             <div
-              className="mb-1.5 text-[13px] leading-snug"
+              className="mb-1.5 break-words text-[13px] leading-snug"
               style={{ color: 'var(--color-text-1)' }}
             >
               <span style={{ color: 'var(--color-text-3)' }}>{i + 1}.</span> {q.question}
@@ -147,12 +147,12 @@ export function ClarificationSection({ taskId, questions }: Props): React.ReactE
             <div className="mt-2 space-y-3">
               {selfAnswered.map((q, i) => (
                 <div key={i} style={{ opacity: 0.7 }}>
-                  <div className="text-[12px]" style={{ color: 'var(--color-text-3)' }}>
+                  <div className="break-words text-[12px]" style={{ color: 'var(--color-text-3)' }}>
                     Q: {q.question}
                   </div>
                   {q.answer && (
                     <div
-                      className="mt-0.5 text-[12px] leading-relaxed"
+                      className="mt-0.5 break-words text-[12px] leading-relaxed"
                       style={{ color: 'var(--color-text-4)' }}
                     >
                       A: {q.answer}

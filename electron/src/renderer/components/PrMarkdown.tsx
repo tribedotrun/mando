@@ -259,7 +259,7 @@ export function PrMarkdown({ text }: { text: string }): React.ReactElement {
     elements.push(
       <div
         key={elements.length}
-        className="py-0.5 text-[12px] leading-relaxed"
+        className="break-words py-0.5 text-[12px] leading-relaxed"
         style={{ color: 'var(--color-text-1)' }}
       >
         {renderInline(line)}
