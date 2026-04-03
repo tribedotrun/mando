@@ -11,7 +11,7 @@ import { useMountEffect } from '#renderer/hooks/useMountEffect';
 import { useToastStore } from '#renderer/stores/toastStore';
 import { useSettingsStore } from '#renderer/stores/settingsStore';
 
-const CHANNELS = ['stable', 'beta', 'alpha'] as const;
+const CHANNELS = ['stable', 'beta'] as const;
 
 type ConnectionState = 'connected' | 'connecting' | 'disconnected';
 
@@ -163,7 +163,27 @@ export function SettingsGeneral(): React.ReactElement {
       </SettingsRow>
 
       <SettingsRow label="Update channel">
-        <SegmentedControl options={CHANNELS} value={updateChannel} onChange={handleChannelChange} />
+        {updateChannel === 'alpha' ? (
+          <span
+            className="text-code"
+            style={{
+              color: 'var(--color-accent)',
+              padding: '5px 16px',
+              borderRadius: 'var(--radius-button)',
+              border: '1px solid var(--color-border)',
+              background: 'var(--color-surface-3)',
+              fontSize: 13,
+            }}
+          >
+            Alpha
+          </span>
+        ) : (
+          <SegmentedControl
+            options={CHANNELS}
+            value={updateChannel}
+            onChange={handleChannelChange}
+          />
+        )}
       </SettingsRow>
 
       <SettingsRow label="Start at login">

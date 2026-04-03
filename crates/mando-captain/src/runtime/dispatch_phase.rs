@@ -1,6 +1,6 @@
 //! Dispatch phase — dispatch ready/new items to workers.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use anyhow::Result;
 use mando_config::settings::Config;
@@ -33,8 +33,9 @@ pub(crate) async fn dispatch_new_work(
     let max_clarifier_retries = workflow.agent.max_clarifier_retries as i64;
     const MAX_SPAWN_FAILS: i64 = 3;
 
-    // Dispatch ready/rework items.
+    // Dispatch ready/rework items. Track IDs so the redispatch pass skips them.
     let dispatchable = dispatch_logic::dispatchable_items(items);
+    let already_dispatched: HashSet<i64> = dispatchable.iter().map(|&i| items[i].id).collect();
     for idx in dispatchable {
         let item = &items[idx];
         let decision = dispatch_logic::check_dispatch(
@@ -179,8 +180,67 @@ pub(crate) async fn dispatch_new_work(
             continue;
         }
 
+        // Pre-generate session_id so we can persist state before the
+        // (potentially long-running) clarifier call.
+        let session_id = mando_uuid::Uuid::v4().to_string();
+        let item = &mut items[idx];
+        item.status = ItemStatus::Clarifying;
+        item.session_ids.clarifier = Some(session_id.clone());
+
+        // Persist immediately so the UI sees the running clarifier.
+        // If this fails, revert and skip — don't run the clarifier with
+        // inconsistent DB state.
+        if let Err(e) = mando_db::queries::tasks::persist_clarify_start(pool, item).await {
+            tracing::error!(
+                module = "captain",
+                id = item.id,
+                error = %e,
+                "failed to persist clarify start — skipping clarifier this tick"
+            );
+            item.status = ItemStatus::New;
+            item.session_ids.clarifier = None;
+            continue;
+        }
+
+        // Log session as running so it appears in the sessions list.
+        crate::io::headless_cc::log_cc_session(
+            pool,
+            &crate::io::headless_cc::SessionLogEntry {
+                session_id: &session_id,
+                cwd: &crate::runtime::clarifier::resolve_clarifier_cwd(item, config),
+                model: &workflow.models.clarifier,
+                caller: "clarifier",
+                cost_usd: None,
+                duration_ms: None,
+                resumed: false,
+                task_id: &item.best_id(),
+                status: mando_types::SessionStatus::Running,
+                worker_name: "",
+            },
+        )
+        .await;
+
+        // Emit ClarifyStarted timeline event.
+        super::timeline_emit::emit_for_task(
+            item,
+            mando_types::timeline::TimelineEventType::ClarifyStarted,
+            "Clarification starting",
+            serde_json::json!({"session_id": &session_id}),
+            pool,
+        )
+        .await;
+
         let linear_cli = &config.captain.linear_cli_path;
-        match clarifier::run_clarification(&items[idx], linear_cli, workflow, config, pool).await {
+        match clarifier::run_clarification(
+            &items[idx],
+            linear_cli,
+            workflow,
+            config,
+            pool,
+            Some(&session_id),
+        )
+        .await
+        {
             Ok(result) => {
                 let item = &mut items[idx];
                 match result.status {
@@ -350,6 +410,8 @@ pub(crate) async fn dispatch_new_work(
             }
             Err(e) => {
                 let item = &mut items[idx];
+                super::dispatch_redispatch::revert_clarifier_start(item, &session_id, &e, pool)
+                    .await;
                 let count = item.clarifier_fail_count + 1;
                 item.clarifier_fail_count = count;
 
@@ -395,6 +457,25 @@ pub(crate) async fn dispatch_new_work(
         alerts,
         max_clarifier_retries,
         pool,
+    )
+    .await;
+
+    // Re-dispatch: items that became Queued during clarification can be
+    // dispatched in the same tick instead of waiting 30s for the next one.
+    super::dispatch_redispatch::redispatch_newly_queued(
+        items,
+        config,
+        &mut active_workers,
+        max_workers,
+        workflow,
+        notifier,
+        dry_run,
+        dry_actions,
+        alerts,
+        resource_limits,
+        &mut resource_counts,
+        pool,
+        &already_dispatched,
     )
     .await;
 

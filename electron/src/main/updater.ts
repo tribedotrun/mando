@@ -7,7 +7,7 @@
  * Channels:
  *   stable — default, receives only full releases
  *   beta   — opt-in via Settings, receives prereleases too
- *   alpha  — team-only, set via MANDO_UPDATE_CHANNEL=alpha env var
+ *   alpha  — team-only, set via MANDO_UPDATE_CHANNEL + MANDO_ALPHA_TOKEN in config.json env
  *
  * Update flow:
  *   1. Periodic check → fetch feed from CF Worker
@@ -32,6 +32,7 @@ import path from 'path';
 import https from 'https';
 import { execSync } from 'child_process';
 import { handleTrusted } from '#main/ipc-security';
+import { getConfigPath } from '#main/daemon';
 import log from '#main/logger';
 
 const UPDATE_CHECK_INTERVAL_MS = 30 * 60 * 1000;
@@ -81,16 +82,28 @@ function getAppBundlePath(): string {
   return path.resolve(process.execPath, '..', '..', '..');
 }
 
+// Config.json helpers — read env section for alpha token and channel override.
+
+function readConfigEnv(): Record<string, string> {
+  try {
+    const raw = readFileSync(getConfigPath(), 'utf-8');
+    const config = JSON.parse(raw) as { env?: Record<string, string> };
+    return config.env ?? {};
+  } catch {
+    return {};
+  }
+}
+
 // Channel persistence
 
 function readChannel(): UpdateChannel {
-  const envChannel = process.env.MANDO_UPDATE_CHANNEL;
-  if (envChannel === 'alpha' || envChannel === 'beta') return envChannel;
+  const cfgChannel = readConfigEnv().MANDO_UPDATE_CHANNEL;
+  if (cfgChannel === 'alpha' || cfgChannel === 'beta') return cfgChannel;
 
   try {
     const raw = readFileSync(getChannelConfigPath(), 'utf-8');
     const parsed = JSON.parse(raw) as { channel?: string };
-    if (parsed.channel === 'alpha' || parsed.channel === 'beta') return parsed.channel;
+    if (parsed.channel === 'beta') return parsed.channel;
   } catch (err) {
     const code = errCode(err);
     if (code !== 'ENOENT') {
@@ -107,7 +120,7 @@ function writeChannel(channel: UpdateChannel): void {
 }
 
 function getAlphaToken(): string | undefined {
-  return process.env.MANDO_ALPHA_TOKEN;
+  return readConfigEnv().MANDO_ALPHA_TOKEN || undefined;
 }
 
 // Feed

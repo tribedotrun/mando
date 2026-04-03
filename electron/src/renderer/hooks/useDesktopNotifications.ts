@@ -10,7 +10,6 @@
  * User can disable all desktop notifications via localStorage preference.
  */
 import { useCallback, useRef } from 'react';
-import { useMountEffect } from '#renderer/hooks/useMountEffect';
 import type { NotificationPayload, NotifyLevel, SSEEvent } from '#renderer/types';
 
 const STORAGE_KEY = 'mando:desktop-notifications-enabled';
@@ -60,13 +59,6 @@ export function useDesktopNotifications(): {
   processEvent: (event: SSEEvent) => void;
 } {
   const recentKeysRef = useRef<Set<string>>(new Set());
-
-  // Clean up notification click listener on unmount.
-  useMountEffect(() => {
-    return () => {
-      window.mandoAPI?.removeNotificationClickListeners();
-    };
-  });
 
   const processEvent = useCallback((event: SSEEvent) => {
     if (!getNotificationsEnabled()) return;

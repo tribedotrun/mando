@@ -5,7 +5,7 @@
  * shows native macOS notifications, and routes click actions
  * back to the renderer.
  */
-import { Notification, shell, BrowserWindow } from 'electron';
+import { Notification, BrowserWindow } from 'electron';
 import { onTrusted } from '#main/ipc-security';
 
 /** Notification payload shape (matches Rust NotificationPayload). */
@@ -72,24 +72,6 @@ function stripHtml(html: string): string {
   return html.replace(/<[^>]*>/g, '');
 }
 
-/** Extract a clickable URL from the notification kind + message. */
-function extractUrl(payload: NotificationPayload): string | null {
-  // Try to extract a GitHub PR URL from the message HTML.
-  const hrefMatch = payload.message.match(/href="(https:\/\/github\.com\/[^"]+)"/);
-  if (hrefMatch) return hrefMatch[1];
-
-  // For PR-related kinds, construct URL if we can find repo info in the message.
-  const kind = payload.kind;
-  if ('pr_number' in kind && kind.pr_number) {
-    const repoMatch = payload.message.match(/([a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+)/);
-    if (repoMatch) {
-      return `https://github.com/${repoMatch[1]}/pull/${kind.pr_number}`;
-    }
-  }
-
-  return null;
-}
-
 /**
  * Register IPC handlers for desktop notifications.
  * Call once during app startup.
@@ -100,7 +82,6 @@ export function registerNotificationHandlers(getMainWindow: () => BrowserWindow 
 
     const title = titleForKind(payload.kind);
     const body = stripHtml(payload.message);
-    const clickUrl = extractUrl(payload);
 
     const notification = new Notification({
       title,
@@ -110,8 +91,6 @@ export function registerNotificationHandlers(getMainWindow: () => BrowserWindow 
     });
 
     notification.on('click', () => {
-      if (clickUrl) shell.openExternal(clickUrl);
-
       const win = getMainWindow();
       if (win) {
         win.show();

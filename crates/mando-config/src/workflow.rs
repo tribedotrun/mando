@@ -103,7 +103,7 @@ impl Default for AgentConfig {
             max_rebase_retries: 5,
             rebase_base_delay_s: 30,
             worker_timeout_s: 21600.0,
-            clarifier_timeout_s: 300,
+            clarifier_timeout_s: 1800,
             needs_clarification_timeout_s: 86400, // 24 hours
             archive_grace_secs: 604800,
             evidence_download_timeout_s: 30,
