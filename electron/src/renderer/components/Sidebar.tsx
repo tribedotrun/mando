@@ -93,9 +93,12 @@ function UpdateButton(): React.ReactElement | null {
   useMountEffect(() => {
     if (!window.mandoAPI?.updates) return;
     window.mandoAPI.updates.onUpdateReady(() => setUpdateReady(true));
-    window.mandoAPI.updates.getPending().then((p) => {
-      if (p) setUpdateReady(true);
-    });
+    window.mandoAPI.updates
+      .getPending()
+      .then((p) => {
+        if (p) setUpdateReady(true);
+      })
+      .catch(() => {});
     return () => window.mandoAPI.updates.removeUpdateListeners();
   });
 

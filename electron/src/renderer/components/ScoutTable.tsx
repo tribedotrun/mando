@@ -59,8 +59,12 @@ export function ScoutTable({
       }
       setExpandedId(id);
       if (!hasSummary || summaryCache[id]) return;
-      const data = await fetchScoutItem(id);
-      if (data.summary) setSummaryCache((c) => ({ ...c, [id]: data.summary! }));
+      try {
+        const data = await fetchScoutItem(id);
+        if (data.summary) setSummaryCache((c) => ({ ...c, [id]: data.summary! }));
+      } catch (err) {
+        console.warn('Failed to fetch scout item summary:', err);
+      }
     },
     [expandedId, summaryCache],
   );

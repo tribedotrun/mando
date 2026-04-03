@@ -302,7 +302,7 @@ app.whenReady().then(async () => {
   if (process.platform === 'darwin' && app.dock) {
     if (isHeadless()) {
       app.dock.hide();
-    } else {
+    } else if (getAppMode() !== 'production') {
       const dockIcon = createDockIcon(resolveAsset('icon.png'), getAppMode());
       if (!dockIcon.isEmpty()) app.dock.setIcon(dockIcon);
     }
@@ -324,19 +324,21 @@ app.whenReady().then(async () => {
 
   setupAutoUpdate();
 
+  // Login item is managed only via the Settings UI toggle (set-login-item IPC).
+  // One-time migration: if config has no explicit startAtLogin, disable the OS
+  // login item (old code defaulted to true, so existing users may have it on).
   if (app.isPackaged) {
-    let openAtLogin = true;
     try {
       const raw = fs.readFileSync(getConfigPath(), 'utf-8');
       const cfg = JSON.parse(raw) as { startAtLogin?: boolean };
-      if (cfg.startAtLogin === false) openAtLogin = false;
-    } catch (err: unknown) {
-      const code = (err as NodeJS.ErrnoException).code;
-      if (code !== 'ENOENT') {
-        log.warn('[login-item] failed to read config, defaulting to enabled:', err);
+      if (cfg.startAtLogin === undefined) {
+        app.setLoginItemSettings({ openAtLogin: false });
+        cfg.startAtLogin = false;
+        fs.writeFileSync(getConfigPath(), JSON.stringify(cfg, null, 2), 'utf-8');
       }
+    } catch {
+      // No config yet (fresh install) — nothing to migrate.
     }
-    app.setLoginItemSettings({ openAtLogin, openAsHidden: true });
   }
 
   app.on('activate', () => {

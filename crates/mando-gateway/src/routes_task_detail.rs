@@ -19,15 +19,28 @@ fn resolve_pr(
 }
 
 /// Resolve a string ID to a numeric task ID: parse as i64, or look up by linear_id.
-async fn resolve_task_id(id: &str, store: &mando_captain::io::task_store::TaskStore) -> i64 {
+/// Returns `None` when the ID is not a valid number and the linear_id lookup
+/// fails or finds no match.
+async fn resolve_task_id(
+    id: &str,
+    store: &mando_captain::io::task_store::TaskStore,
+) -> Result<i64, (StatusCode, Json<Value>)> {
     match id.parse::<i64>() {
-        Ok(n) => n,
-        Err(_) => store
-            .find_by_linear_id(id)
-            .await
-            .unwrap_or(None)
-            .map(|t| t.id)
-            .unwrap_or(0),
+        Ok(n) => Ok(n),
+        Err(_) => match store.find_by_linear_id(id).await {
+            Ok(Some(t)) => Ok(t.id),
+            Ok(None) => Err(error_response(
+                StatusCode::NOT_FOUND,
+                &format!("task not found: {id}"),
+            )),
+            Err(e) => {
+                tracing::error!(error = %e, id = %id, "DB error resolving task id");
+                Err(error_response(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    &format!("database error: {e}"),
+                ))
+            }
+        },
     }
 }
 
@@ -37,7 +50,7 @@ pub(crate) async fn get_task_history(
     Path(id): Path<String>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let store = state.task_store.read().await;
-    let task_id: i64 = resolve_task_id(&id, &store).await;
+    let task_id: i64 = resolve_task_id(&id, &store).await?;
     let pool = store.pool();
 
     let entries = mando_db::queries::ask_history::load(pool, task_id)
@@ -53,7 +66,7 @@ pub(crate) async fn get_task_timeline(
     Path(id): Path<String>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let store = state.task_store.read().await;
-    let id_num: i64 = resolve_task_id(&id, &store).await;
+    let id_num: i64 = resolve_task_id(&id, &store).await?;
     let full_item = store.find_by_id(id_num).await.unwrap_or(None);
     let pool = store.pool().clone();
     let item_ref = full_item.as_ref();
@@ -82,7 +95,7 @@ pub(crate) async fn get_task_sessions(
     Path(id): Path<String>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let store = state.task_store.read().await;
-    let id_num: i64 = resolve_task_id(&id, &store).await;
+    let id_num: i64 = resolve_task_id(&id, &store).await?;
 
     let alt_id = store
         .find_by_id(id_num)
@@ -141,13 +154,7 @@ pub(crate) async fn get_task_pr_summary(
     // Read store, extract what we need, then drop the guard before network I/O.
     let (pr_ref, project, found) = {
         let store = state.task_store.read().await;
-        let id_num: i64 = resolve_task_id(&id, &store).await;
-        if id_num == 0 {
-            return Err(error_response(
-                StatusCode::BAD_REQUEST,
-                &format!("invalid id: {id}"),
-            ));
-        }
+        let id_num: i64 = resolve_task_id(&id, &store).await?;
         match store.find_by_id(id_num).await.unwrap_or(None) {
             Some(it) => (it.pr.clone().unwrap_or_default(), it.project.clone(), true),
             None => (String::new(), None, false),

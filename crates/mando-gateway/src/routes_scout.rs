@@ -7,6 +7,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::response::{error_response, internal_error, not_found_or_internal};
+use crate::scout_notify::emit_scout_processed;
 use crate::AppState;
 
 // ---------------------------------------------------------------
@@ -122,6 +123,8 @@ pub(crate) async fn post_scout_items(
                             mando_types::BusEvent::Scout,
                             Some(json!({"action": "process"})),
                         );
+
+                        emit_scout_processed(&bus, &pool, id).await;
                     });
                     tokio::spawn(async move {
                         if let Err(e) = handle.await {
@@ -162,6 +165,12 @@ pub(crate) async fn post_scout_process(
         mando_types::BusEvent::Scout,
         Some(json!({"action": "process"})),
     );
+
+    // Notify for each processed item.
+    if let Some(id) = body.id {
+        emit_scout_processed(&state.bus, state.db.pool(), id).await;
+    }
+
     Ok(Json(val))
 }
 

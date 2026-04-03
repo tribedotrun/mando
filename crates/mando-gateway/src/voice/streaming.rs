@@ -27,7 +27,9 @@ pub(crate) async fn run_voice_pipeline(
     tx: mpsc::Sender<Result<Event, Infallible>>,
 ) {
     // 1. Thinking event.
-    send(&tx, "thinking", json!({})).await;
+    if !send(&tx, "thinking", json!({})).await {
+        return;
+    }
 
     // 2. Open VoiceDb from the shared pool.
     let db = voice::db::VoiceDb::new(state.db.pool().clone());
@@ -141,7 +143,9 @@ pub(crate) async fn run_voice_pipeline(
     };
 
     // 9. Text event.
-    send(&tx, "text", json!({"chunk": spoken_response})).await;
+    if !send(&tx, "text", json!({"chunk": spoken_response})).await {
+        return;
+    }
 
     // 10. TTS synthesis.
     let tts_start = std::time::Instant::now();
@@ -193,13 +197,22 @@ pub(crate) async fn run_voice_pipeline(
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
+/// Send an SSE event. Returns `false` if the client disconnected.
 async fn send(
     tx: &mpsc::Sender<Result<Event, Infallible>>,
     event_type: &str,
     data: serde_json::Value,
-) {
+) -> bool {
     let event = Event::default().event(event_type).data(data.to_string());
-    let _ = tx.send(Ok(event)).await;
+    if tx.send(Ok(event)).await.is_err() {
+        tracing::debug!(
+            module = "voice",
+            event_type,
+            "voice SSE client disconnected — aborting pipeline"
+        );
+        return false;
+    }
+    true
 }
 
 async fn send_error_done(

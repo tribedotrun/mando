@@ -29,6 +29,7 @@ mod routes_task_detail;
 mod routes_tasks;
 mod routes_voice;
 mod routes_worktrees;
+mod scout_notify;
 pub mod server;
 mod sse;
 mod static_files;

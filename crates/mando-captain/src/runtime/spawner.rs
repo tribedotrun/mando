@@ -94,7 +94,9 @@ pub(crate) async fn spawn_worker(
     }
     let cc_config = cc_builder.build();
 
-    let (pid, stream_path) = mando_cc::spawn_detached(&cc_config, &prompt, &session_id).await?;
+    let (child, pid, stream_path) =
+        mando_cc::spawn_detached(&cc_config, &prompt, &session_id).await?;
+    crate::watch_worker_exit(child);
 
     // Write meta sidecar for retrospective debugging.
     mando_cc::write_stream_meta(

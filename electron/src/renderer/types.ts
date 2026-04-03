@@ -93,6 +93,7 @@ export interface HealthResponse {
 export interface WorkerDetail {
   id: number;
   title: string;
+  status?: ItemStatus;
   project: string;
   github_repo?: string;
   branch?: string;
@@ -303,6 +304,15 @@ type NotificationKind =
       overage_status?: string;
       overage_resets_at?: number;
       overage_disabled_reason?: string;
+    }
+  | {
+      type: 'ScoutProcessed';
+      scout_id: number;
+      title: string;
+      relevance: number;
+      quality: number;
+      source_name?: string;
+      telegraph_url?: string;
     }
   | { type: 'Generic' };
 

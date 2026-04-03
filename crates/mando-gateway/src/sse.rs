@@ -115,6 +115,7 @@ async fn build_snapshot(state: &AppState) -> serde_json::Value {
                 json!({
                     "id": task.id,
                     "title": task.title,
+                    "status": task.status.as_str(),
                     "worker": task.worker,
                     "project": task.project,
                     "worktree": task.worktree,

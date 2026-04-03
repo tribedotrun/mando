@@ -272,14 +272,18 @@ body {
   margin: 1.25em 0;
 }
 
-/* ── Task row actions: absolute overlay, visible on hover ── */
+/* ── Task row actions: inline, collapsed until hover ── */
 [data-testid='task-row'] .action-zone {
+  width: 0;
+  overflow: hidden;
   opacity: 0;
   pointer-events: none;
   transition: opacity 100ms;
 }
 [data-testid='task-row']:hover .action-zone,
 [data-testid='task-row'] .action-zone[data-menu-open] {
+  width: auto;
+  overflow: visible;
   opacity: 1;
   pointer-events: auto;
 }

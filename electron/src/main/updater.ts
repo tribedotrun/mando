@@ -7,7 +7,6 @@
  * Channels:
  *   stable — default, receives only full releases
  *   beta   — opt-in via Settings, receives prereleases too
- *   alpha  — team-only, set via MANDO_UPDATE_CHANNEL + MANDO_ALPHA_TOKEN in config.json env
  *
  * Update flow:
  *   1. Periodic check → fetch feed from CF Worker
@@ -32,7 +31,6 @@ import path from 'path';
 import https from 'https';
 import { execSync } from 'child_process';
 import { handleTrusted } from '#main/ipc-security';
-import { getConfigPath } from '#main/daemon';
 import log from '#main/logger';
 
 const UPDATE_CHECK_INTERVAL_MS = 30 * 60 * 1000;
@@ -40,7 +38,7 @@ const INITIAL_CHECK_DELAY_MS = 10 * 1000;
 const UPDATE_SERVER = 'https://mando-update.gm-e6e.workers.dev';
 const MAX_REDIRECTS = 5;
 
-type UpdateChannel = 'stable' | 'beta' | 'alpha';
+type UpdateChannel = 'stable' | 'beta';
 
 interface FeedResponse {
   url: string;
@@ -82,24 +80,9 @@ function getAppBundlePath(): string {
   return path.resolve(process.execPath, '..', '..', '..');
 }
 
-// Config.json helpers — read env section for alpha token and channel override.
-
-function readConfigEnv(): Record<string, string> {
-  try {
-    const raw = readFileSync(getConfigPath(), 'utf-8');
-    const config = JSON.parse(raw) as { env?: Record<string, string> };
-    return config.env ?? {};
-  } catch {
-    return {};
-  }
-}
-
 // Channel persistence
 
 function readChannel(): UpdateChannel {
-  const cfgChannel = readConfigEnv().MANDO_UPDATE_CHANNEL;
-  if (cfgChannel === 'alpha' || cfgChannel === 'beta') return cfgChannel;
-
   try {
     const raw = readFileSync(getChannelConfigPath(), 'utf-8');
     const parsed = JSON.parse(raw) as { channel?: string };
@@ -119,10 +102,6 @@ function writeChannel(channel: UpdateChannel): void {
   writeFileSync(configPath, JSON.stringify({ channel }), 'utf-8');
 }
 
-function getAlphaToken(): string | undefined {
-  return readConfigEnv().MANDO_ALPHA_TOKEN || undefined;
-}
-
 // Feed
 
 function buildFeedUrl(): string {
@@ -133,26 +112,12 @@ function buildFeedUrl(): string {
   return `${UPDATE_SERVER}/update/darwin/${arch}/${version}${channelParam}`;
 }
 
-function buildFeedHeaders(): Record<string, string> {
-  const headers: Record<string, string> = {};
-  if (readChannel() === 'alpha') {
-    const token = getAlphaToken();
-    if (!token) {
-      log.warn('auto-update: alpha channel requires MANDO_ALPHA_TOKEN');
-    } else {
-      headers['Authorization'] = `Bearer ${token}`;
-    }
-  }
-  return headers;
-}
-
 function fetchFeed(): Promise<FeedResponse | null> {
   return new Promise((resolve) => {
     const url = buildFeedUrl();
-    const headers = buildFeedHeaders();
     log.info(`auto-update: checking ${url}`);
 
-    const req = https.get(url, { headers }, (res) => {
+    const req = https.get(url, (res) => {
       if (res.statusCode === 204) {
         log.info('auto-update: up to date');
         resolve(null);

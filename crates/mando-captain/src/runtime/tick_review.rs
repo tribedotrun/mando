@@ -40,6 +40,19 @@ pub(super) async fn poll_reviewing_items(
             .await
             {
                 tracing::warn!(module = "captain", item_id = item.id, error = %e, "spawn_review failed");
+                // Increment review_fail_count and move to Errored if budget is
+                // exhausted so the item does not get stuck retrying forever.
+                let mut fail_count = item.review_fail_count as u32;
+                captain_review::handle_review_error(
+                    item,
+                    &format!("spawn_review failed: {e}"),
+                    &mut fail_count,
+                    workflow,
+                    notifier,
+                    pool,
+                )
+                .await;
+                item.review_fail_count = fail_count as i64;
             }
             continue;
         }

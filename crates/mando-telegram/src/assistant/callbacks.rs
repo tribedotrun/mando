@@ -1,7 +1,7 @@
 //! Callback query handlers for the assistant bot's inline keyboards.
 //!
 //! Callback data pattern: `dg:{action}:{item_id}`
-//! Actions: show, read, sessions, next, save, archive, rm
+//! Actions: show, read, next, save, archive, rm
 
 use anyhow::{Context, Result};
 use serde_json::Value;
@@ -173,7 +173,6 @@ pub async fn handle_callback(bot: &mut TelegramBot, cb: &Value) -> Result<()> {
     match action {
         "show" => cb_show(bot, cb_id, &chat_id, message_id, id).await,
         "read" => cb_read(bot, cb_id, &chat_id, id).await,
-        "sessions" => cb_sessions(bot, cb_id, &chat_id, id).await,
         "next" => cb_next(bot, cb_id, &chat_id, message_id, id).await,
         "save" => {
             bot.api
@@ -304,45 +303,6 @@ async fn cb_read(bot: &TelegramBot, cb_id: &str, chat_id: &str, id: i64) -> Resu
     );
     bot.api
         .send_message(chat_id, &msg, Some("HTML"), Some(kb), true)
-        .await?;
-    Ok(())
-}
-
-async fn cb_sessions(bot: &TelegramBot, cb_id: &str, chat_id: &str, id: i64) -> Result<()> {
-    bot.api
-        .answer_callback_query(cb_id, Some("Loading sessions\u{2026}"))
-        .await?;
-
-    let sessions = bot.gw().get(&paths::scout_sessions(id)).await?;
-    let rows = sessions.as_array().cloned().unwrap_or_default();
-    if rows.is_empty() {
-        bot.api
-            .send_message(
-                chat_id,
-                &format!("\u{1f9f5} No sessions linked to Scout item #{id}."),
-                None,
-                None,
-                true,
-            )
-            .await?;
-        return Ok(());
-    }
-
-    let mut lines = vec![format!("\u{1f9f5} <b>Scout item #{id} sessions</b>")];
-    for session in rows.into_iter().take(10) {
-        let session_id = session["session_id"].as_str().unwrap_or("?");
-        let caller = session["caller"].as_str().unwrap_or("?");
-        let status = session["status"].as_str().unwrap_or("?");
-        lines.push(format!(
-            "\n\u{2022} <code>{}</code> {} \u{00b7} {}",
-            mando_shared::telegram_format::escape_html(session_id),
-            mando_shared::telegram_format::escape_html(caller),
-            mando_shared::telegram_format::escape_html(status),
-        ));
-    }
-
-    bot.api
-        .send_message(chat_id, &lines.join("\n"), Some("HTML"), None, true)
         .await?;
     Ok(())
 }
