@@ -155,7 +155,6 @@ pub(crate) async fn gather_worker_contexts(
             stream_stale_s: w.stream_stale_s,
             pr_head_sha: result.pr_data.head_sha,
             degraded: result.pr_data.degraded,
-            github_repo_configured: w.github_repo.is_some(),
         });
     }
 
@@ -386,7 +385,6 @@ pub(crate) async fn build_single_context(
 
     // Resolve github repo slug for short PR ref resolution.
     let github_repo = mando_config::resolve_github_repo(item.project.as_deref(), config);
-    let has_github_repo = github_repo.is_some();
     let stub = Task {
         pr: item.pr.clone(),
         project: github_repo,
@@ -434,7 +432,6 @@ pub(crate) async fn build_single_context(
         stream_stale_s,
         pr_head_sha: pr_data.head_sha,
         degraded: pr_data.degraded,
-        github_repo_configured: has_github_repo,
     };
     let formatted = worker_context::format_context(&ctx);
     (ctx, formatted)

@@ -90,7 +90,6 @@ fn construct_worker_context() {
         stream_stale_s: None,
         pr_head_sha: "abc123".into(),
         degraded: false,
-        github_repo_configured: true,
     };
     assert_eq!(ctx.session_name, "worker-1-1");
     assert!(ctx.process_alive);

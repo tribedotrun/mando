@@ -110,18 +110,35 @@ pub async fn nudge_item(
         }
     }
 
+    // Message priority: pending AI feedback > classifier template > nudge_default.
+    // AI feedback takes precedence because the captain review has full context and
+    // its instructions are more specific than any template the classifier produces.
+    // Read but don't clear yet — clear only after nudge is successfully delivered,
+    // so the feedback survives if this function exits early (broken session, etc.).
+    let ai_feedback = {
+        let health_path = mando_config::worker_health_path();
+        let hstate = crate::io::health_store::load_health_state(&health_path);
+        crate::io::health_store::get_health_str(&hstate, &worker, "pending_ai_feedback")
+    };
+
     let msg_owned;
-    let msg = match message {
-        Some(m) if !m.is_empty() => m,
-        _ => {
-            msg_owned = mando_config::render_nudge(
-                "nudge_default",
-                &workflow.nudges,
-                &std::collections::HashMap::new(),
-            )
-            .map_err(|e| anyhow::anyhow!(e))?;
+    let msg = match ai_feedback.as_deref() {
+        Some(fb) if !fb.is_empty() => {
+            msg_owned = fb.to_string();
             &msg_owned
         }
+        _ => match message {
+            Some(m) if !m.is_empty() => m,
+            _ => {
+                msg_owned = mando_config::render_nudge(
+                    "nudge_default",
+                    &workflow.nudges,
+                    &std::collections::HashMap::new(),
+                )
+                .map_err(|e| anyhow::anyhow!(e))?;
+                &msg_owned
+            }
+        },
     };
 
     let old_pid = crate::io::pid_lookup::resolve_pid(&cc_sid, &worker).unwrap_or(0);
@@ -167,6 +184,17 @@ pub async fn nudge_item(
     {
         Ok((pid, _)) => {
             persist_nudge_health(&cc_sid, &worker, pid, stream_size_before, new_count, reason);
+
+            // Clear AI feedback only after the nudge was successfully delivered.
+            if ai_feedback.is_some() {
+                crate::io::health_store::persist_health_field(
+                    &worker,
+                    "pending_ai_feedback",
+                    serde_json::Value::Null,
+                    "failed to clear pending_ai_feedback — next nudge may re-deliver stale feedback",
+                );
+            }
+
             crate::io::headless_cc::log_running_session(
                 pool,
                 &cc_sid,
