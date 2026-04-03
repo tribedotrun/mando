@@ -22,6 +22,7 @@ import {
   startHealthMonitor,
   cleanupDaemon,
   getConnectionState,
+  invalidateDiscoveryCache,
   setMainWindow,
   setIsQuitting,
   updateTrayTooltip,
@@ -243,6 +244,10 @@ handleTrusted('get-app-info', getAppInfo);
 handleTrusted('get-data-dir', () => getDataDir());
 handleTrusted('get-config-path', () => getConfigPath());
 handleTrusted('get-connection-state', () => getConnectionState());
+handleTrusted('restart-daemon', async () => {
+  invalidateDiscoveryCache();
+  return ensureDaemon(getDataDir());
+});
 handleTrusted('get-app-mode', () => getAppMode());
 handleTrusted('select-directory', async () => {
   const opts = { properties: ['openDirectory' as const], message: 'Select a project folder' };

@@ -3,7 +3,6 @@ import { inputStyle, labelStyle, inputCls, labelCls } from '#renderer/styles';
 import { useSettingsStore } from '#renderer/stores/settingsStore';
 import type { VoiceConfig, FeaturesConfig } from '#renderer/stores/settingsStore';
 import { ToggleSwitch } from '#renderer/components/ToggleSwitch';
-import { SettingsScout } from '#renderer/components/SettingsScout';
 
 const EMPTY_VOICE: VoiceConfig = {};
 const EMPTY_FEATURES: FeaturesConfig = {};
@@ -269,23 +268,6 @@ export function SettingsExperimental(): React.ReactElement {
             </div>
           );
         })}
-      </div>
-
-      <h2 className="text-lg font-semibold" style={{ color: 'var(--color-text-1)', marginTop: 32 }}>
-        Scout
-      </h2>
-      <p className="mt-1 text-sm" style={{ color: 'var(--color-text-3)', marginBottom: 16 }}>
-        Personalize how Scout selects and explains content.
-      </p>
-      <div
-        style={{
-          borderRadius: 'var(--radius-panel)',
-          border: '1px solid var(--color-border)',
-          background: 'var(--color-surface-1)',
-          padding: 20,
-        }}
-      >
-        <SettingsScout />
       </div>
     </div>
   );

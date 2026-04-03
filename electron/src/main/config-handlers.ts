@@ -134,7 +134,7 @@ export function registerConfigHandlers(): void {
     if (getAppMode() !== 'sandbox') {
       send('Installing CLI\u2026');
       try {
-        installCliAndPlists(dataDir);
+        installCliAndPlists(dataDir, { skipDaemonPlist: true });
       } catch (e: unknown) {
         log.warn('launchd setup failed:', e instanceof Error ? e.message : e);
       }

@@ -54,7 +54,7 @@ impl Config {
 // ---------------------------------------------------------------------------
 
 /// Feature flags.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct FeaturesConfig {
     pub voice: bool,
@@ -65,21 +65,6 @@ pub struct FeaturesConfig {
     pub analytics: bool,
     pub setup_dismissed: bool,
     pub claude_code_verified: bool,
-}
-
-impl Default for FeaturesConfig {
-    fn default() -> Self {
-        Self {
-            voice: false,
-            decision_journal: false,
-            cron: true,
-            linear: false,
-            dev_mode: false,
-            analytics: false,
-            setup_dismissed: false,
-            claude_code_verified: false,
-        }
-    }
 }
 
 // ---------------------------------------------------------------------------
