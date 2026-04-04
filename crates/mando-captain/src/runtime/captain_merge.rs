@@ -100,9 +100,20 @@ pub(crate) async fn spawn_merge(
     item.status = ItemStatus::CaptainMerging;
     item.last_activity_at = Some(mando_types::now_rfc3339());
 
-    let task_id = item.best_id();
+    let task_id = item.id.to_string();
     let session_id = mando_uuid::Uuid::v4().to_string();
     item.session_ids.merge = Some(session_id.clone());
+
+    // Persist immediately so the session ID survives even if the tick's
+    // end-of-tick write-back is disrupted (concurrent API call, lock timeout, etc.).
+    // On failure, clear the session ID and bail — spawning without a persisted ID
+    // would re-create the exact duplicate-session bug this persist guards against.
+    if let Err(e) = mando_db::queries::tasks::persist_merge_spawn(pool, item).await {
+        tracing::error!(module = "captain", item_id = item.id, error = %e,
+            "failed to persist merge session — skipping spawn, will retry next tick");
+        item.session_ids.merge = None;
+        return Err(e);
+    }
 
     let title = mando_shared::telegram_format::escape_html(&item.title);
     timeline_emit::emit_for_task(
@@ -243,7 +254,7 @@ pub(crate) async fn apply_merge_result(
     item: &mut Task,
     result: &MergeResult,
     notifier: &Notifier,
-    config: &Config,
+    _config: &Config,
     pool: &sqlx::SqlitePool,
 ) {
     item.session_ids.merge = None;
@@ -265,10 +276,6 @@ pub(crate) async fn apply_merge_result(
             notifier
                 .high(&format!("\u{1f389} Captain merged <b>{title}</b>"))
                 .await;
-
-            if let Err(e) = super::linear_integration::writeback_status(item, config).await {
-                tracing::warn!(module = "captain", %e, "Linear status writeback failed");
-            }
         }
         _ => {
             // escalate or unknown → Escalated (from CaptainMerging verdict — captain-managed)
@@ -336,6 +343,30 @@ pub(crate) async fn poll_merging_items(
                 );
                 continue;
             }
+
+            // Guard: if the PR is already merged on GitHub, transition directly
+            // without spawning an expensive CC session.
+            let already_merged = if let Some(pr_ref) = item.pr.as_deref() {
+                let repo = mando_config::resolve_github_repo(item.project.as_deref(), config)
+                    .unwrap_or_default();
+                let pr_num = mando_types::task::extract_pr_number(pr_ref)
+                    .map(|n| n.to_string())
+                    .unwrap_or_default();
+                !repo.is_empty()
+                    && !pr_num.is_empty()
+                    && crate::io::github::is_pr_merged(&repo, &pr_num).await
+            } else {
+                false
+            };
+            if already_merged {
+                let result = MergeResult {
+                    action: "merged".into(),
+                    feedback: "PR already merged on GitHub — skipped merge session".into(),
+                };
+                apply_merge_result(item, &result, notifier, config, pool).await;
+                continue;
+            }
+
             item.last_activity_at = Some(mando_types::now_rfc3339());
             if let Err(e) = spawn_merge(item, config, workflow, notifier, pool).await {
                 tracing::warn!(module = "captain", item_id = item.id, error = %e, "spawn_merge failed");

@@ -56,9 +56,21 @@ pub async fn fetch_content(url: &str) -> Result<String> {
         }
     }
 
-    // YouTube URLs → transcript extraction via yt-dlp.
+    // YouTube URLs → transcript via yt-dlp → firecrawl fallback → stub.
     if is_youtube_url(url) {
-        return crate::runtime::youtube::extract_youtube_transcript(url).await;
+        match crate::runtime::youtube::extract_youtube_transcript(url).await {
+            Ok(content) => return Ok(content),
+            Err(e) => {
+                warn!(url, error = %e, "yt-dlp failed, trying firecrawl");
+                match firecrawl_fallback(url).await {
+                    Ok(content) => return Ok(content),
+                    Err(e2) => {
+                        warn!(url, error = %e2, "firecrawl fallback failed, returning stub");
+                        return Ok(format!("YouTube video (transcript unavailable): {url}"));
+                    }
+                }
+            }
+        }
     }
 
     // Standard path: readability → firecrawl fallback

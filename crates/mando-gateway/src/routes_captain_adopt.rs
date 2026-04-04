@@ -211,19 +211,5 @@ pub(crate) async fn post_captain_adopt(
         val
     };
 
-    // Adopted worktrees typically already have context — only create a Linear
-    // issue if one wasn't already associated via the original task.
-    let item_id = val["id"].as_i64();
-    if let Some(id) = item_id {
-        let item = {
-            let store = state.task_store.read().await;
-            store.find_by_id(id).await.unwrap_or(None)
-        };
-        let needs_linear = item.as_ref().is_none_or(|i| i.linear_id.is_none());
-        if needs_linear {
-            crate::routes_tasks::create_linear_issue_for_new_item(&state, &config, id).await;
-        }
-    }
-
     Ok(Json(val))
 }

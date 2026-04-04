@@ -171,7 +171,7 @@ pub(crate) async fn log_item_session(
             cwd,
             "worker",
             worker_name,
-            &item.best_id(),
+            &item.id.to_string(),
             status,
         )
         .await;

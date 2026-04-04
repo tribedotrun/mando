@@ -33,6 +33,7 @@ pub(super) fn transition_rework_to_queued(items: &mut [Task]) {
         item.pr = None;
         item.worker_started_at = None;
         item.session_ids.worker = None;
+        item.session_ids.ask = None;
         tracing::info!(
             module = "captain",
             title = %&item.title[..item.title.len().min(60)],

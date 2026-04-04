@@ -95,6 +95,12 @@ pub enum NotificationKind {
         source_name: Option<String>,
         telegraph_url: Option<String>,
     },
+    /// Scout item processing failed.
+    ScoutProcessFailed {
+        scout_id: i64,
+        url: String,
+        error: String,
+    },
     /// Generic notification (no special UI).
     Generic,
 }

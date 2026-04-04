@@ -12,11 +12,6 @@ export interface MandoAPI {
   validateTelegramToken: (
     token: string,
   ) => Promise<{ valid: boolean; botName?: string; botUsername?: string; error?: string }>;
-  validateLinearKey: (apiKey: string) => Promise<{
-    valid: boolean;
-    teams: Array<{ id: string; key: string; name: string }>;
-    error?: string;
-  }>;
   // Config & setup (proxied through main process to daemon HTTP)
   gatewayUrl: () => Promise<string>;
   appInfo: () => Promise<{
@@ -65,11 +60,6 @@ export interface MandoAPI {
     removeUpdateListeners: () => void;
     removeCheckListeners: () => void;
   };
-  // Voice window
-  hideVoiceWindow: () => void;
-  onVoiceStartRecording: (callback: () => void) => void;
-  onVoiceStopRecording: (callback: () => void) => void;
-  removeVoiceListeners: () => void;
   // File dialogs
   selectDirectory: () => Promise<string | null>;
   // Login item
@@ -92,7 +82,6 @@ contextBridge.exposeInMainWorld('mandoAPI', {
   // System checks
   checkClaudeCode: () => ipcRenderer.invoke('check-claude-code'),
   validateTelegramToken: (token: string) => ipcRenderer.invoke('validate-telegram-token', token),
-  validateLinearKey: (apiKey: string) => ipcRenderer.invoke('validate-linear-key', apiKey),
   // Config & setup
   gatewayUrl: () => ipcRenderer.invoke('get-gateway-url'),
   appInfo: () => ipcRenderer.invoke('get-app-info'),
@@ -166,18 +155,6 @@ contextBridge.exposeInMainWorld('mandoAPI', {
       ipcRenderer.removeAllListeners('update-check-error');
       ipcRenderer.removeAllListeners('update-check-done');
     },
-  },
-  // Voice window
-  hideVoiceWindow: () => ipcRenderer.send('hide-voice-window'),
-  onVoiceStartRecording: (callback: () => void) => {
-    ipcRenderer.on('voice-start-recording', () => callback());
-  },
-  onVoiceStopRecording: (callback: () => void) => {
-    ipcRenderer.on('voice-stop-recording', () => callback());
-  },
-  removeVoiceListeners: () => {
-    ipcRenderer.removeAllListeners('voice-start-recording');
-    ipcRenderer.removeAllListeners('voice-stop-recording');
   },
   // Login item
   selectDirectory: () => ipcRenderer.invoke('select-directory'),

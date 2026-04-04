@@ -34,8 +34,6 @@ export {
   fetchScoutItemSessions,
 } from '#renderer/api-scout';
 
-export { postVoice, transcribeAudio } from '#renderer/api-voice';
-
 let BASE_URL = 'http://127.0.0.1:18893';
 export async function initBaseUrl(): Promise<void> {
   if (window.mandoAPI) {
@@ -176,7 +174,7 @@ export function apiDel<T>(apiPath: string): Promise<T> {
   return apiRequest<T>('DELETE', apiPath);
 }
 
-// Health & system info (authenticated — includes config paths, projects, linear slug)
+// Health & system info (authenticated — includes config paths, projects)
 export const fetchHealth = () => apiGet<HealthResponse>('/api/health/system');
 
 // Tasks
@@ -187,21 +185,18 @@ export const fetchTasks = (includeArchived?: boolean) => {
 export interface AddTaskInput {
   title: string;
   project?: string;
-  context?: string;
-  linearId?: string;
-  plan?: string;
-  noPr?: boolean;
   images?: File[];
+}
+
+export async function parseBulkTodos(text: string): Promise<string[]> {
+  const data = await apiPost<{ items: string[] }>('/api/ai/parse-todos', { text });
+  return data.items;
 }
 
 export async function addTask(input: AddTaskInput): Promise<TaskItem> {
   const form = new FormData();
   form.append('title', input.title);
   if (input.project) form.append('project', input.project);
-  if (input.context) form.append('context', input.context);
-  if (input.linearId) form.append('linear_id', input.linearId);
-  if (input.plan) form.append('plan', input.plan);
-  if (input.noPr) form.append('no_pr', 'true');
   if (input.images) {
     for (const img of input.images) {
       form.append('images', img, img.name);
@@ -217,10 +212,7 @@ export async function addTask(input: AddTaskInput): Promise<TaskItem> {
   }
   return res.json() as Promise<TaskItem>;
 }
-export const deleteItems = (
-  ids: number[],
-  opts?: { close_pr?: boolean; cancel_linear?: boolean },
-) =>
+export const deleteItems = (ids: number[], opts?: { close_pr?: boolean }) =>
   apiPost<{ ok: boolean; deleted: number; warnings?: string[] }>('/api/tasks/delete', {
     ids,
     ...opts,
@@ -275,13 +267,18 @@ export const nudgeWorker = (itemId: number, message: string) =>
     message,
   });
 export const handoffItem = (id: number) => apiPost<{ ok: boolean }>('/api/tasks/handoff', { id });
+export const cancelItem = (id: number) => apiPost<{ ok: boolean }>('/api/tasks/cancel', { id });
 
 // Workers
 export const fetchWorkers = () => apiGet<WorkersResponse>('/api/workers');
 
-// Task Ask
+// Task Ask (multi-turn: first ask creates session, follow-ups resume)
 export const askTask = (id: number, question: string) =>
   apiPost<AskResponse>('/api/tasks/ask', { id, question });
+
+// End ask session
+export const endAskSession = (id: number) =>
+  apiPost<{ ok: boolean; ended: string }>('/api/tasks/ask/end', { id });
 
 // Task Ask History
 export const fetchAskHistory = (id: number) =>

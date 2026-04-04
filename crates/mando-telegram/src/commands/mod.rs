@@ -90,11 +90,3 @@ pub(crate) fn short_uuid() -> String {
     let id = mando_uuid::Uuid::v4().to_string();
     id.replace('-', "")[..8].to_string()
 }
-
-/// Extract `result_text` from a gateway ops/ask response.
-pub(crate) fn extract_result_text(resp: &serde_json::Value) -> String {
-    resp.get("result_text")
-        .and_then(|v| v.as_str())
-        .unwrap_or("(no response)")
-        .to_string()
-}

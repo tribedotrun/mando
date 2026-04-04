@@ -177,6 +177,19 @@ fn budget_exhausted_captain_review() {
 }
 
 #[test]
+fn budget_exhausted_beats_timeout() {
+    // Even when both timeout and budget are triggered, budget wins (Rule 0).
+    let mut ctx = base_ctx();
+    ctx.process_alive = true;
+    ctx.seconds_active = 25200.0; // 7h > 6h limit
+    ctx.intervention_count = 50; // at max
+    ctx.stream_stale_s = Some(STALE + 1.0);
+    let a = classify(&ctx, &base_item(), None);
+    assert_eq!(a.action, ActionKind::CaptainReview);
+    assert_eq!(a.reason.as_deref(), Some("budget_exhausted"));
+}
+
+#[test]
 fn degraded_clean_pr_routes_to_conservative_review() {
     let mut ctx = base_ctx();
     ctx.degraded = true;

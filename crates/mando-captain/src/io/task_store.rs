@@ -31,10 +31,6 @@ impl TaskStore {
         tasks::find_by_id(&self.pool, id).await
     }
 
-    pub async fn find_by_linear_id(&self, linear_id: &str) -> Result<Option<Task>> {
-        tasks::find_by_linear_id(&self.pool, linear_id).await
-    }
-
     pub async fn load_all(&self) -> Result<Vec<Task>> {
         let mut tasks = tasks::load_all(&self.pool).await?;
         hydrate_rebase_state(&self.pool, &mut tasks).await;

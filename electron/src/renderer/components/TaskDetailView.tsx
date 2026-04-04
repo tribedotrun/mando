@@ -1,7 +1,14 @@
 import React, { useCallback, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useMountEffect } from '#renderer/hooks/useMountEffect';
-import { fetchTimeline, fetchItemSessions, fetchTranscript, fetchPrSummary } from '#renderer/api';
+import log from '#renderer/logger';
+import {
+  fetchTimeline,
+  fetchItemSessions,
+  fetchTranscript,
+  fetchPrSummary,
+  fetchAskHistory,
+} from '#renderer/api';
 import type {
   TaskItem,
   SessionEntry,
@@ -10,66 +17,56 @@ import type {
   ClarifierQuestion,
 } from '#renderer/types';
 import { FINALIZED_STATUSES } from '#renderer/types';
-import { fmtDuration, shortRepo, prLabel, prHref, linearHref } from '#renderer/utils';
-import { useLinearSlug } from '#renderer/hooks/useLinearSlug';
-import { StatusIcon } from '#renderer/components/TaskActions';
+import { shortRepo, prLabel, prHref } from '#renderer/utils';
 import { TranscriptSidebar } from '#renderer/components/TranscriptViewer';
 import { SessionDetailPanel } from '#renderer/components/SessionDetailPanel';
-import { PrSections } from '#renderer/components/PrSections';
 import { TaskActionBar } from '#renderer/components/TaskActionBar';
-import { TaskTimeline } from '#renderer/components/TaskTimeline';
-import { ClarificationSection } from '#renderer/components/ClarificationSection';
-import { TaskQA, type TaskQAHandle } from '#renderer/components/TaskQA';
-import { TaskQAExpanded } from '#renderer/components/TaskQAExpanded';
+import { StatusCard } from '#renderer/components/StatusCard';
+import { DetailOverflowMenu } from '#renderer/components/TaskDetailParts';
+import { ActiveQAView, QAHistoryTab, type QAHandle } from '#renderer/components/TaskQAView';
 import {
-  ActionButton,
-  DetailSection,
-  DetailOverflowMenu,
-  ContextToggle,
-} from '#renderer/components/TaskDetailParts';
+  TimelineTab,
+  PrTab,
+  SessionsTab,
+  InfoTab,
+  ContextModal,
+} from '#renderer/components/TaskDetailTabs';
+
+type DetailTab = 'timeline' | 'pr' | 'sessions' | 'info' | 'qa';
 
 interface Props {
   item: TaskItem;
   onBack: () => void;
   onMerge?: () => void;
-  onReopen?: () => void;
-  onRework?: () => void;
 }
 
-export function TaskDetailView({
-  item,
-  onBack,
-  onMerge,
-  onReopen,
-  onRework,
-}: Props): React.ReactElement {
-  const linearSlug = useLinearSlug();
+export function TaskDetailView({ item, onBack, onMerge }: Props): React.ReactElement {
+  const [activeTab, setActiveTab] = useState<DetailTab>('pr');
   const [transcriptSession, setTranscriptSession] = useState<{
     entry: SessionEntry;
     markdown: string | null;
     loading: boolean;
   } | null>(null);
   const [transcriptFullScreen, setTranscriptFullScreen] = useState(false);
-  const [qaExpanded, setQaExpanded] = useState(false);
-  const [qaOpen, setQaOpen] = useState(true);
-  const qaRef = useRef<TaskQAHandle | null>(null);
+  const [activeQA, setActiveQA] = useState(false);
+  const [contextModalOpen, setContextModalOpen] = useState(false);
+  const qaRef = useRef<QAHandle | null>(null);
+  const [pendingQuestion, setPendingQuestion] = useState<string | null>(null);
 
-  // Refs to avoid stale closure in mount-only keydown handler
-  const transcriptFullScreenRef = React.useRef(transcriptFullScreen);
+  // Refs to avoid stale closures in keydown handler.
+  const transcriptFullScreenRef = useRef(transcriptFullScreen);
   transcriptFullScreenRef.current = transcriptFullScreen;
-  const transcriptSessionRef = React.useRef(transcriptSession);
+  const transcriptSessionRef = useRef(transcriptSession);
   transcriptSessionRef.current = transcriptSession;
-  const qaExpandedRef = React.useRef(qaExpanded);
-  qaExpandedRef.current = qaExpanded;
-  const onBackRef = React.useRef(onBack);
+  const activeQARef = useRef(activeQA);
+  activeQARef.current = activeQA;
+  const onBackRef = useRef(onBack);
   onBackRef.current = onBack;
 
-  // Escape key: close full-screen transcript, then Q&A expanded, then sidebar, then go back.
-  // Skip if another overlay (modal, command palette) is open.
+  // Escape key handler — layered dismiss.
   useMountEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
-      // Don't handle if a modal, command palette, or shortcut overlay is open.
       if (
         document.querySelector('[role="dialog"]') ||
         document.querySelector('[data-command-palette]') ||
@@ -79,8 +76,8 @@ export function TaskDetailView({
       e.stopPropagation();
       if (transcriptFullScreenRef.current) {
         setTranscriptFullScreen(false);
-      } else if (qaExpandedRef.current) {
-        setQaExpanded(false);
+      } else if (activeQARef.current) {
+        setActiveQA(false);
       } else if (transcriptSessionRef.current) {
         setTranscriptSession(null);
       } else {
@@ -91,20 +88,7 @@ export function TaskDetailView({
     return () => document.removeEventListener('keydown', onKey);
   });
 
-  const handleAskFromBar = useCallback((question: string) => {
-    setQaOpen(true);
-    // Small delay so the Q&A component mounts before receiving the ask.
-    setTimeout(() => qaRef.current?.askFromBar(question), 50);
-  }, []);
-
-  const handleQaClose = useCallback(() => {
-    setQaOpen(false);
-  }, []);
-
-  const handleQaExpand = useCallback(() => {
-    setQaExpanded(true);
-  }, []);
-
+  // Data queries.
   const { data: timelineData } = useQuery({
     queryKey: ['task-detail-timeline', item.id],
     queryFn: async () => {
@@ -115,19 +99,43 @@ export function TaskDetailView({
     },
   });
 
-  const { data: prBody } = useQuery({
+  const isFinalized = FINALIZED_STATUSES.includes(item.status);
+  const {
+    data: prBody,
+    isPending: prPending,
+    refetch: refetchPr,
+  } = useQuery({
     queryKey: ['task-detail-pr', item.id],
-    queryFn: () => fetchPrSummary(item.id),
+    queryFn: async () => {
+      const data = await fetchPrSummary(item.id);
+      // Persist to disk for finalized tasks.
+      if (isFinalized && data.summary) {
+        localStorage.setItem(`pr-cache:${item.id}`, JSON.stringify(data));
+      }
+      return data;
+    },
     enabled: !!item.pr,
+    staleTime: isFinalized ? Infinity : 30_000,
+    initialData: () => {
+      if (!isFinalized) return undefined;
+      const cached = localStorage.getItem(`pr-cache:${item.id}`);
+      return cached ? JSON.parse(cached) : undefined;
+    },
   });
+
+  const { data: qaHistory } = useQuery({
+    queryKey: ['task-ask-history', item.id],
+    queryFn: () => fetchAskHistory(item.id),
+  });
+  const hasQAHistory = (qaHistory?.history?.length ?? 0) > 0 || activeQA;
 
   const events = timelineData?.events ?? [];
   const sessionMap = timelineData?.sessionMap ?? {};
-  const sessions = timelineData?.sessions ?? [];
 
-  const totalDuration = sessions.reduce((sum, s) => sum + (s.duration_ms ?? 0), 0);
+  // Timeline is the authoritative source for session data.
+  const sessions = buildSessionsFromTimeline(events, sessionMap, item);
 
-  // Extract structured questions from the latest clarify_question timeline event.
+  // Extract clarifier questions from latest timeline event.
   const clarifierQuestions: ClarifierQuestion[] | null = (() => {
     if (item.status !== 'needs-clarification') return null;
     for (let i = events.length - 1; i >= 0; i--) {
@@ -159,81 +167,101 @@ export function TaskDetailView({
         p?.entry.session_id === sessionId ? { ...p, markdown: data.markdown, loading: false } : p,
       );
     } catch (err) {
-      console.warn('Failed to fetch transcript for session', sessionId, err);
+      log.warn('Failed to fetch transcript for session', sessionId, err);
       setTranscriptSession((p) =>
         p?.entry.session_id === sessionId ? { ...p, markdown: null, loading: false } : p,
       );
     }
   };
 
+  const handleSessionClick = (s: SessionSummary) => {
+    const stub: SessionEntry = {
+      session_id: s.session_id,
+      created_at: s.started_at || '',
+      cwd: s.cwd || item.worktree || '',
+      model: s.model || '',
+      caller: s.caller || 'worker',
+      resumed: s.resumed ? 1 : 0,
+      task_id: String(item.id),
+      worker_name: s.worker_name || '',
+      status: s.status || '',
+    };
+    setTranscriptSession({ entry: stub, markdown: null, loading: true });
+    fetchTranscript(s.session_id)
+      .then((data) => {
+        setTranscriptSession((p) =>
+          p?.entry.session_id === s.session_id
+            ? { ...p, markdown: data.markdown, loading: false }
+            : p,
+        );
+      })
+      .catch((err) => {
+        log.warn('Failed to fetch transcript:', err);
+        setTranscriptSession((p) =>
+          p?.entry.session_id === s.session_id ? { ...p, markdown: null, loading: false } : p,
+        );
+      });
+  };
+
+  const handleAskFromBar = useCallback((question: string) => {
+    if (activeQARef.current && qaRef.current) {
+      qaRef.current.ask(question);
+    } else {
+      setActiveQA(true);
+      setPendingQuestion(question);
+    }
+  }, []);
+
+  const handleQABack = useCallback(() => {
+    setActiveQA(false);
+  }, []);
+
+  // Tab definitions.
+  const tabs: { key: DetailTab; label: string; badge?: boolean }[] = [
+    { key: 'pr', label: 'PR' },
+    { key: 'timeline', label: 'Timeline' },
+    { key: 'sessions', label: 'Sessions' },
+    { key: 'info', label: 'Info' },
+  ];
+  if (hasQAHistory) {
+    tabs.push({ key: 'qa', label: 'Q&A' });
+  }
+
+  const showMerge = onMerge && item.pr && item.project && item.status === 'awaiting-review';
+
   return (
     <div className="flex h-full flex-col">
-      {/* Main row: left column (header + content) + sidebar */}
+      {/* Main row */}
       <div className="flex min-h-0 flex-1">
-        {/* Left column */}
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        {/* Left column — entire column scrolls together */}
+        <div className="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden">
           {/* Header */}
-          <div
-            className="shrink-0 border-b pb-4"
-            style={{ borderColor: 'var(--color-border-subtle)' }}
-          >
-            <button
-              onClick={onBack}
-              className="mb-3 flex items-center gap-1.5 text-[12px]"
-              style={{
-                color: 'var(--color-text-3)',
-                background: 'none',
-                border: 'none',
-                cursor: 'pointer',
-              }}
-            >
-              &larr; Back to list
-            </button>
-            <div className="flex items-start gap-3">
+          <div className="pb-3">
+            {/* Title row — back, title, and actions inline */}
+            <div className="mb-1 flex items-start gap-3">
+              <button
+                onClick={onBack}
+                className="mt-1.5 shrink-0 text-caption"
+                style={{
+                  color: 'var(--color-text-3)',
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                }}
+              >
+                &larr;
+              </button>
               <div className="min-w-0 flex-1">
                 <h1
-                  className="break-words text-[18px] font-semibold leading-snug"
+                  className="break-words text-heading font-semibold leading-snug"
                   style={{ color: 'var(--color-text-1)' }}
                 >
                   {item.title}
-                  {item.linear_id &&
-                    (linearSlug ? (
-                      <a
-                        href={linearHref(item.linear_id, linearSlug)}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="ml-2 inline-flex items-center align-middle font-mono no-underline hover:underline"
-                        style={{
-                          fontSize: 11,
-                          fontWeight: 400,
-                          color: 'var(--color-text-3)',
-                          background: 'var(--color-surface-3)',
-                          padding: '2px 6px',
-                          borderRadius: 3,
-                        }}
-                      >
-                        {item.linear_id}
-                      </a>
-                    ) : (
-                      <span
-                        className="ml-2 inline-flex items-center align-middle font-mono"
-                        style={{
-                          fontSize: 11,
-                          fontWeight: 400,
-                          color: 'var(--color-text-3)',
-                          background: 'var(--color-surface-3)',
-                          padding: '2px 6px',
-                          borderRadius: 3,
-                        }}
-                      >
-                        {item.linear_id}
-                      </span>
-                    ))}
                 </h1>
-                <div className="mt-2 flex flex-wrap items-center gap-2">
-                  <StatusIcon status={item.status} />
+                {/* Metadata */}
+                <div className="mt-0.5 flex flex-wrap items-center gap-2">
                   {item.project && (
-                    <span className="text-[11px]" style={{ color: 'var(--color-text-2)' }}>
+                    <span className="text-caption" style={{ color: 'var(--color-text-3)' }}>
                       {shortRepo(item.project)}
                     </span>
                   )}
@@ -242,84 +270,119 @@ export function TaskDetailView({
                       href={prHref(item.pr, (item.github_repo ?? item.project)!)}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="text-[11px] no-underline hover:underline"
+                      className="text-caption no-underline hover:underline"
                       style={{ color: 'var(--color-accent)' }}
                     >
                       {prLabel(item.pr)}
                     </a>
                   )}
-                  {sessions.length > 0 && (
-                    <span className="text-[11px]" style={{ color: 'var(--color-text-3)' }}>
-                      {sessions.length} sessions &middot; {fmtDuration(totalDuration / 1000)}
+                  {item.no_pr && (
+                    <span className="text-caption" style={{ color: 'var(--color-accent)' }}>
+                      Findings only
                     </span>
                   )}
                 </div>
               </div>
               <div className="flex shrink-0 items-center gap-2">
-                {onReopen && FINALIZED_STATUSES.includes(item.status) && (
-                  <ActionButton label="Reopen" onClick={onReopen} />
+                {showMerge && (
+                  <button
+                    onClick={onMerge}
+                    className="rounded-md px-4 py-1.5 text-caption font-semibold"
+                    style={{
+                      background: 'var(--color-accent)',
+                      color: 'var(--color-bg)',
+                      border: 'none',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Merge
+                  </button>
                 )}
-                {onRework && FINALIZED_STATUSES.includes(item.status) && (
-                  <ActionButton label="Rework" onClick={onRework} />
+                {(item.branch || item.worktree || item.plan || item.context) && (
+                  <DetailOverflowMenu item={item} onViewContext={() => setContextModalOpen(true)} />
                 )}
-                {onMerge && item.pr && item.project && item.status === 'awaiting-review' && (
-                  <ActionButton label="Merge" onClick={onMerge} accent />
-                )}
-                {(item.branch || item.worktree || item.plan) && <DetailOverflowMenu item={item} />}
               </div>
+            </div>
+
+            {/* Status card */}
+            <div className="mt-3 ml-6">
+              <StatusCard item={item} sessions={sessions} clarifierQuestions={clarifierQuestions} />
             </div>
           </div>
 
-          {/* Scrollable details */}
-          <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden break-words pr-4 pt-4">
-            {item.original_prompt && (
-              <DetailSection label="Request">
-                <p className="text-[13px] italic" style={{ color: 'var(--color-text-2)' }}>
-                  {item.original_prompt}
-                </p>
-              </DetailSection>
-            )}
-
-            {/* Clarification questions — prominent when needs-clarification */}
-            {clarifierQuestions && clarifierQuestions.length > 0 && (
-              <ClarificationSection key={item.id} taskId={item.id} questions={clarifierQuestions} />
-            )}
-
-            {item.context && <ContextToggle context={item.context} />}
-            {item.no_pr && (
+          {/* Active Q&A mode — replaces tabs */}
+          {activeQA ? (
+            <div className="flex min-h-0 flex-1 flex-col">
+              <ActiveQAView
+                item={item}
+                qaRef={qaRef}
+                onBack={handleQABack}
+                pendingQuestion={pendingQuestion}
+                onPendingConsumed={() => setPendingQuestion(null)}
+              />
+            </div>
+          ) : (
+            <>
+              {/* Tabs — sticky within scroll */}
               <div
-                className="mb-3 text-[12px]"
-                style={{ color: 'var(--color-accent)', fontWeight: 500 }}
+                className="sticky top-0 z-10 ml-6 flex gap-0"
+                style={{
+                  borderBottom: '1px solid var(--color-border-subtle)',
+                  background: 'var(--color-bg)',
+                }}
               >
-                Findings only — no PR
+                {tabs.map((tab) => {
+                  const isActive = tab.key === activeTab;
+                  return (
+                    <button
+                      key={tab.key}
+                      onClick={() => setActiveTab(tab.key)}
+                      className="rounded-t px-3 py-1.5 text-caption font-medium transition-colors hover:bg-[var(--color-surface-2)]"
+                      style={{
+                        color: isActive ? 'var(--color-text-1)' : 'var(--color-text-3)',
+                        background: 'none',
+                        border: 'none',
+                        borderBottom: isActive
+                          ? '2px solid var(--color-accent)'
+                          : '2px solid transparent',
+                        cursor: 'pointer',
+                        marginBottom: -1,
+                      }}
+                    >
+                      {tab.label}
+                    </button>
+                  );
+                })}
               </div>
-            )}
-            {prBody?.summary && (
-              <DetailSection label="PR">
-                <PrSections text={prBody.summary} />
-              </DetailSection>
-            )}
-            {item.escalation_report && (
-              <DetailSection label="Escalation Report">
-                <pre
-                  className="whitespace-pre-wrap break-words rounded p-3 text-[11px]"
-                  style={{
-                    background: 'var(--color-surface-2)',
-                    color: 'var(--color-text-1)',
-                    border: '1px solid color-mix(in srgb, var(--color-error) 30%, transparent)',
-                  }}
-                >
-                  {item.escalation_report}
-                </pre>
-              </DetailSection>
-            )}
-            <DetailSection label={`Timeline (${events.length})`}>
-              <TaskTimeline events={events} onTranscriptClick={handleTranscriptClick} />
-            </DetailSection>
-          </div>
+
+              {/* Tab content */}
+              <div className="ml-6 break-words pt-4 pr-2">
+                {activeTab === 'timeline' && (
+                  <TimelineTab events={events} onTranscriptClick={handleTranscriptClick} />
+                )}
+                {activeTab === 'pr' && (
+                  <PrTab
+                    item={item}
+                    prBody={prBody}
+                    prPending={prPending}
+                    onRefresh={() => refetchPr()}
+                  />
+                )}
+                {activeTab === 'sessions' && (
+                  <SessionsTab
+                    sessions={sessions}
+                    onSessionClick={handleSessionClick}
+                    taskId={item.id}
+                  />
+                )}
+                {activeTab === 'info' && <InfoTab item={item} />}
+                {activeTab === 'qa' && <QAHistoryTab item={item} />}
+              </div>
+            </>
+          )}
         </div>
 
-        {/* Sidebar — spans full height from top to bottom */}
+        {/* Transcript sidebar */}
         {transcriptSession && !transcriptFullScreen && (
           <TranscriptSidebar
             session={transcriptSession}
@@ -329,18 +392,7 @@ export function TaskDetailView({
         )}
       </div>
 
-      {/* Q&A section — between content and action bar */}
-      {qaOpen && (
-        <TaskQA
-          key={item.id}
-          item={item}
-          qaRef={qaRef}
-          onExpand={handleQaExpand}
-          onClose={handleQaClose}
-        />
-      )}
-
-      {/* Action bar — pinned at bottom, full width */}
+      {/* Action bar — pinned at bottom */}
       <TaskActionBar item={item} onAsk={handleAskFromBar} />
 
       {/* Full-screen transcript overlay */}
@@ -352,9 +404,7 @@ export function TaskDetailView({
               markdown={transcriptSession.markdown}
               loading={transcriptSession.loading}
               error={null}
-              onClose={() => {
-                setTranscriptFullScreen(false);
-              }}
+              onClose={() => setTranscriptFullScreen(false)}
               resumeCmd={
                 transcriptSession.entry.cwd
                   ? `cd ${transcriptSession.entry.cwd} && claude --resume ${transcriptSession.entry.session_id}`
@@ -365,18 +415,53 @@ export function TaskDetailView({
         </div>
       )}
 
-      {/* Expanded Q&A overlay */}
-      {qaExpanded && (
-        <TaskQAExpanded
-          item={item}
-          initialMessages={qaRef.current?.getMessages()}
-          onBack={() => setQaExpanded(false)}
-          onClose={() => {
-            setQaExpanded(false);
-            setQaOpen(false);
-          }}
-        />
+      {/* Context modal */}
+      {contextModalOpen && item.context && (
+        <ContextModal context={item.context} onClose={() => setContextModalOpen(false)} />
       )}
     </div>
   );
+}
+
+/* ── Recent event pill ── */
+
+/* ── Sessions fallback from timeline events ── */
+
+const CALLER_MAP: Record<string, string> = {
+  worker_spawned: 'worker',
+  worker_completed: 'worker',
+  worker_nudged: 'worker',
+  session_resumed: 'worker',
+  captain_review_started: 'captain-review-async',
+  captain_review_verdict: 'captain-review-async',
+  clarify_started: 'clarifier',
+  clarify_resolved: 'clarifier',
+  clarify_question: 'clarifier',
+  human_ask: 'task-ask',
+};
+
+function buildSessionsFromTimeline(
+  events: TimelineEvent[],
+  sessionMap: Record<string, SessionSummary>,
+  item: TaskItem,
+): SessionSummary[] {
+  const seen = new Map<string, SessionSummary>();
+  for (const ev of events) {
+    const sid = ev.data?.session_id as string | undefined;
+    if (!sid || seen.has(sid)) continue;
+    const existing = sessionMap[sid];
+    seen.set(sid, {
+      session_id: sid,
+      status: existing?.status ?? 'stopped',
+      caller: existing?.caller ?? CALLER_MAP[ev.event_type] ?? 'worker',
+      started_at: existing?.started_at ?? ev.timestamp,
+      duration_ms: existing?.duration_ms,
+      cost_usd: existing?.cost_usd,
+      model: existing?.model,
+      resumed: existing?.resumed ?? false,
+      cwd: existing?.cwd ?? item.worktree,
+      worker_name: existing?.worker_name,
+    });
+  }
+  return [...seen.values()];
 }

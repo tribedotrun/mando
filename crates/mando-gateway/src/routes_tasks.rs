@@ -80,7 +80,7 @@ pub(crate) async fn get_tasks(
 // POST endpoints
 // ---------------------------------------------------------------
 
-/// POST /api/tasks/add (multipart: title, project/repo, optional context/linear_id/plan/no_pr, images)
+/// POST /api/tasks/add (multipart: title, project/repo, optional context/plan/no_pr, images)
 pub(crate) async fn post_task_add(
     State(state): State<AppState>,
     mut multipart: Multipart,
@@ -88,7 +88,6 @@ pub(crate) async fn post_task_add(
     let mut title = String::new();
     let mut repo: Option<String> = None;
     let mut context: Option<String> = None;
-    let mut linear_id: Option<String> = None;
     let mut plan: Option<String> = None;
     let mut no_pr: Option<String> = None;
     let mut saved_images: Vec<String> = Vec::new();
@@ -124,15 +123,6 @@ pub(crate) async fn post_task_add(
                     .map_err(|e| error_response(StatusCode::BAD_REQUEST, &e.to_string()))?;
                 if !val.is_empty() {
                     context = Some(val);
-                }
-            }
-            "linear_id" => {
-                let val = field
-                    .text()
-                    .await
-                    .map_err(|e| error_response(StatusCode::BAD_REQUEST, &e.to_string()))?;
-                if !val.is_empty() {
-                    linear_id = Some(val);
                 }
             }
             "plan" => {
@@ -197,12 +187,7 @@ pub(crate) async fn post_task_add(
         .await
         .map_err(internal_error)?;
 
-        if !saved_images.is_empty()
-            || context.is_some()
-            || linear_id.is_some()
-            || plan.is_some()
-            || no_pr.is_some()
-        {
+        if !saved_images.is_empty() || context.is_some() || plan.is_some() || no_pr.is_some() {
             if let Some(id) = val["id"].as_i64() {
                 let mut updates = json!({});
                 if !saved_images.is_empty() {
@@ -210,9 +195,6 @@ pub(crate) async fn post_task_add(
                 }
                 if let Some(ref value) = context {
                     updates["context"] = json!(value);
-                }
-                if let Some(ref value) = linear_id {
-                    updates["linear_id"] = json!(value);
                 }
                 if let Some(ref value) = plan {
                     updates["plan"] = json!(value);
@@ -230,12 +212,6 @@ pub(crate) async fn post_task_add(
         }
         val
     };
-
-    if linear_id.is_none() {
-        if let Some(id) = val["id"].as_i64() {
-            create_linear_issue_for_new_item(&state, &config, id).await;
-        }
-    }
 
     state
         .bus
@@ -323,8 +299,6 @@ pub(crate) struct DeleteBody {
     pub ids: Vec<i64>,
     #[serde(default)]
     pub close_pr: bool,
-    #[serde(default)]
-    pub cancel_linear: bool,
 }
 
 /// POST /api/tasks/delete
@@ -336,7 +310,6 @@ pub(crate) async fn post_task_delete(
     let ids = &body.ids;
     let opts = mando_captain::io::task_cleanup::CleanupOptions {
         close_pr: body.close_pr,
-        cancel_linear: body.cancel_linear,
     };
     let store = state.task_store.read().await;
     match mando_captain::runtime::dashboard::delete_tasks(&config, &store, ids, &opts).await {
@@ -410,54 +383,6 @@ pub(crate) async fn patch_task_item(
         Err(e) => {
             let msg = e.to_string();
             Err(error_response(task_update_error_status(&e), &msg))
-        }
-    }
-}
-
-// ---------------------------------------------------------------
-// Internal
-// ---------------------------------------------------------------
-
-pub(crate) async fn create_linear_issue_for_new_item(
-    state: &AppState,
-    config: &mando_config::settings::Config,
-    item_id: i64,
-) {
-    let item = {
-        let store = state.task_store.read().await;
-        store.find_by_id(item_id).await.unwrap_or(None)
-    };
-    let Some(mut item) = item else { return };
-    if item.linear_id.is_some() {
-        return;
-    }
-    if let Err(e) =
-        mando_captain::runtime::linear_integration::create_issue_for_task(&mut item, config).await
-    {
-        tracing::warn!(
-            module = "tasks",
-            item_id = item_id,
-            error = %e,
-            "failed to create Linear issue for new item"
-        );
-        return;
-    }
-    if let Some(ref linear_id) = item.linear_id {
-        let store = state.task_store.read().await;
-        if let Err(e) = mando_captain::runtime::dashboard::update_task(
-            &store,
-            item_id,
-            &json!({"linear_id": linear_id}),
-        )
-        .await
-        {
-            tracing::warn!(
-                module = "tasks",
-                item_id = item_id,
-                linear_id = %linear_id,
-                error = %e,
-                "created Linear issue but failed to persist linear_id on task"
-            );
         }
     }
 }

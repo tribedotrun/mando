@@ -17,19 +17,21 @@ interface Props {
   projectFilter: string | null;
   onCreateTask?: () => void;
   onOpenDetail?: (item: TaskItem) => void;
+  active?: boolean;
 }
 
 export function CaptainView({
   projectFilter,
   onCreateTask,
   onOpenDetail,
+  active = true,
 }: Props): React.ReactElement {
   const [askItem, setAskItem] = useState<TaskItem | null>(null);
   const [focusedIndex, setFocusedIndex] = useState(-1);
   const actions = useTaskActions();
 
   const handleHandoffItem = (item: TaskItem) => actions.handleHandoff(item.id);
-  const handleCancelItem = (item: TaskItem) => actions.handleStatusChange(item.id, 'canceled');
+  const handleCancelItem = (item: TaskItem) => actions.handleCancel(item.id);
   const handleRetryItem = (item: TaskItem) => actions.handleRetry(item.id);
   const handleAcceptItem = (item: TaskItem) => actions.handleAccept(item.id);
 
@@ -129,7 +131,7 @@ export function CaptainView({
     [hasModal, visibleItems, clampedFocusedIndex, onCreateTask, onOpenDetail, actions],
   );
 
-  useViewKeyHandler(handleKey);
+  useViewKeyHandler(handleKey, active);
 
   if (askItem) {
     return <TaskAsk item={askItem} onBack={() => setAskItem(null)} />;
@@ -139,7 +141,7 @@ export function CaptainView({
     <div className="flex flex-col" style={{ height: '100%' }}>
       <MetricsRow
         onNudge={handleNudgeWorker}
-        onStopWorker={(worker) => actions.handleStatusChange(worker.id, 'canceled')}
+        onStopWorker={(worker) => actions.handleHandoff(worker.id)}
       />
       <StatusFilter />
 

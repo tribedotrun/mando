@@ -29,12 +29,8 @@ pub(crate) async fn backfill_if_needed(item: &Task, pool: &sqlx::SqlitePool) {
         .await
         .unwrap_or_default();
 
-    // Sessions use best_id() (linear_id > id), so look up by both.
     let item_id_str = item.id.to_string();
-    let mut sessions = load_item_sessions(pool, &item.best_id()).await;
-    if item.best_id() != item_id_str.as_str() {
-        sessions.extend(load_item_sessions(pool, &item_id_str).await);
-    }
+    let sessions = load_item_sessions(pool, &item_id_str).await;
     let events = build_events_for_item(item, &sessions);
 
     // Deduplicate by (event_type, session_id).

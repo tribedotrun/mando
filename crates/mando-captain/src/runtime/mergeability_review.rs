@@ -4,7 +4,6 @@ use mando_config::settings::Config;
 use mando_config::workflow::CaptainWorkflow;
 use mando_types::task::{ItemStatus, Task};
 
-use crate::runtime::linear_integration;
 use crate::runtime::notify::Notifier;
 
 /// Check pending-review items for unaddressed review comments and CI failures.
@@ -97,12 +96,12 @@ pub(crate) async fn check_done_review_threads(
         // Worker and session_ids.worker should be preserved from pending-review.
         // Fall back to generated values only as a safety net.
         if items[idx].worker.is_none() {
-            let item_id = items[idx].best_id();
+            let item_id = items[idx].id.to_string();
             tracing::warn!(module = "captain", %item_id, "worker missing on pending-review item — generating fallback name");
             items[idx].worker = Some(format!("mando-reopen-{}", item_id));
         }
         if items[idx].session_ids.worker.is_none() {
-            let item_id = items[idx].best_id();
+            let item_id = items[idx].id.to_string();
             tracing::warn!(
                 module = "captain",
                 %item_id,
@@ -150,23 +149,6 @@ pub(crate) async fn check_done_review_threads(
                     mando_shared::telegram_format::escape_html(&message),
                 );
                 notifier.high(&msg).await;
-
-                if let Err(e) = linear_integration::writeback_status(it, config).await {
-                    tracing::warn!(module = "captain", %e, "Linear status writeback failed");
-                }
-                if let Err(e) = linear_integration::upsert_workpad(
-                    it,
-                    config,
-                    &format!(
-                        "{} reopened (seq={}), working on feedback",
-                        reopen_source, seq
-                    ),
-                    pool,
-                )
-                .await
-                {
-                    tracing::warn!(module = "captain", %e, "Linear workpad upsert failed");
-                }
             }
             Ok(super::action_contract::ReopenOutcome::CaptainReviewing) => {}
             Ok(super::action_contract::ReopenOutcome::QueuedFallback) => {

@@ -70,7 +70,6 @@ pub async fn process_item(
 
     // Build scoring prompt from workflow template.
     let interests_high = bullet_list(&workflow.interests.high);
-    let interests_medium = bullet_list(&workflow.interests.medium);
     let interests_low = bullet_list(&workflow.interests.low);
 
     let user_context_rendered = workflow.user_context.render();
@@ -81,9 +80,7 @@ pub async fn process_item(
     vars.insert("url_type", url_type.as_str());
     vars.insert("content_path", content_path_str.as_str());
     vars.insert("interests_high", interests_high.as_str());
-    vars.insert("interests_medium", interests_medium.as_str());
     vars.insert("interests_low", interests_low.as_str());
-    vars.insert("interests_tone", workflow.interests.tone.as_str());
     vars.insert("user_context", user_context_rendered.as_str());
 
     let prompt = mando_config::render_prompt("process", &workflow.prompts, &vars)

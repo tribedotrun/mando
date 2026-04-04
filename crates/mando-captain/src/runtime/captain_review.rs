@@ -123,7 +123,7 @@ pub(crate) async fn spawn_review(
     let pr_body_for_evidence = ctx.pr_body.clone();
     let worker_name_owned = item.worker.as_deref().unwrap_or("unknown").to_string();
 
-    let task_id = item.best_id();
+    let task_id = item.id.to_string();
     let session_id = mando_uuid::Uuid::v4().to_string();
     item.session_ids.review = Some(session_id.clone());
 
@@ -145,7 +145,7 @@ pub(crate) async fn spawn_review(
     // Clone data needed by the spawned task.
     let trigger_str = trigger.to_string();
     let item_title = item.title.clone();
-    let item_id = item.best_id();
+    let item_id = item.id.to_string();
     let intervention_count_val = item.intervention_count;
     let timeout_s = workflow.agent.captain_review_timeout_s;
     let evidence_dl_timeout = workflow.agent.evidence_download_timeout_s;

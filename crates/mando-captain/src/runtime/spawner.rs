@@ -86,7 +86,7 @@ pub(crate) async fn spawn_worker(
         .cwd(&wt_path)
         .session_id(&session_id)
         .caller("worker")
-        .task_id(item.best_id())
+        .task_id(item.id.to_string())
         .worker_name(&session_name)
         .project(item.project.as_deref().unwrap_or(""));
     if let Some(ref fb) = workflow.models.fallback {
@@ -103,7 +103,7 @@ pub(crate) async fn spawn_worker(
         &mando_cc::SessionMeta {
             session_id: &session_id,
             caller: "worker",
-            task_id: &item.best_id(),
+            task_id: &item.id.to_string(),
             worker_name: &session_name,
             project: item.project.as_deref().unwrap_or(""),
             cwd: &wt_path.display().to_string(),
@@ -121,7 +121,7 @@ pub(crate) async fn spawn_worker(
         &wt_path,
         "worker",
         &session_name,
-        &item.best_id(),
+        &item.id.to_string(),
         false,
     )
     .await;
@@ -185,28 +185,13 @@ fn next_worker_slot(state_dir: &std::path::Path) -> Result<u64> {
 }
 
 fn new_slug(item: &Task, slot: u64) -> String {
-    item.linear_id
-        .as_deref()
-        .map(|lid| {
-            let clean_lid = sanitize_linear_id(lid);
-            let title_slug = mando_config::slugify(&item.title, 30);
-            format!("{}-{}-{}", clean_lid.to_lowercase(), title_slug, slot)
-        })
-        .unwrap_or_else(|| format!("todo-{}", slot))
-}
-
-/// Sanitize a potentially corrupted `linear_id` and return just the identifier (e.g. "ENG-42").
-pub(crate) fn sanitize_linear_id(lid: &str) -> String {
-    let parsed = super::linear_integration::parse_issue_id(lid);
-    if parsed != lid {
-        tracing::warn!(module = "spawner", raw = %lid, clean = %parsed, "sanitized corrupted linear_id");
-    }
-    parsed
+    let title_slug = mando_config::slugify(&item.title, 30);
+    format!("todo-{}-{}-{}", item.id, title_slug, slot)
 }
 
 /// Copy plan/brief files from `~/.mando/plans/` into the worktree's `.ai/briefs/`.
 ///
-/// Copies any files related to the item's Linear ID or plan path. Only copies
+/// Copies any files related to the item's plan path. Only copies
 /// files that don't already exist in the destination (idempotent).
 fn copy_plan_briefs(item: &Task, wt_path: &std::path::Path) {
     let plans_dir = mando_config::state_dir().join("plans");
@@ -227,50 +212,7 @@ fn copy_plan_briefs(item: &Task, wt_path: &std::path::Path) {
         return;
     }
 
-    // Strategy 1: If item has a linear_id, look for a folder named after it.
-    if let Some(ref lid) = item.linear_id {
-        let clean_lid = sanitize_linear_id(lid);
-        let candidate_folders = [
-            plans_dir.join(&clean_lid),
-            plans_dir.join(clean_lid.to_lowercase()),
-        ];
-        for plan_folder in candidate_folders {
-            if !plan_folder.is_dir() {
-                continue;
-            }
-            let Ok(entries) = std::fs::read_dir(&plan_folder) else {
-                continue;
-            };
-            for entry in entries.flatten() {
-                let src = entry.path();
-                if !src.is_file() {
-                    continue;
-                }
-                let filename = entry.file_name();
-                let dst = briefs_dir.join(&filename);
-                if dst.exists() {
-                    continue;
-                }
-                if let Err(e) = std::fs::copy(&src, &dst) {
-                    tracing::error!(
-                        module = "spawner",
-                        src = %src.display(),
-                        dst = %dst.display(),
-                        error = %e,
-                        "failed to copy plan brief — worker may start without this file"
-                    );
-                } else {
-                    tracing::info!(
-                        module = "spawner",
-                        file = %filename.to_string_lossy(),
-                        "copied plan brief to worktree"
-                    );
-                }
-            }
-        }
-    }
-
-    // Strategy 2: Look for a generic brief file matching the item ID.
+    // Look for a generic brief file matching the item ID.
     let id = &item.id.to_string();
     let brief_file = plans_dir.join(format!("item-{id}.md"));
     if brief_file.is_file() {
@@ -310,11 +252,7 @@ fn prepare_initial_worker_prompt(
 
     let context = item.context.as_deref().unwrap_or("");
     let original_prompt = item.original_prompt.as_deref().unwrap_or("");
-    let clean_linear_id = item
-        .linear_id
-        .as_deref()
-        .map(sanitize_linear_id)
-        .unwrap_or_default();
+    let task_id_str = item.id.to_string();
     let no_pr = if item.no_pr { "true" } else { "" };
 
     let check_command = check_command_or_fallback(project_config);
@@ -323,7 +261,7 @@ fn prepare_initial_worker_prompt(
     brief_vars.insert("title", item.title.as_str());
     brief_vars.insert("context", context);
     brief_vars.insert("branch", branch);
-    brief_vars.insert("linear_id", clean_linear_id.as_str());
+    brief_vars.insert("id", task_id_str.as_str());
     brief_vars.insert("original_prompt", original_prompt);
     brief_vars.insert("worker_preamble", project_config.worker_preamble.as_str());
     brief_vars.insert("check_command", check_command.as_str());
@@ -342,7 +280,7 @@ fn prepare_initial_worker_prompt(
 
     let mut vars = HashMap::new();
     vars.insert("brief_filename", brief_filename.as_str());
-    vars.insert("linear_id", clean_linear_id.as_str());
+    vars.insert("id", task_id_str.as_str());
     vars.insert("no_pr", no_pr);
 
     mando_config::render_initial_prompt(initial_prompt_name, &workflow.initial_prompts, &vars)
@@ -350,19 +288,7 @@ fn prepare_initial_worker_prompt(
 }
 
 fn worker_brief_filename(item: &Task, slot: u64) -> String {
-    if let Some(raw_lid) = item.linear_id.as_deref() {
-        let sanitized = sanitize_linear_id(raw_lid);
-        if sanitized.is_empty() {
-            tracing::warn!(
-                module = "spawner",
-                raw_linear_id = %raw_lid,
-                "linear_id sanitized to empty — using generic brief filename"
-            );
-        } else {
-            return format!("{}-{slot}.md", sanitized.to_lowercase());
-        }
-    }
-    format!("todo-{slot}.md")
+    format!("todo-{}-{slot}.md", item.id)
 }
 
 fn resolve_worker_plan_path(item: &Task, wt_path: &std::path::Path) -> Result<Option<String>> {
@@ -432,8 +358,8 @@ mod tests {
             prepare_initial_worker_prompt(&item, 1, "mando/fix-auth-1", &wt, &project, &workflow)
                 .unwrap();
 
-        assert!(initial.contains(".ai/briefs/todo-1.md"));
-        let brief = std::fs::read_to_string(wt.join(".ai/briefs/todo-1.md")).unwrap();
+        assert!(initial.contains(".ai/briefs/todo-0-1.md"));
+        let brief = std::fs::read_to_string(wt.join(".ai/briefs/todo-0-1.md")).unwrap();
         assert!(brief.contains("Captain Brief"));
         assert!(brief.contains("Auth redirect loop in login callback"));
     }
@@ -445,15 +371,14 @@ mod tests {
         std::fs::write(&plan_source, "# Brief").unwrap();
 
         let mut item = Task::new("Implement planned change");
-        item.linear_id = Some("ABR-123".into());
         item.plan = Some(plan_source.display().to_string());
 
         let workflow = CaptainWorkflow::compiled_default();
         let project = ProjectConfig::default();
 
-        prepare_initial_worker_prompt(&item, 2, "mando/abr-123", &wt, &project, &workflow).unwrap();
+        prepare_initial_worker_prompt(&item, 2, "mando/todo-0", &wt, &project, &workflow).unwrap();
 
-        let brief = std::fs::read_to_string(wt.join(".ai/briefs/abr-123-2.md")).unwrap();
+        let brief = std::fs::read_to_string(wt.join(".ai/briefs/todo-0-2.md")).unwrap();
         assert!(brief.contains("Human-Curated Plan"));
         assert!(brief.contains("source-brief.md"));
         assert!(wt.join(".ai/briefs/source-brief.md").exists());
@@ -464,14 +389,13 @@ mod tests {
         let wt = temp_worktree();
         let home = std::path::PathBuf::from(std::env::var("HOME").unwrap());
         let plan_source = home.join(format!(
-            ".mando/plans/ABR-tilde-test-{}/brief.md",
+            ".mando/plans/tilde-test-{}/brief.md",
             mando_uuid::Uuid::v4()
         ));
         std::fs::create_dir_all(plan_source.parent().unwrap()).unwrap();
         std::fs::write(&plan_source, "# Brief from tilde path").unwrap();
 
         let mut item = Task::new("Implement planned change");
-        item.linear_id = Some("ABR-999".into());
         item.plan = Some(format!(
             "~/.mando/plans/{}/brief.md",
             plan_source
@@ -484,9 +408,9 @@ mod tests {
         let workflow = CaptainWorkflow::compiled_default();
         let project = ProjectConfig::default();
 
-        prepare_initial_worker_prompt(&item, 4, "mando/abr-999", &wt, &project, &workflow).unwrap();
+        prepare_initial_worker_prompt(&item, 4, "mando/todo-0", &wt, &project, &workflow).unwrap();
 
-        let brief = std::fs::read_to_string(wt.join(".ai/briefs/abr-999-4.md")).unwrap();
+        let brief = std::fs::read_to_string(wt.join(".ai/briefs/todo-0-4.md")).unwrap();
         assert!(brief.contains(".ai/briefs/brief.md"));
         assert!(wt.join(".ai/briefs/brief.md").exists());
 
@@ -514,7 +438,7 @@ mod tests {
                 .unwrap();
 
         assert!(initial.contains("handed off"));
-        let brief = std::fs::read_to_string(wt.join(".ai/briefs/todo-3.md")).unwrap();
+        let brief = std::fs::read_to_string(wt.join(".ai/briefs/todo-0-3.md")).unwrap();
         assert!(brief.contains("Mid-Implementation Handoff"));
     }
 

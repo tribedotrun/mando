@@ -1,6 +1,6 @@
 //! Deterministic action classifier -- binary decision tree.
 //!
-//! 4 decisions: TIMEOUT -> ACTIVE (skip) -> CC REVIEW -> NUDGE.
+//! 5 decisions: BUDGET -> TIMEOUT -> ACTIVE (skip) -> CC REVIEW -> NUDGE.
 //! Every path returns Some(Action) -- no LLM fallback.
 
 use std::collections::HashMap;
@@ -28,6 +28,17 @@ pub(crate) fn classify_worker(
     max_interventions: u32,
 ) -> Option<Action> {
     let is_no_pr = item.is_some_and(|it| it.no_pr);
+
+    // ── Rule 0: BUDGET — intervention budget exhausted → escalate ──
+    // Checked first so it always wins as the final backstop, even over timeout.
+    if ctx.intervention_count >= max_interventions as i64 {
+        return Some(action(
+            ctx,
+            ActionKind::CaptainReview,
+            "",
+            "budget_exhausted",
+        ));
+    }
 
     // ── Rule 1: TIMEOUT — alive + wall-clock exceeded → review ──
     if worker_timeout_s > 0.0 && ctx.seconds_active >= worker_timeout_s && ctx.process_alive {
@@ -61,14 +72,7 @@ pub(crate) fn classify_worker(
     if has_broken_session {
         return Some(action(ctx, ActionKind::CaptainReview, "", "broken_session"));
     }
-    if ctx.intervention_count >= max_interventions as i64 {
-        return Some(action(
-            ctx,
-            ActionKind::CaptainReview,
-            "",
-            "budget_exhausted",
-        ));
-    }
+    // budget_exhausted is now checked in Rule 0 (before timeout).
     if ctx.degraded && ctx.pr.is_some() && stream_result_clean == Some(true) {
         return Some(action(
             ctx,

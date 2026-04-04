@@ -144,8 +144,7 @@ async fn handle_todo_project(
         }
         return Ok(());
     }
-    if let Some(mut state) = bot.take_todo_confirm(aid) {
-        // Resolve numeric index to project name.
+    if let Some(state) = bot.take_todo_confirm(aid) {
         let idx: usize = sel.parse().unwrap_or(usize::MAX);
         let name = state.picker_slugs.get(idx).cloned().unwrap_or_default();
         if name.is_empty() {
@@ -154,19 +153,13 @@ async fn handle_todo_project(
                 .await?;
             return Ok(());
         }
-        // Assign the selected project to all items that don't have one yet.
-        for item in &mut state.items {
-            if item.project.is_none() {
-                item.project = Some(name.clone());
-            }
-        }
         bot.api().answer_callback_query(cb_id, Some(&name)).await?;
         if let Err(e) = bot
             .edit_message(
                 cid,
                 mid,
                 &format!(
-                    "\u{23f3} Writing to <b>{}</b>\u{2026}",
+                    "\u{23f3} Adding to <b>{}</b>\u{2026}",
                     mando_shared::escape_html(&name)
                 ),
             )
@@ -174,7 +167,33 @@ async fn handle_todo_project(
         {
             tracing::warn!(module = "telegram", error = %e, "message send failed");
         }
-        crate::callback_actions::add_todo_items(bot, cid, &state.items).await?;
+
+        // State holds raw text in a single item for multi-line, or a real
+        // single-line title. Check if AI parsing is needed.
+        let is_multi_line = state.items.len() == 1
+            && state.items[0]
+                .title
+                .lines()
+                .filter(|l| !l.trim().is_empty())
+                .count()
+                > 1;
+
+        if is_multi_line {
+            let raw = &state.items[0].title;
+            let photo = state.items[0].photo_file_id.clone();
+            crate::commands::todo::ai_parse_and_create(bot, cid, raw, Some(&name), photo).await?;
+        } else {
+            // Single-line item — assign project and create directly.
+            let items: Vec<crate::bot::TodoItem> = state
+                .items
+                .into_iter()
+                .map(|mut item| {
+                    item.project = Some(name.clone());
+                    item
+                })
+                .collect();
+            crate::callback_actions::add_todo_items(bot, cid, &items).await?;
+        }
     } else {
         bot.api()
             .answer_callback_query(cb_id, Some("Expired"))

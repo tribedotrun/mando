@@ -11,7 +11,6 @@ pub(super) struct TaskRow {
     pub status: String,
     pub project: Option<String>,
     pub worker: Option<String>,
-    pub linear_id: Option<String>,
     pub resource: Option<String>,
     pub context: Option<String>,
     pub original_prompt: Option<String>,
@@ -59,7 +58,6 @@ impl TaskRow {
             status,
             project: self.project,
             worker: self.worker,
-            linear_id: self.linear_id,
             resource: self.resource,
             context: self.context,
             original_prompt: self.original_prompt,
@@ -100,7 +98,6 @@ pub(super) struct RoutingRow {
     pub status: String,
     pub project: Option<String>,
     pub worker: Option<String>,
-    pub linear_id: Option<String>,
     pub resource: Option<String>,
 }
 
@@ -116,7 +113,6 @@ impl RoutingRow {
             status,
             project: self.project,
             worker: self.worker,
-            linear_id: self.linear_id,
             resource: self.resource,
         }
     }

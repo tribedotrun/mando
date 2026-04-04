@@ -11,23 +11,19 @@ import { SettingsPage, type SettingsSection } from '#renderer/components/Setting
 import { DevInfoBar } from '#renderer/components/DevInfoBar';
 import { CommandPalette } from '#renderer/components/CommandPalette';
 import { ToastContainer } from '#renderer/components/ToastContainer';
+import { BulkCreateProgress } from '#renderer/components/BulkCreateProgress';
 import { CreateTaskModal } from '#renderer/components/AddTaskForm';
 import { MergeModal } from '#renderer/components/MergeModal';
 import { ShortcutOverlay } from '#renderer/components/ShortcutOverlay';
 import { TaskDetailView } from '#renderer/components/TaskDetailView';
 import { useSettingsStore } from '#renderer/stores/settingsStore';
 import { useTaskStore } from '#renderer/stores/taskStore';
-import { apiPost } from '#renderer/api';
+import { apiPost, apiPatch, apiDel } from '#renderer/api';
 import { useToastStore } from '#renderer/stores/toastStore';
 
-const SETUP_TOTAL = 4;
+const SETUP_TOTAL = 3;
 
-const STEP_NAMES = [
-  'Install Claude Code',
-  'Connect Telegram for remote control',
-  'Add a project',
-  'Connect Linear',
-];
+const STEP_NAMES = ['Install Claude Code', 'Connect Telegram for remote control', 'Add a project'];
 
 /**
  * Compute setup progress from config (no IPC — sidebar-safe).
@@ -46,11 +42,17 @@ function useSetupProgress(): SetupProgress | null {
     !!config.features?.claudeCodeVerified,
     !!(config.channels?.telegram?.enabled && config.env?.TELEGRAM_MANDO_BOT_TOKEN),
     hasProject,
-    !!(config.features?.linear && config.captain?.linearTeam && config.env?.LINEAR_API_KEY),
   ];
 
   const completed = done.filter(Boolean).length;
-  if (completed >= SETUP_TOTAL) return null;
+  if (completed >= SETUP_TOTAL) {
+    if (!dismissed) {
+      const store = useSettingsStore.getState();
+      store.updateSection('features', { setupDismissed: true });
+      store.save();
+    }
+    return null;
+  }
 
   const firstIncomplete = done.findIndex((d) => !d);
   return { completed, total: SETUP_TOTAL, currentStep: STEP_NAMES[firstIncomplete] ?? '' };
@@ -218,6 +220,7 @@ export function App(): React.ReactElement {
         <CreateTaskModal open={createTaskOpen} onClose={() => setCreateTaskOpen(false)} />
         <ShortcutOverlay open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
         <ToastContainer />
+        <BulkCreateProgress />
       </div>
     );
   }
@@ -328,6 +331,39 @@ export function App(): React.ReactElement {
                 useToastStore.getState().add('error', msg);
               }
             }}
+            onRenameProject={async (oldName, newName) => {
+              try {
+                await apiPatch(`/api/projects/${encodeURIComponent(oldName)}`, {
+                  rename: newName,
+                });
+                await useSettingsStore.getState().load();
+                setProjectFilter((prev) => (prev === oldName ? newName : prev));
+                useToastStore.getState().add('success', `Renamed to "${newName}"`);
+              } catch (err) {
+                const msg = err instanceof Error ? err.message : 'Failed to rename project';
+                useToastStore.getState().add('error', msg);
+              }
+            }}
+            onRemoveProject={async (name) => {
+              try {
+                const res = await apiDel<{ ok: boolean; deleted_tasks: number }>(
+                  `/api/projects/${encodeURIComponent(name)}`,
+                );
+                await useSettingsStore.getState().load();
+                if (res.deleted_tasks > 0) {
+                  await useTaskStore.getState().fetch();
+                }
+                setProjectFilter((prev) => (prev === name ? null : prev));
+                const taskMsg =
+                  res.deleted_tasks > 0
+                    ? ` and ${res.deleted_tasks} task${res.deleted_tasks !== 1 ? 's' : ''}`
+                    : '';
+                useToastStore.getState().add('success', `Deleted "${name}"${taskMsg}`);
+              } catch (err) {
+                const msg = err instanceof Error ? err.message : 'Failed to remove project';
+                useToastStore.getState().add('error', msg);
+              }
+            }}
             onToggleSetup={() => setSetupActive((v) => !v)}
             onDismissSetup={handleDismissSetup}
             projectFilter={projectFilter}
@@ -338,18 +374,38 @@ export function App(): React.ReactElement {
 
           {/* Main content — always visible, popover floats above from sidebar */}
           <main
-            className="flex-1 overflow-auto"
-            style={{ background: 'var(--color-bg)', padding: '38px 32px 24px' }}
+            className="relative flex-1 overflow-hidden"
+            style={{ background: 'var(--color-bg)' }}
           >
-            {activeTab === 'captain' && (
-              <CaptainView
-                projectFilter={projectFilter}
-                onCreateTask={openCreateTask}
-                onOpenDetail={(item) => setDetailItemId(item.id)}
-              />
-            )}
-            {activeTab === 'scout' && <ScoutPage />}
-            {activeTab === 'sessions' && <SessionsCard />}
+            {/* All tabs stay mounted and stacked. Active tab sits on top via
+                z-index; inactive tabs are behind the opaque background — no
+                visibility/display changes, so CSS transitions can't flash. */}
+            {(['captain', 'scout', 'sessions'] as const).map((tab) => {
+              const isActive = activeTab === tab;
+              return (
+                <div
+                  key={tab}
+                  className="absolute inset-0 overflow-auto"
+                  style={{
+                    padding: '38px 32px 24px',
+                    background: 'var(--color-bg)',
+                    zIndex: isActive ? 1 : 0,
+                    pointerEvents: isActive ? undefined : 'none',
+                  }}
+                >
+                  {tab === 'captain' && (
+                    <CaptainView
+                      projectFilter={projectFilter}
+                      onCreateTask={openCreateTask}
+                      onOpenDetail={(item) => setDetailItemId(item.id)}
+                      active={isActive}
+                    />
+                  )}
+                  {tab === 'scout' && <ScoutPage active={isActive} />}
+                  {tab === 'sessions' && <SessionsCard active={isActive} />}
+                </div>
+              );
+            })}
           </main>
         </div>
       </div>
@@ -365,6 +421,7 @@ export function App(): React.ReactElement {
       <CreateTaskModal open={createTaskOpen} onClose={() => setCreateTaskOpen(false)} />
       <ShortcutOverlay open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
       <ToastContainer />
+      <BulkCreateProgress />
     </div>
   );
 }

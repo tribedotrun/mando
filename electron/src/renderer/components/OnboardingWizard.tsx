@@ -8,10 +8,10 @@ import {
   OutlineButton,
   PrimaryButton,
 } from '#renderer/components/OnboardingPrimitives';
-import { TelegramScreen, LinearScreen } from '#renderer/components/OnboardingSteps';
+import { TelegramScreen } from '#renderer/components/OnboardingSteps';
 import { getErrorMessage } from '#renderer/utils';
 
-type Step = 'welcome' | 'claude-check' | 'telegram' | 'linear' | 'finishing';
+type Step = 'welcome' | 'claude-check' | 'telegram' | 'finishing';
 
 type CCResult = { installed: boolean; version: string | null; works: boolean } | null;
 
@@ -25,8 +25,6 @@ export function OnboardingWizard(): React.ReactElement {
   const [step, setStep] = useState<Step>('welcome');
   const [error, setError] = useState<string | null>(null);
   const [tgToken, setTgToken] = useState('');
-  const [linearKey, setLinearKey] = useState('');
-  const [linearTeam, setLinearTeam] = useState('');
   const [progressMsg, setProgressMsg] = useState<string | null>(null);
 
   useMountEffect(() => {
@@ -34,53 +32,44 @@ export function OnboardingWizard(): React.ReactElement {
   });
 
   /** Persist partial config to disk so progress survives a crash or quit. */
-  const saveProgress = useCallback(
-    (extras?: { linearKey?: string; linearTeam?: string }) => {
-      const config: MandoConfig = { features: { claudeCodeVerified: true } };
-      const env: Record<string, string> = {};
-      if (tgToken.trim()) {
-        config.channels = { telegram: { enabled: true } };
-        env.TELEGRAM_MANDO_BOT_TOKEN = tgToken.trim();
+  const saveProgress = useCallback(() => {
+    const config: MandoConfig = { features: { claudeCodeVerified: true } };
+    const env: Record<string, string> = {};
+    if (tgToken.trim()) {
+      config.channels = { telegram: { enabled: true } };
+      env.TELEGRAM_MANDO_BOT_TOKEN = tgToken.trim();
+    }
+    if (Object.keys(env).length > 0) config.env = env;
+    window.mandoAPI
+      .saveConfigLocal(JSON.stringify(config, null, 2))
+      .catch((e) => console.error('Failed to save onboarding progress:', e));
+  }, [tgToken]);
+
+  const finishSetup = useCallback(
+    async (tokenOverride?: string) => {
+      setError(null);
+      setStep('finishing');
+      try {
+        const effectiveToken = tokenOverride ?? tgToken;
+        const config: MandoConfig = {
+          features: { claudeCodeVerified: true },
+          captain: { autoSchedule: true },
+        };
+        const env: Record<string, string> = {};
+        if (effectiveToken.trim()) {
+          config.channels = { telegram: { enabled: true } };
+          env.TELEGRAM_MANDO_BOT_TOKEN = effectiveToken.trim();
+        }
+        if (Object.keys(env).length > 0) config.env = env;
+        await window.mandoAPI.setupComplete(JSON.stringify(config, null, 2));
+        window.location.reload();
+      } catch (err) {
+        setError(getErrorMessage(err, 'Failed to save configuration'));
+        setStep('telegram');
       }
-      if (extras?.linearKey?.trim() && extras.linearTeam) {
-        config.features!.linear = true;
-        config.captain = { linearTeam: extras.linearTeam };
-        env.LINEAR_API_KEY = extras.linearKey.trim();
-      }
-      if (Object.keys(env).length > 0) config.env = env;
-      window.mandoAPI
-        .saveConfigLocal(JSON.stringify(config, null, 2))
-        .catch((e) => console.error('Failed to save onboarding progress:', e));
     },
     [tgToken],
   );
-
-  const finishSetup = useCallback(async () => {
-    setError(null);
-    setStep('finishing');
-    try {
-      const config: MandoConfig = {
-        features: { claudeCodeVerified: true },
-        captain: { autoSchedule: true },
-      };
-      const env: Record<string, string> = {};
-      if (tgToken.trim()) {
-        config.channels = { telegram: { enabled: true } };
-        env.TELEGRAM_MANDO_BOT_TOKEN = tgToken.trim();
-      }
-      if (linearKey.trim() && linearTeam) {
-        config.features!.linear = true;
-        config.captain!.linearTeam = linearTeam;
-        env.LINEAR_API_KEY = linearKey.trim();
-      }
-      if (Object.keys(env).length > 0) config.env = env;
-      await window.mandoAPI.setupComplete(JSON.stringify(config, null, 2));
-      window.location.reload();
-    } catch (err) {
-      setError(getErrorMessage(err, 'Failed to save configuration'));
-      setStep('linear');
-    }
-  }, [tgToken, linearKey, linearTeam]);
 
   if (step === 'welcome') {
     return <WelcomeScreen onStart={() => setStep('claude-check')} />;
@@ -92,32 +81,19 @@ export function OnboardingWizard(): React.ReactElement {
     );
   }
 
-  if (step === 'telegram') {
-    return (
-      <TelegramScreen
-        token={tgToken}
-        onTokenChange={setTgToken}
-        onBack={() => setStep('claude-check')}
-        onNext={() => {
-          saveProgress();
-          setStep('linear');
-        }}
-        onSkip={() => {
-          setTgToken('');
-          setStep('linear');
-        }}
-      />
-    );
-  }
-
   return (
-    <LinearScreen
-      apiKey={linearKey}
-      onApiKeyChange={setLinearKey}
-      selectedTeam={linearTeam}
-      onTeamChange={setLinearTeam}
-      onBack={() => setStep('telegram')}
-      onFinish={finishSetup}
+    <TelegramScreen
+      token={tgToken}
+      onTokenChange={setTgToken}
+      onBack={() => setStep('claude-check')}
+      onNext={() => {
+        saveProgress();
+        finishSetup();
+      }}
+      onSkip={() => {
+        setTgToken('');
+        finishSetup('');
+      }}
       error={error}
       finishing={step === 'finishing'}
       progressMsg={progressMsg}
@@ -247,7 +223,7 @@ function ClaudeCheckScreen({
     <SetupLayout
       data-testid="onboarding-wizard"
       step={1}
-      total={3}
+      total={2}
       title="Claude Code"
       subtitle="Required to run Mando."
     >

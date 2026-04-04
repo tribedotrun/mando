@@ -16,7 +16,6 @@ pub struct Config {
     pub channels: ChannelsConfig,
     pub gateway: GatewayConfig,
     pub captain: CaptainConfig,
-    pub voice: VoiceConfig,
     pub scout: ScoutConfig,
     pub env: HashMap<String, String>,
 }
@@ -29,7 +28,6 @@ impl Default for Config {
             channels: ChannelsConfig::default(),
             gateway: GatewayConfig::default(),
             captain: CaptainConfig::default(),
-            voice: VoiceConfig::default(),
             scout: ScoutConfig::default(),
             env: HashMap::new(),
         }
@@ -55,8 +53,7 @@ impl Config {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct FeaturesConfig {
-    pub voice: bool,
-    pub linear: bool,
+    pub scout: bool,
     pub setup_dismissed: bool,
     pub claude_code_verified: bool,
 }
@@ -121,30 +118,6 @@ impl Default for DashboardConfig {
 }
 
 // ---------------------------------------------------------------------------
-// Voice (settings only — gated by features.voice)
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
-pub struct VoiceConfig {
-    pub voice_id: String,
-    pub model: String,
-    pub usage_warning_threshold: f64,
-    pub session_expiry_days: u32,
-}
-
-impl Default for VoiceConfig {
-    fn default() -> Self {
-        Self {
-            voice_id: "EXAVITQu4vr4xnSDxMaL".into(),
-            model: "eleven_flash_v2_5".into(),
-            usage_warning_threshold: 0.8,
-            session_expiry_days: 7,
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------
 // Captain
 // ---------------------------------------------------------------------------
 
@@ -161,8 +134,6 @@ pub struct CaptainConfig {
     pub lockfile_path: String,
     #[serde(skip)]
     pub worker_health_path: String,
-    pub linear_team: String,
-    pub linear_cli_path: String,
 }
 
 impl Default for CaptainConfig {
@@ -184,8 +155,6 @@ impl Default for CaptainConfig {
                 .join("worker-health.json")
                 .to_string_lossy()
                 .into_owned(),
-            linear_team: String::new(),
-            linear_cli_path: String::new(),
         }
     }
 }

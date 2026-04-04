@@ -57,14 +57,7 @@ pub(crate) async fn get_sessions(
         .await
         .unwrap_or_default()
         .into_iter()
-        .flat_map(|t| {
-            let title = t.title.clone();
-            let mut pairs = vec![(t.id.to_string(), title.clone())];
-            if let Some(ref lid) = t.linear_id {
-                pairs.push((lid.clone(), title));
-            }
-            pairs
-        })
+        .map(|t| (t.id.to_string(), t.title.clone()))
         .collect();
 
     // Build scout_item_id → title map for enrichment.

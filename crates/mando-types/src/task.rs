@@ -10,7 +10,7 @@ use super::task_update::{expect_boolish_field, expect_i64_field, expect_string_f
 use crate::SessionIds;
 
 /// Routing fields — lightweight struct for captain tick hot path.
-/// Populated from `SELECT id, title, status, project, worker, linear_id, resource
+/// Populated from `SELECT id, title, status, project, worker, resource
 /// FROM tasks WHERE archived_at IS NULL`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskRouting {
@@ -21,8 +21,6 @@ pub struct TaskRouting {
     pub project: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub worker: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub linear_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resource: Option<String>,
 }
@@ -37,8 +35,6 @@ pub struct Task {
     pub project: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub worker: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub linear_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resource: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -135,7 +131,6 @@ impl Task {
             status: ItemStatus::New,
             project: None,
             worker: None,
-            linear_id: None,
             resource: None,
             context: None,
             original_prompt: None,
@@ -168,13 +163,6 @@ impl Task {
         }
     }
 
-    /// Best identifier for logging: linear_id > numeric id.
-    pub fn best_id(&self) -> String {
-        self.linear_id
-            .clone()
-            .unwrap_or_else(|| self.id.to_string())
-    }
-
     /// Extract routing fields for the captain tick hot path.
     pub fn routing(&self) -> TaskRouting {
         TaskRouting {
@@ -183,7 +171,6 @@ impl Task {
             status: self.status,
             project: self.project.clone(),
             worker: self.worker.clone(),
-            linear_id: self.linear_id.clone(),
             resource: self.resource.clone(),
         }
     }
@@ -206,7 +193,6 @@ impl Task {
             }
             "project" => self.project = Some(expect_string_field(key, value)?.to_string()),
             "worker" => self.worker = Some(expect_string_field(key, value)?.to_string()),
-            "linear_id" => self.linear_id = Some(expect_string_field(key, value)?.to_string()),
             "resource" => self.resource = Some(expect_string_field(key, value)?.to_string()),
             "context" => self.context = Some(expect_string_field(key, value)?.to_string()),
             "original_prompt" => {
@@ -269,7 +255,6 @@ impl Task {
         match key {
             "project" => self.project = None,
             "worker" => self.worker = None,
-            "linear_id" => self.linear_id = None,
             "resource" => self.resource = None,
             "context" => self.context = None,
             "original_prompt" => self.original_prompt = None,

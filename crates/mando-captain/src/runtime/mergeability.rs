@@ -7,7 +7,6 @@ use mando_types::Task;
 
 use crate::biz::merge_logic;
 use crate::io::health_store::HealthState;
-use crate::runtime::linear_integration;
 use crate::runtime::mergeability_rebase::{
     check_pr_mergeable, handle_conflict, reap_dead_rebase_workers, MergeStatus,
 };
@@ -186,7 +185,7 @@ pub(crate) async fn check_done_mergeability(
 async fn apply_merged(
     item: &mut Task,
     pr: &str,
-    config: &Config,
+    _config: &Config,
     notifier: &Notifier,
     pool: &sqlx::SqlitePool,
 ) {
@@ -206,21 +205,12 @@ async fn apply_merged(
         pool,
     )
     .await;
-
-    if let Err(e) = linear_integration::writeback_status(item, config).await {
-        tracing::warn!(module = "captain", %e, "Linear status writeback failed");
-    }
-    if let Err(e) =
-        linear_integration::upsert_workpad(item, config, &format!("PR merged ({})", pr), pool).await
-    {
-        tracing::warn!(module = "captain", %e, "Linear workpad upsert failed");
-    }
 }
 
 async fn apply_closed(
     item: &mut Task,
     pr: &str,
-    config: &Config,
+    _config: &Config,
     notifier: &Notifier,
     pool: &sqlx::SqlitePool,
 ) {
@@ -239,8 +229,4 @@ async fn apply_closed(
         pool,
     )
     .await;
-
-    if let Err(e) = linear_integration::writeback_status(item, config).await {
-        tracing::warn!(module = "captain", %e, "Linear status writeback failed");
-    }
 }

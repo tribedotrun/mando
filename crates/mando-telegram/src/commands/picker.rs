@@ -58,8 +58,8 @@ pub async fn show_single(
             item.pr
                 .as_deref()
                 .map(|p| {
-                    let label = mando_shared::helpers::pr_short_label(p);
-                    format!(" ({label})")
+                    let link = mando_shared::helpers::pr_html_link(p, item.github_repo.as_deref());
+                    format!(" ({link})")
                 })
                 .unwrap_or_default()
         } else {

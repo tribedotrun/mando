@@ -17,14 +17,9 @@ export function SettingsTelegram(): React.ReactElement {
 
   return (
     <div data-testid="settings-telegram" className="space-y-8">
-      <div>
-        <h2 className="text-lg font-semibold" style={{ color: 'var(--color-text-1)' }}>
-          Telegram
-        </h2>
-        <p className="mt-1 text-sm" style={{ color: 'var(--color-text-3)' }}>
-          Configure the Telegram bot for notifications and commands.
-        </p>
-      </div>
+      <h2 className="text-lg font-semibold" style={{ color: 'var(--color-text-1)' }}>
+        Telegram
+      </h2>
 
       <div className="space-y-6">
         {/* Enable toggle */}
@@ -34,9 +29,6 @@ export function SettingsTelegram(): React.ReactElement {
               <h3 className="text-sm font-medium" style={{ color: 'var(--color-text-2)' }}>
                 Enabled
               </h3>
-              <p className="mt-0.5 text-xs" style={{ color: 'var(--color-text-3)' }}>
-                Turn the Telegram bot on or off.
-              </p>
             </div>
             <ToggleSwitch
               testId="telegram-enabled"

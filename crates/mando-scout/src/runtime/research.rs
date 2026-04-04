@@ -25,14 +25,12 @@ pub struct ResearchLink {
 /// Run research for a topic, returning discovered links.
 pub async fn run_research(topic: &str, workflow: &ScoutWorkflow) -> Result<ResearchResult> {
     let interests_high = crate::biz::formatting::bullet_list(&workflow.interests.high);
-    let interests_medium = crate::biz::formatting::bullet_list(&workflow.interests.medium);
 
     let user_context_rendered = workflow.user_context.render();
 
     let mut vars = std::collections::HashMap::new();
     vars.insert("topic", topic);
     vars.insert("interests_high", interests_high.as_str());
-    vars.insert("interests_medium", interests_medium.as_str());
     vars.insert("user_context", user_context_rendered.as_str());
 
     let prompt = mando_config::render_prompt("research", &workflow.prompts, &vars)

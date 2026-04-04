@@ -8,6 +8,7 @@ use crate::io::task_store::TaskStore;
 
 pub async fn reconcile_on_startup(config: &Config, pool: &sqlx::SqlitePool) -> Result<()> {
     reconcile_orphaned_worktrees(config, pool).await;
+    reconcile_worker_timeouts(pool).await;
 
     let log_path = ops_log::ops_log_path();
     let mut log = ops_log::load_ops_log(&log_path);
@@ -62,6 +63,46 @@ pub async fn reconcile_on_startup(config: &Config, pool: &sqlx::SqlitePool) -> R
     ops_log::save_ops_log(&log, &log_path)?;
     tracing::info!(module = "reconciler", "reconciliation complete");
     Ok(())
+}
+
+/// Reset `worker_started_at` for all InProgress workers so daemon downtime
+/// (crashes, restarts, laptop sleep) does not count toward the timeout budget.
+async fn reconcile_worker_timeouts(pool: &sqlx::SqlitePool) {
+    let store = TaskStore::new(pool.clone());
+    let tasks = match store.load_all().await {
+        Ok(t) => t,
+        Err(e) => {
+            tracing::error!(module = "reconciler", error = %e,
+                "failed to load tasks — skipping worker timeout reconciliation");
+            return;
+        }
+    };
+    let now = mando_types::now_rfc3339();
+    let mut count = 0u32;
+    for task in &tasks {
+        if task.status == mando_types::task::ItemStatus::InProgress
+            && task.worker_started_at.is_some()
+        {
+            if let Err(e) = store
+                .update(task.id, |t| {
+                    t.worker_started_at = Some(now.clone());
+                })
+                .await
+            {
+                tracing::warn!(module = "reconciler", task_id = task.id, error = %e,
+                    "failed to reset worker_started_at on startup");
+            } else {
+                count += 1;
+            }
+        }
+    }
+    if count > 0 {
+        tracing::info!(
+            module = "reconciler",
+            count,
+            "reset worker timeout clocks on startup"
+        );
+    }
 }
 
 async fn reconcile_orphaned_worktrees(config: &Config, pool: &sqlx::SqlitePool) {

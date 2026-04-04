@@ -31,6 +31,7 @@ import path from 'path';
 import https from 'https';
 import { execSync } from 'child_process';
 import { handleTrusted } from '#main/ipc-security';
+import { readAppPackageVersion } from '#main/app-package';
 import log from '#main/logger';
 
 const UPDATE_CHECK_INTERVAL_MS = 30 * 60 * 1000;
@@ -442,7 +443,7 @@ export function setupAutoUpdate(): void {
     return checkAndDownload();
   });
 
-  handleTrusted('updates:app-version', () => app.getVersion());
+  handleTrusted('updates:app-version', () => readAppPackageVersion() ?? app.getVersion());
   handleTrusted('updates:pending', () => {
     if (pendingUpdate) return { version: pendingUpdate.version, notes: pendingUpdate.notes };
     return null;

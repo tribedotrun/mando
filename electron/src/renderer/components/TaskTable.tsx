@@ -3,8 +3,7 @@ import { useScrollIntoViewRef } from '#renderer/hooks/useScrollIntoViewRef';
 import { useTaskStore } from '#renderer/stores/taskStore';
 import { useFilteredTasks } from '#renderer/hooks/useFilteredTasks';
 import type { TaskItem } from '#renderer/types';
-import { prLabel, prHref, prState, linearHref, canMerge, canReopen, canAsk } from '#renderer/utils';
-import { useLinearSlug } from '#renderer/hooks/useLinearSlug';
+import { prLabel, prHref, prState, canMerge, canReopen, canAsk } from '#renderer/utils';
 import { TaskEmptyState } from '#renderer/components/TaskDetails';
 import { MergeBtn, PrIcon, MoreIcon } from '#renderer/components/TaskIcons';
 
@@ -52,7 +51,6 @@ export function TaskTable(props: Props): React.ReactElement {
     projectFilter,
     focusedIndex = -1,
   } = props;
-  const linearSlug = useLinearSlug();
   const loading = useTaskStore((s) => s.loading);
   const error = useTaskStore((s) => s.error);
   const items = useFilteredTasks(projectFilter);
@@ -86,7 +84,6 @@ export function TaskTable(props: Props): React.ReactElement {
           selected={selectedIds.has(item.id)}
           focused={idx === focusedIndex}
           scrollRef={idx === focusedIndex ? scrollRef : undefined}
-          linearSlug={linearSlug}
           onToggleSelect={() => onToggleSelect(item.id)}
           onMerge={() => onMerge(item)}
           onReopen={() => onReopen(item)}
@@ -124,7 +121,6 @@ interface RowProps {
   selected: boolean;
   focused: boolean;
   scrollRef?: (node: HTMLElement | null) => void;
-  linearSlug?: string;
   onToggleSelect: () => void;
   onMerge: () => void;
   onReopen: () => void;
@@ -143,7 +139,6 @@ const TaskRow = React.memo(function TaskRow({
   selected,
   focused,
   scrollRef,
-  linearSlug,
   ...actions
 }: RowProps): React.ReactElement {
   const fetch = useTaskStore((s) => s.fetch);
@@ -267,38 +262,6 @@ const TaskRow = React.memo(function TaskRow({
           )}
           {item.title}
         </span>
-        {item.linear_id &&
-          (linearSlug ? (
-            <a
-              href={linearHref(item.linear_id, linearSlug)}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex shrink-0 items-center font-mono no-underline hover:underline"
-              style={{
-                fontSize: 11,
-                color: 'var(--color-text-3)',
-                background: 'var(--color-surface-3)',
-                padding: '1px 5px',
-                borderRadius: 3,
-              }}
-              onClick={(e) => e.stopPropagation()}
-            >
-              {item.linear_id}
-            </a>
-          ) : (
-            <span
-              className="inline-flex shrink-0 items-center font-mono"
-              style={{
-                fontSize: 11,
-                color: 'var(--color-text-3)',
-                background: 'var(--color-surface-3)',
-                padding: '1px 5px',
-                borderRadius: 3,
-              }}
-            >
-              {item.linear_id}
-            </span>
-          ))}
         {item.pr && (item.github_repo || item.project) && (
           <a
             href={prHref(item.pr, (item.github_repo ?? item.project)!)}

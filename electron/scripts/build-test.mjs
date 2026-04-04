@@ -22,7 +22,8 @@ import { fileURLToPath } from 'url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, '..');
-const outDir = resolve(root, '.test-build');
+const buildDir = process.env.MANDO_BUILD_DIR || '.test-build';
+const outDir = resolve(root, buildDir);
 
 const isDev = process.argv.includes('--dev');
 const viteUrl = process.env.VITE_DEV_SERVER_URL;
@@ -42,7 +43,7 @@ await build({
   },
   sourcemap: true,
 });
-console.log('  -> .test-build/main/index.js');
+console.log(`  -> ${buildDir}/main/index.js`);
 
 console.log('Building preload script...');
 await build({
@@ -55,7 +56,7 @@ await build({
   outfile: resolve(outDir, 'preload/index.js'),
   sourcemap: true,
 });
-console.log('  -> .test-build/preload/index.js');
+console.log(`  -> ${buildDir}/preload/index.js`);
 
 if (isDev) {
   console.log(`\nDev mode — renderer served from Vite (${viteUrl || 'URL not set'})`);
@@ -71,7 +72,7 @@ if (isDev) {
       stdio: 'inherit',
     },
   );
-  console.log('  -> .test-build/renderer/main_window/');
+  console.log(`  -> ${buildDir}/renderer/main_window/`);
 }
 
 console.log('\nTest build complete.');

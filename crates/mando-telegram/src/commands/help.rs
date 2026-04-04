@@ -7,7 +7,7 @@ use anyhow::Result;
 /// Help text for DM chats.
 const HELP: &str = "\u{1f99e} <b>Tasks</b>\n\
 /todo [items] \u{2014} Add tasks\n\
-/tasks [all] \u{2014} Show task list (alias: /status)\n\
+/tasks [all] \u{2014} Show task list\n\
 /accept &lt;id&gt; \u{2014} Accept a no-PR task\n\
 /reopen \u{2014} Reopen done/failed task with feedback\n\
 /rework \u{2014} Rework a task with fresh worker\n\
@@ -23,18 +23,15 @@ const HELP: &str = "\u{1f99e} <b>Tasks</b>\n\
 /workers \u{2014} Show active workers\n\
 /nudge &lt;id&gt; &lt;msg&gt; \u{2014} Nudge a stuck worker\n\
 /stop \u{2014} Stop all active workers\n\
-/sessions \u{2014} List recent CC sessions\n\
 /triage \u{2014} Rank pending-review PRs\n\
 /health \u{2014} System health (daemon, workers, config)\n\n\
-\u{1f50d} <b>Research</b>\n\
-/addlink &lt;url&gt; \u{2014} Add URL to Scout\n\
-/research &lt;topic&gt; \u{2014} AI-powered link discovery\n\
-/bulkstatus &lt;status&gt; &lt;ids&gt; \u{2014} Bulk-update Scout items\n\
-/bulkdelete &lt;ids&gt; \u{2014} Bulk-delete Scout items\n\
-/publish &lt;id&gt; \u{2014} Publish extracted Scout article\n\
-/list [status] \u{2014} List scout items with summaries\n\
-/simplelist [status] \u{2014} List scout items (compact)\n\
-/saved \u{2014} View saved items\n\
+\u{1f50d} <b>Scout</b>\n\
+/scout_add &lt;url&gt; \u{2014} Add URL to Scout\n\
+/scout_research &lt;topic&gt; \u{2014} AI-powered link discovery\n\
+/scout_publish &lt;id&gt; \u{2014} Publish extracted Scout article\n\
+/scout_list [status] \u{2014} List scout items with summaries\n\
+/scout_simple [status] \u{2014} List scout items (compact)\n\
+/scout_saved \u{2014} View saved items\n\
 /scout \u{2014} Review processed items (swipe)\n\n\
 \u{1f4ac} <b>Interactive</b>\n\
 /ask \u{2014} Q&A on completed tasks\n\

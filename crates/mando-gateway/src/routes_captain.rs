@@ -42,7 +42,6 @@ pub(crate) async fn get_health_system(State(state): State<AppState>) -> Json<Val
         })
         .len();
     let data_dir = mando_config::data_dir();
-    let linear_slug = state.linear_workspace_slug.read().await.clone();
     let uptime = state.start_time.elapsed().as_secs();
     Json(json!({
         "healthy": healthy,
@@ -61,7 +60,6 @@ pub(crate) async fn get_health_system(State(state): State<AppState>) -> Json<Val
         "configuredWorkerHealthPath": configured_paths.worker_health_path.to_string_lossy(),
         "configuredLockfilePath": configured_paths.lockfile_path.to_string_lossy(),
         "restartRequired": active_paths != configured_paths,
-        "linear_workspace_slug": linear_slug,
     }))
 }
 

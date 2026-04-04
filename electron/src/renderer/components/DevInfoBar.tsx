@@ -70,15 +70,21 @@ export function DevInfoBar(): React.ReactElement | null {
 
   if (!info) return null;
 
-  const modeColor = info.mode === 'DEV' ? 'var(--color-accent)' : 'var(--color-text-2)';
-  const bg =
+  const prodLocalColor = '#f97316';
+  const modeColor =
     info.mode === 'DEV'
-      ? 'color-mix(in srgb, var(--color-accent) 5%, transparent)'
-      : 'color-mix(in srgb, var(--color-text-3) 5%, transparent)';
-  const border =
+      ? 'var(--color-accent)'
+      : info.mode === 'PROD-LOCAL'
+        ? prodLocalColor
+        : 'var(--color-text-2)';
+  const tintColor =
     info.mode === 'DEV'
-      ? 'color-mix(in srgb, var(--color-accent) 20%, transparent)'
-      : 'color-mix(in srgb, var(--color-text-3) 20%, transparent)';
+      ? 'var(--color-accent)'
+      : info.mode === 'PROD-LOCAL'
+        ? prodLocalColor
+        : 'var(--color-text-3)';
+  const bg = `color-mix(in srgb, ${tintColor} 5%, transparent)`;
+  const border = `color-mix(in srgb, ${tintColor} 20%, transparent)`;
 
   const btnStyle = {
     color: modeColor,

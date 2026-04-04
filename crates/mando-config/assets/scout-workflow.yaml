@@ -35,11 +35,8 @@ prompts:
 
     HIGH relevance (score 70-100):
     {{ interests_high }}
-    MEDIUM relevance (score 40-69):
-    {{ interests_medium }}
     LOW relevance (score 1-39):
     {{ interests_low }}
-    Tone: {{ interests_tone }}
 
     ## Content
 
@@ -133,8 +130,7 @@ prompts:
 
     Key interests (in priority order):
     {{ interests_high }}
-    Also interested in:
-    {{ interests_medium }}
+
     ## Topic
 
     <user_topic>{{ topic }}</user_topic>

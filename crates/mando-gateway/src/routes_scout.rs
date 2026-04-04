@@ -7,7 +7,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::response::{error_response, internal_error, not_found_or_internal};
-use crate::scout_notify::emit_scout_processed;
+use crate::scout_notify::{emit_scout_process_failed, emit_scout_processed};
 use crate::AppState;
 
 // ---------------------------------------------------------------
@@ -112,11 +112,13 @@ pub(crate) async fn post_scout_items(
                     let workflow = state.scout_workflow.load_full();
                     let pool = state.db.pool().clone();
                     let bus = state.bus.clone();
+                    let url_owned = body.url.clone();
                     let handle = tokio::spawn(async move {
                         if let Err(e) =
                             mando_scout::process_scout(&config, &pool, Some(id), &workflow).await
                         {
                             tracing::warn!(scout_id = id, error = %e, "auto-process failed");
+                            emit_scout_process_failed(&bus, id, &url_owned, &e.to_string());
                             return;
                         }
                         bus.send(

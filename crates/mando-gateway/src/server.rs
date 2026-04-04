@@ -12,6 +12,7 @@ use tracing::info;
 
 use crate::auth;
 use crate::middleware::request_id;
+use crate::routes_ai;
 use crate::routes_captain;
 use crate::routes_captain_adopt;
 use crate::routes_channels;
@@ -25,9 +26,9 @@ use crate::routes_scout_bulk;
 use crate::routes_scout_telegraph;
 use crate::routes_sessions;
 use crate::routes_task_actions;
+use crate::routes_task_ask;
 use crate::routes_task_detail;
 use crate::routes_tasks;
-use crate::routes_voice;
 use crate::routes_worktrees;
 use crate::sse;
 use crate::static_files;
@@ -75,9 +76,9 @@ fn protected_routes() -> Router<AppState> {
         .merge(ops_routes())
         .merge(config_routes())
         .merge(channel_routes())
-        .merge(voice_routes())
         .merge(worktree_routes())
         .merge(project_routes())
+        .merge(ai_routes())
         .route("/api/health/system", get(routes_captain::get_health_system))
         .route("/api/images/{filename}", get(static_files::get_image))
         .route(
@@ -132,7 +133,11 @@ fn task_routes() -> Router<AppState> {
             "/api/tasks/handoff",
             post(routes_task_actions::post_task_handoff),
         )
-        .route("/api/tasks/ask", post(routes_task_actions::post_task_ask))
+        .route("/api/tasks/ask", post(routes_task_ask::post_task_ask))
+        .route(
+            "/api/tasks/ask/end",
+            post(routes_task_ask::post_task_ask_end),
+        )
         .route(
             "/api/tasks/retry",
             post(routes_task_actions::post_task_retry),
@@ -271,21 +276,6 @@ fn channel_routes() -> Router<AppState> {
         )
 }
 
-fn voice_routes() -> Router<AppState> {
-    Router::new()
-        .route("/api/voice", post(routes_voice::post_voice))
-        .route("/api/voice/usage", get(routes_voice::get_voice_usage))
-        .route("/api/voice/sessions", get(routes_voice::get_voice_sessions))
-        .route(
-            "/api/voice/sessions/{id}/messages",
-            get(routes_voice::get_voice_messages),
-        )
-        .route(
-            "/api/voice/transcribe",
-            post(routes_voice::post_voice_transcribe),
-        )
-}
-
 fn worktree_routes() -> Router<AppState> {
     Router::new()
         .route("/api/worktrees", get(routes_worktrees::get_worktrees))
@@ -316,6 +306,10 @@ fn project_routes() -> Router<AppState> {
             "/api/projects/{name}",
             delete(routes_projects::delete_project),
         )
+}
+
+fn ai_routes() -> Router<AppState> {
+    Router::new().route("/api/ai/parse-todos", post(routes_ai::post_parse_todos))
 }
 
 /// Start the gateway HTTP server.
@@ -355,8 +349,6 @@ pub async fn start_server(
         config.captain.tick_interval_s,
     );
     let scout_wf = mando_config::load_scout_workflow(&mando_config::scout_workflow_path(), &config);
-    let voice_wf = mando_config::load_voice_workflow(&mando_config::voice_workflow_path());
-
     let cc_state_dir = mando_config::state_dir().join("ops_sessions").join("cc");
     let mut cc_session_mgr = mando_captain::io::cc_session::CcSessionManager::new(
         cc_state_dir,
@@ -370,20 +362,15 @@ pub async fn start_server(
         runtime_paths,
         captain_workflow: Arc::new(ArcSwap::from_pointee(captain_wf)),
         scout_workflow: Arc::new(ArcSwap::from_pointee(scout_wf)),
-        voice_workflow: Arc::new(ArcSwap::from_pointee(voice_wf)),
         config_write_mu: Arc::new(Mutex::new(())),
         bus: bus_arc.clone(),
         cc_session_mgr: Arc::new(RwLock::new(cc_session_mgr)),
         task_store: task_store_arc,
         db,
-        linear_workspace_slug: Arc::new(RwLock::new(None)),
         qa_session_mgr: mando_scout::runtime::qa::default_session_manager(),
         start_time: std::time::Instant::now(),
         dev_mode: false,
     };
-
-    // Fetch Linear workspace slug in background.
-    crate::spawn_linear_slug_fetch(state.config.clone(), state.linear_workspace_slug.clone());
 
     // Spawn captain tick loop (always runs; respects auto_schedule dynamically).
     crate::background_tasks::spawn_auto_tick(&state, tick_interval_s);
@@ -430,15 +417,11 @@ mod tests {
             scout_workflow: Arc::new(ArcSwap::from_pointee(
                 mando_config::ScoutWorkflow::compiled_default(),
             )),
-            voice_workflow: Arc::new(ArcSwap::from_pointee(
-                mando_config::VoiceWorkflow::compiled_default(),
-            )),
             config_write_mu: Arc::new(Mutex::new(())),
             bus: Arc::new(bus),
             cc_session_mgr: Arc::new(RwLock::new(cc_session_mgr)),
             task_store: Arc::new(RwLock::new(task_store)),
             db,
-            linear_workspace_slug: Arc::new(RwLock::new(None)),
             qa_session_mgr: mando_scout::runtime::qa::default_session_manager(),
             start_time: std::time::Instant::now(),
             dev_mode: false,
@@ -483,7 +466,7 @@ mod tests {
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
         let client = reqwest::Client::new();
-        let origin = "http://127.0.0.1:5173";
+        let origin = "http://127.0.0.1:15173";
         let resp = client
             .get(format!("http://{addr}/api/health"))
             .header(reqwest::header::ORIGIN, origin)

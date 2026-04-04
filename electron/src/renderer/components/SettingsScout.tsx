@@ -87,12 +87,12 @@ export function SettingsScout(): React.ReactElement {
 
   return (
     <div data-testid="settings-scout">
-      <h2 className="text-lg font-semibold" style={{ color: 'var(--color-text-1)' }}>
+      <h2
+        className="text-lg font-semibold"
+        style={{ color: 'var(--color-text-1)', marginBottom: 24 }}
+      >
         Scout
       </h2>
-      <p className="mt-1 text-sm" style={{ color: 'var(--color-text-3)', marginBottom: 24 }}>
-        Personalize how Scout selects and explains content.
-      </p>
 
       <div style={cardStyle}>
         <div className="space-y-4">
@@ -148,34 +148,11 @@ export function SettingsScout(): React.ReactElement {
           />
 
           <TagInput
-            label="Medium Interest Topics"
-            values={interests.medium ?? []}
-            onChange={(v) => updateInterests({ medium: v })}
-            placeholder="e.g. Software architecture"
-          />
-
-          <TagInput
             label="Low Interest Topics"
             values={interests.low ?? []}
             onChange={(v) => updateInterests({ low: v })}
             placeholder="e.g. Marketing, growth hacking"
           />
-
-          <div>
-            <label className={labelCls} style={labelStyle}>
-              Tone Preference
-            </label>
-            <input
-              data-testid="scout-tone"
-              className={inputCls}
-              style={inputStyle}
-              value={interests.tone ?? ''}
-              onChange={(e) => {
-                updateInterests({ tone: e.target.value }, true);
-              }}
-              placeholder="e.g. Practitioner deep-dives preferred."
-            />
-          </div>
         </div>
       </div>
     </div>

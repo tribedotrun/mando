@@ -65,11 +65,11 @@ export function getConfigPath(): string {
 // App mode: production | dev | sandbox
 // ---------------------------------------------------------------------------
 
-export type AppMode = 'production' | 'dev' | 'sandbox';
+export type AppMode = 'production' | 'dev' | 'prod-local' | 'sandbox';
 
 export function getAppMode(): AppMode {
   const mode = process.env.MANDO_APP_MODE;
-  if (mode === 'dev' || mode === 'sandbox') return mode;
+  if (mode === 'dev' || mode === 'sandbox' || mode === 'prod-local') return mode;
   return 'production';
 }
 
@@ -158,6 +158,7 @@ function setConnectionState(state: ConnectionState): void {
 export function getAppTitle(): string {
   const mode = getAppMode();
   if (mode === 'dev') return 'Mando (Dev)';
+  if (mode === 'prod-local') return 'Mando (Prod Local)';
   if (mode === 'sandbox') return 'Mando (Sandbox)';
   return 'Mando';
 }

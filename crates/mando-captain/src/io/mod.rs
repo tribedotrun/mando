@@ -17,7 +17,6 @@ pub mod headless_cc;
 pub mod health_store;
 pub mod hooks;
 pub mod item_lock;
-pub mod linear;
 pub mod ops_log;
 pub mod pid_lookup;
 pub mod pid_registry;

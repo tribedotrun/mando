@@ -14,6 +14,7 @@ import {
   bulkUpdate,
   updateItem,
   handoffItem,
+  cancelItem,
   retryItem,
   answerClarificationText,
   nudgeWorker,
@@ -164,7 +165,7 @@ export function useTaskActions() {
     }
   };
 
-  const handleBulkDelete = async (opts?: { close_pr?: boolean; cancel_linear?: boolean }) => {
+  const handleBulkDelete = async (opts?: { close_pr?: boolean }) => {
     setDeleting(true);
     setDeleteError(null);
     try {
@@ -187,6 +188,9 @@ export function useTaskActions() {
       setDeleting(false);
     }
   };
+
+  const handleCancel = (id: number) =>
+    optimisticAction(id, 'canceled', () => cancelItem(id), 'Cancel failed', 'Task canceled');
 
   const handleRetry = (id: number) =>
     optimisticAction(
@@ -254,6 +258,7 @@ export function useTaskActions() {
     deleting,
     deleteError,
     handleBulkDelete,
+    handleCancel,
     handleRetry,
     handleAnswer,
     handleNudge,

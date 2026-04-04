@@ -1,5 +1,4 @@
-//! Task cleanup — remove worktree, branch, health entry, close PR, cancel Linear issue
-//! when deleting tasks.
+//! Task cleanup — remove worktree, branch, health entry, close PR when deleting tasks.
 
 use anyhow::Result;
 use mando_config::settings::Config;
@@ -9,7 +8,6 @@ use mando_types::Task;
 #[derive(Debug, Clone, Default)]
 pub struct CleanupOptions {
     pub close_pr: bool,
-    pub cancel_linear: bool,
 }
 
 pub(crate) async fn cleanup_task(
@@ -99,9 +97,9 @@ pub(crate) async fn cleanup_task(
     }
 
     {
-        let ids_to_delete = [item.id.to_string(), item.best_id()];
+        let id_str = item.id.to_string();
         let mut total = 0u64;
-        for id in &ids_to_delete {
+        for id in &[id_str.as_str()] {
             match mando_db::queries::sessions::delete_sessions_for_task(pool, id).await {
                 Ok(n) => total += n,
                 Err(e) => {
@@ -148,29 +146,6 @@ pub(crate) async fn cleanup_task(
                 None => {
                     let msg = format!("Cannot close PR: malformed ref \"{pr}\"");
                     tracing::warn!(module = "cleanup", pr = %pr, "{}", msg);
-                    warnings.push(msg);
-                }
-            }
-        }
-    }
-
-    // Cancel Linear issue if requested
-    if opts.cancel_linear {
-        if let Some(ref linear_id) = item.linear_id {
-            match super::linear::resolve_cli_path(&config.captain.linear_cli_path) {
-                Ok(cli) => match super::linear::update_status(&cli, linear_id, "Canceled").await {
-                    Ok(()) => {
-                        tracing::info!(module = "cleanup", linear_id = %linear_id, "canceled Linear issue");
-                    }
-                    Err(e) => {
-                        let msg = format!("Failed to cancel {linear_id}: {e}");
-                        tracing::warn!(module = "cleanup", linear_id = %linear_id, error = %e, "failed to cancel Linear issue");
-                        warnings.push(msg);
-                    }
-                },
-                Err(e) => {
-                    let msg = format!("Cannot cancel {linear_id}: Linear CLI not available ({e})");
-                    tracing::warn!(module = "cleanup", error = %e, "Linear CLI not available");
                     warnings.push(msg);
                 }
             }

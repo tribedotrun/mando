@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import type { TaskItem } from '#renderer/types';
+import { MoreIcon } from '#renderer/components/TaskIcons';
 
 export function ActionButton({
   label,
@@ -46,7 +47,13 @@ export function DetailSection({
   );
 }
 
-export function DetailOverflowMenu({ item }: { item: TaskItem }): React.ReactElement {
+export function DetailOverflowMenu({
+  item,
+  onViewContext,
+}: {
+  item: TaskItem;
+  onViewContext?: () => void;
+}): React.ReactElement {
   const [open, setOpen] = useState(false);
 
   const copyAndClose = (text: string) => {
@@ -74,19 +81,17 @@ export function DetailOverflowMenu({ item }: { item: TaskItem }): React.ReactEle
       <button
         onClick={() => setOpen((v) => !v)}
         aria-label="More info"
-        className="flex items-center justify-center rounded"
+        className="flex items-center justify-center rounded-md transition-colors hover:bg-[var(--color-surface-2)]"
         style={{
           width: 28,
           height: 28,
           background: 'transparent',
-          color: 'var(--color-text-2)',
-          border: '1px solid var(--color-border)',
+          color: 'var(--color-text-3)',
+          border: 'none',
           cursor: 'pointer',
-          fontSize: 14,
-          borderRadius: 6,
         }}
       >
-        &hellip;
+        <MoreIcon />
       </button>
       {open && (
         <div
@@ -97,11 +102,40 @@ export function DetailOverflowMenu({ item }: { item: TaskItem }): React.ReactEle
             boxShadow: '0 4px 16px rgba(0,0,0,0.3)',
           }}
         >
+          {item.context && onViewContext && (
+            <button
+              onClick={() => {
+                setOpen(false);
+                onViewContext();
+              }}
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-caption hover:bg-[var(--color-surface-2)]"
+              style={{
+                color: 'var(--color-text-1)',
+                background: 'none',
+                border: 'none',
+                cursor: 'pointer',
+              }}
+            >
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 12 12"
+                fill="none"
+                stroke="var(--color-text-3)"
+                strokeWidth="1.2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M1.5 3h9M1.5 6h9M1.5 9h5" />
+              </svg>
+              View task brief
+            </button>
+          )}
           {entries.map(({ label, value }) => (
             <button
               key={label}
               onClick={() => copyAndClose(value)}
-              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] hover:bg-[var(--color-surface-2)]"
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-caption hover:bg-[var(--color-surface-2)]"
               style={{
                 color: 'var(--color-text-1)',
                 background: 'none',
@@ -125,44 +159,6 @@ export function DetailOverflowMenu({ item }: { item: TaskItem }): React.ReactEle
             </button>
           ))}
         </div>
-      )}
-    </div>
-  );
-}
-
-export function ContextToggle({ context }: { context: string }): React.ReactElement {
-  const [open, setOpen] = useState(false);
-  return (
-    <div className="mb-5">
-      <button
-        onClick={() => setOpen((v) => !v)}
-        className="mb-2 flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-widest"
-        style={{
-          color: 'var(--color-text-4)',
-          background: 'none',
-          border: 'none',
-          cursor: 'pointer',
-          padding: 0,
-        }}
-      >
-        <svg
-          width="8"
-          height="8"
-          viewBox="0 0 8 8"
-          fill="currentColor"
-          style={{
-            transition: 'transform 150ms',
-            transform: open ? 'rotate(90deg)' : 'none',
-          }}
-        >
-          <path d="M2 1l4 3-4 3V1z" />
-        </svg>
-        Context
-      </button>
-      {open && (
-        <p className="text-[11px] leading-relaxed" style={{ color: 'var(--color-text-3)' }}>
-          {context}
-        </p>
       )}
     </div>
   );

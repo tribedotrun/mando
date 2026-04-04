@@ -29,9 +29,7 @@ impl ScoutWorkflow {
 #[serde(rename_all = "camelCase", default)]
 pub struct InterestsConfig {
     pub high: Vec<String>,
-    pub medium: Vec<String>,
     pub low: Vec<String>,
-    pub tone: String,
 }
 
 /// User context for scout prompts — adapts explanations to the reader's background.

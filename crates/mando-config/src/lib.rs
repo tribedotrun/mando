@@ -4,7 +4,6 @@ pub mod loader;
 pub mod paths;
 pub mod settings;
 pub mod skills;
-pub mod voice_workflow;
 pub mod workflow;
 pub mod workflow_scout;
 pub mod workflow_validate;
@@ -20,7 +19,6 @@ pub use paths::{
     CaptainRuntimePaths,
 };
 pub use settings::Config;
-pub use voice_workflow::{load_voice_workflow, voice_workflow_path, VoiceWorkflow};
 pub use workflow::{
     captain_workflow_path, load_captain_workflow, load_scout_workflow, render_initial_prompt,
     render_nudge, render_prompt, render_template, scout_workflow_path, try_load_captain_workflow,

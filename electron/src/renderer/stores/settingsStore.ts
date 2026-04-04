@@ -15,8 +15,7 @@ export interface ProjectConfig {
 }
 
 export interface FeaturesConfig {
-  voice?: boolean;
-  linear?: boolean;
+  scout?: boolean;
   setupDismissed?: boolean;
   claudeCodeVerified?: boolean;
 }
@@ -41,16 +40,7 @@ export interface CaptainConfig {
   autoSchedule?: boolean;
   tickIntervalS?: number;
   tz?: string;
-  linearTeam?: string;
-  linearCliPath?: string;
   projects?: Record<string, ProjectConfig>;
-}
-
-export interface VoiceConfig {
-  voiceId?: string;
-  model?: string;
-  usageWarningThreshold?: number;
-  sessionExpiryDays?: number;
 }
 
 interface ChannelsConfig {
@@ -59,9 +49,7 @@ interface ChannelsConfig {
 
 interface ScoutInterests {
   high?: string[];
-  medium?: string[];
   low?: string[];
-  tone?: string;
 }
 
 interface ScoutUserContext {
@@ -82,7 +70,6 @@ export interface MandoConfig {
   channels?: ChannelsConfig;
   gateway?: GatewayConfig;
   captain?: CaptainConfig;
-  voice?: VoiceConfig;
   scout?: ScoutConfig;
   env?: Record<string, string>;
 }

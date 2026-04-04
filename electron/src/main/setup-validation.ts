@@ -1,10 +1,9 @@
 /**
- * IPC handlers for onboarding validation: Claude Code, Telegram, Linear.
+ * IPC handlers for onboarding validation: Claude Code, Telegram.
  *
  * All validations hit real APIs even in sandbox mode — they are read-only
- * checks (Telegram getMe, Linear GraphQL query, `which claude`) with no
- * side effects. Sandbox isolation only applies to message sending, not
- * token/key validation.
+ * checks (Telegram getMe, `which claude`) with no side effects. Sandbox
+ * isolation only applies to message sending, not token/key validation.
  */
 import { execFile } from 'child_process';
 import { promisify } from 'util';
@@ -68,33 +67,6 @@ export function registerSetupValidationHandlers(): void {
     } catch (e) {
       log.warn(`[setup-validation] Telegram validation failed: ${e}`);
       return { valid: false, error: e instanceof Error ? e.message : 'Network error' };
-    }
-  });
-
-  handleTrusted('validate-linear-key', async (_e, apiKey: string) => {
-    try {
-      const resp = await fetch('https://api.linear.app/graphql', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: apiKey },
-        body: JSON.stringify({ query: '{ teams { nodes { id key name } } }' }),
-      });
-      if (!resp.ok) {
-        log.warn(`[setup-validation] Linear API returned ${resp.status}`);
-        return { valid: false, teams: [], error: `Linear API returned ${resp.status}` };
-      }
-      const data = (await resp.json()) as {
-        data?: { teams: { nodes: Array<{ id: string; key: string; name: string }> } };
-        errors?: Array<{ message: string }>;
-      };
-      if (data.data?.teams?.nodes) {
-        return { valid: true, teams: data.data.teams.nodes };
-      }
-      const msg = data.errors?.[0]?.message ?? 'Invalid API key';
-      log.warn(`[setup-validation] Linear validation error: ${msg}`);
-      return { valid: false, teams: [], error: msg };
-    } catch (e) {
-      log.warn(`[setup-validation] Linear validation failed: ${e}`);
-      return { valid: false, teams: [], error: e instanceof Error ? e.message : 'Network error' };
     }
   });
 }

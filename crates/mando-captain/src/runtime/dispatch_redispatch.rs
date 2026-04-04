@@ -9,7 +9,6 @@ use mando_types::task::{ItemStatus, Task};
 use mando_types::timeline::TimelineEventType;
 
 use crate::biz::dispatch_logic;
-use crate::runtime::linear_integration;
 use crate::runtime::notify::Notifier;
 
 const MAX_SPAWN_FAILS: i64 = 3;
@@ -117,21 +116,6 @@ pub(crate) async fn redispatch_newly_queued(
                                 mando_shared::telegram_format::escape_html(&item.title),
                             );
                             notifier.normal(&msg).await;
-
-                            if let Err(e) = linear_integration::writeback_status(item, config).await
-                            {
-                                tracing::warn!(module = "captain", %e, "Linear status writeback failed");
-                            }
-                            if let Err(e) = linear_integration::upsert_workpad(
-                                item,
-                                config,
-                                &format!("Worker spawned, working on: {}", item.title),
-                                pool,
-                            )
-                            .await
-                            {
-                                tracing::warn!(module = "captain", %e, "Linear workpad upsert failed");
-                            }
                         }
                         Err(e) => {
                             let item = &mut items[idx];

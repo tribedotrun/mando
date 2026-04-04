@@ -11,40 +11,44 @@ use super::tasks_row::{RoutingRow, TaskRow};
 
 type SqliteQuery<'q> = Query<'q, Sqlite, SqliteArguments<'q>>;
 
+/// Explicit column list matching [`TaskRow`] fields — avoids `SELECT *` which
+/// can break after `ALTER TABLE DROP COLUMN` due to sqlx type-inference on
+/// removed column slots.
+const SELECT_COLS: &str = "\
+    id, title, status, project, worker, resource, context, original_prompt, \
+    created_at, worktree, branch, pr, worker_started_at, intervention_count, \
+    captain_review_trigger, session_ids, last_activity_at, plan, no_pr, \
+    worker_seq, reopen_seq, reopen_source, images, review_fail_count, \
+    clarifier_fail_count, spawn_fail_count, merge_fail_count, \
+    escalation_report, source, archived_at, github_repo";
+
+fn select_tasks_sql() -> &'static str {
+    static SQL: OnceLock<String> = OnceLock::new();
+    SQL.get_or_init(|| format!("SELECT {SELECT_COLS} FROM tasks"))
+}
+
 /// Fetch a single task by ID.
 pub async fn find_by_id(pool: &SqlitePool, id: i64) -> Result<Option<Task>> {
     find_by_id_exec(pool, id).await
 }
 
-/// Fetch a single task by its Linear ID (e.g. "ENG-123").
-pub async fn find_by_linear_id(pool: &SqlitePool, linear_id: &str) -> Result<Option<Task>> {
-    let row: Option<TaskRow> = sqlx::query_as("SELECT * FROM tasks WHERE linear_id = ?")
-        .bind(linear_id)
-        .fetch_optional(pool)
-        .await?;
-    Ok(row.map(|r| r.into_task()))
-}
-
 /// Load all non-archived tasks.
 pub async fn load_all(pool: &SqlitePool) -> Result<Vec<Task>> {
-    let rows: Vec<TaskRow> = sqlx::query_as("SELECT * FROM tasks WHERE archived_at IS NULL")
-        .fetch_all(pool)
-        .await?;
+    let sql = format!("{} WHERE archived_at IS NULL", select_tasks_sql());
+    let rows: Vec<TaskRow> = sqlx::query_as(&sql).fetch_all(pool).await?;
     Ok(rows.into_iter().map(|r| r.into_task()).collect())
 }
 
 /// Load all tasks including archived.
 pub async fn load_all_with_archived(pool: &SqlitePool) -> Result<Vec<Task>> {
-    let rows: Vec<TaskRow> = sqlx::query_as("SELECT * FROM tasks")
-        .fetch_all(pool)
-        .await?;
+    let rows: Vec<TaskRow> = sqlx::query_as(select_tasks_sql()).fetch_all(pool).await?;
     Ok(rows.into_iter().map(|r| r.into_task()).collect())
 }
 
 /// Load routing-level fields only (lighter query).
 pub async fn routing(pool: &SqlitePool) -> Result<Vec<TaskRouting>> {
     let rows: Vec<RoutingRow> = sqlx::query_as(
-        "SELECT id, title, status, project, worker, linear_id, resource
+        "SELECT id, title, status, project, worker, resource
          FROM tasks WHERE archived_at IS NULL",
     )
     .fetch_all(pool)
@@ -54,7 +58,7 @@ pub async fn routing(pool: &SqlitePool) -> Result<Vec<TaskRouting>> {
 
 // ── Column list constants ────────────────────────────────────────────────────
 
-const INSERT_COLS: &str = "title, status, project, worker, linear_id, resource, context,
+const INSERT_COLS: &str = "title, status, project, worker, resource, context,
     original_prompt, created_at, worktree, branch, pr, worker_started_at,
     intervention_count, captain_review_trigger, session_ids,
     last_activity_at, plan, no_pr, worker_seq, reopen_seq,
@@ -62,18 +66,18 @@ const INSERT_COLS: &str = "title, status, project, worker, linear_id, resource, 
     merge_fail_count, escalation_report, source, archived_at, github_repo";
 
 const INSERT_PLACEHOLDERS: &str =
-    "?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31";
+    "?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30";
 
 const INSERT_WITH_ID_PLACEHOLDERS: &str =
-    "?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31,?32";
+    "?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31";
 
-const UPDATE_SET: &str = "title=?1, status=?2, project=?3, worker=?4, linear_id=?5, resource=?6,
-    context=?7, original_prompt=?8, created_at=?9, worktree=?10, branch=?11, pr=?12,
-    worker_started_at=?13, intervention_count=?14, captain_review_trigger=?15,
-    session_ids=?16, last_activity_at=?17, plan=?18,
-    no_pr=?19, worker_seq=?20, reopen_seq=?21, reopen_source=?22, images=?23,
-    review_fail_count=?24, clarifier_fail_count=?25, spawn_fail_count=?26, merge_fail_count=?27,
-    escalation_report=?28, source=?29, archived_at=?30, github_repo=?31";
+const UPDATE_SET: &str = "title=?1, status=?2, project=?3, worker=?4, resource=?5,
+    context=?6, original_prompt=?7, created_at=?8, worktree=?9, branch=?10, pr=?11,
+    worker_started_at=?12, intervention_count=?13, captain_review_trigger=?14,
+    session_ids=?15, last_activity_at=?16, plan=?17,
+    no_pr=?18, worker_seq=?19, reopen_seq=?20, reopen_source=?21, images=?22,
+    review_fail_count=?23, clarifier_fail_count=?24, spawn_fail_count=?25, merge_fail_count=?26,
+    escalation_report=?27, source=?28, archived_at=?29, github_repo=?30";
 fn insert_task_sql() -> &'static str {
     static SQL: OnceLock<String> = OnceLock::new();
     SQL.get_or_init(|| format!("INSERT INTO tasks ({INSERT_COLS}) VALUES ({INSERT_PLACEHOLDERS})"))
@@ -90,7 +94,7 @@ fn insert_task_with_id_sql() -> &'static str {
 
 fn update_task_sql() -> &'static str {
     static SQL: OnceLock<String> = OnceLock::new();
-    SQL.get_or_init(|| format!("UPDATE tasks SET {UPDATE_SET} WHERE id=?32"))
+    SQL.get_or_init(|| format!("UPDATE tasks SET {UPDATE_SET} WHERE id=?31"))
         .as_str()
 }
 
@@ -104,7 +108,6 @@ fn bind_task_write_fields<'q>(query: SqliteQuery<'q>, task: &'q Task) -> SqliteQ
         .bind(task.status.as_str())
         .bind(&task.project)
         .bind(&task.worker)
-        .bind(&task.linear_id)
         .bind(&task.resource)
         .bind(&task.context)
         .bind(&task.original_prompt)
@@ -275,6 +278,26 @@ pub async fn persist_spawn(pool: &SqlitePool, task: &Task) -> Result<()> {
     Ok(())
 }
 
+/// Immediately persist merge session fields so the DB reflects the running
+/// merge session even if captain crashes before tick-end write-back.
+pub async fn persist_merge_spawn(pool: &SqlitePool, task: &Task) -> Result<()> {
+    let result = sqlx::query(
+        "UPDATE tasks SET session_ids=?, last_activity_at=? \
+         WHERE id=? AND status = 'captain-merging'",
+    )
+    .bind(task.session_ids.to_json())
+    .bind(&task.last_activity_at)
+    .bind(task.id)
+    .execute(pool)
+    .await?;
+    anyhow::ensure!(
+        result.rows_affected() > 0,
+        "persist_merge_spawn: 0 rows affected for task {} — status changed concurrently",
+        task.id,
+    );
+    Ok(())
+}
+
 /// Persist clarifier start fields immediately so the UI reflects the running
 /// clarifier while it's still in progress.
 pub async fn persist_clarify_start(pool: &SqlitePool, task: &Task) -> Result<()> {
@@ -360,10 +383,8 @@ async fn find_by_id_exec<'e>(
     exec: impl sqlx::Executor<'e, Database = sqlx::Sqlite>,
     id: i64,
 ) -> Result<Option<Task>> {
-    let row: Option<TaskRow> = sqlx::query_as("SELECT * FROM tasks WHERE id = ?")
-        .bind(id)
-        .fetch_optional(exec)
-        .await?;
+    let sql = format!("{} WHERE id = ?", select_tasks_sql());
+    let row: Option<TaskRow> = sqlx::query_as(&sql).bind(id).fetch_optional(exec).await?;
     Ok(row.map(|r| r.into_task()))
 }
 
