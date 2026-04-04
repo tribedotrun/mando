@@ -38,7 +38,7 @@ prompts:
 
     Title: {{ title }}
     Context: {{ context }}
-    {% if linear_id %}Linear: {{ linear_id }}{% endif %}
+    Task ID: {{ id }}
     {% if original_prompt %}
 
     ## Original Request
@@ -48,31 +48,24 @@ prompts:
     > {{ original_prompt }}
     {% endif %}
 
-    {% if linear_id %}
-    ## Workpad — REQUIRED
+    ## Workpad
 
-    You MUST maintain a workpad on {{ linear_id }} using `/mando-linear-workpad`.
-    The workpad is how humans track your progress — update it generously.
+    Maintain a local workpad at `~/.mando/plans/{{ id }}/workpad.md`.
+    This is how humans track your progress — update it generously.
 
     **When to update:**
     1. **Immediately on starting** — write your implementation plan (checklist)
     2. **After each major milestone** — check off plan items, update status
-    3. **After each commit** — upsert workpad with current progress (`/mando-linear-workpad`)
+    3. **After each commit** — update with current progress
     4. **After creating the PR** — add the PR link
     5. **When hitting blockers** — record them immediately
     6. **Before stopping** — final status with what was accomplished
-
-    The workpad should always reflect your current state. When in doubt, update it.
-    This is NOT optional — a task without workpad updates is considered incomplete.
-    {% endif %}
 
     ## Instructions
 
     - Read CLAUDE.md and understand project conventions and available skills.
     - Explore the codebase around the files mentioned in Context above.
-    {%- if linear_id %}
-    - Run `/mando-linear-workpad` to create your workpad with an implementation plan.
-    {%- endif %}
+    - Update your workpad at `~/.mando/plans/{{ id }}/workpad.md` with an implementation plan.
     - Implement the changes. Commit incrementally — small, logical commits.
     - Run {{ check_command }} after each change. Fix failures before moving on.
     {%- if not no_pr %}
@@ -85,9 +78,9 @@ prompts:
        - **Keep PR evidence current**: if you make code changes after capturing evidence, recapture and update the PR.
     {%- endif %}
     {% if no_pr %}
-    - This is a **research/audit task**. Do NOT create a PR. When your analysis is complete, write findings to your Linear workpad{% if not linear_id %} (if available){% endif %} and stop. Captain will detect your idle state and mark the task done.
+    - This is a **research/audit task**. Do NOT create a PR. When your analysis is complete, write findings to your workpad at `~/.mando/plans/{{ id }}/workpad.md` and stop. Captain will detect your idle state and mark the task done.
     {% else %}
-    - When done, use `/mando-pr` to create the PR.{% if linear_id %} Then update your workpad with the PR link.{% endif %}
+    - When done, use `/mando-pr` to create the PR. Then update your workpad with the PR link.
     - **CI** — after creating a PR, ensure CI passes. Fix all CI failures even if the check is informational (not blocking merge). A clean CI is a quality gate, not optional.
     - Ensure your branch is ahead of origin/main.
     {% endif %}
@@ -101,7 +94,7 @@ prompts:
     ## Escape Hatch
 
     If you hit a true blocker (missing auth/permissions/secrets, broken infra):
-    1. Record the blocker in your Linear workpad{% if not linear_id %} (if available){% endif %}.
+    1. Record the blocker in your workpad at `~/.mando/plans/{{ id }}/workpad.md`.
     2. Stop working — do NOT spin or retry indefinitely.
     3. Captain will detect your idle state and escalate to human.
 
@@ -112,7 +105,7 @@ prompts:
     ## Done Criteria
     {% if no_pr %}
     This is a no-PR task. Captain detects completion when you are idle at the prompt.
-    Write your findings, update the Linear workpad, and stop.
+    Write your findings to the workpad and stop.
     {% else %}
     Captain detects your PR via `gh pr list --head {{ branch }}`.
     Just create the PR when your implementation is complete, tested, and evidence is attached.
@@ -128,7 +121,7 @@ prompts:
     ## Task
 
     Title: {{ title }}
-    {% if linear_id %}Linear: {{ linear_id }}{% endif %}
+    Task ID: {{ id }}
     {% if original_prompt %}
 
     ## Original Request
@@ -146,35 +139,30 @@ prompts:
     codebase and made design decisions — do not second-guess the approach
     unless you find a concrete technical reason it won't work.
 
-    {% if linear_id %}
-    ## Workpad — REQUIRED
+    ## Workpad
 
-    You MUST maintain a workpad on {{ linear_id }} using `/mando-linear-workpad`.
-    The workpad is how humans track your progress — update it generously.
+    Maintain a local workpad at `~/.mando/plans/{{ id }}/workpad.md`.
+    This is how humans track your progress — update it generously.
 
     **When to update:**
     1. **Immediately on starting** — write your implementation plan (checklist)
     2. **After each major milestone** — check off plan items, update status
-    3. **After each commit** — upsert workpad with current progress (`/mando-linear-workpad`)
+    3. **After each commit** — update with current progress
     4. **After creating the PR** — add the PR link
     5. **When hitting blockers** — record them immediately
     6. **Before stopping** — final status with what was accomplished
-
-    The workpad should always reflect your current state. When in doubt, update it.
-    This is NOT optional — a task without workpad updates is considered incomplete.
-    {% endif %}
 
     ## Completion Checklist (all required before signaling DONE)
 
     You own the full lifecycle. Do not stop until every box is checked:
 
-    {% if linear_id %}- [ ] **Workpad** — create workpad on {{ linear_id }} with your plan (`/mando-linear-workpad`){% endif %}
+    - [ ] **Workpad** — update workpad at `~/.mando/plans/{{ id }}/workpad.md` with your plan
     - [ ] **Implement** — follow the brief's approach steps
     - [ ] **Quality gate** — run {{ check_command }}, verify changes work
     {% if no_pr %}
-    - [ ] **Findings** — write results to Linear workpad{% if not linear_id %} (if available){% endif %} and stop. No PR needed.
+    - [ ] **Findings** — write results to workpad at `~/.mando/plans/{{ id }}/workpad.md` and stop. No PR needed.
     {% else %}
-    - [ ] **PR** — use `/mando-pr` to create the PR{% if linear_id %}. Update workpad with PR link.{% endif %}
+    - [ ] **PR** — use `/mando-pr` to create the PR. Update workpad with PR link.
     - [ ] **Evidence** — runtime proof in the PR (after required, before optional). UI: screenshot for static, recording for interactive; always use an isolated/sandbox environment. Non-UI: CLI output under `### After` heading. NOT diagrams or test-only results. Self-verify: read screenshots or extract frames with ffmpeg. Recapture if code changes after evidence.
     - [ ] **CI** — fix all CI failures, even informational ones. A clean CI is a quality gate, not optional.
     - [ ] **Reviews** — address any reviewer comments
@@ -193,7 +181,7 @@ prompts:
     ## Escape Hatch
 
     If you hit a true blocker (missing auth/permissions/secrets, broken infra):
-    1. Record the blocker in your Linear workpad{% if not linear_id %} (if available){% endif %}.
+    1. Record the blocker in your workpad at `~/.mando/plans/{{ id }}/workpad.md`.
     2. Stop working — do NOT spin or retry indefinitely.
     3. Captain will detect your idle state and escalate to human.
 
@@ -204,7 +192,7 @@ prompts:
     ## Done Criteria
     {% if no_pr %}
     This is a no-PR task. Captain detects completion when you are idle at the prompt.
-    Write your findings, update the Linear workpad, and stop.
+    Write your findings to the workpad and stop.
     {% else %}
     Captain detects your PR via `gh pr list --head {{ branch }}`.
     Just create the PR when your implementation is complete, tested, and evidence is attached.
@@ -395,7 +383,7 @@ prompts:
     ## Task
 
     Title: {{ title }}
-    {% if linear_id %}Linear: {{ linear_id }}{% endif %}
+    Task ID: {{ id }}
     {% if original_prompt %}
 
     ## Original Request
@@ -412,23 +400,18 @@ prompts:
     The human left you instructions about what's done and what remains.
     Do NOT start from scratch. Do NOT discard uncommitted changes.
 
-    {% if linear_id %}
-    ## Workpad — REQUIRED
+    ## Workpad
 
-    You MUST maintain a workpad on {{ linear_id }} using `/mando-linear-workpad`.
-    The workpad is how humans track your progress — update it generously.
+    Maintain a local workpad at `~/.mando/plans/{{ id }}/workpad.md`.
+    This is how humans track your progress — update it generously.
 
     **When to update:**
     1. **Immediately on starting** — write current state assessment
     2. **After each major milestone** — check off items, update status
-    3. **After each commit** — upsert workpad with current progress (`/mando-linear-workpad`)
+    3. **After each commit** — update with current progress
     4. **After creating the PR** — add the PR link
     5. **When hitting blockers** — record them immediately
     6. **Before stopping** — final status with what was accomplished
-
-    The workpad should always reflect your current state. When in doubt, update it.
-    This is NOT optional — a task without workpad updates is considered incomplete.
-    {% endif %}
 
     ## Step 1: Assess Current State (do this FIRST)
 
@@ -451,12 +434,12 @@ prompts:
        - **Non-UI changes**: CLI output under `### After` heading with code fence. NOT diagrams, ASCII art, mockups, or test-only results.
        - **Self-verify**: read the screenshot or extract frames with ffmpeg. Fix → recapture if evidence doesn't show the fix.
        - **Keep current**: recapture and update PR if code changes after evidence.
-    5. Create or update the PR using `/mando-pr`{% if linear_id %}. Update workpad with PR link.{% endif %}
+    5. Create or update the PR using `/mando-pr`. Update workpad with PR link.
     6. **CI** — fix all CI failures, even informational ones. A clean CI is a quality gate, not optional.
     7. Ensure your branch is ahead of origin/main
     {%- endif %}
     {% if no_pr %}
-    4. Write findings to your Linear workpad{% if not linear_id %} (if available){% endif %} and stop. No PR needed.
+    4. Write findings to your workpad at `~/.mando/plans/{{ id }}/workpad.md` and stop. No PR needed.
     {% endif %}
     {% if worker_preamble %}
 
@@ -468,7 +451,7 @@ prompts:
     ## Escape Hatch
 
     If you hit a true blocker (missing auth/permissions/secrets, broken infra):
-    1. Record the blocker in your Linear workpad{% if not linear_id %} (if available){% endif %}.
+    1. Record the blocker in your workpad at `~/.mando/plans/{{ id }}/workpad.md`.
     2. Stop working — do NOT spin or retry indefinitely.
     3. Captain will detect your idle state and escalate to human.
 
@@ -479,7 +462,7 @@ prompts:
     ## Done Criteria
     {% if no_pr %}
     This is a no-PR task. Captain detects completion when you are idle at the prompt.
-    Write your findings, update the Linear workpad, and stop.
+    Write your findings to the workpad and stop.
     {% else %}
     Captain detects your PR via `gh pr list --head {{ branch }}`.
     Just create the PR when your implementation is complete, tested, and evidence is attached.
@@ -497,7 +480,9 @@ prompts:
     - Do NOT create a new PR — just rebase and force-push the existing branch.
 
   task_analyst: |
-    You are a task analyst. Answer the human's question using only the context below.
+    You are a task analyst with full access to the task's codebase.
+    You can read files, search code, and inspect git history to answer questions.
+    Do NOT modify any files — this is a read-only session.
 
     ## Task
     - Title: {{ title }}
@@ -514,7 +499,7 @@ prompts:
     ## Question
     {{ question }}
 
-    Answer concisely.
+    Use the codebase to give a thorough, evidence-based answer. Be concise.
 
   restart_resume: >
     Captain restarted you. Reason: {{ reason }}. Resume from current state.
@@ -653,18 +638,12 @@ initial_prompts:
   worker: >
     Read .ai/briefs/{{ brief_filename }} and implement the task described there.
     Start by exploring the codebase.
-    {% if linear_id %}
-    IMPORTANT: You MUST run /mando-linear-workpad to create a workpad on {{ linear_id }}
-    with your implementation plan BEFORE starting any code changes. Update the workpad
-    after each milestone and when done. This is NOT optional.
-    {% endif %}
+    IMPORTANT: Maintain a workpad at ~/.mando/plans/{{ id }}/workpad.md with your
+    implementation plan. Update it after each milestone and when done.
     {% if not no_pr %}
     Use /mando-pr to create the PR when done (not raw gh commands).
     {% endif %}
   adopted: >
     Read .ai/briefs/{{ brief_filename }} — a human was working here and handed off
     to you. Start by assessing current state: git status, git log, and the project's quality gate.
-    {% if linear_id %}
-    IMPORTANT: Run /mando-linear-workpad to update the workpad on {{ linear_id }} with
-    your assessment and plan.
-    {% endif %}
+    Update the workpad at ~/.mando/plans/{{ id }}/workpad.md with your assessment and plan.

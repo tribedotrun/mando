@@ -5,7 +5,6 @@ import {
   ClaudeCodeContent,
   TelegramContent,
   ProjectContent,
-  LinearContent,
   type ClaudeCheckResult,
 } from '#renderer/components/SetupStepContent';
 
@@ -76,15 +75,10 @@ function useStepStates() {
     recheckClaude,
     hasProject: Object.keys(config.captain?.projects ?? {}).length > 0,
     hasTelegram: !!(config.channels?.telegram?.enabled && hasBotToken),
-    hasLinear: !!(
-      config.features?.linear &&
-      config.captain?.linearTeam &&
-      config.env?.LINEAR_API_KEY
-    ),
   };
 }
 
-type StepId = 'project' | 'claude-code' | 'telegram' | 'linear';
+type StepId = 'project' | 'claude-code' | 'telegram';
 
 interface StepDef {
   id: StepId;
@@ -121,12 +115,6 @@ export function SetupChecklist({ onDismiss, onMinimize }: SetupChecklistProps): 
       title: 'Add a project',
       completed: states.hasProject,
       expandable: !states.hasProject,
-    },
-    {
-      id: 'linear',
-      title: 'Connect Linear for task sync',
-      completed: states.hasLinear,
-      expandable: true,
     },
   ];
 
@@ -309,7 +297,6 @@ function StepRow({
             )}
             {step.id === 'telegram' && <TelegramContent />}
             {step.id === 'project' && <ProjectContent />}
-            {step.id === 'linear' && <LinearContent />}
           </div>
         </div>
       )}

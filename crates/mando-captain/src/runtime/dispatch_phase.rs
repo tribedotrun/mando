@@ -9,7 +9,6 @@ use mando_types::task::{ItemStatus, Task};
 
 use crate::biz::dispatch_logic;
 use crate::runtime::clarifier::{self, ClarifierStatus};
-use crate::runtime::linear_integration;
 use crate::runtime::notify::Notifier;
 
 /// Dispatch ready and new items to workers.
@@ -116,22 +115,6 @@ pub(crate) async fn dispatch_new_work(
                                 mando_shared::telegram_format::escape_html(&item.title),
                             );
                             notifier.normal(&msg).await;
-
-                            // Linear writeback: InProgress.
-                            if let Err(e) = linear_integration::writeback_status(item, config).await
-                            {
-                                tracing::warn!(module = "captain", %e, "Linear status writeback failed");
-                            }
-                            if let Err(e) = linear_integration::upsert_workpad(
-                                item,
-                                config,
-                                &format!("Worker spawned, working on: {}", item.title),
-                                pool,
-                            )
-                            .await
-                            {
-                                tracing::warn!(module = "captain", %e, "Linear workpad upsert failed");
-                            }
                         }
                         Err(e) => {
                             let item = &mut items[idx];
@@ -224,7 +207,7 @@ pub(crate) async fn dispatch_new_work(
                 cost_usd: None,
                 duration_ms: None,
                 resumed: false,
-                task_id: &item.best_id(),
+                task_id: &item.id.to_string(),
                 status: mando_types::SessionStatus::Running,
                 worker_name: "",
             },
@@ -241,16 +224,8 @@ pub(crate) async fn dispatch_new_work(
         )
         .await;
 
-        let linear_cli = &config.captain.linear_cli_path;
-        match clarifier::run_clarification(
-            &items[idx],
-            linear_cli,
-            workflow,
-            config,
-            pool,
-            Some(&session_id),
-        )
-        .await
+        match clarifier::run_clarification(&items[idx], workflow, config, pool, Some(&session_id))
+            .await
         {
             Ok(result) => {
                 let item = &mut items[idx];

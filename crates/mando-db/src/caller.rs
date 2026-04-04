@@ -12,6 +12,7 @@ pub enum SessionCaller {
     Clarifier,
     DeepClarifier,
     CaptainReviewAsync,
+    CaptainMergeAsync,
     ExhaustionReport,
     TaskAsk,
     ScoutProcess,
@@ -19,7 +20,6 @@ pub enum SessionCaller {
     ScoutQa,
     ScoutResearch,
     ScoutAct,
-    VoiceAgent,
 }
 
 /// Display group — used for UI category chips and aggregation.
@@ -30,7 +30,6 @@ pub enum CallerGroup {
     CaptainReview,
     CaptainOps,
     Scout,
-    Voice,
 }
 
 impl SessionCaller {
@@ -41,6 +40,7 @@ impl SessionCaller {
             Self::Clarifier => "clarifier",
             Self::DeepClarifier => "deep-clarifier",
             Self::CaptainReviewAsync => "captain-review-async",
+            Self::CaptainMergeAsync => "captain-merge-async",
             Self::ExhaustionReport => "exhaustion-report",
             Self::TaskAsk => "task-ask",
             Self::ScoutProcess => "scout-process",
@@ -48,7 +48,6 @@ impl SessionCaller {
             Self::ScoutQa => "scout-qa",
             Self::ScoutResearch => "scout-research",
             Self::ScoutAct => "scout-act",
-            Self::VoiceAgent => "voice-agent",
         }
     }
 
@@ -59,6 +58,7 @@ impl SessionCaller {
             "clarifier" => Some(Self::Clarifier),
             "deep-clarifier" => Some(Self::DeepClarifier),
             "captain-review-async" => Some(Self::CaptainReviewAsync),
+            "captain-merge-async" => Some(Self::CaptainMergeAsync),
             "exhaustion-report" => Some(Self::ExhaustionReport),
             "task-ask" => Some(Self::TaskAsk),
             "scout-process" => Some(Self::ScoutProcess),
@@ -66,7 +66,6 @@ impl SessionCaller {
             "scout-qa" => Some(Self::ScoutQa),
             "scout-research" => Some(Self::ScoutResearch),
             "scout-act" => Some(Self::ScoutAct),
-            "voice-agent" => Some(Self::VoiceAgent),
             _ => None,
         }
     }
@@ -77,13 +76,14 @@ impl SessionCaller {
             Self::Worker => CallerGroup::Workers,
             Self::Clarifier | Self::DeepClarifier => CallerGroup::Clarifier,
             Self::CaptainReviewAsync => CallerGroup::CaptainReview,
-            Self::ExhaustionReport | Self::TaskAsk => CallerGroup::CaptainOps,
+            Self::CaptainMergeAsync | Self::ExhaustionReport | Self::TaskAsk => {
+                CallerGroup::CaptainOps
+            }
             Self::ScoutProcess
             | Self::ScoutArticle
             | Self::ScoutQa
             | Self::ScoutResearch
             | Self::ScoutAct => CallerGroup::Scout,
-            Self::VoiceAgent => CallerGroup::Voice,
         }
     }
 
@@ -94,6 +94,7 @@ impl SessionCaller {
             Self::Clarifier,
             Self::DeepClarifier,
             Self::CaptainReviewAsync,
+            Self::CaptainMergeAsync,
             Self::ExhaustionReport,
             Self::TaskAsk,
             Self::ScoutProcess,
@@ -101,7 +102,6 @@ impl SessionCaller {
             Self::ScoutQa,
             Self::ScoutResearch,
             Self::ScoutAct,
-            Self::VoiceAgent,
         ]
     }
 
@@ -126,7 +126,6 @@ impl CallerGroup {
             Self::CaptainReview => "captain-review",
             Self::CaptainOps => "captain-ops",
             Self::Scout => "scout",
-            Self::Voice => "voice",
         }
     }
 }
@@ -163,6 +162,6 @@ mod tests {
         assert!(SessionCaller::ScoutProcess.requires_scout_item());
         assert!(SessionCaller::ScoutArticle.requires_scout_item());
         assert!(!SessionCaller::Worker.requires_scout_item());
-        assert!(!SessionCaller::VoiceAgent.requires_scout_item());
+        assert!(!SessionCaller::CaptainReviewAsync.requires_scout_item());
     }
 }

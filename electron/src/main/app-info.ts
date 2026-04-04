@@ -1,5 +1,5 @@
 import { app } from 'electron';
-import { readAppPackageJson } from '#main/app-package';
+import { readAppPackageJson, readAppPackageVersion } from '#main/app-package';
 
 interface AppStackItem {
   name: string;
@@ -25,7 +25,7 @@ function dependencyVersion(pkg: Record<string, unknown>, key: string): string {
 export function getAppInfo(): AppInfo {
   const pkg = readAppPackageJson();
   return {
-    appVersion: app.getVersion(),
+    appVersion: readAppPackageVersion() ?? app.getVersion(),
     stack: [
       { name: 'Electron', version: process.versions.electron ?? '' },
       { name: 'React', version: dependencyVersion(pkg, 'react') },

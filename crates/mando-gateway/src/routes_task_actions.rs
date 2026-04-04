@@ -1,4 +1,4 @@
-//! Task lifecycle-action route handlers (accept, cancel, reopen, rework, ask, handoff).
+//! Task lifecycle-action route handlers (accept, cancel, reopen, rework, handoff).
 
 use axum::extract::State;
 use axum::http::StatusCode;
@@ -19,12 +19,6 @@ pub(crate) struct FeedbackBody {
     pub id: i64,
     #[serde(default)]
     pub feedback: String,
-}
-
-#[derive(Deserialize)]
-pub(crate) struct AskBody {
-    pub id: i64,
-    pub question: String,
 }
 
 /// POST /api/tasks/accept
@@ -87,6 +81,9 @@ pub(crate) async fn post_task_reopen(
         .await
         .map_err(internal_error)?
         .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "item not found"))?;
+    // Close any active ask session — the worker will modify the codebase.
+    crate::routes_task_ask::close_ask_session(&state, id).await;
+
     let old_session_id = item.session_ids.worker.clone();
     let outcome = mando_captain::runtime::action_contract::reopen_item(
         &mut item,
@@ -198,6 +195,10 @@ pub(crate) async fn post_task_rework(
     Json(body): Json<FeedbackBody>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let id = body.id;
+
+    // Close any active ask session — the worktree will be destroyed.
+    crate::routes_task_ask::close_ask_session(&state, id).await;
+
     let store = state.task_store.write().await;
     match mando_captain::runtime::dashboard::rework_item(&store, id, &body.feedback).await {
         Ok(()) => {
@@ -221,45 +222,6 @@ pub(crate) async fn post_task_rework(
                 Some(json!({"action": "rework"})),
             );
             Ok(Json(json!({"ok": true})))
-        }
-        Err(e) => Err(error_response(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            &e.to_string(),
-        )),
-    }
-}
-
-/// POST /api/tasks/ask
-pub(crate) async fn post_task_ask(
-    State(state): State<AppState>,
-    Json(body): Json<AskBody>,
-) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    let id = body.id;
-    let config = state.config.load_full();
-    let (item, pool) = {
-        let store = state.task_store.read().await;
-        let item = store.find_by_id(id).await.unwrap_or(None).ok_or_else(|| {
-            error_response(StatusCode::NOT_FOUND, &format!("item {id} not found"))
-        })?;
-        (item, store.pool().clone())
-    };
-    let workflow = state.captain_workflow.load_full();
-    match mando_captain::runtime::task_ask::ask_task_with(
-        &config,
-        &item,
-        id,
-        &pool,
-        &body.question,
-        &workflow,
-    )
-    .await
-    {
-        Ok(val) => {
-            state.bus.send(
-                mando_types::BusEvent::Tasks,
-                Some(json!({"action": "ask", "id": id})),
-            );
-            Ok(Json(val))
         }
         Err(e) => Err(error_response(
             StatusCode::INTERNAL_SERVER_ERROR,

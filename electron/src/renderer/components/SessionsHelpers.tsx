@@ -37,7 +37,6 @@ const CALLER_LABELS: Record<string, string> = {
   'scout-qa': 'Q&A',
   'scout-research': 'research',
   'scout-act': 'act',
-  'voice-agent': 'voice',
 };
 
 export function formatCallerLabel(caller: string): string {
@@ -84,11 +83,8 @@ export function SessionsEmptyState(): React.ReactElement {
         />
         <circle cx="35" cy="19" r="2" stroke="var(--color-text-4)" strokeWidth="1.5" />
       </svg>
-      <span className="text-subheading mb-1" style={{ color: 'var(--color-text-2)' }}>
+      <span className="text-subheading" style={{ color: 'var(--color-text-2)' }}>
         No sessions yet
-      </span>
-      <span className="text-body" style={{ color: 'var(--color-text-3)' }}>
-        Sessions appear here when AI agents work on tasks.
       </span>
     </div>
   );

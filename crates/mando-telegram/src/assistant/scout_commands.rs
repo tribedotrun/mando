@@ -13,7 +13,7 @@ use crate::gateway_paths as paths;
 /// Items per page for paginated list views.
 const ITEMS_PER_PAGE: usize = 3;
 
-// ── /list (rich list with summaries) ──────────────────────────────
+// ── /scout_list (rich list with summaries) ────────────────────────
 
 pub async fn cmd_list(bot: &mut TelegramBot, chat_id: &str, args: &str) -> Result<()> {
     if let Err(e) = send_list_page(bot, chat_id, args.trim(), 0).await {
@@ -233,7 +233,7 @@ pub async fn show_card(bot: &TelegramBot, chat_id: &str, id: i64) -> Result<()> 
     Ok(())
 }
 
-// ── /research ──────────────────────────────────────────────────────
+// ── /scout_research ────────────────────────────────────────────────
 
 pub async fn cmd_research(bot: &mut TelegramBot, chat_id: &str, args: &str) -> Result<()> {
     let topic = args.trim();
@@ -241,7 +241,7 @@ pub async fn cmd_research(bot: &mut TelegramBot, chat_id: &str, args: &str) -> R
         send_html(
             bot,
             chat_id,
-            "Usage: /research &lt;topic&gt;\nExample: /research Rust async patterns",
+            "Usage: /scout_research &lt;topic&gt;\nExample: /scout_research Rust async patterns",
         )
         .await?;
         return Ok(());

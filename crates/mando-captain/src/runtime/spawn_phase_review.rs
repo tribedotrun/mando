@@ -6,8 +6,6 @@ use mando_config::workflow::CaptainWorkflow;
 use mando_types::captain::Action;
 use mando_types::Task;
 
-use crate::runtime::linear_integration;
-
 pub(crate) async fn handle_captain_review(
     action: &Action,
     items: &mut [Task],
@@ -53,19 +51,5 @@ pub(crate) async fn trigger_captain_review(
         );
         it.status = mando_types::task::ItemStatus::CaptainReviewing;
         it.captain_review_trigger = trigger.parse().ok();
-    }
-
-    if let Err(e) = linear_integration::writeback_status(it, config).await {
-        tracing::warn!(module = "captain", %e, "Linear status writeback failed");
-    }
-    if let Err(e) = linear_integration::upsert_workpad(
-        it,
-        config,
-        &format!("Captain reviewing ({})", trigger),
-        pool,
-    )
-    .await
-    {
-        tracing::warn!(module = "captain", %e, "Linear workpad upsert failed");
     }
 }

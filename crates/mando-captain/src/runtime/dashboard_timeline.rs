@@ -10,16 +10,7 @@ pub async fn get_item_timeline(
     item: Option<&mando_types::Task>,
     pool: &sqlx::SqlitePool,
 ) -> Result<serde_json::Value> {
-    let task_id_num: i64 = match item_id.parse() {
-        Ok(n) => n,
-        Err(_) => {
-            // Non-numeric ID (e.g. Linear ID "ENG-123") — look up the task's numeric ID.
-            mando_db::queries::tasks::find_by_linear_id(pool, item_id)
-                .await?
-                .map(|t| t.id)
-                .unwrap_or(0)
-        }
-    };
+    let task_id_num: i64 = item_id.parse().unwrap_or(0);
 
     if let Some(item) = item {
         timeline_backfill::backfill_if_needed(item, pool).await;

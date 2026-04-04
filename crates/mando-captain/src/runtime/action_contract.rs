@@ -8,9 +8,7 @@ use mando_types::task::{ItemStatus, ReviewTrigger, Task};
 use crate::biz::spawn_logic;
 use crate::runtime::task_notes::append_tagged_note;
 
-use super::{
-    captain_review, linear_integration, notify::Notifier, spawner_lifecycle, timeline_emit,
-};
+use super::{captain_review, notify::Notifier, spawner_lifecycle, timeline_emit};
 
 pub enum ReopenOutcome {
     Reopened,
@@ -201,7 +199,7 @@ pub async fn nudge_item(
                 &wt_path,
                 "worker",
                 &worker,
-                &item.best_id(),
+                &item.id.to_string(),
                 true,
             )
             .await;
@@ -223,23 +221,6 @@ pub async fn nudge_item(
                 pool,
             )
             .await;
-
-            if let Err(e) = linear_integration::writeback_status(item, config).await {
-                tracing::warn!(module = "captain", %e, "Linear status writeback failed");
-            }
-            if let Err(e) = linear_integration::upsert_workpad(
-                item,
-                config,
-                &format!(
-                    "Nudged (#{}/{})",
-                    new_count, workflow.agent.max_interventions
-                ),
-                pool,
-            )
-            .await
-            {
-                tracing::warn!(module = "captain", %e, "Linear workpad upsert failed");
-            }
         }
         Err(e) => {
             crate::io::health_store::persist_nudge_count(&worker, new_count);
@@ -346,13 +327,10 @@ pub async fn reopen_item(
             item.status = ItemStatus::InProgress;
             item.worker = Some(result.session_name);
             item.session_ids.worker = Some(result.session_id);
+            item.session_ids.ask = None;
             item.branch = Some(result.branch);
             item.worktree = Some(result.worktree);
             item.last_activity_at = Some(mando_types::now_rfc3339());
-
-            if let Err(e) = linear_integration::writeback_status(item, config).await {
-                tracing::warn!(module = "captain", %e, "Linear status writeback failed");
-            }
 
             Ok(ReopenOutcome::Reopened)
         }
@@ -394,19 +372,6 @@ async fn trigger_review(
 ) -> Result<()> {
     reset_review_retry(item, trigger);
     captain_review::spawn_review(item, trigger.as_str(), config, workflow, notifier, pool).await?;
-    if let Err(e) = linear_integration::writeback_status(item, config).await {
-        tracing::warn!(module = "captain", %e, "Linear status writeback failed");
-    }
-    if let Err(e) = linear_integration::upsert_workpad(
-        item,
-        config,
-        &format!("Captain reviewing ({})", trigger.as_str()),
-        pool,
-    )
-    .await
-    {
-        tracing::warn!(module = "captain", %e, "Linear workpad upsert failed");
-    }
     Ok(())
 }
 

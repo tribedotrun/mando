@@ -61,6 +61,60 @@ export function PrMarkdown({ text }: { text: string }): React.ReactElement {
       continue;
     }
 
+    // Markdown table
+    if (
+      line.trim().startsWith('|') &&
+      i + 1 < lines.length &&
+      /^\|[\s:|-]+\|$/.test(lines[i + 1].trim())
+    ) {
+      const tableLines: string[] = [];
+      while (i < lines.length && lines[i].trim().startsWith('|')) {
+        tableLines.push(lines[i]);
+        i++;
+      }
+      const headerCells = tableLines[0]
+        .split('|')
+        .filter(Boolean)
+        .map((c) => c.trim());
+      const rows = tableLines.slice(2).map((row) =>
+        row
+          .split('|')
+          .filter(Boolean)
+          .map((c) => c.trim()),
+      );
+      elements.push(
+        <div key={elements.length} className="my-2 overflow-x-auto">
+          <table className="w-full text-caption" style={{ borderCollapse: 'collapse' }}>
+            <thead>
+              <tr style={{ borderBottom: '1px solid var(--color-border)' }}>
+                {headerCells.map((h, ci) => (
+                  <th
+                    key={ci}
+                    className="px-3 py-1.5 text-left font-medium"
+                    style={{ color: 'var(--color-text-1)' }}
+                  >
+                    {renderInline(h)}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row, ri) => (
+                <tr key={ri} style={{ borderBottom: '1px solid var(--color-border-subtle)' }}>
+                  {row.map((cell, ci) => (
+                    <td key={ci} className="px-3 py-1.5" style={{ color: 'var(--color-text-2)' }}>
+                      {renderInline(cell)}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>,
+      );
+      continue;
+    }
+
     // Horizontal rule
     if (/^---+$|^\*\*\*+$|^___+$/.test(line.trim())) {
       elements.push(

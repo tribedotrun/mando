@@ -2,13 +2,8 @@ import React, { useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { fetchHealth } from '#renderer/api';
 import { inputStyle, inputCls } from '#renderer/styles';
-import {
-  MODE_COPY,
-  ModeCard,
-  PlannedTaskFields,
-  type TaskMode,
-} from '#renderer/components/AddTaskModeFields';
 import { useMountEffect } from '#renderer/hooks/useMountEffect';
+import { useBulkCreateStore } from '#renderer/stores/bulkCreateStore';
 import { useTaskStore } from '#renderer/stores/taskStore';
 
 const LAST_PROJECT_KEY = 'mando:lastProject';
@@ -17,6 +12,8 @@ const projectSelectCls =
   'rounded-md px-3 py-2 text-[12px] font-medium uppercase tracking-[0.06em] focus-visible:outline-none';
 const footerButtonCls =
   'px-4 py-2 text-[13px] font-semibold transition-colors hover:bg-[var(--color-accent-hover)] active:bg-[var(--color-accent-pressed)] disabled:opacity-40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-accent)]';
+const bulkToggleCls =
+  'rounded-md px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wider transition-colors';
 
 interface Props {
   open: boolean;
@@ -24,13 +21,9 @@ interface Props {
 }
 
 function AddTaskFormInner({ onClose }: { onClose: () => void }): React.ReactElement {
-  const [mode, setMode] = useState<TaskMode>('quick');
+  const [bulk, setBulk] = useState(false);
   const [title, setTitle] = useState('');
   const [project, setProject] = useState(() => localStorage.getItem(LAST_PROJECT_KEY) ?? '');
-  const [context, setContext] = useState('');
-  const [linearId, setLinearId] = useState('');
-  const [planPath, setPlanPath] = useState('');
-  const [noPr, setNoPr] = useState(false);
   const [image, setImage] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -39,6 +32,7 @@ function AddTaskFormInner({ onClose }: { onClose: () => void }): React.ReactElem
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const add = useTaskStore((s) => s.add);
+  const startBulk = useBulkCreateStore((s) => s.start);
 
   const { data: projects = [] } = useQuery({
     queryKey: ['projects'],
@@ -53,7 +47,7 @@ function AddTaskFormInner({ onClose }: { onClose: () => void }): React.ReactElem
   const effectiveProject = savedProject || (projects.length === 1 ? projects[0] : '');
   const projectRequired = projects.length > 1;
   const trimmedTitle = title.trim();
-  const trimmedPlanPath = planPath.trim();
+  const textareaRows = bulk ? Math.max(6, Math.min(12, title.split('\n').length + 1)) : 5;
 
   useMountEffect(() => {
     setTimeout(() => inputRef.current?.focus(), 50);
@@ -68,12 +62,8 @@ function AddTaskFormInner({ onClose }: { onClose: () => void }): React.ReactElem
   });
 
   const resetForm = () => {
-    setMode('quick');
+    setBulk(false);
     setTitle('');
-    setContext('');
-    setLinearId('');
-    setPlanPath('');
-    setNoPr(false);
     setSubmitError(null);
     if (preview) URL.revokeObjectURL(preview);
     setImage(null);
@@ -98,11 +88,7 @@ function AddTaskFormInner({ onClose }: { onClose: () => void }): React.ReactElem
     else localStorage.removeItem(LAST_PROJECT_KEY);
   };
 
-  const canSubmit =
-    !submitting &&
-    !!trimmedTitle &&
-    (!projectRequired || !!effectiveProject) &&
-    (mode !== 'planned' || !!trimmedPlanPath);
+  const canSubmit = !submitting && !!trimmedTitle && (!projectRequired || !!effectiveProject);
 
   const handleSubmit = async () => {
     if (!trimmedTitle) return;
@@ -110,24 +96,25 @@ function AddTaskFormInner({ onClose }: { onClose: () => void }): React.ReactElem
       setSubmitError('Select a project before handing work to Mando.');
       return;
     }
-    if (mode === 'planned' && !trimmedPlanPath) {
-      setSubmitError('Planned task needs the brief or plan path.');
+
+    if (effectiveProject) localStorage.setItem(LAST_PROJECT_KEY, effectiveProject);
+
+    if (bulk) {
+      startBulk(trimmedTitle, effectiveProject || undefined);
+      resetForm();
+      onClose();
       return;
     }
 
     setSubmitting(true);
     setSubmitError(null);
     try {
-      if (effectiveProject) localStorage.setItem(LAST_PROJECT_KEY, effectiveProject);
       await add({
         title: trimmedTitle,
         project: effectiveProject || undefined,
-        context: mode === 'planned' && context.trim() ? context.trim() : undefined,
-        linearId: mode === 'planned' && linearId.trim() ? linearId.trim() : undefined,
-        plan: mode === 'planned' ? trimmedPlanPath : undefined,
-        noPr: mode === 'planned' && noPr,
         images: image ? [image] : undefined,
       });
+
       resetForm();
       onClose();
     } catch (err) {
@@ -155,8 +142,6 @@ function AddTaskFormInner({ onClose }: { onClose: () => void }): React.ReactElem
     }
   };
 
-  const copy = MODE_COPY[mode];
-
   return (
     <div
       className="fixed inset-0 z-[200] flex items-center justify-center"
@@ -176,16 +161,23 @@ function AddTaskFormInner({ onClose }: { onClose: () => void }): React.ReactElem
           boxShadow: '0 24px 64px #00000099, 0 4px 16px #00000066',
         }}
       >
-        <div
-          className="border-b px-5 pb-4 pt-5"
-          style={{ borderColor: 'var(--color-border-subtle)' }}
-        >
-          <div className="text-[18px] font-semibold" style={{ color: 'var(--color-text-1)' }}>
-            New task
-          </div>
-          <div className="mt-4 grid gap-2 md:grid-cols-2">
-            <ModeCard mode="quick" selected={mode === 'quick'} onSelect={setMode} />
-            <ModeCard mode="planned" selected={mode === 'planned'} onSelect={setMode} />
+        <div className="px-5 pb-2 pt-5">
+          <div className="flex items-center justify-between">
+            <div className="text-[18px] font-semibold" style={{ color: 'var(--color-text-1)' }}>
+              New task
+            </div>
+            <button
+              type="button"
+              onClick={() => setBulk((b) => !b)}
+              className={bulkToggleCls}
+              style={{
+                background: bulk ? 'var(--color-accent-wash)' : 'var(--color-surface-2)',
+                color: bulk ? 'var(--color-accent)' : 'var(--color-text-3)',
+                border: `1px solid ${bulk ? 'var(--color-accent)' : 'var(--color-border-subtle)'}`,
+              }}
+            >
+              Bulk
+            </button>
           </div>
         </div>
 
@@ -205,39 +197,24 @@ function AddTaskFormInner({ onClose }: { onClose: () => void }): React.ReactElem
             )}
 
             <div>
-              <label
-                className="mb-1 block text-xs font-medium uppercase tracking-wider"
-                style={{ color: 'var(--color-text-3)' }}
-              >
-                Task title
-              </label>
               <textarea
                 ref={inputRef}
                 data-testid="task-title-input"
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
-                onPaste={handlePaste}
-                placeholder="What needs to be done?"
-                rows={3}
+                onPaste={bulk ? undefined : handlePaste}
+                placeholder={
+                  bulk
+                    ? 'Describe your tasks — one per line, or free-form.\nAI will parse individual items.'
+                    : 'What needs to be done?'
+                }
+                rows={textareaRows}
                 className={titleInputCls}
                 style={{ ...inputStyle, caretColor: 'var(--color-accent)' }}
               />
             </div>
 
-            {mode === 'planned' && (
-              <PlannedTaskFields
-                linearId={linearId}
-                onLinearIdChange={setLinearId}
-                planPath={planPath}
-                onPlanPathChange={setPlanPath}
-                context={context}
-                onContextChange={setContext}
-                noPr={noPr}
-                onNoPrChange={setNoPr}
-              />
-            )}
-
-            {preview && image && (
+            {!bulk && preview && image && (
               <div
                 className="rounded-xl border p-3"
                 style={{ borderColor: 'var(--color-border-subtle)' }}
@@ -304,38 +281,42 @@ function AddTaskFormInner({ onClose }: { onClose: () => void }): React.ReactElem
               </select>
             )}
 
-            <input
-              ref={fileRef}
-              type="file"
-              accept="image/*"
-              className="hidden"
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                if (file) setImageFile(file);
-                e.target.value = '';
-              }}
-            />
-            <button
-              type="button"
-              onClick={() => fileRef.current?.click()}
-              className="flex h-9 w-9 items-center justify-center rounded-md transition-colors hover:bg-[var(--color-surface-3)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--color-accent)]"
-              style={{ color: 'var(--color-text-3)' }}
-              aria-label="Attach image"
-              title="Attach image (or paste)"
-            >
-              <svg
-                width="15"
-                height="15"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" />
-              </svg>
-            </button>
+            {!bulk && (
+              <>
+                <input
+                  ref={fileRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) setImageFile(file);
+                    e.target.value = '';
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={() => fileRef.current?.click()}
+                  className="flex h-9 w-9 items-center justify-center rounded-md transition-colors hover:bg-[var(--color-surface-3)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--color-accent)]"
+                  style={{ color: 'var(--color-text-3)' }}
+                  aria-label="Attach image"
+                  title="Attach image (or paste)"
+                >
+                  <svg
+                    width="15"
+                    height="15"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" />
+                  </svg>
+                </button>
+              </>
+            )}
 
             {projectRequired && !effectiveProject && (
               <span className="text-[12px]" style={{ color: 'var(--color-stale)' }}>
@@ -345,9 +326,6 @@ function AddTaskFormInner({ onClose }: { onClose: () => void }): React.ReactElem
           </div>
 
           <div className="flex items-center gap-3">
-            <span className="text-[11px]" style={{ color: 'var(--color-text-4)' }}>
-              {'\u2318'}Enter
-            </span>
             <button
               data-testid="submit-task-btn"
               onClick={() => void handleSubmit()}
@@ -359,7 +337,7 @@ function AddTaskFormInner({ onClose }: { onClose: () => void }): React.ReactElem
                 background: 'var(--color-accent)',
               }}
             >
-              {submitting ? 'Working…' : copy.submit}
+              {submitting ? 'Working…' : 'Create'}
             </button>
           </div>
         </div>

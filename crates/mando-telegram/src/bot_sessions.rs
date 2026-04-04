@@ -35,11 +35,15 @@ impl TelegramBot {
     pub fn ask_session_rounds(&self, cid: &str) -> u32 {
         self.ask_sessions.get(cid).map(|s| s.rounds).unwrap_or(0)
     }
-    pub fn open_ask_session(&mut self, cid: &str) {
+    pub fn open_ask_session(&mut self, cid: &str, task_id: i64) {
         // Close conflicting scout QA session so task-ask wins plain-text routing
         self.qa_sessions.remove(cid);
         self.ask_sessions
-            .insert(cid.to_string(), Session::default());
+            .insert(cid.to_string(), Session::new(task_id));
+    }
+
+    pub fn ask_session_task_id(&self, cid: &str) -> Option<i64> {
+        self.ask_sessions.get(cid).map(|s| s.task_id)
     }
     pub fn close_ask_session(&mut self, cid: &str) {
         self.ask_sessions.remove(cid);

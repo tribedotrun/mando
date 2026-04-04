@@ -316,6 +316,43 @@ async fn test_review_failure_budget_moves_item_to_errored_on_fifth_attempt() {
 }
 
 #[tokio::test]
+async fn test_nudge_verdict_resets_worker_started_at() {
+    let db = mando_db::Db::open_in_memory().await.unwrap();
+    let pool = db.pool().clone();
+    let notifier =
+        crate::runtime::notify::Notifier::new(std::sync::Arc::new(mando_shared::EventBus::new()));
+
+    let mut item = Task::new("test");
+    item.status = mando_types::task::ItemStatus::CaptainReviewing;
+    item.worker_started_at = Some("2020-01-01T00:00:00Z".to_string());
+
+    let verdict = CaptainVerdict {
+        action: "nudge".into(),
+        feedback: "keep going".into(),
+        report: None,
+    };
+    let config = mando_config::settings::Config::default();
+    let workflow = mando_config::workflow::CaptainWorkflow::compiled_default();
+    apply_verdict(&mut item, &verdict, &config, &workflow, &notifier, &pool)
+        .await
+        .unwrap();
+
+    assert_eq!(item.status, mando_types::task::ItemStatus::InProgress);
+    // worker_started_at must be reset to ~now, not the old 2020 timestamp.
+    let started = item.worker_started_at.as_deref().unwrap();
+    assert_ne!(started, "2020-01-01T00:00:00Z", "timestamp was not reset");
+    // Verify it's a valid RFC 3339 timestamp within the last 5 seconds.
+    let parsed =
+        time::OffsetDateTime::parse(started, &time::format_description::well_known::Rfc3339)
+            .expect("worker_started_at must be valid RFC 3339");
+    let elapsed = (time::OffsetDateTime::now_utc() - parsed).as_seconds_f64();
+    assert!(
+        elapsed < 5.0,
+        "expected timestamp within last 5s, got {elapsed}s ago"
+    );
+}
+
+#[tokio::test]
 async fn test_apply_verdict_resets_review_fail_count() {
     let db = mando_db::Db::open_in_memory().await.unwrap();
     let pool = db.pool().clone();

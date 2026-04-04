@@ -42,9 +42,8 @@ export interface TaskItem {
   github_repo?: string;
   branch?: string;
   pr?: string;
-  linear_id?: string;
   worker?: string;
-  session_ids?: { worker?: string; review?: string; clarifier?: string };
+  session_ids?: { worker?: string; review?: string; clarifier?: string; ask?: string };
   intervention_count: number;
   captain_review_trigger?: string;
   escalation_report?: string;
@@ -87,7 +86,6 @@ export interface HealthResponse {
   configuredWorkerHealthPath: string;
   configuredLockfilePath: string;
   restartRequired: boolean;
-  linear_workspace_slug?: string;
 }
 
 export interface WorkerDetail {
@@ -163,7 +161,6 @@ export interface SessionEntry {
   scout_item_title?: string;
   github_repo?: string;
   pr?: string;
-  linear_id?: string;
   worktree?: string;
   branch?: string;
   resume_cwd?: string;

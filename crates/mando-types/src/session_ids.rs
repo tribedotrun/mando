@@ -1,9 +1,9 @@
-//! Session ID container — stores worker, review, and clarifier CC session IDs as JSON.
+//! Session ID container — stores worker, review, clarifier, and ask CC session IDs as JSON.
 
 use serde::{Deserialize, Serialize};
 use tracing::warn;
 
-/// Session IDs for the four types of CC sessions a task can have.
+/// Session IDs for the five types of CC sessions a task can have.
 /// Stored as a JSON TEXT column in SQLite.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SessionIds {
@@ -15,6 +15,8 @@ pub struct SessionIds {
     pub clarifier: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub merge: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ask: Option<String>,
 }
 
 impl SessionIds {

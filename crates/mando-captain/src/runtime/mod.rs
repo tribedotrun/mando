@@ -14,7 +14,6 @@ pub mod dashboard_triage;
 pub mod dispatch_phase;
 mod dispatch_reclarify;
 mod dispatch_redispatch;
-pub mod linear_integration;
 pub mod mergeability;
 mod mergeability_rebase;
 mod mergeability_review;
@@ -47,6 +46,7 @@ pub(crate) fn revert_to_queued(item: &mut mando_types::Task) {
     item.status = mando_types::task::ItemStatus::Queued;
     item.worker = None;
     item.session_ids.worker = None;
+    item.session_ids.ask = None;
     item.worktree = None;
     item.branch = None;
     item.worker_started_at = None;

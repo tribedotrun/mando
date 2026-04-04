@@ -69,6 +69,8 @@ pub async fn apply_verdict(
         "nudge" => {
             item.status = ItemStatus::InProgress;
             item.intervention_count += 1;
+            // Reset timeout clock so the worker gets a fresh window after review.
+            item.worker_started_at = Some(mando_types::now_rfc3339());
             timeline_emit::emit_for_task(
                 item,
                 TimelineEventType::CaptainReviewVerdict,
@@ -156,7 +158,7 @@ pub async fn apply_verdict(
                                 &wt_path,
                                 "worker",
                                 w,
-                                &item.best_id(),
+                                &item.id.to_string(),
                                 true,
                             )
                             .await;
@@ -187,13 +189,14 @@ pub async fn apply_verdict(
                     cwd,
                     "worker",
                     &worker_name,
-                    &item.best_id(),
+                    &item.id.to_string(),
                     SessionStatus::Stopped,
                 )
                 .await;
             }
             item.status = ItemStatus::Queued;
             item.session_ids.worker = None;
+            item.session_ids.ask = None;
             item.worker = None;
             item.worktree = None;
             item.branch = None;

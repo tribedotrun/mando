@@ -1,6 +1,6 @@
 {
   "name": "mando",
-  "version": "0.1.8-beta.4",
+  "version": "0.1.8",
   "description": "Desktop app for managing AI coding agents",
   "license": "Apache-2.0",
   "repository": {
@@ -17,7 +17,7 @@
     "make": "electron-forge make",
     "build:test": "node scripts/build-test.mjs",
     "build:dev": "node scripts/build-test.mjs --dev",
-    "dev:renderer": "npx vite dev src/renderer -c vite.renderer.config.mts --port 5173 --strictPort",
+    "dev:renderer": "npx vite dev src/renderer -c vite.renderer.config.mts --port 15173 --strictPort",
     "pretest": "npm run build:test",
     "test": "npx playwright test",
     "typecheck": "tsc --noEmit",

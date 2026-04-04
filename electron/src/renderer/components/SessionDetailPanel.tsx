@@ -11,7 +11,6 @@ interface Props {
   error: string | null;
   onClose: () => void;
   resumeCmd: string;
-  linearSlug?: string;
   sequenceNum?: number;
 }
 
@@ -35,7 +34,6 @@ export function SessionDetailPanel({
   error,
   onClose,
   resumeCmd,
-  linearSlug,
   sequenceNum,
 }: Props): React.ReactElement {
   const copyRef = useRef<HTMLButtonElement>(null);
@@ -70,22 +68,7 @@ export function SessionDetailPanel({
     );
   }
   if (session.task_id) {
-    if (linearSlug) {
-      subtitleParts.push(
-        <a
-          key="task"
-          href={`https://linear.app/${linearSlug}/issue/${session.task_id}`}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="no-underline hover:underline"
-          style={{ color: 'var(--color-accent)' }}
-        >
-          {session.task_id}
-        </a>,
-      );
-    } else {
-      subtitleParts.push(<span key="task">{session.task_id}</span>);
-    }
+    subtitleParts.push(<span key="task">{session.task_id}</span>);
   }
   if (session.created_at) {
     subtitleParts.push(<span key="time">{formatTimestamp(session.created_at)}</span>);

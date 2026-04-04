@@ -6,20 +6,24 @@ import { MakerZIP } from '@electron-forge/maker-zip';
 import { PublisherGithub } from '@electron-forge/publisher-github';
 import { FuseV1Options, FuseVersion } from '@electron/fuses';
 
-const VALID_MODES = ['production', 'dev', 'sandbox'] as const;
+const VALID_MODES = ['production', 'dev', 'prod-local', 'sandbox'] as const;
 const rawMode = process.env.MANDO_APP_MODE || 'production';
 if (!VALID_MODES.includes(rawMode as (typeof VALID_MODES)[number])) {
   throw new Error(`Invalid MANDO_APP_MODE="${rawMode}". Must be: ${VALID_MODES.join(', ')}`);
 }
 const appMode = rawMode as (typeof VALID_MODES)[number];
-const appName =
-  appMode === 'dev' ? 'Mando (Dev)' : appMode === 'sandbox' ? 'Mando (Sandbox)' : 'Mando';
-const bundleId =
-  appMode === 'dev'
-    ? 'run.tribe.mando-dev'
-    : appMode === 'sandbox'
-      ? 'run.tribe.mando-sandbox'
-      : 'run.tribe.mando';
+const APP_NAMES: Record<string, string> = {
+  dev: 'Mando (Dev)',
+  'prod-local': 'Mando (Prod Local)',
+  sandbox: 'Mando (Sandbox)',
+};
+const BUNDLE_IDS: Record<string, string> = {
+  dev: 'run.tribe.mando-dev',
+  'prod-local': 'run.tribe.mando-prod-local',
+  sandbox: 'run.tribe.mando-sandbox',
+};
+const appName = APP_NAMES[appMode] || 'Mando';
+const bundleId = BUNDLE_IDS[appMode] || 'run.tribe.mando';
 
 const rustTargetDir = process.env.MANDO_RUST_TARGET_DIR || '../target/release';
 
@@ -31,9 +35,7 @@ const config: ForgeConfig = {
     asar: true,
     appBundleId: bundleId,
     darwinDarkModeSupport: true,
-    extendInfo: {
-      NSMicrophoneUsageDescription: 'Mando uses the microphone for voice commands.',
-    },
+    extendInfo: {},
     extraResource: [
       `${rustTargetDir}/mando-gw`,
       `${rustTargetDir}/mando-tg`,

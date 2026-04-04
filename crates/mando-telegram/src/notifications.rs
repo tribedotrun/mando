@@ -180,6 +180,12 @@ impl NotificationHandler {
                 buttons.push(button("Archive", &format!("dg:archive:{scout_id}")));
                 Some(inline_keyboard(buttons))
             }
+            NotificationKind::ScoutProcessFailed { scout_id, .. } => {
+                Some(inline_keyboard(vec![button(
+                    "Retry",
+                    &format!("dg:process:{scout_id}"),
+                )]))
+            }
             _ => None,
         }
     }

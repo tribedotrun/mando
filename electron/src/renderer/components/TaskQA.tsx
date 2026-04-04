@@ -1,7 +1,7 @@
 import React, { useCallback, useImperativeHandle, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import log from '#renderer/logger';
-import { askTask, fetchAskHistory } from '#renderer/api';
+import { askTask, endAskSession, fetchAskHistory } from '#renderer/api';
 import { PrMarkdown } from '#renderer/components/PrMarkdown';
 import type { AskHistoryEntry, TaskItem } from '#renderer/types';
 import { getErrorMessage, shortTs } from '#renderer/utils';
@@ -143,6 +143,8 @@ export function TaskQA({ item, qaRef, onExpand, onClose }: TaskQAProps): React.R
   const scrollRef = useRef<HTMLDivElement>(null);
   const queryClient = useQueryClient();
 
+  const hasAskSession = !!item.session_ids?.ask;
+
   const {
     data: serverHistory,
     isError,
@@ -184,6 +186,7 @@ export function TaskQA({ item, qaRef, onExpand, onClose }: TaskQAProps): React.R
           { role: 'assistant', content: data.answer, timestamp: new Date().toISOString() },
         ]);
         queryClient.invalidateQueries({ queryKey: ['task-ask-history', item.id] });
+        queryClient.invalidateQueries({ queryKey: ['tasks'] });
       } catch (err) {
         log.warn('[TaskQA] ask failed:', err);
         setLocalMessages((prev) => [
@@ -201,6 +204,19 @@ export function TaskQA({ item, qaRef, onExpand, onClose }: TaskQAProps): React.R
     },
     [item.id, scrollToBottom, queryClient],
   );
+
+  const [endingSession, setEndingSession] = useState(false);
+  const handleEndSession = useCallback(async () => {
+    setEndingSession(true);
+    try {
+      await endAskSession(item.id);
+    } catch (err) {
+      log.warn('[TaskQA] end session failed:', err);
+    } finally {
+      setEndingSession(false);
+      queryClient.invalidateQueries({ queryKey: ['tasks'] });
+    }
+  }, [item.id, queryClient]);
 
   const messagesRef = useRef(messages);
   messagesRef.current = messages;
@@ -261,6 +277,22 @@ export function TaskQA({ item, qaRef, onExpand, onClose }: TaskQAProps): React.R
           )}
         </button>
         <span className="flex-1" />
+        {hasAskSession && (
+          <button
+            onClick={handleEndSession}
+            disabled={endingSession}
+            className="rounded px-1.5 py-0.5 text-[10px] disabled:opacity-40"
+            style={{
+              background: 'none',
+              border: '1px solid var(--color-border-subtle)',
+              color: 'var(--color-text-4)',
+              cursor: endingSession ? 'default' : 'pointer',
+            }}
+            title="End ask session (next question starts fresh)"
+          >
+            {endingSession ? '...' : 'End session'}
+          </button>
+        )}
         <button
           onClick={onExpand}
           className="flex items-center justify-center rounded"

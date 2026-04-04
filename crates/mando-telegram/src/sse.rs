@@ -212,6 +212,42 @@ fn parse_event_json(json: &Value) -> Option<SseEvent> {
     }
 }
 
+/// Run the SSE notification loop — subscribes to gateway events and forwards
+/// notifications to Telegram. Reconnects automatically on failure.
+///
+/// Called from `main.rs` at startup (when owner is known) and from the bot
+/// at runtime (when owner auto-registers via first message).
+pub async fn run_notification_loop(
+    base_url: String,
+    token: Option<String>,
+    api: crate::api::TelegramApi,
+    chat_id: String,
+) {
+    let sse = SseConsumer::new(&base_url, token);
+    let mut handler = crate::notifications::NotificationHandler::new(api, chat_id);
+
+    let mut rx = match sse.subscribe().await {
+        Ok(rx) => rx,
+        Err(e) => {
+            tracing::error!("SSE subscribe failed: {e}");
+            return;
+        }
+    };
+
+    while let Some(event) = rx.recv().await {
+        match event {
+            SseEvent::Notification(payload) => {
+                handler.handle(payload).await;
+            }
+            SseEvent::Reconnected => {
+                handler.clear_tracked_messages();
+            }
+            _ => {}
+        }
+    }
+    tracing::warn!("SSE notification listener exited");
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

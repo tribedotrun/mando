@@ -18,29 +18,6 @@ struct BundledSkill {
 
 const SKILLS: &[BundledSkill] = &[
     BundledSkill {
-        name: "mando-linear",
-        files: &[
-            (
-                "SKILL.md",
-                include_str!("../../../skills/mando-linear/SKILL.md"),
-                false,
-            ),
-            (
-                "linear",
-                include_str!("../../../skills/mando-linear/linear"),
-                true,
-            ),
-        ],
-    },
-    BundledSkill {
-        name: "mando-linear-workpad",
-        files: &[(
-            "SKILL.md",
-            include_str!("../../../skills/mando-linear-workpad/SKILL.md"),
-            false,
-        )],
-    },
-    BundledSkill {
         name: "mando-pr",
         files: &[
             (

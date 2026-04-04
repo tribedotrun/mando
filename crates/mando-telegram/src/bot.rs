@@ -27,9 +27,16 @@ use crate::permissions;
 // ── Session state types ──────────────────────────────────────────────
 
 /// Lightweight session tracker for /ask.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct Session {
+    pub task_id: i64,
     pub rounds: u32,
+}
+
+impl Session {
+    pub fn new(task_id: i64) -> Self {
+        Self { task_id, rounds: 0 }
+    }
 }
 
 /// Active Q&A session for a chat (scout items).
@@ -256,11 +263,22 @@ impl TelegramBot {
             self.dispatch_text(message, &chat_id).await
         };
 
-        // Restart after the command completes so the SSE listener picks up
-        // the new owner. Launchd KeepAlive restarts us automatically.
+        // Spawn SSE notification listener now that we have an owner.
         if just_registered {
-            info!("Restarting to enable notifications for new owner");
-            std::process::exit(0);
+            info!("Owner registered — starting SSE notification listener");
+            let base_url = self.gw.base_url().to_string();
+            let gw_token = self.gw.token().map(String::from);
+            let config = self.config.read().await;
+            let tg = &config.channels.telegram;
+            let api_base_url = crate::resolve_api_base_url();
+            let api = match &api_base_url {
+                Some(url) => TelegramApi::with_base_url(&tg.token, url)?,
+                None => TelegramApi::new(&tg.token),
+            };
+            let owner_chat_id = chat_id.clone();
+            tokio::spawn(async move {
+                crate::sse::run_notification_loop(base_url, gw_token, api, owner_chat_id).await;
+            });
         }
 
         result

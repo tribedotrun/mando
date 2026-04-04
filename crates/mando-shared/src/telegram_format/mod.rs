@@ -19,10 +19,6 @@ pub use crate::telegram_tables::convert_md_tables;
 /// Matches `PR #123` or `PR#123` (case-insensitive, requires PR prefix).
 static PR_REF_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)\bPR\s*#(\d+)").unwrap());
 
-/// Matches Linear-style issue refs like `ABC-123`.
-static LINEAR_REF_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"\b([A-Z]{2,10}-\d+)\b").unwrap());
-
 /// Extract `owner/repo` from a git remote URL (SSH or HTTPS).
 ///
 /// Delegates to `mando_config::parse_github_slug` — single implementation.
@@ -59,28 +55,6 @@ pub fn linkify_pr_refs(text: &str, repo_slug: &str) -> String {
                 "<a href=\"{url}\">{repo} PR #{num}</a>",
                 repo = escape_html(repo_name),
             )
-        })
-        .into_owned()
-}
-
-/// Build a Telegram HTML hyperlink for a Linear issue reference.
-///
-/// `issue_ref` is e.g. `ABC-123`, `org` is the Linear workspace slug.
-pub fn linear_hyperlink(issue_ref: &str, org: &str) -> String {
-    let url = format!("https://linear.app/{org}/issue/{issue_ref}");
-    format!(
-        "<a href=\"{url}\">{ref_}</a>",
-        ref_ = escape_html(issue_ref),
-    )
-}
-
-/// Scan `text` for Linear issue references (`ABC-123`) and replace each with
-/// a clickable Telegram hyperlink.
-pub fn linkify_linear_refs(text: &str, org: &str) -> String {
-    LINEAR_REF_RE
-        .replace_all(text, |caps: &regex::Captures| {
-            let issue_ref = &caps[1];
-            linear_hyperlink(issue_ref, org)
         })
         .into_owned()
 }
@@ -439,23 +413,5 @@ mod tests {
         let result = linkify_pr_refs(text, "acme/widgets");
         assert!(result.contains("widgets PR #446"));
         assert!(!result.contains("See PR #446"));
-    }
-
-    #[test]
-    fn linear_hyperlink_formats_correctly() {
-        let link = linear_hyperlink("MAN-123", "acme");
-        assert_eq!(
-            link,
-            "<a href=\"https://linear.app/acme/issue/MAN-123\">MAN-123</a>",
-        );
-    }
-
-    #[test]
-    fn linkify_linear_refs_replaces_all() {
-        let text = "Fixed MAN-10 and CORE-20 today";
-        let result = linkify_linear_refs(text, "acme");
-        assert!(result.contains("https://linear.app/acme/issue/MAN-10"));
-        assert!(result.contains("https://linear.app/acme/issue/CORE-20"));
-        assert!(!result.contains("Fixed MAN-10"));
     }
 }

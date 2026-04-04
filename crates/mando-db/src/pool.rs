@@ -96,7 +96,10 @@ impl Db {
 }
 
 /// Embedded migrations. Each tuple: (version, SQL).
-const MIGRATIONS: &[(i64, &str)] = &[(1, include_str!("../migrations/001_initial.sql"))];
+const MIGRATIONS: &[(i64, &str)] = &[
+    (1, include_str!("../migrations/001_initial.sql")),
+    (2, include_str!("../migrations/002_drop_linear.sql")),
+];
 
 #[cfg(test)]
 mod tests {

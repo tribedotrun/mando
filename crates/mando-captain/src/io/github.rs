@@ -147,6 +147,35 @@ pub async fn merge_pr(repo: &str, pr_number: &str) -> Result<String> {
     .await
 }
 
+/// Check if a PR is already merged on GitHub.
+pub(crate) async fn is_pr_merged(repo: &str, pr_number: &str) -> bool {
+    let output = tokio::process::Command::new("gh")
+        .args([
+            "pr", "view", pr_number, "--repo", repo, "--json", "state", "-q", ".state",
+        ])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .output()
+        .await;
+    match output {
+        Ok(o) if o.status.success() => {
+            let state = String::from_utf8_lossy(&o.stdout);
+            state.trim().eq_ignore_ascii_case("MERGED")
+        }
+        Ok(o) => {
+            let stderr = String::from_utf8_lossy(&o.stderr);
+            tracing::warn!(module = "github", %repo, %pr_number, %stderr,
+                "is_pr_merged: gh failed — defaulting to not-merged");
+            false
+        }
+        Err(e) => {
+            tracing::warn!(module = "github", %repo, %pr_number, error = %e,
+                "is_pr_merged: failed to execute gh — defaulting to not-merged");
+            false
+        }
+    }
+}
+
 /// Check if branch is ahead of main.
 pub(crate) async fn is_pr_branch_ahead(repo: &str, pr_number: &str) -> Result<bool> {
     let repo = repo.to_string();

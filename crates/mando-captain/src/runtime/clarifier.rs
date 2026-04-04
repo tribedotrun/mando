@@ -19,7 +19,6 @@ use crate::biz::json_parse::parse_llm_json;
 /// Run the clarification flow for a new task (single-turn).
 pub(crate) async fn run_clarification(
     item: &Task,
-    _linear_cli_path: &str,
     workflow: &CaptainWorkflow,
     config: &mando_config::Config,
     pool: &sqlx::SqlitePool,
@@ -31,7 +30,7 @@ pub(crate) async fn run_clarification(
     // Resolve project cwd so the clarifier can read project files.
     let cwd = resolve_clarifier_cwd(item, config);
 
-    let task_id = item.best_id();
+    let task_id = item.id.to_string();
     let valid_names: Vec<String> = projects.values().map(|pc| pc.name.clone()).collect();
     let schema = build_clarifier_schema(&valid_names);
 
@@ -157,21 +156,13 @@ pub enum ClarifierStatus {
 }
 
 /// Format structured questions into human-readable text.
+/// Self-answered questions are excluded — users only see what needs their input.
 pub fn format_questions_text(questions: &[ClarifierQuestion]) -> String {
     questions
         .iter()
+        .filter(|q| !q.self_answered)
         .enumerate()
-        .map(|(i, q)| {
-            if q.self_answered {
-                if let Some(ref a) = q.answer {
-                    format!("{}. Q: {}\n   A: {} (self-answered)", i + 1, q.question, a)
-                } else {
-                    format!("{}. Q: {} (self-answered)", i + 1, q.question)
-                }
-            } else {
-                format!("{}. {}", i + 1, q.question)
-            }
-        })
+        .map(|(i, q)| format!("{}. {}", i + 1, q.question))
         .collect::<Vec<_>>()
         .join("\n")
 }
@@ -316,7 +307,7 @@ pub async fn answer_and_reclarify(
     let prompt =
         build_interactive_clarifier_turn_prompt(item, workflow, answer, questions.as_deref())?;
     let cwd = resolve_clarifier_cwd(item, config);
-    let task_id = item.best_id();
+    let task_id = item.id.to_string();
     let timeout = Duration::from_secs(workflow.agent.clarifier_timeout_s);
 
     let mut builder = CcConfig::builder()
@@ -561,9 +552,9 @@ mod tests {
         ];
         let text = format_questions_text(&qs);
         assert!(text.contains("1. What DB?"));
-        assert!(text.contains("2. Q: What HTTP client?"));
-        assert!(text.contains("reqwest"));
-        assert!(text.contains("self-answered"));
+        // Self-answered questions are excluded from user-facing output.
+        assert!(!text.contains("HTTP client"));
+        assert!(!text.contains("self-answered"));
     }
 
     #[test]

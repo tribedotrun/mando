@@ -14,7 +14,7 @@ import { useToastStore } from '#renderer/stores/toastStore';
 const USER_SETTABLE = ['pending', 'processed', 'saved', 'archived'];
 const TYPES = ['all', 'github', 'youtube', 'arxiv', 'other'] as const;
 
-export function ScoutPage(): React.ReactElement {
+export function ScoutPage({ active = true }: { active?: boolean } = {}): React.ReactElement {
   const {
     query,
     setQuery,
@@ -101,7 +101,7 @@ export function ScoutPage(): React.ReactElement {
     [inListView, items, clampedFocusedIndex],
   );
 
-  useViewKeyHandler(handleKey);
+  useViewKeyHandler(handleKey, active);
 
   const statusFilter = query.status ?? 'all';
   const typeFilter = query.type ?? 'all';

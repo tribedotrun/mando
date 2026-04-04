@@ -32,7 +32,6 @@ const BASE_NAV_ITEMS: NavItem[] = [
   { id: 'projects', label: 'Projects' },
   { id: 'captain', label: 'Captain' },
   { id: 'telegram', label: 'Telegram' },
-  { id: 'scout', label: 'Scout' },
   { id: 'experimental', label: 'Experimental' },
   { id: 'about', label: 'About' },
 ];
@@ -80,7 +79,20 @@ export function SettingsPage({
   const loading = useSettingsStore((s) => s.loading);
   const error = useSettingsStore((s) => s.error);
   const saveSuccess = useSettingsStore((s) => s.saveSuccess);
-  const navItems = BASE_NAV_ITEMS;
+  const scoutEnabled = useSettingsStore((s) => !!s.config.features?.scout);
+  const setupDismissed = useSettingsStore((s) => !!s.config.features?.setupDismissed);
+  const navItems = (() => {
+    let items = setupDismissed ? BASE_NAV_ITEMS.filter((i) => i.id !== 'setup') : BASE_NAV_ITEMS;
+    if (scoutEnabled) {
+      const idx = items.findIndex((i) => i.id === 'experimental');
+      items = [
+        ...items.slice(0, idx),
+        { id: 'scout' as SettingsSection, label: 'Scout' },
+        ...items.slice(idx),
+      ];
+    }
+    return items;
+  })();
 
   useMountEffect(() => {
     load();

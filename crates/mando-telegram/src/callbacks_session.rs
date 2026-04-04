@@ -18,9 +18,14 @@ pub(crate) async fn handle_ask_callback(
             bot.api()
                 .answer_callback_query(cb_id, Some("Session ended"))
                 .await?;
-            let key = format!("ask:{cid}");
-            if let Err(e) = bot.gw().post("/api/ops/end", &json!({"key": key})).await {
-                tracing::warn!(module = "telegram", error = %e, "failed to end server-side ops session");
+            if let Some(task_id) = bot.ask_session_task_id(cid) {
+                if let Err(e) = bot
+                    .gw()
+                    .post("/api/tasks/ask/end", &json!({"id": task_id}))
+                    .await
+                {
+                    tracing::warn!(module = "telegram", error = %e, "failed to end ask session");
+                }
             }
             bot.close_ask_session(cid);
             // Preserve previous message content — just strip the keyboard.
@@ -51,37 +56,30 @@ pub(crate) async fn handle_ask_callback(
                 if idx < picker.items.len() {
                     let item = &picker.items[idx];
                     let title = mando_shared::escape_html(&item.title);
-                    bot.close_ask_session(cid);
-                    bot.open_ask_session(cid);
-                    bot.api()
-                        .answer_callback_query(cb_id, Some("Starting\u{2026}"))
-                        .await?;
-                    if let Err(e) = bot
-                        .edit_message(cid, mid, &format!("Ask: {title}\n\nType your question."))
-                        .await
-                    {
-                        tracing::warn!(module = "telegram", error = %e, "message send failed");
-                    }
-
-                    // Prime the Claude session with item context so follow-up
-                    // questions know which item the user is asking about.
-                    let context = format!("Item ID: {}\nTitle: {}", item.id, item.title,);
-                    if let Err(e) = crate::commands::ask::prime_session(bot, cid, &context).await {
-                        bot.close_ask_session(cid);
-                        if let Err(e) = bot
-                            .edit_message(
-                                cid,
-                                mid,
-                                &format!(
-                                    "Ask: {title}\n\n\u{274c} Failed to start session: {}",
-                                    mando_shared::escape_html(&e.to_string()),
-                                ),
-                            )
-                            .await
-                        {
-                            tracing::warn!(module = "telegram", error = %e, "message send failed");
+                    match item.id.parse::<i64>() {
+                        Ok(task_id) => {
+                            bot.close_ask_session(cid);
+                            bot.open_ask_session(cid, task_id);
+                            bot.api()
+                                .answer_callback_query(cb_id, Some("Ready"))
+                                .await?;
+                            if let Err(e) = bot
+                                .edit_message(
+                                    cid,
+                                    mid,
+                                    &format!("Ask: {title}\n\nType your question."),
+                                )
+                                .await
+                            {
+                                tracing::warn!(module = "telegram", error = %e, "message send failed");
+                            }
                         }
-                        return Ok(());
+                        Err(e) => {
+                            tracing::warn!(module = "telegram", raw_id = %item.id, error = %e, "invalid task ID in picker");
+                            bot.api()
+                                .answer_callback_query(cb_id, Some("Invalid task ID"))
+                                .await?;
+                        }
                     }
                 } else {
                     bot.api()

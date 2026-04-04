@@ -295,7 +295,7 @@ pub(crate) async fn add_todo_items(
     cid: &str,
     items: &[crate::bot::TodoItem],
 ) -> Result<()> {
-    let mut ok_count = 0usize;
+    let mut ok_titles: Vec<String> = Vec::new();
 
     for item in items {
         let mut fields = vec![("title", item.title.as_str())];
@@ -347,7 +347,7 @@ pub(crate) async fn add_todo_items(
         {
             Ok(result) => {
                 info!("todo: added '{}' -> {:?}", item.title, item.project);
-                ok_count += 1;
+                ok_titles.push(item.title.clone());
                 let id_opt = result["id"]
                     .as_i64()
                     .map(|n| n.to_string())
@@ -390,10 +390,24 @@ pub(crate) async fn add_todo_items(
         }
     }
 
-    if ok_count > 0 {
+    if !ok_titles.is_empty() {
+        let list: String = ok_titles
+            .iter()
+            .enumerate()
+            .map(|(i, t)| format!("{}. {}", i + 1, mando_shared::escape_html(t)))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let project_label = items
+            .iter()
+            .find_map(|i| i.project.as_deref())
+            .map(|p| format!(" to <b>{}</b>", mando_shared::escape_html(p)))
+            .unwrap_or_default();
         bot.send_html(
             cid,
-            &format!("\u{2705} Added {ok_count} item(s) to task list."),
+            &format!(
+                "\u{2705} Added {} task(s){project_label}:\n\n{list}",
+                ok_titles.len()
+            ),
         )
         .await?;
     }

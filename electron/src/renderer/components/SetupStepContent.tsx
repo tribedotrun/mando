@@ -1,7 +1,6 @@
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback } from 'react';
 import { useSettingsStore } from '#renderer/stores/settingsStore';
 import { useToastStore } from '#renderer/stores/toastStore';
-import { useMountEffect } from '#renderer/hooks/useMountEffect';
 
 const inputCls =
   'w-full rounded px-2.5 py-1.5 text-xs placeholder-[var(--color-text-3)] focus:outline-none';
@@ -190,125 +189,6 @@ export function ProjectContent(): React.ReactElement {
       <button onClick={handlePick} disabled={adding} className={btnCls} style={primaryBtn}>
         {adding ? 'Adding…' : 'Choose folder'}
       </button>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Linear — API key → auto-fetch teams → pick from list
-// ---------------------------------------------------------------------------
-
-export function LinearContent(): React.ReactElement {
-  const existingKey = useSettingsStore((s) => s.config.env?.LINEAR_API_KEY ?? '');
-  const existingTeam = useSettingsStore((s) => s.config.captain?.linearTeam ?? '');
-  const updateSection = useSettingsStore((s) => s.updateSection);
-  const updateEnv = useSettingsStore((s) => s.updateEnv);
-  const save = useSettingsStore((s) => s.save);
-
-  const [apiKey, setApiKey] = useState(existingKey);
-  const [teams, setTeams] = useState<Array<{ id: string; key: string; name: string }>>([]);
-  const [selectedTeam, setSelectedTeam] = useState(existingTeam);
-  const [fetching, setFetching] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useMountEffect(() => () => {
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-  });
-
-  const fetchTeams = useCallback(async (key: string) => {
-    setFetching(true);
-    setError(null);
-    setTeams([]);
-    setSelectedTeam('');
-    try {
-      const res = await window.mandoAPI.validateLinearKey(key.trim());
-      if (res.valid && res.teams.length > 0) {
-        setTeams(res.teams);
-        if (res.teams.length === 1) setSelectedTeam(res.teams[0].key);
-      } else {
-        setError(res.error ?? 'Invalid API key');
-      }
-    } catch {
-      setError('Validation failed — try again');
-    } finally {
-      setFetching(false);
-    }
-  }, []);
-
-  const handleApiKeyChange = useCallback(
-    (value: string) => {
-      setApiKey(value);
-      setError(null);
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-      if (value.trim().length > 30) {
-        debounceRef.current = setTimeout(() => fetchTeams(value), 600);
-      }
-    },
-    [fetchTeams],
-  );
-
-  const canSave = !!selectedTeam && !!apiKey.trim() && teams.length > 0;
-
-  const handleSave = useCallback(() => {
-    updateEnv('LINEAR_API_KEY', apiKey.trim());
-    updateSection('captain', { linearTeam: selectedTeam });
-    updateSection('features', { linear: true });
-    save();
-  }, [selectedTeam, apiKey, updateEnv, updateSection, save]);
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-        <input
-          type="text"
-          className={inputCls}
-          style={inputStyle}
-          value={apiKey}
-          onChange={(e) => handleApiKeyChange(e.target.value)}
-          placeholder="API key"
-        />
-        {fetching && (
-          <span className="text-[11px]" style={{ color: 'var(--color-text-3)' }}>
-            Fetching teams…
-          </span>
-        )}
-        {error && <StatusLine ok={false} label={error} />}
-        {teams.length > 0 && (
-          <select
-            className={inputCls}
-            style={{ ...inputStyle, cursor: 'pointer' }}
-            value={selectedTeam}
-            onChange={(e) => setSelectedTeam(e.target.value)}
-          >
-            {teams.length > 1 && <option value="">Select a team</option>}
-            {teams.map((t) => (
-              <option key={t.id} value={t.key}>
-                {t.name} ({t.key})
-              </option>
-            ))}
-          </select>
-        )}
-      </div>
-      <div className="flex items-center justify-between">
-        <a
-          href="https://linear.app/settings/api"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-[11px]"
-          style={{ color: 'var(--color-text-3)' }}
-        >
-          Get API key
-        </a>
-        <button
-          onClick={handleSave}
-          disabled={!canSave}
-          className={btnCls}
-          style={{ ...primaryBtn, cursor: canSave ? 'pointer' : 'default' }}
-        >
-          Connect
-        </button>
-      </div>
     </div>
   );
 }

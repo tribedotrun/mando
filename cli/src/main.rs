@@ -10,7 +10,6 @@ mod project;
 mod scout;
 mod sessions;
 mod todo;
-mod voice;
 mod worktree;
 
 use clap::{Args, Parser, Subcommand};
@@ -41,8 +40,6 @@ enum Commands {
     Scout(scout::ScoutArgs),
     /// CC session history
     Sessions(sessions::SessionsArgs),
-    /// Voice control and TTS usage
-    Voice(voice::VoiceArgs),
     /// Git worktree management
     Worktree(worktree::WorktreeArgs),
     /// Daemon lifecycle management
@@ -134,7 +131,6 @@ async fn main() {
         Commands::Captain(args) => captain::handle(args).await,
         Commands::Scout(args) => scout::handle(args).await,
         Commands::Sessions(args) => sessions::handle(args).await,
-        Commands::Voice(args) => voice::handle(args).await,
         Commands::Worktree(args) => worktree::handle(args).await,
         Commands::Daemon(args) => gateway::handle(args).await,
         Commands::Channels(_) => handle_channels().await,
@@ -277,16 +273,11 @@ async fn handle_tasks(args: TasksArgs) -> anyhow::Result<()> {
 
             for item in &status_items {
                 let id = item["id"].as_i64().unwrap_or(0);
-                let linear_id = item["linear_id"].as_str().unwrap_or("");
                 let title = item["title"].as_str().unwrap_or("?");
                 let worker = item["worker"].as_str().unwrap_or("");
                 let pr = item["pr"].as_str().unwrap_or("");
 
-                let id_str = if !linear_id.is_empty() {
-                    linear_id.to_string()
-                } else {
-                    format!("#{id}")
-                };
+                let id_str = format!("#{id}");
 
                 let mut suffix = String::new();
                 if !worker.is_empty() {

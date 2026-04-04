@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useTaskStore } from '#renderer/stores/taskStore';
 import { useSettingsStore } from '#renderer/stores/settingsStore';
 import { SetupChecklist } from '#renderer/components/SetupChecklist';
+import { SidebarProjectItem } from '#renderer/components/SidebarProjectItem';
 import { useMountEffect } from '#renderer/hooks/useMountEffect';
 
 export type Tab = 'captain' | 'scout' | 'sessions';
@@ -18,6 +19,8 @@ interface Props {
   onNewTask: () => void;
   onOpenSettings: () => void;
   onAddProject: () => void;
+  onRenameProject: (oldName: string, newName: string) => Promise<void>;
+  onRemoveProject: (name: string) => Promise<void>;
   onToggleSetup: () => void;
   onDismissSetup: () => void;
   projectFilter: string | null;
@@ -109,6 +112,8 @@ export function Sidebar({
   onNewTask,
   onOpenSettings,
   onAddProject,
+  onRenameProject,
+  onRemoveProject,
   onToggleSetup,
   onDismissSetup,
   projectFilter,
@@ -118,7 +123,8 @@ export function Sidebar({
 }: Props): React.ReactElement {
   const items = useTaskStore((s) => s.items);
 
-  const visibleNav = NAV_ITEMS;
+  const scoutEnabled = useSettingsStore((s) => !!s.config.features?.scout);
+  const visibleNav = scoutEnabled ? NAV_ITEMS : NAV_ITEMS.filter((i) => i.id !== 'scout');
 
   const configProjects = useSettingsStore((s) => s.config.captain?.projects);
 
@@ -282,38 +288,21 @@ export function Sidebar({
         </div>
         {projects.length > 0 && (
           <div className="flex flex-col" style={{ gap: 4 }}>
-            {projects.map((name) => {
-              const active = projectFilter === name;
+            {projects.map((pName) => {
+              const isActive = projectFilter === pName;
               return (
-                <button
-                  key={name}
-                  onClick={() => {
+                <SidebarProjectItem
+                  key={pName}
+                  name={pName}
+                  count={projectCounts[pName] ?? 0}
+                  active={isActive}
+                  onSelect={() => {
                     onTabChange('captain');
-                    onProjectFilter(active ? null : name);
+                    onProjectFilter(isActive ? null : pName);
                   }}
-                  className="flex items-center justify-between text-[13px] transition-colors"
-                  style={{
-                    background: active ? 'var(--color-surface-2)' : 'transparent',
-                    color: active ? 'var(--color-text-1)' : '#C4BDD8',
-                    fontWeight: active ? 500 : 400,
-                    padding: '6px 10px',
-                    borderRadius: 5,
-                    border: 'none',
-                    cursor: 'pointer',
-                  }}
-                >
-                  <span className="truncate">{name}</span>
-                  <span
-                    className="shrink-0"
-                    style={{
-                      fontSize: 11,
-                      color: 'var(--color-text-3)',
-                      marginLeft: 4,
-                    }}
-                  >
-                    {projectCounts[name] ?? 0}
-                  </span>
-                </button>
+                  onRename={onRenameProject}
+                  onRemove={onRemoveProject}
+                />
               );
             })}
           </div>

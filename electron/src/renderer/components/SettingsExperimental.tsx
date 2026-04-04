@@ -1,189 +1,21 @@
 import React from 'react';
-import { inputStyle, labelStyle, inputCls, labelCls } from '#renderer/styles';
 import { useSettingsStore } from '#renderer/stores/settingsStore';
-import type { VoiceConfig, FeaturesConfig } from '#renderer/stores/settingsStore';
+import type { FeaturesConfig } from '#renderer/stores/settingsStore';
 import { ToggleSwitch } from '#renderer/components/ToggleSwitch';
 
-const EMPTY_VOICE: VoiceConfig = {};
 const EMPTY_FEATURES: FeaturesConfig = {};
-
-const MODEL_OPTIONS = ['eleven_flash_v2_5', 'eleven_multilingual_v2', 'eleven_turbo_v2_5'];
-
-function VoiceSettings() {
-  const voice = useSettingsStore((s) => s.config.voice ?? EMPTY_VOICE);
-  const elevenLabsKey = useSettingsStore((s) => s.config.env?.ELEVENLABS_API_KEY ?? '');
-  const updateSection = useSettingsStore((s) => s.updateSection);
-  const updateEnv = useSettingsStore((s) => s.updateEnv);
-  const save = useSettingsStore((s) => s.save);
-  const scheduleSave = useSettingsStore((s) => s.scheduleSave);
-
-  return (
-    <div className="grid gap-3 sm:grid-cols-2">
-      <div className="sm:col-span-2">
-        <label className={labelCls} style={labelStyle}>
-          ElevenLabs API Key
-        </label>
-        <input
-          data-testid="voice-elevenlabs-key"
-          type="password"
-          className={inputCls}
-          style={inputStyle}
-          value={elevenLabsKey}
-          onChange={(e) => {
-            updateEnv('ELEVENLABS_API_KEY', e.target.value);
-            scheduleSave();
-          }}
-          placeholder="sk_..."
-        />
-      </div>
-      <div>
-        <label className={labelCls} style={labelStyle}>
-          Voice ID
-        </label>
-        <input
-          data-testid="voice-voice-id"
-          className={inputCls}
-          style={inputStyle}
-          value={voice.voiceId ?? ''}
-          onChange={(e) => {
-            updateSection('voice', { voiceId: e.target.value });
-            scheduleSave();
-          }}
-          placeholder="EXAVITQu4vr4xnSDxMaL"
-        />
-      </div>
-      <div>
-        <label className={labelCls} style={labelStyle}>
-          Model
-        </label>
-        <select
-          data-testid="voice-model"
-          className={inputCls}
-          style={inputStyle}
-          value={voice.model ?? 'eleven_flash_v2_5'}
-          onChange={(e) => {
-            updateSection('voice', { model: e.target.value });
-            save();
-          }}
-        >
-          {MODEL_OPTIONS.map((m) => (
-            <option key={m} value={m}>
-              {m}
-            </option>
-          ))}
-        </select>
-      </div>
-      <div>
-        <label className={labelCls} style={labelStyle}>
-          Usage Warning Threshold
-        </label>
-        <input
-          data-testid="voice-usage-threshold"
-          type="number"
-          min={0}
-          max={1}
-          step={0.1}
-          className={inputCls}
-          style={inputStyle}
-          value={voice.usageWarningThreshold ?? ''}
-          onChange={(e) => {
-            updateSection('voice', {
-              usageWarningThreshold: e.target.value ? Number(e.target.value) : undefined,
-            });
-            scheduleSave();
-          }}
-          placeholder="0.8"
-        />
-      </div>
-      <div>
-        <label className={labelCls} style={labelStyle}>
-          Session Expiry (days)
-        </label>
-        <input
-          data-testid="voice-session-expiry"
-          type="number"
-          min={1}
-          className={inputCls}
-          style={inputStyle}
-          value={voice.sessionExpiryDays ?? ''}
-          onChange={(e) => {
-            updateSection('voice', {
-              sessionExpiryDays: e.target.value ? Number(e.target.value) : undefined,
-            });
-            scheduleSave();
-          }}
-          placeholder="7"
-        />
-      </div>
-    </div>
-  );
-}
-
-function LinearSettings() {
-  const linearTeam = useSettingsStore((s) => s.config.captain?.linearTeam ?? '');
-  const linearKey = useSettingsStore((s) => s.config.env?.LINEAR_API_KEY ?? '');
-  const updateSection = useSettingsStore((s) => s.updateSection);
-  const updateEnv = useSettingsStore((s) => s.updateEnv);
-  const scheduleSave = useSettingsStore((s) => s.scheduleSave);
-
-  return (
-    <div className="grid gap-3 sm:grid-cols-2">
-      <div>
-        <label className={labelCls} style={labelStyle}>
-          Linear Team
-        </label>
-        <input
-          data-testid="linear-team"
-          className={inputCls}
-          style={inputStyle}
-          value={linearTeam}
-          onChange={(e) => {
-            updateSection('captain', { linearTeam: e.target.value });
-            scheduleSave();
-          }}
-          placeholder="e.g. ABR"
-        />
-      </div>
-      <div>
-        <label className={labelCls} style={labelStyle}>
-          API Key
-        </label>
-        <input
-          data-testid="linear-api-key"
-          type="password"
-          className={inputCls}
-          style={inputStyle}
-          value={linearKey}
-          onChange={(e) => {
-            updateEnv('LINEAR_API_KEY', e.target.value);
-            scheduleSave();
-          }}
-          placeholder="lin_api_..."
-        />
-      </div>
-    </div>
-  );
-}
 
 interface FlagDef {
   key: keyof FeaturesConfig;
   label: string;
   description: string;
-  Settings?: React.FC;
 }
 
 const FLAGS: FlagDef[] = [
   {
-    key: 'voice',
-    label: 'Voice',
-    description: 'Voice synthesis via ElevenLabs.',
-    Settings: VoiceSettings,
-  },
-  {
-    key: 'linear',
-    label: 'Linear Sync',
-    description: 'Import Linear "Todo" issues into captain tasks.',
-    Settings: LinearSettings,
+    key: 'scout',
+    label: 'Scout',
+    description: 'Research tech blogs and turn them into actionable tasks for your project.',
   },
 ];
 
@@ -234,21 +66,6 @@ export function SettingsExperimental(): React.ReactElement {
                   }}
                 />
               </div>
-              {on && flag.Settings && (
-                <div
-                  style={{
-                    padding: '0 20px 16px',
-                    borderTop: '1px solid var(--color-border-subtle)',
-                    marginLeft: 20,
-                    marginRight: 20,
-                    paddingTop: 16,
-                    marginTop: -1,
-                    borderTopStyle: 'dashed',
-                  }}
-                >
-                  <flag.Settings />
-                </div>
-              )}
             </div>
           );
         })}

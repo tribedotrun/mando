@@ -1,38 +1,9 @@
-import React, { useState, useMemo } from 'react';
+import React, { useMemo } from 'react';
 import type { SessionEntry } from '#renderer/types';
 import { CopyBtn } from '#renderer/components/CopyBtn';
-import { PrMarkdown } from '#renderer/components/PrMarkdown';
 import { sessionTitle, sessionSubtitle } from '#renderer/components/SessionsHelpers';
-
-// ── Types ──
-
-interface TranscriptSection {
-  kind: 'human' | 'turn' | 'queue-op' | 'session-end';
-  heading: string;
-  meta?: string; // model, timestamp
-  blocks: ContentBlock[];
-}
-
-type ContentBlock =
-  | { type: 'text'; content: string }
-  | { type: 'tool'; name: string; label: string; body: string; lang?: string }
-  | { type: 'results'; content: string };
-
-// ── Timestamp helpers ──
-
-/** Convert an ISO UTC timestamp to local time display. */
-function localizeTimestamp(ts: string): string {
-  const d = new Date(ts);
-  if (Number.isNaN(d.getTime())) return ts;
-  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-}
-
-/** Replace ISO timestamps in meta strings with local time. */
-function localizeMeta(meta: string): string {
-  return meta.replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z?/g, (m) =>
-    localizeTimestamp(m),
-  );
-}
+import type { TranscriptSection, ContentBlock } from '#renderer/components/TranscriptBlocks';
+import { SectionRow } from '#renderer/components/TranscriptBlocks';
 
 // ── Parser ──
 
@@ -168,135 +139,6 @@ function parseTurnBody(body: string): ContentBlock[] {
   return blocks;
 }
 
-// ── Components ──
-
-const TOOL_COLORS: Record<string, string> = {
-  Bash: 'var(--color-success)',
-  Read: 'var(--color-accent)',
-  Edit: 'var(--color-stale)',
-  Write: 'var(--color-stale)',
-  Grep: 'var(--color-text-2)',
-  Glob: 'var(--color-text-2)',
-  Agent: '#e879a0',
-  Skill: 'var(--color-accent)',
-  Error: 'var(--color-error)',
-  StructuredOutput: 'var(--color-success)',
-};
-
-/** Tool names that should start expanded. */
-const AUTO_OPEN_TOOLS = new Set(['StructuredOutput']);
-
-function ToolBlock({
-  block,
-}: {
-  block: Extract<ContentBlock, { type: 'tool' }>;
-}): React.ReactElement {
-  const [open, setOpen] = useState(AUTO_OPEN_TOOLS.has(block.name));
-  const color = TOOL_COLORS[block.name] || 'var(--color-text-2)';
-  const hasBody = block.body.trim().length > 0;
-
-  return (
-    <div
-      className="my-1 rounded"
-      style={{
-        background: 'var(--color-surface-2)',
-        border: '1px solid var(--color-border-subtle)',
-      }}
-    >
-      <button
-        className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[11px]"
-        style={{ color: 'var(--color-text-1)', cursor: hasBody ? 'pointer' : 'default' }}
-        onClick={() => hasBody && setOpen((v) => !v)}
-      >
-        <span
-          className="inline-block h-1.5 w-1.5 shrink-0 rounded-full"
-          style={{ background: color }}
-        />
-        <span className="font-semibold" style={{ color }}>
-          {block.name}
-        </span>
-        {block.label && (
-          <span className="min-w-0 truncate text-[10px]" style={{ color: 'var(--color-text-3)' }}>
-            {cleanLabel(block.label)}
-          </span>
-        )}
-        {hasBody && (
-          <span className="ml-auto text-[9px]" style={{ color: 'var(--color-text-4)' }}>
-            {open ? '\u25BC' : '\u25B6'}
-          </span>
-        )}
-      </button>
-      {open && hasBody && (
-        <div className="border-t px-3 py-2" style={{ borderColor: 'var(--color-border-subtle)' }}>
-          <pre
-            className="overflow-x-auto whitespace-pre-wrap text-[11px] leading-relaxed"
-            style={{
-              color: 'var(--color-text-1)',
-              fontFamily: 'var(--font-mono, Geist Mono, monospace)',
-            }}
-          >
-            {block.lang === 'diff' ? <DiffContent text={block.body} /> : block.body}
-          </pre>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function DiffContent({ text }: { text: string }): React.ReactElement {
-  return (
-    <>
-      {text.split('\n').map((line, i) => {
-        let color = 'var(--color-text-2)';
-        let bg = 'transparent';
-        if (line.startsWith('+ ')) {
-          color = 'var(--color-success)';
-          bg = 'color-mix(in srgb, var(--color-success) 8%, transparent)';
-        } else if (line.startsWith('- ')) {
-          color = 'var(--color-error)';
-          bg = 'color-mix(in srgb, var(--color-error) 8%, transparent)';
-        }
-        return (
-          <div key={i} style={{ color, background: bg, paddingInline: 4, marginInline: -4 }}>
-            {line}
-          </div>
-        );
-      })}
-    </>
-  );
-}
-
-function cleanLabel(label: string): string {
-  // Remove markdown formatting from label
-  return label.replace(/\*([^*]+)\*/g, '$1').replace(/`([^`]+)`/g, '$1');
-}
-
-function SectionHeader({ section }: { section: TranscriptSection }): React.ReactElement {
-  const isHuman = section.kind === 'human';
-  const dotColor = isHuman ? 'var(--color-needs-human)' : 'var(--color-accent)';
-  const label = isHuman ? section.heading : section.heading.replace(/^Turn/, 'Turn');
-
-  return (
-    <div className="flex items-center gap-2 pt-3 pb-1">
-      <span
-        className="inline-block h-2 w-2 shrink-0 rounded-full"
-        style={{ background: dotColor }}
-      />
-      <span
-        className="text-[11px] font-semibold uppercase tracking-wider"
-        style={{ color: dotColor }}
-      >
-        {label}
-      </span>
-      {section.meta && (
-        <span className="text-[10px] font-mono" style={{ color: 'var(--color-text-4)' }}>
-          {localizeMeta(section.meta)}
-        </span>
-      )}
-    </div>
-  );
-}
-
 // ── Main export ──
 
 interface Props {
@@ -306,8 +148,8 @@ interface Props {
 export function TranscriptViewer({ markdown }: Props): React.ReactElement {
   const sections = useMemo(() => parseTranscript(markdown), [markdown]);
 
-  // Filter out queue-op sections (ENQUEUE/DEQUEUE are internal plumbing)
-  const visibleSections = sections.filter((s) => s.kind !== 'queue-op');
+  // Filter out internal plumbing sections.
+  const visibleSections = sections.filter((s) => s.kind !== 'queue-op' && s.kind !== 'session-end');
 
   if (visibleSections.length === 0) {
     return (
@@ -320,48 +162,7 @@ export function TranscriptViewer({ markdown }: Props): React.ReactElement {
   return (
     <div className="space-y-0.5">
       {visibleSections.map((section, si) => (
-        <div key={si}>
-          {section.kind === 'session-end' ? (
-            <div
-              className="mt-3 border-t pt-2 text-center text-[10px] italic"
-              style={{ borderColor: 'var(--color-border-subtle)', color: 'var(--color-text-4)' }}
-            >
-              {section.heading}
-            </div>
-          ) : (
-            <>
-              <SectionHeader section={section} />
-              {section.blocks.map((block, bi) => {
-                if (block.type === 'text' && block.content) {
-                  return (
-                    <div
-                      key={bi}
-                      className="text-[12px] leading-relaxed py-0.5"
-                      style={{ color: 'var(--color-text-1)' }}
-                    >
-                      <PrMarkdown text={block.content} />
-                    </div>
-                  );
-                }
-                if (block.type === 'tool') {
-                  return <ToolBlock key={bi} block={block} />;
-                }
-                if (block.type === 'results') {
-                  return (
-                    <div
-                      key={bi}
-                      className="text-[10px] italic py-0.5"
-                      style={{ color: 'var(--color-text-4)' }}
-                    >
-                      {block.content}
-                    </div>
-                  );
-                }
-                return null;
-              })}
-            </>
-          )}
-        </div>
+        <SectionRow key={si} section={section} />
       ))}
     </div>
   );
@@ -388,21 +189,25 @@ export function TranscriptSidebar({
 
   return (
     <div
-      className="flex h-full w-[420px] shrink-0 flex-col border-l"
-      style={{ borderColor: 'var(--color-border)', background: 'var(--color-surface-1)' }}
+      className="flex h-full w-[440px] shrink-0 flex-col"
+      style={{
+        background: 'var(--color-surface-2)',
+        borderLeft: '1px solid var(--color-border-subtle)',
+      }}
     >
+      {/* Header */}
       <div
-        className="flex items-center gap-2 border-b px-3 py-2"
-        style={{ borderColor: 'var(--color-border)' }}
+        className="flex items-center gap-2 px-4 py-3"
+        style={{ borderBottom: '1px solid var(--color-border-subtle)' }}
       >
         <div className="min-w-0 flex-1">
           <div
-            className="truncate text-[12px] font-medium"
+            className="truncate text-caption font-medium"
             style={{ color: 'var(--color-text-1)' }}
           >
             {sessionTitle(s)}
           </div>
-          <div className="flex gap-2 text-[10px]" style={{ color: 'var(--color-text-3)' }}>
+          <div className="flex gap-2 text-label" style={{ color: 'var(--color-text-3)' }}>
             {subtitle && <span>{subtitle}</span>}
             {s.model && <span>{s.model}</span>}
             {s.duration_ms != null && s.duration_ms > 0 && (
@@ -419,10 +224,10 @@ export function TranscriptSidebar({
           <button
             onClick={onExpand}
             title="Expand to full view"
-            className="flex items-center justify-center"
+            className="flex items-center justify-center rounded-md transition-colors hover:bg-[var(--color-surface-3)]"
             style={{
-              width: 20,
-              height: 20,
+              width: 24,
+              height: 24,
               color: 'var(--color-text-3)',
               background: 'none',
               border: 'none',
@@ -438,35 +243,45 @@ export function TranscriptSidebar({
               strokeWidth="1.5"
               strokeLinecap="round"
             >
-              <path d="M8.5 1.5H12.5V5.5" />
-              <path d="M5.5 12.5H1.5V8.5" />
-              <path d="M12.5 1.5L8 6" />
-              <path d="M1.5 12.5L6 8" />
+              <path d="M8.5 1.5H12.5V5.5M5.5 12.5H1.5V8.5M12.5 1.5L8 6M1.5 12.5L6 8" />
             </svg>
           </button>
         )}
         <button
           onClick={onClose}
-          className="text-sm leading-none"
+          className="flex items-center justify-center rounded-md transition-colors hover:bg-[var(--color-surface-3)]"
           style={{
+            width: 24,
+            height: 24,
             color: 'var(--color-text-3)',
             background: 'none',
             border: 'none',
             cursor: 'pointer',
           }}
         >
-          &times;
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 14 14"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+          >
+            <path d="M3 3l8 8M11 3l-8 8" />
+          </svg>
         </button>
       </div>
-      <div className="flex-1 overflow-auto px-3 py-2">
+      {/* Transcript content */}
+      <div className="flex-1 overflow-auto px-4 py-3">
         {session.loading ? (
-          <div className="text-[11px]" style={{ color: 'var(--color-text-3)' }}>
+          <div className="text-caption" style={{ color: 'var(--color-text-3)' }}>
             Loading transcript&hellip;
           </div>
         ) : session.markdown ? (
           <TranscriptViewer markdown={session.markdown} />
         ) : (
-          <div className="text-[11px]" style={{ color: 'var(--color-text-3)' }}>
+          <div className="text-caption" style={{ color: 'var(--color-text-3)' }}>
             No transcript available
           </div>
         )}

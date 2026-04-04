@@ -18,14 +18,9 @@ export function SettingsProjects(): React.ReactElement {
 
   return (
     <div data-testid="settings-projects" className="space-y-8">
-      <div>
-        <h2 className="text-lg font-semibold" style={{ color: 'var(--color-text-1)' }}>
-          Projects
-        </h2>
-        <p className="mt-1 text-sm" style={{ color: 'var(--color-text-3)' }}>
-          Manage projects Mando can work on.
-        </p>
-      </div>
+      <h2 className="text-lg font-semibold" style={{ color: 'var(--color-text-1)' }}>
+        Projects
+      </h2>
 
       <div className="space-y-4">
         {pathKeys.length === 0 && (

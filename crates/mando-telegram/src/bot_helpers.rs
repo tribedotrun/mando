@@ -47,7 +47,7 @@ pub(crate) fn dm_reply_keyboard() -> Value {
     serde_json::json!({
         "keyboard": [
             ["/tasks", "/captain", "/scout"],
-            ["/todo", "/sessions", "/triage"],
+            ["/todo", "/health", "/triage"],
         ],
         "resize_keyboard": true,
         "is_persistent": true,

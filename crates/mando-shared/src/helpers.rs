@@ -12,6 +12,36 @@ pub fn pr_short_label(pr: &str) -> String {
     }
 }
 
+/// Build a clickable Telegram HTML hyperlink for a PR.
+///
+/// If `pr` is a full URL, extracts the number and links to the URL.
+/// If `pr` is a bare number (or `#N`), constructs a GitHub URL from `github_repo`
+/// (e.g. `"owner/repo"`). Returns plain `PR #N` only when no URL can be built.
+pub fn pr_html_link(pr: &str, github_repo: Option<&str>) -> String {
+    let num = match mando_types::task::extract_pr_number(pr) {
+        Some(n) => n,
+        None => return crate::telegram_format::escape_html(pr),
+    };
+    let label = crate::telegram_format::escape_html(&format!("PR #{num}"));
+    // Full URL already present — use it directly.
+    if pr.starts_with("http") {
+        return format!(
+            "<a href=\"{}\">{label}</a>",
+            crate::telegram_format::escape_html(pr),
+        );
+    }
+    // Construct URL from github_repo if available.
+    if let Some(repo) = github_repo {
+        let url = format!("https://github.com/{repo}/pull/{num}");
+        return format!(
+            "<a href=\"{}\">{label}</a>",
+            crate::telegram_format::escape_html(&url),
+        );
+    }
+    // No URL possible — plain text fallback.
+    label
+}
+
 /// Sanitize an ID for safe use in file paths (prevent path traversal).
 pub fn sanitize_path_id(id: &str) -> String {
     id.chars()
@@ -80,5 +110,38 @@ mod tests {
     #[test]
     fn pr_short_label_from_bare_number() {
         assert_eq!(pr_short_label("99"), "#99");
+    }
+
+    #[test]
+    fn pr_html_link_full_url() {
+        let link = pr_html_link("https://github.com/org/repo/pull/123", None);
+        assert_eq!(
+            link,
+            "<a href=\"https://github.com/org/repo/pull/123\">PR #123</a>"
+        );
+    }
+
+    #[test]
+    fn pr_html_link_bare_number_with_repo() {
+        let link = pr_html_link("504", Some("tribedotrun/mando-private"));
+        assert_eq!(
+            link,
+            "<a href=\"https://github.com/tribedotrun/mando-private/pull/504\">PR #504</a>"
+        );
+    }
+
+    #[test]
+    fn pr_html_link_hash_ref_with_repo() {
+        let link = pr_html_link("#42", Some("acme/widgets"));
+        assert_eq!(
+            link,
+            "<a href=\"https://github.com/acme/widgets/pull/42\">PR #42</a>"
+        );
+    }
+
+    #[test]
+    fn pr_html_link_bare_number_no_repo() {
+        let link = pr_html_link("99", None);
+        assert_eq!(link, "PR #99");
     }
 }

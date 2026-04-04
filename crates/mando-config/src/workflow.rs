@@ -1,13 +1,11 @@
 //! Workflow configuration — loads workflow.yaml, renders prompt templates.
 //!
-//! Three workflow files:
+//! Two workflow files:
 //! - **Captain** (`captain/workflow.yaml`): orchestration, prompts, nudges
 //! - **Scout** (`scout/workflow.yaml`): triage, article, research, QA
-//! - **Voice** (`voice/workflow.yaml`): intent parsing for voice control
 //!
 //! Binary ships a compiled-in default; user can override at `~/.mando/workflow.yaml`
-//! (captain), `~/.mando/scout-workflow.yaml` (scout), or
-//! `~/.mando/voice-workflow.yaml` (voice).
+//! (captain) or `~/.mando/scout-workflow.yaml` (scout).
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -403,8 +401,8 @@ mod tests {
     #[test]
     fn render_inline_if_expression() {
         let mut vars = HashMap::new();
-        vars.insert("linear_id", "ENG-42");
-        let tmpl = "{{ '4' if linear_id else '3' }}";
+        vars.insert("id", "42");
+        let tmpl = "{{ '4' if id else '3' }}";
         assert_eq!(render_template(tmpl, &vars).unwrap(), "4");
     }
 
@@ -452,7 +450,7 @@ mod tests {
         vars.insert("title", "Fix the login bug");
         vars.insert("context", "Auth module is broken");
         vars.insert("branch", "mando/fix-login-1");
-        vars.insert("linear_id", "ENG-42");
+        vars.insert("id", "42");
         vars.insert("no_pr", "false");
         vars.insert("original_prompt", "");
         vars.insert("worker_preamble", "");
@@ -484,12 +482,12 @@ mod tests {
         let wf = CaptainWorkflow::compiled_default();
         let mut vars = HashMap::new();
         vars.insert("brief_filename", "brief.md");
-        vars.insert("linear_id", "ENG-42");
+        vars.insert("id", "42");
         vars.insert("no_pr", "false");
 
         let rendered = render_initial_prompt("worker", &wf.initial_prompts, &vars).unwrap();
         assert!(rendered.contains(".ai/briefs/brief.md"));
-        assert!(rendered.contains("ENG-42"));
+        assert!(rendered.contains("42"));
     }
 
     #[test]

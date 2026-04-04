@@ -11,9 +11,10 @@ import { nativeImage, NativeImage } from 'electron';
 import log from '#main/logger';
 import type { AppMode } from '#main/daemon';
 
-// Dev = blue (dev environment), sandbox = gray (neutral, disposable).
+// Dev = blue, prod-local = orange (real data, local code), sandbox = gray.
 const MODE_COLORS: Record<string, [number, number, number]> = {
   dev: [59, 130, 246],
+  'prod-local': [249, 115, 22],
   sandbox: [156, 163, 175],
 };
 

@@ -129,12 +129,7 @@ pub async fn handle(bot: &TelegramBot, chat_id: &str, args: &str) -> Result<()> 
 
             for item in &status_items {
                 // Under a status header, show compact: #id Title (worker | PR #N)
-                // Show Linear ID if available, otherwise task ID
-                let id_str = item
-                    .linear_id
-                    .as_deref()
-                    .map(|lid| format!("{lid} "))
-                    .unwrap_or_else(|| format!("#{} ", item.id));
+                let id_str = format!("#{} ", item.id);
                 let title = escape_html(&item.title);
                 let worker = item
                     .worker
@@ -147,20 +142,11 @@ pub async fn handle(bot: &TelegramBot, chat_id: &str, args: &str) -> Result<()> 
                     .as_deref()
                     .filter(|p| !p.is_empty())
                     .map(|pr_ref| {
-                        let num = pr_ref
-                            .rsplit('/')
-                            .next()
-                            .unwrap_or(pr_ref)
-                            .trim_start_matches('#');
-                        if pr_ref.starts_with("http") {
-                            format!(
-                                " | <a href=\"{}\">{}</a>",
-                                escape_html(pr_ref),
-                                escape_html(&format!("PR #{num}"))
-                            )
-                        } else {
-                            format!(" | PR #{}", escape_html(num))
-                        }
+                        let link = mando_shared::helpers::pr_html_link(
+                            pr_ref,
+                            item.github_repo.as_deref(),
+                        );
+                        format!(" | {link}")
                     })
                     .unwrap_or_default();
                 lines.push(format!("  \u{2022} {id_str}{title}{worker}{pr_part}"));

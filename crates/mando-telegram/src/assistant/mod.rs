@@ -13,8 +13,8 @@ mod tests {
 
     #[test]
     fn parse_command_simple() {
-        let (cmd, args) = parse_command("/addlink https://example.com");
-        assert_eq!(cmd, "addlink");
+        let (cmd, args) = parse_command("/scout_add https://example.com");
+        assert_eq!(cmd, "scout_add");
         assert_eq!(args, "https://example.com");
     }
 
@@ -27,8 +27,8 @@ mod tests {
 
     #[test]
     fn parse_command_with_bot_mention() {
-        let (cmd, args) = parse_command("/list@scout_bot saved");
-        assert_eq!(cmd, "list");
+        let (cmd, args) = parse_command("/scout_list@scout_bot saved");
+        assert_eq!(cmd, "scout_list");
         assert_eq!(args, "saved");
     }
 }

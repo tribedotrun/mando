@@ -1,4 +1,5 @@
 node_modules/
 .test-build/
+.test-build-prod/
 .vite/
 test-results/

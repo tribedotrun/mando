@@ -16,9 +16,8 @@ use tracing_subscriber::{EnvFilter, Layer};
 
 use mando_telegram::api::TelegramApi;
 use mando_telegram::http::GatewayClient;
-use mando_telegram::notifications::NotificationHandler;
 use mando_telegram::resolve_api_base_url;
-use mando_telegram::sse::{SseConsumer, SseEvent};
+use mando_telegram::sse;
 
 #[derive(Parser)]
 #[command(name = "mando-tg", about = "Mando Telegram bot (standalone)")]
@@ -88,7 +87,7 @@ async fn main() -> Result<()> {
             };
             let chat_id = tg.owner.clone();
             set.spawn(async move {
-                run_notification_listener(base_url, gw_token, api, chat_id).await;
+                sse::run_notification_loop(base_url, gw_token, api, chat_id).await;
             });
         }
     }
@@ -204,39 +203,6 @@ async fn run_gateway_watchdog(gw: GatewayClient) {
             }
         }
     }
-}
-
-/// SSE notification loop — reconnects on failure.
-async fn run_notification_listener(
-    base_url: String,
-    token: Option<String>,
-    api: TelegramApi,
-    chat_id: String,
-) {
-    let sse = SseConsumer::new(&base_url, token);
-    let mut handler = NotificationHandler::new(api, chat_id);
-
-    // SseConsumer handles reconnection internally — subscribe once and consume.
-    let mut rx = match sse.subscribe().await {
-        Ok(rx) => rx,
-        Err(e) => {
-            tracing::error!("SSE subscribe failed: {e}");
-            return;
-        }
-    };
-
-    while let Some(event) = rx.recv().await {
-        match event {
-            SseEvent::Notification(payload) => {
-                handler.handle(payload).await;
-            }
-            SseEvent::Reconnected => {
-                handler.clear_tracked_messages();
-            }
-            _ => {}
-        }
-    }
-    tracing::warn!("SSE notification listener exited");
 }
 
 /// Read auth token from data dir.

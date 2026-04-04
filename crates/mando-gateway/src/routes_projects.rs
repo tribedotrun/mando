@@ -241,7 +241,7 @@ pub(crate) async fn patch_project(
     Ok(Json(json!({ "ok": true })))
 }
 
-/// DELETE /api/projects/{name} — remove a project.
+/// DELETE /api/projects/{name} — remove a project and cascade-delete its tasks.
 pub(crate) async fn delete_project(
     State(state): State<AppState>,
     Path(name): Path<String>,
@@ -249,9 +249,56 @@ pub(crate) async fn delete_project(
     let _write_guard = state.config_write_mu.lock().await;
     let mut config = (*state.config.load_full()).clone();
     let key = resolve_project_key(&config, &name)?;
+
+    // Collect all identifiers tasks might use to reference this project.
+    let mut identifiers = vec![key.clone()];
+    if let Some(pc) = config.captain.projects.get(&key) {
+        identifiers.push(pc.name.clone());
+        identifiers.extend(pc.aliases.iter().cloned());
+        if pc.path != key {
+            identifiers.push(pc.path.clone());
+        }
+    }
+
+    // Cascade-delete tasks belonging to this project.
+    let store = state.task_store.read().await;
+    let all_tasks = store.load_all_with_archived().await.map_err(|e| {
+        error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            &format!("task load failed: {e}"),
+        )
+    })?;
+    let task_ids: Vec<i64> = all_tasks
+        .iter()
+        .filter(|t| {
+            t.project
+                .as_ref()
+                .is_some_and(|p| identifiers.iter().any(|id| id.eq_ignore_ascii_case(p)))
+        })
+        .map(|t| t.id)
+        .collect();
+    let deleted_tasks = task_ids.len();
+
+    if !task_ids.is_empty() {
+        let opts = mando_captain::io::task_cleanup::CleanupOptions { close_pr: false };
+        mando_captain::runtime::dashboard::delete_tasks(&config, &store, &task_ids, &opts)
+            .await
+            .map_err(|e| {
+                error_response(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    &format!("task cleanup failed: {e}"),
+                )
+            })?;
+        state.bus.send(
+            mando_types::BusEvent::Tasks,
+            Some(json!({"action": "delete"})),
+        );
+    }
+
     config.captain.projects.remove(&key);
     save_and_reload(&state, &config).await?;
-    Ok(Json(json!({ "ok": true })))
+
+    Ok(Json(json!({ "ok": true, "deleted_tasks": deleted_tasks })))
 }
 
 /// Auto-detect a project summary from Cargo.toml, package.json, or README.

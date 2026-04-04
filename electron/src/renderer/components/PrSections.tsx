@@ -16,7 +16,8 @@ type GroupKey = 'main' | 'prSummary' | 'details' | 'full';
 function stripBadge(text: string): string {
   return text
     .replace(/<!-- devin-review-badge-begin -->[\s\S]*?<!-- devin-review-badge-end -->/g, '')
-    .replace(/\n---\s*\n*$/, '')
+    .replace(/<!-- pr-summary-head:.*?-->/g, '')
+    .replace(/(\n\s*---\s*)+\s*$/g, '')
     .trim();
 }
 
@@ -53,10 +54,10 @@ function parseSections(raw: string): Section[] {
 function classifySection(heading: string): Exclude<GroupKey, 'full'> {
   if (!heading) return 'main';
   const h = heading.toLowerCase();
-  if (/^(summary|problem|changes?)$/.test(h)) return 'main';
-  if (/test|verif|evidence/.test(h)) return 'main';
   if (/pr\s*summary/.test(h)) return 'prSummary';
-  return 'details';
+  if (/checklist|reviewer/i.test(h)) return 'details';
+  // Everything else goes to main — only explicit checklist headings become their own tab.
+  return 'main';
 }
 
 /**
@@ -79,9 +80,11 @@ interface Tab {
 
 interface Props {
   text: string;
+  onRefresh?: () => void;
+  refreshing?: boolean;
 }
 
-export function PrSections({ text }: Props): React.ReactElement | null {
+export function PrSections({ text, onRefresh, refreshing }: Props): React.ReactElement | null {
   const cleaned = stripBadge(text);
   const sections = parseSections(text);
 
@@ -125,6 +128,7 @@ export function PrSections({ text }: Props): React.ReactElement | null {
     const items = singleTab ? groups[singleTab.key as Exclude<GroupKey, 'full'>] : groups.main;
     return (
       <div>
+        {onRefresh && <RefreshIcon onClick={onRefresh} spinning={refreshing} />}
         {items.map((s, i) => (
           <div key={i} className="mb-2">
             {s.heading && <SectionHeading text={s.heading} />}
@@ -138,26 +142,38 @@ export function PrSections({ text }: Props): React.ReactElement | null {
   // Multiple groups — add Full tab at the end
   tabs.push({ key: 'full', label: 'Full' });
 
-  return <TabGroup tabs={tabs} groups={groups} fullText={cleaned} />;
+  return (
+    <TabGroup
+      tabs={tabs}
+      groups={groups}
+      fullText={cleaned}
+      onRefresh={onRefresh}
+      refreshing={refreshing}
+    />
+  );
 }
 
 function TabGroup({
   tabs,
   groups,
   fullText,
+  onRefresh,
+  refreshing,
 }: {
   tabs: Tab[];
   groups: Record<Exclude<GroupKey, 'full'>, Section[]>;
   fullText: string;
+  onRefresh?: () => void;
+  refreshing?: boolean;
 }): React.ReactElement {
   const [active, setActive] = useState<GroupKey>(tabs[0].key);
 
   return (
     <div>
-      {/* Tab bar */}
+      {/* Sub-tab pills + refresh — same row, sticky */}
       <div
-        className="mb-3 flex gap-0"
-        style={{ borderBottom: '1px solid var(--color-border-subtle)' }}
+        className="sticky top-0 z-10 flex items-center gap-1 pb-3"
+        style={{ background: 'var(--color-bg)' }}
       >
         {tabs.map((tab) => {
           const isActive = tab.key === active;
@@ -165,20 +181,20 @@ function TabGroup({
             <button
               key={tab.key}
               onClick={() => setActive(tab.key)}
-              className="px-3 py-1.5 text-[11px] font-medium"
+              className="rounded-md px-2.5 py-1 text-label font-medium transition-colors"
               style={{
                 color: isActive ? 'var(--color-text-1)' : 'var(--color-text-3)',
-                background: 'none',
+                background: isActive ? 'var(--color-surface-3)' : 'transparent',
                 border: 'none',
-                borderBottom: isActive ? '2px solid var(--color-accent)' : '2px solid transparent',
                 cursor: 'pointer',
-                marginBottom: -1,
               }}
             >
               {tab.label}
             </button>
           );
         })}
+        <span className="flex-1" />
+        {onRefresh && <RefreshIcon onClick={onRefresh} spinning={refreshing} />}
       </div>
 
       {/* Active tab content */}
@@ -195,6 +211,42 @@ function TabGroup({
         )}
       </div>
     </div>
+  );
+}
+
+function RefreshIcon({
+  onClick,
+  spinning,
+}: {
+  onClick: () => void;
+  spinning?: boolean;
+}): React.ReactElement {
+  return (
+    <button
+      onClick={onClick}
+      disabled={spinning}
+      className="flex items-center justify-center rounded-md transition-colors hover:bg-[var(--color-surface-2)]"
+      style={{
+        width: 24,
+        height: 24,
+        color: 'var(--color-text-3)',
+        background: 'none',
+        border: 'none',
+        cursor: spinning ? 'default' : 'pointer',
+        opacity: spinning ? 0.5 : 1,
+      }}
+      title="Refresh PR content"
+    >
+      <svg
+        width="14"
+        height="14"
+        viewBox="0 0 16 16"
+        fill="currentColor"
+        className={spinning ? 'animate-spin' : ''}
+      >
+        <path d="M8 2.5a5.487 5.487 0 0 0-4.131 1.869l1.204 1.204A.25.25 0 0 1 4.896 6H1.25A.25.25 0 0 1 1 5.75V2.104a.25.25 0 0 1 .427-.177l1.38 1.38A7.001 7.001 0 0 1 14.95 7.16a.75.75 0 1 1-1.49.178A5.501 5.501 0 0 0 8 2.5ZM1.705 8.005a.75.75 0 0 1 .834.656 5.501 5.501 0 0 0 9.592 2.97l-1.204-1.204a.25.25 0 0 1 .177-.427h3.646a.25.25 0 0 1 .25.25v3.646a.25.25 0 0 1-.427.177l-1.38-1.38A7.001 7.001 0 0 1 1.05 8.84a.75.75 0 0 1 .656-.834Z" />
+      </svg>
+    </button>
   );
 }
 

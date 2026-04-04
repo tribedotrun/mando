@@ -1,52 +1,30 @@
-//! Task Q&A — ask questions about tasks via headless CC.
+//! Task Q&A — multi-turn ask sessions with worktree access.
+//!
+//! Each task gets a single persistent ask session (stored in `session_ids.ask`).
+//! First ask creates a new CC session in the task's worktree; follow-up asks
+//! resume the same session via `--resume`.
 
 use anyhow::Result;
-use mando_config::settings::Config;
 use mando_config::workflow::CaptainWorkflow;
 
 use super::dashboard::truncate_utf8;
-use mando_cc::{CcConfig, CcOneShot};
 
-/// Ask a question about a pre-loaded task (avoids holding store lock).
-pub async fn ask_task_with(
-    config: &Config,
-    item: &mando_types::Task,
-    item_id: i64,
-    pool: &sqlx::SqlitePool,
-    question: &str,
-    workflow: &CaptainWorkflow,
-) -> Result<serde_json::Value> {
-    ask_task_with_inner(config, item, &item_id.to_string(), question, workflow, pool).await
-}
-
-pub(crate) async fn ask_task_with_inner(
-    _config: &Config,
+/// Build the initial prompt for the first ask turn.
+///
+/// Includes task metadata, timeline context, and the user's question.
+/// The session runs in the task's worktree, so it has full code access.
+pub fn build_initial_prompt(
     item: &mando_types::Task,
     item_id: &str,
     question: &str,
     workflow: &CaptainWorkflow,
-    pool: &sqlx::SqlitePool,
-) -> Result<serde_json::Value> {
-    // Build context from item fields + recent timeline (from DB).
-    let task_id_num: i64 = item_id.parse().unwrap_or(item.id);
-    let timeline_events = mando_db::queries::timeline::load_last_n(pool, task_id_num, 10)
-        .await
-        .unwrap_or_default();
-    let timeline_summary: Vec<String> = timeline_events
-        .iter()
-        .map(|e| format!("[{}] {} — {}", e.timestamp, e.actor, e.summary))
-        .collect();
-
+    timeline_text: &str,
+) -> Result<String> {
     let status_str = serde_json::to_value(item.status)
         .unwrap_or_default()
         .as_str()
         .unwrap_or("unknown")
         .to_string();
-    let timeline_text = if timeline_summary.is_empty() {
-        "No timeline events.".to_string()
-    } else {
-        timeline_summary.join("\n")
-    };
 
     let mut vars = std::collections::HashMap::new();
     vars.insert("title", item.title.as_str());
@@ -56,79 +34,66 @@ pub(crate) async fn ask_task_with_inner(
     vars.insert("pr", item.pr.as_deref().unwrap_or("none"));
     vars.insert("branch", item.branch.as_deref().unwrap_or("none"));
     vars.insert("context", item.context.as_deref().unwrap_or("none"));
-    vars.insert("timeline", timeline_text.as_str());
+    vars.insert("timeline", timeline_text);
     vars.insert("question", question);
 
-    let prompt = mando_config::render_prompt("task_analyst", &workflow.prompts, &vars)
-        .map_err(|e| anyhow::anyhow!(e))?;
+    mando_config::render_prompt("task_analyst", &workflow.prompts, &vars)
+        .map_err(|e| anyhow::anyhow!(e))
+}
 
-    let cc_result = CcOneShot::run(
-        &prompt,
-        CcConfig::builder()
-            .model(&workflow.models.captain)
-            .timeout(std::time::Duration::from_secs(60))
-            .caller("task-ask")
-            .task_id(item_id)
-            .build(),
-    )
-    .await?;
+/// Build timeline text from recent events.
+pub async fn build_timeline_text(pool: &sqlx::SqlitePool, task_id: i64) -> String {
+    let events = mando_db::queries::timeline::load_last_n(pool, task_id, 10)
+        .await
+        .unwrap_or_default();
+    if events.is_empty() {
+        "No timeline events.".to_string()
+    } else {
+        events
+            .iter()
+            .map(|e| format!("[{}] {} — {}", e.timestamp, e.actor, e.summary))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+}
 
-    crate::io::headless_cc::log_cc_session(
-        pool,
-        &crate::io::headless_cc::SessionLogEntry {
-            session_id: &cc_result.session_id,
-            cwd: std::path::Path::new(""),
-            model: &workflow.models.captain,
-            caller: "task-ask",
-            cost_usd: cc_result.cost_usd,
-            duration_ms: cc_result.duration_ms,
-            resumed: false,
-            task_id: item_id,
-            status: mando_types::SessionStatus::Stopped,
-            worker_name: "",
-        },
-    )
-    .await;
-
-    let answer = cc_result.text;
-
-    // Persist Q&A to ask history (DB).
+/// Record ask Q&A in history and timeline.
+pub async fn record_ask(pool: &sqlx::SqlitePool, task_id: i64, question: &str, answer: &str) {
     let now = mando_types::now_rfc3339();
-    mando_db::queries::ask_history::append(
+    if let Err(e) = mando_db::queries::ask_history::append(
         pool,
-        task_id_num,
+        task_id,
         &mando_types::AskHistoryEntry {
             role: "human".into(),
             content: question.into(),
             timestamp: now.clone(),
         },
     )
-    .await?;
-    mando_db::queries::ask_history::append(
+    .await
+    {
+        tracing::warn!(task_id, error = %e, "failed to persist ask question to history");
+    }
+    if let Err(e) = mando_db::queries::ask_history::append(
         pool,
-        task_id_num,
+        task_id,
         &mando_types::AskHistoryEntry {
             role: "assistant".into(),
-            content: answer.clone(),
+            content: answer.into(),
             timestamp: now,
         },
     )
-    .await?;
+    .await
+    {
+        tracing::warn!(task_id, error = %e, "failed to persist ask answer to history");
+    }
 
-    // Emit timeline event (DB).
     super::timeline_emit::emit(
         pool,
-        task_id_num,
+        task_id,
         mando_types::timeline::TimelineEventType::HumanAsk,
         "human",
         &format!("Asked: {}", truncate_utf8(question, 80)),
         serde_json::json!({"question": question}),
     )
     .await;
-
-    Ok(serde_json::json!({
-        "id": item_id,
-        "question": question,
-        "answer": answer,
-    }))
 }

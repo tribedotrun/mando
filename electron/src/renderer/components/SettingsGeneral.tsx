@@ -1,7 +1,6 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import log from '#renderer/logger';
-import { fetchHealth } from '#renderer/api';
 import {
   getNotificationsEnabled,
   setNotificationsEnabled,
@@ -12,8 +11,6 @@ import { useToastStore } from '#renderer/stores/toastStore';
 import { useSettingsStore } from '#renderer/stores/settingsStore';
 
 const CHANNELS = ['stable', 'beta'] as const;
-
-type ConnectionState = 'connected' | 'connecting' | 'disconnected';
 
 function SettingsRow({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -26,24 +23,11 @@ function SettingsRow({ label, children }: { label: string; children: React.React
   );
 }
 
-function SectionDivider() {
-  return <div style={{ height: 1, background: 'var(--color-border-subtle)', margin: '8px 0' }} />;
-}
-
-const GATEWAY_STATE: Record<string, { dot: string; label: string }> = {
-  connected: { dot: 'var(--color-success)', label: 'Connected' },
-  connecting: { dot: 'var(--color-stale)', label: 'Connecting' },
-  disconnected: { dot: 'var(--color-error)', label: 'Disconnected' },
-  updating: { dot: 'var(--color-stale)', label: 'Updating' },
-};
-const GATEWAY_FALLBACK = GATEWAY_STATE.disconnected;
-
 type UpdateCheckStatus = 'idle' | 'checking' | 'up-to-date' | 'update-available' | 'error';
 
 export function SettingsGeneral(): React.ReactElement {
   const [channelOverride, setChannelOverride] = useState<string | null>(null);
   const [notificationsEnabled, setNotifState] = useState(getNotificationsEnabled);
-  const [liveConnectionState, setLiveConnectionState] = useState<ConnectionState | null>(null);
   const [updateCheckStatus, setUpdateCheckStatus] = useState<UpdateCheckStatus>('idle');
   const clearTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const startAtLogin = useSettingsStore((s) => s.config.startAtLogin ?? false);
@@ -54,45 +38,18 @@ export function SettingsGeneral(): React.ReactElement {
     queryKey: ['settings', 'general', 'systemInfo'],
     queryFn: async () => {
       if (!window.mandoAPI) {
-        return {
-          dataDir: '',
-          configPath: '',
-          appVersion: '',
-          channel: 'stable',
-          gatewayUrl: '',
-          connectionState: 'disconnected' as ConnectionState,
-        };
+        return { appVersion: '', channel: 'stable' };
       }
-      const [dataDir, configPath, appVersion, channel, gatewayUrl, currentConnectionState] =
-        await Promise.all([
-          window.mandoAPI.dataDir(),
-          window.mandoAPI.configPath(),
-          window.mandoAPI.updates.appVersion(),
-          window.mandoAPI.updates.getChannel(),
-          window.mandoAPI.gatewayUrl(),
-          window.mandoAPI.connectionState(),
-        ]);
-      return {
-        dataDir,
-        configPath,
-        appVersion,
-        channel,
-        gatewayUrl,
-        connectionState: currentConnectionState as ConnectionState,
-      };
+      const [appVersion, channel] = await Promise.all([
+        window.mandoAPI.updates.appVersion(),
+        window.mandoAPI.updates.getChannel(),
+      ]);
+      return { appVersion, channel };
     },
-  });
-  const { data: health } = useQuery({
-    queryKey: ['settings', 'general', 'health'],
-    queryFn: fetchHealth,
-    retry: false,
   });
 
   useMountEffect(() => {
     if (!window.mandoAPI) return;
-    window.mandoAPI.onConnectionState((state) => {
-      setLiveConnectionState(state as ConnectionState);
-    });
     window.mandoAPI.updates.onUpdateChecking(() => {
       clearTimeout(clearTimerRef.current);
       setUpdateCheckStatus('checking');
@@ -110,27 +67,12 @@ export function SettingsGeneral(): React.ReactElement {
     });
     return () => {
       clearTimeout(clearTimerRef.current);
-      window.mandoAPI.removeConnectionStateListeners();
       window.mandoAPI.updates.removeCheckListeners();
     };
   });
 
-  const dataDir = systemInfo?.dataDir ?? '';
-  const configPath = systemInfo?.configPath ?? '';
   const appVersion = systemInfo?.appVersion ?? '';
   const updateChannel = channelOverride ?? systemInfo?.channel ?? 'stable';
-  const gatewayUrl = systemInfo?.gatewayUrl ?? '';
-  const connectionState = liveConnectionState ?? systemInfo?.connectionState ?? 'connecting';
-
-  const gatewayDisplay = useMemo(() => {
-    if (!gatewayUrl) return 'Gateway unavailable';
-    try {
-      const url = new URL(gatewayUrl);
-      return `${url.hostname}:${url.port}`;
-    } catch {
-      return gatewayUrl;
-    }
-  }, [gatewayUrl]);
 
   const handleChannelChange = async (channel: string) => {
     setChannelOverride(channel);
@@ -173,10 +115,6 @@ export function SettingsGeneral(): React.ReactElement {
         General
       </h2>
 
-      <div className="text-label" style={{ color: 'var(--color-accent)', marginBottom: 12 }}>
-        Application
-      </div>
-
       <SettingsRow label="Version">
         <span className="flex items-center gap-3">
           <span className="text-code" style={{ color: 'var(--color-text-1)' }}>
@@ -200,9 +138,6 @@ export function SettingsGeneral(): React.ReactElement {
           onChange={toggleLoginItem}
         />
       </SettingsRow>
-      <p className="text-caption" style={{ color: 'var(--color-text-3)', marginTop: -4 }}>
-        Launch Mando when you log in to your Mac
-      </p>
 
       <SettingsRow label="Desktop notifications">
         <ToggleSwitch
@@ -211,75 +146,6 @@ export function SettingsGeneral(): React.ReactElement {
           onChange={toggleNotifications}
         />
       </SettingsRow>
-      <p className="text-caption" style={{ color: 'var(--color-text-3)', marginTop: -4 }}>
-        Show macOS notifications for agent events
-      </p>
-
-      <SectionDivider />
-
-      <div
-        className="text-label"
-        style={{ color: 'var(--color-accent)', marginBottom: 12, marginTop: 16 }}
-      >
-        System
-      </div>
-
-      <SettingsRow label="Data directory">
-        <span className="text-code" style={{ color: 'var(--color-text-2)' }}>
-          {dataDir || '~/.mando/'}
-        </span>
-      </SettingsRow>
-
-      <SettingsRow label="Config file">
-        <span className="text-code" style={{ color: 'var(--color-text-2)' }}>
-          {configPath || '~/.mando/config.json'}
-        </span>
-      </SettingsRow>
-
-      <SettingsRow label="Task database">
-        <span className="text-code" style={{ color: 'var(--color-text-2)' }}>
-          {health?.taskDbPath || '~/.mando/mando.db'}
-        </span>
-      </SettingsRow>
-
-      <SettingsRow label="Worker health">
-        <span className="text-code" style={{ color: 'var(--color-text-2)' }}>
-          {health?.workerHealthPath || '~/.mando/state/worker-health.json'}
-        </span>
-      </SettingsRow>
-
-      <SettingsRow label="Captain lock">
-        <span className="text-code" style={{ color: 'var(--color-text-2)' }}>
-          {health?.lockfilePath || '~/.mando/captain.lock'}
-        </span>
-      </SettingsRow>
-
-      <SettingsRow label="Gateway">
-        <span className="flex items-center gap-2">
-          <span
-            style={{
-              width: 6,
-              height: 6,
-              borderRadius: 3,
-              background: (GATEWAY_STATE[connectionState] ?? GATEWAY_FALLBACK).dot,
-              flexShrink: 0,
-            }}
-          />
-          <span className="text-code" style={{ color: 'var(--color-text-1)' }}>
-            {gatewayDisplay}
-          </span>
-          <span className="text-caption" style={{ color: 'var(--color-text-3)' }}>
-            {(GATEWAY_STATE[connectionState] ?? GATEWAY_FALLBACK).label}
-          </span>
-        </span>
-      </SettingsRow>
-
-      {health?.restartRequired ? (
-        <p className="text-caption" style={{ color: 'var(--color-stale)', marginTop: 8 }}>
-          Path changes are saved, but the daemon will keep using the active runtime paths until it
-          restarts.
-        </p>
-      ) : null}
     </div>
   );
 }

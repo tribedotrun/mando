@@ -1,5 +1,7 @@
 import React, { useCallback, useRef, useState } from 'react';
-import { askTask } from '#renderer/api';
+import { useQueryClient } from '@tanstack/react-query';
+import log from '#renderer/logger';
+import { askTask, endAskSession } from '#renderer/api';
 import { QAChat } from '#renderer/components/QAChat';
 import type { QAEntry } from '#renderer/components/QAChat';
 import type { TaskItem } from '#renderer/types';
@@ -14,6 +16,7 @@ export function TaskAsk({ item, onBack }: Props): React.ReactElement {
   const [history, setHistory] = useState<QAEntry[]>([]);
   const [pending, setPending] = useState(false);
   const scrollRef = useRef<(() => void) | null>(null);
+  const queryClient = useQueryClient();
 
   const handleAsk = useCallback(
     async (q: string) => {
@@ -22,6 +25,7 @@ export function TaskAsk({ item, onBack }: Props): React.ReactElement {
       try {
         const data = await askTask(item.id, q);
         setHistory((prev) => [...prev, { role: 'assistant', text: data.answer }]);
+        queryClient.invalidateQueries({ queryKey: ['tasks'] });
       } catch (err) {
         setHistory((prev) => [
           ...prev,
@@ -32,8 +36,23 @@ export function TaskAsk({ item, onBack }: Props): React.ReactElement {
         scrollRef.current?.();
       }
     },
-    [item.id],
+    [item.id, queryClient],
   );
+
+  const [endingSession, setEndingSession] = useState(false);
+  const handleEndSession = useCallback(async () => {
+    setEndingSession(true);
+    try {
+      await endAskSession(item.id);
+    } catch (err) {
+      log.warn('[TaskAsk] end session failed:', err);
+    } finally {
+      setEndingSession(false);
+      queryClient.invalidateQueries({ queryKey: ['tasks'] });
+    }
+  }, [item.id, queryClient]);
+
+  const hasAskSession = !!item.session_ids?.ask;
 
   const header = (
     <div className="mb-3 flex items-center gap-2">
@@ -66,6 +85,23 @@ export function TaskAsk({ item, onBack }: Props): React.ReactElement {
         >
           {prLabel(item.pr)}
         </a>
+      )}
+      {hasAskSession && (
+        <button
+          onClick={handleEndSession}
+          disabled={endingSession}
+          className="rounded px-2 py-1 text-[10px] disabled:opacity-40"
+          style={{
+            background: 'none',
+            border: '1px solid var(--color-border-subtle)',
+            color: 'var(--color-text-4)',
+            cursor: endingSession ? 'default' : 'pointer',
+            marginLeft: item.pr ? '0' : 'auto',
+          }}
+          title="End ask session (next question starts fresh)"
+        >
+          {endingSession ? '...' : 'End session'}
+        </button>
       )}
     </div>
   );

@@ -85,8 +85,6 @@ async fn main() {
     );
     let mut scout_wf =
         mando_config::load_scout_workflow(&mando_config::scout_workflow_path(), &config);
-    let voice_wf = mando_config::load_voice_workflow(&mando_config::voice_workflow_path());
-
     if args.dev {
         mando_gateway::apply_dev_model_overrides(&mut captain_wf, &mut scout_wf);
     }
@@ -108,23 +106,15 @@ async fn main() {
         runtime_paths,
         captain_workflow: Arc::new(ArcSwap::from_pointee(captain_wf)),
         scout_workflow: Arc::new(ArcSwap::from_pointee(scout_wf)),
-        voice_workflow: Arc::new(ArcSwap::from_pointee(voice_wf)),
         config_write_mu: Arc::new(tokio::sync::Mutex::new(())),
         bus: bus.clone(),
         cc_session_mgr: Arc::new(RwLock::new(cc_session_mgr)),
         task_store: task_store_arc,
         db,
-        linear_workspace_slug: Arc::new(RwLock::new(None)),
         qa_session_mgr: mando_scout::runtime::qa::default_session_manager(),
         start_time,
         dev_mode: args.dev,
     };
-
-    // Fetch Linear workspace slug in background.
-    mando_gateway::spawn_linear_slug_fetch(
-        state.config.clone(),
-        state.linear_workspace_slug.clone(),
-    );
 
     // Spawn captain auto-tick loop (always runs; respects auto_schedule dynamically).
     let tick_interval_s = config.captain.tick_interval_s.max(10);

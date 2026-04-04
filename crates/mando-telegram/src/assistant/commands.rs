@@ -20,7 +20,7 @@ fn parse_id_list(raw: &str) -> Vec<i64> {
         .collect()
 }
 
-// ── /addlink ────────────────────────────────────────────────────────
+// ── /scout_add ─────────────────────────────────────────────────────
 
 pub async fn cmd_addlink(bot: &mut TelegramBot, chat_id: &str, args: &str) -> Result<()> {
     let args = args.trim();
@@ -28,7 +28,7 @@ pub async fn cmd_addlink(bot: &mut TelegramBot, chat_id: &str, args: &str) -> Re
         send_html(
             bot,
             chat_id,
-            "Usage: /addlink &lt;url&gt; [title]\nMultiple: /addlink &lt;url1&gt; &lt;url2&gt; ...",
+            "Usage: /scout_add &lt;url&gt; [title]\nMultiple: /scout_add &lt;url1&gt; &lt;url2&gt; ...",
         )
         .await?;
         return Ok(());
@@ -50,7 +50,7 @@ pub async fn cmd_addlink(bot: &mut TelegramBot, chat_id: &str, args: &str) -> Re
         send_html(
             bot,
             chat_id,
-            "\u{274c} Not a valid URL. Usage: /addlink &lt;url&gt; [title]",
+            "\u{274c} Not a valid URL. Usage: /scout_add &lt;url&gt; [title]",
         )
         .await?;
         return Ok(());
@@ -61,68 +61,9 @@ pub async fn cmd_addlink(bot: &mut TelegramBot, chat_id: &str, args: &str) -> Re
         None
     };
 
-    let sent = send_html(bot, chat_id, "\u{1f4e5} Adding\u{2026}").await?;
-    let message_id = sent["message_id"].as_i64().unwrap_or(0);
-    let body = serde_json::json!({"url": url, "title": title});
-    let result = match bot.gw().post(paths::SCOUT_ITEMS, &body).await {
-        Ok(r) => r,
-        Err(e) => {
-            if message_id > 0 {
-                if let Err(e) = bot
-                    .api
-                    .edit_message_text(
-                        chat_id,
-                        message_id,
-                        &format!("\u{274c} Failed to add: {}", escape_html(&e.to_string())),
-                        Some("HTML"),
-                        None,
-                    )
-                    .await
-                {
-                    tracing::warn!(module = "telegram", error = %e, "message send failed");
-                }
-            }
-            return Ok(());
-        }
-    };
-    let id = result["id"].as_i64().unwrap_or(0);
-    let added = result["added"].as_bool().unwrap_or(false);
-    let item_type = result["type"].as_str().unwrap_or("unknown");
-
-    if added {
-        let msg = format!(
-            "\u{1f4e5} Added #{id}: <a href=\"{}\">{item_type}</a>",
-            escape_html(url),
-        );
-        if message_id > 0 {
-            if let Err(e) = bot
-                .api
-                .edit_message_text(chat_id, message_id, &msg, Some("HTML"), None)
-                .await
-            {
-                tracing::warn!(module = "telegram", error = %e, "message send failed");
-            }
-        }
-    } else {
-        if message_id > 0 {
-            if let Err(e) = bot
-                .api
-                .edit_message_text(
-                    chat_id,
-                    message_id,
-                    &format!(
-                        "Already exists as #{id} (<a href=\"{}\">{item_type}</a>)",
-                        escape_html(url),
-                    ),
-                    Some("HTML"),
-                    None,
-                )
-                .await
-            {
-                tracing::warn!(module = "telegram", error = %e, "message send failed");
-            }
-        }
-    }
+    let sent = send_html(bot, chat_id, "\u{23f3} Adding\u{2026}").await?;
+    let mid = sent["message_id"].as_i64().unwrap_or(0);
+    super::helpers::add_and_track(&bot.api, bot.gw(), chat_id, mid, url, title.as_deref()).await?;
     Ok(())
 }
 
@@ -166,7 +107,7 @@ async fn addlink_batch(bot: &mut TelegramBot, chat_id: &str, urls: &[&str]) -> R
     Ok(())
 }
 
-// ── /simplelist ─────────────────────────────────────────────────────
+// ── /scout_simple ──────────────────────────────────────────────────
 
 pub async fn cmd_simplelist(bot: &mut TelegramBot, chat_id: &str, args: &str) -> Result<()> {
     if let Err(e) = send_simplelist_page(bot, chat_id, args.trim(), 0).await {
@@ -322,7 +263,7 @@ pub async fn edit_simplelist_page(
     Ok(())
 }
 
-// ── /bulkstatus ─────────────────────────────────────────────────────
+// ── bulkstatus (removed from TG, handler kept for reuse) ──────────
 
 pub async fn cmd_bulk_status(bot: &mut TelegramBot, chat_id: &str, args: &str) -> Result<()> {
     let mut parts = args.split_whitespace();
@@ -363,7 +304,7 @@ pub async fn cmd_bulk_status(bot: &mut TelegramBot, chat_id: &str, args: &str) -
     Ok(())
 }
 
-// ── /bulkdelete ─────────────────────────────────────────────────────
+// ── bulkdelete (removed from TG, handler kept for reuse) ──────────
 
 pub async fn cmd_bulk_delete(bot: &mut TelegramBot, chat_id: &str, args: &str) -> Result<()> {
     let ids = parse_id_list(args);
@@ -391,7 +332,7 @@ pub async fn cmd_bulk_delete(bot: &mut TelegramBot, chat_id: &str, args: &str) -
     Ok(())
 }
 
-// ── /publish ───────────────────────────────────────────────────────
+// ── /scout_publish ─────────────────────────────────────────────────
 
 pub async fn cmd_publish(bot: &mut TelegramBot, chat_id: &str, args: &str) -> Result<()> {
     let id = args.trim().trim_start_matches('#');
@@ -399,7 +340,7 @@ pub async fn cmd_publish(bot: &mut TelegramBot, chat_id: &str, args: &str) -> Re
         send_html(
             bot,
             chat_id,
-            "Usage: /publish &lt;id&gt;\nExample: /publish 42",
+            "Usage: /scout_publish &lt;id&gt;\nExample: /scout_publish 42",
         )
         .await?;
         return Ok(());

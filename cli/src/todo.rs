@@ -23,9 +23,6 @@ pub(crate) enum TodoCommand {
         /// Initial context to attach to the item
         #[arg(long)]
         context: Option<String>,
-        /// Existing Linear issue ID to attach instead of creating a new one
-        #[arg(long = "linear-id")]
-        linear_id: Option<String>,
         /// Plan/brief path for planned handoff
         #[arg(long)]
         plan: Option<String>,
@@ -99,7 +96,6 @@ pub(crate) async fn handle(args: TodoArgs) -> anyhow::Result<()> {
             title,
             project,
             context,
-            linear_id,
             plan,
             no_pr,
         } => {
@@ -107,7 +103,6 @@ pub(crate) async fn handle(args: TodoArgs) -> anyhow::Result<()> {
                 &title,
                 project.as_deref(),
                 context.as_deref(),
-                linear_id.as_deref(),
                 plan.as_deref(),
                 no_pr,
             )
@@ -136,7 +131,6 @@ async fn handle_add(
     title: &str,
     project: Option<&str>,
     context: Option<&str>,
-    linear_id: Option<&str>,
     plan: Option<&str>,
     no_pr: bool,
 ) -> anyhow::Result<()> {
@@ -147,9 +141,6 @@ async fn handle_add(
     }
     if let Some(ctx) = context {
         form = form.text("context", ctx.to_string());
-    }
-    if let Some(id) = linear_id {
-        form = form.text("linear_id", id.to_string());
     }
     if let Some(plan_path) = plan {
         form = form.text("plan", plan_path.to_string());
@@ -283,21 +274,21 @@ async fn handle_pr_summary(item_id: &str) -> anyhow::Result<()> {
 }
 
 async fn handle_ask(item_id: &str, message: Option<&str>, end: bool) -> anyhow::Result<()> {
+    let id = parse_id(item_id, "item")?;
     if end {
         let client = DaemonClient::discover()?;
         client
-            .post("/api/ops/end", &json!({"key": format!("ask-{item_id}")}))
-            .await
-            .ok();
+            .post("/api/tasks/ask/end", &json!({"id": id}))
+            .await?;
         println!("Ended Q&A session for item #{item_id}.");
         return Ok(());
     }
     match message {
         Some(msg) => {
             let client = DaemonClient::discover()?;
-            let body = json!({"id": parse_id(item_id, "item")?, "question": msg});
+            let body = json!({"id": id, "question": msg});
             let result = client.post("/api/tasks/ask", &body).await?;
-            let reply = result["reply"].as_str().unwrap_or("(no reply)");
+            let reply = result["answer"].as_str().unwrap_or("(no reply)");
             println!("{reply}");
         }
         None => {
@@ -453,14 +444,12 @@ mod tests {
                     title,
                     project,
                     context,
-                    linear_id,
                     plan,
                     no_pr,
                 } => {
                     assert_eq!(title, "Fix bug");
                     assert!(project.is_none());
                     assert!(context.is_none());
-                    assert!(linear_id.is_none());
                     assert!(plan.is_none());
                     assert!(!no_pr);
                 }
@@ -490,10 +479,8 @@ mod tests {
             "todo",
             "add",
             "Ship planned task",
-            "--linear-id",
-            "ABR-123",
             "--plan",
-            "~/.mando/plans/ABR-123/brief.md",
+            "~/.mando/plans/42/brief.md",
             "--context",
             "Use the agreed approach",
             "--no-pr",
@@ -502,14 +489,12 @@ mod tests {
         match cli.cmd {
             TestCmd::Todo(args) => match args.command {
                 TodoCommand::Add {
-                    linear_id,
                     plan,
                     context,
                     no_pr,
                     ..
                 } => {
-                    assert_eq!(linear_id.as_deref(), Some("ABR-123"));
-                    assert_eq!(plan.as_deref(), Some("~/.mando/plans/ABR-123/brief.md"));
+                    assert_eq!(plan.as_deref(), Some("~/.mando/plans/42/brief.md"));
                     assert_eq!(context.as_deref(), Some("Use the agreed approach"));
                     assert!(no_pr);
                 }

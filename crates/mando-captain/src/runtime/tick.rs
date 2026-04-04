@@ -1,7 +1,7 @@
 //! Captain tick entry point — `run_captain_tick()`.
 //!
 //! 5-phase single-pass tick:
-//! §1 LOAD — all non-terminal items + health state + Linear sync + kill orphans
+//! §1 LOAD — all non-terminal items + health state + kill orphans
 //! §2 GATHER — context for ALL non-terminal items
 //! §3 CLASSIFY — one pass, all items, produces action list
 //! §4 EXECUTE — all actions
@@ -156,24 +156,6 @@ async fn run_captain_tick_inner(
     if !dry_run {
         super::tick_action_loop::kill_orphan_workers(&indices_snapshot, &mut health_state, &pool)
             .await;
-    }
-
-    // Linear sync: import "Todo" issues into tasks.
-    if !dry_run && config.features.linear {
-        match super::linear_integration::sync_linear_to_tasks(config).await {
-            Ok(new_items) => {
-                let filtered = super::linear_integration::filter_existing(new_items, &items);
-                if !filtered.is_empty() {
-                    tracing::info!(
-                        module = "captain",
-                        count = filtered.len(),
-                        "imported items from Linear"
-                    );
-                    items.extend(filtered);
-                }
-            }
-            Err(e) => tracing::warn!(module = "captain", error = %e, "linear sync failed"),
-        }
     }
 
     let max_workers = workflow.agent.max_concurrent;

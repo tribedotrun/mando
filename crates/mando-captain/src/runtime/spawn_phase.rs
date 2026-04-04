@@ -6,7 +6,6 @@ use mando_types::captain::{Action, ActionKind};
 use mando_types::Task;
 
 use crate::biz::spawn_logic;
-use crate::runtime::linear_integration;
 use mando_config::workflow::CaptainWorkflow;
 
 /// Execute a single captain action against the live item list.
@@ -160,21 +159,6 @@ async fn execute_ship(
     );
     notifier.high(&msg).await;
     tracing::info!(module = "captain", worker = %action.worker, "transitioned to awaiting-review");
-
-    // Linear writeback.
-    if let Err(e) = linear_integration::writeback_status(it, config).await {
-        tracing::warn!(module = "captain", %e, "Linear status writeback failed");
-    }
-    if let Err(e) = linear_integration::upsert_workpad(
-        it,
-        config,
-        &format!("Worker done, awaiting review ({})", pr_ref),
-        pool,
-    )
-    .await
-    {
-        tracing::warn!(module = "captain", %e, "Linear workpad upsert failed");
-    }
 
     Ok(())
 }

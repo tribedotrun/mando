@@ -12,8 +12,7 @@ fn parse_full_config() {
     let json = r#"{
         "workspace": "~/my-workspace",
         "features": {
-            "voice": true,
-            "linear": true
+            "scout": true
         },
         "channels": {
             "telegram": {
@@ -39,12 +38,11 @@ fn parse_full_config() {
                     "hooks": { "pre_spawn": "echo hi" },
                     "workerPreamble": "be careful"
                 }
-            },
-            "linearTeam": "XYZ"
+            }
         },
         "env": {
             "TELEGRAM_MANDO_BOT_TOKEN": "tok-123",
-            "ELEVENLABS_API_KEY": "el-key"
+            "SOME_OTHER_KEY": "test-val"
         }
     }"#;
 
@@ -55,8 +53,7 @@ fn parse_full_config() {
     assert_eq!(cfg.workspace, "~/my-workspace");
 
     // Features
-    assert!(cfg.features.voice);
-    assert!(cfg.features.linear);
+    assert!(cfg.features.scout);
 
     // Channels
     assert!(cfg.channels.telegram.enabled);
@@ -69,7 +66,6 @@ fn parse_full_config() {
     // Captain
     assert!(cfg.captain.auto_schedule);
     assert_eq!(cfg.captain.tick_interval_s, 60);
-    assert_eq!(cfg.captain.linear_team, "XYZ");
     let project = cfg.captain.projects.get("/code/repo").unwrap();
     assert_eq!(project.name, "repo");
     assert_eq!(project.path, "/code/repo");
@@ -79,7 +75,7 @@ fn parse_full_config() {
     assert_eq!(project.worker_preamble, "be careful");
 
     // Env
-    assert_eq!(cfg.env.get("ELEVENLABS_API_KEY").unwrap(), "el-key");
+    assert_eq!(cfg.env.get("TELEGRAM_MANDO_BOT_TOKEN").unwrap(), "tok-123");
 }
 
 // ---------------------------------------------------------------------------
@@ -92,14 +88,12 @@ fn parse_minimal_config_uses_defaults() {
     let cfg: Config = serde_json::from_str(json).unwrap();
 
     assert_eq!(cfg.workspace, "~/.mando/workspace");
-    assert!(!cfg.features.voice);
-    assert!(!cfg.features.linear);
+    assert!(!cfg.features.scout);
     assert!(!cfg.channels.telegram.enabled);
     assert_eq!(cfg.channels.telegram.token, "");
     assert_eq!(cfg.gateway.dashboard.port, 18791);
     assert!(!cfg.captain.auto_schedule);
     assert_eq!(cfg.captain.tick_interval_s, 30);
-    assert_eq!(cfg.captain.linear_team, "");
     assert!(cfg.env.is_empty());
 }
 

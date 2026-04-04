@@ -12,8 +12,6 @@ import {
 // ---- Shared types ----
 
 type TGResult = { botUsername?: string; error?: string } | null;
-type LinearTeam = { id: string; key: string; name: string };
-type LinearResult = { teams?: LinearTeam[]; error?: string } | null;
 
 const FORM_CARD: React.CSSProperties = {
   padding: '28px 28px',
@@ -32,12 +30,18 @@ export function TelegramScreen({
   onBack,
   onNext,
   onSkip,
+  error,
+  finishing,
+  progressMsg,
 }: {
   token: string;
   onTokenChange: (v: string) => void;
   onBack: () => void;
   onNext: () => void;
   onSkip: () => void;
+  error?: string | null;
+  finishing?: boolean;
+  progressMsg?: string | null;
 }): React.ReactElement {
   const [validating, setValidating] = useState(false);
   const [tgResult, setTgResult] = useState<TGResult>(null);
@@ -61,7 +65,7 @@ export function TelegramScreen({
     <SetupLayout
       data-testid="onboarding-wizard"
       step={2}
-      total={3}
+      total={2}
       title="Telegram"
       subtitle="Notifications and remote control from your phone."
     >
@@ -105,125 +109,6 @@ export function TelegramScreen({
         </div>
       </div>
 
-      <div className="flex items-center" style={{ justifyContent: 'space-between' }}>
-        <div className="flex items-center" style={{ gap: 12 }}>
-          <GhostButton onClick={onBack}>Back</GhostButton>
-          {!tgResult?.botUsername && <GhostButton onClick={onSkip}>Skip</GhostButton>}
-        </div>
-        <PrimaryButton onClick={onNext} disabled={!tgResult?.botUsername}>
-          Continue
-        </PrimaryButton>
-      </div>
-    </SetupLayout>
-  );
-}
-
-// ---- Linear setup (optional) ----
-
-export function LinearScreen({
-  apiKey,
-  onApiKeyChange,
-  selectedTeam,
-  onTeamChange,
-  onBack,
-  onFinish,
-  error,
-  finishing,
-  progressMsg,
-}: {
-  apiKey: string;
-  onApiKeyChange: (v: string) => void;
-  selectedTeam: string;
-  onTeamChange: (v: string) => void;
-  onBack: () => void;
-  onFinish: () => void;
-  error: string | null;
-  finishing: boolean;
-  progressMsg: string | null;
-}): React.ReactElement {
-  const [validating, setValidating] = useState(false);
-  const [result, setResult] = useState<LinearResult>(null);
-
-  const validate = useCallback(async () => {
-    setValidating(true);
-    setResult(null);
-    try {
-      const res = await window.mandoAPI.validateLinearKey(apiKey.trim());
-      if (res.valid && res.teams?.length) {
-        setResult({ teams: res.teams });
-        onTeamChange(res.teams[0].key);
-      } else {
-        setResult({ error: res.error ?? 'Invalid API key' });
-      }
-    } catch {
-      setResult({ error: 'Validation failed' });
-    } finally {
-      setValidating(false);
-    }
-  }, [apiKey, selectedTeam, onTeamChange]);
-
-  const hasTeams = !!result?.teams?.length;
-
-  return (
-    <SetupLayout
-      data-testid="onboarding-wizard"
-      step={3}
-      total={3}
-      title="Linear"
-      subtitle="Sync tasks with Linear."
-    >
-      <div style={FORM_CARD}>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <div className="flex items-center" style={{ gap: 8 }}>
-            <input
-              className={INPUT_CLS}
-              style={{ ...INPUT_STYLE, fontSize: 13 }}
-              value={apiKey}
-              onChange={(e) => {
-                onApiKeyChange(e.target.value);
-                setResult(null);
-                onTeamChange('');
-              }}
-              placeholder="API key"
-            />
-            <OutlineButton onClick={validate} disabled={!apiKey.trim() || validating}>
-              <span style={{ display: 'inline-block', minWidth: 52, textAlign: 'center' }}>
-                {validating ? 'Connecting\u2026' : 'Connect'}
-              </span>
-            </OutlineButton>
-          </div>
-          <a
-            href="https://linear.app/settings/api"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-caption"
-            style={{ color: 'var(--color-text-3)' }}
-          >
-            linear.app/settings/api
-          </a>
-          {hasTeams && (
-            <div className="flex flex-col" style={{ gap: 4, marginTop: 4 }}>
-              <span className="text-caption" style={{ color: 'var(--color-text-3)' }}>
-                Team
-              </span>
-              <select
-                className={INPUT_CLS}
-                style={{ ...INPUT_STYLE, fontSize: 13, flex: 'none', width: 'auto' }}
-                value={selectedTeam}
-                onChange={(e) => onTeamChange(e.target.value)}
-              >
-                {result.teams!.map((t) => (
-                  <option key={t.key} value={t.key}>
-                    {t.name} ({t.key})
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
-          {result?.error && <CheckRow ok={false} label={result.error} />}
-        </div>
-      </div>
-
       {error && (
         <div
           className="text-caption"
@@ -240,14 +125,17 @@ export function LinearScreen({
       )}
 
       <div className="flex items-center" style={{ justifyContent: 'space-between' }}>
-        {!finishing && <GhostButton onClick={onBack}>Back</GhostButton>}
+        <div className="flex items-center" style={{ gap: 12 }}>
+          {!finishing && <GhostButton onClick={onBack}>Back</GhostButton>}
+          {!tgResult?.botUsername && !finishing && <GhostButton onClick={onSkip}>Skip</GhostButton>}
+        </div>
         <div className="flex items-center" style={{ gap: 12 }}>
           {finishing && progressMsg && (
             <span className="text-caption" style={{ color: 'var(--color-text-3)' }}>
               {progressMsg}
             </span>
           )}
-          <PrimaryButton onClick={onFinish} disabled={finishing}>
+          <PrimaryButton onClick={onNext} disabled={finishing || !tgResult?.botUsername}>
             {finishing ? 'Setting up\u2026' : 'Finish Setup'}
           </PrimaryButton>
         </div>

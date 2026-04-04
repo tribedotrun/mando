@@ -12,24 +12,44 @@ function isInputFocused(): boolean {
 }
 
 // ── View handler registry ──
-// Only one view is active at a time. It registers a handler that receives
-// keys the global handler didn't consume.
+// Multiple views stay mounted (hidden via display:none to avoid flicker).
+// Each registers a handler + active ref; dispatch calls the active one.
 type ViewKeyHandler = (key: string, e: KeyboardEvent) => void;
-let activeViewHandler: ViewKeyHandler | null = null;
+interface ViewEntry {
+  handler: ViewKeyHandler;
+  activeRef: React.RefObject<boolean>;
+}
+const viewHandlers = new Set<ViewEntry>();
+
+function dispatchToActiveView(key: string, e: KeyboardEvent): void {
+  for (const entry of viewHandlers) {
+    if (entry.activeRef.current) {
+      entry.handler(key, e);
+      return;
+    }
+  }
+}
 
 /**
  * Hook for views to register their keyboard handler.
  * The handler receives the raw key string and KeyboardEvent for unhandled keys.
- * Only call this in a component that is conditionally rendered based on the active tab.
+ * Pass `active` to control when the handler is live — required when tabs stay
+ * mounted but hidden to avoid flicker.
  */
-export function useViewKeyHandler(handler: ViewKeyHandler): void {
-  const ref = useRef(handler);
-  ref.current = handler;
+export function useViewKeyHandler(handler: ViewKeyHandler, active = true): void {
+  const handlerRef = useRef(handler);
+  handlerRef.current = handler;
+  const activeRef = useRef(active);
+  activeRef.current = active;
+
   useMountEffect(() => {
-    const wrapped: ViewKeyHandler = (key, e) => ref.current(key, e);
-    activeViewHandler = wrapped;
+    const entry: ViewEntry = {
+      handler: (key, e) => handlerRef.current(key, e),
+      activeRef,
+    };
+    viewHandlers.add(entry);
     return () => {
-      if (activeViewHandler === wrapped) activeViewHandler = null;
+      viewHandlers.delete(entry);
     };
   });
 }
@@ -89,7 +109,7 @@ export function useGlobalKeyboard(config: GlobalKeyboardConfig): void {
           return;
         }
         if (s.showSettings) return;
-        activeViewHandler?.('Escape', e);
+        dispatchToActiveView('Escape', e);
         return;
       }
 
@@ -139,7 +159,7 @@ export function useGlobalKeyboard(config: GlobalKeyboardConfig): void {
       }
 
       // ── Dispatch to active view ──
-      activeViewHandler?.(e.key, e);
+      dispatchToActiveView(e.key, e);
     };
 
     window.addEventListener('keydown', handler);

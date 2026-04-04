@@ -19,7 +19,6 @@ pub(crate) const REGISTERED_COMMANDS: &[(&str, &str)] = &[
     ("adopt", "Adopt human's worktree"),
     ("input", "Clarify tasks"),
     ("captain", "Run captain tick"),
-    ("status", "Show task list"),
     ("tasks", "Show task list"),
     ("workers", "Show active workers"),
     ("nudge", "Nudge a stuck worker"),
@@ -30,20 +29,17 @@ pub(crate) const REGISTERED_COMMANDS: &[(&str, &str)] = &[
     ("rework", "Rework task"),
     ("delete", "Delete a task"),
     ("ask", "Q&A on completed tasks"),
-    ("sessions", "List CC sessions"),
     ("timeline", "Task lifecycle timeline"),
     ("prsummary", "Show PR description"),
     ("triage", "Rank pending-review PRs by merge readiness"),
     ("health", "System health (daemon, workers, config)"),
     ("history", "Show ask history for a task"),
-    ("addlink", "Add URL to Scout"),
-    ("research", "AI-powered link discovery on a topic"),
-    ("bulkstatus", "Bulk-update Scout items"),
-    ("bulkdelete", "Bulk-delete Scout items"),
-    ("publish", "Publish a Scout article"),
-    ("list", "List scout items with summaries"),
-    ("simplelist", "List scout items (compact)"),
-    ("saved", "View saved scout items"),
+    ("scout_add", "Add URL to Scout"),
+    ("scout_research", "AI-powered link discovery on a topic"),
+    ("scout_publish", "Publish a Scout article"),
+    ("scout_list", "List scout items with summaries"),
+    ("scout_simple", "List scout items (compact)"),
+    ("scout_saved", "View saved scout items"),
     ("scout", "Review processed items (swipe)"),
 ];
 
@@ -59,7 +55,7 @@ impl TelegramBot {
         match command {
             "start" | "help" => commands::help::handle(self, chat_id, args).await,
             "todo" => commands::todo::handle(self, chat_id, args).await,
-            "status" | "tasks" => commands::status::handle(self, chat_id, args).await,
+            "tasks" => commands::status::handle(self, chat_id, args).await,
             "captain" => commands::captain::handle(self, chat_id, args).await,
             "input" => commands::input::handle(self, chat_id, args).await,
             "reopen" => commands::reopen::handle(self, chat_id, args).await,
@@ -71,7 +67,6 @@ impl TelegramBot {
             "answer" => commands::answer::handle(self, chat_id, args).await,
             "retry" => commands::retry::handle(self, chat_id, args).await,
             "ask" => commands::ask::handle(self, chat_id, args).await,
-            "sessions" => commands::sessions::handle(self, chat_id, args).await,
             "history" => commands::history::handle(self, chat_id, args).await,
             "timeline" => commands::timeline::handle(self, chat_id, args).await,
             "prsummary" => commands::pr_summary::handle(self, chat_id, args).await,
@@ -82,14 +77,12 @@ impl TelegramBot {
             "stop" => commands::stop::handle(self, chat_id, args).await,
             "health" => commands::health::handle(self, chat_id, args).await,
             // Scout commands
-            "addlink" => crate::assistant::commands::cmd_addlink(self, chat_id, args).await,
-            "research" => crate::assistant::commands::cmd_research(self, chat_id, args).await,
-            "bulkstatus" => crate::assistant::commands::cmd_bulk_status(self, chat_id, args).await,
-            "bulkdelete" => crate::assistant::commands::cmd_bulk_delete(self, chat_id, args).await,
-            "publish" => crate::assistant::commands::cmd_publish(self, chat_id, args).await,
-            "list" => crate::assistant::commands::cmd_list(self, chat_id, args).await,
-            "simplelist" => crate::assistant::commands::cmd_simplelist(self, chat_id, args).await,
-            "saved" => crate::assistant::commands::cmd_list(self, chat_id, "saved").await,
+            "scout_add" => crate::assistant::commands::cmd_addlink(self, chat_id, args).await,
+            "scout_research" => crate::assistant::commands::cmd_research(self, chat_id, args).await,
+            "scout_publish" => crate::assistant::commands::cmd_publish(self, chat_id, args).await,
+            "scout_list" => crate::assistant::commands::cmd_list(self, chat_id, args).await,
+            "scout_simple" => crate::assistant::commands::cmd_simplelist(self, chat_id, args).await,
+            "scout_saved" => crate::assistant::commands::cmd_list(self, chat_id, "saved").await,
             "scout" if args.is_empty() => {
                 crate::assistant::commands::cmd_scout(self, chat_id).await
             }
@@ -190,19 +183,11 @@ mod tests {
             assert!(names.contains(command), "missing /{command} registration");
         }
 
-        for command in [
-            "addlink",
-            "research",
-            "bulkstatus",
-            "bulkdelete",
-            "publish",
-            "scout",
-        ] {
+        for command in ["scout_add", "scout_research", "scout_publish", "scout"] {
             let capability = match command {
-                "addlink" => "add",
-                "bulkstatus" => "bulk_update",
-                "bulkdelete" => "bulk_delete",
-                "publish" => "publish_article",
+                "scout_add" => "add",
+                "scout_research" => "research",
+                "scout_publish" => "publish_article",
                 "scout" => "read",
                 other => other,
             };

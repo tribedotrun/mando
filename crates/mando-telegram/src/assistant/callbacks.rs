@@ -1,7 +1,7 @@
 //! Callback query handlers for the assistant bot's inline keyboards.
 //!
 //! Callback data pattern: `dg:{action}:{item_id}`
-//! Actions: show, read, next, save, archive, rm
+//! Actions: show, read, next, save, archive, rm, process
 
 use anyhow::{Context, Result};
 use serde_json::Value;
@@ -196,6 +196,23 @@ pub async fn handle_callback(bot: &mut TelegramBot, cb: &Value) -> Result<()> {
                 .await?;
             bot.gw().delete(&paths::scout_item(id)).await?;
             swipe_next(bot, &chat_id, message_id, id).await
+        }
+        "process" => {
+            bot.api
+                .answer_callback_query(cb_id, Some("Reprocessing\u{2026}"))
+                .await?;
+            let body = serde_json::json!({"id": id});
+            bot.gw().post(paths::SCOUT_PROCESS, &body).await?;
+            bot.api
+                .edit_message_text(
+                    &chat_id,
+                    message_id,
+                    "\u{1f504} Reprocessing\u{2026}",
+                    None,
+                    None,
+                )
+                .await?;
+            Ok(())
         }
         "ask" => {
             bot.api

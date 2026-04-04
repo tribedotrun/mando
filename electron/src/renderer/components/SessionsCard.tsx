@@ -1,9 +1,8 @@
-import React, { useState, useCallback } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import React, { useState, useCallback, useRef } from 'react';
+import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import { fetchSessions, fetchTranscript } from '#renderer/api';
 import { useViewKeyHandler } from '#renderer/hooks/useKeyboardShortcuts';
 import { useScrollIntoViewRef } from '#renderer/hooks/useScrollIntoViewRef';
-import { useLinearSlug } from '#renderer/hooks/useLinearSlug';
 import type { SessionEntry } from '#renderer/types';
 import { getErrorMessage, relativeTime } from '#renderer/utils';
 import { SessionDetailPanel } from '#renderer/components/SessionDetailPanel';
@@ -16,15 +15,7 @@ import {
 } from '#renderer/components/SessionsHelpers';
 
 const PER_PAGE = 50;
-const CATEGORY_ORDER = [
-  'workers',
-  'clarifier',
-  'captain-review',
-  'captain-ops',
-  'scout',
-  'voice',
-  'system',
-];
+const CATEGORY_ORDER = ['workers', 'clarifier', 'captain-review', 'captain-ops', 'scout', 'system'];
 
 const STATUS_COLOR: Record<string, string> = {
   running: 'var(--color-success)',
@@ -32,7 +23,7 @@ const STATUS_COLOR: Record<string, string> = {
   failed: 'var(--color-error)',
 };
 
-export function SessionsCard(): React.ReactElement {
+export function SessionsCard({ active = true }: { active?: boolean } = {}): React.ReactElement {
   const [page, setPage] = useState(1);
   const [filterCategory, setFilterCategory] = useState('');
   const [filterStatus, setFilterStatus] = useState<string>('all');
@@ -42,8 +33,6 @@ export function SessionsCard(): React.ReactElement {
   const [transcriptError, setTranscriptError] = useState<string | null>(null);
   const [focusedIndex, setFocusedIndex] = useState(-1);
 
-  const linearSlug = useLinearSlug();
-
   const {
     data: sessionsData,
     isLoading: loading,
@@ -51,7 +40,11 @@ export function SessionsCard(): React.ReactElement {
   } = useQuery({
     queryKey: ['sessions', page, filterCategory],
     queryFn: () => fetchSessions(page, PER_PAGE, filterCategory || undefined),
+    placeholderData: keepPreviousData,
   });
+  // Track whether we've ever loaded data — suppress loading text on category switches
+  const hasLoadedRef = useRef(false);
+  if (sessionsData) hasLoadedRef.current = true;
 
   const allSessions: SessionEntry[] = sessionsData?.sessions ?? [];
   const sessions =
@@ -149,7 +142,7 @@ export function SessionsCard(): React.ReactElement {
     [hasDetailOpen, sessions, clampedFocusedIndex, openSession],
   );
 
-  useViewKeyHandler(handleKey);
+  useViewKeyHandler(handleKey, active);
 
   const allTotal = Object.values(categories).reduce((a, b) => a + b, 0);
   const sortedCats = CATEGORY_ORDER.filter((c) => c in categories);
@@ -167,7 +160,6 @@ export function SessionsCard(): React.ReactElement {
         error={transcriptError}
         onClose={() => setViewSession(null)}
         resumeCmd={resumeCmd(viewSession)}
-        linearSlug={linearSlug}
         sequenceNum={sessionSeqMap.get(viewSession.session_id)}
       />
     );
@@ -266,8 +258,8 @@ export function SessionsCard(): React.ReactElement {
         </div>
       )}
 
-      {/* Content */}
-      {loading && sessions.length === 0 ? (
+      {/* Content — only show loading text on first-ever fetch, not category switches */}
+      {loading && !hasLoadedRef.current ? (
         <div className="py-8 text-center text-body" style={{ color: 'var(--color-text-3)' }}>
           Loading sessions...
         </div>

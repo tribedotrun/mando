@@ -132,7 +132,7 @@ pub(crate) async fn reopen_worker(
     let resume_msg = mando_config::render_prompt("reopen_resume", &workflow.prompts, &vars)
         .map_err(|e| anyhow::anyhow!(e))?;
 
-    let item_id = &item.best_id();
+    let item_id = &item.id.to_string();
 
     // Record stream file size before resume for zero-byte detection.
     let stream_size_before = mando_cc::get_stream_file_size(&stream_path);

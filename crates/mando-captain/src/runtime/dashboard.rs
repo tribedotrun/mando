@@ -121,19 +121,10 @@ pub async fn accept_item(store: &TaskStore, id: i64) -> Result<()> {
 }
 
 pub async fn cancel_item(store: &TaskStore, id: i64, pool: &sqlx::SqlitePool) -> Result<()> {
-    // Terminate ALL running sessions for this task. Sessions are stored with
-    // best_id() (linear_id when present, else numeric id), so query both.
-    let task = store.find_by_id(id).await?;
+    // Terminate ALL running sessions for this task.
     let numeric_id = id.to_string();
-    let best_id = task.as_ref().map(|t| t.best_id()).unwrap_or_default();
-    let task_ids: Vec<&str> = [numeric_id.as_str(), best_id.as_str()]
-        .into_iter()
-        .filter(|s| !s.is_empty())
-        .collect::<std::collections::HashSet<_>>()
-        .into_iter()
-        .collect();
 
-    for tid in &task_ids {
+    for tid in &[numeric_id.as_str()] {
         match mando_db::queries::sessions::list_running_sessions_for_task(pool, tid).await {
             Ok(running) => {
                 for row in &running {
@@ -297,7 +288,7 @@ pub async fn resume_reopened_worker(
         &wt_path,
         "worker",
         worker,
-        &item.best_id(),
+        &item.id.to_string(),
         true,
     )
     .await;

@@ -33,7 +33,6 @@ import {
 import { createTrayIcon, createDockIcon } from '#main/icons';
 import { registerNotificationHandlers } from '#main/notifications';
 import { setupAutoUpdate, applyPendingUpdateIfAny } from '#main/updater';
-import { createVoiceWindow, onVoiceHotkeyDown } from '#main/voice-window';
 import { getAppInfo } from '#main/app-info';
 import { startRendererServer } from '#main/renderer-server';
 
@@ -155,13 +154,6 @@ function createTray(): void {
         mainWindow?.focus();
       },
     },
-    {
-      label: 'Voice Input',
-      accelerator: 'Alt+Space',
-      click: () => {
-        onVoiceHotkeyDown(resolvePreload, voiceRendererUrl());
-      },
-    },
     { type: 'separator' },
     {
       label: `Quit ${title}`,
@@ -174,12 +166,6 @@ function createTray(): void {
   ]);
 
   tray.setContextMenu(contextMenu);
-}
-
-function voiceRendererUrl(): string {
-  return MAIN_WINDOW_VITE_DEV_SERVER_URL
-    ? `${MAIN_WINDOW_VITE_DEV_SERVER_URL}?voice=1`
-    : `http://127.0.0.1:${rendererPort}/index.html?voice=1`;
 }
 
 function trustedRendererOrigins(): string[] {
@@ -198,30 +184,6 @@ function registerShortcuts(): void {
   globalShortcut.register('CommandOrControl+N', () => {
     mainWindow?.webContents.send('shortcut', 'add-task');
   });
-
-  // Register voice shortcut — try multiple accelerators since Alt+Space
-  // is often claimed by macOS input source switching.
-  const voiceAccelerators = [
-    'Alt+Space',
-    'CommandOrControl+Shift+Space',
-    'CommandOrControl+Shift+V',
-  ];
-  let voiceRegistered = false;
-  for (const accel of voiceAccelerators) {
-    if (
-      globalShortcut.register(accel, () => {
-        onVoiceHotkeyDown(resolvePreload, voiceRendererUrl());
-      })
-    ) {
-      log.info(`[voice] Global shortcut registered: ${accel}`);
-      voiceRegistered = true;
-      break;
-    }
-    log.debug(`[voice] Failed to register: ${accel}, trying next...`);
-  }
-  if (!voiceRegistered) {
-    log.warn('[voice] All shortcut accelerators failed — voice window only available via menu bar');
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -267,7 +229,7 @@ handleTrusted('toggle-devtools', () => {
 
 handleTrusted('get-dev-git-info', getDevGitInfo);
 
-// Setup validation handlers (Claude Code, Telegram, Linear) — see setup-validation.ts
+// Setup validation handlers (Claude Code, Telegram) — see setup-validation.ts
 registerSetupValidationHandlers();
 
 // Config read/write, onboarding setup-complete, launchd — see config-handlers.ts
@@ -322,8 +284,6 @@ app.whenReady().then(async () => {
     }
     registerShortcuts();
   }
-  // Voice window after main so CDP tools connect to main window first.
-  createVoiceWindow(resolvePreload, voiceRendererUrl());
   registerNotificationHandlers(() => mainWindow);
   startHealthMonitor();
 
