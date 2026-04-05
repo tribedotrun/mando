@@ -56,6 +56,8 @@ interface PendingUpdate {
 
 let pendingUpdate: PendingUpdate | null = null;
 let downloading = false;
+let checkTimer: ReturnType<typeof setTimeout> | null = null;
+let checkInterval: ReturnType<typeof setInterval> | null = null;
 
 /** Extract Node.js error code (e.g. 'ENOENT') or empty string. */
 function errCode(err: unknown): string {
@@ -468,6 +470,17 @@ export function setupAutoUpdate(): void {
   }
 
   // Schedule periodic checks
-  setTimeout(() => checkAndDownload(), INITIAL_CHECK_DELAY_MS);
-  setInterval(() => checkAndDownload(), UPDATE_CHECK_INTERVAL_MS);
+  checkTimer = setTimeout(() => checkAndDownload(), INITIAL_CHECK_DELAY_MS);
+  checkInterval = setInterval(() => checkAndDownload(), UPDATE_CHECK_INTERVAL_MS);
+}
+
+export function cleanupAutoUpdate(): void {
+  if (checkTimer) {
+    clearTimeout(checkTimer);
+    checkTimer = null;
+  }
+  if (checkInterval) {
+    clearInterval(checkInterval);
+    checkInterval = null;
+  }
 }

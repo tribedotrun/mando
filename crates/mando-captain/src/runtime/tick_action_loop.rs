@@ -10,6 +10,8 @@ use crate::io::health_store;
 
 /// Kill workers tracked in health state that have no matching in-progress task.
 /// Also terminates associated sessions via `terminate_session`.
+///
+/// Queries running sessions once, then terminates all orphans in parallel.
 pub(super) async fn kill_orphan_workers(
     items: &[mando_types::TaskRouting],
     health_state: &mut health_store::HealthState,
@@ -32,46 +34,73 @@ pub(super) async fn kill_orphan_workers(
         .cloned()
         .collect();
 
-    for worker_name in orphan_keys {
-        // Find the running session for this worker and terminate it.
-        match mando_db::queries::sessions::list_running_sessions(pool).await {
-            Ok(rows) => {
-                if let Some(row) = rows
-                    .iter()
-                    .find(|r| r.worker_name.as_deref() == Some(&worker_name))
-                {
-                    tracing::warn!(
-                        module = "captain",
-                        worker = %worker_name,
-                        session_id = %row.session_id,
-                        "terminating orphan worker session"
-                    );
-                    crate::io::session_terminate::terminate_session(
-                        pool,
-                        &row.session_id,
-                        mando_types::SessionStatus::Stopped,
-                        Some(health_state),
-                    )
-                    .await;
-                    continue;
-                }
-                // No matching session — safe to clean health state.
-                health_state.remove(&worker_name);
-                tracing::info!(
-                    module = "captain",
-                    worker = %worker_name,
-                    "removed orphan health entry (no session)"
-                );
-            }
-            Err(e) => {
-                // DB error — skip this orphan, retry on next tick.
-                tracing::warn!(
-                    module = "captain",
-                    worker = %worker_name,
-                    error = %e,
-                    "failed to query sessions for orphan — skipping, will retry next tick"
-                );
-            }
+    if orphan_keys.is_empty() {
+        return;
+    }
+
+    // Query running sessions once (not per orphan).
+    let sessions = match mando_db::queries::sessions::list_running_sessions(pool).await {
+        Ok(rows) => rows,
+        Err(e) => {
+            tracing::warn!(
+                module = "captain",
+                error = %e,
+                "failed to query sessions for orphan cleanup — skipping, will retry next tick"
+            );
+            return;
+        }
+    };
+
+    // Collect orphans with running sessions for parallel termination.
+    struct OrphanTerminate<'a> {
+        worker_name: &'a str,
+        session_id: &'a str,
+    }
+    let mut to_terminate: Vec<OrphanTerminate> = Vec::new();
+
+    for worker_name in &orphan_keys {
+        if let Some(row) = sessions
+            .iter()
+            .find(|r| r.worker_name.as_deref() == Some(worker_name.as_str()))
+        {
+            tracing::warn!(
+                module = "captain",
+                worker = %worker_name,
+                session_id = %row.session_id,
+                "terminating orphan worker session"
+            );
+            to_terminate.push(OrphanTerminate {
+                worker_name,
+                session_id: &row.session_id,
+            });
+        } else {
+            health_state.remove(worker_name);
+            tracing::info!(
+                module = "captain",
+                worker = %worker_name,
+                "removed orphan health entry (no session)"
+            );
+        }
+    }
+
+    // Terminate all orphan sessions in parallel.
+    if !to_terminate.is_empty() {
+        let futs: Vec<_> = to_terminate
+            .iter()
+            .map(|o| {
+                crate::io::session_terminate::terminate_session(
+                    pool,
+                    o.session_id,
+                    mando_types::SessionStatus::Stopped,
+                    None,
+                )
+            })
+            .collect();
+        futures::future::join_all(futs).await;
+
+        // Clean health state after parallel termination.
+        for o in &to_terminate {
+            health_state.remove(o.worker_name);
         }
     }
 }

@@ -13,28 +13,12 @@ use crate::commands;
 pub(crate) const REGISTERED_COMMANDS: &[(&str, &str)] = &[
     ("start", "Show available commands"),
     ("todo", "Add tasks"),
-    ("accept", "Accept a no-PR task"),
-    ("reopen", "Reopen done/failed task"),
-    ("handoff", "Hand off task to human"),
-    ("adopt", "Adopt human's worktree"),
-    ("input", "Clarify tasks"),
-    ("captain", "Run captain tick"),
+    ("action", "Actions on a task"),
     ("tasks", "Show task list"),
-    ("workers", "Show active workers"),
-    ("nudge", "Nudge a stuck worker"),
     ("stop", "Stop all active workers"),
-    ("answer", "Answer clarifier questions"),
-    ("retry", "Retry errored captain review"),
-    ("cancel", "Cancel a task"),
-    ("rework", "Rework task"),
-    ("delete", "Delete a task"),
-    ("ask", "Q&A on completed tasks"),
-    ("timeline", "Task lifecycle timeline"),
-    ("prsummary", "Show PR description"),
+    ("timeline", "Task lifecycle timeline + Q&A history"),
     ("triage", "Rank pending-review PRs by merge readiness"),
-    ("health", "System health (daemon, workers, config)"),
-    ("history", "Show ask history for a task"),
-    ("sessions", "Show recent CC sessions"),
+    ("health", "System health + active workers"),
     ("scout_add", "Add URL to Scout"),
     ("scout_research", "AI-powered link discovery on a topic"),
     ("scout_list", "List scout items"),
@@ -55,27 +39,40 @@ impl TelegramBot {
             "start" | "help" => commands::help::handle(self, chat_id, args).await,
             "todo" => commands::todo::handle(self, chat_id, args).await,
             "tasks" => commands::status::handle(self, chat_id, args).await,
-            "captain" => commands::captain::handle(self, chat_id, args).await,
-            "input" => commands::input::handle(self, chat_id, args).await,
-            "reopen" => commands::reopen::handle(self, chat_id, args).await,
-            "rework" => commands::rework::handle(self, chat_id, args).await,
-            "cancel" => commands::cancel::handle(self, chat_id, args).await,
-            "delete" => commands::delete::handle(self, chat_id, args).await,
-            "handoff" => commands::handoff::handle(self, chat_id, args).await,
-            "adopt" => commands::adopt::handle(self, chat_id, args).await,
-            "answer" => commands::answer::handle(self, chat_id, args).await,
-            "retry" => commands::retry::handle(self, chat_id, args).await,
-            "ask" => commands::ask::handle(self, chat_id, args).await,
-            "history" => commands::history::handle(self, chat_id, args).await,
-            "sessions" => commands::sessions::handle(self, chat_id, args).await,
-            "timeline" => commands::timeline::handle(self, chat_id, args).await,
-            "prsummary" => commands::pr_summary::handle(self, chat_id, args).await,
+            "action" => commands::action::handle(self, chat_id, args).await,
+            // Legacy aliases — keep /input cancel and /ask end working
+            "input" if args.trim() == "cancel" => {
+                if self.has_input_session(chat_id) {
+                    self.close_input_session(chat_id);
+                    self.send_html(chat_id, "\u{23ed} Input session closed.")
+                        .await?;
+                    Ok(())
+                } else {
+                    commands::action::handle(self, chat_id, "").await
+                }
+            }
+            "ask" if args.trim().eq_ignore_ascii_case("end") => {
+                if self.has_ask_session(chat_id) {
+                    if let Some(task_id) = self.ask_session_task_id(chat_id) {
+                        let _ = self
+                            .gw()
+                            .post("/api/tasks/ask/end", &serde_json::json!({"id": task_id}))
+                            .await;
+                    }
+                    self.close_ask_session(chat_id);
+                    self.send_html(chat_id, "Ask session ended.").await?;
+                    Ok(())
+                } else {
+                    commands::action::handle(self, chat_id, "").await
+                }
+            }
+            // Bare /input, /ask, and all other replaced commands → /action
+            "input" | "ask" | "reopen" | "rework" | "cancel" | "handoff" | "answer" | "accept"
+            | "nudge" => commands::action::handle(self, chat_id, "").await,
+            "timeline" | "history" => commands::timeline::handle(self, chat_id, args).await,
             "triage" => commands::triage::handle(self, chat_id, args).await,
-            "accept" => commands::accept::handle(self, chat_id, args).await,
-            "workers" => commands::workers::handle(self, chat_id, args).await,
-            "nudge" => commands::nudge::handle(self, chat_id, args).await,
             "stop" => commands::stop::handle(self, chat_id, args).await,
-            "health" => commands::health::handle(self, chat_id, args).await,
+            "health" | "workers" => commands::health::handle(self, chat_id, args).await,
             // Scout commands
             "scout_add" => crate::assistant::commands::cmd_addlink(self, chat_id, args).await,
             "scout_research" => crate::assistant::commands::cmd_research(self, chat_id, args).await,
@@ -118,10 +115,45 @@ impl TelegramBot {
             )
             .await;
         }
-        if commands::input::handle_text(self, chat_id, text).await? {
+        if let Some((item_id, _title)) = self.pending_nudge.remove(chat_id) {
+            let gw = self.gw().clone();
+            match gw
+                .post(
+                    crate::gateway_paths::CAPTAIN_NUDGE,
+                    &serde_json::json!({"item_id": item_id, "message": text}),
+                )
+                .await
+            {
+                Ok(resp) => {
+                    let worker = resp["worker"].as_str().unwrap_or("worker");
+                    self.send_html(
+                        chat_id,
+                        &format!(
+                            "\u{1f4e3} Nudged {} for #{}",
+                            mando_shared::escape_html(worker),
+                            mando_shared::escape_html(&item_id),
+                        ),
+                    )
+                    .await?;
+                }
+                Err(e) => {
+                    self.send_html(
+                        chat_id,
+                        &format!(
+                            "\u{274c} Nudge failed for #{}: {}",
+                            mando_shared::escape_html(&item_id),
+                            mando_shared::escape_html(&e.to_string()),
+                        ),
+                    )
+                    .await?;
+                }
+            }
             return Ok(());
         }
-        if commands::ask::handle_text(self, chat_id, text).await? {
+        if commands::action::handle_input_text(self, chat_id, text).await? {
+            return Ok(());
+        }
+        if commands::action::handle_ask_text(self, chat_id, text).await? {
             return Ok(());
         }
         // Scout act session: take atomically to avoid TOCTOU
@@ -175,7 +207,8 @@ mod tests {
         );
         assert!(names.contains("tasks"), "missing /tasks registration");
 
-        for command in ["workers", "triage", "accept", "nudge", "stop"] {
+        // accept/nudge are now reached via /action, not individual registrations
+        for command in ["triage", "stop"] {
             assert!(
                 contract["captain"].get(command).is_some(),
                 "missing {command} in contract"

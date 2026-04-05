@@ -17,13 +17,6 @@ fn parse_item_id(item_id: &str) -> Result<i64> {
         .map_err(|_| anyhow::anyhow!("invalid item ID: {item_id}"))
 }
 
-fn parse_item_ids(ids: &[String]) -> Result<Vec<i64>> {
-    ids.iter()
-        .map(|s| s.parse())
-        .collect::<std::result::Result<_, _>>()
-        .map_err(|_| anyhow::anyhow!("invalid item IDs"))
-}
-
 /// Look up a task by ID via the gateway HTTP API.
 async fn find_task(gw: &GatewayClient, id: &str) -> Option<mando_types::Task> {
     let id_num: i64 = id.parse().ok()?;
@@ -40,10 +33,9 @@ async fn find_task(gw: &GatewayClient, id: &str) -> Option<mando_types::Task> {
 
 // ── Merge ────────────────────────────────────────────────────────────
 
-/// Merge a PR for the given task, then mark item as merged.
+/// Initiate captain merge for a task's PR.
 pub(crate) async fn merge(bot: &TelegramBot, cid: &str, item_id: &str) -> Result<()> {
     let esc = mando_shared::escape_html(item_id);
-    let id_num = parse_item_id(item_id)?;
     let gw = bot.gw();
 
     let item = find_task(gw, item_id)
@@ -70,18 +62,8 @@ pub(crate) async fn merge(bot: &TelegramBot, cid: &str, item_id: &str) -> Result
         .await
     {
         Ok(_) => {
-            // Mark item as merged in the task list.
-            if let Err(e) = gw.post(paths::TASKS_ACCEPT, &json!({"id": id_num})).await {
-                error!("merge: PR merged but failed to update task for #{item_id}: {e}");
-                bot.send_html(
-                    cid,
-                    &format!("\u{26a0}\u{fe0f} PR merged for #{esc} but task update failed: {e}"),
-                )
-                .await?;
-                return Ok(());
-            }
-            info!("merge: PR merged and item #{item_id} marked merged");
-            bot.send_html(cid, &format!("\u{1f389} Merged #{esc}"))
+            info!("merge: captain merge initiated for #{item_id}");
+            bot.send_html(cid, &format!("\u{1f680} Captain merge started for #{esc}"))
                 .await?;
         }
         Err(e) => {
@@ -156,18 +138,6 @@ pub(crate) async fn reopen_with_feedback(
 
 // ── Rework ───────────────────────────────────────────────────────────
 
-/// Request rework on a task.
-pub(crate) async fn rework(bot: &TelegramBot, cid: &str, item_id: &str, title: &str) -> Result<()> {
-    rework_with_feedback(
-        bot,
-        cid,
-        item_id,
-        title,
-        "Restart cleanly and fix the outstanding issues.",
-    )
-    .await
-}
-
 /// Request rework on a task with explicit operator feedback.
 pub(crate) async fn rework_with_feedback(
     bot: &TelegramBot,
@@ -233,59 +203,6 @@ pub(crate) async fn handoff(
 }
 
 // ── Cancel (multi-select) ────────────────────────────────────────────
-
-/// Cancel all items from a multi-select picker.
-pub(crate) async fn cancel_items(bot: &TelegramBot, cid: &str, ids: &[String]) -> Result<()> {
-    let count = ids.len();
-    let id_nums = parse_item_ids(ids)?;
-
-    match bot
-        .gw()
-        .post(
-            paths::TASKS_BULK,
-            &json!({"ids": id_nums, "updates": {"status": "canceled"}}),
-        )
-        .await
-    {
-        Ok(_) => {
-            info!("cancel: {count} item(s) cancelled");
-            bot.send_html(cid, &format!("\u{274c} Cancelled {count} item(s)."))
-                .await?;
-        }
-        Err(e) => {
-            error!("cancel: bulk cancel failed: {e}");
-            bot.send_html(cid, &format!("\u{274c} Cancel failed: {e}"))
-                .await?;
-        }
-    }
-    Ok(())
-}
-
-// ── Delete (multi-select) ────────────────────────────────────────────
-
-/// Delete all items from a multi-select picker.
-pub(crate) async fn delete_items(bot: &TelegramBot, cid: &str, ids: &[String]) -> Result<()> {
-    let count = ids.len();
-    let id_nums = parse_item_ids(ids)?;
-
-    match bot
-        .gw()
-        .post(paths::TASKS_DELETE, &json!({"ids": id_nums}))
-        .await
-    {
-        Ok(_) => {
-            info!("delete: {count} item(s) deleted");
-            bot.send_html(cid, &format!("\u{1f5d1}\u{fe0f} Deleted {count} item(s)."))
-                .await?;
-        }
-        Err(e) => {
-            error!("delete: failed: {e}");
-            bot.send_html(cid, &format!("\u{274c} Delete failed: {e}"))
-                .await?;
-        }
-    }
-    Ok(())
-}
 
 // ── Todo confirm ─────────────────────────────────────────────────────
 
@@ -410,32 +327,6 @@ pub(crate) async fn add_todo_items(
             ),
         )
         .await?;
-    }
-    Ok(())
-}
-
-// ── Retry ────────────────────────────────────────────────────────────
-
-/// Retry captain review for an errored task.
-pub(crate) async fn retry_item(bot: &TelegramBot, cid: &str, item_id: &str) -> Result<()> {
-    let esc = mando_shared::escape_html(item_id);
-    let id_num = parse_item_id(item_id)?;
-
-    match bot
-        .gw()
-        .post(paths::TASKS_RETRY, &json!({"id": id_num}))
-        .await
-    {
-        Ok(_) => {
-            info!("retry: item #{item_id} retried");
-            bot.send_html(cid, &format!("\u{1f504} Retry queued for #{esc}"))
-                .await?;
-        }
-        Err(e) => {
-            error!("retry: failed for #{item_id}: {e}");
-            bot.send_html(cid, &format!("\u{274c} Retry failed for #{esc}: {e}"))
-                .await?;
-        }
     }
     Ok(())
 }

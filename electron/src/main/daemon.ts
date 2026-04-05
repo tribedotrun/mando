@@ -21,6 +21,7 @@ import {
 export type ConnectionState = 'connecting' | 'connected' | 'disconnected' | 'updating';
 let connectionState: ConnectionState = 'connecting';
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+let healthMonitorInterval: ReturnType<typeof setInterval> | null = null;
 let reconnectDelay = 1000;
 let reconnectAttempts = 0;
 const MAX_RECONNECT_DELAY = 30000;
@@ -241,7 +242,7 @@ function scheduleReconnect(): void {
 }
 
 export function startHealthMonitor(): void {
-  setInterval(async () => {
+  healthMonitorInterval = setInterval(async () => {
     if (isQuittingRef) return;
     if (connectionState === 'updating') return;
 
@@ -418,11 +419,15 @@ export async function ensureDaemon(dataDir: string): Promise<boolean> {
   return ready;
 }
 
-/** Clean up reconnect timer and stop dev daemon. */
+/** Clean up all timers and stop dev daemon. */
 export function cleanupDaemon(): void {
   if (reconnectTimer) {
     clearTimeout(reconnectTimer);
     reconnectTimer = null;
+  }
+  if (healthMonitorInterval) {
+    clearInterval(healthMonitorInterval);
+    healthMonitorInterval = null;
   }
   // In dev, stop the launchd-managed daemon on quit.
   // In prod, the daemon persists across Electron restarts via KeepAlive.

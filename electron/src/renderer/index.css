@@ -296,6 +296,14 @@ select:focus-visible {
   transition-delay: 400ms;
 }
 
+/* ── Sidebar new-task CTA ── */
+.sidebar-new-task {
+  transition: background-color 150ms ease, color 150ms ease, transform 150ms ease;
+}
+.sidebar-new-task:active {
+  transform: scale(0.98);
+}
+
 /* ── Transition defaults ── */
 .transition-colors {
   transition-property: color, background-color, border-color;

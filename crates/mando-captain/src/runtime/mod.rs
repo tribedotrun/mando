@@ -4,6 +4,7 @@
 
 pub mod action_contract;
 pub mod captain_merge;
+mod captain_merge_poll;
 pub mod captain_review;
 mod captain_review_verdict;
 pub mod clarifier;
@@ -11,6 +12,7 @@ mod clarifier_validate;
 pub mod dashboard;
 pub mod dashboard_timeline;
 pub mod dashboard_triage;
+mod dispatch_clarify;
 pub mod dispatch_phase;
 mod dispatch_reclarify;
 mod dispatch_redispatch;

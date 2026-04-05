@@ -19,6 +19,7 @@ pub(crate) fn to_picker_state(chat_id: &str, items: &[&mando_types::Task]) -> Pi
                         .and_then(|v| v.as_str().map(String::from))
                         .unwrap_or_else(|| format!("{:?}", it.status)),
                 ),
+                has_pr: it.pr.as_ref().is_some_and(|p| !p.is_empty()),
             })
             .collect(),
         selected: std::collections::HashSet::new(),
@@ -43,12 +44,14 @@ pub(crate) fn extract_photo_todo(message: &Value) -> Option<String> {
 /// Build a persistent reply keyboard for DM context.
 ///
 /// Shows common commands as quick-tap buttons at the bottom of the chat.
-pub(crate) fn dm_reply_keyboard() -> Value {
+/// Scout button only appears when the scout feature flag is enabled.
+pub(crate) fn dm_reply_keyboard(scout_enabled: bool) -> Value {
+    let mut row = vec!["/tasks", "/action", "/todo"];
+    if scout_enabled {
+        row.push("/scout");
+    }
     serde_json::json!({
-        "keyboard": [
-            ["/tasks", "/captain", "/scout"],
-            ["/todo", "/health", "/triage"],
-        ],
+        "keyboard": [row],
         "resize_keyboard": true,
         "is_persistent": true,
     })

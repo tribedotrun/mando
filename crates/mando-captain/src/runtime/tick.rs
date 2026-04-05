@@ -258,7 +258,7 @@ async fn run_captain_tick_inner(
 
     // CaptainMerging — poll for merge session results from async CC sessions.
     if !dry_run {
-        super::captain_merge::poll_merging_items(
+        super::captain_merge_poll::poll_merging_items(
             &mut items,
             config,
             workflow,

@@ -225,12 +225,19 @@ function AddTaskFormInner({ onClose }: { onClose: () => void }): React.ReactElem
                   Reference image
                 </div>
                 <div className="flex items-start gap-3">
-                  <img
-                    src={preview}
-                    alt={image.name}
-                    className="h-20 w-20 rounded-md object-cover"
-                    style={{ border: '1px solid var(--color-border)' }}
-                  />
+                  <div
+                    className="flex h-20 w-20 shrink-0 items-center justify-center rounded-md"
+                    style={{
+                      border: '1px solid var(--color-border)',
+                      background: 'var(--color-surface-2)',
+                    }}
+                  >
+                    <img
+                      src={preview}
+                      alt={image.name}
+                      className="max-h-20 max-w-20 rounded-md object-contain"
+                    />
+                  </div>
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-[13px]" style={{ color: 'var(--color-text-2)' }}>
                       {image.name}

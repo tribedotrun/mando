@@ -23,7 +23,7 @@ interface Props {
   count: number;
   statuses?: string[];
   onDelete: () => void;
-  onBulkStatus: (status: string) => void;
+  onBulkStatus?: (status: string) => void;
   onCancel: () => void;
 }
 
@@ -49,30 +49,34 @@ export function BulkBar({
       <span className="text-code tabular-nums" style={{ color: 'var(--color-accent)' }}>
         {count} selected
       </span>
-      <div className="h-4 w-px" style={{ background: 'var(--color-border)' }} />
-      <select
-        onChange={(e) => {
-          if (e.target.value) onBulkStatus(e.target.value);
-          e.target.value = '';
-        }}
-        defaultValue=""
-        aria-label="Set status for selected items"
-        className="rounded-md px-2 py-1 text-[12px]"
-        style={{
-          background: 'var(--color-surface-3)',
-          color: 'var(--color-text-2)',
-          border: '1px solid var(--color-border)',
-        }}
-      >
-        <option value="" disabled>
-          set status...
-        </option>
-        {statusList.map((s) => (
-          <option key={s} value={s}>
-            {s}
-          </option>
-        ))}
-      </select>
+      {onBulkStatus && (
+        <>
+          <div className="h-4 w-px" style={{ background: 'var(--color-border)' }} />
+          <select
+            onChange={(e) => {
+              if (e.target.value) onBulkStatus(e.target.value);
+              e.target.value = '';
+            }}
+            defaultValue=""
+            aria-label="Set status for selected items"
+            className="rounded-md px-2 py-1 text-[12px]"
+            style={{
+              background: 'var(--color-surface-3)',
+              color: 'var(--color-text-2)',
+              border: '1px solid var(--color-border)',
+            }}
+          >
+            <option value="" disabled>
+              set status...
+            </option>
+            {statusList.map((s) => (
+              <option key={s} value={s}>
+                {s}
+              </option>
+            ))}
+          </select>
+        </>
+      )}
       <button
         onClick={onDelete}
         className="rounded-md px-3 py-1 text-[12px] font-medium"

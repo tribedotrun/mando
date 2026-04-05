@@ -75,9 +75,9 @@ pub async fn handle(bot: &TelegramBot, chat_id: &str, args: &str) -> Result<()> 
                 )];
 
                 for event in events.iter().take(20) {
-                    let ts = event["ts"].as_str().unwrap_or("");
-                    let kind = event["kind"].as_str().unwrap_or("event");
-                    let detail = event["detail"].as_str().unwrap_or("");
+                    let ts = event["timestamp"].as_str().unwrap_or("");
+                    let kind = event["event_type"].as_str().unwrap_or("event");
+                    let detail = event["summary"].as_str().unwrap_or("");
                     let short_ts = super::truncate(ts, 16);
                     let icon = timeline_icon(kind);
                     lines.push(format!(
@@ -93,6 +93,32 @@ pub async fn handle(bot: &TelegramBot, chat_id: &str, args: &str) -> Result<()> 
                     lines.push(format!("\n\u{2026} and {} more events", events.len() - 20));
                 }
 
+                // Q&A history
+                if let Ok(hist_resp) = bot
+                    .gw()
+                    .get(&format!("/api/tasks/{}/history", item_id))
+                    .await
+                {
+                    let entries = hist_resp["history"].as_array().cloned().unwrap_or_default();
+                    if !entries.is_empty() {
+                        lines.push("\n\u{1f4ac} <b>Q&A History</b>".to_string());
+                        for entry in entries.iter().take(5) {
+                            let role = entry["role"].as_str().unwrap_or("?");
+                            let text = entry["text"].as_str().unwrap_or("");
+                            let icon = if role == "human" {
+                                "\u{1f464}"
+                            } else {
+                                "\u{1f916}"
+                            };
+                            let truncated = super::truncate(text, 120);
+                            lines.push(format!("{} {}", icon, escape_html(truncated)));
+                        }
+                        if entries.len() > 5 {
+                            lines.push(format!("\u{2026} and {} more", entries.len() - 5));
+                        }
+                    }
+                }
+
                 // Try HTML first, fall back to plain text if parse fails
                 let html_text = lines.join("\n");
                 match bot.send_html(chat_id, &html_text).await {
@@ -101,9 +127,9 @@ pub async fn handle(bot: &TelegramBot, chat_id: &str, args: &str) -> Result<()> 
                         warn!(module = "timeline", error = %e, "HTML send failed, falling back to plain text");
                         let mut plain_lines = vec![format!("{mode} Timeline for #{item_id}\n")];
                         for event in events.iter().take(20) {
-                            let ts = event["ts"].as_str().unwrap_or("");
-                            let kind = event["kind"].as_str().unwrap_or("event");
-                            let detail = event["detail"].as_str().unwrap_or("");
+                            let ts = event["timestamp"].as_str().unwrap_or("");
+                            let kind = event["event_type"].as_str().unwrap_or("event");
+                            let detail = event["summary"].as_str().unwrap_or("");
                             plain_lines.push(format!(
                                 "{} | {kind} {}",
                                 super::truncate(ts, 16),

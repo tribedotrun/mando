@@ -31,7 +31,7 @@ pub async fn handle(bot: &TelegramBot, chat_id: &str, _args: &str) -> Result<()>
             lines.push(format!("<b>{} Pending-Review Tasks</b>\n", items.len()));
 
             for (i, item) in items.iter().enumerate() {
-                let repo = item["repo"].as_str().unwrap_or("?");
+                let repo = item["github_repo"].as_str().unwrap_or("?");
                 let repo_short = repo.split('/').next_back().unwrap_or(repo);
                 let pr_num = item["pr_number"].as_i64().unwrap_or(0);
                 let title = item["title"].as_str().unwrap_or("?");

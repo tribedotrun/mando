@@ -145,7 +145,7 @@ export function CaptainView({
         onNudge={handleNudgeWorker}
         onStopWorker={(worker) => actions.handleHandoff(worker.id)}
       />
-      <StatusFilter />
+      <StatusFilter projectFilter={projectFilter} />
 
       <div className="min-h-0 flex-1" style={{ paddingTop: 4 }}>
         <TaskTable
@@ -170,7 +170,6 @@ export function CaptainView({
       <BulkBar
         count={actions.selectedIds.size}
         onDelete={() => actions.setDeleteModalOpen(true)}
-        onBulkStatus={actions.handleBulkStatus}
         onCancel={actions.clearSelection}
       />
 

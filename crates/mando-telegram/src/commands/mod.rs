@@ -1,30 +1,14 @@
 //! Command handlers — one module per Telegram command.
 
-pub mod accept;
-pub mod adopt;
-pub mod answer;
-pub mod ask;
-pub mod cancel;
-pub mod captain;
-pub mod delete;
-pub mod handoff;
+pub mod action;
+mod action_sessions;
 pub mod health;
 pub mod help;
-pub mod history;
-pub mod input;
-pub mod nudge;
-pub mod picker;
-pub mod pr_summary;
-pub mod reopen;
-pub mod retry;
-pub mod rework;
-pub mod sessions;
 pub mod status;
 pub mod stop;
 pub mod timeline;
 pub mod todo;
 pub mod triage;
-pub mod workers;
 
 // ── Shared helpers ───────────────────────────────────────────────────
 

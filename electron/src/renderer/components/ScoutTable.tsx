@@ -28,7 +28,6 @@ interface Props {
   items: ScoutItem[];
   selectedIds: Set<number>;
   onToggleSelect: (id: number) => void;
-  onToggleSelectAll: () => void;
   onSelect: (id: number) => void;
   onRefresh: () => void;
   focusedIndex?: number;
@@ -38,7 +37,6 @@ export function ScoutTable({
   items,
   selectedIds,
   onToggleSelect,
-  onToggleSelectAll,
   onSelect,
   onRefresh,
   focusedIndex = -1,
@@ -81,8 +79,6 @@ export function ScoutTable({
     setEditingId(null);
   };
 
-  const allSelected = items.length > 0 && items.every((i) => selectedIds.has(i.id));
-
   if (items.length === 0) {
     return (
       <div data-testid="scout-table" className="flex flex-col items-center justify-center py-16">
@@ -115,50 +111,6 @@ export function ScoutTable({
 
   return (
     <div ref={listRef} data-testid="scout-table" className="flex flex-col" style={{ gap: 1 }}>
-      {/* Header row */}
-      <div
-        className="flex items-center"
-        style={{
-          padding: '6px 12px',
-          borderBottom: '1px solid var(--color-border-subtle)',
-        }}
-      >
-        <input
-          type="checkbox"
-          checked={allSelected}
-          onChange={onToggleSelectAll}
-          aria-label="Select all items"
-          style={{
-            width: 14,
-            height: 14,
-            borderRadius: 3,
-            marginRight: 12,
-            accentColor: 'var(--color-accent)',
-          }}
-        />
-        <span className="text-label flex-1" style={{ color: 'var(--color-text-4)' }}>
-          Title
-        </span>
-        <span
-          className="text-label"
-          style={{ color: 'var(--color-text-4)', width: 80, textAlign: 'center' }}
-        >
-          Source
-        </span>
-        <span
-          className="text-label"
-          style={{ color: 'var(--color-text-4)', width: 64, textAlign: 'center' }}
-        >
-          Type
-        </span>
-        <span
-          className="text-label"
-          style={{ color: 'var(--color-text-4)', width: 80, textAlign: 'center' }}
-        >
-          Status
-        </span>
-      </div>
-
       {items.map((item, idx) => {
         const sc = STATUS_STYLES[item.status] ?? STATUS_STYLES.pending;
         const isExpanded = expandedId === item.id;
@@ -180,7 +132,7 @@ export function ScoutTable({
               aria-label={`Scout item: ${item.title || 'Untitled'}`}
               className="group flex cursor-pointer items-center"
               style={{
-                paddingBlock: 9,
+                paddingBlock: 8,
                 paddingInline: 12,
                 gap: 12,
                 background: sel ? 'var(--color-accent-wash)' : 'var(--color-surface-1)',
@@ -205,32 +157,33 @@ export function ScoutTable({
                 }}
               />
 
-              {/* Title — single line */}
+              {/* Title + source */}
               <button
                 onClick={(e) => {
                   e.stopPropagation();
                   onSelect(item.id);
                 }}
-                className="min-w-0 flex-1 truncate text-left text-[13px] hover:underline"
+                className="min-w-0 flex-1 text-left hover:underline"
                 style={{
-                  color: 'var(--color-text-1)',
                   background: 'transparent',
                   border: 'none',
                   cursor: 'pointer',
                   padding: 0,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 2,
                 }}
                 title={item.url}
               >
-                {item.title || (item.status === 'pending' ? 'Pending...' : 'Untitled')}
+                <span className="truncate text-[13px]" style={{ color: 'var(--color-text-1)' }}>
+                  {item.title || (item.status === 'pending' ? 'Pending...' : 'Untitled')}
+                </span>
+                {domain && (
+                  <span className="truncate" style={{ fontSize: 11, color: 'var(--color-text-3)' }}>
+                    {domain}
+                  </span>
+                )}
               </button>
-
-              {/* Source domain */}
-              <span
-                className="shrink-0 truncate text-center"
-                style={{ fontSize: 11, color: 'var(--color-text-3)', width: 80 }}
-              >
-                {domain}
-              </span>
 
               {/* Type badge */}
               <span className="shrink-0 text-center" style={{ width: 64 }}>
