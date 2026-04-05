@@ -1,10 +1,9 @@
 //! `/cancel [id]` — cancel tasks (direct ID or multi-select picker).
 
-use super::picker::{self, MultiPicker};
+use super::picker::{self, DirectIdAction, MultiPicker};
 use crate::bot::TelegramBot;
 use anyhow::Result;
-use mando_shared::telegram_format::escape_html;
-use serde_json::json;
+use serde_json::{json, Value};
 
 const PICKER: MultiPicker = MultiPicker {
     header: "Select tasks to cancel:",
@@ -15,6 +14,24 @@ const PICKER: MultiPicker = MultiPicker {
     store: TelegramBot::store_cancel_picker,
 };
 
+fn cancel_body(id: i64) -> Value {
+    json!({"ids": [id], "updates": {"status": "canceled"}})
+}
+
+const DIRECT: DirectIdAction = DirectIdAction {
+    failure_verb: "Cancel",
+    success_prefix: "\u{274c} Cancelled:",
+    api_path: "/api/tasks/bulk",
+    build_body: cancel_body,
+    ineligibility_check: |it| {
+        if it.status.is_finalized() {
+            Some("is already finalized")
+        } else {
+            None
+        }
+    },
+};
+
 /// Handle `/cancel [id]`.
 pub async fn handle(bot: &mut TelegramBot, chat_id: &str, args: &str) -> Result<()> {
     let items = match super::load_tasks_or_notify(bot, chat_id).await {
@@ -22,61 +39,9 @@ pub async fn handle(bot: &mut TelegramBot, chat_id: &str, args: &str) -> Result<
         None => return Ok(()),
     };
 
-    // Direct cancel by ID
     let target_id = args.trim();
     if !target_id.is_empty() {
-        let target_num: Option<i64> = target_id.parse().ok();
-        let item = target_num.and_then(|n| items.iter().find(|it| it.id == n));
-        match item {
-            None => {
-                bot.send_html(
-                    chat_id,
-                    &format!(
-                        "\u{26a0}\u{fe0f} Task #{} not found.",
-                        escape_html(target_id)
-                    ),
-                )
-                .await?;
-            }
-            Some(it) if it.status.is_finalized() => {
-                bot.send_html(
-                    chat_id,
-                    &format!(
-                        "\u{26a0}\u{fe0f} Task #{} is already finalized.",
-                        escape_html(target_id)
-                    ),
-                )
-                .await?;
-            }
-            Some(it) => {
-                let id_num = it.id;
-                let title = escape_html(&it.title);
-                match bot
-                    .gw()
-                    .post(
-                        "/api/tasks/bulk",
-                        &json!({"ids": [id_num], "updates": {"status": "canceled"}}),
-                    )
-                    .await
-                {
-                    Ok(_) => {
-                        bot.send_html(chat_id, &format!("\u{274c} Cancelled: {title}"))
-                            .await?;
-                    }
-                    Err(e) => {
-                        bot.send_html(
-                            chat_id,
-                            &format!(
-                                "\u{274c} Cancel failed for #{}: {e}",
-                                escape_html(target_id)
-                            ),
-                        )
-                        .await?;
-                    }
-                }
-            }
-        }
-        return Ok(());
+        return picker::direct_by_id(bot, chat_id, &items, target_id, &DIRECT).await;
     }
 
     // Show multi-select picker

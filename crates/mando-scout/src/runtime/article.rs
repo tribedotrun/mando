@@ -37,13 +37,7 @@ pub async fn generate_article(
     let prompt = mando_config::render_prompt("synthesize", &workflow.prompts, &vars)
         .map_err(|e| anyhow::anyhow!(e))?;
 
-    let model = workflow.models.get("article").cloned().unwrap_or_else(|| {
-        tracing::warn!(
-            module = "scout",
-            "missing 'article' model in workflow config, using empty default"
-        );
-        String::new()
-    });
+    let model = crate::biz::model_lookup::required_model(workflow, "article")?;
     let result = mando_cc::CcOneShot::run(
         &prompt,
         mando_cc::CcConfig::builder()

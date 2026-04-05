@@ -11,7 +11,7 @@ use tracing::{info, warn};
 use mando_cc::{CcConfig, CcOneShot};
 
 use super::clarifier_validate::{build_clarifier_schema, check_repo, retry_with_correction};
-use super::task_notes::append_labeled_prompt;
+use super::dashboard::truncate_utf8;
 use crate::biz::json_parse::parse_llm_json;
 
 // ── Single-turn (captain tick auto-clarification) ───────────────────
@@ -24,14 +24,18 @@ pub(crate) async fn run_clarification(
     pool: &sqlx::SqlitePool,
     pre_session_id: Option<&str>,
 ) -> Result<ClarifierResult> {
-    let projects = &config.captain.projects;
-    let prompt = build_clarifier_prompt(item, None, workflow, projects)?;
+    let prompt = build_clarifier_prompt(item, None, workflow)?;
 
     // Resolve project cwd so the clarifier can read project files.
     let cwd = resolve_clarifier_cwd(item, config);
 
     let task_id = item.id.to_string();
-    let valid_names: Vec<String> = projects.values().map(|pc| pc.name.clone()).collect();
+    let valid_names: Vec<String> = config
+        .captain
+        .projects
+        .values()
+        .map(|pc| pc.name.clone())
+        .collect();
     let schema = build_clarifier_schema(&valid_names);
 
     let mut builder = CcConfig::builder()
@@ -84,7 +88,7 @@ pub(crate) async fn run_clarification(
         warn!(
             module = "clarifier",
             repo = %bad_repo,
-            title = %&item.title[..item.title.len().min(60)],
+            title = %truncate_utf8(&item.title, 60),
             "clarifier returned invalid project name — retrying"
         );
         match retry_with_correction(
@@ -114,7 +118,7 @@ pub(crate) async fn run_clarification(
 
     info!(
         module = "clarifier",
-        title = %&item.title[..item.title.len().min(60)],
+        title = %truncate_utf8(&item.title, 60),
         status = ?parsed.status,
         "clarification complete"
     );
@@ -193,22 +197,9 @@ fn build_clarifier_prompt(
     item: &Task,
     human_input: Option<&str>,
     workflow: &CaptainWorkflow,
-    projects: &std::collections::HashMap<String, mando_config::settings::ProjectConfig>,
 ) -> anyhow::Result<String> {
     let context = item.context.as_deref().unwrap_or("none");
     let repo = item.project.as_deref().unwrap_or("");
-
-    let repo_list = projects
-        .values()
-        .map(|cfg| {
-            if let Some(ref gh) = cfg.github_repo {
-                format!("- {} (GitHub: {})", cfg.name, gh)
-            } else {
-                format!("- {}", cfg.name)
-            }
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
 
     let mut resource_names: Vec<&str> = vec!["cc"];
     for key in workflow.agent.resource_limits.keys() {
@@ -219,19 +210,39 @@ fn build_clarifier_prompt(
     resource_names[1..].sort();
     let resource_list = resource_names.join(", ");
 
+    let images = item
+        .images
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .map(|s| {
+            let images_dir = mando_config::images_dir();
+            s.split(',')
+                .filter_map(|f| {
+                    let name = f.trim();
+                    let basename = std::path::Path::new(name).file_name()?.to_str()?;
+                    if basename == name && !name.contains("..") {
+                        Some(format!("- {}", images_dir.join(basename).display()))
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        })
+        .unwrap_or_default();
+
     let mut vars = HashMap::new();
     vars.insert("title", item.title.as_str());
     vars.insert("context", context);
     vars.insert("repo", repo);
-    vars.insert("repo_list", &repo_list);
+    vars.insert("images", images.as_str());
     vars.insert("resource_list", &resource_list);
-
-    let mut prompt = mando_config::render_prompt("clarifier", &workflow.prompts, &vars)
-        .map_err(|e| anyhow::anyhow!(e))?;
     if let Some(input) = human_input {
-        append_labeled_prompt(&mut prompt, "Human provided additional details", input);
+        vars.insert("human_input", input);
     }
-    Ok(prompt)
+
+    mando_config::render_prompt("clarifier", &workflow.prompts, &vars)
+        .map_err(|e| anyhow::anyhow!(e))
 }
 
 pub(crate) fn build_interactive_clarifier_turn_prompt(
@@ -240,9 +251,6 @@ pub(crate) fn build_interactive_clarifier_turn_prompt(
     human_input: &str,
     outstanding_questions: Option<&[ClarifierQuestion]>,
 ) -> anyhow::Result<String> {
-    let system_prompt =
-        mando_config::render_prompt("interactive_clarifier", &workflow.prompts, &HashMap::new())
-            .map_err(|e| anyhow::anyhow!(e))?;
     let details = item
         .original_prompt
         .as_deref()
@@ -251,21 +259,16 @@ pub(crate) fn build_interactive_clarifier_turn_prompt(
     let questions_text = outstanding_questions
         .map(format_questions_text)
         .unwrap_or_else(|| "(none)".to_string());
-    let human_response = human_input.trim();
 
-    Ok(format!(
-        "{system_prompt}\n\n\
-         You MUST respond with JSON only.\n\n\
-         Task:\n\
-         - Title: {}\n\
-         - Details: {}\n\
-         - Current Context: {}\n\
-         - Outstanding Questions:\n{}\n\n\
-         Human response:\n\
-         {}\n\n\
-         Update the context and decide if the item is ready or still needs clarification.",
-        item.title, details, current_context, questions_text, human_response,
-    ))
+    let mut vars = HashMap::new();
+    vars.insert("title", item.title.as_str());
+    vars.insert("details", details);
+    vars.insert("current_context", current_context);
+    vars.insert("outstanding_questions", questions_text.as_str());
+    vars.insert("human_response", human_input.trim());
+
+    mando_config::render_prompt("interactive_clarifier", &workflow.prompts, &vars)
+        .map_err(|e| anyhow::anyhow!(e))
 }
 
 /// Unified clarification answer: appends human answer to context, runs the
@@ -373,7 +376,7 @@ pub async fn answer_and_reclarify(
 
     info!(
         module = "clarifier",
-        title = %&item.title[..item.title.len().min(60)],
+        title = %truncate_utf8(&item.title, 60),
         status = ?parsed.status,
         "answer_and_reclarify complete"
     );
@@ -560,10 +563,9 @@ mod tests {
     #[test]
     fn build_prompt_without_human_input() {
         let workflow = CaptainWorkflow::compiled_default();
-        let projects = HashMap::new();
         let mut item = Task::new("Fix bug");
         item.context = Some("in auth".into());
-        let prompt = build_clarifier_prompt(&item, None, &workflow, &projects).unwrap();
+        let prompt = build_clarifier_prompt(&item, None, &workflow).unwrap();
         assert!(prompt.contains("Fix bug"));
         assert!(prompt.contains("in auth"));
         assert!(!prompt.contains("Human provided"));
@@ -572,12 +574,40 @@ mod tests {
     #[test]
     fn build_prompt_with_human_input() {
         let workflow = CaptainWorkflow::compiled_default();
-        let projects = HashMap::new();
         let item = Task::new("Fix bug");
         let prompt =
-            build_clarifier_prompt(&item, Some("it's in the login page"), &workflow, &projects)
-                .unwrap();
+            build_clarifier_prompt(&item, Some("it's in the login page"), &workflow).unwrap();
         assert!(prompt.contains("Human provided additional details: it's in the login page"));
+    }
+
+    #[test]
+    fn build_prompt_with_images() {
+        let workflow = CaptainWorkflow::compiled_default();
+        let mut item = Task::new("Fix layout");
+        item.images = Some("abc123.png,def456.jpg".into());
+        let prompt = build_clarifier_prompt(&item, None, &workflow).unwrap();
+        assert!(prompt.contains("abc123.png"));
+        assert!(prompt.contains("def456.jpg"));
+        assert!(prompt.contains("Attached Images"));
+    }
+
+    #[test]
+    fn build_prompt_rejects_path_traversal_images() {
+        let workflow = CaptainWorkflow::compiled_default();
+        let mut item = Task::new("Fix layout");
+        item.images = Some("good.png,../../etc/passwd,/absolute/path.jpg".into());
+        let prompt = build_clarifier_prompt(&item, None, &workflow).unwrap();
+        assert!(prompt.contains("good.png"));
+        assert!(!prompt.contains("passwd"));
+        assert!(!prompt.contains("/absolute/path.jpg"));
+    }
+
+    #[test]
+    fn build_prompt_without_images_omits_section() {
+        let workflow = CaptainWorkflow::compiled_default();
+        let item = Task::new("Fix bug");
+        let prompt = build_clarifier_prompt(&item, None, &workflow).unwrap();
+        assert!(!prompt.contains("Attached Images"));
     }
 
     #[test]
@@ -592,26 +622,5 @@ mod tests {
         let json = r#"{"status":"ready","context":"ctx"}"#;
         let result = parse_clarifier_response(json, "fallback");
         assert_eq!(result.status, ClarifierStatus::Ready);
-    }
-
-    #[test]
-    fn repo_list_shows_project_name_not_path_key() {
-        let workflow = CaptainWorkflow::compiled_default();
-        let mut projects = HashMap::new();
-        projects.insert(
-            "/code/mando".to_string(),
-            mando_config::settings::ProjectConfig {
-                name: "mando".into(),
-                path: "/code/mando".into(),
-                github_repo: Some("acme/widgets".into()),
-                ..Default::default()
-            },
-        );
-        let item = Task::new("Fix bug");
-        let prompt = build_clarifier_prompt(&item, None, &workflow, &projects).unwrap();
-        // Must show project name first, GitHub slug labeled.
-        assert!(prompt.contains("- mando (GitHub: acme/widgets)"));
-        // Must NOT show the raw path key as the primary identifier.
-        assert!(!prompt.contains("- /code/mando"));
     }
 }

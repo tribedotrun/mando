@@ -1,10 +1,9 @@
 //! `/delete [id]` — permanently remove tasks.
 
-use super::picker::{self, MultiPicker};
+use super::picker::{self, DirectIdAction, MultiPicker};
 use crate::bot::TelegramBot;
 use anyhow::Result;
-use mando_shared::telegram_format::escape_html;
-use serde_json::json;
+use serde_json::{json, Value};
 
 const PICKER: MultiPicker = MultiPicker {
     header: "\u{26a0}\u{fe0f} Select tasks to permanently delete:",
@@ -15,6 +14,19 @@ const PICKER: MultiPicker = MultiPicker {
     store: TelegramBot::store_delete_picker,
 };
 
+fn delete_body(id: i64) -> Value {
+    json!({"ids": [id]})
+}
+
+const DIRECT: DirectIdAction = DirectIdAction {
+    failure_verb: "Delete",
+    success_prefix: "\u{1f5d1}\u{fe0f} Deleted:",
+    api_path: "/api/tasks/delete",
+    build_body: delete_body,
+    // Any existing task can be deleted; no eligibility guard.
+    ineligibility_check: |_| None,
+};
+
 /// Handle `/delete [id]`.
 pub async fn handle(bot: &mut TelegramBot, chat_id: &str, args: &str) -> Result<()> {
     let items = match super::load_tasks_or_notify(bot, chat_id).await {
@@ -22,48 +34,9 @@ pub async fn handle(bot: &mut TelegramBot, chat_id: &str, args: &str) -> Result<
         None => return Ok(()),
     };
 
-    // Direct delete by ID
     let target_id = args.trim();
     if !target_id.is_empty() {
-        let target_num: Option<i64> = target_id.parse().ok();
-        let item = target_num.and_then(|n| items.iter().find(|it| it.id == n));
-        match item {
-            None => {
-                bot.send_html(
-                    chat_id,
-                    &format!(
-                        "\u{26a0}\u{fe0f} Task #{} not found.",
-                        escape_html(target_id)
-                    ),
-                )
-                .await?;
-            }
-            Some(it) => {
-                let id_num = it.id;
-                let title = escape_html(&it.title);
-                match bot
-                    .gw()
-                    .post("/api/tasks/delete", &json!({"ids": [id_num]}))
-                    .await
-                {
-                    Ok(_) => {
-                        bot.send_html(chat_id, &format!("\u{1f5d1}\u{fe0f} Deleted: {title}"))
-                            .await?;
-                    }
-                    Err(e) => {
-                        bot.send_html(
-                            chat_id,
-                            &format!(
-                                "\u{274c} Delete failed for #{}: {e}",
-                                escape_html(target_id)
-                            ),
-                        )
-                        .await?;
-                    }
-                }
-            }
-        }
-        return Ok(());
+        return picker::direct_by_id(bot, chat_id, &items, target_id, &DIRECT).await;
     }
 
     // Show multi-select picker (all items are deletable)

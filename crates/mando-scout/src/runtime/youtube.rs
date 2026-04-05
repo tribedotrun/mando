@@ -2,6 +2,16 @@
 
 use anyhow::{Context, Result};
 
+async fn cleanup_tmp_dir(dir: &std::path::Path) {
+    if let Err(e) = tokio::fs::remove_dir_all(dir).await {
+        tracing::warn!(
+            path = %dir.display(),
+            error = %e,
+            "yt-dlp tmp dir cleanup failed (leaked files)"
+        );
+    }
+}
+
 /// Extract transcript text from a YouTube video URL.
 ///
 /// Uses `yt-dlp --write-sub --skip-download` to fetch subtitles, then
@@ -52,7 +62,7 @@ pub async fn extract_youtube_transcript(url: &str) -> Result<String> {
             }
 
             // Cleanup.
-            tokio::fs::remove_dir_all(&tmp_dir).await.ok();
+            cleanup_tmp_dir(&tmp_dir).await;
 
             if transcript.is_empty() {
                 anyhow::bail!("no subtitles found for {url}");
@@ -60,12 +70,12 @@ pub async fn extract_youtube_transcript(url: &str) -> Result<String> {
             Ok(transcript)
         }
         Ok(out) => {
-            tokio::fs::remove_dir_all(&tmp_dir).await.ok();
+            cleanup_tmp_dir(&tmp_dir).await;
             let stderr = String::from_utf8_lossy(&out.stderr);
             anyhow::bail!("yt-dlp failed: {stderr}");
         }
         Err(e) => {
-            tokio::fs::remove_dir_all(&tmp_dir).await.ok();
+            cleanup_tmp_dir(&tmp_dir).await;
             anyhow::bail!("yt-dlp exec failed ({}): {e}", yt_dlp_bin.display());
         }
     }

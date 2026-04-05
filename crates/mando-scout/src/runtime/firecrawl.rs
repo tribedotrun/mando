@@ -50,7 +50,10 @@ pub async fn scrape(url: &str) -> Result<String> {
 
     let status = resp.status();
     if !status.is_success() {
-        let body = resp.text().await.unwrap_or_default();
+        let body = resp
+            .text()
+            .await
+            .unwrap_or_else(|e| format!("(unable to read error body: {e})"));
         bail!("firecrawl API returned HTTP {status}: {body}");
     }
 

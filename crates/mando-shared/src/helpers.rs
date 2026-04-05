@@ -123,10 +123,10 @@ mod tests {
 
     #[test]
     fn pr_html_link_bare_number_with_repo() {
-        let link = pr_html_link("504", Some("tribedotrun/mando-private"));
+        let link = pr_html_link("504", Some("tribedotrun/mando"));
         assert_eq!(
             link,
-            "<a href=\"https://github.com/tribedotrun/mando-private/pull/504\">PR #504</a>"
+            "<a href=\"https://github.com/tribedotrun/mando/pull/504\">PR #504</a>"
         );
     }
 

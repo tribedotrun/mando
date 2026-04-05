@@ -36,13 +36,7 @@ pub async fn run_research(topic: &str, workflow: &ScoutWorkflow) -> Result<Resea
     let prompt = mando_config::render_prompt("research", &workflow.prompts, &vars)
         .map_err(|e| anyhow::anyhow!(e))?;
 
-    let model = workflow.models.get("research").cloned().unwrap_or_else(|| {
-        tracing::warn!(
-            module = "scout",
-            "missing 'research' model in workflow config, using empty default"
-        );
-        String::new()
-    });
+    let model = crate::biz::model_lookup::required_model(workflow, "research")?;
     let result = mando_cc::CcOneShot::run(
         &prompt,
         mando_cc::CcConfig::builder()

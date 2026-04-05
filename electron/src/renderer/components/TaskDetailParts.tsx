@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
+import log from '#renderer/logger';
 import type { TaskItem } from '#renderer/types';
 import { MoreIcon } from '#renderer/components/TaskIcons';
+import { useToastStore } from '#renderer/stores/toastStore';
 
 export function ActionButton({
   label,
@@ -57,7 +59,10 @@ export function DetailOverflowMenu({
   const [open, setOpen] = useState(false);
 
   const copyAndClose = (text: string) => {
-    navigator.clipboard.writeText(text).catch(() => {});
+    navigator.clipboard.writeText(text).catch((err: unknown) => {
+      log.warn('[TaskDetail] clipboard copy failed:', err);
+      useToastStore.getState().add('error', 'Copy failed — check clipboard permissions');
+    });
     setOpen(false);
   };
 

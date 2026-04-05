@@ -265,30 +265,6 @@ pub async fn update_processed(
     Ok(result.rows_affected() > 0)
 }
 
-/// Restore pre-process metadata and force status back to pending.
-pub async fn rollback_processed(pool: &SqlitePool, item: &ScoutItem) -> Result<()> {
-    let result = sqlx::query(
-        "UPDATE scout_items
-         SET title = ?, relevance = ?, quality = ?,
-             source_name = ?, status = 'pending', date_processed = ?,
-             date_published = ?
-         WHERE id = ?",
-    )
-    .bind(item.title.as_deref())
-    .bind(item.relevance)
-    .bind(item.quality)
-    .bind(item.source_name.as_deref())
-    .bind(item.date_processed.as_deref())
-    .bind(item.date_published.as_deref())
-    .bind(item.id)
-    .execute(pool)
-    .await?;
-    if result.rows_affected() == 0 {
-        bail!("item #{} not found", item.id);
-    }
-    Ok(())
-}
-
 /// Set title without changing status.
 pub async fn set_title(pool: &SqlitePool, id: i64, title: &str) -> Result<()> {
     let result = sqlx::query("UPDATE scout_items SET title = ? WHERE id = ?")

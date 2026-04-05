@@ -9,6 +9,7 @@ use mando_types::task::{ItemStatus, Task};
 
 use crate::biz::dispatch_logic;
 use crate::runtime::clarifier::{self, ClarifierStatus};
+use crate::runtime::dashboard::truncate_utf8;
 use crate::runtime::notify::Notifier;
 
 /// Dispatch ready and new items to workers.
@@ -50,7 +51,7 @@ pub(crate) async fn dispatch_new_work(
                 if dry_run {
                     dry_actions.push(format!(
                         "would spawn worker for '{}'",
-                        &item.title[..item.title.len().min(60)]
+                        truncate_utf8(&item.title, 60)
                     ));
                     active_workers += 1;
                     let resource = item.resource.as_deref().unwrap_or("cc").to_string();
@@ -130,7 +131,7 @@ pub(crate) async fn dispatch_new_work(
                                 let msg = format!(
                                     "Spawn failed {} times for '{}', escalated to captain review: {}",
                                     count,
-                                    &item.title[..item.title.len().min(60)],
+                                    truncate_utf8(&item.title, 60),
                                     e
                                 );
                                 tracing::error!(module = "captain", error = %msg, "spawn permanently failed");
@@ -140,7 +141,7 @@ pub(crate) async fn dispatch_new_work(
                                     "Spawn failed ({}/{}) for '{}': {}",
                                     count,
                                     3,
-                                    &item.title[..item.title.len().min(60)],
+                                    truncate_utf8(&item.title, 60),
                                     e
                                 );
                                 tracing::error!(module = "captain", error = %msg, "spawn failed");
@@ -169,7 +170,7 @@ pub(crate) async fn dispatch_new_work(
         if dry_run {
             dry_actions.push(format!(
                 "would clarify '{}'",
-                &items[idx].title[..items[idx].title.len().min(60)]
+                truncate_utf8(&items[idx].title, 60)
             ));
             continue;
         }
@@ -243,7 +244,7 @@ pub(crate) async fn dispatch_new_work(
                         if context_trimmed.len() < 20 {
                             tracing::warn!(
                                 module = "captain",
-                                title = %&item.title[..item.title.len().min(60)],
+                                title = %truncate_utf8(&item.title, 60),
                                 context_len = context_trimmed.len(),
                                 "clarifier returned trivial context (<20 chars), escalating to captain review"
                             );
@@ -291,7 +292,7 @@ pub(crate) async fn dispatch_new_work(
                                     tracing::warn!(
                                         module = "captain",
                                         resource = %resource,
-                                        title = %&item.title[..item.title.len().min(60)],
+                                        title = %truncate_utf8(&item.title, 60),
                                         "clarifier returned unknown resource — ignoring"
                                     );
                                 }
@@ -309,7 +310,7 @@ pub(crate) async fn dispatch_new_work(
 
                             tracing::info!(
                                 module = "captain",
-                                title = %&item.title[..item.title.len().min(60)],
+                                title = %truncate_utf8(&item.title, 60),
                                 "clarified, now ready"
                             );
                         }
@@ -414,7 +415,7 @@ pub(crate) async fn dispatch_new_work(
                     let msg = format!(
                         "Clarifier failed {} times for '{}', escalated to captain review: {}",
                         count,
-                        &item.title[..item.title.len().min(60)],
+                        truncate_utf8(&item.title, 60),
                         e
                     );
                     tracing::error!(module = "captain", error = %msg, "clarifier permanently failed");

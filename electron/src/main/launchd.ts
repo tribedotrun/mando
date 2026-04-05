@@ -331,8 +331,8 @@ export function installTgPlist(dataDir: string): void {
       log.info('[launchd] Skipping TG plist — Telegram not configured');
       return;
     }
-  } catch {
-    log.info('[launchd] Skipping TG plist — cannot read config');
+  } catch (e: unknown) {
+    log.info(`[launchd] Skipping TG plist — cannot read config: ${errorMsg(e)}`);
     return;
   }
 

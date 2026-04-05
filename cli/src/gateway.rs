@@ -76,20 +76,36 @@ async fn handle_stop() -> anyhow::Result<()> {
 
     match pid {
         Some(pid) => {
-            let _ = tokio::process::Command::new("kill")
+            match tokio::process::Command::new("kill")
                 .arg(pid.to_string())
                 .status()
-                .await;
-            println!("Sent SIGTERM to daemon (pid {pid}).");
+                .await
+            {
+                Ok(status) if status.success() => {
+                    println!("Sent SIGTERM to daemon (pid {pid}).");
+                }
+                Ok(status) => {
+                    eprintln!("Warning: kill exited with status {status} for pid {pid}.");
+                }
+                Err(e) => {
+                    eprintln!("Warning: failed to send SIGTERM to pid {pid}: {e}");
+                }
+            }
         }
         None => {
             println!("No running daemon found (no PID file).");
         }
     }
 
-    // Clean up both files.
-    let _ = std::fs::remove_file(&pid_file);
-    let _ = std::fs::remove_file(data_dir.join("daemon.port"));
+    // Clean up both files. NotFound is expected; other errors are surfaced
+    // so permission issues or a broken data dir don't pass silently.
+    for path in [pid_file, data_dir.join("daemon.port")] {
+        if let Err(e) = std::fs::remove_file(&path) {
+            if e.kind() != std::io::ErrorKind::NotFound {
+                eprintln!("Warning: failed to remove {}: {e}", path.display());
+            }
+        }
+    }
 
     Ok(())
 }

@@ -39,10 +39,6 @@ impl ScoutDb {
         dq::get_item(&self.pool, id).await
     }
 
-    pub async fn get_item_by_url(&self, url: &str) -> Result<Option<ScoutItem>> {
-        dq::get_item_by_url(&self.pool, url).await
-    }
-
     pub async fn list_items(&self, status: Option<&str>) -> Result<Vec<ScoutItem>> {
         dq::list_items(&self.pool, status).await
     }
@@ -83,13 +79,6 @@ impl ScoutDb {
             date_published,
         )
         .await
-    }
-
-    /// Restore pre-process metadata after a downstream write failure.
-    ///
-    /// The item is made retryable again by forcing status back to `pending`.
-    pub async fn rollback_processed(&self, item: &ScoutItem) -> Result<()> {
-        dq::rollback_processed(&self.pool, item).await
     }
 
     pub async fn set_title(&self, id: i64, title: &str) -> Result<()> {
@@ -203,7 +192,9 @@ impl ScoutDb {
             }
         }
 
-        scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        // total_cmp is NaN-safe; fuzzy_score cannot currently produce NaN but
+        // this future-proofs against any scoring change that introduces one.
+        scored.sort_by(|a, b| b.1.total_cmp(&a.1));
 
         let total = scored.len();
         let per_page = if q.per_page == 0 { 50 } else { q.per_page };
@@ -514,38 +505,6 @@ mod tests {
         let updated = db.get_item(item.id).await.unwrap().unwrap();
         assert_eq!(updated.status, ScoutStatus::Processed);
         assert_eq!(updated.title.as_deref(), Some("Retried OK"));
-    }
-
-    #[tokio::test]
-    async fn rollback_processed_restores_original_metadata() {
-        let db = test_db().await;
-        let (item, _) = db
-            .add_item("https://rollback.com", "other", None)
-            .await
-            .unwrap();
-        db.set_title(item.id, "Original Title").await.unwrap();
-        let original = db.get_item(item.id).await.unwrap().unwrap();
-
-        db.update_processed(
-            item.id,
-            "AI Title",
-            91,
-            77,
-            Some("Feed"),
-            Some("2026-03-01"),
-        )
-        .await
-        .unwrap();
-        db.rollback_processed(&original).await.unwrap();
-
-        let rolled_back = db.get_item(item.id).await.unwrap().unwrap();
-        assert_eq!(rolled_back.status, ScoutStatus::Pending);
-        assert_eq!(rolled_back.title.as_deref(), Some("Original Title"));
-        assert_eq!(rolled_back.relevance, original.relevance);
-        assert_eq!(rolled_back.quality, original.quality);
-        assert_eq!(rolled_back.source_name, original.source_name);
-        assert_eq!(rolled_back.date_processed, original.date_processed);
-        assert_eq!(rolled_back.date_published, original.date_published);
     }
 
     #[tokio::test]

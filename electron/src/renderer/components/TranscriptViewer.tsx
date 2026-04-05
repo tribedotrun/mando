@@ -28,7 +28,7 @@ function parseTranscript(markdown: string): TranscriptSection[] {
     const body = nlIdx >= 0 ? chunk.slice(nlIdx + 1) : '';
 
     let kind: TranscriptSection['kind'] = 'turn';
-    if (heading.startsWith('Human')) kind = 'human';
+    if (heading.startsWith('Prompt') || heading.startsWith('Human')) kind = 'human';
     else if (heading.startsWith('[')) kind = 'queue-op';
     else if (heading.startsWith('*Session end')) {
       sections.push({ kind: 'session-end', heading, blocks: [] });

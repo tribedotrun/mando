@@ -1,11 +1,11 @@
 {
   "name": "mando",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "description": "Desktop app for managing AI coding agents",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "https://github.com/tribedotrun/mando-private.git"
+    "url": "https://github.com/tribedotrun/mando.git"
   },
   "homepage": "https://mando.build",
   "main": ".vite/build/index.js",

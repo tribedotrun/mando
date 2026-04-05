@@ -82,10 +82,29 @@ pub(crate) async fn post_task_ask(
             "stale session_ids.ask — manager has no session, clearing"
         );
         let store = state.task_store.write().await;
-        if let Ok(Some(mut task)) = store.find_by_id(id).await {
-            task.session_ids.ask = None;
-            if let Err(e) = store.write_task(&task).await {
-                tracing::warn!(task_id = id, error = %e, "failed to clear stale session_ids.ask");
+        match store.find_by_id(id).await {
+            Ok(Some(mut task)) => {
+                task.session_ids.ask = None;
+                if let Err(e) = store.write_task(&task).await {
+                    tracing::warn!(
+                        task_id = id,
+                        error = %e,
+                        "failed to clear stale session_ids.ask"
+                    );
+                }
+            }
+            Ok(None) => {
+                tracing::warn!(
+                    task_id = id,
+                    "stale session_ids.ask clear skipped — task vanished between lookups"
+                );
+            }
+            Err(e) => {
+                tracing::warn!(
+                    task_id = id,
+                    error = %e,
+                    "stale session_ids.ask clear skipped — task store read failed"
+                );
             }
         }
     }

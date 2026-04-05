@@ -43,7 +43,7 @@ fn resolve_project<'a>(
 }
 
 /// Find the project that owns a worktree path by checking the central worktrees dir.
-/// Uses longest-prefix-wins to handle overlapping repo names (e.g. `mando` vs `mando-private`).
+/// Uses longest-prefix-wins to handle overlapping repo names (e.g. `foo` vs `foo-bar`).
 fn find_project_for_worktree(config: &mando_config::Config, wt_path: &Path) -> Option<PathBuf> {
     let wt_dir = git::worktrees_dir();
     if !wt_path.starts_with(&wt_dir) {

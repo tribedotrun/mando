@@ -12,8 +12,13 @@ interface DevInfo {
   slot: string | null;
 }
 
+// Cache survives component unmount/remount (list↔detail navigation in App.tsx
+// causes a full DOM swap). Without this, the bar loads async on every remount,
+// shifting the layout when it appears.
+let _cachedInfo: DevInfo | null = null;
+
 export function DevInfoBar(): React.ReactElement | null {
-  const [info, setInfo] = useState<DevInfo | null>(null);
+  const [info, setInfo] = useState<DevInfo | null>(_cachedInfo);
   const [inspecting, setInspecting] = useState(false);
   const [hoveredName, setHoveredName] = useState<string | null>(null);
   const inspectingRef = useRef(false);
@@ -46,6 +51,7 @@ export function DevInfoBar(): React.ReactElement | null {
   });
 
   useMountEffect(() => {
+    if (_cachedInfo) return;
     const load = async () => {
       if (!window.mandoAPI) return;
       const [mode, gatewayUrl, gitInfo] = await Promise.all([
@@ -56,14 +62,16 @@ export function DevInfoBar(): React.ReactElement | null {
       if (mode === 'production') return;
       if (!gatewayUrl) return;
       const port = new URL(gatewayUrl).port;
-      setInfo({
+      const loaded: DevInfo = {
         mode: mode.toUpperCase(),
         version: __APP_VERSION__,
         port,
         branch: gitInfo.branch,
         worktree: gitInfo.worktree,
         slot: gitInfo.slot,
-      });
+      };
+      _cachedInfo = loaded;
+      setInfo(loaded);
     };
     load().catch((err) => log.error('[DevInfoBar] failed to load:', err));
   });

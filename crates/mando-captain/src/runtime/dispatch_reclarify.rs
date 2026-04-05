@@ -6,6 +6,7 @@ use mando_types::task::{ItemStatus, Task};
 
 use crate::biz::dispatch_logic;
 use crate::runtime::clarifier::{self, ClarifierStatus};
+use crate::runtime::dashboard::truncate_utf8;
 
 /// Re-clarify items where human answered (Clarifying status).
 /// Safety net for items that got stuck or where the inline call failed.
@@ -31,7 +32,7 @@ pub(crate) async fn reclarify_items(
         if dry_run {
             dry_actions.push(format!(
                 "would re-clarify '{}'",
-                &items[idx].title[..items[idx].title.len().min(60)]
+                truncate_utf8(&items[idx].title, 60)
             ));
             continue;
         }
@@ -60,7 +61,7 @@ pub(crate) async fn reclarify_items(
 
                         tracing::info!(
                             module = "captain",
-                            title = %&item.title[..item.title.len().min(60)],
+                            title = %truncate_utf8(&item.title, 60),
                             "re-clarified, now ready"
                         );
                     }
@@ -117,7 +118,7 @@ pub(crate) async fn reclarify_items(
                     alerts.push(format!(
                         "Re-clarification failed {} times for '{}': {}",
                         count,
-                        &item.title[..item.title.len().min(60)],
+                        truncate_utf8(&item.title, 60),
                         e
                     ));
                 } else {

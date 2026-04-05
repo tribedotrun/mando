@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import log from '#renderer/logger';
 import { useTaskStore } from '#renderer/stores/taskStore';
 import { useSettingsStore } from '#renderer/stores/settingsStore';
 import { SetupChecklist } from '#renderer/components/SetupChecklist';
@@ -80,7 +81,9 @@ function UpdateButton(): React.ReactElement | null {
       .then((p) => {
         if (p) setUpdateReady(true);
       })
-      .catch(() => {});
+      .catch((err: unknown) => {
+        log.warn('[Sidebar] failed to read pending update status:', err);
+      });
     return () => window.mandoAPI.updates.removeUpdateListeners();
   });
 

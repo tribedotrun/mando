@@ -78,114 +78,151 @@ export function TaskActionBar({ item, onAsk }: Props): React.ReactElement | null
     [text, handleSubmit],
   );
 
-  // Hide for finalized, clarification (handled in status card), and queued states.
+  // Determine visibility — hidden states still reserve no space via height collapse.
   const isFinalized = FINALIZED_STATUSES.includes(item.status);
-  if (isFinalized) return null;
-  if (item.status === 'needs-clarification') return null;
-  if (item.status === 'new' || item.status === 'queued') return null;
-  if (available.length === 0) return null;
+  const hidden =
+    isFinalized ||
+    item.status === 'needs-clarification' ||
+    item.status === 'new' ||
+    item.status === 'queued' ||
+    available.length === 0;
 
   const config = ACTION_CONFIG[selectedAction];
   const hasMultipleActions = available.length > 1;
-  const canSubmit = text.trim().length > 0 && !pendingAction;
+  const canSubmit = !hidden && text.trim().length > 0 && !pendingAction;
 
   return (
     <div
-      className="shrink-0 px-4 pt-3 pb-3"
-      style={{ borderTop: '1px solid var(--color-border-subtle)' }}
+      className="shrink-0 overflow-hidden"
+      style={{
+        maxHeight: hidden ? 0 : '80px',
+        opacity: hidden ? 0 : 1,
+        transition: 'max-height 150ms ease, opacity 150ms ease',
+        borderTop: hidden ? 'none' : '1px solid var(--color-border-subtle)',
+      }}
     >
-      <div
-        className="flex items-center gap-2 rounded-lg px-3 py-2"
-        style={{
-          background: 'var(--color-surface-2)',
-          border: '1px solid var(--color-border-subtle)',
-        }}
-      >
-        <textarea
-          className="min-h-[20px] flex-1 resize-none bg-transparent text-body leading-snug focus:outline-none"
-          style={{ color: 'var(--color-text-1)' }}
-          rows={1}
-          placeholder={config.placeholder}
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={handleKeyDown}
-          disabled={!!pendingAction}
-        />
-
-        {/* Split button */}
+      <div className="px-4 pt-3 pb-3">
         <div
-          className="relative flex shrink-0 items-center"
-          onBlur={(e) => {
-            if (!e.currentTarget.contains(e.relatedTarget)) setDropdownOpen(false);
+          className="flex items-center gap-2 rounded-lg px-3 py-2"
+          style={{
+            background: 'var(--color-surface-2)',
+            border: '1px solid var(--color-border-subtle)',
           }}
         >
+          <textarea
+            className="min-h-[20px] flex-1 resize-none bg-transparent text-body leading-snug focus:outline-none"
+            style={{ color: 'var(--color-text-1)' }}
+            rows={1}
+            placeholder={config.placeholder}
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={handleKeyDown}
+            disabled={!!pendingAction}
+          />
+
+          {/* Action selector — text dropdown */}
+          {hasMultipleActions && (
+            <div
+              className="relative shrink-0"
+              onBlur={(e) => {
+                if (!e.currentTarget.contains(e.relatedTarget)) setDropdownOpen(false);
+              }}
+            >
+              <button
+                onClick={() => setDropdownOpen((v) => !v)}
+                className="flex items-center gap-1"
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: 'var(--color-text-2)',
+                  fontSize: '13px',
+                  fontWeight: 500,
+                  cursor: 'pointer',
+                  padding: '4px 2px',
+                  lineHeight: '18px',
+                }}
+              >
+                {config.label}
+                <svg
+                  width="10"
+                  height="10"
+                  viewBox="0 0 10 10"
+                  fill="currentColor"
+                  style={{ opacity: 0.6 }}
+                >
+                  <path d="M3 4l2 2 2-2" />
+                </svg>
+              </button>
+
+              {dropdownOpen && (
+                <div
+                  className="absolute bottom-full left-0 z-50 mb-1 min-w-[120px] rounded-lg py-1"
+                  style={{
+                    background: 'var(--color-surface-3)',
+                    border: '1px solid var(--color-border)',
+                    boxShadow: '0 4px 16px rgba(0,0,0,0.3)',
+                  }}
+                >
+                  {available.map((action) => (
+                    <button
+                      key={action}
+                      onClick={() => {
+                        setSelectedAction(action);
+                        setDropdownOpen(false);
+                      }}
+                      className="flex w-full items-center justify-between px-3 py-1.5 text-left text-caption hover:bg-[var(--color-surface-2)]"
+                      style={{
+                        color: 'var(--color-text-1)',
+                        background: 'none',
+                        border: 'none',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      {ACTION_CONFIG[action].label}
+                      {action === selectedAction && (
+                        <span style={{ color: 'var(--color-accent)' }}>&#10003;</span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Circular send button */}
           <button
             onClick={handleSubmit}
             disabled={!canSubmit}
-            className="rounded-l-md px-3 py-1 text-label font-medium disabled:opacity-40"
+            className="flex shrink-0 items-center justify-center"
             style={{
-              background: 'var(--color-accent)',
-              color: 'var(--color-bg)',
+              width: '28px',
+              height: '28px',
+              borderRadius: '50%',
+              background: canSubmit ? 'var(--color-accent)' : 'var(--color-surface-3)',
+              color: canSubmit ? 'var(--color-bg)' : 'var(--color-text-3)',
               border: 'none',
-              borderRight: hasMultipleActions ? '1px solid var(--color-accent-pressed)' : 'none',
-              borderRadius: hasMultipleActions ? undefined : '6px',
               cursor: canSubmit ? 'pointer' : 'default',
-              lineHeight: '14px',
+              transition: 'background 120ms ease, color 120ms ease',
             }}
           >
-            {pendingAction ? '...' : config.label}
-          </button>
-
-          {hasMultipleActions && (
-            <button
-              onClick={() => setDropdownOpen((v) => !v)}
-              className="rounded-r-md px-1.5 py-1"
-              style={{
-                background: 'var(--color-accent)',
-                color: 'var(--color-bg)',
-                border: 'none',
-                cursor: 'pointer',
-                lineHeight: '14px',
-              }}
-            >
-              <svg width="10" height="10" viewBox="0 0 10 10" fill="currentColor">
-                <path d="M2.5 4l2.5 2.5L7.5 4" />
+            {pendingAction ? (
+              <span style={{ fontSize: '12px' }}>&hellip;</span>
+            ) : (
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 14 14"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M7 12V3" />
+                <path d="M3 6l4-4 4 4" />
               </svg>
-            </button>
-          )}
-
-          {dropdownOpen && (
-            <div
-              className="absolute bottom-full right-0 z-50 mb-1 min-w-[120px] rounded-lg py-1"
-              style={{
-                background: 'var(--color-surface-3)',
-                border: '1px solid var(--color-border)',
-                boxShadow: '0 4px 16px rgba(0,0,0,0.3)',
-              }}
-            >
-              {available.map((action) => (
-                <button
-                  key={action}
-                  onClick={() => {
-                    setSelectedAction(action);
-                    setDropdownOpen(false);
-                  }}
-                  className="flex w-full items-center justify-between px-3 py-1.5 text-left text-caption hover:bg-[var(--color-surface-2)]"
-                  style={{
-                    color: 'var(--color-text-1)',
-                    background: 'none',
-                    border: 'none',
-                    cursor: 'pointer',
-                  }}
-                >
-                  {ACTION_CONFIG[action].label}
-                  {action === selectedAction && (
-                    <span style={{ color: 'var(--color-accent)' }}>&#10003;</span>
-                  )}
-                </button>
-              ))}
-            </div>
-          )}
+            )}
+          </button>
         </div>
       </div>
     </div>

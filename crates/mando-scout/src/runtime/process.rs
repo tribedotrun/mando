@@ -86,13 +86,7 @@ pub async fn process_item(
     let prompt = mando_config::render_prompt("process", &workflow.prompts, &vars)
         .map_err(|e| anyhow::anyhow!(e))?;
 
-    let model = workflow.models.get("process").cloned().unwrap_or_else(|| {
-        tracing::warn!(
-            module = "scout",
-            "missing 'process' model in workflow config, using empty default"
-        );
-        String::new()
-    });
+    let model = crate::biz::model_lookup::required_model(workflow, "process")?;
     let result = mando_cc::CcOneShot::run(
         &prompt,
         mando_cc::CcConfig::builder()

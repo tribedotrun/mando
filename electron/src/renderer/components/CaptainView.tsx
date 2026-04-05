@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef } from 'react';
 import { useTaskActions } from '#renderer/hooks/useTaskActions';
 import { useFilteredTasks } from '#renderer/hooks/useFilteredTasks';
 import { useViewKeyHandler } from '#renderer/hooks/useKeyboardShortcuts';
@@ -27,6 +27,8 @@ export function CaptainView({
   active = true,
 }: Props): React.ReactElement {
   const [askItem, setAskItem] = useState<TaskItem | null>(null);
+  const [answerItem, setAnswerItem] = useState<TaskItem | null>(null);
+  const [nudgeWorker, setNudgeWorker] = useState<WorkerDetail | null>(null);
   const [focusedIndex, setFocusedIndex] = useState(-1);
   const actions = useTaskActions();
 
@@ -35,20 +37,18 @@ export function CaptainView({
   const handleRetryItem = (item: TaskItem) => actions.handleRetry(item.id);
   const handleAcceptItem = (item: TaskItem) => actions.handleAccept(item.id);
 
-  const handleAnswerItem = (item: TaskItem) => {
-    const answer = window.prompt(`Answer for "${item.title}":`);
-    if (answer) actions.handleAnswer(item.id, answer);
-  };
-
-  const handleNudgeWorker = (worker: WorkerDetail) => {
-    const message = window.prompt(
-      `Nudge message for "${worker.title}"`,
-      'Keep going. Ship the next concrete step.',
-    );
-    if (message) actions.handleNudge(worker.id, message);
-  };
+  const handleAnswerItem = (item: TaskItem) => setAnswerItem(item);
+  const handleNudgeWorker = (worker: WorkerDetail) => setNudgeWorker(worker);
 
   const visibleItems = useFilteredTasks(projectFilter);
+
+  // Reset keyboard focus when the user switches projects, using the
+  // "derive state from props" ref pattern (the codebase bans useEffect).
+  const prevProjectFilterRef = useRef(projectFilter);
+  if (prevProjectFilterRef.current !== projectFilter) {
+    prevProjectFilterRef.current = projectFilter;
+    if (focusedIndex !== -1) setFocusedIndex(-1);
+  }
 
   // Clamp focusedIndex inline — derived from visibleItems.length
   const clampedFocusedIndex =
@@ -60,6 +60,8 @@ export function CaptainView({
 
   const hasModal =
     !!askItem ||
+    !!answerItem ||
+    !!nudgeWorker ||
     !!actions.mergeItem ||
     !!actions.reopenItem ||
     !!actions.reworkItem ||
@@ -215,6 +217,39 @@ export function CaptainView({
           error={actions.deleteError}
           onConfirm={actions.handleBulkDelete}
           onCancel={() => actions.setDeleteModalOpen(false)}
+        />
+      )}
+      {answerItem && (
+        <FeedbackModal
+          testId="answer-modal"
+          title="Answer"
+          subtitle={answerItem.title}
+          placeholder="Type your answer…"
+          buttonLabel="Send"
+          pendingLabel="Sending…"
+          isPending={actions.answerPending}
+          onSubmit={async (answer) => {
+            const ok = await actions.handleAnswer(answerItem.id, answer);
+            if (ok) setAnswerItem(null);
+          }}
+          onCancel={() => setAnswerItem(null)}
+        />
+      )}
+      {nudgeWorker && (
+        <FeedbackModal
+          testId="nudge-modal"
+          title="Nudge worker"
+          subtitle={nudgeWorker.title}
+          placeholder="Nudge message"
+          initialValue="Keep going. Ship the next concrete step."
+          buttonLabel="Nudge"
+          pendingLabel="Nudging…"
+          isPending={actions.nudgePending}
+          onSubmit={async (msg) => {
+            const ok = await actions.handleNudge(nudgeWorker.id, msg);
+            if (ok) setNudgeWorker(null);
+          }}
+          onCancel={() => setNudgeWorker(null)}
         />
       )}
     </div>

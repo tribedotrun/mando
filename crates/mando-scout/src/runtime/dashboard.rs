@@ -150,7 +150,9 @@ pub async fn ensure_scout_article(
             article = Some(summary_article);
         } else if content_path.exists() {
             info!(id, title = %title, "scout: healing stale or missing article");
-            let raw_content = file_store::read_content(id).unwrap_or_default();
+            let raw_content = file_store::read_content(id).with_context(|| {
+                format!("item #{id} content file exists but could not be read; refusing to heal with empty content")
+            })?;
             let normalized = if let Some(local_article) =
                 build_local_article_if_short(&title, &item.url, &raw_content)
             {
@@ -310,6 +312,8 @@ pub async fn act_on_scout_item(
 
     let title = item.title.clone().unwrap_or_else(|| "Untitled".into());
     let slug = slugify_title(item.title.as_deref().unwrap_or("untitled"));
+    // Summary is optional context — if missing, the act prompt still works
+    // using title + content. read_summary already logs non-NotFound errors.
     let summary = file_store::read_summary(id, &slug).unwrap_or_default();
     let content = file_store::read_content(id)
         .filter(|c| !c.is_empty())
@@ -335,13 +339,7 @@ pub async fn act_on_scout_item(
 
     info!(id, %project_name, "act: calling AI");
 
-    let model = workflow.models.get("act").cloned().unwrap_or_else(|| {
-        tracing::warn!(
-            module = "scout",
-            "missing 'act' model in workflow config, using empty default"
-        );
-        String::new()
-    });
+    let model = crate::biz::model_lookup::required_model(workflow, "act")?;
     let result = mando_cc::CcOneShot::run(
         &prompt,
         mando_cc::CcConfig::builder()

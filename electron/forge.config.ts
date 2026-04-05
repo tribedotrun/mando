@@ -60,7 +60,7 @@ const config: ForgeConfig = {
   ],
   publishers: [
     new PublisherGithub({
-      repository: { owner: 'tribedotrun', name: 'mando-private' },
+      repository: { owner: 'tribedotrun', name: 'mando' },
       draft: true,
       prerelease: false,
       tagPrefix: 'v',
