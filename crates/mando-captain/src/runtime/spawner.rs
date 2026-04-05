@@ -185,8 +185,7 @@ fn next_worker_slot(state_dir: &std::path::Path) -> Result<u64> {
 }
 
 fn new_slug(item: &Task, slot: u64) -> String {
-    let title_slug = mando_config::slugify(&item.title, 30);
-    format!("todo-{}-{}-{}", item.id, title_slug, slot)
+    format!("todo-{}-{}", item.id, slot)
 }
 
 /// Copy plan/brief files from `~/.mando/plans/` into the worktree's `.ai/briefs/`.
