@@ -6,48 +6,22 @@ use tracing::info;
 
 use crate::bot::{PickerItem, PickerState};
 
-/// Serialize picker maps to JSON.
-pub(crate) fn collect_json(
-    input: &HashMap<String, PickerState>,
-    reopen: &HashMap<String, PickerState>,
-    rework: &HashMap<String, PickerState>,
-    handoff: &HashMap<String, PickerState>,
-    cancel: &HashMap<String, PickerState>,
-    delete: &HashMap<String, PickerState>,
-    ask: &HashMap<String, PickerState>,
-) -> serde_json::Value {
+/// Serialize picker map to JSON.
+pub(crate) fn collect_json(action: &HashMap<String, PickerState>) -> serde_json::Value {
     serde_json::json!({
-        "input": serialize_map(input),
-        "reopen": serialize_map(reopen),
-        "rework": serialize_map(rework),
-        "handoff": serialize_map(handoff),
-        "cancel": serialize_map(cancel),
-        "delete": serialize_map(delete),
-        "ask": serialize_map(ask),
+        "action": serialize_map(action),
     })
 }
 
-/// Restore picker maps from JSON.
+/// Restore picker map from JSON.
 pub(crate) fn restore_json(val: &serde_json::Value) -> PickerMaps {
     PickerMaps {
-        input: restore_map(&val["input"]),
-        reopen: restore_map(&val["reopen"]),
-        rework: restore_map(&val["rework"]),
-        handoff: restore_map(&val["handoff"]),
-        cancel: restore_map(&val["cancel"]),
-        delete: restore_map(&val["delete"]),
-        ask: restore_map(&val["ask"]),
+        action: restore_map(&val["action"]),
     }
 }
 
 pub(crate) struct PickerMaps {
-    pub input: HashMap<String, PickerState>,
-    pub reopen: HashMap<String, PickerState>,
-    pub rework: HashMap<String, PickerState>,
-    pub handoff: HashMap<String, PickerState>,
-    pub cancel: HashMap<String, PickerState>,
-    pub delete: HashMap<String, PickerState>,
-    pub ask: HashMap<String, PickerState>,
+    pub action: HashMap<String, PickerState>,
 }
 
 /// Save picker state to disk.

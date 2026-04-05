@@ -1,14 +1,13 @@
-//! `/health` — show system health (daemon, workers, config).
+//! `/health` — system health + active workers.
 
 use anyhow::Result;
-
 use mando_shared::telegram_format::escape_html;
 
 use crate::bot::TelegramBot;
 
-/// Handle `/health`.
 pub async fn handle(bot: &TelegramBot, chat_id: &str, _args: &str) -> Result<()> {
-    match bot.gw().get("/api/health/system").await {
+    // System health
+    let health_text = match bot.gw().get("/api/health/system").await {
         Ok(h) => {
             let version = h["version"].as_str().unwrap_or("?");
             let pid = h["pid"].as_u64().unwrap_or(0);
@@ -33,7 +32,7 @@ pub async fn handle(bot: &TelegramBot, chat_id: &str, _args: &str) -> Result<()>
                 format!("{uptime}s")
             };
 
-            let text = format!(
+            format!(
                 "\u{1f9ee} <b>System Health</b>\n\
                  Daemon: v{} (pid {pid}, up {uptime_str})\n\
                  Workers: {active} active\n\
@@ -41,19 +40,46 @@ pub async fn handle(bot: &TelegramBot, chat_id: &str, _args: &str) -> Result<()>
                  Projects: {}",
                 escape_html(version),
                 escape_html(&projects),
-            );
-            bot.send_html(chat_id, &text).await?;
+            )
         }
         Err(e) => {
-            bot.send_html(
-                chat_id,
-                &format!(
-                    "\u{274c} Health check failed: {}",
-                    escape_html(&e.to_string())
-                ),
+            format!(
+                "\u{274c} Health check failed: {}",
+                escape_html(&e.to_string())
             )
-            .await?;
         }
-    }
+    };
+
+    // Workers
+    let workers_text = match bot.gw().get("/api/workers").await {
+        Ok(resp) => {
+            let workers = resp["workers"].as_array().cloned().unwrap_or_default();
+            if workers.is_empty() {
+                "\n\n\u{1f6cc} No active workers.".to_string()
+            } else {
+                let mut lines = Vec::new();
+                for worker in &workers {
+                    let id = worker["id"].as_i64().unwrap_or(0);
+                    let title = worker["title"].as_str().unwrap_or("Untitled");
+                    let project = worker["project"].as_str().unwrap_or("unknown");
+                    let stale_tag = if worker["is_stale"].as_bool() == Some(true) {
+                        " \u{00b7} stale"
+                    } else {
+                        ""
+                    };
+                    lines.push(format!(
+                        "\u{2022} <b>#{id}</b> {} <code>{}</code>{stale_tag}",
+                        escape_html(title),
+                        escape_html(project),
+                    ));
+                }
+                format!("\n\n\u{1f477} <b>Workers</b>\n{}", lines.join("\n"))
+            }
+        }
+        Err(_) => String::new(),
+    };
+
+    bot.send_html(chat_id, &format!("{health_text}{workers_text}"))
+        .await?;
     Ok(())
 }

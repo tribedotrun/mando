@@ -187,17 +187,13 @@ export function Sidebar({
       {/* New task — primary action */}
       <button
         onClick={onNewTask}
-        className="flex w-full items-center text-[13px] transition-colors"
-        style={{
-          background: 'var(--color-surface-2)',
-          color: 'var(--color-text-2)',
-          borderRadius: 'var(--radius-button)',
-          padding: '7px 10px',
-          border: 'none',
-          cursor: 'pointer',
-        }}
+        className="sidebar-new-task flex w-full items-center gap-2 rounded-[var(--radius-button)] border-none bg-[var(--color-accent)] px-3 py-2 text-[13px] font-semibold text-[var(--color-bg)] hover:bg-[var(--color-accent-hover)] active:bg-[var(--color-accent-pressed)]"
+        style={{ cursor: 'pointer' }}
         data-testid="add-task-btn"
       >
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+          <path d="M8 3v10M3 8h10" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+        </svg>
         New task
       </button>
 

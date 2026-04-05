@@ -27,7 +27,7 @@ export function ScoutPage({ active = true }: { active?: boolean } = {}): React.R
     statusCounts,
     fetch: scoutFetch,
   } = useScoutStore();
-  const { selectedIds, toggleSelect, toggleSelectAll, clearSelection } = useSelection();
+  const { selectedIds, toggleSelect, clearSelection } = useSelection();
   const [activeItemId, setActiveItemId] = useState<number | null>(null);
   const [view, setView] = useState<'' | 'read'>('');
   const [qaOpen, setQaOpen] = useState(false);
@@ -308,7 +308,6 @@ export function ScoutPage({ active = true }: { active?: boolean } = {}): React.R
         items={items}
         selectedIds={selectedIds}
         onToggleSelect={toggleSelect}
-        onToggleSelectAll={() => toggleSelectAll(items)}
         onSelect={openReader}
         onRefresh={() => scoutFetch()}
         focusedIndex={clampedFocusedIndex}

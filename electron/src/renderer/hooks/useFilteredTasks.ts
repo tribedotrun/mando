@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { useTaskStore } from '#renderer/stores/taskStore';
-import { useSettingsStore } from '#renderer/stores/settingsStore';
+import { useProjectFilterPaths } from '#renderer/hooks/useProjectFilterPaths';
 import type { TaskItem } from '#renderer/types';
 import { sortTaskItems } from '#renderer/utils';
 import { ACTION_NEEDED_STATUSES, IN_PROGRESS_STATUSES } from '#renderer/types';
@@ -16,24 +16,7 @@ export function useFilteredTasks(projectFilter?: string | null): TaskItem[] {
   const items = useTaskStore((s) => s.items);
   const statusFilter = useTaskStore((s) => s.statusFilter);
   const showArchived = useTaskStore((s) => s.showArchived);
-  const configProjects = useSettingsStore((s) => s.config.captain?.projects);
-
-  // Build a set of paths that map to the selected project name so filtering
-  // works whether projectFilter is a display name or a raw path.
-  const filterPaths = useMemo(() => {
-    if (!projectFilter) return null;
-    const paths = new Set<string>();
-    paths.add(projectFilter);
-    if (configProjects) {
-      for (const [key, proj] of Object.entries(configProjects)) {
-        if (proj.name === projectFilter) {
-          paths.add(key);
-          if (proj.path) paths.add(proj.path);
-        }
-      }
-    }
-    return paths;
-  }, [projectFilter, configProjects]);
+  const filterPaths = useProjectFilterPaths(projectFilter);
 
   return useMemo(() => {
     let filtered = items;

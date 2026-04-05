@@ -39,7 +39,7 @@ description: Commit, push, create PR, and tag AI reviewers. Use when ready to op
    <mando-dev test / mando-dev check results — confirms nothing broke>
 
    ### E2E verification
-   <Bespoke steps exercising the exact new behavior against a running system (no mocks). Include commands run + observed output. If not yet performed, leave empty — mando-pr-summary will flag it.>
+   <Bespoke steps exercising the exact new behavior against a running system (no mocks). Include commands run + observed output in text. Do NOT paste screenshots or images here — visual evidence belongs in the Evidence section added by mando-pr-summary. If not yet performed, leave empty — mando-pr-summary will flag it.>
    EOF
 
    gh pr create --title "..." --body-file /tmp/pr-body.md

@@ -2,6 +2,7 @@ import React from 'react';
 import type { ItemStatus } from '#renderer/types';
 import { ACTION_NEEDED_STATUSES, IN_PROGRESS_STATUSES } from '#renderer/types';
 import { useTaskStore } from '#renderer/stores/taskStore';
+import { useProjectFilterPaths } from '#renderer/hooks/useProjectFilterPaths';
 import { ViewOptions } from '#renderer/components/ViewOptions';
 
 type FilterKey = ItemStatus | 'action-needed' | 'in-progress-group' | null;
@@ -28,10 +29,11 @@ export function StatusFilter({ projectFilter }: Props): React.ReactElement {
   const setFilter = useTaskStore((s) => s.setFilter);
   const items = useTaskStore((s) => s.items);
   const showArchived = useTaskStore((s) => s.showArchived);
+  const filterPaths = useProjectFilterPaths(projectFilter);
 
   const filtered = React.useMemo(
-    () => (projectFilter ? items.filter((i) => i.project === projectFilter) : items),
-    [items, projectFilter],
+    () => (filterPaths ? items.filter((i) => i.project && filterPaths.has(i.project)) : items),
+    [items, filterPaths],
   );
 
   const counts = React.useMemo(() => {

@@ -32,7 +32,7 @@ import {
 } from '#main/daemon';
 import { createTrayIcon, createDockIcon } from '#main/icons';
 import { registerNotificationHandlers } from '#main/notifications';
-import { setupAutoUpdate, applyPendingUpdateIfAny } from '#main/updater';
+import { setupAutoUpdate, applyPendingUpdateIfAny, cleanupAutoUpdate } from '#main/updater';
 import { getAppInfo } from '#main/app-info';
 import { startRendererServer } from '#main/renderer-server';
 
@@ -330,5 +330,6 @@ app.on('before-quit', async () => {
   setIsQuitting(true);
   globalShortcut.unregisterAll();
   cleanupDaemon();
+  cleanupAutoUpdate();
   rendererServer?.close();
 });

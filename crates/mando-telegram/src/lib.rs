@@ -14,7 +14,6 @@ mod bot_sessions;
 mod callback_actions;
 pub mod callbacks;
 mod callbacks_picker;
-mod callbacks_session;
 pub mod commands;
 mod gateway_paths;
 pub mod http;

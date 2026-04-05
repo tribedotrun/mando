@@ -72,6 +72,9 @@ pub struct PickerItem {
     /// Item status string (e.g. "needs-clarification").
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<String>,
+    /// Whether this task has a PR attached.
+    #[serde(default)]
+    pub has_pr: bool,
 }
 
 /// One parsed todo item with optional project assignment.
@@ -123,16 +126,11 @@ pub struct TelegramBot {
     pub(crate) input_sessions: HashMap<String, String>,
     pub(crate) pending_reopen: HashMap<String, (String, String)>,
     pub(crate) pending_rework: HashMap<String, (String, String)>,
+    pub(crate) pending_nudge: HashMap<String, (String, String)>,
     pub(crate) qa_sessions: HashMap<String, QaSession>,
     pub(crate) act_sessions: HashMap<String, ActSession>,
     todo_confirm: HashMap<String, TodoConfirmState>,
-    input_pickers: HashMap<String, PickerState>,
-    reopen_pickers: HashMap<String, PickerState>,
-    rework_pickers: HashMap<String, PickerState>,
-    handoff_pickers: HashMap<String, PickerState>,
-    cancel_pickers: HashMap<String, PickerState>,
-    delete_pickers: HashMap<String, PickerState>,
-    ask_pickers: HashMap<String, PickerState>,
+    action_pickers: HashMap<String, PickerState>,
 }
 
 impl TelegramBot {
@@ -159,16 +157,11 @@ impl TelegramBot {
             input_sessions: HashMap::new(),
             pending_reopen: HashMap::new(),
             pending_rework: HashMap::new(),
+            pending_nudge: HashMap::new(),
             qa_sessions: HashMap::new(),
             act_sessions: HashMap::new(),
             todo_confirm: HashMap::new(),
-            input_pickers: HashMap::new(),
-            reopen_pickers: HashMap::new(),
-            rework_pickers: HashMap::new(),
-            handoff_pickers: HashMap::new(),
-            cancel_pickers: HashMap::new(),
-            delete_pickers: HashMap::new(),
-            ask_pickers: HashMap::new(),
+            action_pickers: HashMap::new(),
         })
     }
 
@@ -295,6 +288,7 @@ impl TelegramBot {
             }
             self.pending_reopen.remove(chat_id);
             self.pending_rework.remove(chat_id);
+            self.pending_nudge.remove(chat_id);
             self.act_sessions.remove(chat_id);
             return self.dispatch_command(chat_id, &command, args).await;
         }
@@ -403,46 +397,18 @@ impl TelegramBot {
     }
 
     // Picker state — persisted to ~/.mando/state/picker-state.json (#359).
-    picker_methods!(store_input_picker, take_input_picker, input_pickers);
-    picker_methods!(store_reopen_picker, take_reopen_picker, reopen_pickers);
-    picker_methods!(store_rework_picker, take_rework_picker, rework_pickers);
-    picker_methods!(store_handoff_picker, take_handoff_picker, handoff_pickers);
-    picker_methods!(store_cancel_picker, take_cancel_picker, cancel_pickers);
-    picker_methods!(store_delete_picker, take_delete_picker, delete_pickers);
-    picker_methods!(store_ask_picker, take_ask_picker, ask_pickers);
-
-    pub fn ms_picker_mut(&mut self, pfx: &str, aid: &str) -> Option<&mut PickerState> {
-        match pfx {
-            "ms_cancel" => self.cancel_pickers.get_mut(aid),
-            "ms_delete" => self.delete_pickers.get_mut(aid),
-            _ => None,
-        }
-    }
+    picker_methods!(store_action_picker, take_action_picker, action_pickers);
 
     /// Persist all picker state to disk.
     pub fn save_picker_state(&self) {
-        let json = crate::picker_store::collect_json(
-            &self.input_pickers,
-            &self.reopen_pickers,
-            &self.rework_pickers,
-            &self.handoff_pickers,
-            &self.cancel_pickers,
-            &self.delete_pickers,
-            &self.ask_pickers,
-        );
+        let json = crate::picker_store::collect_json(&self.action_pickers);
         crate::picker_store::save(&json);
     }
 
     /// Load picker state from disk on startup.
     pub fn load_picker_state(&mut self) {
         if let Some(maps) = crate::picker_store::load() {
-            self.input_pickers = maps.input;
-            self.reopen_pickers = maps.reopen;
-            self.rework_pickers = maps.rework;
-            self.handoff_pickers = maps.handoff;
-            self.cancel_pickers = maps.cancel;
-            self.delete_pickers = maps.delete;
-            self.ask_pickers = maps.ask;
+            self.action_pickers = maps.action;
         }
     }
 

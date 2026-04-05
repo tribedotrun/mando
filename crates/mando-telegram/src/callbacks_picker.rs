@@ -1,114 +1,95 @@
-//! Generic picker callbacks (input/reopen/rework/handoff).
+//! `/action` callback handlers — picker and action execution.
 
 use anyhow::Result;
+use serde_json::json;
 
 use crate::bot::TelegramBot;
+use crate::commands::action;
 
-pub(crate) async fn handle_picker(
+/// Handle all `act:*` callbacks.
+pub(crate) async fn handle_action_callback(
     bot: &mut TelegramBot,
-    kind: &str,
     parts: &[&str],
     cb_id: &str,
     cid: &str,
     mid: i64,
 ) -> Result<()> {
     let action = parts.get(1).copied().unwrap_or("");
-    let aid = parts.get(2).copied().unwrap_or("");
 
-    if action == "cancel" {
-        take_picker_by_kind(bot, kind, aid);
-        bot.api()
-            .answer_callback_query(cb_id, Some("Cancelled"))
-            .await?;
-        if let Err(e) = bot.edit_message(cid, mid, "\u{23ed} Cancelled").await {
-            tracing::warn!(module = "telegram", error = %e, "message send failed");
+    match action {
+        "cancel" => {
+            let aid = parts.get(2).copied().unwrap_or("");
+            bot.take_action_picker(aid);
+            bot.api()
+                .answer_callback_query(cb_id, Some("Cancelled"))
+                .await?;
+            let _ = bot.edit_message(cid, mid, "\u{23ed} Cancelled").await;
         }
-        return Ok(());
+        "pick" => handle_pick(bot, parts, cb_id, cid, mid).await?,
+        "do" => handle_do(bot, parts, cb_id, cid, mid).await?,
+        "ask_end" => {
+            if let Some(task_id) = bot.ask_session_task_id(cid) {
+                let _ = bot
+                    .gw()
+                    .post("/api/tasks/ask/end", &json!({"id": task_id}))
+                    .await;
+            }
+            bot.close_ask_session(cid);
+            bot.api()
+                .answer_callback_query(cb_id, Some("Session ended"))
+                .await?;
+            let _ = bot.remove_keyboard(cid, mid).await;
+            let _ = bot.send_html(cid, "Ask session ended.").await;
+        }
+        "noop" => {
+            bot.api()
+                .answer_callback_query(cb_id, Some("No actions available"))
+                .await?;
+        }
+        _ => {
+            bot.api().answer_callback_query(cb_id, None).await?;
+        }
     }
-    if action != "pick" {
-        bot.api().answer_callback_query(cb_id, None).await?;
-        return Ok(());
-    }
+
+    Ok(())
+}
+
+/// User picked a task from the picker → show action buttons.
+async fn handle_pick(
+    bot: &mut TelegramBot,
+    parts: &[&str],
+    cb_id: &str,
+    cid: &str,
+    mid: i64,
+) -> Result<()> {
+    let aid = parts.get(2).copied().unwrap_or("");
     let idx: usize = parts
         .get(3)
         .and_then(|s| s.parse().ok())
         .unwrap_or(usize::MAX);
-    let picker = take_picker_by_kind(bot, kind, aid);
+
+    let picker = bot.take_action_picker(aid);
 
     match picker {
         Some(p) if idx < p.items.len() => {
             let item = &p.items[idx];
-            let item_id = &item.id;
-            let raw_title = &item.title;
-            let title = mando_shared::escape_html(raw_title);
+            let task_id = &item.id;
+            let title = mando_shared::escape_html(&item.title);
+            let status: mando_types::ItemStatus = item
+                .status
+                .as_deref()
+                .and_then(|s| serde_json::from_value(json!(s)).ok())
+                .unwrap_or(mando_types::ItemStatus::New);
+
             bot.api()
-                .answer_callback_query(cb_id, Some("Processing\u{2026}"))
+                .answer_callback_query(cb_id, Some("Choose action"))
                 .await?;
 
-            if kind == "input" {
-                bot.open_input_session(cid, raw_title);
-                let questions = fetch_clarifier_questions(bot, item_id).await;
-                let msg = if let Some(ref questions) = questions {
-                    format!(
-                        "\u{2753} <b>{title}</b>\n\n\
-                         {}\n\n\
-                         Reply with your answers, or send /input cancel to exit.",
-                        mando_shared::escape_html(questions),
-                    )
-                } else {
-                    format!(
-                        "\u{1f9ed} Input: {title}\n\n\
-                         Type extra context for this item, or send /input cancel to exit."
-                    )
-                };
-                if let Err(e) = bot.edit_message(cid, mid, &msg).await {
-                    tracing::warn!(module = "telegram", error = %e, "message send failed");
-                }
-            } else if kind == "reopen" {
-                bot.pending_reopen.insert(
-                    cid.to_string(),
-                    (item_id.to_string(), raw_title.to_string()),
-                );
-                if let Err(e) = bot
-                    .edit_message(
-                        cid,
-                        mid,
-                        &format!(
-                            "\u{1f504} Reopen: {title}\n\n\
-                             Type your feedback \u{2014} what changes are needed?"
-                        ),
-                    )
-                    .await
-                {
-                    tracing::warn!(module = "telegram", error = %e, "message send failed");
-                }
-            } else if kind == "rework" {
-                bot.pending_rework.insert(
-                    cid.to_string(),
-                    (item_id.to_string(), raw_title.to_string()),
-                );
-                if let Err(e) = bot
-                    .edit_message(
-                        cid,
-                        mid,
-                        &format!(
-                            "🔁 Rework: {title}\n\n\
-                             Type the new instructions for Captain."
-                        ),
-                    )
-                    .await
-                {
-                    tracing::warn!(module = "telegram", error = %e, "message send failed");
-                }
-            } else {
-                if let Err(e) = bot
-                    .edit_message(cid, mid, &format!("\u{23f3} {kind}: {title}\u{2026}"))
-                    .await
-                {
-                    tracing::warn!(module = "telegram", error = %e, "message send failed");
-                }
-                execute_picker_action(bot, kind, cid, item_id, raw_title).await?;
-            }
+            let buttons = action::action_buttons(task_id, status, item.has_pr);
+            let msg = format!("\u{2699}\u{fe0f} <b>#{task_id}</b> {title}\n\nChoose an action:");
+            let _ = bot
+                .edit_message_with_markup(cid, mid, &msg, Some(json!({"inline_keyboard": buttons})))
+                .await;
         }
         Some(_) => {
             bot.api()
@@ -124,73 +105,173 @@ pub(crate) async fn handle_picker(
     Ok(())
 }
 
-fn take_picker_by_kind(
+/// User tapped an action button → execute it.
+async fn handle_do(
     bot: &mut TelegramBot,
-    kind: &str,
-    aid: &str,
-) -> Option<crate::bot::PickerState> {
-    match kind {
-        "input" => bot.take_input_picker(aid),
-        "reopen" => bot.take_reopen_picker(aid),
-        "rework" => bot.take_rework_picker(aid),
-        "handoff" => bot.take_handoff_picker(aid),
-        _ => None,
-    }
-}
-
-/// Fetch the latest clarifier questions for a task from the gateway timeline.
-async fn fetch_clarifier_questions(bot: &TelegramBot, item_id: &str) -> Option<String> {
-    let path = format!("/api/tasks/{item_id}/timeline");
-    let val = match bot.gw().get(&path).await {
-        Ok(v) => v,
-        Err(e) => {
-            tracing::warn!(
-                module = "telegram",
-                item_id,
-                error = %e,
-                "failed to fetch timeline for clarifier questions"
-            );
-            return None;
-        }
-    };
-    let events = val["events"].as_array()?;
-    events
-        .iter()
-        .rev()
-        .find(|e| e["event_type"].as_str() == Some("clarify_question"))
-        .and_then(|e| {
-            let q = &e["data"]["questions"];
-            // Structured questions array: format into readable text.
-            if let Some(arr) = q.as_array() {
-                let lines: Vec<String> = arr
-                    .iter()
-                    .filter(|item| !item["self_answered"].as_bool().unwrap_or(false))
-                    .enumerate()
-                    .map(|(i, item)| {
-                        format!("{}. {}", i + 1, item["question"].as_str().unwrap_or("?"))
-                    })
-                    .collect();
-                if lines.is_empty() {
-                    None
-                } else {
-                    Some(lines.join("\n"))
-                }
-            } else {
-                q.as_str().map(String::from)
-            }
-        })
-}
-
-async fn execute_picker_action(
-    bot: &TelegramBot,
-    kind: &str,
+    parts: &[&str],
+    cb_id: &str,
     cid: &str,
-    item_id: &str,
-    title: &str,
+    mid: i64,
 ) -> Result<()> {
-    match kind {
-        "rework" => crate::callback_actions::rework(bot, cid, item_id, title).await,
-        "handoff" => crate::callback_actions::handoff(bot, cid, item_id, title).await,
-        _ => Ok(()),
+    let task_id = parts.get(2).copied().unwrap_or("");
+    let action_name = parts.get(3).copied().unwrap_or("");
+
+    bot.api()
+        .answer_callback_query(cb_id, Some(&format!("{action_name}\u{2026}")))
+        .await?;
+
+    match action_name {
+        // Immediate actions
+        "merge" => {
+            let _ = bot.edit_message(cid, mid, "\u{23f3} Merging\u{2026}").await;
+            crate::callback_actions::merge(bot, cid, task_id).await?;
+        }
+        "accept" => {
+            let _ = bot
+                .edit_message(cid, mid, "\u{23f3} Accepting\u{2026}")
+                .await;
+            crate::callback_actions::accept(bot, cid, task_id).await?;
+        }
+        "handoff" => {
+            let _ = bot
+                .edit_message(cid, mid, "\u{23f3} Handing off\u{2026}")
+                .await;
+            crate::callback_actions::handoff(bot, cid, task_id, "").await?;
+        }
+        "cancel" => {
+            let _ = bot
+                .edit_message(cid, mid, "\u{23f3} Cancelling\u{2026}")
+                .await;
+            let id_num: i64 = task_id.parse().unwrap_or(0);
+            match bot
+                .gw()
+                .post(
+                    crate::gateway_paths::TASKS_BULK,
+                    &json!({"ids": [id_num], "updates": {"status": "canceled"}}),
+                )
+                .await
+            {
+                Ok(_) => {
+                    bot.send_html(
+                        cid,
+                        &format!("\u{274c} Cancelled #{}", mando_shared::escape_html(task_id)),
+                    )
+                    .await?;
+                }
+                Err(e) => {
+                    bot.send_html(
+                        cid,
+                        &format!(
+                            "\u{274c} Cancel failed: {}",
+                            mando_shared::escape_html(&e.to_string())
+                        ),
+                    )
+                    .await?;
+                }
+            }
+        }
+        // Text-requiring actions — prompt for input
+        "reopen" => {
+            let title = fetch_task_title(bot, task_id).await;
+            bot.pending_reopen
+                .insert(cid.to_string(), (task_id.to_string(), title.clone()));
+            let _ = bot
+                .edit_message(
+                    cid,
+                    mid,
+                    &format!(
+                        "\u{1f504} Reopen: {}\n\nType your feedback \u{2014} what changes are needed?",
+                        mando_shared::escape_html(&title)
+                    ),
+                )
+                .await;
+        }
+        "rework" => {
+            let title = fetch_task_title(bot, task_id).await;
+            bot.pending_rework
+                .insert(cid.to_string(), (task_id.to_string(), title.clone()));
+            let _ = bot
+                .edit_message(
+                    cid,
+                    mid,
+                    &format!(
+                        "\u{1f501} Rework: {}\n\nType the new instructions.",
+                        mando_shared::escape_html(&title)
+                    ),
+                )
+                .await;
+        }
+        "nudge" => {
+            let title = fetch_task_title(bot, task_id).await;
+            bot.pending_nudge
+                .insert(cid.to_string(), (task_id.to_string(), title.clone()));
+            let _ = bot
+                .edit_message(
+                    cid,
+                    mid,
+                    &format!(
+                        "\u{1f4e3} Nudge: {}\n\nType the message for the worker.",
+                        mando_shared::escape_html(&title)
+                    ),
+                )
+                .await;
+        }
+        // Session-based actions
+        "input" => {
+            let title = fetch_task_title(bot, task_id).await;
+            bot.open_input_session(cid, &title);
+            let questions = action::fetch_clarifier_questions(bot, task_id).await;
+            let msg = if let Some(ref q) = questions {
+                format!(
+                    "\u{2753} <b>{}</b>\n\n{}\n\nReply with your answers, or /action cancel.",
+                    mando_shared::escape_html(&title),
+                    mando_shared::escape_html(q),
+                )
+            } else {
+                format!(
+                    "\u{1f9ed} Input: {}\n\nType context, or /action cancel.",
+                    mando_shared::escape_html(&title),
+                )
+            };
+            let _ = bot.edit_message(cid, mid, &msg).await;
+        }
+        "ask" => {
+            let id_num: i64 = task_id.parse().unwrap_or(0);
+            bot.close_ask_session(cid);
+            bot.open_ask_session(cid, id_num);
+            let title = fetch_task_title(bot, task_id).await;
+            let _ = bot
+                .edit_message(
+                    cid,
+                    mid,
+                    &format!(
+                        "\u{1f4ac} Ask: {}\n\nType your question.",
+                        mando_shared::escape_html(&title)
+                    ),
+                )
+                .await;
+        }
+        _ => {}
     }
+
+    Ok(())
+}
+
+/// Fetch task title by ID from the task list.
+async fn fetch_task_title(bot: &TelegramBot, task_id: &str) -> String {
+    let id_num: i64 = task_id.parse().unwrap_or(0);
+    bot.gw()
+        .get(crate::gateway_paths::TASKS)
+        .await
+        .ok()
+        .and_then(|r| {
+            r["items"].as_array()?.iter().find_map(|v| {
+                if v["id"].as_i64()? == id_num {
+                    v["title"].as_str().map(String::from)
+                } else {
+                    None
+                }
+            })
+        })
+        .unwrap_or_else(|| format!("#{task_id}"))
 }

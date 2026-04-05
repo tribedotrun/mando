@@ -157,9 +157,8 @@ pub async fn handle(bot: &TelegramBot, chat_id: &str, args: &str) -> Result<()> 
                     ItemStatus::AwaitingReview => {
                         if let Some(ref pr) = item.pr {
                             let pr_num = pr.trim_start_matches('#');
-                            let ts = super::truncate(&item.title, 22);
                             merge_buttons.push(json!([{
-                                "text": format!("\u{1f500} Merge PR #{pr_num} \u{2014} {ts}"),
+                                "text": format!("Merge PR #{pr_num}"),
                                 "callback_data": format!("merge:{id}"),
                             }]));
                         } else {
