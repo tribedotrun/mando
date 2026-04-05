@@ -145,11 +145,6 @@ pub fn write_stream_meta(
     );
 }
 
-/// Update meta sidecar status — delegates to mando_cc.
-pub fn update_stream_meta_status(session_id: &str, status: &str, cost_usd: Option<f64>) {
-    mando_cc::update_stream_meta_status(session_id, status, cost_usd);
-}
-
 // Tests for stream functions now live in mando-cc.
 // Tests for process functions (cputime, resolve_binary) also in mando-cc.
 // This module is a thin delegation layer — keeping only an integration test.

@@ -13,11 +13,9 @@ interface Props {
 
 export function ClarificationSection({ taskId, questions }: Props): React.ReactElement {
   const unanswered = questions.filter((q) => !q.self_answered);
-  const selfAnswered = questions.filter((q) => q.self_answered);
   const [answers, setAnswers] = useState<Record<number, string>>({});
   const [pending, setPending] = useState(false);
   const [completed, setCompleted] = useState<string | null>(null);
-  const [selfExpanded, setSelfExpanded] = useState(false);
   const taskFetch = useTaskStore((s) => s.fetch);
   const toast = useToastStore.getState;
 
@@ -65,24 +63,7 @@ export function ClarificationSection({ taskId, questions }: Props): React.ReactE
 
   return (
     <div className="mb-5">
-      <div className="mb-2 flex items-baseline justify-between">
-        <div
-          className="text-[10px] font-medium uppercase tracking-widest"
-          style={{ color: 'var(--color-needs-human)' }}
-        >
-          Questions
-        </div>
-        <span className="text-[11px]" style={{ color: 'var(--color-text-3)' }}>
-          {unanswered.length} of {questions.length}
-        </span>
-      </div>
-
-      <p className="mb-3 text-[12px]" style={{ color: 'var(--color-text-3)' }}>
-        The clarifier explored the codebase and answered {selfAnswered.length} question
-        {selfAnswered.length !== 1 ? 's' : ''} on its own. {unanswered.length} remain for you.
-      </p>
-
-      {/* Unanswered questions with input fields */}
+      {/* Questions with input fields */}
       <div className="space-y-4">
         {unanswered.map((q, i) => (
           <div key={i}>
@@ -114,56 +95,6 @@ export function ClarificationSection({ taskId, questions }: Props): React.ReactE
           </div>
         ))}
       </div>
-
-      {/* Self-answered questions (collapsed) */}
-      {selfAnswered.length > 0 && (
-        <div className="mt-4">
-          <button
-            onClick={() => setSelfExpanded((v) => !v)}
-            className="flex items-center gap-1.5 text-[11px]"
-            style={{
-              color: 'var(--color-text-4)',
-              background: 'none',
-              border: 'none',
-              cursor: 'pointer',
-              padding: 0,
-            }}
-          >
-            <svg
-              width="8"
-              height="8"
-              viewBox="0 0 8 8"
-              fill="currentColor"
-              style={{
-                transition: 'transform 150ms',
-                transform: selfExpanded ? 'rotate(90deg)' : 'none',
-              }}
-            >
-              <path d="M2 1l4 3-4 3V1z" />
-            </svg>
-            Self-answered ({selfAnswered.length})
-          </button>
-          {selfExpanded && (
-            <div className="mt-2 space-y-3">
-              {selfAnswered.map((q, i) => (
-                <div key={i} style={{ opacity: 0.7 }}>
-                  <div className="break-words text-[12px]" style={{ color: 'var(--color-text-3)' }}>
-                    Q: {q.question}
-                  </div>
-                  {q.answer && (
-                    <div
-                      className="mt-0.5 break-words text-[12px] leading-relaxed"
-                      style={{ color: 'var(--color-text-4)' }}
-                    >
-                      A: {q.answer}
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
 
       {/* Submit bar */}
       <div

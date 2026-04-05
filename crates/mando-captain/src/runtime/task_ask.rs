@@ -37,7 +37,7 @@ pub fn build_initial_prompt(
     vars.insert("timeline", timeline_text);
     vars.insert("question", question);
 
-    mando_config::render_prompt("task_analyst", &workflow.prompts, &vars)
+    mando_config::render_prompt("task_ask", &workflow.prompts, &vars)
         .map_err(|e| anyhow::anyhow!(e))
 }
 

@@ -32,8 +32,6 @@ pub fn jsonl_to_markdown(jsonl_content: &str) -> String {
     let mut human_num = 0u32;
     let mut turn_num = 0u32;
     let mut i = 0;
-    let mut last_enqueue = String::new();
-
     while i < messages.len() {
         let msg = &messages[i];
         let msg_type = msg_str(msg, "type");
@@ -46,9 +44,6 @@ pub fn jsonl_to_markdown(jsonl_content: &str) -> String {
             let content = msg_str(msg, "content");
             if !content.is_empty() {
                 parts.push(format!("```\n{content}\n```\n"));
-                if op == "enqueue" {
-                    last_enqueue = content.to_owned();
-                }
             }
             i += 1;
             continue;
@@ -66,21 +61,15 @@ pub fn jsonl_to_markdown(jsonl_content: &str) -> String {
         if (msg_type == "human" || msg_type == "user") && !is_tool_result_msg(msg) {
             let inner = msg.get("message").unwrap_or(msg);
             let text = extract_text_from_content(inner.get("content"));
-            // Deduplicate vs enqueue
-            if !last_enqueue.is_empty() && text.trim() == last_enqueue.trim() {
-                last_enqueue.clear();
-                i += 1;
-                continue;
-            }
-            last_enqueue.clear();
             human_num += 1;
+            let label = format!("Prompt #{human_num}");
             let ts = msg_str(msg, "timestamp");
             let ts_part = if ts.is_empty() {
                 String::new()
             } else {
                 format!("  `{ts}`")
             };
-            parts.push(format!("---\n## Human #{human_num}{ts_part}\n"));
+            parts.push(format!("---\n## {label}{ts_part}\n"));
             let trimmed = text.trim();
             if !trimmed.is_empty() {
                 parts.push(format!("{trimmed}\n"));
@@ -317,7 +306,7 @@ mod tests {
     fn renders_human_message() {
         let input = r#"{"type":"human","message":{"role":"user","content":"hello"}}"#;
         let md = jsonl_to_markdown(input);
-        assert!(md.contains("Human #1"));
+        assert!(md.contains("Prompt #1"));
         assert!(md.contains("hello"));
     }
 
@@ -345,5 +334,18 @@ mod tests {
         assert!(md.contains("**Edit**"));
         assert!(md.contains("- old"));
         assert!(md.contains("+ new"));
+    }
+
+    #[test]
+    fn labels_prompt_after_enqueue() {
+        let input = [
+            r#"{"type":"queue-operation","operation":"enqueue","content":"fix the bug","timestamp":"2026-01-01T00:00:00Z"}"#,
+            r#"{"type":"human","message":{"role":"user","content":"fix the bug"}}"#,
+            r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"On it."}]}}"#,
+        ]
+        .join("\n");
+        let md = jsonl_to_markdown(&input);
+        assert!(md.contains("## Prompt #1"), "labeled Prompt #1");
+        assert!(md.contains("fix the bug"), "prompt text preserved");
     }
 }

@@ -7,6 +7,7 @@ use tracing::{info, warn};
 use mando_cc::{CcConfig, CcOneShot};
 
 use super::clarifier::{parse_clarifier_response, ClarifierResult};
+use super::dashboard::truncate_utf8;
 
 /// Build the JSON schema for clarifier output, with `repo` constrained to
 /// an enum of valid project names.
@@ -127,7 +128,7 @@ pub(crate) async fn retry_with_correction(
 
     info!(
         module = "clarifier",
-        title = %&item_title[..item_title.len().min(60)],
+        title = %truncate_utf8(item_title, 60),
         status = ?parsed.status,
         "clarification complete (after retry)"
     );

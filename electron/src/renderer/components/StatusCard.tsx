@@ -123,11 +123,9 @@ function NeedsClarificationCard({
   questions: ClarifierQuestion[];
 }) {
   const unanswered = questions.filter((q) => !q.self_answered);
-  const selfAnswered = questions.filter((q) => q.self_answered);
   const [answers, setAnswers] = useState<Record<number, string>>({});
   const [pending, setPending] = useState(false);
   const [completed, setCompleted] = useState<string | null>(null);
-  const [selfExpanded, setSelfExpanded] = useState(false);
   const taskFetch = useTaskStore((s) => s.fetch);
   const toast = useToastStore.getState;
 
@@ -183,9 +181,6 @@ function NeedsClarificationCard({
         <span className="text-body font-medium" style={{ color: 'var(--color-text-1)' }}>
           Needs your input
         </span>
-        <span className="text-caption" style={{ color: 'var(--color-text-3)' }}>
-          {unanswered.length} of {questions.length} remaining
-        </span>
       </div>
 
       <div className="space-y-3">
@@ -219,58 +214,6 @@ function NeedsClarificationCard({
           </div>
         ))}
       </div>
-
-      {selfAnswered.length > 0 && (
-        <div className="mt-3">
-          <button
-            onClick={() => setSelfExpanded((v) => !v)}
-            className="flex items-center gap-1.5 text-caption"
-            style={{
-              color: 'var(--color-text-4)',
-              background: 'none',
-              border: 'none',
-              cursor: 'pointer',
-              padding: 0,
-            }}
-          >
-            <svg
-              width="8"
-              height="8"
-              viewBox="0 0 8 8"
-              fill="currentColor"
-              style={{
-                transition: 'transform 150ms',
-                transform: selfExpanded ? 'rotate(90deg)' : 'none',
-              }}
-            >
-              <path d="M2 1l4 3-4 3V1z" />
-            </svg>
-            Self-answered ({selfAnswered.length})
-          </button>
-          {selfExpanded && (
-            <div className="mt-2 space-y-2">
-              {selfAnswered.map((q, i) => (
-                <div key={i} style={{ opacity: 0.7 }}>
-                  <div
-                    className="break-words text-caption"
-                    style={{ color: 'var(--color-text-3)' }}
-                  >
-                    Q: {q.question}
-                  </div>
-                  {q.answer && (
-                    <div
-                      className="mt-0.5 break-words text-caption leading-relaxed"
-                      style={{ color: 'var(--color-text-4)' }}
-                    >
-                      A: {q.answer}
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
 
       <div
         className="mt-3 flex items-center justify-between rounded-lg px-3 py-2"

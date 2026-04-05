@@ -13,8 +13,7 @@ const REQUIRED_CAPTAIN_PROMPTS: &[&str] = &[
     "interactive_clarifier",
     "captain_review",
     "rebase_worker",
-    "task_analyst",
-    "restart_resume",
+    "task_ask",
     "reopen_resume",
     "review_reopen_message",
     "captain_merge",
@@ -22,7 +21,6 @@ const REQUIRED_CAPTAIN_PROMPTS: &[&str] = &[
 
 /// Required nudge keys for captain workflow.
 const REQUIRED_CAPTAIN_NUDGES: &[&str] = &[
-    "continuation_preamble",
     "unresolved_threads",
     "missing_diagram",
     "missing_evidence",

@@ -256,7 +256,9 @@ async fn handle_clarify_response(
                     escape_html(questions),
                 )
             };
-            let _ = bot.edit_message(chat_id, message_id, &msg).await;
+            if let Err(e) = bot.edit_message(chat_id, message_id, &msg).await {
+                tracing::warn!(module = "telegram", error = %e, "clarification error edit failed");
+            }
         }
         _ => {
             if let Err(e) = bot

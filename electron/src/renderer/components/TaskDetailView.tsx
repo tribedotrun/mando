@@ -2,6 +2,7 @@ import React, { useCallback, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useMountEffect } from '#renderer/hooks/useMountEffect';
 import log from '#renderer/logger';
+import { useToastStore } from '#renderer/stores/toastStore';
 import {
   fetchTimeline,
   fetchItemSessions,
@@ -118,17 +119,23 @@ export function TaskDetailView({ item, onBack, onMerge }: Props): React.ReactEle
     staleTime: isFinalized ? Infinity : 30_000,
     initialData: () => {
       if (!isFinalized) return undefined;
-      const cached = localStorage.getItem(`pr-cache:${item.id}`);
-      return cached ? JSON.parse(cached) : undefined;
+      const key = `pr-cache:${item.id}`;
+      const cached = localStorage.getItem(key);
+      if (!cached) return undefined;
+      try {
+        return JSON.parse(cached);
+      } catch (err) {
+        log.warn(`[TaskDetail] corrupted pr-cache for item ${item.id}, clearing:`, err);
+        localStorage.removeItem(key);
+        return undefined;
+      }
     },
   });
 
-  const { data: qaHistory } = useQuery({
+  useQuery({
     queryKey: ['task-ask-history', item.id],
     queryFn: () => fetchAskHistory(item.id),
   });
-  const hasQAHistory = (qaHistory?.history?.length ?? 0) > 0 || activeQA;
-
   const events = timelineData?.events ?? [];
   const sessionMap = timelineData?.sessionMap ?? {};
 
@@ -168,6 +175,7 @@ export function TaskDetailView({ item, onBack, onMerge }: Props): React.ReactEle
       );
     } catch (err) {
       log.warn('Failed to fetch transcript for session', sessionId, err);
+      useToastStore.getState().add('error', 'Transcript unavailable — check daemon logs');
       setTranscriptSession((p) =>
         p?.entry.session_id === sessionId ? { ...p, markdown: null, loading: false } : p,
       );
@@ -197,6 +205,7 @@ export function TaskDetailView({ item, onBack, onMerge }: Props): React.ReactEle
       })
       .catch((err) => {
         log.warn('Failed to fetch transcript:', err);
+        useToastStore.getState().add('error', 'Transcript unavailable — check daemon logs');
         setTranscriptSession((p) =>
           p?.entry.session_id === s.session_id ? { ...p, markdown: null, loading: false } : p,
         );
@@ -216,16 +225,14 @@ export function TaskDetailView({ item, onBack, onMerge }: Props): React.ReactEle
     setActiveQA(false);
   }, []);
 
-  // Tab definitions.
-  const tabs: { key: DetailTab; label: string; badge?: boolean }[] = [
+  // Tab definitions — always include Q&A to avoid tab bar reflow.
+  const tabs: { key: DetailTab; label: string }[] = [
     { key: 'pr', label: 'PR' },
     { key: 'timeline', label: 'Timeline' },
     { key: 'sessions', label: 'Sessions' },
     { key: 'info', label: 'Info' },
+    { key: 'qa', label: 'Q&A' },
   ];
-  if (hasQAHistory) {
-    tabs.push({ key: 'qa', label: 'Q&A' });
-  }
 
   const showMerge = onMerge && item.pr && item.project && item.status === 'awaiting-review';
 

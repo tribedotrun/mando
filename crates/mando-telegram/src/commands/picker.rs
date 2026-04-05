@@ -161,3 +161,93 @@ pub async fn show_multi(
 
     Ok(())
 }
+
+// ── Direct-by-ID action (shared by /cancel and /delete) ───────────────
+
+/// Configuration for a direct-by-ID action that bulk-updates a single task.
+///
+/// Captures the differences between commands like `/cancel <id>` and
+/// `/delete <id>` so the common flow (parse id → lookup → eligibility →
+/// POST → user feedback) lives in one place.
+///
+/// Eligibility is intentionally expressed as a single function that returns
+/// the ineligibility reason. Returning `None` means the item can be acted on;
+/// returning `Some(phrase)` both rejects the item AND supplies the phrase the
+/// user sees (e.g. `"is already finalized"`). This makes it impossible to
+/// forget the user-facing message for a custom eligibility rule — the type
+/// system forces the two concerns to live together.
+pub struct DirectIdAction {
+    /// User-facing verb used in the failure line, e.g. "Cancel" or "Delete".
+    pub failure_verb: &'static str,
+    /// Success prefix including emoji, e.g. "❌ Cancelled:" or "🗑️ Deleted:".
+    /// The task title is appended after a space.
+    pub success_prefix: &'static str,
+    /// API path hit for the bulk action.
+    pub api_path: &'static str,
+    /// Build the JSON body for the bulk action given the target id.
+    pub build_body: fn(i64) -> serde_json::Value,
+    /// Check whether the item can be acted on. Returns `None` for eligible
+    /// items, or `Some(phrase)` with the reason shown to the user (phrase
+    /// is appended to `"Task #N "` so phrase should start with "is", "was",
+    /// etc. Example: `"is already finalized"`).
+    pub ineligibility_check: fn(&Task) -> Option<&'static str>,
+}
+
+/// Run a direct-by-ID action. Sends all user-visible feedback to `chat_id`.
+pub async fn direct_by_id(
+    bot: &TelegramBot,
+    chat_id: &str,
+    items: &[Task],
+    target_id: &str,
+    cfg: &DirectIdAction,
+) -> Result<()> {
+    let target_num: Option<i64> = target_id.parse().ok();
+    let item = target_num.and_then(|n| items.iter().find(|it| it.id == n));
+    match item {
+        None => {
+            bot.send_html(
+                chat_id,
+                &format!(
+                    "\u{26a0}\u{fe0f} Task #{} not found.",
+                    escape_html(target_id)
+                ),
+            )
+            .await?;
+        }
+        Some(it) => match (cfg.ineligibility_check)(it) {
+            Some(phrase) => {
+                bot.send_html(
+                    chat_id,
+                    &format!(
+                        "\u{26a0}\u{fe0f} Task #{} {}.",
+                        escape_html(target_id),
+                        phrase
+                    ),
+                )
+                .await?;
+            }
+            None => {
+                let id_num = it.id;
+                let title = escape_html(&it.title);
+                match bot.gw().post(cfg.api_path, &(cfg.build_body)(id_num)).await {
+                    Ok(_) => {
+                        bot.send_html(chat_id, &format!("{} {title}", cfg.success_prefix))
+                            .await?;
+                    }
+                    Err(e) => {
+                        bot.send_html(
+                            chat_id,
+                            &format!(
+                                "\u{274c} {} failed for #{}: {e}",
+                                cfg.failure_verb,
+                                escape_html(target_id)
+                            ),
+                        )
+                        .await?;
+                    }
+                }
+            }
+        },
+    }
+    Ok(())
+}

@@ -138,7 +138,7 @@ export function SetupChecklist({ onDismiss, onMinimize }: SetupChecklistProps): 
         Get started with Mando
       </h2>
 
-      {/* Progress bar — fills left-to-right by count */}
+      {/* Progress bar — each segment maps to its step */}
       <div className="flex" style={{ gap: 1, marginBottom: 12 }}>
         {steps.map((_, i) => (
           <div
@@ -147,7 +147,7 @@ export function SetupChecklist({ onDismiss, onMinimize }: SetupChecklistProps): 
               flex: 1,
               height: 3,
               borderRadius: 1.5,
-              background: i < completedCount ? 'var(--color-success)' : 'var(--color-surface-3)',
+              background: steps[i].completed ? 'var(--color-success)' : 'var(--color-surface-3)',
               transition: 'background 0.3s ease',
             }}
           />

@@ -6,6 +6,8 @@ use std::sync::LazyLock;
 use mando_config::settings::ClassifyRule;
 use regex::Regex;
 
+use crate::runtime::dashboard::truncate_utf8;
+
 // ── Per-repo file classification rules ───────────────────────────────────
 
 /// Default classification rules used when a project has no custom `classify_rules`.
@@ -280,7 +282,7 @@ pub(crate) fn format_triage_table(items: &[TriageItem]) -> String {
                 .to_string()
         };
         let title = if item.title.len() > 50 {
-            format!("{}\u{2026}", &item.title[..50])
+            format!("{}\u{2026}", truncate_utf8(&item.title, 50))
         } else {
             item.title.clone()
         };

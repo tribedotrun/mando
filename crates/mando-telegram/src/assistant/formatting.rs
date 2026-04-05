@@ -220,6 +220,26 @@ pub fn qa_session_kb(item_id: i64) -> Value {
 mod tests {
     use super::*;
 
+    /// Extract the `inline_keyboard` rows from a keyboard Value, failing the
+    /// test with a clear structural message if the shape is wrong.
+    fn kb_rows(kb: &Value) -> &Vec<Value> {
+        kb["inline_keyboard"]
+            .as_array()
+            .expect("keyboard must have inline_keyboard array")
+    }
+
+    /// Extract a row (array) from a Value, failing with a clear message.
+    fn row_array<'a>(row: &'a Value, label: &str) -> &'a Vec<Value> {
+        row.as_array()
+            .unwrap_or_else(|| panic!("{label} must be an array"))
+    }
+
+    /// Extract a string field, failing with a clear message.
+    fn field_str<'a>(v: &'a Value, label: &str) -> &'a str {
+        v.as_str()
+            .unwrap_or_else(|| panic!("{label} must be a string"))
+    }
+
     #[test]
     fn type_icon_lookup() {
         assert_eq!(type_icon("youtube"), "\u{1f3ac}");
@@ -230,28 +250,29 @@ mod tests {
     #[test]
     fn swipe_card_kb_has_action_row() {
         let kb = swipe_card_kb(42, None);
-        let rows = kb["inline_keyboard"].as_array().unwrap();
+        let rows = kb_rows(&kb);
         assert_eq!(rows.len(), 2);
         // Top row: Read, Ask, Next = 3 buttons
-        let top_row = rows[0].as_array().unwrap();
+        let top_row = row_array(&rows[0], "swipe card top row");
         assert_eq!(top_row.len(), 3);
-        assert!(top_row[0]["callback_data"]
-            .as_str()
-            .unwrap()
-            .contains("read"));
+        assert!(field_str(
+            &top_row[0]["callback_data"],
+            "swipe card read button callback"
+        )
+        .contains("read"));
         // Action row: Save, Archive, Act, Delete
-        let action_row = rows[1].as_array().unwrap();
+        let action_row = row_array(&rows[1], "swipe card action row");
         assert_eq!(action_row.len(), 4);
     }
 
     #[test]
     fn swipe_card_kb_youtube_telegraph() {
         let kb = swipe_card_kb(42, Some("https://telegra.ph/Test-42"));
-        let rows = kb["inline_keyboard"].as_array().unwrap();
-        let top_row = rows[0].as_array().unwrap();
+        let rows = kb_rows(&kb);
+        let top_row = row_array(&rows[0], "swipe card top row");
         assert_eq!(top_row.len(), 3);
         assert_eq!(
-            top_row[0]["url"].as_str().unwrap(),
+            field_str(&top_row[0]["url"], "telegraph read url"),
             "https://telegra.ph/Test-42"
         );
     }
@@ -259,22 +280,19 @@ mod tests {
     #[test]
     fn swipe_card_kb_youtube_no_telegraph_uses_callback() {
         let kb = swipe_card_kb(42, None);
-        let rows = kb["inline_keyboard"].as_array().unwrap();
-        let top_row = rows[0].as_array().unwrap();
-        assert!(top_row[0]["callback_data"]
-            .as_str()
-            .unwrap()
-            .contains("read"));
+        let rows = kb_rows(&kb);
+        let top_row = row_array(&rows[0], "swipe card top row");
+        assert!(field_str(&top_row[0]["callback_data"], "fallback read callback").contains("read"));
     }
 
     #[test]
     fn qa_session_kb_has_end_button() {
         let kb = qa_session_kb(42);
-        let rows = kb["inline_keyboard"].as_array().unwrap();
+        let rows = kb_rows(&kb);
         assert_eq!(rows.len(), 1);
-        let row = rows[0].as_array().unwrap();
+        let row = row_array(&rows[0], "qa session row");
         assert_eq!(row.len(), 2);
-        assert!(row[1]["callback_data"].as_str().unwrap().contains("endqa"));
+        assert!(field_str(&row[1]["callback_data"], "qa end button callback").contains("endqa"));
     }
 
     #[test]
@@ -316,23 +334,23 @@ mod tests {
     #[test]
     fn list_kb_items_only_no_pagination() {
         let kb = list_kb(&[10, 20, 30], 0, 1, "all", "dg:page", 5, 0);
-        let rows = kb["inline_keyboard"].as_array().unwrap();
+        let rows = kb_rows(&kb);
         assert_eq!(rows.len(), 1); // one row of item buttons, no nav
-        let item_row = rows[0].as_array().unwrap();
+        let item_row = row_array(&rows[0], "list_kb item row");
         assert_eq!(item_row.len(), 3);
-        assert_eq!(item_row[0]["text"].as_str().unwrap(), "1");
-        assert!(item_row[0]["callback_data"]
-            .as_str()
-            .unwrap()
-            .contains("dg:show:10"));
+        assert_eq!(field_str(&item_row[0]["text"], "first button text"), "1");
+        assert!(
+            field_str(&item_row[0]["callback_data"], "first button callback")
+                .contains("dg:show:10")
+        );
     }
 
     #[test]
     fn list_kb_with_pagination() {
         let kb = list_kb(&[1, 2, 3], 0, 3, "saved", "dg:page", 5, 0);
-        let rows = kb["inline_keyboard"].as_array().unwrap();
+        let rows = kb_rows(&kb);
         assert_eq!(rows.len(), 2); // item row + nav row
-        let nav_row = rows[1].as_array().unwrap();
+        let nav_row = row_array(&rows[1], "list_kb nav row");
         assert_eq!(nav_row.len(), 1); // only Next on first page
     }
 
@@ -340,12 +358,12 @@ mod tests {
     fn list_kb_chunked_rows() {
         let ids: Vec<i64> = (1..=7).collect();
         let kb = list_kb(&ids, 1, 3, "all", "dg:cpage", 5, 5);
-        let rows = kb["inline_keyboard"].as_array().unwrap();
+        let rows = kb_rows(&kb);
         // 5 + 2 items = 2 item rows, plus 1 nav row (Prev + Next)
         assert_eq!(rows.len(), 3);
-        assert_eq!(rows[0].as_array().unwrap().len(), 5);
-        assert_eq!(rows[1].as_array().unwrap().len(), 2);
-        assert_eq!(rows[2].as_array().unwrap().len(), 2); // Prev + Next
+        assert_eq!(row_array(&rows[0], "first item row").len(), 5);
+        assert_eq!(row_array(&rows[1], "second item row").len(), 2);
+        assert_eq!(row_array(&rows[2], "nav row").len(), 2); // Prev + Next
     }
 
     #[test]

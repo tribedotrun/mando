@@ -2,4 +2,5 @@
 
 pub mod formatting;
 pub mod fuzzy;
+pub mod model_lookup;
 pub mod url_detect;

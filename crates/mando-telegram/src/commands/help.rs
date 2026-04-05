@@ -37,7 +37,8 @@ const HELP: &str = "\u{1f99e} <b>Tasks</b>\n\
 /ask \u{2014} Q&A on completed tasks\n\
 /timeline [id] [chat] \u{2014} Lifecycle timeline\n\
 /prsummary &lt;id&gt; \u{2014} Show PR description\n\
-/history [id] \u{2014} Ask history for a task";
+/history [id] \u{2014} Ask history for a task\n\
+/sessions \u{2014} Recent CC sessions";
 
 /// Handle `/start` or `/help`.
 pub async fn handle(bot: &TelegramBot, chat_id: &str, _args: &str) -> Result<()> {

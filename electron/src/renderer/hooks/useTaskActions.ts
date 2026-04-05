@@ -42,6 +42,8 @@ export function useTaskActions() {
   const [reopenPending, setReopenPending] = useState(false);
   const [reworkItem2, setReworkItem] = useState<TaskItem | null>(null);
   const [reworkPending, setReworkPending] = useState(false);
+  const [answerPending, setAnswerPending] = useState(false);
+  const [nudgePending, setNudgePending] = useState(false);
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -201,7 +203,11 @@ export function useTaskActions() {
       'Retry triggered',
     );
 
-  const handleAnswer = async (id: number, answer: string) => {
+  // Returns true on success so callers can decide whether to close a modal.
+  // On failure the error is surfaced via toast and false is returned, allowing
+  // the modal to stay open so the user does not lose their typed input.
+  const handleAnswer = async (id: number, answer: string): Promise<boolean> => {
+    setAnswerPending(true);
     try {
       const result = await answerClarificationText(id, answer);
       taskFetch();
@@ -212,19 +218,28 @@ export function useTaskActions() {
       };
       const [variant, msg] = msgs[result.status] ?? ['success', 'Answer saved'];
       toast().add(variant, msg);
+      return true;
     } catch (err) {
       taskFetch();
       toast().add('error', getErrorMessage(err, 'Answer failed'));
+      return false;
+    } finally {
+      setAnswerPending(false);
     }
   };
 
-  const handleNudge = async (id: number, message: string) => {
+  const handleNudge = async (id: number, message: string): Promise<boolean> => {
+    setNudgePending(true);
     try {
       await nudgeWorker(id, message);
       taskFetch();
       toast().add('success', `Nudged task #${id}`);
+      return true;
     } catch (err) {
       toast().add('error', getErrorMessage(err, 'Nudge failed'));
+      return false;
+    } finally {
+      setNudgePending(false);
     }
   };
 
@@ -261,6 +276,8 @@ export function useTaskActions() {
     handleCancel,
     handleRetry,
     handleAnswer,
+    answerPending,
     handleNudge,
+    nudgePending,
   };
 }

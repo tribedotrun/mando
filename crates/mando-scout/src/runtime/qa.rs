@@ -109,7 +109,7 @@ impl QaSessionManager {
         let prompt =
             render_first_turn_prompt(question, summary, article, raw_content_note, workflow)?;
 
-        let mut cc = mando_cc::CcSession::spawn(qa_cc_config(workflow, None)).await?;
+        let mut cc = mando_cc::CcSession::spawn(qa_cc_config(workflow, None)?).await?;
         let session_id = cc.session_id().to_string();
 
         cc.send_message(&prompt).await?;
@@ -217,7 +217,7 @@ impl QaSessionManager {
         session_key: &str,
         workflow: &ScoutWorkflow,
     ) -> Result<QaResult> {
-        let result = mando_cc::CcOneShot::run(question, qa_cc_config(workflow, Some(session_key)))
+        let result = mando_cc::CcOneShot::run(question, qa_cc_config(workflow, Some(session_key))?)
             .await
             .with_context(|| format!("resume Q&A session {session_key}"))?;
 
@@ -291,14 +291,11 @@ pub fn default_session_manager() -> Arc<QaSessionManager> {
     Arc::new(QaSessionManager::new(Duration::from_secs(600)))
 }
 
-fn qa_cc_config(workflow: &ScoutWorkflow, resume_session: Option<&str>) -> mando_cc::CcConfig {
-    let model = workflow.models.get("qa").cloned().unwrap_or_else(|| {
-        tracing::warn!(
-            module = "scout",
-            "missing 'qa' model in workflow config, using empty default"
-        );
-        String::new()
-    });
+fn qa_cc_config(
+    workflow: &ScoutWorkflow,
+    resume_session: Option<&str>,
+) -> anyhow::Result<mando_cc::CcConfig> {
+    let model = crate::biz::model_lookup::required_model(workflow, "qa")?;
     let mut builder = mando_cc::CcConfig::builder()
         .model(model)
         .timeout(Duration::from_secs(120))
@@ -307,7 +304,7 @@ fn qa_cc_config(workflow: &ScoutWorkflow, resume_session: Option<&str>) -> mando
     if let Some(session_id) = resume_session {
         builder = builder.resume(session_id);
     }
-    builder.build()
+    Ok(builder.build())
 }
 
 // ---------------------------------------------------------------------------

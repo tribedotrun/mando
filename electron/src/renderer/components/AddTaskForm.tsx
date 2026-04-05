@@ -8,10 +8,9 @@ import { useTaskStore } from '#renderer/stores/taskStore';
 
 const LAST_PROJECT_KEY = 'mando:lastProject';
 const titleInputCls = `${inputCls} resize-none`;
-const projectSelectCls =
-  'rounded-md px-3 py-2 text-[12px] font-medium uppercase tracking-[0.06em] focus-visible:outline-none';
+const projectSelectCls = 'rounded-md px-3 py-2 text-[12px] font-medium uppercase tracking-[0.06em]';
 const footerButtonCls =
-  'px-4 py-2 text-[13px] font-semibold transition-colors hover:bg-[var(--color-accent-hover)] active:bg-[var(--color-accent-pressed)] disabled:opacity-40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-accent)]';
+  'px-4 py-2 text-[13px] font-semibold transition-colors hover:bg-[var(--color-accent-hover)] active:bg-[var(--color-accent-pressed)] disabled:opacity-40';
 const bulkToggleCls =
   'rounded-md px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wider transition-colors';
 
@@ -297,7 +296,7 @@ function AddTaskFormInner({ onClose }: { onClose: () => void }): React.ReactElem
                 <button
                   type="button"
                   onClick={() => fileRef.current?.click()}
-                  className="flex h-9 w-9 items-center justify-center rounded-md transition-colors hover:bg-[var(--color-surface-3)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--color-accent)]"
+                  className="flex h-9 w-9 items-center justify-center rounded-md transition-colors hover:bg-[var(--color-surface-3)]"
                   style={{ color: 'var(--color-text-3)' }}
                   aria-label="Attach image"
                   title="Attach image (or paste)"

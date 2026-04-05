@@ -16,20 +16,9 @@ pub fn append_tagged_note(existing: Option<&str>, tag: &str, text: &str) -> Opti
     }
 }
 
-pub(crate) fn append_labeled_prompt(prompt: &mut String, label: &str, text: &str) {
-    let text = text.trim();
-    if text.is_empty() {
-        return;
-    }
-    prompt.push_str("\n\n");
-    prompt.push_str(label);
-    prompt.push_str(": ");
-    prompt.push_str(text);
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{append_labeled_prompt, append_tagged_note, tagged_note};
+    use super::{append_tagged_note, tagged_note};
 
     #[test]
     fn tagged_note_ignores_blank_text() {
@@ -42,26 +31,5 @@ mod tests {
             append_tagged_note(Some("Existing context"), "Human answer", "Need more logs")
                 .expect("note should be added");
         assert_eq!(updated, "Existing context\n\n[Human answer] Need more logs");
-    }
-
-    #[test]
-    fn append_labeled_prompt_ignores_blank_text() {
-        let mut prompt = String::from("Base prompt");
-        append_labeled_prompt(&mut prompt, "Human provided additional details", "   ");
-        assert_eq!(prompt, "Base prompt");
-    }
-
-    #[test]
-    fn append_labeled_prompt_adds_section() {
-        let mut prompt = String::from("Base prompt");
-        append_labeled_prompt(
-            &mut prompt,
-            "Human provided additional details",
-            "it's in the login page",
-        );
-        assert_eq!(
-            prompt,
-            "Base prompt\n\nHuman provided additional details: it's in the login page"
-        );
     }
 }

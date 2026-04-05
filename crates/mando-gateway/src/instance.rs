@@ -103,18 +103,24 @@ fn is_process_alive(pid: u32) -> bool {
 
 /// Send SIGTERM, wait briefly, then SIGKILL if still alive.
 fn kill_process(pid: u32) {
-    let _ = std::process::Command::new("kill")
+    if let Err(e) = std::process::Command::new("kill")
         .arg(pid.to_string())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
-        .status();
+        .status()
+    {
+        tracing::warn!(pid, error = %e, "SIGTERM to stale daemon failed");
+    }
     std::thread::sleep(std::time::Duration::from_millis(500));
     if is_process_alive(pid) {
-        let _ = std::process::Command::new("kill")
+        if let Err(e) = std::process::Command::new("kill")
             .args(["-9", &pid.to_string()])
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
-            .status();
+            .status()
+        {
+            tracing::warn!(pid, error = %e, "SIGKILL to stale daemon failed");
+        }
     }
 }
 

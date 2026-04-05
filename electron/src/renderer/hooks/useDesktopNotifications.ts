@@ -37,8 +37,9 @@ function shouldShow(level: NotifyLevel, windowFocused: boolean): boolean {
 
 /**
  * Parse an SSE event into a NotificationPayload, or return null if not a notification.
+ * Exported so DataProvider and other consumers share the same structural narrow.
  */
-function parseNotification(event: SSEEvent): NotificationPayload | null {
+export function parseNotification(event: SSEEvent): NotificationPayload | null {
   if (event.event !== 'notification' || !event.data) return null;
 
   const data = event.data as Record<string, unknown>;
@@ -71,11 +72,12 @@ export function useDesktopNotifications(): {
     if (!shouldShow(payload.level, windowFocused)) return;
 
     // Deduplicate by task_key within a short window.
-    if (payload.task_key) {
-      if (recentKeysRef.current.has(payload.task_key)) return;
-      recentKeysRef.current.add(payload.task_key);
+    const taskKey = payload.task_key;
+    if (taskKey) {
+      if (recentKeysRef.current.has(taskKey)) return;
+      recentKeysRef.current.add(taskKey);
       setTimeout(() => {
-        recentKeysRef.current.delete(payload.task_key!);
+        recentKeysRef.current.delete(taskKey);
       }, 5000);
     }
 

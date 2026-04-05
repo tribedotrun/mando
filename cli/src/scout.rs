@@ -279,11 +279,16 @@ async fn handle_list_with_summaries(status: Option<&str>) -> anyhow::Result<()> 
             };
             println!("#{id} [{st}] {title}{scores}");
 
-            if let Ok(full) = client.get(&format!("/api/scout/items/{id}")).await {
-                if let Some(summary) = full["summary"].as_str() {
-                    for line in summary.lines().take(3) {
-                        println!("  {line}");
+            match client.get(&format!("/api/scout/items/{id}")).await {
+                Ok(full) => {
+                    if let Some(summary) = full["summary"].as_str() {
+                        for line in summary.lines().take(3) {
+                            println!("  {line}");
+                        }
                     }
+                }
+                Err(e) => {
+                    eprintln!("  (summary unavailable: {e})");
                 }
             }
             println!();

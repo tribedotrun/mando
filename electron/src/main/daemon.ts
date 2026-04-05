@@ -324,8 +324,12 @@ async function killDaemonByPid(pid: number, dataDir: string): Promise<boolean> {
     process.kill(pid, 0);
     process.kill(pid, 'SIGKILL');
     await new Promise((r) => setTimeout(r, 500));
-  } catch {
-    // Expected: ESRCH if already dead
+  } catch (err: unknown) {
+    // ESRCH means the process is already dead, which is what we want.
+    // Log any other error (e.g. EPERM) so we don't silently hide failures.
+    if ((err as NodeJS.ErrnoException | null)?.code !== 'ESRCH') {
+      log.warn(`[daemon] force-kill pid ${pid} unexpected error:`, err);
+    }
   }
 
   // Verify it's actually dead.
@@ -335,11 +339,15 @@ async function killDaemonByPid(pid: number, dataDir: string): Promise<boolean> {
   }
 
   // Clean up files the daemon may not have cleaned after SIGKILL.
+  // ENOENT is expected (files may not exist); other errors are logged
+  // so permission/disk issues don't pass silently.
   for (const f of ['daemon.pid', 'daemon.port', 'daemon-dev.port']) {
     try {
       fs.unlinkSync(path.join(dataDir, f));
-    } catch {
-      /* ok */
+    } catch (err: unknown) {
+      if ((err as NodeJS.ErrnoException)?.code !== 'ENOENT') {
+        log.warn(`[daemon] cleanup of ${f} failed:`, err);
+      }
     }
   }
   return true;

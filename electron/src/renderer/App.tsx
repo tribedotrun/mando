@@ -45,17 +45,9 @@ function useSetupProgress(): SetupProgress | null {
   ];
 
   const completed = done.filter(Boolean).length;
-  if (completed >= SETUP_TOTAL) {
-    if (!dismissed) {
-      const store = useSettingsStore.getState();
-      store.updateSection('features', { setupDismissed: true });
-      store.save();
-    }
-    return null;
-  }
-
   const firstIncomplete = done.findIndex((d) => !d);
-  return { completed, total: SETUP_TOTAL, currentStep: STEP_NAMES[firstIncomplete] ?? '' };
+  const stepLabel = firstIncomplete >= 0 ? STEP_NAMES[firstIncomplete] : 'All done!';
+  return { completed, total: SETUP_TOTAL, currentStep: stepLabel };
 }
 
 export function App(): React.ReactElement {

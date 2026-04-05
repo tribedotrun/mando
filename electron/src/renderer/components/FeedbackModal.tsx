@@ -7,6 +7,10 @@ interface FeedbackModalProps {
   subtitle?: string;
   label?: string;
   placeholder: string;
+  /** Optional pre-filled text. Matches the old window.prompt default-value
+   * behaviour so common actions (e.g. nudge with a canned message) stay
+   * one-click. */
+  initialValue?: string;
   buttonLabel: string;
   pendingLabel: string;
   isPending: boolean;
@@ -21,6 +25,7 @@ export function FeedbackModal({
   subtitle,
   label,
   placeholder,
+  initialValue,
   buttonLabel,
   pendingLabel,
   isPending,
@@ -28,7 +33,7 @@ export function FeedbackModal({
   onSubmit,
   onCancel,
 }: FeedbackModalProps): React.ReactElement {
-  const [feedback, setFeedback] = useState('');
+  const [feedback, setFeedback] = useState(initialValue ?? '');
   const { ref: dialogRef, handleKeyDown } = useFocusTrap(onCancel);
 
   return (

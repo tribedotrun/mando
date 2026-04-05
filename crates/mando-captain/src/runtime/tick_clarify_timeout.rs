@@ -4,6 +4,7 @@ use mando_config::workflow::CaptainWorkflow;
 use mando_types::task::ItemStatus;
 use mando_types::Task;
 
+use super::dashboard::truncate_utf8;
 use super::notify::Notifier;
 
 /// Check NeedsClarification items for timeout and escalate stale ones.
@@ -42,7 +43,7 @@ pub(super) async fn check_clarifier_timeouts(
         tracing::warn!(
             module = "captain",
             item_id = item.id,
-            title = %&item.title[..item.title.len().min(60)],
+            title = %truncate_utf8(&item.title, 60),
             timeout_s = timeout_s,
             "NeedsClarification item timed out — escalating"
         );

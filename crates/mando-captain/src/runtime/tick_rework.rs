@@ -3,6 +3,8 @@
 use mando_types::task::ItemStatus;
 use mando_types::Task;
 
+use super::dashboard::truncate_utf8;
+
 /// Transition all Rework items to Queued, clearing worker fields.
 pub(super) fn transition_rework_to_queued(items: &mut [Task]) {
     for item in items.iter_mut() {
@@ -36,7 +38,7 @@ pub(super) fn transition_rework_to_queued(items: &mut [Task]) {
         item.session_ids.ask = None;
         tracing::info!(
             module = "captain",
-            title = %&item.title[..item.title.len().min(60)],
+            title = %truncate_utf8(&item.title, 60),
             "dispatch: rework to queued"
         );
     }

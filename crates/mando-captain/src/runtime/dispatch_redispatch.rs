@@ -9,6 +9,7 @@ use mando_types::task::{ItemStatus, Task};
 use mando_types::timeline::TimelineEventType;
 
 use crate::biz::dispatch_logic;
+use crate::runtime::dashboard::truncate_utf8;
 use crate::runtime::notify::Notifier;
 
 const MAX_SPAWN_FAILS: i64 = 3;
@@ -55,7 +56,7 @@ pub(crate) async fn redispatch_newly_queued(
                 if dry_run {
                     dry_actions.push(format!(
                         "would spawn worker for '{}'",
-                        &item.title[..item.title.len().min(60)]
+                        truncate_utf8(&item.title, 60)
                     ));
                     *active_workers += 1;
                     let resource = item.resource.as_deref().unwrap_or("cc").to_string();
@@ -131,7 +132,7 @@ pub(crate) async fn redispatch_newly_queued(
                                 let msg = format!(
                                     "Spawn failed {} times for '{}', escalated to captain review: {}",
                                     count,
-                                    &item.title[..item.title.len().min(60)],
+                                    truncate_utf8(&item.title, 60),
                                     e
                                 );
                                 tracing::error!(module = "captain", error = %msg, "spawn permanently failed");
@@ -141,7 +142,7 @@ pub(crate) async fn redispatch_newly_queued(
                                     "Spawn failed ({}/{}) for '{}': {}",
                                     count,
                                     3,
-                                    &item.title[..item.title.len().min(60)],
+                                    truncate_utf8(&item.title, 60),
                                     e
                                 );
                                 tracing::error!(module = "captain", error = %msg, "spawn failed");
@@ -181,7 +182,7 @@ pub(crate) async fn revert_clarifier_start(
     super::timeline_emit::emit_for_task(
         item,
         TimelineEventType::Errored,
-        &format!("Clarifier failed: {}", &err_msg[..err_msg.len().min(120)]),
+        &format!("Clarifier failed: {}", truncate_utf8(&err_msg, 120)),
         serde_json::json!({"session_id": session_id}),
         pool,
     )

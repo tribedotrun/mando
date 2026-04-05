@@ -36,7 +36,13 @@ const BASE_NAV_ITEMS: NavItem[] = [
   { id: 'about', label: 'About' },
 ];
 
-function SettingsPanel({ section }: { section: SettingsSection }) {
+function SettingsPanel({
+  section,
+  onNavigate,
+}: {
+  section: SettingsSection;
+  onNavigate: (s: SettingsSection) => void;
+}) {
   switch (section) {
     case 'setup':
       return (
@@ -45,7 +51,9 @@ function SettingsPanel({ section }: { section: SettingsSection }) {
             const store = useSettingsStore.getState();
             store.updateSection('features', { setupDismissed: true });
             store.save();
+            onNavigate('general');
           }}
+          onMinimize={() => onNavigate('general')}
         />
       );
     case 'general':
@@ -192,7 +200,7 @@ export function SettingsPage({
       <main className="flex-1 overflow-y-auto" style={{ padding: '38px 32px 24px' }}>
         <div style={{ maxWidth: 720 }}>
           <ErrorBoundary key={section} fallbackLabel={section}>
-            <SettingsPanel section={section} />
+            <SettingsPanel section={section} onNavigate={setSection} />
           </ErrorBoundary>
         </div>
       </main>

@@ -8,8 +8,10 @@ import { ScoutStatusTabs } from '#renderer/components/ScoutStatusTabs';
 import { ScoutReader } from '#renderer/components/ScoutReader';
 import { ScoutQA } from '#renderer/components/ScoutQA';
 import { BulkBar } from '#renderer/components/BulkBar';
+import { FeedbackModal } from '#renderer/components/FeedbackModal';
 import { bulkUpdateScout, bulkDeleteScout, researchScout } from '#renderer/api';
 import { useToastStore } from '#renderer/stores/toastStore';
+import { getErrorMessage } from '#renderer/utils';
 
 const USER_SETTABLE = ['pending', 'processed', 'saved', 'archived'];
 const TYPES = ['all', 'github', 'youtube', 'arxiv', 'other'] as const;
@@ -32,6 +34,8 @@ export function ScoutPage({ active = true }: { active?: boolean } = {}): React.R
   const [qaEverOpened, setQaEverOpened] = useState(false);
   const [searchInput, setSearchInput] = useState('');
   const [focusedIndex, setFocusedIndex] = useState(-1);
+  const [researchModalOpen, setResearchModalOpen] = useState(false);
+  const [researchPending, setResearchPending] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const searchRef = useRef<HTMLInputElement>(null);
 
@@ -41,26 +45,32 @@ export function ScoutPage({ active = true }: { active?: boolean } = {}): React.R
 
   const inListView = view === '' && !activeItemId;
 
-  const handleResearch = useCallback(async () => {
-    const topic = window.prompt('Scout research topic');
-    if (!topic) return;
-    try {
-      const result = await researchScout(topic, true);
-      await scoutFetch();
-      const added = result.added ?? 0;
-      const processed = result.processed ?? 0;
-      useToastStore
-        .getState()
-        .add('success', `Research added ${added} link(s) and processed ${processed}`);
-    } catch (err) {
-      useToastStore
-        .getState()
-        .add('error', `Research failed: ${err instanceof Error ? err.message : String(err)}`);
-    }
-  }, [scoutFetch]);
+  const runResearch = useCallback(
+    async (topic: string) => {
+      setResearchPending(true);
+      try {
+        const result = await researchScout(topic, true);
+        await scoutFetch();
+        const added = result.added ?? 0;
+        const processed = result.processed ?? 0;
+        useToastStore
+          .getState()
+          .add('success', `Research added ${added} link(s) and processed ${processed}`);
+        setResearchModalOpen(false);
+      } catch (err) {
+        useToastStore.getState().add('error', getErrorMessage(err, 'Research failed'));
+      } finally {
+        setResearchPending(false);
+      }
+    },
+    [scoutFetch],
+  );
 
   const handleKey = useCallback(
     (key: string, e: KeyboardEvent) => {
+      // The research modal owns the keyboard while it is open — Enter and
+      // Escape must submit/cancel the modal, not trigger list actions behind it.
+      if (researchModalOpen) return;
       // Escape from reader goes back to list
       if (!inListView) {
         if (key === 'Escape') {
@@ -98,7 +108,7 @@ export function ScoutPage({ active = true }: { active?: boolean } = {}): React.R
           break;
       }
     },
-    [inListView, items, clampedFocusedIndex],
+    [inListView, items, clampedFocusedIndex, researchModalOpen],
   );
 
   useViewKeyHandler(handleKey, active);
@@ -146,9 +156,7 @@ export function ScoutPage({ active = true }: { active?: boolean } = {}): React.R
       clearSelection();
       await scoutFetch();
     } catch (err) {
-      useToastStore
-        .getState()
-        .add('error', `Failed: ${err instanceof Error ? err.message : String(err)}`);
+      useToastStore.getState().add('error', getErrorMessage(err, 'Bulk scout action failed'));
     }
   };
 
@@ -212,18 +220,17 @@ export function ScoutPage({ active = true }: { active?: boolean } = {}): React.R
         </div>
         <div className="flex items-center gap-2">
           <button
-            onClick={() => {
-              void handleResearch();
-            }}
-            className="rounded-md px-3 py-1.5 text-[12px] font-medium"
+            onClick={() => setResearchModalOpen(true)}
+            disabled={researchPending}
+            className="rounded-md px-3 py-1.5 text-[12px] font-medium disabled:opacity-50"
             style={{
               background: 'var(--color-surface-2)',
               color: 'var(--color-text-2)',
               border: '1px solid var(--color-border)',
-              cursor: 'pointer',
+              cursor: researchPending ? 'default' : 'pointer',
             }}
           >
-            Research
+            {researchPending ? 'Researching…' : 'Research'}
           </button>
           <AddUrlForm />
         </div>
@@ -339,6 +346,21 @@ export function ScoutPage({ active = true }: { active?: boolean } = {}): React.R
         onBulkStatus={handleBulkStatus}
         onCancel={clearSelection}
       />
+
+      {researchModalOpen && (
+        <FeedbackModal
+          testId="scout-research-modal"
+          title="Scout research"
+          placeholder="What should Scout research? (e.g. Rust async runtime fairness)"
+          buttonLabel="Research"
+          pendingLabel="Researching…"
+          isPending={researchPending}
+          onSubmit={(topic) => {
+            void runResearch(topic);
+          }}
+          onCancel={() => setResearchModalOpen(false)}
+        />
+      )}
     </div>
   );
 }

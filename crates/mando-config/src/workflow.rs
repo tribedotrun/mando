@@ -248,16 +248,24 @@ pub fn render_template(template: &str, vars: &HashMap<&str, &str>) -> Result<Str
 }
 
 /// Look up a named template from a map and render it with the given variables.
+/// All templates from the map are registered in the environment so that
+/// `{% include "other_template" %}` works across entries.
 fn render_named(
     kind: &str,
     template_name: &str,
     templates: &HashMap<String, String>,
     vars: &HashMap<&str, &str>,
 ) -> Result<String, String> {
-    let raw = templates
-        .get(template_name)
-        .ok_or_else(|| format!("unknown {kind} template: {template_name:?}"))?;
-    render_template_value_map(raw, &coerce_template_vars(vars))
+    if !templates.contains_key(template_name) {
+        return Err(format!("unknown {kind} template: {template_name:?}"));
+    }
+    let mut env = Environment::new();
+    for (name, content) in templates {
+        env.add_template(name, content).map_err(|e| e.to_string())?;
+    }
+    let tmpl = env.get_template(template_name).map_err(|e| e.to_string())?;
+    tmpl.render(JsonValue::Object(coerce_template_vars(vars)))
+        .map_err(|e| e.to_string())
 }
 
 /// Render a named prompt from a workflow's prompt map.
@@ -461,20 +469,6 @@ mod tests {
         let rendered = result.unwrap();
         assert!(rendered.contains("Fix the login bug"));
         assert!(rendered.contains("mando/fix-login-1"));
-    }
-
-    #[test]
-    fn render_nudge_continuation() {
-        let wf = CaptainWorkflow::compiled_default();
-        let mut vars = HashMap::new();
-        vars.insert("nudge_count", "5");
-        vars.insert("max_interventions", "50");
-
-        let result = render_nudge("continuation_preamble", &wf.nudges, &vars);
-        assert!(result.is_ok());
-        let rendered = result.unwrap();
-        assert!(rendered.contains("5"));
-        assert!(rendered.contains("50"));
     }
 
     #[test]

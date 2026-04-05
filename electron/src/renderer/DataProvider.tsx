@@ -5,10 +5,13 @@ import { initBaseUrl, connectSSE } from '#renderer/api';
 import log from '#renderer/logger';
 import { useTaskStore } from '#renderer/stores/taskStore';
 import { useScoutStore } from '#renderer/stores/scoutStore';
-import { useDesktopNotifications } from '#renderer/hooks/useDesktopNotifications';
+import {
+  useDesktopNotifications,
+  parseNotification,
+} from '#renderer/hooks/useDesktopNotifications';
 import { useMountEffect } from '#renderer/hooks/useMountEffect';
 import { useToastStore } from '#renderer/stores/toastStore';
-import type { NotificationPayload, SSEConnectionStatus } from '#renderer/types';
+import type { SSEConnectionStatus } from '#renderer/types';
 
 // ---------------------------------------------------------------------------
 // Context — exposes SSE status + sessions refresh trigger to consumers
@@ -105,9 +108,9 @@ export function DataProvider({ children }: { children: React.ReactNode }): React
                 queryClient.invalidateQueries({ queryKey: ['sessions'] });
                 queryClient.invalidateQueries({ queryKey: ['task-detail-timeline'] });
                 break;
-              case 'notification':
-                if (event.data && typeof event.data === 'object' && 'message' in event.data) {
-                  const payload = event.data as unknown as NotificationPayload;
+              case 'notification': {
+                const payload = parseNotification(event);
+                if (payload) {
                   if (payload.kind?.type === 'RateLimited') {
                     const variant = payload.kind.status === 'rejected' ? 'error' : 'info';
                     useToastStore.getState().add(variant, payload.message);
@@ -116,6 +119,7 @@ export function DataProvider({ children }: { children: React.ReactNode }): React
                   log.warn('[DataProvider] unexpected notification shape:', event.data);
                 }
                 break;
+              }
             }
             processNotification(event);
           },

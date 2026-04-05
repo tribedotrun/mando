@@ -135,8 +135,6 @@ prompts:
 
     <user_topic>{{ topic }}</user_topic>
 
-
-
     ## Tools
 
     1. **WebSearch** — fast, built-in web search for discovery. Max 10 searches.

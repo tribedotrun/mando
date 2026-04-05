@@ -1,4 +1,4 @@
-import React, { useCallback } from 'react';
+import React, { useCallback, useState } from 'react';
 import { apiPost } from '#renderer/api';
 import { useSettingsStore } from '#renderer/stores/settingsStore';
 import { useToastStore } from '#renderer/stores/toastStore';
@@ -6,18 +6,35 @@ import { useToastStore } from '#renderer/stores/toastStore';
 export function TaskEmptyState(): React.ReactElement {
   const projects = useSettingsStore((s) => s.config.captain?.projects);
   const hasProjects = projects && Object.keys(projects).length > 0;
+  const [adding, setAdding] = useState(false);
 
   const handleAddProject = useCallback(async () => {
-    const dir = await window.mandoAPI.selectDirectory();
+    if (adding) return;
+
+    // Run the picker outside the loading state so the button doesn't flash
+    // "Adding…" while the user is still browsing. Errors from the picker
+    // itself (IPC failure) are surfaced as a toast.
+    let dir: string | null;
+    try {
+      dir = await window.mandoAPI.selectDirectory();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Directory picker failed';
+      useToastStore.getState().add('error', msg);
+      return;
+    }
     if (!dir) return;
+
+    setAdding(true);
     try {
       await apiPost('/api/projects', { path: dir });
       useSettingsStore.getState().load();
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to add project';
       useToastStore.getState().add('error', msg);
+    } finally {
+      setAdding(false);
     }
-  }, []);
+  }, [adding]);
 
   return (
     <div className="flex flex-col items-center justify-center py-16">
@@ -50,17 +67,18 @@ export function TaskEmptyState(): React.ReactElement {
       {!hasProjects && (
         <button
           onClick={handleAddProject}
-          className="text-[13px] font-semibold transition-colors hover:brightness-110 active:brightness-90"
+          disabled={adding}
+          className="text-[13px] font-semibold transition-colors hover:brightness-110 active:brightness-90 disabled:opacity-50"
           style={{
             padding: '8px 20px',
             borderRadius: 'var(--radius-button)',
             background: 'var(--color-accent)',
             color: 'var(--color-bg)',
             border: 'none',
-            cursor: 'pointer',
+            cursor: adding ? 'default' : 'pointer',
           }}
         >
-          Add project
+          {adding ? 'Adding…' : 'Add project'}
         </button>
       )}
     </div>

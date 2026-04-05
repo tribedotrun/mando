@@ -53,7 +53,7 @@ export function PrTab({
     return (
       <div
         className="flex items-center gap-2 text-caption"
-        style={{ color: 'var(--color-text-3)' }}
+        style={{ color: 'var(--color-text-3)', minHeight: '120px' }}
       >
         <span
           className="inline-block h-3 w-3 animate-spin rounded-full"
