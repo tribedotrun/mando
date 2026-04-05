@@ -28,9 +28,7 @@ const HELP: &str = "\u{1f99e} <b>Tasks</b>\n\
 \u{1f50d} <b>Scout</b>\n\
 /scout_add &lt;url&gt; \u{2014} Add URL to Scout\n\
 /scout_research &lt;topic&gt; \u{2014} AI-powered link discovery\n\
-/scout_publish &lt;id&gt; \u{2014} Publish extracted Scout article\n\
-/scout_list [status] \u{2014} List scout items with summaries\n\
-/scout_simple [status] \u{2014} List scout items (compact)\n\
+/scout_list [status] \u{2014} List scout items\n\
 /scout_saved \u{2014} View saved items\n\
 /scout \u{2014} Review processed items (swipe)\n\n\
 \u{1f4ac} <b>Interactive</b>\n\

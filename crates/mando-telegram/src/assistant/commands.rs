@@ -12,7 +12,7 @@ use crate::bot::TelegramBot;
 use crate::gateway_paths as paths;
 
 // Re-export scout commands used by the dispatcher.
-pub use super::scout_commands::{cmd_list, cmd_research, cmd_scout, edit_list_page, show_card};
+pub use super::scout_commands::{cmd_research, cmd_scout, show_card};
 fn parse_id_list(raw: &str) -> Vec<i64> {
     raw.split(|ch: char| ch.is_whitespace() || ch == ',')
         .filter(|part| !part.is_empty())
@@ -107,7 +107,7 @@ async fn addlink_batch(bot: &mut TelegramBot, chat_id: &str, urls: &[&str]) -> R
     Ok(())
 }
 
-// ── /scout_simple ──────────────────────────────────────────────────
+// ── /scout_list ───────────────────────────────────────────────────
 
 pub async fn cmd_simplelist(bot: &mut TelegramBot, chat_id: &str, args: &str) -> Result<()> {
     if let Err(e) = send_simplelist_page(bot, chat_id, args.trim(), 0).await {
@@ -327,60 +327,6 @@ pub async fn cmd_bulk_delete(bot: &mut TelegramBot, chat_id: &str, args: &str) -
         bot,
         chat_id,
         &format!("🗑️ Deleted {} Scout item(s).", count),
-    )
-    .await?;
-    Ok(())
-}
-
-// ── /scout_publish ─────────────────────────────────────────────────
-
-pub async fn cmd_publish(bot: &mut TelegramBot, chat_id: &str, args: &str) -> Result<()> {
-    let id = args.trim().trim_start_matches('#');
-    if id.is_empty() {
-        send_html(
-            bot,
-            chat_id,
-            "Usage: /scout_publish &lt;id&gt;\nExample: /scout_publish 42",
-        )
-        .await?;
-        return Ok(());
-    }
-
-    let id_num = match id.parse::<i64>() {
-        Ok(id_num) => id_num,
-        Err(_) => {
-            send_html(
-                bot,
-                chat_id,
-                &format!("⚠️ Invalid Scout item ID: {}", escape_html(id)),
-            )
-            .await?;
-            return Ok(());
-        }
-    };
-
-    let result = bot
-        .gw()
-        .post(&paths::scout_telegraph(id_num), &serde_json::json!({}))
-        .await?;
-    let url = result["url"].as_str().unwrap_or_default();
-    if url.is_empty() {
-        send_html(
-            bot,
-            chat_id,
-            "❌ Publish failed: daemon returned no article URL.",
-        )
-        .await?;
-        return Ok(());
-    }
-
-    send_html(
-        bot,
-        chat_id,
-        &format!(
-            "📚 Published Scout article for #{id_num}: <a href=\"{}\">open article</a>",
-            escape_html(url)
-        ),
     )
     .await?;
     Ok(())

@@ -504,10 +504,7 @@ mod tests {
     fn render_captain_merge_prompt_for_blocking_ci() {
         let wf = CaptainWorkflow::compiled_default();
         let mut vars = HashMap::new();
-        vars.insert(
-            "pr_url",
-            "https://github.com/tribedotrun/mando/pull/334",
-        );
+        vars.insert("pr_url", "https://github.com/tribedotrun/mando/pull/334");
         vars.insert("repo", "tribedotrun/mando");
         vars.insert("pr_number", "334");
         vars.insert("title", "Remove Triage all pending button from Scout page");
@@ -518,9 +515,7 @@ mod tests {
         assert!(rendered.contains("--required --watch --fail-fast"));
         assert!(rendered.contains("15 minutes"));
         assert!(rendered.contains("gh pr merge 334 --repo tribedotrun/mando --squash"));
-        assert!(
-            rendered.contains("gh pr merge 334 --repo tribedotrun/mando --squash --admin")
-        );
+        assert!(rendered.contains("gh pr merge 334 --repo tribedotrun/mando --squash --admin"));
         assert!(rendered.contains("Do not use `/ci`"));
 
         assert!(!rendered.contains("Read `.github/workflows/` to understand how CI is triggered"));

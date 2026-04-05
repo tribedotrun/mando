@@ -37,9 +37,7 @@ pub(crate) const REGISTERED_COMMANDS: &[(&str, &str)] = &[
     ("sessions", "Show recent CC sessions"),
     ("scout_add", "Add URL to Scout"),
     ("scout_research", "AI-powered link discovery on a topic"),
-    ("scout_publish", "Publish a Scout article"),
-    ("scout_list", "List scout items with summaries"),
-    ("scout_simple", "List scout items (compact)"),
+    ("scout_list", "List scout items"),
     ("scout_saved", "View saved scout items"),
     ("scout", "Review processed items (swipe)"),
 ];
@@ -81,10 +79,10 @@ impl TelegramBot {
             // Scout commands
             "scout_add" => crate::assistant::commands::cmd_addlink(self, chat_id, args).await,
             "scout_research" => crate::assistant::commands::cmd_research(self, chat_id, args).await,
-            "scout_publish" => crate::assistant::commands::cmd_publish(self, chat_id, args).await,
-            "scout_list" => crate::assistant::commands::cmd_list(self, chat_id, args).await,
-            "scout_simple" => crate::assistant::commands::cmd_simplelist(self, chat_id, args).await,
-            "scout_saved" => crate::assistant::commands::cmd_list(self, chat_id, "saved").await,
+            "scout_list" => crate::assistant::commands::cmd_simplelist(self, chat_id, args).await,
+            "scout_saved" => {
+                crate::assistant::commands::cmd_simplelist(self, chat_id, "saved").await
+            }
             "scout" if args.is_empty() => {
                 crate::assistant::commands::cmd_scout(self, chat_id).await
             }
@@ -185,11 +183,10 @@ mod tests {
             assert!(names.contains(command), "missing /{command} registration");
         }
 
-        for command in ["scout_add", "scout_research", "scout_publish", "scout"] {
+        for command in ["scout_add", "scout_research", "scout"] {
             let capability = match command {
                 "scout_add" => "add",
                 "scout_research" => "research",
-                "scout_publish" => "publish_article",
                 "scout" => "read",
                 other => other,
             };

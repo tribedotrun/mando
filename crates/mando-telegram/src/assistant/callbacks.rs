@@ -89,22 +89,12 @@ pub async fn handle_callback(bot: &mut TelegramBot, cb: &Value) -> Result<()> {
         return Ok(());
     }
 
-    // Pagination callbacks: dg:page (summary list), dg:cpage (compact list)
-    if action == "page" || action == "cpage" {
+    // Pagination callback: dg:cpage (list pagination)
+    if action == "cpage" {
         bot.api.answer_callback_query(cb_id, None).await?;
         let page: usize = parts.get(2).and_then(|s| s.parse().ok()).unwrap_or(0);
         let status_filter = parts.get(3).copied().unwrap_or("");
-        if action == "cpage" {
-            return super::commands::edit_simplelist_page(
-                bot,
-                &chat_id,
-                message_id,
-                status_filter,
-                page,
-            )
-            .await;
-        }
-        return super::scout_commands::edit_list_page(
+        return super::commands::edit_simplelist_page(
             bot,
             &chat_id,
             message_id,
