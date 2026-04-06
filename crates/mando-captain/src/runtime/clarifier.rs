@@ -1,11 +1,9 @@
 //! Clarification flow — single-turn and multi-turn via unified endpoint.
 
-use std::collections::HashMap;
-use std::time::Duration;
-
 use anyhow::Result;
 use mando_config::workflow::CaptainWorkflow;
 use mando_types::Task;
+use rustc_hash::FxHashMap;
 use tracing::{info, warn};
 
 use mando_cc::{CcConfig, CcOneShot};
@@ -27,7 +25,7 @@ pub(crate) async fn run_clarification(
     let prompt = build_clarifier_prompt(item, None, workflow)?;
 
     // Resolve project cwd so the clarifier can read project files.
-    let cwd = resolve_clarifier_cwd(item, config);
+    let cwd = resolve_clarifier_cwd(item, config)?;
 
     let task_id = item.id.to_string();
     let valid_names: Vec<String> = config
@@ -40,7 +38,7 @@ pub(crate) async fn run_clarification(
 
     let mut builder = CcConfig::builder()
         .model(&workflow.models.clarifier)
-        .timeout(Duration::from_secs(workflow.agent.clarifier_timeout_s))
+        .timeout(workflow.agent.clarifier_timeout_s)
         .caller("clarifier")
         .task_id(&task_id)
         .cwd(cwd.clone())
@@ -53,11 +51,11 @@ pub(crate) async fn run_clarification(
         Ok(result) => result,
         Err(e) => {
             warn!(module = "clarifier", title = %item.title, error = %e, "CC failed");
-            return Err(e);
+            return Err(e.into());
         }
     };
 
-    crate::io::headless_cc::log_cc_session(
+    if let Err(e) = crate::io::headless_cc::log_cc_session(
         pool,
         &crate::io::headless_cc::SessionLogEntry {
             session_id: &result.session_id,
@@ -72,7 +70,10 @@ pub(crate) async fn run_clarification(
             worker_name: "",
         },
     )
-    .await;
+    .await
+    {
+        warn!(module = "clarifier", error = %e, "failed to log clarifier session");
+    }
 
     let text = result
         .structured
@@ -106,12 +107,14 @@ pub(crate) async fn run_clarification(
         {
             Ok(corrected) => return Ok(corrected),
             Err(e) => {
-                warn!(
-                    module = "clarifier",
-                    error = %e,
-                    "correction retry failed — clearing invalid repo"
-                );
-                parsed.repo = None;
+                // Previously this silently cleared parsed.repo and returned
+                // the invalid clarifier result, which meant downstream
+                // dispatch would run against a nonsense project context.
+                // Fail the clarification instead so the caller escalates.
+                return Err(anyhow::anyhow!(
+                    "clarifier correction retry failed (invalid repo {:?}): {e}",
+                    parsed.repo
+                ));
             }
         }
     }
@@ -174,22 +177,21 @@ pub fn format_questions_text(questions: &[ClarifierQuestion]) -> String {
 // ── Shared helpers ──────────────────────────────────────────────────
 
 /// Resolve the working directory for the clarifier based on the item's project.
+///
+/// Returns `Err` if the project cannot be resolved. Previously this fell back
+/// to `data_dir()` which gave the clarifier no access to project files and
+/// silently produced bogus results; callers now escalate instead.
 pub(crate) fn resolve_clarifier_cwd(
     item: &Task,
     config: &mando_config::Config,
-) -> std::path::PathBuf {
-    if let Some((_key, proj)) =
-        mando_config::resolve_project_config(item.project.as_deref(), config)
-    {
-        mando_config::expand_tilde(&proj.path)
-    } else {
-        warn!(
-            module = "clarifier",
-            project = ?item.project,
-            title = %item.title,
-            "could not resolve project for clarifier cwd — using data dir as fallback"
-        );
-        mando_config::data_dir()
+) -> Result<std::path::PathBuf> {
+    match mando_config::resolve_project_config(item.project.as_deref(), config) {
+        Some((_key, proj)) => Ok(mando_config::expand_tilde(&proj.path)),
+        None => Err(anyhow::anyhow!(
+            "could not resolve project {:?} for clarifier cwd on item {:?}",
+            item.project.as_deref().unwrap_or("<unset>"),
+            item.title
+        )),
     }
 }
 
@@ -231,7 +233,7 @@ fn build_clarifier_prompt(
         })
         .unwrap_or_default();
 
-    let mut vars = HashMap::new();
+    let mut vars: FxHashMap<&str, &str> = FxHashMap::default();
     vars.insert("title", item.title.as_str());
     vars.insert("context", context);
     vars.insert("repo", repo);
@@ -260,7 +262,7 @@ pub(crate) fn build_interactive_clarifier_turn_prompt(
         .map(format_questions_text)
         .unwrap_or_else(|| "(none)".to_string());
 
-    let mut vars = HashMap::new();
+    let mut vars: FxHashMap<&str, &str> = FxHashMap::default();
     vars.insert("title", item.title.as_str());
     vars.insert("details", details);
     vars.insert("current_context", current_context);
@@ -309,9 +311,9 @@ pub async fn answer_and_reclarify(
     };
     let prompt =
         build_interactive_clarifier_turn_prompt(item, workflow, answer, questions.as_deref())?;
-    let cwd = resolve_clarifier_cwd(item, config);
+    let cwd = resolve_clarifier_cwd(item, config)?;
     let task_id = item.id.to_string();
-    let timeout = Duration::from_secs(workflow.agent.clarifier_timeout_s);
+    let timeout = workflow.agent.clarifier_timeout_s;
 
     let mut builder = CcConfig::builder()
         .model(&workflow.models.clarifier)
@@ -349,7 +351,7 @@ pub async fn answer_and_reclarify(
     let result = CcOneShot::run(&prompt, builder.build()).await?;
 
     let resumed = item.session_ids.clarifier.is_some();
-    crate::io::headless_cc::log_cc_session(
+    if let Err(e) = crate::io::headless_cc::log_cc_session(
         pool,
         &crate::io::headless_cc::SessionLogEntry {
             session_id: &result.session_id,
@@ -364,7 +366,10 @@ pub async fn answer_and_reclarify(
             worker_name: "",
         },
     )
-    .await;
+    .await
+    {
+        warn!(module = "clarifier", error = %e, "failed to log clarifier session");
+    }
 
     let text = result
         .structured

@@ -3,14 +3,19 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 
 /// Run a named hook script.
+///
+/// When `fatal_on_failure` is true, a non-zero exit status is returned as an
+/// error so the caller can abort the surrounding operation. When false, the
+/// failure is logged at warn level and `Ok(())` is returned.
 pub(crate) async fn run_hook(
     hooks: &HashMap<String, String>,
     hook_name: &str,
     cwd: &Path,
     env: &HashMap<String, String>,
+    fatal_on_failure: bool,
 ) -> Result<()> {
     let script = match hooks.get(hook_name) {
         Some(s) if !s.is_empty() => s,
@@ -26,34 +31,39 @@ pub(crate) async fn run_hook(
     let output = cmd.output().await?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        tracing::warn!(
-            hook = hook_name,
-            "hook failed (non-fatal): {}",
-            stderr.chars().take(200).collect::<String>()
-        );
+        let snippet: String = stderr.chars().take(200).collect();
+        if fatal_on_failure {
+            return Err(anyhow!(
+                "hook `{}` failed (exit {:?}): {}",
+                hook_name,
+                output.status.code(),
+                snippet
+            ));
+        }
+        tracing::warn!(hook = hook_name, "hook failed (non-fatal): {}", snippet);
     }
     Ok(())
 }
 
-/// Run the pre_spawn hook.
+/// Run the pre_spawn hook (fatal — aborts spawn on failure).
 pub(crate) async fn pre_spawn(
     hooks: &HashMap<String, String>,
     cwd: &Path,
     env: &HashMap<String, String>,
 ) -> Result<()> {
-    run_hook(hooks, "pre_spawn", cwd, env).await
+    run_hook(hooks, "pre_spawn", cwd, env, true).await
 }
 
-/// Run the worker_teardown hook (no env overrides).
+/// Run the worker_teardown hook (non-fatal — failure is logged only).
 pub(crate) async fn teardown(hooks: &HashMap<String, String>, cwd: &Path) -> Result<()> {
-    run_hook(hooks, "worker_teardown", cwd, &HashMap::new()).await
+    run_hook(hooks, "worker_teardown", cwd, &HashMap::new(), false).await
 }
 
-/// Run the post_merge hook.
+/// Run the post_merge hook (fatal — aborts the surrounding merge op).
 pub(crate) async fn post_merge(
     hooks: &HashMap<String, String>,
     cwd: &Path,
     env: &HashMap<String, String>,
 ) -> Result<()> {
-    run_hook(hooks, "post_merge", cwd, env).await
+    run_hook(hooks, "post_merge", cwd, env, true).await
 }

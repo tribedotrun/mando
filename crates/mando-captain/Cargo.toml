@@ -25,5 +25,6 @@ thiserror.workspace = true
 regex = { workspace = true }
 mando-db.workspace = true
 sqlx.workspace = true
+rustc-hash.workspace = true
 futures = "0.3"
 libc = "0.2"

@@ -1,5 +1,6 @@
 //! Axum app setup — router, CORS middleware, and server bind.
 
+use std::future::Future;
 use std::sync::Arc;
 
 use arc_swap::ArcSwap;
@@ -7,6 +8,8 @@ use axum::http::{header, Method};
 use axum::routing::{delete, get, patch, post, put};
 use axum::{middleware, Router};
 use tokio::sync::{Mutex, RwLock};
+use tokio_util::sync::CancellationToken;
+use tokio_util::task::TaskTracker;
 use tower_http::cors::{AllowOrigin, CorsLayer};
 use tracing::info;
 
@@ -313,10 +316,31 @@ fn ai_routes() -> Router<AppState> {
 }
 
 /// Start the gateway HTTP server.
+///
+/// Accepts an optional graceful-shutdown future. On signal, the server drains
+/// in-flight requests and returns. If `shutdown` is `None`, the server runs
+/// until axum returns.
+///
+/// `unsafe_start` controls behaviour when WAL reconciliation fails on boot:
+/// - `false` (default) — refuse to start. Returns `Err`.
+/// - `true` — log the error and continue.
 pub async fn start_server(
     config: mando_config::Config,
     bus: mando_shared::EventBus,
 ) -> anyhow::Result<()> {
+    start_server_with(config, bus, std::future::pending::<()>(), false).await
+}
+
+/// Full `start_server` with explicit shutdown signal and unsafe-start gate.
+pub async fn start_server_with<F>(
+    config: mando_config::Config,
+    bus: mando_shared::EventBus,
+    shutdown: F,
+    unsafe_start: bool,
+) -> anyhow::Result<()>
+where
+    F: Future<Output = ()> + Send + 'static,
+{
     let host = config.gateway.dashboard.host.clone();
     let port = config.gateway.dashboard.port;
     let runtime_paths = mando_config::resolve_captain_runtime_paths(&config);
@@ -332,30 +356,65 @@ pub async fn start_server(
     let config_arc = Arc::new(ArcSwap::from_pointee(config));
 
     let config = config_arc.load_full();
-    let tick_interval_s = config.captain.tick_interval_s.max(10);
+    let raw_tick = config.captain.tick_interval_s;
+    let tick_interval_s = raw_tick.max(10);
+    if raw_tick != tick_interval_s {
+        tracing::warn!(
+            module = "startup",
+            configured = raw_tick,
+            clamped = tick_interval_s,
+            "tick_interval_s below minimum 10s, clamped"
+        );
+    }
 
     // Clean dead PIDs first so reconciliation sees accurate liveness state.
-    mando_captain::io::pid_registry::cleanup_dead();
+    if let Err(e) = mando_captain::io::pid_registry::cleanup_dead() {
+        tracing::warn!(module = "startup", error = %e, "pid_registry cleanup_dead failed");
+    }
 
-    // Reconcile incomplete operations from previous run (WAL recovery).
+    // Reconcile incomplete operations from previous run (WAL recovery). By
+    // default, refuse to start if reconciliation fails — booting with an
+    // unreconciled WAL can silently duplicate or lose work. Override with
+    // `unsafe_start: true` only after inspecting the error.
     if let Err(e) =
         mando_captain::runtime::reconciler::reconcile_on_startup(&config, db.pool()).await
     {
-        tracing::error!(module = "startup", error = %e, "reconciliation failed");
+        if unsafe_start {
+            tracing::error!(
+                module = "startup",
+                error = %e,
+                "reconciliation failed — continuing under unsafe_start"
+            );
+        } else {
+            tracing::error!(
+                module = "startup",
+                error = %e,
+                "reconciliation failed — refusing to start (set MANDO_UNSAFE_START=1 to override)"
+            );
+            return Err(e);
+        }
     }
 
     let captain_wf = mando_config::load_captain_workflow(
         &mando_config::captain_workflow_path(),
         config.captain.tick_interval_s,
-    );
-    let scout_wf = mando_config::load_scout_workflow(&mando_config::scout_workflow_path(), &config);
+    )?;
+    let scout_wf =
+        mando_config::load_scout_workflow(&mando_config::scout_workflow_path(), &config)?;
     let cc_state_dir = mando_config::state_dir().join("ops_sessions").join("cc");
-    let mut cc_session_mgr = mando_captain::io::cc_session::CcSessionManager::new(
+    let cc_session_mgr = mando_captain::io::cc_session::CcSessionManager::new(
         cc_state_dir,
         "sonnet",
         db.pool().clone(),
     );
-    cc_session_mgr.recover();
+    let cc_recovered = cc_session_mgr.recover();
+    if cc_recovered.recovered > 0 || cc_recovered.corrupt > 0 {
+        tracing::info!(
+            recovered = cc_recovered.recovered,
+            corrupt = cc_recovered.corrupt,
+            "recovered sessions from disk"
+        );
+    }
 
     let state = AppState {
         config: config_arc,
@@ -364,23 +423,40 @@ pub async fn start_server(
         scout_workflow: Arc::new(ArcSwap::from_pointee(scout_wf)),
         config_write_mu: Arc::new(Mutex::new(())),
         bus: bus_arc.clone(),
-        cc_session_mgr: Arc::new(RwLock::new(cc_session_mgr)),
+        cc_session_mgr: Arc::new(cc_session_mgr),
         task_store: task_store_arc,
         db,
         qa_session_mgr: mando_scout::runtime::qa::default_session_manager(),
         start_time: std::time::Instant::now(),
         dev_mode: false,
+        task_tracker: TaskTracker::new(),
+        cancellation_token: CancellationToken::new(),
     };
 
     // Spawn captain tick loop (always runs; respects auto_schedule dynamically).
     crate::background_tasks::spawn_auto_tick(&state, tick_interval_s);
 
+    let tracker = state.task_tracker.clone();
+    let cancel = state.cancellation_token.clone();
     let app = build_router(state);
     let addr = format!("{host}:{port}");
     info!("gateway listening on {addr}");
 
     let listener = tokio::net::TcpListener::bind(&addr).await?;
-    axum::serve(listener, app).await?;
+    // Wrap the caller-supplied shutdown future so cancelling the token fires
+    // the cooperative-abort signal as soon as shutdown starts.
+    let graceful = async move {
+        shutdown.await;
+        cancel.cancel();
+    };
+    axum::serve(listener, app)
+        .with_graceful_shutdown(graceful)
+        .await?;
+
+    // Wait for tracked spawns to finish before returning so shutdown is
+    // ordered and no background work is left dangling.
+    tracker.close();
+    tracker.wait().await;
     Ok(())
 }
 
@@ -419,12 +495,14 @@ mod tests {
             )),
             config_write_mu: Arc::new(Mutex::new(())),
             bus: Arc::new(bus),
-            cc_session_mgr: Arc::new(RwLock::new(cc_session_mgr)),
+            cc_session_mgr: Arc::new(cc_session_mgr),
             task_store: Arc::new(RwLock::new(task_store)),
             db,
             qa_session_mgr: mando_scout::runtime::qa::default_session_manager(),
             start_time: std::time::Instant::now(),
             dev_mode: false,
+            task_tracker: TaskTracker::new(),
+            cancellation_token: CancellationToken::new(),
         }
     }
 

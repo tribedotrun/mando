@@ -101,32 +101,34 @@ pub fn try_validate_agent_config(agent: &AgentConfig, tick_interval_s: u64) -> R
     if agent.max_interventions == 0 {
         errors.push("max_interventions must be > 0".into());
     }
-    if agent.stale_threshold_s <= 0.0 {
+    if agent.stale_threshold_s.is_zero() {
         errors.push("stale_threshold_s must be > 0".into());
     }
-    if agent.worker_timeout_s <= 0.0 {
+    if agent.worker_timeout_s.is_zero() {
         errors.push("worker_timeout_s must be > 0".into());
     }
-    if agent.captain_review_timeout_s == 0 {
+    if agent.captain_review_timeout_s.is_zero() {
         errors.push("captain_review_timeout_s must be > 0".into());
     }
 
     // Relative checks only when individual values are positive.
-    if agent.worker_timeout_s > 0.0
-        && agent.stale_threshold_s > 0.0
+    if !agent.worker_timeout_s.is_zero()
+        && !agent.stale_threshold_s.is_zero()
         && agent.worker_timeout_s <= agent.stale_threshold_s
     {
         errors.push(format!(
-            "worker_timeout_s ({}) must be > stale_threshold_s ({})",
-            agent.worker_timeout_s, agent.stale_threshold_s
+            "worker_timeout_s ({}s) must be > stale_threshold_s ({}s)",
+            agent.worker_timeout_s.as_secs_f64(),
+            agent.stale_threshold_s.as_secs_f64()
         ));
     }
 
-    let min_stale = 2.0 * tick_interval_s as f64;
-    if agent.stale_threshold_s > 0.0 && agent.stale_threshold_s < min_stale {
+    let min_stale = std::time::Duration::from_secs(2 * tick_interval_s);
+    if !agent.stale_threshold_s.is_zero() && agent.stale_threshold_s < min_stale {
         errors.push(format!(
-            "stale_threshold_s ({}) must be >= 2 * tick_interval_s ({})",
-            agent.stale_threshold_s, min_stale
+            "stale_threshold_s ({}s) must be >= 2 * tick_interval_s ({}s)",
+            agent.stale_threshold_s.as_secs_f64(),
+            min_stale.as_secs_f64()
         ));
     }
 
@@ -192,18 +194,20 @@ mod tests {
     #[test]
     #[should_panic(expected = "worker_timeout_s")]
     fn worker_timeout_not_greater_than_stale_panics() {
+        use std::time::Duration;
         let mut ac = default_agent();
-        ac.worker_timeout_s = 100.0;
-        ac.stale_threshold_s = 100.0; // equal, not greater
+        ac.worker_timeout_s = Duration::from_secs(100);
+        ac.stale_threshold_s = Duration::from_secs(100); // equal, not greater
         validate_agent_config(&ac, 30);
     }
 
     #[test]
     #[should_panic(expected = "stale_threshold_s")]
     fn stale_threshold_below_2x_tick_panics() {
+        use std::time::Duration;
         let mut ac = default_agent();
-        ac.stale_threshold_s = 50.0; // < 2 * 30 = 60
-        ac.worker_timeout_s = 21600.0;
+        ac.stale_threshold_s = Duration::from_secs(50); // < 2 * 30 = 60
+        ac.worker_timeout_s = Duration::from_secs(21600);
         validate_agent_config(&ac, 30);
     }
 
@@ -211,7 +215,7 @@ mod tests {
     #[should_panic(expected = "captain_review_timeout_s must be > 0")]
     fn zero_captain_review_timeout_panics() {
         let mut ac = default_agent();
-        ac.captain_review_timeout_s = 0;
+        ac.captain_review_timeout_s = std::time::Duration::ZERO;
         validate_agent_config(&ac, 30);
     }
 

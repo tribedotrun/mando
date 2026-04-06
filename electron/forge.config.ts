@@ -6,7 +6,7 @@ import { MakerZIP } from '@electron-forge/maker-zip';
 import { PublisherGithub } from '@electron-forge/publisher-github';
 import { FuseV1Options, FuseVersion } from '@electron/fuses';
 
-const VALID_MODES = ['production', 'dev', 'prod-local', 'sandbox'] as const;
+const VALID_MODES = ['production', 'dev', 'prod-local', 'sandbox', 'preview'] as const;
 const rawMode = process.env.MANDO_APP_MODE || 'production';
 if (!VALID_MODES.includes(rawMode as (typeof VALID_MODES)[number])) {
   throw new Error(`Invalid MANDO_APP_MODE="${rawMode}". Must be: ${VALID_MODES.join(', ')}`);
@@ -16,11 +16,13 @@ const APP_NAMES: Record<string, string> = {
   dev: 'Mando (Dev)',
   'prod-local': 'Mando (Prod Local)',
   sandbox: 'Mando (Sandbox)',
+  preview: 'Mando (Preview)',
 };
 const BUNDLE_IDS: Record<string, string> = {
   dev: 'run.tribe.mando-dev',
   'prod-local': 'run.tribe.mando-prod-local',
   sandbox: 'run.tribe.mando-sandbox',
+  preview: 'build.mando.preview',
 };
 const appName = APP_NAMES[appMode] || 'Mando';
 const bundleId = BUNDLE_IDS[appMode] || 'run.tribe.mando';

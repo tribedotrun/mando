@@ -12,9 +12,7 @@ use crate::gateway_paths as paths;
 use crate::http::GatewayClient;
 
 fn parse_item_id(item_id: &str) -> Result<i64> {
-    item_id
-        .parse()
-        .map_err(|_| anyhow::anyhow!("invalid item ID: {item_id}"))
+    mando_types::parse_i64_id(item_id, "item").map_err(|e| anyhow::anyhow!(e))
 }
 
 /// Look up a task by ID via the gateway HTTP API.

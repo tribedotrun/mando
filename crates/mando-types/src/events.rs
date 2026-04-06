@@ -44,32 +44,10 @@ pub struct NotificationPayload {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum NotificationKind {
-    /// Item moved to awaiting-review.
-    AwaitingReview {
-        item_id: String,
-        pr_number: Option<u32>,
-    },
-    /// Item needs human clarification.
-    ClarifierNeeded { item_id: String },
-    /// Rebase failed after retries.
-    RebaseFailed { item_id: String, pr_number: u32 },
-    /// Worker crashed and exhausted retries — escalated to human.
-    WorkerEscalated { item_id: String },
-    /// Captain review verdict rendered (approve/rework/escalate).
-    CaptainReviewVerdict {
-        item_id: String,
-        verdict: String,
-        feedback: Option<String>,
-    },
     /// Item escalated to human — includes CTO report summary.
     Escalated {
         item_id: String,
         summary: Option<String>,
-    },
-    /// Item errored during captain review.
-    Errored {
-        item_id: String,
-        error: Option<String>,
     },
     /// Item needs human clarification — includes questions.
     NeedsClarification {

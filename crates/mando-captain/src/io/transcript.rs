@@ -13,7 +13,7 @@ pub(crate) fn read_tail(path: &Path, n: usize) -> Vec<String> {
         }
     };
     let lines: Vec<&str> = content.lines().collect();
-    let start = if lines.len() > n { lines.len() - n } else { 0 };
+    let start = lines.len().saturating_sub(n);
     lines[start..].iter().map(|l| l.to_string()).collect()
 }
 

@@ -2,9 +2,23 @@
 
 CTO for your AI coding agents.
 
-Native macOS desktop app built with Electron + Rust. Standalone `mando-gw` daemon managed by launchd; Electron and CLI are thin HTTP/SSE clients. Manages a task list, spawns Claude Code workers, reviews their work, and merges PRs — all autonomously.
+Autonomously works through your backlog: assigns tasks to Claude Code agents, reviews their PRs, nudges them when they go off track, and merges when the work is ready.
 
 ![Mando](https://storage.googleapis.com/hypertribe-public/mando/readme-hero.png)
+
+## Key Features
+
+### Captain: Autonomous Agent Orchestration
+
+Captain is the tick-based engine that runs your AI coding agents end-to-end. It assigns tasks to Claude Code workers, monitors their progress, nudges stalled sessions, and intervenes when things go off track. No babysitting required.
+
+### AI Code Review
+
+Every PR goes through Captain's review pipeline before it can merge. It reads the diff, evaluates correctness and style, and either approves or escalates to you with a CTO-level report explaining exactly what needs attention.
+
+### Multi-Surface Control
+
+Manage everything from the native macOS desktop app, the `mando` CLI, or Telegram. All three are thin clients over the same HTTP/SSE API, so you get the same data and actions everywhere.
 
 ## Architecture
 
@@ -48,4 +62,4 @@ cargo nextest run --workspace --lib      # Run unit tests
 
 ## License
 
-Apache 2.0 — see [LICENSE](LICENSE).
+Apache 2.0, see [LICENSE](LICENSE).

@@ -39,10 +39,6 @@ impl ScoutDb {
         dq::get_item(&self.pool, id).await
     }
 
-    pub async fn list_items(&self, status: Option<&str>) -> Result<Vec<ScoutItem>> {
-        dq::list_items(&self.pool, status).await
-    }
-
     pub async fn list_processable(&self) -> Result<Vec<ScoutItem>> {
         dq::list_processable(&self.pool).await
     }
@@ -176,14 +172,31 @@ impl ScoutDb {
         Ok(ListResult { items, total })
     }
 
+    /// Upper bound on rows loaded into memory for a single fuzzy query.
+    ///
+    /// Scout items are typically in the low thousands; this cap is a safety
+    /// valve against unbounded memory use on very large collections. When
+    /// hit, we emit a `warn` so operators can migrate to FTS5 before the
+    /// ceiling actually bites user-visible results.
+    const FUZZY_SCAN_CAP: usize = 5000;
+
     async fn fuzzy_query(&self, q: &ListQuery) -> Result<ListResult> {
         let all = self
             .fetch_filtered(q.status.as_deref(), q.item_type.as_deref())
             .await?;
+        let loaded = all.len();
+        if loaded >= Self::FUZZY_SCAN_CAP {
+            tracing::warn!(
+                module = "scout-db",
+                loaded,
+                cap = Self::FUZZY_SCAN_CAP,
+                "scout fuzzy search loaded a large row set — consider FTS5 migration"
+            );
+        }
         let query = q.search.as_deref().unwrap_or("");
 
-        let mut scored: Vec<(ScoutItem, f64)> = Vec::new();
-        for item in all {
+        let mut scored: Vec<(ScoutItem, f64)> = Vec::with_capacity(loaded.min(256));
+        for item in all.into_iter().take(Self::FUZZY_SCAN_CAP) {
             let title_score = fuzzy_score(query, item.title.as_deref().unwrap_or(""));
             let url_score = fuzzy_score(query, &item.url);
             let best = title_score.max(url_score);
@@ -237,7 +250,7 @@ mod tests {
     #[tokio::test]
     async fn open_and_create_tables() {
         let db = test_db().await;
-        let items = db.list_items(Some("all")).await.unwrap();
+        let items = dq::list_items(db.pool(), Some("all")).await.unwrap();
         assert!(items.is_empty());
     }
 
@@ -286,11 +299,11 @@ mod tests {
         db.add_item("https://a.com", "other", None).await.unwrap();
         db.add_item("https://b.com", "other", None).await.unwrap();
 
-        let items = db.list_items(None).await.unwrap();
+        let items = dq::list_items(db.pool(), None).await.unwrap();
         assert_eq!(items.len(), 2);
 
         db.update_status(items[0].id, "archived").await.unwrap();
-        let items = db.list_items(None).await.unwrap();
+        let items = dq::list_items(db.pool(), None).await.unwrap();
         assert_eq!(items.len(), 1);
     }
 
@@ -301,11 +314,11 @@ mod tests {
         let (item_b, _) = db.add_item("https://b.com", "other", None).await.unwrap();
         db.update_status(item_b.id, "processed").await.unwrap();
 
-        let pending = db.list_items(Some("pending")).await.unwrap();
+        let pending = dq::list_items(db.pool(), Some("pending")).await.unwrap();
         assert_eq!(pending.len(), 1);
-        let processed = db.list_items(Some("processed")).await.unwrap();
+        let processed = dq::list_items(db.pool(), Some("processed")).await.unwrap();
         assert_eq!(processed.len(), 1);
-        let all = db.list_items(Some("all")).await.unwrap();
+        let all = dq::list_items(db.pool(), Some("all")).await.unwrap();
         assert_eq!(all.len(), 2);
     }
 

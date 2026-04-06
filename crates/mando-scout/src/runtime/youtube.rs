@@ -83,32 +83,31 @@ pub async fn extract_youtube_transcript(url: &str) -> Result<String> {
 
 /// Parse WebVTT subtitle content into plain text.
 fn parse_vtt(vtt: &str) -> String {
-    let mut lines = Vec::new();
-    let mut prev_line = String::new();
+    let mut lines: Vec<String> = vtt
+        .lines()
+        .filter_map(|line| {
+            let trimmed = line.trim();
+            // Skip headers, timestamps, and empty lines.
+            if trimmed.is_empty()
+                || trimmed.starts_with("WEBVTT")
+                || trimmed.starts_with("Kind:")
+                || trimmed.starts_with("Language:")
+                || trimmed.contains("-->")
+                || trimmed.parse::<u32>().is_ok()
+            {
+                return None;
+            }
+            let clean = strip_vtt_tags(trimmed);
+            if clean.is_empty() {
+                None
+            } else {
+                Some(clean)
+            }
+        })
+        .collect();
 
-    for line in vtt.lines() {
-        let trimmed = line.trim();
-        // Skip headers, timestamps, and empty lines.
-        if trimmed.is_empty()
-            || trimmed.starts_with("WEBVTT")
-            || trimmed.starts_with("Kind:")
-            || trimmed.starts_with("Language:")
-            || trimmed.contains("-->")
-            || trimmed.parse::<u32>().is_ok()
-        {
-            continue;
-        }
-
-        // Strip VTT formatting tags.
-        let clean = strip_vtt_tags(trimmed);
-        if clean.is_empty() || clean == prev_line {
-            continue;
-        }
-
-        prev_line = clean.clone();
-        lines.push(clean);
-    }
-
+    // Collapse consecutive duplicate caption lines.
+    lines.dedup();
     lines.join(" ")
 }
 

@@ -95,7 +95,7 @@ pub struct Notifier {
 
 impl Notifier {
     /// Clone the inner EventBus handle (cheap Arc clone).
-    pub fn clone_bus(&self) -> Arc<EventBus> {
+    pub(crate) fn clone_bus(&self) -> Arc<EventBus> {
         Arc::clone(&self.bus)
     }
 
@@ -373,12 +373,7 @@ impl Notifier {
                 utilization: rl.utilization,
                 resets_at: rl.resets_at,
                 rate_limit_type: rl.rate_limit_type.clone(),
-                overage_status: rl.overage_status.as_ref().map(|s| match s {
-                    mando_cc::RateLimitStatus::Allowed => "allowed".to_string(),
-                    mando_cc::RateLimitStatus::AllowedWarning => "allowed_warning".to_string(),
-                    mando_cc::RateLimitStatus::Rejected => "rejected".to_string(),
-                    mando_cc::RateLimitStatus::Unknown(v) => v.clone(),
-                }),
+                overage_status: rl.overage_status.as_ref().map(|s| s.as_str().to_string()),
                 overage_resets_at: rl.overage_resets_at,
                 overage_disabled_reason: rl.overage_disabled_reason.clone(),
             },
@@ -635,7 +630,7 @@ mod tests {
                 overage_disabled_reason: None,
                 raw: serde_json::Value::Null,
             }),
-            pid: 0,
+            pid: mando_types::Pid::new(0),
         }
     }
 

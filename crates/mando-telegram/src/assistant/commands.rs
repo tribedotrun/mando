@@ -13,12 +13,6 @@ use crate::gateway_paths as paths;
 
 // Re-export scout commands used by the dispatcher.
 pub use super::scout_commands::{cmd_research, cmd_scout, show_card};
-fn parse_id_list(raw: &str) -> Vec<i64> {
-    raw.split(|ch: char| ch.is_whitespace() || ch == ',')
-        .filter(|part| !part.is_empty())
-        .filter_map(|part| part.trim_start_matches('#').parse::<i64>().ok())
-        .collect()
-}
 
 // ── /scout_add ─────────────────────────────────────────────────────
 
@@ -260,75 +254,6 @@ pub async fn edit_simplelist_page(
             }
         }
     }
-    Ok(())
-}
-
-// ── bulkstatus (removed from TG, handler kept for reuse) ──────────
-
-pub async fn cmd_bulk_status(bot: &mut TelegramBot, chat_id: &str, args: &str) -> Result<()> {
-    let mut parts = args.split_whitespace();
-    let Some(status) = parts.next() else {
-        send_html(
-            bot,
-            chat_id,
-            "Usage: /bulkstatus &lt;pending|processed|saved|archived&gt; &lt;id...&gt;\nExample: /bulkstatus archived 12 14 18",
-        )
-        .await?;
-        return Ok(());
-    };
-
-    let ids = parse_id_list(&parts.collect::<Vec<_>>().join(" "));
-    if ids.is_empty() {
-        send_html(bot, chat_id, "Provide at least one Scout item ID.").await?;
-        return Ok(());
-    }
-    let count = ids.len();
-
-    bot.gw()
-        .post(
-            "/api/scout/bulk",
-            &serde_json::json!({"ids": ids, "updates": {"status": status}}),
-        )
-        .await?;
-
-    send_html(
-        bot,
-        chat_id,
-        &format!(
-            "✅ Updated {} Scout item(s) to <b>{}</b>.",
-            count,
-            escape_html(status)
-        ),
-    )
-    .await?;
-    Ok(())
-}
-
-// ── bulkdelete (removed from TG, handler kept for reuse) ──────────
-
-pub async fn cmd_bulk_delete(bot: &mut TelegramBot, chat_id: &str, args: &str) -> Result<()> {
-    let ids = parse_id_list(args);
-    if ids.is_empty() {
-        send_html(
-            bot,
-            chat_id,
-            "Usage: /bulkdelete &lt;id...&gt;\nExample: /bulkdelete 12 14 18",
-        )
-        .await?;
-        return Ok(());
-    }
-    let count = ids.len();
-
-    bot.gw()
-        .post("/api/scout/bulk-delete", &serde_json::json!({"ids": ids}))
-        .await?;
-
-    send_html(
-        bot,
-        chat_id,
-        &format!("🗑️ Deleted {} Scout item(s).", count),
-    )
-    .await?;
     Ok(())
 }
 

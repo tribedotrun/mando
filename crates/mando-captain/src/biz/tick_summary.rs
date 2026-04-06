@@ -38,10 +38,9 @@ pub(crate) fn format_tick_result(result: &TickResult) -> String {
     }
 
     if !result.tasks.is_empty() {
-        let mut pairs: Vec<_> = result.tasks.iter().collect();
-        pairs.sort_by(|(a, _), (b, _)| a.cmp(b));
-        let summary = pairs
-            .iter()
+        let sorted: std::collections::BTreeMap<_, _> = result.tasks.iter().collect();
+        let summary = sorted
+            .into_iter()
             .map(|(k, v)| format!("{}={}", k, v))
             .collect::<Vec<_>>()
             .join(", ");

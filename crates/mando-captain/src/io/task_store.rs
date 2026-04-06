@@ -2,13 +2,12 @@
 
 use std::collections::HashMap;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use mando_db::queries::{rebase, sessions, tasks};
 use mando_types::rebase_state::RebaseState;
 use mando_types::session::SessionEntry;
 use mando_types::task::{Task, TaskRouting, TaskUpdateError};
 use sqlx::SqlitePool;
-use tracing::warn;
 
 pub struct TaskStore {
     pool: SqlitePool,
@@ -27,19 +26,20 @@ impl TaskStore {
         tasks::routing(&self.pool).await
     }
 
+    #[must_use = "find_by_id returns a Future that must be awaited"]
     pub async fn find_by_id(&self, id: i64) -> Result<Option<Task>> {
         tasks::find_by_id(&self.pool, id).await
     }
 
     pub async fn load_all(&self) -> Result<Vec<Task>> {
         let mut tasks = tasks::load_all(&self.pool).await?;
-        hydrate_rebase_state(&self.pool, &mut tasks).await;
+        hydrate_rebase_state(&self.pool, &mut tasks).await?;
         Ok(tasks)
     }
 
     pub async fn load_all_with_archived(&self) -> Result<Vec<Task>> {
         let mut tasks = tasks::load_all_with_archived(&self.pool).await?;
-        hydrate_rebase_state(&self.pool, &mut tasks).await;
+        hydrate_rebase_state(&self.pool, &mut tasks).await?;
         Ok(tasks)
     }
 
@@ -94,8 +94,8 @@ impl TaskStore {
         Ok(())
     }
 
-    pub(crate) async fn archive_terminal(&self, grace_secs: u64) -> Result<usize> {
-        tasks::archive_terminal(&self.pool, grace_secs).await
+    pub(crate) async fn archive_terminal(&self, grace: std::time::Duration) -> Result<usize> {
+        tasks::archive_terminal(&self.pool, grace.as_secs()).await
     }
 
     /// Merge tick-changed items into the store, preserving concurrent human edits.
@@ -104,6 +104,7 @@ impl TaskStore {
     /// For items without a snapshot (new items), upserts directly.
     /// All writes are wrapped in a single transaction for atomicity.
     /// Also persists rebase state changes to the `task_rebase_state` table.
+    /// Any rebase state error fails the whole merge so the tick reports it.
     pub(crate) async fn merge_changed_items(
         &self,
         pre_tick_snapshot: &HashMap<i64, serde_json::Value>,
@@ -115,10 +116,12 @@ impl TaskStore {
             changed_items,
             merge_task_changes,
         )
-        .await?;
+        .await
+        .context("merge_changed_items: task update transaction")?;
 
         // Persist rebase state for any task that has rebase fields set.
         // Delete stale rebase state for tasks where all fields are cleared.
+        // Errors here propagate; the tick must not silently drop rebase state.
         for task in changed_items {
             if task.rebase_worker.is_some()
                 || task.rebase_retries > 0
@@ -131,13 +134,13 @@ impl TaskStore {
                     retries: task.rebase_retries,
                     head_sha: task.rebase_head_sha.clone(),
                 };
-                if let Err(e) = rebase::upsert(&self.pool, &state).await {
-                    warn!(task_id = task.id, error = %e, "failed to persist rebase state");
-                }
+                rebase::upsert(&self.pool, &state)
+                    .await
+                    .with_context(|| format!("persist rebase state for task {}", task.id))?;
             } else if task.id > 0 {
-                if let Err(e) = rebase::delete(&self.pool, task.id).await {
-                    warn!(task_id = task.id, error = %e, "failed to delete cleared rebase state");
-                }
+                rebase::delete(&self.pool, task.id)
+                    .await
+                    .with_context(|| format!("delete cleared rebase state for task {}", task.id))?;
             }
         }
 
@@ -163,6 +166,12 @@ impl TaskStore {
     // -- Session methods --
 
     pub async fn upsert_session(&self, entry: &SessionEntry) -> Result<()> {
+        let status: mando_types::SessionStatus = entry.status.parse().map_err(|e| {
+            anyhow::anyhow!(
+                "upsert_session: invalid session status {:?}: {e}",
+                entry.status
+            )
+        })?;
         sessions::upsert_session(
             &self.pool,
             &sessions::SessionUpsert {
@@ -171,10 +180,7 @@ impl TaskStore {
                 caller: &entry.caller,
                 cwd: &entry.cwd,
                 model: &entry.model,
-                status: entry
-                    .status
-                    .parse()
-                    .unwrap_or(mando_types::SessionStatus::Stopped),
+                status,
                 cost_usd: entry.cost_usd,
                 duration_ms: entry.duration_ms,
                 resumed: entry.resumed,
@@ -198,60 +204,40 @@ impl TaskStore {
     pub async fn list_sessions_for_task(
         &self,
         task_id: &str,
-    ) -> Vec<mando_db::queries::sessions::SessionRow> {
-        match sessions::list_sessions_for_task(&self.pool, task_id).await {
-            Ok(rows) => rows,
-            Err(e) => {
-                tracing::warn!(module = "task_store", task_id = %task_id, error = %e, "failed to list sessions for task");
-                Vec::new()
-            }
-        }
+    ) -> Result<Vec<mando_db::queries::sessions::SessionRow>> {
+        sessions::list_sessions_for_task(&self.pool, task_id)
+            .await
+            .with_context(|| format!("list_sessions_for_task {}", task_id))
     }
 
-    pub async fn session_cwd(&self, session_id: &str) -> Option<String> {
-        match sessions::session_cwd(&self.pool, session_id).await {
-            Ok(cwd) => cwd,
-            Err(e) => {
-                tracing::warn!(module = "task_store", session_id = %session_id, error = %e, "failed to fetch session cwd");
-                None
-            }
-        }
+    pub async fn session_cwd(&self, session_id: &str) -> Result<Option<String>> {
+        sessions::session_cwd(&self.pool, session_id)
+            .await
+            .with_context(|| format!("session_cwd {}", session_id))
     }
 
-    pub async fn total_session_cost(&self) -> f64 {
-        match sessions::total_session_cost(&self.pool).await {
-            Ok(cost) => cost,
-            Err(e) => {
-                tracing::warn!(module = "task_store", error = %e, "failed to fetch total session cost");
-                0.0
-            }
-        }
+    pub async fn total_session_cost(&self) -> Result<f64> {
+        sessions::total_session_cost(&self.pool)
+            .await
+            .context("total_session_cost")
     }
 
-    pub async fn category_counts(&self) -> HashMap<String, usize> {
-        match sessions::category_counts(&self.pool).await {
-            Ok(counts) => counts,
-            Err(e) => {
-                tracing::warn!(module = "task_store", error = %e, "failed to fetch category counts");
-                HashMap::new()
-            }
-        }
+    pub async fn category_counts(&self) -> Result<HashMap<String, usize>> {
+        sessions::category_counts(&self.pool)
+            .await
+            .context("category_counts")
     }
 }
 
 /// Hydrate rebase fields on tasks from the `task_rebase_state` table.
 ///
 /// Loads all rebase state rows in a single query, then matches by task_id.
-async fn hydrate_rebase_state(pool: &SqlitePool, tasks: &mut [Task]) {
-    let states = match rebase::all(pool).await {
-        Ok(s) => s,
-        Err(e) => {
-            tracing::warn!(module = "task_store", error = %e, "failed to load rebase state — tasks will lack rebase fields");
-            return;
-        }
-    };
+async fn hydrate_rebase_state(pool: &SqlitePool, tasks: &mut [Task]) -> Result<()> {
+    let states = rebase::all(pool)
+        .await
+        .context("load rebase state for hydration")?;
     if states.is_empty() {
-        return;
+        return Ok(());
     }
     let map: HashMap<i64, _> = states.into_iter().map(|s| (s.task_id, s)).collect();
     for task in tasks.iter_mut() {
@@ -261,8 +247,25 @@ async fn hydrate_rebase_state(pool: &SqlitePool, tasks: &mut [Task]) {
             task.rebase_head_sha = state.head_sha.clone();
         }
     }
+    Ok(())
 }
 
+/// Serialize a `Task` into the canonical JSON snapshot used for per-tick
+/// change detection and three-way merge.
+///
+/// Equality of two snapshots reflects semantic equality of the underlying
+/// `Task` values:
+///
+/// - `serde_json::Value::Object` is backed by `BTreeMap` in this build
+///   (`preserve_order` feature is NOT enabled), so key order is normalized
+///   and `PartialEq` is structural.
+/// - `Task` fields use `#[serde(skip_serializing_if = "Option::is_none")]`
+///   consistently for optional fields, so present-as-`Some(None)` cannot
+///   differ from absent.
+///
+/// If either of those invariants is relaxed in the future, `tick.rs`'s
+/// change-detection loop will start producing spurious writes — this
+/// function is the place to normalize before that happens.
 pub(crate) fn task_snapshot(task: &Task) -> Result<serde_json::Value> {
     serde_json::to_value(task).map_err(|e| anyhow::anyhow!("task serialization failed: {e}"))
 }

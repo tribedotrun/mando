@@ -101,7 +101,7 @@ pub(crate) async fn post_task_clarify(
     };
 
     // Emit HumanAnswered timeline event.
-    mando_captain::runtime::timeline_emit::emit_for_task(
+    let _ = mando_captain::runtime::timeline_emit::emit_for_task(
         &item,
         mando_types::timeline::TimelineEventType::HumanAnswered,
         &format!("Human answered: {answer}"),
@@ -140,7 +140,7 @@ pub(crate) async fn post_task_clarify(
                     .await
                     .map_err(internal_error)?;
 
-                    mando_captain::runtime::timeline_emit::emit_for_task(
+                    let _ = mando_captain::runtime::timeline_emit::emit_for_task(
                         &item,
                         mando_types::timeline::TimelineEventType::ClarifyResolved,
                         "Clarification complete, ready for work",
@@ -163,7 +163,7 @@ pub(crate) async fn post_task_clarify(
                     .await
                     .map_err(internal_error)?;
 
-                    mando_captain::runtime::timeline_emit::emit_for_task(
+                    let _ = mando_captain::runtime::timeline_emit::emit_for_task(
                         &item,
                         mando_types::timeline::TimelineEventType::ClarifyQuestion,
                         "Still needs clarification",
@@ -206,7 +206,8 @@ pub(crate) async fn post_task_clarify(
         Err(e) => {
             // LLM failed — keep the human's answer in context but stay in
             // needs-clarification so the human can retry or captain can
-            // pick it up on next tick.
+            // pick it up on next tick. Return HTTP 500 so clients can
+            // distinguish a real error from a successful clarification.
             tracing::warn!(
                 module = "clarifier",
                 task_id = id,
@@ -230,13 +231,14 @@ pub(crate) async fn post_task_clarify(
                         None
                     }
                 };
-            Ok(Json(json!({
-                "ok": true,
+            let body = json!({
+                "ok": false,
                 "status": "needs-clarification",
                 "context": item.context,
                 "questions": questions,
                 "error": e.to_string(),
-            })))
+            });
+            Err((StatusCode::INTERNAL_SERVER_ERROR, Json(body)))
         }
     }
 }

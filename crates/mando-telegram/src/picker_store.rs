@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use tracing::info;
+use tracing::{error, info};
 
 use crate::bot::{PickerItem, PickerState};
 
@@ -40,10 +40,35 @@ pub(crate) fn save(json: &serde_json::Value) {
 }
 
 /// Load picker state from disk. Returns None if file doesn't exist.
+/// Read or parse errors are logged at error level and surfaced as None so the
+/// bot starts with an empty picker state instead of silently dropping data.
 pub(crate) fn load() -> Option<PickerMaps> {
     let path = mando_config::state_dir().join("picker-state.json");
-    let text = std::fs::read_to_string(&path).ok()?;
-    let val: serde_json::Value = serde_json::from_str(&text).ok()?;
+    let text = match std::fs::read_to_string(&path) {
+        Ok(t) => t,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return None,
+        Err(e) => {
+            error!(
+                module = "picker",
+                path = %path.display(),
+                error = %e,
+                "failed to read picker state from disk",
+            );
+            return None;
+        }
+    };
+    let val: serde_json::Value = match serde_json::from_str(&text) {
+        Ok(v) => v,
+        Err(e) => {
+            error!(
+                module = "picker",
+                path = %path.display(),
+                error = %e,
+                "failed to parse picker state JSON — starting empty",
+            );
+            return None;
+        }
+    };
     info!("loaded picker state from disk");
     Some(restore_json(&val))
 }
@@ -74,7 +99,18 @@ fn restore_map(v: &serde_json::Value) -> HashMap<String, PickerState> {
                 .as_array()
                 .map(|arr| {
                     arr.iter()
-                        .filter_map(|i| serde_json::from_value(i.clone()).ok())
+                        .filter_map(|i| match serde_json::from_value::<PickerItem>(i.clone()) {
+                            Ok(item) => Some(item),
+                            Err(e) => {
+                                error!(
+                                    module = "picker",
+                                    key = %k,
+                                    error = %e,
+                                    "failed to parse picker item — dropping this entry, keeping siblings",
+                                );
+                                None
+                            }
+                        })
                         .collect()
                 })
                 .unwrap_or_default();

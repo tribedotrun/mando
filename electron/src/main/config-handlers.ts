@@ -7,7 +7,7 @@ import type { IpcMainInvokeEvent } from 'electron';
 import { shell } from 'electron';
 import log from '#main/logger';
 import { handleTrusted } from '#main/ipc-security';
-import { installCliAndPlists, getDaemonStatus } from '#main/launchd';
+import { installCliAndPlists } from '#main/launchd';
 import { getDataDir, getConfigPath, daemonFetch, ensureDaemon, getAppMode } from '#main/daemon';
 
 class DaemonConfigHttpError extends Error {}
@@ -55,7 +55,7 @@ export function registerConfigHandlers(): void {
         method: 'PUT',
         body: configJson,
       });
-      if (resp.ok) return true;
+      if (resp.ok) return { ok: true as const, via: 'daemon' as const };
       const err = await resp.json().catch(() => ({ error: resp.statusText }));
       log.error('save-config via daemon failed:', err);
       throw new DaemonConfigHttpError(err.error || `HTTP ${resp.status}`);
@@ -76,26 +76,29 @@ export function registerConfigHandlers(): void {
       }
 
       log.error('save-config fetch failed:', message);
+      return { ok: false as const, reason: 'daemon unreachable' as const, message };
     }
-    // Fallback: write locally so config isn't lost.
-    log.warn('save-config: daemon unreachable, falling back to local file write');
-    const configPath = getConfigPath();
-    fs.mkdirSync(path.dirname(configPath), { recursive: true });
-    fs.writeFileSync(configPath, configJson, 'utf-8');
-    return true;
   });
 
-  /** Save partial onboarding progress to a separate file (not config.json — that would make hasConfig return true). */
+  // Save partial onboarding progress to a separate file. Using config.json
+  // would make hasConfig return true and skip the remainder of onboarding.
   handleTrusted('save-config-local', (_: unknown, configJson: string) => {
-    const dir = path.dirname(getConfigPath());
-    fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(path.join(dir, 'config.partial.json'), configJson, 'utf-8');
-    return true;
+    try {
+      const dir = path.dirname(getConfigPath());
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, 'config.partial.json'), configJson, 'utf-8');
+      return true;
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      log.error('save-config-local: failed to persist partial config:', message);
+      throw new Error(`Failed to save onboarding progress: ${message}`, { cause: err });
+    }
   });
 
   handleTrusted('setup-complete', async (event: IpcMainInvokeEvent, configJson: string) => {
     const send = (step: string) => event.sender.send('setup-progress', step);
     const dataDir = getDataDir();
+    let lastError: string | undefined;
 
     send('Saving configuration\u2026');
     for (const sub of ['state', 'logs', 'images']) {
@@ -111,35 +114,46 @@ export function registerConfigHandlers(): void {
     await ensureDaemon(dataDir);
 
     send('Configuring daemon\u2026');
-    let setupNotified = false;
+    let daemonNotified = false;
     for (let attempt = 0; attempt < 5; attempt++) {
       try {
         await daemonFetch('/api/config/setup', {
           method: 'POST',
           body: JSON.stringify({ config: JSON.parse(configJson) }),
         });
-        setupNotified = true;
+        daemonNotified = true;
         break;
       } catch (err: unknown) {
-        log.debug(`setup-complete: attempt ${attempt + 1}/5 failed:`, err);
+        const message = err instanceof Error ? err.message : String(err);
+        lastError = message;
+        log.debug(`setup-complete: attempt ${attempt + 1}/5 failed: ${message}`);
         await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
       }
     }
-    if (!setupNotified) {
+    if (!daemonNotified) {
       log.error(
-        'setup-complete: failed to notify daemon after 5 attempts — daemon will pick up config on next restart, but captain may not start until then',
+        `setup-complete: failed to notify daemon after 5 attempts (last: ${lastError ?? 'unknown'}) - daemon will pick up config on next restart, but captain may not start until then`,
       );
     }
 
+    let launchdInstalled = true;
     if (getAppMode() !== 'sandbox') {
       send('Installing CLI\u2026');
       try {
         installCliAndPlists(dataDir, { skipDaemonPlist: true });
       } catch (e: unknown) {
-        log.warn('launchd setup failed:', e instanceof Error ? e.message : e);
+        const message = e instanceof Error ? e.message : String(e);
+        log.error('launchd setup failed:', message);
+        launchdInstalled = false;
+        if (!lastError) lastError = `Launchd install failed: ${message}`;
       }
     }
-    return true;
+    return {
+      ok: daemonNotified && launchdInstalled,
+      daemonNotified,
+      launchdInstalled,
+      error: lastError,
+    };
   });
 
   // -- Launchd IPC handlers (Electron-native) --
@@ -165,6 +179,5 @@ export function registerConfigHandlers(): void {
     installCliAndPlists(getDataDir());
     return true;
   });
-  handleTrusted('launchd:daemon-status', () => getDaemonStatus());
   handleTrusted('open-logs-folder', () => shell.openPath(path.join(getDataDir(), 'logs')));
 }

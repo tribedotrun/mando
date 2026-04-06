@@ -39,7 +39,7 @@ pub async fn spawn_worker_for_item(
         );
     }
 
-    let claude_path = crate::io::process_manager::resolve_claude_binary();
+    let claude_path = mando_cc::resolve_claude_binary();
     if !claude_path.exists() && claude_path.to_str() == Some("claude") {
         let which = tokio::process::Command::new("which")
             .arg("claude")

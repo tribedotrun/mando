@@ -15,7 +15,7 @@ pub(super) async fn poll_reviewing_items(
     pool: &sqlx::SqlitePool,
     rate_limited: bool,
 ) {
-    let review_timeout_s = workflow.agent.captain_review_timeout_s;
+    let review_timeout = workflow.agent.captain_review_timeout_s;
     for item in items
         .iter_mut()
         .filter(|it| it.status == ItemStatus::CaptainReviewing)
@@ -82,7 +82,7 @@ pub(super) async fn poll_reviewing_items(
                     item_id = item.id,
                     "review failed due to rate limit — not counting against retry budget"
                 );
-                timeline_emit::emit_rate_limited(item, pool).await;
+                let _ = timeline_emit::emit_rate_limited(item, pool).await;
                 item.session_ids.review = None;
                 continue;
             }
@@ -114,17 +114,35 @@ pub(super) async fn poll_reviewing_items(
             continue;
         }
 
-        let is_timed_out = item
-            .last_activity_at
-            .as_deref()
-            .and_then(|ts| {
-                time::OffsetDateTime::parse(ts, &time::format_description::well_known::Rfc3339).ok()
-            })
-            .map(|entered| {
-                let elapsed = time::OffsetDateTime::now_utc() - entered;
-                elapsed.whole_seconds() as u64 > review_timeout_s
-            })
-            .unwrap_or(true);
+        let is_timed_out = match item.last_activity_at.as_deref() {
+            Some(ts) => match time::OffsetDateTime::parse(
+                ts,
+                &time::format_description::well_known::Rfc3339,
+            ) {
+                Ok(entered) => {
+                    let elapsed = time::OffsetDateTime::now_utc() - entered;
+                    elapsed.whole_seconds() as u64 > review_timeout.as_secs()
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        module = "captain",
+                        item_id = item.id,
+                        last_activity_at = %ts,
+                        error = %e,
+                        "unparseable last_activity_at on reviewing item; skipping this tick"
+                    );
+                    continue;
+                }
+            },
+            None => {
+                tracing::warn!(
+                    module = "captain",
+                    item_id = item.id,
+                    "reviewing item has no last_activity_at timestamp; skipping this tick"
+                );
+                continue;
+            }
+        };
 
         if is_timed_out {
             // Check if the review session was killed by rate limiting.
@@ -139,7 +157,7 @@ pub(super) async fn poll_reviewing_items(
                     item_id = item.id,
                     "review timeout during rate limit — not counting against retry budget"
                 );
-                timeline_emit::emit_rate_limited(item, pool).await;
+                let _ = timeline_emit::emit_rate_limited(item, pool).await;
                 // Clear session so a fresh one spawns after cooldown.
                 item.session_ids.review = None;
                 continue;

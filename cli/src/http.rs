@@ -7,21 +7,10 @@ use reqwest::{Client, Method};
 use serde_json::Value;
 use tracing::debug;
 
-/// Resolve the mando data directory (~/.mando or MANDO_DATA_DIR).
-/// Must stay in sync with mando_types::data_dir().
-pub(crate) fn data_dir() -> std::path::PathBuf {
-    if let Ok(dir) = std::env::var("MANDO_DATA_DIR") {
-        if let Some(rest) = dir.strip_prefix("~/") {
-            return home_dir().join(rest);
-        }
-        return std::path::PathBuf::from(dir);
-    }
-    home_dir().join(".mando")
-}
-
-fn home_dir() -> std::path::PathBuf {
-    dirs::home_dir().expect("could not determine home directory — set MANDO_DATA_DIR or HOME")
-}
+/// Re-export for use inside the CLI crate. Single source of truth lives in
+/// mando-types so the CLI and daemon cannot drift out of sync on where
+/// runtime state is read/written.
+pub(crate) use mando_types::data_dir;
 
 /// Discover daemon port and auth token, build a pre-configured client.
 pub(crate) struct DaemonClient {
@@ -53,10 +42,23 @@ impl DaemonClient {
 
         // Read auth token.
         let token_file = data_dir.join("auth-token");
-        let token = std::fs::read_to_string(&token_file)
-            .ok()
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty());
+        let token = match std::fs::read_to_string(&token_file) {
+            Ok(s) => {
+                let trimmed = s.trim().to_string();
+                if trimmed.is_empty() {
+                    None
+                } else {
+                    Some(trimmed)
+                }
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+            Err(e) => {
+                return Err(anyhow::Error::from(e).context(format!(
+                    "failed to read auth token at {}",
+                    token_file.display(),
+                )));
+            }
+        };
 
         Ok(Self {
             client: Client::new(),
@@ -89,6 +91,28 @@ impl DaemonClient {
     /// GET request to the daemon.
     pub(crate) async fn get(&self, path: &str) -> Result<Value> {
         self.request(Method::GET, path, None).await
+    }
+
+    /// GET request that returns the JSON body even when the daemon responds
+    /// with 5xx. Used by health endpoints that return HTTP 503 with a
+    /// structured body describing the degradation (so `mando health` can
+    /// still print the degradation details instead of failing with the
+    /// raw status line).
+    pub(crate) async fn get_with_body_on_5xx(&self, path: &str) -> Result<Value> {
+        let start = Instant::now();
+        let url = format!("{}{path}", self.base_url);
+        let mut req = self.client.get(&url);
+        if let Some(t) = &self.token {
+            req = req.bearer_auth(t);
+        }
+        let resp = req.send().await.context("daemon request failed")?;
+        let status = resp.status();
+        debug!(method = "GET", path = path, status = %status, elapsed_ms = start.elapsed().as_millis(), "daemon request (allow 5xx)");
+        if status.is_success() || status.is_server_error() {
+            return resp.json().await.context("invalid JSON response");
+        }
+        let text = resp.text().await.unwrap_or_default();
+        bail!("daemon returned {status}: {text}");
     }
 
     /// POST request with JSON body.
@@ -144,8 +168,8 @@ impl DaemonClient {
     }
 }
 
-/// Parse a string ID to i64 (shared by captain and todo modules).
+/// Thin wrapper around `mando_types::parse_i64_id` that returns an
+/// `anyhow::Error` instead of a plain String, so call sites can use `?`.
 pub(crate) fn parse_id(id: &str, label: &str) -> Result<i64> {
-    id.parse()
-        .map_err(|_| anyhow::anyhow!("invalid {label} ID: {id}"))
+    mando_types::parse_i64_id(id, label).map_err(|e| anyhow::anyhow!(e))
 }

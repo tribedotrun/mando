@@ -5,6 +5,7 @@
 import path from 'path';
 import fs from 'fs';
 import http from 'http';
+import log from '#main/logger';
 
 const MIME_TYPES: Record<string, string> = {
   '.html': 'text/html',
@@ -34,8 +35,17 @@ export function startRendererServer(
       const contentType = MIME_TYPES[ext] || 'application/octet-stream';
       fs.readFile(filePath, (err, data) => {
         if (err) {
-          res.writeHead(404);
-          res.end('Not found');
+          const code = (err as NodeJS.ErrnoException).code;
+          if (code === 'ENOENT') {
+            res.writeHead(404);
+            res.end('Not found');
+            return;
+          }
+          log.error(
+            `[renderer-server] readFile failed for ${cleanPath} (${code ?? 'unknown'}): ${err.message}`,
+          );
+          res.writeHead(500);
+          res.end(`Internal error reading ${cleanPath}: ${err.message}`);
           return;
         }
         res.writeHead(200, { 'Content-Type': contentType });

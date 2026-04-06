@@ -10,6 +10,7 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tracing::{info, warn};
 
 use crate::config::CcConfig;
+use crate::error::CcError;
 use crate::message::{CcMessage, ResultMessage};
 use crate::protocol;
 use crate::CcResult;
@@ -17,10 +18,10 @@ use crate::CcResult;
 /// A long-lived bidirectional CC session.
 pub struct CcSession {
     child: tokio::process::Child,
-    /// Persistent buffered reader over stdout — survives across recv_result() calls
-    /// so buffered data is not lost in multi-turn sessions.
-    stdout_reader: Option<BufReader<tokio::process::ChildStdout>>,
-    pid: u32,
+    /// Persistent buffered reader over stdout, survives across recv_result()
+    /// calls so buffered data is not lost in multi-turn sessions.
+    stdout_reader: BufReader<tokio::process::ChildStdout>,
+    pid: mando_types::Pid,
     session_id: String,
     stream_path: PathBuf,
     stream_file: std::fs::File,
@@ -31,7 +32,7 @@ pub struct CcSession {
 
 impl CcSession {
     /// Spawn a new CC session with stream-json bidirectional I/O.
-    pub async fn spawn(config: CcConfig) -> Result<Self> {
+    pub async fn spawn(config: CcConfig) -> Result<Self, CcError> {
         let session_id = config.effective_session_id();
 
         let (mut child, pid, stream_path, _stderr_path) =
@@ -43,10 +44,12 @@ impl CcSession {
                 .create(true)
                 .append(true)
                 .open(&stream_path)
-                .with_context(|| format!("open stream for tee: {}", stream_path.display()))?
+                .with_context(|| format!("open stream for tee: {}", stream_path.display()))
+                .map_err(CcError::Other)?
         } else {
             std::fs::File::create(&stream_path)
-                .with_context(|| format!("create stream for tee: {}", stream_path.display()))?
+                .with_context(|| format!("create stream for tee: {}", stream_path.display()))
+                .map_err(CcError::Other)?
         };
 
         // Write meta sidecar.
@@ -66,16 +69,13 @@ impl CcSession {
             module = "mando-cc",
             caller = %config.caller,
             session_id = %session_id,
-            pid = pid,
+            pid = %pid,
             "session spawned"
         );
 
         // Take stdout immediately and wrap in a persistent BufReader.
-        let stdout = child
-            .stdout
-            .take()
-            .ok_or_else(|| anyhow::anyhow!("stdout not piped"))?;
-        let stdout_reader = Some(BufReader::new(stdout));
+        let stdout = child.stdout.take().ok_or(CcError::StreamClosed)?;
+        let stdout_reader = BufReader::new(stdout);
 
         Ok(Self {
             child,
@@ -111,22 +111,15 @@ impl CcSession {
     /// stream JSONL file.
     pub async fn recv_result(&mut self) -> Result<CcResult> {
         let start = std::time::Instant::now();
-
-        // Use the persistent BufReader to preserve buffered data across calls.
-        let mut reader = self
-            .stdout_reader
-            .take()
-            .ok_or_else(|| anyhow::anyhow!("stdout closed"))?;
         let mut line_buf = String::new();
 
-        let result = loop {
+        loop {
             line_buf.clear();
-            let bytes_read = reader.read_line(&mut line_buf).await?;
+            let bytes_read = self.stdout_reader.read_line(&mut line_buf).await?;
             if bytes_read == 0 {
-                // EOF — process exited. Put reader back and handle.
-                self.stdout_reader = Some(reader);
+                // EOF — process exited.
                 let elapsed = start.elapsed();
-                return self.handle_eof(elapsed).await;
+                return self.handle_eof(elapsed);
             }
 
             let trimmed = line_buf.trim();
@@ -154,15 +147,18 @@ impl CcSession {
                     }
                 }
                 CcMessage::ControlRequest(cr) => {
-                    // Dispatch through hooks for can_use_tool and hook_callback.
+                    // Control protocol: no hook variants exist, so `can_use_tool`
+                    // always allows and `hook_callback` returns empty success.
                     let response = match cr.subtype.as_str() {
-                        "initialize" => protocol::control_response_init(&cr.request_id),
-                        "can_use_tool" | "hook_callback" => crate::hooks::dispatch_hook(
-                            &self.config.hooks,
-                            &cr.subtype,
-                            &cr.request_id,
-                            &cr.payload,
-                        ),
+                        "can_use_tool" => protocol::control_response_allow(&cr.request_id),
+                        "hook_callback" => serde_json::json!({
+                            "type": "control_response",
+                            "response": {
+                                "subtype": "success",
+                                "request_id": cr.request_id,
+                                "response": {}
+                            }
+                        }),
                         _ => protocol::control_response_init(&cr.request_id),
                     };
                     let resp_line = serde_json::to_string(&response)? + "\n";
@@ -172,12 +168,7 @@ impl CcSession {
                     }
                 }
                 CcMessage::RateLimit(rl) => {
-                    let status_str = match &rl.status {
-                        crate::message::RateLimitStatus::Allowed => "allowed",
-                        crate::message::RateLimitStatus::AllowedWarning => "allowed_warning",
-                        crate::message::RateLimitStatus::Rejected => "rejected",
-                        crate::message::RateLimitStatus::Unknown(s) => s.as_str(),
-                    };
+                    let status_str = rl.status.as_str();
                     match &rl.status {
                         crate::message::RateLimitStatus::Rejected => {
                             warn!(
@@ -205,20 +196,15 @@ impl CcSession {
                 }
                 CcMessage::Result(result) => {
                     let elapsed = start.elapsed();
-                    break self.build_result(result, elapsed);
+                    return Ok(self.build_result(result, elapsed));
                 }
                 _ => {}
             }
-        };
-
-        // Put reader back for future recv_result calls.
-        self.stdout_reader = Some(reader);
-
-        Ok(result)
+        }
     }
 
     /// Handle EOF (process exited) during recv_result.
-    async fn handle_eof(&self, elapsed: std::time::Duration) -> Result<CcResult> {
+    fn handle_eof(&self, elapsed: std::time::Duration) -> Result<CcResult> {
         // Try to extract result from stream file.
         if let Some(result_val) = crate::stream::get_stream_result(&self.stream_path) {
             let result_msg = match CcMessage::parse(result_val) {
@@ -296,7 +282,7 @@ impl CcSession {
     }
 
     /// Get the process ID.
-    pub fn pid(&self) -> u32 {
+    pub fn pid(&self) -> mando_types::Pid {
         self.pid
     }
 

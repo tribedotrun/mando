@@ -13,6 +13,7 @@ mando-config.workspace = true
 mando-uuid.workspace = true
 sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite"] }
 anyhow.workspace = true
+tokio.workspace = true
 tracing.workspace = true
 serde.workspace = true
 serde_json.workspace = true

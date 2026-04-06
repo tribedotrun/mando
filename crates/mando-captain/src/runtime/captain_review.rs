@@ -6,7 +6,11 @@
 //! 3. On subsequent ticks, polls for completion
 //! 4. Applies the verdict (ship/nudge/respawn/escalate/retry)
 
+use std::panic::AssertUnwindSafe;
+
 use anyhow::Result;
+use futures::FutureExt;
+use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
 
@@ -18,7 +22,7 @@ use mando_types::timeline::TimelineEventType;
 use super::notify::Notifier;
 use super::review_phase;
 use super::timeline_emit;
-use crate::io::{evidence, process_manager};
+use crate::io::evidence;
 
 use super::captain_review_verdict::escaped_title;
 pub use super::captain_review_verdict::{apply_verdict, handle_review_error};
@@ -33,32 +37,52 @@ pub struct CaptainVerdict {
 }
 
 fn is_verdict_allowed(trigger: &str, action: &str) -> bool {
+    // Captain is the last line of defense — it must solve problems, not punt
+    // them. Escalate and retry_clarifier are restricted to specific triggers.
     match trigger {
-        "gates_pass" => matches!(action, "ship" | "nudge" | "escalate"),
-        "degraded_context" => matches!(action, "ship" | "nudge" | "escalate"),
-        "timeout" => matches!(action, "nudge" | "escalate"),
-        "broken_session" => matches!(action, "nudge" | "respawn" | "escalate"),
-        "budget_exhausted" => matches!(action, "escalate"),
         "clarifier_fail" => matches!(action, "retry_clarifier" | "escalate"),
-        "rebase_fail" => matches!(action, "nudge" | "escalate"),
-        "ci_failure" => matches!(action, "nudge" | "escalate"),
-        "merge_fail" => matches!(action, "nudge" | "escalate"),
-        "repeated_nudge" => matches!(action, "nudge" | "respawn" | "escalate"),
-        _ => false,
+        "budget_exhausted" => matches!(
+            action,
+            "ship" | "nudge" | "respawn" | "reset_budget" | "escalate"
+        ),
+        // All other triggers: captain must act. No escalation, no retry_clarifier.
+        _ => matches!(action, "ship" | "nudge" | "respawn" | "reset_budget"),
     }
 }
 
-/// All possible verdict actions across all triggers.
-const ALL_VERDICT_ACTIONS: &[&str] = &["ship", "nudge", "escalate", "respawn", "retry_clarifier"];
+/// All recognized captain review triggers; used to populate `is_<trigger>`
+/// template variables for the captain review prompt.
+const TRIGGERS: &[&str] = &[
+    "gates_pass",
+    "degraded_context",
+    "timeout",
+    "broken_session",
+    "budget_exhausted",
+    "clarifier_fail",
+    "rebase_fail",
+    "ci_failure",
+    "merge_fail",
+    "repeated_nudge",
+];
+
+/// Allowed actions for a given trigger, matching `is_verdict_allowed`.
+fn allowed_actions_for_trigger(trigger: &str) -> &'static [&'static str] {
+    match trigger {
+        "clarifier_fail" => &["retry_clarifier", "escalate"],
+        "budget_exhausted" => &["ship", "nudge", "respawn", "reset_budget", "escalate"],
+        _ => &["ship", "nudge", "respawn", "reset_budget"],
+    }
+}
 
 /// JSON Schema for the CaptainVerdict structured output.
-fn verdict_json_schema() -> serde_json::Value {
+/// Trigger-aware: only offers actions the captain can actually choose.
+fn verdict_json_schema(trigger: &str) -> serde_json::Value {
     serde_json::json!({
         "type": "object",
         "properties": {
             "action": {
                 "type": "string",
-                "enum": ALL_VERDICT_ACTIONS,
+                "enum": allowed_actions_for_trigger(trigger),
                 "description": "The verdict action — must be one of the allowed values"
             },
             "feedback": {
@@ -113,13 +137,26 @@ pub(crate) async fn spawn_review(
         anyhow::bail!("captain_review prompt template missing from workflow");
     }
 
-    // All fallible operations succeeded — now commit state changes.
-    item.status = ItemStatus::CaptainReviewing;
-    item.captain_review_trigger = trigger.parse().ok();
-    item.last_activity_at = Some(mando_types::now_rfc3339());
+    // Parse the trigger up-front: an unknown trigger means a newer component
+    // produced a label that captain_review cannot classify, and silently
+    // accepting it would cause every such review to escalate with no hint
+    // why. Fail the spawn instead.
+    let parsed_trigger: mando_types::task::ReviewTrigger = trigger
+        .parse()
+        .map_err(|e| anyhow::anyhow!("captain_review: unknown trigger {trigger:?}: {e}"))?;
 
     // --- Gather worker context (PR data, stream tail, process status) ---
-    let (ctx, worker_contexts_text) = review_phase::build_single_context(item, config).await;
+    // This must run BEFORE any state mutation: build_single_context can fail
+    // (e.g. on an unparseable worker_started_at). If we flipped the item to
+    // CaptainReviewing first and the context build then errored, callers like
+    // action_contract::trigger_review bubble the error up with no rollback,
+    // leaving the task stuck in CaptainReviewing with no review session.
+    let (ctx, worker_contexts_text) = review_phase::build_single_context(item, config).await?;
+
+    // All fallible operations succeeded, now commit state changes.
+    item.status = ItemStatus::CaptainReviewing;
+    item.captain_review_trigger = Some(parsed_trigger);
+    item.last_activity_at = Some(mando_types::now_rfc3339());
     let pr_body_for_evidence = ctx.pr_body.clone();
     let worker_name_owned = item.worker.as_deref().unwrap_or("unknown").to_string();
 
@@ -127,7 +164,7 @@ pub(crate) async fn spawn_review(
     let session_id = mando_uuid::Uuid::v4().to_string();
     item.session_ids.review = Some(session_id.clone());
 
-    timeline_emit::emit_for_task(
+    let _ = timeline_emit::emit_for_task(
         item,
         TimelineEventType::CaptainReviewStarted,
         &format!("Captain review started (trigger: {trigger})"),
@@ -142,12 +179,42 @@ pub(crate) async fn spawn_review(
         ))
         .await;
 
-    // Clone data needed by the spawned task.
+    // Log "running" session entry eagerly so (a) cancel can find it
+    // immediately and (b) timeline never references a missing session.
+    if let Err(e) = crate::io::headless_cc::log_running_session(
+        pool,
+        &session_id,
+        &cwd,
+        "captain-review-async",
+        "",
+        &item.id.to_string(),
+        false,
+    )
+    .await
+    {
+        warn!(module = "captain", %session_id, %e, "failed to log running session");
+    }
+
+    // Clone data needed by the spawned task. Pre-stringify values that don't
+    // depend on async I/O so they're computed once per review instead of on
+    // every spawn closure run.
     let trigger_str = trigger.to_string();
     let item_title = item.title.clone();
     let item_id = item.id.to_string();
-    let intervention_count_val = item.intervention_count;
-    let timeout_s = workflow.agent.captain_review_timeout_s;
+    let intervention_count_str = item.intervention_count.to_string();
+    let trigger_flags: Vec<(String, String)> = TRIGGERS
+        .iter()
+        .map(|name| {
+            let key = format!("is_{name}");
+            let flag = if trigger_str == *name {
+                "true".to_string()
+            } else {
+                String::new()
+            };
+            (key, flag)
+        })
+        .collect();
+    let timeout = workflow.agent.captain_review_timeout_s;
     let evidence_dl_timeout = workflow.agent.evidence_download_timeout_s;
     let evidence_ff_timeout = workflow.agent.evidence_ffmpeg_timeout_s;
     let prompts = workflow.prompts.clone();
@@ -155,17 +222,25 @@ pub(crate) async fn spawn_review(
     let pool = pool.clone();
     let review_notifier = notifier.fork();
 
+    let session_id_for_panic = session_id.clone();
+    // TRACKED: detached captain-review CC session. Not registered with the
+    // gateway's TaskTracker because mando-captain is a library crate and has
+    // no dependency on AppState. On shutdown the external CC process is killed
+    // via the pid registry; this task writes its final verdict to the stream
+    // file which persists across restarts, so no in-memory state is lost.
     tokio::spawn(async move {
+        let result = AssertUnwindSafe(async move {
         // Download evidence images from PR body.
         let work_dir = mando_config::state_dir().join("captain-evidence");
         let worker_dir = work_dir.join(&worker_name_owned);
-        let evidence_paths = evidence::download_evidence(
+        let evidence_download = evidence::download_evidence(
             &pr_body_for_evidence,
             &worker_dir,
             evidence_dl_timeout,
             evidence_ff_timeout,
         )
         .await;
+        let evidence_paths = evidence_download.paths;
         let evidence_listing = if evidence_paths.is_empty() {
             String::new()
         } else {
@@ -187,28 +262,22 @@ pub(crate) async fn spawn_review(
             }
         };
 
-        // Build template variables.
-        let intervention_count_str = intervention_count_val.to_string();
-        let trigger_flag = |name: &str| if trigger_str == name { "true" } else { "" };
-
-        let mut vars = std::collections::HashMap::new();
-        vars.insert("trigger", trigger_str.as_str());
-        vars.insert("title", item_title.as_str());
-        vars.insert("item_id", item_id.as_str());
-        vars.insert("worker_contexts", worker_contexts_text.as_str());
-        vars.insert("knowledge_base", knowledge_base.as_str());
-        vars.insert("evidence_images", evidence_listing.as_str());
-        vars.insert("intervention_count", intervention_count_str.as_str());
-        vars.insert("is_gates_pass", trigger_flag("gates_pass"));
-        vars.insert("is_degraded_context", trigger_flag("degraded_context"));
-        vars.insert("is_timeout", trigger_flag("timeout"));
-        vars.insert("is_broken_session", trigger_flag("broken_session"));
-        vars.insert("is_budget_exhausted", trigger_flag("budget_exhausted"));
-        vars.insert("is_clarifier_fail", trigger_flag("clarifier_fail"));
-        vars.insert("is_rebase_fail", trigger_flag("rebase_fail"));
-        vars.insert("is_ci_failure", trigger_flag("ci_failure"));
-        vars.insert("is_merge_fail", trigger_flag("merge_fail"));
-        vars.insert("is_repeated_nudge", trigger_flag("repeated_nudge"));
+        // Assemble template variables. Values that don't depend on async I/O
+        // were pre-computed before `tokio::spawn`; we only insert references
+        // here. `FxHashMap` keyed by `&str` with owned `String` values gives
+        // the hot path a faster hasher without fighting the borrow checker over
+        // per-call-site lifetimes.
+        let mut vars: FxHashMap<&str, String> = FxHashMap::default();
+        vars.insert("trigger", trigger_str.clone());
+        vars.insert("title", item_title.clone());
+        vars.insert("item_id", item_id.clone());
+        vars.insert("worker_contexts", worker_contexts_text.clone());
+        vars.insert("knowledge_base", knowledge_base.clone());
+        vars.insert("evidence_images", evidence_listing.clone());
+        vars.insert("intervention_count", intervention_count_str.clone());
+        for (key, flag) in &trigger_flags {
+            vars.insert(key.as_str(), flag.clone());
+        }
 
         let prompt = match mando_config::render_prompt("captain_review", &prompts, &vars) {
             Ok(p) => p,
@@ -225,49 +294,45 @@ pub(crate) async fn spawn_review(
 
         let config = mando_cc::CcConfig::builder()
             .model(&captain_model)
-            .timeout(std::time::Duration::from_secs(timeout_s))
+            .timeout(timeout)
             .caller("captain-review-async")
             .task_id(&task_id)
             .cwd(cwd.clone())
             .session_id(session_id.clone())
             .allowed_tools(vec!["Read".into()])
-            .json_schema(verdict_json_schema())
+            .json_schema(verdict_json_schema(&trigger_str))
             .build();
-
-        // Log "running" session entry so cancel can find it immediately.
-        crate::io::headless_cc::log_running_session(
-            &pool,
-            &session_id,
-            &cwd,
-            "captain-review-async",
-            "",
-            &task_id,
-            false,
-        )
-        .await;
 
         let sid_for_hook = session_id.clone();
         match mando_cc::CcOneShot::run_with_pid_hook(&prompt, config, |pid| {
-            crate::io::pid_registry::register(&sid_for_hook, pid);
+            if let Err(e) = crate::io::pid_registry::register(&sid_for_hook, pid) {
+                warn!(module = "captain", sid = %sid_for_hook, %e, "pid_registry register failed");
+            }
         })
         .await
         {
             Ok(result) => {
                 info!(module = "captain", %session_id, "captain review CC completed");
-                crate::io::pid_registry::unregister(&session_id);
+                if let Err(e) = crate::io::pid_registry::unregister(&session_id) {
+                    warn!(module = "captain", %session_id, %e, "pid_registry unregister failed");
+                }
                 review_notifier.check_rate_limit(&result).await;
-                crate::io::headless_cc::log_cc_result(
+                if let Err(e) = crate::io::headless_cc::log_cc_result(
                     &pool,
                     &result,
                     &cwd,
                     "captain-review-async",
                     &task_id,
                 )
-                .await;
+                .await {
+                    warn!(module = "captain", %session_id, %e, "log_cc_result failed");
+                }
             }
             Err(e) => {
                 warn!(module = "captain", %session_id, %e, "captain review CC failed");
-                crate::io::pid_registry::unregister(&session_id);
+                if let Err(e2) = crate::io::pid_registry::unregister(&session_id) {
+                    warn!(module = "captain", %session_id, %e2, "pid_registry unregister failed");
+                }
                 // Write a synthetic error result so check_review() finds it on
                 // the next tick instead of waiting for the full timeout.
                 let stream_path = mando_config::stream_path_for_session(&session_id);
@@ -275,15 +340,34 @@ pub(crate) async fn spawn_review(
                     &stream_path,
                     &format!("captain review CC process failed: {e}"),
                 );
-                crate::io::headless_cc::log_cc_failure(
+                if let Err(e2) = crate::io::headless_cc::log_cc_failure(
                     &pool,
                     &session_id,
                     &cwd,
                     "captain-review-async",
                     &task_id,
                 )
-                .await;
+                .await {
+                    warn!(module = "captain", %session_id, %e2, "log_cc_failure failed");
+                }
             }
+        }
+        })
+        .catch_unwind()
+        .await;
+
+        if let Err(panic) = result {
+            tracing::error!(
+                module = "captain",
+                session_id = %session_id_for_panic,
+                "captain review spawn panicked: {:?}",
+                panic
+            );
+            let stream_path = mando_config::stream_path_for_session(&session_id_for_panic);
+            mando_cc::write_error_result(
+                &stream_path,
+                &format!("captain review spawn panicked: {:?}", panic),
+            );
         }
     });
 
@@ -322,7 +406,7 @@ pub(crate) fn check_review(item: &Task) -> Option<CaptainVerdict> {
 
     // If result field is empty, recover from the last assistant text block.
     if verdict_text.is_empty() {
-        if let Some(text) = process_manager::get_last_assistant_text(&stream_path) {
+        if let Some(text) = mando_cc::get_last_assistant_text(&stream_path) {
             warn!(module = "captain", %session_id,
                 "check_review: result field empty, recovered from last assistant text");
             verdict_text = text;

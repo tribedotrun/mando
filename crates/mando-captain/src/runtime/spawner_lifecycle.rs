@@ -3,10 +3,11 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use mando_config::settings::{Config, ProjectConfig};
 use mando_config::workflow::CaptainWorkflow;
 use mando_types::Task;
+use rustc_hash::FxHashMap;
 
 use crate::io::{git, pid_registry, process_manager};
 use crate::runtime::spawner;
@@ -15,7 +16,7 @@ use crate::runtime::spawner;
 pub struct LifecycleResult {
     pub session_name: String,
     pub session_id: String,
-    pub pid: u32,
+    pub pid: mando_types::Pid,
     pub branch: String,
     pub worktree: String,
 }
@@ -31,7 +32,7 @@ async fn clean_and_spawn_fresh(
     pool: &sqlx::SqlitePool,
 ) -> Result<LifecycleResult> {
     let old_wt = mando_config::expand_tilde(wt_path);
-    if old_wt.exists() {
+    if tokio::fs::try_exists(&old_wt).await.unwrap_or(false) {
         let repo_path = mando_config::expand_tilde(&project_config.path);
         match git::remove_worktree(&repo_path, &old_wt).await {
             Ok(_) => {
@@ -83,10 +84,10 @@ pub(crate) async fn reopen_worker(
         .ok_or_else(|| anyhow::anyhow!("no branch for reopen"))?;
 
     // Kill existing worker.
-    let pid = pid_registry::get_pid(&cc_sid).unwrap_or(0);
-    if pid > 0 {
+    let pid = pid_registry::get_pid(&cc_sid).unwrap_or(mando_types::Pid::new(0));
+    if pid.as_u32() > 0 {
         if let Err(e) = mando_cc::kill_process(pid).await {
-            tracing::warn!(module = "captain", pid = pid, error = %e, "failed to kill existing worker for reopen");
+            tracing::warn!(module = "captain", pid = %pid, error = %e, "failed to kill existing worker for reopen");
         }
     }
 
@@ -100,7 +101,8 @@ pub(crate) async fn reopen_worker(
             "# Captain Reopen (seq={})\n\nReview feedback:\n{}\n\nAddress the feedback, then post an ack comment: `[Mando] Reopen #{} addressed: <summary>`\n",
             reopen_seq, feedback, reopen_seq
         ),
-    )?;
+    )
+    .await?;
 
     // Check if the session was ever created — broken session guard.
     let stream_path = mando_config::stream_path_for_session(&cc_sid);
@@ -127,7 +129,7 @@ pub(crate) async fn reopen_worker(
     let env = HashMap::new();
 
     let reopen_seq_str = reopen_seq.to_string();
-    let mut vars = HashMap::new();
+    let mut vars: FxHashMap<&str, &str> = FxHashMap::default();
     vars.insert("reopen_seq", reopen_seq_str.as_str());
     let resume_msg = mando_config::render_prompt("reopen_resume", &workflow.prompts, &vars)
         .map_err(|e| anyhow::anyhow!(e))?;
@@ -138,7 +140,6 @@ pub(crate) async fn reopen_worker(
     let stream_size_before = mando_cc::get_stream_file_size(&stream_path);
 
     match process_manager::resume_worker_process(
-        &session_name,
         &resume_msg,
         &wt,
         model,
@@ -150,10 +151,12 @@ pub(crate) async fn reopen_worker(
     {
         Ok((new_pid, _)) => {
             // Register PID in the session registry.
-            pid_registry::register(&cc_sid, new_pid);
+            pid_registry::register(&cc_sid, new_pid)?;
 
             let health_path = mando_config::worker_health_path();
-            let mut state = crate::io::health_store::load_health_state(&health_path);
+            let mut state = crate::io::health_store::load_health_state_async(&health_path)
+                .await
+                .with_context(|| format!("load health state from {}", health_path.display()))?;
             crate::io::health_store::set_health_field(
                 &mut state,
                 &session_name,
@@ -165,7 +168,7 @@ pub(crate) async fn reopen_worker(
                     module = "captain",
                     worker = %session_name,
                     error = %e,
-                    "failed to persist health state — zero-byte resume detection may be disabled"
+                    "failed to persist health state; zero-byte resume detection may be disabled"
                 );
             }
             crate::io::headless_cc::log_running_session(
@@ -177,11 +180,11 @@ pub(crate) async fn reopen_worker(
                 item_id,
                 true,
             )
-            .await;
+            .await?;
             tracing::info!(
                 module = "lifecycle",
                 worker = %session_name,
-                pid = new_pid,
+                pid = %new_pid,
                 reopen_seq = reopen_seq,
                 title = %item.title,
                 "reopened worker"
@@ -195,22 +198,19 @@ pub(crate) async fn reopen_worker(
             })
         }
         Err(e) => {
+            // Do NOT silently destroy the worktree by falling through to
+            // clean_and_spawn_fresh. Resume failure could be transient; the
+            // caller must explicitly opt into a fresh spawn (e.g. by calling
+            // rework instead of reopen).
             tracing::warn!(
                 module = "lifecycle",
                 worker = %session_name,
                 error = %e,
-                "reopen resume failed, cleaning old worktree and spawning fresh"
+                "reopen resume failed; refusing to auto-destroy worktree"
             );
-            clean_and_spawn_fresh(
-                item,
-                &slug,
-                project_config,
-                config,
-                workflow,
-                &wt_path,
-                pool,
-            )
-            .await
+            Err(anyhow::anyhow!(
+                "reopen resume failed for worker {session_name}: {e}"
+            ))
         }
     }
 }
@@ -222,9 +222,9 @@ fn resolve_project<'a>(item: &Task, config: &'a Config) -> Result<(&'a str, &'a 
         .ok_or_else(|| anyhow::anyhow!("no project config for item '{}'", item.title))
 }
 
-fn write_context_file(worktree: &Path, filename: &str, content: &str) -> Result<()> {
+async fn write_context_file(worktree: &Path, filename: &str, content: &str) -> Result<()> {
     let ai_dir = worktree.join(".ai");
-    std::fs::create_dir_all(&ai_dir)?;
-    std::fs::write(ai_dir.join(filename), content)?;
+    tokio::fs::create_dir_all(&ai_dir).await?;
+    tokio::fs::write(ai_dir.join(filename), content).await?;
     Ok(())
 }

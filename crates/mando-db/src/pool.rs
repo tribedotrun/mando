@@ -15,7 +15,7 @@ impl Db {
     /// Open (or create) `mando.db` at the given path, run migrations, return pool.
     pub async fn open(path: &Path) -> Result<Self> {
         if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
+            tokio::fs::create_dir_all(parent).await?;
         }
 
         let options = SqliteConnectOptions::new()

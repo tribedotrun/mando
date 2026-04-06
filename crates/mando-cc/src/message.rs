@@ -21,6 +21,18 @@ pub enum RateLimitStatus {
     Unknown(String),
 }
 
+impl RateLimitStatus {
+    /// String tag for this status (protocol-level values).
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Allowed => "allowed",
+            Self::AllowedWarning => "allowed_warning",
+            Self::Rejected => "rejected",
+            Self::Unknown(v) => v.as_str(),
+        }
+    }
+}
+
 /// Rate limit event emitted when subscription rate limit status changes.
 #[derive(Debug, Clone)]
 pub struct RateLimitEvent {
@@ -118,14 +130,23 @@ pub struct ControlRequest {
 
 impl CcMessage {
     /// Parse a JSON line from stdout into a typed message.
+    ///
+    /// Forward-compatible: unknown message types return `CcMessage::Other(val)`
+    /// and missing string fields default to the empty string, since the CC
+    /// stream-JSON protocol evolves upstream. Both cases are logged at
+    /// `debug`/`warn` so protocol drift is observable in the runtime.
     pub fn parse(val: serde_json::Value) -> Self {
         let msg_type = val.get("type").and_then(|t| t.as_str()).unwrap_or("");
         match msg_type {
             "system" => {
                 let subtype = val.get("subtype").and_then(|s| s.as_str()).unwrap_or("");
                 if subtype == "init" {
+                    let session_id = str_field(&val, "session_id");
+                    if session_id.is_empty() {
+                        tracing::warn!(module = "cc-message", "init message missing session_id");
+                    }
                     CcMessage::Init(InitMessage {
-                        session_id: str_field(&val, "session_id"),
+                        session_id,
                         tools: val
                             .get("tools")
                             .and_then(|t| t.as_array())
@@ -140,6 +161,11 @@ impl CcMessage {
                         raw: val,
                     })
                 } else {
+                    tracing::debug!(
+                        module = "cc-message",
+                        subtype = %subtype,
+                        "unknown system subtype — forwarding as Other"
+                    );
                     CcMessage::Other(val)
                 }
             }
@@ -172,6 +198,9 @@ impl CcMessage {
             }
             "result" => {
                 let subtype_str = val.get("subtype").and_then(|s| s.as_str()).unwrap_or("");
+                if subtype_str.is_empty() {
+                    tracing::warn!(module = "cc-message", "result message missing subtype");
+                }
                 let subtype = match subtype_str {
                     "success" => ResultSubtype::Success,
                     "error_max_turns" => ResultSubtype::ErrorMaxTurns,
@@ -267,7 +296,14 @@ impl CcMessage {
                     raw: val,
                 })
             }
-            _ => CcMessage::Other(val),
+            _ => {
+                tracing::debug!(
+                    module = "cc-message",
+                    msg_type = %msg_type,
+                    "unknown stream message type — forwarding as Other"
+                );
+                CcMessage::Other(val)
+            }
         }
     }
 }

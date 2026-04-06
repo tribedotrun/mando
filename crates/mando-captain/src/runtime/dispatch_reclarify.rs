@@ -83,7 +83,16 @@ async fn apply_reclarify_ok(
                 item.session_ids.clarifier = Some(sid.clone());
             }
 
-            super::timeline_emit::emit_for_task(
+            if let Err(e) = mando_db::queries::tasks::persist_clarify_result(pool, item).await {
+                tracing::error!(
+                    module = "captain",
+                    id = item.id,
+                    error = %e,
+                    "failed to persist clarify result"
+                );
+            }
+
+            let _ = super::timeline_emit::emit_for_task(
                 item,
                 mando_types::timeline::TimelineEventType::ClarifyResolved,
                 "Re-clarification complete, ready for work",
@@ -110,7 +119,16 @@ async fn apply_reclarify_ok(
                 item.session_ids.clarifier = Some(sid.clone());
             }
 
-            super::timeline_emit::emit_for_task(
+            if let Err(e) = mando_db::queries::tasks::persist_clarify_result(pool, item).await {
+                tracing::error!(
+                    module = "captain",
+                    id = item.id,
+                    error = %e,
+                    "failed to persist clarify result"
+                );
+            }
+
+            let _ = super::timeline_emit::emit_for_task(
                 item,
                 mando_types::timeline::TimelineEventType::ClarifyQuestion,
                 "Still needs clarification",
@@ -128,6 +146,15 @@ async fn apply_reclarify_ok(
             if let Some(ref sid) = result.session_id {
                 item.session_ids.clarifier = Some(sid.clone());
             }
+
+            if let Err(e) = mando_db::queries::tasks::persist_clarify_result(pool, item).await {
+                tracing::error!(
+                    module = "captain",
+                    id = item.id,
+                    error = %e,
+                    "failed to persist clarify result"
+                );
+            }
         }
     }
 }
@@ -142,7 +169,7 @@ async fn apply_reclarify_err(
     // Rate-limit-caused failure — activate cooldown, skip retry count.
     if let Some(ref sid) = item.session_ids.clarifier {
         if super::rate_limit_cooldown::check_and_activate_from_stream(sid) {
-            super::timeline_emit::emit_rate_limited(item, pool).await;
+            let _ = super::timeline_emit::emit_rate_limited(item, pool).await;
             return;
         }
     }

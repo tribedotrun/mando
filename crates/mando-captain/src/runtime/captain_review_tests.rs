@@ -1,28 +1,40 @@
 use super::*;
 
 #[test]
-fn test_verdict_schema_is_valid_json() {
-    let schema = verdict_json_schema();
+fn test_verdict_schema_is_trigger_aware() {
+    // Default triggers: ship, nudge, respawn, reset_budget (no escalate).
+    let schema = verdict_json_schema("gates_pass");
     assert_eq!(schema["type"], "object");
-    assert!(schema["properties"]["action"].is_object());
-    assert!(schema["properties"]["feedback"].is_object());
-    assert!(schema["properties"]["report"].is_object());
     let required = schema["required"].as_array().unwrap();
     assert!(required.contains(&serde_json::json!("action")));
     assert!(required.contains(&serde_json::json!("feedback")));
-    // Action field must have enum constraint.
-    let action_enum = schema["properties"]["action"]["enum"].as_array().unwrap();
-    assert!(action_enum.contains(&serde_json::json!("ship")));
-    assert!(action_enum.contains(&serde_json::json!("nudge")));
-    assert!(action_enum.contains(&serde_json::json!("escalate")));
-    assert!(action_enum.contains(&serde_json::json!("respawn")));
-    assert!(action_enum.contains(&serde_json::json!("retry_clarifier")));
+    let actions = schema["properties"]["action"]["enum"].as_array().unwrap();
+    assert!(actions.contains(&serde_json::json!("ship")));
+    assert!(actions.contains(&serde_json::json!("nudge")));
+    assert!(actions.contains(&serde_json::json!("respawn")));
+    assert!(actions.contains(&serde_json::json!("reset_budget")));
+    assert!(!actions.contains(&serde_json::json!("escalate")));
+    assert!(!actions.contains(&serde_json::json!("retry_clarifier")));
+
+    // budget_exhausted: includes escalate.
+    let schema = verdict_json_schema("budget_exhausted");
+    let actions = schema["properties"]["action"]["enum"].as_array().unwrap();
+    assert!(actions.contains(&serde_json::json!("escalate")));
+    assert!(actions.contains(&serde_json::json!("reset_budget")));
+    assert!(!actions.contains(&serde_json::json!("retry_clarifier")));
+
+    // clarifier_fail: only retry_clarifier and escalate.
+    let schema = verdict_json_schema("clarifier_fail");
+    let actions = schema["properties"]["action"]["enum"].as_array().unwrap();
+    assert!(actions.contains(&serde_json::json!("retry_clarifier")));
+    assert!(actions.contains(&serde_json::json!("escalate")));
+    assert!(!actions.contains(&serde_json::json!("ship")));
 }
 
 #[test]
 fn test_template_renders_gates_pass_verdicts() {
     let workflow = mando_config::workflow::CaptainWorkflow::compiled_default();
-    let mut vars = std::collections::HashMap::new();
+    let mut vars: rustc_hash::FxHashMap<&str, &str> = rustc_hash::FxHashMap::default();
     vars.insert("trigger", "gates_pass");
     vars.insert("title", "Test task");
     vars.insert("item_id", "42");
@@ -34,11 +46,15 @@ fn test_template_renders_gates_pass_verdicts() {
     vars.insert("evidence_images", "");
     vars.insert("intervention_count", "3");
     vars.insert("is_gates_pass", "true");
+    vars.insert("is_degraded_context", "");
     vars.insert("is_timeout", "");
     vars.insert("is_broken_session", "");
     vars.insert("is_budget_exhausted", "");
     vars.insert("is_clarifier_fail", "");
     vars.insert("is_rebase_fail", "");
+    vars.insert("is_ci_failure", "");
+    vars.insert("is_merge_fail", "");
+    vars.insert("is_repeated_nudge", "");
 
     let rendered = mando_config::render_prompt("captain_review", &workflow.prompts, &vars).unwrap();
 
@@ -47,17 +63,21 @@ fn test_template_renders_gates_pass_verdicts() {
         rendered.contains("test-worker"),
         "should contain worker context"
     );
-    // Allowed verdicts for gates_pass are present.
+    // Non-budget/non-clarifier triggers: ship, nudge, respawn, reset_budget.
+    // No escalate, no retry_clarifier.
     assert!(rendered.contains("**ship**"), "should have ship verdict");
     assert!(rendered.contains("**nudge**"), "should have nudge verdict");
     assert!(
-        rendered.contains("**escalate**"),
-        "should have escalate verdict"
+        rendered.contains("**respawn**"),
+        "should have respawn verdict"
     );
-    // Other trigger verdicts should NOT be present.
     assert!(
-        !rendered.contains("**respawn**"),
-        "no respawn for gates_pass"
+        rendered.contains("**reset_budget**"),
+        "should have reset_budget verdict"
+    );
+    assert!(
+        !rendered.contains("**escalate**"),
+        "no escalate for gates_pass"
     );
     assert!(
         !rendered.contains("**retry_clarifier**"),
@@ -68,7 +88,7 @@ fn test_template_renders_gates_pass_verdicts() {
 #[test]
 fn test_template_renders_timeout_verdicts() {
     let workflow = mando_config::workflow::CaptainWorkflow::compiled_default();
-    let mut vars = std::collections::HashMap::new();
+    let mut vars: rustc_hash::FxHashMap<&str, &str> = rustc_hash::FxHashMap::default();
     vars.insert("trigger", "timeout");
     vars.insert("title", "Test");
     vars.insert("item_id", "1");
@@ -77,22 +97,32 @@ fn test_template_renders_timeout_verdicts() {
     vars.insert("evidence_images", "");
     vars.insert("intervention_count", "0");
     vars.insert("is_gates_pass", "");
+    vars.insert("is_degraded_context", "");
     vars.insert("is_timeout", "true");
     vars.insert("is_broken_session", "");
     vars.insert("is_budget_exhausted", "");
     vars.insert("is_clarifier_fail", "");
     vars.insert("is_rebase_fail", "");
+    vars.insert("is_ci_failure", "");
+    vars.insert("is_merge_fail", "");
+    vars.insert("is_repeated_nudge", "");
 
     let rendered = mando_config::render_prompt("captain_review", &workflow.prompts, &vars).unwrap();
 
+    // Timeout: ship, nudge, respawn, reset_budget. No escalate.
+    assert!(rendered.contains("**ship**"), "timeout should have ship");
     assert!(rendered.contains("**nudge**"), "timeout should have nudge");
     assert!(
-        rendered.contains("**escalate**"),
-        "timeout should have escalate"
+        rendered.contains("**respawn**"),
+        "timeout should have respawn"
     );
     assert!(
-        !rendered.contains("**ship**"),
-        "timeout should not have ship"
+        rendered.contains("**reset_budget**"),
+        "timeout should have reset_budget"
+    );
+    assert!(
+        !rendered.contains("**escalate**"),
+        "timeout should NOT have escalate"
     );
 }
 
@@ -353,7 +383,12 @@ async fn test_nudge_verdict_resets_worker_started_at() {
 }
 
 #[tokio::test]
-async fn test_apply_verdict_resets_review_fail_count() {
+async fn test_apply_verdict_nudge_preserves_review_context_on_failed_resume() {
+    // When nudge resume fails (no worker/session/worktree to resume), the
+    // review context must be preserved so the next tick can retry. Previously
+    // this was silently cleared, causing the task to lose its review trigger
+    // and review_fail_count, which left it stuck in InProgress without any
+    // review context on the next tick.
     let db = mando_db::Db::open_in_memory().await.unwrap();
     let pool = db.pool().clone();
     let notifier =
@@ -375,8 +410,70 @@ async fn test_apply_verdict_resets_review_fail_count() {
         .await
         .unwrap();
 
+    // Status still transitions so the UI reflects the nudge attempt.
     assert_eq!(item.status, mando_types::task::ItemStatus::InProgress);
-    assert_eq!(item.review_fail_count, 0);
-    assert!(item.session_ids.review.is_none());
-    assert!(item.captain_review_trigger.is_none());
+    // On failed resume, review fields are preserved for the next tick's retry.
+    assert_eq!(item.review_fail_count, 4);
+    assert!(item.session_ids.review.is_some());
+}
+
+#[tokio::test]
+async fn test_reset_budget_verdict_resets_intervention_count() {
+    let db = mando_db::Db::open_in_memory().await.unwrap();
+    let pool = db.pool().clone();
+    let notifier =
+        crate::runtime::notify::Notifier::new(std::sync::Arc::new(mando_shared::EventBus::new()));
+
+    let mut item = Task::new("test");
+    item.status = mando_types::task::ItemStatus::CaptainReviewing;
+    item.intervention_count = 42;
+    item.worker_started_at = Some("2020-01-01T00:00:00Z".to_string());
+
+    let verdict = CaptainVerdict {
+        action: "reset_budget".into(),
+        feedback: "try a different approach".into(),
+        report: None,
+    };
+    let config = mando_config::settings::Config::default();
+    let workflow = mando_config::workflow::CaptainWorkflow::compiled_default();
+    apply_verdict(&mut item, &verdict, &config, &workflow, &notifier, &pool)
+        .await
+        .unwrap();
+
+    assert_eq!(item.status, mando_types::task::ItemStatus::InProgress);
+    assert_eq!(item.intervention_count, 0, "budget must be reset to 0");
+    // worker_started_at must be reset to ~now.
+    let started = item.worker_started_at.as_deref().unwrap();
+    assert_ne!(started, "2020-01-01T00:00:00Z", "timestamp was not reset");
+}
+
+#[tokio::test]
+async fn test_reset_budget_preserves_review_fields_on_failed_resume() {
+    let db = mando_db::Db::open_in_memory().await.unwrap();
+    let pool = db.pool().clone();
+    let notifier =
+        crate::runtime::notify::Notifier::new(std::sync::Arc::new(mando_shared::EventBus::new()));
+
+    let mut item = Task::new("test");
+    item.status = mando_types::task::ItemStatus::CaptainReviewing;
+    item.intervention_count = 50;
+    item.review_fail_count = 2;
+    item.session_ids.review = Some("review-session".into());
+
+    let verdict = CaptainVerdict {
+        action: "reset_budget".into(),
+        feedback: "unblock this".into(),
+        report: None,
+    };
+    let config = mando_config::settings::Config::default();
+    let workflow = mando_config::workflow::CaptainWorkflow::compiled_default();
+    apply_verdict(&mut item, &verdict, &config, &workflow, &notifier, &pool)
+        .await
+        .unwrap();
+
+    assert_eq!(item.status, mando_types::task::ItemStatus::InProgress);
+    assert_eq!(item.intervention_count, 0);
+    // On failed resume (no worker/session/worktree), review fields preserved.
+    assert_eq!(item.review_fail_count, 2);
+    assert!(item.session_ids.review.is_some());
 }

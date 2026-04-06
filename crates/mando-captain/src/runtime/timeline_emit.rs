@@ -3,6 +3,7 @@
 //! Retries transient DB failures (3 attempts, 100ms apart) before giving up.
 //! Never blocks the critical path beyond the retry budget (~200ms worst case).
 
+use anyhow::{anyhow, Result};
 use mando_types::timeline::{TimelineEvent, TimelineEventType};
 use sqlx::SqlitePool;
 
@@ -12,8 +13,10 @@ const RETRY_DELAY_MS: u64 = 100;
 /// Emit a timeline event with bounded retry.
 ///
 /// Retries up to 3 times (100ms between attempts) to survive transient DB
-/// hiccups. If all attempts fail, logs at ERROR with enough context to
-/// identify the gap. Never blocks the caller beyond ~200ms.
+/// hiccups. If all attempts fail, logs at ERROR and returns an error so
+/// callers can escalate, persist to a fallback, or surface the gap in a
+/// tick alert. Callers that legitimately treat the timeline as best-effort
+/// can ignore the result with `let _ =` — but the default is to handle it.
 pub(crate) async fn emit(
     pool: &SqlitePool,
     task_id: i64,
@@ -21,7 +24,7 @@ pub(crate) async fn emit(
     actor: &str,
     summary: &str,
     data: serde_json::Value,
-) {
+) -> Result<()> {
     let event = TimelineEvent {
         event_type,
         timestamp: mando_types::now_rfc3339(),
@@ -33,7 +36,7 @@ pub(crate) async fn emit(
     let mut last_err = None;
     for attempt in 1..=MAX_ATTEMPTS {
         match mando_db::queries::timeline::append(pool, task_id, &event).await {
-            Ok(()) => return,
+            Ok(()) => return Ok(()),
             Err(e) => {
                 if attempt < MAX_ATTEMPTS {
                     tracing::warn!(
@@ -62,6 +65,9 @@ pub(crate) async fn emit(
         error = %err,
         "timeline event lost after {MAX_ATTEMPTS} attempts — audit trail gap"
     );
+    Err(anyhow!(
+        "timeline event lost after {MAX_ATTEMPTS} attempts: {err}"
+    ))
 }
 
 /// Emit a timeline event for a task.
@@ -71,12 +77,12 @@ pub async fn emit_for_task(
     summary: &str,
     data: serde_json::Value,
     pool: &SqlitePool,
-) {
-    emit(pool, item.id, event_type, "captain", summary, data).await;
+) -> Result<()> {
+    emit(pool, item.id, event_type, "captain", summary, data).await
 }
 
 /// Emit a rate-limited timeline event with computed retry-at time.
-pub async fn emit_rate_limited(item: &mando_types::Task, pool: &SqlitePool) {
+pub async fn emit_rate_limited(item: &mando_types::Task, pool: &SqlitePool) -> Result<()> {
     let remaining = super::rate_limit_cooldown::remaining_secs();
     let retry_at = time::OffsetDateTime::now_utc() + time::Duration::seconds(remaining as i64);
     let retry_at_str = retry_at
@@ -89,5 +95,5 @@ pub async fn emit_rate_limited(item: &mando_types::Task, pool: &SqlitePool) {
         serde_json::json!({ "remaining_secs": remaining, "retry_at": retry_at_str }),
         pool,
     )
-    .await;
+    .await
 }

@@ -25,9 +25,21 @@ pub(crate) async fn backfill_if_needed(item: &Task, pool: &sqlx::SqlitePool) {
         }
     }
 
-    let existing = mando_db::queries::timeline::load(pool, task_id)
-        .await
-        .unwrap_or_default();
+    // Load existing timeline to dedup against. If the load fails, we cannot
+    // safely backfill because we would generate duplicates; bail out loudly
+    // instead of returning an empty Vec and double-writing every event.
+    let existing = match mando_db::queries::timeline::load(pool, task_id).await {
+        Ok(rows) => rows,
+        Err(e) => {
+            tracing::error!(
+                module = "captain",
+                task_id = task_id,
+                error = %e,
+                "timeline backfill: failed to load existing timeline, aborting to avoid duplicates"
+            );
+            return;
+        }
+    };
 
     let item_id_str = item.id.to_string();
     let sessions = load_item_sessions(pool, &item_id_str).await;

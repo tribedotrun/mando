@@ -7,6 +7,9 @@ import path from 'path';
 import fs from 'fs';
 import { execSync } from 'child_process';
 import log from '#main/logger';
+import { isServiceLoaded, waitForServiceUnloaded } from '#main/port-check';
+export type { DaemonStatus } from '#main/port-check';
+export { getDaemonStatus } from '#main/port-check';
 
 // ---------------------------------------------------------------------------
 // Mode-aware identifiers — dev uses `.dev` suffixed labels and separate
@@ -17,11 +20,17 @@ function isDev(): boolean {
   return process.env.MANDO_APP_MODE === 'dev';
 }
 
+function isPreview(): boolean {
+  return process.env.MANDO_APP_MODE === 'preview' || process.execPath.includes('Mando (Preview)');
+}
+
 function daemonLabel(): string {
+  if (isPreview()) return 'build.mando.preview.daemon';
   return isDev() ? 'build.mando.daemon.dev' : 'build.mando.daemon';
 }
 
 function tgLabel(): string {
+  if (isPreview()) return 'build.mando.preview.telegram';
   return isDev() ? 'build.mando.telegram.dev' : 'build.mando.telegram';
 }
 
@@ -30,7 +39,16 @@ function errorMsg(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
-export function homeDir(): string {
+/** Normalize an execSync error's stderr (Buffer or string) to a plain string. */
+function stderrString(e: unknown): string {
+  const raw = (e as { stderr?: unknown }).stderr;
+  if (raw == null) return '';
+  if (typeof raw === 'string') return raw;
+  if (Buffer.isBuffer(raw)) return raw.toString('utf-8');
+  return String(raw);
+}
+
+function homeDir(): string {
   return app.getPath('home');
 }
 
@@ -47,7 +65,8 @@ function tgPlistPath(): string {
 }
 
 function cliInstallPath(): string {
-  return path.join(homeDir(), '.local', 'bin', isDev() ? 'mando-dev' : 'mando');
+  const name = isPreview() ? 'mando-preview' : isDev() ? 'mando-dev' : 'mando';
+  return path.join(homeDir(), '.local', 'bin', name);
 }
 
 /** Resolve cargo target dir — respects env overrides, then walks up to workspace root. */
@@ -74,7 +93,7 @@ function cliSourcePath(): string {
 
 /** Staged daemon binary path in Application Support. */
 function daemonInstallPath(): string {
-  const name = isDev() ? 'mando-daemon-dev' : 'mando-daemon';
+  const name = isPreview() ? 'mando-daemon-preview' : isDev() ? 'mando-daemon-dev' : 'mando-daemon';
   return path.join(homeDir(), 'Library', 'Application Support', 'Mando', 'bin', name);
 }
 
@@ -86,7 +105,11 @@ function daemonSourcePath(): string {
 
 /** Staged TG bot binary path in Application Support. */
 function tgInstallPath(): string {
-  const name = isDev() ? 'mando-telegram-dev' : 'mando-telegram';
+  const name = isPreview()
+    ? 'mando-telegram-preview'
+    : isDev()
+      ? 'mando-telegram-dev'
+      : 'mando-telegram';
   return path.join(homeDir(), 'Library', 'Application Support', 'Mando', 'bin', name);
 }
 
@@ -97,7 +120,8 @@ function tgSourcePath(): string {
 }
 
 function daemonLogDir(): string {
-  return path.join(homeDir(), 'Library', 'Logs', isDev() ? 'Mando-Dev' : 'Mando');
+  const dir = isPreview() ? 'Mando-Preview' : isDev() ? 'Mando-Dev' : 'Mando';
+  return path.join(homeDir(), 'Library', 'Logs', dir);
 }
 
 export function currentPath(): string {
@@ -118,7 +142,9 @@ function generateDaemonPlist(dataDir: string): string {
   const home = homeDir();
   const binary = daemonInstallPath();
   const logDir = daemonLogDir();
-  const devArg = isDev() ? '\n        <string>--dev</string>' : '';
+  let extraArgs = '';
+  if (isDev()) extraArgs = '\n        <string>--dev</string>';
+  if (isPreview()) extraArgs = '\n        <string>--port</string>\n        <string>18650</string>';
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -127,7 +153,7 @@ function generateDaemonPlist(dataDir: string): string {
     <string>${daemonLabel()}</string>
     <key>ProgramArguments</key>
     <array>
-        <string>${binary}</string>${devArg}
+        <string>${binary}</string>${extraArgs}
     </array>
     <key>WorkingDirectory</key>
     <string>${dataDir}</string>
@@ -202,16 +228,6 @@ function launchctlLoad(plistPath: string, label: string): void {
   execSync(`launchctl bootstrap gui/${uid} "${plistPath}"`);
 }
 
-/** Check whether a launchd service is currently loaded. */
-function isServiceLoaded(label: string): boolean {
-  try {
-    execSync(`launchctl list ${label}`, { stdio: 'pipe' });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 /** Bootout a loaded launchd service. Caller checks isServiceLoaded() first. */
 function launchctlBootout(label: string): void {
   const uid = process.getuid?.() ?? 501;
@@ -224,29 +240,24 @@ function launchctlBootout(label: string): void {
   }
 }
 
-/** Poll until a launchd service is fully unloaded (or timeout). */
-function waitForServiceUnloaded(label: string, timeoutMs = 5000): void {
-  const deadline = Date.now() + timeoutMs;
-  while (isServiceLoaded(label) && Date.now() < deadline) {
-    execSync('sleep 0.2', { stdio: 'pipe' });
-  }
-  if (isServiceLoaded(label)) {
-    log.warn(`[launchd] ${label} still loaded after ${timeoutMs}ms — proceeding with bootstrap`);
-  }
-}
-
-/** Kickstart the daemon service — tells launchd to start it immediately,
- *  bypassing any crash-loop throttle. No-op if the service is not loaded. */
+// Kickstart the daemon service, telling launchd to start it immediately,
+// bypassing any crash-loop throttle. No-op if the service is not loaded.
 export function kickstartDaemon(): boolean {
   const label = daemonLabel();
   if (!isServiceLoaded(label)) return false;
   const uid = process.getuid?.() ?? 501;
   try {
-    execSync(`launchctl kickstart gui/${uid}/${label}`, { stdio: 'pipe' });
+    execSync(`launchctl kickstart gui/${uid}/${label}`, {
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
     log.info('[launchd] daemon kickstarted');
     return true;
   } catch (e: unknown) {
-    log.warn('[launchd] kickstart daemon failed:', errorMsg(e));
+    const status = (e as { status?: number }).status;
+    const stderr = stderrString(e);
+    log.warn(
+      `[launchd] kickstart daemon failed (status=${status}): ${stderr.trim() || errorMsg(e)}`,
+    );
     return false;
   }
 }
@@ -255,7 +266,7 @@ export function kickstartDaemon(): boolean {
 // Daemon binary staging + plist management
 // ---------------------------------------------------------------------------
 
-/** Stage a binary from source to install path. */
+/** Stage a binary from source to install path (atomic: write tmp then rename). */
 function stageBinary(src: string, dest: string, label: string): boolean {
   if (!fs.existsSync(src)) {
     log.warn(`${label} binary not found at ${src}`);
@@ -263,8 +274,10 @@ function stageBinary(src: string, dest: string, label: string): boolean {
   }
 
   fs.mkdirSync(path.dirname(dest), { recursive: true });
-  fs.copyFileSync(src, dest);
-  fs.chmodSync(dest, 0o755);
+  const tmp = `${dest}.tmp`;
+  fs.copyFileSync(src, tmp);
+  fs.chmodSync(tmp, 0o755);
+  fs.renameSync(tmp, dest);
   return true;
 }
 
@@ -274,7 +287,7 @@ export function stageDaemonBinary(): boolean {
 }
 
 /** Stage the TG bot binary from app bundle to Application Support. */
-export function stageTgBinary(): boolean {
+function stageTgBinary(): boolean {
   return stageBinary(tgSourcePath(), tgInstallPath(), 'tg-bot');
 }
 
@@ -285,8 +298,8 @@ function ensureLaunchdDirs(dataDir: string): void {
   fs.mkdirSync(path.join(dataDir, 'logs'), { recursive: true });
 }
 
-/** Bootout and remove legacy launchd services from before the label rename.
- *  Safe to call repeatedly — no-ops when the old services are not loaded. */
+// Bootout and remove legacy launchd services from before the label rename.
+// Safe to call repeatedly, no-ops when the old services are not loaded.
 function migrateOldLaunchdLabels(): void {
   const oldLabels = ['run.tribe.mando.daemon', 'run.tribe.mando.telegram'];
   for (const label of oldLabels) {
@@ -295,12 +308,19 @@ function migrateOldLaunchdLabels(): void {
       waitForServiceUnloaded(label);
       log.info(`[launchd] migrated legacy service: ${label}`);
     }
-    // Remove old plist file.
+    // Remove old plist file. ENOENT is normal (migration already ran on a
+    // prior launch); anything else hints at permission or filesystem issues
+    // we want visible without spamming debug logs for missing files.
     const plist = path.join(launchAgentsDir(), `${label}.plist`);
     try {
-      if (fs.existsSync(plist)) fs.unlinkSync(plist);
-    } catch {
-      /* best-effort */
+      fs.unlinkSync(plist);
+    } catch (e: unknown) {
+      const code = (e as NodeJS.ErrnoException)?.code;
+      if (code === 'ENOENT') {
+        log.debug(`[launchd] legacy plist ${label} already absent`);
+      } else {
+        log.warn(`[launchd] failed to remove legacy plist ${plist}: ${errorMsg(e)}`);
+      }
     }
   }
 }
@@ -314,8 +334,8 @@ export function installDaemonPlist(dataDir: string): void {
   launchctlLoad(plistFile, daemonLabel());
 }
 
-/** Install and load the TG bot LaunchAgent plist — skips if Telegram is not configured. */
-export function installTgPlist(dataDir: string): void {
+/** Install and load the TG bot LaunchAgent plist. Skips if Telegram is not configured. */
+function installTgPlist(dataDir: string): void {
   // Only install the TG bot service if Telegram is actually configured.
   // Without a token, mando-tg will crash-loop under KeepAlive.
   const configPath = path.join(dataDir, 'config.json');
@@ -342,8 +362,11 @@ export function installTgPlist(dataDir: string): void {
   launchctlLoad(plistFile, tgLabel());
 }
 
-/** Update daemon binary: bootout, replace binary, bootstrap. */
-export function updateDaemonBinary(dataDir: string): boolean {
+/** Update daemon binary: bootout, replace binary, bootstrap.
+ *  When `stagedAppPath` is provided, binaries are copied from the staged app
+ *  bundle instead of the currently running app — used by the update flow to
+ *  install the NEW binary before swapping the .app bundle. */
+export function updateDaemonBinary(dataDir: string, stagedAppPath?: string): boolean {
   const dest = daemonInstallPath();
   const prev = `${dest}.prev`;
 
@@ -369,8 +392,11 @@ export function updateDaemonBinary(dataDir: string): boolean {
     }
   }
 
-  // Copy new binaries from app bundle.
-  if (!stageDaemonBinary()) {
+  // Copy new binaries — from the staged app bundle if provided, else current.
+  const gwSrc = stagedAppPath
+    ? path.join(stagedAppPath, 'Contents', 'Resources', 'mando-gw')
+    : daemonSourcePath();
+  if (!stageBinary(gwSrc, dest, 'daemon')) {
     // Rollback on failure.
     if (fs.existsSync(prev)) {
       try {
@@ -383,7 +409,10 @@ export function updateDaemonBinary(dataDir: string): boolean {
   }
 
   // Stage TG binary (non-fatal if missing — user may not use Telegram).
-  stageTgBinary();
+  const tgSrc = stagedAppPath
+    ? path.join(stagedAppPath, 'Contents', 'Resources', 'mando-tg')
+    : tgSourcePath();
+  stageBinary(tgSrc, tgInstallPath(), 'tg-bot');
 
   // Bootstrap updated daemon + TG bot.
   installDaemonPlist(dataDir);
@@ -418,37 +447,10 @@ export function rollbackDaemonBinary(dataDir: string): boolean {
   return true;
 }
 
-/** Get daemon status via launchctl. */
-interface DaemonStatus {
-  loaded: boolean;
-  running: boolean;
-  pid: number | null;
-}
-
-export function getDaemonStatus(): DaemonStatus {
-  try {
-    const out = execSync(`launchctl list ${daemonLabel()} 2>/dev/null`, { encoding: 'utf-8' });
-    const pidMatch = out.match(/"PID"\s*=\s*(\d+)/);
-    return {
-      loaded: true,
-      running: pidMatch !== null && pidMatch[1] !== '0',
-      pid: pidMatch ? parseInt(pidMatch[1], 10) : null,
-    };
-  } catch (e: unknown) {
-    // launchctl list exits non-zero when the service isn't loaded — that's expected.
-    // Log anything else so real errors aren't silent.
-    const msg = errorMsg(e);
-    if (!msg.includes('Could not find service')) {
-      log.warn('[launchd] daemon status check failed:', msg);
-    }
-    return { loaded: false, running: false, pid: null };
-  }
-}
-
-/** Bootout dev-mode launchd services on quit. No-op in prod
+/** Bootout dev/preview-mode launchd services on quit. No-op in prod
  *  (prod daemon persists across Electron restarts via KeepAlive). */
 export function bootoutDevServices(): void {
-  if (!isDev()) return;
+  if (!isDev() && !isPreview()) return;
   const dl = daemonLabel();
   const tl = tgLabel();
   if (isServiceLoaded(dl)) launchctlBootout(dl);

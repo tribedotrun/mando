@@ -20,7 +20,7 @@ pub(crate) async fn poll_merging_items(
     pool: &sqlx::SqlitePool,
     rate_limited: bool,
 ) {
-    let merge_timeout_s = workflow.agent.captain_merge_timeout_s;
+    let merge_timeout = workflow.agent.captain_merge_timeout_s;
     let max_merge_retries = workflow.agent.max_review_retries;
 
     // Categorize CaptainMerging items by state.
@@ -56,25 +56,59 @@ pub(crate) async fn poll_merging_items(
         pr_num: String,
     }
     let mut checks: Vec<MergeCheck> = Vec::new();
-    let mut spawn_direct: Vec<usize> = Vec::new();
 
+    // Items whose project/PR context is broken: escalate to captain review
+    // instead of spawning a merge session against a malformed context that
+    // would burn tokens and possibly hallucinate a wrong-PR merge.
+    let mut escalate_unresolved: Vec<(usize, String)> = Vec::new();
     for &idx in &needs_spawn {
         let item = &items[idx];
-        let mut matched = false;
-        if let Some(pr_ref) = item.pr.as_deref() {
-            let repo = mando_config::resolve_github_repo(item.project.as_deref(), config)
-                .unwrap_or_default();
-            let pr_num = mando_types::task::extract_pr_number(pr_ref)
-                .map(|n| n.to_string())
-                .unwrap_or_default();
-            if !repo.is_empty() && !pr_num.is_empty() {
-                checks.push(MergeCheck { idx, repo, pr_num });
-                matched = true;
+        let Some(pr_ref) = item.pr.as_deref() else {
+            escalate_unresolved.push((idx, "item has no PR ref".to_string()));
+            continue;
+        };
+        let repo = mando_config::resolve_github_repo(item.project.as_deref(), config);
+        let pr_num = mando_types::task::extract_pr_number(pr_ref);
+        match (repo, pr_num) {
+            (Some(repo), Some(pr_num)) if !repo.is_empty() => {
+                checks.push(MergeCheck {
+                    idx,
+                    repo,
+                    pr_num: pr_num.to_string(),
+                });
             }
+            (None, _) => escalate_unresolved.push((
+                idx,
+                format!(
+                    "cannot resolve github_repo for project {:?}",
+                    item.project.as_deref().unwrap_or("<unset>")
+                ),
+            )),
+            (_, None) => escalate_unresolved
+                .push((idx, format!("cannot extract PR number from ref {pr_ref:?}"))),
+            (Some(repo), Some(_)) if repo.is_empty() => {
+                escalate_unresolved.push((idx, "resolved github_repo is empty string".to_string()))
+            }
+            _ => unreachable!(),
         }
-        if !matched {
-            spawn_direct.push(idx);
-        }
+    }
+    // Push the escalations forward so they are handled in the normal flow.
+    for (idx, reason) in &escalate_unresolved {
+        let item = &mut items[*idx];
+        tracing::error!(
+            module = "captain",
+            item_id = item.id,
+            reason = %reason,
+            "captain-merging item has broken PR/project context, escalating to captain review"
+        );
+        handle_merge_error(
+            item,
+            &format!("config/data mismatch: {reason}"),
+            max_merge_retries,
+            notifier,
+            pool,
+        )
+        .await;
     }
 
     // Run is_pr_merged checks in parallel.
@@ -85,12 +119,24 @@ pub(crate) async fn poll_merging_items(
             .collect();
         let merge_results = futures::future::join_all(futs).await;
 
-        for (check, already_merged) in checks.iter().zip(merge_results) {
+        for (check, merge_result) in checks.iter().zip(merge_results) {
             let item = &mut items[check.idx];
+            let already_merged = match merge_result {
+                Ok(b) => b,
+                Err(e) => {
+                    tracing::warn!(
+                        module = "captain",
+                        item_id = item.id,
+                        error = %e,
+                        "is_pr_merged check failed; treating as not merged and spawning"
+                    );
+                    false
+                }
+            };
             if already_merged {
                 let result = MergeResult {
                     action: "merged".into(),
-                    feedback: "PR already merged on GitHub — skipped merge session".into(),
+                    feedback: "PR already merged on GitHub; skipped merge session".into(),
                 };
                 apply_merge_result(item, &result, notifier, config, pool).await;
             } else {
@@ -110,22 +156,8 @@ pub(crate) async fn poll_merging_items(
         }
     }
 
-    // Items without PR info → spawn directly.
-    for &idx in &spawn_direct {
-        let item = &mut items[idx];
-        item.last_activity_at = Some(mando_types::now_rfc3339());
-        if let Err(e) = spawn_merge(item, config, workflow, notifier, pool).await {
-            tracing::warn!(module = "captain", item_id = item.id, error = %e, "spawn_merge failed");
-            handle_merge_error(
-                item,
-                &format!("spawn failed: {e}"),
-                max_merge_retries,
-                notifier,
-                pool,
-            )
-            .await;
-        }
-    }
+    // (All unresolved/broken-context items are now escalated above via
+    // handle_merge_error rather than spawned with a malformed context.)
 
     // Phase 2: Poll items with existing sessions.
     for &idx in &has_session {
@@ -133,18 +165,35 @@ pub(crate) async fn poll_merging_items(
         if let Some(result) = check_merge(item) {
             apply_merge_result(item, &result, notifier, config, pool).await;
         } else {
-            let is_timed_out = item
-                .last_activity_at
-                .as_deref()
-                .and_then(|ts| {
-                    time::OffsetDateTime::parse(ts, &time::format_description::well_known::Rfc3339)
-                        .ok()
-                })
-                .map(|entered| {
-                    let elapsed = time::OffsetDateTime::now_utc() - entered;
-                    elapsed.whole_seconds() as u64 > merge_timeout_s
-                })
-                .unwrap_or(true);
+            let is_timed_out = match item.last_activity_at.as_deref() {
+                Some(ts) => match time::OffsetDateTime::parse(
+                    ts,
+                    &time::format_description::well_known::Rfc3339,
+                ) {
+                    Ok(entered) => {
+                        let elapsed = time::OffsetDateTime::now_utc() - entered;
+                        elapsed.whole_seconds() as u64 > merge_timeout.as_secs()
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            module = "captain",
+                            item_id = item.id,
+                            last_activity_at = %ts,
+                            error = %e,
+                            "unparseable last_activity_at on captain-merging item; skipping this tick"
+                        );
+                        continue;
+                    }
+                },
+                None => {
+                    tracing::warn!(
+                        module = "captain",
+                        item_id = item.id,
+                        "captain-merging item has no last_activity_at; skipping this tick"
+                    );
+                    continue;
+                }
+            };
 
             if is_timed_out {
                 let is_rl = item.session_ids.merge.as_deref().is_some_and(|sid| {
@@ -156,7 +205,7 @@ pub(crate) async fn poll_merging_items(
                         item_id = item.id,
                         "merge timeout during rate limit — not counting against retry budget"
                     );
-                    super::timeline_emit::emit_rate_limited(item, pool).await;
+                    let _ = super::timeline_emit::emit_rate_limited(item, pool).await;
                     item.session_ids.merge = None;
                     continue;
                 }

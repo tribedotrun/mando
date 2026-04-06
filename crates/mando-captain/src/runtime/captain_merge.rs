@@ -6,7 +6,11 @@
 //! 3. On subsequent ticks, polls for completion
 //! 4. Applies the result (merged or escalate)
 
+use std::panic::AssertUnwindSafe;
+
 use anyhow::Result;
+use futures::FutureExt;
+use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
 
@@ -17,7 +21,6 @@ use mando_types::timeline::TimelineEventType;
 
 use super::notify::Notifier;
 use super::timeline_emit;
-use crate::io::process_manager;
 
 /// Structured result from a captain merge CC session.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -89,7 +92,7 @@ pub(crate) async fn spawn_merge(
 
     // Render prompt before any side effects so failures propagate as Err
     // rather than dying silently inside tokio::spawn.
-    let mut vars = std::collections::HashMap::new();
+    let mut vars: FxHashMap<&str, &str> = FxHashMap::default();
     vars.insert("pr_url", pr_url.as_str());
     vars.insert("repo", repo.as_str());
     vars.insert("pr_number", pr_number.as_str());
@@ -116,7 +119,7 @@ pub(crate) async fn spawn_merge(
     }
 
     let title = mando_shared::telegram_format::escape_html(&item.title);
-    timeline_emit::emit_for_task(
+    let _ = timeline_emit::emit_for_task(
         item,
         TimelineEventType::CaptainMergeStarted,
         "Captain merge session started",
@@ -131,72 +134,107 @@ pub(crate) async fn spawn_merge(
         .await;
 
     let captain_model = workflow.models.captain.clone();
-    let timeout_s = workflow.agent.captain_merge_timeout_s;
+    let timeout = workflow.agent.captain_merge_timeout_s;
     let pool = pool.clone();
     let merge_notifier = notifier.fork();
 
+    let session_id_for_panic = session_id.clone();
+    // TRACKED: detached captain-merge CC session. Same rationale as
+    // captain_review::spawn_review — library crate, no AppState dependency,
+    // external CC process is managed via the pid registry on shutdown.
     tokio::spawn(async move {
-        let config = mando_cc::CcConfig::builder()
-            .model(&captain_model)
-            .timeout(std::time::Duration::from_secs(timeout_s))
-            .caller("captain-merge-async")
-            .task_id(&task_id)
-            .cwd(cwd.clone())
-            .session_id(session_id.clone())
-            .allowed_tools(vec![
-                "Read".into(),
-                "Bash".into(),
-                "Edit".into(),
-                "Write".into(),
-                "Grep".into(),
-                "Glob".into(),
-            ])
-            .json_schema(merge_json_schema())
-            .build();
+        let result = AssertUnwindSafe(async move {
+            let config = mando_cc::CcConfig::builder()
+                .model(&captain_model)
+                .timeout(timeout)
+                .caller("captain-merge-async")
+                .task_id(&task_id)
+                .cwd(cwd.clone())
+                .session_id(session_id.clone())
+                .allowed_tools(vec![
+                    "Read".into(),
+                    "Bash".into(),
+                    "Edit".into(),
+                    "Write".into(),
+                    "Grep".into(),
+                    "Glob".into(),
+                ])
+                .json_schema(merge_json_schema())
+                .build();
 
-        // Log "running" session entry so cancel can find it immediately.
-        crate::io::headless_cc::log_running_session(
-            &pool,
-            &session_id,
-            &cwd,
-            "captain-merge-async",
-            "",
-            &task_id,
-            false,
-        )
-        .await;
+            // Log "running" session entry so cancel can find it immediately.
+            if let Err(e) = crate::io::headless_cc::log_running_session(
+                &pool,
+                &session_id,
+                &cwd,
+                "captain-merge-async",
+                "",
+                &task_id,
+                false,
+            )
+            .await
+            {
+                warn!(module = "captain", %session_id, %e, "failed to log running session");
+            }
 
-        let sid_for_hook = session_id.clone();
-        match mando_cc::CcOneShot::run_with_pid_hook(&prompt, config, |pid| {
-            crate::io::pid_registry::register(&sid_for_hook, pid);
+            let sid_for_hook = session_id.clone();
+            match mando_cc::CcOneShot::run_with_pid_hook(&prompt, config, |pid| {
+            if let Err(e) = crate::io::pid_registry::register(&sid_for_hook, pid) {
+                warn!(module = "captain", sid = %sid_for_hook, %e, "pid_registry register failed");
+            }
         })
         .await
         {
             Ok(result) => {
                 info!(module = "captain", %session_id, "captain merge CC completed");
-                crate::io::pid_registry::unregister(&session_id);
+                if let Err(e) = crate::io::pid_registry::unregister(&session_id) {
+                    warn!(module = "captain", %session_id, %e, "pid_registry unregister failed");
+                }
                 merge_notifier.check_rate_limit(&result).await;
-                crate::io::headless_cc::log_cc_result(
+                if let Err(e) = crate::io::headless_cc::log_cc_result(
                     &pool,
                     &result,
                     &cwd,
                     "captain-merge-async",
                     &task_id,
                 )
-                .await;
+                .await {
+                    warn!(module = "captain", %session_id, %e, "log_cc_result failed");
+                }
             }
             Err(e) => {
                 warn!(module = "captain", %session_id, %e, "captain merge CC failed");
-                crate::io::pid_registry::unregister(&session_id);
-                crate::io::headless_cc::log_cc_failure(
+                if let Err(e2) = crate::io::pid_registry::unregister(&session_id) {
+                    warn!(module = "captain", %session_id, %e2, "pid_registry unregister failed");
+                }
+                if let Err(e2) = crate::io::headless_cc::log_cc_failure(
                     &pool,
                     &session_id,
                     &cwd,
                     "captain-merge-async",
                     &task_id,
                 )
-                .await;
+                .await {
+                    warn!(module = "captain", %session_id, %e2, "log_cc_failure failed");
+                }
             }
+        }
+        })
+        .catch_unwind()
+        .await;
+
+        if let Err(panic) = result {
+            tracing::error!(
+                module = "captain",
+                session_id = %session_id_for_panic,
+                "captain merge spawn panicked: {:?}",
+                panic
+            );
+            let stream_path = mando_config::stream_path_for_session(&session_id_for_panic);
+            mando_cc::write_error_result(
+                &stream_path,
+                &format!("captain merge spawn panicked: {:?}", panic),
+            );
         }
     });
 
@@ -227,7 +265,7 @@ pub(crate) fn check_merge(item: &Task) -> Option<MergeResult> {
         .to_string();
 
     if text.is_empty() {
-        if let Some(t) = process_manager::get_last_assistant_text(&stream_path) {
+        if let Some(t) = mando_cc::get_last_assistant_text(&stream_path) {
             text = t;
         } else {
             return Some(MergeResult {
@@ -265,7 +303,7 @@ pub(crate) async fn apply_merge_result(
         "merged" => {
             item.status = ItemStatus::Merged;
             item.merge_fail_count = 0;
-            timeline_emit::emit_for_task(
+            let _ = timeline_emit::emit_for_task(
                 item,
                 TimelineEventType::Merged,
                 &format!("Captain merged: {}", result.feedback),
@@ -295,7 +333,7 @@ pub(crate) async fn apply_merge_result(
             item.status = ItemStatus::Escalated;
             item.merge_fail_count = 0;
             item.escalation_report = Some(report);
-            timeline_emit::emit_for_task(
+            let _ = timeline_emit::emit_for_task(
                 item,
                 TimelineEventType::Escalated,
                 &format!("Merge escalated: {}", result.feedback),
@@ -354,7 +392,7 @@ pub(crate) async fn handle_merge_error(
         );
         item.escalation_report = Some(report);
 
-        timeline_emit::emit_for_task(
+        let _ = timeline_emit::emit_for_task(
             item,
             TimelineEventType::CaptainReviewStarted,
             &format!("Merge failed {fail_count}/{max_retries} — captain reviewing: {error}"),
@@ -372,7 +410,7 @@ pub(crate) async fn handle_merge_error(
         // Stay in CaptainMerging — will retry on next tick.
         tracing::warn!(module = "captain", fail_count, max = max_retries, %error,
             "merge session failed, will retry");
-        timeline_emit::emit_for_task(
+        let _ = timeline_emit::emit_for_task(
             item,
             TimelineEventType::CaptainMergeStarted,
             &format!("Merge attempt {fail_count}/{max_retries} failed: {error}"),

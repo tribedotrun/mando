@@ -59,6 +59,9 @@
   /* Destructive button border */
   --color-border-destructive: #402d30;
 
+  /* Overlay */
+  --color-overlay: #0c0b10b8;
+
   /* Spacing (4pt grid) */
   --spacing-1: 4px;
   --spacing-2: 8px;
@@ -146,6 +149,79 @@ body {
   line-height: 18px;
 }
 
+/* ── Button variants ── */
+.btn {
+  font-family: var(--font-sans);
+  font-size: 13px;
+  border-radius: var(--radius-button);
+  padding: 8px 20px;
+  cursor: pointer;
+  transition:
+    background-color 150ms ease,
+    border-color 150ms ease,
+    color 150ms ease;
+}
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.btn:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
+}
+
+.btn-primary {
+  background: var(--color-accent);
+  border: none;
+  color: var(--color-bg);
+  font-weight: 600;
+}
+.btn-primary:hover:not(:disabled) {
+  background: var(--color-accent-hover);
+}
+.btn-primary:active:not(:disabled) {
+  background: var(--color-accent-pressed);
+}
+
+.btn-ghost {
+  background: transparent;
+  border: 1px solid var(--color-border);
+  color: var(--color-text-2);
+  font-weight: 500;
+}
+.btn-ghost:hover:not(:disabled) {
+  background: var(--color-surface-3);
+}
+.btn-ghost:active:not(:disabled) {
+  background: var(--color-surface-2);
+}
+
+.btn-destructive {
+  background: transparent;
+  border: 1px solid var(--color-border-destructive);
+  color: var(--color-error);
+  font-weight: 500;
+}
+.btn-destructive:hover:not(:disabled) {
+  background: var(--color-error-bg);
+}
+.btn-destructive:active:not(:disabled) {
+  background: color-mix(in srgb, var(--color-error) 15%, transparent);
+}
+
+.btn-text {
+  background: transparent;
+  border: none;
+  color: var(--color-text-2);
+  font-weight: 500;
+}
+.btn-text:hover:not(:disabled) {
+  color: var(--color-text-1);
+}
+.btn-text:active:not(:disabled) {
+  color: var(--color-text-3);
+}
+
 /* ── Scrollbar ── */
 ::-webkit-scrollbar {
   width: 6px;
@@ -165,11 +241,20 @@ body {
 }
 
 /* ── Focus ring ── */
-input:not([type="checkbox"]):not([type="radio"]):focus-visible,
+input:not([type='checkbox']):not([type='radio']):focus-visible,
 textarea:focus-visible,
 select:focus-visible {
   outline: none;
   border-color: var(--color-text-3);
+}
+
+/* ── Form inputs: opt out of drag region so text is selectable ── */
+input:not([type="checkbox"]):not([type="radio"]),
+textarea,
+select {
+  -webkit-app-region: no-drag;
+  -webkit-user-select: text;
+  user-select: text;
 }
 
 /* ── Selection ── */
@@ -187,7 +272,7 @@ select:focus-visible {
   margin-bottom: 0.5em;
 }
 .prose-scout h1 {
-  font-size: 20px;
+  font-size: 22px;
   font-weight: 700;
 }
 .prose-scout h2 {
@@ -242,7 +327,7 @@ select:focus-visible {
   font-family: var(--font-mono);
   background: var(--color-surface-2);
   padding: 0.15em 0.35em;
-  border-radius: 3px;
+  border-radius: var(--radius-row);
   font-size: 13px;
 }
 
@@ -298,10 +383,29 @@ select:focus-visible {
 
 /* ── Sidebar new-task CTA ── */
 .sidebar-new-task {
-  transition: background-color 150ms ease, color 150ms ease, transform 150ms ease;
+  transition:
+    background-color 150ms ease,
+    color 150ms ease,
+    transform 150ms ease;
 }
 .sidebar-new-task:active {
   transform: scale(0.98);
+}
+
+/* ── Sidebar project item: show dots on hover, hide count ── */
+.sidebar-project-item .sidebar-project-dots {
+  display: none;
+}
+.sidebar-project-item .sidebar-project-count {
+  display: inline;
+}
+.sidebar-project-item:hover .sidebar-project-dots,
+.sidebar-project-item[data-menu-open] .sidebar-project-dots {
+  display: inline-flex;
+}
+.sidebar-project-item:hover .sidebar-project-count,
+.sidebar-project-item[data-menu-open] .sidebar-project-count {
+  display: none;
 }
 
 /* ── Transition defaults ── */

@@ -40,15 +40,32 @@ impl fmt::Display for SessionStatus {
     }
 }
 
+/// Error returned when parsing a `SessionStatus` from a string fails.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParseSessionStatusError {
+    /// The input value that failed to parse.
+    pub value: String,
+}
+
+impl fmt::Display for ParseSessionStatusError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "unknown session status: {}", self.value)
+    }
+}
+
+impl std::error::Error for ParseSessionStatusError {}
+
 impl FromStr for SessionStatus {
-    type Err = String;
+    type Err = ParseSessionStatusError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "running" => Ok(Self::Running),
             "stopped" => Ok(Self::Stopped),
             "failed" => Ok(Self::Failed),
-            _ => Err(format!("unknown session status: {s}")),
+            _ => Err(ParseSessionStatusError {
+                value: s.to_string(),
+            }),
         }
     }
 }

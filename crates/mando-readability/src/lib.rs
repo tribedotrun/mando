@@ -26,6 +26,7 @@ pub struct Article {
 
 /// Errors that can occur during extraction.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum ReadabilityError {
     /// The input was empty or contained no parseable content.
     EmptyInput,

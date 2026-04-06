@@ -40,15 +40,16 @@ pub fn fuzzy_score(query: &str, text: &str) -> f64 {
     }
 
     // Tier 3: word-level edit distance
-    let mut total = 0.0;
-    for qw in &query_words {
-        let best = text_words
-            .iter()
-            .map(|tw| word_similarity(qw, tw))
-            .fold(0.0_f64, f64::max);
-        total += best;
-    }
-    let avg = total / query_words.len() as f64;
+    let avg = query_words
+        .iter()
+        .map(|qw| {
+            text_words
+                .iter()
+                .map(|tw| word_similarity(qw, tw))
+                .fold(0.0_f64, f64::max)
+        })
+        .sum::<f64>()
+        / query_words.len() as f64;
 
     if avg >= 0.5 {
         avg * 0.85

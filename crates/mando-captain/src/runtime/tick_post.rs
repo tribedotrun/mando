@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 
 use mando_shared::EventBus;
 use mando_types::BusEvent;
@@ -16,26 +16,14 @@ pub(crate) async fn run_post_phase(
     dry_run: bool,
     health_path: &Path,
     health_state: &HealthState,
+    removed_workers: &[String],
     notifier: &super::notify::Notifier,
     bus: Option<&EventBus>,
 ) -> Result<()> {
     if !dry_run {
-        // Reload from disk and merge: PIDs are now in pid_registry, but
-        // stream_size_at_spawn is still written during §4. Reload, then
-        // overlay our in-memory cpu/stale updates.
-        let mut fresh = health_store::load_health_state(health_path);
-        for (worker, entry) in health_state {
-            if let Some(obj) = entry.as_object() {
-                for (k, v) in obj {
-                    // Skip fields written to disk during §4 — the in-memory
-                    // values are stale (from §1 load).
-                    if k == "stream_size_at_spawn" {
-                        continue;
-                    }
-                    health_store::set_health_field(&mut fresh, worker, k, v.clone());
-                }
-            }
-        }
+        let mut fresh = health_store::load_health_state(health_path)
+            .with_context(|| format!("load health state from {}", health_path.display()))?;
+        merge_health_state(&mut fresh, health_state, removed_workers);
         if let Err(e) = health_store::save_health_state(health_path, &fresh) {
             tracing::warn!(module = "captain", error = %e, "health state save failed — worker tracking may be stale");
         }
@@ -44,9 +32,12 @@ pub(crate) async fn run_post_phase(
         let wal_path = ops_log::ops_log_path();
         let mut wal = ops_log::load_ops_log(&wal_path);
         ops_log::prune_stale(&mut wal, ops_log::STALE_AGE_SECS);
-        if let Err(e) = ops_log::save_ops_log(&wal, &wal_path) {
-            tracing::warn!(module = "captain", error = %e, "ops log save failed — completed operations may replay on restart");
-        }
+        ops_log::save_ops_log(&wal, &wal_path).with_context(|| {
+            format!(
+                "tick post phase: failed to save ops log at {}",
+                wal_path.display()
+            )
+        })?;
     }
 
     // Flush batched notifications.
@@ -65,6 +56,38 @@ pub(crate) async fn run_post_phase(
     Ok(())
 }
 
+/// Merge in-memory health state into the on-disk snapshot.
+///
+/// Only tick-owned fields (`cpu_time_s`, `cwd`) are overlaid from the
+/// in-memory snapshot. All other fields (written to disk by §4 EXECUTE)
+/// are preserved from the on-disk version. Workers explicitly removed
+/// during the tick (orphan cleanup) are removed from the merged result;
+/// other on-disk entries are preserved even if absent from in-memory,
+/// because they may have been created during §4 (e.g. newly dispatched
+/// workers).
+pub(crate) fn merge_health_state(
+    on_disk: &mut HealthState,
+    in_memory: &HealthState,
+    removed_workers: &[String],
+) {
+    const TICK_OWNED_FIELDS: &[&str] = &["cpu_time_s", "cwd"];
+
+    for (worker, entry) in in_memory {
+        if let Some(obj) = entry.as_object() {
+            for (k, v) in obj {
+                if TICK_OWNED_FIELDS.contains(&k.as_str()) {
+                    health_store::set_health_field(on_disk, worker, k, v.clone());
+                }
+            }
+        }
+    }
+
+    // Only remove workers that were explicitly cleaned up during the tick.
+    for w in removed_workers {
+        on_disk.remove(w);
+    }
+}
+
 /// Build tick summary from status counts and log it.
 pub(crate) fn log_tick_summary(
     status_counts: &std::collections::HashMap<String, usize>,
@@ -79,4 +102,108 @@ pub(crate) fn log_tick_summary(
         alert_count = alert_count,
         "tick done"
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_health(fields: &[(&str, &str, serde_json::Value)]) -> HealthState {
+        let mut state = HealthState::new();
+        for (worker, field, value) in fields {
+            health_store::set_health_field(&mut state, worker, field, value.clone());
+        }
+        state
+    }
+
+    #[test]
+    fn pending_ai_feedback_cleared_on_disk_survives_merge() {
+        let in_memory = make_health(&[
+            ("w1", "pending_ai_feedback", serde_json::json!("fix CI")),
+            ("w1", "cpu_time_s", serde_json::json!(42.0)),
+            ("w1", "pid", serde_json::json!(1234)),
+        ]);
+        let mut on_disk = make_health(&[
+            ("w1", "pid", serde_json::json!(5678)),
+            ("w1", "nudge_count", serde_json::json!(5)),
+        ]);
+
+        merge_health_state(&mut on_disk, &in_memory, &[]);
+
+        let cpu = health_store::get_health_f64(&on_disk, "w1", "cpu_time_s");
+        assert_eq!(cpu, Some(42.0));
+        let fb = health_store::get_health_str(&on_disk, "w1", "pending_ai_feedback");
+        assert!(fb.is_none(), "pending_ai_feedback was clobbered: {fb:?}");
+        let pid = health_store::get_health_u32(&on_disk, "w1", "pid");
+        assert_eq!(pid, 5678);
+        let nc = health_store::get_health_u32(&on_disk, "w1", "nudge_count");
+        assert_eq!(nc, 5);
+    }
+
+    #[test]
+    fn nudge_reason_fields_not_clobbered() {
+        let in_memory = make_health(&[
+            ("w1", "last_nudge_reason", serde_json::json!("old reason")),
+            ("w1", "nudge_reason_consecutive", serde_json::json!(1)),
+        ]);
+        let mut on_disk = make_health(&[
+            ("w1", "last_nudge_reason", serde_json::json!("new reason")),
+            ("w1", "nudge_reason_consecutive", serde_json::json!(3)),
+        ]);
+
+        merge_health_state(&mut on_disk, &in_memory, &[]);
+
+        let reason = health_store::get_health_str(&on_disk, "w1", "last_nudge_reason");
+        assert_eq!(reason.as_deref(), Some("new reason"));
+        let consec = health_store::get_health_u32(&on_disk, "w1", "nudge_reason_consecutive");
+        assert_eq!(consec, 3);
+    }
+
+    #[test]
+    fn orphan_worker_removed_from_merged_state() {
+        let in_memory = make_health(&[("w1", "cpu_time_s", serde_json::json!(10.0))]);
+        let mut on_disk = make_health(&[
+            ("w1", "pid", serde_json::json!(1111)),
+            ("orphan", "pid", serde_json::json!(9999)),
+        ]);
+        let removed = vec!["orphan".to_string()];
+
+        merge_health_state(&mut on_disk, &in_memory, &removed);
+
+        assert!(on_disk.contains_key("w1"), "live worker should survive");
+        assert!(
+            !on_disk.contains_key("orphan"),
+            "orphan worker should be removed"
+        );
+    }
+
+    #[test]
+    fn new_worker_on_disk_preserved() {
+        // A worker written to disk during §4 (dispatch) that wasn't in the
+        // §1 snapshot should survive the merge.
+        let in_memory = make_health(&[("w1", "cpu_time_s", serde_json::json!(10.0))]);
+        let mut on_disk = make_health(&[
+            ("w1", "pid", serde_json::json!(1111)),
+            ("w2-new", "pid", serde_json::json!(2222)),
+        ]);
+
+        merge_health_state(&mut on_disk, &in_memory, &[]);
+
+        assert!(on_disk.contains_key("w1"));
+        assert!(
+            on_disk.contains_key("w2-new"),
+            "new worker written during §4 should be preserved"
+        );
+    }
+
+    #[test]
+    fn cwd_is_overlaid_from_in_memory() {
+        let in_memory = make_health(&[("w1", "cwd", serde_json::json!("/new/path"))]);
+        let mut on_disk = make_health(&[("w1", "cwd", serde_json::json!("/old/path"))]);
+
+        merge_health_state(&mut on_disk, &in_memory, &[]);
+
+        let cwd = health_store::get_health_str(&on_disk, "w1", "cwd");
+        assert_eq!(cwd.as_deref(), Some("/new/path"));
+    }
 }

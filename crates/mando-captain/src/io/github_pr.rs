@@ -1,10 +1,9 @@
 //! Richer GitHub PR data fetching via `gh` CLI.
 
 use anyhow::{Context, Result};
-use mando_shared::retry::{classify_cli_error, retry_on_transient};
 use serde::Deserialize;
 
-use super::gh_retry_config;
+use super::gh_run::{run_gh, run_gh_api_paginate};
 
 /// A comment on a PR (issue comment).
 ///
@@ -38,7 +37,7 @@ pub struct ReviewThread {
     pub comments: Vec<ThreadComment>,
 }
 
-/// Lenient author deserializer — handles null, missing, and object values
+/// Lenient author deserializer. Handles null, missing, and object values
 /// (returns empty string on failure).
 fn deserialize_author_lenient<'de, D>(deserializer: D) -> std::result::Result<String, D::Error>
 where
@@ -56,82 +55,29 @@ where
     })
 }
 
-async fn gh_api_paginate(args: &[&str]) -> Result<Vec<serde_json::Value>> {
-    let args: Vec<String> = args.iter().map(|s| s.to_string()).collect();
-    let text = retry_on_transient(
-        &gh_retry_config(),
-        |e: &anyhow::Error| classify_cli_error(&e.to_string()),
-        || {
-            let args = args.clone();
-            async move {
-                let str_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
-                let output = tokio::process::Command::new("gh")
-                    .args(["api", "--paginate"])
-                    .args(&str_refs)
-                    .output()
-                    .await
-                    .context("gh api")?;
-                if !output.status.success() {
-                    let stderr = String::from_utf8_lossy(&output.stderr);
-                    anyhow::bail!("gh api failed: {stderr}");
-                }
-                Ok(String::from_utf8_lossy(&output.stdout).to_string())
-            }
-        },
-    )
-    .await?;
-
-    let mut results = Vec::new();
-    for chunk in text.split('\n') {
-        let chunk = chunk.trim();
-        if chunk.is_empty() {
-            continue;
-        }
-        let val: serde_json::Value = serde_json::from_str(chunk)?;
-        if let serde_json::Value::Array(arr) = val {
-            results.extend(arr);
-        } else {
-            results.push(val);
-        }
-    }
-    Ok(results)
-}
-
 /// Fetch the PR description body.
 pub async fn get_pr_body(repo: &str, pr: u32) -> Result<String> {
     let endpoint = format!("repos/{repo}/pulls/{pr}");
-    let text = retry_on_transient(
-        &gh_retry_config(),
-        |e: &anyhow::Error| classify_cli_error(&e.to_string()),
-        || {
-            let endpoint = endpoint.clone();
-            async move {
-                let output = tokio::process::Command::new("gh")
-                    .args(["api", &endpoint, "--jq", ".body"])
-                    .output()
-                    .await
-                    .context("gh api pr body")?;
-                if !output.status.success() {
-                    let stderr = String::from_utf8_lossy(&output.stderr);
-                    anyhow::bail!("gh api failed: {stderr}");
-                }
-                let body = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                // gh api --jq outputs literal "null" for null JSON values
-                if body == "null" || body.is_empty() {
-                    return Ok(String::new());
-                }
-                Ok(body)
-            }
-        },
-    )
-    .await?;
-    Ok(text)
+    let body = run_gh(&["api", &endpoint, "--jq", ".body"]).await?;
+    let trimmed = body.trim();
+    // gh api --jq outputs literal "null" for null JSON values
+    if trimmed == "null" || trimmed.is_empty() {
+        return Ok(String::new());
+    }
+    Ok(trimmed.to_string())
 }
 
 /// Fetch all issue comments on a PR.
+///
+/// Returns `Err` when the API returns raw comment rows but every single one
+/// fails to parse, because that's indistinguishable from a schema drift
+/// that would make the captain ship a PR while thinking there are no
+/// comments. The caller is expected to mark the PR as degraded.
+/// Individual parse failures (e.g. one deleted-user comment among many) are
+/// still skipped with a warn log so one bad row does not block the whole fetch.
 pub(crate) async fn get_pr_comments(repo: &str, pr: u32) -> Result<Vec<PrComment>> {
     let endpoint = format!("repos/{repo}/issues/{pr}/comments");
-    let items = gh_api_paginate(&[&endpoint]).await?;
+    let items = run_gh_api_paginate(&[&endpoint]).await?;
     let total = items.len();
     let comments: Vec<PrComment> = items
         .into_iter()
@@ -145,11 +91,9 @@ pub(crate) async fn get_pr_comments(repo: &str, pr: u32) -> Result<Vec<PrComment
         })
         .collect();
     if comments.is_empty() && total > 0 {
-        tracing::error!(
-            pr = pr,
-            total_raw = total,
-            "all PR comments failed to parse — possible API schema change"
-        );
+        return Err(anyhow::anyhow!(
+            "all {total} PR comments failed to parse for pr #{pr} in {repo}, possible API schema drift"
+        ));
     }
     Ok(comments)
 }
@@ -183,26 +127,8 @@ pub(crate) async fn get_pr_review_threads(repo: &str, pr: u32) -> Result<Vec<Rev
 }}"#
     );
 
-    let text = retry_on_transient(
-        &gh_retry_config(),
-        |e: &anyhow::Error| classify_cli_error(&e.to_string()),
-        || {
-            let query = query.clone();
-            async move {
-                let output = tokio::process::Command::new("gh")
-                    .args(["api", "graphql", "-f", &format!("query={query}")])
-                    .output()
-                    .await
-                    .context("gh api graphql")?;
-                if !output.status.success() {
-                    let stderr = String::from_utf8_lossy(&output.stderr);
-                    anyhow::bail!("gh api graphql failed: {stderr}");
-                }
-                Ok(String::from_utf8_lossy(&output.stdout).to_string())
-            }
-        },
-    )
-    .await?;
+    let query_arg = format!("query={query}");
+    let text = run_gh(&["api", "graphql", "-f", &query_arg]).await?;
     let val: serde_json::Value = serde_json::from_str(&text)?;
 
     let threads_arr = &val["data"]["repository"]["pullRequest"]["reviewThreads"]["nodes"];
@@ -213,7 +139,14 @@ pub(crate) async fn get_pr_review_threads(repo: &str, pr: u32) -> Result<Vec<Rev
     let mut result = Vec::new();
     for thread in threads {
         let id = thread["id"].as_str().unwrap_or("").to_string();
-        let is_resolved = thread["isResolved"].as_bool().unwrap_or(false);
+        // A missing isResolved field must NOT silently become false. Callers
+        // should mark the PR as degraded.
+        let is_resolved = thread["isResolved"].as_bool().with_context(|| {
+            format!(
+                "missing isResolved on thread {} (pr #{pr}, repo {repo})",
+                if id.is_empty() { "<unknown>" } else { &id }
+            )
+        })?;
 
         let comments = thread["comments"]["nodes"]
             .as_array()

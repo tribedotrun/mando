@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use anyhow::{Context, Result};
 
 use crate::config::CcConfig;
+use crate::error::CcError;
 
 /// Spawn a claude subprocess with stream-json input/output.
 ///
@@ -12,33 +13,48 @@ use crate::config::CcConfig;
 /// Stdin is piped for bidirectional communication.
 /// Stdout is piped for reading messages.
 /// Stderr goes to a file.
+/// Spawn a Claude Code process attached to the parent (stdin/stdout piped for
+/// interactive streaming). Returns the child handle, its `Pid`, and the paths
+/// to the stream and stderr log files.
 pub(crate) async fn spawn_process(
     config: &CcConfig,
     session_id: &str,
-) -> Result<(tokio::process::Child, u32, PathBuf, PathBuf)> {
+) -> Result<(tokio::process::Child, mando_types::Pid, PathBuf, PathBuf), CcError> {
     let claude = crate::resolve_claude_binary();
     let stream_dir = mando_config::cc_streams_dir();
-    std::fs::create_dir_all(&stream_dir)?;
+    tokio::fs::create_dir_all(&stream_dir).await?;
 
     let stream_path = stream_dir.join(format!("{session_id}.jsonl"));
     let stderr_path = stream_dir.join(format!("{session_id}.stderr"));
 
     // Stream file: append for resume, create for new.
-    let _stream_file = if config.resume_session_id.is_some() {
-        std::fs::File::options()
+    // `std::process::Stdio::from` needs a blocking `std::fs::File`, so these
+    // opens must stay blocking — wrap them in spawn_blocking to avoid stalling
+    // the async runtime.
+    let stream_path_clone = stream_path.clone();
+    let stderr_path_clone = stderr_path.clone();
+    let resume = config.resume_session_id.is_some();
+    let (_stream_file, stderr_file) = tokio::task::spawn_blocking(move || -> Result<_> {
+        let stream_file = if resume {
+            std::fs::File::options()
+                .create(true)
+                .append(true)
+                .open(&stream_path_clone)
+                .with_context(|| format!("open stream log: {}", stream_path_clone.display()))?
+        } else {
+            std::fs::File::create(&stream_path_clone)
+                .with_context(|| format!("create stream log: {}", stream_path_clone.display()))?
+        };
+        let stderr_file = std::fs::File::options()
             .create(true)
             .append(true)
-            .open(&stream_path)
-            .with_context(|| format!("open stream log: {}", stream_path.display()))?
-    } else {
-        std::fs::File::create(&stream_path)
-            .with_context(|| format!("create stream log: {}", stream_path.display()))?
-    };
-    let stderr_file = std::fs::File::options()
-        .create(true)
-        .append(true)
-        .open(&stderr_path)
-        .with_context(|| format!("open stderr log: {}", stderr_path.display()))?;
+            .open(&stderr_path_clone)
+            .with_context(|| format!("open stderr log: {}", stderr_path_clone.display()))?;
+        Ok((stream_file, stderr_file))
+    })
+    .await
+    .map_err(|e| CcError::Other(anyhow::Error::new(e)))?
+    .map_err(CcError::Other)?;
 
     let mut args = config.to_cli_args();
 
@@ -53,7 +69,11 @@ pub(crate) async fn spawn_process(
     cmd.args(&args)
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::from(stderr_file));
+        .stderr(std::process::Stdio::from(stderr_file))
+        // Interactive sessions: kill the subprocess when the `Child` handle is
+        // dropped. Prevents Claude subprocess leaks when `CcSession` errors out
+        // before its explicit `close()` path runs.
+        .kill_on_drop(true);
 
     // Tee stdout to stream file via a background task (handled by caller).
     // For now, stdout is piped directly — caller reads from it and writes to file.
@@ -87,12 +107,11 @@ pub(crate) async fn spawn_process(
         });
     }
 
-    let child = cmd
-        .spawn()
-        .map_err(|e| anyhow::anyhow!("spawn claude at {:?}: {}", claude, e))?;
-    let pid = child
-        .id()
-        .ok_or_else(|| anyhow::anyhow!("process exited before PID read"))?;
+    let child = cmd.spawn().map_err(|e| CcError::SpawnFailed {
+        binary: claude.clone(),
+        source: e,
+    })?;
+    let pid = mando_types::Pid::new(child.id().ok_or(CcError::StreamClosed)?);
 
     Ok((child, pid, stream_path, stderr_path))
 }
@@ -110,29 +129,41 @@ pub async fn spawn_detached(
     config: &CcConfig,
     prompt: &str,
     session_id: &str,
-) -> Result<(tokio::process::Child, u32, PathBuf)> {
+) -> Result<(tokio::process::Child, mando_types::Pid, PathBuf), CcError> {
     let claude = crate::resolve_claude_binary();
     let stream_dir = mando_config::cc_streams_dir();
-    std::fs::create_dir_all(&stream_dir)?;
+    tokio::fs::create_dir_all(&stream_dir).await?;
 
     let stream_path = stream_dir.join(format!("{session_id}.jsonl"));
     let stderr_path = stream_dir.join(format!("{session_id}.stderr"));
 
-    let stream_file = if config.resume_session_id.is_some() {
-        std::fs::File::options()
+    // `std::process::Stdio::from` needs a blocking `std::fs::File`, so these
+    // opens must stay blocking — wrap them in spawn_blocking to avoid stalling
+    // the async runtime.
+    let stream_path_clone = stream_path.clone();
+    let stderr_path_clone = stderr_path.clone();
+    let resume = config.resume_session_id.is_some();
+    let (stream_file, stderr_file) = tokio::task::spawn_blocking(move || -> Result<_> {
+        let stream_file = if resume {
+            std::fs::File::options()
+                .create(true)
+                .append(true)
+                .open(&stream_path_clone)
+                .with_context(|| format!("open stream: {}", stream_path_clone.display()))?
+        } else {
+            std::fs::File::create(&stream_path_clone)
+                .with_context(|| format!("create stream: {}", stream_path_clone.display()))?
+        };
+        let stderr_file = std::fs::File::options()
             .create(true)
             .append(true)
-            .open(&stream_path)
-            .with_context(|| format!("open stream: {}", stream_path.display()))?
-    } else {
-        std::fs::File::create(&stream_path)
-            .with_context(|| format!("create stream: {}", stream_path.display()))?
-    };
-    let stderr_file = std::fs::File::options()
-        .create(true)
-        .append(true)
-        .open(&stderr_path)
-        .with_context(|| format!("open stderr: {}", stderr_path.display()))?;
+            .open(&stderr_path_clone)
+            .with_context(|| format!("open stderr: {}", stderr_path_clone.display()))?;
+        Ok((stream_file, stderr_file))
+    })
+    .await
+    .map_err(|e| CcError::Other(anyhow::Error::new(e)))?
+    .map_err(CcError::Other)?;
 
     // Build args — reuse to_cli_args, then prepend -p and fix session-id for
     // detached mode (prompt via CLI flag, not stdin).
@@ -194,19 +225,23 @@ pub async fn spawn_detached(
         });
     }
 
-    let child = cmd
-        .spawn()
-        .map_err(|e| anyhow::anyhow!("spawn detached claude at {:?}: {}", claude, e))?;
-    let pid = child
-        .id()
-        .ok_or_else(|| anyhow::anyhow!("process exited before PID read"))?;
+    let child = cmd.spawn().map_err(|e| CcError::SpawnFailed {
+        binary: claude.clone(),
+        source: e,
+    })?;
+    let pid = mando_types::Pid::new(child.id().ok_or(CcError::StreamClosed)?);
 
     Ok((child, pid, stream_path))
 }
 
 /// Kill a process: SIGTERM → poll 5s → SIGKILL.
-pub async fn kill_process(pid: u32) -> Result<()> {
-    if pid == 0 {
+///
+/// Detached workers are owned by captain via a stream file + PID, not a
+/// `Child` handle, so we can't `.wait()` on them. We poll `is_process_alive`
+/// with tokio::time::sleep inside a bounded `tokio::time::timeout` instead of
+/// a hand-rolled loop counter.
+pub async fn kill_process(pid: mando_types::Pid) -> Result<()> {
+    if pid.as_u32() == 0 {
         tracing::warn!(
             module = "mando-cc",
             "kill_process called with pid=0, skipping"
@@ -216,31 +251,36 @@ pub async fn kill_process(pid: u32) -> Result<()> {
 
     #[cfg(unix)]
     unsafe {
-        libc::kill(-(pid as i32), libc::SIGTERM);
+        libc::kill(-pid.as_i32(), libc::SIGTERM);
     }
 
-    for _ in 0..50 {
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-        if !is_process_alive(pid) {
-            return Ok(());
+    let wait_exit = async {
+        while is_process_alive(pid) {
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         }
+    };
+    if tokio::time::timeout(std::time::Duration::from_secs(5), wait_exit)
+        .await
+        .is_ok()
+    {
+        return Ok(());
     }
 
     #[cfg(unix)]
     unsafe {
-        libc::kill(-(pid as i32), libc::SIGKILL);
+        libc::kill(-pid.as_i32(), libc::SIGKILL);
     }
     Ok(())
 }
 
 /// Check if a process is alive.
-pub fn is_process_alive(pid: u32) -> bool {
-    if pid == 0 {
+pub fn is_process_alive(pid: mando_types::Pid) -> bool {
+    if pid.as_u32() == 0 {
         return false;
     }
     #[cfg(unix)]
     {
-        unsafe { libc::kill(pid as i32, 0) == 0 }
+        unsafe { libc::kill(pid.as_i32(), 0) == 0 }
     }
     #[cfg(not(unix))]
     {
@@ -249,7 +289,7 @@ pub fn is_process_alive(pid: u32) -> bool {
 }
 
 /// Get CPU time in seconds for a process via `ps -o cputime=`.
-pub async fn get_cpu_time(pid: u32) -> Result<f64> {
+pub async fn get_cpu_time(pid: mando_types::Pid) -> Result<f64> {
     let output = tokio::process::Command::new("ps")
         .arg("-p")
         .arg(pid.to_string())
@@ -295,6 +335,6 @@ mod tests {
 
     #[test]
     fn pid_zero_not_alive() {
-        assert!(!is_process_alive(0));
+        assert!(!is_process_alive(mando_types::Pid::new(0)));
     }
 }

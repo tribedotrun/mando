@@ -1,19 +1,22 @@
-//! Review marshal — parse PR reviews, classify reviewer verdicts.
+//! Review marshal. Parses PR reviews and classifies reviewer verdicts.
 
+#[cfg(test)]
 use serde::{Deserialize, Serialize};
 
 /// Per-reviewer verdict.
+#[cfg(test)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ReviewerVerdict {
+struct ReviewerVerdict {
     pub reviewer: String,
     pub status: ReviewStatus,
     pub detail: String,
 }
 
 /// Possible review outcomes.
+#[cfg(test)]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum ReviewStatus {
+enum ReviewStatus {
     Approved,
     Blocked,
     Pending,
@@ -21,8 +24,9 @@ pub enum ReviewStatus {
 }
 
 /// Aggregate review gate result.
+#[cfg(test)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ReviewGateResult {
+struct ReviewGateResult {
     pub state: ReviewGateState,
     pub summary: String,
     pub reviewer_verdicts: Vec<ReviewerVerdict>,
@@ -31,9 +35,10 @@ pub struct ReviewGateResult {
 }
 
 /// Overall gate state.
+#[cfg(test)]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum ReviewGateState {
+enum ReviewGateState {
     Pass,
     Fail,
     Pending,
@@ -42,7 +47,7 @@ pub enum ReviewGateState {
 
 /// Parse PR review data from `gh pr view` JSON output.
 #[cfg(test)]
-pub(crate) fn evaluate_reviews(pr_json: &serde_json::Value) -> ReviewGateResult {
+fn evaluate_reviews(pr_json: &serde_json::Value) -> ReviewGateResult {
     let empty_reviews = vec![];
     let reviews = pr_json["reviews"].as_array().unwrap_or(&empty_reviews);
 

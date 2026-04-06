@@ -135,37 +135,14 @@ impl NotificationHandler {
 
         // Generate default keyboards for known kinds.
         match &payload.kind {
-            NotificationKind::AwaitingReview { item_id, .. } => Some(inline_keyboard(vec![
-                button("Approve & Merge", &format!("merge:{item_id}")),
-                button("View", &format!("view:{item_id}")),
-            ])),
-            NotificationKind::ClarifierNeeded { item_id }
-            | NotificationKind::NeedsClarification { item_id, .. } => {
+            NotificationKind::NeedsClarification { item_id, .. } => {
                 Some(inline_keyboard(vec![button(
                     "Answer",
                     &format!("answer:{item_id}"),
                 )]))
             }
-            NotificationKind::WorkerEscalated { item_id } => Some(inline_keyboard(vec![button(
-                "Retry",
-                &format!("retry:{item_id}"),
-            )])),
-            NotificationKind::Errored { item_id, .. } => Some(inline_keyboard(vec![
-                button("Retry", &format!("retry:{item_id}")),
-                button("View Timeline", &format!("view:{item_id}")),
-            ])),
             NotificationKind::Escalated { item_id, .. } => Some(inline_keyboard(vec![button(
                 "View Timeline",
-                &format!("view:{item_id}"),
-            )])),
-            NotificationKind::CaptainReviewVerdict { item_id, .. } => {
-                Some(inline_keyboard(vec![button(
-                    "View Timeline",
-                    &format!("view:{item_id}"),
-                )]))
-            }
-            NotificationKind::RebaseFailed { item_id, .. } => Some(inline_keyboard(vec![button(
-                "View",
                 &format!("view:{item_id}"),
             )])),
             NotificationKind::ScoutProcessed {
@@ -227,28 +204,6 @@ mod tests {
     }
 
     #[test]
-    fn awaiting_review_gets_keyboard() {
-        let api = TelegramApi::new("fake:token");
-        let handler = NotificationHandler::new(api, "12345".into());
-        let payload = NotificationPayload {
-            message: "PR ready".into(),
-            level: NotifyLevel::High,
-            kind: NotificationKind::AwaitingReview {
-                item_id: "ITEM-1".into(),
-                pr_number: Some(42),
-            },
-            task_key: None,
-            reply_markup: None,
-        };
-        let markup = handler.build_reply_markup(&payload);
-        assert!(markup.is_some());
-        let kb = markup.unwrap();
-        let buttons = kb["inline_keyboard"][0].as_array().unwrap();
-        assert_eq!(buttons[0]["text"], "Approve & Merge");
-        assert_eq!(buttons[0]["callback_data"], "merge:ITEM-1");
-    }
-
-    #[test]
     fn generic_notification_no_keyboard() {
         let api = TelegramApi::new("fake:token");
         let handler = NotificationHandler::new(api, "12345".into());
@@ -272,9 +227,9 @@ mod tests {
         let payload = NotificationPayload {
             message: "with custom markup".into(),
             level: NotifyLevel::High,
-            kind: NotificationKind::AwaitingReview {
+            kind: NotificationKind::Escalated {
                 item_id: "ITEM-1".into(),
-                pr_number: Some(42),
+                summary: None,
             },
             task_key: None,
             reply_markup: Some(custom.clone()),

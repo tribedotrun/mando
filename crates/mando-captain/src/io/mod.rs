@@ -10,6 +10,7 @@ pub(crate) fn gh_retry_config() -> RetryConfig {
 pub mod captain_lock;
 pub mod cc_session;
 pub mod evidence;
+pub(crate) mod gh_run;
 pub mod git;
 pub mod github;
 pub mod github_pr;

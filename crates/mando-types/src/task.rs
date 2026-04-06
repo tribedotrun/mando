@@ -164,6 +164,7 @@ impl Task {
     }
 
     /// Extract routing fields for the captain tick hot path.
+    #[must_use]
     pub fn routing(&self) -> TaskRouting {
         TaskRouting {
             id: self.id,

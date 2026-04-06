@@ -182,6 +182,48 @@ pub(crate) async fn check_done_mergeability(
     Ok(())
 }
 
+/// Apply a terminal PR status (merged or closed) discovered on GitHub.
+/// Sets the item status, notifies, and emits a timeline event; factoring out
+/// the duplicated scaffolding between `apply_merged` and `apply_closed`.
+#[allow(clippy::too_many_arguments)]
+async fn apply_terminal_from_github(
+    item: &mut Task,
+    pr: &str,
+    new_status: mando_types::task::ItemStatus,
+    event_type: mando_types::timeline::TimelineEventType,
+    emoji: &str,
+    verb_present: &str,
+    verb_past: &str,
+    notifier: &Notifier,
+    pool: &sqlx::SqlitePool,
+) {
+    item.status = new_status;
+    let msg = format!(
+        "{} {} (PR {}): <b>{}</b>",
+        emoji,
+        verb_present,
+        pr,
+        mando_shared::telegram_format::escape_html(&item.title)
+    );
+    notifier.high(&msg).await;
+    tracing::info!(
+        module = "captain",
+        title = %item.title,
+        pr = %pr,
+        verb_past = verb_past,
+        "item {}",
+        verb_past
+    );
+    let _ = super::timeline_emit::emit_for_task(
+        item,
+        event_type,
+        &format!("PR {pr} {verb_past} on GitHub"),
+        serde_json::json!({ "pr": pr }),
+        pool,
+    )
+    .await;
+}
+
 async fn apply_merged(
     item: &mut Task,
     pr: &str,
@@ -189,19 +231,15 @@ async fn apply_merged(
     notifier: &Notifier,
     pool: &sqlx::SqlitePool,
 ) {
-    item.status = mando_types::task::ItemStatus::Merged;
-    let msg = format!(
-        "\u{1f389} Merged (PR {}): <b>{}</b>",
-        pr,
-        mando_shared::telegram_format::escape_html(&item.title)
-    );
-    notifier.high(&msg).await;
-    tracing::info!(module = "captain", title = %item.title, pr = %pr, "item merged");
-    super::timeline_emit::emit_for_task(
+    apply_terminal_from_github(
         item,
+        pr,
+        mando_types::task::ItemStatus::Merged,
         mando_types::timeline::TimelineEventType::Merged,
-        &format!("PR {pr} merged on GitHub"),
-        serde_json::json!({ "pr": pr }),
+        "\u{1f389}",
+        "Merged",
+        "merged",
+        notifier,
         pool,
     )
     .await;
@@ -214,18 +252,15 @@ async fn apply_closed(
     notifier: &Notifier,
     pool: &sqlx::SqlitePool,
 ) {
-    item.status = mando_types::task::ItemStatus::Canceled;
-    let msg = format!(
-        "\u{26d4} PR closed ({}): <b>{}</b>",
-        pr,
-        mando_shared::telegram_format::escape_html(&item.title)
-    );
-    notifier.high(&msg).await;
-    super::timeline_emit::emit_for_task(
+    apply_terminal_from_github(
         item,
+        pr,
+        mando_types::task::ItemStatus::Canceled,
         mando_types::timeline::TimelineEventType::Canceled,
-        &format!("PR {pr} closed on GitHub"),
-        serde_json::json!({ "pr": pr }),
+        "\u{26d4}",
+        "PR closed",
+        "closed",
+        notifier,
         pool,
     )
     .await;

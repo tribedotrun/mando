@@ -2,12 +2,11 @@
 //!
 //! Each handler receives a pool, wraps it in ScoutDb, performs the operation, and returns JSON.
 
-use std::collections::HashMap;
-
 use anyhow::{bail, Context, Result};
 use mando_config::workflow::ScoutWorkflow;
 use mando_config::Config;
 use mando_types::ScoutStatus;
+use rustc_hash::FxHashMap;
 use serde_json::{json, Value};
 use sqlx::SqlitePool;
 use tracing::{info, warn};
@@ -75,16 +74,17 @@ pub async fn get_scout_item(pool: &SqlitePool, id: i64) -> Result<Value> {
         .with_context(|| format!("item #{id} not found"))?;
 
     let slug = slugify_title(item.title.as_deref().unwrap_or("untitled"));
-    let summary = file_store::read_summary(id, &slug);
+    let summary = file_store::read_summary_async(id, &slug).await;
 
     let mut val = serde_json::to_value(&item)?;
     if let Some(s) = summary {
         val["summary"] = Value::String(s);
     }
     if let Some(title) = item.title.as_deref() {
-        if let Some(article_md) =
-            file_store::read_article(id).filter(|md| article_matches_title(title, md))
-        {
+        let article = file_store::read_article_async(id)
+            .await
+            .filter(|md| article_matches_title(title, md));
+        if let Some(article_md) = article {
             if let Some(tg_url) =
                 crate::io::telegraph::get_cached_url_if_fresh(id, title, &article_md)
             {
@@ -104,7 +104,9 @@ pub async fn get_scout_article(pool: &SqlitePool, id: i64) -> Result<Value> {
         .with_context(|| format!("item #{id} not found"))?;
 
     let title = item.title.clone().unwrap_or_else(|| "Untitled".into());
-    let article = file_store::read_article(id).filter(|md| article_matches_title(&title, md));
+    let article = file_store::read_article_async(id)
+        .await
+        .filter(|md| article_matches_title(&title, md));
 
     let mut val = json!({
         "id": id,
@@ -134,23 +136,26 @@ pub async fn ensure_scout_article(
         .with_context(|| format!("item #{id} not found"))?;
 
     let title = item.title.clone().unwrap_or_else(|| "Untitled".into());
-    let mut article = file_store::read_article(id).filter(|md| article_matches_title(&title, md));
+    let mut article = file_store::read_article_async(id)
+        .await
+        .filter(|md| article_matches_title(&title, md));
 
     if article.is_none() && should_repair_article(item.status) {
         let content_path = file_store::content_path(id);
         let slug = slugify_title(&title);
-        let fallback_summary = file_store::read_summary(id, &slug);
+        let fallback_summary = file_store::read_summary_async(id, &slug).await;
         if let Some(summary_article) =
             fallback_summary.and_then(|summary| build_article_from_summary(&title, &summary))
         {
             info!(id, title = %title, "scout: repairing article from current summary");
-            file_store::write_article(id, &summary_article)
+            file_store::write_article_async(id, &summary_article)
+                .await
                 .with_context(|| format!("write repaired article for #{id}"))?;
             crate::io::telegraph::invalidate_cache(id);
             article = Some(summary_article);
-        } else if content_path.exists() {
+        } else if tokio::fs::try_exists(&content_path).await.unwrap_or(false) {
             info!(id, title = %title, "scout: healing stale or missing article");
-            let raw_content = file_store::read_content(id).with_context(|| {
+            let raw_content = file_store::read_content_async(id).await.with_context(|| {
                 format!("item #{id} content file exists but could not be read; refusing to heal with empty content")
             })?;
             let normalized = if let Some(local_article) =
@@ -186,7 +191,8 @@ pub async fn ensure_scout_article(
                 }
                 normalize_article_markdown(&title, &article_result.text)
             };
-            file_store::write_article(id, &normalized)
+            file_store::write_article_async(id, &normalized)
+                .await
                 .with_context(|| format!("write repaired article for #{id}"))?;
             crate::io::telegraph::invalidate_cache(id);
             article = Some(normalized);
@@ -325,7 +331,7 @@ pub async fn act_on_scout_item(
     let truncated = &content[..end];
 
     let user_prompt_str = user_prompt.unwrap_or("");
-    let mut vars = HashMap::new();
+    let mut vars: FxHashMap<&str, &str> = FxHashMap::default();
     vars.insert("title", title.as_str());
     vars.insert("url", item.url.as_str());
     vars.insert("summary", summary.as_str());

@@ -218,8 +218,6 @@ fn reopenable_set() {
 fn status_method_helpers() {
     assert!(ItemStatus::Merged.is_finalized());
     assert!(!ItemStatus::InProgress.is_finalized());
-    assert!(ItemStatus::AwaitingReview.is_reworkable());
-    assert!(ItemStatus::Errored.is_reopenable());
 }
 
 // -----------------------------------------------------------------------

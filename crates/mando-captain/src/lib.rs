@@ -20,6 +20,11 @@ pub static WORKER_EXIT_SIGNAL: tokio::sync::Notify = tokio::sync::Notify::const_
 
 /// Spawn a background task that awaits the child process and signals
 /// [`WORKER_EXIT_SIGNAL`] on exit so the next tick fires immediately.
+///
+/// TRACKED: not registered with the gateway's TaskTracker because mando-captain
+/// is a library crate and has no dependency on the gateway's AppState. The child
+/// process itself owns its lifecycle and is separately killed on gateway shutdown
+/// via the pid registry; this watcher only observes exit.
 pub fn watch_worker_exit(mut child: tokio::process::Child) {
     tokio::spawn(async move {
         match child.wait().await {

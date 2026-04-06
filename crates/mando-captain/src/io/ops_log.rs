@@ -63,7 +63,8 @@ pub(crate) fn load_ops_log(path: &Path) -> OpsLog {
 
 /// Save the WAL to disk.
 pub(crate) fn save_ops_log(log: &OpsLog, path: &Path) -> Result<()> {
-    mando_shared::save_json_file(path, log)
+    mando_shared::save_json_file(path, log)?;
+    Ok(())
 }
 
 /// Begin a new operation. Returns the op_id.

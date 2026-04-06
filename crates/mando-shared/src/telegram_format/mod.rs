@@ -26,23 +26,6 @@ pub fn repo_slug_from_remote(remote_url: &str) -> Option<String> {
     mando_config::parse_github_slug(remote_url)
 }
 
-/// Build a Telegram HTML hyperlink for a PR reference.
-///
-/// `pr_ref` is either `#446` or `PR #446`. The repo name is extracted from
-/// the slug and used as a label prefix: `<a href="...">mando PR #446</a>`.
-pub fn pr_hyperlink(pr_ref: &str, repo_slug: &str) -> String {
-    let num = pr_ref
-        .chars()
-        .filter(|c| c.is_ascii_digit())
-        .collect::<String>();
-    let repo_name = repo_slug.rsplit('/').next().unwrap_or(repo_slug);
-    let url = format!("https://github.com/{repo_slug}/pull/{num}");
-    format!(
-        "<a href=\"{url}\">{repo} PR #{num}</a>",
-        repo = escape_html(repo_name),
-    )
-}
-
 /// Scan `text` for PR references (`#123`, `PR #123`) and replace each with
 /// a clickable Telegram hyperlink pointing at the GitHub PR.
 pub fn linkify_pr_refs(text: &str, repo_slug: &str) -> String {
@@ -371,24 +354,6 @@ mod tests {
     #[test]
     fn repo_slug_from_invalid_remote() {
         assert_eq!(repo_slug_from_remote("not-a-url"), None);
-    }
-
-    #[test]
-    fn pr_hyperlink_formats_correctly() {
-        let link = pr_hyperlink("#446", "acme/widgets");
-        assert_eq!(
-            link,
-            "<a href=\"https://github.com/acme/widgets/pull/446\">widgets PR #446</a>",
-        );
-    }
-
-    #[test]
-    fn pr_hyperlink_with_pr_prefix() {
-        let link = pr_hyperlink("PR #99", "owner/repo");
-        assert_eq!(
-            link,
-            "<a href=\"https://github.com/owner/repo/pull/99\">repo PR #99</a>",
-        );
     }
 
     #[test]

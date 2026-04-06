@@ -79,16 +79,9 @@ pub const REWORKABLE: [ItemStatus; 4] = ACTIONABLE_TERMINAL;
 pub const REOPENABLE: [ItemStatus; 4] = ACTIONABLE_TERMINAL;
 
 impl ItemStatus {
+    #[must_use]
     pub fn is_finalized(self) -> bool {
         FINALIZED.contains(&self)
-    }
-
-    pub fn is_reworkable(self) -> bool {
-        ACTIONABLE_TERMINAL.contains(&self)
-    }
-
-    pub fn is_reopenable(self) -> bool {
-        ACTIONABLE_TERMINAL.contains(&self)
     }
 
     /// The serde string representation (kebab-case).

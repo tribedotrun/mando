@@ -269,6 +269,10 @@ impl TelegramBot {
                 None => TelegramApi::new(&tg.token),
             };
             let owner_chat_id = chat_id.clone();
+            // TRACKED: SSE notification loop for the telegram bot process.
+            // mando-tg runs as a separate OS process from the gateway, so it
+            // has no access to the gateway's TaskTracker. The loop exits when
+            // the SSE mpsc receiver drops on bot shutdown.
             tokio::spawn(async move {
                 crate::sse::run_notification_loop(base_url, gw_token, api, owner_chat_id).await;
             });
@@ -308,12 +312,29 @@ impl TelegramBot {
     /// command finishes so the SSE notification listener picks up the new owner.
     async fn auto_register_owner(&mut self, user_id: &str, chat_id: &str) -> Result<()> {
         info!(user_id, chat_id, "Auto-registering bot owner");
-        {
+        let save_result = {
             let mut cfg = self.config.write().await;
             cfg.channels.telegram.owner = user_id.to_string();
-            if let Err(e) = mando_config::save_config(&cfg, None) {
-                error!("Failed to persist owner to config: {e}");
-            }
+            mando_config::save_config(&cfg, None)
+        };
+        if let Err(e) = save_result {
+            error!("Failed to persist owner to config: {e}");
+            // Roll back the in-memory edit so the next message retries cleanly.
+            self.config.write().await.channels.telegram.owner.clear();
+            let _ = self
+                .api
+                .send_message(
+                    chat_id,
+                    "Registration failed: could not persist owner to config. \
+                     Please retry — if this keeps happening, check the daemon logs.",
+                    Some("HTML"),
+                    None,
+                    true,
+                )
+                .await;
+            return Err(anyhow::anyhow!(
+                "auto_register_owner: save_config failed: {e}"
+            ));
         }
         Ok(())
     }

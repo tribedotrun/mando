@@ -6,7 +6,7 @@ import type {
   ActResponse,
   ScoutItemSession,
 } from '#renderer/types';
-import { apiGet, apiPost, apiPatch, apiDel } from '#renderer/api';
+import { apiGet, apiPost, apiPatch } from '#renderer/api';
 
 export interface ScoutQueryParams {
   status?: string;
@@ -31,7 +31,6 @@ export const fetchScoutArticle = (id: number) =>
   apiGet<ScoutArticleResponse>(`/api/scout/items/${id}/article`);
 export const addScoutUrl = (scoutUrl: string, title?: string) =>
   apiPost<ScoutItem>('/api/scout/items', { url: scoutUrl, title });
-export const deleteScoutItem = (id: number) => apiDel<void>(`/api/scout/items/${id}`);
 export const updateScoutStatus = (id: number, status: string) =>
   apiPatch<ScoutItem>(`/api/scout/items/${id}`, { status });
 export const bulkUpdateScout = (ids: number[], updates: { status: string }) =>

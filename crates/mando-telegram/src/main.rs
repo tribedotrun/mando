@@ -45,7 +45,7 @@ async fn main() -> Result<()> {
     }
 
     // Load config.
-    let config = mando_config::load_config(None);
+    let config = mando_config::load_config(None)?;
 
     // Inject env vars from config into process environment.
     for (k, v) in &config.env {

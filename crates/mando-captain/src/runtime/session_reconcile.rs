@@ -11,11 +11,20 @@ use mando_types::SessionStatus;
 use sqlx::SqlitePool;
 
 /// Reconcile all sessions currently marked "running" against PID + stream truth.
-pub(crate) async fn reconcile_running_sessions(pool: &SqlitePool, stale_threshold_s: f64) {
+///
+/// Reconcile failures (DB query error) are pushed into `alerts` so the tick
+/// surfaces them alongside other problems instead of burying them in logs.
+pub(crate) async fn reconcile_running_sessions(
+    pool: &SqlitePool,
+    stale_threshold: std::time::Duration,
+    alerts: &mut Vec<String>,
+) {
+    let stale_threshold_s = stale_threshold.as_secs_f64();
     let running = match mando_db::queries::sessions::list_running_sessions(pool).await {
         Ok(rows) => rows,
         Err(e) => {
             tracing::warn!(module = "captain", error = %e, "session reconciliation: failed to query");
+            alerts.push(format!("session reconciliation query failed: {e}"));
             return;
         }
     };
@@ -36,7 +45,7 @@ pub(crate) async fn reconcile_running_sessions(pool: &SqlitePool, stale_threshol
 
         // L1: PID liveness
         if let Some(pid) = crate::io::pid_registry::get_pid(sid) {
-            if pid > 0 {
+            if pid.as_u32() > 0 {
                 if mando_cc::is_process_alive(pid) {
                     continue; // genuinely running
                 }

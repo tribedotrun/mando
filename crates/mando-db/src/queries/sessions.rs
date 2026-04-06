@@ -37,11 +37,6 @@ impl SessionRow {
     pub fn group(&self) -> Option<CallerGroup> {
         self.parsed_caller().map(|c| c.group())
     }
-
-    /// Parse the status string into the enum.
-    pub fn parsed_status(&self) -> SessionStatus {
-        self.status.parse().unwrap_or(SessionStatus::Stopped)
-    }
 }
 
 /// Input for upserting a session.
@@ -139,16 +134,46 @@ pub async fn list_sessions(
     let per_page = if per_page == 0 { 50 } else { per_page };
     let offset = page.saturating_sub(1) * per_page;
 
-    // Build the list of caller strings that belong to this group.
-    let caller_filter: Option<Vec<&str>> = group.map(|g| {
-        SessionCaller::all()
-            .iter()
-            .filter(|c| c.group().as_str() == g)
-            .map(|c| c.as_str())
-            .collect()
-    });
+    // Build a WHERE clause for callers in this group.
+    // Uses exact matches for canonical callers and LIKE patterns for callers
+    // that embed IDs in their keys (e.g. "parse-todos-{uuid}", "task-ask:{id}").
+    // This keeps the parameter count bounded by the enum size, not DB cardinality.
+    let caller_where: Option<(String, Vec<String>)> = match group {
+        None => None,
+        Some(g) => {
+            let group_callers: Vec<&SessionCaller> = SessionCaller::all()
+                .iter()
+                .filter(|c| c.group().as_str() == g)
+                .collect();
 
-    let (rows, total) = match &caller_filter {
+            let mut conditions: Vec<String> = Vec::new();
+            let mut params: Vec<String> = Vec::new();
+
+            // Exact matches for canonical caller names.
+            let exact: Vec<&str> = group_callers.iter().map(|c| c.as_str()).collect();
+            if !exact.is_empty() {
+                let ph: String = exact.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+                conditions.push(format!("caller IN ({ph})"));
+                params.extend(exact.iter().map(|s| (*s).to_string()));
+            }
+
+            // LIKE patterns for callers that use key-embedded IDs.
+            for c in &group_callers {
+                if let Some(prefix) = c.like_prefix() {
+                    conditions.push("caller LIKE ?".to_string());
+                    params.push(prefix.to_string());
+                }
+            }
+
+            if conditions.is_empty() {
+                Some(("1=0".to_string(), Vec::new()))
+            } else {
+                Some((conditions.join(" OR "), params))
+            }
+        }
+    };
+
+    let (rows, total) = match &caller_where {
         None => {
             let total: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM cc_sessions")
                 .fetch_one(pool)
@@ -165,16 +190,12 @@ pub async fn list_sessions(
             .await?;
             (rows, total as usize)
         }
-        Some(callers) if callers.is_empty() => (Vec::new(), 0),
-        Some(callers) => {
-            // Build dynamic IN clause.
-            let placeholders: String = callers.iter().map(|_| "?").collect::<Vec<_>>().join(",");
-
-            let count_sql =
-                format!("SELECT COUNT(*) FROM cc_sessions WHERE caller IN ({placeholders})");
+        Some((_, params)) if params.is_empty() => (Vec::new(), 0),
+        Some((where_clause, params)) => {
+            let count_sql = format!("SELECT COUNT(*) FROM cc_sessions WHERE {where_clause}");
             let mut q = sqlx::query_scalar::<_, i64>(&count_sql);
-            for c in callers {
-                q = q.bind(*c);
+            for p in params {
+                q = q.bind(p.as_str());
             }
             let total: i64 = q.fetch_one(pool).await?;
 
@@ -182,12 +203,12 @@ pub async fn list_sessions(
                 "SELECT session_id, created_at, caller, cwd, model, status,
                         cost_usd, duration_ms, resumed, turn_count,
                         task_id, scout_item_id, worker_name
-                 FROM cc_sessions WHERE caller IN ({placeholders})
+                 FROM cc_sessions WHERE {where_clause}
                  ORDER BY created_at DESC LIMIT ? OFFSET ?"
             );
             let mut q = sqlx::query_as::<_, SessionRow>(&select_sql);
-            for c in callers {
-                q = q.bind(*c);
+            for p in params {
+                q = q.bind(p.as_str());
             }
             q = q.bind(per_page as i64).bind(offset as i64);
             let rows = q.fetch_all(pool).await?;
@@ -269,6 +290,34 @@ pub async fn update_session_status(
     Ok(())
 }
 
+/// Update status and backfill cost/duration from stream data.
+///
+/// Cost and duration use "set if currently null" semantics so repeated
+/// calls (e.g. reconciliation after a prior completion write) never
+/// double-count.
+pub async fn update_session_status_with_cost(
+    pool: &SqlitePool,
+    session_id: &str,
+    status: SessionStatus,
+    cost_usd: Option<f64>,
+    duration_ms: Option<i64>,
+) -> Result<()> {
+    sqlx::query(
+        "UPDATE cc_sessions SET
+            status = ?1,
+            cost_usd = CASE WHEN cost_usd IS NULL THEN ?2 ELSE cost_usd END,
+            duration_ms = CASE WHEN duration_ms IS NULL THEN ?3 ELSE duration_ms END
+         WHERE session_id = ?4",
+    )
+    .bind(status.as_str())
+    .bind(cost_usd)
+    .bind(duration_ms)
+    .bind(session_id)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
 /// Get a single session by ID.
 pub async fn session_by_id(pool: &SqlitePool, session_id: &str) -> Result<Option<SessionRow>> {
     let row: Option<SessionRow> = sqlx::query_as(
@@ -281,6 +330,19 @@ pub async fn session_by_id(pool: &SqlitePool, session_id: &str) -> Result<Option
     .fetch_optional(pool)
     .await?;
     Ok(row)
+}
+
+/// List sessions with NULL cost (for startup cost reconciliation).
+pub async fn list_sessions_missing_cost(pool: &SqlitePool) -> Result<Vec<SessionRow>> {
+    let rows: Vec<SessionRow> = sqlx::query_as(
+        "SELECT session_id, created_at, caller, cwd, model, status,
+                cost_usd, duration_ms, resumed, turn_count,
+                task_id, scout_item_id, worker_name
+         FROM cc_sessions WHERE cost_usd IS NULL AND status != 'running'",
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok(rows)
 }
 
 /// Check if a specific session is currently running (single-row query).

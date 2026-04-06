@@ -26,12 +26,13 @@ mod tests {
     use std::collections::HashMap;
 
     fn workflow_with(models: &[(&str, &str)]) -> ScoutWorkflow {
-        let mut wf = ScoutWorkflow::default();
-        wf.models = models
-            .iter()
-            .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
-            .collect::<HashMap<_, _>>();
-        wf
+        ScoutWorkflow {
+            models: models
+                .iter()
+                .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
+                .collect::<HashMap<_, _>>(),
+            ..ScoutWorkflow::default()
+        }
     }
 
     #[test]

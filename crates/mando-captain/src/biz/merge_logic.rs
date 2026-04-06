@@ -42,13 +42,14 @@ pub(crate) fn next_rebase_retry(item: &Task) -> u32 {
     item.rebase_retries as u32 + 1
 }
 
-/// Exponential backoff delay for rebase retries: base_s * 2^(retries-1).
-/// Returns 0 for the first attempt (no delay).
-pub(crate) fn rebase_delay_s(retries: u32, base_s: u64) -> u64 {
+/// Exponential backoff delay for rebase retries: base * 2^(retries-1).
+/// Returns Duration::ZERO for the first attempt (no delay).
+pub(crate) fn rebase_delay(retries: u32, base: std::time::Duration) -> std::time::Duration {
     if retries == 0 {
-        return 0;
+        return std::time::Duration::ZERO;
     }
-    base_s.saturating_mul(1u64 << (retries - 1).min(10))
+    let multiplier = 1u32 << (retries - 1).min(10);
+    base.saturating_mul(multiplier)
 }
 
 /// Check whether a rebase succeeded by comparing the current branch HEAD SHA
@@ -139,16 +140,20 @@ mod tests {
 
     #[test]
     fn rebase_delay_first_attempt() {
-        assert_eq!(rebase_delay_s(0, 30), 0);
+        assert_eq!(
+            rebase_delay(0, std::time::Duration::from_secs(30)),
+            std::time::Duration::ZERO
+        );
     }
 
     #[test]
     fn rebase_delay_exponential() {
-        assert_eq!(rebase_delay_s(1, 30), 30);
-        assert_eq!(rebase_delay_s(2, 30), 60);
-        assert_eq!(rebase_delay_s(3, 30), 120);
-        assert_eq!(rebase_delay_s(4, 30), 240);
-        assert_eq!(rebase_delay_s(5, 30), 480);
+        let base = std::time::Duration::from_secs(30);
+        assert_eq!(rebase_delay(1, base), std::time::Duration::from_secs(30));
+        assert_eq!(rebase_delay(2, base), std::time::Duration::from_secs(60));
+        assert_eq!(rebase_delay(3, base), std::time::Duration::from_secs(120));
+        assert_eq!(rebase_delay(4, base), std::time::Duration::from_secs(240));
+        assert_eq!(rebase_delay(5, base), std::time::Duration::from_secs(480));
     }
 
     #[test]

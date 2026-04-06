@@ -2,10 +2,12 @@
 
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
+use axum::response::IntoResponse;
 use axum::Json;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
+use crate::background_tasks::captain_health_degraded;
 use crate::response::{error_response, internal_error};
 use crate::AppState;
 
@@ -21,7 +23,10 @@ pub(crate) async fn get_health(State(state): State<AppState>) -> Json<Value> {
 }
 
 /// GET /api/health/system — full system info (protected, auth required).
-pub(crate) async fn get_health_system(State(state): State<AppState>) -> Json<Value> {
+///
+/// Returns HTTP 503 if the underlying database is unreachable or the
+/// captain auto-tick loop has flagged itself as degraded.
+pub(crate) async fn get_health_system(State(state): State<AppState>) -> impl IntoResponse {
     let config = state.config.load_full();
     let active_paths = state.runtime_paths.clone();
     let configured_paths = mando_config::resolve_captain_runtime_paths(&config);
@@ -41,15 +46,20 @@ pub(crate) async fn get_health_system(State(state): State<AppState>) -> Json<Val
             Vec::new()
         })
         .len();
+    let captain_degraded = captain_health_degraded();
+    if captain_degraded {
+        healthy = false;
+    }
     let data_dir = mando_config::data_dir();
     let uptime = state.start_time.elapsed().as_secs();
-    Json(json!({
+    let body = json!({
         "healthy": healthy,
         "version": env!("CARGO_PKG_VERSION"),
         "pid": std::process::id(),
         "uptime": uptime,
         "active_workers": active,
         "total_items": total,
+        "captain_degraded": captain_degraded,
         "projects": config.captain.projects.values().map(|pc| &pc.name).collect::<Vec<_>>(),
         "dataDir": data_dir.to_string_lossy(),
         "configPath": mando_config::get_config_path().to_string_lossy(),
@@ -60,7 +70,13 @@ pub(crate) async fn get_health_system(State(state): State<AppState>) -> Json<Val
         "configuredWorkerHealthPath": configured_paths.worker_health_path.to_string_lossy(),
         "configuredLockfilePath": configured_paths.lockfile_path.to_string_lossy(),
         "restartRequired": active_paths != configured_paths,
-    }))
+    });
+    let status = if healthy {
+        StatusCode::OK
+    } else {
+        StatusCode::SERVICE_UNAVAILABLE
+    };
+    (status, Json(body))
 }
 
 #[derive(Deserialize)]
@@ -261,7 +277,9 @@ pub(crate) async fn post_worker_kill(
     Path(id): Path<String>,
     Json(body): Json<KillWorkerBody>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    match mando_captain::io::process_manager::kill_worker_process(body.pid).await {
+    match mando_captain::io::process_manager::kill_worker_process(mando_types::Pid::new(body.pid))
+        .await
+    {
         Ok(()) => {
             state.bus.send(mando_types::BusEvent::Tasks, None);
             Ok(Json(json!({"ok": true, "killed": id})))
@@ -274,23 +292,31 @@ pub(crate) async fn post_worker_kill(
 }
 
 /// GET /api/workers
-pub(crate) async fn get_workers(State(state): State<AppState>) -> Json<Value> {
+pub(crate) async fn get_workers(
+    State(state): State<AppState>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let config = state.config.load_full();
     let workflow = state.captain_workflow.load_full();
     let store = state.task_store.read().await;
-    let all_items = match store.load_all().await {
-        Ok(items) => items,
-        Err(e) => {
-            tracing::error!(error = %e, "failed to load tasks for workers endpoint");
-            return Json(json!({"error": "database error", "workers": []}));
-        }
-    };
+    let all_items = store.load_all().await.map_err(|e| {
+        tracing::error!(error = %e, "failed to load tasks for workers endpoint");
+        error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            &format!("database error: {e}"),
+        )
+    })?;
     drop(store);
 
     let health_path = mando_config::worker_health_path();
-    let health = mando_captain::io::health_store::load_health_state(&health_path);
+    let health = mando_captain::io::health_store::load_health_state(&health_path).map_err(|e| {
+        tracing::error!(error = %e, "failed to load health state for workers endpoint");
+        error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            &format!("health state error: {e}"),
+        )
+    })?;
     let nudge_budget = workflow.agent.max_interventions;
-    let stale_threshold_s = workflow.agent.stale_threshold_s;
+    let stale_threshold_s = workflow.agent.stale_threshold_s.as_secs_f64();
 
     // Filter items with an active worker — single load_all, no N+1 find_by_id.
     let workers: Vec<Value> = all_items
@@ -366,7 +392,9 @@ pub(crate) async fn get_workers(State(state): State<AppState>) -> Json<Value> {
         .collect();
 
     let rl_remaining = mando_captain::runtime::rate_limit_cooldown::remaining_secs();
-    Json(json!({ "workers": workers, "rate_limit_remaining_secs": rl_remaining }))
+    Ok(Json(
+        json!({ "workers": workers, "rate_limit_remaining_secs": rl_remaining }),
+    ))
 }
 
 /// GET /api/workers/{id}
@@ -390,7 +418,13 @@ pub(crate) async fn get_worker(
         .find(|idx| idx.worker.as_deref() == Some(id.as_str()) || idx.id.to_string() == id);
 
     let full_item = if let Some(idx) = found {
-        store.find_by_id(idx.id).await.unwrap_or(None)
+        store.find_by_id(idx.id).await.map_err(|e| {
+            tracing::error!(error = %e, "failed to load worker task detail");
+            error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                &format!("database error: {e}"),
+            )
+        })?
     } else {
         store
             .load_all()

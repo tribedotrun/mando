@@ -4,6 +4,14 @@ use std::collections::HashMap;
 
 use mando_types::task::{ItemStatus, Task};
 
+/// Default resource name when a task has no explicit `resource` field.
+///
+/// Tasks without a resource are scheduled against the generic `cc` pool
+/// (Claude Code). This default is intentional and documented — callers must
+/// treat `item.resource.as_deref().unwrap_or(DEFAULT_RESOURCE)` as the single
+/// source of truth for resource lookup rather than hard-coding the literal.
+pub const DEFAULT_RESOURCE: &str = "cc";
+
 /// Result of a dispatch check for a single item.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DispatchDecision {
@@ -37,7 +45,7 @@ pub(crate) fn check_dispatch(
     }
 
     // Check resource-specific limits.
-    let resource = item.resource.as_deref().unwrap_or("cc");
+    let resource = item.resource.as_deref().unwrap_or(DEFAULT_RESOURCE);
     if let Some(&limit) = resource_limits.get(resource) {
         let current = resource_counts.get(resource).copied().unwrap_or(0);
         if current >= limit {
@@ -53,7 +61,7 @@ pub(crate) fn count_resources(items: &[Task]) -> HashMap<String, usize> {
     let mut counts = HashMap::new();
     for item in items {
         if item.status == ItemStatus::InProgress {
-            let resource = item.resource.as_deref().unwrap_or("cc");
+            let resource = item.resource.as_deref().unwrap_or(DEFAULT_RESOURCE);
             *counts.entry(resource.to_string()).or_insert(0) += 1;
         }
     }

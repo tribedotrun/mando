@@ -19,9 +19,30 @@ use crate::AppState;
 pub(crate) async fn sse_events(
     State(state): State<AppState>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
-    // Build initial snapshot from current state.
-    let snapshot = build_snapshot(&state).await;
-    let snapshot_event = Event::default().data(snapshot.to_string());
+    // Build initial snapshot from current state. On failure, send an explicit
+    // error frame so clients reload via the REST APIs instead of seeing
+    // empty-state silently.
+    let snapshot_event = match build_snapshot(&state).await {
+        Ok(value) => Event::default().data(value.to_string()),
+        Err(e) => {
+            tracing::error!(error = %e, "SSE snapshot: failed to build snapshot");
+            let payload = json!({
+                "event": "snapshot_error",
+                "data": {
+                    "message": format!("snapshot build failed: {e}"),
+                    "retry": true,
+                },
+            });
+            // Use a custom event name (not "error") so it doesn't collide with
+            // EventSource's built-in "error" event, which fires on native
+            // connection failures and dispatches a plain Event (no data). A
+            // named SSE event is dispatched as a MessageEvent only to listeners
+            // registered for that exact name.
+            Event::default()
+                .event("snapshot_error")
+                .data(payload.to_string())
+        }
+    };
     let snapshot_stream = futures_util::stream::once(async { Ok(snapshot_event) });
 
     // Live event stream (incremental deltas).
@@ -51,9 +72,34 @@ pub(crate) async fn sse_events(
 
                 Some(Ok(event))
             }
-            Err(_) => {
-                // Lagged — skip missed events.
-                None
+            Err(lag_err) => {
+                // Slow consumer: the broadcast channel dropped events.
+                // Emit a named `resync` event so the client reloads full
+                // state via the REST APIs instead of silently missing
+                // messages. Using a dedicated event name (not the default
+                // SSE message channel) lets the renderer hook up a specific
+                // addEventListener without polluting the normal bus stream.
+                let skipped = format!("{lag_err}");
+                tracing::warn!(
+                    module = "sse",
+                    error = %skipped,
+                    "SSE client lagged, broadcast events dropped"
+                );
+                let ts = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or(Duration::ZERO)
+                    .as_secs_f64();
+                let payload = json!({
+                    "event": "resync",
+                    "ts": ts,
+                    "data": {
+                        "reason": skipped,
+                        "reload": ["/api/tasks", "/api/sessions", "/api/workers"],
+                    },
+                });
+                Some(Ok(Event::default()
+                    .event("resync")
+                    .data(payload.to_string())))
             }
         }
     });
@@ -69,25 +115,19 @@ pub(crate) async fn sse_events(
 }
 
 /// Build a full state snapshot for the initial SSE event.
-async fn build_snapshot(state: &AppState) -> serde_json::Value {
+async fn build_snapshot(state: &AppState) -> anyhow::Result<serde_json::Value> {
     let workflow = state.captain_workflow.load_full();
 
     // Task items + active workers from the TaskStore.
     // Load all items once and build a lookup map — avoids N+1 find_by_id calls.
     let store = state.task_store.read().await;
-    let all_items = store.load_all().await.unwrap_or_else(|e| {
-        tracing::error!(error = %e, "SSE snapshot: failed to load tasks from DB");
-        Vec::new()
-    });
+    let all_items = store.load_all().await?;
     drop(store);
-    let tasks = serde_json::to_value(&all_items).unwrap_or_else(|e| {
-        tracing::warn!(error = %e, "failed to serialize task items");
-        json!([])
-    });
+    let tasks = serde_json::to_value(&all_items)?;
 
     let workers = {
         let health_path = mando_config::worker_health_path();
-        let health = mando_captain::io::health_store::load_health_state(&health_path);
+        let health = mando_captain::io::health_store::load_health_state_async(&health_path).await?;
         let nudge_budget = workflow.agent.max_interventions;
 
         all_items
@@ -140,7 +180,7 @@ async fn build_snapshot(state: &AppState) -> serde_json::Value {
         .unwrap_or(Duration::ZERO)
         .as_secs_f64();
 
-    json!({
+    Ok(json!({
         "event": "snapshot",
         "ts": ts,
         "data": {
@@ -151,7 +191,7 @@ async fn build_snapshot(state: &AppState) -> serde_json::Value {
                 "uptime": uptime,
             }
         }
-    })
+    }))
 }
 
 #[cfg(test)]

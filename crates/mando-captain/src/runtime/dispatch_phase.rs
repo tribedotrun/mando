@@ -53,7 +53,11 @@ pub(crate) async fn dispatch_new_work(
                         truncate_utf8(&item.title, 60)
                     ));
                     active_workers += 1;
-                    let resource = item.resource.as_deref().unwrap_or("cc").to_string();
+                    let resource = item
+                        .resource
+                        .as_deref()
+                        .unwrap_or(dispatch_logic::DEFAULT_RESOURCE)
+                        .to_string();
                     *resource_counts.entry(resource).or_insert(0) += 1;
                 } else {
                     items[idx].worker_seq += 1;
@@ -70,7 +74,11 @@ pub(crate) async fn dispatch_new_work(
                             item.session_ids.worker = Some(spawn_result.session_id);
                             item.spawn_fail_count = 0;
                             active_workers += 1;
-                            let resource = item.resource.as_deref().unwrap_or("cc").to_string();
+                            let resource = item
+                                .resource
+                                .as_deref()
+                                .unwrap_or(dispatch_logic::DEFAULT_RESOURCE)
+                                .to_string();
                             *resource_counts.entry(resource).or_insert(0) += 1;
 
                             // Persist worker fields immediately so the DB
@@ -92,7 +100,11 @@ pub(crate) async fn dispatch_new_work(
                                 }
                                 super::revert_to_queued(item);
                                 active_workers -= 1;
-                                let resource = item.resource.as_deref().unwrap_or("cc").to_string();
+                                let resource = item
+                                    .resource
+                                    .as_deref()
+                                    .unwrap_or(dispatch_logic::DEFAULT_RESOURCE)
+                                    .to_string();
                                 if let Some(c) = resource_counts.get_mut(&resource) {
                                     *c = c.saturating_sub(1);
                                 }
@@ -100,7 +112,7 @@ pub(crate) async fn dispatch_new_work(
                             }
 
                             // Emit timeline event with session_id.
-                            super::timeline_emit::emit_for_task(
+                            let _ = super::timeline_emit::emit_for_task(
                                 item,
                                 mando_types::timeline::TimelineEventType::WorkerSpawned,
                                 &format!("Spawned {}", spawn_result.session_name),

@@ -3,10 +3,11 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use mando_config::settings::{CaptainConfig, ProjectConfig};
 use mando_config::workflow::CaptainWorkflow;
 use mando_types::Task;
+use rustc_hash::FxHashMap;
 
 use crate::io::{git, hooks, pid_registry};
 
@@ -28,10 +29,11 @@ pub(crate) async fn spawn_worker(
     pool: &sqlx::SqlitePool,
 ) -> Result<SpawnResult> {
     let repo_path = mando_config::expand_tilde(&project_config.path);
-    let state_dir = mando_config::state_dir();
 
     // Allocate slot (global counter for worktree/branch slug uniqueness).
-    let slot = next_worker_slot(&state_dir)?;
+    // next_worker_slot does blocking fs, so move it off the executor.
+    let slot_state_dir = mando_config::state_dir();
+    let slot = tokio::task::spawn_blocking(move || next_worker_slot(&slot_state_dir)).await??;
     // Worker name is task-scoped: worker-{taskId}-{seq}.
     // Uses worker_seq as-is (caller is responsible for incrementing before calling).
     let session_name = format!("worker-{}-{}", item.id, item.worker_seq);
@@ -68,16 +70,36 @@ pub(crate) async fn spawn_worker(
         (branch, wt)
     };
 
-    // Copy plan briefs into worktree if they exist.
-    copy_plan_briefs(item, &wt_path);
+    // Copy plan briefs into worktree if they exist (blocking fs → spawn_blocking).
+    {
+        let item_clone = item.clone();
+        let wt_clone = wt_path.clone();
+        tokio::task::spawn_blocking(move || copy_plan_briefs(&item_clone, &wt_clone)).await??;
+    }
 
     // Run pre_spawn hook.
     let hook_env = HashMap::new();
     hooks::pre_spawn(&project_config.hooks, &wt_path, &hook_env).await?;
 
-    // Render prompt from workflow template.
-    let prompt =
-        prepare_initial_worker_prompt(item, slot, &branch, &wt_path, project_config, workflow)?;
+    // Render prompt from workflow template (blocking fs → spawn_blocking).
+    let prompt = {
+        let item_clone = item.clone();
+        let branch_clone = branch.clone();
+        let wt_clone = wt_path.clone();
+        let project_clone = project_config.clone();
+        let workflow_clone = workflow.clone();
+        tokio::task::spawn_blocking(move || {
+            prepare_initial_worker_prompt(
+                &item_clone,
+                slot,
+                &branch_clone,
+                &wt_clone,
+                &project_clone,
+                &workflow_clone,
+            )
+        })
+        .await??
+    };
 
     // Spawn CC via mando-cc.
     let mut cc_builder = mando_cc::CcConfig::builder()
@@ -112,7 +134,7 @@ pub(crate) async fn spawn_worker(
     );
 
     // Register PID in the session registry for liveness tracking.
-    pid_registry::register(&session_id, pid);
+    pid_registry::register(&session_id, pid)?;
 
     // Log "running" session entry so the UI shows it immediately.
     crate::io::headless_cc::log_running_session(
@@ -124,12 +146,12 @@ pub(crate) async fn spawn_worker(
         &item.id.to_string(),
         false,
     )
-    .await;
+    .await?;
 
     tracing::info!(
         module = "spawner",
         worker = %session_name,
-        pid = pid,
+        pid = %pid,
         title = %item.title,
         "spawned worker"
     );
@@ -148,7 +170,7 @@ pub(crate) async fn spawn_worker(
 pub struct SpawnResult {
     pub session_name: String,
     pub session_id: String,
-    pub pid: u32,
+    pub pid: mando_types::Pid,
     pub branch: String,
     pub worktree: String,
     pub stream_path: PathBuf,
@@ -157,19 +179,13 @@ pub struct SpawnResult {
 fn next_worker_slot(state_dir: &std::path::Path) -> Result<u64> {
     let counter_path = state_dir.join("worker-counter.txt");
     let current = match std::fs::read_to_string(&counter_path) {
-        Ok(contents) => match contents.trim().parse::<u64>() {
-            Ok(n) => n,
-            Err(e) => {
-                tracing::warn!(
-                    module = "spawner",
-                    path = %counter_path.display(),
-                    contents = %contents.trim(),
-                    error = %e,
-                    "corrupt worker counter file — resetting to 0"
-                );
-                0
-            }
-        },
+        Ok(contents) => contents.trim().parse::<u64>().map_err(|e| {
+            anyhow::anyhow!(
+                "corrupt worker counter file at {}: {:?} ({e}); refusing to reset to 0 because the counter must be monotonic",
+                counter_path.display(),
+                contents.trim()
+            )
+        })?,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => 0,
         Err(e) => anyhow::bail!(
             "failed to read worker counter at {}: {e}",
@@ -192,24 +208,18 @@ fn new_slug(item: &Task, slot: u64) -> String {
 ///
 /// Copies any files related to the item's plan path. Only copies
 /// files that don't already exist in the destination (idempotent).
-fn copy_plan_briefs(item: &Task, wt_path: &std::path::Path) {
+/// Returns `Err` on filesystem failure so spawn_worker can abort cleanly
+/// rather than starting a worker with missing plan files.
+fn copy_plan_briefs(item: &Task, wt_path: &std::path::Path) -> Result<()> {
     let plans_dir = mando_config::state_dir().join("plans");
     if !plans_dir.exists() {
-        return;
+        return Ok(());
     }
 
     let briefs_dir = wt_path.join(".ai").join("briefs");
 
-    // Eagerly create the briefs directory — all strategies need it.
-    if let Err(e) = std::fs::create_dir_all(&briefs_dir) {
-        tracing::error!(
-            module = "spawner",
-            path = %briefs_dir.display(),
-            error = %e,
-            "failed to create briefs directory — worker will start without plan files"
-        );
-        return;
-    }
+    std::fs::create_dir_all(&briefs_dir)
+        .with_context(|| format!("failed to create briefs directory {}", briefs_dir.display()))?;
 
     // Look for a generic brief file matching the item ID.
     let id = &item.id.to_string();
@@ -217,17 +227,16 @@ fn copy_plan_briefs(item: &Task, wt_path: &std::path::Path) {
     if brief_file.is_file() {
         let dst = briefs_dir.join(format!("item-{id}.md"));
         if !dst.exists() {
-            if let Err(e) = std::fs::copy(&brief_file, &dst) {
-                tracing::error!(
-                    module = "spawner",
-                    src = %brief_file.display(),
-                    dst = %dst.display(),
-                    error = %e,
-                    "failed to copy item brief"
-                );
-            }
+            std::fs::copy(&brief_file, &dst).with_context(|| {
+                format!(
+                    "failed to copy item brief {} -> {}",
+                    brief_file.display(),
+                    dst.display()
+                )
+            })?;
         }
     }
+    Ok(())
 }
 
 fn prepare_initial_worker_prompt(
@@ -256,7 +265,7 @@ fn prepare_initial_worker_prompt(
 
     let check_command = check_command_or_fallback(project_config);
 
-    let mut brief_vars = HashMap::new();
+    let mut brief_vars: FxHashMap<&str, &str> = FxHashMap::default();
     brief_vars.insert("title", item.title.as_str());
     brief_vars.insert("context", context);
     brief_vars.insert("branch", branch);
@@ -277,7 +286,7 @@ fn prepare_initial_worker_prompt(
     std::fs::create_dir_all(&briefs_dir)?;
     std::fs::write(briefs_dir.join(&brief_filename), rendered_brief)?;
 
-    let mut vars = HashMap::new();
+    let mut vars: FxHashMap<&str, &str> = FxHashMap::default();
     vars.insert("brief_filename", brief_filename.as_str());
     vars.insert("id", task_id_str.as_str());
     vars.insert("no_pr", no_pr);

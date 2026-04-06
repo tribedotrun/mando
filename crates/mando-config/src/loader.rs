@@ -2,6 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
+use crate::error::ConfigError;
 use crate::paths::expand_tilde;
 use crate::settings::Config;
 
@@ -13,29 +14,32 @@ pub fn get_config_path() -> PathBuf {
     crate::paths::data_dir().join("config.json")
 }
 
-/// Load configuration from file, falling back to `Config::default()`.
+/// Load configuration from file.
+///
+/// Returns `Config::default()` only when the file does not exist. Any read
+/// or parse failure is surfaced as an error so the caller can fail loudly
+/// instead of silently running with defaults.
 ///
 /// After loading, populates runtime fields (e.g. Telegram tokens from `env`).
-pub fn load_config(path: Option<&Path>) -> Config {
+pub fn load_config(path: Option<&Path>) -> Result<Config, ConfigError> {
     let path = path.map(PathBuf::from).unwrap_or_else(get_config_path);
 
     let mut config = if path.exists() {
-        std::fs::read_to_string(&path)
-            .map_err(|e| format!("Failed to read config from {}: {e}", path.display()))
-            .and_then(|content| {
-                serde_json::from_str::<Config>(&content)
-                    .map_err(|e| format!("Failed to parse config from {}: {e}", path.display()))
-            })
-            .unwrap_or_else(|e| {
-                eprintln!("Warning: {e}");
-                Config::default()
-            })
+        let content = std::fs::read_to_string(&path).map_err(|e| ConfigError::Io {
+            op: "read".into(),
+            path: path.clone(),
+            source: e,
+        })?;
+        serde_json::from_str::<Config>(&content).map_err(|e| ConfigError::JsonParse {
+            path: path.clone(),
+            source: e,
+        })?
     } else {
         Config::default()
     };
 
     config.populate_runtime_fields();
-    config
+    Ok(config)
 }
 
 /// Save configuration to a JSON file.

@@ -6,6 +6,7 @@ use tokio::time::sleep;
 
 /// Configuration for retry behavior.
 #[derive(Debug, Clone)]
+#[must_use]
 pub struct RetryConfig {
     /// Maximum number of attempts (including the first).
     pub max_attempts: u32,

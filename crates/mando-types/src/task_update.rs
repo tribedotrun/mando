@@ -2,8 +2,9 @@
 
 use std::fmt;
 
-/// Typed error for task field updates — replaces string-based error classification.
+/// Typed error for task field updates, replaces string-based error classification.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum TaskUpdateError {
     NotFound(i64),
     InvalidStatus(String),

@@ -73,7 +73,15 @@ pub async fn triage_pending_review(
                 github_repo_map.insert(it.id.to_string(), github_repo.clone());
                 triage_items.push(ti);
             }
-            Err(_) => {
+            Err(e) => {
+                tracing::warn!(
+                    module = "triage",
+                    task_id = it.id,
+                    pr = pr_num,
+                    repo = %github_repo,
+                    error = %e,
+                    "fetch_pr_status failed"
+                );
                 github_repo_map.insert(it.id.to_string(), github_repo.clone());
                 triage_items.push(crate::biz::triage::TriageItem {
                     task_id: it.id.to_string(),
@@ -86,6 +94,7 @@ pub async fn triage_pending_review(
                     cursor_risk: None,
                     file_count: 0,
                     fetch_failed: true,
+                    fetch_error: e.to_string(),
                 });
             }
         }
@@ -110,6 +119,7 @@ pub async fn triage_pending_review(
                 "cursor_risk": ti.cursor_risk,
                 "file_count": ti.file_count,
                 "fetch_failed": ti.fetch_failed,
+                "fetch_error": ti.fetch_error,
                 "merge_readiness_score": crate::biz::triage::merge_readiness_score(ti),
             })
         })

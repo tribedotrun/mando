@@ -1,6 +1,16 @@
 //! Stream JSONL file introspection utilities.
 
+use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
+
+/// Upper bound for the tail-read window.
+///
+/// Stream log files grow unbounded for long-running workers, but all callers
+/// of [`current_session_lines`] only need the lines from the last `system/init`
+/// event onward. For sessions where the last init is within 1 MiB of EOF (the
+/// overwhelmingly common case) we read only that window; otherwise we fall
+/// back to a full read.
+const TAIL_READ_MAX_BYTES: u64 = 1024 * 1024;
 
 /// Check if a JSONL line is a session init event (`{"type":"system","subtype":"init"}`).
 fn is_init_event(line: &str) -> bool {
@@ -12,8 +22,48 @@ fn is_init_event(line: &str) -> bool {
         })
 }
 
+/// Read the last up-to-`max_bytes` of a file.
+///
+/// Returns `(content, truncated)` where `truncated` is true if the file is
+/// longer than `max_bytes` and we only read the tail. A leading partial line
+/// (everything before the first `\n` within the window) is discarded when
+/// truncated, so the returned content always starts at a line boundary.
+fn read_tail(stream_path: &Path, max_bytes: u64) -> std::io::Result<(String, bool)> {
+    let mut file = std::fs::File::open(stream_path)?;
+    let len = file.metadata()?.len();
+    if len <= max_bytes {
+        let mut buf = String::new();
+        file.read_to_string(&mut buf)?;
+        return Ok((buf, false));
+    }
+    let start = len - max_bytes;
+    file.seek(SeekFrom::Start(start))?;
+    let mut bytes = Vec::with_capacity(max_bytes as usize);
+    file.take(max_bytes).read_to_end(&mut bytes)?;
+    let content = String::from_utf8_lossy(&bytes).into_owned();
+    // Drop any leading partial line so we always start on a full line boundary.
+    let trimmed = match content.find('\n') {
+        Some(nl) => content[nl + 1..].to_string(),
+        None => content,
+    };
+    Ok((trimmed, true))
+}
+
 /// Read a stream file and return content + index of last session's init event.
+///
+/// For files larger than [`TAIL_READ_MAX_BYTES`] we first try a tail read of
+/// the final window. If no init event is present in the tail (very long
+/// current session), we fall back to a full read so correctness is preserved.
 pub fn current_session_lines(stream_path: &Path) -> Option<(String, usize)> {
+    let (content, truncated) = read_tail(stream_path, TAIL_READ_MAX_BYTES).ok()?;
+    let lines: Vec<&str> = content.lines().collect();
+    if let Some(idx) = lines.iter().rposition(|line| is_init_event(line)) {
+        return Some((content, idx));
+    }
+    if !truncated {
+        return Some((content, 0));
+    }
+    // Tail window contained no init event — fall back to full read.
     let content = std::fs::read_to_string(stream_path).ok()?;
     let lines: Vec<&str> = content.lines().collect();
     let last_init_idx = lines
@@ -26,8 +76,14 @@ pub fn current_session_lines(stream_path: &Path) -> Option<(String, usize)> {
 /// Write a synthetic error result to a stream file so `get_stream_result` picks it up.
 ///
 /// Used when an async CC task crashes before the CC process writes its own result event.
+///
+/// The append is serialized with an exclusive BSD `flock(2)` on the stream
+/// file itself. Two concurrent writers (e.g. resumed sessions sharing the
+/// same stream) would otherwise interleave JSON lines and corrupt the JSONL
+/// transcript. The lock is released when `file` goes out of scope.
 pub fn write_error_result(stream_path: &Path, error: &str) {
     use std::io::Write;
+    use std::os::unix::io::AsRawFd;
     let line = serde_json::json!({
         "type": "result",
         "subtype": "error",
@@ -48,8 +104,24 @@ pub fn write_error_result(stream_path: &Path, error: &str) {
             return;
         }
     };
+    // SAFETY: `file` owns a valid fd for the body of this function.
+    // `flock(LOCK_EX)` blocks until the exclusive lock is acquired; failure
+    // is non-fatal — we still attempt the write (best-effort) and log a warning.
+    let locked = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) } == 0;
+    if !locked {
+        tracing::warn!(
+            path = %stream_path.display(),
+            "failed to acquire exclusive flock on stream — writing without serialization"
+        );
+    }
     if let Err(e) = writeln!(file, "{}", line) {
         tracing::warn!(%e, path = %stream_path.display(), "failed to write error result line to stream");
+    }
+    if locked {
+        // Explicit unlock; the fd is closed on drop of `file` which also
+        // releases the lock, but unlocking here makes ordering unambiguous.
+        // SAFETY: fd is still valid until `file` is dropped.
+        unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_UN) };
     }
 }
 
@@ -138,6 +210,18 @@ pub fn has_rate_limit_rejection(stream_path: &Path) -> Option<u64> {
 
 /// Check if a stream file has a broken session (content but zero init events).
 pub fn stream_has_broken_session(stream_path: &Path) -> bool {
+    // Try tail first; if tail has an init, we're not broken. If tail has no
+    // init but is truncated, fall back to full read so we don't false-positive.
+    let (tail, truncated) = match read_tail(stream_path, TAIL_READ_MAX_BYTES) {
+        Ok(t) if !t.0.trim().is_empty() => t,
+        _ => return false,
+    };
+    if tail.lines().any(is_init_event) {
+        return false;
+    }
+    if !truncated {
+        return true;
+    }
     let content = match std::fs::read_to_string(stream_path) {
         Ok(c) if !c.trim().is_empty() => c,
         _ => return false,
@@ -157,6 +241,23 @@ pub fn get_last_stream_event_type(stream_path: &Path) -> Option<String> {
         }
     }
     None
+}
+
+/// Cost and duration extracted from a stream result event.
+pub struct StreamCostInfo {
+    pub cost_usd: Option<f64>,
+    pub duration_ms: Option<u64>,
+}
+
+/// Extract cost and duration from the result event in a JSONL stream file.
+///
+/// Returns `None` if the stream file is missing or has no result event.
+pub fn get_stream_cost(stream_path: &Path) -> Option<StreamCostInfo> {
+    let result = get_stream_result(stream_path)?;
+    Some(StreamCostInfo {
+        cost_usd: result.get("total_cost_usd").and_then(|v| v.as_f64()),
+        duration_ms: result.get("duration_ms").and_then(|v| v.as_u64()),
+    })
 }
 
 /// Seconds since last stream file modification.
@@ -250,6 +351,11 @@ mod tests {
 
     #[test]
     fn file_size_missing() {
-        assert_eq!(get_stream_file_size(Path::new("/nonexistent")), 0);
+        // Use a dynamically constructed path guaranteed not to exist on the
+        // test host. The previous `/nonexistent` literal accidentally matched
+        // a real directory in some sandboxed CI environments.
+        let missing =
+            std::env::temp_dir().join(format!("mando-cc-missing-{}.jsonl", std::process::id()));
+        assert_eq!(get_stream_file_size(&missing), 0);
     }
 }

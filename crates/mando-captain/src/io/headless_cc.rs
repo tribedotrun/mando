@@ -1,10 +1,10 @@
-//! CC session logging — persist session metadata to the unified mando.db.
+//! CC session logging; persist session metadata to the unified mando.db.
 
 use std::path::Path;
 
+use anyhow::{Context, Result};
 use mando_types::SessionStatus;
 use sqlx::SqlitePool;
-use tracing::warn;
 
 pub struct SessionLogEntry<'a> {
     pub session_id: &'a str,
@@ -28,8 +28,8 @@ fn non_empty(s: &str) -> Option<&str> {
     }
 }
 
-pub async fn log_cc_session(pool: &SqlitePool, entry: &SessionLogEntry<'_>) {
-    if let Err(e) = mando_db::queries::sessions::upsert_session(
+pub async fn log_cc_session(pool: &SqlitePool, entry: &SessionLogEntry<'_>) -> Result<()> {
+    mando_db::queries::sessions::upsert_session(
         pool,
         &mando_db::queries::sessions::SessionUpsert {
             session_id: entry.session_id,
@@ -47,9 +47,8 @@ pub async fn log_cc_session(pool: &SqlitePool, entry: &SessionLogEntry<'_>) {
         },
     )
     .await
-    {
-        warn!(module = "cc", error = %e, "failed to upsert session");
-    }
+    .context("upsert_session")?;
+    Ok(())
 }
 
 pub(crate) async fn log_running_session(
@@ -60,7 +59,7 @@ pub(crate) async fn log_running_session(
     worker_name: &str,
     task_id: &str,
     resumed: bool,
-) {
+) -> Result<()> {
     log_cc_session(
         pool,
         &SessionLogEntry {
@@ -76,7 +75,7 @@ pub(crate) async fn log_running_session(
             worker_name,
         },
     )
-    .await;
+    .await
 }
 
 pub(crate) async fn log_session_completion(
@@ -87,7 +86,34 @@ pub(crate) async fn log_session_completion(
     worker_name: &str,
     task_id: &str,
     status: SessionStatus,
-) {
+) -> Result<()> {
+    // Read cost/duration from the stream file. Use update_session_status_with_cost
+    // (set-if-null) instead of upsert_session (cumulative) to avoid double-counting
+    // when this function is called multiple times for the same session.
+    let stream_path = mando_config::stream_path_for_session(session_id);
+    let cost_info = mando_cc::get_stream_cost(&stream_path);
+    let (cost_usd, duration_ms) = match &cost_info {
+        Some(info) => (info.cost_usd, info.duration_ms.map(|d| d as i64)),
+        None => (None, None),
+    };
+
+    if let Err(e) = mando_db::queries::sessions::update_session_status_with_cost(
+        pool,
+        session_id,
+        status,
+        cost_usd,
+        duration_ms,
+    )
+    .await
+    {
+        tracing::warn!(
+            module = "headless_cc",
+            session_id,
+            error = %e,
+            "failed to update session cost"
+        );
+    }
+
     let cwd_path = Path::new(cwd);
     log_cc_session(
         pool,
@@ -104,7 +130,7 @@ pub(crate) async fn log_session_completion(
             worker_name,
         },
     )
-    .await;
+    .await
 }
 
 pub(crate) async fn log_cc_result(
@@ -113,7 +139,7 @@ pub(crate) async fn log_cc_result(
     cwd: &Path,
     caller: &str,
     task_id: &str,
-) {
+) -> Result<()> {
     log_cc_session(
         pool,
         &SessionLogEntry {
@@ -129,7 +155,7 @@ pub(crate) async fn log_cc_result(
             worker_name: "",
         },
     )
-    .await;
+    .await
 }
 
 pub(crate) async fn log_cc_failure(
@@ -138,7 +164,7 @@ pub(crate) async fn log_cc_failure(
     cwd: &Path,
     caller: &str,
     task_id: &str,
-) {
+) -> Result<()> {
     log_cc_session(
         pool,
         &SessionLogEntry {
@@ -154,7 +180,7 @@ pub(crate) async fn log_cc_failure(
             worker_name: "",
         },
     )
-    .await;
+    .await
 }
 
 pub(crate) async fn log_item_session(
@@ -162,7 +188,7 @@ pub(crate) async fn log_item_session(
     item: &mando_types::Task,
     worker_name: &str,
     status: SessionStatus,
-) {
+) -> Result<()> {
     if let Some(ref sid) = item.session_ids.worker {
         let cwd = item.worktree.as_deref().unwrap_or("");
         log_session_completion(
@@ -174,6 +200,7 @@ pub(crate) async fn log_item_session(
             &item.id.to_string(),
             status,
         )
-        .await;
+        .await?;
     }
+    Ok(())
 }

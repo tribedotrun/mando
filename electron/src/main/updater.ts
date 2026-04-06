@@ -32,6 +32,8 @@ import https from 'https';
 import { execSync } from 'child_process';
 import { handleTrusted } from '#main/ipc-security';
 import { readAppPackageVersion } from '#main/app-package';
+import { updateDaemonBinary } from '#main/launchd';
+import { getDataDir } from '#main/daemon';
 import log from '#main/logger';
 
 const UPDATE_CHECK_INTERVAL_MS = 30 * 60 * 1000;
@@ -58,13 +60,10 @@ let pendingUpdate: PendingUpdate | null = null;
 let downloading = false;
 let checkTimer: ReturnType<typeof setTimeout> | null = null;
 let checkInterval: ReturnType<typeof setInterval> | null = null;
-
 /** Extract Node.js error code (e.g. 'ENOENT') or empty string. */
 function errCode(err: unknown): string {
   return err instanceof Error && 'code' in err ? ((err as NodeJS.ErrnoException).code ?? '') : '';
 }
-
-// Paths
 
 function getStagingDir(): string {
   return path.join(app.getPath('userData'), 'updates');
@@ -82,8 +81,6 @@ function getAppBundlePath(): string {
   // process.execPath = /Applications/Mando.app/Contents/MacOS/Mando
   return path.resolve(process.execPath, '..', '..', '..');
 }
-
-// Channel persistence
 
 function readChannel(): UpdateChannel {
   try {
@@ -105,8 +102,6 @@ function writeChannel(channel: UpdateChannel): void {
   writeFileSync(configPath, JSON.stringify({ channel }), 'utf-8');
 }
 
-// Feed
-
 function buildFeedUrl(): string {
   const arch = process.arch;
   const version = app.getVersion();
@@ -124,30 +119,37 @@ function fetchFeed(): Promise<FeedResult> {
   return new Promise((resolve) => {
     const url = buildFeedUrl();
     log.info(`auto-update: checking ${url}`);
-
     const req = https.get(url, (res) => {
       if (res.statusCode === 204) {
         log.info('auto-update: up to date');
         resolve({ kind: 'up-to-date' });
         return;
       }
-      if (res.statusCode !== 200) {
-        log.warn(`auto-update: feed returned ${res.statusCode}`);
-        res.resume();
-        resolve({ kind: 'error' });
-        return;
-      }
       let body = '';
       res.on('data', (chunk: Buffer) => {
-        body += chunk.toString();
+        if (body.length < 500 || res.statusCode === 200) body += chunk.toString();
       });
       res.on('end', () => {
+        if (res.statusCode !== 200) {
+          const snippet = body.slice(0, 500).replace(/\s+/g, ' ').trim();
+          log.warn(
+            `auto-update: feed returned ${res.statusCode}${snippet ? ` body="${snippet}"` : ''}`,
+          );
+          resolve({ kind: 'error' });
+          return;
+        }
         try {
           resolve({ kind: 'update', feed: JSON.parse(body) as FeedResponse });
-        } catch {
-          log.error('auto-update: invalid feed JSON');
+        } catch (err) {
+          log.error(
+            `auto-update: invalid feed JSON: ${err instanceof Error ? err.message : String(err)}`,
+          );
           resolve({ kind: 'error' });
         }
+      });
+      res.on('error', (err) => {
+        log.warn(`auto-update: feed body read failed: ${err.message}`);
+        resolve({ kind: 'error' });
       });
     });
     req.on('error', (err) => {
@@ -156,8 +158,6 @@ function fetchFeed(): Promise<FeedResult> {
     });
   });
 }
-
-// Download
 
 function downloadFile(url: string, dest: string, redirectsLeft = MAX_REDIRECTS): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -201,14 +201,11 @@ function downloadFile(url: string, dest: string, redirectsLeft = MAX_REDIRECTS):
   });
 }
 
-// Extract + stage
-
 function extractAndStage(zipPath: string): string {
   const stagingDir = getStagingDir();
   const extractDir = path.join(stagingDir, 'extract');
 
-  // Clean previous extraction
-  if (existsSync(extractDir)) rmSync(extractDir, { recursive: true });
+  if (existsSync(extractDir)) rmSync(extractDir, { recursive: true }); // clean previous
   mkdirSync(extractDir, { recursive: true });
 
   // ditto -xk preserves code signatures and resource forks
@@ -230,13 +227,9 @@ function extractAndStage(zipPath: string): string {
   throw new Error('No .app bundle found in ZIP');
 }
 
-// Code signature verification
-
 function verifyCodeSignature(appPath: string): void {
   execSync(`codesign --verify --deep --strict "${appPath}"`, { timeout: 30_000 });
 }
-
-// Apply update (swap .app bundle)
 
 function applyUpdate(newAppPath: string): void {
   const currentApp = getAppBundlePath();
@@ -286,27 +279,18 @@ function applyUpdate(newAppPath: string): void {
 
 function cleanupAfterUpdate(): void {
   if (downloading) return; // don't clean up while a download is in progress
-
   const stagingDir = getStagingDir();
-  const pendingPath = getPendingPath();
-  if (existsSync(pendingPath)) rmSync(pendingPath);
-
+  if (existsSync(getPendingPath())) rmSync(getPendingPath());
   const oldAppPath = path.join(stagingDir, 'Mando-old.app');
   if (existsSync(oldAppPath)) {
     rmSync(oldAppPath, { recursive: true });
     log.info('auto-update: cleaned up old app');
   }
-
   const extractDir = path.join(stagingDir, 'extract');
-  if (existsSync(extractDir)) {
-    rmSync(extractDir, { recursive: true });
-  }
-
+  if (existsSync(extractDir)) rmSync(extractDir, { recursive: true });
   const zipPath = path.join(stagingDir, 'update.zip');
   if (existsSync(zipPath)) rmSync(zipPath);
 }
-
-// Staged update: apply on next launch
 
 function writePending(update: PendingUpdate): void {
   const pendingPath = getPendingPath();
@@ -344,6 +328,15 @@ export function applyPendingUpdateIfAny(): boolean {
   // Delete the marker FIRST to prevent relaunch loops
   rmSync(getPendingPath());
 
+  // Update daemon binary from the STAGED app bundle (not the current one) so
+  // the new daemon is running before the app swap. Best-effort: the version-mismatch
+  // handler in ensureDaemon() catches stragglers on relaunch.
+  try {
+    updateDaemonBinary(getDataDir(), staged.appPath);
+  } catch (err) {
+    log.warn('auto-update: pre-swap daemon binary update failed (will retry on relaunch)', err);
+  }
+
   try {
     applyUpdate(staged.appPath);
     app.relaunch();
@@ -355,8 +348,6 @@ export function applyPendingUpdateIfAny(): boolean {
     return false;
   }
 }
-
-// Check + download flow
 
 function broadcastToWindows(channel: string, payload?: unknown): void {
   for (const win of BrowserWindow.getAllWindows()) {
@@ -410,8 +401,6 @@ async function checkAndDownload(): Promise<void> {
   }
 }
 
-// Public API
-
 export function setupAutoUpdate(): void {
   handleTrusted('updates:install', () => {
     if (!app.isPackaged) {
@@ -424,6 +413,12 @@ export function setupAutoUpdate(): void {
     }
     log.info(`auto-update: user requested install of v${pendingUpdate.version}`);
     try {
+      // Update daemon binary from staged app BEFORE app swap.
+      try {
+        updateDaemonBinary(getDataDir(), pendingUpdate.appPath);
+      } catch (err) {
+        log.warn('auto-update: pre-swap daemon binary update failed (will retry on relaunch)', err);
+      }
       applyUpdate(pendingUpdate.appPath);
       rmSync(getPendingPath(), { force: true });
       app.relaunch();
@@ -432,6 +427,7 @@ export function setupAutoUpdate(): void {
       log.error('auto-update: install failed', err);
       cleanupAfterUpdate();
       pendingUpdate = null;
+      throw err;
     }
   });
 
@@ -446,10 +442,9 @@ export function setupAutoUpdate(): void {
   });
 
   handleTrusted('updates:app-version', () => readAppPackageVersion() ?? app.getVersion());
-  handleTrusted('updates:pending', () => {
-    if (pendingUpdate) return { version: pendingUpdate.version, notes: pendingUpdate.notes };
-    return null;
-  });
+  handleTrusted('updates:pending', () =>
+    pendingUpdate ? { version: pendingUpdate.version, notes: pendingUpdate.notes } : null,
+  );
   handleTrusted('updates:get-channel', () => readChannel());
 
   handleTrusted('updates:set-channel', (_: unknown, channel: string) => {
@@ -475,12 +470,8 @@ export function setupAutoUpdate(): void {
 }
 
 export function cleanupAutoUpdate(): void {
-  if (checkTimer) {
-    clearTimeout(checkTimer);
-    checkTimer = null;
-  }
-  if (checkInterval) {
-    clearInterval(checkInterval);
-    checkInterval = null;
-  }
+  if (checkTimer) clearTimeout(checkTimer);
+  if (checkInterval) clearInterval(checkInterval);
+  checkTimer = null;
+  checkInterval = null;
 }

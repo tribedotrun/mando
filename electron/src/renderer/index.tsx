@@ -1,8 +1,8 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
-import { DataProvider } from '#renderer/DataProvider';
-import { App } from '#renderer/App';
-import { ErrorBoundary } from '#renderer/components/ErrorBoundary';
+import { DataProvider } from '#renderer/app/DataProvider';
+import { App } from '#renderer/app/App';
+import { ErrorBoundary } from '#renderer/global/components/ErrorBoundary';
 import './index.css';
 
 const container = document.getElementById('root');
