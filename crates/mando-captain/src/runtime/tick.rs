@@ -273,6 +273,20 @@ async fn run_captain_tick_inner(
         .await;
     }
 
+    // Clarifying — poll for results from async clarifier sessions.
+    if !dry_run {
+        super::tick_clarify_poll::poll_clarifying_items(
+            &mut items,
+            config,
+            workflow,
+            &notifier,
+            &pool,
+            rate_limited,
+            &workflow.agent.resource_limits,
+        )
+        .await;
+    }
+
     // CaptainMerging — poll for merge session results from async CC sessions.
     if !dry_run {
         super::captain_merge_poll::poll_merging_items(

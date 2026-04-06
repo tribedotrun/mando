@@ -118,7 +118,7 @@ export function TaskActionBar({ item, onAsk }: Props): React.ReactElement | null
         >
           <textarea
             ref={textareaRef}
-            className="min-h-[20px] max-h-[120px] flex-1 resize-none overflow-y-auto bg-transparent text-body leading-snug focus:outline-none"
+            className="min-h-[20px] max-h-[120px] flex-1 resize-none overflow-y-auto bg-transparent py-1 text-body leading-snug focus:outline-none"
             style={{ color: 'var(--color-text-1)' }}
             rows={1}
             placeholder={config.placeholder}

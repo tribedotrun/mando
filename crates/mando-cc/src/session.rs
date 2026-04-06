@@ -112,6 +112,17 @@ impl CcSession {
     pub async fn recv_result(&mut self) -> Result<CcResult> {
         let start = std::time::Instant::now();
         let mut line_buf = String::new();
+        let mut lines_read: u64 = 0;
+        let mut bytes_teed: u64 = 0;
+
+        tracing::debug!(
+            module = "mando-cc",
+            session_id = %self.session_id,
+            caller = %self.config.caller,
+            pid = %self.pid,
+            stream_path = %self.stream_path.display(),
+            "recv_result started — waiting for stdout"
+        );
 
         loop {
             line_buf.clear();
@@ -119,9 +130,21 @@ impl CcSession {
             if bytes_read == 0 {
                 // EOF — process exited.
                 let elapsed = start.elapsed();
+                tracing::warn!(
+                    module = "mando-cc",
+                    session_id = %self.session_id,
+                    caller = %self.config.caller,
+                    pid = %self.pid,
+                    lines_read,
+                    bytes_teed,
+                    elapsed_ms = elapsed.as_millis() as u64,
+                    stream_path = %self.stream_path.display(),
+                    "recv_result hit EOF — process exited without result event"
+                );
                 return self.handle_eof(elapsed);
             }
 
+            lines_read += 1;
             let trimmed = line_buf.trim();
             if trimmed.is_empty() {
                 continue;
@@ -129,8 +152,18 @@ impl CcSession {
 
             // Tee to stream file.
             use std::io::Write;
+            let trimmed_len = trimmed.len() as u64;
             if let Err(e) = writeln!(self.stream_file, "{trimmed}") {
-                tracing::warn!(error = %e, "stream tee-write failed — transcript may be incomplete");
+                tracing::warn!(
+                    module = "mando-cc",
+                    session_id = %self.session_id,
+                    error = %e,
+                    lines_read,
+                    bytes_teed,
+                    "stream tee-write failed — transcript may be incomplete"
+                );
+            } else {
+                bytes_teed += trimmed_len + 1; // +1 for newline
             }
 
             // Parse message.
@@ -196,6 +229,15 @@ impl CcSession {
                 }
                 CcMessage::Result(result) => {
                     let elapsed = start.elapsed();
+                    tracing::info!(
+                        module = "mando-cc",
+                        session_id = %self.session_id,
+                        caller = %self.config.caller,
+                        lines_read,
+                        bytes_teed,
+                        elapsed_ms = elapsed.as_millis() as u64,
+                        "recv_result got result event"
+                    );
                     return Ok(self.build_result(result, elapsed));
                 }
                 _ => {}
@@ -205,6 +247,22 @@ impl CcSession {
 
     /// Handle EOF (process exited) during recv_result.
     fn handle_eof(&self, elapsed: std::time::Duration) -> Result<CcResult> {
+        // Log stream file size at EOF for diagnostics.
+        let stream_size = std::fs::metadata(&self.stream_path)
+            .map(|m| m.len())
+            .unwrap_or(u64::MAX);
+        let pid_alive = crate::process::is_process_alive(self.pid);
+        tracing::warn!(
+            module = "mando-cc",
+            session_id = %self.session_id,
+            caller = %self.config.caller,
+            pid = %self.pid,
+            pid_alive,
+            stream_file_bytes = stream_size,
+            elapsed_ms = elapsed.as_millis() as u64,
+            "handle_eof: attempting recovery from stream file"
+        );
+
         // Try to extract result from stream file.
         if let Some(result_val) = crate::stream::get_stream_result(&self.stream_path) {
             let result_msg = match CcMessage::parse(result_val) {

@@ -197,6 +197,7 @@ export const parseBulkTodos = (text: string) =>
 export async function addTask(input: AddTaskInput): Promise<TaskItem> {
   const form = new FormData();
   form.append('title', input.title);
+  form.append('source', 'electron');
   if (input.project) form.append('project', input.project);
   if (input.images) {
     for (const img of input.images) {

@@ -213,7 +213,7 @@ pub(crate) async fn add_todo_items(
     let mut ok_titles: Vec<String> = Vec::new();
 
     for item in items {
-        let mut fields = vec![("title", item.title.as_str())];
+        let mut fields = vec![("title", item.title.as_str()), ("source", "telegram")];
         if let Some(ref p) = item.project {
             fields.push(("project", p.as_str()));
         }

@@ -39,6 +39,7 @@ pub async fn add_task(
     store: &TaskStore,
     title: &str,
     project: Option<&str>,
+    source: Option<&str>,
 ) -> Result<serde_json::Value> {
     let projects = &config.captain.projects;
     let (resolved_project, clean_title) = if let Some(r) = project {
@@ -65,6 +66,7 @@ pub async fn add_task(
     new_task.github_repo = github_repo;
     new_task.original_prompt = Some(title.to_string());
     new_task.created_at = Some(mando_types::now_rfc3339());
+    new_task.source = source.map(String::from);
 
     let id = store.add(new_task).await?;
 
@@ -125,8 +127,9 @@ pub async fn add_task_with_context(
     title: &str,
     project: Option<&str>,
     context: Option<&str>,
+    source: Option<&str>,
 ) -> Result<serde_json::Value> {
-    let result = add_task(config, store, title, project).await?;
+    let result = add_task(config, store, title, project, source).await?;
     if let Some(ctx) = context {
         if let Some(id) = result["id"].as_i64() {
             update_task(store, id, &serde_json::json!({"context": ctx})).await?;

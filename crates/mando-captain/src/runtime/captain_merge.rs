@@ -186,7 +186,17 @@ pub(crate) async fn spawn_merge(
         .await
         {
             Ok(result) => {
-                info!(module = "captain", %session_id, "captain merge CC completed");
+                let stream_size = std::fs::metadata(&result.stream_path)
+                    .map(|m| m.len())
+                    .unwrap_or(u64::MAX);
+                info!(
+                    module = "captain",
+                    %session_id,
+                    cost_usd = result.cost_usd.unwrap_or(0.0),
+                    duration_ms = result.duration_ms.unwrap_or(0),
+                    stream_file_bytes = stream_size,
+                    "captain merge CC completed"
+                );
                 if let Err(e) = crate::io::pid_registry::unregister(&session_id) {
                     warn!(module = "captain", %session_id, %e, "pid_registry unregister failed");
                 }
@@ -203,7 +213,17 @@ pub(crate) async fn spawn_merge(
                 }
             }
             Err(e) => {
-                warn!(module = "captain", %session_id, %e, "captain merge CC failed");
+                let stream_path = mando_config::stream_path_for_session(&session_id);
+                let stream_size = std::fs::metadata(&stream_path)
+                    .map(|m| m.len())
+                    .unwrap_or(u64::MAX);
+                warn!(
+                    module = "captain",
+                    %session_id,
+                    stream_file_bytes = stream_size,
+                    error = %e,
+                    "captain merge CC failed"
+                );
                 if let Err(e2) = crate::io::pid_registry::unregister(&session_id) {
                     warn!(module = "captain", %session_id, %e2, "pid_registry unregister failed");
                 }
@@ -245,7 +265,23 @@ pub(crate) async fn spawn_merge(
 pub(crate) fn check_merge(item: &Task) -> Option<MergeResult> {
     let session_id = item.session_ids.merge.as_deref()?;
     let stream_path = mando_config::stream_path_for_session(session_id);
-    let result = mando_cc::get_stream_result(&stream_path)?;
+    let result = match mando_cc::get_stream_result(&stream_path) {
+        Some(r) => r,
+        None => {
+            let stream_size = std::fs::metadata(&stream_path)
+                .map(|m| m.len())
+                .unwrap_or(u64::MAX);
+            tracing::debug!(
+                module = "captain",
+                item_id = item.id,
+                %session_id,
+                stream_file_bytes = stream_size,
+                stream_path = %stream_path.display(),
+                "check_merge: no result in stream file"
+            );
+            return None;
+        }
+    };
 
     // Try structured_output first.
     if let Some(so) = result.get("structured_output").filter(|v| !v.is_null()) {

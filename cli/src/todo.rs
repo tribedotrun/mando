@@ -135,7 +135,9 @@ async fn handle_add(
     no_pr: bool,
 ) -> anyhow::Result<()> {
     let client = DaemonClient::discover()?;
-    let mut form = reqwest::multipart::Form::new().text("title", title.to_string());
+    let mut form = reqwest::multipart::Form::new()
+        .text("title", title.to_string())
+        .text("source", "cli");
     if let Some(p) = project {
         form = form.text("project", p.to_string());
     }
@@ -174,7 +176,9 @@ async fn handle_bulk(
         if line.is_empty() {
             continue;
         }
-        let mut form = reqwest::multipart::Form::new().text("title", line.to_string());
+        let mut form = reqwest::multipart::Form::new()
+            .text("title", line.to_string())
+            .text("source", "cli");
         if let Some(p) = project {
             form = form.text("project", p.to_string());
         }

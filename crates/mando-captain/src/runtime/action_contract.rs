@@ -326,6 +326,7 @@ pub async fn reopen_item(
             item.status = ItemStatus::Queued;
             item.worker_started_at = None;
             item.last_activity_at = Some(mando_types::now_rfc3339());
+            let _ = emit_reopen_event(item, reopen_source, feedback, "queued", pool).await;
             return Ok(ReopenOutcome::QueuedFallback);
         }
         bail!("item missing worker/session/worktree — cannot reopen");
@@ -345,6 +346,7 @@ pub async fn reopen_item(
             item.worker_started_at = Some(mando_types::now_rfc3339());
             item.last_activity_at = item.worker_started_at.clone();
 
+            let _ = emit_reopen_event(item, reopen_source, feedback, "reopened", pool).await;
             Ok(ReopenOutcome::Reopened)
         }
         Err(e) => {
@@ -360,6 +362,7 @@ pub async fn reopen_item(
                 item.status = ItemStatus::Queued;
                 item.worker_started_at = None;
                 item.last_activity_at = Some(mando_types::now_rfc3339());
+                let _ = emit_reopen_event(item, reopen_source, feedback, "queued", pool).await;
                 Ok(ReopenOutcome::QueuedFallback)
             } else {
                 Err(e)
@@ -387,6 +390,44 @@ async fn trigger_review(
     reset_review_retry(item, trigger);
     captain_review::spawn_review(item, trigger.as_str(), config, workflow, notifier, pool).await?;
     Ok(())
+}
+
+async fn emit_reopen_event(
+    item: &Task,
+    source: &str,
+    feedback: &str,
+    outcome: &str,
+    pool: &sqlx::SqlitePool,
+) {
+    // Human reopens already emit HumanReopen from the gateway handler.
+    if source == "human" {
+        return;
+    }
+    let source_label = match source {
+        "review" => "review comments",
+        "ci" => "CI failure",
+        "evidence" => "missing evidence",
+        _ => source,
+    };
+    let summary = format!(
+        "Auto-reopened for {} (seq {})",
+        source_label, item.reopen_seq
+    );
+    let _ = timeline_emit::emit_for_task(
+        item,
+        mando_types::timeline::TimelineEventType::WorkerReopened,
+        &summary,
+        serde_json::json!({
+            "source": source,
+            "reopen_seq": item.reopen_seq,
+            "outcome": outcome,
+            "feedback": feedback,
+            "worker": item.worker,
+            "session_id": item.session_ids.worker,
+        }),
+        pool,
+    )
+    .await;
 }
 
 fn persist_nudge_health(

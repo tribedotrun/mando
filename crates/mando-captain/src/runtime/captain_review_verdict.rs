@@ -271,7 +271,11 @@ pub async fn apply_verdict(
             log_stopped_after = true;
         }
         "retry_clarifier" => {
-            item.status = ItemStatus::Clarifying;
+            // Route through the async initial clarification flow (dispatch_clarify)
+            // rather than the blocking reclarify path.
+            item.status = ItemStatus::New;
+            item.session_ids.clarifier = None;
+            item.clarifier_fail_count = 0;
             item.worker_started_at = None;
             let _ = timeline_emit::emit_for_task(
                 item,

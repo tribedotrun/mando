@@ -52,12 +52,12 @@ function QueuedCard() {
   );
 }
 
-function CaptainReviewingCard() {
+function CaptainReviewingCard({ label }: { label: string }) {
   return (
     <CardShell color="var(--color-accent)">
       <StatusDot color="var(--color-accent)" pulse />
       <span className="text-body font-medium" style={{ color: 'var(--color-text-1)' }}>
-        Captain reviewing
+        {label}
       </span>
     </CardShell>
   );
@@ -312,7 +312,8 @@ export function StatusCard({ item, sessions, clarifierQuestions }: Props): React
   if (s === 'in-progress' || s === 'clarifying')
     return <StreamingCard item={item} sessions={sessions} />;
   if (s === 'new' || s === 'queued') return <QueuedCard />;
-  if (s === 'captain-reviewing' || s === 'captain-merging') return <CaptainReviewingCard />;
+  if (s === 'captain-reviewing') return <CaptainReviewingCard label="Captain reviewing" />;
+  if (s === 'captain-merging') return <CaptainReviewingCard label="Captain merging" />;
   if (s === 'awaiting-review') return <AwaitingReviewCard item={item} />;
   if (s === 'escalated') return <EscalatedCard item={item} />;
   if (s === 'errored' || s === 'rework') return <FailedCard item={item} />;
