@@ -3,6 +3,7 @@ import { cardStyle } from '#renderer/styles';
 import { ProjectEditor } from '#renderer/domains/settings/components/ProjectEditor';
 import { useSettingsStore } from '#renderer/domains/settings/stores/settingsStore';
 import type { ProjectConfig } from '#renderer/domains/settings/stores/settingsStore';
+import { buildUrl } from '#renderer/domains/settings/hooks/useApi';
 
 const EMPTY_PROJECTS: Record<string, ProjectConfig> = {};
 
@@ -52,9 +53,23 @@ export function SettingsProjects(): React.ReactElement {
             <div key={pathKey} data-testid={`project-card-${displayName}`} style={cardStyle}>
               <div className="flex items-start justify-between">
                 <div className="min-w-0 flex-1">
-                  <h3 className="text-sm font-semibold" style={{ color: 'var(--color-text-1)' }}>
-                    {displayName}
-                  </h3>
+                  <div className="flex items-center gap-2">
+                    {project.logo && (
+                      <img
+                        src={buildUrl(`/api/images/${project.logo}`)}
+                        alt=""
+                        width={20}
+                        height={20}
+                        className="shrink-0 rounded object-contain"
+                        onError={(e) => {
+                          (e.target as HTMLImageElement).style.display = 'none';
+                        }}
+                      />
+                    )}
+                    <h3 className="text-sm font-semibold" style={{ color: 'var(--color-text-1)' }}>
+                      {displayName}
+                    </h3>
+                  </div>
                   <p
                     className="mt-1 truncate font-mono text-xs"
                     style={{ color: 'var(--color-text-3)' }}

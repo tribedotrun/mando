@@ -1,6 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import type { TaskItem, ClarifierQuestion, SessionSummary } from '#renderer/types';
 import { answerClarification } from '#renderer/domains/captain/hooks/useApi';
+import { useDraftRecord } from '#renderer/global/hooks/useDraft';
 import { useTaskStore } from '#renderer/domains/captain/stores/taskStore';
 import { useToastStore } from '#renderer/global/stores/toastStore';
 import log from '#renderer/logger';
@@ -129,7 +130,15 @@ function NeedsClarificationCard({
   questions: ClarifierQuestion[];
 }) {
   const unanswered = questions.filter((q) => !q.self_answered);
-  const [answers, setAnswers] = useState<Record<number, string>>({});
+  // Include question count + first question hash so stale drafts from a
+  // different question set are automatically ignored on key change.
+  const qFingerprint = `${unanswered.length}:${unanswered
+    .map((q) => q.question)
+    .join('|')
+    .slice(0, 64)}`;
+  const [answers, setAnswers, clearAnswersDraft] = useDraftRecord(
+    `mando:draft:clarify:${taskId}:${qFingerprint}`,
+  );
   const [pending, setPending] = useState(false);
   const [completed, setCompleted] = useState<string | null>(null);
   const taskFetch = useTaskStore((s) => s.fetch);
@@ -149,15 +158,15 @@ function NeedsClarificationCard({
       taskFetch();
       const { variant, msg } = clarifyResultToToast(result.status);
       toast().add(variant, msg);
+      clearAnswersDraft();
       if (result.status !== 'clarifying') setCompleted(msg);
-      else setAnswers({});
     } catch (err) {
       log.warn(`[StatusCard] clarification submit failed for task ${taskId}:`, err);
       toast().add('error', getErrorMessage(err, 'Failed to submit answers'));
     } finally {
       setPending(false);
     }
-  }, [answers, unanswered, taskId, taskFetch, toast]);
+  }, [answers, unanswered, taskId, taskFetch, toast, clearAnswersDraft]);
 
   if (completed) {
     return (
@@ -203,7 +212,7 @@ function NeedsClarificationCard({
               rows={1}
               placeholder="Your answer..."
               value={answers[i] ?? ''}
-              onChange={(e) => setAnswers((prev) => ({ ...prev, [i]: e.target.value }))}
+              onChange={(e) => setAnswers({ ...answers, [i]: e.target.value })}
               disabled={pending}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && e.metaKey && filledCount > 0) {

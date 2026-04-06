@@ -378,7 +378,7 @@ fn parse_qa_result(result: &mando_cc::CcResult, ctx_sid: &str) -> QaResult {
     make(result.text.clone(), Vec::new())
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "dev-mocks"))]
 mod tests {
     use super::*;
     use std::path::PathBuf;

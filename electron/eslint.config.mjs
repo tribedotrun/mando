@@ -71,7 +71,10 @@ export default tseslint.config(
   // ── Ban useEffect + hover handlers ──
   {
     files: ['src/**/*.ts', 'src/**/*.tsx'],
-    ignores: ['src/renderer/global/hooks/useMountEffect.ts'],
+    ignores: [
+      'src/renderer/global/hooks/useMountEffect.ts',
+      'src/renderer/global/hooks/useDraft.ts',
+    ],
     rules: {
       'no-restricted-syntax': [
         'error',

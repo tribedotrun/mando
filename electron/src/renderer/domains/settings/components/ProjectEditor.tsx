@@ -1,7 +1,9 @@
 import React, { useState } from 'react';
 import { inputStyle, labelStyle, inputCls, labelCls } from '#renderer/styles';
+import { useSettingsStore } from '#renderer/domains/settings/stores/settingsStore';
 import type { ProjectConfig } from '#renderer/domains/settings/stores/settingsStore';
 import { shortRepo } from '#renderer/utils';
+import { apiPatch, buildUrl } from '#renderer/domains/settings/hooks/useApi';
 
 export interface ProjectEditorProps {
   pathKey: string;
@@ -20,7 +22,11 @@ export function ProjectEditor({
   onCancel,
   isNew,
 }: ProjectEditorProps): React.ReactElement {
+  const reloadConfig = useSettingsStore((s) => s.load);
   const [name, setName] = useState(project.name || '');
+  const [logoFile, setLogoFile] = useState(project.logo || null);
+  const [detectingLogo, setDetectingLogo] = useState(false);
+  const [detectError, setDetectError] = useState<string | null>(null);
   const [projectPath, setProjectPath] = useState(project.path || '');
   const [githubRepo, setGithubRepo] = useState(project.githubRepo || '');
   const [aliases, setAliases] = useState((project.aliases || []).join(', '));
@@ -58,6 +64,7 @@ export function ProjectEditor({
       name: name.trim(),
       path: projectPath.trim(),
       githubRepo: githubRepo.trim() || undefined,
+      logo: logoFile ?? undefined,
       aliases: aliases
         .split(',')
         .map((a) => a.trim())
@@ -123,6 +130,66 @@ export function ProjectEditor({
           </p>
         )}
       </div>
+
+      {!isNew && (
+        <div>
+          <label className={labelCls} style={labelStyle}>
+            Logo
+          </label>
+          <div className="flex items-center gap-3">
+            {logoFile && (
+              <img
+                src={buildUrl(`/api/images/${logoFile}`)}
+                alt=""
+                width={24}
+                height={24}
+                className="shrink-0 rounded object-contain"
+                onError={(e) => {
+                  (e.target as HTMLImageElement).style.display = 'none';
+                }}
+              />
+            )}
+            <button
+              type="button"
+              disabled={detectingLogo}
+              onClick={async () => {
+                setDetectingLogo(true);
+                setDetectError(null);
+                try {
+                  const res = await apiPatch<{ logo?: string | null }>(
+                    `/api/projects/${encodeURIComponent(project.name)}`,
+                    { redetect_logo: true },
+                  );
+                  setLogoFile(res.logo ?? null);
+                  await reloadConfig();
+                } catch (err) {
+                  setDetectError(err instanceof Error ? err.message : 'Detection failed');
+                } finally {
+                  setDetectingLogo(false);
+                }
+              }}
+              className="rounded-md px-3 py-1 text-xs"
+              style={{
+                border: '1px solid var(--color-border)',
+                color: 'var(--color-text-2)',
+                opacity: detectingLogo ? 0.5 : 1,
+              }}
+            >
+              {detectingLogo ? 'Detecting...' : logoFile ? 'Re-detect' : 'Detect logo'}
+            </button>
+            {detectError && (
+              <span className="text-xs" style={{ color: 'var(--color-error)' }}>
+                {detectError}
+              </span>
+            )}
+            {!logoFile && !detectingLogo && !detectError && (
+              <span className="text-xs" style={{ color: 'var(--color-text-3)' }}>
+                No logo detected
+              </span>
+            )}
+          </div>
+        </div>
+      )}
 
       {!isNew && (
         <div>

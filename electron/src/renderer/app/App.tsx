@@ -217,7 +217,11 @@ export function App(): React.ReactElement {
           onClose={() => setPaletteOpen(false)}
           onAction={handlePaletteAction}
         />
-        <CreateTaskModal open={createTaskOpen} onClose={() => setCreateTaskOpen(false)} />
+        <CreateTaskModal
+          open={createTaskOpen}
+          onClose={() => setCreateTaskOpen(false)}
+          initialProject={projectFilter}
+        />
         <ShortcutOverlay open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
         <ToastContainer />
         <BulkCreateProgress />
@@ -425,7 +429,11 @@ export function App(): React.ReactElement {
         onClose={() => setPaletteOpen(false)}
         onAction={handlePaletteAction}
       />
-      <CreateTaskModal open={createTaskOpen} onClose={() => setCreateTaskOpen(false)} />
+      <CreateTaskModal
+        open={createTaskOpen}
+        onClose={() => setCreateTaskOpen(false)}
+        initialProject={projectFilter}
+      />
       <ShortcutOverlay open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
       <ToastContainer />
       <BulkCreateProgress />

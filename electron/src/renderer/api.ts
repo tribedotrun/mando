@@ -40,7 +40,7 @@ export async function initBaseUrl(): Promise<void> {
   }
 }
 
-function buildUrl(path: string): string {
+export function buildUrl(path: string): string {
   return `${BASE_URL}${path}`;
 }
 

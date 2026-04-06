@@ -225,9 +225,11 @@ pub async fn run_notification_loop(
     token: Option<String>,
     api: crate::api::TelegramApi,
     chat_id: String,
+    gw: crate::http::GatewayClient,
+    pending: crate::PendingMessages,
 ) {
     let sse = SseConsumer::new(&base_url, token);
-    let mut handler = crate::notifications::NotificationHandler::new(api, chat_id);
+    let mut handler = crate::notifications::NotificationHandler::new(api, chat_id, gw, pending);
 
     let mut rx = match sse.subscribe().await {
         Ok(rx) => rx,

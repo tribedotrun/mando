@@ -1,7 +1,9 @@
 import React, { useState, useCallback, useRef } from 'react';
+import { buildUrl } from '#renderer/global/hooks/useApi';
 
 interface SidebarProjectItemProps {
   name: string;
+  logo?: string | null;
   count: number;
   active: boolean;
   onSelect: () => void;
@@ -11,6 +13,7 @@ interface SidebarProjectItemProps {
 
 export function SidebarProjectItem({
   name,
+  logo,
   count,
   active,
   onSelect,
@@ -105,7 +108,22 @@ export function SidebarProjectItem({
             cursor: 'pointer',
           }}
         >
-          <span className="truncate">{name}</span>
+          <span className="flex min-w-0 items-center gap-1.5">
+            {logo && (
+              <img
+                key={logo}
+                src={buildUrl(`/api/images/${logo}`)}
+                alt=""
+                width={16}
+                height={16}
+                className="shrink-0 rounded-sm object-contain"
+                onError={(e) => {
+                  (e.target as HTMLImageElement).style.display = 'none';
+                }}
+              />
+            )}
+            <span className="truncate">{name}</span>
+          </span>
           <span
             role="button"
             tabIndex={-1}

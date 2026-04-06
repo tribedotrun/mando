@@ -8,6 +8,7 @@ export interface ProjectConfig {
   name: string;
   path: string;
   githubRepo?: string | null;
+  logo?: string | null;
   aliases?: string[];
   hooks?: Record<string, string>;
   workerPreamble?: string;

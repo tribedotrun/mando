@@ -169,6 +169,8 @@ pub struct ProjectConfig {
     pub aliases: Vec<String>,
     pub worker_preamble: String,
     pub check_command: String,
+    /// Filename of the project logo in `~/.mando/images/` (e.g. `project-mando.png`).
+    pub logo: Option<String>,
     /// If set, this project is included in scout QA context with this summary.
     pub scout_summary: String,
     /// Per-project file classification rules for PR triage.

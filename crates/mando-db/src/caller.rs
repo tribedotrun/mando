@@ -30,6 +30,7 @@ pub enum CallerGroup {
     Clarifier,
     CaptainReview,
     CaptainOps,
+    TodoParser,
     Scout,
 }
 
@@ -83,9 +84,10 @@ impl SessionCaller {
             Self::Worker => CallerGroup::Workers,
             Self::Clarifier | Self::DeepClarifier => CallerGroup::Clarifier,
             Self::CaptainReviewAsync => CallerGroup::CaptainReview,
-            Self::CaptainMergeAsync | Self::ExhaustionReport | Self::TaskAsk | Self::ParseTodos => {
+            Self::CaptainMergeAsync | Self::ExhaustionReport | Self::TaskAsk => {
                 CallerGroup::CaptainOps
             }
+            Self::ParseTodos => CallerGroup::TodoParser,
             Self::ScoutProcess
             | Self::ScoutArticle
             | Self::ScoutQa
@@ -143,6 +145,7 @@ impl CallerGroup {
             Self::Clarifier => "clarifier",
             Self::CaptainReview => "captain-review",
             Self::CaptainOps => "captain-ops",
+            Self::TodoParser => "todo-parser",
             Self::Scout => "scout",
         }
     }
