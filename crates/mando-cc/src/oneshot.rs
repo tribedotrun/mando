@@ -34,16 +34,41 @@ impl CcOneShot {
         let caller = config.caller.clone();
 
         let mut session = crate::CcSession::spawn(config).await?;
-        on_spawn(session.pid());
+        let pid = session.pid();
+        let sid = session.session_id().to_string();
+        on_spawn(pid);
 
         // Send the prompt. Internal helpers still use anyhow::Result;
         // normalize into CcError::Other at the public boundary.
         session.send_message(prompt).await.map_err(CcError::Other)?;
 
+        info!(
+            module = "mando-cc",
+            caller = %caller,
+            session_id = %sid,
+            pid = %pid,
+            timeout_s = timeout.as_secs(),
+            "oneshot prompt sent, waiting for result"
+        );
+
         // Wait for result with timeout.
         let result = match tokio::time::timeout(timeout, session.recv_result()).await {
             Ok(Ok(result)) => result,
             Ok(Err(e)) => {
+                let stream_size = std::fs::metadata(session.stream_path())
+                    .map(|m| m.len())
+                    .unwrap_or(u64::MAX);
+                let pid_alive = crate::process::is_process_alive(pid);
+                warn!(
+                    module = "mando-cc",
+                    caller = %caller,
+                    session_id = %sid,
+                    pid = %pid,
+                    pid_alive,
+                    stream_file_bytes = stream_size,
+                    error = %e,
+                    "oneshot recv_result failed"
+                );
                 crate::update_stream_meta_status(session.session_id(), "failed", None);
                 // Close cleanly before propagating.
                 let _ = session.close().await;
@@ -53,17 +78,24 @@ impl CcOneShot {
                 // Timeout — kill and bail.
                 let session_id = session.session_id().to_string();
                 let stream_path = session.stream_path().to_path_buf();
+                let stream_size = std::fs::metadata(&stream_path)
+                    .map(|m| m.len())
+                    .unwrap_or(u64::MAX);
+                let pid_alive = crate::process::is_process_alive(pid);
                 crate::update_stream_meta_status(&session_id, "timeout", None);
 
                 warn!(
                     module = "mando-cc",
                     caller = %caller,
                     session_id = %session_id,
+                    pid = %pid,
+                    pid_alive,
                     timeout_s = timeout.as_secs(),
+                    stream_file_bytes = stream_size,
                     "oneshot timed out"
                 );
 
-                crate::process::kill_process(session.pid())
+                crate::process::kill_process(pid)
                     .await
                     .map_err(CcError::Other)?;
 

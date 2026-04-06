@@ -17,6 +17,7 @@ electron/mando-napi.node
 # AI artifacts
 .ai/local/
 .ai/evidence/
+.ai/media/
 .claude/worktrees/
 .cursor/
 .playwright-mcp/

@@ -398,6 +398,7 @@ pub(crate) async fn post_scout_act(
         task_title,
         project_name,
         task_description,
+        Some("scout"),
     )
     .await
     .map_err(internal_error)?;

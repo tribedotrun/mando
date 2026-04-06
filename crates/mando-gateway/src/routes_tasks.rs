@@ -100,6 +100,7 @@ pub(crate) async fn post_task_add(
     let mut context: Option<String> = None;
     let mut plan: Option<String> = None;
     let mut no_pr: Option<String> = None;
+    let mut source: Option<String> = None;
     let mut saved_images: Vec<String> = Vec::new();
 
     let images_dir = images_dir();
@@ -132,6 +133,11 @@ pub(crate) async fn post_task_add(
             "no_pr" => {
                 if let Some(val) = field_text(field).await? {
                     no_pr = Some(val);
+                }
+            }
+            "source" => {
+                if let Some(val) = field_text(field).await? {
+                    source = Some(val);
                 }
             }
             "images" => {
@@ -184,6 +190,7 @@ pub(crate) async fn post_task_add(
             &store,
             title.trim(),
             repo.as_deref(),
+            source.as_deref(),
         )
         .await
         .map_err(internal_error)?;

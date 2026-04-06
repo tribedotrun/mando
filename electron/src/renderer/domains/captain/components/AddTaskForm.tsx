@@ -8,6 +8,8 @@ import { useTaskStore } from '#renderer/domains/captain/stores/taskStore';
 import { bulkTextareaRows, getErrorMessage, shortRepo } from '#renderer/utils';
 
 const LAST_PROJECT_KEY = 'mando:lastProject';
+const DRAFT_BULK_KEY = 'mando:draft:newTask:bulk';
+const DRAFT_PROJECT_KEY = 'mando:draft:newTask:project';
 const titleInputCls = `${inputCls} resize-none`;
 const projectSelectCls = 'rounded-md px-3 py-2 text-label';
 const footerButtonCls =
@@ -27,18 +29,26 @@ function AddTaskFormInner({
   onClose: () => void;
   initialProject?: string | null;
 }): React.ReactElement {
-  const [bulk, setBulk] = useState(false);
   const [title, setTitle, clearTitleDraft] = useDraft('mando:draft:newTask');
+  const hasDraft = title !== '';
+  const [bulk, setBulk] = useState(() => hasDraft && localStorage.getItem(DRAFT_BULK_KEY) === '1');
   // The health API returns project display names (not paths), and the sidebar
   // filter is also a display name — so initialProject can be used directly.
-  const [project, setProject] = useState(
-    () => initialProject ?? localStorage.getItem(LAST_PROJECT_KEY) ?? '',
-  );
+  // When restoring a draft, the draft-specific project takes precedence.
+  const [project, setProject] = useState(() => {
+    if (hasDraft) {
+      const draftProject = localStorage.getItem(DRAFT_PROJECT_KEY);
+      if (draftProject !== null) return draftProject;
+    }
+    return initialProject ?? localStorage.getItem(LAST_PROJECT_KEY) ?? '';
+  });
   const [image, setImage] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
+  const titleRef = useRef(title);
+  titleRef.current = title;
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const add = useTaskStore((s) => s.add);
@@ -54,6 +64,12 @@ function AddTaskFormInner({
 
   useMountEffect(() => {
     setTimeout(() => inputRef.current?.focus(), 50);
+    return () => {
+      if (!titleRef.current.trim()) {
+        localStorage.removeItem(DRAFT_BULK_KEY);
+        localStorage.removeItem(DRAFT_PROJECT_KEY);
+      }
+    };
   });
 
   const previewRef = useRef(preview);
@@ -67,6 +83,8 @@ function AddTaskFormInner({
   const resetForm = () => {
     setBulk(false);
     clearTitleDraft();
+    localStorage.removeItem(DRAFT_BULK_KEY);
+    localStorage.removeItem(DRAFT_PROJECT_KEY);
     setSubmitError(null);
     if (preview) URL.revokeObjectURL(preview);
     setImage(null);
@@ -87,8 +105,13 @@ function AddTaskFormInner({
 
   const handleProjectChange = (value: string) => {
     setProject(value);
-    if (value) localStorage.setItem(LAST_PROJECT_KEY, value);
-    else localStorage.removeItem(LAST_PROJECT_KEY);
+    if (value) {
+      localStorage.setItem(LAST_PROJECT_KEY, value);
+      localStorage.setItem(DRAFT_PROJECT_KEY, value);
+    } else {
+      localStorage.removeItem(LAST_PROJECT_KEY);
+      localStorage.removeItem(DRAFT_PROJECT_KEY);
+    }
   };
 
   const canSubmit = !submitting && !!trimmedTitle && (!projectRequired || !!effectiveProject);
@@ -171,7 +194,14 @@ function AddTaskFormInner({
             </div>
             <button
               type="button"
-              onClick={() => setBulk((b) => !b)}
+              onClick={() =>
+                setBulk((b) => {
+                  const next = !b;
+                  if (next) localStorage.setItem(DRAFT_BULK_KEY, '1');
+                  else localStorage.removeItem(DRAFT_BULK_KEY);
+                  return next;
+                })
+              }
               className={bulkToggleCls}
               style={{
                 background: bulk ? 'var(--color-accent-wash)' : 'var(--color-surface-2)',

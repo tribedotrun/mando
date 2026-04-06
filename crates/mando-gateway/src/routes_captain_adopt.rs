@@ -185,6 +185,7 @@ pub(crate) async fn post_captain_adopt(
             &body.title,
             Some(project_name.as_str()),
             Some(&ctx),
+            Some("adopt"),
         )
         .await
         .map_err(internal_error)?;

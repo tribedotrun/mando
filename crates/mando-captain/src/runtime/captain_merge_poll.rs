@@ -160,65 +160,134 @@ pub(crate) async fn poll_merging_items(
     // handle_merge_error rather than spawned with a malformed context.)
 
     // Phase 2: Poll items with existing sessions.
+    //
+    // For items where the stream file has no result yet, also check GitHub as a
+    // fallback — the PR may have been merged successfully even when the stream
+    // file is empty (e.g. CC stdout was never captured due to pipe/buffering
+    // issues). This avoids waiting for the full merge timeout.
+    let mut pending_github_check: Vec<(usize, String, String)> = Vec::new();
+    let mut pending_timeout_only: Vec<usize> = Vec::new();
+
     for &idx in &has_session {
         let item = &mut items[idx];
         if let Some(result) = check_merge(item) {
             apply_merge_result(item, &result, notifier, config, pool).await;
-        } else {
-            let is_timed_out = match item.last_activity_at.as_deref() {
-                Some(ts) => match time::OffsetDateTime::parse(
-                    ts,
-                    &time::format_description::well_known::Rfc3339,
-                ) {
-                    Ok(entered) => {
-                        let elapsed = time::OffsetDateTime::now_utc() - entered;
-                        elapsed.whole_seconds() as u64 > merge_timeout.as_secs()
-                    }
-                    Err(e) => {
-                        tracing::warn!(
-                            module = "captain",
-                            item_id = item.id,
-                            last_activity_at = %ts,
-                            error = %e,
-                            "unparseable last_activity_at on captain-merging item; skipping this tick"
-                        );
-                        continue;
-                    }
-                },
-                None => {
+            continue;
+        }
+
+        // Stream file has no result. Before falling through to the timeout,
+        // queue a GitHub API check to see if the PR was already merged.
+        if let Some(pr_ref) = item.pr.as_deref() {
+            let repo = mando_config::resolve_github_repo(item.project.as_deref(), config);
+            let pr_num = mando_types::task::extract_pr_number(pr_ref);
+            if let (Some(repo), Some(pr_num)) = (repo, pr_num) {
+                if !repo.is_empty() {
+                    pending_github_check.push((idx, repo, pr_num.to_string()));
+                    continue;
+                }
+            }
+        }
+        // No valid PR/repo for GitHub check — still needs timeout handling.
+        pending_timeout_only.push(idx);
+    }
+
+    // Run GitHub is_pr_merged checks in parallel for items with no stream result.
+    // Items confirmed merged skip timeout; items not merged fall through to timeout.
+    let mut needs_timeout: Vec<usize> = pending_timeout_only;
+
+    if !pending_github_check.is_empty() {
+        let futs: Vec<_> = pending_github_check
+            .iter()
+            .map(|(_, repo, pr_num)| crate::io::github::is_pr_merged(repo, pr_num))
+            .collect();
+        let gh_results = futures::future::join_all(futs).await;
+
+        for ((idx, _, _), gh_result) in pending_github_check.iter().zip(gh_results) {
+            let item = &mut items[*idx];
+            let already_merged = matches!(gh_result, Ok(true));
+
+            if already_merged {
+                let session_id = item.session_ids.merge.as_deref().unwrap_or("<none>");
+                let stream_path = mando_config::stream_path_for_session(session_id);
+                let stream_size = std::fs::metadata(&stream_path)
+                    .map(|m| m.len())
+                    .unwrap_or(u64::MAX);
+                tracing::warn!(
+                    module = "captain",
+                    item_id = item.id,
+                    session_id,
+                    stream_file_bytes = stream_size,
+                    "merge poll: PR already merged on GitHub but stream file had no result — recovering via GitHub fallback"
+                );
+                let result = MergeResult {
+                    action: "merged".into(),
+                    feedback: "PR already merged on GitHub; stream file had no result".into(),
+                };
+                apply_merge_result(item, &result, notifier, config, pool).await;
+            } else {
+                needs_timeout.push(*idx);
+            }
+        }
+    }
+
+    // Timeout handling for all items that had no stream result and weren't
+    // already merged on GitHub.
+    for idx in needs_timeout {
+        let item = &mut items[idx];
+        let is_timed_out = match item.last_activity_at.as_deref() {
+            Some(ts) => match time::OffsetDateTime::parse(
+                ts,
+                &time::format_description::well_known::Rfc3339,
+            ) {
+                Ok(entered) => {
+                    let elapsed = time::OffsetDateTime::now_utc() - entered;
+                    elapsed.whole_seconds() as u64 > merge_timeout.as_secs()
+                }
+                Err(e) => {
                     tracing::warn!(
                         module = "captain",
                         item_id = item.id,
-                        "captain-merging item has no last_activity_at; skipping this tick"
+                        last_activity_at = %ts,
+                        error = %e,
+                        "unparseable last_activity_at on captain-merging item; skipping this tick"
                     );
                     continue;
                 }
-            };
+            },
+            None => {
+                tracing::warn!(
+                    module = "captain",
+                    item_id = item.id,
+                    "captain-merging item has no last_activity_at; skipping this tick"
+                );
+                continue;
+            }
+        };
 
-            if is_timed_out {
-                let is_rl = item.session_ids.merge.as_deref().is_some_and(|sid| {
+        if is_timed_out {
+            let is_rl =
+                item.session_ids.merge.as_deref().is_some_and(|sid| {
                     super::rate_limit_cooldown::check_and_activate_from_stream(sid)
                 });
-                if is_rl || rate_limited {
-                    tracing::info!(
-                        module = "captain",
-                        item_id = item.id,
-                        "merge timeout during rate limit — not counting against retry budget"
-                    );
-                    let _ = super::timeline_emit::emit_rate_limited(item, pool).await;
-                    item.session_ids.merge = None;
-                    continue;
-                }
-
-                handle_merge_error(
-                    item,
-                    "merge session timed out without producing a result",
-                    max_merge_retries,
-                    notifier,
-                    pool,
-                )
-                .await;
+            if is_rl || rate_limited {
+                tracing::info!(
+                    module = "captain",
+                    item_id = item.id,
+                    "merge timeout during rate limit — not counting against retry budget"
+                );
+                let _ = super::timeline_emit::emit_rate_limited(item, pool).await;
+                item.session_ids.merge = None;
+                continue;
             }
+
+            handle_merge_error(
+                item,
+                "merge session timed out without producing a result",
+                max_merge_retries,
+                notifier,
+                pool,
+            )
+            .await;
         }
     }
 }

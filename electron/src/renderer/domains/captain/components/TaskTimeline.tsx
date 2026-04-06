@@ -29,7 +29,17 @@ const EVENT_ICON_MAP: Record<string, string> = {
   status_changed: 'queued',
   rebase_triggered: 'in-progress',
   rate_limited: 'queued',
+  worker_reopened: 'captain-reviewing',
 };
+
+/** Human-readable label for auto-reopens based on source. */
+function reopenLabel(data: Record<string, unknown>): string {
+  const source = data.source as string | undefined;
+  if (source === 'review') return 'review reopened';
+  if (source === 'ci') return 'CI reopened';
+  if (source === 'evidence') return 'evidence reopened';
+  return 'auto reopened';
+}
 
 /** Keys to always exclude from expanded detail view. */
 const HIDDEN_KEYS = new Set(['session_id', 'source', 'item_id', 'task_id']);
@@ -101,7 +111,9 @@ export function TaskTimeline({
                 )}
               </span>
               <span className="text-caption font-medium" style={{ color: 'var(--color-text-1)' }}>
-                {event.event_type.replace(/_/g, ' ')}
+                {event.event_type === 'worker_reopened'
+                  ? reopenLabel(event.data)
+                  : event.event_type.replace(/_/g, ' ')}
               </span>
               <span
                 className="min-w-0 flex-1 truncate text-caption"

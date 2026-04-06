@@ -94,21 +94,38 @@ async fn tick_live_retries_clarifier_on_failure() {
     let orig_home = std::env::var("HOME").unwrap_or_default();
     std::env::set_var("PATH", "/nonexistent");
     std::env::set_var("HOME", dir.to_string_lossy().to_string());
+    // Create the cc-streams dir so the async clarifier task can write
+    // error results to stream files.
+    std::fs::create_dir_all(dir.join(".mando/state/cc-streams")).unwrap();
 
+    // Tick 1: dispatch spawns async clarifier task (fails quickly, writes
+    // error to stream file). Task moves to Clarifying.
     let result = run_captain_tick_inner(&config, &wf, false, None, true, &store_lock)
+        .await
+        .unwrap();
+
+    assert_eq!(result.mode, TickMode::Live);
+    assert!(result.error.is_none());
+    // After tick 1, task is Clarifying (async session spawned).
+    assert_eq!(result.tasks.get("clarifying"), Some(&1));
+
+    // Let the async task finish writing the error to the stream file.
+    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+
+    // Tick 2: poll detects the error, reverts to New, increments fail count.
+    let result2 = run_captain_tick_inner(&config, &wf, false, None, true, &store_lock)
         .await
         .unwrap();
 
     std::env::set_var("PATH", &orig_path);
     std::env::set_var("HOME", &orig_home);
 
-    assert_eq!(result.mode, TickMode::Live);
-    assert!(result.error.is_none());
-    // Task stays New (retryable), not auto-promoted to Ready.
-    assert_eq!(result.tasks.get("new"), Some(&1));
-    assert_eq!(result.tasks.get("ready"), None);
+    assert_eq!(result2.mode, TickMode::Live);
+    // The poll detected the failure and reverted to New, then the dispatch
+    // phase in the same tick re-dispatched it to Clarifying (retry).
+    assert_eq!(result2.tasks.get("clarifying"), Some(&1));
 
-    // Verify clarifier failure count incremented.
+    // Verify clarifier failure count incremented (proves the poll processed the error).
     let store = store_lock.read().await;
     let task = store.find_by_id(1).await.unwrap().unwrap();
     assert_eq!(task.clarifier_fail_count, 1);

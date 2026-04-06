@@ -1,17 +1,20 @@
-//! Re-clarification loop — safety net for items stuck in Clarifying status.
+//! Re-clarification dispatch — spawns re-clarify sessions as background tasks.
 //!
-//! Runs all re-clarification CC sessions in parallel via `futures::join_all`.
+//! Safety net for items stuck in Clarifying status where the inline
+//! answer_and_reclarify call failed. Sessions run as detached tokio tasks;
+//! results are polled by tick_clarify_poll on subsequent ticks.
 
+use std::panic::AssertUnwindSafe;
+
+use futures::FutureExt;
 use mando_config::settings::Config;
 use mando_config::workflow::CaptainWorkflow;
 use mando_types::task::{ItemStatus, Task};
 
 use crate::biz::dispatch_logic;
-use crate::runtime::clarifier::{self, ClarifierStatus};
+use crate::runtime::clarifier;
 use crate::runtime::dashboard::truncate_utf8;
 
-/// Re-clarify items where human answered (Clarifying status).
-/// Safety net for items that got stuck or where the inline call failed.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn reclarify_items(
     items: &mut [Task],
@@ -19,16 +22,30 @@ pub(crate) async fn reclarify_items(
     workflow: &CaptainWorkflow,
     dry_run: bool,
     dry_actions: &mut Vec<String>,
-    alerts: &mut Vec<String>,
-    max_clarifier_retries: i64,
+    _alerts: &mut Vec<String>,
+    _max_clarifier_retries: i64,
     pool: &sqlx::SqlitePool,
 ) {
-    // Only re-clarify items in Clarifying status (human answered but inline
-    // call failed). NeedsClarification items are waiting for human input —
-    // don't re-run the clarifier and produce events that strip self-answered context.
+    // Only re-clarify items in Clarifying status with no active session.
+    // Items with a session_id are handled by tick_clarify_poll.
+    // NeedsClarification items are waiting for human input.
     let clarifying: Vec<usize> = dispatch_logic::clarifying_items(items)
         .into_iter()
-        .filter(|&idx| items[idx].status == ItemStatus::Clarifying)
+        .filter(|&idx| {
+            let item = &items[idx];
+            if item.status != ItemStatus::Clarifying {
+                return false;
+            }
+            if item
+                .session_ids
+                .clarifier
+                .as_deref()
+                .is_some_and(|s| !s.is_empty())
+            {
+                return false;
+            }
+            true
+        })
         .collect();
 
     let mut jobs: Vec<usize> = Vec::new();
@@ -47,160 +64,136 @@ pub(crate) async fn reclarify_items(
         return;
     }
 
-    // Run all re-clarifications in parallel.
+    // Spawn all re-clarifications as detached async tasks.
+    // Results are polled by tick_clarify_poll on subsequent ticks.
     let hint = "(review the context above and decide if the item is ready)";
-    let task_snapshots: Vec<Task> = jobs.iter().map(|&idx| items[idx].clone()).collect();
-    let futs: Vec<_> = task_snapshots
-        .iter()
-        .map(|task| clarifier::answer_and_reclarify(task, hint, workflow, config, pool))
-        .collect();
-    let results = futures::future::join_all(futs).await;
+    for &idx in &jobs {
+        let session_id = mando_uuid::Uuid::v4().to_string();
+        let item = &mut items[idx];
+        item.session_ids.clarifier = Some(session_id.clone());
+        item.last_activity_at = Some(mando_types::now_rfc3339());
 
-    // Apply results sequentially.
-    for (&idx, result) in jobs.iter().zip(results) {
-        match result {
-            Ok(result) => {
-                apply_reclarify_ok(&mut items[idx], result, pool).await;
-            }
-            Err(e) => {
-                apply_reclarify_err(&mut items[idx], e, max_clarifier_retries, alerts, pool).await;
-            }
-        }
-    }
-}
-
-async fn apply_reclarify_ok(
-    item: &mut Task,
-    result: clarifier::ClarifierResult,
-    pool: &sqlx::SqlitePool,
-) {
-    item.clarifier_fail_count = 0;
-    match result.status {
-        ClarifierStatus::Ready => {
-            item.status = ItemStatus::Queued;
-            item.context = Some(result.context);
-            if let Some(ref sid) = result.session_id {
-                item.session_ids.clarifier = Some(sid.clone());
-            }
-
-            if let Err(e) = mando_db::queries::tasks::persist_clarify_result(pool, item).await {
-                tracing::error!(
-                    module = "captain",
-                    id = item.id,
-                    error = %e,
-                    "failed to persist clarify result"
-                );
-            }
-
-            let _ = super::timeline_emit::emit_for_task(
-                item,
-                mando_types::timeline::TimelineEventType::ClarifyResolved,
-                "Re-clarification complete, ready for work",
-                serde_json::json!({"session_id": result.session_id}),
-                pool,
-            )
-            .await;
-
-            tracing::info!(
+        if let Err(e) = mando_db::queries::tasks::persist_clarify_start(pool, item).await {
+            tracing::error!(
                 module = "captain",
-                title = %truncate_utf8(&item.title, 60),
-                "re-clarified, now ready"
+                id = item.id,
+                error = %e,
+                "failed to persist reclarify start"
             );
+            item.session_ids.clarifier = None;
+            continue;
         }
-        ClarifierStatus::Clarifying => {
-            // Only stamp last_activity_at on the initial transition
-            // so the timeout clock doesn't reset every tick.
-            if item.status != ItemStatus::NeedsClarification {
-                item.last_activity_at = Some(mando_types::now_rfc3339());
-            }
-            item.status = ItemStatus::NeedsClarification;
-            item.context = Some(result.context);
-            if let Some(ref sid) = result.session_id {
-                item.session_ids.clarifier = Some(sid.clone());
-            }
 
-            if let Err(e) = mando_db::queries::tasks::persist_clarify_result(pool, item).await {
+        let cwd = match clarifier::resolve_clarifier_cwd(item, config) {
+            Ok(c) => c,
+            Err(e) => {
                 tracing::error!(
                     module = "captain",
                     id = item.id,
                     error = %e,
-                    "failed to persist clarify result"
+                    "cannot resolve cwd for async reclarifier"
                 );
+                let stream_path = mando_config::stream_path_for_session(&session_id);
+                mando_cc::write_error_result(
+                    &stream_path,
+                    &format!("cannot resolve reclarifier cwd: {e}"),
+                );
+                continue;
             }
+        };
 
-            let _ = super::timeline_emit::emit_for_task(
-                item,
-                mando_types::timeline::TimelineEventType::ClarifyQuestion,
-                "Still needs clarification",
-                serde_json::json!({"session_id": result.session_id, "questions": result.questions}),
-                pool,
-            )
+        if let Err(e) = crate::io::headless_cc::log_cc_session(
+            pool,
+            &crate::io::headless_cc::SessionLogEntry {
+                session_id: &session_id,
+                cwd: &cwd,
+                model: &workflow.models.clarifier,
+                caller: "clarifier",
+                cost_usd: None,
+                duration_ms: None,
+                resumed: item.session_ids.clarifier.is_some(),
+                task_id: &item.id.to_string(),
+                status: mando_types::SessionStatus::Running,
+                worker_name: "",
+            },
+        )
+        .await
+        {
+            tracing::warn!(
+                module = "captain",
+                id = item.id,
+                error = %e,
+                "failed to log reclarifier session start"
+            );
+        }
+
+        let task = item.clone();
+        let workflow = workflow.clone();
+        let config = config.clone();
+        let pool = pool.clone();
+        let hint = hint.to_string();
+        let session_id_for_panic = session_id.clone();
+        let cwd_for_failure = cwd.clone();
+        let task_id = task.id.to_string();
+
+        tokio::spawn(async move {
+            let result = AssertUnwindSafe(async {
+                match clarifier::answer_and_reclarify(&task, &hint, &workflow, &config, &pool).await
+                {
+                    Ok(_result) => {
+                        tracing::info!(
+                            module = "captain",
+                            %session_id,
+                            "async reclarifier completed"
+                        );
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            module = "captain",
+                            %session_id,
+                            error = %e,
+                            "async reclarifier failed"
+                        );
+                        let stream_path = mando_config::stream_path_for_session(&session_id);
+                        mando_cc::write_error_result(
+                            &stream_path,
+                            &format!("reclarifier failed: {e}"),
+                        );
+                        if let Err(e2) = crate::io::headless_cc::log_cc_failure(
+                            &pool,
+                            &session_id,
+                            &cwd_for_failure,
+                            "clarifier",
+                            &task_id,
+                        )
+                        .await
+                        {
+                            tracing::warn!(
+                                module = "captain",
+                                %session_id,
+                                error = %e2,
+                                "log_cc_failure failed"
+                            );
+                        }
+                    }
+                }
+            })
+            .catch_unwind()
             .await;
-        }
-        ClarifierStatus::Escalate => {
-            super::action_contract::reset_review_retry(
-                item,
-                mando_types::task::ReviewTrigger::ClarifierFail,
-            );
-            item.context = Some(result.context);
-            if let Some(ref sid) = result.session_id {
-                item.session_ids.clarifier = Some(sid.clone());
-            }
 
-            if let Err(e) = mando_db::queries::tasks::persist_clarify_result(pool, item).await {
+            if let Err(panic) = result {
                 tracing::error!(
                     module = "captain",
-                    id = item.id,
-                    error = %e,
-                    "failed to persist clarify result"
+                    session_id = %session_id_for_panic,
+                    "async reclarifier panicked: {:?}",
+                    panic
+                );
+                let stream_path = mando_config::stream_path_for_session(&session_id_for_panic);
+                mando_cc::write_error_result(
+                    &stream_path,
+                    &format!("reclarifier panicked: {:?}", panic),
                 );
             }
-        }
-    }
-}
-
-async fn apply_reclarify_err(
-    item: &mut Task,
-    e: anyhow::Error,
-    max_clarifier_retries: i64,
-    alerts: &mut Vec<String>,
-    pool: &sqlx::SqlitePool,
-) {
-    // Rate-limit-caused failure — activate cooldown, skip retry count.
-    if let Some(ref sid) = item.session_ids.clarifier {
-        if super::rate_limit_cooldown::check_and_activate_from_stream(sid) {
-            let _ = super::timeline_emit::emit_rate_limited(item, pool).await;
-            return;
-        }
-    }
-    let count = item.clarifier_fail_count + 1;
-    item.clarifier_fail_count = count;
-
-    if count >= max_clarifier_retries {
-        super::action_contract::reset_review_retry(
-            item,
-            mando_types::task::ReviewTrigger::ClarifierFail,
-        );
-        tracing::error!(
-            module = "captain",
-            title = %item.title,
-            attempt = count,
-            error = %e,
-            "re-clarification failed 3 times — escalating"
-        );
-        alerts.push(format!(
-            "Re-clarification failed {} times for '{}': {}",
-            count,
-            truncate_utf8(&item.title, 60),
-            e
-        ));
-    } else {
-        tracing::warn!(
-            module = "captain",
-            title = %item.title,
-            attempt = count,
-            error = %e,
-            "re-clarification failed — will retry on next tick"
-        );
+        });
     }
 }

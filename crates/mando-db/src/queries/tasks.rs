@@ -263,7 +263,7 @@ pub async fn merge_changed_items(
 pub async fn persist_spawn(pool: &SqlitePool, task: &Task) -> Result<()> {
     sqlx::query(
         "UPDATE tasks SET status=?, worker=?, session_ids=?, worker_started_at=?, \
-         branch=?, worktree=? \
+         branch=?, worktree=?, plan=? \
          WHERE id=? AND status NOT IN ('merged','completed-no-pr','canceled')",
     )
     .bind(task.status.as_str())
@@ -272,6 +272,7 @@ pub async fn persist_spawn(pool: &SqlitePool, task: &Task) -> Result<()> {
     .bind(&task.worker_started_at)
     .bind(&task.branch)
     .bind(&task.worktree)
+    .bind(&task.plan)
     .bind(task.id)
     .execute(pool)
     .await?;
