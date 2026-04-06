@@ -68,17 +68,18 @@ pub async fn post_parse_todos(
 
     let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/tmp"));
 
-    let mut mgr = state.cc_session_mgr.write().await;
+    let mgr = &state.cc_session_mgr;
     let session_key = format!("parse-todos-{}", mando_uuid::Uuid::v4().short());
 
     let result = mgr
-        .start(
+        .start_with_item(
             &session_key,
             &prompt,
             &cwd,
             Some("sonnet"),
             Duration::from_secs(60),
             Duration::from_secs(30),
+            "",
         )
         .await
         .map_err(internal_error)?;

@@ -322,56 +322,85 @@ prompts:
     {{ evidence_images }}
     {% endif %}
 
-    ## Allowed Verdicts for "{{ trigger }}"
+    ## Available Verdicts
+
+    {% if is_clarifier_fail %}
+    The task is still in clarification (no worker has started yet).
+    - **retry_clarifier** — The task is understandable, clarifier just needs another attempt.
+    - **escalate** — Task is too vague or ambiguous for automated clarification.
+    {% elif is_budget_exhausted %}
+    The intervention budget is exhausted ({{ intervention_count }} interventions).
+    You may escalate if the task is genuinely beyond recovery, but first consider
+    whether the budget was burned by false alarms or recoverable issues.
+    - **ship** — Work is actually complete despite the budget warning.
+    - **nudge** — Provide targeted instructions to finish the remaining work.
+    - **respawn** — Start fresh with a new worktree.
+    - **reset_budget** — Budget was burned by false alarms. Reset to zero and nudge.
+    - **escalate** — Task is genuinely beyond automated recovery. Produce a CTO-level report.
+    {% else %}
+    You are the last line of defense. You MUST solve the problem -- escalation is
+    not available. Choose the action that moves the task forward:
+
+    - **ship** — Work is complete, evidence is valid, PR is ready for human review.
+    - **nudge** — Work needs improvement or is blocked. Provide specific actionable feedback
+      (exact error messages, file paths, line numbers). The worker will be resumed with your instructions.
+    - **respawn** — Session is broken beyond recovery or worker is stuck in a loop. Start fresh
+      with a new worktree.
+    - **reset_budget** — The intervention budget was exhausted but you identified a clear,
+      solvable issue. Resets the intervention counter to zero and nudges with your instructions.
+    {% endif %}
+
+    ## Trigger-Specific Guidance
 
     {% if is_gates_pass %}
-    - **ship** — Work is complete, evidence is valid, PR is ready for human review.
-    - **nudge** — Work needs improvement. Provide specific actionable feedback.
-    - **escalate** — Cannot determine quality or fundamental issue requires human judgment.
-
-    **Evidence quality rules:**
+    **Trigger: gates_pass** — All quality gates passed. Verify evidence quality before shipping.
     - After evidence is required. Before is optional.
     - GOOD: terminal output, screenshots, recordings showing runtime behavior.
     - BAD: AI-drawn diagrams, test-only results, empty evidence sections.
     {% endif %}
     {% if is_degraded_context %}
-    - **ship** — The work is complete and the available evidence is enough despite degraded GitHub context.
-    - **nudge** — The work likely needs changes and you can state them concretely.
-    - **escalate** — GitHub context is too degraded to make a safe decision automatically.
+    **Trigger: degraded_context** — PR data fetch partially failed. Assess whether the available
+    evidence is sufficient to make a decision despite incomplete GitHub context.
     {% endif %}
     {% if is_timeout %}
-    - **nudge** — You can identify the blocker and provide specific instructions to unblock.
-    - **escalate** — Worker is fundamentally stuck, human must intervene.
+    **Trigger: timeout** — Worker exceeded wall-clock time. Determine the actual state:
+    the worker may be stuck, or it may have completed and exited. If the PR is complete
+    with passing CI, ship it. If blocked, nudge with specific unblock instructions.
     {% endif %}
     {% if is_broken_session %}
-    - **nudge** — Session may be recoverable. Provide specific instructions to resume work.
-    - **respawn** — Session is broken beyond recovery, start fresh with a new worktree.
-    - **escalate** — Task itself is problematic, human must intervene.
+    **Trigger: broken_session** — Stream file is corrupted (content but no init event).
+    Check if the work is complete despite the broken session. If so, ship. If the session
+    needs recovery, nudge or respawn.
     {% endif %}
     {% if is_repeated_nudge %}
-    - **nudge** — Worker needs more time. Provide refined instructions (different from previous nudge).
-    - **respawn** — Worker is stuck in a loop, start fresh with a new worktree.
-    - **escalate** — Worker cannot self-recover, human must intervene.
-    {% endif %}
-    {% if is_budget_exhausted %}
-    - **escalate** — Worker has been intervened {{ intervention_count }} times without completing. Produce a CTO-level report.
-    {% endif %}
-    {% if is_clarifier_fail %}
-    - **retry_clarifier** — The task is understandable, clarifier just needs another attempt.
-    - **escalate** — Task is too vague or ambiguous for automated clarification.
+    **Trigger: repeated_nudge** — Same nudge delivered multiple times. The worker may be
+    stuck in a loop. Provide different instructions than previous nudges, or respawn fresh.
     {% endif %}
     {% if is_rebase_fail %}
-    - **nudge** — Provide specific rebase/merge conflict resolution instructions.
-    - **escalate** — Conflicts are too complex for automated resolution.
+    **Trigger: rebase_fail** — Rebase failed after max retries. Provide specific merge
+    conflict resolution instructions, or escalate if conflicts are too complex.
     {% endif %}
     {% if is_ci_failure %}
-    - **nudge** — You identified the CI failure root cause. Provide the worker with
-      precise, actionable instructions: exact error messages, file paths, line numbers.
-      Run `gh pr checks` and read CI logs to understand what failed. Do NOT give vague
-      instructions like "CI checks are failing" — the worker needs specifics.
-    - **escalate** — CI failure is an infrastructure issue (flaky tests, CI config
-      problem, rate limits) that the worker cannot fix. Explain why.
+    **Trigger: ci_failure** — Required CI check failed. Run `gh pr checks` and read CI
+    logs. Provide the worker with precise, actionable instructions: exact error messages,
+    file paths, line numbers. Do NOT give vague instructions like "CI checks are failing."
+    Escalate only if the failure is infrastructure (flaky tests, CI config, rate limits).
     {% endif %}
+    {% if is_merge_fail %}
+    **Trigger: merge_fail** — Merge attempt failed after max retries. Provide specific
+    conflict resolution instructions, or escalate if conflicts are too complex.
+    {% endif %}
+    {% if is_budget_exhausted %}
+    **Trigger: budget_exhausted** — Worker has been intervened {{ intervention_count }}
+    times. Review the history: if the budget was burned by false alarms or recoverable
+    issues, use **reset_budget** with targeted instructions. If the work is actually done,
+    **ship** it. Only escalate if the task is genuinely beyond automated recovery.
+    {% endif %}
+    {% if is_clarifier_fail %}
+    **Trigger: clarifier_fail** — Task clarification failed. If the task is understandable,
+    **retry_clarifier**. If fundamentally ambiguous, escalate.
+    {% endif %}
+
     ## Output
 
     Your output will be validated against a JSON schema with these fields:

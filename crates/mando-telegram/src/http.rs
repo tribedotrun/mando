@@ -35,10 +35,23 @@ impl GatewayClient {
             .context("invalid port in daemon.port")?;
 
         let token_file = data_dir.join("auth-token");
-        let token = std::fs::read_to_string(&token_file)
-            .ok()
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty());
+        let token = match std::fs::read_to_string(&token_file) {
+            Ok(s) => {
+                let trimmed = s.trim().to_string();
+                if trimmed.is_empty() {
+                    None
+                } else {
+                    Some(trimmed)
+                }
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+            Err(e) => {
+                return Err(anyhow::Error::from(e).context(format!(
+                    "failed to read auth token at {}",
+                    token_file.display(),
+                )));
+            }
+        };
 
         Ok(Self::new(port, token))
     }
@@ -70,6 +83,27 @@ impl GatewayClient {
             .await
             .context("gateway GET request failed")?;
         Self::check_response(resp).await
+    }
+
+    /// GET that returns the JSON body even when the gateway responds with
+    /// 5xx. Used by `/api/health/system`, which returns HTTP 503 with a
+    /// structured body when the daemon is degraded so the bot's `/health`
+    /// command can still print the degradation details.
+    pub async fn get_with_body_on_5xx(&self, path: &str) -> Result<Value> {
+        let resp = self
+            .authed_request(self.client.get(self.url(path)))
+            .send()
+            .await
+            .context("gateway GET request failed")?;
+        let status = resp.status();
+        if status.is_success() || status.is_server_error() {
+            return resp
+                .json()
+                .await
+                .context("failed to parse gateway JSON response");
+        }
+        let text = resp.text().await.unwrap_or_default();
+        anyhow::bail!("gateway returned {status}: {text}")
     }
 
     /// POST request with JSON body.

@@ -66,6 +66,9 @@ impl SseConsumer {
         let client = self.client.clone();
         let token = self.token.clone();
 
+        // TRACKED: the telegram bot (mando-tg) is a separate OS process from
+        // the gateway and has no access to AppState. Its own shutdown signal
+        // drops the mpsc receiver, which this task observes and exits cleanly.
         tokio::spawn(async move {
             let mut backoff = Duration::from_secs(1);
             let max_backoff = Duration::from_secs(30);

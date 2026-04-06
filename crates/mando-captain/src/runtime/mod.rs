@@ -22,6 +22,7 @@ mod mergeability_review;
 pub mod notify;
 pub mod rate_limit_cooldown;
 pub mod reconciler;
+mod reconciler_orphans;
 pub mod review_phase;
 mod session_reconcile;
 pub mod spawn_phase;

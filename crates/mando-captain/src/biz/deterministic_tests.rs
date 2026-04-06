@@ -6,8 +6,12 @@ fn test_nudges() -> HashMap<String, String> {
     mando_config::workflow::CaptainWorkflow::compiled_default().nudges
 }
 
-const TIMEOUT: f64 = 21600.0;
-const STALE: f64 = 1200.0;
+const TIMEOUT: std::time::Duration = std::time::Duration::from_secs(21600);
+const STALE: std::time::Duration = std::time::Duration::from_secs(1200);
+/// The `stream_stale_s` field on `WorkerContext` stays as `f64` seconds so
+/// the classifier can compare fractional staleness against the threshold.
+/// These test constants are the equivalent f64 forms for building contexts.
+const STALE_F64: f64 = 1200.0;
 const MAX_INT: u32 = 50;
 
 fn base_ctx() -> WorkerContext {
@@ -58,7 +62,7 @@ fn classify(ctx: &WorkerContext, item: &Task, stream: Option<bool>) -> Action {
         STALE,
         MAX_INT,
     )
-    .expect("always returns Some")
+    .expect("nudge templates render")
 }
 
 // ── Rule 1: TIMEOUT ──
@@ -67,7 +71,7 @@ fn classify(ctx: &WorkerContext, item: &Task, stream: Option<bool>) -> Action {
 fn timeout_captain_review() {
     let mut ctx = base_ctx();
     ctx.process_alive = true;
-    ctx.stream_stale_s = Some(STALE + 1.0);
+    ctx.stream_stale_s = Some(STALE_F64 + 1.0);
     ctx.seconds_active = 25200.0; // 7h > 6h limit
     let a = classify(&ctx, &base_item(), None);
     assert_eq!(a.action, ActionKind::CaptainReview);
@@ -89,7 +93,7 @@ fn timeout_fires_without_stream_file() {
 fn timeout_disabled_when_zero() {
     let mut ctx = base_ctx();
     ctx.process_alive = true;
-    ctx.stream_stale_s = Some(STALE + 1.0);
+    ctx.stream_stale_s = Some(STALE_F64 + 1.0);
     ctx.seconds_active = 360000.0;
     let a = classify_worker(
         &ctx,
@@ -97,11 +101,11 @@ fn timeout_disabled_when_zero() {
         None,
         false,
         &test_nudges(),
-        0.0,
+        std::time::Duration::ZERO,
         STALE,
         MAX_INT,
     )
-    .unwrap();
+    .expect("nudge templates render");
     // Should NOT be CaptainReview with reason "timeout"
     assert_ne!(a.reason.as_deref(), Some("timeout"));
 }
@@ -122,7 +126,7 @@ fn alive_streaming_skip() {
 fn alive_at_threshold_not_skip() {
     let mut ctx = base_ctx();
     ctx.process_alive = true;
-    ctx.stream_stale_s = Some(STALE); // exactly at threshold, not below
+    ctx.stream_stale_s = Some(STALE_F64); // exactly at threshold, not below
     let a = classify(&ctx, &base_item(), None);
     assert_ne!(a.action, ActionKind::Skip);
 }
@@ -183,7 +187,7 @@ fn budget_exhausted_beats_timeout() {
     ctx.process_alive = true;
     ctx.seconds_active = 25200.0; // 7h > 6h limit
     ctx.intervention_count = 50; // at max
-    ctx.stream_stale_s = Some(STALE + 1.0);
+    ctx.stream_stale_s = Some(STALE_F64 + 1.0);
     let a = classify(&ctx, &base_item(), None);
     assert_eq!(a.action, ActionKind::CaptainReview);
     assert_eq!(a.reason.as_deref(), Some("budget_exhausted"));
@@ -214,7 +218,7 @@ fn degraded_pr_does_not_fire_missing_evidence_nudge() {
 fn alive_stale_nudge() {
     let mut ctx = base_ctx();
     ctx.process_alive = true;
-    ctx.stream_stale_s = Some(STALE + 100.0);
+    ctx.stream_stale_s = Some(STALE_F64 + 100.0);
     let a = classify(&ctx, &base_item(), None);
     assert_eq!(a.action, ActionKind::Nudge);
     assert_eq!(a.reason.as_deref(), Some("you appear stuck"));
@@ -335,7 +339,7 @@ fn broken_session_with_error_result_triggers_review() {
         STALE,
         MAX_INT,
     )
-    .unwrap();
+    .expect("nudge templates render");
     assert_eq!(a.action, ActionKind::CaptainReview);
     assert_eq!(a.reason.as_deref(), Some("broken_session"));
 }
@@ -367,10 +371,11 @@ fn alive_no_stream_data_skip() {
 }
 
 #[test]
-fn always_returns_some() {
-    // Verify the contract: classify_worker never returns None.
+fn always_returns_action() {
+    // Verify the contract: classify_worker always returns an Action
+    // (no Option wrapper — every input shape produces a definite action).
     let ctx = base_ctx();
-    let result = classify_worker(
+    classify_worker(
         &ctx,
         Some(&base_item()),
         None,
@@ -379,6 +384,6 @@ fn always_returns_some() {
         TIMEOUT,
         STALE,
         MAX_INT,
-    );
-    assert!(result.is_some());
+    )
+    .expect("nudge templates render");
 }

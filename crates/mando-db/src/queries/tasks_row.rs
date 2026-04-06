@@ -1,5 +1,6 @@
 //! Internal row types for task queries — kept separate to respect file length limits.
 
+use anyhow::{Context, Result};
 use mando_types::session_ids::SessionIds;
 use mando_types::task::{ItemStatus, Task, TaskRouting};
 
@@ -40,19 +41,22 @@ pub(super) struct TaskRow {
 }
 
 impl TaskRow {
-    pub fn into_task(self) -> Task {
-        let status: ItemStatus = self.status.parse().unwrap_or_else(|_| {
-            tracing::warn!(module = "task-db", status = %self.status, "unknown status");
-            ItemStatus::New
-        });
-        let captain_review_trigger = self.captain_review_trigger.and_then(|s| {
-            s.parse()
-                .map_err(|_| {
-                    tracing::warn!(module = "task-db", trigger = %s, "unknown trigger");
-                })
-                .ok()
-        });
-        Task {
+    pub fn into_task(self) -> Result<Task> {
+        let status: ItemStatus = self.status.parse().map_err(|e| {
+            anyhow::anyhow!("task {} has unknown status {:?}: {e}", self.id, self.status)
+        })?;
+        let captain_review_trigger = match self.captain_review_trigger {
+            Some(s) => Some(s.parse().map_err(|e| {
+                anyhow::anyhow!(
+                    "task {} has unknown captain_review_trigger {s:?}: {e}",
+                    self.id,
+                )
+            })?),
+            None => None,
+        };
+        let session_ids = SessionIds::from_json(&self.session_ids)
+            .with_context(|| format!("task {} has invalid session_ids JSON", self.id))?;
+        Ok(Task {
             id: self.id,
             title: self.title,
             status,
@@ -68,7 +72,7 @@ impl TaskRow {
             worker_started_at: self.worker_started_at,
             intervention_count: self.intervention_count,
             captain_review_trigger,
-            session_ids: SessionIds::from_json(&self.session_ids),
+            session_ids,
             last_activity_at: self.last_activity_at,
             plan: self.plan,
             no_pr: self.no_pr != 0,
@@ -87,7 +91,7 @@ impl TaskRow {
             rebase_worker: None,
             rebase_retries: 0,
             rebase_head_sha: None,
-        }
+        })
     }
 }
 
@@ -102,18 +106,21 @@ pub(super) struct RoutingRow {
 }
 
 impl RoutingRow {
-    pub fn into_routing(self) -> TaskRouting {
-        let status: ItemStatus = self.status.parse().unwrap_or_else(|_| {
-            tracing::warn!(module = "task-db", status = %self.status, "unknown status");
-            ItemStatus::New
-        });
-        TaskRouting {
+    pub fn into_routing(self) -> Result<TaskRouting> {
+        let status: ItemStatus = self.status.parse().map_err(|e| {
+            anyhow::anyhow!(
+                "routing row {} has unknown status {:?}: {e}",
+                self.id,
+                self.status,
+            )
+        })?;
+        Ok(TaskRouting {
             id: self.id,
             title: self.title,
             status,
             project: self.project,
             worker: self.worker,
             resource: self.resource,
-        }
+        })
     }
 }

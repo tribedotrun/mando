@@ -35,11 +35,26 @@ pub(crate) async fn get_image(Path(filename): Path<String>) -> impl IntoResponse
                 bytes,
             )
         }
-        Err(_) => (
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => (
             StatusCode::NOT_FOUND,
             [(header::CONTENT_TYPE, "application/json")],
             json!({"error": "image not found"}).to_string().into_bytes(),
         ),
+        Err(e) => {
+            tracing::error!(
+                module = "static_files",
+                path = %path.display(),
+                error = %e,
+                "failed to read image"
+            );
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                [(header::CONTENT_TYPE, "application/json")],
+                json!({"error": format!("read failed: {e}")})
+                    .to_string()
+                    .into_bytes(),
+            )
+        }
     }
 }
 

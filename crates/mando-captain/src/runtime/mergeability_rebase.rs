@@ -40,8 +40,12 @@ pub(super) async fn check_pr_mergeable(pr: &str, repo: &str) -> Result<MergeStat
     }
 
     let json: serde_json::Value = serde_json::from_slice(&output.stdout)?;
-    let state = json["state"].as_str().unwrap_or("");
-    let mergeable = json["mergeable"].as_str().unwrap_or("");
+    let state = json["state"].as_str().ok_or_else(|| {
+        anyhow::anyhow!("gh pr view response missing `state` field for PR {pr} in {repo}")
+    })?;
+    let mergeable = json["mergeable"].as_str().ok_or_else(|| {
+        anyhow::anyhow!("gh pr view response missing `mergeable` field for PR {pr} in {repo}")
+    })?;
 
     match state {
         "MERGED" => Ok(MergeStatus::Merged),
@@ -64,8 +68,8 @@ pub(super) async fn reap_dead_rebase_workers(items: &mut [Task]) {
             _ => continue,
         };
         // Look up rebase worker PID from pid_registry (registered by session_name).
-        let pid = crate::io::pid_registry::get_pid(&rw).unwrap_or(0);
-        if pid != 0 && mando_cc::is_process_alive(pid) {
+        let pid = crate::io::pid_registry::get_pid(&rw).unwrap_or(mando_types::Pid::new(0));
+        if pid.as_u32() != 0 && mando_cc::is_process_alive(pid) {
             continue; // still running
         }
 
@@ -110,7 +114,9 @@ pub(super) async fn reap_dead_rebase_workers(items: &mut [Task]) {
         }
 
         // Unregister PID for the worker_name key (registered at spawn time).
-        crate::io::pid_registry::unregister(&rw);
+        if let Err(e) = crate::io::pid_registry::unregister(&rw) {
+            tracing::warn!(module = "captain", worker = %rw, %e, "pid_registry unregister failed on rebase completion");
+        }
         item.rebase_worker = None;
     }
 }
@@ -143,7 +149,7 @@ pub(super) async fn handle_conflict(
             mando_types::task::ReviewTrigger::RebaseFail,
         );
 
-        super::timeline_emit::emit_for_task(
+        let _ = super::timeline_emit::emit_for_task(
             item,
             mando_types::timeline::TimelineEventType::CaptainReviewStarted,
             &format!(
@@ -169,24 +175,24 @@ pub(super) async fn handle_conflict(
     }
 
     // Check exponential backoff: don't spawn if not enough time has passed.
-    let delay_s = merge_logic::rebase_delay_s(rebase_retries, workflow.agent.rebase_base_delay_s);
-    if delay_s > 0 {
+    let delay = merge_logic::rebase_delay(rebase_retries, workflow.agent.rebase_base_delay_s);
+    if !delay.is_zero() {
         if let Some(ref last_activity) = item.last_activity_at {
             match time::OffsetDateTime::parse(
                 last_activity,
                 &time::format_description::well_known::Rfc3339,
             ) {
                 Ok(last) => {
-                    let elapsed = (time::OffsetDateTime::now_utc() - last)
+                    let elapsed_secs = (time::OffsetDateTime::now_utc() - last)
                         .whole_seconds()
                         .max(0) as u64;
-                    if elapsed < delay_s {
+                    if elapsed_secs < delay.as_secs() {
                         tracing::debug!(
                             module = "captain",
                             pr = %pr,
-                            delay_s,
-                            elapsed,
-                            "rebase backoff — waiting"
+                            delay_s = delay.as_secs(),
+                            elapsed = elapsed_secs,
+                            "rebase backoff, waiting"
                         );
                         return;
                     }
@@ -219,9 +225,19 @@ pub(super) async fn handle_conflict(
     };
 
     let repo_path = mando_config::expand_tilde(&project_config.path);
-    let default_branch_raw = crate::io::git::default_branch(&repo_path)
-        .await
-        .unwrap_or_else(|_| "main".into());
+    let default_branch_raw = match crate::io::git::default_branch(&repo_path).await {
+        Ok(db) => db,
+        Err(e) => {
+            tracing::warn!(
+                module = "captain",
+                pr = %pr,
+                repo = %repo_path.display(),
+                error = %e,
+                "skipping rebase; default_branch lookup failed"
+            );
+            return;
+        }
+    };
     let default_branch = default_branch_raw
         .strip_prefix("origin/")
         .unwrap_or(&default_branch_raw)
@@ -245,18 +261,18 @@ pub(super) async fn handle_conflict(
         .unwrap_or_else(|| {
             "Rebase {{ branch }} onto origin/{{ default_branch }}. PR #{{ pr_num }}.".into()
         });
-    let prompt = match mando_config::render_template(
-        &rebase_tmpl,
-        &[
-            ("branch", branch),
-            ("default_branch", &default_branch),
-            ("pr_num", &pr_num),
-            ("attempt", &(rebase_retries + 1).to_string()),
-            ("max_retries", &max_rebase_retries.to_string()),
-        ]
-        .into_iter()
-        .collect(),
-    ) {
+    let attempt_str = (rebase_retries + 1).to_string();
+    let max_retries_str = max_rebase_retries.to_string();
+    let rebase_vars: rustc_hash::FxHashMap<&str, &str> = [
+        ("branch", branch),
+        ("default_branch", default_branch.as_str()),
+        ("pr_num", pr_num.as_str()),
+        ("attempt", attempt_str.as_str()),
+        ("max_retries", max_retries_str.as_str()),
+    ]
+    .into_iter()
+    .collect();
+    let prompt = match mando_config::render_template(&rebase_tmpl, &rebase_vars) {
         Ok(p) => p,
         Err(e) => {
             tracing::error!(module = "captain", error = %e, "failed to render rebase_worker template");
@@ -309,7 +325,6 @@ pub(super) async fn handle_conflict(
     let session_id = mando_uuid::Uuid::v4().to_string();
 
     match crate::io::process_manager::spawn_worker_process(
-        &session_name,
         &prompt,
         &wt_path,
         &workflow.models.worker,
@@ -320,9 +335,11 @@ pub(super) async fn handle_conflict(
     .await
     {
         Ok((pid, _)) => {
-            // Register by session_name (not session_id) — reap_dead_rebase_workers
+            // Register by session_name (not session_id) so reap_dead_rebase_workers
             // looks up by worker name and unregisters it on completion.
-            crate::io::pid_registry::register(&session_name, pid);
+            if let Err(e) = crate::io::pid_registry::register(&session_name, pid) {
+                tracing::warn!(module = "captain", worker = %session_name, %e, "pid_registry register failed");
+            }
             let item = &mut items[idx];
             item.rebase_worker = Some(session_name.clone());
             item.rebase_retries = merge_logic::next_rebase_retry(item) as i64;
@@ -335,10 +352,10 @@ pub(super) async fn handle_conflict(
             tracing::info!(
                 module = "captain",
                 worker = %session_name,
-                pid = pid,
+                pid = %pid,
                 "rebase worker spawned"
             );
-            super::timeline_emit::emit_for_task(
+            let _ = super::timeline_emit::emit_for_task(
                 item,
                 mando_types::timeline::TimelineEventType::RebaseTriggered,
                 &format!(

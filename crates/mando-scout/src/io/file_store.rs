@@ -43,9 +43,26 @@ fn read_optional(path: &std::path::Path) -> Option<String> {
     }
 }
 
+/// Async variant of [`read_optional`] for callers on the tokio runtime.
+async fn read_optional_async(path: &std::path::Path) -> Option<String> {
+    match tokio::fs::read_to_string(path).await {
+        Ok(s) => Some(s),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        Err(e) => {
+            tracing::warn!("failed to read {}: {e}", path.display());
+            None
+        }
+    }
+}
+
 /// Read a summary file, returning None if it doesn't exist.
 pub fn read_summary(id: i64, slug: &str) -> Option<String> {
     read_optional(&summary_path(id, slug))
+}
+
+/// Async variant of [`read_summary`].
+pub async fn read_summary_async(id: i64, slug: &str) -> Option<String> {
+    read_optional_async(&summary_path(id, slug)).await
 }
 
 /// Write a summary file, creating directories as needed.
@@ -93,9 +110,19 @@ pub fn read_content(id: i64) -> Option<String> {
     read_optional(&content_path(id))
 }
 
+/// Async variant of [`read_content`].
+pub async fn read_content_async(id: i64) -> Option<String> {
+    read_optional_async(&content_path(id)).await
+}
+
 /// Read the synthesized article markdown, returning None if it doesn't exist.
 pub fn read_article(id: i64) -> Option<String> {
     read_optional(&article_path(id))
+}
+
+/// Async variant of [`read_article`].
+pub async fn read_article_async(id: i64) -> Option<String> {
+    read_optional_async(&article_path(id)).await
 }
 
 /// Path for the synthesized article: `{id:03d}-article.md`.
@@ -134,6 +161,15 @@ pub fn write_article(id: i64, article: &str) -> std::io::Result<()> {
         std::fs::create_dir_all(parent)?;
     }
     std::fs::write(&path, article)
+}
+
+/// Async variant of [`write_article`].
+pub async fn write_article_async(id: i64, article: &str) -> std::io::Result<()> {
+    let path = article_path(id);
+    if let Some(parent) = path.parent() {
+        tokio::fs::create_dir_all(parent).await?;
+    }
+    tokio::fs::write(&path, article).await
 }
 
 /// Write raw content file, creating directories as needed.

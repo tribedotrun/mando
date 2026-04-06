@@ -2,7 +2,7 @@
  * Daemon connection management — discovery, health checks, reconnection,
  * version handshake, and HTTP fetch helper.
  */
-import { app, BrowserWindow, dialog } from 'electron';
+import { app, dialog } from 'electron';
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
@@ -32,19 +32,8 @@ let isQuittingRef = false;
 let cachedPort: string | null = null;
 let cachedToken: string | null = null;
 
-// -- Window reference for sending IPC messages --
-let mainWindowRef: BrowserWindow | null = null;
-
-export function setMainWindow(win: BrowserWindow | null): void {
-  mainWindowRef = win;
-}
-
 export function setIsQuitting(quitting: boolean): void {
   isQuittingRef = quitting;
-}
-
-export function getConnectionState(): ConnectionState {
-  return connectionState;
 }
 
 // ---------------------------------------------------------------------------
@@ -53,7 +42,8 @@ export function getConnectionState(): ConnectionState {
 
 export function getDataDir(): string {
   if (process.env.MANDO_DATA_DIR) return process.env.MANDO_DATA_DIR;
-  // Dev mode uses an isolated data directory to avoid conflicts with prod.
+  // Dev and preview modes use isolated data directories to avoid conflicts with prod.
+  if (getAppMode() === 'preview') return path.join(os.homedir(), '.mando-preview');
   if (getAppMode() === 'dev') return path.join(os.homedir(), '.mando-dev');
   return path.join(os.homedir(), '.mando');
 }
@@ -66,11 +56,14 @@ export function getConfigPath(): string {
 // App mode: production | dev | sandbox
 // ---------------------------------------------------------------------------
 
-export type AppMode = 'production' | 'dev' | 'prod-local' | 'sandbox';
+export type AppMode = 'production' | 'dev' | 'prod-local' | 'sandbox' | 'preview';
 
 export function getAppMode(): AppMode {
   const mode = process.env.MANDO_APP_MODE;
-  if (mode === 'dev' || mode === 'sandbox' || mode === 'prod-local') return mode;
+  if (mode === 'dev' || mode === 'sandbox' || mode === 'prod-local' || mode === 'preview')
+    return mode;
+  // Detect preview mode from app bundle path when launched from /Applications.
+  if (app.isPackaged && process.execPath.includes('Mando (Preview)')) return 'preview';
   return 'production';
 }
 
@@ -86,7 +79,8 @@ export function isHeadless(): boolean {
 export async function readPort(): Promise<string> {
   if (cachedPort) return cachedPort;
   const dataDir = getDataDir();
-  const portFileName = getAppMode() === 'dev' ? 'daemon-dev.port' : 'daemon.port';
+  const mode = getAppMode();
+  const portFileName = mode === 'dev' ? 'daemon-dev.port' : 'daemon.port';
   const portFile = path.join(dataDir, portFileName);
   const content = await fs.promises.readFile(portFile, 'utf-8');
   cachedPort = content.trim();
@@ -110,7 +104,11 @@ async function hasExternalGatewayToken(dataDir: string): Promise<boolean> {
     const tokenFile = path.join(dataDir, 'auth-token');
     const content = await fs.promises.readFile(tokenFile, 'utf-8');
     return content.trim().length > 0;
-  } catch {
+  } catch (err: unknown) {
+    const code = (err as NodeJS.ErrnoException)?.code;
+    if (code !== 'ENOENT') {
+      log.warn('[daemon] hasExternalGatewayToken: unexpected error reading token file:', err);
+    }
     return false;
   }
 }
@@ -153,12 +151,12 @@ function isProcessAlive(pid: number): boolean {
 
 function setConnectionState(state: ConnectionState): void {
   connectionState = state;
-  mainWindowRef?.webContents.send('connection-state', state);
 }
 
 export function getAppTitle(): string {
   const mode = getAppMode();
   if (mode === 'dev') return 'Mando (Dev)';
+  if (mode === 'preview') return 'Mando (Preview)';
   if (mode === 'prod-local') return 'Mando (Prod Local)';
   if (mode === 'sandbox') return 'Mando (Sandbox)';
   return 'Mando';
@@ -175,6 +173,8 @@ export function updateTrayTooltip(): string {
   return tooltips[connectionState];
 }
 
+let healthCheckFailureStreak = 0;
+
 async function healthCheck(): Promise<{
   healthy: boolean;
   version?: string;
@@ -184,12 +184,27 @@ async function healthCheck(): Promise<{
     const url = `http://127.0.0.1:${port}/api/health`;
     const resp = await fetch(url, { signal: AbortSignal.timeout(5000) });
     if (resp.ok) {
+      healthCheckFailureStreak = 0;
       return (await resp.json()) as { healthy: boolean; version?: string };
     }
-    log.debug(`healthCheck: HTTP ${resp.status} from daemon`);
+    // First failure in a streak: log at info so forensic investigation is
+    // possible without enabling debug logging. Subsequent failures drop to
+    // debug to avoid filling the log with a stuck daemon's HTTP errors.
+    if (healthCheckFailureStreak === 0) {
+      log.info(`healthCheck: HTTP ${resp.status} from daemon`);
+    } else {
+      log.debug(`healthCheck: HTTP ${resp.status} from daemon`);
+    }
+    healthCheckFailureStreak++;
     return { healthy: false };
   } catch (err: unknown) {
-    log.debug('healthCheck failed:', err instanceof Error ? err.message : err);
+    const reason = err instanceof Error ? err.message : String(err);
+    if (healthCheckFailureStreak === 0) {
+      log.info(`healthCheck failed: ${reason}`);
+    } else {
+      log.debug(`healthCheck failed: ${reason}`);
+    }
+    healthCheckFailureStreak++;
     return { healthy: false };
   }
 }
@@ -266,12 +281,30 @@ export function startHealthMonitor(): void {
 // Version handshake + update cycle
 // ---------------------------------------------------------------------------
 
+/** Compare two semver strings. Returns >0 if a > b, 0 if equal, <0 if a < b. */
+function compareSemver(a: string, b: string): number {
+  const pa = a.split('.').map(Number);
+  const pb = b.split('.').map(Number);
+  for (let i = 0; i < 3; i++) {
+    const diff = (pa[i] || 0) - (pb[i] || 0);
+    if (diff !== 0) return diff;
+  }
+  return 0;
+}
+
 async function checkVersionAndUpdate(dataDir: string): Promise<void> {
   const result = await healthCheck();
   if (!result.healthy || !result.version) return;
 
   const bundledVersion = readAppPackageVersion();
-  if (!bundledVersion || result.version === bundledVersion) return;
+  if (!bundledVersion || compareSemver(bundledVersion, result.version) <= 0) {
+    if (bundledVersion && compareSemver(bundledVersion, result.version) < 0) {
+      log.info(
+        `Daemon ${result.version} is newer than bundled ${bundledVersion} — skipping update`,
+      );
+    }
+    return;
+  }
 
   log.info(`Version mismatch: daemon=${result.version}, bundled=${bundledVersion}. Updating...`);
   setConnectionState('updating');
@@ -342,7 +375,7 @@ async function killDaemonByPid(pid: number, dataDir: string): Promise<boolean> {
   // Clean up files the daemon may not have cleaned after SIGKILL.
   // ENOENT is expected (files may not exist); other errors are logged
   // so permission/disk issues don't pass silently.
-  for (const f of ['daemon.pid', 'daemon.port', 'daemon-dev.port']) {
+  for (const f of ['daemon.pid', 'daemon.port', 'daemon-dev.port', 'daemon-preview.port']) {
     try {
       fs.unlinkSync(path.join(dataDir, f));
     } catch (err: unknown) {

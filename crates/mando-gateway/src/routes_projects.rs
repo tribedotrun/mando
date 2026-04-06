@@ -35,12 +35,24 @@ async fn save_and_reload(
     state: &AppState,
     config: &mando_config::Config,
 ) -> Result<(), (StatusCode, Json<Value>)> {
-    mando_config::save_config(config, None).map_err(|e| {
-        error_response(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            &format!("save failed: {e}"),
-        )
-    })?;
+    // save_config is synchronous — move to the blocking pool so we don't
+    // stall the async executor while holding config_write_mu.
+    let to_save = config.clone();
+    match tokio::task::spawn_blocking(move || mando_config::save_config(&to_save, None)).await {
+        Ok(Ok(())) => {}
+        Ok(Err(e)) => {
+            return Err(error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                &format!("save failed: {e}"),
+            ));
+        }
+        Err(e) => {
+            return Err(error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                &format!("save task panicked: {e}"),
+            ));
+        }
+    }
 
     state.config.store(Arc::new(config.clone()));
     Ok(())
@@ -125,11 +137,14 @@ pub(crate) async fn post_projects(
     }
 
     // Reject if directory is not a git repo.
-    let is_git = abs_path.join(".git").exists()
-        || std::process::Command::new("git")
+    let is_git = tokio::fs::try_exists(abs_path.join(".git"))
+        .await
+        .unwrap_or(false)
+        || tokio::process::Command::new("git")
             .args(["rev-parse", "--git-dir"])
             .current_dir(&abs_path)
             .output()
+            .await
             .is_ok_and(|o| o.status.success());
     if !is_git {
         return Err(error_response(
@@ -154,7 +169,7 @@ pub(crate) async fn post_projects(
     }
 
     // Auto-generate scout summary from project metadata.
-    let scout_summary = detect_project_summary(&abs_path);
+    let scout_summary = detect_project_summary(&abs_path).await;
 
     let pc = mando_config::settings::ProjectConfig {
         name: name.clone(),
@@ -301,49 +316,64 @@ pub(crate) async fn delete_project(
     Ok(Json(json!({ "ok": true, "deleted_tasks": deleted_tasks })))
 }
 
+/// Read a file, pass its contents to an extractor, and return the first
+/// non-empty result. Used to chain multiple source files when auto-detecting a
+/// project summary.
+async fn try_source(
+    path: std::path::PathBuf,
+    extract: impl FnOnce(&str) -> Option<String>,
+) -> Option<String> {
+    let content = tokio::fs::read_to_string(&path).await.ok()?;
+    extract(&content).filter(|s| !s.is_empty())
+}
+
 /// Auto-detect a project summary from Cargo.toml, package.json, or README.
-fn detect_project_summary(project_path: &std::path::Path) -> String {
-    // Try Cargo.toml [package].description via JSON deserialization.
-    if let Ok(content) = std::fs::read_to_string(project_path.join("Cargo.toml")) {
-        if let Ok(toml) = content.parse::<toml::Table>() {
-            if let Some(desc) = toml
-                .get("package")
+async fn detect_project_summary(project_path: &std::path::Path) -> String {
+    // Cargo.toml [package].description.
+    if let Some(desc) = try_source(project_path.join("Cargo.toml"), |content| {
+        content.parse::<toml::Table>().ok().and_then(|toml| {
+            toml.get("package")
                 .and_then(|p| p.get("description"))
                 .and_then(|d| d.as_str())
-            {
-                let desc = desc.trim();
-                if !desc.is_empty() {
-                    return desc.to_string();
-                }
-            }
-        }
+                .map(|s| s.trim().to_string())
+        })
+    })
+    .await
+    {
+        return desc;
     }
 
-    // Try package.json description.
-    if let Ok(content) = std::fs::read_to_string(project_path.join("package.json")) {
-        if let Ok(pkg) = serde_json::from_str::<Value>(&content) {
-            if let Some(desc) = pkg.get("description").and_then(|d| d.as_str()) {
-                let desc = desc.trim();
-                if !desc.is_empty() {
-                    return desc.to_string();
-                }
-            }
-        }
+    // package.json description.
+    if let Some(desc) = try_source(project_path.join("package.json"), |content| {
+        serde_json::from_str::<Value>(content).ok().and_then(|pkg| {
+            pkg.get("description")
+                .and_then(|d| d.as_str())
+                .map(|s| s.trim().to_string())
+        })
+    })
+    .await
+    {
+        return desc;
     }
 
-    // Try first meaningful line of README.md (skip headings and blank lines).
-    if let Ok(content) = std::fs::read_to_string(project_path.join("README.md")) {
-        for line in content.lines() {
-            let trimmed = line.trim();
-            if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with("![") {
-                continue;
-            }
-            let summary: String = trimmed.chars().take(200).collect();
-            if summary.len() < trimmed.len() {
-                return format!("{summary}…");
-            }
-            return summary;
-        }
+    // First meaningful line of README.md (skip headings and blank lines).
+    if let Some(desc) = try_source(project_path.join("README.md"), |content| {
+        content
+            .lines()
+            .map(str::trim)
+            .find(|l| !l.is_empty() && !l.starts_with('#') && !l.starts_with("!["))
+            .map(|line| {
+                let summary: String = line.chars().take(200).collect();
+                if summary.len() < line.len() {
+                    format!("{summary}…")
+                } else {
+                    summary
+                }
+            })
+    })
+    .await
+    {
+        return desc;
     }
 
     String::new()

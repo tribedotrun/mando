@@ -19,6 +19,116 @@ pub(crate) fn escaped_title(item: &Task) -> String {
     mando_shared::telegram_format::escape_html(&item.title)
 }
 
+/// Inline resume of a worker process with feedback. Shared by `nudge` and
+/// `reset_budget` verdict handlers. Kills old process, checks for broken
+/// stream, resumes with feedback, updates health state and session log.
+///
+/// Returns `true` if the worker was successfully resumed.
+async fn inline_resume_worker(
+    item: &Task,
+    feedback: &str,
+    workflow: &CaptainWorkflow,
+    pool: &SqlitePool,
+) -> bool {
+    let (Some(w), Some(sid), Some(wt)) = (&item.worker, &item.session_ids.worker, &item.worktree)
+    else {
+        warn!(
+            module = "captain",
+            item_id = item.id,
+            "verdict resume has no worker/session/worktree; next tick will handle"
+        );
+        return false;
+    };
+
+    let stream_path = mando_config::stream_path_for_session(sid);
+    if mando_cc::stream_has_broken_session(&stream_path) {
+        warn!(
+            module = "captain", worker = %w,
+            "verdict skipped resume; stream is broken, next tick will handle"
+        );
+        return false;
+    }
+
+    let old_pid = crate::io::pid_lookup::resolve_pid(sid, w).unwrap_or(mando_types::Pid::new(0));
+    if old_pid.as_u32() > 0 {
+        if let Err(e) = mando_cc::kill_process(old_pid).await {
+            warn!(
+                module = "captain", worker = %w, pid = %old_pid, error = %e,
+                "failed to kill old process before verdict resume"
+            );
+        }
+    }
+
+    let wt_path = mando_config::expand_tilde(wt);
+    let stream_size_before = mando_cc::get_stream_file_size(&stream_path);
+    let env = std::collections::HashMap::new();
+    match crate::io::process_manager::resume_worker_process(
+        feedback,
+        &wt_path,
+        &workflow.models.worker,
+        sid,
+        &env,
+        workflow.models.fallback.as_deref(),
+    )
+    .await
+    {
+        Ok((pid, _)) => {
+            if let Err(e) = crate::io::pid_registry::register(sid, pid) {
+                warn!(module = "captain", worker = %w, %e, "pid_registry register failed");
+            }
+            // Health-state bookkeeping must not abort: the worker is already
+            // running. Degrade gracefully on failure instead of double-resuming.
+            let health_path = mando_config::worker_health_path();
+            match crate::io::health_store::load_health_state(&health_path) {
+                Ok(mut hstate) => {
+                    crate::io::health_store::set_health_field(
+                        &mut hstate,
+                        w,
+                        "pid",
+                        serde_json::json!(pid),
+                    );
+                    crate::io::health_store::set_health_field(
+                        &mut hstate,
+                        w,
+                        "stream_size_at_spawn",
+                        serde_json::json!(stream_size_before),
+                    );
+                    if let Err(e) =
+                        crate::io::health_store::save_health_state(&health_path, &hstate)
+                    {
+                        warn!(module = "captain", worker = %w, error = %e,
+                            "failed to persist health after verdict resume");
+                    }
+                }
+                Err(e) => {
+                    warn!(module = "captain", worker = %w, error = %e,
+                        "failed to load health state after verdict resume; skipping bookkeeping");
+                }
+            }
+            if let Err(e) = crate::io::headless_cc::log_running_session(
+                pool,
+                sid,
+                &wt_path,
+                "worker",
+                w,
+                &item.id.to_string(),
+                true,
+            )
+            .await
+            {
+                warn!(module = "captain", worker = %w, %e,
+                    "failed to log running session after verdict resume");
+            }
+            true
+        }
+        Err(e) => {
+            warn!(module = "captain", worker = %w, error = %e,
+                "verdict resume failed; next tick will retry");
+            false
+        }
+    }
+}
+
 /// Apply a captain review verdict to an item.
 pub async fn apply_verdict(
     item: &mut Task,
@@ -35,6 +145,13 @@ pub async fn apply_verdict(
     let data = serde_json::json!({ "action": verdict.action, "feedback": verdict.feedback });
     let title = escaped_title(item);
 
+    // Outcome tracking. log_stopped_after tells the post-match block to mark
+    // the worker session stopped (covers ship/escalate/retry_clarifier/other).
+    // clear_review_fields is false only when nudge resume fails, so the next
+    // tick can retry the same verdict.
+    let mut log_stopped_after = false;
+    let mut clear_review_fields = true;
+
     match verdict.action.as_str() {
         "ship" => {
             let is_no_pr = item.no_pr;
@@ -44,34 +161,27 @@ pub async fn apply_verdict(
             } else {
                 (TimelineEventType::AwaitingReview, "ready for review")
             };
-            timeline_emit::emit_for_task(
+            let _ = timeline_emit::emit_for_task(
                 item,
                 event,
-                &format!("Captain approved — {msg_suffix}"),
+                &format!("Captain approved; {msg_suffix}"),
                 data,
                 pool,
             )
             .await;
             notifier
                 .high(&format!(
-                    "\u{2705} Captain approved <b>{title}</b> — {msg_suffix}"
+                    "\u{2705} Captain approved <b>{title}</b>; {msg_suffix}"
                 ))
                 .await;
-            // Mark worker session as stopped.
-            crate::io::headless_cc::log_item_session(
-                pool,
-                item,
-                &worker_name,
-                SessionStatus::Stopped,
-            )
-            .await;
+            log_stopped_after = true;
         }
         "nudge" => {
             item.status = ItemStatus::InProgress;
             item.intervention_count += 1;
             // Reset timeout clock so the worker gets a fresh window after review.
             item.worker_started_at = Some(mando_types::now_rfc3339());
-            timeline_emit::emit_for_task(
+            let _ = timeline_emit::emit_for_task(
                 item,
                 TimelineEventType::CaptainReviewVerdict,
                 &format!("Captain nudge: {}", verdict.feedback),
@@ -90,100 +200,24 @@ pub async fn apply_verdict(
                     w,
                     "pending_ai_feedback",
                     serde_json::json!(verdict.feedback),
-                    "failed to persist AI nudge feedback — worker will receive generic template instead",
+                    "failed to persist AI nudge feedback; worker will receive generic template instead",
                 );
             }
 
             // Resume the worker process inline so the next tick sees a live
             // process (Rule 2 skip) instead of a dead one (Rule 3 broken).
-            if let (Some(w), Some(sid), Some(wt)) =
-                (&item.worker, &item.session_ids.worker, &item.worktree)
-            {
-                let stream_path = mando_config::stream_path_for_session(sid);
-                if mando_cc::stream_has_broken_session(&stream_path) {
-                    warn!(
-                        module = "captain", worker = %w,
-                        "nudge verdict skipped resume — stream is broken, next tick will handle"
-                    );
-                } else {
-                    let old_pid = crate::io::pid_lookup::resolve_pid(sid, w).unwrap_or(0);
-                    if old_pid > 0 {
-                        if let Err(e) = mando_cc::kill_process(old_pid).await {
-                            warn!(
-                                module = "captain", worker = %w, pid = old_pid, error = %e,
-                                "failed to kill old process before verdict resume"
-                            );
-                        }
-                    }
-                    let wt_path = mando_config::expand_tilde(wt);
-                    let stream_size_before = mando_cc::get_stream_file_size(&stream_path);
-                    let env = std::collections::HashMap::new();
-                    match crate::io::process_manager::resume_worker_process(
-                        w,
-                        &verdict.feedback,
-                        &wt_path,
-                        &workflow.models.worker,
-                        sid,
-                        &env,
-                        workflow.models.fallback.as_deref(),
-                    )
-                    .await
-                    {
-                        Ok((pid, _)) => {
-                            crate::io::pid_registry::register(sid, pid);
-                            let health_path = mando_config::worker_health_path();
-                            let mut hstate =
-                                crate::io::health_store::load_health_state(&health_path);
-                            crate::io::health_store::set_health_field(
-                                &mut hstate,
-                                w,
-                                "pid",
-                                serde_json::json!(pid),
-                            );
-                            crate::io::health_store::set_health_field(
-                                &mut hstate,
-                                w,
-                                "stream_size_at_spawn",
-                                serde_json::json!(stream_size_before),
-                            );
-                            if let Err(e) =
-                                crate::io::health_store::save_health_state(&health_path, &hstate)
-                            {
-                                warn!(module = "captain", worker = %w, error = %e,
-                                    "failed to persist health after verdict resume");
-                            }
-                            crate::io::headless_cc::log_running_session(
-                                pool,
-                                sid,
-                                &wt_path,
-                                "worker",
-                                w,
-                                &item.id.to_string(),
-                                true,
-                            )
-                            .await;
-                        }
-                        Err(e) => {
-                            warn!(
-                                module = "captain", worker = %w, error = %e,
-                                "nudge verdict resume failed — next tick will retry"
-                            );
-                        }
-                    }
-                }
-            } else {
-                warn!(
-                    module = "captain",
-                    item_id = item.id,
-                    "nudge verdict has no worker/session/worktree — next tick will handle"
-                );
+            // clear_review_fields stays false until we confirm the resume
+            // succeeded; failed resumes leave the verdict session ID intact
+            // so the next tick can retry.
+            if !inline_resume_worker(item, &verdict.feedback, workflow, pool).await {
+                clear_review_fields = false;
             }
         }
         "respawn" => {
             // Mark old worker session as stopped before clearing refs.
             if let Some(ref sid) = worker_session_id {
                 let cwd = item.worktree.as_deref().unwrap_or("");
-                crate::io::headless_cc::log_session_completion(
+                if let Err(e) = crate::io::headless_cc::log_session_completion(
                     pool,
                     sid,
                     cwd,
@@ -192,7 +226,10 @@ pub async fn apply_verdict(
                     &item.id.to_string(),
                     SessionStatus::Stopped,
                 )
-                .await;
+                .await
+                {
+                    warn!(module = "captain", %e, "failed to log session completion on respawn");
+                }
             }
             item.status = ItemStatus::Queued;
             item.session_ids.worker = None;
@@ -201,7 +238,8 @@ pub async fn apply_verdict(
             item.worktree = None;
             item.branch = None;
             item.pr = None;
-            timeline_emit::emit_for_task(
+            item.worker_started_at = None;
+            let _ = timeline_emit::emit_for_task(
                 item,
                 TimelineEventType::CaptainReviewVerdict,
                 &format!("Captain respawn: {}", verdict.feedback),
@@ -216,7 +254,7 @@ pub async fn apply_verdict(
         "escalate" => {
             item.status = ItemStatus::Escalated;
             item.escalation_report = verdict.report.clone();
-            timeline_emit::emit_for_task(
+            let _ = timeline_emit::emit_for_task(
                 item,
                 TimelineEventType::Escalated,
                 &format!("Escalated: {}", verdict.feedback),
@@ -230,18 +268,12 @@ pub async fn apply_verdict(
                     mando_shared::telegram_format::escape_html(&verdict.feedback),
                 ))
                 .await;
-            // Mark worker session as stopped.
-            crate::io::headless_cc::log_item_session(
-                pool,
-                item,
-                &worker_name,
-                SessionStatus::Stopped,
-            )
-            .await;
+            log_stopped_after = true;
         }
         "retry_clarifier" => {
             item.status = ItemStatus::Clarifying;
-            timeline_emit::emit_for_task(
+            item.worker_started_at = None;
+            let _ = timeline_emit::emit_for_task(
                 item,
                 TimelineEventType::CaptainReviewVerdict,
                 &format!("Retry clarifier: {}", verdict.feedback),
@@ -252,19 +284,64 @@ pub async fn apply_verdict(
             notifier
                 .normal(&format!("\u{1f501} Retrying clarifier for <b>{title}</b>"))
                 .await;
-            // Mark worker session as stopped.
-            crate::io::headless_cc::log_item_session(
-                pool,
+            log_stopped_after = true;
+        }
+        "reset_budget" => {
+            // Captain overrides the intervention budget and nudges the worker
+            // with fresh instructions. This is the captain's authority to
+            // unblock tasks that exhausted their budget due to false alarms
+            // or recoverable issues.
+            let old_count = item.intervention_count;
+            item.intervention_count = 0;
+            item.status = ItemStatus::InProgress;
+            item.worker_started_at = Some(mando_types::now_rfc3339());
+            let _ = timeline_emit::emit_for_task(
                 item,
-                &worker_name,
-                SessionStatus::Stopped,
+                TimelineEventType::CaptainReviewVerdict,
+                &format!(
+                    "Captain reset budget ({old_count} -> 0) and nudged: {}",
+                    verdict.feedback
+                ),
+                data,
+                pool,
             )
             .await;
+            notifier
+                .normal(&format!(
+                    "\u{1f504} Captain reset budget on <b>{title}</b> ({old_count} \u{2192} 0)"
+                ))
+                .await;
+
+            // Clear repeated-nudge circuit breaker so the fresh budget
+            // doesn't immediately re-trigger a review loop.
+            if let Some(ref w) = item.worker {
+                crate::io::health_store::persist_health_field(
+                    w,
+                    "nudge_reason_consecutive",
+                    serde_json::json!(0),
+                    "failed to reset nudge circuit breaker after reset_budget",
+                );
+                crate::io::health_store::persist_health_field(
+                    w,
+                    "last_nudge_reason",
+                    serde_json::json!(null),
+                    "failed to clear last nudge reason after reset_budget",
+                );
+                crate::io::health_store::persist_health_field(
+                    w,
+                    "pending_ai_feedback",
+                    serde_json::json!(verdict.feedback),
+                    "failed to persist AI feedback after reset_budget; worker will receive generic template instead",
+                );
+            }
+            if !inline_resume_worker(item, &verdict.feedback, workflow, pool).await {
+                clear_review_fields = false;
+            }
         }
         other => {
             warn!(module = "captain", action = %other, "unknown verdict action, escalating");
             item.status = ItemStatus::Escalated;
-            timeline_emit::emit_for_task(
+            let _ = timeline_emit::emit_for_task(
                 item,
                 TimelineEventType::Escalated,
                 &format!("Unknown verdict '{other}', escalated"),
@@ -277,22 +354,33 @@ pub async fn apply_verdict(
                     "\u{1f6a8} Unknown verdict on <b>{title}</b>, escalated"
                 ))
                 .await;
-            // Mark worker session as stopped.
-            crate::io::headless_cc::log_item_session(
-                pool,
-                item,
-                &worker_name,
-                SessionStatus::Stopped,
-            )
-            .await;
+            log_stopped_after = true;
         }
     }
 
-    // Clear review fields only after successful application so that a
-    // failure leaves the session ID intact for retry on the next tick.
-    item.captain_review_trigger = None;
-    item.session_ids.review = None;
-    item.review_fail_count = 0;
+    // Single consolidated log call for every arm that marks the worker
+    // session as stopped (ship / escalate / retry_clarifier / unknown).
+    if log_stopped_after {
+        if let Err(e) = crate::io::headless_cc::log_item_session(
+            pool,
+            item,
+            &worker_name,
+            SessionStatus::Stopped,
+        )
+        .await
+        {
+            warn!(module = "captain", item_id = item.id, %e, "failed to log stopped worker session");
+        }
+    }
+
+    if clear_review_fields {
+        // Clear review fields only after successful application so that a
+        // failed nudge resume leaves the session ID intact for retry on the
+        // next tick.
+        item.captain_review_trigger = None;
+        item.session_ids.review = None;
+        item.review_fail_count = 0;
+    }
 
     Ok(())
 }
@@ -316,7 +404,7 @@ pub async fn handle_review_error(
     if *review_fail_count >= max {
         item.status = ItemStatus::Errored;
         item.captain_review_trigger = None;
-        timeline_emit::emit_for_task(
+        let _ = timeline_emit::emit_for_task(
             item,
             TimelineEventType::Errored,
             &format!(
@@ -336,7 +424,7 @@ pub async fn handle_review_error(
     } else {
         warn!(module = "captain", fail_count = *review_fail_count, %max, %error,
             "captain review failed, will retry");
-        timeline_emit::emit_for_task(
+        let _ = timeline_emit::emit_for_task(
             item,
             TimelineEventType::CaptainReviewVerdict,
             &format!("Review attempt {}/{max} failed: {error}", review_fail_count),

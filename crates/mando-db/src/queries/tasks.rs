@@ -36,13 +36,13 @@ pub async fn find_by_id(pool: &SqlitePool, id: i64) -> Result<Option<Task>> {
 pub async fn load_all(pool: &SqlitePool) -> Result<Vec<Task>> {
     let sql = format!("{} WHERE archived_at IS NULL", select_tasks_sql());
     let rows: Vec<TaskRow> = sqlx::query_as(&sql).fetch_all(pool).await?;
-    Ok(rows.into_iter().map(|r| r.into_task()).collect())
+    rows.into_iter().map(|r| r.into_task()).collect()
 }
 
 /// Load all tasks including archived.
 pub async fn load_all_with_archived(pool: &SqlitePool) -> Result<Vec<Task>> {
     let rows: Vec<TaskRow> = sqlx::query_as(select_tasks_sql()).fetch_all(pool).await?;
-    Ok(rows.into_iter().map(|r| r.into_task()).collect())
+    rows.into_iter().map(|r| r.into_task()).collect()
 }
 
 /// Load routing-level fields only (lighter query).
@@ -53,7 +53,7 @@ pub async fn routing(pool: &SqlitePool) -> Result<Vec<TaskRouting>> {
     )
     .fetch_all(pool)
     .await?;
-    Ok(rows.into_iter().map(|r| r.into_routing()).collect())
+    rows.into_iter().map(|r| r.into_routing()).collect()
 }
 
 // ── Column list constants ────────────────────────────────────────────────────
@@ -298,6 +298,33 @@ pub async fn persist_merge_spawn(pool: &SqlitePool, task: &Task) -> Result<()> {
     Ok(())
 }
 
+/// Immediately persist clarifier result fields so the DB reflects the
+/// enriched context even if captain crashes before tick-end merge.
+pub async fn persist_clarify_result(pool: &SqlitePool, task: &Task) -> Result<()> {
+    let trigger_str = task.captain_review_trigger.map(|t| t.as_str().to_string());
+    sqlx::query(
+        "UPDATE tasks SET status=?, context=?, title=?, session_ids=?, project=?, \
+         no_pr=?, resource=?, clarifier_fail_count=?, last_activity_at=?, \
+         captain_review_trigger=?, review_fail_count=? \
+         WHERE id=? AND status IN ('clarifying','needs-clarification')",
+    )
+    .bind(task.status.as_str())
+    .bind(&task.context)
+    .bind(&task.title)
+    .bind(task.session_ids.to_json())
+    .bind(&task.project)
+    .bind(task.no_pr as i64)
+    .bind(&task.resource)
+    .bind(task.clarifier_fail_count)
+    .bind(&task.last_activity_at)
+    .bind(&trigger_str)
+    .bind(task.review_fail_count)
+    .bind(task.id)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
 /// Persist clarifier start fields immediately so the UI reflects the running
 /// clarifier while it's still in progress.
 pub async fn persist_clarify_start(pool: &SqlitePool, task: &Task) -> Result<()> {
@@ -385,7 +412,7 @@ async fn find_by_id_exec<'e>(
 ) -> Result<Option<Task>> {
     let sql = format!("{} WHERE id = ?", select_tasks_sql());
     let row: Option<TaskRow> = sqlx::query_as(&sql).bind(id).fetch_optional(exec).await?;
-    Ok(row.map(|r| r.into_task()))
+    row.map(|r| r.into_task()).transpose()
 }
 
 async fn update_task_exec<'e>(

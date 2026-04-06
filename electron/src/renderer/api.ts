@@ -1,7 +1,6 @@
 import type {
   TaskListResponse,
   TaskItem,
-  HealthResponse,
   WorkersResponse,
   SessionsResponse,
   TranscriptResponse,
@@ -23,7 +22,6 @@ export {
   fetchScoutItem,
   fetchScoutArticle,
   addScoutUrl,
-  deleteScoutItem,
   updateScoutStatus,
   bulkUpdateScout,
   bulkDeleteScout,
@@ -42,7 +40,7 @@ export async function initBaseUrl(): Promise<void> {
   }
 }
 
-export function buildUrl(path: string): string {
+function buildUrl(path: string): string {
   return `${BASE_URL}${path}`;
 }
 
@@ -70,11 +68,15 @@ interface ClientLogEntry {
 let errorBatch: ClientLogEntry[] = [];
 let batchTimer: ReturnType<typeof setTimeout> | null = null;
 let flushFailures = 0;
+let degradationReported = false;
 
 const MAX_ERROR_BATCH = 200;
 const MAX_FLUSH_RETRIES = 5;
 const BASE_RETRY_MS = 5_000;
 const MAX_RETRY_MS = 60_000;
+
+/** Fired once when the client-logs flush exceeds MAX_FLUSH_RETRIES consecutive failures. */
+export const OBS_DEGRADED_EVENT = 'mando:obs-degraded';
 
 function queueError(level: string, message: string, context?: unknown): void {
   if (errorBatch.length >= MAX_ERROR_BATCH) return;
@@ -106,17 +108,21 @@ async function flushErrors(): Promise<void> {
     flushFailures = 0;
   } catch (err) {
     flushFailures++;
+    const reason = getErrorMessage(err, 'unknown');
     if (flushFailures >= MAX_FLUSH_RETRIES) {
-      log.warn(
-        `[obs] dropping ${entries.length} entries after ${MAX_FLUSH_RETRIES} flush failures`,
+      log.error(
+        `[obs] dropping ${entries.length} entries after ${MAX_FLUSH_RETRIES} flush failures (last error: ${reason})`,
       );
+      if (!degradationReported && typeof window !== 'undefined') {
+        degradationReported = true;
+        window.dispatchEvent(new CustomEvent(OBS_DEGRADED_EVENT));
+      }
       flushFailures = 0;
       return;
     }
-    if (flushFailures === 1) {
-      const reason = getErrorMessage(err, 'unknown');
-      log.warn(`[obs] flush failed (${reason}), will retry`);
-    }
+    log.warn(
+      `[obs] flush failed (attempt ${flushFailures}/${MAX_FLUSH_RETRIES}, ${reason}), will retry`,
+    );
     errorBatch.push(...entries.slice(0, MAX_ERROR_BATCH - errorBatch.length));
     if (!batchTimer && errorBatch.length > 0) {
       const delay = Math.min(BASE_RETRY_MS * 2 ** flushFailures, MAX_RETRY_MS);
@@ -174,9 +180,6 @@ export function apiDel<T>(apiPath: string): Promise<T> {
   return apiRequest<T>('DELETE', apiPath);
 }
 
-// Health & system info (authenticated — includes config paths, projects)
-export const fetchHealth = () => apiGet<HealthResponse>('/api/health/system');
-
 // Tasks
 export const fetchTasks = (includeArchived?: boolean) => {
   const qs = includeArchived ? '?include_archived=true' : '';
@@ -188,10 +191,8 @@ export interface AddTaskInput {
   images?: File[];
 }
 
-export async function parseBulkTodos(text: string): Promise<string[]> {
-  const data = await apiPost<{ items: string[] }>('/api/ai/parse-todos', { text });
-  return data.items;
-}
+export const parseBulkTodos = (text: string) =>
+  apiPost<{ items: string[] }>('/api/ai/parse-todos', { text });
 
 export async function addTask(input: AddTaskInput): Promise<TaskItem> {
   const form = new FormData();
@@ -217,10 +218,6 @@ export const deleteItems = (ids: number[], opts?: { close_pr?: boolean }) =>
     ids,
     ...opts,
   });
-export const updateItem = (id: number, fields: Partial<TaskItem>) =>
-  apiPatch<TaskItem>(`/api/tasks/${id}`, fields);
-export const bulkUpdate = (ids: number[], updates: Partial<TaskItem>) =>
-  apiPost<void>('/api/tasks/bulk', { ids, updates });
 export const acceptItem = (id: number) => apiPost<void>('/api/tasks/accept', { id });
 export const reopenItem = (id: number, feedback: string) =>
   apiPost<void>('/api/tasks/reopen', { id, feedback });
@@ -323,6 +320,7 @@ export function connectSSE(
   };
 
   let consecutiveParseFailures = 0;
+  let degradedEmittedForStream = false;
   const PARSE_FAILURE_THRESHOLD = 5;
 
   source.onmessage = (msg) => {
@@ -333,9 +331,15 @@ export function connectSSE(
     } catch (e) {
       consecutiveParseFailures++;
       log.warn('[SSE] failed to parse event data:', e);
+      // First parse failure: emit degraded event so the DevInfoBar / indicator
+      // reacts immediately. Keep the counter-based escalation for the toast.
+      if (!degradedEmittedForStream && typeof window !== 'undefined') {
+        degradedEmittedForStream = true;
+        window.dispatchEvent(new CustomEvent(OBS_DEGRADED_EVENT));
+      }
       if (consecutiveParseFailures === PARSE_FAILURE_THRESHOLD) {
         log.error(
-          `[SSE] ${PARSE_FAILURE_THRESHOLD} consecutive parse failures — data stream may be corrupt`,
+          `[SSE] ${PARSE_FAILURE_THRESHOLD} consecutive parse failures, data stream may be corrupt`,
         );
         queueError(
           'error',
@@ -350,6 +354,42 @@ export function connectSSE(
     log.warn('[SSE] connection error — will auto-reconnect');
     emitStatus('disconnected');
   };
+
+  // Named SSE events from the gateway: "snapshot_error" fires when the server
+  // cannot build the initial snapshot (DB failure), and "resync" fires when
+  // the broadcast stream lagged and the client needs to reload from REST to
+  // catch up. EventSource does not route named events to onmessage, so
+  // without explicit addEventListener calls these were silently dropped and
+  // the UI would show stale data with no feedback.
+  //
+  // We deliberately use the name "snapshot_error" instead of "error" because
+  // EventSource dispatches a plain Event (not a MessageEvent) to any listener
+  // registered for "error" on native connection failures (network drops,
+  // server restarts). That would make a named "error" event indistinguishable
+  // from a reconnection attempt, producing spurious "snapshot failed" toasts.
+  source.addEventListener('snapshot_error' as unknown as 'message', (msg: MessageEvent) => {
+    try {
+      const data = typeof msg.data === 'string' ? JSON.parse(msg.data) : null;
+      const reason =
+        data && typeof data === 'object' && 'error' in data
+          ? String((data as { error: unknown }).error)
+          : 'server failed to build snapshot';
+      log.error('[SSE] snapshot_error event from server:', reason);
+      queueError('error', `SSE snapshot failed: ${reason}`);
+      emitStatus('disconnected');
+    } catch (e) {
+      log.error('[SSE] snapshot_error event (unparseable):', e);
+      queueError('error', 'SSE snapshot failed (unparseable error payload)');
+      emitStatus('disconnected');
+    }
+  });
+
+  source.addEventListener('resync' as unknown as 'message', () => {
+    log.warn('[SSE] broadcast lagged, client must reload snapshot');
+    // Forward as a normal event so the DataProvider / store layer can
+    // trigger a re-fetch of the initial data set.
+    onEvent({ event: 'resync', ts: Date.now() });
+  });
 
   return source;
 }

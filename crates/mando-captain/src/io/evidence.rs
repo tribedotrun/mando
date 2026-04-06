@@ -156,19 +156,40 @@ pub(crate) async fn extract_frame(
     Ok(())
 }
 
+/// Result of an evidence download pass.
+#[derive(Debug, Clone, Default)]
+#[allow(dead_code)]
+pub(crate) struct EvidenceDownload {
+    pub paths: Vec<PathBuf>,
+    pub attempt_count: usize,
+    pub fail_count: usize,
+}
+
+#[allow(dead_code)]
+impl EvidenceDownload {
+    /// True when every download attempt failed. Callers use this to decide
+    /// whether to escalate instead of continuing with a blind review.
+    pub fn all_failed(&self) -> bool {
+        self.attempt_count > 0 && self.fail_count == self.attempt_count
+    }
+}
+
 /// Download evidence images/videos and extract key frames.
 ///
-/// Returns a list of local file paths that captain can read.
+/// Returns the downloaded paths along with attempt and failure counts so
+/// callers can decide whether to escalate when every download failed.
 /// Cleans up old evidence before downloading fresh copies.
 pub(crate) async fn download_evidence(
     pr_body: &str,
     work_dir: &Path,
-    download_timeout_s: u64,
-    ffmpeg_timeout_s: u64,
-) -> Vec<PathBuf> {
+    download_timeout: std::time::Duration,
+    ffmpeg_timeout: std::time::Duration,
+) -> EvidenceDownload {
+    let download_timeout_s = download_timeout.as_secs();
+    let ffmpeg_timeout_s = ffmpeg_timeout.as_secs();
     let urls = extract_evidence_urls(pr_body);
     if urls.is_empty() {
-        return Vec::new();
+        return EvidenceDownload::default();
     }
 
     let images_dir = work_dir.join("evidence");
@@ -180,7 +201,8 @@ pub(crate) async fn download_evidence(
     }
 
     let mut paths = Vec::new();
-    let mut download_failures = 0usize;
+    let mut fail_count = 0usize;
+    let attempt_count = urls.len();
 
     for (i, url) in urls.iter().enumerate() {
         let ext = url_extension(url);
@@ -213,15 +235,16 @@ pub(crate) async fn download_evidence(
                         tracing::error!(
                             module = "evidence",
                             url = %url,
-                            "all frame extractions failed — ffmpeg may be missing or video corrupt"
+                            "all frame extractions failed; ffmpeg may be missing or video corrupt"
                         );
+                        fail_count += 1;
                     }
                 } else {
                     paths.push(path);
                 }
             }
             Err(e) => {
-                download_failures += 1;
+                fail_count += 1;
                 tracing::warn!(
                     module = "evidence",
                     url = %url,
@@ -232,15 +255,19 @@ pub(crate) async fn download_evidence(
         }
     }
 
-    if download_failures == urls.len() && !urls.is_empty() {
+    if fail_count == attempt_count && attempt_count > 0 {
         tracing::error!(
             module = "evidence",
-            attempted = urls.len(),
-            "all evidence downloads failed — review will proceed without visual inspection"
+            attempted = attempt_count,
+            "all evidence downloads failed; review will proceed without visual inspection"
         );
     }
 
-    paths
+    EvidenceDownload {
+        paths,
+        attempt_count,
+        fail_count,
+    }
 }
 
 #[cfg(test)]

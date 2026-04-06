@@ -139,7 +139,7 @@ async fn handle_workers(watch: bool, interval: Option<u64>) -> anyhow::Result<()
     let interval_secs = interval.unwrap_or(5);
     let client = DaemonClient::discover()?;
     loop {
-        let health = client.get("/api/health/system").await?;
+        let health = client.get_with_body_on_5xx("/api/health/system").await?;
 
         if watch {
             print!("\x1b[2J\x1b[H");

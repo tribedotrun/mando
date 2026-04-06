@@ -29,15 +29,33 @@ pub(crate) async fn trigger_captain_review(
     trigger: &str,
     pool: &sqlx::SqlitePool,
 ) {
+    // Snapshot prior status and trigger so we can roll back cleanly if
+    // spawn_review fails. Setting CaptainReviewing on failure would hide
+    // the real error from the next tick and leave the item stuck.
     let Some(it) = items
         .iter_mut()
         .find(|it| it.worker.as_deref() == Some(&action.worker))
     else {
         return;
     };
-    let trigger_enum = trigger
-        .parse()
-        .unwrap_or(mando_types::task::ReviewTrigger::CaptainDecision);
+    let prior_status = it.status;
+    let prior_trigger = it.captain_review_trigger;
+    let prior_review_fail_count = it.review_fail_count;
+    let prior_last_activity = it.last_activity_at.clone();
+
+    let trigger_enum: mando_types::task::ReviewTrigger = match trigger.parse() {
+        Ok(t) => t,
+        Err(e) => {
+            tracing::error!(
+                module = "captain",
+                worker = %action.worker,
+                trigger = %trigger,
+                error = %e,
+                "unknown review trigger, cannot dispatch to captain review"
+            );
+            return;
+        }
+    };
     super::action_contract::reset_review_retry(it, trigger_enum);
 
     if let Err(e) =
@@ -47,9 +65,15 @@ pub(crate) async fn trigger_captain_review(
             module = "captain",
             worker = %action.worker,
             error = %e,
-            "failed to spawn captain review session"
+            "failed to spawn captain review session; rolling back and incrementing fail counter"
         );
-        it.status = mando_types::task::ItemStatus::CaptainReviewing;
-        it.captain_review_trigger = trigger.parse().ok();
+        // Roll back to the prior state (do NOT leave the item pinned at
+        // CaptainReviewing with no session ID) and bump the fail counter so
+        // the next tick can see the repeated failure.
+        it.status = prior_status;
+        it.captain_review_trigger = prior_trigger;
+        it.last_activity_at = prior_last_activity;
+        it.review_fail_count = prior_review_fail_count.saturating_add(1);
+        it.session_ids.review = None;
     }
 }

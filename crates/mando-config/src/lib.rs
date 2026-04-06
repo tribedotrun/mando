@@ -1,5 +1,6 @@
 //! mando-config — configuration loading, env file parsing, and path constants.
 
+pub mod error;
 pub mod loader;
 pub mod paths;
 pub mod settings;
@@ -9,6 +10,7 @@ pub mod workflow_scout;
 pub mod workflow_validate;
 
 // Convenience re-exports.
+pub use error::ConfigError;
 pub use loader::{get_config_path, load_config, save_config};
 pub use paths::{
     active_captain_runtime_paths, bin_dir, captain_lock_path, cc_streams_dir, data_dir,

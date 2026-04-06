@@ -3,6 +3,7 @@
 use mando_config::settings::Config;
 use mando_config::workflow::CaptainWorkflow;
 use mando_types::task::{ItemStatus, Task};
+use rustc_hash::FxHashMap;
 
 use crate::runtime::notify::Notifier;
 
@@ -63,7 +64,7 @@ pub(crate) async fn check_done_review_threads(
                 mando_types::task::ReviewTrigger::CiFailure,
             );
 
-            super::timeline_emit::emit_for_task(
+            let _ = super::timeline_emit::emit_for_task(
                 item,
                 mando_types::timeline::TimelineEventType::CaptainReviewStarted,
                 "CI failure detected — captain reviewing",
@@ -94,20 +95,25 @@ pub(crate) async fn check_done_review_threads(
         };
 
         // Worker and session_ids.worker should be preserved from pending-review.
-        // Fall back to generated values only as a safety net.
-        if items[idx].worker.is_none() {
+        // If either is missing, skip the reopen and emit an alert; generating
+        // fake identifiers would break reopen (resume-nonexistent-session) and
+        // leak PIDs.
+        if items[idx].worker.is_none() || items[idx].session_ids.worker.is_none() {
             let item_id = items[idx].id.to_string();
-            tracing::warn!(module = "captain", %item_id, "worker missing on pending-review item — generating fallback name");
-            items[idx].worker = Some(format!("mando-reopen-{}", item_id));
-        }
-        if items[idx].session_ids.worker.is_none() {
-            let item_id = items[idx].id.to_string();
-            tracing::warn!(
-                module = "captain",
-                %item_id,
-                "worker session_id missing on pending-review item — generating fresh session"
-            );
-            items[idx].session_ids.worker = Some(mando_uuid::Uuid::v4().to_string());
+            let missing = match (
+                items[idx].worker.is_some(),
+                items[idx].session_ids.worker.is_some(),
+            ) {
+                (false, false) => "worker and session_id",
+                (false, true) => "worker",
+                (true, false) => "session_id",
+                (true, true) => unreachable!(),
+            };
+            let msg =
+                format!("Skipping reopen on pending-review item {item_id}: missing {missing}");
+            tracing::error!(module = "captain", %item_id, %missing, "{msg}");
+            alerts.push(msg);
+            continue;
         }
 
         let item = &mut items[idx];
@@ -219,7 +225,7 @@ pub(crate) fn classify_review_state(
     }
 
     let issues_text = parts.join("\n");
-    let mut vars = std::collections::HashMap::new();
+    let mut vars: FxHashMap<&str, &str> = FxHashMap::default();
     vars.insert("issues", issues_text.as_str());
     let message = match mando_config::render_prompt(
         "review_reopen_message",

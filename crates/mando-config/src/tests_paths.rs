@@ -160,7 +160,7 @@ fn parse_github_slug_formats() {
 #[test]
 fn load_missing_config_returns_default() {
     use std::path::Path;
-    let cfg = crate::loader::load_config(Some(Path::new("/nonexistent/config.json")));
+    let cfg = crate::loader::load_config(Some(Path::new("/nonexistent/config.json"))).unwrap();
     assert_eq!(cfg.workspace, "~/.mando/workspace");
     assert_eq!(cfg.gateway.dashboard.port, 18791);
 }

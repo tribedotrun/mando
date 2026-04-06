@@ -7,72 +7,21 @@
  */
 import { Notification, BrowserWindow } from 'electron';
 import { onTrusted } from '#main/ipc-security';
-
-/** Notification payload shape (matches Rust NotificationPayload). */
-interface NotificationPayload {
-  message: string;
-  level: 'Low' | 'Normal' | 'High' | 'Critical';
-  kind: NotificationKind;
-  task_key?: string;
-  reply_markup?: unknown;
-}
-
-type NotificationKind =
-  | { type: 'AwaitingReview'; item_id: string; pr_number?: number }
-  | { type: 'ClarifierNeeded'; item_id: string }
-  | { type: 'RebaseFailed'; item_id: string; pr_number: number }
-  | { type: 'WorkerEscalated'; item_id: string }
-  | { type: 'CaptainReviewVerdict'; item_id: string; verdict: string; feedback?: string }
-  | { type: 'Escalated'; item_id: string; summary?: string }
-  | { type: 'Errored'; item_id: string; error?: string }
-  | { type: 'NeedsClarification'; item_id: string; questions?: string }
-  | { type: 'CronAlert'; action_id: string }
-  | {
-      type: 'RateLimited';
-      status: string;
-      utilization?: number;
-      resets_at?: number;
-      rate_limit_type?: string;
-      overage_status?: string;
-      overage_resets_at?: number;
-      overage_disabled_reason?: string;
-    }
-  | {
-      type: 'ScoutProcessed';
-      scout_id: number;
-      title: string;
-      relevance: number;
-      quality: number;
-      source_name?: string;
-      telegraph_url?: string;
-    }
-  | { type: 'Generic' };
+import type { NotificationPayload, NotificationKind } from '#shared/notifications';
 
 /** Map notification kind to a human-readable title. */
 function titleForKind(kind: NotificationKind): string {
   switch (kind.type) {
-    case 'AwaitingReview':
-      return 'PR Ready for Review';
-    case 'ClarifierNeeded':
-      return 'Clarification Needed';
-    case 'RebaseFailed':
-      return 'Rebase Failed';
-    case 'WorkerEscalated':
-      return 'Worker Escalated';
-    case 'CaptainReviewVerdict':
-      return 'Captain Review Verdict';
     case 'Escalated':
       return 'Escalated';
-    case 'Errored':
-      return 'Error';
     case 'NeedsClarification':
       return 'Clarification Needed';
-    case 'CronAlert':
-      return 'Cron Alert';
     case 'RateLimited':
       return 'Rate Limited';
     case 'ScoutProcessed':
       return 'Scout Processed';
+    case 'ScoutProcessFailed':
+      return 'Scout Failed';
     case 'Generic':
       return 'Mando';
   }

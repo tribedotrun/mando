@@ -168,35 +168,30 @@ impl QaSessionManager {
         live.last_active = Instant::now();
         let session_id = live.session_id.clone();
 
-        let cc = match live.cc.as_mut() {
-            Some(cc) => cc,
-            None => {
-                drop(live);
-                self.sessions.lock().await.remove(key);
-                return Err("live session already closed".into());
-            }
+        let Some(cc) = live.cc.as_mut() else {
+            drop(live);
+            return self
+                .drop_and_remove(key, "live session already closed".into())
+                .await;
         };
 
         if let Err(e) = cc.send_message(question).await {
-            let msg = format!("send failed: {e}");
             drop(live);
-            self.sessions.lock().await.remove(key);
-            return Err(msg);
+            return self.drop_and_remove(key, format!("send failed: {e}")).await;
         }
 
         let timeout = Duration::from_secs(120);
         let result = match tokio::time::timeout(timeout, cc.recv_result()).await {
             Ok(Ok(r)) => r,
             Ok(Err(e)) => {
-                let msg = format!("recv failed: {e}");
                 drop(live);
-                self.sessions.lock().await.remove(key);
-                return Err(msg);
+                return self.drop_and_remove(key, format!("recv failed: {e}")).await;
             }
             Err(_) => {
                 drop(live);
-                self.sessions.lock().await.remove(key);
-                return Err(format!("recv timed out after {timeout:?}"));
+                return self
+                    .drop_and_remove(key, format!("recv timed out after {timeout:?}"))
+                    .await;
             }
         };
 
@@ -209,6 +204,14 @@ impl QaSessionManager {
             self.sessions.lock().await.remove(key);
         }
         Ok(r)
+    }
+
+    /// Remove a session from the map and return an error reason. Used by
+    /// `try_live_followup` when any step (send/recv/timeout) fails — the live
+    /// session is abandoned and the next call falls back to resume.
+    async fn drop_and_remove(&self, key: &str, reason: String) -> Result<QaResult, String> {
+        self.sessions.lock().await.remove(key);
+        Err(reason)
     }
 
     async fn ask_via_resume(
@@ -258,29 +261,27 @@ impl QaSessionManager {
                 .filter_map(|k| sessions.remove(&k))
                 .collect()
         };
-
-        for arc in stale {
-            let mut live = arc.lock().await;
-            info!(module = "scout-qa", session_id = %live.session_id, "expiring stale Q&A session");
-            if let Some(cc) = live.cc.take() {
-                if let Err(e) = cc.close().await {
-                    warn!(module = "scout-qa", error = %e, "failed to close expired CC process");
-                }
-            }
-        }
+        close_sessions(stale, "expiring stale").await;
     }
 
     /// Shut down all active sessions (for graceful shutdown). Closes outside map lock.
     pub async fn shutdown(&self) {
         let all: Vec<Arc<Mutex<LiveSession>>> =
             { self.sessions.lock().await.drain().map(|(_, v)| v).collect() };
-        for arc in all {
-            let mut live = arc.lock().await;
-            info!(module = "scout-qa", session_id = %live.session_id, "shutting down Q&A session");
-            if let Some(cc) = live.cc.take() {
-                if let Err(e) = cc.close().await {
-                    warn!(module = "scout-qa", error = %e, "failed to close CC on shutdown");
-                }
+        close_sessions(all, "shutting down").await;
+    }
+}
+
+/// Close a set of live sessions, logging progress and any errors. Called from
+/// both `expire_stale` and `shutdown` after they've removed the sessions from
+/// the map.
+async fn close_sessions(arcs: Vec<Arc<Mutex<LiveSession>>>, reason: &str) {
+    for arc in arcs {
+        let mut live = arc.lock().await;
+        info!(module = "scout-qa", session_id = %live.session_id, reason, "closing Q&A session");
+        if let Some(cc) = live.cc.take() {
+            if let Err(e) = cc.close().await {
+                warn!(module = "scout-qa", error = %e, reason, "failed to close CC process");
             }
         }
     }
@@ -321,7 +322,7 @@ fn render_first_turn_prompt(
     let raw_note = raw_content_note.unwrap_or("");
     let user_context_rendered = workflow.user_context.render();
 
-    let mut vars = std::collections::HashMap::new();
+    let mut vars: rustc_hash::FxHashMap<&str, &str> = rustc_hash::FxHashMap::default();
     vars.insert("question", question);
     vars.insert("summary", summary);
     vars.insert("article", article);

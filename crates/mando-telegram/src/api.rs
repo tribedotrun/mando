@@ -36,10 +36,27 @@ pub struct BotCommand {
 }
 
 /// Raw HTTP client for the Telegram Bot API.
+///
+/// The bot token is stored separately from the server root so it never ends
+/// up baked into struct fields that could be accidentally logged. URLs are
+/// constructed on demand by [`Self::url`].
 #[derive(Clone)]
 pub struct TelegramApi {
     client: reqwest::Client,
-    base_url: String,
+    /// Scheme + host + optional path, e.g. `"https://api.telegram.org"` in
+    /// production or `"http://127.0.0.1:PORT"` in tests.
+    server_root: String,
+    /// Bot token. Never included in Debug output.
+    token: String,
+}
+
+impl std::fmt::Debug for TelegramApi {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TelegramApi")
+            .field("server_root", &self.server_root)
+            .field("token", &"<redacted>")
+            .finish()
+    }
 }
 
 impl TelegramApi {
@@ -47,7 +64,8 @@ impl TelegramApi {
     pub fn new(token: &str) -> Self {
         Self {
             client: reqwest::Client::new(),
-            base_url: format!("https://api.telegram.org/bot{token}"),
+            server_root: "https://api.telegram.org".to_string(),
+            token: token.to_string(),
         }
     }
 
@@ -59,22 +77,23 @@ impl TelegramApi {
         );
         Ok(Self {
             client: reqwest::Client::new(),
-            base_url: format!("{base_url}/bot{token}"),
+            server_root: base_url.trim_end_matches('/').to_string(),
+            token: token.to_string(),
         })
     }
 
     fn url(&self, method: &str) -> String {
-        format!("{}/{method}", self.base_url)
+        format!("{}/bot{}/{method}", self.server_root, self.token)
     }
 
     /// POST JSON to a Telegram API method with automatic retry on transient errors.
+    ///
+    /// The request body is cloned lazily inside the retry closure so
+    /// single-attempt calls (the hot path) never pay for an unused clone.
     async fn post_with_retry(&self, method: &str, body: &Value) -> Result<Value> {
         let url = self.url(method);
-        let method = method.to_string();
-        let body = body.clone();
         retry_on_transient(&tg_retry_config(), classify_tg_error, || {
             let url = url.clone();
-            let method = method.clone();
             let body = body.clone();
             let client = self.client.clone();
             async move {
@@ -87,7 +106,7 @@ impl TelegramApi {
                     .json()
                     .await
                     .context(format!("{method} response parse failed"))?;
-                resp.into_result(&method)
+                resp.into_result(method)
             }
         })
         .await
@@ -227,13 +246,7 @@ impl TelegramApi {
     ///
     /// `file_path` is the value returned by `getFile` (e.g. "photos/file_42.jpg").
     pub async fn download_file(&self, file_path: &str) -> Result<Vec<u8>> {
-        // self.base_url is "{scheme}://{host}/bot{token}"
-        // We need "{scheme}://{host}/file/bot{token}/{file_path}"
-        let (root, bot_suffix) = self
-            .base_url
-            .split_once("/bot")
-            .ok_or_else(|| anyhow::anyhow!("unexpected base_url format: {}", self.base_url))?;
-        let url = format!("{root}/file/bot{bot_suffix}/{file_path}");
+        let url = format!("{}/file/bot{}/{file_path}", self.server_root, self.token);
         let resp = self
             .client
             .get(&url)

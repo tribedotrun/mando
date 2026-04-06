@@ -298,7 +298,7 @@ async fn handle_tasks(args: TasksArgs) -> anyhow::Result<()> {
 
 async fn handle_health() -> anyhow::Result<()> {
     let client = DaemonClient::discover()?;
-    let health = client.get("/api/health/system").await?;
+    let health = client.get_with_body_on_5xx("/api/health/system").await?;
     let version = health["version"].as_str().unwrap_or("?");
     let pid = health["pid"].as_u64().unwrap_or(0);
     let uptime = health["uptime"].as_u64().unwrap_or(0);

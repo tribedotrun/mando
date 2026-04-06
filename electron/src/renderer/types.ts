@@ -69,25 +69,6 @@ export interface TaskListResponse {
   count: number;
 }
 
-export interface HealthResponse {
-  healthy: boolean;
-  version: string;
-  pid: number;
-  uptime: number;
-  active_workers: number;
-  total_items: number;
-  projects: string[];
-  dataDir: string;
-  configPath: string;
-  taskDbPath: string;
-  workerHealthPath: string;
-  lockfilePath: string;
-  configuredTaskDbPath: string;
-  configuredWorkerHealthPath: string;
-  configuredLockfilePath: string;
-  restartRequired: boolean;
-}
-
 export interface WorkerDetail {
   id: number;
   title: string;
@@ -273,48 +254,8 @@ export interface SSEEvent {
   data?: unknown;
 }
 
-// ── Desktop notification types (matching Rust NotificationPayload) ──
-
-export type NotifyLevel = 'Low' | 'Normal' | 'High' | 'Critical';
-
-type NotificationKind =
-  | { type: 'AwaitingReview'; item_id: string; pr_number?: number }
-  | { type: 'ClarifierNeeded'; item_id: string }
-  | { type: 'RebaseFailed'; item_id: string; pr_number: number }
-  | { type: 'WorkerEscalated'; item_id: string }
-  | { type: 'CaptainReviewVerdict'; item_id: string; verdict: string; feedback?: string }
-  | { type: 'Escalated'; item_id: string; summary?: string }
-  | { type: 'Errored'; item_id: string; error?: string }
-  | { type: 'NeedsClarification'; item_id: string; questions?: string }
-  | { type: 'CronAlert'; action_id: string }
-  | {
-      type: 'RateLimited';
-      status: string;
-      utilization?: number;
-      resets_at?: number;
-      rate_limit_type?: string;
-      overage_status?: string;
-      overage_resets_at?: number;
-      overage_disabled_reason?: string;
-    }
-  | {
-      type: 'ScoutProcessed';
-      scout_id: number;
-      title: string;
-      relevance: number;
-      quality: number;
-      source_name?: string;
-      telegraph_url?: string;
-    }
-  | { type: 'Generic' };
-
-export interface NotificationPayload {
-  message: string;
-  level: NotifyLevel;
-  kind: NotificationKind;
-  task_key?: string;
-  reply_markup?: unknown;
-}
+// ── Desktop notification types (re-exported from shared module) ──
+export type { NotifyLevel, NotificationPayload } from '#shared/notifications';
 
 export interface ScoutItemSession {
   session_id: string;

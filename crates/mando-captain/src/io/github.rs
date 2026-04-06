@@ -1,10 +1,9 @@
 //! GitHub PR operations via `gh` CLI.
 
 use anyhow::{Context, Result};
-use mando_shared::retry::{classify_cli_error, retry_on_transient};
 use std::process::Stdio;
 
-use super::gh_retry_config;
+use super::gh_run::run_gh;
 
 /// PR status from GitHub.
 #[derive(Debug, Clone, Default)]
@@ -23,36 +22,15 @@ pub struct PrStatus {
 
 /// Fetch PR status using `gh pr view`.
 pub(crate) async fn fetch_pr_status(repo: &str, pr_number: &str) -> Result<PrStatus> {
-    let repo = repo.to_string();
-    let pr_number = pr_number.to_string();
-    let text = retry_on_transient(
-        &gh_retry_config(),
-        |e: &anyhow::Error| classify_cli_error(&e.to_string()),
-        || {
-            let repo = repo.clone();
-            let pr_number = pr_number.clone();
-            async move {
-                let output = tokio::process::Command::new("gh")
-                    .args([
-                        "pr",
-                        "view",
-                        &pr_number,
-                        "--repo",
-                        &repo,
-                        "--json",
-                        "number,author,body,headRefOid,statusCheckRollup,comments,files",
-                    ])
-                    .output()
-                    .await
-                    .context("gh pr view")?;
-                if !output.status.success() {
-                    let stderr = String::from_utf8_lossy(&output.stderr);
-                    anyhow::bail!("gh pr view failed: {}", stderr);
-                }
-                Ok(String::from_utf8_lossy(&output.stdout).to_string())
-            }
-        },
-    )
+    let text = run_gh(&[
+        "pr",
+        "view",
+        pr_number,
+        "--repo",
+        repo,
+        "--json",
+        "number,author,body,headRefOid,statusCheckRollup,comments,files",
+    ])
     .await?;
     let val: serde_json::Value = serde_json::from_str(&text).context("parse gh pr view JSON")?;
 
@@ -105,9 +83,9 @@ pub(crate) async fn fetch_pr_status(repo: &str, pr_number: &str) -> Result<PrSta
         .unwrap_or_default();
 
     // Thread counts come from get_pr_review_threads (GraphQL) in fetch_pr_data,
-    // not from gh pr view. Set to zero here — the caller overrides with hygiene data.
+    // not from gh pr view. Set to zero here; the caller overrides with hygiene data.
     Ok(PrStatus {
-        number: pr_number,
+        number: pr_number.to_string(),
         author,
         ci_status,
         comments,
@@ -122,118 +100,32 @@ pub(crate) async fn fetch_pr_status(repo: &str, pr_number: &str) -> Result<PrSta
 
 /// Squash-merge a PR.
 pub async fn merge_pr(repo: &str, pr_number: &str) -> Result<String> {
-    let repo = repo.to_string();
-    let pr_number = pr_number.to_string();
-    retry_on_transient(
-        &gh_retry_config(),
-        |e: &anyhow::Error| classify_cli_error(&e.to_string()),
-        || {
-            let repo = repo.clone();
-            let pr_number = pr_number.clone();
-            async move {
-                let output = tokio::process::Command::new("gh")
-                    .args(["pr", "merge", &pr_number, "--repo", &repo, "--squash"])
-                    .output()
-                    .await
-                    .context("gh pr merge")?;
-                if !output.status.success() {
-                    let stderr = String::from_utf8_lossy(&output.stderr);
-                    anyhow::bail!("gh pr merge failed: {}", stderr);
-                }
-                Ok(String::from_utf8_lossy(&output.stdout).to_string())
-            }
-        },
-    )
-    .await
+    run_gh(&["pr", "merge", pr_number, "--repo", repo, "--squash"]).await
 }
 
-/// Check if a PR is already merged on GitHub.
-pub(crate) async fn is_pr_merged(repo: &str, pr_number: &str) -> bool {
-    let output = tokio::process::Command::new("gh")
-        .args([
-            "pr", "view", pr_number, "--repo", repo, "--json", "state", "-q", ".state",
-        ])
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .output()
-        .await;
-    match output {
-        Ok(o) if o.status.success() => {
-            let state = String::from_utf8_lossy(&o.stdout);
-            state.trim().eq_ignore_ascii_case("MERGED")
-        }
-        Ok(o) => {
-            let stderr = String::from_utf8_lossy(&o.stderr);
-            tracing::warn!(module = "github", %repo, %pr_number, %stderr,
-                "is_pr_merged: gh failed — defaulting to not-merged");
-            false
-        }
-        Err(e) => {
-            tracing::warn!(module = "github", %repo, %pr_number, error = %e,
-                "is_pr_merged: failed to execute gh — defaulting to not-merged");
-            false
-        }
-    }
+/// Check if a PR is already merged on GitHub. Returns an error on gh
+/// failure so callers can distinguish transient failures from "not merged".
+pub(crate) async fn is_pr_merged(repo: &str, pr_number: &str) -> Result<bool> {
+    let state = run_gh(&[
+        "pr", "view", pr_number, "--repo", repo, "--json", "state", "-q", ".state",
+    ])
+    .await?;
+    Ok(state.trim().eq_ignore_ascii_case("MERGED"))
 }
 
 /// Check if branch is ahead of main.
 pub(crate) async fn is_pr_branch_ahead(repo: &str, pr_number: &str) -> Result<bool> {
-    let repo = repo.to_string();
-    let pr_number = pr_number.to_string();
-    retry_on_transient(
-        &gh_retry_config(),
-        |e: &anyhow::Error| classify_cli_error(&e.to_string()),
-        || {
-            let repo = repo.clone();
-            let pr_number = pr_number.clone();
-            async move {
-                let output = tokio::process::Command::new("gh")
-                    .args([
-                        "pr", "view", &pr_number, "--repo", &repo, "--json", "commits",
-                    ])
-                    .output()
-                    .await
-                    .context("gh pr view commits")?;
-                if !output.status.success() {
-                    let stderr = String::from_utf8_lossy(&output.stderr);
-                    anyhow::bail!("gh pr view commits failed: {}", stderr);
-                }
-                let text = String::from_utf8_lossy(&output.stdout);
-                let val: serde_json::Value =
-                    serde_json::from_str(&text).context("parse gh pr view commits JSON")?;
-                let commits = val["commits"].as_array().map(|a| a.len()).unwrap_or(0);
-                Ok(commits > 0)
-            }
-        },
-    )
-    .await
+    let text = run_gh(&["pr", "view", pr_number, "--repo", repo, "--json", "commits"]).await?;
+    let val: serde_json::Value =
+        serde_json::from_str(&text).context("parse gh pr view commits JSON")?;
+    let commits = val["commits"].as_array().map(|a| a.len()).unwrap_or(0);
+    Ok(commits > 0)
 }
 
 /// Close an open PR without merging.
 pub(crate) async fn close_pr(repo: &str, pr_number: &str) -> Result<()> {
-    let repo = repo.to_string();
-    let pr_number = pr_number.to_string();
-    retry_on_transient(
-        &gh_retry_config(),
-        |e: &anyhow::Error| classify_cli_error(&e.to_string()),
-        || {
-            let repo = repo.clone();
-            let pr_number = pr_number.clone();
-            async move {
-                let output = tokio::process::Command::new("gh")
-                    .args(["pr", "close", &pr_number, "--repo", &repo])
-                    .output()
-                    .await
-                    .context("gh pr close")?;
-                if !output.status.success() {
-                    let stderr = String::from_utf8_lossy(&output.stderr);
-                    anyhow::bail!("gh pr close failed: {}", stderr);
-                }
-                Ok(())
-            }
-        },
-    )
-    .await
+    run_gh(&["pr", "close", pr_number, "--repo", repo]).await?;
+    Ok(())
 }
 
 /// Discover an open PR for a branch. Returns the PR URL if found.
@@ -256,11 +148,18 @@ pub(crate) async fn discover_pr_for_branch(repo: &str, branch: &str) -> Option<S
     };
 
     if !output.status.success() {
+        // Stderr is display-only for the log, so lossy is fine here.
         let stderr = String::from_utf8_lossy(&output.stderr);
         tracing::warn!(module = "github", repo = %repo, branch = %branch, stderr = %stderr, "gh pr list failed");
         return None;
     }
-    let text = String::from_utf8_lossy(&output.stdout);
+    let text = match String::from_utf8(output.stdout) {
+        Ok(t) => t,
+        Err(e) => {
+            tracing::warn!(module = "github", repo = %repo, branch = %branch, error = %e, "gh pr list stdout not UTF-8");
+            return None;
+        }
+    };
     let arr: Vec<serde_json::Value> = match serde_json::from_str(&text) {
         Ok(a) => a,
         Err(e) => {

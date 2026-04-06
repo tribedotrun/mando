@@ -252,16 +252,8 @@ async fn handle_list(all: bool) -> anyhow::Result<()> {
 
 async fn handle_pr_summary(item_id: &str) -> anyhow::Result<()> {
     let client = DaemonClient::discover()?;
-    let resp = client.get("/api/tasks").await?;
-    let arr = resp
-        .get("items")
-        .and_then(|v| v.as_array())
-        .or_else(|| resp.as_array());
-
     let id_num = parse_id(item_id, "item")?;
-    let item = arr
-        .and_then(|a| a.iter().find(|it| it["id"].as_i64() == Some(id_num)))
-        .ok_or_else(|| anyhow::anyhow!("item #{item_id} not found"))?;
+    let item = fetch_task_by_id(&client, id_num).await?;
 
     match item["pr"].as_str() {
         Some(pr) => {
@@ -271,6 +263,20 @@ async fn handle_pr_summary(item_id: &str) -> anyhow::Result<()> {
         None => println!("No PR linked to item #{item_id}."),
     }
     Ok(())
+}
+
+/// Fetch all tasks and return the one matching `id_num`. Errors if the item
+/// is not found. The daemon has no single-task-by-id GET endpoint, so we
+/// always list and filter client-side.
+async fn fetch_task_by_id(client: &DaemonClient, id_num: i64) -> anyhow::Result<serde_json::Value> {
+    let resp = client.get("/api/tasks").await?;
+    let arr = resp
+        .get("items")
+        .and_then(|v| v.as_array())
+        .or_else(|| resp.as_array());
+    arr.and_then(|a| a.iter().find(|it| it["id"].as_i64() == Some(id_num)))
+        .cloned()
+        .ok_or_else(|| anyhow::anyhow!("item #{id_num} not found"))
 }
 
 async fn handle_ask(item_id: &str, message: Option<&str>, end: bool) -> anyhow::Result<()> {
@@ -326,16 +332,7 @@ async fn handle_input(item_id: &str, message: &str) -> anyhow::Result<()> {
     let client = DaemonClient::discover()?;
 
     // Fetch current item status.
-    let resp = client.get("/api/tasks").await?;
-    let arr = resp
-        .get("items")
-        .and_then(|v| v.as_array())
-        .or_else(|| resp.as_array());
-
-    let item = arr
-        .and_then(|a| a.iter().find(|it| it["id"].as_i64() == Some(id_num)))
-        .ok_or_else(|| anyhow::anyhow!("item #{item_id} not found"))?;
-
+    let item = fetch_task_by_id(&client, id_num).await?;
     let status = item["status"].as_str().unwrap_or("");
 
     match status {

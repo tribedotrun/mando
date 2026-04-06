@@ -3,10 +3,10 @@
 //! Sends prompt via stdin, waits for result, closes stdin.
 //! Hooks still work (stdin open until result arrives).
 
-use anyhow::Result;
 use tracing::{info, warn};
 
 use crate::config::CcConfig;
+use crate::error::CcError;
 use crate::CcResult;
 
 /// Single-turn CC invocation.
@@ -17,7 +17,7 @@ impl CcOneShot {
     ///
     /// Sends prompt via stdin (not `-p`), waits for result, returns typed output.
     /// Hooks work because stdin stays open until the result message arrives.
-    pub async fn run(prompt: &str, config: CcConfig) -> Result<CcResult> {
+    pub async fn run(prompt: &str, config: CcConfig) -> Result<CcResult, CcError> {
         Self::run_with_pid_hook(prompt, config, |_| {}).await
     }
 
@@ -28,16 +28,17 @@ impl CcOneShot {
     pub async fn run_with_pid_hook(
         prompt: &str,
         config: CcConfig,
-        on_spawn: impl FnOnce(u32),
-    ) -> Result<CcResult> {
+        on_spawn: impl FnOnce(mando_types::Pid),
+    ) -> Result<CcResult, CcError> {
         let timeout = config.timeout;
         let caller = config.caller.clone();
 
         let mut session = crate::CcSession::spawn(config).await?;
         on_spawn(session.pid());
 
-        // Send the prompt.
-        session.send_message(prompt).await?;
+        // Send the prompt. Internal helpers still use anyhow::Result;
+        // normalize into CcError::Other at the public boundary.
+        session.send_message(prompt).await.map_err(CcError::Other)?;
 
         // Wait for result with timeout.
         let result = match tokio::time::timeout(timeout, session.recv_result()).await {
@@ -46,7 +47,7 @@ impl CcOneShot {
                 crate::update_stream_meta_status(session.session_id(), "failed", None);
                 // Close cleanly before propagating.
                 let _ = session.close().await;
-                return Err(e);
+                return Err(CcError::Other(e));
             }
             Err(_) => {
                 // Timeout — kill and bail.
@@ -62,14 +63,16 @@ impl CcOneShot {
                     "oneshot timed out"
                 );
 
-                crate::process::kill_process(session.pid()).await?;
+                crate::process::kill_process(session.pid())
+                    .await
+                    .map_err(CcError::Other)?;
 
-                anyhow::bail!(
+                return Err(CcError::Other(anyhow::anyhow!(
                     "oneshot timed out after {}s (session={}, stream={})",
                     timeout.as_secs(),
                     session_id,
                     stream_path.display()
-                );
+                )));
             }
         };
 

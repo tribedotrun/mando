@@ -44,31 +44,25 @@ const MIN_CONTENT_CHARS: usize = 200;
 
 /// Fetch and extract readable article content from a URL.
 pub async fn fetch_content(url: &str) -> Result<String> {
-    // Tweet status URLs: try oEmbed, degrade gracefully if it fails.
-    // Firecrawl blocks X, so there's no viable fallback — return a stub.
+    // Tweet status URLs: oEmbed is the only viable path. Firecrawl blocks X,
+    // so there is no fallback — return the error instead of a stub that would
+    // be scored and summarized as if it were real content.
     if is_tweet_status_url(url) {
-        match fetch_twitter(url).await {
-            Ok(content) => return Ok(content),
-            Err(e) => {
-                warn!(url, error = %e, "oEmbed failed, returning stub");
-                return Ok(format!("Tweet (content unavailable): {url}"));
-            }
-        }
+        return fetch_twitter(url)
+            .await
+            .with_context(|| format!("oEmbed failed for tweet {url}"));
     }
 
-    // YouTube URLs → transcript via yt-dlp → firecrawl fallback → stub.
+    // YouTube URLs → transcript via yt-dlp → firecrawl fallback.
+    // Return the underlying error if both fail; never synthesize a stub.
     if is_youtube_url(url) {
         match crate::runtime::youtube::extract_youtube_transcript(url).await {
             Ok(content) => return Ok(content),
             Err(e) => {
                 warn!(url, error = %e, "yt-dlp failed, trying firecrawl");
-                match firecrawl_fallback(url).await {
-                    Ok(content) => return Ok(content),
-                    Err(e2) => {
-                        warn!(url, error = %e2, "firecrawl fallback failed, returning stub");
-                        return Ok(format!("YouTube video (transcript unavailable): {url}"));
-                    }
-                }
+                return firecrawl_fallback(url).await.with_context(|| {
+                    format!("yt-dlp and firecrawl both failed for YouTube {url}")
+                });
             }
         }
     }
@@ -91,11 +85,26 @@ fn is_youtube_url(url: &str) -> bool {
 }
 
 fn is_twitter_url(url: &str) -> bool {
-    let lower = url.to_lowercase();
-    lower.contains("://x.com/")
-        || lower.contains("://www.x.com/")
-        || lower.contains("://twitter.com/")
-        || lower.contains("://www.twitter.com/")
+    const TWITTER_HOSTS: &[&str] = &["x.com", "www.x.com", "twitter.com", "www.twitter.com"];
+    let Some(host) = extract_host(url) else {
+        return false;
+    };
+    TWITTER_HOSTS.contains(&host.to_lowercase().as_str())
+}
+
+/// Extract the host component from an `http(s)://host/...` URL. Returns `None`
+/// for relative URLs or anything without a scheme.
+fn extract_host(url: &str) -> Option<&str> {
+    let after_scheme = url.split_once("://")?.1;
+    let end = after_scheme
+        .find(['/', '?', '#'])
+        .unwrap_or(after_scheme.len());
+    let host = &after_scheme[..end];
+    if host.is_empty() {
+        None
+    } else {
+        Some(host)
+    }
 }
 
 /// True for tweet/status URLs only — NOT for x.com articles or other content.

@@ -268,16 +268,45 @@ pub(crate) async fn post_worktrees_cleanup(
     // Collect tracked worktrees from ALL projects first to avoid cross-project deletions.
     let mut all_tracked = std::collections::HashSet::new();
     let mut project_prefixes = Vec::new();
+    let mut prune_errors: Vec<Value> = Vec::new();
     for pc in config.captain.projects.values() {
         let project_path = mando_config::expand_tilde(&pc.path);
         let prefix = format!("{}-", repo_dir_name(&project_path));
 
         if !body.dry_run {
-            let _ = tokio::process::Command::new("git")
+            let out = tokio::process::Command::new("git")
                 .args(["worktree", "prune"])
                 .current_dir(&project_path)
                 .output()
                 .await;
+            match out {
+                Ok(o) if o.status.success() => {}
+                Ok(o) => {
+                    let stderr = String::from_utf8_lossy(&o.stderr).trim().to_string();
+                    tracing::warn!(
+                        module = "worktrees",
+                        project = %pc.name,
+                        stderr = %stderr,
+                        "git worktree prune (cleanup) failed"
+                    );
+                    prune_errors.push(json!({
+                        "project": pc.name,
+                        "error": stderr,
+                    }));
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        module = "worktrees",
+                        project = %pc.name,
+                        error = %e,
+                        "git worktree prune (cleanup) failed"
+                    );
+                    prune_errors.push(json!({
+                        "project": pc.name,
+                        "error": e.to_string(),
+                    }));
+                }
+            }
         }
 
         match git::list_worktrees(&project_path).await {
@@ -296,14 +325,30 @@ pub(crate) async fn post_worktrees_cleanup(
         }
     }
 
-    // Scan central worktrees directory once.
+    // Scan central worktrees directory once. A real read_dir failure is a 500:
+    // silently returning an empty orphans list hides the problem.
     let wt_dir = git::worktrees_dir();
     let mut entries = match tokio::fs::read_dir(&wt_dir).await {
         Ok(e) => e,
-        Err(_) => {
-            return Ok(Json(
-                json!({"ok": true, "orphans": orphans, "removed": removed}),
-            ))
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(Json(json!({
+                "ok": true,
+                "orphans": orphans,
+                "removed": removed,
+                "prune_errors": prune_errors,
+            })));
+        }
+        Err(e) => {
+            tracing::error!(
+                module = "worktrees",
+                dir = %wt_dir.display(),
+                error = %e,
+                "failed to read worktrees dir"
+            );
+            return Err(error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                &format!("read_dir {} failed: {e}", wt_dir.display()),
+            ));
         }
     };
 
@@ -344,5 +389,6 @@ pub(crate) async fn post_worktrees_cleanup(
         "ok": true,
         "orphans": orphans,
         "removed": removed,
+        "prune_errors": prune_errors,
     })))
 }

@@ -5,7 +5,7 @@ use axum::http::StatusCode;
 use axum::Json;
 use serde_json::{json, Value};
 
-use crate::response::error_response;
+use crate::response::{error_response, internal_error};
 use crate::AppState;
 
 /// Resolve (repo, pr_number) from a PR ref + project name via config.
@@ -35,7 +35,7 @@ pub(crate) async fn get_task_history(
 
     let entries = mando_db::queries::ask_history::load(pool, task_id)
         .await
-        .unwrap_or_default();
+        .map_err(internal_error)?;
 
     Ok(Json(json!({ "history": entries })))
 }
@@ -47,7 +47,7 @@ pub(crate) async fn get_task_timeline(
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let store = state.task_store.read().await;
     let id_num: i64 = resolve_task_id(&id)?;
-    let full_item = store.find_by_id(id_num).await.unwrap_or(None);
+    let full_item = store.find_by_id(id_num).await.map_err(internal_error)?;
     let pool = store.pool().clone();
     let item_ref = full_item.as_ref();
 
@@ -77,7 +77,10 @@ pub(crate) async fn get_task_sessions(
     let _id_num: i64 = resolve_task_id(&id)?;
     let store = state.task_store.read().await;
 
-    let sessions = store.list_sessions_for_task(&id).await;
+    let sessions = store
+        .list_sessions_for_task(&id)
+        .await
+        .map_err(internal_error)?;
 
     let matched: Vec<Value> = sessions
         .into_iter()
@@ -107,48 +110,47 @@ pub(crate) async fn get_task_pr_summary(
     Path(id): Path<String>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     // Read store, extract what we need, then drop the guard before network I/O.
-    let (pr_ref, project, found) = {
+    let (pr_ref, project) = {
         let store = state.task_store.read().await;
         let id_num: i64 = resolve_task_id(&id)?;
-        match store.find_by_id(id_num).await.unwrap_or(None) {
-            Some(it) => (it.pr.clone().unwrap_or_default(), it.project.clone(), true),
-            None => (String::new(), None, false),
-        }
+        let item = store
+            .find_by_id(id_num)
+            .await
+            .map_err(internal_error)?
+            .ok_or_else(|| {
+                error_response(StatusCode::NOT_FOUND, &format!("item {id} not found"))
+            })?;
+        (item.pr.clone().unwrap_or_default(), item.project.clone())
     };
-
-    if !found {
-        return Err(error_response(
-            StatusCode::NOT_FOUND,
-            &format!("item {id} not found"),
-        ));
-    }
 
     // Fetch PR body outside the read lock.
     let config = state.config.load();
-    let summary = if let Some((repo, num)) = resolve_pr(&pr_ref, project.as_deref(), &config) {
-        match mando_captain::io::github_pr::get_pr_body(&repo, num).await {
-            Ok(body) if !body.is_empty() => Some(body),
-            Ok(_) => None,
-            Err(e) => {
-                tracing::warn!(
-                    task_id = %id,
-                    pr = %pr_ref,
-                    error = %e,
-                    "failed to fetch PR body from GitHub"
-                );
-                None
+    let (summary, summary_error) =
+        if let Some((repo, num)) = resolve_pr(&pr_ref, project.as_deref(), &config) {
+            match mando_captain::io::github_pr::get_pr_body(&repo, num).await {
+                Ok(body) if !body.is_empty() => (Some(body), None),
+                Ok(_) => (None, None),
+                Err(e) => {
+                    tracing::warn!(
+                        task_id = %id,
+                        pr = %pr_ref,
+                        error = %e,
+                        "failed to fetch PR body from GitHub"
+                    );
+                    (None, Some(e.to_string()))
+                }
             }
-        }
-    } else {
-        if !pr_ref.is_empty() {
-            tracing::debug!(pr = %pr_ref, "cannot resolve PR repo, skipping body fetch");
-        }
-        None
-    };
+        } else {
+            if !pr_ref.is_empty() {
+                tracing::debug!(pr = %pr_ref, "cannot resolve PR repo, skipping body fetch");
+            }
+            (None, None)
+        };
 
     Ok(Json(json!({
         "id": id,
         "pr": pr_ref,
         "summary": summary,
+        "summary_error": summary_error,
     })))
 }

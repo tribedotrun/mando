@@ -4,6 +4,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 use mando_config::workflow::ScoutWorkflow;
+use rustc_hash::FxHashMap;
 
 /// Research result — a list of discovered links.
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
@@ -28,7 +29,7 @@ pub async fn run_research(topic: &str, workflow: &ScoutWorkflow) -> Result<Resea
 
     let user_context_rendered = workflow.user_context.render();
 
-    let mut vars = std::collections::HashMap::new();
+    let mut vars: FxHashMap<&str, &str> = FxHashMap::default();
     vars.insert("topic", topic);
     vars.insert("interests_high", interests_high.as_str());
     vars.insert("user_context", user_context_rendered.as_str());
@@ -67,10 +68,9 @@ pub async fn run_research(topic: &str, workflow: &ScoutWorkflow) -> Result<Resea
     .await?;
 
     if let Some(structured) = result.structured {
-        let parsed: ResearchResult = serde_json::from_value(structured).unwrap_or_else(|e| {
-            tracing::warn!(error = %e, "failed to parse LLM structured output, using empty result");
-            ResearchResult::default()
-        });
+        let parsed: ResearchResult = serde_json::from_value(structured).map_err(|e| {
+            anyhow::anyhow!("failed to parse LLM structured output for research: {e}")
+        })?;
         return Ok(parsed);
     }
     let parsed: ResearchResult = mando_captain::biz::json_parse::parse_llm_json_as(&result.text)?;

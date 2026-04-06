@@ -1,5 +1,7 @@
 //! Task lifecycle-action route handlers (accept, cancel, reopen, rework, handoff).
 
+use std::future::Future;
+
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::Json;
@@ -21,6 +23,25 @@ pub(crate) struct FeedbackBody {
     pub feedback: String,
 }
 
+/// Shared wrapper for simple task actions that take a task store and an id,
+/// return `anyhow::Result<()>`, and emit a `Tasks` bus event on success.
+async fn simple_task_action<Fut>(
+    state: &AppState,
+    id: i64,
+    action: &'static str,
+    work: Fut,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)>
+where
+    Fut: Future<Output = anyhow::Result<()>>,
+{
+    work.await.map_err(internal_error)?;
+    state.bus.send(
+        mando_types::BusEvent::Tasks,
+        Some(json!({"action": action, "id": id})),
+    );
+    Ok(Json(json!({"ok": true})))
+}
+
 /// POST /api/tasks/accept
 pub(crate) async fn post_task_accept(
     State(state): State<AppState>,
@@ -28,19 +49,13 @@ pub(crate) async fn post_task_accept(
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let id = body.id;
     let store = state.task_store.read().await;
-    match mando_captain::runtime::dashboard::accept_item(&store, id).await {
-        Ok(()) => {
-            state.bus.send(
-                mando_types::BusEvent::Tasks,
-                Some(json!({"action": "accept"})),
-            );
-            Ok(Json(json!({"ok": true})))
-        }
-        Err(e) => Err(error_response(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            &e.to_string(),
-        )),
-    }
+    simple_task_action(
+        &state,
+        id,
+        "accept",
+        mando_captain::runtime::dashboard::accept_item(&store, id),
+    )
+    .await
 }
 
 /// POST /api/tasks/cancel
@@ -51,19 +66,13 @@ pub(crate) async fn post_task_cancel(
     let id = body.id;
     let store = state.task_store.read().await;
     let pool = state.db.pool();
-    match mando_captain::runtime::dashboard::cancel_item(&store, id, pool).await {
-        Ok(()) => {
-            state.bus.send(
-                mando_types::BusEvent::Tasks,
-                Some(json!({"action": "cancel"})),
-            );
-            Ok(Json(json!({"ok": true})))
-        }
-        Err(e) => Err(error_response(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            &e.to_string(),
-        )),
-    }
+    simple_task_action(
+        &state,
+        id,
+        "cancel",
+        mando_captain::runtime::dashboard::cancel_item(&store, id, pool),
+    )
+    .await
 }
 
 /// POST /api/tasks/reopen
@@ -127,7 +136,7 @@ pub(crate) async fn post_task_reopen(
             }
         }
     };
-    mando_captain::runtime::timeline_emit::emit_for_task(
+    let _ = mando_captain::runtime::timeline_emit::emit_for_task(
         &item,
         mando_types::timeline::TimelineEventType::HumanReopen,
         &summary,
@@ -159,7 +168,7 @@ pub(crate) async fn post_task_reopen(
                 format!("Spawned {}", item.worker.as_deref().unwrap_or("worker")),
             )
         };
-        mando_captain::runtime::timeline_emit::emit_for_task(
+        let _ = mando_captain::runtime::timeline_emit::emit_for_task(
             &item,
             evt,
             &summary,
@@ -200,34 +209,30 @@ pub(crate) async fn post_task_rework(
     crate::routes_task_ask::close_ask_session(&state, id).await;
 
     let store = state.task_store.write().await;
-    match mando_captain::runtime::dashboard::rework_item(&store, id, &body.feedback).await {
-        Ok(()) => {
-            let summary = if body.feedback.is_empty() {
-                "Rework requested".to_string()
-            } else {
-                format!("Rework requested: {}", body.feedback)
-            };
-            if let Some(item) = store.find_by_id(id).await.unwrap_or(None) {
-                mando_captain::runtime::timeline_emit::emit_for_task(
-                    &item,
-                    mando_types::timeline::TimelineEventType::ReworkRequested,
-                    &summary,
-                    json!({"content": &body.feedback}),
-                    store.pool(),
-                )
-                .await;
-            }
-            state.bus.send(
-                mando_types::BusEvent::Tasks,
-                Some(json!({"action": "rework"})),
-            );
-            Ok(Json(json!({"ok": true})))
-        }
-        Err(e) => Err(error_response(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            &e.to_string(),
-        )),
+    mando_captain::runtime::dashboard::rework_item(&store, id, &body.feedback)
+        .await
+        .map_err(internal_error)?;
+
+    let summary = if body.feedback.is_empty() {
+        "Rework requested".to_string()
+    } else {
+        format!("Rework requested: {}", body.feedback)
+    };
+    if let Some(item) = store.find_by_id(id).await.map_err(internal_error)? {
+        let _ = mando_captain::runtime::timeline_emit::emit_for_task(
+            &item,
+            mando_types::timeline::TimelineEventType::ReworkRequested,
+            &summary,
+            json!({"content": &body.feedback}),
+            store.pool(),
+        )
+        .await;
     }
+    state.bus.send(
+        mando_types::BusEvent::Tasks,
+        Some(json!({"action": "rework"})),
+    );
+    Ok(Json(json!({"ok": true})))
 }
 
 /// POST /api/tasks/retry — re-trigger CaptainReviewing for Errored items.
@@ -237,29 +242,24 @@ pub(crate) async fn post_task_retry(
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let id = body.id;
     let store = state.task_store.read().await;
-    match mando_captain::runtime::dashboard::retry_item(&store, id).await {
-        Ok(()) => {
-            if let Some(item) = store.find_by_id(id).await.unwrap_or(None) {
-                mando_captain::runtime::timeline_emit::emit_for_task(
-                    &item,
-                    mando_types::timeline::TimelineEventType::StatusChanged,
-                    "Retried — re-entering captain review",
-                    json!({"from": "errored", "to": "captain-reviewing"}),
-                    store.pool(),
-                )
-                .await;
-            }
-            state.bus.send(
-                mando_types::BusEvent::Tasks,
-                Some(json!({"action": "retry"})),
-            );
-            Ok(Json(json!({"ok": true})))
-        }
-        Err(e) => Err(error_response(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            &e.to_string(),
-        )),
+    mando_captain::runtime::dashboard::retry_item(&store, id)
+        .await
+        .map_err(internal_error)?;
+    if let Some(item) = store.find_by_id(id).await.map_err(internal_error)? {
+        let _ = mando_captain::runtime::timeline_emit::emit_for_task(
+            &item,
+            mando_types::timeline::TimelineEventType::StatusChanged,
+            "Retried — re-entering captain review",
+            json!({"from": "errored", "to": "captain-reviewing"}),
+            store.pool(),
+        )
+        .await;
     }
+    state.bus.send(
+        mando_types::BusEvent::Tasks,
+        Some(json!({"action": "retry"})),
+    );
+    Ok(Json(json!({"ok": true})))
 }
 
 /// Shared logic for archive/unarchive: call a DB function returning `Result<bool>`,
@@ -327,17 +327,11 @@ pub(crate) async fn post_task_handoff(
     let id = body.id;
     let store = state.task_store.read().await;
     let pool = state.db.pool();
-    match mando_captain::runtime::dashboard::handoff_item(&store, id, pool).await {
-        Ok(()) => {
-            state.bus.send(
-                mando_types::BusEvent::Tasks,
-                Some(json!({"action": "handoff"})),
-            );
-            Ok(Json(json!({"ok": true})))
-        }
-        Err(e) => Err(error_response(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            &e.to_string(),
-        )),
-    }
+    simple_task_action(
+        &state,
+        id,
+        "handoff",
+        mando_captain::runtime::dashboard::handoff_item(&store, id, pool),
+    )
+    .await
 }

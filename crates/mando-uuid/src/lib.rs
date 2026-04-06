@@ -4,34 +4,42 @@ use std::fmt;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Uuid([u8; 16]);
 
-/// Errors that can occur when parsing a UUID string.
-#[cfg(test)]
+/// Errors that can occur when generating or parsing a UUID.
 #[derive(Debug)]
 pub enum UuidError {
+    /// CSPRNG was unavailable — platform-level failure.
+    Rng(getrandom::Error),
+    #[cfg(test)]
     InvalidLength,
+    #[cfg(test)]
     InvalidFormat,
+    #[cfg(test)]
     InvalidHex,
 }
 
-#[cfg(test)]
 impl fmt::Display for UuidError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            UuidError::Rng(e) => write!(f, "failed to read random bytes from CSPRNG: {e}"),
+            #[cfg(test)]
             UuidError::InvalidLength => write!(f, "invalid UUID length"),
+            #[cfg(test)]
             UuidError::InvalidFormat => write!(f, "invalid UUID format (expected 8-4-4-4-12)"),
+            #[cfg(test)]
             UuidError::InvalidHex => write!(f, "invalid hex character in UUID"),
         }
     }
 }
 
-#[cfg(test)]
 impl std::error::Error for UuidError {}
 
 impl Uuid {
-    /// Generate a random v4 UUID using CSPRNG.
-    pub fn v4() -> Uuid {
+    /// Generate a random v4 UUID using the OS CSPRNG. Returns an error if
+    /// the platform's CSPRNG is unavailable; callers that cannot proceed
+    /// without an id should propagate this error rather than panicking.
+    pub fn try_v4() -> Result<Uuid, UuidError> {
         let mut bytes = [0u8; 16];
-        getrandom::getrandom(&mut bytes).expect("failed to get random bytes");
+        getrandom::getrandom(&mut bytes).map_err(UuidError::Rng)?;
 
         // Set version nibble to 4 (byte 6: top 4 bits = 0100).
         bytes[6] = (bytes[6] & 0x0F) | 0x40;
@@ -39,7 +47,16 @@ impl Uuid {
         // Set variant bits to 10xx (byte 8: top 2 bits = 10).
         bytes[8] = (bytes[8] & 0x3F) | 0x80;
 
-        Uuid(bytes)
+        Ok(Uuid(bytes))
+    }
+
+    /// Generate a random v4 UUID, panicking on CSPRNG failure.
+    ///
+    /// Preserved for call sites where a CSPRNG failure is genuinely fatal
+    /// (tick id, auth token bootstrap, test fixtures). Prefer `try_v4`
+    /// in request-scoped paths where propagating an error is feasible.
+    pub fn v4() -> Uuid {
+        Self::try_v4().expect("failed to get random bytes from CSPRNG")
     }
 
     /// Parse a UUID from the standard `8-4-4-4-12` hex string.
@@ -71,11 +88,13 @@ impl Uuid {
     }
 
     /// Return the raw 16-byte array.
+    #[must_use]
     pub fn as_bytes(&self) -> &[u8; 16] {
         &self.0
     }
 
     /// Short 8-character hex identifier (first 4 bytes) for log correlation.
+    #[must_use]
     pub fn short(&self) -> String {
         let b = &self.0;
         format!("{:02x}{:02x}{:02x}{:02x}", b[0], b[1], b[2], b[3])

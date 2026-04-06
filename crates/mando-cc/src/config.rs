@@ -98,8 +98,6 @@ pub struct CcConfig {
     pub worker_name: String,
     pub project: String,
     pub extra_args: HashMap<String, Option<String>>,
-    /// Hooks for the control protocol (PreToolUse, PostToolUse, etc.).
-    pub hooks: Vec<crate::hooks::Hook>,
 }
 
 impl Default for CcConfig {
@@ -134,7 +132,6 @@ impl Default for CcConfig {
             worker_name: String::new(),
             project: String::new(),
             extra_args: HashMap::new(),
-            hooks: Vec::new(),
         }
     }
 }
@@ -235,6 +232,7 @@ impl CcConfigBuilder {
 }
 
 impl CcConfig {
+    #[must_use]
     pub fn builder() -> CcConfigBuilder {
         CcConfigBuilder::new()
     }

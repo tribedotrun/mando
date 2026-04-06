@@ -15,14 +15,28 @@ struct RebaseRow {
 }
 
 impl RebaseRow {
-    fn into_state(self) -> RebaseState {
-        RebaseState {
+    fn into_state(self) -> Result<RebaseState> {
+        let status = self.status.parse().map_err(|e| {
+            tracing::error!(
+                module = "rebase-db",
+                task_id = self.task_id,
+                status = %self.status,
+                error = %e,
+                "failed to parse rebase status",
+            );
+            anyhow::anyhow!(
+                "rebase row {} has invalid status {:?}: {e}",
+                self.task_id,
+                self.status,
+            )
+        })?;
+        Ok(RebaseState {
             task_id: self.task_id,
             worker: self.worker,
-            status: self.status.parse().unwrap_or_default(),
+            status,
             retries: self.retries,
             head_sha: self.head_sha,
-        }
+        })
     }
 }
 
@@ -33,7 +47,7 @@ pub async fn get(pool: &SqlitePool, task_id: i64) -> Result<Option<RebaseState>>
             .bind(task_id)
             .fetch_optional(pool)
             .await?;
-    Ok(row.map(|r| r.into_state()))
+    row.map(|r| r.into_state()).transpose()
 }
 
 /// Upsert rebase state for a task.
@@ -71,5 +85,5 @@ pub async fn all(pool: &SqlitePool) -> Result<Vec<RebaseState>> {
     let rows: Vec<RebaseRow> = sqlx::query_as("SELECT * FROM task_rebase_state")
         .fetch_all(pool)
         .await?;
-    Ok(rows.into_iter().map(|r| r.into_state()).collect())
+    rows.into_iter().map(|r| r.into_state()).collect()
 }

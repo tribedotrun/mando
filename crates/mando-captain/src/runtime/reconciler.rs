@@ -7,8 +7,20 @@ use crate::io::ops_log::{self, OpsLog};
 use crate::io::task_store::TaskStore;
 
 pub async fn reconcile_on_startup(config: &Config, pool: &sqlx::SqlitePool) -> Result<()> {
-    reconcile_orphaned_worktrees(config, pool).await;
+    let orphan_report = reconcile_orphaned_worktrees(config, pool).await;
+    if orphan_report.has_problems() {
+        tracing::warn!(
+            module = "reconciler",
+            load_tasks_error = ?orphan_report.load_tasks_error,
+            list_worktrees_errors = ?orphan_report.list_worktrees_errors,
+            read_dir_error = ?orphan_report.read_dir_error,
+            removed = orphan_report.removed.len(),
+            remove_errors = ?orphan_report.remove_errors,
+            "orphaned-worktree reconcile completed with problems"
+        );
+    }
     reconcile_worker_timeouts(pool).await;
+    reconcile_session_costs(pool).await;
 
     let log_path = ops_log::ops_log_path();
     let mut log = ops_log::load_ops_log(&log_path);
@@ -105,104 +117,89 @@ async fn reconcile_worker_timeouts(pool: &sqlx::SqlitePool) {
     }
 }
 
-async fn reconcile_orphaned_worktrees(config: &Config, pool: &sqlx::SqlitePool) {
-    let store = TaskStore::new(pool.clone());
-
-    let mut tracked: std::collections::HashSet<std::path::PathBuf> =
-        std::collections::HashSet::new();
-    let tasks = match store.load_all().await {
-        Ok(tasks) => tasks,
+/// Backfill cost/duration for sessions that were interrupted before
+/// `log_cc_result` ran. Reads the stream `.meta.json` sidecar for each
+/// session with NULL cost and applies any cost/duration found there.
+/// Uses set-if-null semantics so repeated startups never double-count.
+async fn reconcile_session_costs(pool: &sqlx::SqlitePool) {
+    let sessions = match mando_db::queries::sessions::list_sessions_missing_cost(pool).await {
+        Ok(rows) => rows,
         Err(e) => {
-            tracing::error!(
-                module = "reconciler",
-                error = %e,
-                "failed to load tasks — skipping orphan worktree cleanup to avoid destroying work"
-            );
+            tracing::error!(module = "reconciler", error = %e,
+                    "failed to load sessions — skipping cost reconciliation");
             return;
         }
     };
-    for task in tasks {
-        if let Some(ref wt) = task.worktree {
-            tracked.insert(mando_config::expand_tilde(wt));
-        }
-    }
 
-    // Collect git-tracked worktrees from ALL projects before cleanup,
-    // so we never delete a worktree that belongs to another project.
-    let mut all_git_tracked = std::collections::HashSet::new();
-    let mut project_prefixes = Vec::new();
-    for project_cfg in config.captain.projects.values() {
-        let project_path = mando_config::expand_tilde(&project_cfg.path);
-        let repo_name = project_path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("repo")
-            .to_string();
-        match crate::io::git::list_worktrees(&project_path).await {
-            Ok(paths) => {
-                all_git_tracked.extend(paths);
-                project_prefixes.push((project_path, format!("{repo_name}-")));
-            }
+    let mut count = 0u32;
+    for session in &sessions {
+        let meta_path = mando_config::stream_meta_path_for_session(&session.session_id);
+        let data = match std::fs::read_to_string(&meta_path) {
+            Ok(d) => d,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
             Err(e) => {
-                tracing::error!(
-                    module = "reconciler",
-                    project = %project_path.display(),
-                    error = %e,
-                    "failed to list git worktrees — skipping orphan cleanup for this project"
-                );
+                tracing::warn!(module = "reconciler", session_id = %session.session_id,
+                    error = %e, "failed to read stream meta");
+                continue;
             }
-        }
-    }
-
-    let worktrees_dir = crate::io::git::worktrees_dir();
-    if !worktrees_dir.is_dir() {
-        return;
-    }
-    let mut entries = match tokio::fs::read_dir(&worktrees_dir).await {
-        Ok(e) => e,
-        Err(e) => {
-            tracing::warn!(
-                module = "reconciler",
-                path = %worktrees_dir.display(),
-                error = %e,
-                "failed to read worktrees directory"
-            );
-            return;
-        }
-    };
-
-    while let Ok(Some(entry)) = entries.next_entry().await {
-        let path = entry.path();
-        if !path.is_dir() {
-            continue;
-        }
-        let dir_name = entry.file_name().to_string_lossy().to_string();
-        // Find the owning project (longest prefix wins).
-        let owner = project_prefixes
-            .iter()
-            .filter(|(_, pfx)| dir_name.starts_with(pfx.as_str()))
-            .max_by_key(|(_, pfx)| pfx.len());
-        let Some((project_path, _)) = owner else {
-            continue;
         };
-        if tracked.contains(&path) || all_git_tracked.contains(&path) {
+        let val: serde_json::Value = match serde_json::from_str(&data) {
+            Ok(v) => v,
+            Err(e) => {
+                tracing::warn!(module = "reconciler", session_id = %session.session_id,
+                    error = %e, "corrupt stream meta sidecar");
+                continue;
+            }
+        };
+        let status = val["status"].as_str().unwrap_or("");
+        if status != "done" {
             continue;
         }
-        match crate::io::git::remove_worktree(project_path, &path).await {
-            Ok(_) => tracing::info!(
-                module = "reconciler",
-                path = %path.display(),
-                "removed orphaned worktree on startup"
-            ),
-            Err(e) => tracing::warn!(
-                module = "reconciler",
-                path = %path.display(),
-                error = %e,
-                "failed to remove orphaned worktree"
-            ),
+        let cost = val["cost_usd"].as_f64();
+        if cost.is_none() {
+            continue;
         }
+        // Compute duration from started_at / finished_at in the meta.
+        let duration_ms = (|| {
+            let started = time::OffsetDateTime::parse(
+                val["started_at"].as_str()?,
+                &time::format_description::well_known::Rfc3339,
+            )
+            .ok()?;
+            let finished = time::OffsetDateTime::parse(
+                val["finished_at"].as_str()?,
+                &time::format_description::well_known::Rfc3339,
+            )
+            .ok()?;
+            let dur = finished - started;
+            Some((dur.whole_milliseconds().max(0)) as i64)
+        })();
+
+        if let Err(e) = mando_db::queries::sessions::update_session_status_with_cost(
+            pool,
+            &session.session_id,
+            mando_types::SessionStatus::Stopped,
+            cost,
+            duration_ms,
+        )
+        .await
+        {
+            tracing::warn!(module = "reconciler", session_id = %session.session_id, error = %e,
+                "failed to backfill session cost");
+        } else {
+            count += 1;
+        }
+    }
+    if count > 0 {
+        tracing::info!(
+            module = "reconciler",
+            count,
+            "backfilled session costs from stream meta"
+        );
     }
 }
+
+use super::reconciler_orphans::reconcile_orphaned_worktrees;
 
 async fn reconcile_merge(
     log: &mut OpsLog,
@@ -288,10 +285,22 @@ async fn reconcile_merge(
 
     if !ops_log::is_step_done(log, op_id, "update_task") {
         let store = TaskStore::new(pool.clone());
-        let item_id_num: i64 = item_id.parse().unwrap_or_else(|e| {
-            tracing::warn!(raw = item_id, error = %e, "invalid item_id in merge ops log, falling back to PR lookup");
-            0
-        });
+        let item_id_num: i64 = match item_id.parse() {
+            Ok(n) => n,
+            Err(e) => {
+                tracing::error!(
+                    module = "reconciler",
+                    op_id = %op_id,
+                    raw = item_id,
+                    error = %e,
+                    "corrupt item_id in merge ops log; leaving WAL entry for manual review, not completing op"
+                );
+                // Do NOT coerce to 0 and complete the op. Leave the WAL entry
+                // alone so the next reconcile pass (or an operator) can see
+                // the corruption and fix it explicitly.
+                return Ok(());
+            }
+        };
         let match_id = if item_id_num > 0 {
             store
                 .find_by_id(item_id_num)
@@ -345,7 +354,7 @@ async fn reconcile_merge(
                 );
                 return Ok(());
             }
-            super::timeline_emit::emit(
+            let _ = super::timeline_emit::emit(
                 pool,
                 id,
                 mando_types::timeline::TimelineEventType::Merged,
@@ -395,10 +404,19 @@ async fn reconcile_accept(
 
     if !ops_log::is_step_done(log, op_id, "update_task") {
         let store = TaskStore::new(pool.clone());
-        let id: i64 = item_id.parse().unwrap_or_else(|e| {
-            tracing::warn!(raw = item_id, error = %e, "invalid item_id in accept ops log");
-            0
-        });
+        let id: i64 = match item_id.parse() {
+            Ok(n) => n,
+            Err(e) => {
+                tracing::error!(
+                    module = "reconciler",
+                    op_id = %op_id,
+                    raw = item_id,
+                    error = %e,
+                    "corrupt item_id in accept ops log; leaving WAL entry for manual review"
+                );
+                return Ok(());
+            }
+        };
         if id > 0 {
             if let Err(e) = store
                 .update(id, |t| {
@@ -423,13 +441,30 @@ async fn reconcile_accept(
 }
 
 async fn reconcile_todo_commit(log: &mut OpsLog, op_id: &str) -> Result<()> {
-    tracing::info!(module = "reconciler", op_id = %op_id, "resuming todo_commit");
+    // No recovery logic is required for todo_commit: the task and commit
+    // write happen inline before the op is logged, so a resume just finalizes
+    // the WAL entry. Emit a structured event so unexpected drift is visible.
+    tracing::info!(
+        module = "reconciler",
+        op_id = %op_id,
+        event = "reconcile_no_recovery_required",
+        op_type = "todo_commit",
+        "todo_commit reconcile: no recovery required, completing op"
+    );
     ops_log::complete_op(log, op_id);
     Ok(())
 }
 
 async fn reconcile_learn(log: &mut OpsLog, op_id: &str) -> Result<()> {
-    tracing::info!(module = "reconciler", op_id = %op_id, "resuming learn");
+    // No recovery logic is required for learn: the persisted knowledge note is
+    // the source of truth, so a resume just finalizes the WAL entry.
+    tracing::info!(
+        module = "reconciler",
+        op_id = %op_id,
+        event = "reconcile_no_recovery_required",
+        op_type = "learn",
+        "learn reconcile: no recovery required, completing op"
+    );
     ops_log::complete_op(log, op_id);
     Ok(())
 }

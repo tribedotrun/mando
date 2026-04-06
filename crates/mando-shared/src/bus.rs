@@ -30,6 +30,7 @@ impl EventBus {
     }
 
     /// Subscribe to the event bus. Returns a receiver that gets all future events.
+    #[must_use]
     pub fn subscribe(&self) -> broadcast::Receiver<(BusEvent, Option<Value>)> {
         self.tx.subscribe()
     }

@@ -7,7 +7,10 @@ use crate::bot::TelegramBot;
 
 pub async fn handle(bot: &TelegramBot, chat_id: &str, _args: &str) -> Result<()> {
     // System health
-    let health_text = match bot.gw().get("/api/health/system").await {
+    // Use the 5xx-tolerant variant so degraded-state responses (HTTP 503
+    // with a body containing `healthy: false` + details) still render the
+    // degradation info instead of failing with a raw status line.
+    let health_text = match bot.gw().get_with_body_on_5xx("/api/health/system").await {
         Ok(h) => {
             let version = h["version"].as_str().unwrap_or("?");
             let pid = h["pid"].as_u64().unwrap_or(0);

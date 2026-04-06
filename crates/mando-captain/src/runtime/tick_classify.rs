@@ -1,5 +1,6 @@
-//! Worker classification and health-state updates — extracted from `tick.rs` phase 2.
+//! Worker classification and health-state updates. Extracted from tick.rs phase 2.
 
+use anyhow::Result;
 use mando_config::workflow::CaptainWorkflow;
 use mando_types::captain::{Action, WorkerContext};
 use mando_types::Task;
@@ -26,7 +27,7 @@ pub(super) fn classify_and_update_health(
     health_state: &mut HealthState,
     workflow: &CaptainWorkflow,
     dry_run: bool,
-) -> ClassifyResult {
+) -> Result<ClassifyResult> {
     let mut actions_to_execute = Vec::new();
     let mut dry_actions = Vec::new();
 
@@ -45,7 +46,7 @@ pub(super) fn classify_and_update_health(
             .as_deref()
             .is_some_and(mando_cc::stream_has_broken_session);
 
-        let action = match crate::biz::deterministic::classify_worker(
+        let action = crate::biz::deterministic::classify_worker(
             ctx,
             item_ref,
             stream_clean,
@@ -54,17 +55,7 @@ pub(super) fn classify_and_update_health(
             workflow.agent.worker_timeout_s,
             workflow.agent.stale_threshold_s,
             workflow.agent.max_interventions,
-        ) {
-            Some(a) => a,
-            None => {
-                tracing::error!(
-                    module = "captain",
-                    worker = %ctx.session_name,
-                    "classify_worker returned None — skipping worker"
-                );
-                continue;
-            }
-        };
+        )?;
 
         if dry_run {
             dry_actions.push(action);
@@ -93,8 +84,8 @@ pub(super) fn classify_and_update_health(
         }
     }
 
-    ClassifyResult {
+    Ok(ClassifyResult {
         actions_to_execute,
         dry_actions,
-    }
+    })
 }

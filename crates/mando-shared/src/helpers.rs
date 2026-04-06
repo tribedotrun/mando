@@ -49,44 +49,102 @@ pub fn sanitize_path_id(id: &str) -> String {
         .collect()
 }
 
-/// Load a JSON file, returning `T::default()` on missing or corrupt file.
+/// Load a JSON file, returning `T::default()` on a missing file and an error
+/// on any other failure (IO error or parse error).
+///
+/// Missing is treated as a healthy fresh-state because most callers use this
+/// for state files that only exist after the first save. Corrupt files are
+/// errors so the caller can decide whether to bail, rename-aside, or retry.
+/// Callers that want the "always return a value, log on corruption" behavior
+/// can chain `.unwrap_or_default()` at the call site.
+///
+/// The `_module` parameter is kept for API compatibility but is no longer
+/// interpolated into error strings; use structured logging at the call site
+/// to capture module context.
 pub fn load_json_file<T: serde::de::DeserializeOwned + Default>(
     path: &std::path::Path,
-    module: &str,
-) -> T {
+    _module: &str,
+) -> Result<T, crate::error::SharedError> {
+    use crate::error::SharedError;
     match std::fs::read_to_string(path) {
-        Ok(text) => serde_json::from_str(&text).unwrap_or_else(|e| {
-            tracing::warn!(
-                module = %module,
-                path = %path.display(),
-                error = %e,
-                "JSON file corrupt — returning default",
-            );
-            T::default()
+        Ok(text) => serde_json::from_str(&text).map_err(|e| SharedError::JsonParse {
+            path: path.to_path_buf(),
+            source: e,
         }),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => T::default(),
-        Err(e) => {
-            tracing::warn!(
-                module = %module,
-                path = %path.display(),
-                error = %e,
-                "failed to read JSON file — returning default",
-            );
-            T::default()
-        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(T::default()),
+        Err(e) => Err(SharedError::Io {
+            op: "read".into(),
+            path: path.to_path_buf(),
+            source: e,
+        }),
     }
 }
 
-/// Save a value as pretty-printed JSON, creating parent directories as needed.
+/// Save a value as pretty-printed JSON atomically.
+///
+/// Writes to a per-call unique temp file alongside the target, fsyncs, then
+/// renames onto `path` so concurrent readers never see a partially written
+/// file and concurrent writers cannot race on the same temp pathname. On
+/// rename failure, removes the temp file to avoid leaving orphans on disk.
 pub fn save_json_file<T: serde::Serialize>(
     path: &std::path::Path,
     value: &T,
-) -> anyhow::Result<()> {
+) -> Result<(), crate::error::SharedError> {
+    use crate::error::SharedError;
+    use std::io::Write;
+    use std::sync::atomic::{AtomicU64, Ordering};
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
+        std::fs::create_dir_all(parent).map_err(|e| SharedError::Io {
+            op: "create_dir_all".into(),
+            path: parent.to_path_buf(),
+            source: e,
+        })?;
     }
     let json = serde_json::to_string_pretty(value)?;
-    std::fs::write(path, json)?;
+
+    // Unique temp name per write: PID + monotonic counter + nanos. Two
+    // concurrent writers to the same path each get a distinct temp file,
+    // so neither can rename the other's in-flight file out from under it.
+    static TMP_COUNTER: AtomicU64 = AtomicU64::new(0);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let seq = TMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let tmp = path.with_extension(format!(
+        "{}.tmp.{}.{}.{}",
+        path.extension().and_then(|e| e.to_str()).unwrap_or("json"),
+        std::process::id(),
+        seq,
+        nanos,
+    ));
+
+    let mut f = std::fs::File::create(&tmp).map_err(|e| SharedError::Io {
+        op: "create".into(),
+        path: tmp.clone(),
+        source: e,
+    })?;
+    f.write_all(json.as_bytes()).map_err(|e| SharedError::Io {
+        op: "write".into(),
+        path: tmp.clone(),
+        source: e,
+    })?;
+    f.sync_all().map_err(|e| SharedError::Io {
+        op: "fsync".into(),
+        path: tmp.clone(),
+        source: e,
+    })?;
+    drop(f);
+    // Clean up the temp file if the rename fails; otherwise repeated save
+    // failures leave stale `.tmp.*` files cluttering the state directory.
+    if let Err(e) = std::fs::rename(&tmp, path) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(SharedError::Io {
+            op: "rename".into(),
+            path: path.to_path_buf(),
+            source: e,
+        });
+    }
     Ok(())
 }
 

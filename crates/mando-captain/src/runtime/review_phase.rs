@@ -1,5 +1,6 @@
 //! Review phase — gather worker contexts and fetch PR data.
 
+use anyhow::{anyhow, Result};
 use mando_config::settings::Config;
 use mando_types::Task;
 use mando_types::WorkerContext;
@@ -8,15 +9,19 @@ use crate::biz::review_marshal;
 use crate::io::{github, github_pr, health_store, pid_registry};
 
 /// Compute seconds since a worker started from an RFC 3339 timestamp.
-fn seconds_since(started_at: Option<&str>) -> f64 {
-    started_at
-        .and_then(|ts| {
-            time::OffsetDateTime::parse(ts, &time::format_description::well_known::Rfc3339)
-                .map_err(|e| tracing::warn!(module = "captain", timestamp = %ts, error = %e, "unparseable started_at"))
-                .ok()
-        })
-        .map(|started| (time::OffsetDateTime::now_utc() - started).as_seconds_f64())
-        .unwrap_or(0.0)
+///
+/// A missing timestamp is treated as "not started yet" and returns `Ok(0.0)`.
+/// An unparseable timestamp is a persisted-state bug: it is propagated as an
+/// error so the caller can abort instead of silently treating it as zero
+/// seconds elapsed (which would bypass timeout rules).
+fn seconds_since(started_at: Option<&str>) -> Result<f64> {
+    let ts = match started_at {
+        Some(s) => s,
+        None => return Ok(0.0),
+    };
+    let started = time::OffsetDateTime::parse(ts, &time::format_description::well_known::Rfc3339)
+        .map_err(|e| anyhow!("unparseable worker_started_at '{ts}': {e}"))?;
+    Ok((time::OffsetDateTime::now_utc() - started).as_seconds_f64())
 }
 
 /// Gather WorkerContext for each in-progress item with a worker.
@@ -28,7 +33,7 @@ pub(crate) async fn gather_worker_contexts(
     items: &mut [Task],
     config: &Config,
     health_state: &health_store::HealthState,
-) -> Vec<WorkerContext> {
+) -> Result<Vec<WorkerContext>> {
     // Phase 1: collect sync-local data and build async work descriptors.
     let mut work: Vec<GatherWork> = Vec::new();
 
@@ -49,14 +54,16 @@ pub(crate) async fn gather_worker_contexts(
             .unwrap_or_default();
 
         let cc_sid = item.session_ids.worker.as_deref().unwrap_or("");
-        let pid = pid_registry::get_pid(cc_sid).unwrap_or(0);
-        let process_alive = pid > 0 && mando_cc::is_process_alive(pid);
+        let pid = pid_registry::get_pid(cc_sid).unwrap_or(mando_types::Pid::new(0));
+        let process_alive = pid.as_u32() > 0 && mando_cc::is_process_alive(pid);
         let stream_tail = crate::io::transcript::extract_stream_tail(&stream_path, 50);
         let stream_stale_s = mando_cc::stream_stale_seconds(&stream_path);
         let prev_cpu_time_s =
             health_store::get_health_f64(health_state, worker_name.as_str(), "cpu_time_s");
 
-        let seconds_active = seconds_since(item.worker_started_at.as_deref());
+        // Unparseable worker_started_at is a persisted-state bug: propagate
+        // rather than bypass timeout rules with a silent 0.0.
+        let seconds_active = seconds_since(item.worker_started_at.as_deref())?;
 
         // Build PR discovery args if needed.
         let discover_pr = if item.pr.is_none() {
@@ -97,7 +104,7 @@ pub(crate) async fn gather_worker_contexts(
     }
 
     if work.is_empty() {
-        return Vec::new();
+        return Ok(Vec::new());
     }
 
     // Phase 2: run GitHub API calls in parallel across all workers.
@@ -158,14 +165,14 @@ pub(crate) async fn gather_worker_contexts(
         });
     }
 
-    contexts
+    Ok(contexts)
 }
 
 /// Sync-local data collected in phase 1 for each worker.
 struct GatherWork {
     item_idx: usize,
     worker_name: String,
-    pid: u32,
+    pid: mando_types::Pid,
     process_alive: bool,
     stream_tail: String,
     stream_stale_s: Option<f64>,
@@ -193,7 +200,7 @@ struct GatherResult {
 /// Run the async portion of context gathering for one worker (PR discovery + PR data + CPU time).
 async fn gather_one_async(w: &GatherWork) -> GatherResult {
     // CPU time (async syscall).
-    let cpu_time_s = if w.process_alive && w.pid > 0 {
+    let cpu_time_s = if w.process_alive && w.pid.as_u32() > 0 {
         mando_cc::get_cpu_time(w.pid).await.ok()
     } else {
         None
@@ -367,9 +374,8 @@ fn check_reopen_ack(body: &str, issue_comments: &[String], reopen_seq: i64) -> b
 pub(crate) async fn build_single_context(
     item: &Task,
     config: &mando_config::Config,
-) -> (mando_types::WorkerContext, String) {
+) -> Result<(mando_types::WorkerContext, String)> {
     use crate::biz::worker_context;
-    use crate::io::process_manager;
 
     let worker_name = item.worker.as_deref().unwrap_or("unknown");
     let stream_path = item
@@ -379,9 +385,9 @@ pub(crate) async fn build_single_context(
         .map(mando_config::stream_path_for_session)
         .unwrap_or_default();
     let stream_tail = crate::io::transcript::extract_stream_tail(&stream_path, 50);
-    let stream_stale_s = process_manager::stream_stale_seconds(&stream_path);
+    let stream_stale_s = mando_cc::stream_stale_seconds(&stream_path);
 
-    let seconds_active = seconds_since(item.worker_started_at.as_deref());
+    let seconds_active = seconds_since(item.worker_started_at.as_deref())?;
 
     // Resolve github repo slug for short PR ref resolution.
     let github_repo = mando_config::resolve_github_repo(item.project.as_deref(), config);
@@ -434,7 +440,7 @@ pub(crate) async fn build_single_context(
         degraded: pr_data.degraded,
     };
     let formatted = worker_context::format_context(&ctx);
-    (ctx, formatted)
+    Ok((ctx, formatted))
 }
 
 #[cfg(test)]

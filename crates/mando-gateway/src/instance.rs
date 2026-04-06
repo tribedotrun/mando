@@ -34,7 +34,8 @@ pub fn check_and_write_pid(port: u16) -> anyhow::Result<()> {
     if let Ok(contents) = fs::read_to_string(&path) {
         if let Ok(pid) = contents.trim().parse::<u32>() {
             if pid != std::process::id() && is_process_alive(pid) {
-                if is_mando_process(pid) {
+                let mando = is_mando_process(pid)?;
+                if mando {
                     eprintln!("killing stale daemon (pid {pid}) before starting");
                     kill_process(pid);
                 } else {
@@ -52,7 +53,8 @@ pub fn check_and_write_pid(port: u16) -> anyhow::Result<()> {
     // No PID file but port might be occupied (e.g. rm -rf ~/.mando while daemon was running).
     if let Some(pid) = find_port_occupant(port) {
         if pid != std::process::id() {
-            if is_mando_process(pid) {
+            let mando = is_mando_process(pid)?;
+            if mando {
                 eprintln!("killing stale daemon on port {port} (pid {pid})");
                 kill_process(pid);
             } else {
@@ -125,22 +127,19 @@ fn kill_process(pid: u32) {
 }
 
 /// Check if a PID belongs to a mando-gw process (or "mando-daemon" in prod).
-fn is_mando_process(pid: u32) -> bool {
+/// Returns an error if `ps` fails — the operator must decide whether to force
+/// a restart. Previously this silently returned `false`, which could kill
+/// unrelated processes when `ps` was unavailable.
+fn is_mando_process(pid: u32) -> anyhow::Result<bool> {
     let output = std::process::Command::new("ps")
         .args(["-o", "comm=", "-p", &pid.to_string()])
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())
-        .output();
-    match output {
-        Ok(o) => {
-            let comm = String::from_utf8_lossy(&o.stdout);
-            let name = comm.trim();
-            name.contains("mando-gw")
-                || name.contains("mando-daemon")
-                || name.contains("Mando Daemon")
-        }
-        Err(_) => false,
-    }
+        .output()
+        .map_err(|e| anyhow::anyhow!("ps lookup for pid {pid} failed: {e}"))?;
+    let comm = String::from_utf8_lossy(&output.stdout);
+    let name = comm.trim();
+    Ok(name.contains("mando-gw") || name.contains("mando-daemon") || name.contains("Mando Daemon"))
 }
 
 /// Find the PID of a process listening on a TCP port (macOS lsof).

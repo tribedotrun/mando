@@ -11,12 +11,19 @@ use serde_json::{json, Value};
 use crate::response::error_response;
 use crate::AppState;
 
-/// Resolve the working directory from config (first project path).
-fn resolve_cwd(state: &AppState) -> std::path::PathBuf {
+/// Resolve the working directory from config (first project path). Returns
+/// 400 if no project is configured — the previous behaviour silently
+/// defaulted to an empty PathBuf which blew up downstream.
+fn resolve_cwd(state: &AppState) -> Result<std::path::PathBuf, (StatusCode, Json<Value>)> {
     let cfg = state.config.load_full();
     mando_config::paths::first_project_path(&cfg)
         .map(|p| mando_config::paths::expand_tilde(&p))
-        .unwrap_or_default()
+        .ok_or_else(|| {
+            error_response(
+                StatusCode::BAD_REQUEST,
+                "no project configured — cannot run ops session",
+            )
+        })
 }
 
 #[derive(Deserialize)]
@@ -32,19 +39,16 @@ pub(crate) async fn post_ops_start(
     State(state): State<AppState>,
     Json(body): Json<OpsStartBody>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    let cwd = resolve_cwd(&state);
+    let cwd = resolve_cwd(&state)?;
 
     let prompt = body.prompt;
 
-    let mut mgr = state.cc_session_mgr.write().await;
-
-    // Close any existing session for this key before starting fresh.
-    if mgr.has_session(&body.key) {
-        mgr.close(&body.key);
-    }
-
-    match mgr
-        .start(
+    // `start_replacing` atomically closes any existing session for this key
+    // and starts a fresh one under the per-key async mutex, so two concurrent
+    // `/api/ops/start` calls with the same key cannot clobber each other.
+    match state
+        .cc_session_mgr
+        .start_replacing(
             &body.key,
             &prompt,
             &cwd,
@@ -61,10 +65,7 @@ pub(crate) async fn post_ops_start(
             "cost_usd": result.cost_usd,
             "duration_ms": result.duration_ms,
         }))),
-        Err(e) => Err(error_response(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            &e.to_string(),
-        )),
+        Err(e) => Err(crate::response::internal_error(e)),
     }
 }
 
@@ -79,8 +80,8 @@ pub(crate) async fn post_ops_message(
     State(state): State<AppState>,
     Json(body): Json<OpsMessageBody>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    let cwd = resolve_cwd(&state);
-    let mut mgr = state.cc_session_mgr.write().await;
+    let cwd = resolve_cwd(&state)?;
+    let mgr = &state.cc_session_mgr;
 
     if !mgr.has_session(&body.key) {
         return Err(error_response(
@@ -97,10 +98,7 @@ pub(crate) async fn post_ops_message(
             "cost_usd": result.cost_usd,
             "duration_ms": result.duration_ms,
         }))),
-        Err(e) => Err(error_response(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            &e.to_string(),
-        )),
+        Err(e) => Err(crate::response::internal_error(e)),
     }
 }
 
@@ -114,15 +112,15 @@ pub(crate) async fn post_ops_end(
     State(state): State<AppState>,
     Json(body): Json<OpsEndBody>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    let mut mgr = state.cc_session_mgr.write().await;
-
-    if !mgr.has_session(&body.key) {
+    if !state.cc_session_mgr.has_session(&body.key) {
         return Err(error_response(
             StatusCode::NOT_FOUND,
             &format!("no active ops session for '{}'", body.key),
         ));
     }
 
-    mgr.close(&body.key);
+    // `close_async` acquires the per-key mutex so it cannot race with a
+    // concurrent start/follow_up on the same key.
+    state.cc_session_mgr.close_async(&body.key).await;
     Ok(Json(json!({"ok": true, "ended": body.key})))
 }

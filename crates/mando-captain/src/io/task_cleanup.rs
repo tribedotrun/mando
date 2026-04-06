@@ -1,4 +1,4 @@
-//! Task cleanup — remove worktree, branch, health entry, close PR when deleting tasks.
+//! Task cleanup. Removes worktree, branch, health entry, close PR when deleting tasks.
 
 use anyhow::Result;
 use mando_config::settings::Config;
@@ -25,16 +25,22 @@ pub(crate) async fn cleanup_task(
 
     {
         let cc_sid = item.session_ids.worker.as_deref().unwrap_or("");
-        let pid = super::pid_registry::get_pid(cc_sid).unwrap_or(0);
-        if pid > 0 {
+        let pid = super::pid_registry::get_pid(cc_sid).unwrap_or(mando_types::Pid::new(0));
+        if pid.as_u32() > 0 {
             if let Err(e) = mando_cc::kill_process(pid).await {
-                tracing::warn!(module = "cleanup", worker = ?item.worker, pid = pid, error = %e, "failed to kill worker process");
+                let msg = format!("kill worker pid {pid}: {e}");
+                tracing::warn!(module = "cleanup", worker = ?item.worker, pid = %pid, error = %e, "failed to kill worker process");
+                warnings.push(msg);
             } else {
-                tracing::info!(module = "cleanup", worker = ?item.worker, pid = pid, "killed worker");
+                tracing::info!(module = "cleanup", worker = ?item.worker, pid = %pid, "killed worker");
             }
         }
         if !cc_sid.is_empty() {
-            super::pid_registry::unregister(cc_sid);
+            if let Err(e) = super::pid_registry::unregister(cc_sid) {
+                let msg = format!("pid_registry unregister {cc_sid}: {e}");
+                tracing::warn!(module = "cleanup", cc_sid = %cc_sid, error = %e, "failed to unregister pid");
+                warnings.push(msg);
+            }
         }
     }
 
@@ -47,7 +53,9 @@ pub(crate) async fn cleanup_task(
                         tracing::info!(module = "cleanup", path = %wt_path.display(), "removed worktree")
                     }
                     Err(e) => {
-                        tracing::warn!(module = "cleanup", error = %e, "failed to remove worktree")
+                        let msg = format!("remove_worktree {}: {e}", wt_path.display());
+                        tracing::warn!(module = "cleanup", error = %e, "failed to remove worktree");
+                        warnings.push(msg);
                     }
                 }
             } else {
@@ -56,7 +64,9 @@ pub(crate) async fn cleanup_task(
                         tracing::info!(module = "cleanup", path = %wt_path.display(), "removed worktree dir (no repo context)")
                     }
                     Err(e) => {
-                        tracing::warn!(module = "cleanup", path = %wt_path.display(), error = %e, "failed to remove worktree dir")
+                        let msg = format!("remove_dir_all {}: {e}", wt_path.display());
+                        tracing::warn!(module = "cleanup", path = %wt_path.display(), error = %e, "failed to remove worktree dir");
+                        warnings.push(msg);
                     }
                 }
             }
@@ -66,7 +76,9 @@ pub(crate) async fn cleanup_task(
     if let Some(ref branch) = item.branch {
         if let Some(ref rp) = repo_path {
             if let Err(e) = super::git::delete_local_branch(rp, branch).await {
+                let msg = format!("delete_local_branch {branch}: {e}");
                 tracing::warn!(module = "cleanup", branch = %branch, error = %e, "failed to delete branch");
+                warnings.push(msg);
             } else {
                 tracing::info!(module = "cleanup", branch = %branch, "deleted branch");
             }
@@ -75,10 +87,20 @@ pub(crate) async fn cleanup_task(
 
     if let Some(ref worker) = item.worker {
         let health_path = mando_config::worker_health_path();
-        let mut health = super::health_store::load_health_state(&health_path);
-        health.remove(worker.as_str());
-        if let Err(e) = super::health_store::save_health_state(&health_path, &health) {
-            tracing::warn!(path = %health_path.display(), error = %e, "failed to save health state during cleanup");
+        match super::health_store::load_health_state(&health_path) {
+            Ok(mut health) => {
+                health.remove(worker.as_str());
+                if let Err(e) = super::health_store::save_health_state(&health_path, &health) {
+                    let msg = format!("save_health_state {}: {e}", health_path.display());
+                    tracing::warn!(path = %health_path.display(), error = %e, "failed to save health state during cleanup");
+                    warnings.push(msg);
+                }
+            }
+            Err(e) => {
+                let msg = format!("load_health_state {}: {e}", health_path.display());
+                tracing::warn!(path = %health_path.display(), error = %e, "failed to load health state during cleanup");
+                warnings.push(msg);
+            }
         }
     }
 
@@ -86,29 +108,41 @@ pub(crate) async fn cleanup_task(
         let id_str = item.id.to_string();
         let lock_dir = mando_config::state_dir().join("item-locks");
         let lock_path = lock_dir.join(format!("{id_str}.lock"));
-        tokio::fs::remove_file(&lock_path).await.ok();
+        if let Err(e) = tokio::fs::remove_file(&lock_path).await {
+            if e.kind() != std::io::ErrorKind::NotFound {
+                let msg = format!("remove lock file {}: {e}", lock_path.display());
+                tracing::warn!(module = "cleanup", path = %lock_path.display(), error = %e, "failed to remove item lock file");
+                warnings.push(msg);
+            }
+        }
     }
 
     {
         let id_str = item.id.to_string();
         let timeline_path =
             super::timeline_store::timeline_path(&mando_config::state_dir(), &id_str);
-        tokio::fs::remove_file(&timeline_path).await.ok();
+        if let Err(e) = tokio::fs::remove_file(&timeline_path).await {
+            if e.kind() != std::io::ErrorKind::NotFound {
+                let msg = format!("remove timeline {}: {e}", timeline_path.display());
+                tracing::warn!(module = "cleanup", path = %timeline_path.display(), error = %e, "failed to remove timeline file");
+                warnings.push(msg);
+            }
+        }
     }
 
     {
         let id_str = item.id.to_string();
-        let mut total = 0u64;
-        for id in &[id_str.as_str()] {
-            match mando_db::queries::sessions::delete_sessions_for_task(pool, id).await {
-                Ok(n) => total += n,
-                Err(e) => {
-                    tracing::warn!(module = "cleanup", task_id = %id, error = %e, "failed to delete sessions");
+        match mando_db::queries::sessions::delete_sessions_for_task(pool, &id_str).await {
+            Ok(n) => {
+                if n > 0 {
+                    tracing::info!(module = "cleanup", item_id = %item.id, deleted = n, "purged session entries");
                 }
             }
-        }
-        if total > 0 {
-            tracing::info!(module = "cleanup", item_id = %item.id, deleted = total, "purged session entries");
+            Err(e) => {
+                let msg = format!("delete_sessions_for_task {}: {e}", id_str);
+                tracing::warn!(module = "cleanup", task_id = %id_str, error = %e, "failed to delete sessions");
+                warnings.push(msg);
+            }
         }
     }
 

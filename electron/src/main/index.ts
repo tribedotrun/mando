@@ -21,9 +21,7 @@ import {
   ensureDaemon,
   startHealthMonitor,
   cleanupDaemon,
-  getConnectionState,
   invalidateDiscoveryCache,
-  setMainWindow,
   setIsQuitting,
   updateTrayTooltip,
   getAppMode,
@@ -38,6 +36,7 @@ import { startRendererServer } from '#main/renderer-server';
 
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
+let trayAvailable = false;
 let rendererServer: http.Server | null = null;
 let rendererPort = 0;
 let isQuitting = false;
@@ -118,15 +117,14 @@ function createWindow(): void {
     mainWindow.once('ready-to-show', () => mainWindow?.show());
   }
 
-  // Hide to tray on close (not quit)
+  // Hide to tray on close (not quit). If the tray failed to create, fall
+  // back to a normal close so the window is not orphaned with no way back.
   mainWindow.on('close', (e) => {
-    if (!isQuitting) {
+    if (!isQuitting && trayAvailable) {
       e.preventDefault();
       mainWindow?.hide();
     }
   });
-
-  setMainWindow(mainWindow);
 }
 
 function resolveAsset(name: string): string {
@@ -166,6 +164,7 @@ function createTray(): void {
   ]);
 
   tray.setContextMenu(contextMenu);
+  trayAvailable = true;
 }
 
 function trustedRendererOrigins(): string[] {
@@ -203,9 +202,6 @@ handleTrusted('get-gateway-url', async () => {
 
 handleTrusted('get-app-info', getAppInfo);
 
-handleTrusted('get-data-dir', () => getDataDir());
-handleTrusted('get-config-path', () => getConfigPath());
-handleTrusted('get-connection-state', () => getConnectionState());
 handleTrusted('restart-daemon', async () => {
   invalidateDiscoveryCache();
   return ensureDaemon(getDataDir());
@@ -280,7 +276,11 @@ app.whenReady().then(async () => {
     try {
       createTray();
     } catch (err) {
-      log.warn('[main] tray creation failed:', err);
+      // Tray creation can fail on missing icon assets or on systems without a
+      // menu bar. Without a tray there is no way to reopen the app from a
+      // hidden state, so the window close handler must fall back to quit.
+      log.error('[main] tray creation failed, disabling close-to-tray:', err);
+      trayAvailable = false;
     }
     registerShortcuts();
   }
@@ -301,8 +301,13 @@ app.whenReady().then(async () => {
         cfg.startAtLogin = false;
         fs.writeFileSync(getConfigPath(), JSON.stringify(cfg, null, 2), 'utf-8');
       }
-    } catch {
-      // No config yet (fresh install) — nothing to migrate.
+    } catch (err: unknown) {
+      const code = (err as NodeJS.ErrnoException)?.code;
+      if (code === 'ENOENT') {
+        // Fresh install, nothing to migrate.
+      } else {
+        log.error('[main] login-item config migration failed:', err);
+      }
     }
   }
 

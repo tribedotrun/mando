@@ -10,21 +10,43 @@ use serde_json::{json, Value};
 
 use crate::AppState;
 
-/// Reload captain + scout workflows from disk into daemon state.
-fn reload_workflows(state: &AppState) {
-    let cfg = state.config.load_full();
+/// Load captain + scout workflows for a candidate config WITHOUT publishing
+/// them to daemon state. Returns the loaded workflows on success so callers
+/// can atomically commit both config and workflows together after validation.
+///
+/// This is the safe path: load everything first, fail the request if anything
+/// is bad, then commit. Avoids the partial-apply window where config is live
+/// but workflow reload has failed, leaving the daemon running mixed state.
+fn load_workflows_for(
+    state: &AppState,
+    cfg: &mando_config::Config,
+) -> anyhow::Result<(
+    mando_config::workflow::CaptainWorkflow,
+    mando_config::workflow::ScoutWorkflow,
+)> {
     let mut new_cwf = mando_config::load_captain_workflow(
         &mando_config::captain_workflow_path(),
         cfg.captain.tick_interval_s,
-    );
-    let mut new_dwf = mando_config::load_scout_workflow(&mando_config::scout_workflow_path(), &cfg);
+    )?;
+    let mut new_dwf = mando_config::load_scout_workflow(&mando_config::scout_workflow_path(), cfg)?;
 
     if state.dev_mode {
         crate::apply_dev_model_overrides(&mut new_cwf, &mut new_dwf);
     }
 
-    state.captain_workflow.store(Arc::new(new_cwf));
-    state.scout_workflow.store(Arc::new(new_dwf));
+    Ok((new_cwf, new_dwf))
+}
+
+/// Publish a previously-loaded workflow pair to daemon state. Split from
+/// `load_workflows_for` so callers can fail the request before any state
+/// mutation if loading fails.
+fn publish_workflows(
+    state: &AppState,
+    cwf: mando_config::workflow::CaptainWorkflow,
+    dwf: mando_config::workflow::ScoutWorkflow,
+) {
+    state.captain_workflow.store(Arc::new(cwf));
+    state.scout_workflow.store(Arc::new(dwf));
 }
 
 /// GET /api/config — read current config.
@@ -63,26 +85,60 @@ pub(crate) async fn put_config(
     // Validate workflow config before persisting anything.
     {
         let tick_s = new_config.captain.tick_interval_s;
-        if let Err(msg) =
+        if let Err(e) =
             mando_config::try_load_captain_workflow(&mando_config::captain_workflow_path(), tick_s)
         {
-            return (StatusCode::BAD_REQUEST, Json(json!({"error": msg}))).into_response();
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": e.to_string()})),
+            )
+                .into_response();
         }
     }
 
-    // Save to disk (validation passed).
-    if let Err(e) = mando_config::save_config(&new_config, None) {
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": format!("save failed: {e}")})),
-        )
-            .into_response();
+    // Load the workflow files against the candidate config BEFORE persisting
+    // anything. If the workflow files are bad, we refuse the update with no
+    // state mutation, rather than committing a config that leaves the daemon
+    // running with mismatched workflows.
+    let workflows = match load_workflows_for(&state, &new_config) {
+        Ok(w) => w,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("workflow reload failed: {e}")})),
+            )
+                .into_response();
+        }
+    };
+
+    // Save to disk (validation passed). save_config uses blocking std::fs —
+    // move it off the async runtime so we don't stall the executor while
+    // holding config_write_mu.
+    let save_config = new_config.clone();
+    let save_result =
+        tokio::task::spawn_blocking(move || mando_config::save_config(&save_config, None)).await;
+    match save_result {
+        Ok(Ok(())) => {}
+        Ok(Err(e)) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("save failed: {e}")})),
+            )
+                .into_response();
+        }
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("save task panicked: {e}")})),
+            )
+                .into_response();
+        }
     }
 
-    // Hot-reload into daemon state.
+    // Commit config and workflows together. Both are pre-validated, so
+    // neither of these can fail.
     state.config.store(Arc::new(new_config));
-
-    reload_workflows(&state);
+    publish_workflows(&state, workflows.0, workflows.1);
 
     // Notify SSE clients.
     state.bus.send(mando_types::BusEvent::Status, None);
@@ -106,7 +162,7 @@ pub(crate) async fn get_config_status(State(state): State<AppState>) -> Json<Val
     let active_paths = state.runtime_paths.clone();
     let configured_paths = mando_config::resolve_captain_runtime_paths(&config);
     let (setup_complete, error) = if exists {
-        match std::fs::read_to_string(&config_path) {
+        match tokio::fs::read_to_string(&config_path).await {
             Ok(contents) => match serde_json::from_str::<mando_config::Config>(&contents) {
                 Ok(_) => (true, None),
                 Err(e) => {
@@ -157,27 +213,60 @@ pub(crate) async fn post_config_setup(
         let _write_guard = state.config_write_mu.lock().await;
         new_config.populate_runtime_fields();
 
-        // Validate before persisting.
+        // Validate before persisting. try_load_captain_workflow is the lighter
+        // BAD_REQUEST check; load_workflows_for below is the full load that
+        // also covers the scout workflow.
         {
             let tick_s = new_config.captain.tick_interval_s;
-            if let Err(msg) = mando_config::try_load_captain_workflow(
+            if let Err(e) = mando_config::try_load_captain_workflow(
                 &mando_config::captain_workflow_path(),
                 tick_s,
             ) {
-                return (StatusCode::BAD_REQUEST, Json(json!({"error": msg}))).into_response();
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({"error": e.to_string()})),
+                )
+                    .into_response();
             }
         }
 
-        if let Err(e) = mando_config::save_config(&new_config, None) {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": format!("save failed: {e}")})),
-            )
-                .into_response();
+        // Full load of both workflow files against the candidate config
+        // before any state mutation. Refuses the setup if either fails.
+        let workflows = match load_workflows_for(&state, &new_config) {
+            Ok(w) => w,
+            Err(e) => {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": format!("workflow reload failed: {e}")})),
+                )
+                    .into_response();
+            }
+        };
+
+        let save_config = new_config.clone();
+        let save_result =
+            tokio::task::spawn_blocking(move || mando_config::save_config(&save_config, None))
+                .await;
+        match save_result {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": format!("save failed: {e}")})),
+                )
+                    .into_response();
+            }
+            Err(e) => {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": format!("save task panicked: {e}")})),
+                )
+                    .into_response();
+            }
         }
 
         state.config.store(Arc::new(new_config));
-        reload_workflows(&state);
+        publish_workflows(&state, workflows.0, workflows.1);
     }
 
     Json(json!({"ok": true})).into_response()

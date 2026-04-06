@@ -2,11 +2,10 @@
 //!
 //! Pipeline: fetch → extract → summarize → update DB → save summary file.
 
-use std::collections::HashMap;
-
 use anyhow::{bail, Context, Result};
 use mando_config::workflow::ScoutWorkflow;
 use mando_config::Config;
+use rustc_hash::FxHashMap;
 use tracing::{info, warn};
 
 use crate::biz::formatting::{bullet_list, slugify_title};
@@ -74,7 +73,7 @@ pub async fn process_item(
 
     let user_context_rendered = workflow.user_context.render();
 
-    let mut vars = HashMap::new();
+    let mut vars: FxHashMap<&str, &str> = FxHashMap::default();
     vars.insert("url", item.url.as_str());
     vars.insert("title", title.as_str());
     vars.insert("url_type", url_type.as_str());
@@ -182,54 +181,59 @@ pub async fn process_item(
         .with_context(|| format!("write summary for #{id}"))?;
 
     // Phase 4: Article generation + Telegraph publish for every processed item.
-    let article_md =
-        if let Some(local_article) = build_local_article_if_short(&ai_title, &item.url, &content) {
-            info!(
-                id,
-                chars = content.len(),
-                "process: short source, using local article"
-            );
-            local_article
-        } else {
-            match crate::runtime::article::generate_article(
-                &ai_title,
-                &item.url,
-                url_type.as_str(),
-                &content_path_str,
-                workflow,
-            )
-            .await
-            {
-                Ok(article_result) => {
-                    if let Err(e) = db
-                        .record_session(
-                            id,
-                            &article_result.session_id,
-                            "scout-article",
-                            article_result.cost_usd,
-                            article_result.duration_ms,
-                        )
-                        .await
-                    {
-                        warn!(
-                            id,
-                            error = %e,
-                            "process: failed to record article session — cost tracking gap"
-                        );
-                    }
-                    normalize_article_markdown(&ai_title, &article_result.text)
-                }
-                Err(e) => {
+    let article_md = if let Some(local_article) =
+        build_local_article_if_short(&ai_title, &item.url, &content)
+    {
+        info!(
+            id,
+            chars = content.len(),
+            "process: short source, using local article"
+        );
+        local_article
+    } else {
+        match crate::runtime::article::generate_article(
+            &ai_title,
+            &item.url,
+            url_type.as_str(),
+            &content_path_str,
+            workflow,
+        )
+        .await
+        {
+            Ok(article_result) => {
+                if let Err(e) = db
+                    .record_session(
+                        id,
+                        &article_result.session_id,
+                        "scout-article",
+                        article_result.cost_usd,
+                        article_result.duration_ms,
+                    )
+                    .await
+                {
                     warn!(
                         id,
                         error = %e,
-                        "process: article generation failed, falling back to summary article"
+                        "process: failed to record article session — cost tracking gap"
                     );
-                    build_article_from_summary(&ai_title, &summary)
-                        .unwrap_or_else(|| normalize_article_markdown(&ai_title, &summary))
                 }
+                normalize_article_markdown(&ai_title, &article_result.text)
             }
-        };
+            Err(e) => {
+                // TODO: add a `degraded: true` flag to the persisted article
+                // so the UI can visibly mark this as a degraded rendering.
+                // The Article struct doesn't expose such a field today;
+                // for now we escalate the log level so ops can detect this.
+                tracing::error!(
+                    id,
+                    error = %e,
+                    "process: article generation failed, falling back to summary article (degraded)"
+                );
+                build_article_from_summary(&ai_title, &summary)
+                    .unwrap_or_else(|| normalize_article_markdown(&ai_title, &summary))
+            }
+        }
+    };
     file_store::write_article(id, &article_md)
         .with_context(|| format!("write article for #{id}"))?;
     match crate::io::telegraph::publish_article(id, &ai_title, &article_md).await {

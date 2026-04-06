@@ -418,27 +418,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "dirs"
-version = "6.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c3e8aa94d75141228480295a7d0e7feb620b1a5ad9f12bc40be62411e38cce4e"
-dependencies = [
- "dirs-sys",
-]
-
-[[package]]
-name = "dirs-sys"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e01a3366d27ee9890022452ee61b2b63a67e6f13f58900b651ff5665f0bb1fab"
-dependencies = [
- "libc",
- "option-ext",
- "redox_users",
- "windows-sys 0.61.2",
-]
-
-[[package]]
 name = "displaydoc"
 version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1237,7 +1216,7 @@ checksum = "c41e0c4fef86961ac6d6f8a82609f55f31b05e4fce149ac5710e439df7619ba4"
 
 [[package]]
 name = "mando-captain"
-version = "0.1.11"
+version = "0.1.12"
 dependencies = [
  "anyhow",
  "futures",
@@ -1250,6 +1229,7 @@ dependencies = [
  "mando-uuid",
  "regex",
  "reqwest",
+ "rustc-hash",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -1262,7 +1242,7 @@ dependencies = [
 
 [[package]]
 name = "mando-cc"
-version = "0.1.11"
+version = "0.1.12"
 dependencies = [
  "anyhow",
  "libc",
@@ -1271,17 +1251,18 @@ dependencies = [
  "mando-uuid",
  "serde",
  "serde_json",
+ "thiserror",
  "tokio",
  "tracing",
 ]
 
 [[package]]
 name = "mando-cli"
-version = "0.1.11"
+version = "0.1.12"
 dependencies = [
  "anyhow",
  "clap",
- "dirs",
+ "mando-types",
  "reqwest",
  "serde",
  "serde_json",
@@ -1293,20 +1274,23 @@ dependencies = [
 
 [[package]]
 name = "mando-config"
-version = "0.1.11"
+version = "0.1.12"
 dependencies = [
+ "anyhow",
  "iana-time-zone",
  "mando-types",
  "minijinja",
+ "rustc-hash",
  "serde",
  "serde_json",
  "serde_yaml",
+ "thiserror",
  "tracing",
 ]
 
 [[package]]
 name = "mando-db"
-version = "0.1.11"
+version = "0.1.12"
 dependencies = [
  "anyhow",
  "mando-config",
@@ -1322,7 +1306,7 @@ dependencies = [
 
 [[package]]
 name = "mando-gateway"
-version = "0.1.11"
+version = "0.1.12"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -1350,6 +1334,7 @@ dependencies = [
  "time",
  "tokio",
  "tokio-stream",
+ "tokio-util",
  "toml",
  "tower-http",
  "tracing",
@@ -1361,14 +1346,14 @@ dependencies = [
 
 [[package]]
 name = "mando-readability"
-version = "0.1.11"
+version = "0.1.12"
 dependencies = [
  "html5ever",
 ]
 
 [[package]]
 name = "mando-scout"
-version = "0.1.11"
+version = "0.1.12"
 dependencies = [
  "anyhow",
  "mando-captain",
@@ -1380,6 +1365,7 @@ dependencies = [
  "mando-types",
  "mando-uuid",
  "reqwest",
+ "rustc-hash",
  "serde",
  "serde_json",
  "sha2",
@@ -1393,7 +1379,7 @@ dependencies = [
 
 [[package]]
 name = "mando-shared"
-version = "0.1.11"
+version = "0.1.12"
 dependencies = [
  "anyhow",
  "mando-config",
@@ -1403,13 +1389,14 @@ dependencies = [
  "serde",
  "serde_json",
  "sqlx",
+ "thiserror",
  "tokio",
  "tracing",
 ]
 
 [[package]]
 name = "mando-telegram"
-version = "0.1.11"
+version = "0.1.12"
 dependencies = [
  "anyhow",
  "clap",
@@ -1429,7 +1416,7 @@ dependencies = [
 
 [[package]]
 name = "mando-types"
-version = "0.1.11"
+version = "0.1.12"
 dependencies = [
  "mando-uuid",
  "serde",
@@ -1440,7 +1427,7 @@ dependencies = [
 
 [[package]]
 name = "mando-uuid"
-version = "0.1.11"
+version = "0.1.12"
 dependencies = [
  "getrandom 0.2.17",
 ]
@@ -1787,12 +1774,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "option-ext"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
-
-[[package]]
 name = "parking"
 version = "2.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2104,17 +2085,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "redox_users"
-version = "0.5.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a4e608c6638b9c18977b00b475ac1f28d14e84b27d8d42f70e0bf1e3dec127ac"
-dependencies = [
- "getrandom 0.2.17",
- "libredox",
- "thiserror",
-]
-
-[[package]]
 name = "regex"
 version = "1.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2219,6 +2189,12 @@ dependencies = [
  "subtle",
  "zeroize",
 ]
+
+[[package]]
+name = "rustc-hash"
+version = "2.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "94300abf3f1ae2e2b8ffb7b58043de3d399c73fa6f4b73826402a5c457614dbe"
 
 [[package]]
 name = "rustix"
@@ -2991,6 +2967,7 @@ dependencies = [
  "bytes",
  "futures-core",
  "futures-sink",
+ "futures-util",
  "pin-project-lite",
  "tokio",
 ]

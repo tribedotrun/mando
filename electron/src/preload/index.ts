@@ -18,11 +18,13 @@ export interface MandoAPI {
     appVersion: string;
     stack: Array<{ name: string; version: string }>;
   }>;
-  dataDir: () => Promise<string>;
   hasConfig: () => Promise<boolean>;
-  configPath: () => Promise<string>;
   readConfig: () => Promise<string>;
-  saveConfig: (config: string) => Promise<boolean>;
+  saveConfig: (
+    config: string,
+  ) => Promise<
+    { ok: true; via: 'daemon' } | { ok: false; reason: 'daemon unreachable'; message: string }
+  >;
   addProject: (body: string) => Promise<{
     ok: boolean;
     name: string;
@@ -30,13 +32,15 @@ export interface MandoAPI {
     githubRepo: string;
   }>;
   saveConfigLocal: (config: string) => Promise<boolean>;
-  setupComplete: (config: string) => Promise<boolean>;
+  setupComplete: (config: string) => Promise<{
+    ok: boolean;
+    daemonNotified: boolean;
+    launchdInstalled: boolean;
+    error?: string;
+  }>;
   onSetupProgress: (callback: (step: string) => void) => void;
-  // Connection state
-  connectionState: () => Promise<string>;
+  // Daemon control
   restartDaemon: () => Promise<boolean>;
-  onConnectionState: (callback: (state: string) => void) => void;
-  removeConnectionStateListeners: () => void;
   // Shortcuts
   onShortcut: (callback: (action: string) => void) => void;
   removeShortcutListeners: () => void;
@@ -71,7 +75,6 @@ export interface MandoAPI {
   // Launchd (macOS)
   launchd: {
     reinstall: () => Promise<boolean>;
-    daemonStatus: () => Promise<{ loaded: boolean; running: boolean; pid: number | null }>;
   };
 }
 
@@ -85,9 +88,7 @@ contextBridge.exposeInMainWorld('mandoAPI', {
   // Config & setup
   gatewayUrl: () => ipcRenderer.invoke('get-gateway-url'),
   appInfo: () => ipcRenderer.invoke('get-app-info'),
-  dataDir: () => ipcRenderer.invoke('get-data-dir'),
   hasConfig: () => ipcRenderer.invoke('has-config'),
-  configPath: () => ipcRenderer.invoke('get-config-path'),
   readConfig: () => ipcRenderer.invoke('read-config'),
   saveConfig: (config: string) => ipcRenderer.invoke('save-config', config),
   addProject: (body: string) => ipcRenderer.invoke('add-project', body),
@@ -96,15 +97,8 @@ contextBridge.exposeInMainWorld('mandoAPI', {
   onSetupProgress: (callback: (step: string) => void) => {
     ipcRenderer.on('setup-progress', (_event, step: string) => callback(step));
   },
-  // Connection state
-  connectionState: () => ipcRenderer.invoke('get-connection-state'),
+  // Daemon control
   restartDaemon: () => ipcRenderer.invoke('restart-daemon'),
-  onConnectionState: (callback: (state: string) => void) => {
-    ipcRenderer.on('connection-state', (_event, state: string) => callback(state));
-  },
-  removeConnectionStateListeners: () => {
-    ipcRenderer.removeAllListeners('connection-state');
-  },
   // Shortcuts
   onShortcut: (callback: (action: string) => void) => {
     ipcRenderer.on('shortcut', (_event, action: string) => callback(action));
@@ -166,6 +160,5 @@ contextBridge.exposeInMainWorld('mandoAPI', {
   // Launchd (macOS)
   launchd: {
     reinstall: () => ipcRenderer.invoke('launchd:reinstall'),
-    daemonStatus: () => ipcRenderer.invoke('launchd:daemon-status'),
   },
 } satisfies MandoAPI);

@@ -4,6 +4,7 @@ pub mod ask_history;
 pub mod captain;
 pub mod events;
 pub mod notify;
+pub mod pid;
 pub mod rebase_state;
 pub mod scout;
 pub mod session;
@@ -18,12 +19,21 @@ pub use ask_history::AskHistoryEntry;
 pub use captain::{Action, ActionKind, TickMode, TickResult, WorkerContext};
 pub use events::{BusEvent, NotificationKind, NotificationPayload};
 pub use notify::NotifyLevel;
+pub use pid::Pid;
 pub use rebase_state::{RebaseState, RebaseStatus};
 pub use scout::{ScoutItem, ScoutStatus};
 pub use session::{SessionEntry, SessionStatus};
 pub use session_ids::SessionIds;
 pub use task::{ItemStatus, ReviewTrigger, Task, TaskRouting, TaskUpdateError};
 pub use timeline::{TimelineEvent, TimelineEventType};
+
+/// Parse a string item/task ID to i64 with a caller-supplied label used in
+/// the error message. Shared by CLI commands and the Telegram bot so both
+/// surfaces produce consistent error strings.
+pub fn parse_i64_id(id: &str, label: &str) -> Result<i64, String> {
+    id.parse::<i64>()
+        .map_err(|_| format!("invalid {label} ID: {id}"))
+}
 
 /// Current UTC time as an RFC 3339 string.
 pub fn now_rfc3339() -> String {

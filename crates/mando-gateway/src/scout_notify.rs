@@ -24,8 +24,14 @@ pub(crate) fn emit_scout_process_failed(bus: &EventBus, id: i64, url: &str, erro
         reply_markup: None,
     };
 
-    if let Ok(json) = serde_json::to_value(&payload) {
-        bus.send(mando_types::BusEvent::Notification, Some(json));
+    match serde_json::to_value(&payload) {
+        Ok(json) => bus.send(mando_types::BusEvent::Notification, Some(json)),
+        Err(e) => tracing::error!(
+            module = "scout_notify",
+            scout_id = id,
+            error = %e,
+            "failed to serialize ScoutProcessFailed payload — notification dropped (code bug)"
+        ),
     }
 }
 
@@ -70,7 +76,13 @@ pub(crate) async fn emit_scout_processed(bus: &EventBus, pool: &sqlx::SqlitePool
         reply_markup: None,
     };
 
-    if let Ok(json) = serde_json::to_value(&payload) {
-        bus.send(mando_types::BusEvent::Notification, Some(json));
+    match serde_json::to_value(&payload) {
+        Ok(json) => bus.send(mando_types::BusEvent::Notification, Some(json)),
+        Err(e) => tracing::error!(
+            module = "scout_notify",
+            scout_id = id,
+            error = %e,
+            "failed to serialize ScoutProcessed payload — notification dropped (code bug)"
+        ),
     }
 }

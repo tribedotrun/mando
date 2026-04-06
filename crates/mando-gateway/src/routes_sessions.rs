@@ -37,7 +37,7 @@ pub(crate) async fn get_sessions(
             )
         })?;
 
-    let cat_counts = store.category_counts().await;
+    let cat_counts = store.category_counts().await.map_err(internal_error)?;
 
     let total_pages = if total == 0 {
         1
@@ -55,7 +55,7 @@ pub(crate) async fn get_sessions(
     let task_titles: std::collections::HashMap<String, String> = store
         .routing()
         .await
-        .unwrap_or_default()
+        .map_err(internal_error)?
         .into_iter()
         .map(|t| (t.id.to_string(), t.title.clone()))
         .collect();
@@ -94,7 +94,7 @@ pub(crate) async fn get_sessions(
         })
         .collect();
 
-    let total_cost_usd = store.total_session_cost().await;
+    let total_cost_usd = store.total_session_cost().await.map_err(internal_error)?;
 
     Ok(Json(json!({
         "total": total,
@@ -133,7 +133,7 @@ pub(crate) async fn get_session_transcript(
     // Read JSONL directly from CC's storage (deterministic path via CWD lookup).
     let cwd = {
         let store = state.task_store.read().await;
-        store.session_cwd(&id).await
+        store.session_cwd(&id).await.map_err(internal_error)?
     };
     let jsonl = find_cc_transcript(&id, cwd.as_deref())
         .await
@@ -144,7 +144,7 @@ pub(crate) async fn get_session_transcript(
     let markdown = mando_shared::transcript::jsonl_to_markdown(&jsonl);
 
     // Cache as .md only if the session is complete (not still running).
-    if !is_session_running(&id) {
+    if !is_session_running(&id).await {
         if let Err(e) = tokio::fs::create_dir_all(&cache_dir).await {
             tracing::warn!(module = "sessions", error = %e, "failed to create transcript cache dir");
         } else if let Err(e) = tokio::fs::write(cache_dir.join(format!("{id}.md")), &markdown).await
@@ -156,25 +156,47 @@ pub(crate) async fn get_session_transcript(
     Ok(Json(json!({ "session_id": id, "markdown": markdown })))
 }
 
-/// Check if a session is still running by looking at stream meta.
-fn is_session_running(session_id: &str) -> bool {
+/// Result of a stream meta sidecar read.
+enum StreamMeta {
+    /// File exists and parsed successfully.
+    Found(serde_json::Value),
+    /// File exists but JSON is corrupt.
+    Corrupt,
+    /// File does not exist.
+    Missing,
+}
+
+/// Read and parse a stream meta sidecar for a session.
+async fn read_stream_meta(session_id: &str) -> StreamMeta {
     let meta_path = mando_config::state_dir()
         .join("cc-streams")
         .join(format!("{session_id}.meta.json"));
-    match std::fs::read_to_string(&meta_path) {
-        Ok(content) => match serde_json::from_str::<serde_json::Value>(&content) {
-            Ok(val) => val["status"].as_str() == Some("running"),
-            Err(e) => {
-                tracing::warn!(
-                    module = "sessions",
-                    session_id = %session_id,
-                    error = %e,
-                    "stream meta corrupt — treating as running to avoid caching incomplete transcript"
-                );
-                true
-            }
-        },
-        Err(_) => false,
+    let content = match tokio::fs::read_to_string(&meta_path).await {
+        Ok(c) => c,
+        Err(_) => return StreamMeta::Missing,
+    };
+    match serde_json::from_str::<serde_json::Value>(&content) {
+        Ok(val) => StreamMeta::Found(val),
+        Err(e) => {
+            tracing::warn!(
+                module = "sessions",
+                session_id = %session_id,
+                error = %e,
+                "stream meta corrupt"
+            );
+            StreamMeta::Corrupt
+        }
+    }
+}
+
+/// Check if a session is still running by looking at stream meta.
+async fn is_session_running(session_id: &str) -> bool {
+    match read_stream_meta(session_id).await {
+        StreamMeta::Found(val) => val["status"].as_str() == Some("running"),
+        // Corrupt meta — conservatively treat as running to avoid caching an
+        // incomplete transcript.
+        StreamMeta::Corrupt => true,
+        StreamMeta::Missing => false,
     }
 }
 
@@ -187,9 +209,10 @@ async fn find_cc_transcript(session_id: &str, cwd: Option<&str>) -> Option<Strin
     let target = format!("{session_id}.jsonl");
 
     // Try deterministic path via CWD from session DB or stream meta.
-    let effective_cwd = cwd
-        .map(String::from)
-        .or_else(|| lookup_cwd_from_meta(session_id));
+    let effective_cwd = match cwd.map(String::from) {
+        Some(c) => Some(c),
+        None => lookup_cwd_from_meta(session_id).await,
+    };
     if let Some(ref cwd_val) = effective_cwd {
         if !cwd_val.is_empty() {
             // CC sanitizes CWD by replacing "/" with "-" (absolute paths get a leading dash).
@@ -220,65 +243,56 @@ pub(crate) struct MessagesQuery {
     pub offset: Option<usize>,
 }
 
-/// GET /api/sessions/{id}/messages?limit=N&offset=M
-pub(crate) async fn get_session_messages(
-    Path(id): Path<String>,
-    Query(params): Query<MessagesQuery>,
-) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    let stream = mando_config::stream_path_for_session(&id);
-    if !stream.exists() {
+/// Resolve a session's stream file path, returning 404 if it doesn't exist.
+async fn get_stream_or_404(id: &str) -> Result<std::path::PathBuf, (StatusCode, Json<Value>)> {
+    let stream = mando_config::stream_path_for_session(id);
+    if !tokio::fs::try_exists(&stream).await.unwrap_or(false) {
         return Err(error_response(
             StatusCode::NOT_FOUND,
             &format!("stream not found for session {id}"),
         ));
     }
+    Ok(stream)
+}
+
+/// GET /api/sessions/{id}/messages?limit=N&offset=M
+pub(crate) async fn get_session_messages(
+    Path(id): Path<String>,
+    Query(params): Query<MessagesQuery>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let stream = get_stream_or_404(&id).await?;
     let messages =
         mando_cc::transcript::parse_messages(&stream, params.limit, params.offset.unwrap_or(0));
-    Ok(Json(
-        serde_json::to_value(&messages).unwrap_or(Value::Array(vec![])),
-    ))
+    let val = serde_json::to_value(&messages).map_err(internal_error)?;
+    Ok(Json(val))
 }
 
 /// GET /api/sessions/{id}/tools
 pub(crate) async fn get_session_tools(
     Path(id): Path<String>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    let stream = mando_config::stream_path_for_session(&id);
-    if !stream.exists() {
-        return Err(error_response(
-            StatusCode::NOT_FOUND,
-            &format!("stream not found for session {id}"),
-        ));
-    }
+    let stream = get_stream_or_404(&id).await?;
     let usage = mando_cc::transcript::tool_usage(&stream);
-    Ok(Json(
-        serde_json::to_value(&usage).unwrap_or(Value::Array(vec![])),
-    ))
+    let val = serde_json::to_value(&usage).map_err(internal_error)?;
+    Ok(Json(val))
 }
 
 /// GET /api/sessions/{id}/cost
 pub(crate) async fn get_session_cost(
     Path(id): Path<String>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    let stream = mando_config::stream_path_for_session(&id);
-    if !stream.exists() {
-        return Err(error_response(
-            StatusCode::NOT_FOUND,
-            &format!("stream not found for session {id}"),
-        ));
-    }
+    let stream = get_stream_or_404(&id).await?;
     let cost = mando_cc::transcript::session_cost(&stream);
     let val = serde_json::to_value(&cost).map_err(internal_error)?;
     Ok(Json(val))
 }
 
 /// Look up the CWD from stream meta sidecar (fallback when DB has no entry).
-fn lookup_cwd_from_meta(session_id: &str) -> Option<String> {
-    let meta_path = mando_config::state_dir()
-        .join("cc-streams")
-        .join(format!("{session_id}.meta.json"));
-    let content = std::fs::read_to_string(&meta_path).ok()?;
-    let val: serde_json::Value = serde_json::from_str(&content).ok()?;
+async fn lookup_cwd_from_meta(session_id: &str) -> Option<String> {
+    let val = match read_stream_meta(session_id).await {
+        StreamMeta::Found(v) => v,
+        StreamMeta::Corrupt | StreamMeta::Missing => return None,
+    };
     val["cwd"]
         .as_str()
         .filter(|s| !s.is_empty())

@@ -6,6 +6,7 @@
 
 use anyhow::Result;
 use mando_config::workflow::CaptainWorkflow;
+use rustc_hash::FxHashMap;
 
 use super::dashboard::truncate_utf8;
 
@@ -26,7 +27,7 @@ pub fn build_initial_prompt(
         .unwrap_or("unknown")
         .to_string();
 
-    let mut vars = std::collections::HashMap::new();
+    let mut vars: FxHashMap<&str, &str> = FxHashMap::default();
     vars.insert("title", item.title.as_str());
     vars.insert("id", item_id);
     vars.insert("status", status_str.as_str());
@@ -41,26 +42,36 @@ pub fn build_initial_prompt(
         .map_err(|e| anyhow::anyhow!(e))
 }
 
-/// Build timeline text from recent events.
-pub async fn build_timeline_text(pool: &sqlx::SqlitePool, task_id: i64) -> String {
+/// Build timeline text from recent events. DB errors are propagated so the
+/// caller surfaces "we couldn't read your history" instead of silently
+/// handing the worker an empty timeline (which looks like a fresh task).
+pub async fn build_timeline_text(pool: &sqlx::SqlitePool, task_id: i64) -> Result<String> {
     let events = mando_db::queries::timeline::load_last_n(pool, task_id, 10)
         .await
-        .unwrap_or_default();
+        .map_err(|e| anyhow::anyhow!("load_last_n({task_id}): {e}"))?;
     if events.is_empty() {
-        "No timeline events.".to_string()
+        Ok("No timeline events.".to_string())
     } else {
-        events
+        Ok(events
             .iter()
             .map(|e| format!("[{}] {} — {}", e.timestamp, e.actor, e.summary))
             .collect::<Vec<_>>()
-            .join("\n")
+            .join("\n"))
     }
 }
 
-/// Record ask Q&A in history and timeline.
-pub async fn record_ask(pool: &sqlx::SqlitePool, task_id: i64, question: &str, answer: &str) {
+/// Record ask Q&A in history and timeline. Any persistence failure is
+/// propagated so the caller returns 500 to the human instead of silently
+/// leaving the DB inconsistent (history/timeline out of sync with the CC
+/// session).
+pub async fn record_ask(
+    pool: &sqlx::SqlitePool,
+    task_id: i64,
+    question: &str,
+    answer: &str,
+) -> Result<()> {
     let now = mando_types::now_rfc3339();
-    if let Err(e) = mando_db::queries::ask_history::append(
+    mando_db::queries::ask_history::append(
         pool,
         task_id,
         &mando_types::AskHistoryEntry {
@@ -70,10 +81,9 @@ pub async fn record_ask(pool: &sqlx::SqlitePool, task_id: i64, question: &str, a
         },
     )
     .await
-    {
-        tracing::warn!(task_id, error = %e, "failed to persist ask question to history");
-    }
-    if let Err(e) = mando_db::queries::ask_history::append(
+    .map_err(|e| anyhow::anyhow!("persist ask question for task {task_id}: {e}"))?;
+
+    mando_db::queries::ask_history::append(
         pool,
         task_id,
         &mando_types::AskHistoryEntry {
@@ -83,9 +93,7 @@ pub async fn record_ask(pool: &sqlx::SqlitePool, task_id: i64, question: &str, a
         },
     )
     .await
-    {
-        tracing::warn!(task_id, error = %e, "failed to persist ask answer to history");
-    }
+    .map_err(|e| anyhow::anyhow!("persist ask answer for task {task_id}: {e}"))?;
 
     super::timeline_emit::emit(
         pool,
@@ -95,5 +103,6 @@ pub async fn record_ask(pool: &sqlx::SqlitePool, task_id: i64, question: &str, a
         &format!("Asked: {}", truncate_utf8(question, 80)),
         serde_json::json!({"question": question}),
     )
-    .await;
+    .await?;
+    Ok(())
 }

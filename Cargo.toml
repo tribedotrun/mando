@@ -16,7 +16,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.11"
+version = "0.1.12"
 edition = "2021"
 license = "Apache-2.0"
 repository = "https://github.com/tribedotrun/mando"
@@ -41,6 +41,7 @@ opentelemetry-otlp = { version = "0.31", features = ["grpc-tonic"] }
 tracing-opentelemetry = "0.32"
 tower-http = { version = "0.6", features = ["cors"] }
 tokio-stream = { version = "0.1", features = ["sync"] }
+tokio-util = { version = "0.7", features = ["rt"] }
 futures-util = "0.3"
 html5ever = "0.29"
 regex = "1"
@@ -50,6 +51,7 @@ sha2 = "0.10"
 thiserror = "2"
 time = { version = "0.3", features = ["formatting", "parsing", "macros", "local-offset"] }
 sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite"] }
+rustc-hash = "2"
 
 # Internal crates
 mando-uuid = { path = "crates/mando-uuid" }

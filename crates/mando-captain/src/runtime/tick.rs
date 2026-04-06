@@ -9,7 +9,7 @@
 
 use std::sync::Arc;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use tracing::Instrument;
 
 use mando_config::settings::Config;
@@ -143,20 +143,30 @@ async fn run_captain_tick_inner(
         )
     };
     // Snapshot item IDs + serialized state so we only write back items the tick changed.
-    let pre_tick_snapshot: std::collections::HashMap<i64, serde_json::Value> = items
-        .iter()
-        .filter_map(|it| task_store::task_snapshot(it).ok().map(|s| (it.id, s)))
-        .collect();
-    let mut health_state = health_store::load_health_state(&health_path);
+    // Serialization failure is a schema bug, not a runtime glitch; propagate so
+    // the tick surfaces the problem instead of silently dropping items.
+    let mut pre_tick_snapshot: std::collections::HashMap<i64, serde_json::Value> =
+        std::collections::HashMap::with_capacity(items.len());
+    for it in items.iter() {
+        let snap = task_store::task_snapshot(it).with_context(|| {
+            format!("tick pre-snapshot serialization failed for task {}", it.id)
+        })?;
+        pre_tick_snapshot.insert(it.id, snap);
+    }
+    let mut health_state = health_store::load_health_state(&health_path)
+        .with_context(|| format!("load health state from {}", health_path.display()))?;
 
     // Clean stale per-item operation locks.
     crate::io::item_lock::clean_stale_locks();
 
     // Kill orphan workers — processes tracked in health state with no matching in-progress item.
-    if !dry_run {
+    // Returns removed worker names so the POST phase can clean them from disk.
+    let removed_workers = if !dry_run {
         super::tick_action_loop::kill_orphan_workers(&indices_snapshot, &mut health_state, &pool)
-            .await;
-    }
+            .await
+    } else {
+        Vec::new()
+    };
 
     let max_workers = workflow.agent.max_concurrent;
     let active_workers = items
@@ -186,10 +196,11 @@ async fn run_captain_tick_inner(
     // ── §2 GATHER — context for ALL non-terminal items ────────────────
 
     let worker_contexts =
-        review_phase::gather_worker_contexts(&mut items, config, &health_state).await;
+        review_phase::gather_worker_contexts(&mut items, config, &health_state).await?;
 
     // Persist any PRs discovered during context gathering so they survive a crash.
-    super::tick_persist::flush_discovered_prs(&items, &pre_tick_snapshot, store_lock).await;
+    super::tick_persist::flush_discovered_prs(&items, &pre_tick_snapshot, store_lock, &mut alerts)
+        .await;
 
     // ── §3 CLASSIFY — single pass over all non-terminal items ─────────
     //
@@ -206,7 +217,7 @@ async fn run_captain_tick_inner(
         &mut health_state,
         workflow,
         dry_run,
-    );
+    )?;
     let actions_to_execute = classify_result.actions_to_execute;
     dry_actions.extend(classify_result.dry_actions);
 
@@ -232,7 +243,13 @@ async fn run_captain_tick_inner(
         }
 
         // Persist any PRs discovered during mergeability check.
-        super::tick_persist::flush_discovered_prs(&items, &pre_tick_snapshot, store_lock).await;
+        super::tick_persist::flush_discovered_prs(
+            &items,
+            &pre_tick_snapshot,
+            store_lock,
+            &mut alerts,
+        )
+        .await;
     }
 
     // CaptainReviewing — poll for review verdicts from async CC sessions.
@@ -316,7 +333,7 @@ async fn run_captain_tick_inner(
     let mut dry_dispatch_actions: Vec<String> = Vec::new();
 
     if !dry_run {
-        super::tick_rework::transition_rework_to_queued(&mut items);
+        super::tick_rework::transition_rework_to_queued(&mut items, &mut alerts);
 
         // Dispatch Queued items to workers + New items to clarifier.
         // Skip entirely during rate-limit cooldown — no CC sessions will be spawned.
@@ -362,11 +379,25 @@ async fn run_captain_tick_inner(
                 {
                     Ok(guard) => guard,
                     Err(_) => {
+                        // Escalate loudly — a stuck write lock means a reader
+                        // is wedged and the tick cannot persist its progress.
+                        // Fire a CRITICAL notification so operators see it on
+                        // Telegram / Electron instead of only in the log, and
+                        // return an Err so the auto-tick loop increments its
+                        // consecutive-failure counter.
                         tracing::error!(
                             module = "captain",
-                            "tick write-lock timed out after 30s — aborting merge"
+                            "tick write-lock timed out after 30s — aborting merge, task_store reader wedged"
                         );
-                        return Err(anyhow::anyhow!("tick write-lock timed out after 30s"));
+                        notifier
+                            .critical(
+                                "Captain tick aborted: task store write lock timed out after 30s. \
+                                 A reader task is wedged — investigate active /api handlers and SSE subscribers.",
+                            )
+                            .await;
+                        return Err(anyhow::anyhow!(
+                            "tick write-lock timed out after 30s (task_store reader wedged)"
+                        ));
                     }
                 };
                 store
@@ -378,7 +409,15 @@ async fn run_captain_tick_inner(
 
     // ── §5 POST — persist, SSE, prune ─────────────────────────────────
 
-    super::tick_post::run_post_phase(dry_run, &health_path, &health_state, &notifier, bus).await?;
+    super::tick_post::run_post_phase(
+        dry_run,
+        &health_path,
+        &health_state,
+        &removed_workers,
+        &notifier,
+        bus,
+    )
+    .await?;
 
     // Archive terminal tasks that have been finalized longer than the grace period.
     if !dry_run {
@@ -403,17 +442,22 @@ async fn run_captain_tick_inner(
         super::session_reconcile::reconcile_running_sessions(
             store.pool(),
             workflow.agent.stale_threshold_s,
+            &mut alerts,
         )
         .await;
     }
 
-    let status_counts = {
-        store_lock
-            .read()
-            .await
-            .status_counts()
-            .await
-            .unwrap_or_default()
+    let status_counts = match store_lock.read().await.status_counts().await {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::error!(
+                module = "captain",
+                error = %e,
+                "tick status_counts failed; surfacing as alert"
+            );
+            alerts.push(format!("tick status_counts query failed: {e}"));
+            std::collections::HashMap::new()
+        }
     };
     super::tick_post::log_tick_summary(&status_counts, active_workers, alerts.len());
 

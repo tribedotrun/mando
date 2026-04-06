@@ -1,8 +1,11 @@
 //! /api/scout/* route handlers.
 
+use std::panic::AssertUnwindSafe;
+
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::Json;
+use futures_util::FutureExt;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
@@ -105,7 +108,10 @@ pub(crate) async fn post_scout_items(
                 .bus
                 .send(mando_types::BusEvent::Scout, Some(json!({"action": "add"})));
 
-            // Auto-process newly added items in the background.
+            // Auto-process newly added items in the background. Panic-safe:
+            // AssertUnwindSafe + catch_unwind ensures an auto-process failure
+            // cannot take down the runtime. Registered with the task tracker
+            // so shutdown awaits in-flight auto-processing before exit.
             if val["added"].as_bool() == Some(true) {
                 if let Some(id) = val["id"].as_i64() {
                     let config = state.config.load_full();
@@ -113,24 +119,27 @@ pub(crate) async fn post_scout_items(
                     let pool = state.db.pool().clone();
                     let bus = state.bus.clone();
                     let url_owned = body.url.clone();
-                    let handle = tokio::spawn(async move {
-                        if let Err(e) =
-                            mando_scout::process_scout(&config, &pool, Some(id), &workflow).await
-                        {
-                            tracing::warn!(scout_id = id, error = %e, "auto-process failed");
-                            emit_scout_process_failed(&bus, id, &url_owned, &e.to_string());
-                            return;
-                        }
-                        bus.send(
-                            mando_types::BusEvent::Scout,
-                            Some(json!({"action": "process"})),
-                        );
+                    state.task_tracker.spawn(async move {
+                        let result = AssertUnwindSafe(async {
+                            if let Err(e) =
+                                mando_scout::process_scout(&config, &pool, Some(id), &workflow)
+                                    .await
+                            {
+                                tracing::warn!(scout_id = id, error = %e, "auto-process failed");
+                                emit_scout_process_failed(&bus, id, &url_owned, &e.to_string());
+                                return;
+                            }
+                            bus.send(
+                                mando_types::BusEvent::Scout,
+                                Some(json!({"action": "process"})),
+                            );
 
-                        emit_scout_processed(&bus, &pool, id).await;
-                    });
-                    tokio::spawn(async move {
-                        if let Err(e) = handle.await {
-                            tracing::error!(scout_id = id, error = %e, "auto-process panicked");
+                            emit_scout_processed(&bus, &pool, id).await;
+                        })
+                        .catch_unwind()
+                        .await;
+                        if let Err(panic) = result {
+                            tracing::error!(scout_id = id, ?panic, "auto-process panicked");
                         }
                     });
                 }
@@ -199,21 +208,36 @@ pub(crate) async fn post_scout_research(
 
         let mut added = 0u64;
         let mut processed_count = 0u64;
+        let mut errors: Vec<Value> = Vec::new();
         for link in &research.links {
-            if let Ok(val) = mando_scout::add_scout_item(&pool, &link.url, Some(&link.title)).await
-            {
-                if val["added"].as_bool() == Some(true) {
-                    added += 1;
-                    if process {
-                        if let Some(id) = val["id"].as_i64() {
-                            if mando_scout::process_scout(&config, &pool, Some(id), &workflow)
-                                .await
-                                .is_ok()
-                            {
-                                processed_count += 1;
+            match mando_scout::add_scout_item(&pool, &link.url, Some(&link.title)).await {
+                Ok(val) => {
+                    if val["added"].as_bool() == Some(true) {
+                        added += 1;
+                        if process {
+                            if let Some(id) = val["id"].as_i64() {
+                                if let Err(e) =
+                                    mando_scout::process_scout(&config, &pool, Some(id), &workflow)
+                                        .await
+                                {
+                                    errors.push(json!({
+                                        "url": link.url,
+                                        "stage": "process",
+                                        "error": e.to_string(),
+                                    }));
+                                } else {
+                                    processed_count += 1;
+                                }
                             }
                         }
                     }
+                }
+                Err(e) => {
+                    errors.push(json!({
+                        "url": link.url,
+                        "stage": "add",
+                        "error": e.to_string(),
+                    }));
                 }
             }
         }
@@ -236,6 +260,7 @@ pub(crate) async fn post_scout_research(
             "links": links_json,
             "added": added,
             "processed": processed_count,
+            "errors": errors,
         }))
     }
     .await
@@ -346,9 +371,9 @@ pub(crate) async fn post_scout_act(
         if msg.contains("unknown project") {
             error_response(StatusCode::BAD_REQUEST, &msg)
         } else if msg.contains("not found") {
-            error_response(StatusCode::NOT_FOUND, &msg)
+            error_response(StatusCode::NOT_FOUND, "not found")
         } else {
-            error_response(StatusCode::INTERNAL_SERVER_ERROR, &msg)
+            crate::response::internal_error(e)
         }
     })?;
 

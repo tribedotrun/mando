@@ -76,11 +76,24 @@ pub(crate) async fn clarify_new_items(
             continue;
         }
 
-        crate::io::headless_cc::log_cc_session(
+        let clarifier_cwd = match crate::runtime::clarifier::resolve_clarifier_cwd(item, config) {
+            Ok(cwd) => cwd,
+            Err(e) => {
+                tracing::error!(
+                    module = "captain",
+                    id = item.id,
+                    error = %e,
+                    "cannot log clarifier session start, skipping this dispatch"
+                );
+                item.session_ids.clarifier = None;
+                continue;
+            }
+        };
+        if let Err(e) = crate::io::headless_cc::log_cc_session(
             pool,
             &crate::io::headless_cc::SessionLogEntry {
                 session_id: &session_id,
-                cwd: &crate::runtime::clarifier::resolve_clarifier_cwd(item, config),
+                cwd: &clarifier_cwd,
                 model: &workflow.models.clarifier,
                 caller: "clarifier",
                 cost_usd: None,
@@ -91,9 +104,12 @@ pub(crate) async fn clarify_new_items(
                 worker_name: "",
             },
         )
-        .await;
+        .await
+        {
+            tracing::warn!(module = "captain", id = item.id, error = %e, "failed to log clarifier session start");
+        }
 
-        super::timeline_emit::emit_for_task(
+        let _ = super::timeline_emit::emit_for_task(
             item,
             mando_types::timeline::TimelineEventType::ClarifyStarted,
             "Clarification starting",
@@ -197,16 +213,24 @@ async fn apply_clarifier_ok(
                     }
                 }
                 if let Some(repo) = result.repo.filter(|r| !r.trim().is_empty()) {
-                    let (_, pc) = mando_config::resolve_project_config(Some(&repo), config)
-                        .unwrap_or_else(|| {
-                            panic!(
-                                "clarifier returned repo '{}' which passed schema \
-                                     validation but fails resolve_project_config — \
-                                     config/schema mismatch",
-                                repo
-                            )
-                        });
-                    item.project = Some(pc.name.clone());
+                    match mando_config::resolve_project_config(Some(&repo), config) {
+                        Some((_, pc)) => {
+                            item.project = Some(pc.name.clone());
+                        }
+                        None => {
+                            tracing::error!(
+                                module = "captain",
+                                repo = %repo,
+                                title = %truncate_utf8(&item.title, 60),
+                                "clarifier returned repo that passed schema but fails resolve_project_config; config/schema mismatch; escalating"
+                            );
+                            super::action_contract::reset_review_retry(
+                                item,
+                                mando_types::task::ReviewTrigger::ClarifierFail,
+                            );
+                            return;
+                        }
+                    }
                 }
                 if let Some(no_pr) = result.no_pr {
                     item.no_pr = no_pr;
@@ -225,7 +249,16 @@ async fn apply_clarifier_ok(
                     }
                 }
 
-                super::timeline_emit::emit_for_task(
+                if let Err(e) = mando_db::queries::tasks::persist_clarify_result(pool, item).await {
+                    tracing::error!(
+                        module = "captain",
+                        id = item.id,
+                        error = %e,
+                        "failed to persist clarify result"
+                    );
+                }
+
+                let _ = super::timeline_emit::emit_for_task(
                     item,
                     mando_types::timeline::TimelineEventType::ClarifyResolved,
                     "Clarification complete, ready for work",
@@ -249,7 +282,16 @@ async fn apply_clarifier_ok(
                 item.session_ids.clarifier = Some(sid.clone());
             }
 
-            super::timeline_emit::emit_for_task(
+            if let Err(e) = mando_db::queries::tasks::persist_clarify_result(pool, item).await {
+                tracing::error!(
+                    module = "captain",
+                    id = item.id,
+                    error = %e,
+                    "failed to persist clarify result"
+                );
+            }
+
+            let _ = super::timeline_emit::emit_for_task(
                 item,
                 mando_types::timeline::TimelineEventType::ClarifyQuestion,
                 "Needs clarification",
@@ -288,7 +330,16 @@ async fn apply_clarifier_ok(
                 item.session_ids.clarifier = Some(sid.clone());
             }
 
-            super::timeline_emit::emit_for_task(
+            if let Err(e) = mando_db::queries::tasks::persist_clarify_result(pool, item).await {
+                tracing::error!(
+                    module = "captain",
+                    id = item.id,
+                    error = %e,
+                    "failed to persist clarify result"
+                );
+            }
+
+            let _ = super::timeline_emit::emit_for_task(
                 item,
                 mando_types::timeline::TimelineEventType::ClarifyQuestion,
                 "Needs human input",
@@ -332,7 +383,7 @@ async fn apply_clarifier_err(
     super::dispatch_redispatch::revert_clarifier_start(item, session_id, &e, pool).await;
     // Rate-limit-caused failure — activate cooldown, skip retry count.
     if super::rate_limit_cooldown::check_and_activate_from_stream(session_id) {
-        super::timeline_emit::emit_rate_limited(item, pool).await;
+        let _ = super::timeline_emit::emit_rate_limited(item, pool).await;
         return;
     }
     let count = item.clarifier_fail_count + 1;

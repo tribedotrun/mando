@@ -1,9 +1,10 @@
 //! Shared captain action execution for manual and automatic flows.
 
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use mando_config::settings::Config;
 use mando_config::workflow::CaptainWorkflow;
 use mando_types::task::{ItemStatus, ReviewTrigger, Task};
+use rustc_hash::FxHashMap;
 
 use crate::biz::spawn_logic;
 use crate::runtime::task_notes::append_tagged_note;
@@ -69,7 +70,8 @@ pub async fn nudge_item(
     // ── Circuit breaker: repeated identical nudge reason → captain review ──
     if let Some(reason_str) = reason {
         let health_path = mando_config::worker_health_path();
-        let hstate = crate::io::health_store::load_health_state(&health_path);
+        let hstate = crate::io::health_store::load_health_state(&health_path)
+            .with_context(|| format!("load health state from {}", health_path.display()))?;
         let last_reason =
             crate::io::health_store::get_health_str(&hstate, &worker, "last_nudge_reason");
         let consecutive =
@@ -115,7 +117,8 @@ pub async fn nudge_item(
     // so the feedback survives if this function exits early (broken session, etc.).
     let ai_feedback = {
         let health_path = mando_config::worker_health_path();
-        let hstate = crate::io::health_store::load_health_state(&health_path);
+        let hstate = crate::io::health_store::load_health_state(&health_path)
+            .with_context(|| format!("load health state from {}", health_path.display()))?;
         crate::io::health_store::get_health_str(&hstate, &worker, "pending_ai_feedback")
     };
 
@@ -128,21 +131,20 @@ pub async fn nudge_item(
         _ => match message {
             Some(m) if !m.is_empty() => m,
             _ => {
-                msg_owned = mando_config::render_nudge(
-                    "nudge_default",
-                    &workflow.nudges,
-                    &std::collections::HashMap::new(),
-                )
-                .map_err(|e| anyhow::anyhow!(e))?;
+                let empty_vars: FxHashMap<&str, &str> = FxHashMap::default();
+                msg_owned =
+                    mando_config::render_nudge("nudge_default", &workflow.nudges, &empty_vars)
+                        .map_err(|e| anyhow::anyhow!(e))?;
                 &msg_owned
             }
         },
     };
 
-    let old_pid = crate::io::pid_lookup::resolve_pid(&cc_sid, &worker).unwrap_or(0);
-    if old_pid > 0 {
+    let old_pid =
+        crate::io::pid_lookup::resolve_pid(&cc_sid, &worker).unwrap_or(mando_types::Pid::new(0));
+    if old_pid.as_u32() > 0 {
         if let Err(e) = mando_cc::kill_process(old_pid).await {
-            tracing::warn!(module = "captain", worker = %worker, pid = old_pid, error = %e, "failed to kill old process before nudge");
+            tracing::warn!(module = "captain", worker = %worker, pid = %old_pid, error = %e, "failed to kill old process before nudge");
         }
     }
 
@@ -170,7 +172,6 @@ pub async fn nudge_item(
     let env = std::collections::HashMap::new();
 
     match crate::io::process_manager::resume_worker_process(
-        &worker,
         msg,
         &wt_path,
         &workflow.models.worker,
@@ -181,7 +182,7 @@ pub async fn nudge_item(
     .await
     {
         Ok((pid, _)) => {
-            persist_nudge_health(&cc_sid, &worker, pid, stream_size_before, new_count, reason);
+            persist_nudge_health(&cc_sid, &worker, pid, stream_size_before, new_count, reason)?;
 
             // Clear AI feedback only after the nudge was successfully delivered.
             if ai_feedback.is_some() {
@@ -189,11 +190,11 @@ pub async fn nudge_item(
                     &worker,
                     "pending_ai_feedback",
                     serde_json::Value::Null,
-                    "failed to clear pending_ai_feedback — next nudge may re-deliver stale feedback",
+                    "failed to clear pending_ai_feedback; next nudge may re-deliver stale feedback",
                 );
             }
 
-            crate::io::headless_cc::log_running_session(
+            if let Err(e) = crate::io::headless_cc::log_running_session(
                 pool,
                 &cc_sid,
                 &wt_path,
@@ -202,10 +203,13 @@ pub async fn nudge_item(
                 &item.id.to_string(),
                 true,
             )
-            .await;
+            .await
+            {
+                tracing::warn!(module = "captain", worker = %worker, %e, "failed to log running session after nudge");
+            }
 
             item.intervention_count = new_count as i64;
-            timeline_emit::emit_for_task(
+            let _ = timeline_emit::emit_for_task(
                 item,
                 mando_types::timeline::TimelineEventType::WorkerNudged,
                 &format!(
@@ -221,30 +225,31 @@ pub async fn nudge_item(
                 pool,
             )
             .await;
+            Ok(())
         }
         Err(e) => {
-            crate::io::health_store::persist_nudge_count(&worker, new_count);
-            item.intervention_count = new_count as i64;
-            timeline_emit::emit_for_task(
+            // Nudge delivery failed; do NOT increment intervention_count.
+            // The budget must only decrement on successful interventions so
+            // transient resume failures don't burn the worker's budget.
+            let _ = timeline_emit::emit_for_task(
                 item,
                 mando_types::timeline::TimelineEventType::WorkerNudged,
                 &format!(
-                    "Nudge failed for {} ({}/{}): {}",
+                    "Nudge delivery failed for {} ({}/{}): {}",
                     worker, new_count, workflow.agent.max_interventions, e
                 ),
                 serde_json::json!({
                     "worker": worker,
                     "session_id": cc_sid,
-                    "nudge_count": new_count,
+                    "nudge_count_attempted": new_count,
                     "error": e.to_string(),
                 }),
                 pool,
             )
             .await;
+            Err(anyhow::anyhow!("nudge delivery failed for {worker}: {e}"))
         }
     }
-
-    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -283,6 +288,11 @@ pub async fn reopen_item(
         item.context = Some(new_context);
     }
 
+    // Human reopens get a fresh intervention budget.
+    if reopen_source == "human" {
+        item.intervention_count = 0;
+    }
+
     let budget = spawn_logic::check_intervention(
         item.intervention_count as u32,
         1,
@@ -314,6 +324,7 @@ pub async fn reopen_item(
             item.intervention_count = new_count as i64;
             item.reopen_seq += 1;
             item.status = ItemStatus::Queued;
+            item.worker_started_at = None;
             item.last_activity_at = Some(mando_types::now_rfc3339());
             return Ok(ReopenOutcome::QueuedFallback);
         }
@@ -330,7 +341,9 @@ pub async fn reopen_item(
             item.session_ids.ask = None;
             item.branch = Some(result.branch);
             item.worktree = Some(result.worktree);
-            item.last_activity_at = Some(mando_types::now_rfc3339());
+            // Reset timeout clock so the worker gets a fresh window after reopen.
+            item.worker_started_at = Some(mando_types::now_rfc3339());
+            item.last_activity_at = item.worker_started_at.clone();
 
             Ok(ReopenOutcome::Reopened)
         }
@@ -345,6 +358,7 @@ pub async fn reopen_item(
                 item.intervention_count = new_count as i64;
                 item.reopen_seq += 1;
                 item.status = ItemStatus::Queued;
+                item.worker_started_at = None;
                 item.last_activity_at = Some(mando_types::now_rfc3339());
                 Ok(ReopenOutcome::QueuedFallback)
             } else {
@@ -378,15 +392,21 @@ async fn trigger_review(
 fn persist_nudge_health(
     session_id: &str,
     worker: &str,
-    pid: u32,
+    pid: mando_types::Pid,
     stream_size_before: u64,
     new_count: u32,
     reason: Option<&str>,
-) {
-    crate::io::pid_registry::register(session_id, pid);
+) -> Result<()> {
+    crate::io::pid_registry::register(session_id, pid)?;
     let health_path = mando_config::worker_health_path();
-    let mut hstate = crate::io::health_store::load_health_state(&health_path);
-    crate::io::health_store::set_health_field(&mut hstate, worker, "pid", serde_json::json!(pid));
+    let mut hstate = crate::io::health_store::load_health_state(&health_path)
+        .with_context(|| format!("load health state from {}", health_path.display()))?;
+    crate::io::health_store::set_health_field(
+        &mut hstate,
+        worker,
+        "pid",
+        serde_json::json!(pid.as_u32()),
+    );
     crate::io::health_store::set_health_field(
         &mut hstate,
         worker,
@@ -426,4 +446,5 @@ fn persist_nudge_health(
     if let Err(e) = crate::io::health_store::save_health_state(&health_path, &hstate) {
         tracing::error!(module = "captain", worker = %worker, error = %e, "failed to persist health state");
     }
+    Ok(())
 }

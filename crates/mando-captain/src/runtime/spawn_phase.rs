@@ -101,10 +101,11 @@ async fn execute_ship(
 
     // Kill worker process.
     let cc_sid = it.session_ids.worker.as_deref().unwrap_or("");
-    let pid = crate::io::pid_lookup::resolve_pid(cc_sid, &action.worker).unwrap_or(0);
-    if pid > 0 {
+    let pid = crate::io::pid_lookup::resolve_pid(cc_sid, &action.worker)
+        .unwrap_or(mando_types::Pid::new(0));
+    if pid.as_u32() > 0 {
         if let Err(e) = mando_cc::kill_process(pid).await {
-            tracing::warn!(module = "captain", worker = %action.worker, pid = pid, error = %e, "failed to kill worker for ship");
+            tracing::warn!(module = "captain", worker = %action.worker, pid = %pid, error = %e, "failed to kill worker for ship");
         }
     }
 
@@ -125,7 +126,7 @@ async fn execute_ship(
     it.status = spawn_logic::ship_status(is_no_pr);
 
     // Emit timeline event.
-    super::timeline_emit::emit_for_task(
+    let _ = super::timeline_emit::emit_for_task(
         it,
         mando_types::timeline::TimelineEventType::AwaitingReview,
         &format!(
@@ -141,13 +142,16 @@ async fn execute_ship(
     )
     .await;
 
-    crate::io::headless_cc::log_item_session(
+    if let Err(e) = crate::io::headless_cc::log_item_session(
         pool,
         it,
         &action.worker,
         mando_types::SessionStatus::Stopped,
     )
-    .await;
+    .await
+    {
+        tracing::warn!(module = "captain", worker = %action.worker, %e, "failed to log stopped worker session");
+    }
 
     // Notify via Telegram.
     let pr_ref = it.pr.as_deref().map(mando_shared::helpers::pr_short_label);

@@ -5,6 +5,7 @@ use std::time::Duration;
 use crate::biz::formatting::slugify_title;
 use anyhow::Result;
 use mando_config::workflow::ScoutWorkflow;
+use rustc_hash::FxHashMap;
 
 const LOCAL_ARTICLE_MAX_CHARS: usize = 280;
 
@@ -27,7 +28,7 @@ pub async fn generate_article(
 ) -> Result<ArticleResult> {
     let user_context_rendered = workflow.user_context.render();
 
-    let mut vars = std::collections::HashMap::new();
+    let mut vars: FxHashMap<&str, &str> = FxHashMap::default();
     vars.insert("title", title);
     vars.insert("url", url);
     vars.insert("url_type", url_type);

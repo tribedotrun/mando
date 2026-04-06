@@ -149,7 +149,7 @@ pub(crate) async fn post_captain_adopt(
     };
 
     let brief_dir = wt_path.join(".ai").join("briefs");
-    std::fs::create_dir_all(&brief_dir).map_err(|e| {
+    tokio::fs::create_dir_all(&brief_dir).await.map_err(|e| {
         error_response(
             StatusCode::INTERNAL_SERVER_ERROR,
             &format!("failed to create adopt brief directory: {e}"),
@@ -163,12 +163,14 @@ pub(crate) async fn post_captain_adopt(
         "# Adopt Handoff\n\nBranch: {branch}\nTitle: {}\n\n{note_text}\n",
         body.title
     );
-    std::fs::write(brief_dir.join("adopt-handoff.md"), &brief).map_err(|e| {
-        error_response(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            &format!("failed to write adopt brief: {e}"),
-        )
-    })?;
+    tokio::fs::write(brief_dir.join("adopt-handoff.md"), &brief)
+        .await
+        .map_err(|e| {
+            error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                &format!("failed to write adopt brief: {e}"),
+            )
+        })?;
 
     let wt_display = wt_path.display().to_string();
     let val = {

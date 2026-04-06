@@ -10,7 +10,7 @@
 
 mod binary;
 mod config;
-pub(crate) mod hooks;
+mod error;
 mod message;
 mod oneshot;
 mod process;
@@ -21,6 +21,7 @@ pub mod transcript;
 
 pub use binary::resolve_claude_binary;
 pub use config::{CcConfig, Effort, PermissionMode, TaskBudget, ThinkingConfig};
+pub use error::CcError;
 pub use message::{
     AssistantMessage, CcMessage, ContentBlock, InitMessage, RateLimitEvent, RateLimitStatus,
     ResultMessage, ResultSubtype,
@@ -29,9 +30,9 @@ pub use oneshot::CcOneShot;
 pub use process::{get_cpu_time, is_process_alive, kill_process, spawn_detached};
 pub use session::CcSession;
 pub use stream::{
-    get_last_assistant_text, get_last_stream_event_type, get_stream_file_size, get_stream_result,
-    has_rate_limit_rejection, is_clean_result, stream_has_broken_session, stream_stale_seconds,
-    write_error_result,
+    get_last_assistant_text, get_last_stream_event_type, get_stream_cost, get_stream_file_size,
+    get_stream_result, has_rate_limit_rejection, is_clean_result, stream_has_broken_session,
+    stream_stale_seconds, write_error_result, StreamCostInfo,
 };
 
 /// Result from a CC invocation with optional structured output.
@@ -58,8 +59,8 @@ pub struct CcResult<T = serde_json::Value> {
     pub stream_path: std::path::PathBuf,
     /// Most recent rate limit event observed during the session (if any).
     pub rate_limit: Option<RateLimitEvent>,
-    /// PID of the CC process (0 if unknown / already exited).
-    pub pid: u32,
+    /// PID of the CC process (Pid(0) if unknown or already exited).
+    pub pid: mando_types::Pid,
 }
 
 /// Metadata for session logging.

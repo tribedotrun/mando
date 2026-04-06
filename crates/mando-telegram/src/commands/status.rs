@@ -6,6 +6,10 @@ use mando_shared::telegram_format::{escape_html, split_message, status_icon};
 use mando_types::ItemStatus;
 use serde_json::json;
 
+/// How long finalized tasks (merged/completed/canceled) remain visible in the
+/// default `/tasks` view before being hidden. `tasks all` bypasses this.
+const FINALIZED_VISIBLE_HOURS: i64 = 8;
+
 /// Workflow state display order.
 const STATUS_ORDER: &[ItemStatus] = &[
     ItemStatus::New,
@@ -78,7 +82,30 @@ pub async fn handle(bot: &TelegramBot, chat_id: &str, args: &str) -> Result<()> 
         return Ok(());
     }
 
-    let display: Vec<&mando_types::Task> = items.iter().collect();
+    // In the default view, hide finalized tasks older than the visibility window.
+    let display: Vec<&mando_types::Task> = if show_all {
+        items.iter().collect()
+    } else {
+        let cutoff =
+            time::OffsetDateTime::now_utc() - time::Duration::hours(FINALIZED_VISIBLE_HOURS);
+        items
+            .iter()
+            .filter(|t| {
+                if !t.status.is_finalized() {
+                    return true;
+                }
+                // Use last_activity_at, fall back to created_at. If neither
+                // exists, keep the task visible (shouldn't happen in practice).
+                let ts_str = t.last_activity_at.as_deref().or(t.created_at.as_deref());
+                let Some(ts_str) = ts_str else {
+                    return true;
+                };
+                time::OffsetDateTime::parse(ts_str, &time::format_description::well_known::Rfc3339)
+                    .map(|ts| ts > cutoff)
+                    .unwrap_or(true)
+            })
+            .collect()
+    };
 
     // Summary line
     let mut status_counts: std::collections::HashMap<&str, usize> =

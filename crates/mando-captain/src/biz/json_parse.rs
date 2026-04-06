@@ -40,11 +40,7 @@ pub fn parse_llm_json(raw: &str) -> Result<serde_json::Value, LlmJsonParseError>
     }
 
     // All strategies failed.
-    let end = raw.len().min(200);
-    let end = (0..=end)
-        .rev()
-        .find(|&i| raw.is_char_boundary(i))
-        .unwrap_or(0);
+    let end = raw.floor_char_boundary(raw.len().min(200));
     let preview = &raw[..end];
     Err(LlmJsonParseError {
         preview: preview.to_string(),
@@ -129,16 +125,19 @@ fn apply_fixups(text: &str) -> String {
     s = fix_single_quotes(&s);
 
     // Strip markdown code fences.
-    if s.starts_with("```") {
-        if let Some(first_newline) = s.find('\n') {
-            s = s[first_newline + 1..].to_string();
-        }
-        if s.ends_with("```") {
-            s = s[..s.len() - 3].trim().to_string();
-        }
-    }
+    s = strip_code_fence(&s).to_string();
 
     s
+}
+
+/// Strip ```…``` markdown code fences from both ends. Drops the optional
+/// language tag line after the opening fence (e.g. ```json\n).
+fn strip_code_fence(s: &str) -> &str {
+    let Some(rest) = s.strip_prefix("```") else {
+        return s;
+    };
+    let after_lang = rest.find('\n').map(|i| &rest[i + 1..]).unwrap_or(rest);
+    after_lang.trim_end_matches("```").trim()
 }
 
 /// Naively replace single quotes with double quotes when not inside a double-quoted string.

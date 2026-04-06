@@ -59,7 +59,11 @@ pub(crate) async fn redispatch_newly_queued(
                         truncate_utf8(&item.title, 60)
                     ));
                     *active_workers += 1;
-                    let resource = item.resource.as_deref().unwrap_or("cc").to_string();
+                    let resource = item
+                        .resource
+                        .as_deref()
+                        .unwrap_or(dispatch_logic::DEFAULT_RESOURCE)
+                        .to_string();
                     *resource_counts.entry(resource).or_insert(0) += 1;
                 } else {
                     items[idx].worker_seq += 1;
@@ -76,7 +80,11 @@ pub(crate) async fn redispatch_newly_queued(
                             item.session_ids.worker = Some(spawn_result.session_id);
                             item.spawn_fail_count = 0;
                             *active_workers += 1;
-                            let resource = item.resource.as_deref().unwrap_or("cc").to_string();
+                            let resource = item
+                                .resource
+                                .as_deref()
+                                .unwrap_or(dispatch_logic::DEFAULT_RESOURCE)
+                                .to_string();
                             *resource_counts.entry(resource).or_insert(0) += 1;
 
                             if let Err(e) =
@@ -95,14 +103,18 @@ pub(crate) async fn redispatch_newly_queued(
                                 }
                                 super::revert_to_queued(item);
                                 *active_workers -= 1;
-                                let resource = item.resource.as_deref().unwrap_or("cc").to_string();
+                                let resource = item
+                                    .resource
+                                    .as_deref()
+                                    .unwrap_or(dispatch_logic::DEFAULT_RESOURCE)
+                                    .to_string();
                                 if let Some(c) = resource_counts.get_mut(&resource) {
                                     *c = c.saturating_sub(1);
                                 }
                                 continue;
                             }
 
-                            super::timeline_emit::emit_for_task(
+                            let _ = super::timeline_emit::emit_for_task(
                                 item,
                                 mando_types::timeline::TimelineEventType::WorkerSpawned,
                                 &format!("Spawned {}", spawn_result.session_name),
@@ -179,7 +191,7 @@ pub(crate) async fn revert_clarifier_start(
     }
 
     let err_msg = error.to_string();
-    super::timeline_emit::emit_for_task(
+    let _ = super::timeline_emit::emit_for_task(
         item,
         TimelineEventType::Errored,
         &format!("Clarifier failed: {}", truncate_utf8(&err_msg, 120)),

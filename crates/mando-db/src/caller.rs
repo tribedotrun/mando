@@ -15,6 +15,7 @@ pub enum SessionCaller {
     CaptainMergeAsync,
     ExhaustionReport,
     TaskAsk,
+    ParseTodos,
     ScoutProcess,
     ScoutArticle,
     ScoutQa,
@@ -43,6 +44,7 @@ impl SessionCaller {
             Self::CaptainMergeAsync => "captain-merge-async",
             Self::ExhaustionReport => "exhaustion-report",
             Self::TaskAsk => "task-ask",
+            Self::ParseTodos => "parse-todos",
             Self::ScoutProcess => "scout-process",
             Self::ScoutArticle => "scout-article",
             Self::ScoutQa => "scout-qa",
@@ -61,11 +63,16 @@ impl SessionCaller {
             "captain-merge-async" => Some(Self::CaptainMergeAsync),
             "exhaustion-report" => Some(Self::ExhaustionReport),
             "task-ask" => Some(Self::TaskAsk),
+            "parse-todos" => Some(Self::ParseTodos),
             "scout-process" => Some(Self::ScoutProcess),
             "scout-article" => Some(Self::ScoutArticle),
             "scout-qa" => Some(Self::ScoutQa),
             "scout-research" => Some(Self::ScoutResearch),
             "scout-act" => Some(Self::ScoutAct),
+            // Prefixed callers: session key includes an embedded ID but maps
+            // to the same logical caller for grouping/display.
+            s if s.starts_with("parse-todos-") => Some(Self::ParseTodos),
+            s if s.starts_with("task-ask:") => Some(Self::TaskAsk),
             _ => None,
         }
     }
@@ -76,7 +83,7 @@ impl SessionCaller {
             Self::Worker => CallerGroup::Workers,
             Self::Clarifier | Self::DeepClarifier => CallerGroup::Clarifier,
             Self::CaptainReviewAsync => CallerGroup::CaptainReview,
-            Self::CaptainMergeAsync | Self::ExhaustionReport | Self::TaskAsk => {
+            Self::CaptainMergeAsync | Self::ExhaustionReport | Self::TaskAsk | Self::ParseTodos => {
                 CallerGroup::CaptainOps
             }
             Self::ScoutProcess
@@ -97,12 +104,23 @@ impl SessionCaller {
             Self::CaptainMergeAsync,
             Self::ExhaustionReport,
             Self::TaskAsk,
+            Self::ParseTodos,
             Self::ScoutProcess,
             Self::ScoutArticle,
             Self::ScoutQa,
             Self::ScoutResearch,
             Self::ScoutAct,
         ]
+    }
+
+    /// SQL LIKE prefix for callers that use key-embedded IDs.
+    /// Returns `None` for callers stored with their canonical name only.
+    pub fn like_prefix(&self) -> Option<&'static str> {
+        match self {
+            Self::ParseTodos => Some("parse-todos-%"),
+            Self::TaskAsk => Some("task-ask:%"),
+            _ => None,
+        }
     }
 
     /// Whether this caller requires a scout_item_id.

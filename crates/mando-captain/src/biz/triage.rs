@@ -17,37 +17,22 @@ const DEFAULT_RULES: &[(&str, &[&str])] = &[
         &[
             // Rust-style
             "crates/**/tests/**",
-            "crates/**/tests/*",
             "crates/**/*_tests.rs",
             "crates/**/tests.rs",
             "cli/**/tests/**",
-            "cli/**/tests/*",
             // Web-style (JS/TS)
             "**/__tests__/**",
             "**/*.test.*",
             "**/*.spec.*",
         ],
     ),
-    (
-        "skill",
-        &[
-            "ai-kit/skills/**",
-            "ai-kit/skills/*",
-            ".claude/skills/**",
-            ".claude/skills/*",
-        ],
-    ),
-    (
-        "docs",
-        &["*.md", ".ai/plans/**", ".ai/plans/*", "CLAUDE.md"],
-    ),
+    ("skill", &["ai-kit/skills/**", ".claude/skills/**"]),
+    ("docs", &["*.md", ".ai/plans/**", "CLAUDE.md"]),
     (
         "config",
         &[
             "scripts/**",
-            "scripts/*",
             ".github/**",
-            ".github/*",
             "*.toml",
             "*.cfg",
             "Cargo.lock",
@@ -60,7 +45,7 @@ const DEFAULT_RULES: &[(&str, &[&str])] = &[
 // ── Cursor risk parsing ──────────────────────────────────────────────────
 
 static CURSOR_RISK_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"\*\*(Low|Medium|High|Critical)\s+Risk\*\*").unwrap());
+    LazyLock::new(|| Regex::new(r"\*\*(?P<risk>Low|Medium|High|Critical)\s+Risk\*\*").unwrap());
 
 static CURSOR_BLOCK_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?s)<!--\s*CURSOR_SUMMARY\s*-->(.+?)<!--\s*/CURSOR_SUMMARY\s*-->").unwrap()
@@ -93,6 +78,8 @@ pub struct TriageItem {
     pub cursor_risk: Option<String>,
     pub file_count: usize,
     pub fetch_failed: bool,
+    /// Human-readable reason a fetch failed (empty when `fetch_failed` is false).
+    pub fetch_error: String,
 }
 
 // ── File classification ──────────────────────────────────────────────────
@@ -153,7 +140,7 @@ pub(crate) fn parse_cursor_risk(pr_body: &str) -> Option<String> {
     let block = CURSOR_BLOCK_RE.captures(pr_body)?;
     let block_text = block.get(1)?.as_str();
     let m = CURSOR_RISK_RE.captures(block_text)?;
-    Some(m.get(1)?.as_str().to_string())
+    Some(m.name("risk")?.as_str().to_string())
 }
 
 // ── Builder ──────────────────────────────────────────────────────────────
@@ -192,6 +179,7 @@ pub(crate) fn build_triage_item(
         cursor_risk: parse_cursor_risk(pr_body),
         file_count: files.len(),
         fetch_failed: false,
+        fetch_error: String::new(),
     }
 }
 
@@ -303,35 +291,30 @@ pub(crate) fn format_triage_table(items: &[TriageItem]) -> String {
         ));
     }
 
-    let fast_count = items
-        .iter()
-        .filter(|it| it.fast_track && !it.fetch_failed)
-        .count();
-    let fail_count = items.iter().filter(|it| it.fetch_failed).count();
+    // Single pass: split fetch_failed vs fast_track PRs into two lists.
+    let mut fast_prs: Vec<String> = Vec::new();
+    let mut fail_prs: Vec<String> = Vec::new();
+    for it in items {
+        if it.fetch_failed {
+            fail_prs.push(format!("#{}", it.pr_number));
+        } else if it.fast_track {
+            fast_prs.push(format!("#{}", it.pr_number));
+        }
+    }
 
-    if fast_count > 0 {
-        let fast_prs: Vec<String> = items
-            .iter()
-            .filter(|it| it.fast_track && !it.fetch_failed)
-            .map(|it| format!("#{}", it.pr_number))
-            .collect();
+    if !fast_prs.is_empty() {
         lines.push(format!(
             "\nFast-Track ({}): {}",
-            fast_count,
+            fast_prs.len(),
             fast_prs.join(", ")
         ));
     } else {
         lines.push("\nNo fast-track PRs.".to_string());
     }
-    if fail_count > 0 {
-        let fail_prs: Vec<String> = items
-            .iter()
-            .filter(|it| it.fetch_failed)
-            .map(|it| format!("#{}", it.pr_number))
-            .collect();
+    if !fail_prs.is_empty() {
         lines.push(format!(
             "Fetch failed ({}): {}",
-            fail_count,
+            fail_prs.len(),
             fail_prs.join(", ")
         ));
     }
@@ -657,6 +640,7 @@ mod tests {
                 cursor_risk: Some("Medium".into()),
                 file_count: 1,
                 fetch_failed: false,
+                fetch_error: String::new(),
             },
             TriageItem {
                 task_id: "2".into(),
@@ -676,6 +660,7 @@ mod tests {
                 cursor_risk: None,
                 file_count: 1,
                 fetch_failed: false,
+                fetch_error: String::new(),
             },
         ];
         sort_triage_items(&mut items);
@@ -715,6 +700,7 @@ mod tests {
             cursor_risk: None,
             file_count: 1,
             fetch_failed: false,
+            fetch_error: String::new(),
         };
         assert_eq!(merge_readiness_score(&item), 95);
     }
@@ -732,6 +718,7 @@ mod tests {
             cursor_risk: None,
             file_count: 0,
             fetch_failed: true,
+            fetch_error: String::new(),
         };
         assert_eq!(merge_readiness_score(&item), 0);
     }
@@ -753,6 +740,7 @@ mod tests {
             cursor_risk: Some("Critical".into()),
             file_count: 1,
             fetch_failed: false,
+            fetch_error: String::new(),
         };
         assert_eq!(merge_readiness_score(&item), 30);
     }
@@ -775,6 +763,7 @@ mod tests {
             cursor_risk: None,
             file_count: 25,
             fetch_failed: false,
+            fetch_error: String::new(),
         };
         assert_eq!(merge_readiness_score(&item), 35); // 50 - 15
     }

@@ -80,7 +80,7 @@ pub(crate) async fn retry_with_correction(
         &correction_prompt,
         CcConfig::builder()
             .model(&workflow.models.clarifier)
-            .timeout(Duration::from_secs(workflow.agent.clarifier_timeout_s))
+            .timeout(workflow.agent.clarifier_timeout_s)
             .caller("clarifier-retry")
             .task_id(task_id)
             .cwd(cwd)
@@ -91,7 +91,7 @@ pub(crate) async fn retry_with_correction(
     )
     .await?;
 
-    crate::io::headless_cc::log_cc_session(
+    if let Err(e) = crate::io::headless_cc::log_cc_session(
         pool,
         &crate::io::headless_cc::SessionLogEntry {
             session_id: &result.session_id,
@@ -106,7 +106,10 @@ pub(crate) async fn retry_with_correction(
             worker_name: "",
         },
     )
-    .await;
+    .await
+    {
+        tracing::warn!(module = "clarifier", error = %e, "failed to log clarifier retry session");
+    }
 
     let text = result
         .structured
@@ -134,8 +137,6 @@ pub(crate) async fn retry_with_correction(
     );
     Ok(parsed)
 }
-
-use std::time::Duration;
 
 #[cfg(test)]
 mod tests {

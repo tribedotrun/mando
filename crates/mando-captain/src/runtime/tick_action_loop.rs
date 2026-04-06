@@ -16,7 +16,7 @@ pub(super) async fn kill_orphan_workers(
     items: &[mando_types::TaskRouting],
     health_state: &mut health_store::HealthState,
     pool: &sqlx::SqlitePool,
-) {
+) -> Vec<String> {
     let active_workers: std::collections::HashSet<&str> = items
         .iter()
         .filter(|it| {
@@ -35,7 +35,7 @@ pub(super) async fn kill_orphan_workers(
         .collect();
 
     if orphan_keys.is_empty() {
-        return;
+        return Vec::new();
     }
 
     // Query running sessions once (not per orphan).
@@ -47,7 +47,7 @@ pub(super) async fn kill_orphan_workers(
                 error = %e,
                 "failed to query sessions for orphan cleanup — skipping, will retry next tick"
             );
-            return;
+            return Vec::new();
         }
     };
 
@@ -103,4 +103,6 @@ pub(super) async fn kill_orphan_workers(
             health_state.remove(o.worker_name);
         }
     }
+
+    orphan_keys
 }

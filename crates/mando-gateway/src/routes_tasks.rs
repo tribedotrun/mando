@@ -2,6 +2,7 @@
 
 use std::path::PathBuf;
 
+use axum::extract::multipart::Field;
 use axum::extract::{Multipart, Path, Query, State};
 use axum::http::StatusCode;
 use axum::Json;
@@ -10,6 +11,15 @@ use serde_json::{json, Value};
 
 use crate::response::{error_response, internal_error};
 use crate::AppState;
+
+/// Extract a text field from a multipart part, returning `Ok(None)` if empty.
+async fn field_text(field: Field<'_>) -> Result<Option<String>, (StatusCode, Json<Value>)> {
+    let val = field
+        .text()
+        .await
+        .map_err(|e| error_response(StatusCode::BAD_REQUEST, &e.to_string()))?;
+    Ok(if val.is_empty() { None } else { Some(val) })
+}
 
 #[derive(Deserialize, Default)]
 pub(crate) struct TaskListQuery {
@@ -102,44 +112,25 @@ pub(crate) async fn post_task_add(
         let name = field.name().unwrap_or("").to_string();
         match name.as_str() {
             "title" => {
-                title = field
-                    .text()
-                    .await
-                    .map_err(|e| error_response(StatusCode::BAD_REQUEST, &e.to_string()))?;
+                title = field_text(field).await?.unwrap_or_default();
             }
             "project" | "repo" => {
-                let val = field
-                    .text()
-                    .await
-                    .map_err(|e| error_response(StatusCode::BAD_REQUEST, &e.to_string()))?;
-                if !val.is_empty() {
+                if let Some(val) = field_text(field).await? {
                     repo = Some(val);
                 }
             }
             "context" => {
-                let val = field
-                    .text()
-                    .await
-                    .map_err(|e| error_response(StatusCode::BAD_REQUEST, &e.to_string()))?;
-                if !val.is_empty() {
+                if let Some(val) = field_text(field).await? {
                     context = Some(val);
                 }
             }
             "plan" => {
-                let val = field
-                    .text()
-                    .await
-                    .map_err(|e| error_response(StatusCode::BAD_REQUEST, &e.to_string()))?;
-                if !val.is_empty() {
+                if let Some(val) = field_text(field).await? {
                     plan = Some(val);
                 }
             }
             "no_pr" => {
-                let val = field
-                    .text()
-                    .await
-                    .map_err(|e| error_response(StatusCode::BAD_REQUEST, &e.to_string()))?;
-                if !val.is_empty() {
+                if let Some(val) = field_text(field).await? {
                     no_pr = Some(val);
                 }
             }
@@ -158,12 +149,22 @@ pub(crate) async fn post_task_add(
                     .await
                     .map_err(|e| error_response(StatusCode::BAD_REQUEST, &e.to_string()))?;
 
-                std::fs::create_dir_all(&images_dir).map_err(|e| {
-                    error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string())
+                tokio::fs::create_dir_all(&images_dir).await.map_err(|e| {
+                    crate::response::internal_error_with(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        e,
+                        "failed to save image",
+                    )
                 })?;
-                std::fs::write(images_dir.join(&dest_name), &data).map_err(|e| {
-                    error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string())
-                })?;
+                tokio::fs::write(images_dir.join(&dest_name), &data)
+                    .await
+                    .map_err(|e| {
+                        crate::response::internal_error_with(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            e,
+                            "failed to save image",
+                        )
+                    })?;
 
                 saved_images.push(dest_name);
             }
@@ -206,7 +207,11 @@ pub(crate) async fn post_task_add(
                 mando_captain::runtime::dashboard::update_task(&store, id, &updates)
                     .await
                     .map_err(|e| {
-                        error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string())
+                        crate::response::internal_error_with(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            e,
+                            "failed to update task",
+                        )
                     })?;
             }
         }
@@ -217,47 +222,11 @@ pub(crate) async fn post_task_add(
         .bus
         .send(mando_types::BusEvent::Tasks, Some(json!({"action": "add"})));
 
-    // Trigger an immediate captain tick so the new task gets dispatched without
-    // waiting for the next scheduled auto-tick (up to 30s away).
+    // Signal the auto-tick loop to run immediately so the new task is
+    // dispatched without waiting for the next scheduled interval. The loop
+    // watches `mando_captain::WORKER_EXIT_SIGNAL` as its wake trigger.
     if config.captain.auto_schedule {
-        let tick_config = state.config.clone();
-        let tick_workflow = state.captain_workflow.clone();
-        let tick_bus = state.bus.clone();
-        let tick_store = state.task_store.clone();
-        let handle = tokio::spawn(async move {
-            let cfg = tick_config.load_full();
-            let wf = tick_workflow.load_full();
-            match mando_captain::runtime::dashboard::trigger_captain_tick(
-                &cfg,
-                &wf,
-                false,
-                Some(&tick_bus),
-                true,
-                &tick_store,
-            )
-            .await
-            {
-                Ok(result) => {
-                    tracing::info!(
-                        module = "captain",
-                        active_workers = result.get("active_workers").and_then(|v| v.as_u64()),
-                        "immediate tick after task add"
-                    );
-                }
-                Err(e) => {
-                    tracing::warn!(
-                        module = "captain",
-                        error = %e,
-                        "immediate tick after task add failed"
-                    );
-                }
-            }
-        });
-        tokio::spawn(async move {
-            if let Err(e) = handle.await {
-                tracing::error!(module = "captain", error = %e, "immediate tick panicked");
-            }
-        });
+        mando_captain::WORKER_EXIT_SIGNAL.notify_one();
     }
 
     Ok((StatusCode::CREATED, Json(val)))

@@ -1,5 +1,7 @@
-import type { TaskItem } from '#renderer/types';
+import type { TaskItem, TimelineEvent, ClarifierQuestion, ItemStatus } from '#renderer/types';
 import { FINALIZED_STATUSES } from '#renderer/types';
+import { useToastStore } from '#renderer/global/stores/toastStore';
+import log from '#renderer/logger';
 
 /** Extract the last path segment from a GitHub `owner/repo` string. */
 export function shortRepo(project?: string): string {
@@ -44,9 +46,25 @@ export function canRework(t: TaskItem): boolean {
   return ['awaiting-review', 'handed-off', 'escalated', 'errored'].includes(t.status);
 }
 
-/** Whether a task can be asked a question. */
-export function canAsk(t: TaskItem): boolean {
+/** Whether a task can be asked a question in its terminal/review states (narrow). */
+export function canAskTerminal(t: TaskItem): boolean {
   return ['awaiting-review', 'escalated'].includes(t.status);
+}
+
+/**
+ * Whether a task can be asked a question in any active or review state (broad).
+ * Superset of canAskTerminal — also covers in-progress, captain reviews, merging,
+ * and clarifying states so the action bar surface lets the human query mid-flight.
+ */
+export function canAskAny(t: TaskItem): boolean {
+  return [
+    'awaiting-review',
+    'escalated',
+    'in-progress',
+    'captain-reviewing',
+    'captain-merging',
+    'clarifying',
+  ].includes(t.status);
 }
 
 /** Whether a task can be restarted (broader than rework — includes merged/canceled). */
@@ -103,6 +121,21 @@ export function createMutate(
   };
 }
 
+/** Extract the latest clarifier question set from timeline events, if the task is in the `needs-clarification` state. */
+export function extractClarifierQuestions(
+  events: TimelineEvent[],
+  status: ItemStatus,
+): ClarifierQuestion[] | null {
+  if (status !== 'needs-clarification') return null;
+  for (let i = events.length - 1; i >= 0; i--) {
+    const e = events[i];
+    if (e.event_type !== 'clarify_question') continue;
+    const q = e.data?.questions;
+    if (Array.isArray(q)) return q as ClarifierQuestion[];
+  }
+  return null;
+}
+
 /** Human-readable relative time from an ISO timestamp (e.g. "3m ago", "in 2h"). */
 export function relativeTime(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
@@ -132,10 +165,133 @@ export function shortTs(iso: string): string {
   });
 }
 
+/** Shorten absolute macOS paths by replacing the home directory with `~`. */
+export function shortenPath(path: string): string {
+  const m = path.match(/^\/Users\/[^/]+/);
+  return m ? '~' + path.slice(m[0].length) : path;
+}
+
 /** Human-readable duration from seconds (e.g. "3m 12s"). */
 export function fmtDuration(sec: number): string {
   if (sec < 60) return `${Math.round(sec)}s`;
   const m = Math.floor(sec / 60);
   const s = Math.round(sec % 60);
   return s > 0 ? `${m}m ${s}s` : `${m}m`;
+}
+
+/**
+ * Map a clarification API result status to a toast variant + message.
+ * Used by both the detail view clarifier card and useTaskActions.handleAnswer.
+ */
+export function clarifyResultToToast(status: string | undefined): {
+  variant: 'success' | 'info';
+  msg: string;
+} {
+  switch (status) {
+    case 'ready':
+      return { variant: 'success', msg: 'Clarified, task queued' };
+    case 'clarifying':
+      return { variant: 'info', msg: 'Still needs more info' };
+    case 'escalate':
+      return { variant: 'info', msg: 'Escalated to captain review' };
+    default:
+      return { variant: 'success', msg: 'Answer saved' };
+  }
+}
+
+/**
+ * Write text to the clipboard and show a toast on success or failure.
+ * Returns true on success so callers can decide whether to run follow-up logic.
+ */
+export async function copyToClipboard(text: string, label?: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text);
+    if (label) {
+      useToastStore.getState().add('success', label);
+    }
+    return true;
+  } catch (err) {
+    log.warn('clipboard write failed:', err);
+    useToastStore
+      .getState()
+      .add('error', getErrorMessage(err, 'Copy failed, clipboard access denied'));
+    return false;
+  }
+}
+
+/* ── Numeric helpers (extracted to keep Math.* out of component files) ── */
+
+/** Clamp a value between lo and hi (inclusive). */
+export function clamp(v: number, lo: number, hi: number): number {
+  return Math.min(Math.max(v, lo), hi);
+}
+
+/** Increment index, clamped to [0, maxIndex]. */
+export function indexNext(i: number, maxIndex: number): number {
+  return Math.min(i + 1, maxIndex);
+}
+
+/** Decrement index, clamped to [0, maxIndex]. */
+export function indexPrev(i: number): number {
+  return Math.max(i - 1, 0);
+}
+
+/** Wrap-around modulo (always non-negative). */
+export function wrapIndex(i: number, length: number): number {
+  const len = Math.max(length, 1);
+  return ((i % len) + len) % len;
+}
+
+/** Round to nearest integer. */
+export function round(v: number): number {
+  return Math.round(v);
+}
+
+/** Floor to nearest integer. */
+export function floor(v: number): number {
+  return Math.floor(v);
+}
+
+/** Ceiling to nearest integer. */
+export function ceil(v: number): number {
+  return Math.ceil(v);
+}
+
+/** Format a number as USD with 2 decimal places (e.g. "1.50"). */
+export function fmtUsd(v: number): string {
+  return v.toFixed(2);
+}
+
+/** Format milliseconds as a short human duration (e.g. "3m" or "45s"). */
+export function fmtMs(ms: number): string {
+  return ms >= 60_000 ? `${Math.round(ms / 60_000)}m` : `${Math.round(ms / 1_000)}s`;
+}
+
+/** Compute a whole-number percentage (0-100). */
+export function pct(completed: number, total: number): number {
+  if (total === 0) return 0;
+  return Math.round((completed / total) * 100);
+}
+
+/** Format worker runtime from an ISO start timestamp (e.g. "3h 12m"). */
+export function fmtRuntime(startedAt?: string): string {
+  if (!startedAt) return '-';
+  const start = new Date(startedAt).getTime();
+  if (Number.isNaN(start)) return '-';
+  const diffMs = Date.now() - start;
+  if (diffMs < 0) return '-';
+  const totalMin = Math.floor(diffMs / 60_000);
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+  return h > 0 ? `${h}h ${m}m` : `${m}m`;
+}
+
+/** Compute textarea row count for bulk mode. */
+export function bulkTextareaRows(lineCount: number): number {
+  return Math.max(6, Math.min(12, lineCount));
+}
+
+/** Ceil-based minutes remaining (e.g. rate limit countdown). */
+export function ceilMinutes(secs: number): number {
+  return Math.ceil(secs / 60);
 }

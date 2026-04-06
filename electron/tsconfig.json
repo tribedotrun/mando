@@ -16,6 +16,7 @@
     "paths": {
       "#renderer/*": ["src/renderer/*"],
       "#main/*": ["src/main/*"],
+      "#shared/*": ["src/shared/*"],
       "#contracts/*": ["../contracts/*"]
     }
   },
