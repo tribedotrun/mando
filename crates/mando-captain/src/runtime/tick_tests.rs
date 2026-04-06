@@ -72,6 +72,7 @@ async fn tick_live_retries_clarifier_on_failure() {
             worker_preamble: String::new(),
             scout_summary: String::new(),
             github_repo: None,
+            logo: None,
             hooks: Default::default(),
             classify_rules: vec![],
         },

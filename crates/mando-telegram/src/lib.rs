@@ -23,7 +23,8 @@ pub mod permissions;
 mod picker_store;
 pub mod sse;
 
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 use tokio::sync::RwLock;
 
 use anyhow::Result;
@@ -31,6 +32,13 @@ use mando_config::settings::Config;
 
 pub use api::{BotCommand, TelegramApi};
 pub use bot::TelegramBot;
+
+/// Shared map of `task_key → message_id` for scout "processing..." messages.
+///
+/// When `add_and_track` sends a "processing..." message, it registers the
+/// message_id here so the SSE notification handler can edit it in-place
+/// with the full summary card (instead of creating a duplicate message).
+pub type PendingMessages = Arc<Mutex<HashMap<String, i64>>>;
 
 /// Override Telegram API base URL via `TG_API_BASE_URL` env var (dev/test only).
 pub fn resolve_api_base_url() -> Option<String> {
@@ -43,7 +51,11 @@ pub fn resolve_api_base_url() -> Option<String> {
 ///
 /// If `gw` is provided, it is used as-is (preserving CLI `--port`).
 /// Otherwise falls back to `GatewayClient::discover()`.
-pub async fn start_bot(config: Arc<RwLock<Config>>, gw: Option<http::GatewayClient>) -> Result<()> {
+pub async fn start_bot(
+    config: Arc<RwLock<Config>>,
+    gw: Option<http::GatewayClient>,
+    pending: PendingMessages,
+) -> Result<()> {
     let (token, base_url) = {
         let cfg = config.read().await;
         let tg = &cfg.channels.telegram;
@@ -66,6 +78,6 @@ pub async fn start_bot(config: Arc<RwLock<Config>>, gw: Option<http::GatewayClie
         Some(g) => g,
         None => http::GatewayClient::discover()?,
     };
-    let mut bot = TelegramBot::with_base_url(config, &token, base_url.as_deref(), gw)?;
+    let mut bot = TelegramBot::with_base_url(config, &token, base_url.as_deref(), gw, pending)?;
     bot.start().await
 }

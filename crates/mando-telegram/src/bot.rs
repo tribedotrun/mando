@@ -23,6 +23,7 @@ use crate::bot_helpers::{
 use crate::callbacks;
 use crate::commands;
 use crate::permissions;
+use crate::PendingMessages;
 
 // ── Session state types ──────────────────────────────────────────────
 
@@ -131,11 +132,15 @@ pub struct TelegramBot {
     pub(crate) act_sessions: HashMap<String, ActSession>,
     todo_confirm: HashMap<String, TodoConfirmState>,
     action_pickers: HashMap<String, PickerState>,
+    /// Shared with `NotificationHandler` — scout "processing..." message IDs
+    /// so SSE notifications can edit them in-place with the full card.
+    pub(crate) pending_scout_msgs: PendingMessages,
 }
 
 impl TelegramBot {
     pub fn new(config: Arc<RwLock<Config>>, token: &str, gw: GatewayClient) -> Self {
-        Self::with_base_url(config, token, None, gw).expect("default TelegramApi creation")
+        let pending = std::sync::Arc::new(std::sync::Mutex::new(HashMap::new()));
+        Self::with_base_url(config, token, None, gw, pending).expect("default TelegramApi creation")
     }
 
     pub fn with_base_url(
@@ -143,6 +148,7 @@ impl TelegramBot {
         token: &str,
         api_base_url: Option<&str>,
         gw: GatewayClient,
+        pending_scout_msgs: PendingMessages,
     ) -> anyhow::Result<Self> {
         let api = match api_base_url {
             Some(url) => TelegramApi::with_base_url(token, url)?,
@@ -162,6 +168,7 @@ impl TelegramBot {
             act_sessions: HashMap::new(),
             todo_confirm: HashMap::new(),
             action_pickers: HashMap::new(),
+            pending_scout_msgs,
         })
     }
 
@@ -269,12 +276,22 @@ impl TelegramBot {
                 None => TelegramApi::new(&tg.token),
             };
             let owner_chat_id = chat_id.clone();
+            let sse_gw = self.gw.clone();
+            let sse_pending = self.pending_scout_msgs.clone();
             // TRACKED: SSE notification loop for the telegram bot process.
             // mando-tg runs as a separate OS process from the gateway, so it
             // has no access to the gateway's TaskTracker. The loop exits when
             // the SSE mpsc receiver drops on bot shutdown.
             tokio::spawn(async move {
-                crate::sse::run_notification_loop(base_url, gw_token, api, owner_chat_id).await;
+                crate::sse::run_notification_loop(
+                    base_url,
+                    gw_token,
+                    api,
+                    owner_chat_id,
+                    sse_gw,
+                    sse_pending,
+                )
+                .await;
             });
         }
 

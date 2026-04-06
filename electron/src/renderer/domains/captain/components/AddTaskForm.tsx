@@ -1,5 +1,6 @@
 import React, { useRef, useState } from 'react';
 import { inputStyle, inputCls } from '#renderer/styles';
+import { useDraft } from '#renderer/global/hooks/useDraft';
 import { useMountEffect } from '#renderer/global/hooks/useMountEffect';
 import { useProjects } from '#renderer/domains/settings';
 import { useBulkCreateStore } from '#renderer/domains/captain/stores/bulkCreateStore';
@@ -16,12 +17,23 @@ const bulkToggleCls = 'rounded-md px-2 py-0.5 text-label transition-colors';
 interface Props {
   open: boolean;
   onClose: () => void;
+  initialProject?: string | null;
 }
 
-function AddTaskFormInner({ onClose }: { onClose: () => void }): React.ReactElement {
+function AddTaskFormInner({
+  onClose,
+  initialProject,
+}: {
+  onClose: () => void;
+  initialProject?: string | null;
+}): React.ReactElement {
   const [bulk, setBulk] = useState(false);
-  const [title, setTitle] = useState('');
-  const [project, setProject] = useState(() => localStorage.getItem(LAST_PROJECT_KEY) ?? '');
+  const [title, setTitle, clearTitleDraft] = useDraft('mando:draft:newTask');
+  // The health API returns project display names (not paths), and the sidebar
+  // filter is also a display name — so initialProject can be used directly.
+  const [project, setProject] = useState(
+    () => initialProject ?? localStorage.getItem(LAST_PROJECT_KEY) ?? '',
+  );
   const [image, setImage] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -54,7 +66,7 @@ function AddTaskFormInner({ onClose }: { onClose: () => void }): React.ReactElem
 
   const resetForm = () => {
     setBulk(false);
-    setTitle('');
+    clearTitleDraft();
     setSubmitError(null);
     if (preview) URL.revokeObjectURL(preview);
     setImage(null);
@@ -341,7 +353,11 @@ function AddTaskFormInner({ onClose }: { onClose: () => void }): React.ReactElem
   );
 }
 
-export function CreateTaskModal({ open, onClose }: Props): React.ReactElement | null {
+export function CreateTaskModal({
+  open,
+  onClose,
+  initialProject,
+}: Props): React.ReactElement | null {
   if (!open) return null;
-  return <AddTaskFormInner onClose={onClose} />;
+  return <AddTaskFormInner onClose={onClose} initialProject={initialProject} />;
 }

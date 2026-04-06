@@ -181,6 +181,16 @@ export function Sidebar({
     return [...names].sort();
   }, [projectCounts, configProjects]);
 
+  const projectLogos = React.useMemo(() => {
+    const map: Record<string, string> = {};
+    if (configProjects) {
+      for (const proj of Object.values(configProjects)) {
+        if (proj.name && proj.logo) map[proj.name] = proj.logo;
+      }
+    }
+    return map;
+  }, [configProjects]);
+
   const homeActive = activeTab === 'captain' && !projectFilter;
 
   return (
@@ -306,6 +316,7 @@ export function Sidebar({
                 <SidebarProjectItem
                   key={pName}
                   name={pName}
+                  logo={projectLogos[pName]}
                   count={projectCounts[pName] ?? 0}
                   active={isActive}
                   onSelect={() => {

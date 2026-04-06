@@ -57,7 +57,7 @@ pub async fn cmd_addlink(bot: &mut TelegramBot, chat_id: &str, args: &str) -> Re
 
     let sent = send_html(bot, chat_id, "\u{23f3} Adding\u{2026}").await?;
     let mid = sent["message_id"].as_i64().unwrap_or(0);
-    super::helpers::add_and_track(&bot.api, bot.gw(), chat_id, mid, url, title.as_deref()).await?;
+    super::helpers::add_and_track(bot, chat_id, mid, url, title.as_deref()).await?;
     Ok(())
 }
 

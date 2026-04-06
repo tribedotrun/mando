@@ -15,24 +15,40 @@ use mando_types::events::{NotificationKind, NotificationPayload};
 use mando_types::NotifyLevel;
 
 use crate::api::TelegramApi;
+use crate::assistant::formatting::{format_swipe_card, swipe_card_kb};
+use crate::gateway_paths as paths;
+use crate::http::GatewayClient;
+use crate::PendingMessages;
 
 /// Handles incoming notification payloads and sends/edits TG messages.
 pub struct NotificationHandler {
     api: TelegramApi,
     chat_id: String,
+    gw: GatewayClient,
     /// Maps `task_key` → Telegram `message_id` for edit-in-place.
     task_messages: HashMap<String, i64>,
+    /// Messages pre-registered by `add_and_track` — the SSE handler
+    /// imports them into `task_messages` so it edits the "processing..."
+    /// message instead of creating a duplicate.
+    pending: PendingMessages,
     /// Minimum level to actually send. Below this we log and skip.
     min_level: NotifyLevel,
 }
 
 impl NotificationHandler {
     /// Create a new handler targeting `chat_id`.
-    pub fn new(api: TelegramApi, chat_id: String) -> Self {
+    pub fn new(
+        api: TelegramApi,
+        chat_id: String,
+        gw: GatewayClient,
+        pending: PendingMessages,
+    ) -> Self {
         Self {
             api,
             chat_id,
+            gw,
             task_messages: HashMap::new(),
+            pending,
             min_level: NotifyLevel::Normal,
         }
     }
@@ -54,6 +70,21 @@ impl NotificationHandler {
                 min = ?self.min_level,
                 "notification below threshold, skipping"
             );
+            return;
+        }
+
+        // Import any pre-registered message from add_and_track so we can
+        // edit the "processing..." message instead of duplicating it.
+        if let Some(task_key) = &payload.task_key {
+            if let Some(msg_id) = self.pending.lock().unwrap().remove(task_key) {
+                self.task_messages.insert(task_key.clone(), msg_id);
+            }
+        }
+
+        // ScoutProcessed: show full summary card instead of Read/Archive buttons.
+        if let NotificationKind::ScoutProcessed { scout_id, .. } = &payload.kind {
+            self.handle_scout_processed(*scout_id, &payload.task_key)
+                .await;
             return;
         }
 
@@ -103,6 +134,62 @@ impl NotificationHandler {
 
     // ── private helpers ─────────────────────────────────────────────
 
+    /// Fetch the full scout item from the gateway and show the summary card.
+    /// Edits a pre-registered "processing..." message when one exists.
+    async fn handle_scout_processed(&mut self, scout_id: i64, task_key: &Option<String>) {
+        let item = match self.gw.get(&paths::scout_item(scout_id)).await {
+            Ok(v) => v,
+            Err(e) => {
+                warn!(scout_id, error = %e, "failed to fetch scout item for card");
+                // Edit the "processing..." message so it doesn't stay stuck.
+                if let Some(key) = task_key {
+                    if let Some(&msg_id) = self.task_messages.get(key) {
+                        let fallback =
+                            format!("\u{26a0}\u{fe0f} Scout #{scout_id}: failed to load summary");
+                        let _ = self.edit_message(msg_id, &fallback, None).await;
+                    }
+                }
+                return;
+            }
+        };
+
+        let summary = item["summary"].as_str();
+        let text = format_swipe_card(&item, summary);
+        let tg_url = item["telegraphUrl"].as_str();
+        let kb = swipe_card_kb(scout_id, tg_url);
+
+        // Try edit-in-place (pre-registered "processing..." message).
+        if let Some(key) = task_key {
+            if let Some(&msg_id) = self.task_messages.get(key) {
+                match self.edit_message(msg_id, &text, Some(kb.clone())).await {
+                    Ok(_) => {
+                        debug!(task_key = %key, msg_id, "edited scout card in place");
+                        return;
+                    }
+                    Err(e) => {
+                        warn!(task_key = %key, msg_id, "edit failed, sending new: {e:#}");
+                        self.task_messages.remove(key);
+                    }
+                }
+            }
+        }
+
+        // No pre-registered message — send a new card.
+        match self.send_message(&text, Some(kb)).await {
+            Ok(msg_id) => {
+                if let Some(key) = task_key {
+                    if self.task_messages.len() >= 500 {
+                        self.task_messages.clear();
+                    }
+                    self.task_messages.insert(key.clone(), msg_id);
+                }
+            }
+            Err(e) => {
+                warn!(scout_id, "failed to send scout card: {e:#}");
+            }
+        }
+    }
+
     async fn send_message(&self, text: &str, reply_markup: Option<Value>) -> Result<i64> {
         let result = self
             .api
@@ -145,18 +232,9 @@ impl NotificationHandler {
                 "View Timeline",
                 &format!("view:{item_id}"),
             )])),
-            NotificationKind::ScoutProcessed {
-                scout_id,
-                telegraph_url,
-                ..
-            } => {
-                let mut buttons = Vec::new();
-                if telegraph_url.is_some() {
-                    buttons.push(button("Read", &format!("dg:read:{scout_id}")));
-                }
-                buttons.push(button("Archive", &format!("dg:archive:{scout_id}")));
-                Some(inline_keyboard(buttons))
-            }
+            // ScoutProcessed is handled in handle_scout_processed() before
+            // reaching build_reply_markup — this branch is a dead-code fallback.
+            NotificationKind::ScoutProcessed { .. } => None,
             NotificationKind::ScoutProcessFailed { scout_id, .. } => {
                 Some(inline_keyboard(vec![button(
                     "Retry",
@@ -187,6 +265,14 @@ fn inline_keyboard(buttons: Vec<Value>) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Arc, Mutex};
+
+    fn test_handler() -> NotificationHandler {
+        let api = TelegramApi::new("fake:token");
+        let gw = GatewayClient::new(0, None);
+        let pending = Arc::new(Mutex::new(std::collections::HashMap::new()));
+        NotificationHandler::new(api, "12345".into(), gw, pending)
+    }
 
     #[test]
     fn button_json_shape() {
@@ -205,8 +291,7 @@ mod tests {
 
     #[test]
     fn generic_notification_no_keyboard() {
-        let api = TelegramApi::new("fake:token");
-        let handler = NotificationHandler::new(api, "12345".into());
+        let handler = test_handler();
         let payload = NotificationPayload {
             message: "something happened".into(),
             level: NotifyLevel::Normal,
@@ -220,8 +305,7 @@ mod tests {
 
     #[test]
     fn explicit_markup_takes_priority() {
-        let api = TelegramApi::new("fake:token");
-        let handler = NotificationHandler::new(api, "12345".into());
+        let handler = test_handler();
         let custom =
             serde_json::json!({"inline_keyboard": [[{"text": "Custom", "callback_data": "x"}]]});
         let payload = NotificationPayload {
@@ -239,11 +323,10 @@ mod tests {
     }
 
     #[test]
-    fn scout_processed_gets_read_and_archive_buttons() {
-        let api = TelegramApi::new("fake:token");
-        let handler = NotificationHandler::new(api, "12345".into());
+    fn scout_processed_no_keyboard_from_build_reply_markup() {
+        let handler = test_handler();
         let payload = NotificationPayload {
-            message: "📰 Article Title".into(),
+            message: "scout processed".into(),
             level: NotifyLevel::Normal,
             kind: NotificationKind::ScoutProcessed {
                 scout_id: 42,
@@ -256,51 +339,32 @@ mod tests {
             task_key: Some("scout:42".into()),
             reply_markup: None,
         };
+        // ScoutProcessed is handled by handle_scout_processed, not build_reply_markup
         let markup = handler.build_reply_markup(&payload);
-        assert!(markup.is_some());
-        let kb = markup.unwrap();
-        let buttons = kb["inline_keyboard"][0].as_array().unwrap();
-        assert_eq!(buttons.len(), 2);
-        assert_eq!(buttons[0]["text"], "Read");
-        assert_eq!(buttons[0]["callback_data"], "dg:read:42");
-        assert_eq!(buttons[1]["text"], "Archive");
-        assert_eq!(buttons[1]["callback_data"], "dg:archive:42");
+        assert!(markup.is_none());
     }
 
     #[test]
-    fn scout_processed_no_telegraph_omits_read_button() {
+    fn pending_messages_imported_into_task_messages() {
         let api = TelegramApi::new("fake:token");
-        let handler = NotificationHandler::new(api, "12345".into());
-        let payload = NotificationPayload {
-            message: "📰 Article Title".into(),
-            level: NotifyLevel::Normal,
-            kind: NotificationKind::ScoutProcessed {
-                scout_id: 7,
-                title: "Article Title".into(),
-                relevance: 50,
-                quality: 60,
-                source_name: None,
-                telegraph_url: None,
-            },
-            task_key: Some("scout:7".into()),
-            reply_markup: None,
-        };
-        let markup = handler.build_reply_markup(&payload);
-        assert!(markup.is_some());
-        let kb = markup.unwrap();
-        let buttons = kb["inline_keyboard"][0].as_array().unwrap();
-        assert_eq!(buttons.len(), 1);
-        assert_eq!(buttons[0]["text"], "Archive");
-        assert_eq!(buttons[0]["callback_data"], "dg:archive:7");
+        let gw = GatewayClient::new(0, None);
+        let pending: PendingMessages = Arc::new(Mutex::new(std::collections::HashMap::new()));
+        pending.lock().unwrap().insert("scout:42".into(), 99999);
+        let mut handler = NotificationHandler::new(api, "12345".into(), gw, pending.clone());
+
+        // Simulate the import that happens in handle()
+        let key = "scout:42".to_string();
+        if let Some(msg_id) = handler.pending.lock().unwrap().remove(&key) {
+            handler.task_messages.insert(key.clone(), msg_id);
+        }
+        assert_eq!(handler.task_messages.get("scout:42"), Some(&99999));
+        assert!(pending.lock().unwrap().is_empty());
     }
 
     #[test]
     fn below_threshold_filtered() {
-        let api = TelegramApi::new("fake:token");
-        let mut handler = NotificationHandler::new(api, "12345".into());
+        let mut handler = test_handler();
         handler.set_min_level(NotifyLevel::High);
-        // A Normal-level notification is below High threshold.
-        // We can't test the async `handle` here, but we can verify the level comparison.
         assert!(NotifyLevel::Normal < NotifyLevel::High);
     }
 }

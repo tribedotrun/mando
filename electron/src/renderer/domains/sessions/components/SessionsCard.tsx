@@ -23,7 +23,15 @@ import {
 } from '#renderer/domains/sessions/components/SessionsHelpers';
 
 const PER_PAGE = 50;
-const CATEGORY_ORDER = ['workers', 'clarifier', 'captain-review', 'captain-ops', 'scout', 'system'];
+const CATEGORY_ORDER = [
+  'workers',
+  'clarifier',
+  'captain-review',
+  'captain-ops',
+  'todo-parser',
+  'scout',
+  'system',
+];
 
 export function SessionsCard({ active = true }: { active?: boolean } = {}): React.ReactElement {
   const [page, setPage] = useState(1);

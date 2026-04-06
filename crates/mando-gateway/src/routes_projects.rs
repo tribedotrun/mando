@@ -71,6 +71,7 @@ pub(crate) async fn get_projects(State(state): State<AppState>) -> Json<Value> {
                 "name": pc.name,
                 "path": pc.path,
                 "githubRepo": pc.github_repo,
+                "logo": pc.logo,
                 "aliases": pc.aliases,
             })
         })
@@ -171,10 +172,14 @@ pub(crate) async fn post_projects(
     // Auto-generate scout summary from project metadata.
     let scout_summary = detect_project_summary(&abs_path).await;
 
+    // Auto-detect project logo.
+    let logo = detect_project_logo(&abs_path, &name);
+
     let pc = mando_config::settings::ProjectConfig {
         name: name.clone(),
         path: abs_path_str.clone(),
         github_repo: github_repo.clone(),
+        logo: logo.clone(),
         aliases: body.aliases,
         scout_summary,
         ..Default::default()
@@ -188,6 +193,7 @@ pub(crate) async fn post_projects(
         "name": name,
         "path": abs_path_str,
         "githubRepo": github_repo,
+        "logo": logo,
     })))
 }
 
@@ -200,6 +206,7 @@ pub(crate) struct EditProjectBody {
     pub preamble: Option<String>,
     pub check_command: Option<String>,
     pub scout_summary: Option<String>,
+    pub redetect_logo: Option<bool>,
 }
 
 /// PATCH /api/projects/{name} — edit a project.
@@ -251,9 +258,14 @@ pub(crate) async fn patch_project(
     if let Some(summary) = body.scout_summary {
         pc.scout_summary = summary;
     }
+    if body.redetect_logo == Some(true) {
+        let project_path = std::path::Path::new(&pc.path);
+        pc.logo = detect_project_logo(project_path, &pc.name);
+    }
 
+    let logo = pc.logo.clone();
     save_and_reload(&state, &config).await?;
-    Ok(Json(json!({ "ok": true })))
+    Ok(Json(json!({ "ok": true, "logo": logo })))
 }
 
 /// DELETE /api/projects/{name} — remove a project and cascade-delete its tasks.
@@ -327,6 +339,88 @@ async fn try_source(
     extract(&content).filter(|s| !s.is_empty())
 }
 
+/// Candidate paths for project logo files, checked in priority order.
+const LOGO_CANDIDATES: &[&str] = &[
+    "logo.png",
+    "logo.svg",
+    "logo.jpg",
+    "logo.webp",
+    "public/logo.png",
+    "public/logo.svg",
+    "public/favicon.ico",
+    "public/favicon.png",
+    "public/favicon.svg",
+    "assets/logo.png",
+    "assets/icon.png",
+    "src/assets/logo.png",
+    "src/assets/icon.png",
+    ".github/logo.png",
+    ".github/icon.png",
+    "electron/assets/icon.png",
+    "icon.png",
+    "icon.svg",
+    "icon.ico",
+    "favicon.ico",
+];
+
+/// Auto-detect a logo image from the project directory, copy it to
+/// `~/.mando/images/`, and return the stored filename.
+fn detect_project_logo(project_path: &std::path::Path, project_name: &str) -> Option<String> {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+
+    let source = LOGO_CANDIDATES
+        .iter()
+        .map(|c| project_path.join(c))
+        .find(|p| p.is_file())?;
+
+    let ext = source.extension().and_then(|e| e.to_str()).unwrap_or("png");
+
+    // Sanitize project name for filename.
+    let safe_name: String = project_name
+        .chars()
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' {
+                c
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>()
+        .to_lowercase();
+
+    // Include a short path hash to avoid collisions between projects whose
+    // sanitized names are identical (e.g. "my_app" and "my-app").
+    let mut hasher = DefaultHasher::new();
+    project_path.hash(&mut hasher);
+    let path_hash = format!("{:08x}", hasher.finish() & 0xFFFF_FFFF);
+
+    let filename = format!("project-{safe_name}-{path_hash}.{ext}");
+    let dest_dir = mando_config::images_dir();
+    if let Err(e) = std::fs::create_dir_all(&dest_dir) {
+        tracing::warn!(
+            project = project_name,
+            dir = %dest_dir.display(),
+            error = %e,
+            "failed to create images directory for project logo"
+        );
+        return None;
+    }
+    let dest = dest_dir.join(&filename);
+
+    match std::fs::copy(&source, &dest) {
+        Ok(_) => Some(filename),
+        Err(e) => {
+            tracing::warn!(
+                project = project_name,
+                source = %source.display(),
+                error = %e,
+                "failed to copy project logo"
+            );
+            None
+        }
+    }
+}
 /// Auto-detect a project summary from Cargo.toml, package.json, or README.
 async fn detect_project_summary(project_path: &std::path::Path) -> String {
     // Cargo.toml [package].description.

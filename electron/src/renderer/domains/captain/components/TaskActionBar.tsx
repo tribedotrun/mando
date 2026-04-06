@@ -2,6 +2,7 @@ import React, { useState, useCallback, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import log from '#renderer/logger';
 import { reopenItem, reworkItem } from '#renderer/domains/captain/hooks/useApi';
+import { useDraft } from '#renderer/global/hooks/useDraft';
 import { useTaskStore } from '#renderer/domains/captain/stores/taskStore';
 import { useToastStore } from '#renderer/global/stores/toastStore';
 import type { TaskItem } from '#renderer/types';
@@ -29,7 +30,9 @@ export function TaskActionBar({ item, onAsk }: Props): React.ReactElement | null
   const available = getAvailableActions(item);
   const defaultAction = getDefaultAction(item);
   const [selectedAction, setSelectedAction] = useState<Action>(defaultAction);
-  const [text, setText] = useState('');
+  const [text, setText, clearTextDraft] = useDraft(
+    `mando:draft:action:${item.id}:${selectedAction}`,
+  );
   const [pendingAction, setPendingAction] = useState<Action | null>(null);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -49,7 +52,7 @@ export function TaskActionBar({ item, onAsk }: Props): React.ReactElement | null
     try {
       if (selectedAction === 'ask') {
         onAsk?.(trimmed);
-        setText('');
+        clearTextDraft();
         if (textareaRef.current) textareaRef.current.style.height = 'auto';
         setPendingAction(null);
         return;
@@ -60,7 +63,7 @@ export function TaskActionBar({ item, onAsk }: Props): React.ReactElement | null
       invalidateTaskDetail(queryClient, item.id);
       const msg = selectedAction === 'reopen' ? 'Task reopened' : 'Rework requested';
       toast().add('success', msg);
-      setText('');
+      clearTextDraft();
       if (textareaRef.current) textareaRef.current.style.height = 'auto';
     } catch (err) {
       log.warn(`[TaskActionBar] ${selectedAction} failed for item ${item.id}:`, err);
@@ -68,7 +71,7 @@ export function TaskActionBar({ item, onAsk }: Props): React.ReactElement | null
     } finally {
       setPendingAction(null);
     }
-  }, [text, selectedAction, item.id, taskFetch, queryClient, toast, onAsk]);
+  }, [text, selectedAction, item.id, taskFetch, queryClient, toast, onAsk, clearTextDraft]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -139,6 +142,7 @@ export function TaskActionBar({ item, onAsk }: Props): React.ReactElement | null
             >
               <button
                 onClick={() => setDropdownOpen((v) => !v)}
+                disabled={!!pendingAction}
                 className="flex items-center gap-1"
                 style={{
                   background: 'none',
@@ -146,7 +150,7 @@ export function TaskActionBar({ item, onAsk }: Props): React.ReactElement | null
                   color: 'var(--color-text-2)',
                   fontSize: '13px',
                   fontWeight: 500,
-                  cursor: 'pointer',
+                  cursor: pendingAction ? 'default' : 'pointer',
                   padding: '4px 8px',
                   lineHeight: '18px',
                 }}

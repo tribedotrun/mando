@@ -72,6 +72,11 @@ async fn main() -> Result<()> {
     let tg = &config.channels.telegram;
     let tg_enabled = tg.enabled && !tg.token.is_empty();
 
+    // Shared map so the SSE notification handler can edit "processing..."
+    // messages sent by add_and_track, preventing duplicate cards.
+    let pending: mando_telegram::PendingMessages =
+        std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()));
+
     // Spawn SSE notification listener — sends alerts to telegram.owner.
     // Skipped when no owner is configured — may be auto-registered later via first message.
     if tg_enabled {
@@ -86,8 +91,11 @@ async fn main() -> Result<()> {
                 None => TelegramApi::new(&tg.token),
             };
             let chat_id = tg.owner.clone();
+            let sse_gw = gw.clone();
+            let sse_pending = pending.clone();
             set.spawn(async move {
-                sse::run_notification_loop(base_url, gw_token, api, chat_id).await;
+                sse::run_notification_loop(base_url, gw_token, api, chat_id, sse_gw, sse_pending)
+                    .await;
             });
         }
     }
@@ -96,8 +104,9 @@ async fn main() -> Result<()> {
     if tg_enabled {
         let cfg = Arc::new(RwLock::new(config.clone()));
         let bot_gw = gw.clone();
+        let bot_pending = pending.clone();
         set.spawn(async move {
-            if let Err(e) = mando_telegram::start_bot(cfg, Some(bot_gw)).await {
+            if let Err(e) = mando_telegram::start_bot(cfg, Some(bot_gw), bot_pending).await {
                 tracing::error!("[telegram] bot stopped: {e}");
             }
         });
