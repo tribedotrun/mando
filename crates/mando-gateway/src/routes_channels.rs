@@ -12,6 +12,7 @@ use crate::AppState;
 /// GET /api/channels — show configured channels and their status.
 pub(crate) async fn get_channels(State(state): State<AppState>) -> Json<Value> {
     let config = state.config.load_full();
+    let tg_status = state.telegram_runtime.status().await;
 
     let tg = &config.channels.telegram;
 
@@ -29,9 +30,12 @@ pub(crate) async fn get_channels(State(state): State<AppState>) -> Json<Value> {
         "channels": [
             {
                 "name": "telegram",
-                "enabled": !tg.token.is_empty(),
+                "enabled": tg_status.enabled,
+                "running": tg_status.running,
+                "mode": tg_status.mode,
                 "token": mask_token(&tg.token),
                 "owner": tg.owner,
+                "lastError": tg_status.last_error,
             },
         ]
     }))
@@ -41,6 +45,53 @@ pub(crate) async fn get_channels(State(state): State<AppState>) -> Json<Value> {
 pub(crate) struct NotifyBody {
     pub message: String,
     pub chat_id: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct TelegramOwnerBody {
+    pub owner: String,
+}
+
+pub(crate) async fn post_telegram_owner(
+    State(state): State<AppState>,
+    Json(body): Json<TelegramOwnerBody>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    state
+        .config_manager
+        .update(|cfg| {
+            cfg.channels.telegram.owner = body.owner.clone();
+            Ok(())
+        })
+        .await
+        .map_err(|err| error_response(StatusCode::INTERNAL_SERVER_ERROR, &err.to_string()))?;
+
+    state
+        .telegram_runtime
+        .register_owner(body.owner)
+        .await
+        .map_err(|err| error_response(StatusCode::INTERNAL_SERVER_ERROR, &err.to_string()))?;
+
+    Ok(Json(json!({"ok": true})))
+}
+
+pub(crate) async fn post_telegram_restart(
+    State(state): State<AppState>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let config = state.config_manager.load_full();
+    if !config.channels.telegram.enabled || config.channels.telegram.token.is_empty() {
+        return Err(error_response(
+            StatusCode::BAD_REQUEST,
+            "telegram is disabled or missing a bot token",
+        ));
+    }
+
+    state
+        .telegram_runtime
+        .restart()
+        .await
+        .map_err(|err| error_response(StatusCode::INTERNAL_SERVER_ERROR, &err.to_string()))?;
+
+    Ok(Json(json!({"ok": true})))
 }
 
 /// POST /api/notify — send a Telegram notification.

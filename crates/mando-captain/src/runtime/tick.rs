@@ -369,6 +369,7 @@ async fn run_captain_tick_inner(
                 &mut alerts,
                 resource_limits,
                 &pool,
+                bus,
             )
             .await;
         }
@@ -442,33 +443,7 @@ async fn run_captain_tick_inner(
     )
     .await?;
 
-    // Archive terminal tasks that have been finalized longer than the grace period.
-    if !dry_run {
-        let store = store_lock.read().await;
-        match store
-            .archive_terminal(workflow.agent.archive_grace_secs)
-            .await
-        {
-            Ok(n) if n > 0 => {
-                tracing::info!(module = "captain", archived = n, "archived terminal tasks");
-            }
-            Err(e) => {
-                tracing::warn!(module = "captain", error = %e, "archive terminal tasks failed");
-            }
-            _ => {}
-        }
-    }
-
-    // Reconcile stale "running" sessions against stream ground truth.
-    if !dry_run {
-        let store = store_lock.read().await;
-        super::session_reconcile::reconcile_running_sessions(
-            store.pool(),
-            workflow.agent.stale_threshold_s,
-            &mut alerts,
-        )
-        .await;
-    }
+    super::tick_post::run_post_cleanup(dry_run, store_lock, workflow, &mut alerts).await;
 
     let status_counts = match store_lock.read().await.status_counts().await {
         Ok(c) => c,

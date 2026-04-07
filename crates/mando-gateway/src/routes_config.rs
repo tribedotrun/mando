@@ -1,13 +1,13 @@
 //! Config management endpoints for the daemon.
 
-use std::sync::Arc;
-
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::Json;
 use serde_json::{json, Value};
+use std::sync::Arc;
 
+use crate::config_manager::ConfigChangeEvent;
 use crate::AppState;
 
 /// Load captain + scout workflows for a candidate config WITHOUT publishing
@@ -76,9 +76,6 @@ pub(crate) async fn put_config(
         }
     };
 
-    // Serialize config writes — prevents concurrent saves from clobbering each other.
-    let _write_guard = state.config_write_mu.lock().await;
-
     // Populate runtime fields (e.g. Telegram tokens from env section).
     new_config.populate_runtime_fields();
 
@@ -111,39 +108,37 @@ pub(crate) async fn put_config(
         }
     };
 
-    // Save to disk (validation passed). save_config uses blocking std::fs —
-    // move it off the async runtime so we don't stall the executor while
-    // holding config_write_mu.
-    let save_config = new_config.clone();
-    let save_result =
-        tokio::task::spawn_blocking(move || mando_config::save_config(&save_config, None)).await;
-    match save_result {
-        Ok(Ok(())) => {}
-        Ok(Err(e)) => {
+    let change = match state
+        .config_manager
+        .replace_then(new_config, |_| {
+            publish_workflows(&state, workflows.0, workflows.1);
+        })
+        .await
+    {
+        Ok(change) => change,
+        Err(e) => {
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({"error": format!("save failed: {e}")})),
             )
                 .into_response();
         }
-        Err(e) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": format!("save task panicked: {e}")})),
-            )
-                .into_response();
+    };
+
+    let committed_config = state.config_manager.load_full();
+    if matches!(
+        change,
+        ConfigChangeEvent::Telegram | ConfigChangeEvent::Full
+    ) {
+        if let Err(err) = state.telegram_runtime.configure(&committed_config).await {
+            tracing::warn!(module = "telegram", error = %err, "telegram hot reload failed");
         }
     }
-
-    // Commit config and workflows together. Both are pre-validated, so
-    // neither of these can fail.
-    state.config.store(Arc::new(new_config));
-    publish_workflows(&state, workflows.0, workflows.1);
 
     // Notify SSE clients.
     state.bus.send(mando_types::BusEvent::Status, None);
 
-    let configured_paths = mando_config::resolve_captain_runtime_paths(&state.config.load_full());
+    let configured_paths = mando_config::resolve_captain_runtime_paths(&committed_config);
     Json(json!({
         "ok": true,
         "restartRequired": state.runtime_paths != configured_paths,
@@ -210,7 +205,6 @@ pub(crate) async fn post_config_setup(
             }
         };
 
-        let _write_guard = state.config_write_mu.lock().await;
         new_config.populate_runtime_fields();
 
         // Validate before persisting. try_load_captain_workflow is the lighter
@@ -243,30 +237,32 @@ pub(crate) async fn post_config_setup(
             }
         };
 
-        let save_config = new_config.clone();
-        let save_result =
-            tokio::task::spawn_blocking(move || mando_config::save_config(&save_config, None))
-                .await;
-        match save_result {
-            Ok(Ok(())) => {}
-            Ok(Err(e)) => {
+        let change = match state
+            .config_manager
+            .replace_then(new_config, |_| {
+                publish_workflows(&state, workflows.0, workflows.1);
+            })
+            .await
+        {
+            Ok(change) => change,
+            Err(e) => {
                 return (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     Json(json!({"error": format!("save failed: {e}")})),
                 )
                     .into_response();
             }
-            Err(e) => {
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": format!("save task panicked: {e}")})),
-                )
-                    .into_response();
+        };
+
+        if matches!(
+            change,
+            ConfigChangeEvent::Telegram | ConfigChangeEvent::Full
+        ) {
+            let committed_config = state.config_manager.load_full();
+            if let Err(err) = state.telegram_runtime.configure(&committed_config).await {
+                tracing::warn!(module = "telegram", error = %err, "telegram hot reload failed");
             }
         }
-
-        state.config.store(Arc::new(new_config));
-        publish_workflows(&state, workflows.0, workflows.1);
     }
 
     Json(json!({"ok": true})).into_response()

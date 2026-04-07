@@ -2,7 +2,7 @@
  * Mando Electron main process — thin client that talks to the daemon via HTTP.
  *
  * No napi loading. All data operations go through HTTP to the daemon.
- * Daemon lifecycle managed via launchd (prod) or direct spawn (dev).
+ * Daemon owns runtime; Electron handles bootstrap, update, and login-item UX.
  */
 import { app, BrowserWindow, Tray, Menu, globalShortcut, dialog, shell } from 'electron';
 import path from 'path';
@@ -33,6 +33,7 @@ import { registerNotificationHandlers } from '#main/notifications';
 import { setupAutoUpdate, applyPendingUpdateIfAny, cleanupAutoUpdate } from '#main/updater';
 import { getAppInfo } from '#main/app-info';
 import { startRendererServer } from '#main/renderer-server';
+import { announceUiQuitting, announceUiRegistered } from '#main/ui-lifecycle';
 
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
@@ -40,6 +41,7 @@ let trayAvailable = false;
 let rendererServer: http.Server | null = null;
 let rendererPort = 0;
 let isQuitting = false;
+let rendererUrl: string | null = null;
 
 // ---------------------------------------------------------------------------
 // Window management
@@ -74,11 +76,8 @@ function createWindow(): void {
     },
   });
 
-  if (MAIN_WINDOW_VITE_DEV_SERVER_URL) {
-    mainWindow.loadURL(MAIN_WINDOW_VITE_DEV_SERVER_URL);
-  } else {
-    mainWindow.loadURL(`http://127.0.0.1:${rendererPort}/index.html`);
-  }
+  const url = rendererUrl ?? `http://127.0.0.1:${rendererPort}/index.html`;
+  mainWindow.loadURL(url);
 
   // Open external URLs in system browser; allow app-local (127.0.0.1) URLs
   const isAppLocal = (url: string) => {
@@ -169,14 +168,42 @@ function createTray(): void {
 
 function trustedRendererOrigins(): string[] {
   const origins = new Set<string>();
-  if (MAIN_WINDOW_VITE_DEV_SERVER_URL) {
-    origins.add(new URL(MAIN_WINDOW_VITE_DEV_SERVER_URL).origin);
+  if (rendererUrl) {
+    origins.add(new URL(rendererUrl).origin);
   }
   if (rendererPort > 0) {
     origins.add(`http://127.0.0.1:${rendererPort}`);
     origins.add(`http://localhost:${rendererPort}`);
   }
   return Array.from(origins);
+}
+
+async function devServerReachable(url: string): Promise<boolean> {
+  try {
+    const response = await fetch(url, { method: 'HEAD' });
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
+async function prepareRendererSource(): Promise<void> {
+  if (MAIN_WINDOW_VITE_DEV_SERVER_URL) {
+    if (await devServerReachable(MAIN_WINDOW_VITE_DEV_SERVER_URL)) {
+      rendererUrl = MAIN_WINDOW_VITE_DEV_SERVER_URL;
+      return;
+    }
+
+    log.warn(
+      `[renderer] Vite dev server unavailable at ${MAIN_WINDOW_VITE_DEV_SERVER_URL}; falling back to static renderer`,
+    );
+  }
+
+  const rendererDir = path.join(__dirname, `../renderer/${MAIN_WINDOW_VITE_NAME}`);
+  const result = await startRendererServer(rendererDir);
+  rendererPort = result.port;
+  rendererServer = result.server;
+  rendererUrl = `http://127.0.0.1:${rendererPort}/index.html`;
 }
 
 function registerShortcuts(): void {
@@ -241,20 +268,16 @@ app.whenReady().then(async () => {
 
   // Apply staged update from previous session (swap .app bundle + relaunch).
   // Must run before anything else — if it triggers, the process exits.
-  if (app.isPackaged && applyPendingUpdateIfAny()) return;
+  if (app.isPackaged && (await applyPendingUpdateIfAny())) return;
 
   const dataDir = getDataDir();
 
   // Start daemon (or discover running daemon).
   await ensureDaemon(dataDir);
   if (isQuitting) return;
+  await announceUiRegistered();
 
-  if (!MAIN_WINDOW_VITE_DEV_SERVER_URL) {
-    const rendererDir = path.join(__dirname, `../renderer/${MAIN_WINDOW_VITE_NAME}`);
-    const result = await startRendererServer(rendererDir);
-    rendererPort = result.port;
-    rendererServer = result.server;
-  }
+  await prepareRendererSource();
   setTrustedRendererOrigins(trustedRendererOrigins());
   installTrustedGatewayAuth();
 
@@ -290,15 +313,21 @@ app.whenReady().then(async () => {
   setupAutoUpdate();
 
   // Login item is managed only via the Settings UI toggle (set-login-item IPC).
-  // One-time migration: if config has no explicit startAtLogin, disable the OS
-  // login item (old code defaulted to true, so existing users may have it on).
+  // MIGRATION-ONLY: move legacy top-level `startAtLogin` into `ui.openAtLogin`.
+  // Keep this local to Electron startup so the daemon/Rust side stays free of
+  // one-off config upgrade logic. Delete once old configs are no longer in use.
   if (app.isPackaged) {
     try {
       const raw = fs.readFileSync(getConfigPath(), 'utf-8');
-      const cfg = JSON.parse(raw) as { startAtLogin?: boolean };
-      if (cfg.startAtLogin === undefined) {
-        app.setLoginItemSettings({ openAtLogin: false });
-        cfg.startAtLogin = false;
+      const cfg = JSON.parse(raw) as {
+        startAtLogin?: boolean;
+        ui?: { openAtLogin?: boolean };
+      };
+      if (cfg.startAtLogin !== undefined && cfg.ui?.openAtLogin === undefined) {
+        const migrated = cfg.startAtLogin;
+        app.setLoginItemSettings({ openAtLogin: migrated, openAsHidden: true });
+        cfg.ui = { ...(cfg.ui || {}), openAtLogin: migrated };
+        delete cfg.startAtLogin;
         fs.writeFileSync(getConfigPath(), JSON.stringify(cfg, null, 2), 'utf-8');
       }
     } catch (err: unknown) {
@@ -334,6 +363,7 @@ app.on('before-quit', async () => {
   isQuitting = true;
   setIsQuitting(true);
   globalShortcut.unregisterAll();
+  void announceUiQuitting();
   cleanupDaemon();
   cleanupAutoUpdate();
   rendererServer?.close();

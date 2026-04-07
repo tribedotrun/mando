@@ -1,6 +1,6 @@
 {
   "name": "mando",
-  "version": "0.1.13",
+  "version": "0.1.14",
   "description": "Desktop app for managing AI coding agents",
   "license": "Apache-2.0",
   "repository": {
@@ -40,6 +40,7 @@
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "electron": "^41.0.3",
+    "esbuild": "^0.28.0",
     "eslint": "^10.0.3",
     "prettier": "^3.8.1",
     "tailwindcss": "^4.1.0",

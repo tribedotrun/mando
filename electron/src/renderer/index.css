@@ -249,7 +249,7 @@ select:focus-visible {
 }
 
 /* ── Form inputs: opt out of drag region so text is selectable ── */
-input:not([type="checkbox"]):not([type="radio"]),
+input:not([type='checkbox']):not([type='radio']),
 textarea,
 select {
   -webkit-app-region: no-drag;

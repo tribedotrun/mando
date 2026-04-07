@@ -93,8 +93,16 @@ export function useTaskActions() {
     }
   };
 
-  const handleAccept = (id: number) =>
-    optimisticAction(id, 'completed-no-pr', () => acceptItem(id), 'Accept failed');
+  const [acceptPendingId, setAcceptPendingId] = useState<number | null>(null);
+
+  const handleAccept = async (id: number) => {
+    setAcceptPendingId(id);
+    try {
+      await optimisticAction(id, 'completed-no-pr', () => acceptItem(id), 'Accept failed');
+    } finally {
+      setAcceptPendingId(null);
+    }
+  };
 
   const handleReopen = async (id: number, feedback: string) => {
     setReopenPending(true);
@@ -123,9 +131,11 @@ export function useTaskActions() {
   };
 
   const handleHandoff = async (id: number) => {
+    optimisticUpdate(id, { status: 'handed-off' });
     try {
       await handoffItem(id);
       taskFetch();
+      invalidateTaskDetail(queryClient, id);
       const wt = taskItems.find((b) => b.id === id)?.worktree;
       if (wt) {
         const copied = await copyToClipboard(wt);
@@ -136,6 +146,7 @@ export function useTaskActions() {
         toast.success('Task handed off');
       }
     } catch (err) {
+      taskFetch();
       toast.error(getErrorMessage(err, 'Handoff failed'));
     }
   };
@@ -234,6 +245,7 @@ export function useTaskActions() {
     reworkPending,
     handleRework,
     handleAccept,
+    acceptPendingId,
     handleHandoff,
     deleteModalOpen,
     setDeleteModalOpen,

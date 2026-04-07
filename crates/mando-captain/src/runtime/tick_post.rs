@@ -88,6 +88,44 @@ pub(crate) fn merge_health_state(
     }
 }
 
+/// Archive terminal tasks and reconcile stale sessions.
+pub(crate) async fn run_post_cleanup(
+    dry_run: bool,
+    store_lock: &std::sync::Arc<tokio::sync::RwLock<crate::io::task_store::TaskStore>>,
+    workflow: &mando_config::workflow::CaptainWorkflow,
+    alerts: &mut Vec<String>,
+) {
+    if dry_run {
+        return;
+    }
+    // Archive terminal tasks that have been finalized longer than the grace period.
+    {
+        let store = store_lock.read().await;
+        match store
+            .archive_terminal(workflow.agent.archive_grace_secs)
+            .await
+        {
+            Ok(n) if n > 0 => {
+                tracing::info!(module = "captain", archived = n, "archived terminal tasks");
+            }
+            Err(e) => {
+                tracing::warn!(module = "captain", error = %e, "archive terminal tasks failed");
+            }
+            _ => {}
+        }
+    }
+    // Reconcile stale "running" sessions against stream ground truth.
+    {
+        let store = store_lock.read().await;
+        super::session_reconcile::reconcile_running_sessions(
+            store.pool(),
+            workflow.agent.stale_threshold_s,
+            alerts,
+        )
+        .await;
+    }
+}
+
 /// Build tick summary from status counts and log it.
 pub(crate) fn log_tick_summary(
     status_counts: &std::collections::HashMap<String, usize>,

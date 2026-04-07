@@ -41,9 +41,11 @@ mando-uuid.workspace = true
 mando-cc.workspace = true
 mando-db.workspace = true
 sqlx.workspace = true
+mando-telegram = { path = "../mando-telegram" }
 base64 = "0.22"
 bytes = "1"
 toml = "0.8"
+libc = "0.2"
 
 [features]
 default = ["otlp"]

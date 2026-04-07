@@ -30,10 +30,6 @@ pub(crate) async fn spawn_worker(
 ) -> Result<SpawnResult> {
     let repo_path = mando_config::expand_tilde(&project_config.path);
 
-    // Allocate slot (global counter for worktree/branch slug uniqueness).
-    // next_worker_slot does blocking fs, so move it off the executor.
-    let slot_state_dir = mando_config::state_dir();
-    let slot = tokio::task::spawn_blocking(move || next_worker_slot(&slot_state_dir)).await??;
     // Worker name is task-scoped: worker-{taskId}-{seq}.
     // Uses worker_seq as-is (caller is responsible for incrementing before calling).
     let session_name = format!("worker-{}-{}", item.id, item.worker_seq);
@@ -48,27 +44,19 @@ pub(crate) async fn spawn_worker(
         .as_deref()
         .map(mando_config::expand_tilde)
         .filter(|p| p.exists());
-    let (branch, wt_path) = if let (Some(wt), Some(existing_branch)) =
-        (existing_wt, item.branch.as_deref())
-    {
-        tracing::info!(
-            module = "spawner",
-            worktree = %wt.display(),
-            branch = existing_branch,
-            "reusing existing worktree for reopened item"
-        );
-        (existing_branch.to_string(), wt)
-    } else {
-        let slug = new_slug(item, slot);
-        let branch = format!("mando/{}", slug);
-        let wt = git::worktree_path(&repo_path, &slug);
-        let default_branch = git::default_branch(&repo_path).await?;
-        if let Err(e) = git::delete_local_branch(&repo_path, &branch).await {
-            tracing::warn!(module = "spawner", branch = %branch, error = %e, "failed to delete stale local branch");
-        }
-        git::create_worktree(&repo_path, &branch, &wt, &default_branch).await?;
-        (branch, wt)
-    };
+    let (branch, wt_path) =
+        if let (Some(wt), Some(existing_branch)) = (existing_wt, item.branch.as_deref()) {
+            tracing::info!(
+                module = "spawner",
+                worktree = %wt.display(),
+                branch = existing_branch,
+                "reusing existing worktree for reopened item"
+            );
+            (existing_branch.to_string(), wt)
+        } else {
+            let default_branch = git::default_branch(&repo_path).await?;
+            reserve_fresh_worktree(item, &repo_path, &default_branch).await?
+        };
 
     // Copy plan briefs into worktree if they exist (blocking fs → spawn_blocking).
     {
@@ -89,6 +77,7 @@ pub(crate) async fn spawn_worker(
         let project_clone = project_config.clone();
         let workflow_clone = workflow.clone();
         tokio::task::spawn_blocking(move || {
+            let slot = branch_slot(&branch_clone).unwrap_or(0);
             prepare_initial_worker_prompt(
                 &item_clone,
                 slot,
@@ -118,7 +107,7 @@ pub(crate) async fn spawn_worker(
 
     let (child, pid, stream_path) =
         mando_cc::spawn_detached(&cc_config, &prompt, &session_id).await?;
-    crate::watch_worker_exit(child);
+    crate::watch_worker_exit(child, pid, &session_id);
 
     // Write meta sidecar for retrospective debugging.
     mando_cc::write_stream_meta(
@@ -204,6 +193,57 @@ fn new_slug(item: &Task, slot: u64) -> String {
     format!("todo-{}-{}", item.id, slot)
 }
 
+async fn reserve_fresh_worktree(
+    item: &Task,
+    repo_path: &std::path::Path,
+    default_branch: &str,
+) -> Result<(String, PathBuf)> {
+    const MAX_ATTEMPTS: usize = 20;
+
+    for attempt in 0..MAX_ATTEMPTS {
+        let slot_state_dir = mando_config::state_dir();
+        let slot = tokio::task::spawn_blocking(move || next_worker_slot(&slot_state_dir)).await??;
+        let slug = new_slug(item, slot);
+        let branch = format!("mando/{}", slug);
+        let wt = git::worktree_path(repo_path, &slug);
+
+        if let Err(e) = git::prune_worktrees(repo_path).await {
+            tracing::warn!(module = "spawner", error = %e, "failed to prune stale git worktrees");
+        }
+        if let Err(e) = git::delete_local_branch(repo_path, &branch).await {
+            tracing::warn!(
+                module = "spawner",
+                branch = %branch,
+                error = %e,
+                "failed to delete stale local branch"
+            );
+        }
+
+        match git::create_worktree(repo_path, &branch, &wt, default_branch).await {
+            Ok(()) => return Ok((branch, wt)),
+            Err(e) if e.to_string().contains("already exists") && attempt + 1 < MAX_ATTEMPTS => {
+                tracing::warn!(
+                    module = "spawner",
+                    branch = %branch,
+                    attempt = attempt + 1,
+                    "branch/worktree already exists — retrying with a fresh slot"
+                );
+            }
+            Err(e) => return Err(e),
+        }
+    }
+
+    anyhow::bail!(
+        "failed to reserve a fresh worktree after {} attempts for task {}",
+        MAX_ATTEMPTS,
+        item.id
+    );
+}
+
+fn branch_slot(branch: &str) -> Option<u64> {
+    branch.rsplit('-').next()?.parse().ok()
+}
+
 /// Copy plan/brief files from `~/.mando/plans/` into the worktree's `.ai/briefs/`.
 ///
 /// Copies any files related to the item's plan path. Only copies
@@ -262,20 +302,22 @@ fn prepare_initial_worker_prompt(
     let original_prompt = item.original_prompt.as_deref().unwrap_or("");
     let task_id_str = item.id.to_string();
     let no_pr = if item.no_pr { "true" } else { "" };
+    let workpad_path = ensure_workpad_path(item)?;
 
     let check_command = check_command_or_fallback(project_config);
 
-    let mut brief_vars: FxHashMap<&str, &str> = FxHashMap::default();
-    brief_vars.insert("title", item.title.as_str());
-    brief_vars.insert("context", context);
-    brief_vars.insert("branch", branch);
-    brief_vars.insert("id", task_id_str.as_str());
-    brief_vars.insert("original_prompt", original_prompt);
-    brief_vars.insert("worker_preamble", project_config.worker_preamble.as_str());
-    brief_vars.insert("check_command", check_command.as_str());
-    brief_vars.insert("no_pr", no_pr);
+    let mut brief_vars: FxHashMap<&str, String> = FxHashMap::default();
+    brief_vars.insert("title", item.title.clone());
+    brief_vars.insert("context", context.to_string());
+    brief_vars.insert("branch", branch.to_string());
+    brief_vars.insert("id", task_id_str.clone());
+    brief_vars.insert("original_prompt", original_prompt.to_string());
+    brief_vars.insert("worker_preamble", project_config.worker_preamble.clone());
+    brief_vars.insert("check_command", check_command.clone());
+    brief_vars.insert("no_pr", no_pr.to_string());
+    brief_vars.insert("workpad_path", workpad_path.clone());
     if let Some(ref plan_path) = plan {
-        brief_vars.insert("plan", plan_path.as_str());
+        brief_vars.insert("plan", plan_path.clone());
     }
 
     let rendered_brief = mando_config::render_prompt(prompt_name, &workflow.prompts, &brief_vars)
@@ -284,15 +326,34 @@ fn prepare_initial_worker_prompt(
     let brief_filename = worker_brief_filename(item, slot);
     let briefs_dir = wt_path.join(".ai").join("briefs");
     std::fs::create_dir_all(&briefs_dir)?;
-    std::fs::write(briefs_dir.join(&brief_filename), rendered_brief)?;
+    let brief_path = briefs_dir.join(&brief_filename);
+    std::fs::write(&brief_path, rendered_brief)?;
 
-    let mut vars: FxHashMap<&str, &str> = FxHashMap::default();
-    vars.insert("brief_filename", brief_filename.as_str());
-    vars.insert("id", task_id_str.as_str());
-    vars.insert("no_pr", no_pr);
+    let mut vars: FxHashMap<&str, String> = FxHashMap::default();
+    vars.insert("brief_filename", brief_filename.clone());
+    vars.insert("brief_path", brief_path.display().to_string());
+    vars.insert("id", task_id_str);
+    vars.insert("no_pr", no_pr.to_string());
+    vars.insert("workpad_path", workpad_path);
 
     mando_config::render_initial_prompt(initial_prompt_name, &workflow.initial_prompts, &vars)
         .map_err(anyhow::Error::msg)
+}
+
+fn ensure_workpad_path(item: &Task) -> Result<String> {
+    let workpad_path = mando_config::data_dir()
+        .join("plans")
+        .join(item.id.to_string())
+        .join("workpad.md");
+    if let Some(parent) = workpad_path.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create workpad directory {}", parent.display()))?;
+    }
+    if !workpad_path.exists() {
+        std::fs::write(&workpad_path, "")
+            .with_context(|| format!("failed to initialize workpad {}", workpad_path.display()))?;
+    }
+    Ok(workpad_path.display().to_string())
 }
 
 fn worker_brief_filename(item: &Task, slot: u64) -> String {
@@ -315,7 +376,7 @@ fn resolve_worker_plan_path(item: &Task, wt_path: &std::path::Path) -> Result<Op
         if plan != copied_path {
             std::fs::copy(&plan, &copied_path)?;
         }
-        return Ok(Some(format!(".ai/briefs/{}", file_name.to_string_lossy())));
+        return Ok(Some(copied_path.display().to_string()));
     }
 
     let relative = plan_path.trim().to_string();
@@ -323,7 +384,7 @@ fn resolve_worker_plan_path(item: &Task, wt_path: &std::path::Path) -> Result<Op
         return Ok(None);
     }
 
-    Ok(Some(relative))
+    Ok(Some(wt_path.join(relative).display().to_string()))
 }
 
 fn is_adopted_handoff(item: &Task, plan: Option<&str>, wt_path: &std::path::Path) -> bool {
@@ -366,10 +427,23 @@ mod tests {
             prepare_initial_worker_prompt(&item, 1, "mando/fix-auth-1", &wt, &project, &workflow)
                 .unwrap();
 
-        assert!(initial.contains(".ai/briefs/todo-0-1.md"));
+        assert!(initial.contains(&wt.join(".ai/briefs/todo-0-1.md").display().to_string()));
+        assert!(initial.contains("Before you update the workpad, first read"));
+        assert!(initial.contains(
+            &mando_config::data_dir()
+                .join("plans/0/workpad.md")
+                .display()
+                .to_string()
+        ));
         let brief = std::fs::read_to_string(wt.join(".ai/briefs/todo-0-1.md")).unwrap();
         assert!(brief.contains("Captain Brief"));
         assert!(brief.contains("Auth redirect loop in login callback"));
+        assert!(brief.contains(
+            &mando_config::data_dir()
+                .join("plans/0/workpad.md")
+                .display()
+                .to_string()
+        ));
     }
 
     #[test]
@@ -388,7 +462,7 @@ mod tests {
 
         let brief = std::fs::read_to_string(wt.join(".ai/briefs/todo-0-2.md")).unwrap();
         assert!(brief.contains("Human-Curated Plan"));
-        assert!(brief.contains("source-brief.md"));
+        assert!(brief.contains(&wt.join(".ai/briefs/source-brief.md").display().to_string()));
         assert!(wt.join(".ai/briefs/source-brief.md").exists());
     }
 
@@ -419,7 +493,7 @@ mod tests {
         prepare_initial_worker_prompt(&item, 4, "mando/todo-0", &wt, &project, &workflow).unwrap();
 
         let brief = std::fs::read_to_string(wt.join(".ai/briefs/todo-0-4.md")).unwrap();
-        assert!(brief.contains(".ai/briefs/brief.md"));
+        assert!(brief.contains(&wt.join(".ai/briefs/brief.md").display().to_string()));
         assert!(wt.join(".ai/briefs/brief.md").exists());
 
         let _ = std::fs::remove_file(&plan_source);
@@ -446,6 +520,13 @@ mod tests {
                 .unwrap();
 
         assert!(initial.contains("handed off"));
+        assert!(initial.contains("Before you update the workpad, first read"));
+        assert!(initial.contains(
+            &mando_config::data_dir()
+                .join("plans/0/workpad.md")
+                .display()
+                .to_string()
+        ));
         let brief = std::fs::read_to_string(wt.join(".ai/briefs/todo-0-3.md")).unwrap();
         assert!(brief.contains("Mid-Implementation Handoff"));
     }

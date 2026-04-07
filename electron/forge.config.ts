@@ -38,12 +38,7 @@ const config: ForgeConfig = {
     appBundleId: bundleId,
     darwinDarkModeSupport: true,
     extendInfo: {},
-    extraResource: [
-      `${rustTargetDir}/mando-gw`,
-      `${rustTargetDir}/mando-tg`,
-      `${rustTargetDir}/mando`,
-      './assets',
-    ],
+    extraResource: [`${rustTargetDir}/mando-gw`, `${rustTargetDir}/mando`, './assets'],
     osxSign: {
       optionsForFile: () => ({
         entitlements: 'entitlements/entitlements.mac.plist',

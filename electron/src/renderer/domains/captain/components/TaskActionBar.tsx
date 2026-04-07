@@ -37,9 +37,7 @@ export function TaskActionBar({ item, onAsk }: Props): React.ReactElement | null
   const available = getAvailableActions(item);
   const defaultAction = getDefaultAction(item);
   const [selectedAction, setSelectedAction] = useState<Action>(defaultAction);
-  const [text, setText, clearTextDraft] = useDraft(
-    `mando:draft:action:${item.id}:${selectedAction}`,
-  );
+  const [text, setText, clearTextDraft] = useDraft(`mando:draft:action:${item.id}`);
   const [pendingAction, setPendingAction] = useState<Action | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const taskFetch = useTaskStore((s) => s.fetch);
@@ -99,7 +97,9 @@ export function TaskActionBar({ item, onAsk }: Props): React.ReactElement | null
 
   const config = ACTION_CONFIG[selectedAction];
   const hasMultipleActions = available.length > 1;
+  const isLoading = !!pendingAction;
   const canSubmit = !hidden && text.trim().length > 0 && !pendingAction;
+  const showAccent = canSubmit || isLoading;
 
   return (
     <div
@@ -179,15 +179,23 @@ export function TaskActionBar({ item, onAsk }: Props): React.ReactElement | null
               width: '28px',
               height: '28px',
               borderRadius: '50%',
-              background: canSubmit ? 'var(--color-accent)' : 'var(--color-surface-3)',
-              color: canSubmit ? 'var(--color-bg)' : 'var(--color-text-3)',
+              background: showAccent ? 'var(--color-accent)' : 'var(--color-surface-3)',
+              color: showAccent ? 'var(--color-bg)' : 'var(--color-text-3)',
               border: 'none',
               cursor: canSubmit ? 'pointer' : 'default',
               transition: 'background 150ms ease, color 150ms ease',
             }}
           >
-            {pendingAction ? (
-              <span style={{ fontSize: '12px' }}>&hellip;</span>
+            {isLoading ? (
+              <svg className="animate-spin" width="14" height="14" viewBox="0 0 14 14" fill="none">
+                <circle cx="7" cy="7" r="5.5" stroke="currentColor" strokeWidth="2" opacity="0.3" />
+                <path
+                  d="M12.5 7a5.5 5.5 0 0 0-5.5-5.5"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                />
+              </svg>
             ) : (
               <ArrowUp size={14} strokeWidth={2} />
             )}

@@ -10,10 +10,7 @@ import { SettingsTelegram } from '#renderer/domains/settings/components/Settings
 import { SettingsScout } from '#renderer/domains/settings/components/SettingsScout';
 import { SettingsExperimental } from '#renderer/domains/settings/components/SettingsExperimental';
 import { SettingsAbout } from '#renderer/domains/settings/components/SettingsAbout';
-import { SetupChecklist } from '#renderer/domains/onboarding';
-
 export type SettingsSection =
-  | 'setup'
   | 'general'
   | 'projects'
   | 'captain'
@@ -28,7 +25,6 @@ interface NavItem {
 }
 
 const BASE_NAV_ITEMS: NavItem[] = [
-  { id: 'setup', label: 'Setup' },
   { id: 'general', label: 'General' },
   { id: 'projects', label: 'Projects' },
   { id: 'captain', label: 'Captain' },
@@ -37,26 +33,8 @@ const BASE_NAV_ITEMS: NavItem[] = [
   { id: 'about', label: 'About' },
 ];
 
-function SettingsPanel({
-  section,
-  onNavigate,
-}: {
-  section: SettingsSection;
-  onNavigate: (s: SettingsSection) => void;
-}) {
+function SettingsPanel({ section }: { section: SettingsSection }) {
   switch (section) {
-    case 'setup':
-      return (
-        <SetupChecklist
-          onDismiss={() => {
-            const store = useSettingsStore.getState();
-            store.updateSection('features', { setupDismissed: true });
-            store.save();
-            onNavigate('general');
-          }}
-          onMinimize={() => onNavigate('general')}
-        />
-      );
     case 'general':
       return <SettingsGeneral />;
     case 'projects':
@@ -89,9 +67,8 @@ export function SettingsPage({
   const error = useSettingsStore((s) => s.error);
   const saveSuccess = useSettingsStore((s) => s.saveSuccess);
   const scoutEnabled = useSettingsStore((s) => !!s.config.features?.scout);
-  const setupDismissed = useSettingsStore((s) => !!s.config.features?.setupDismissed);
   const navItems = useMemo(() => {
-    let items = setupDismissed ? BASE_NAV_ITEMS.filter((i) => i.id !== 'setup') : BASE_NAV_ITEMS;
+    let items = BASE_NAV_ITEMS;
     if (scoutEnabled) {
       const idx = items.findIndex((i) => i.id === 'experimental');
       items = [
@@ -101,7 +78,7 @@ export function SettingsPage({
       ];
     }
     return items;
-  }, [setupDismissed, scoutEnabled]);
+  }, [scoutEnabled]);
 
   useMountEffect(() => {
     load();
@@ -181,7 +158,7 @@ export function SettingsPage({
       <main className="flex-1 overflow-y-auto" style={{ padding: '38px 32px 24px' }}>
         <div style={{ maxWidth: 720 }}>
           <ErrorBoundary key={section} fallbackLabel={section}>
-            <SettingsPanel section={section} onNavigate={setSection} />
+            <SettingsPanel section={section} />
           </ErrorBoundary>
         </div>
       </main>

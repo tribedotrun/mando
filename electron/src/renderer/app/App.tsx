@@ -25,6 +25,7 @@ import { useTaskStore } from '#renderer/domains/captain/stores/taskStore';
 import { apiPost, apiPatch, apiDel } from '#renderer/api';
 import { toast } from 'sonner';
 import { getErrorMessage } from '#renderer/utils';
+import log from '#renderer/logger';
 
 const SETUP_TOTAL = 3;
 
@@ -39,8 +40,8 @@ function useSetupProgress(): SetupProgress | null {
   const config = useSettingsStore((s) => s.config);
   const loaded = useSettingsStore((s) => s.loaded);
   const dismissed = config.features?.setupDismissed ?? false;
-
-  if (!loaded || dismissed) return null;
+  const [hidden, setHidden] = useState(false);
+  const timerRef = React.useRef<ReturnType<typeof setTimeout>>(undefined);
 
   const hasProject = Object.keys(config.captain?.projects ?? {}).length > 0;
   const done = [
@@ -48,8 +49,21 @@ function useSetupProgress(): SetupProgress | null {
     !!(config.channels?.telegram?.enabled && config.env?.TELEGRAM_MANDO_BOT_TOKEN),
     hasProject,
   ];
-
   const completed = done.filter(Boolean).length;
+  const allDone = completed === SETUP_TOTAL;
+
+  // Schedule auto-hide 3s after reaching 100%. Zustand selector re-renders
+  // trigger this on every config change, so the timer is set exactly once.
+  if (allDone && !hidden && timerRef.current === undefined) {
+    timerRef.current = setTimeout(() => setHidden(true), 3000);
+  }
+  if (!allDone && timerRef.current !== undefined) {
+    clearTimeout(timerRef.current);
+    timerRef.current = undefined;
+  }
+
+  if (!loaded || dismissed || hidden) return null;
+
   const firstIncomplete = done.findIndex((d) => !d);
   const stepLabel = firstIncomplete >= 0 ? STEP_NAMES[firstIncomplete] : 'All done!';
   return { completed, total: SETUP_TOTAL, currentStep: stepLabel };
@@ -81,7 +95,25 @@ export function App(): React.ReactElement {
   const setupProgress = useSetupProgress();
 
   useMountEffect(() => {
-    settingsLoad();
+    settingsLoad().then(() => {
+      // Eagerly verify Claude Code so the sidebar progress is accurate on
+      // first render, rather than waiting for the checklist popover to open.
+      const store = useSettingsStore.getState();
+      if (store.config.features?.claudeCodeVerified || store.config.features?.setupDismissed)
+        return;
+      window.mandoAPI
+        ?.checkClaudeCode?.()
+        .then((result) => {
+          if (result.installed && result.works) {
+            const s = useSettingsStore.getState();
+            if (!s.config.features?.claudeCodeVerified) {
+              s.updateSection('features', { claudeCodeVerified: true });
+              s.save();
+            }
+          }
+        })
+        .catch((err) => log.warn('eager CC check failed:', err));
+    });
   });
 
   const handleDismissSetup = useCallback(() => {

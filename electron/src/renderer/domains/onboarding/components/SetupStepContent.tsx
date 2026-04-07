@@ -1,10 +1,10 @@
 import React, { useState, useCallback } from 'react';
 import { useSettingsStore } from '#renderer/domains/settings';
 import { toast } from 'sonner';
+import log from '#renderer/logger';
 import { getErrorMessage } from '#renderer/utils';
 import { inputClsCompact, inputStyleSubtle } from '#renderer/styles';
 import { useTelegramTokenValidator } from '#renderer/global/hooks/useTelegramTokenValidator';
-import log from '#renderer/logger';
 
 const btnCls = 'text-[11px] font-medium disabled:opacity-40';
 const primaryBtn: React.CSSProperties = {
@@ -97,23 +97,13 @@ export function TelegramContent(): React.ReactElement {
 
   const [token, setToken] = useState(existingToken);
   const { validating, result, validate, reset: resetResult } = useTelegramTokenValidator();
-  const [serviceWarning, setServiceWarning] = useState<string | null>(null);
 
   const handleSave = useCallback(async () => {
-    setServiceWarning(null);
     const ok = await validate(token);
     if (!ok) return;
     updateEnv('TELEGRAM_MANDO_BOT_TOKEN', token.trim());
     updateTelegram({ enabled: true });
-    save();
-    // Install TG launchd plist now that Telegram is configured.
-    try {
-      await window.mandoAPI.launchd.reinstall();
-    } catch (reinstallErr) {
-      log.warn('[Setup] TG launchd reinstall failed', reinstallErr);
-      setServiceWarning('Service install pending, restart Mando');
-      toast.error(getErrorMessage(reinstallErr, 'Failed to install Telegram service'));
-    }
+    await save();
   }, [token, validate, updateEnv, updateTelegram, save]);
 
   const canSave = !!token.trim() && !validating;
@@ -145,7 +135,6 @@ export function TelegramContent(): React.ReactElement {
       />
       {result?.botUsername && <StatusLine ok label={`Connected — @${result.botUsername}`} />}
       {result?.error && <StatusLine ok={false} label={result.error} />}
-      {serviceWarning && <StatusLine ok={false} label={serviceWarning} />}
       <div>
         <button
           onClick={handleSave}

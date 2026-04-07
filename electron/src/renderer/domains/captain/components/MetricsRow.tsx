@@ -58,9 +58,10 @@ function WorkerRow({
   worker: WorkerDetail;
   stale: boolean;
   onNudge?: (worker: WorkerDetail) => void;
-  onStop?: (worker: WorkerDetail) => void;
+  onStop?: (worker: WorkerDetail) => void | Promise<void>;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [stopping, setStopping] = useState(false);
   const hasActions = !!onNudge || !!onStop;
   const phase = getWorkerPhase(worker, stale);
   const colors = PHASE_COLORS[phase];
@@ -163,8 +164,21 @@ function WorkerRow({
           <DropdownMenuContent align="end">
             {onNudge && <DropdownMenuItem onSelect={() => onNudge(worker)}>Nudge</DropdownMenuItem>}
             {onStop && (
-              <DropdownMenuItem destructive onSelect={() => onStop(worker)}>
-                Stop
+              <DropdownMenuItem
+                destructive
+                disabled={stopping}
+                onSelect={async (event) => {
+                  event.preventDefault();
+                  setStopping(true);
+                  try {
+                    await onStop(worker);
+                  } finally {
+                    setStopping(false);
+                    setMenuOpen(false);
+                  }
+                }}
+              >
+                {stopping ? 'Stopping...' : 'Stop'}
               </DropdownMenuItem>
             )}
           </DropdownMenuContent>
@@ -179,7 +193,7 @@ export function MetricsRow({
   onStopWorker,
 }: {
   onNudge?: (worker: WorkerDetail) => void;
-  onStopWorker?: (worker: WorkerDetail) => void;
+  onStopWorker?: (worker: WorkerDetail) => void | Promise<void>;
 } = {}): React.ReactElement {
   const [expanded, setExpanded] = useState(true);
 

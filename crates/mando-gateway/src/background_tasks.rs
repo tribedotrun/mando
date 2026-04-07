@@ -2,8 +2,10 @@
 
 use std::panic::AssertUnwindSafe;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
 use futures_util::FutureExt;
+use tokio::sync::watch;
 use tracing::info;
 
 use crate::AppState;
@@ -25,18 +27,18 @@ pub fn captain_health_degraded() -> bool {
 
 /// Spawn the captain auto-tick loop that periodically runs a captain tick
 /// and cleans up expired CC sessions.
-pub fn spawn_auto_tick(state: &AppState, tick_interval_s: u64) {
+pub fn spawn_auto_tick(state: &AppState, tick_rx: watch::Receiver<Duration>) {
     let tick_config = state.config.clone();
     let tick_workflow = state.captain_workflow.clone();
     let tick_bus = state.bus.clone();
     let tick_store = state.task_store.clone();
     let tick_sessions = state.cc_session_mgr.clone();
     let cancel_outer = state.cancellation_token.clone();
-    let interval = std::time::Duration::from_secs(tick_interval_s);
+    let initial_interval = *tick_rx.borrow();
 
     info!(
         module = "captain",
-        interval_s = tick_interval_s,
+        interval_s = initial_interval.as_secs(),
         "auto-tick enabled"
     );
 
@@ -52,6 +54,8 @@ pub fn spawn_auto_tick(state: &AppState, tick_interval_s: u64) {
         }
         // Outer loop: restart on panic so captain never stops permanently.
         loop {
+            let mut tick_rx = tick_rx.clone();
+            let mut interval = *tick_rx.borrow_and_update();
             if cancel_outer.is_cancelled() {
                 info!(module = "captain", "auto-tick exiting on cancellation");
                 return;
@@ -163,6 +167,18 @@ pub fn spawn_auto_tick(state: &AppState, tick_interval_s: u64) {
                     // Also exit promptly on shutdown cancellation.
                     tokio::select! {
                         _ = tokio::time::sleep(interval) => {},
+                        changed = tick_rx.changed() => {
+                            if changed.is_err() {
+                                info!(module = "captain", "auto-tick exiting: tick config channel closed");
+                                return;
+                            }
+                            interval = *tick_rx.borrow();
+                            info!(
+                                module = "captain",
+                                interval_s = interval.as_secs(),
+                                "auto-tick interval updated"
+                            );
+                        },
                         _ = mando_captain::WORKER_EXIT_SIGNAL.notified() => {
                             tracing::debug!(module = "captain", "worker exit detected — triggering immediate tick");
                         },

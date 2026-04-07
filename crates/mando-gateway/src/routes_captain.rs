@@ -30,6 +30,8 @@ pub(crate) async fn get_health_system(State(state): State<AppState>) -> impl Int
     let config = state.config.load_full();
     let active_paths = state.runtime_paths.clone();
     let configured_paths = mando_config::resolve_captain_runtime_paths(&config);
+    let ui_status = state.ui_runtime.status().await;
+    let telegram_status = state.telegram_runtime.status().await;
     let store = state.task_store.read().await;
     let mut healthy = true;
     let active = store.active_worker_count().await.unwrap_or_else(|e| {
@@ -48,6 +50,9 @@ pub(crate) async fn get_health_system(State(state): State<AppState>) -> impl Int
         .len();
     let captain_degraded = captain_health_degraded();
     if captain_degraded {
+        healthy = false;
+    }
+    if telegram_status.enabled && !telegram_status.running {
         healthy = false;
     }
     let data_dir = mando_config::data_dir();
@@ -70,6 +75,8 @@ pub(crate) async fn get_health_system(State(state): State<AppState>) -> impl Int
         "configuredWorkerHealthPath": configured_paths.worker_health_path.to_string_lossy(),
         "configuredLockfilePath": configured_paths.lockfile_path.to_string_lossy(),
         "restartRequired": active_paths != configured_paths,
+        "telegram": telegram_status,
+        "ui": ui_status,
     });
     let status = if healthy {
         StatusCode::OK

@@ -1216,7 +1216,7 @@ checksum = "c41e0c4fef86961ac6d6f8a82609f55f31b05e4fce149ac5710e439df7619ba4"
 
 [[package]]
 name = "mando-captain"
-version = "0.1.13"
+version = "0.1.14"
 dependencies = [
  "anyhow",
  "futures",
@@ -1243,7 +1243,7 @@ dependencies = [
 
 [[package]]
 name = "mando-cc"
-version = "0.1.13"
+version = "0.1.14"
 dependencies = [
  "anyhow",
  "libc",
@@ -1259,7 +1259,7 @@ dependencies = [
 
 [[package]]
 name = "mando-cli"
-version = "0.1.13"
+version = "0.1.14"
 dependencies = [
  "anyhow",
  "clap",
@@ -1275,7 +1275,7 @@ dependencies = [
 
 [[package]]
 name = "mando-config"
-version = "0.1.13"
+version = "0.1.14"
 dependencies = [
  "anyhow",
  "iana-time-zone",
@@ -1291,7 +1291,7 @@ dependencies = [
 
 [[package]]
 name = "mando-db"
-version = "0.1.13"
+version = "0.1.14"
 dependencies = [
  "anyhow",
  "mando-config",
@@ -1307,7 +1307,7 @@ dependencies = [
 
 [[package]]
 name = "mando-gateway"
-version = "0.1.13"
+version = "0.1.14"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -1323,6 +1323,7 @@ dependencies = [
  "mando-db",
  "mando-scout",
  "mando-shared",
+ "mando-telegram",
  "mando-types",
  "mando-uuid",
  "opentelemetry",
@@ -1347,14 +1348,14 @@ dependencies = [
 
 [[package]]
 name = "mando-readability"
-version = "0.1.13"
+version = "0.1.14"
 dependencies = [
  "html5ever",
 ]
 
 [[package]]
 name = "mando-scout"
-version = "0.1.13"
+version = "0.1.14"
 dependencies = [
  "anyhow",
  "mando-captain",
@@ -1380,7 +1381,7 @@ dependencies = [
 
 [[package]]
 name = "mando-shared"
-version = "0.1.13"
+version = "0.1.14"
 dependencies = [
  "anyhow",
  "mando-config",
@@ -1397,7 +1398,7 @@ dependencies = [
 
 [[package]]
 name = "mando-telegram"
-version = "0.1.13"
+version = "0.1.14"
 dependencies = [
  "anyhow",
  "clap",
@@ -1417,7 +1418,7 @@ dependencies = [
 
 [[package]]
 name = "mando-types"
-version = "0.1.13"
+version = "0.1.14"
 dependencies = [
  "mando-uuid",
  "serde",
@@ -1428,7 +1429,7 @@ dependencies = [
 
 [[package]]
 name = "mando-uuid"
-version = "0.1.13"
+version = "0.1.14"
 dependencies = [
  "getrandom 0.2.17",
 ]

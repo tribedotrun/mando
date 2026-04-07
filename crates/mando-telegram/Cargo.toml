@@ -7,10 +7,6 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 
-[[bin]]
-name = "mando-tg"
-path = "src/main.rs"
-
 [dependencies]
 mando-types.workspace = true
 mando-config.workspace = true
