@@ -4,7 +4,9 @@ use std::collections::{HashMap, HashSet};
 
 use mando_config::settings::Config;
 use mando_config::workflow::CaptainWorkflow;
+use mando_shared::EventBus;
 use mando_types::task::{ItemStatus, Task};
+use mando_types::BusEvent;
 
 use crate::biz::dispatch_logic;
 use crate::runtime::dashboard::truncate_utf8;
@@ -26,10 +28,12 @@ pub(crate) async fn dispatch_new_work(
     alerts: &mut Vec<String>,
     resource_limits: &HashMap<String, usize>,
     pool: &sqlx::SqlitePool,
+    bus: Option<&EventBus>,
 ) -> usize {
     let mut resource_counts = dispatch_logic::count_resources(items);
     let max_clarifier_retries = workflow.agent.max_clarifier_retries as i64;
     const MAX_SPAWN_FAILS: i64 = 3;
+    let mut needs_live_refresh = false;
 
     // Dispatch ready/rework items. Track IDs so the redispatch pass skips them.
     let dispatchable = dispatch_logic::dispatchable_items(items);
@@ -126,6 +130,7 @@ pub(crate) async fn dispatch_new_work(
                                 mando_shared::telegram_format::escape_html(&item.title),
                             );
                             notifier.normal(&msg).await;
+                            needs_live_refresh = true;
                         }
                         Err(e) => {
                             let item = &mut items[idx];
@@ -171,6 +176,9 @@ pub(crate) async fn dispatch_new_work(
             dispatch_logic::DispatchDecision::NotReady => {}
         }
     }
+    if needs_live_refresh {
+        emit_live_refresh(bus);
+    }
     // Dispatch new items to clarifier (parallel).
     super::dispatch_clarify::clarify_new_items(
         items,
@@ -185,6 +193,7 @@ pub(crate) async fn dispatch_new_work(
         resource_limits,
         max_clarifier_retries,
         pool,
+        bus,
     )
     .await;
 
@@ -221,6 +230,14 @@ pub(crate) async fn dispatch_new_work(
 
     active_workers
 }
+
+fn emit_live_refresh(bus: Option<&EventBus>) {
+    if let Some(bus) = bus {
+        bus.send(BusEvent::Tasks, None);
+        bus.send(BusEvent::Sessions, None);
+    }
+}
+
 #[cfg(test)]
 #[path = "dispatch_phase_tests.rs"]
 mod tests;

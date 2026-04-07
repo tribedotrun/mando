@@ -598,12 +598,14 @@ mod tests {
         vars.insert("original_prompt", "");
         vars.insert("worker_preamble", "");
         vars.insert("check_command", "`mando-dev check`");
+        vars.insert("workpad_path", "/tmp/mando/plans/42/workpad.md");
 
         let result = render_prompt("worker_initial", &wf.prompts, &vars);
         assert!(result.is_ok());
         let rendered = result.unwrap();
         assert!(rendered.contains("Fix the login bug"));
         assert!(rendered.contains("mando/fix-login-1"));
+        assert!(rendered.contains("/tmp/mando/plans/42/workpad.md"));
     }
 
     #[test]
@@ -611,12 +613,16 @@ mod tests {
         let wf = CaptainWorkflow::compiled_default();
         let mut vars: FxHashMap<&str, &str> = FxHashMap::default();
         vars.insert("brief_filename", "brief.md");
+        vars.insert("brief_path", "/tmp/mando/.ai/briefs/brief.md");
         vars.insert("id", "42");
         vars.insert("no_pr", "false");
+        vars.insert("workpad_path", "/tmp/mando/plans/42/workpad.md");
 
         let rendered = render_initial_prompt("worker", &wf.initial_prompts, &vars).unwrap();
-        assert!(rendered.contains(".ai/briefs/brief.md"));
+        assert!(rendered.contains("/tmp/mando/.ai/briefs/brief.md"));
         assert!(rendered.contains("42"));
+        assert!(rendered.contains("Before you update the workpad, first read"));
+        assert!(rendered.contains("/tmp/mando/plans/42/workpad.md"));
     }
 
     #[test]

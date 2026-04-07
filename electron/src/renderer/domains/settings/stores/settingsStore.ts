@@ -64,9 +64,13 @@ export interface ScoutConfig {
   userContext?: ScoutUserContext;
 }
 
+export interface UiConfig {
+  openAtLogin?: boolean;
+}
+
 export interface MandoConfig {
   workspace?: string;
-  startAtLogin?: boolean;
+  ui?: UiConfig;
   features?: FeaturesConfig;
   channels?: ChannelsConfig;
   gateway?: GatewayConfig;

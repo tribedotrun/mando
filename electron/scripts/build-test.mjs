@@ -12,7 +12,9 @@
  *   renderer: path.join(__dirname, '../renderer/${MAIN_WINDOW_VITE_NAME}/index.html')
  *
  * Flags:
- *   --dev  Skip renderer build; inject VITE_DEV_SERVER_URL for HMR mode.
+ *   --dev  Inject VITE_DEV_SERVER_URL for HMR mode, but still build a static
+ *          renderer fallback so daemon-led Electron relaunches can recover if
+ *          the Vite server is gone.
  *          Set VITE_DEV_SERVER_URL env var to the running Vite dev server URL.
  */
 import { build } from 'esbuild';
@@ -58,21 +60,21 @@ await build({
 });
 console.log(`  -> ${buildDir}/preload/index.js`);
 
+console.log('Building renderer...');
+const rendererRoot = resolve(root, 'src/renderer');
+const rendererOut = resolve(outDir, 'renderer/main_window');
+const rendererConfig = resolve(root, 'vite.renderer.config.mts');
+execSync(
+  `npx vite build "${rendererRoot}" -c "${rendererConfig}" --outDir "${rendererOut}" --emptyOutDir --minify false`,
+  {
+    cwd: root,
+    stdio: 'inherit',
+  },
+);
+console.log(`  -> ${buildDir}/renderer/main_window/`);
+
 if (isDev) {
-  console.log(`\nDev mode — renderer served from Vite (${viteUrl || 'URL not set'})`);
-} else {
-  console.log('Building renderer...');
-  const rendererRoot = resolve(root, 'src/renderer');
-  const rendererOut = resolve(outDir, 'renderer/main_window');
-  const rendererConfig = resolve(root, 'vite.renderer.config.mts');
-  execSync(
-    `npx vite build "${rendererRoot}" -c "${rendererConfig}" --outDir "${rendererOut}" --emptyOutDir --minify false`,
-    {
-      cwd: root,
-      stdio: 'inherit',
-    },
-  );
-  console.log(`  -> ${buildDir}/renderer/main_window/`);
+  console.log(`\nDev mode — renderer served from Vite (${viteUrl || 'URL not set'}) with static fallback`);
 }
 
 console.log('\nTest build complete.');

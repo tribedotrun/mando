@@ -42,7 +42,7 @@ prompts:
   _workpad: |
     ## Workpad
 
-    Maintain a local workpad at `~/.mando/plans/{{ id }}/workpad.md`.
+    Maintain a local workpad at `{{ workpad_path }}`.
     This is how humans track your progress — update it generously.
 
     **When to update:**
@@ -57,7 +57,7 @@ prompts:
     ## Escape Hatch
 
     If you hit a true blocker (missing auth/permissions/secrets, broken infra):
-    1. Record the blocker in your workpad at `~/.mando/plans/{{ id }}/workpad.md`.
+    1. Record the blocker in your workpad at `{{ workpad_path }}`.
     2. Stop working — do NOT spin or retry indefinitely.
     3. Captain will detect your idle state and escalate to human.
 
@@ -73,6 +73,7 @@ prompts:
     {% else %}
     Captain detects your PR via `gh pr list --head {{ branch }}`.
     Just create the PR when your implementation is complete, tested, and evidence is attached.
+    Before you stop, hand off, or mark the task done, clean up any local processes you started for this task. If you launched a dev server, preview server, watcher, simulator, or app for testing or evidence capture, shut it down and verify it is no longer running. Never leave background services running in the worktree.
     {% endif %}
 
   # ── Worker Prompts ────────────────────────────────────────────────────
@@ -94,8 +95,9 @@ prompts:
     ## Instructions
 
     - Explore the codebase around the files mentioned in Context above.
-    - Update your workpad at `~/.mando/plans/{{ id }}/workpad.md` with an implementation plan.
+    - Update your workpad at `{{ workpad_path }}` with an implementation plan.
     - Implement the changes. Commit incrementally — small, logical commits.
+    - If the repo needs local dependencies or tooling that are missing in the worktree (for example `node_modules` absent or `vite`/`pnpm`/`cargo-nextest` not found), install them in the repo first, record that in the workpad, and then continue. Missing local tooling is not a blocker by itself.
     - Run {{ check_command }} after each change. Fix failures before moving on.
     {%- if not no_pr %}
     - **Evidence requirements** — your PR MUST include runtime proof of your changes:
@@ -105,11 +107,12 @@ prompts:
        - **Non-UI changes**: run the relevant command and capture terminal output under an `### After` heading with a code fence.
        - **Self-verify**: after capturing, read the screenshot or extract frames with ffmpeg. If evidence doesn't show the fix working, fix → recapture → verify.
        - **Keep PR evidence current**: if you make code changes after capturing evidence, recapture and update the PR.
+       - **Cleanup is required**: if you start a local dev server, preview server, watcher, or any other background helper for verification/evidence, stop it before you finish. Do not leave orphaned background jobs behind. Prefer a cleanup trap (for example `trap 'kill $SERVER_PID' EXIT`) when starting temporary servers.
     {%- endif %}
     {% if no_pr %}
-    - This is a **research/audit task**. Do NOT create a PR. When your analysis is complete, write findings to your workpad at `~/.mando/plans/{{ id }}/workpad.md` and stop.
+    - This is a **research/audit task**. Do NOT create a PR. When your analysis is complete, write findings to your workpad at `{{ workpad_path }}` and stop.
     {% else %}
-    - When done, use `/mando-pr` Skill to create the PR. Then update your workpad with the PR link.
+    - When done, use `/mando-pr --fast` to create or update the PR. Captain will monitor follow-up review/CI state after the handoff. Then update your workpad with the PR link.
     - **CI** — after creating a PR, ensure CI passes. Fix all CI failures even if the check is informational (not blocking merge). A clean CI is a quality gate, not optional.
     - Ensure your branch is ahead of origin/main.
     {% endif %}
@@ -149,14 +152,16 @@ prompts:
 
     You own the full lifecycle. Do not stop until every box is checked:
 
-    - [ ] **Workpad** — update workpad at `~/.mando/plans/{{ id }}/workpad.md` with your plan
+    - [ ] **Workpad** — update workpad at `{{ workpad_path }}` with your plan
     - [ ] **Implement** — follow the brief's approach steps
+    - [ ] **Dependencies** — if local repo tooling is missing in the worktree (for example no `node_modules`, `vite` missing, package manager not installed), install what the repo needs before treating it as blocked
     - [ ] **Quality gate** — run {{ check_command }}, verify changes work
     {% if no_pr %}
-    - [ ] **Findings** — write results to workpad at `~/.mando/plans/{{ id }}/workpad.md` and stop. No PR needed.
+    - [ ] **Findings** — write results to workpad at `{{ workpad_path }}` and stop. No PR needed.
     {% else %}
-    - [ ] **PR** — use `/mando-pr` to create the PR. Update workpad with PR link.
+    - [ ] **PR** — use `/mando-pr --fast` to create or update the PR. Captain will monitor follow-up review/CI state after the handoff. Update workpad with PR link.
     - [ ] **Evidence** — runtime proof in the PR (after required, before optional). UI: screenshot for static, recording for interactive; always use an isolated/sandbox environment. Non-UI: CLI output under `### After` heading. NOT diagrams or test-only results. Self-verify: read screenshots or extract frames with ffmpeg. Recapture if code changes after evidence.
+    - [ ] **Cleanup** — stop any background servers, watchers, or helper processes you started for verification/evidence. No orphaned background jobs may remain when you finish.
     - [ ] **CI** — fix all CI failures, even informational ones. A clean CI is a quality gate, not optional.
     - [ ] **Reviews** — address any reviewer comments
     - [ ] **Diagram** — PR has summary diagram (`/mando-pr-summary`)
@@ -443,21 +448,23 @@ prompts:
 
     Based on the handoff note and your state assessment:
     1. Commit any uncommitted work the human left (logical, small commits)
-    2. Fix failing tests
-    3. Address any remaining items from the handoff note
+    2. If the repo needs local dependencies or tooling that are missing in the worktree (for example `node_modules` absent or `vite`/`pnpm`/`cargo-nextest` not found), install them in the repo first and record that in the workpad
+    3. Fix failing tests
+    4. Address any remaining items from the handoff note
     {%- if not no_pr %}
-    4. **Evidence requirements** — your PR MUST include runtime proof:
+    5. **Evidence requirements** — your PR MUST include runtime proof:
        - After evidence is **required**. Before evidence is **optional**.
        - **UI changes**: use the evidence tool for your repo (see Repo-Specific Instructions) — screenshot for static, recording for interactive/multi-step. **Always use an isolated/sandbox environment** for evidence capture.
        - **Non-UI changes**: CLI output under `### After` heading with code fence. NOT diagrams, ASCII art, mockups, or test-only results.
        - **Self-verify**: read the screenshot or extract frames with ffmpeg. Fix → recapture if evidence doesn't show the fix.
        - **Keep current**: recapture and update PR if code changes after evidence.
-    5. Create or update the PR using `/mando-pr`. Update workpad with PR link.
-    6. **CI** — fix all CI failures, even informational ones. A clean CI is a quality gate, not optional.
-    7. Ensure your branch is ahead of origin/main
+       - **Cleanup is required**: if you start a temporary dev server, preview server, watcher, or any other background helper for verification/evidence, stop it before you finish. Do not leave orphaned background jobs behind. Prefer a cleanup trap (for example `trap 'kill $SERVER_PID' EXIT`) when starting temporary servers.
+    6. Create or update the PR using `/mando-pr --fast`. Captain will monitor follow-up review/CI state after the handoff. Update workpad with PR link.
+    7. **CI** — fix all CI failures, even informational ones. A clean CI is a quality gate, not optional.
+    8. Ensure your branch is ahead of origin/main
     {%- endif %}
     {% if no_pr %}
-    4. Write findings to your workpad at `~/.mando/plans/{{ id }}/workpad.md` and stop. No PR needed.
+    5. Write findings to your workpad at `{{ workpad_path }}` and stop. No PR needed.
     {% endif %}
     {% if worker_preamble %}
 
@@ -647,20 +654,21 @@ nudges:
 
 initial_prompts:
   worker: |
-    Read .ai/briefs/{{ brief_filename }} and implement the task described there.
+    Read {{ brief_path }} and implement the task described there.
     Start by exploring the codebase.
 
-    IMPORTANT: Maintain a workpad at ~/.mando/plans/{{ id }}/workpad.md with your
-    implementation plan. Update it after each milestone and when done.
+    IMPORTANT: Before you update the workpad, first read {{ workpad_path }}.
+    Then maintain that workpad with your implementation plan. Update it after each
+    milestone and when done.
     {% if not no_pr %}
 
-    Use /mando-pr to create the PR when done (not raw gh commands).
+    Use /mando-pr --fast to create or update the PR when done (not raw gh commands). Captain will monitor follow-up review/CI state after the handoff.
     {% endif %}
 
   adopted: |
-    Read .ai/briefs/{{ brief_filename }} — a human was working here and handed off
+    Read {{ brief_path }} — a human was working here and handed off
     to you. Start by assessing current state: git status, git log, and the project's
     quality gate.
 
-    Update the workpad at ~/.mando/plans/{{ id }}/workpad.md with your assessment
-    and plan.
+    Before you update the workpad, first read {{ workpad_path }}.
+    Then update it with your assessment and plan.

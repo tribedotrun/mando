@@ -1,11 +1,78 @@
 import React from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { apiGet } from '#renderer/domains/settings/hooks/useApi';
 import { cardStyle, inputStyle, labelStyle, inputCls, labelCls } from '#renderer/styles';
 import { useSettingsStore } from '#renderer/domains/settings/stores/settingsStore';
 import { toast } from 'sonner';
 import type { TelegramConfig } from '#renderer/domains/settings/stores/settingsStore';
 import { Switch } from '#renderer/global/components/Switch';
-import log from '#renderer/logger';
-import { getErrorMessage } from '#renderer/utils';
+
+interface TelegramHealth {
+  enabled: boolean;
+  running: boolean;
+  owner: string;
+  lastError: string | null;
+  degraded: boolean;
+  restartCount: number;
+  mode: string;
+}
+
+function StatusDot({ color }: { color: string }): React.ReactElement {
+  return (
+    <span
+      style={{
+        display: 'inline-block',
+        width: 8,
+        height: 8,
+        borderRadius: '50%',
+        backgroundColor: color,
+        marginRight: 6,
+        flexShrink: 0,
+      }}
+    />
+  );
+}
+
+function RuntimeStatus({ health }: { health: TelegramHealth | undefined }): React.ReactElement {
+  if (!health) {
+    return (
+      <span className="text-xs" style={{ color: 'var(--color-text-3)' }}>
+        Loading...
+      </span>
+    );
+  }
+  if (!health.enabled) {
+    return (
+      <span className="text-xs flex items-center" style={{ color: 'var(--color-text-3)' }}>
+        <StatusDot color="var(--color-text-3)" />
+        Disabled
+      </span>
+    );
+  }
+  if (health.degraded) {
+    return (
+      <span className="text-xs flex items-center" style={{ color: 'var(--color-warning)' }}>
+        <StatusDot color="var(--color-warning)" />
+        Degraded{health.lastError ? ` — ${health.lastError}` : ''}
+      </span>
+    );
+  }
+  if (health.running) {
+    return (
+      <span className="text-xs flex items-center" style={{ color: 'var(--color-success)' }}>
+        <StatusDot color="var(--color-success)" />
+        Running
+        {health.restartCount > 0 ? ` (${health.restartCount} restarts)` : ''}
+      </span>
+    );
+  }
+  return (
+    <span className="text-xs flex items-center" style={{ color: 'var(--color-error)' }}>
+      <StatusDot color="var(--color-error)" />
+      Stopped{health.lastError ? ` — ${health.lastError}` : ''}
+    </span>
+  );
+}
 
 const EMPTY_TELEGRAM: TelegramConfig = {};
 
@@ -17,11 +84,27 @@ export function SettingsTelegram(): React.ReactElement {
   const save = useSettingsStore((s) => s.save);
   const scheduleSave = useSettingsStore((s) => s.scheduleSave);
 
+  const { data: health } = useQuery<TelegramHealth>({
+    queryKey: ['health', 'telegram'],
+    queryFn: () => apiGet<TelegramHealth>('/api/health/telegram'),
+    refetchInterval: 10_000,
+  });
+
   return (
     <div data-testid="settings-telegram" className="space-y-8">
       <h2 className="text-lg font-semibold text-text-1">Telegram</h2>
 
       <div className="space-y-6">
+        {/* Runtime status */}
+        <div style={cardStyle}>
+          <div className="flex items-center justify-between">
+            <span className="text-sm font-medium" style={{ color: 'var(--color-text-2)' }}>
+              Status
+            </span>
+            <RuntimeStatus health={health} />
+          </div>
+        </div>
+
         {/* Enable toggle */}
         <div style={cardStyle}>
           <div className="flex items-center justify-between">
@@ -34,17 +117,10 @@ export function SettingsTelegram(): React.ReactElement {
               onCheckedChange={async () => {
                 const enabling = !telegram.enabled;
                 updateTelegram({ enabled: enabling });
-                await save();
-                if (!enabling) return;
-                try {
-                  await window.mandoAPI.launchd.reinstall();
-                } catch (err) {
-                  log.warn('[SettingsTelegram] launchd reinstall failed', err);
-                  // Revert the toggle so the user sees the toggle reflect the
-                  // actual system state (service not installed).
-                  updateTelegram({ enabled: false });
-                  await save();
-                  toast.error(getErrorMessage(err, 'Failed to install Telegram service'));
+                const result = await save();
+                if (!result.ok) {
+                  updateTelegram({ enabled: !enabling });
+                  toast.error(result.error ?? 'Failed to update Telegram settings');
                 }
               }}
             />

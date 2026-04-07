@@ -23,6 +23,12 @@ pub async fn create_worktree(
     )
     .await?;
 
+    // New worker branches should not track the base branch (for example
+    // origin/main). Leave them without an upstream until the first
+    // `git push -u origin HEAD`, otherwise plain `git push` tries to update
+    // the default branch and fails with a branch-name mismatch.
+    run_git(wt_path, &["branch", "--unset-upstream"]).await?;
+
     // Copy gitignored local-only files that workers need.
     let local_files: &[&str] = &["claude.local.md", "devtools/mando-dev/dev.env.local"];
     for rel in local_files {
@@ -78,6 +84,12 @@ pub async fn remove_worktree(repo_path: &Path, wt_path: &Path) -> Result<()> {
 /// Delete a local branch.
 pub async fn delete_local_branch(repo_path: &Path, branch: &str) -> Result<()> {
     run_git(repo_path, &["branch", "-D", branch]).await?;
+    Ok(())
+}
+
+/// Prune stale git worktree metadata for worktrees whose directories no longer exist.
+pub async fn prune_worktrees(repo_path: &Path) -> Result<()> {
+    run_git(repo_path, &["worktree", "prune"]).await?;
     Ok(())
 }
 

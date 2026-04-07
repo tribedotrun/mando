@@ -12,6 +12,7 @@ use std::collections::HashMap;
 #[serde(rename_all = "camelCase", default)]
 pub struct Config {
     pub workspace: String,
+    pub ui: UiConfig,
     pub features: FeaturesConfig,
     pub channels: ChannelsConfig,
     pub gateway: GatewayConfig,
@@ -24,6 +25,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             workspace: "~/.mando/workspace".into(),
+            ui: UiConfig::default(),
             features: FeaturesConfig::default(),
             channels: ChannelsConfig::default(),
             gateway: GatewayConfig::default(),
@@ -43,6 +45,12 @@ impl Config {
             self.channels.telegram.token = val.clone();
         }
     }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct UiConfig {
+    pub open_at_login: bool,
 }
 
 // ---------------------------------------------------------------------------

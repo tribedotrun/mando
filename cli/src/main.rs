@@ -44,6 +44,8 @@ enum Commands {
     Worktree(worktree::WorktreeArgs),
     /// Daemon lifecycle management
     Daemon(gateway::DaemonArgs),
+    /// Launch the Electron UI
+    Ui(UiArgs),
     /// Show configured channels
     Channels(ChannelsArgs),
     /// Squash-merge a PR (alias for captain merge)
@@ -113,6 +115,9 @@ struct TasksArgs {
 #[derive(Args)]
 struct HealthArgs;
 
+#[derive(Args)]
+struct UiArgs;
+
 #[tokio::main]
 async fn main() {
     let cli = Cli::parse();
@@ -133,6 +138,7 @@ async fn main() {
         Commands::Sessions(args) => sessions::handle(args).await,
         Commands::Worktree(args) => worktree::handle(args).await,
         Commands::Daemon(args) => gateway::handle(args).await,
+        Commands::Ui(_) => handle_ui_launch().await,
         Commands::Channels(_) => handle_channels().await,
         Commands::Merge(args) => handle_merge(args).await,
         Commands::Notify(args) => handle_notify(args).await,
@@ -325,6 +331,13 @@ async fn handle_health() -> anyhow::Result<()> {
     println!("  Config:         {config_path}");
     println!("  Data dir:       {data_dir}");
 
+    Ok(())
+}
+
+async fn handle_ui_launch() -> anyhow::Result<()> {
+    let client = DaemonClient::discover()?;
+    client.post("/api/ui/launch", &json!({})).await?;
+    println!("UI launch requested");
     Ok(())
 }
 

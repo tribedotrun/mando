@@ -29,11 +29,6 @@ function daemonLabel(): string {
   return isDev() ? 'build.mando.daemon.dev' : 'build.mando.daemon';
 }
 
-function tgLabel(): string {
-  if (isPreview()) return 'build.mando.preview.telegram';
-  return isDev() ? 'build.mando.telegram.dev' : 'build.mando.telegram';
-}
-
 /** Extract message string from an unknown error. */
 function errorMsg(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
@@ -58,10 +53,6 @@ function launchAgentsDir(): string {
 
 function daemonPlistPath(): string {
   return path.join(launchAgentsDir(), `${daemonLabel()}.plist`);
-}
-
-function tgPlistPath(): string {
-  return path.join(launchAgentsDir(), `${tgLabel()}.plist`);
 }
 
 function cliInstallPath(): string {
@@ -101,22 +92,6 @@ function daemonInstallPath(): string {
 function daemonSourcePath(): string {
   if (app.isPackaged) return path.join(process.resourcesPath!, 'mando-gw');
   return path.join(cargoTargetDir(), 'mando-gw');
-}
-
-/** Staged TG bot binary path in Application Support. */
-function tgInstallPath(): string {
-  const name = isPreview()
-    ? 'mando-telegram-preview'
-    : isDev()
-      ? 'mando-telegram-dev'
-      : 'mando-telegram';
-  return path.join(homeDir(), 'Library', 'Application Support', 'Mando', 'bin', name);
-}
-
-/** Source TG bot binary: app bundle or cargo build output. */
-function tgSourcePath(): string {
-  if (app.isPackaged) return path.join(process.resourcesPath!, 'mando-tg');
-  return path.join(cargoTargetDir(), 'mando-tg');
 }
 
 function daemonLogDir(): string {
@@ -165,43 +140,6 @@ function generateDaemonPlist(dataDir: string): string {
     <string>${path.join(logDir, 'daemon.log')}</string>
     <key>StandardErrorPath</key>
     <string>${path.join(logDir, 'daemon.log')}</string>
-    <key>EnvironmentVariables</key>
-    <dict>
-        <key>HOME</key>
-        <string>${home}</string>
-        <key>MANDO_DATA_DIR</key>
-        <string>${dataDir}</string>
-        <key>PATH</key>
-        <string>${currentPath()}</string>
-    </dict>
-</dict>
-</plist>`;
-}
-
-function generateTgPlist(dataDir: string): string {
-  const home = homeDir();
-  const binary = tgInstallPath();
-  const logDir = daemonLogDir();
-  return `<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key>
-    <string>${tgLabel()}</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>${binary}</string>
-    </array>
-    <key>WorkingDirectory</key>
-    <string>${dataDir}</string>
-    <key>KeepAlive</key>
-    <true/>
-    <key>ThrottleInterval</key>
-    <integer>3</integer>
-    <key>StandardOutPath</key>
-    <string>${path.join(logDir, 'tg-bot.log')}</string>
-    <key>StandardErrorPath</key>
-    <string>${path.join(logDir, 'tg-bot.log')}</string>
     <key>EnvironmentVariables</key>
     <dict>
         <key>HOME</key>
@@ -286,11 +224,6 @@ export function stageDaemonBinary(): boolean {
   return stageBinary(daemonSourcePath(), daemonInstallPath(), 'daemon');
 }
 
-/** Stage the TG bot binary from app bundle to Application Support. */
-function stageTgBinary(): boolean {
-  return stageBinary(tgSourcePath(), tgInstallPath(), 'tg-bot');
-}
-
 /** Ensure shared directories exist for launchd services. */
 function ensureLaunchdDirs(dataDir: string): void {
   fs.mkdirSync(daemonLogDir(), { recursive: true });
@@ -325,41 +258,53 @@ function migrateOldLaunchdLabels(): void {
   }
 }
 
+function cleanupTelegramArtifacts(): void {
+  const label = isPreview()
+    ? 'build.mando.preview.telegram'
+    : isDev()
+      ? 'build.mando.telegram.dev'
+      : 'build.mando.telegram';
+  if (isServiceLoaded(label)) {
+    launchctlBootout(label);
+    waitForServiceUnloaded(label);
+    log.info(`[launchd] removed deprecated Telegram service: ${label}`);
+  }
+
+  const plistPath = path.join(launchAgentsDir(), `${label}.plist`);
+  const tgInstallName = isPreview()
+    ? 'mando-telegram-preview'
+    : isDev()
+      ? 'mando-telegram-dev'
+      : 'mando-telegram';
+  const tgBinaryPath = path.join(
+    homeDir(),
+    'Library',
+    'Application Support',
+    'Mando',
+    'bin',
+    tgInstallName,
+  );
+
+  for (const file of [plistPath, tgBinaryPath]) {
+    try {
+      fs.unlinkSync(file);
+    } catch (e: unknown) {
+      const code = (e as NodeJS.ErrnoException)?.code;
+      if (code !== 'ENOENT') {
+        log.warn(`[launchd] failed to remove deprecated Telegram artifact ${file}: ${errorMsg(e)}`);
+      }
+    }
+  }
+}
+
 /** Install and load the daemon LaunchAgent plist. */
 export function installDaemonPlist(dataDir: string): void {
   migrateOldLaunchdLabels();
+  cleanupTelegramArtifacts();
   ensureLaunchdDirs(dataDir);
   const plistFile = daemonPlistPath();
   fs.writeFileSync(plistFile, generateDaemonPlist(dataDir), 'utf-8');
   launchctlLoad(plistFile, daemonLabel());
-}
-
-/** Install and load the TG bot LaunchAgent plist. Skips if Telegram is not configured. */
-function installTgPlist(dataDir: string): void {
-  // Only install the TG bot service if Telegram is actually configured.
-  // Without a token, mando-tg will crash-loop under KeepAlive.
-  const configPath = path.join(dataDir, 'config.json');
-  try {
-    const raw = fs.readFileSync(configPath, 'utf-8');
-    const cfg = JSON.parse(raw) as {
-      channels?: { telegram?: { enabled?: boolean } };
-      env?: Record<string, string>;
-    };
-    const enabled = cfg.channels?.telegram?.enabled ?? false;
-    const hasToken = !!cfg.env?.TELEGRAM_MANDO_BOT_TOKEN;
-    if (!enabled || !hasToken) {
-      log.info('[launchd] Skipping TG plist — Telegram not configured');
-      return;
-    }
-  } catch (e: unknown) {
-    log.info(`[launchd] Skipping TG plist — cannot read config: ${errorMsg(e)}`);
-    return;
-  }
-
-  ensureLaunchdDirs(dataDir);
-  const plistFile = tgPlistPath();
-  fs.writeFileSync(plistFile, generateTgPlist(dataDir), 'utf-8');
-  launchctlLoad(plistFile, tgLabel());
 }
 
 /** Update daemon binary: bootout, replace binary, bootstrap.
@@ -372,16 +317,12 @@ export function updateDaemonBinary(dataDir: string, stagedAppPath?: string): boo
 
   // Bootout running services before replacing binaries.
   // Wait for each to fully unload — bootout is async at the OS level.
-  const tl = tgLabel();
   const dl = daemonLabel();
-  if (isServiceLoaded(tl)) {
-    launchctlBootout(tl);
-    waitForServiceUnloaded(tl);
-  }
   if (isServiceLoaded(dl)) {
     launchctlBootout(dl);
     waitForServiceUnloaded(dl);
   }
+  cleanupTelegramArtifacts();
 
   // Rename current binary to .prev for rollback.
   if (fs.existsSync(dest)) {
@@ -408,15 +349,8 @@ export function updateDaemonBinary(dataDir: string, stagedAppPath?: string): boo
     return false;
   }
 
-  // Stage TG binary (non-fatal if missing — user may not use Telegram).
-  const tgSrc = stagedAppPath
-    ? path.join(stagedAppPath, 'Contents', 'Resources', 'mando-tg')
-    : tgSourcePath();
-  stageBinary(tgSrc, tgInstallPath(), 'tg-bot');
-
-  // Bootstrap updated daemon + TG bot.
+  // Bootstrap updated daemon.
   installDaemonPlist(dataDir);
-  installTgPlist(dataDir);
   return true;
 }
 
@@ -426,16 +360,12 @@ export function rollbackDaemonBinary(dataDir: string): boolean {
   const prev = `${dest}.prev`;
   if (!fs.existsSync(prev)) return false;
 
-  const tl = tgLabel();
   const dl = daemonLabel();
-  if (isServiceLoaded(tl)) {
-    launchctlBootout(tl);
-    waitForServiceUnloaded(tl);
-  }
   if (isServiceLoaded(dl)) {
     launchctlBootout(dl);
     waitForServiceUnloaded(dl);
   }
+  cleanupTelegramArtifacts();
   try {
     fs.renameSync(prev, dest);
   } catch (err) {
@@ -443,18 +373,7 @@ export function rollbackDaemonBinary(dataDir: string): boolean {
     return false;
   }
   installDaemonPlist(dataDir);
-  installTgPlist(dataDir);
   return true;
-}
-
-/** Bootout dev/preview-mode launchd services on quit. No-op in prod
- *  (prod daemon persists across Electron restarts via KeepAlive). */
-export function bootoutDevServices(): void {
-  if (!isDev() && !isPreview()) return;
-  const dl = daemonLabel();
-  const tl = tgLabel();
-  if (isServiceLoaded(dl)) launchctlBootout(dl);
-  if (isServiceLoaded(tl)) launchctlBootout(tl);
 }
 
 // ---------------------------------------------------------------------------
@@ -482,8 +401,4 @@ export function installCliAndPlists(dataDir: string, opts?: { skipDaemonPlist?: 
     stageDaemonBinary();
     installDaemonPlist(dataDir);
   }
-
-  // 4. Stage TG bot binary + install TG plist
-  stageTgBinary();
-  installTgPlist(dataDir);
 }

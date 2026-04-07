@@ -1,7 +1,7 @@
-//! mando-gw — standalone Mando daemon.
+//! mando-gw — unified Mando daemon.
 //!
-//! Runs axum HTTP server and captain auto-tick as a single process
-//! managed by macOS launchd. Telegram bots run separately via `mando-tg`.
+//! Runs axum HTTP server, captain auto-tick, and embedded Telegram bot
+//! as a single process managed by macOS launchd.
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -28,6 +28,18 @@ struct Args {
     /// Dev mode — writes daemon-dev.port instead of daemon.port
     #[arg(long)]
     dev: bool,
+
+    /// No Electron UI at all (no window, no CDP)
+    #[arg(long)]
+    no_ui: bool,
+
+    /// Spawn Electron but invisible (no window, no Dock icon). CDP works.
+    #[arg(long)]
+    headless: bool,
+
+    /// Skip embedded Telegram bot
+    #[arg(long)]
+    no_telegram: bool,
 }
 
 #[tokio::main]
@@ -58,7 +70,7 @@ async fn main() {
         std::process::exit(1);
     }
 
-    mando_gateway::auth::ensure_auth_token();
+    let auth_token = mando_gateway::auth::ensure_auth_token();
 
     // Sync bundled prod skills to ~/.claude/skills/mando-*.
     mando_config::skills::sync_bundled_skills();
@@ -78,6 +90,15 @@ async fn main() {
     let task_store_arc = Arc::new(RwLock::new(task_store));
 
     let config_arc = Arc::new(ArcSwap::from_pointee(config.clone()));
+    let config_write_mu = Arc::new(tokio::sync::Mutex::new(()));
+    let (tick_tx, _) = tokio::sync::watch::channel(
+        mando_gateway::config_manager::initial_tick_duration(&config),
+    );
+    let config_manager = mando_gateway::config_manager::ConfigManager::new(
+        config_arc.clone(),
+        config_write_mu.clone(),
+        tick_tx,
+    );
 
     // Refuse to start if reconciliation fails — booting with an unreconciled
     // WAL can silently duplicate or lose external work. Set MANDO_UNSAFE_START=1
@@ -139,39 +160,127 @@ async fn main() {
         );
     }
 
+    let task_tracker = TaskTracker::new();
+    let cancellation_token = CancellationToken::new();
+    let ui_runtime = Arc::new(mando_gateway::ui_runtime::UiRuntime::new(
+        mando_config::state_dir().join("ui-state.json"),
+    ));
+    let telegram_runtime = Arc::new(mando_gateway::telegram_runtime::TelegramRuntime::new(
+        port, auth_token,
+    ));
+
     let state = mando_gateway::AppState {
         config: config_arc.clone(),
+        config_manager,
         runtime_paths,
         captain_workflow: Arc::new(ArcSwap::from_pointee(captain_wf)),
         scout_workflow: Arc::new(ArcSwap::from_pointee(scout_wf)),
-        config_write_mu: Arc::new(tokio::sync::Mutex::new(())),
+        config_write_mu,
         bus: bus.clone(),
         cc_session_mgr: Arc::new(cc_session_mgr),
         task_store: task_store_arc,
         db,
         qa_session_mgr: mando_scout::runtime::qa::default_session_manager(),
         start_time,
+        listen_port: port,
         dev_mode: args.dev,
-        task_tracker: TaskTracker::new(),
-        cancellation_token: CancellationToken::new(),
+        task_tracker,
+        cancellation_token,
+        telegram_runtime,
+        ui_runtime,
     };
 
-    // Spawn captain auto-tick loop (always runs; respects auto_schedule dynamically).
-    let raw_tick = config.captain.tick_interval_s;
-    let tick_interval_s = raw_tick.max(10);
-    if raw_tick != tick_interval_s {
-        tracing::warn!(
-            module = "startup",
-            configured = raw_tick,
-            clamped = tick_interval_s,
-            "tick_interval_s below minimum 10s, clamped"
-        );
+    if !args.no_ui {
+        state
+            .ui_runtime
+            .start_monitor(&state.task_tracker, state.cancellation_token.clone());
     }
-    mando_gateway::background_tasks::spawn_auto_tick(&state, tick_interval_s);
+
+    // Spawn captain auto-tick loop (always runs; respects auto_schedule dynamically).
+    mando_gateway::background_tasks::spawn_auto_tick(&state, state.config_manager.subscribe_tick());
+
+    if !args.no_telegram {
+        if let Err(err) = state.telegram_runtime.configure(&config).await {
+            warn!(module = "telegram", error = %err, "failed to start embedded telegram runtime");
+        }
+    } else {
+        info!("telegram disabled via --no-telegram");
+    }
 
     mando_gateway::instance::write_port_file(port, args.dev);
 
+    // Auto-spawn Electron if env vars are set and UI is not disabled.
+    if !args.no_ui {
+        if let (Ok(electron_bin), Ok(entrypoint)) = (
+            std::env::var("MANDO_ELECTRON_BIN"),
+            std::env::var("MANDO_ELECTRON_ENTRYPOINT"),
+        ) {
+            let ui_rt = state.ui_runtime.clone();
+            let headless = args.headless;
+            state.task_tracker.spawn(async move {
+                // Wait 3s for an existing Electron to register (e.g. first-run,
+                // update relaunch, login-item launch).
+                tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                let status = ui_rt.status().await;
+                if status.running {
+                    info!("Electron already registered, skipping auto-spawn");
+                    return;
+                }
+
+                let mut env_map = std::collections::HashMap::new();
+                env_map.insert("MANDO_EXTERNAL_GATEWAY".to_string(), "1".to_string());
+                env_map.insert("MANDO_GATEWAY_PORT".to_string(), port.to_string());
+                if let Ok(v) = std::env::var("MANDO_AUTH_TOKEN") {
+                    env_map.insert("MANDO_AUTH_TOKEN".to_string(), v);
+                } else if let Ok(v) =
+                    std::fs::read_to_string(mando_config::data_dir().join("auth-token"))
+                {
+                    env_map.insert("MANDO_AUTH_TOKEN".to_string(), v.trim().to_string());
+                }
+                for key in &[
+                    "MANDO_APP_MODE",
+                    "MANDO_DATA_DIR",
+                    "MANDO_LOG_DIR",
+                    "ELECTRON_DISABLE_SECURITY_WARNINGS",
+                ] {
+                    if let Ok(v) = std::env::var(key) {
+                        env_map.insert(key.to_string(), v);
+                    }
+                }
+                if headless {
+                    env_map.insert("MANDO_HEADLESS".to_string(), "1".to_string());
+                }
+
+                let mut args = vec![entrypoint];
+                if let Ok(inspect) = std::env::var("MANDO_ELECTRON_INSPECT_PORT") {
+                    args.push(format!("--inspect={inspect}"));
+                }
+                if let Ok(cdp) = std::env::var("MANDO_ELECTRON_CDP_PORT") {
+                    args.push(format!("--remote-debugging-port={cdp}"));
+                }
+
+                let spec = mando_gateway::ui_runtime::UiLaunchSpec {
+                    exec_path: electron_bin,
+                    args,
+                    cwd: None,
+                    env: env_map,
+                };
+
+                // Register the spec and launch.
+                if let Err(e) = ui_rt.set_launch_spec(spec).await {
+                    warn!(module = "ui", error = %e, "failed to set launch spec for auto-spawn");
+                    return;
+                }
+                if let Err(e) = ui_rt.launch().await {
+                    warn!(module = "ui", error = %e, "failed to auto-spawn Electron");
+                }
+            });
+        }
+    }
+
     let qa_mgr = state.qa_session_mgr.clone();
+    let tg_rt = state.telegram_runtime.clone();
+    let ui_rt = state.ui_runtime.clone();
     let tracker = state.task_tracker.clone();
     let cancel = state.cancellation_token.clone();
     let app = mando_gateway::server::build_router(state);
@@ -183,11 +292,22 @@ async fn main() {
 
     info!("mando-gw listening on {addr}");
 
-    // Fire the cancellation token as soon as a shutdown signal arrives so
-    // cooperative loops (auto-tick, SSE readers) can exit promptly.
+    // Shutdown order (per plan):
+    // 1. Receive signal, cancel cooperative loops
+    // 2. Shutdown TG (needs service layer alive for in-flight updates)
+    // 3. Shutdown UI (SIGTERM Electron, wait up to 5s)
+    // 4. Close HTTP server (drain in-flight requests)
+    // 5. Drain tracked spawns
+    // 6. Exit
+    //
+    // TG and UI shutdown happen INSIDE the graceful_shutdown closure so they
+    // run before axum tries to drain SSE connections (Electron holds an SSE
+    // connection that would block drain indefinitely if we killed it after).
     let shutdown = async move {
         shutdown_signal().await;
         cancel.cancel();
+        tg_rt.shutdown().await;
+        ui_rt.shutdown().await;
     };
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown)

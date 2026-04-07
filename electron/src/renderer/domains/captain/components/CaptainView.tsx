@@ -144,6 +144,7 @@ export function CaptainView({
           onRework={actions.setReworkItem}
           onAsk={setAskItem}
           onAccept={actions.handleAccept}
+          acceptPendingId={actions.acceptPendingId}
           onHandoff={actions.handleHandoff}
           onCancel={actions.handleCancel}
           onRetry={actions.handleRetry}

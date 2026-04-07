@@ -5,6 +5,7 @@
 
 pub mod auth;
 pub mod background_tasks;
+pub mod config_manager;
 pub mod instance;
 pub mod middleware;
 pub(crate) mod response;
@@ -25,12 +26,15 @@ mod routes_task_actions;
 mod routes_task_ask;
 mod routes_task_detail;
 mod routes_tasks;
+mod routes_ui;
 mod routes_worktrees;
 mod scout_notify;
 pub mod server;
 mod sse;
 mod static_files;
+pub mod telegram_runtime;
 pub mod telemetry;
+pub mod ui_runtime;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -43,6 +47,7 @@ use tokio_util::task::TaskTracker;
 #[derive(Clone)]
 pub struct AppState {
     pub config: Arc<ArcSwap<mando_config::Config>>,
+    pub config_manager: config_manager::ConfigManager,
     pub runtime_paths: mando_config::CaptainRuntimePaths,
     pub captain_workflow: Arc<ArcSwap<mando_config::CaptainWorkflow>>,
     pub scout_workflow: Arc<ArcSwap<mando_config::ScoutWorkflow>>,
@@ -61,6 +66,7 @@ pub struct AppState {
     pub db: Arc<mando_db::Db>,
     pub qa_session_mgr: Arc<mando_scout::runtime::qa::QaSessionManager>,
     pub start_time: Instant,
+    pub listen_port: u16,
     /// When true, all CC invocations use sonnet instead of the configured model.
     pub dev_mode: bool,
     /// Tracks all fire-and-forget spawns so the process can await their
@@ -70,6 +76,8 @@ pub struct AppState {
     /// Cancellation signal for cooperative shutdown. Long-running loops
     /// (auto-tick, SSE streams) should check this via `tokio::select!`.
     pub cancellation_token: CancellationToken,
+    pub telegram_runtime: Arc<telegram_runtime::TelegramRuntime>,
+    pub ui_runtime: Arc<ui_runtime::UiRuntime>,
 }
 
 /// Force all workflow models to sonnet (dev mode cost savings).

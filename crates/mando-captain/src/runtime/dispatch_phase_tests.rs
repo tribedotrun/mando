@@ -31,6 +31,7 @@ async fn dispatch_dry_run() {
         &mut alerts,
         &HashMap::new(),
         &pool,
+        None,
     )
     .await;
 
@@ -64,6 +65,7 @@ async fn dispatch_full_slots() {
         &mut alerts,
         &HashMap::new(),
         &pool,
+        None,
     )
     .await;
 
@@ -106,6 +108,7 @@ async fn dispatch_dry_run_reserves_resource_between_items() {
         &mut alerts,
         &resource_limits,
         &pool,
+        None,
     )
     .await;
 

@@ -1,7 +1,5 @@
 //! /api/projects/* route handlers — project CRUD.
 
-use std::sync::Arc;
-
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::Json;
@@ -10,6 +8,18 @@ use serde_json::{json, Value};
 
 use crate::response::error_response;
 use crate::AppState;
+
+/// Conflict error raised when a project name or path already exists.
+#[derive(Debug)]
+struct ProjectConflict(String);
+
+impl std::fmt::Display for ProjectConflict {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for ProjectConflict {}
 
 /// Resolve a project from config by name or alias (case-insensitive).
 fn resolve_project_key(
@@ -30,32 +40,16 @@ fn resolve_project_key(
     ))
 }
 
-/// Save config to disk and hot-reload into daemon state.
-async fn save_and_reload(
-    state: &AppState,
-    config: &mando_config::Config,
-) -> Result<(), (StatusCode, Json<Value>)> {
-    // save_config is synchronous — move to the blocking pool so we don't
-    // stall the async executor while holding config_write_mu.
-    let to_save = config.clone();
-    match tokio::task::spawn_blocking(move || mando_config::save_config(&to_save, None)).await {
-        Ok(Ok(())) => {}
-        Ok(Err(e)) => {
-            return Err(error_response(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                &format!("save failed: {e}"),
-            ));
-        }
-        Err(e) => {
-            return Err(error_response(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                &format!("save task panicked: {e}"),
-            ));
-        }
+/// Map an `anyhow::Error` from `config_manager.update()` into an HTTP error.
+/// [`ProjectConflict`] errors become 409; everything else is 500.
+fn update_err(e: anyhow::Error) -> (StatusCode, Json<Value>) {
+    if e.downcast_ref::<ProjectConflict>().is_some() {
+        return error_response(StatusCode::CONFLICT, &format!("{e}"));
     }
-
-    state.config.store(Arc::new(config.clone()));
-    Ok(())
+    error_response(
+        StatusCode::INTERNAL_SERVER_ERROR,
+        &format!("save failed: {e}"),
+    )
 }
 
 /// GET /api/projects — list all projects.
@@ -93,8 +87,6 @@ pub(crate) async fn post_projects(
     State(state): State<AppState>,
     Json(body): Json<AddProjectBody>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    let _write_guard = state.config_write_mu.lock().await;
-    let mut config = (*state.config.load_full()).clone();
     let abs_path = mando_config::expand_tilde(&body.path);
 
     // Validate path exists and is a directory.
@@ -106,8 +98,6 @@ pub(crate) async fn post_projects(
     }
 
     let abs_path_str = abs_path.to_string_lossy().into_owned();
-
-    // Canonical key = absolute path.
     let key = abs_path_str.clone();
 
     // Default name to folder basename if not provided.
@@ -119,23 +109,6 @@ pub(crate) async fn post_projects(
             .unwrap_or("project")
             .to_string(),
     };
-
-    // Check duplicate key or name.
-    if config.captain.projects.contains_key(&key) {
-        return Err(error_response(
-            StatusCode::CONFLICT,
-            &format!("project already exists at path: {key}"),
-        ));
-    }
-    let name_lower = name.to_lowercase();
-    for v in config.captain.projects.values() {
-        if v.name.to_lowercase() == name_lower {
-            return Err(error_response(
-                StatusCode::CONFLICT,
-                &format!("project name already exists: {}", v.name),
-            ));
-        }
-    }
 
     // Reject if directory is not a git repo.
     let is_git = tokio::fs::try_exists(abs_path.join(".git"))
@@ -169,10 +142,8 @@ pub(crate) async fn post_projects(
         ));
     }
 
-    // Auto-generate scout summary from project metadata.
+    // Auto-generate scout summary and logo (async I/O, before lock).
     let scout_summary = detect_project_summary(&abs_path).await;
-
-    // Auto-detect project logo.
     let logo = detect_project_logo(&abs_path, &name);
 
     let pc = mando_config::settings::ProjectConfig {
@@ -185,8 +156,30 @@ pub(crate) async fn post_projects(
         ..Default::default()
     };
 
-    config.captain.projects.insert(key, pc);
-    save_and_reload(&state, &config).await?;
+    // Atomically check duplicates and insert under write lock.
+    state
+        .config_manager
+        .update(|cfg| {
+            if cfg.captain.projects.contains_key(&key) {
+                return Err(
+                    ProjectConflict(format!("project already exists at path: {key}")).into(),
+                );
+            }
+            let name_lower = name.to_lowercase();
+            for v in cfg.captain.projects.values() {
+                if v.name.to_lowercase() == name_lower {
+                    return Err(ProjectConflict(format!(
+                        "project name already exists: {}",
+                        v.name
+                    ))
+                    .into());
+                }
+            }
+            cfg.captain.projects.insert(key.clone(), pc.clone());
+            Ok(())
+        })
+        .await
+        .map_err(update_err)?;
 
     Ok(Json(json!({
         "ok": true,
@@ -215,56 +208,70 @@ pub(crate) async fn patch_project(
     Path(name): Path<String>,
     Json(body): Json<EditProjectBody>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    let _write_guard = state.config_write_mu.lock().await;
-    let mut config = (*state.config.load_full()).clone();
-    let key = resolve_project_key(&config, &name)?;
+    // Early 404 check (racy, but avoids holding the lock for the common case).
+    let config = state.config.load_full();
+    let _ = resolve_project_key(&config, &name)?;
 
-    // Check rename uniqueness.
-    if let Some(ref new_name) = body.rename {
-        let new_lower = new_name.to_lowercase();
-        for (k, v) in &config.captain.projects {
-            if *k != key && v.name.to_lowercase() == new_lower {
-                return Err(error_response(
-                    StatusCode::CONFLICT,
-                    &format!("project name already exists: {}", v.name),
-                ));
+    let logo = std::sync::Arc::new(std::sync::Mutex::new(None::<Option<String>>));
+    let logo_out = logo.clone();
+
+    state
+        .config_manager
+        .update(|cfg| {
+            let key = resolve_project_key(cfg, &name)
+                .map_err(|(_, j)| anyhow::anyhow!("{}", j.0["error"]))?;
+
+            if let Some(ref new_name) = body.rename {
+                let new_lower = new_name.to_lowercase();
+                for (k, v) in &cfg.captain.projects {
+                    if *k != key && v.name.to_lowercase() == new_lower {
+                        return Err(ProjectConflict(format!(
+                            "project name already exists: {}",
+                            v.name
+                        ))
+                        .into());
+                    }
+                }
             }
-        }
-    }
 
-    let pc = config
-        .captain
-        .projects
-        .get_mut(&key)
-        .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "project vanished"))?;
+            let pc = cfg
+                .captain
+                .projects
+                .get_mut(&key)
+                .ok_or_else(|| anyhow::anyhow!("project vanished"))?;
 
-    if let Some(new_name) = body.rename {
-        pc.name = new_name;
-    }
-    if body.clear_github_repo == Some(true) {
-        pc.github_repo = None;
-    } else if let Some(repo) = body.github_repo {
-        pc.github_repo = Some(repo);
-    }
-    if let Some(aliases) = body.aliases {
-        pc.aliases = aliases;
-    }
-    if let Some(preamble) = body.preamble {
-        pc.worker_preamble = preamble;
-    }
-    if let Some(check_cmd) = body.check_command {
-        pc.check_command = check_cmd;
-    }
-    if let Some(summary) = body.scout_summary {
-        pc.scout_summary = summary;
-    }
-    if body.redetect_logo == Some(true) {
-        let project_path = std::path::Path::new(&pc.path);
-        pc.logo = detect_project_logo(project_path, &pc.name);
-    }
+            if let Some(ref new_name) = body.rename {
+                pc.name = new_name.clone();
+            }
+            if body.clear_github_repo == Some(true) {
+                pc.github_repo = None;
+            } else if let Some(ref repo) = body.github_repo {
+                pc.github_repo = Some(repo.clone());
+            }
+            if let Some(ref aliases) = body.aliases {
+                pc.aliases = aliases.clone();
+            }
+            if let Some(ref preamble) = body.preamble {
+                pc.worker_preamble = preamble.clone();
+            }
+            if let Some(ref check_cmd) = body.check_command {
+                pc.check_command = check_cmd.clone();
+            }
+            if let Some(ref summary) = body.scout_summary {
+                pc.scout_summary = summary.clone();
+            }
+            if body.redetect_logo == Some(true) {
+                let project_path = std::path::Path::new(&pc.path);
+                pc.logo = detect_project_logo(project_path, &pc.name);
+            }
 
-    let logo = pc.logo.clone();
-    save_and_reload(&state, &config).await?;
+            *logo_out.lock().unwrap() = Some(pc.logo.clone());
+            Ok(())
+        })
+        .await
+        .map_err(update_err)?;
+
+    let logo = logo.lock().unwrap().clone().flatten();
     Ok(Json(json!({ "ok": true, "logo": logo })))
 }
 
@@ -273,8 +280,7 @@ pub(crate) async fn delete_project(
     State(state): State<AppState>,
     Path(name): Path<String>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    let _write_guard = state.config_write_mu.lock().await;
-    let mut config = (*state.config.load_full()).clone();
+    let config = state.config.load_full();
     let key = resolve_project_key(&config, &name)?;
 
     // Collect all identifiers tasks might use to reference this project.
@@ -287,7 +293,7 @@ pub(crate) async fn delete_project(
         }
     }
 
-    // Cascade-delete tasks belonging to this project.
+    // Cascade-delete tasks belonging to this project (async I/O, before lock).
     let store = state.task_store.read().await;
     let all_tasks = store.load_all_with_archived().await.map_err(|e| {
         error_response(
@@ -322,8 +328,15 @@ pub(crate) async fn delete_project(
         );
     }
 
-    config.captain.projects.remove(&key);
-    save_and_reload(&state, &config).await?;
+    // Atomically remove the project under write lock.
+    state
+        .config_manager
+        .update(|cfg| {
+            cfg.captain.projects.remove(&key);
+            Ok(())
+        })
+        .await
+        .map_err(update_err)?;
 
     Ok(Json(json!({ "ok": true, "deleted_tasks": deleted_tasks })))
 }

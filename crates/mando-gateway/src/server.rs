@@ -1,13 +1,10 @@
-//! Axum app setup — router, CORS middleware, and server bind.
-
-use std::future::Future;
-use std::sync::Arc;
-
 use arc_swap::ArcSwap;
 use axum::http::{header, Method};
 use axum::routing::{delete, get, patch, post, put};
 use axum::{middleware, Router};
-use tokio::sync::{Mutex, RwLock};
+use std::future::Future;
+use std::sync::Arc;
+use tokio::sync::{watch, Mutex, RwLock};
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 use tower_http::cors::{AllowOrigin, CorsLayer};
@@ -32,12 +29,14 @@ use crate::routes_task_actions;
 use crate::routes_task_ask;
 use crate::routes_task_detail;
 use crate::routes_tasks;
+use crate::routes_ui;
 use crate::routes_worktrees;
 use crate::sse;
 use crate::static_files;
+use crate::telegram_runtime;
+use crate::ui_runtime;
 use crate::AppState;
 
-/// Build the full axum router with all routes and middleware.
 pub fn build_router(state: AppState) -> Router {
     let cors = CorsLayer::new()
         .allow_origin(AllowOrigin::predicate(|origin, _| {
@@ -82,7 +81,10 @@ fn protected_routes() -> Router<AppState> {
         .merge(worktree_routes())
         .merge(project_routes())
         .merge(ai_routes())
+        .merge(ui_routes())
         .route("/api/health/system", get(routes_captain::get_health_system))
+        .route("/api/health/ui", get(routes_ui::get_ui_health))
+        .route("/api/health/telegram", get(routes_ui::get_telegram_health))
         .route("/api/images/{filename}", get(static_files::get_image))
         .route(
             "/api/client-logs",
@@ -272,6 +274,14 @@ fn config_routes() -> Router<AppState> {
 fn channel_routes() -> Router<AppState> {
     Router::new()
         .route("/api/channels", get(routes_channels::get_channels))
+        .route(
+            "/api/channels/telegram/owner",
+            post(routes_channels::post_telegram_owner),
+        )
+        .route(
+            "/api/telegram/restart",
+            post(routes_channels::post_telegram_restart),
+        )
         .route("/api/notify", post(routes_channels::post_notify))
         .route(
             "/api/firecrawl/scrape",
@@ -315,15 +325,15 @@ fn ai_routes() -> Router<AppState> {
     Router::new().route("/api/ai/parse-todos", post(routes_ai::post_parse_todos))
 }
 
-/// Start the gateway HTTP server.
-///
-/// Accepts an optional graceful-shutdown future. On signal, the server drains
-/// in-flight requests and returns. If `shutdown` is `None`, the server runs
-/// until axum returns.
-///
-/// `unsafe_start` controls behaviour when WAL reconciliation fails on boot:
-/// - `false` (default) — refuse to start. Returns `Err`.
-/// - `true` — log the error and continue.
+fn ui_routes() -> Router<AppState> {
+    Router::new()
+        .route("/api/ui/register", post(routes_ui::post_ui_register))
+        .route("/api/ui/quitting", post(routes_ui::post_ui_quitting))
+        .route("/api/ui/updating", post(routes_ui::post_ui_updating))
+        .route("/api/ui/launch", post(routes_ui::post_ui_launch))
+        .route("/api/ui/restart", post(routes_ui::post_ui_restart))
+}
+
 pub async fn start_server(
     config: mando_config::Config,
     bus: mando_shared::EventBus,
@@ -348,34 +358,34 @@ where
 
     let bus_arc = Arc::new(bus);
 
-    // Unified DB pool — shared across all subsystems.
     let db = mando_db::Db::open(&runtime_paths.task_db_path).await?;
     let db = Arc::new(db);
     let task_store = mando_captain::io::task_store::TaskStore::new(db.pool().clone());
     let task_store_arc = Arc::new(RwLock::new(task_store));
     let config_arc = Arc::new(ArcSwap::from_pointee(config));
+    let config_write_mu = Arc::new(Mutex::new(()));
+    let (tick_tx, tick_rx) = watch::channel(crate::config_manager::initial_tick_duration(
+        &config_arc.load_full(),
+    ));
+    let config_manager = crate::config_manager::ConfigManager::new(
+        config_arc.clone(),
+        config_write_mu.clone(),
+        tick_tx,
+    );
+    let auth_token = crate::auth::ensure_auth_token();
+    let task_tracker = TaskTracker::new();
+    let cancellation_token = CancellationToken::new();
+    let ui_runtime = Arc::new(ui_runtime::UiRuntime::new(
+        mando_config::state_dir().join("ui-state.json"),
+    ));
+    let telegram_runtime = Arc::new(telegram_runtime::TelegramRuntime::new(port, auth_token));
 
     let config = config_arc.load_full();
-    let raw_tick = config.captain.tick_interval_s;
-    let tick_interval_s = raw_tick.max(10);
-    if raw_tick != tick_interval_s {
-        tracing::warn!(
-            module = "startup",
-            configured = raw_tick,
-            clamped = tick_interval_s,
-            "tick_interval_s below minimum 10s, clamped"
-        );
-    }
 
-    // Clean dead PIDs first so reconciliation sees accurate liveness state.
     if let Err(e) = mando_captain::io::pid_registry::cleanup_dead() {
         tracing::warn!(module = "startup", error = %e, "pid_registry cleanup_dead failed");
     }
 
-    // Reconcile incomplete operations from previous run (WAL recovery). By
-    // default, refuse to start if reconciliation fails — booting with an
-    // unreconciled WAL can silently duplicate or lose work. Override with
-    // `unsafe_start: true` only after inspecting the error.
     if let Err(e) =
         mando_captain::runtime::reconciler::reconcile_on_startup(&config, db.pool()).await
     {
@@ -418,23 +428,38 @@ where
 
     let state = AppState {
         config: config_arc,
+        config_manager,
         runtime_paths,
         captain_workflow: Arc::new(ArcSwap::from_pointee(captain_wf)),
         scout_workflow: Arc::new(ArcSwap::from_pointee(scout_wf)),
-        config_write_mu: Arc::new(Mutex::new(())),
+        config_write_mu,
         bus: bus_arc.clone(),
         cc_session_mgr: Arc::new(cc_session_mgr),
         task_store: task_store_arc,
         db,
         qa_session_mgr: mando_scout::runtime::qa::default_session_manager(),
         start_time: std::time::Instant::now(),
+        listen_port: port,
         dev_mode: false,
-        task_tracker: TaskTracker::new(),
-        cancellation_token: CancellationToken::new(),
+        task_tracker,
+        cancellation_token,
+        telegram_runtime,
+        ui_runtime,
     };
 
-    // Spawn captain tick loop (always runs; respects auto_schedule dynamically).
-    crate::background_tasks::spawn_auto_tick(&state, tick_interval_s);
+    state
+        .ui_runtime
+        .start_monitor(&state.task_tracker, state.cancellation_token.clone());
+
+    crate::background_tasks::spawn_auto_tick(&state, tick_rx);
+
+    if let Err(err) = state.telegram_runtime.configure(&config).await {
+        tracing::warn!(
+            module = "telegram",
+            error = %err,
+            "failed to start embedded telegram runtime"
+        );
+    }
 
     let tracker = state.task_tracker.clone();
     let cancel = state.cancellation_token.clone();
@@ -443,8 +468,6 @@ where
     info!("gateway listening on {addr}");
 
     let listener = tokio::net::TcpListener::bind(&addr).await?;
-    // Wrap the caller-supplied shutdown future so cancelling the token fires
-    // the cooperative-abort signal as soon as shutdown starts.
     let graceful = async move {
         shutdown.await;
         cancel.cancel();
@@ -453,112 +476,10 @@ where
         .with_graceful_shutdown(graceful)
         .await?;
 
-    // Wait for tracked spawns to finish before returning so shutdown is
-    // ordered and no background work is left dangling.
     tracker.close();
     tracker.wait().await;
     Ok(())
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::AppState;
-
-    async fn test_state() -> AppState {
-        let config = mando_config::Config::default();
-        let runtime_paths = mando_config::resolve_captain_runtime_paths(&config);
-        mando_config::set_active_captain_runtime_paths(runtime_paths.clone());
-        let bus = mando_shared::EventBus::new();
-        let db = mando_db::Db::open_in_memory().await.unwrap();
-        let db = Arc::new(db);
-
-        let cc_state_dir = std::env::temp_dir().join(format!(
-            "mando-gw-test-cc-sessions-{:?}",
-            std::thread::current().id()
-        ));
-        let cc_session_mgr = mando_captain::io::cc_session::CcSessionManager::new(
-            cc_state_dir,
-            "sonnet",
-            db.pool().clone(),
-        );
-        let task_store = mando_captain::io::task_store::TaskStore::new(db.pool().clone());
-
-        AppState {
-            config: Arc::new(ArcSwap::from_pointee(config)),
-            runtime_paths,
-            captain_workflow: Arc::new(ArcSwap::from_pointee(
-                mando_config::CaptainWorkflow::compiled_default(),
-            )),
-            scout_workflow: Arc::new(ArcSwap::from_pointee(
-                mando_config::ScoutWorkflow::compiled_default(),
-            )),
-            config_write_mu: Arc::new(Mutex::new(())),
-            bus: Arc::new(bus),
-            cc_session_mgr: Arc::new(cc_session_mgr),
-            task_store: Arc::new(RwLock::new(task_store)),
-            db,
-            qa_session_mgr: mando_scout::runtime::qa::default_session_manager(),
-            start_time: std::time::Instant::now(),
-            dev_mode: false,
-            task_tracker: TaskTracker::new(),
-            cancellation_token: CancellationToken::new(),
-        }
-    }
-
-    #[tokio::test]
-    async fn health_endpoint() {
-        let state = test_state().await;
-        let app = build_router(state);
-
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let addr = listener.local_addr().unwrap();
-
-        tokio::spawn(async move {
-            axum::serve(listener, app).await.unwrap();
-        });
-
-        let url = format!("http://{addr}/api/health");
-        // Give server a moment to start.
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-
-        let resp = reqwest::get(&url).await.unwrap();
-        assert_eq!(resp.status(), 200);
-
-        let body: serde_json::Value = resp.json().await.unwrap();
-        assert_eq!(body["healthy"], true);
-    }
-
-    #[tokio::test]
-    async fn cors_headers_present() {
-        let state = test_state().await;
-        let app = build_router(state);
-
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let addr = listener.local_addr().unwrap();
-
-        tokio::spawn(async move {
-            axum::serve(listener, app).await.unwrap();
-        });
-
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-
-        let client = reqwest::Client::new();
-        let origin = "http://127.0.0.1:15173";
-        let resp = client
-            .get(format!("http://{addr}/api/health"))
-            .header(reqwest::header::ORIGIN, origin)
-            .send()
-            .await
-            .unwrap();
-
-        let cors = resp
-            .headers()
-            .get("access-control-allow-origin")
-            .map(|v| v.to_str().unwrap_or(""));
-        assert_eq!(cors, Some(origin));
-
-        let credentials = resp.headers().get("access-control-allow-credentials");
-        assert_eq!(credentials, None);
-    }
-}
+mod tests;

@@ -41,7 +41,7 @@ async fn spawn_worker_impl(
     }
     let (child, pid, stream_path) =
         mando_cc::spawn_detached(&builder.build(), prompt, session_or_resume_id).await?;
-    crate::watch_worker_exit(child);
+    crate::watch_worker_exit(child, pid, session_or_resume_id);
     Ok((pid, stream_path))
 }
 

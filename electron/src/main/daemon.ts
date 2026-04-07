@@ -14,7 +14,6 @@ import {
   updateDaemonBinary,
   rollbackDaemonBinary,
   kickstartDaemon,
-  bootoutDevServices,
 } from '#main/launchd';
 
 // -- Connection state --
@@ -245,7 +244,7 @@ function scheduleReconnect(): void {
     // After several failed reconnects, the daemon may be stuck (launchd
     // throttling a crash-loop, or service loaded but not running).
     // Kickstart tells launchd to start it immediately, bypassing throttle.
-    if (reconnectAttempts === KICKSTART_AFTER_ATTEMPTS) {
+    if (reconnectAttempts === KICKSTART_AFTER_ATTEMPTS && !process.env.MANDO_EXTERNAL_GATEWAY) {
       log.info('[daemon] reconnect attempts exhausted — kickstarting via launchd');
       kickstartDaemon();
     }
@@ -452,7 +451,7 @@ export async function ensureDaemon(dataDir: string): Promise<boolean> {
   return ready;
 }
 
-/** Clean up all timers and stop dev daemon. */
+/** Clean up all timers. Daemon lifecycle is owned externally. */
 export function cleanupDaemon(): void {
   if (reconnectTimer) {
     clearTimeout(reconnectTimer);
@@ -462,7 +461,4 @@ export function cleanupDaemon(): void {
     clearInterval(healthMonitorInterval);
     healthMonitorInterval = null;
   }
-  // In dev, stop the launchd-managed daemon on quit.
-  // In prod, the daemon persists across Electron restarts via KeepAlive.
-  bootoutDevServices();
 }

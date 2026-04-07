@@ -27,19 +27,19 @@ mando-gw daemon (launchd / --foreground)
     ├── axum HTTP API
     ├── SSE /api/events (live updates)
     ├── captain auto-tick (worker orchestration)
-    ├── Telegram bots
+    ├── Telegram runtime
     └── cron service
         ▲ HTTP/SSE ▲
-    ┌───┴──────────┴───┐
-    │   Electron app   │  thin client (no Rust in-process)
-    │   CLI (mando)    │  pure HTTP client
-    │   Telegram bots  │  in-daemon
-    └──────────────────┘
+    ┌──────────┴──────────┐
+    │   Electron app      │  thin client (no Rust in-process)
+    │   CLI (mando)       │  pure HTTP client
+    │   Telegram runtime  │  owned by daemon
+    └─────────────────────┘
 
 Rust crates:
     ├── mando-gateway    ← daemon binary + axum server
     ├── mando-captain    ← tick engine, workers, clarifier
-    ├── mando-telegram   ← bot commands
+    ├── mando-telegram   ← Telegram runtime library
     ├── mando-config     ← Config struct (serde)
     ├── mando-types      ← TaskItem, ItemStatus, etc.
     ├── mando-shared     ← cron, event bus, helpers

@@ -6,7 +6,9 @@ use std::panic::AssertUnwindSafe;
 use futures::FutureExt;
 use mando_config::settings::Config;
 use mando_config::workflow::CaptainWorkflow;
+use mando_shared::EventBus;
 use mando_types::task::{ItemStatus, Task};
+use mando_types::BusEvent;
 
 use crate::biz::dispatch_logic;
 use crate::runtime::clarifier;
@@ -32,6 +34,7 @@ pub(crate) async fn clarify_new_items(
     _resource_limits: &HashMap<String, usize>,
     _max_clarifier_retries: i64,
     pool: &sqlx::SqlitePool,
+    bus: Option<&EventBus>,
 ) {
     let new_items = dispatch_logic::new_items(items);
     if new_items.is_empty() {
@@ -127,6 +130,8 @@ pub(crate) async fn clarify_new_items(
     if jobs.is_empty() {
         return;
     }
+
+    emit_live_refresh(bus);
 
     // Phase 2: Spawn all clarifications as detached async tasks.
     // Each task runs the CC session and writes results to the stream file.
@@ -228,5 +233,12 @@ pub(crate) async fn clarify_new_items(
                 );
             }
         });
+    }
+}
+
+fn emit_live_refresh(bus: Option<&EventBus>) {
+    if let Some(bus) = bus {
+        bus.send(BusEvent::Tasks, None);
+        bus.send(BusEvent::Sessions, None);
     }
 }

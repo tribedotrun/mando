@@ -34,6 +34,7 @@ import { handleTrusted } from '#main/ipc-security';
 import { readAppPackageVersion } from '#main/app-package';
 import { updateDaemonBinary } from '#main/launchd';
 import { getDataDir } from '#main/daemon';
+import { announceUiUpdating } from '#main/ui-lifecycle';
 import log from '#main/logger';
 
 const UPDATE_CHECK_INTERVAL_MS = 30 * 60 * 1000;
@@ -316,7 +317,7 @@ function readPending(): PendingUpdate | null {
 }
 
 /** Called early in app startup — before window creation. */
-export function applyPendingUpdateIfAny(): boolean {
+export async function applyPendingUpdateIfAny(): Promise<boolean> {
   const staged = readPending();
   if (!staged || !existsSync(staged.appPath)) {
     cleanupAfterUpdate();
@@ -327,6 +328,8 @@ export function applyPendingUpdateIfAny(): boolean {
 
   // Delete the marker FIRST to prevent relaunch loops
   rmSync(getPendingPath());
+
+  await announceUiUpdating();
 
   // Update daemon binary from the STAGED app bundle (not the current one) so
   // the new daemon is running before the app swap. Best-effort: the version-mismatch
@@ -402,7 +405,7 @@ async function checkAndDownload(): Promise<void> {
 }
 
 export function setupAutoUpdate(): void {
-  handleTrusted('updates:install', () => {
+  handleTrusted('updates:install', async () => {
     if (!app.isPackaged) {
       log.info('auto-update: install requested in dev mode — ignoring');
       return;
@@ -413,6 +416,8 @@ export function setupAutoUpdate(): void {
     }
     log.info(`auto-update: user requested install of v${pendingUpdate.version}`);
     try {
+      await announceUiUpdating();
+
       // Update daemon binary from staged app BEFORE app swap.
       try {
         updateDaemonBinary(getDataDir(), pendingUpdate.appPath);

@@ -34,7 +34,7 @@ export function SettingsGeneral(): React.ReactElement {
   const [notificationsEnabled, setNotifState] = useState(getNotificationsEnabled);
   const [updateCheckStatus, setUpdateCheckStatus] = useState<UpdateCheckStatus>('idle');
   const clearTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
-  const startAtLogin = useSettingsStore((s) => s.config.startAtLogin ?? false);
+  const openAtLogin = useSettingsStore((s) => s.config.ui?.openAtLogin ?? false);
   const update = useSettingsStore((s) => s.update);
   const save = useSettingsStore((s) => s.save);
 
@@ -96,12 +96,12 @@ export function SettingsGeneral(): React.ReactElement {
   };
 
   const toggleLoginItem = async () => {
-    const next = !startAtLogin;
-    update({ startAtLogin: next });
+    const next = !openAtLogin;
+    update({ ui: { ...(useSettingsStore.getState().config.ui || {}), openAtLogin: next } });
     const result = await save();
     if (!result.ok) {
       log.warn('[SettingsGeneral] login-item save failed:', result.error);
-      update({ startAtLogin: !next });
+      update({ ui: { ...(useSettingsStore.getState().config.ui || {}), openAtLogin: !next } });
       toast.error(result.error ?? 'Failed to save login setting');
       return;
     }
@@ -109,7 +109,7 @@ export function SettingsGeneral(): React.ReactElement {
       await window.mandoAPI.setLoginItem(next);
     } catch (err) {
       log.error('[SettingsGeneral] login item IPC failed:', err);
-      update({ startAtLogin: !next });
+      update({ ui: { ...(useSettingsStore.getState().config.ui || {}), openAtLogin: !next } });
       toast.error('Failed to change login setting');
     }
   };
@@ -138,10 +138,10 @@ export function SettingsGeneral(): React.ReactElement {
         <SegmentedControl options={CHANNELS} value={updateChannel} onChange={handleChannelChange} />
       </SettingsRow>
 
-      <SettingsRow label="Start at login">
+      <SettingsRow label="Open app at login">
         <Switch
           testId="start-at-login-toggle"
-          checked={startAtLogin}
+          checked={openAtLogin}
           onCheckedChange={toggleLoginItem}
         />
       </SettingsRow>

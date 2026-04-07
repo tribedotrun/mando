@@ -25,7 +25,12 @@ pub static WORKER_EXIT_SIGNAL: tokio::sync::Notify = tokio::sync::Notify::const_
 /// is a library crate and has no dependency on the gateway's AppState. The child
 /// process itself owns its lifecycle and is separately killed on gateway shutdown
 /// via the pid registry; this watcher only observes exit.
-pub fn watch_worker_exit(mut child: tokio::process::Child) {
+pub fn watch_worker_exit(
+    mut child: tokio::process::Child,
+    pid: mando_types::Pid,
+    session_id: &str,
+) {
+    let session_id = session_id.to_string();
     tokio::spawn(async move {
         match child.wait().await {
             Ok(status) => {
@@ -40,6 +45,30 @@ pub fn watch_worker_exit(mut child: tokio::process::Child) {
                     module = "captain",
                     error = %e,
                     "worker process wait failed — signaling exit anyway"
+                );
+            }
+        }
+        // Best-effort cleanup on natural exit. Detached helper processes started
+        // by the worker may still be attached to the worker's process group even
+        // after the Claude parent exits. If this session still owns the same PID
+        // in the registry, try to terminate the process group and then clear the
+        // registry entry. This is idempotent with explicit cancel/reopen cleanup.
+        if crate::io::pid_registry::get_pid(&session_id) == Some(pid) {
+            if let Err(e) = mando_cc::kill_process(pid).await {
+                tracing::warn!(
+                    module = "captain",
+                    %session_id,
+                    %pid,
+                    error = %e,
+                    "worker-exit cleanup kill failed"
+                );
+            }
+            if let Err(e) = crate::io::pid_registry::unregister(&session_id) {
+                tracing::warn!(
+                    module = "captain",
+                    %session_id,
+                    error = %e,
+                    "worker-exit cleanup unregister failed"
                 );
             }
         }

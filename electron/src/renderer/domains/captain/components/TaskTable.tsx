@@ -34,6 +34,7 @@ interface Props {
   onRework: (item: TaskItem) => void;
   onAsk: (item: TaskItem) => void;
   onAccept: (id: number) => void;
+  acceptPendingId?: number | null;
   onHandoff: (id: number) => void;
   onCancel: (id: number) => void;
   onRetry: (id: number) => void;
@@ -52,6 +53,7 @@ export function TaskTable(props: Props): React.ReactElement {
     onRework,
     onAsk,
     onAccept,
+    acceptPendingId,
     onHandoff,
     onCancel,
     onRetry,
@@ -91,6 +93,7 @@ export function TaskTable(props: Props): React.ReactElement {
           onRework={() => onRework(item)}
           onAsk={() => onAsk(item)}
           onAccept={() => onAccept(item.id)}
+          acceptPending={acceptPendingId === item.id}
           onHandoff={() => onHandoff(item.id)}
           onCancel={() => onCancel(item.id)}
           onRetry={() => onRetry(item.id)}
@@ -128,6 +131,7 @@ interface RowProps {
   onRework: () => void;
   onAsk: () => void;
   onAccept: () => void;
+  acceptPending?: boolean;
   onHandoff: () => void;
   onCancel: () => void;
   onRetry: () => void;
@@ -318,7 +322,12 @@ const TaskRow = React.memo(function TaskRow({
       >
         {canMerge(item) && <MergeBtn onClick={actions.onMerge} />}
         {item.status === 'awaiting-review' && !item.pr && (
-          <ActionBtn label="Accept" onClick={actions.onAccept} testId="accept-btn" />
+          <ActionBtn
+            label="Accept"
+            onClick={actions.onAccept}
+            testId="accept-btn"
+            pending={actions.acceptPending}
+          />
         )}
         {item.status === 'needs-clarification' && (
           <ActionBtn label="Answer" onClick={actions.onAnswer} testId="answer-btn" />
