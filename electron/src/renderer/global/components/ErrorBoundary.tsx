@@ -28,27 +28,22 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
     if (this.state.error) {
       return (
         <div
-          className="rounded-lg border p-6"
+          className="rounded-lg border bg-error-bg p-6"
           style={{
             borderColor: 'color-mix(in srgb, var(--color-error) 50%, transparent)',
-            backgroundColor: 'var(--color-error-bg)',
           }}
         >
-          <h3 className="text-sm font-medium" style={{ color: 'var(--color-error)' }}>
+          <h3 className="text-sm font-medium text-error">
             {this.props.fallbackLabel || 'Component'} failed to render
           </h3>
-          <pre
-            className="mt-2 whitespace-pre-wrap text-xs"
-            style={{ color: 'var(--color-error)', opacity: 0.7 }}
-          >
+          <pre className="mt-2 whitespace-pre-wrap text-xs text-error" style={{ opacity: 0.7 }}>
             {this.state.error.message}
           </pre>
           <button
             onClick={() => this.setState({ error: null })}
-            className="mt-3 rounded-md px-3 py-1.5 text-xs"
+            className="mt-3 rounded-md px-3 py-1.5 text-xs text-error"
             style={{
               backgroundColor: 'color-mix(in srgb, var(--color-error) 40%, transparent)',
-              color: 'var(--color-error)',
             }}
           >
             Retry

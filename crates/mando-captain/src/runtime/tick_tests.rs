@@ -18,7 +18,8 @@ async fn tick_no_tasks() {
     let store_lock = test_store_lock(&dir).await;
     let config = Config::default();
     let wf = test_workflow();
-    let result = run_captain_tick_inner(&config, &wf, true, None, true, &store_lock)
+    let cancel = tokio_util::sync::CancellationToken::new();
+    let result = run_captain_tick_inner(&config, &wf, true, None, true, &store_lock, &cancel)
         .await
         .unwrap();
     assert_eq!(result.mode, TickMode::DryRun);
@@ -39,7 +40,8 @@ async fn tick_dry_run_does_not_mutate() {
     }
     let config = Config::default();
     let wf = test_workflow();
-    let result = run_captain_tick_inner(&config, &wf, true, None, true, &store_lock)
+    let cancel = tokio_util::sync::CancellationToken::new();
+    let result = run_captain_tick_inner(&config, &wf, true, None, true, &store_lock, &cancel)
         .await
         .unwrap();
     assert_eq!(result.mode, TickMode::DryRun);
@@ -100,7 +102,8 @@ async fn tick_live_retries_clarifier_on_failure() {
 
     // Tick 1: dispatch spawns async clarifier task (fails quickly, writes
     // error to stream file). Task moves to Clarifying.
-    let result = run_captain_tick_inner(&config, &wf, false, None, true, &store_lock)
+    let cancel = tokio_util::sync::CancellationToken::new();
+    let result = run_captain_tick_inner(&config, &wf, false, None, true, &store_lock, &cancel)
         .await
         .unwrap();
 
@@ -113,7 +116,7 @@ async fn tick_live_retries_clarifier_on_failure() {
     tokio::time::sleep(std::time::Duration::from_secs(2)).await;
 
     // Tick 2: poll detects the error, reverts to New, increments fail count.
-    let result2 = run_captain_tick_inner(&config, &wf, false, None, true, &store_lock)
+    let result2 = run_captain_tick_inner(&config, &wf, false, None, true, &store_lock, &cancel)
         .await
         .unwrap();
 

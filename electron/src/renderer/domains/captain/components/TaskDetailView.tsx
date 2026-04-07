@@ -2,7 +2,7 @@ import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useMountEffect } from '#renderer/global/hooks/useMountEffect';
 import log from '#renderer/logger';
-import { useToastStore } from '#renderer/global/stores/toastStore';
+import { toast } from 'sonner';
 import {
   fetchTimeline,
   fetchItemSessions,
@@ -54,6 +54,7 @@ export function TaskDetailView({ item, onBack, onMerge }: Props): React.ReactEle
   const [contextModalOpen, setContextModalOpen] = useState(false);
   const qaRef = useRef<QAHandle | null>(null);
   const [pendingQuestion, setPendingQuestion] = useState<string | null>(null);
+  const sidebarRef = useRef<HTMLDivElement>(null);
 
   // Refs to avoid stale closures in keydown handler.
   const transcriptFullScreenRef = useRef(transcriptFullScreen);
@@ -88,6 +89,23 @@ export function TaskDetailView({ item, onBack, onMerge }: Props): React.ReactEle
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
+  });
+
+  // Click-outside to close transcript sidebar.
+  useMountEffect(() => {
+    const onMouseDown = (e: MouseEvent) => {
+      if (!transcriptSessionRef.current || transcriptFullScreenRef.current) return;
+      if (
+        document.querySelector('[role="dialog"]') ||
+        document.querySelector('[data-command-palette]') ||
+        document.querySelector('[data-shortcut-overlay]')
+      )
+        return;
+      if (sidebarRef.current?.contains(e.target as Node)) return;
+      setTranscriptSession(null);
+    };
+    document.addEventListener('mousedown', onMouseDown);
+    return () => document.removeEventListener('mousedown', onMouseDown);
   });
 
   // Data queries.
@@ -170,7 +188,7 @@ export function TaskDetailView({ item, onBack, onMerge }: Props): React.ReactEle
       );
     } catch (err) {
       log.warn('Failed to fetch transcript for session', sessionId, err);
-      useToastStore.getState().add('error', 'Transcript unavailable, check daemon logs');
+      toast.error('Transcript unavailable, check daemon logs');
       setTranscriptSession((p) =>
         p?.entry.session_id === sessionId ? { ...p, markdown: null, loading: false } : p,
       );
@@ -200,7 +218,7 @@ export function TaskDetailView({ item, onBack, onMerge }: Props): React.ReactEle
       })
       .catch((err) => {
         log.warn('Failed to fetch transcript:', err);
-        useToastStore.getState().add('error', 'Transcript unavailable, check daemon logs');
+        toast.error('Transcript unavailable, check daemon logs');
         setTranscriptSession((p) =>
           p?.entry.session_id === s.session_id ? { ...p, markdown: null, loading: false } : p,
         );
@@ -254,35 +272,25 @@ export function TaskDetailView({ item, onBack, onMerge }: Props): React.ReactEle
                 &larr;
               </button>
               <div className="min-w-0 flex-1">
-                <h1
-                  className="break-words text-heading font-semibold leading-snug"
-                  style={{ color: 'var(--color-text-1)' }}
-                >
+                <h1 className="break-words text-heading font-semibold leading-snug text-text-1">
                   {item.title}
                 </h1>
                 {/* Metadata */}
                 <div className="mt-0.5 flex flex-wrap items-center gap-2">
                   {item.project && (
-                    <span className="text-caption" style={{ color: 'var(--color-text-3)' }}>
-                      {shortRepo(item.project)}
-                    </span>
+                    <span className="text-caption text-text-3">{shortRepo(item.project)}</span>
                   )}
                   {item.pr && (item.github_repo || item.project) && (
                     <a
                       href={prHref(item.pr, (item.github_repo ?? item.project)!)}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="text-caption no-underline hover:underline"
-                      style={{ color: 'var(--color-accent)' }}
+                      className="text-caption no-underline hover:underline text-accent"
                     >
                       {prLabel(item.pr)}
                     </a>
                   )}
-                  {item.no_pr && (
-                    <span className="text-caption" style={{ color: 'var(--color-accent)' }}>
-                      Findings only
-                    </span>
-                  )}
+                  {item.no_pr && <span className="text-caption text-accent">Findings only</span>}
                 </div>
               </div>
               <div className="flex shrink-0 items-center gap-2">
@@ -339,7 +347,7 @@ export function TaskDetailView({ item, onBack, onMerge }: Props): React.ReactEle
                     <button
                       key={tab.key}
                       onClick={() => setActiveTab(tab.key)}
-                      className="rounded-t px-3 py-1.5 text-caption font-medium transition-colors hover:bg-[var(--color-surface-2)]"
+                      className="rounded-t px-3 py-1.5 text-caption font-medium transition-colors hover:bg-surface-2"
                       style={{
                         color: isActive ? 'var(--color-text-1)' : 'var(--color-text-3)',
                         background: 'none',
@@ -386,11 +394,13 @@ export function TaskDetailView({ item, onBack, onMerge }: Props): React.ReactEle
 
         {/* Transcript sidebar */}
         {transcriptSession && !transcriptFullScreen && (
-          <TranscriptSidebar
-            session={transcriptSession}
-            onClose={() => setTranscriptSession(null)}
-            onExpand={() => setTranscriptFullScreen(true)}
-          />
+          <div ref={sidebarRef} className="flex h-full shrink-0">
+            <TranscriptSidebar
+              session={transcriptSession}
+              onClose={() => setTranscriptSession(null)}
+              onExpand={() => setTranscriptFullScreen(true)}
+            />
+          </div>
         )}
       </div>
 
@@ -399,7 +409,7 @@ export function TaskDetailView({ item, onBack, onMerge }: Props): React.ReactEle
 
       {/* Full-screen transcript overlay */}
       {transcriptSession && transcriptFullScreen && (
-        <div className="fixed inset-0 z-[300]" style={{ background: 'var(--color-bg)' }}>
+        <div className="fixed inset-0 z-[300] bg-bg">
           <div className="h-full p-6">
             <SessionDetailPanel
               session={transcriptSession.entry}

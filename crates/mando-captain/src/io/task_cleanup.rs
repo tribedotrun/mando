@@ -44,6 +44,20 @@ pub(crate) async fn cleanup_task(
         }
     }
 
+    // Read the live branch from the worktree before removing it — the DB
+    // value can be stale if mando-pr renamed the branch.
+    let live_branch = if let Some(ref wt) = item.worktree {
+        let wt_path = mando_config::expand_tilde(wt);
+        if wt_path.exists() {
+            super::git::current_branch(&wt_path).await.ok()
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+    let branch_to_delete = live_branch.as_deref().or(item.branch.as_deref());
+
     if let Some(ref wt) = item.worktree {
         let wt_path = mando_config::expand_tilde(wt);
         if wt_path.exists() {
@@ -73,7 +87,7 @@ pub(crate) async fn cleanup_task(
         }
     }
 
-    if let Some(ref branch) = item.branch {
+    if let Some(branch) = branch_to_delete {
         if let Some(ref rp) = repo_path {
             if let Err(e) = super::git::delete_local_branch(rp, branch).await {
                 let msg = format!("delete_local_branch {branch}: {e}");

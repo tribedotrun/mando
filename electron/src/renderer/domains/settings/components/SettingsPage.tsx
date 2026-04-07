@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import { ChevronLeft } from 'lucide-react';
 import { useSettingsStore } from '#renderer/domains/settings/stores/settingsStore';
 import { useMountEffect } from '#renderer/global/hooks/useMountEffect';
 import { ErrorBoundary } from '#renderer/global/components/ErrorBoundary';
@@ -108,12 +109,7 @@ export function SettingsPage({
 
   if (loading) {
     return (
-      <div
-        className="flex h-full items-center justify-center"
-        style={{ color: 'var(--color-text-3)' }}
-      >
-        Loading settings...
-      </div>
+      <div className="flex h-full items-center justify-center text-text-3">Loading settings...</div>
     );
   }
 
@@ -145,14 +141,7 @@ export function SettingsPage({
             fontWeight: 500,
           }}
         >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M15 19l-7-7 7-7"
-            />
-          </svg>
+          <ChevronLeft size={14} />
           Settings
         </button>
 
@@ -183,16 +172,8 @@ export function SettingsPage({
 
         {(error || saveSuccess) && (
           <div style={{ paddingTop: 12, borderTop: '1px solid var(--color-border-subtle)' }}>
-            {error && (
-              <p className="text-xs" style={{ color: 'var(--color-error)' }}>
-                {error}
-              </p>
-            )}
-            {saveSuccess && (
-              <p className="text-xs" style={{ color: 'var(--color-success)' }}>
-                Saved
-              </p>
-            )}
+            {error && <p className="text-xs text-error">{error}</p>}
+            {saveSuccess && <p className="text-xs text-success">Saved</p>}
           </div>
         )}
       </aside>

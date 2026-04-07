@@ -53,6 +53,7 @@ pub(crate) async fn check_done_review_threads(
         let has_ci_failure = pr_data.ci_status.as_deref() == Some("failure");
         if has_ci_failure {
             let item = &mut items[idx];
+            let snap = super::action_contract::ReviewFieldsSnapshot::capture(item);
             let title = mando_shared::telegram_format::escape_html(&item.title);
             tracing::info!(
                 module = "captain",
@@ -64,19 +65,36 @@ pub(crate) async fn check_done_review_threads(
                 mando_types::task::ReviewTrigger::CiFailure,
             );
 
-            let _ = super::timeline_emit::emit_for_task(
-                item,
-                mando_types::timeline::TimelineEventType::CaptainReviewStarted,
-                "CI failure detected — captain reviewing",
-                serde_json::json!({ "trigger": "ci_failure" }),
+            let event = mando_types::timeline::TimelineEvent {
+                event_type: mando_types::timeline::TimelineEventType::CaptainReviewStarted,
+                timestamp: mando_types::now_rfc3339(),
+                actor: "captain".to_string(),
+                summary: "CI failure detected — captain reviewing".to_string(),
+                data: serde_json::json!({ "trigger": "ci_failure" }),
+            };
+            match mando_db::queries::tasks::persist_status_transition(
                 pool,
+                item,
+                snap.status.as_str(),
+                &event,
             )
-            .await;
-            notifier
-                .normal(&format!(
-                    "\u{1f6a8} CI failing on <b>{title}</b> — captain investigating"
-                ))
-                .await;
+            .await
+            {
+                Ok(true) => {
+                    notifier
+                        .normal(&format!(
+                            "\u{1f6a8} CI failing on <b>{title}</b> — captain investigating"
+                        ))
+                        .await;
+                }
+                Ok(false) => {
+                    tracing::info!(module = "captain", "CI failure transition already applied");
+                }
+                Err(e) => {
+                    snap.restore(item);
+                    tracing::error!(module = "captain", error = %e, "persist failed for CI failure");
+                }
+            }
             continue;
         }
 

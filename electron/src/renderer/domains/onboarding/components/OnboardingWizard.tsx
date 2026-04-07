@@ -9,7 +9,7 @@ import {
   PrimaryButton,
 } from '#renderer/domains/onboarding/components/OnboardingPrimitives';
 import { TelegramScreen } from '#renderer/domains/onboarding/components/OnboardingSteps';
-import { useToastStore } from '#renderer/global/stores/toastStore';
+import { toast } from 'sonner';
 import log from '#renderer/logger';
 import { getErrorMessage } from '#renderer/utils';
 
@@ -50,9 +50,7 @@ export function OnboardingWizard(): React.ReactElement {
     if (Object.keys(env).length > 0) config.env = env;
     window.mandoAPI.saveConfigLocal(JSON.stringify(config, null, 2)).catch((e) => {
       log.error('Failed to save onboarding progress:', e);
-      useToastStore
-        .getState()
-        .add('error', getErrorMessage(e, 'Failed to save onboarding progress'));
+      toast.error(getErrorMessage(e, 'Failed to save onboarding progress'));
     });
   }, [tgToken]);
 
@@ -130,11 +128,7 @@ export function OnboardingWizard(): React.ReactElement {
 
 function WelcomeScreen({ onStart }: { onStart: () => void }): React.ReactElement {
   return (
-    <div
-      data-testid="onboarding-wizard"
-      className="relative flex h-full"
-      style={{ background: 'var(--color-bg)' }}
-    >
+    <div data-testid="onboarding-wizard" className="relative flex h-full bg-bg">
       <div
         className="absolute inset-x-0 top-0 z-10 h-8"
         style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
@@ -144,12 +138,10 @@ function WelcomeScreen({ onStart }: { onStart: () => void }): React.ReactElement
         style={{ width: 460, padding: 48, flexShrink: 0 }}
       >
         <div style={{ marginBottom: 24 }}>
-          <h1 className="text-display" style={{ color: 'var(--color-text-1)' }}>
-            Mando
-          </h1>
+          <h1 className="text-display text-text-1">Mando</h1>
           <p
-            className="text-subheading"
-            style={{ color: 'var(--color-text-2)', marginTop: 8, letterSpacing: '0.01em' }}
+            className="text-subheading text-text-2"
+            style={{ marginTop: 8, letterSpacing: '0.01em' }}
           >
             Manage tasks, not agents.
           </p>
@@ -167,7 +159,7 @@ function WelcomeScreen({ onStart }: { onStart: () => void }): React.ReactElement
                   marginTop: 6,
                 }}
               />
-              <span className="text-body" style={{ color: 'var(--color-text-1)', lineHeight: 1.5 }}>
+              <span className="text-body text-text-1" style={{ lineHeight: 1.5 }}>
                 {text}
               </span>
             </li>
@@ -270,9 +262,7 @@ function ClaudeCheckScreen({
                 flexShrink: 0,
               }}
             />
-            <span className="text-body" style={{ color: 'var(--color-text-3)' }}>
-              Checking…
-            </span>
+            <span className="text-body text-text-3">Checking…</span>
           </div>
         )}
         {result && !checking && result.checkFailed && (
@@ -295,13 +285,13 @@ function ClaudeCheckScreen({
       </div>
 
       {result && !result.checkFailed && !result.installed && !checking && (
-        <p className="text-body" style={{ color: 'var(--color-text-2)', marginBottom: 24 }}>
+        <p className="text-body text-text-2" style={{ marginBottom: 24 }}>
           Install Claude Code from{' '}
           <a
             href="https://code.claude.com/docs/en/overview"
             target="_blank"
             rel="noopener noreferrer"
-            style={{ color: 'var(--color-accent)' }}
+            className="text-accent"
           >
             the docs
           </a>
@@ -360,11 +350,7 @@ function StatusCheck({
       >
         {label}
       </span>
-      {detail && (
-        <span className="text-caption" style={{ color: 'var(--color-text-3)' }}>
-          {detail}
-        </span>
-      )}
+      {detail && <span className="text-caption text-text-3">{detail}</span>}
     </div>
   );
 }

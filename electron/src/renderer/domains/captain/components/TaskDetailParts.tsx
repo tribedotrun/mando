@@ -1,7 +1,14 @@
-import React, { useState } from 'react';
+import React from 'react';
+import { AlignLeft, Copy } from 'lucide-react';
 import type { TaskItem } from '#renderer/types';
 import { MoreIcon } from '#renderer/domains/captain/components/TaskIcons';
 import { copyToClipboard } from '#renderer/utils';
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from '#renderer/global/components/DropdownMenu';
 
 export function ActionButton({
   label,
@@ -37,9 +44,7 @@ export function DetailSection({
 }): React.ReactElement {
   return (
     <div className="mb-5">
-      <div className="mb-2 text-label" style={{ color: 'var(--color-text-4)' }}>
-        {label}
-      </div>
+      <div className="mb-2 text-label text-text-4">{label}</div>
       {children}
     </div>
   );
@@ -52,13 +57,6 @@ export function DetailOverflowMenu({
   item: TaskItem;
   onViewContext?: () => void;
 }): React.ReactElement {
-  const [open, setOpen] = useState(false);
-
-  const copyAndClose = (text: string) => {
-    copyToClipboard(text);
-    setOpen(false);
-  };
-
   const entries: { label: string; value: string }[] = [];
   if (item.branch) entries.push({ label: 'Copy branch', value: item.branch });
   if (item.worktree) entries.push({ label: 'Copy working directory', value: item.worktree });
@@ -70,94 +68,37 @@ export function DetailOverflowMenu({
   }
 
   return (
-    <div
-      className="relative"
-      onBlur={(e) => {
-        if (!e.currentTarget.contains(e.relatedTarget)) setOpen(false);
-      }}
-    >
-      <button
-        onClick={() => setOpen((v) => !v)}
-        aria-label="More info"
-        className="flex items-center justify-center rounded-md transition-colors hover:bg-[var(--color-surface-2)]"
-        style={{
-          width: 28,
-          height: 28,
-          background: 'transparent',
-          color: 'var(--color-text-3)',
-          border: 'none',
-          cursor: 'pointer',
-        }}
-      >
-        <MoreIcon />
-      </button>
-      {open && (
-        <div
-          className="absolute right-0 top-full z-50 mt-1 min-w-[220px] rounded-lg py-1"
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          aria-label="More info"
+          className="flex items-center justify-center rounded-md transition-colors hover:bg-surface-2"
           style={{
-            background: 'var(--color-surface-3)',
-            border: '1px solid var(--color-border)',
-            boxShadow: '0 4px 16px rgba(0,0,0,0.3)',
+            width: 28,
+            height: 28,
+            background: 'transparent',
+            color: 'var(--color-text-3)',
+            border: 'none',
+            cursor: 'pointer',
           }}
         >
-          {item.context && onViewContext && (
-            <button
-              onClick={() => {
-                setOpen(false);
-                onViewContext();
-              }}
-              className="flex w-full items-center gap-2 px-3 py-1 text-left text-caption hover:bg-[var(--color-surface-2)]"
-              style={{
-                color: 'var(--color-text-1)',
-                background: 'none',
-                border: 'none',
-                cursor: 'pointer',
-              }}
-            >
-              <svg
-                width="12"
-                height="12"
-                viewBox="0 0 12 12"
-                fill="none"
-                stroke="var(--color-text-3)"
-                strokeWidth="1.2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M1.5 3h9M1.5 6h9M1.5 9h5" />
-              </svg>
-              View task brief
-            </button>
-          )}
-          {entries.map(({ label, value }) => (
-            <button
-              key={label}
-              onClick={() => copyAndClose(value)}
-              className="flex w-full items-center gap-2 px-3 py-1 text-left text-caption hover:bg-[var(--color-surface-2)]"
-              style={{
-                color: 'var(--color-text-1)',
-                background: 'none',
-                border: 'none',
-                cursor: 'pointer',
-              }}
-            >
-              <svg
-                width="12"
-                height="12"
-                viewBox="0 0 12 12"
-                fill="none"
-                stroke="var(--color-text-3)"
-                strokeWidth="1.2"
-                strokeLinecap="round"
-              >
-                <rect x="4" y="4" width="7" height="7" rx="1" />
-                <path d="M8 4V2.5A1.5 1.5 0 006.5 1H2.5A1.5 1.5 0 001 2.5v4A1.5 1.5 0 002.5 8H4" />
-              </svg>
-              {label}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
+          <MoreIcon />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="min-w-[220px]">
+        {item.context && onViewContext && (
+          <DropdownMenuItem onSelect={onViewContext}>
+            <AlignLeft size={12} color="var(--color-text-3)" />
+            View task brief
+          </DropdownMenuItem>
+        )}
+        {entries.map(({ label, value }) => (
+          <DropdownMenuItem key={label} onSelect={() => copyToClipboard(value)}>
+            <Copy size={12} color="var(--color-text-3)" />
+            {label}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }

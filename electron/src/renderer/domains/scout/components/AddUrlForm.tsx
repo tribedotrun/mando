@@ -31,8 +31,7 @@ export function AddUrlForm(): React.ReactElement {
       <button
         data-testid="add-url-btn"
         onClick={() => setIsOpen(true)}
-        className="rounded px-4 py-2 text-sm font-medium text-[var(--color-bg)]"
-        style={{ background: 'var(--color-accent)' }}
+        className="rounded px-4 py-2 text-sm font-medium text-bg bg-accent"
       >
         + Add URL
       </button>
@@ -62,16 +61,14 @@ export function AddUrlForm(): React.ReactElement {
         data-testid="submit-url-btn"
         type="submit"
         disabled={!url.trim()}
-        className="rounded px-4 py-2 text-sm font-medium text-[var(--color-bg)] disabled:opacity-50"
-        style={{ background: 'var(--color-success)' }}
+        className="rounded px-4 py-2 text-sm font-medium text-bg disabled:opacity-50 bg-success"
       >
         Add
       </button>
       <button
         type="button"
         onClick={() => setIsOpen(false)}
-        className="rounded px-3 py-2 text-sm"
-        style={{ color: 'var(--color-text-2)' }}
+        className="rounded px-3 py-2 text-sm text-text-2"
       >
         Cancel
       </button>

@@ -36,7 +36,8 @@ pub async fn handle_callback(bot: &mut TelegramBot, callback: &Value) -> Result<
         "act" => callbacks_picker::handle_action_callback(bot, &parts, cb_id, &chat_id, mid).await,
         "merge" => handle_action(bot, "Merge", &parts, cb_id, &chat_id).await,
         "accept" => handle_action(bot, "Accept", &parts, cb_id, &chat_id).await,
-        "view" => handle_view_cb(bot, &parts, cb_id, &chat_id).await,
+        "view" => handle_view_cb(bot, &parts, cb_id, &chat_id, mid).await,
+        "dtl" => handle_detail_cb(bot, &parts, cb_id, &chat_id, mid).await,
         "dg" => crate::assistant::callbacks::handle_callback(bot, callback).await,
         other => {
             tracing::warn!(action = other, "unrecognized callback prefix");
@@ -207,14 +208,48 @@ async fn handle_action(
     Ok(())
 }
 
-// ── View callback ───────────────────────────────────────────────────
+// ── View / detail callbacks ─────────────────────────────────────────
 
-async fn handle_view_cb(bot: &TelegramBot, parts: &[&str], cb_id: &str, cid: &str) -> Result<()> {
+async fn handle_view_cb(
+    bot: &TelegramBot,
+    parts: &[&str],
+    cb_id: &str,
+    cid: &str,
+    mid: i64,
+) -> Result<()> {
     let item_id = parts.get(1).copied().unwrap_or("");
     bot.api()
         .answer_callback_query(cb_id, Some("Loading\u{2026}"))
         .await?;
-    crate::commands::timeline::handle(bot, cid, item_id).await
+    crate::commands::detail::handle_view(bot, cid, mid, item_id).await
+}
+
+async fn handle_detail_cb(
+    bot: &TelegramBot,
+    parts: &[&str],
+    cb_id: &str,
+    cid: &str,
+    mid: i64,
+) -> Result<()> {
+    let action = parts.get(1).copied().unwrap_or("");
+    match action {
+        "back" => {
+            bot.api().answer_callback_query(cb_id, None).await?;
+            let _ = bot.remove_keyboard(cid, mid).await;
+            crate::commands::status::handle(bot, cid, "").await
+        }
+        "tl" => {
+            let item_id = parts.get(2).copied().unwrap_or("");
+            bot.api()
+                .answer_callback_query(cb_id, Some("Loading\u{2026}"))
+                .await?;
+            crate::commands::timeline::handle(bot, cid, item_id).await
+        }
+        _ => {
+            bot.api().answer_callback_query(cb_id, None).await?;
+            Ok(())
+        }
+    }
 }
 
 // ── Tests ────────────────────────────────────────────────────────────
@@ -250,8 +285,9 @@ mod tests {
             "merge",
             "accept",
             "view",
+            "dtl",
             "dg",
         ];
-        assert_eq!(prefixes.len(), 7);
+        assert_eq!(prefixes.len(), 8);
     }
 }

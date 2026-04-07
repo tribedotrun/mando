@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { RefreshCw } from 'lucide-react';
 import { PrMarkdown } from '#renderer/domains/captain/components/PrMarkdown';
 
 /**
@@ -109,11 +110,7 @@ export function PrSections({ text, onRefresh, refreshing }: Props): React.ReactE
   }
 
   if (sections.length === 0) {
-    return (
-      <span className="text-[12px] italic" style={{ color: 'var(--color-text-3)' }}>
-        No description
-      </span>
-    );
+    return <span className="text-[12px] italic text-text-3">No description</span>;
   }
 
   // Build tabs — only include groups that have content, always add Full
@@ -171,10 +168,7 @@ function TabGroup({
   return (
     <div>
       {/* Sub-tab pills + refresh — same row, sticky */}
-      <div
-        className="sticky top-0 z-10 flex items-center gap-1 pb-3"
-        style={{ background: 'var(--color-bg)' }}
-      >
+      <div className="sticky top-0 z-10 flex items-center gap-1 pb-3 bg-bg">
         {tabs.map((tab) => {
           const isActive = tab.key === active;
           return (
@@ -225,7 +219,7 @@ function RefreshIcon({
     <button
       onClick={onClick}
       disabled={spinning}
-      className="flex items-center justify-center rounded-md transition-colors hover:bg-[var(--color-surface-2)]"
+      className="flex items-center justify-center rounded-md transition-colors hover:bg-surface-2"
       style={{
         width: 24,
         height: 24,
@@ -237,23 +231,11 @@ function RefreshIcon({
       }}
       title="Refresh PR content"
     >
-      <svg
-        width="14"
-        height="14"
-        viewBox="0 0 16 16"
-        fill="currentColor"
-        className={spinning ? 'animate-spin' : ''}
-      >
-        <path d="M8 2.5a5.487 5.487 0 0 0-4.131 1.869l1.204 1.204A.25.25 0 0 1 4.896 6H1.25A.25.25 0 0 1 1 5.75V2.104a.25.25 0 0 1 .427-.177l1.38 1.38A7.001 7.001 0 0 1 14.95 7.16a.75.75 0 1 1-1.49.178A5.501 5.501 0 0 0 8 2.5ZM1.705 8.005a.75.75 0 0 1 .834.656 5.501 5.501 0 0 0 9.592 2.97l-1.204-1.204a.25.25 0 0 1 .177-.427h3.646a.25.25 0 0 1 .25.25v3.646a.25.25 0 0 1-.427.177l-1.38-1.38A7.001 7.001 0 0 1 1.05 8.84a.75.75 0 0 1 .656-.834Z" />
-      </svg>
+      <RefreshCw size={14} className={spinning ? 'animate-spin' : ''} />
     </button>
   );
 }
 
 function SectionHeading({ text }: { text: string }): React.ReactElement {
-  return (
-    <div className="mt-3 mb-1 text-[12px] font-semibold" style={{ color: 'var(--color-text-2)' }}>
-      {text}
-    </div>
-  );
+  return <div className="mt-3 mb-1 text-[12px] font-semibold text-text-2">{text}</div>;
 }

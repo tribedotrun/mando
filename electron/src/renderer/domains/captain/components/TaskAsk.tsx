@@ -56,32 +56,18 @@ export function TaskAsk({ item, onBack }: Props): React.ReactElement {
 
   const header = (
     <div className="mb-3 flex items-center gap-2">
-      <button
-        onClick={onBack}
-        className="rounded px-3 py-1 text-xs"
-        style={{ color: 'var(--color-text-2)' }}
-      >
+      <button onClick={onBack} className="rounded px-3 py-1 text-xs text-text-2">
         &larr; Back
       </button>
-      <span className="font-mono text-xs" style={{ color: 'var(--color-accent)' }}>
-        #{item.id}
-      </span>
-      <span
-        className="truncate max-w-xs font-mono text-xs"
-        style={{ color: 'var(--color-text-3)' }}
-      >
-        {item.title}
-      </span>
-      <span className="ml-1 font-mono text-[0.6rem]" style={{ color: 'var(--color-text-4)' }}>
-        [{item.status}]
-      </span>
+      <span className="font-mono text-xs text-accent">#{item.id}</span>
+      <span className="truncate max-w-xs font-mono text-xs text-text-3">{item.title}</span>
+      <span className="ml-1 font-mono text-[0.6rem] text-text-4">[{item.status}]</span>
       {item.pr && (item.github_repo || item.project) && (
         <a
           href={prHref(item.pr, (item.github_repo ?? item.project)!)}
           target="_blank"
           rel="noopener noreferrer"
-          className="ml-auto font-mono text-xs no-underline hover:underline"
-          style={{ color: 'var(--color-accent)' }}
+          className="ml-auto font-mono text-xs no-underline hover:underline text-accent"
         >
           {prLabel(item.pr)}
         </a>

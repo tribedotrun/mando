@@ -19,15 +19,11 @@ export function SettingsProjects(): React.ReactElement {
 
   return (
     <div data-testid="settings-projects" className="space-y-8">
-      <h2 className="text-lg font-semibold" style={{ color: 'var(--color-text-1)' }}>
-        Projects
-      </h2>
+      <h2 className="text-lg font-semibold text-text-1">Projects</h2>
 
       <div className="space-y-4">
         {pathKeys.length === 0 && (
-          <p className="text-sm" style={{ color: 'var(--color-text-3)' }}>
-            No projects configured yet.
-          </p>
+          <p className="text-sm text-text-3">No projects configured yet.</p>
         )}
 
         {pathKeys.map((pathKey) => {
@@ -66,36 +62,21 @@ export function SettingsProjects(): React.ReactElement {
                         }}
                       />
                     )}
-                    <h3 className="text-sm font-semibold" style={{ color: 'var(--color-text-1)' }}>
-                      {displayName}
-                    </h3>
+                    <h3 className="text-sm font-semibold text-text-1">{displayName}</h3>
                   </div>
-                  <p
-                    className="mt-1 truncate font-mono text-xs"
-                    style={{ color: 'var(--color-text-3)' }}
-                  >
-                    {project.path}
-                  </p>
+                  <p className="mt-1 truncate font-mono text-xs text-text-3">{project.path}</p>
                   {project.scoutSummary && (
-                    <p className="mt-1 text-xs" style={{ color: 'var(--color-text-2)' }}>
-                      {project.scoutSummary}
-                    </p>
+                    <p className="mt-1 text-xs text-text-2">{project.scoutSummary}</p>
                   )}
                   {project.githubRepo && (
-                    <p className="mt-1 text-xs" style={{ color: 'var(--color-text-3)' }}>
-                      {project.githubRepo}
-                    </p>
+                    <p className="mt-1 text-xs text-text-3">{project.githubRepo}</p>
                   )}
                   {project.aliases && project.aliases.length > 0 && (
                     <div className="mt-2 flex flex-wrap gap-1">
                       {project.aliases.map((a) => (
                         <span
                           key={a}
-                          className="rounded px-2 py-0.5 text-xs"
-                          style={{
-                            background: 'var(--color-surface-2)',
-                            color: 'var(--color-text-2)',
-                          }}
+                          className="rounded bg-surface-2 px-2 py-0.5 text-xs text-text-2"
                         >
                           {a}
                         </span>
@@ -103,7 +84,7 @@ export function SettingsProjects(): React.ReactElement {
                     </div>
                   )}
                   {project.hooks && Object.keys(project.hooks).length > 0 && (
-                    <div className="mt-2 text-xs" style={{ color: 'var(--color-text-3)' }}>
+                    <div className="mt-2 text-xs text-text-3">
                       Hooks: {Object.keys(project.hooks).join(', ')}
                     </div>
                   )}
@@ -112,8 +93,7 @@ export function SettingsProjects(): React.ReactElement {
                   <button
                     data-testid={`project-edit-${displayName}`}
                     onClick={() => setEditing(pathKey)}
-                    className="rounded-md px-3 py-1 text-xs"
-                    style={{ color: 'var(--color-text-2)' }}
+                    className="rounded-md px-3 py-1 text-xs text-text-2"
                   >
                     Edit
                   </button>

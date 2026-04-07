@@ -1,4 +1,5 @@
 import React, { useRef } from 'react';
+import { ChevronLeft } from 'lucide-react';
 import type { SessionEntry } from '#renderer/types';
 import { TranscriptViewer } from '#renderer/domains/sessions/components/TranscriptViewer';
 import { fmtDuration, copyToClipboard } from '#renderer/utils';
@@ -86,24 +87,11 @@ export function SessionDetailPanel({
           }}
           title="Back to sessions"
         >
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-            <path
-              d="M10 3L5 8l5 5"
-              stroke="currentColor"
-              strokeWidth="1.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          </svg>
+          <ChevronLeft size={16} />
         </button>
         <div className="min-w-0 flex-1">
-          <div className="truncate text-subheading" style={{ color: 'var(--color-text-1)' }}>
-            {title}
-          </div>
-          <div
-            className="mt-0.5 flex min-w-0 items-center gap-2 text-caption"
-            style={{ color: 'var(--color-text-3)' }}
-          >
+          <div className="truncate text-subheading text-text-1">{title}</div>
+          <div className="mt-0.5 flex min-w-0 items-center gap-2 text-caption text-text-3">
             {subtitleParts}
           </div>
         </div>
@@ -118,14 +106,9 @@ export function SessionDetailPanel({
       </div>
 
       {/* Transcript — scrollable area */}
-      <div
-        className="flex-1 overflow-auto rounded-lg px-5 py-4"
-        style={{ background: 'var(--color-surface-1)' }}
-      >
+      <div className="flex-1 overflow-auto rounded-lg px-5 py-4 bg-surface-1">
         {loading ? (
-          <div className="text-body" style={{ color: 'var(--color-text-3)' }}>
-            Loading transcript...
-          </div>
+          <div className="text-body text-text-3">Loading transcript...</div>
         ) : error ? (
           <div
             className="rounded border px-3 py-2 text-body"
@@ -140,9 +123,7 @@ export function SessionDetailPanel({
         ) : markdown ? (
           <TranscriptViewer markdown={markdown} />
         ) : (
-          <div className="text-body" style={{ color: 'var(--color-text-3)' }}>
-            No transcript available
-          </div>
+          <div className="text-body text-text-3">No transcript available</div>
         )}
       </div>
     </div>

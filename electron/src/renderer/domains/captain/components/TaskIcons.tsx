@@ -1,3 +1,4 @@
+import { MoreHorizontal } from 'lucide-react';
 import React from 'react';
 
 /* PR state icon — GitHub Octicons (git-pull-request, git-merge, git-pull-request-closed) */
@@ -35,13 +36,7 @@ export function PrIcon({ state }: { state: PrState }): React.ReactElement {
 }
 
 export function MoreIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-      <circle cx="4" cy="8" r="1.2" />
-      <circle cx="8" cy="8" r="1.2" />
-      <circle cx="12" cy="8" r="1.2" />
-    </svg>
-  );
+  return <MoreHorizontal size={16} />;
 }
 
 export function MergeBtn({ onClick }: { onClick: () => void }): React.ReactElement {

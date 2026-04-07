@@ -1,5 +1,10 @@
 import React, { useState } from 'react';
-import { useFocusTrap } from '#renderer/global/hooks/useFocusTrap';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogTitle,
+} from '#renderer/global/components/Dialog';
 
 interface FeedbackModalProps {
   testId: string;
@@ -7,9 +12,6 @@ interface FeedbackModalProps {
   subtitle?: string;
   label?: string;
   placeholder: string;
-  /** Optional pre-filled text. Matches the old window.prompt default-value
-   * behaviour so common actions (e.g. nudge with a canned message) stay
-   * one-click. */
   initialValue?: string;
   buttonLabel: string;
   pendingLabel: string;
@@ -34,41 +36,18 @@ export function FeedbackModal({
   onCancel,
 }: FeedbackModalProps): React.ReactElement {
   const [feedback, setFeedback] = useState(initialValue ?? '');
-  const { ref: dialogRef, handleKeyDown } = useFocusTrap(onCancel);
 
   return (
-    <div
-      data-testid={testId}
-      role="dialog"
-      aria-modal="true"
-      aria-label={title}
-      className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60"
-      onClick={(e) => e.target === e.currentTarget && onCancel()}
-      onKeyDown={handleKeyDown}
-    >
-      <div
-        ref={dialogRef}
-        className="w-[440px] max-w-[90vw] rounded-lg p-5"
-        style={{ background: 'var(--color-surface-2)', border: '1px solid var(--color-border)' }}
-      >
-        <h3 className="text-subheading mb-1" style={{ color: 'var(--color-text-1)' }}>
-          {title}
-        </h3>
+    <Dialog open={true} onOpenChange={() => onCancel()}>
+      <DialogContent data-testid={testId}>
+        <DialogTitle className="mb-1">{title}</DialogTitle>
         {subtitle && (
-          <p
-            className="text-body mb-3 truncate"
-            style={{ color: 'var(--color-text-2)' }}
-            title={subtitle}
-          >
+          <DialogDescription className="truncate" title={subtitle}>
             {subtitle}
-          </p>
+          </DialogDescription>
         )}
 
-        {label && (
-          <div className="text-label mb-1.5" style={{ color: 'var(--color-text-4)' }}>
-            {label}
-          </div>
-        )}
+        {label && <div className="text-label mb-1.5 text-text-4">{label}</div>}
         <textarea
           className="mb-3 w-full rounded-md px-3 py-2 text-[13px] focus:outline-none"
           style={{
@@ -107,7 +86,7 @@ export function FeedbackModal({
             {isPending ? pendingLabel : buttonLabel}
           </button>
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }

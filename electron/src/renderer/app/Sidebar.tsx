@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { FileText, List, Settings, Plus, FolderPlus, ChevronUp } from 'lucide-react';
 import log from '#renderer/logger';
 import { pct } from '#renderer/utils';
 import { useTaskStore } from '#renderer/domains/captain';
@@ -31,44 +32,9 @@ interface Props {
   setupActive: boolean;
 }
 
-function ScoutIcon() {
-  return (
-    <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor">
-      <rect x="2" y="2" width="12" height="12" rx="2" strokeWidth="1.5" />
-      <path d="M5 6h6M5 8.5h4" strokeWidth="1.5" strokeLinecap="round" />
-    </svg>
-  );
-}
-
-function SessionsIcon() {
-  return (
-    <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor">
-      <path d="M3 4h10M3 8h10M3 12h6" strokeWidth="1.5" strokeLinecap="round" />
-    </svg>
-  );
-}
-
-function SettingsIcon() {
-  return (
-    <svg
-      width="15"
-      height="15"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <circle cx="12" cy="12" r="3" />
-      <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 01-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" />
-    </svg>
-  );
-}
-
 const NAV_ITEMS: { id: Tab; label: string; Icon: React.FC }[] = [
-  { id: 'sessions', label: 'Sessions', Icon: SessionsIcon },
-  { id: 'scout', label: 'Scout', Icon: ScoutIcon },
+  { id: 'sessions', label: 'Sessions', Icon: () => <List size={16} /> },
+  { id: 'scout', label: 'Scout', Icon: () => <FileText size={16} /> },
 ];
 
 function UpdateButton(): React.ReactElement | null {
@@ -210,13 +176,11 @@ export function Sidebar({
       {/* New task — primary action */}
       <button
         onClick={onNewTask}
-        className="sidebar-new-task flex w-full items-center gap-2 rounded-[var(--radius-button)] border-none bg-[var(--color-accent)] px-3 py-2 text-[13px] font-semibold text-[var(--color-bg)] hover:bg-[var(--color-accent-hover)] active:bg-[var(--color-accent-pressed)]"
+        className="sidebar-new-task flex w-full items-center gap-2 rounded-button border-none bg-accent px-3 py-2 text-[13px] font-semibold text-bg hover:bg-accent-hover active:bg-accent-pressed"
         style={{ cursor: 'pointer' }}
         data-testid="add-task-btn"
       >
-        <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-          <path d="M8 3v10M3 8h10" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-        </svg>
+        <Plus size={14} strokeWidth={2} />
         New task
       </button>
 
@@ -281,7 +245,7 @@ export function Sidebar({
             data-testid="add-project-sidebar-btn"
             onClick={onAddProject}
             title="Add a new project"
-            className="ml-auto flex items-center justify-center text-[var(--color-text-3)] transition-colors hover:text-[var(--color-text-2)]"
+            className="ml-auto flex items-center justify-center text-text-3 transition-colors hover:text-text-2"
             style={{
               width: 20,
               height: 20,
@@ -292,20 +256,7 @@ export function Sidebar({
               padding: 0,
             }}
           >
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-              <path
-                d="M2 5.5v7A1.5 1.5 0 003.5 14h9a1.5 1.5 0 001.5-1.5v-6A1.5 1.5 0 0012.5 5H8.25L6.75 3H3.5A1.5 1.5 0 002 4.5v1z"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                strokeLinejoin="round"
-              />
-              <path
-                d="M8 8v4M6 10h4"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                strokeLinecap="round"
-              />
-            </svg>
+            <FolderPlus size={14} />
           </button>
         </div>
         {projects.length > 0 && (
@@ -346,7 +297,7 @@ export function Sidebar({
             cursor: 'pointer',
           }}
         >
-          <SettingsIcon />
+          <Settings size={16} />
           Settings
         </button>
       </div>
@@ -444,31 +395,26 @@ function SetupTrigger({
           />
         </svg>
         <div className="flex flex-1 flex-col items-start">
-          <span className="text-[12px] font-medium" style={{ color: 'var(--color-text-1)' }}>
+          <span className="text-[12px] font-medium text-text-1">
             Get started{' '}
-            <span style={{ color: 'var(--color-text-3)', fontWeight: 400 }}>{progressPct}%</span>
+            <span className="text-text-3" style={{ fontWeight: 400 }}>
+              {progressPct}%
+            </span>
           </span>
-          <span
-            className="text-caption truncate"
-            style={{ color: 'var(--color-text-3)', maxWidth: 120 }}
-          >
+          <span className="text-caption truncate text-text-3" style={{ maxWidth: 120 }}>
             {progress.currentStep}
           </span>
         </div>
-        <svg
-          width="12"
-          height="12"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="var(--color-text-3)"
+        <ChevronUp
+          size={12}
+          color="var(--color-text-3)"
+          strokeWidth={2.5}
           style={{
             transform: active ? 'rotate(180deg)' : 'none',
             transition: 'transform 0.15s',
             flexShrink: 0,
           }}
-        >
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 15l7-7 7 7" />
-        </svg>
+        />
       </button>
     </div>
   );

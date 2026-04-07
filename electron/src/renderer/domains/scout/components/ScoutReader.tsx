@@ -102,9 +102,7 @@ export function ScoutReader({ itemId, onBack, onAsk, qaOpen }: Props): React.Rea
   if (loading) {
     return (
       <div data-testid="scout-reader" className="flex items-center gap-2 py-16 justify-center">
-        <span className="text-xs" style={{ color: 'var(--color-text-3)' }}>
-          Loading...
-        </span>
+        <span className="text-xs text-text-3">Loading...</span>
       </div>
     );
   }
@@ -112,16 +110,10 @@ export function ScoutReader({ itemId, onBack, onAsk, qaOpen }: Props): React.Rea
   if (error || !item) {
     return (
       <div data-testid="scout-reader">
-        <button
-          onClick={onBack}
-          className="mb-3 rounded px-3 py-1 text-xs"
-          style={{ color: 'var(--color-text-2)' }}
-        >
+        <button onClick={onBack} className="mb-3 rounded px-3 py-1 text-xs text-text-2">
           &larr; Back
         </button>
-        <div className="text-xs" style={{ color: 'var(--color-error)' }}>
-          {error ?? `Item #${itemId} not found`}
-        </div>
+        <div className="text-xs text-error">{error ?? `Item #${itemId} not found`}</div>
       </div>
     );
   }
@@ -136,16 +128,10 @@ export function ScoutReader({ itemId, onBack, onAsk, qaOpen }: Props): React.Rea
           borderColor: 'var(--color-surface-2)',
         }}
       >
-        <button
-          onClick={onBack}
-          className="rounded px-3 py-1 text-xs"
-          style={{ color: 'var(--color-text-2)' }}
-        >
+        <button onClick={onBack} className="rounded px-3 py-1 text-xs text-text-2">
           &larr; Back
         </button>
-        <span className="text-xs truncate max-w-[300px]" style={{ color: 'var(--color-text-3)' }}>
-          {displayTitle}
-        </span>
+        <span className="text-xs truncate max-w-[300px] text-text-3">{displayTitle}</span>
         <div className="ml-auto flex items-center gap-1">
           <button
             onClick={onAsk}
@@ -184,9 +170,8 @@ export function ScoutReader({ itemId, onBack, onAsk, qaOpen }: Props): React.Rea
           )}
           <button
             onClick={handlePublish}
-            className="rounded px-3 py-1 text-xs"
+            className="rounded px-3 py-1 text-xs text-text-2"
             disabled={publishing}
-            style={{ color: 'var(--color-text-2)' }}
           >
             {publishing ? 'Publishing…' : telegraphUrl ? 'Open article' : 'Publish'}
           </button>
@@ -205,8 +190,7 @@ export function ScoutReader({ itemId, onBack, onAsk, qaOpen }: Props): React.Rea
             href={item.url}
             target="_blank"
             rel="noopener noreferrer"
-            className="rounded px-3 py-1 text-xs"
-            style={{ color: 'var(--color-text-2)' }}
+            className="rounded px-3 py-1 text-xs text-text-2"
           >
             Source
           </a>
@@ -235,21 +219,15 @@ export function ScoutReader({ itemId, onBack, onAsk, qaOpen }: Props): React.Rea
             background: 'var(--color-surface-1)',
           }}
         >
-          <div className="mb-2 text-label" style={{ color: 'var(--color-text-4)' }}>
-            Scout sessions
-          </div>
+          <div className="mb-2 text-label text-text-4">Scout sessions</div>
           {sessionsQuery.isLoading ? (
-            <div className="text-xs" style={{ color: 'var(--color-text-4)' }}>
-              Loading sessions…
-            </div>
+            <div className="text-xs text-text-4">Loading sessions…</div>
           ) : sessionsQuery.error ? (
-            <div className="text-xs" style={{ color: 'var(--color-error)' }}>
+            <div className="text-xs text-error">
               {getErrorMessage(sessionsQuery.error, 'Failed to load sessions')}
             </div>
           ) : (sessionsQuery.data?.length ?? 0) === 0 ? (
-            <div className="text-xs" style={{ color: 'var(--color-text-4)' }}>
-              No linked sessions.
-            </div>
+            <div className="text-xs text-text-4">No linked sessions.</div>
           ) : (
             <div className="space-y-2">
               {sessionsQuery.data?.map((session) => (
@@ -262,19 +240,14 @@ export function ScoutReader({ itemId, onBack, onAsk, qaOpen }: Props): React.Rea
                   }}
                 >
                   <div className="min-w-0 flex-1">
-                    <div
-                      className="truncate text-xs font-medium"
-                      style={{ color: 'var(--color-text-2)' }}
-                    >
+                    <div className="truncate text-xs font-medium text-text-2">
                       {session.session_id}
                     </div>
-                    <div className="text-[11px]" style={{ color: 'var(--color-text-4)' }}>
+                    <div className="text-[11px] text-text-4">
                       {session.caller} · {session.status}
                     </div>
                   </div>
-                  <div className="text-[11px]" style={{ color: 'var(--color-text-4)' }}>
-                    {session.created_at}
-                  </div>
+                  <div className="text-[11px] text-text-4">{session.created_at}</div>
                 </div>
               ))}
             </div>
@@ -284,16 +257,8 @@ export function ScoutReader({ itemId, onBack, onAsk, qaOpen }: Props): React.Rea
 
       {/* Title block */}
       <div className="mb-5">
-        <h1
-          className="text-lg font-semibold leading-snug mb-2"
-          style={{ color: 'var(--color-text-1)' }}
-        >
-          {displayTitle}
-        </h1>
-        <div
-          className="flex items-center gap-3 font-mono text-xs"
-          style={{ color: 'var(--color-text-3)' }}
-        >
+        <h1 className="text-lg font-semibold leading-snug mb-2 text-text-1">{displayTitle}</h1>
+        <div className="flex items-center gap-3 font-mono text-xs text-text-3">
           <span
             className="rounded border px-1.5 py-0.5 text-label"
             style={{ borderColor: 'var(--color-border)' }}
@@ -322,20 +287,15 @@ export function ScoutReader({ itemId, onBack, onAsk, qaOpen }: Props): React.Rea
       {/* Article */}
       <div>
         {articleLoading && (
-          <div className="text-xs text-center py-12" style={{ color: 'var(--color-text-3)' }}>
-            Loading article...
-          </div>
+          <div className="text-xs text-center py-12 text-text-3">Loading article...</div>
         )}
         {article && (
-          <div
-            className="prose-scout text-sm leading-relaxed"
-            style={{ color: 'var(--color-text-1)' }}
-          >
+          <div className="prose-scout text-sm leading-relaxed text-text-1">
             <Markdown>{article}</Markdown>
           </div>
         )}
         {!article && !articleLoading && (
-          <div className="text-xs text-center py-8" style={{ color: 'var(--color-text-3)' }}>
+          <div className="text-xs text-center py-8 text-text-3">
             No article content. Process the item first.
           </div>
         )}
@@ -355,20 +315,15 @@ function ScoutSummary({
 }): React.ReactElement {
   return (
     <div className="mb-5">
-      <button
-        onClick={onToggle}
-        className="flex items-center gap-2 mb-2 text-label"
-        style={{ color: 'var(--color-text-3)' }}
-      >
+      <button onClick={onToggle} className="flex items-center gap-2 mb-2 text-label text-text-3">
         <span className="text-[0.6rem]">{summaryOpen ? '\u25BC' : '\u25B6'}</span>
         Process Summary
       </button>
       {summaryOpen && (
         <div
-          className="border-l-2 pl-4 text-xs leading-relaxed prose-scout"
+          className="border-l-2 pl-4 text-xs leading-relaxed prose-scout text-text-1"
           style={{
             borderColor: 'color-mix(in srgb, var(--color-accent) 30%, transparent)',
-            color: 'var(--color-text-1)',
           }}
         >
           <Markdown>{summary}</Markdown>
@@ -399,8 +354,8 @@ function ScoutActForm({
 }): React.ReactElement {
   return (
     <div
-      className="mb-5 rounded-lg p-4"
-      style={{ background: 'var(--color-surface-2)', border: '1px solid var(--color-border)' }}
+      className="mb-5 rounded-lg p-4 bg-surface-2"
+      style={{ border: '1px solid var(--color-border)' }}
     >
       <div className="flex flex-col gap-3">
         <div className="flex items-center gap-2">
@@ -424,10 +379,7 @@ function ScoutActForm({
             </select>
           )}
           {projects.length === 1 && (
-            <span
-              className="shrink-0 rounded-md px-2.5 py-1.5 text-xs font-medium"
-              style={{ color: 'var(--color-text-2)', background: 'var(--color-surface-3)' }}
-            >
+            <span className="shrink-0 rounded-md bg-surface-3 px-2.5 py-1.5 text-xs font-medium text-text-2">
               {projects[0]}
             </span>
           )}
@@ -451,17 +403,12 @@ function ScoutActForm({
           <button
             onClick={onAct}
             disabled={!actProject || acting}
-            className="shrink-0 rounded-md px-4 py-1.5 text-xs font-medium text-[var(--color-bg)] disabled:opacity-40"
-            style={{ background: 'var(--color-accent)' }}
+            className="shrink-0 rounded-md bg-accent px-4 py-1.5 text-xs font-medium text-bg disabled:opacity-40"
           >
             {acting ? 'Creating...' : 'Create Task'}
           </button>
         </div>
-        {actResult && (
-          <div className="text-xs" style={{ color: 'var(--color-text-2)' }}>
-            {actResult}
-          </div>
-        )}
+        {actResult && <div className="text-xs text-text-2">{actResult}</div>}
       </div>
     </div>
   );

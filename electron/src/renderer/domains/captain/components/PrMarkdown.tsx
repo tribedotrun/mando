@@ -1,11 +1,10 @@
-import React from 'react';
+import React, { useRef, useState } from 'react';
+import { ImageLightbox } from '#renderer/domains/captain/components/ImageLightbox';
 
-/**
- * Render GitHub-flavored markdown for PR descriptions.
- * Supports: headings, bold, italic, code (inline + blocks), lists (ordered/unordered),
- * checkboxes, images, links, blockquotes, horizontal rules.
- */
 export function PrMarkdown({ text }: { text: string }): React.ReactElement {
+  const [lightbox, setLightbox] = useState<{ images: string[]; index: number } | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+
   // Pre-process: strip HTML comments and clean up
   const cleaned = text
     .replace(/<!--[\s\S]*?-->/g, '') // strip HTML comments
@@ -34,11 +33,7 @@ export function PrMarkdown({ text }: { text: string }): React.ReactElement {
       if (!foundClose && codeLines.length === 0) {
         // Lone ``` with no closing — treat as regular text
         elements.push(
-          <div
-            key={elements.length}
-            className="py-1 text-[12px]"
-            style={{ color: 'var(--color-text-1)' }}
-          >
+          <div key={elements.length} className="py-1 text-[12px] text-text-1">
             {line}
           </div>,
         );
@@ -47,12 +42,10 @@ export function PrMarkdown({ text }: { text: string }): React.ReactElement {
       elements.push(
         <pre
           key={elements.length}
-          className="my-2 overflow-x-auto rounded p-3 text-[11px] leading-relaxed"
+          className="my-2 overflow-x-auto rounded bg-surface-2 p-3 text-[11px] leading-relaxed text-text-1"
           style={{
-            background: 'var(--color-surface-2)',
             border: '1px solid var(--color-border-subtle)',
             fontFamily: 'var(--font-mono)',
-            color: 'var(--color-text-1)',
           }}
         >
           {codeLines.join('\n')}
@@ -88,11 +81,7 @@ export function PrMarkdown({ text }: { text: string }): React.ReactElement {
             <thead>
               <tr style={{ borderBottom: '1px solid var(--color-border)' }}>
                 {headerCells.map((h, ci) => (
-                  <th
-                    key={ci}
-                    className="px-3 py-1 text-left font-medium"
-                    style={{ color: 'var(--color-text-1)' }}
-                  >
+                  <th key={ci} className="px-3 py-1 text-left font-medium text-text-1">
                     {renderInline(h)}
                   </th>
                 ))}
@@ -102,7 +91,7 @@ export function PrMarkdown({ text }: { text: string }): React.ReactElement {
               {rows.map((row, ri) => (
                 <tr key={ri} style={{ borderBottom: '1px solid var(--color-border-subtle)' }}>
                   {row.map((cell, ci) => (
-                    <td key={ci} className="px-3 py-1" style={{ color: 'var(--color-text-2)' }}>
+                    <td key={ci} className="px-3 py-1 text-text-2">
                       {renderInline(cell)}
                     </td>
                   ))}
@@ -131,11 +120,7 @@ export function PrMarkdown({ text }: { text: string }): React.ReactElement {
     // Headings
     if (line.startsWith('#### ')) {
       elements.push(
-        <div
-          key={elements.length}
-          className="mt-3 mb-1 text-[12px] font-semibold"
-          style={{ color: 'var(--color-text-1)' }}
-        >
+        <div key={elements.length} className="mt-3 mb-1 text-[12px] font-semibold text-text-1">
           {renderInline(line.slice(5))}
         </div>,
       );
@@ -144,11 +129,7 @@ export function PrMarkdown({ text }: { text: string }): React.ReactElement {
     }
     if (line.startsWith('### ')) {
       elements.push(
-        <div
-          key={elements.length}
-          className="mt-3 mb-1 text-[13px] font-semibold"
-          style={{ color: 'var(--color-text-1)' }}
-        >
+        <div key={elements.length} className="mt-3 mb-1 text-[13px] font-semibold text-text-1">
           {renderInline(line.slice(4))}
         </div>,
       );
@@ -157,11 +138,7 @@ export function PrMarkdown({ text }: { text: string }): React.ReactElement {
     }
     if (line.startsWith('## ')) {
       elements.push(
-        <div
-          key={elements.length}
-          className="mt-4 mb-1.5 text-body font-semibold"
-          style={{ color: 'var(--color-text-1)' }}
-        >
+        <div key={elements.length} className="mt-4 mb-1.5 text-body font-semibold text-text-1">
           {renderInline(line.slice(3))}
         </div>,
       );
@@ -170,11 +147,7 @@ export function PrMarkdown({ text }: { text: string }): React.ReactElement {
     }
     if (line.startsWith('# ')) {
       elements.push(
-        <div
-          key={elements.length}
-          className="mt-4 mb-2 text-subheading"
-          style={{ color: 'var(--color-text-1)' }}
-        >
+        <div key={elements.length} className="mt-4 mb-2 text-subheading text-text-1">
           {renderInline(line.slice(2))}
         </div>,
       );
@@ -218,7 +191,7 @@ export function PrMarkdown({ text }: { text: string }): React.ReactElement {
               {type}
             </div>
             {bodyLines.map((bl, bi) => (
-              <div key={bi} style={{ color: 'var(--color-text-2)' }}>
+              <div key={bi} className="text-text-2">
                 {renderInline(bl)}
               </div>
             ))}
@@ -236,10 +209,9 @@ export function PrMarkdown({ text }: { text: string }): React.ReactElement {
       elements.push(
         <div
           key={elements.length}
-          className="my-1 pl-3 text-[12px] italic"
+          className="my-1 pl-3 text-[12px] italic text-text-3"
           style={{
             borderLeft: '2px solid var(--color-border)',
-            color: 'var(--color-text-3)',
           }}
         >
           {bqLines.map((bl, bi) => (
@@ -266,7 +238,7 @@ export function PrMarkdown({ text }: { text: string }): React.ReactElement {
           >
             {checked ? '✓' : ''}
           </span>
-          <span style={{ color: 'var(--color-text-1)' }}>{renderInline(checkMatch[3])}</span>
+          <span className="text-text-1">{renderInline(checkMatch[3])}</span>
         </div>,
       );
       i++;
@@ -278,8 +250,8 @@ export function PrMarkdown({ text }: { text: string }): React.ReactElement {
     if (ulMatch) {
       elements.push(
         <div key={elements.length} className="flex gap-2 py-1 pl-2 text-[12px]">
-          <span style={{ color: 'var(--color-text-3)' }}>&bull;</span>
-          <span style={{ color: 'var(--color-text-1)' }}>{renderInline(ulMatch[2])}</span>
+          <span className="text-text-3">&bull;</span>
+          <span className="text-text-1">{renderInline(ulMatch[2])}</span>
         </div>,
       );
       i++;
@@ -292,10 +264,8 @@ export function PrMarkdown({ text }: { text: string }): React.ReactElement {
       const num = line.match(/^(\s*)(\d+)\./)?.[2] ?? '1';
       elements.push(
         <div key={elements.length} className="flex gap-2 py-1 pl-2 text-[12px]">
-          <span className="w-4 shrink-0 text-right" style={{ color: 'var(--color-text-3)' }}>
-            {num}.
-          </span>
-          <span style={{ color: 'var(--color-text-1)' }}>{renderInline(olMatch[2])}</span>
+          <span className="w-4 shrink-0 text-right text-text-3">{num}.</span>
+          <span className="text-text-1">{renderInline(olMatch[2])}</span>
         </div>,
       );
       i++;
@@ -313,8 +283,7 @@ export function PrMarkdown({ text }: { text: string }): React.ReactElement {
     elements.push(
       <div
         key={elements.length}
-        className="break-words py-1 text-[12px] leading-relaxed"
-        style={{ color: 'var(--color-text-1)' }}
+        className="break-words py-1 text-[12px] leading-relaxed text-text-1"
       >
         {renderInline(line)}
       </div>,
@@ -322,7 +291,30 @@ export function PrMarkdown({ text }: { text: string }): React.ReactElement {
     i++;
   }
 
-  return <div>{elements}</div>;
+  const handleClick = (e: React.MouseEvent) => {
+    const target = e.target as HTMLElement;
+    if (target.tagName !== 'IMG' || !target.getAttribute('data-lightbox-src')) return;
+    const el = containerRef.current;
+    if (!el) return;
+    const imgs = Array.from(el.querySelectorAll<HTMLImageElement>('img[data-lightbox-src]'));
+    const urls = imgs.map((img) => img.src);
+    const idx = imgs.indexOf(target as HTMLImageElement);
+    if (idx !== -1 && urls.length > 0) setLightbox({ images: urls, index: idx });
+  };
+
+  return (
+    <div ref={containerRef} onClick={handleClick}>
+      {elements}
+      {lightbox && (
+        <ImageLightbox
+          images={lightbox.images}
+          index={lightbox.index}
+          onClose={() => setLightbox(null)}
+          onNavigate={(i) => setLightbox((prev) => (prev ? { ...prev, index: i } : null))}
+        />
+      )}
+    </div>
+  );
 }
 
 /** Render inline markdown: **bold**, *italic*, `code`, [links](url), ![images](url), HTML tags. */
@@ -350,13 +342,14 @@ function renderInline(text: string): React.ReactNode {
             key={key++}
             src={imgUrl}
             alt={match[1]}
-            className="my-1 max-w-full rounded"
+            data-lightbox-src={imgUrl}
+            className="my-1 max-w-full cursor-pointer rounded transition-opacity hover:opacity-80"
             style={{ maxHeight: 300, border: '1px solid var(--color-border-subtle)' }}
           />,
         );
       } else {
         parts.push(
-          <span key={key++} style={{ color: 'var(--color-text-3)', fontStyle: 'italic' }}>
+          <span key={key++} className="text-text-3" style={{ fontStyle: 'italic' }}>
             [{match[1] || 'image'}]
           </span>,
         );
@@ -372,13 +365,12 @@ function renderInline(text: string): React.ReactNode {
             href={linkUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="hover:underline"
-            style={{ color: 'var(--color-accent)' }}
+            className="text-accent hover:underline"
           >
             {match[3]}
           </a>
         ) : (
-          <span key={key++} style={{ color: 'var(--color-accent)' }}>
+          <span key={key++} className="text-accent">
             {match[3]}
           </span>
         ),
@@ -386,7 +378,7 @@ function renderInline(text: string): React.ReactNode {
     } else if (match[5]) {
       // Bold
       parts.push(
-        <strong key={key++} style={{ fontWeight: 600, color: 'var(--color-text-1)' }}>
+        <strong key={key++} className="text-text-1" style={{ fontWeight: 600 }}>
           {match[5]}
         </strong>,
       );
@@ -398,8 +390,8 @@ function renderInline(text: string): React.ReactNode {
       parts.push(
         <code
           key={key++}
-          className="rounded px-1 py-1 text-[11px]"
-          style={{ background: 'var(--color-surface-3)', fontFamily: 'var(--font-mono)' }}
+          className="rounded bg-surface-3 px-1 py-1 text-[11px]"
+          style={{ fontFamily: 'var(--font-mono)' }}
         >
           {match[7]}
         </code>,
@@ -407,7 +399,7 @@ function renderInline(text: string): React.ReactNode {
     } else if (match[8]) {
       // Strikethrough
       parts.push(
-        <del key={key++} style={{ color: 'var(--color-text-3)' }}>
+        <del key={key++} className="text-text-3">
           {match[8]}
         </del>,
       );
@@ -430,13 +422,12 @@ function renderInline(text: string): React.ReactNode {
             href={aHref}
             target="_blank"
             rel="noopener noreferrer"
-            className="hover:underline"
-            style={{ color: 'var(--color-accent)' }}
+            className="text-accent hover:underline"
           >
             {match[12]}
           </a>
         ) : (
-          <span key={key++} style={{ color: 'var(--color-accent)' }}>
+          <span key={key++} className="text-accent">
             {match[12]}
           </span>
         ),
@@ -450,11 +441,12 @@ function renderInline(text: string): React.ReactNode {
             key={key++}
             src={imgSrc}
             alt=""
-            className="my-1 max-w-full rounded"
+            data-lightbox-src={imgSrc}
+            className="my-1 max-w-full cursor-pointer rounded transition-opacity hover:opacity-80"
             style={{ maxHeight: 300, border: '1px solid var(--color-border-subtle)' }}
           />
         ) : (
-          <span key={key++} style={{ color: 'var(--color-text-3)', fontStyle: 'italic' }}>
+          <span key={key++} className="text-text-3" style={{ fontStyle: 'italic' }}>
             [image]
           </span>
         ),

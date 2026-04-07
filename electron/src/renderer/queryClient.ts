@@ -18,7 +18,8 @@ export const queryClient = new QueryClient({
 });
 
 /**
- * Invalidate the query caches that back the task detail view (timeline + PR summary).
+ * Invalidate the query caches that back the task detail view
+ * (timeline + PR summary + Q&A history).
  * Pass `id` to scope to a single task, or omit to invalidate for all tasks
  * (used by the SSE handler which fans out broadly).
  */
@@ -26,8 +27,10 @@ export function invalidateTaskDetail(client: QC, id?: number): void {
   if (id != null) {
     client.invalidateQueries({ queryKey: ['task-detail-timeline', id] });
     client.invalidateQueries({ queryKey: ['task-detail-pr', id] });
+    client.invalidateQueries({ queryKey: ['task-ask-history', id] });
   } else {
     client.invalidateQueries({ queryKey: ['task-detail-timeline'] });
     client.invalidateQueries({ queryKey: ['task-detail-pr'] });
+    client.invalidateQueries({ queryKey: ['task-ask-history'] });
   }
 }

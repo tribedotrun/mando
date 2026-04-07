@@ -346,7 +346,9 @@ export function DevInspector({
             pointerEvents: 'none',
           }}
         >
-          <span style={{ color: 'var(--color-success)', fontSize: 11 }}>✓ copied</span>
+          <span className="text-success" style={{ fontSize: 11 }}>
+            ✓ copied
+          </span>
           <span
             style={{
               maxWidth: 300,

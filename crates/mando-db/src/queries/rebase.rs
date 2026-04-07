@@ -5,6 +5,8 @@ use sqlx::SqlitePool;
 
 use mando_types::rebase_state::RebaseState;
 
+const SELECT_COLS: &str = "task_id, worker, status, retries, head_sha";
+
 #[derive(sqlx::FromRow)]
 struct RebaseRow {
     task_id: i64,
@@ -42,11 +44,12 @@ impl RebaseRow {
 
 /// Get rebase state for a task (None if no rebase has been attempted).
 pub async fn get(pool: &SqlitePool, task_id: i64) -> Result<Option<RebaseState>> {
-    let row: Option<RebaseRow> =
-        sqlx::query_as("SELECT * FROM task_rebase_state WHERE task_id = ?")
-            .bind(task_id)
-            .fetch_optional(pool)
-            .await?;
+    let row: Option<RebaseRow> = sqlx::query_as(&format!(
+        "SELECT {SELECT_COLS} FROM task_rebase_state WHERE task_id = ?"
+    ))
+    .bind(task_id)
+    .fetch_optional(pool)
+    .await?;
     row.map(|r| r.into_state()).transpose()
 }
 
@@ -82,8 +85,9 @@ pub async fn delete(pool: &SqlitePool, task_id: i64) -> Result<()> {
 
 /// Get all rebase state rows (for hydration on load).
 pub async fn all(pool: &SqlitePool) -> Result<Vec<RebaseState>> {
-    let rows: Vec<RebaseRow> = sqlx::query_as("SELECT * FROM task_rebase_state")
-        .fetch_all(pool)
-        .await?;
+    let rows: Vec<RebaseRow> =
+        sqlx::query_as(&format!("SELECT {SELECT_COLS} FROM task_rebase_state"))
+            .fetch_all(pool)
+            .await?;
     rows.into_iter().map(|r| r.into_state()).collect()
 }

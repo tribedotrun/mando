@@ -3,15 +3,9 @@ import type { TaskItem, ClarifierQuestion, SessionSummary } from '#renderer/type
 import { answerClarification } from '#renderer/domains/captain/hooks/useApi';
 import { useDraftRecord } from '#renderer/global/hooks/useDraft';
 import { useTaskStore } from '#renderer/domains/captain/stores/taskStore';
-import { useToastStore } from '#renderer/global/stores/toastStore';
+import { toast } from 'sonner';
 import log from '#renderer/logger';
-import {
-  clarifyResultToToast,
-  fmtDuration,
-  fmtUsd,
-  getErrorMessage,
-  relativeTime,
-} from '#renderer/utils';
+import { clarifyResultToToast, fmtDuration, getErrorMessage, relativeTime } from '#renderer/utils';
 import { PrIcon } from '#renderer/domains/captain/components/TaskIcons';
 
 interface Props {
@@ -26,17 +20,13 @@ interface Props {
 function StreamingCard({ item, sessions }: Pick<Props, 'item' | 'sessions'>) {
   const active = sessions.find((s) => s.status === 'running');
   const dur = active ? (active.duration_ms ?? 0) / 1000 : 0;
-  const cost = active ? (active.cost_usd ?? 0) : 0;
   return (
     <CardShell color="var(--color-success)">
       <StatusDot color="var(--color-success)" pulse />
-      <span className="text-body font-medium" style={{ color: 'var(--color-text-1)' }}>
-        Streaming
-      </span>
+      <span className="text-body font-medium text-text-1">Streaming</span>
       <Sep />
-      <span className="text-caption" style={{ color: 'var(--color-text-2)' }}>
+      <span className="text-caption text-text-2">
         {item.worker ?? 'Worker'} &middot; {dur > 0 ? fmtDuration(dur) : 'starting'}
-        {cost > 0 && ` · $${fmtUsd(cost)}`}
       </span>
     </CardShell>
   );
@@ -45,9 +35,7 @@ function StreamingCard({ item, sessions }: Pick<Props, 'item' | 'sessions'>) {
 function QueuedCard() {
   return (
     <CardShell color="var(--color-text-4)">
-      <span className="text-body" style={{ color: 'var(--color-text-3)' }}>
-        &#9719; Queued
-      </span>
+      <span className="text-body text-text-3">&#9719; Queued</span>
     </CardShell>
   );
 }
@@ -56,9 +44,7 @@ function CaptainReviewingCard({ label }: { label: string }) {
   return (
     <CardShell color="var(--color-accent)">
       <StatusDot color="var(--color-accent)" pulse />
-      <span className="text-body font-medium" style={{ color: 'var(--color-text-1)' }}>
-        {label}
-      </span>
+      <span className="text-body font-medium text-text-1">{label}</span>
     </CardShell>
   );
 }
@@ -67,15 +53,11 @@ function AwaitingReviewCard({ item }: { item: TaskItem }) {
   return (
     <CardShell color="var(--color-success)">
       <StatusDot color="var(--color-success)" />
-      <span className="text-body font-medium" style={{ color: 'var(--color-text-1)' }}>
-        Ready for review
-      </span>
+      <span className="text-body font-medium text-text-1">Ready for review</span>
       {item.pr && (
         <>
           <Sep />
-          <span className="text-caption" style={{ color: 'var(--color-text-2)' }}>
-            PR {item.pr.replace(/.*\/pull\//, '#')}
-          </span>
+          <span className="text-caption text-text-2">PR {item.pr.replace(/.*\/pull\//, '#')}</span>
         </>
       )}
     </CardShell>
@@ -90,23 +72,20 @@ function EscalatedCard({ item }: { item: TaskItem }) {
       <div className="flex w-full flex-col gap-1">
         <div className="flex items-center gap-2">
           <StatusDot color="var(--color-error)" />
-          <span className="text-body font-medium" style={{ color: 'var(--color-text-1)' }}>
-            Escalated
-          </span>
+          <span className="text-body font-medium text-text-1">Escalated</span>
         </div>
         {preview && (
-          <div className="text-caption" style={{ color: 'var(--color-text-2)' }}>
+          <div className="text-caption text-text-2">
             &ldquo;{expanded ? item.escalation_report : preview}
             {!expanded && (item.escalation_report?.length ?? 0) > 120 ? '...' : ''}
             &rdquo;
             {(item.escalation_report?.length ?? 0) > 120 && (
               <button
                 onClick={() => setExpanded((v) => !v)}
-                className="ml-1"
+                className="ml-1 text-accent"
                 style={{
                   background: 'none',
                   border: 'none',
-                  color: 'var(--color-accent)',
                   cursor: 'pointer',
                   padding: 0,
                   fontSize: 'inherit',
@@ -142,8 +121,6 @@ function NeedsClarificationCard({
   const [pending, setPending] = useState(false);
   const [completed, setCompleted] = useState<string | null>(null);
   const taskFetch = useTaskStore((s) => s.fetch);
-  const toast = useToastStore.getState;
-
   const filledCount = unanswered.filter((_, i) => answers[i]?.trim()).length;
 
   const handleSubmit = useCallback(async () => {
@@ -157,23 +134,22 @@ function NeedsClarificationCard({
       const result = await answerClarification(taskId, payload);
       taskFetch();
       const { variant, msg } = clarifyResultToToast(result.status);
-      toast().add(variant, msg);
+      const fn = variant === 'success' ? toast.success : toast.info;
+      fn(msg);
       clearAnswersDraft();
       if (result.status !== 'clarifying') setCompleted(msg);
     } catch (err) {
       log.warn(`[StatusCard] clarification submit failed for task ${taskId}:`, err);
-      toast().add('error', getErrorMessage(err, 'Failed to submit answers'));
+      toast.error(getErrorMessage(err, 'Failed to submit answers'));
     } finally {
       setPending(false);
     }
-  }, [answers, unanswered, taskId, taskFetch, toast, clearAnswersDraft]);
+  }, [answers, unanswered, taskId, taskFetch, clearAnswersDraft]);
 
   if (completed) {
     return (
       <CardShell color="var(--color-success)">
-        <span className="text-body font-medium" style={{ color: 'var(--color-success)' }}>
-          {completed}
-        </span>
+        <span className="text-body font-medium text-success">{completed}</span>
       </CardShell>
     );
   }
@@ -188,26 +164,19 @@ function NeedsClarificationCard({
     >
       <div className="mb-3 flex items-center gap-2">
         <StatusDot color="var(--color-needs-human)" />
-        <span className="text-body font-medium" style={{ color: 'var(--color-text-1)' }}>
-          Needs your input
-        </span>
+        <span className="text-body font-medium text-text-1">Needs your input</span>
       </div>
 
       <div className="space-y-3">
         {unanswered.map((q, i) => (
           <div key={i}>
-            <div
-              className="mb-1 break-words text-body leading-snug"
-              style={{ color: 'var(--color-text-1)' }}
-            >
-              <span style={{ color: 'var(--color-text-3)' }}>{i + 1}.</span> {q.question}
+            <div className="mb-1 break-words text-body leading-snug text-text-1">
+              <span className="text-text-3">{i + 1}.</span> {q.question}
             </div>
             <textarea
-              className="w-full resize-none rounded-md bg-transparent px-3 py-2 text-body leading-snug focus:outline-none"
+              className="w-full resize-none rounded-md bg-surface-2 px-3 py-2 text-body leading-snug text-text-1 focus:outline-none"
               style={{
-                color: 'var(--color-text-1)',
                 border: '1px solid var(--color-border-subtle)',
-                background: 'var(--color-surface-2)',
               }}
               rows={1}
               placeholder="Your answer..."
@@ -226,22 +195,19 @@ function NeedsClarificationCard({
       </div>
 
       <div
-        className="mt-3 flex items-center justify-between rounded-lg px-3 py-2"
+        className="mt-3 flex items-center justify-between rounded-lg bg-surface-2 px-3 py-2"
         style={{
-          background: 'var(--color-surface-2)',
           border: '1px solid var(--color-border-subtle)',
         }}
       >
-        <span className="text-caption" style={{ color: 'var(--color-text-3)' }}>
+        <span className="text-caption text-text-3">
           {filledCount} of {unanswered.length} answered
         </span>
         <button
           onClick={handleSubmit}
           disabled={filledCount === 0 || pending}
-          className="rounded-md px-4 py-1.5 text-caption font-medium disabled:opacity-40"
+          className="rounded-md bg-accent px-4 py-1.5 text-caption font-medium text-bg disabled:opacity-40"
           style={{
-            background: 'var(--color-accent)',
-            color: 'var(--color-bg)',
             border: 'none',
             cursor: filledCount === 0 || pending ? 'default' : 'pointer',
           }}
@@ -257,11 +223,11 @@ function FailedCard({ item }: { item: TaskItem }) {
   return (
     <CardShell color="var(--color-error)">
       <StatusDot color="var(--color-error)" />
-      <span className="text-body font-medium" style={{ color: 'var(--color-text-1)' }}>
+      <span className="text-body font-medium text-text-1">
         {item.status === 'errored' ? 'Failed' : 'Rework'}
       </span>
       <Sep />
-      <span className="text-caption" style={{ color: 'var(--color-text-2)' }}>
+      <span className="text-caption text-text-2">
         {item.intervention_count > 0 && `${item.intervention_count} interventions`}
       </span>
     </CardShell>
@@ -269,11 +235,10 @@ function FailedCard({ item }: { item: TaskItem }) {
 }
 
 function MergedCard({ item, sessions }: Pick<Props, 'item' | 'sessions'>) {
-  const totalCost = sessions.reduce((s, x) => s + (x.cost_usd ?? 0), 0);
   return (
     <CardShell color="var(--color-text-4)">
       {item.status === 'merged' && <PrIcon state="merged" />}
-      <span className="text-body" style={{ color: 'var(--color-text-3)' }}>
+      <span className="text-body text-text-3">
         {item.status === 'merged'
           ? 'Merged'
           : item.status === 'canceled'
@@ -281,10 +246,9 @@ function MergedCard({ item, sessions }: Pick<Props, 'item' | 'sessions'>) {
             : 'Completed'}
       </span>
       <Sep />
-      <span className="text-caption" style={{ color: 'var(--color-text-3)' }}>
+      <span className="text-caption text-text-3">
         {item.last_activity_at && relativeTime(item.last_activity_at)}
         {sessions.length > 0 && ` · ${sessions.length} sessions`}
-        {totalCost > 0 && ` · $${fmtUsd(totalCost)}`}
       </span>
     </CardShell>
   );
@@ -302,9 +266,7 @@ export function StatusCard({ item, sessions, clarifierQuestions }: Props): React
     return (
       <CardShell color="var(--color-needs-human)">
         <StatusDot color="var(--color-needs-human)" />
-        <span className="text-body font-medium" style={{ color: 'var(--color-text-1)' }}>
-          Needs your input
-        </span>
+        <span className="text-body font-medium text-text-1">Needs your input</span>
       </CardShell>
     );
   }
@@ -320,9 +282,7 @@ export function StatusCard({ item, sessions, clarifierQuestions }: Props): React
   if (s === 'handed-off') {
     return (
       <CardShell color="var(--color-text-3)">
-        <span className="text-body" style={{ color: 'var(--color-text-3)' }}>
-          Handed off
-        </span>
+        <span className="text-body text-text-3">Handed off</span>
       </CardShell>
     );
   }
@@ -363,9 +323,5 @@ function StatusDot({ color, pulse }: { color: string; pulse?: boolean }): React.
 }
 
 function Sep(): React.ReactElement {
-  return (
-    <span className="text-caption" style={{ color: 'var(--color-text-4)' }}>
-      &middot;
-    </span>
-  );
+  return <span className="text-caption text-text-4">&middot;</span>;
 }

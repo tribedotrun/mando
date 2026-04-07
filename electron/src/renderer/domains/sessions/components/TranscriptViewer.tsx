@@ -1,4 +1,5 @@
 import React, { useMemo } from 'react';
+import { Maximize2, X } from 'lucide-react';
 import type { SessionEntry } from '#renderer/types';
 import { CopyBtn } from '#renderer/global/components/CopyBtn';
 import { fmtMs } from '#renderer/utils';
@@ -220,11 +221,7 @@ export function TranscriptViewer({ markdown }: Props): React.ReactElement {
   const visibleSections = sections.filter((s) => s.kind !== 'queue-op' && s.kind !== 'session-end');
 
   if (visibleSections.length === 0) {
-    return (
-      <div className="text-[11px]" style={{ color: 'var(--color-text-3)' }}>
-        No transcript content
-      </div>
-    );
+    return <div className="text-[11px] text-text-3">No transcript content</div>;
   }
 
   // Hoist StructuredOutput blocks to the top of the transcript.
@@ -280,13 +277,8 @@ export function TranscriptSidebar({
         style={{ borderBottom: '1px solid var(--color-border-subtle)' }}
       >
         <div className="min-w-0 flex-1">
-          <div
-            className="truncate text-caption font-medium"
-            style={{ color: 'var(--color-text-1)' }}
-          >
-            {sessionTitle(s)}
-          </div>
-          <div className="flex gap-2 text-label" style={{ color: 'var(--color-text-3)' }}>
+          <div className="truncate text-caption font-medium text-text-1">{sessionTitle(s)}</div>
+          <div className="flex gap-2 text-label text-text-3">
             {subtitle && <span>{subtitle}</span>}
             {s.model && <span>{s.model}</span>}
             {s.duration_ms != null && s.duration_ms > 0 && <span>{fmtMs(s.duration_ms)}</span>}
@@ -297,7 +289,7 @@ export function TranscriptSidebar({
           <button
             onClick={onExpand}
             title="Expand to full view"
-            className="flex items-center justify-center rounded-md transition-colors hover:bg-[var(--color-surface-3)]"
+            className="flex items-center justify-center rounded-md transition-colors hover:bg-surface-3"
             style={{
               width: 24,
               height: 24,
@@ -307,22 +299,12 @@ export function TranscriptSidebar({
               cursor: 'pointer',
             }}
           >
-            <svg
-              width="14"
-              height="14"
-              viewBox="0 0 14 14"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.5"
-              strokeLinecap="round"
-            >
-              <path d="M8.5 1.5H12.5V5.5M5.5 12.5H1.5V8.5M12.5 1.5L8 6M1.5 12.5L6 8" />
-            </svg>
+            <Maximize2 size={14} strokeWidth={1.5} />
           </button>
         )}
         <button
           onClick={onClose}
-          className="flex items-center justify-center rounded-md transition-colors hover:bg-[var(--color-surface-3)]"
+          className="flex items-center justify-center rounded-md transition-colors hover:bg-surface-3"
           style={{
             width: 24,
             height: 24,
@@ -332,31 +314,17 @@ export function TranscriptSidebar({
             cursor: 'pointer',
           }}
         >
-          <svg
-            width="14"
-            height="14"
-            viewBox="0 0 14 14"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            strokeLinecap="round"
-          >
-            <path d="M3 3l8 8M11 3l-8 8" />
-          </svg>
+          <X size={14} strokeWidth={1.5} />
         </button>
       </div>
       {/* Transcript content */}
       <div className="flex-1 overflow-auto px-4 py-3">
         {session.loading ? (
-          <div className="text-caption" style={{ color: 'var(--color-text-3)' }}>
-            Loading transcript&hellip;
-          </div>
+          <div className="text-caption text-text-3">Loading transcript&hellip;</div>
         ) : session.markdown ? (
           <TranscriptViewer markdown={session.markdown} />
         ) : (
-          <div className="text-caption" style={{ color: 'var(--color-text-3)' }}>
-            No transcript available
-          </div>
+          <div className="text-caption text-text-3">No transcript available</div>
         )}
       </div>
     </div>

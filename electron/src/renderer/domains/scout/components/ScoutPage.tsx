@@ -1,4 +1,5 @@
 import React, { useCallback, useRef, useState } from 'react';
+import { Search } from 'lucide-react';
 import { useScoutStore } from '#renderer/domains/scout/stores/scoutStore';
 import { useViewKeyHandler } from '#renderer/global/hooks/useKeyboardShortcuts';
 import { useSelection } from '#renderer/domains/captain';
@@ -13,7 +14,7 @@ import {
   bulkDeleteScout,
   researchScout,
 } from '#renderer/domains/scout/hooks/useApi';
-import { useToastStore } from '#renderer/global/stores/toastStore';
+import { toast } from 'sonner';
 import { getErrorMessage, indexNext, indexPrev } from '#renderer/utils';
 
 const USER_SETTABLE = ['pending', 'processed', 'saved', 'archived'];
@@ -56,12 +57,10 @@ export function ScoutPage({ active = true }: { active?: boolean } = {}): React.R
         await scoutFetch();
         const added = result.added ?? 0;
         const processed = result.processed ?? 0;
-        useToastStore
-          .getState()
-          .add('success', `Research added ${added} link(s) and processed ${processed}`);
+        toast.success(`Research added ${added} link(s) and processed ${processed}`);
         setResearchModalOpen(false);
       } catch (err) {
-        useToastStore.getState().add('error', getErrorMessage(err, 'Research failed'));
+        toast.error(getErrorMessage(err, 'Research failed'));
       } finally {
         setResearchPending(false);
       }
@@ -159,7 +158,7 @@ export function ScoutPage({ active = true }: { active?: boolean } = {}): React.R
       clearSelection();
       await scoutFetch();
     } catch (err) {
-      useToastStore.getState().add('error', getErrorMessage(err, 'Bulk scout action failed'));
+      toast.error(getErrorMessage(err, 'Bulk scout action failed'));
     }
   };
 
@@ -214,12 +213,8 @@ export function ScoutPage({ active = true }: { active?: boolean } = {}): React.R
       {/* Row 1: Title + count */}
       <div className="flex items-baseline justify-between">
         <div className="flex items-baseline gap-3">
-          <h2 className="text-heading" style={{ color: 'var(--color-text-1)' }}>
-            Scout
-          </h2>
-          <span className="text-caption" style={{ color: 'var(--color-text-3)' }}>
-            {total} items
-          </span>
+          <h2 className="text-heading text-text-1">Scout</h2>
+          <span className="text-caption text-text-3">{total} items</span>
         </div>
         <div className="flex items-center gap-2">
           <button
@@ -242,13 +237,10 @@ export function ScoutPage({ active = true }: { active?: boolean } = {}): React.R
       {/* Row 2: Search */}
       <div className="flex items-center gap-3">
         <div className="flex flex-1 items-center gap-2" style={{ position: 'relative' }}>
-          <svg
-            width="14"
-            height="14"
-            viewBox="0 0 16 16"
-            fill="none"
-            stroke="var(--color-text-3)"
-            strokeWidth="1.5"
+          <Search
+            size={14}
+            color="var(--color-text-3)"
+            strokeWidth={1.5}
             style={{
               position: 'absolute',
               left: 10,
@@ -256,10 +248,7 @@ export function ScoutPage({ active = true }: { active?: boolean } = {}): React.R
               transform: 'translateY(-50%)',
               pointerEvents: 'none',
             }}
-          >
-            <circle cx="7" cy="7" r="4.5" />
-            <path d="M10.5 10.5L14 14" strokeLinecap="round" />
-          </svg>
+          />
           <input
             ref={searchRef}
             type="text"
@@ -327,7 +316,7 @@ export function ScoutPage({ active = true }: { active?: boolean } = {}): React.R
           >
             Prev
           </button>
-          <span className="text-code tabular-nums" style={{ color: 'var(--color-text-3)' }}>
+          <span className="text-code tabular-nums text-text-3">
             {page + 1} / {pages}
           </span>
           <button

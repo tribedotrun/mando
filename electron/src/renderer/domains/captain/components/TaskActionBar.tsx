@@ -1,14 +1,21 @@
 import React, { useState, useCallback, useRef } from 'react';
+import { ArrowUp, ChevronDown } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import log from '#renderer/logger';
 import { reopenItem, reworkItem } from '#renderer/domains/captain/hooks/useApi';
 import { useDraft } from '#renderer/global/hooks/useDraft';
 import { useTaskStore } from '#renderer/domains/captain/stores/taskStore';
-import { useToastStore } from '#renderer/global/stores/toastStore';
+import { toast } from 'sonner';
 import type { TaskItem } from '#renderer/types';
 import { FINALIZED_STATUSES } from '#renderer/types';
 import { canReopen, canRework, canAskAny, getErrorMessage } from '#renderer/utils';
 import { invalidateTaskDetail } from '#renderer/queryClient';
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuCheckboxItem,
+} from '#renderer/global/components/DropdownMenu';
 
 type Action = 'ask' | 'reopen' | 'rework';
 
@@ -34,12 +41,9 @@ export function TaskActionBar({ item, onAsk }: Props): React.ReactElement | null
     `mando:draft:action:${item.id}:${selectedAction}`,
   );
   const [pendingAction, setPendingAction] = useState<Action | null>(null);
-  const [dropdownOpen, setDropdownOpen] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const taskFetch = useTaskStore((s) => s.fetch);
   const queryClient = useQueryClient();
-  const toast = useToastStore.getState;
-
   // Sync selected action when task status changes — only when there are valid actions.
   if (available.length > 0 && !available.includes(selectedAction)) {
     setSelectedAction(defaultAction);
@@ -62,16 +66,16 @@ export function TaskActionBar({ item, onAsk }: Props): React.ReactElement | null
       taskFetch();
       invalidateTaskDetail(queryClient, item.id);
       const msg = selectedAction === 'reopen' ? 'Task reopened' : 'Rework requested';
-      toast().add('success', msg);
+      toast.success(msg);
       clearTextDraft();
       if (textareaRef.current) textareaRef.current.style.height = 'auto';
     } catch (err) {
       log.warn(`[TaskActionBar] ${selectedAction} failed for item ${item.id}:`, err);
-      toast().add('error', getErrorMessage(err, `${selectedAction} failed`));
+      toast.error(getErrorMessage(err, `${selectedAction} failed`));
     } finally {
       setPendingAction(null);
     }
-  }, [text, selectedAction, item.id, taskFetch, queryClient, toast, onAsk, clearTextDraft]);
+  }, [text, selectedAction, item.id, taskFetch, queryClient, onAsk, clearTextDraft]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -118,8 +122,7 @@ export function TaskActionBar({ item, onAsk }: Props): React.ReactElement | null
         >
           <textarea
             ref={textareaRef}
-            className="min-h-[20px] max-h-[120px] flex-1 resize-none overflow-y-auto bg-transparent py-1 text-body leading-snug focus:outline-none"
-            style={{ color: 'var(--color-text-1)' }}
+            className="min-h-[20px] max-h-[120px] flex-1 resize-none overflow-y-auto bg-transparent py-1 text-body leading-snug text-text-1 focus:outline-none"
             rows={1}
             placeholder={config.placeholder}
             value={text}
@@ -132,74 +135,39 @@ export function TaskActionBar({ item, onAsk }: Props): React.ReactElement | null
             disabled={!!pendingAction}
           />
 
-          {/* Action selector — text dropdown */}
           {hasMultipleActions && (
-            <div
-              className="relative shrink-0"
-              onBlur={(e) => {
-                if (!e.currentTarget.contains(e.relatedTarget)) setDropdownOpen(false);
-              }}
-            >
-              <button
-                onClick={() => setDropdownOpen((v) => !v)}
-                disabled={!!pendingAction}
-                className="flex items-center gap-1"
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  color: 'var(--color-text-2)',
-                  fontSize: '13px',
-                  fontWeight: 500,
-                  cursor: pendingAction ? 'default' : 'pointer',
-                  padding: '4px 8px',
-                  lineHeight: '18px',
-                }}
-              >
-                {config.label}
-                <svg
-                  width="10"
-                  height="10"
-                  viewBox="0 0 10 10"
-                  fill="currentColor"
-                  style={{ opacity: 0.6 }}
-                >
-                  <path d="M3 4l2 2 2-2" />
-                </svg>
-              </button>
-
-              {dropdownOpen && (
-                <div
-                  className="absolute bottom-full left-0 z-50 mb-1 min-w-[120px] rounded-lg py-1"
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  disabled={!!pendingAction}
+                  className="flex shrink-0 items-center gap-1"
                   style={{
-                    background: 'var(--color-surface-3)',
-                    border: '1px solid var(--color-border)',
-                    boxShadow: '0 4px 16px rgba(0,0,0,0.3)',
+                    background: 'none',
+                    border: 'none',
+                    color: 'var(--color-text-2)',
+                    fontSize: '13px',
+                    fontWeight: 500,
+                    cursor: pendingAction ? 'default' : 'pointer',
+                    padding: '4px 8px',
+                    lineHeight: '18px',
                   }}
                 >
-                  {available.map((action) => (
-                    <button
-                      key={action}
-                      onClick={() => {
-                        setSelectedAction(action);
-                        setDropdownOpen(false);
-                      }}
-                      className="flex w-full items-center justify-between px-3 py-1.5 text-left text-caption hover:bg-[var(--color-surface-2)]"
-                      style={{
-                        color: 'var(--color-text-1)',
-                        background: 'none',
-                        border: 'none',
-                        cursor: 'pointer',
-                      }}
-                    >
-                      {ACTION_CONFIG[action].label}
-                      {action === selectedAction && (
-                        <span style={{ color: 'var(--color-accent)' }}>&#10003;</span>
-                      )}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
+                  {config.label}
+                  <ChevronDown size={10} style={{ opacity: 0.6 }} />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent side="top" align="start" className="min-w-[120px]">
+                {available.map((action) => (
+                  <DropdownMenuCheckboxItem
+                    key={action}
+                    checked={action === selectedAction}
+                    onSelect={() => setSelectedAction(action)}
+                  >
+                    {ACTION_CONFIG[action].label}
+                  </DropdownMenuCheckboxItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
           )}
 
           {/* Circular send button */}
@@ -221,19 +189,7 @@ export function TaskActionBar({ item, onAsk }: Props): React.ReactElement | null
             {pendingAction ? (
               <span style={{ fontSize: '12px' }}>&hellip;</span>
             ) : (
-              <svg
-                width="14"
-                height="14"
-                viewBox="0 0 14 14"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M7 12V3" />
-                <path d="M3 6l4-4 4 4" />
-              </svg>
+              <ArrowUp size={14} strokeWidth={2} />
             )}
           </button>
         </div>

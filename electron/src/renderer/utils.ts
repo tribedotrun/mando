@@ -1,6 +1,6 @@
 import type { TaskItem, TimelineEvent, ClarifierQuestion, ItemStatus } from '#renderer/types';
 import { FINALIZED_STATUSES } from '#renderer/types';
-import { useToastStore } from '#renderer/global/stores/toastStore';
+import { toast } from 'sonner';
 import log from '#renderer/logger';
 
 /** Extract the last path segment from a GitHub `owner/repo` string. */
@@ -207,14 +207,12 @@ export async function copyToClipboard(text: string, label?: string): Promise<boo
   try {
     await navigator.clipboard.writeText(text);
     if (label) {
-      useToastStore.getState().add('success', label);
+      toast.success(label);
     }
     return true;
   } catch (err) {
     log.warn('clipboard write failed:', err);
-    useToastStore
-      .getState()
-      .add('error', getErrorMessage(err, 'Copy failed, clipboard access denied'));
+    toast.error(getErrorMessage(err, 'Copy failed, clipboard access denied'));
     return false;
   }
 }
@@ -255,11 +253,6 @@ export function floor(v: number): number {
 /** Ceiling to nearest integer. */
 export function ceil(v: number): number {
   return Math.ceil(v);
-}
-
-/** Format a number as USD with 2 decimal places (e.g. "1.50"). */
-export function fmtUsd(v: number): string {
-  return v.toFixed(2);
 }
 
 /** Format milliseconds as a short human duration (e.g. "3m" or "45s"). */

@@ -1,4 +1,5 @@
 import React, { useState, useCallback } from 'react';
+import { Check, ChevronDown } from 'lucide-react';
 import { useSettingsStore } from '#renderer/domains/settings';
 import { useMountEffect } from '#renderer/global/hooks/useMountEffect';
 import log from '#renderer/logger';
@@ -147,10 +148,7 @@ export function SetupChecklist({ onDismiss, onMinimize }: SetupChecklistProps): 
 
   return (
     <div style={{ padding: 12 }}>
-      <h2
-        className="text-[13px] font-semibold"
-        style={{ color: 'var(--color-text-1)', marginBottom: 10 }}
-      >
+      <h2 className="text-[13px] font-semibold text-text-1" style={{ marginBottom: 10 }}>
         Get started with Mando
       </h2>
 
@@ -186,7 +184,7 @@ export function SetupChecklist({ onDismiss, onMinimize }: SetupChecklistProps): 
 
       {/* Footer */}
       <div className="flex items-center justify-between" style={{ marginTop: 12 }}>
-        <span className="text-[11px]" style={{ color: 'var(--color-text-3)' }}>
+        <span className="text-[11px] text-text-3">
           {completedCount} of {steps.length} complete
         </span>
         {allComplete ? (
@@ -262,25 +260,15 @@ function StepRow({
         </span>
         <span>
           {step.expandable && !step.completed && (
-            <svg
-              width="12"
-              height="12"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="var(--color-text-3)"
+            <ChevronDown
+              size={12}
+              color="var(--color-text-3)"
               style={{
                 transform: expanded ? 'rotate(180deg)' : 'none',
                 transition: 'transform 0.15s ease',
                 opacity: 0.5,
               }}
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M19 9l-7 7-7-7"
-              />
-            </svg>
+            />
           )}
         </span>
       </button>
@@ -315,16 +303,7 @@ function StepIndicator({ completed }: { completed: boolean }): React.ReactElemen
         className="flex shrink-0 items-center justify-center"
         style={{ width: 16, height: 16, borderRadius: 8, background: 'var(--color-success)' }}
       >
-        <svg
-          width="9"
-          height="9"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="var(--color-bg)"
-          strokeWidth={3}
-        >
-          <path strokeLinecap="round" strokeLinejoin="round" d="M20 6L9 17l-5-5" />
-        </svg>
+        <Check size={9} color="var(--color-bg)" strokeWidth={3} />
       </div>
     );
   }

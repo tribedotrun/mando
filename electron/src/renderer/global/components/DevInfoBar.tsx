@@ -117,24 +117,24 @@ export function DevInfoBar(): React.ReactElement | null {
         style={{ borderColor: border, background: bg, color: modeColor }}
       >
         <span className="font-semibold">{info.mode}</span>
-        <span style={{ color: 'var(--color-text-3)' }}>v{info.version}</span>
-        <span style={{ color: 'var(--color-text-3)' }}>
-          <span style={{ color: 'var(--color-text-4)' }}>port:</span>
+        <span className="text-text-3">v{info.version}</span>
+        <span className="text-text-3">
+          <span className="text-text-4">port:</span>
           {info.port}
         </span>
         {info.slot && (
-          <span style={{ color: 'var(--color-text-3)' }}>
-            <span style={{ color: 'var(--color-text-4)' }}>slot:</span>
+          <span className="text-text-3">
+            <span className="text-text-4">slot:</span>
             {info.slot}
           </span>
         )}
-        <span style={{ color: 'var(--color-text-3)' }}>
-          <span style={{ color: 'var(--color-text-4)' }}>branch:</span>
+        <span className="text-text-3">
+          <span className="text-text-4">branch:</span>
           {info.branch}
         </span>
         {info.worktree && (
-          <span style={{ color: 'var(--color-text-3)' }}>
-            <span style={{ color: 'var(--color-text-4)' }}>wt:</span>
+          <span className="text-text-3">
+            <span className="text-text-4">wt:</span>
             {info.worktree}
           </span>
         )}
@@ -161,7 +161,7 @@ export function DevInfoBar(): React.ReactElement | null {
           >
             {inspecting ? '● Inspect' : 'Inspect'}
           </button>
-          <span style={{ color: 'var(--color-text-4)', fontSize: 11 }}>
+          <span className="text-text-4" style={{ fontSize: 11 }}>
             {inspecting ? '⇧A copy · Esc exit' : '⇧A'}
           </span>
           <button

@@ -105,6 +105,7 @@ pub(crate) async fn post_captain_tick(
         Some(&state.bus),
         body.emit_notifications,
         &state.task_store,
+        &state.cancellation_token,
     )
     .await
     {

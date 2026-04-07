@@ -199,7 +199,6 @@ pub(crate) async fn post_captain_adopt(
 
         let updates = json!({
             "worktree": wt_display,
-            "branch": branch,
             "status": "queued",
             "plan": ".ai/briefs/adopt-handoff.md"
         });

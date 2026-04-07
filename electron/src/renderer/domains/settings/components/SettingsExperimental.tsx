@@ -1,7 +1,7 @@
 import React from 'react';
 import { useSettingsStore } from '#renderer/domains/settings/stores/settingsStore';
 import type { FeaturesConfig } from '#renderer/domains/settings/stores/settingsStore';
-import { ToggleSwitch } from '#renderer/global/components/ToggleSwitch';
+import { Switch } from '#renderer/global/components/Switch';
 
 const EMPTY_FEATURES: FeaturesConfig = {};
 
@@ -26,10 +26,8 @@ export function SettingsExperimental(): React.ReactElement {
 
   return (
     <div data-testid="settings-experimental">
-      <h2 className="text-lg font-semibold" style={{ color: 'var(--color-text-1)' }}>
-        Experimental
-      </h2>
-      <p className="mt-1 text-sm" style={{ color: 'var(--color-text-3)', marginBottom: 24 }}>
+      <h2 className="text-lg font-semibold text-text-1">Experimental</h2>
+      <p className="mt-1 text-sm text-text-3" style={{ marginBottom: 24 }}>
         Alpha features. These may change or be removed at any time.
       </p>
 
@@ -50,18 +48,16 @@ export function SettingsExperimental(): React.ReactElement {
             >
               <div className="flex items-center justify-between" style={{ padding: '14px 20px' }}>
                 <div style={{ paddingRight: 16 }}>
-                  <h3 className="text-sm font-medium" style={{ color: 'var(--color-text-1)' }}>
-                    {flag.label}
-                  </h3>
-                  <p className="text-xs" style={{ color: 'var(--color-text-3)', marginTop: 2 }}>
+                  <h3 className="text-sm font-medium text-text-1">{flag.label}</h3>
+                  <p className="text-xs text-text-3" style={{ marginTop: 2 }}>
                     {flag.description}
                   </p>
                 </div>
-                <ToggleSwitch
+                <Switch
                   testId={`experimental-${flag.key}`}
                   checked={on}
-                  onChange={() => {
-                    updateSection('features', { [flag.key]: !on });
+                  onCheckedChange={(checked) => {
+                    updateSection('features', { [flag.key]: checked });
                     save();
                   }}
                 />

@@ -2,7 +2,6 @@
 
 use std::collections::{HashMap, HashSet};
 
-use anyhow::Result;
 use mando_config::settings::Config;
 use mando_config::workflow::CaptainWorkflow;
 use mando_types::task::{ItemStatus, Task};
@@ -27,7 +26,7 @@ pub(crate) async fn dispatch_new_work(
     alerts: &mut Vec<String>,
     resource_limits: &HashMap<String, usize>,
     pool: &sqlx::SqlitePool,
-) -> Result<usize> {
+) -> usize {
     let mut resource_counts = dispatch_logic::count_resources(items);
     let max_clarifier_retries = workflow.agent.max_clarifier_retries as i64;
     const MAX_SPAWN_FAILS: i64 = 3;
@@ -220,7 +219,7 @@ pub(crate) async fn dispatch_new_work(
     )
     .await;
 
-    Ok(active_workers)
+    active_workers
 }
 #[cfg(test)]
 #[path = "dispatch_phase_tests.rs"]

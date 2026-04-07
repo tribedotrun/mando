@@ -101,9 +101,7 @@ export function QAChat({
 
       <div className={`flex-1 overflow-y-auto ${historyClassName}`} style={historyStyle}>
         {history.length === 0 && (
-          <div className="text-center py-8 text-xs" style={{ color: 'var(--color-text-3)' }}>
-            {placeholder}
-          </div>
+          <div className="text-center py-8 text-xs text-text-3">{placeholder}</div>
         )}
         {history.map((entry, i) => (
           <div key={i} className={`mb-3 ${entry.role === 'user' ? 'text-right' : 'text-left'}`}>
@@ -121,9 +119,7 @@ export function QAChat({
         ))}
         {pending && (
           <div className="flex items-center gap-2 py-2">
-            <span className="text-xs" style={{ color: 'var(--color-text-3)' }}>
-              Thinking...
-            </span>
+            <span className="text-xs text-text-3">Thinking...</span>
           </div>
         )}
         <div ref={chatEndRef} />
@@ -151,7 +147,7 @@ export function QAChat({
             }
           }}
           placeholder={placeholder}
-          className="flex-1 resize-none rounded px-3 py-2 text-sm placeholder-[var(--color-text-3)] focus:outline-none"
+          className="flex-1 resize-none rounded px-3 py-2 text-sm placeholder-text-3 focus:outline-none"
           style={{
             border: '1px solid var(--color-border)',
             background: 'var(--color-surface-2)',
@@ -163,8 +159,7 @@ export function QAChat({
         <button
           type="submit"
           disabled={pending || !question.trim()}
-          className="rounded px-4 py-2 text-xs font-medium disabled:opacity-50"
-          style={{ background: 'var(--color-accent)', color: 'var(--color-bg)' }}
+          className="rounded bg-accent px-4 py-2 text-xs font-medium text-bg disabled:opacity-50"
         >
           Ask
         </button>

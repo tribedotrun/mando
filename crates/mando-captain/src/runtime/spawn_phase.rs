@@ -122,47 +122,54 @@ async fn execute_ship(
     }
 
     // Update status.
+    let prev_status = it.status;
     let is_no_pr = it.no_pr;
     it.status = spawn_logic::ship_status(is_no_pr);
 
-    // Emit timeline event.
-    let _ = super::timeline_emit::emit_for_task(
-        it,
-        mando_types::timeline::TimelineEventType::AwaitingReview,
-        &format!(
-            "Worker done ({})",
-            it.pr
-                .as_deref()
-                .map(mando_shared::helpers::pr_short_label)
-                .as_deref()
-                .unwrap_or("no PR")
-        ),
-        serde_json::json!({"worker": action.worker, "session_id": it.session_ids.worker, "pr": it.pr}),
-        pool,
-    )
-    .await;
-
-    if let Err(e) = crate::io::headless_cc::log_item_session(
+    let pr_label = it.pr.as_deref().map(mando_shared::helpers::pr_short_label);
+    let event = mando_types::timeline::TimelineEvent {
+        event_type: mando_types::timeline::TimelineEventType::AwaitingReview,
+        timestamp: mando_types::now_rfc3339(),
+        actor: "captain".to_string(),
+        summary: format!("Worker done ({})", pr_label.as_deref().unwrap_or("no PR")),
+        data: serde_json::json!({"worker": action.worker, "session_id": it.session_ids.worker, "pr": it.pr}),
+    };
+    match mando_db::queries::tasks::persist_status_transition(
         pool,
         it,
-        &action.worker,
-        mando_types::SessionStatus::Stopped,
+        prev_status.as_str(),
+        &event,
     )
     .await
     {
-        tracing::warn!(module = "captain", worker = %action.worker, %e, "failed to log stopped worker session");
+        Ok(true) => {
+            if let Err(e) = crate::io::headless_cc::log_item_session(
+                pool,
+                it,
+                &action.worker,
+                mando_types::SessionStatus::Stopped,
+            )
+            .await
+            {
+                tracing::warn!(module = "captain", worker = %action.worker, %e, "failed to log stopped worker session");
+            }
+            let pr_ref = pr_label.as_deref().unwrap_or("no PR");
+            let msg = format!(
+                "\u{2705} Awaiting review ({}): <b>{}</b>",
+                pr_ref,
+                mando_shared::telegram_format::escape_html(&it.title),
+            );
+            notifier.high(&msg).await;
+            tracing::info!(module = "captain", worker = %action.worker, "transitioned to awaiting-review");
+        }
+        Ok(false) => {
+            tracing::info!(module = "captain", worker = %action.worker, "ship transition already applied");
+        }
+        Err(e) => {
+            it.status = prev_status;
+            tracing::error!(module = "captain", worker = %action.worker, error = %e, "persist failed for ship");
+        }
     }
-
-    // Notify via Telegram.
-    let pr_ref = it.pr.as_deref().map(mando_shared::helpers::pr_short_label);
-    let pr_ref = pr_ref.as_deref().unwrap_or("no PR");
-    let msg = format!(
-        "\u{2705} Awaiting review ({}): <b>{}</b>",
-        pr_ref,
-        mando_shared::telegram_format::escape_html(&it.title),
-    );
-    notifier.high(&msg).await;
-    tracing::info!(module = "captain", worker = %action.worker, "transitioned to awaiting-review");
 
     Ok(())
 }

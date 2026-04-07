@@ -68,8 +68,8 @@ function ToolBlock({
       }}
     >
       <button
-        className="flex w-full items-center gap-2 border-none bg-transparent px-3 py-1 text-left text-label"
-        style={{ color: 'var(--color-text-1)', cursor: hasBody ? 'pointer' : 'default' }}
+        className="flex w-full items-center gap-2 border-none bg-transparent px-3 py-1 text-left text-label text-text-1"
+        style={{ cursor: hasBody ? 'pointer' : 'default' }}
         onClick={() => hasBody && setOpen((v) => !v)}
       >
         <span
@@ -81,24 +81,17 @@ function ToolBlock({
         </span>
         {block.label && (
           <span
-            className="min-w-0 truncate text-label"
-            style={{ color: 'var(--color-text-3)', textTransform: 'none' }}
+            className="min-w-0 truncate text-label text-text-3"
+            style={{ textTransform: 'none' }}
           >
             {cleanLabel(block.label)}
           </span>
         )}
-        {hasBody && (
-          <span className="ml-auto" style={{ color: 'var(--color-text-4)' }}>
-            {open ? '\u25BC' : '\u25B6'}
-          </span>
-        )}
+        {hasBody && <span className="ml-auto text-text-4">{open ? '\u25BC' : '\u25B6'}</span>}
       </button>
       {open && hasBody && (
         <div className="border-t px-3 py-2" style={{ borderColor: 'var(--color-border-subtle)' }}>
-          <pre
-            className="overflow-x-auto whitespace-pre-wrap text-code leading-relaxed"
-            style={{ color: 'var(--color-text-1)' }}
-          >
+          <pre className="overflow-x-auto whitespace-pre-wrap text-code leading-relaxed text-text-1">
             {block.lang === 'diff' ? <DiffContent text={block.body} /> : block.body}
           </pre>
         </div>
@@ -121,14 +114,8 @@ export function StructuredOutputBlock({
   })();
 
   const header = (
-    <div
-      className="mb-1 flex items-center gap-2 text-label font-semibold"
-      style={{ color: 'var(--color-success)' }}
-    >
-      <span
-        className="inline-block h-1.5 w-1.5 shrink-0 rounded-full"
-        style={{ background: 'var(--color-success)' }}
-      />
+    <div className="mb-1 flex items-center gap-2 text-label font-semibold text-success">
+      <span className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-success" />
       STRUCTURED OUTPUT
     </div>
   );
@@ -143,10 +130,7 @@ export function StructuredOutputBlock({
         }}
       >
         {header}
-        <pre
-          className="overflow-x-auto whitespace-pre-wrap text-code leading-relaxed"
-          style={{ color: 'var(--color-text-1)' }}
-        >
+        <pre className="overflow-x-auto whitespace-pre-wrap text-code leading-relaxed text-text-1">
           {block.body}
         </pre>
       </div>
@@ -166,13 +150,10 @@ export function StructuredOutputBlock({
         const text = typeof value === 'string' ? value : JSON.stringify(value, null, 2);
         return (
           <div key={key}>
-            <div
-              className="text-label font-semibold"
-              style={{ color: 'var(--color-text-3)', marginBottom: 2 }}
-            >
+            <div className="text-label font-semibold text-text-3" style={{ marginBottom: 2 }}>
               {key}
             </div>
-            <div className="text-caption leading-relaxed" style={{ color: 'var(--color-text-1)' }}>
+            <div className="text-caption leading-relaxed text-text-1">
               <PrMarkdown text={text} />
             </div>
           </div>
@@ -254,19 +235,15 @@ export function SectionRow({ section }: { section: TranscriptSection }): React.R
         <StructuredOutputBlock key={`so-${bi}`} block={block} />
       ))}
       {textBlocks.map((block, bi) => (
-        <div
-          key={bi}
-          className="py-1 text-caption leading-relaxed"
-          style={{ color: 'var(--color-text-1)' }}
-        >
+        <div key={bi} className="py-1 text-caption leading-relaxed text-text-1">
           <PrMarkdown text={(block as Extract<ContentBlock, { type: 'text' }>).content} />
         </div>
       ))}
       {toolCount > 0 && (
         <>
           <button
-            className="mt-1 flex items-center gap-1.5 rounded border-none bg-transparent px-0 py-1 text-label"
-            style={{ color: 'var(--color-text-4)', cursor: 'pointer' }}
+            className="mt-1 flex items-center gap-1.5 rounded border-none bg-transparent px-0 py-1 text-label text-text-4"
+            style={{ cursor: 'pointer' }}
             onClick={() => setShowTools((v) => !v)}
           >
             <span style={{ fontSize: 11 }}>{showTools ? '\u25BC' : '\u25B6'}</span>
@@ -279,11 +256,7 @@ export function SectionRow({ section }: { section: TranscriptSection }): React.R
               }
               if (block.type === 'results') {
                 return (
-                  <div
-                    key={bi}
-                    className="py-1 text-label italic"
-                    style={{ color: 'var(--color-text-4)' }}
-                  >
+                  <div key={bi} className="py-1 text-label italic text-text-4">
                     {block.content}
                   </div>
                 );

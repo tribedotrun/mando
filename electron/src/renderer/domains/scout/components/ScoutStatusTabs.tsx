@@ -1,4 +1,6 @@
 import React from 'react';
+import * as Tabs from '@radix-ui/react-tabs';
+import { cn } from '#renderer/cn';
 
 const STATUSES = ['all', 'pending', 'fetched', 'processed', 'saved', 'archived', 'error'];
 
@@ -16,52 +18,33 @@ export function ScoutStatusTabs({
   const allCount = Object.values(statusCounts).reduce((a, b) => a + b, 0);
 
   return (
-    <div
-      data-testid="scout-status-tabs"
-      className="flex items-center"
-      style={{ borderBottom: '1px solid var(--color-border-subtle)', gap: 0 }}
-    >
-      {STATUSES.map((s) => {
-        const count = s === 'all' ? allCount : (statusCounts[s] ?? 0);
-        const active = activeStatus === s;
-        const isError = s === 'error' && count > 0;
-        return (
-          <button
-            key={s}
-            onClick={() => onStatusChange(s)}
-            className="text-[13px] transition-colors"
-            style={{
-              background: 'transparent',
-              color: isError
-                ? 'var(--color-error)'
-                : active
-                  ? 'var(--color-text-1)'
-                  : 'var(--color-text-2)',
-              fontWeight: active ? 500 : 400,
-              padding: '6px 12px',
-              border: 'none',
-              borderBottomWidth: 2,
-              borderBottomStyle: 'solid',
-              borderBottomColor: active ? 'var(--color-accent)' : 'transparent',
-              cursor: 'pointer',
-              marginBottom: -1,
-            }}
-          >
-            {s}
-            {count > 0 && (
-              <span
-                className="ml-1"
-                style={{
-                  fontSize: 12,
-                  color: active ? 'var(--color-text-2)' : 'var(--color-text-3)',
-                }}
-              >
-                {count}
-              </span>
-            )}
-          </button>
-        );
-      })}
-    </div>
+    <Tabs.Root data-testid="scout-status-tabs" value={activeStatus} onValueChange={onStatusChange}>
+      <Tabs.List className="flex items-center gap-0 border-b border-border-subtle">
+        {STATUSES.map((s) => {
+          const count = s === 'all' ? allCount : (statusCounts[s] ?? 0);
+          const isError = s === 'error' && count > 0;
+          return (
+            <Tabs.Trigger
+              key={s}
+              value={s}
+              className={cn(
+                'group text-[13px] px-3 py-1.5 -mb-px border-b-2 transition-colors',
+                'bg-transparent cursor-pointer',
+                isError
+                  ? 'text-error border-transparent data-[state=active]:border-error data-[state=active]:font-medium data-[state=inactive]:font-normal'
+                  : 'data-[state=active]:border-accent data-[state=active]:text-text-1 data-[state=active]:font-medium data-[state=inactive]:border-transparent data-[state=inactive]:text-text-2 data-[state=inactive]:font-normal',
+              )}
+            >
+              {s}
+              {count > 0 && (
+                <span className="ml-1 text-xs text-text-3 group-data-[state=active]:text-text-2">
+                  {count}
+                </span>
+              )}
+            </Tabs.Trigger>
+          );
+        })}
+      </Tabs.List>
+    </Tabs.Root>
   );
 }

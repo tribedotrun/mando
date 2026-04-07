@@ -1,9 +1,9 @@
 import React from 'react';
 import { cardStyle, inputStyle, labelStyle, inputCls, labelCls } from '#renderer/styles';
 import { useSettingsStore } from '#renderer/domains/settings/stores/settingsStore';
-import { useToastStore } from '#renderer/global/stores/toastStore';
+import { toast } from 'sonner';
 import type { TelegramConfig } from '#renderer/domains/settings/stores/settingsStore';
-import { ToggleSwitch } from '#renderer/global/components/ToggleSwitch';
+import { Switch } from '#renderer/global/components/Switch';
 import log from '#renderer/logger';
 import { getErrorMessage } from '#renderer/utils';
 
@@ -19,23 +19,19 @@ export function SettingsTelegram(): React.ReactElement {
 
   return (
     <div data-testid="settings-telegram" className="space-y-8">
-      <h2 className="text-lg font-semibold" style={{ color: 'var(--color-text-1)' }}>
-        Telegram
-      </h2>
+      <h2 className="text-lg font-semibold text-text-1">Telegram</h2>
 
       <div className="space-y-6">
         {/* Enable toggle */}
         <div style={cardStyle}>
           <div className="flex items-center justify-between">
             <div>
-              <h3 className="text-sm font-medium" style={{ color: 'var(--color-text-2)' }}>
-                Enabled
-              </h3>
+              <h3 className="text-sm font-medium text-text-2">Enabled</h3>
             </div>
-            <ToggleSwitch
+            <Switch
               testId="telegram-enabled"
               checked={!!telegram.enabled}
-              onChange={async () => {
+              onCheckedChange={async () => {
                 const enabling = !telegram.enabled;
                 updateTelegram({ enabled: enabling });
                 await save();
@@ -48,9 +44,7 @@ export function SettingsTelegram(): React.ReactElement {
                   // actual system state (service not installed).
                   updateTelegram({ enabled: false });
                   await save();
-                  useToastStore
-                    .getState()
-                    .add('error', getErrorMessage(err, 'Failed to install Telegram service'));
+                  toast.error(getErrorMessage(err, 'Failed to install Telegram service'));
                 }
               }}
             />
@@ -59,9 +53,7 @@ export function SettingsTelegram(): React.ReactElement {
 
         {/* Credentials */}
         <div style={cardStyle}>
-          <h3 className="mb-4 text-sm font-medium" style={{ color: 'var(--color-text-2)' }}>
-            Credentials
-          </h3>
+          <h3 className="mb-4 text-sm font-medium text-text-2">Credentials</h3>
           <div className="space-y-4">
             <div>
               <label className={labelCls} style={labelStyle}>
@@ -84,7 +76,7 @@ export function SettingsTelegram(): React.ReactElement {
               <label className={labelCls} style={labelStyle}>
                 Owner
               </label>
-              <p className="mb-1.5 text-xs" style={{ color: 'var(--color-text-3)' }}>
+              <p className="mb-1.5 text-xs text-text-3">
                 Auto-detected when you /start the bot. Override here if needed.
               </p>
               <input

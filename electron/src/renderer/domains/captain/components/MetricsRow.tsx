@@ -1,9 +1,16 @@
-import React, { useState, useRef } from 'react';
+import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { ChevronDown, MoreVertical } from 'lucide-react';
 import { fetchWorkers } from '#renderer/domains/captain/hooks/useApi';
 import { fmtRuntime, ceilMinutes } from '#renderer/utils';
 import type { WorkerDetail } from '#renderer/types';
 import { shortRepo } from '#renderer/utils';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '#renderer/global/components/DropdownMenu';
 
 type WorkerPhase = 'active' | 'reviewing' | 'merging' | 'stale';
 
@@ -53,10 +60,8 @@ function WorkerRow({
   onNudge?: (worker: WorkerDetail) => void;
   onStop?: (worker: WorkerDetail) => void;
 }) {
-  const [menuOpenRaw, setMenuOpen] = useState(false);
-  const btnRef = useRef<HTMLButtonElement>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
   const hasActions = !!onNudge || !!onStop;
-  const menuOpen = hasActions && menuOpenRaw;
   const phase = getWorkerPhase(worker, stale);
   const colors = PHASE_COLORS[phase];
   const dotColor = colors.dot;
@@ -134,86 +139,36 @@ function WorkerRow({
       )}
 
       {hasActions && (
-        <>
-          {/* Overflow menu trigger */}
-          <button
-            ref={btnRef}
-            onClick={() => setMenuOpen((v) => !v)}
-            aria-label="Worker actions"
-            className="shrink-0 rounded opacity-0 transition-opacity group-hover:opacity-100"
-            style={{
-              width: 20,
-              height: 20,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              background: 'transparent',
-              border: 'none',
-              color: 'var(--color-text-2)',
-              cursor: 'pointer',
-              ...(menuOpen ? { opacity: 1 } : {}),
-            }}
-          >
-            <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
-              <circle cx="8" cy="3" r="1.5" />
-              <circle cx="8" cy="8" r="1.5" />
-              <circle cx="8" cy="13" r="1.5" />
-            </svg>
-          </button>
-
-          {/* Dropdown menu, fixed positioning to escape overflow:hidden parent */}
-          {menuOpen && (
-            <>
-              <div className="fixed inset-0 z-40" onClick={() => setMenuOpen(false)} />
-              <div
-                className="fixed z-50 rounded border py-1"
-                style={{
-                  top: btnRef.current ? btnRef.current.getBoundingClientRect().bottom + 4 : 0,
-                  left: btnRef.current ? btnRef.current.getBoundingClientRect().right - 100 : 0,
-                  background: 'var(--color-surface-2)',
-                  borderColor: 'var(--color-border)',
-                  boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
-                  minWidth: 100,
-                }}
-              >
-                {onNudge && (
-                  <button
-                    onClick={() => {
-                      setMenuOpen(false);
-                      onNudge(worker);
-                    }}
-                    className="flex w-full items-center px-3 py-1.5 text-left text-xs"
-                    style={{
-                      color: 'var(--color-text-2)',
-                      background: 'none',
-                      border: 'none',
-                      cursor: 'pointer',
-                    }}
-                  >
-                    Nudge
-                  </button>
-                )}
-                {onStop && (
-                  <button
-                    onClick={() => {
-                      setMenuOpen(false);
-                      onStop(worker);
-                    }}
-                    className="flex w-full items-center px-3 py-1.5 text-left text-xs"
-                    style={{
-                      color: 'var(--color-error)',
-                      background: 'none',
-                      border: 'none',
-                      cursor: 'pointer',
-                    }}
-                  >
-                    Stop
-                  </button>
-                )}
-              </div>
-            </>
-          )}
-        </>
+        <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
+          <DropdownMenuTrigger asChild>
+            <button
+              aria-label="Worker actions"
+              className="shrink-0 rounded opacity-0 transition-opacity group-hover:opacity-100"
+              style={{
+                width: 20,
+                height: 20,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                background: 'transparent',
+                border: 'none',
+                color: 'var(--color-text-2)',
+                cursor: 'pointer',
+                ...(menuOpen ? { opacity: 1 } : {}),
+              }}
+            >
+              <MoreVertical size={10} />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            {onNudge && <DropdownMenuItem onSelect={() => onNudge(worker)}>Nudge</DropdownMenuItem>}
+            {onStop && (
+              <DropdownMenuItem destructive onSelect={() => onStop(worker)}>
+                Stop
+              </DropdownMenuItem>
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
       )}
     </div>
   );
@@ -387,9 +342,7 @@ function HeaderContent({
 }) {
   return (
     <>
-      <span className="text-label" style={{ color: 'var(--color-text-3)' }}>
-        Workers
-      </span>
+      <span className="text-label text-text-3">Workers</span>
       <span style={{ fontSize: 12, color: 'var(--color-success)', lineHeight: '16px' }}>
         {activeCount} active
       </span>
@@ -422,20 +375,13 @@ function HeaderContent({
       )}
       <span style={{ flex: 1 }} />
       {(activeCount > 0 || reviewingCount > 0 || mergingCount > 0 || staleCount > 0) && (
-        <svg
-          width="10"
-          height="10"
-          viewBox="0 0 10 10"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.5"
+        <ChevronDown
+          size={10}
           style={{
             transform: expanded ? 'rotate(180deg)' : 'rotate(0)',
             transition: 'transform 150ms',
           }}
-        >
-          <path d="M2 4l3 3 3-3" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
+        />
       )}
     </>
   );

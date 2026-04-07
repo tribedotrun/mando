@@ -1,8 +1,10 @@
 import React from 'react';
+import { X } from 'lucide-react';
 import {
   useBulkCreateStore,
   type BulkCreatePhase,
 } from '#renderer/domains/captain/stores/bulkCreateStore';
+import { Spinner } from '#renderer/global/components/Spinner';
 
 function progressText(phase: BulkCreatePhase): string {
   switch (phase.step) {
@@ -47,19 +49,7 @@ export function BulkCreateProgress(): React.ReactElement | null {
           animation: 'bulk-in 200ms ease-out',
         }}
       >
-        {isActive && (
-          <span
-            className="animate-spin"
-            style={{
-              width: 14,
-              height: 14,
-              borderRadius: 8,
-              border: '2px solid var(--color-accent)',
-              borderTopColor: 'transparent',
-              flexShrink: 0,
-            }}
-          />
-        )}
+        {isActive && <Spinner />}
 
         <span
           className="text-[13px] font-medium"
@@ -82,14 +72,7 @@ export function BulkCreateProgress(): React.ReactElement | null {
             }}
             aria-label="Dismiss"
           >
-            <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-              <path
-                d="M4 4L10 10M10 4L4 10"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                strokeLinecap="round"
-              />
-            </svg>
+            <X size={14} />
           </button>
         )}
       </div>

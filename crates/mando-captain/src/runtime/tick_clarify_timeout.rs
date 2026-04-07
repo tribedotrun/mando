@@ -67,28 +67,49 @@ pub(super) async fn check_clarifier_timeouts(
             "NeedsClarification item timed out — escalating"
         );
 
+        let snap = super::action_contract::ReviewFieldsSnapshot::capture(item);
         super::action_contract::reset_review_retry(
             item,
             mando_types::task::ReviewTrigger::ClarifierFail,
         );
 
-        let _ = super::timeline_emit::emit_for_task(
-            item,
-            mando_types::timeline::TimelineEventType::ClarifyQuestion,
-            &format!(
+        let event = mando_types::timeline::TimelineEvent {
+            event_type: mando_types::timeline::TimelineEventType::ClarifyQuestion,
+            timestamp: mando_types::now_rfc3339(),
+            actor: "captain".to_string(),
+            summary: format!(
                 "Clarification timed out after {}s — escalating to captain review",
                 timeout_s
             ),
-            serde_json::json!({"timeout_s": timeout_s}),
+            data: serde_json::json!({"timeout_s": timeout_s}),
+        };
+        match mando_db::queries::tasks::persist_status_transition(
             pool,
+            item,
+            snap.status.as_str(),
+            &event,
         )
-        .await;
-
-        let msg = format!(
-            "\u{23f0} Clarification timed out for <b>{}</b> ({}s) — escalating",
-            mando_shared::telegram_format::escape_html(&item.title),
-            timeout_s,
-        );
-        notifier.high(&msg).await;
+        .await
+        {
+            Ok(true) => {
+                let msg = format!(
+                    "\u{23f0} Clarification timed out for <b>{}</b> ({}s) — escalating",
+                    mando_shared::telegram_format::escape_html(&item.title),
+                    timeout_s,
+                );
+                notifier.high(&msg).await;
+            }
+            Ok(false) => {
+                tracing::info!(
+                    module = "captain",
+                    item_id = item.id,
+                    "clarify timeout already applied"
+                );
+            }
+            Err(e) => {
+                snap.restore(item);
+                tracing::error!(module = "captain", item_id = item.id, error = %e, "persist failed for clarify timeout");
+            }
+        }
     }
 }

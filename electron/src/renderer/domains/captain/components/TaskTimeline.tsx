@@ -78,11 +78,7 @@ export function TaskTimeline({
   const shownSessionIds = new Set<string>();
 
   if (events.length === 0) {
-    return (
-      <div className="text-caption" style={{ color: 'var(--color-text-3)' }}>
-        No timeline events
-      </div>
-    );
+    return <div className="text-caption text-text-3">No timeline events</div>;
   }
 
   return (
@@ -99,7 +95,7 @@ export function TaskTimeline({
         return (
           <div key={`${event.timestamp}-${i}`} className="mb-0.5">
             <div
-              className={`flex items-center gap-2 rounded-md px-2 py-1 transition-colors${hasDetails ? ' cursor-pointer' : ''} hover:bg-[var(--color-surface-2)]`}
+              className={`flex items-center gap-2 rounded-md px-2 py-1 transition-colors${hasDetails ? ' cursor-pointer' : ''} hover:bg-surface-2`}
               onClick={() => hasDetails && setExpandedIdx(isExpanded ? null : i)}
             >
               {/* Icon */}
@@ -110,15 +106,12 @@ export function TaskTimeline({
                   <StatusIcon status={EVENT_ICON_MAP[event.event_type] ?? 'queued'} />
                 )}
               </span>
-              <span className="text-caption font-medium" style={{ color: 'var(--color-text-1)' }}>
+              <span className="text-caption font-medium text-text-1">
                 {event.event_type === 'worker_reopened'
                   ? reopenLabel(event.data)
                   : event.event_type.replace(/_/g, ' ')}
               </span>
-              <span
-                className="min-w-0 flex-1 truncate text-caption"
-                style={{ color: 'var(--color-text-3)' }}
-              >
+              <span className="min-w-0 flex-1 truncate text-caption text-text-3">
                 {event.summary}
               </span>
               {showTranscript && (
@@ -127,26 +120,20 @@ export function TaskTimeline({
                     e.stopPropagation();
                     onTranscriptClick(sessionId, event);
                   }}
-                  className="shrink-0 cursor-pointer rounded border-none bg-transparent px-1.5 py-0.5 text-caption text-[var(--color-accent)] hover:bg-[var(--color-accent-wash)]"
+                  className="shrink-0 cursor-pointer rounded border-none bg-transparent px-1.5 py-0.5 text-caption text-accent hover:bg-accent-wash"
                 >
                   transcript
                 </button>
               )}
-              <span className="shrink-0 text-caption" style={{ color: 'var(--color-text-4)' }}>
+              <span className="shrink-0 text-caption text-text-4">
                 {relativeTime(event.timestamp)}
               </span>
             </div>
             {isExpanded && hasDetails && (
-              <div
-                className="ml-6 mt-1 break-words rounded-md px-3 py-2 text-caption"
-                style={{
-                  background: 'var(--color-surface-2)',
-                  color: 'var(--color-text-2)',
-                }}
-              >
+              <div className="ml-6 mt-1 break-words rounded-md bg-surface-2 px-3 py-2 text-caption text-text-2">
                 {details.map(([k, v]) => (
                   <div key={k} className="mb-0.5">
-                    <span style={{ color: 'var(--color-text-4)' }}>{k}:</span> {v}
+                    <span className="text-text-4">{k}:</span> {v}
                   </div>
                 ))}
               </div>

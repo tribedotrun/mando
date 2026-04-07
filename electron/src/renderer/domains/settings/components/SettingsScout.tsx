@@ -34,8 +34,7 @@ function TagInput({
         {values.map((v) => (
           <span
             key={v}
-            className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs"
-            style={{ background: 'var(--color-surface-2)', color: 'var(--color-text-2)' }}
+            className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs bg-surface-2 text-text-2"
           >
             {v}
             <button
@@ -87,10 +86,7 @@ export function SettingsScout(): React.ReactElement {
 
   return (
     <div data-testid="settings-scout">
-      <h2
-        className="text-lg font-semibold"
-        style={{ color: 'var(--color-text-1)', marginBottom: 24 }}
-      >
+      <h2 className="text-lg font-semibold text-text-1" style={{ marginBottom: 24 }}>
         Scout
       </h2>
 
@@ -112,7 +108,7 @@ export function SettingsScout(): React.ReactElement {
               }}
               placeholder="fc-..."
             />
-            <p className="mt-1 text-xs" style={{ color: 'var(--color-text-3)' }}>
+            <p className="mt-1 text-xs text-text-3">
               Used for web scraping when processing scout items.
             </p>
           </div>

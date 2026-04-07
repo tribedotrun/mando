@@ -15,7 +15,7 @@ export function SettingsAbout(): React.ReactElement {
 
   return (
     <div data-testid="settings-about">
-      <h2 className="text-heading" style={{ color: 'var(--color-text-1)', marginBottom: 24 }}>
+      <h2 className="text-heading text-text-1" style={{ marginBottom: 24 }}>
         About
       </h2>
 
@@ -23,12 +23,8 @@ export function SettingsAbout(): React.ReactElement {
         className="flex items-center justify-between"
         style={{ padding: '10px 0', minHeight: 40 }}
       >
-        <span className="text-body" style={{ color: 'var(--color-text-1)' }}>
-          Mando
-        </span>
-        <span className="text-code" style={{ color: 'var(--color-text-2)' }}>
-          {appVersion || '\u2014'}
-        </span>
+        <span className="text-body text-text-1">Mando</span>
+        <span className="text-code text-text-2">{appVersion || '\u2014'}</span>
       </div>
 
       <div style={{ padding: '10px 0' }}>
@@ -36,8 +32,7 @@ export function SettingsAbout(): React.ReactElement {
           href="https://github.com/tribedotrun/mando"
           target="_blank"
           rel="noopener noreferrer"
-          className="text-body"
-          style={{ color: 'var(--color-accent)' }}
+          className="text-body text-accent"
         >
           GitHub
         </a>
