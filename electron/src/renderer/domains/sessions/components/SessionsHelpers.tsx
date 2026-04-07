@@ -2,20 +2,19 @@ import React from 'react';
 import { Monitor } from 'lucide-react';
 import type { SessionEntry, SessionSummary, TaskItem, TimelineEvent } from '#renderer/types';
 
-/** Status → dot color for session list rows. */
-const STATUS_COLOR: Record<string, string> = {
-  running: 'var(--color-success)',
-  stopped: 'var(--color-text-3)',
-  failed: 'var(--color-error)',
+/** Status -> dot Tailwind class for session list rows. */
+const STATUS_DOT_CLASS: Record<string, string> = {
+  running: 'bg-success',
+  stopped: 'bg-text-3',
+  failed: 'bg-destructive',
 };
 
 /** Shared dot indicator for session status across SessionsCard + task detail sessions tab. */
 export function SessionDot({ status }: { status?: string }): React.ReactElement {
-  const color = STATUS_COLOR[status ?? ''] ?? 'var(--color-text-4)';
+  const bgClass = STATUS_DOT_CLASS[status ?? ''] ?? 'bg-text-4';
   return (
     <span
-      className={`inline-block h-2 w-2 shrink-0 rounded-full${status === 'running' ? ' animate-pulse' : ''}`}
-      style={{ background: color }}
+      className={`inline-block size-2 shrink-0 rounded-full ${bgClass}${status === 'running' ? ' animate-pulse' : ''}`}
     />
   );
 }
@@ -68,7 +67,7 @@ export function buildSessionsFromTimeline(
 }
 
 /**
- * Build a map of session_id → sequence number for any caller type that has
+ * Build a map of session_id -> sequence number for any caller type that has
  * multiple sessions on the same task. Sequences are per (task_id, caller) pair
  * so "worker #2" and "captain review #1" don't share a counter.
  */
@@ -111,7 +110,7 @@ export function formatCallerLabel(caller: string): string {
 }
 
 /**
- * Primary title — the caller type, capitalized.
+ * Primary title -- the caller type, capitalized.
  * Sequence number (e.g. "#2") is handled separately in the row renderer.
  */
 export function sessionTitle(s: SessionEntry): string {
@@ -120,7 +119,7 @@ export function sessionTitle(s: SessionEntry): string {
 }
 
 /**
- * Secondary line — contextual detail: task title, scout item title, or date.
+ * Secondary line -- contextual detail: task title, scout item title, or date.
  * Returns null when there's nothing useful to show.
  */
 export function sessionSubtitle(s: SessionEntry): string | null {
@@ -132,8 +131,8 @@ export function sessionSubtitle(s: SessionEntry): string | null {
 export function SessionsEmptyState(): React.ReactElement {
   return (
     <div className="flex flex-col items-center justify-center py-16">
-      <Monitor size={48} color="var(--color-text-4)" strokeWidth={1} className="mb-4" />
-      <span className="text-subheading text-text-2">No sessions yet</span>
+      <Monitor size={48} color="var(--text-4)" strokeWidth={1} className="mb-4" />
+      <span className="text-subheading text-muted-foreground">No sessions yet</span>
     </div>
   );
 }

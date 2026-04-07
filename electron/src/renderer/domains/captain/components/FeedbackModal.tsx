@@ -2,9 +2,14 @@ import React, { useState } from 'react';
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
+  DialogHeader,
   DialogTitle,
-} from '#renderer/global/components/Dialog';
+  DialogDescription,
+  DialogFooter,
+} from '#renderer/components/ui/dialog';
+import { Button } from '#renderer/components/ui/button';
+import { Textarea } from '#renderer/components/ui/textarea';
+import { Label } from '#renderer/components/ui/label';
 
 interface FeedbackModalProps {
   testId: string;
@@ -39,53 +44,37 @@ export function FeedbackModal({
 
   return (
     <Dialog open={true} onOpenChange={() => onCancel()}>
-      <DialogContent data-testid={testId}>
-        <DialogTitle className="mb-1">{title}</DialogTitle>
-        {subtitle && (
-          <DialogDescription className="truncate" title={subtitle}>
-            {subtitle}
-          </DialogDescription>
-        )}
+      <DialogContent data-testid={testId} showCloseButton={false}>
+        <DialogHeader>
+          <DialogTitle>{title}</DialogTitle>
+          {subtitle && (
+            <DialogDescription className="truncate" title={subtitle}>
+              {subtitle}
+            </DialogDescription>
+          )}
+        </DialogHeader>
 
-        {label && <div className="text-label mb-1.5 text-text-4">{label}</div>}
-        <textarea
-          className="mb-3 w-full rounded-md px-3 py-2 text-[13px] focus:outline-none"
-          style={{
-            background: 'var(--color-surface-1)',
-            color: 'var(--color-text-1)',
-            border: '1px solid var(--color-border-subtle)',
-          }}
+        {label && <Label className="text-muted-foreground">{label}</Label>}
+        <Textarea
+          className="min-h-[80px]"
           rows={3}
           placeholder={placeholder}
           value={feedback}
           onChange={(e) => setFeedback(e.target.value)}
           autoFocus
         />
-        <div className="flex justify-end gap-2">
-          <button
-            onClick={onCancel}
-            className="rounded-md px-3 py-1.5 text-[13px]"
-            style={{
-              background: 'transparent',
-              color: 'var(--color-text-2)',
-              border: '1px solid var(--color-border)',
-            }}
-          >
+
+        <DialogFooter>
+          <Button variant="outline" onClick={onCancel}>
             Cancel
-          </button>
-          <button
+          </Button>
+          <Button
             onClick={() => onSubmit(feedback)}
             disabled={(requireFeedback && !feedback.trim()) || isPending}
-            className="rounded-md px-4 py-1.5 text-[13px] font-semibold disabled:opacity-50"
-            style={{
-              background: 'var(--color-accent)',
-              color: 'var(--color-bg)',
-              fontWeight: 600,
-            }}
           >
             {isPending ? pendingLabel : buttonLabel}
-          </button>
-        </div>
+          </Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );

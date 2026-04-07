@@ -3,7 +3,7 @@ import { useMountEffect } from '#renderer/global/hooks/useMountEffect';
 import { useDataContext } from '#renderer/app/DataProvider';
 import { useGlobalKeyboard } from '#renderer/global/hooks/useKeyboardShortcuts';
 import { useTaskActions } from '#renderer/domains/captain/hooks/useTaskActions';
-import { Sidebar, type Tab, type SetupProgress } from '#renderer/app/Sidebar';
+import { Sidebar, type Tab } from '#renderer/app/Sidebar';
 import { CaptainView } from '#renderer/domains/captain/components/CaptainView';
 import { ScoutPage } from '#renderer/domains/scout/components/ScoutPage';
 import { SessionsCard } from '#renderer/domains/sessions/components/SessionsCard';
@@ -18,56 +18,17 @@ import { CreateTaskModal } from '#renderer/domains/captain/components/AddTaskFor
 import { MergeModal } from '#renderer/domains/captain/components/MergeModal';
 import { ShortcutOverlay } from '#renderer/global/components/ShortcutOverlay';
 import { TaskDetailView } from '#renderer/domains/captain/components/TaskDetailView';
+import { TerminalPage } from '#renderer/domains/terminal/components/TerminalPage';
 import { RetryButton } from '#renderer/domains/captain/components/RetryButton';
+import { Button } from '#renderer/components/ui/button';
 import { ErrorBoundary } from '#renderer/global/components/ErrorBoundary';
 import { useSettingsStore } from '#renderer/domains/settings/stores/settingsStore';
+import { useSetupProgress } from '#renderer/app/useSetupProgress';
 import { useTaskStore } from '#renderer/domains/captain/stores/taskStore';
 import { apiPost, apiPatch, apiDel } from '#renderer/api';
 import { toast } from 'sonner';
 import { getErrorMessage } from '#renderer/utils';
 import log from '#renderer/logger';
-
-const SETUP_TOTAL = 3;
-
-const STEP_NAMES = ['Install Claude Code', 'Connect Telegram for remote control', 'Add a project'];
-
-/**
- * Compute setup progress from config (no IPC, sidebar-safe).
- * Claude Code detection is async (IPC) so the sidebar can't check it directly.
- * We mark CC as done only after the checklist has validated it (stored in features).
- */
-function useSetupProgress(): SetupProgress | null {
-  const config = useSettingsStore((s) => s.config);
-  const loaded = useSettingsStore((s) => s.loaded);
-  const dismissed = config.features?.setupDismissed ?? false;
-  const [hidden, setHidden] = useState(false);
-  const timerRef = React.useRef<ReturnType<typeof setTimeout>>(undefined);
-
-  const hasProject = Object.keys(config.captain?.projects ?? {}).length > 0;
-  const done = [
-    !!config.features?.claudeCodeVerified,
-    !!(config.channels?.telegram?.enabled && config.env?.TELEGRAM_MANDO_BOT_TOKEN),
-    hasProject,
-  ];
-  const completed = done.filter(Boolean).length;
-  const allDone = completed === SETUP_TOTAL;
-
-  // Schedule auto-hide 3s after reaching 100%. Zustand selector re-renders
-  // trigger this on every config change, so the timer is set exactly once.
-  if (allDone && !hidden && timerRef.current === undefined) {
-    timerRef.current = setTimeout(() => setHidden(true), 3000);
-  }
-  if (!allDone && timerRef.current !== undefined) {
-    clearTimeout(timerRef.current);
-    timerRef.current = undefined;
-  }
-
-  if (!loaded || dismissed || hidden) return null;
-
-  const firstIncomplete = done.findIndex((d) => !d);
-  const stepLabel = firstIncomplete >= 0 ? STEP_NAMES[firstIncomplete] : 'All done!';
-  return { completed, total: SETUP_TOTAL, currentStep: stepLabel };
-}
 
 export function App(): React.ReactElement {
   const [activeTab, setActiveTab] = useState<Tab>('captain');
@@ -79,6 +40,13 @@ export function App(): React.ReactElement {
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [detailItemId, setDetailItemId] = useState<number | null>(null);
   const [setupActive, setSetupActive] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [terminalPage, setTerminalPage] = useState<{
+    project: string;
+    cwd: string;
+    label: string;
+    resumeSessionId?: string | null;
+  } | null>(null);
 
   const actions = useTaskActions();
 
@@ -139,6 +107,30 @@ export function App(): React.ReactElement {
     setActiveTab('captain');
     setCreateTaskOpen(true);
   }, []);
+
+  const handleNewTerminal = useCallback((project: string) => {
+    const cfg = useSettingsStore.getState().config;
+    const pc = cfg.captain?.projects
+      ? Object.values(cfg.captain.projects).find((p) => p.name === project)
+      : undefined;
+    if (!pc?.path) {
+      toast.error(`No path configured for project "${project}"`);
+      return;
+    }
+    setDetailItemId(null);
+    setTerminalPage({ project, cwd: pc.path, label: `${project} / terminal` });
+  }, []);
+
+  useMountEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'b') {
+        e.preventDefault();
+        setSidebarCollapsed((v) => !v);
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  });
 
   useGlobalKeyboard({
     paletteOpen,
@@ -219,19 +211,37 @@ export function App(): React.ReactElement {
 
   if (detailItem) {
     return (
-      <div className="flex h-screen flex-col bg-bg">
+      <div className="flex h-screen flex-col bg-background">
         <div className="h-8 shrink-0" style={{ WebkitAppRegion: 'drag' } as React.CSSProperties} />
-        <div className="flex-1 overflow-hidden px-8 py-4">
-          <ErrorBoundary fallbackLabel="Task detail">
-            <TaskDetailView
-              item={detailItem}
-              onBack={() => {
-                actions.setMergeItem(null);
-                setDetailItemId(null);
-              }}
-              onMerge={() => actions.setMergeItem(detailItem)}
-            />
-          </ErrorBoundary>
+        <div className="relative flex-1 overflow-hidden">
+          {terminalPage ? (
+            <div className="absolute inset-0 z-[2] bg-background">
+              <TerminalPage
+                project={terminalPage.project}
+                cwd={terminalPage.cwd}
+                label={terminalPage.label}
+                resumeSessionId={terminalPage.resumeSessionId}
+                onResumeConsumed={() =>
+                  setTerminalPage((p) => (p ? { ...p, resumeSessionId: null } : null))
+                }
+                onBack={() => setTerminalPage(null)}
+              />
+            </div>
+          ) : (
+            <div className="h-full px-8 py-4">
+              <ErrorBoundary fallbackLabel="Task detail">
+                <TaskDetailView
+                  item={detailItem}
+                  onBack={() => {
+                    actions.setMergeItem(null);
+                    setDetailItemId(null);
+                  }}
+                  onMerge={() => actions.setMergeItem(detailItem)}
+                  onOpenTerminal={(opts) => setTerminalPage(opts)}
+                />
+              </ErrorBoundary>
+            </div>
+          )}
         </div>
         <DevInfoBar />
         {actions.mergeItem && (
@@ -260,14 +270,13 @@ export function App(): React.ReactElement {
   }
 
   return (
-    <div className="relative flex h-screen flex-col bg-bg">
+    <div className="relative flex h-screen flex-col bg-background">
       {/* Title bar drag region, absolute so it doesn't push content down */}
       <div
         className="absolute inset-x-0 top-0 z-10 h-8"
         style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
       />
 
-      {/* Settings, overlays the main layout without unmounting it */}
       {showSettings && (
         <div className="flex-1 overflow-hidden">
           <SettingsPage
@@ -281,53 +290,40 @@ export function App(): React.ReactElement {
       )}
 
       {/* Main layout, hidden (not unmounted) when settings is open */}
-      <div
-        className="flex min-h-0 flex-1 flex-col"
-        style={{ display: showSettings ? 'none' : undefined }}
-      >
+      <div className={`flex min-h-0 flex-1 flex-col${showSettings ? ' hidden' : ''}`}>
         {/* Disconnected banner, mt-8 clears absolute drag region */}
         {sseStatus === 'disconnected' && (
-          <div
-            className="flex shrink-0 items-center gap-3 px-4 mt-8 bg-surface-1"
-            style={{
-              height: 40,
-              borderBottom: '1px solid var(--color-border-subtle)',
-            }}
-          >
+          <div className="flex h-10 shrink-0 items-center gap-3 px-4 mt-8 bg-card">
             <span className="h-2 w-2 shrink-0 rounded-full bg-stale" />
-            <span className="text-body font-medium text-text-1">Daemon disconnected</span>
-            <span className="text-caption text-text-3">Reconnecting&hellip;</span>
+            <span className="text-body font-medium text-foreground">Daemon disconnected</span>
+            <span className="text-caption text-muted-foreground">Reconnecting&hellip;</span>
             <span className="flex-1" />
             <RetryButton
-              className="rounded-md px-3 py-1 text-[13px] font-medium"
-              style={{
-                background: 'transparent',
-                border: '1px solid var(--color-border)',
-                color: 'var(--color-text-2)',
-                cursor: 'pointer',
-                borderRadius: 6,
-              }}
+              className="inline-flex items-center justify-center rounded-md bg-secondary px-3 py-1 text-[13px] font-medium text-muted-foreground hover:bg-accent hover:text-accent-foreground"
               onRetry={() =>
                 window.mandoAPI.restartDaemon().finally(() => window.location.reload())
               }
             />
-            <button
-              className="text-caption"
-              style={{
-                background: 'none',
-                border: 'none',
-                color: 'var(--color-text-3)',
-                cursor: 'pointer',
-                padding: 0,
-              }}
+            <Button
+              variant="link"
+              size="xs"
+              className="text-caption text-muted-foreground hover:text-foreground"
               onClick={() => window.mandoAPI.openLogsFolder()}
             >
               View logs
-            </button>
+            </Button>
           </div>
         )}
 
         <div className="flex min-h-0 flex-1">
+          {sidebarCollapsed && (
+            <div
+              onClick={() => setSidebarCollapsed(false)}
+              title="Expand sidebar (Cmd+B)"
+              className="w-1 shrink-0 cursor-pointer bg-border-subtle transition-colors hover:bg-surface-2"
+            />
+          )}
+
           {/* Sidebar */}
           <Sidebar
             activeTab={activeTab}
@@ -387,10 +383,29 @@ export function App(): React.ReactElement {
             onProjectFilter={setProjectFilter}
             setupProgress={setupProgress}
             setupActive={setupActive}
+            collapsed={sidebarCollapsed}
+            onToggleCollapse={() => setSidebarCollapsed((v) => !v)}
+            onNewTerminal={handleNewTerminal}
+            onOpenTask={(id) => setDetailItemId(id)}
           />
 
           {/* Main content, always visible, popover floats above from sidebar */}
-          <main className="relative flex-1 overflow-hidden bg-bg">
+          <main className="relative flex-1 overflow-hidden bg-background">
+            {terminalPage && (
+              <div className="absolute inset-0 z-[2] overflow-hidden bg-background pt-[38px]">
+                <TerminalPage
+                  project={terminalPage.project}
+                  cwd={terminalPage.cwd}
+                  label={terminalPage.label}
+                  resumeSessionId={terminalPage.resumeSessionId}
+                  onResumeConsumed={() =>
+                    setTerminalPage((p) => (p ? { ...p, resumeSessionId: null } : null))
+                  }
+                  onBack={() => setTerminalPage(null)}
+                />
+              </div>
+            )}
+
             {/* All tabs stay mounted and stacked. Active tab sits on top via
                 z-index; inactive tabs are behind the opaque background, no
                 visibility/display changes, so CSS transitions can't flash. */}
@@ -399,12 +414,7 @@ export function App(): React.ReactElement {
               return (
                 <div
                   key={tab}
-                  className="absolute inset-0 overflow-auto bg-bg"
-                  style={{
-                    padding: '38px 32px 24px',
-                    zIndex: isActive ? 1 : 0,
-                    pointerEvents: isActive ? undefined : 'none',
-                  }}
+                  className={`absolute inset-0 overflow-auto bg-background px-8 pb-6 pt-[38px]${isActive ? ' z-[1]' : ' z-0 pointer-events-none'}`}
                 >
                   {tab === 'captain' && (
                     <ErrorBoundary fallbackLabel="Captain view">

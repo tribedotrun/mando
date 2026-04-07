@@ -1,0 +1,16 @@
+[package]
+name = "mando-terminal"
+version.workspace = true
+edition = "2021"
+description = "PTY-backed terminal session host for embedded Claude Code / Codex terminals"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+
+[dependencies]
+portable-pty = "0.8"
+tokio = { workspace = true, features = ["sync", "rt"] }
+serde = { workspace = true }
+tracing.workspace = true
+anyhow.workspace = true
+mando-uuid.workspace = true

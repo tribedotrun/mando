@@ -1,11 +1,13 @@
 import React, { useState } from 'react';
+import { Button } from '#renderer/components/ui/button';
 
 interface Props {
   onRetry: () => Promise<unknown> | void;
   label?: string;
   retryingLabel?: string;
   className?: string;
-  style?: React.CSSProperties;
+  variant?: 'default' | 'outline' | 'ghost' | 'secondary' | 'destructive' | 'link';
+  size?: 'default' | 'xs' | 'sm' | 'lg';
 }
 
 /**
@@ -19,17 +21,16 @@ export function RetryButton({
   label = 'Retry',
   retryingLabel = 'Retrying\u2026',
   className,
-  style,
+  variant = 'default',
+  size = 'default',
 }: Props): React.ReactElement {
   const [retrying, setRetrying] = useState(false);
   return (
-    <button
+    <Button
+      variant={variant}
+      size={size}
       className={className}
-      style={{
-        ...style,
-        opacity: retrying ? 0.5 : 1,
-        pointerEvents: retrying ? 'none' : undefined,
-      }}
+      disabled={retrying}
       onClick={() => {
         setRetrying(true);
         const result = onRetry();
@@ -39,6 +40,6 @@ export function RetryButton({
       }}
     >
       {retrying ? retryingLabel : label}
-    </button>
+    </Button>
   );
 }

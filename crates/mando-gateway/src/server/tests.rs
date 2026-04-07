@@ -44,6 +44,7 @@ async fn test_state() -> AppState {
         task_store: Arc::new(RwLock::new(task_store)),
         db,
         qa_session_mgr: mando_scout::runtime::qa::default_session_manager(),
+        terminal_host: Arc::new(mando_terminal::TerminalHost::new()),
         start_time: std::time::Instant::now(),
         listen_port: 0,
         dev_mode: false,

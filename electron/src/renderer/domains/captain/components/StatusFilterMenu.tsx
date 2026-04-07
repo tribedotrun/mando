@@ -6,7 +6,7 @@ import {
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuTrigger,
-} from '#renderer/global/components/DropdownMenu';
+} from '#renderer/components/ui/dropdown-menu';
 
 const STATUS_OPTIONS = ['all', 'running', 'stopped', 'failed'] as const;
 
@@ -34,7 +34,7 @@ export function StatusFilterMenu({
             <DropdownMenuItem
               key={opt}
               onSelect={() => onChange(opt)}
-              className={active ? 'text-text-1' : ''}
+              className={active ? 'text-foreground' : ''}
             >
               <span className="flex-1 capitalize">{opt}</span>
               {active && <Check size={14} />}

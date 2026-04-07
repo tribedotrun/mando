@@ -352,87 +352,8 @@ async fn try_source(
     extract(&content).filter(|s| !s.is_empty())
 }
 
-/// Candidate paths for project logo files, checked in priority order.
-const LOGO_CANDIDATES: &[&str] = &[
-    "logo.png",
-    "logo.svg",
-    "logo.jpg",
-    "logo.webp",
-    "public/logo.png",
-    "public/logo.svg",
-    "public/favicon.ico",
-    "public/favicon.png",
-    "public/favicon.svg",
-    "assets/logo.png",
-    "assets/icon.png",
-    "src/assets/logo.png",
-    "src/assets/icon.png",
-    ".github/logo.png",
-    ".github/icon.png",
-    "electron/assets/icon.png",
-    "icon.png",
-    "icon.svg",
-    "icon.ico",
-    "favicon.ico",
-];
-
-/// Auto-detect a logo image from the project directory, copy it to
-/// `~/.mando/images/`, and return the stored filename.
 fn detect_project_logo(project_path: &std::path::Path, project_name: &str) -> Option<String> {
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
-
-    let source = LOGO_CANDIDATES
-        .iter()
-        .map(|c| project_path.join(c))
-        .find(|p| p.is_file())?;
-
-    let ext = source.extension().and_then(|e| e.to_str()).unwrap_or("png");
-
-    // Sanitize project name for filename.
-    let safe_name: String = project_name
-        .chars()
-        .map(|c| {
-            if c.is_alphanumeric() || c == '-' {
-                c
-            } else {
-                '-'
-            }
-        })
-        .collect::<String>()
-        .to_lowercase();
-
-    // Include a short path hash to avoid collisions between projects whose
-    // sanitized names are identical (e.g. "my_app" and "my-app").
-    let mut hasher = DefaultHasher::new();
-    project_path.hash(&mut hasher);
-    let path_hash = format!("{:08x}", hasher.finish() & 0xFFFF_FFFF);
-
-    let filename = format!("project-{safe_name}-{path_hash}.{ext}");
-    let dest_dir = mando_config::images_dir();
-    if let Err(e) = std::fs::create_dir_all(&dest_dir) {
-        tracing::warn!(
-            project = project_name,
-            dir = %dest_dir.display(),
-            error = %e,
-            "failed to create images directory for project logo"
-        );
-        return None;
-    }
-    let dest = dest_dir.join(&filename);
-
-    match std::fs::copy(&source, &dest) {
-        Ok(_) => Some(filename),
-        Err(e) => {
-            tracing::warn!(
-                project = project_name,
-                source = %source.display(),
-                error = %e,
-                "failed to copy project logo"
-            );
-            None
-        }
-    }
+    mando_config::detect_project_logo(project_path, project_name)
 }
 /// Auto-detect a project summary from Cargo.toml, package.json, or README.
 async fn detect_project_summary(project_path: &std::path::Path) -> String {

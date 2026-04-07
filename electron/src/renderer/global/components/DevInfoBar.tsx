@@ -2,6 +2,8 @@ import React, { useRef, useState } from 'react';
 import log from '#renderer/logger';
 import { useMountEffect } from '#renderer/global/hooks/useMountEffect';
 import { DevInspector } from '#renderer/global/components/DevInspector';
+import { Badge } from '#renderer/components/ui/badge';
+import { Button } from '#renderer/components/ui/button';
 
 interface DevInfo {
   mode: string;
@@ -78,26 +80,25 @@ export function DevInfoBar(): React.ReactElement | null {
 
   if (!info) return null;
 
-  const prodLocalColor = 'var(--color-needs-human)';
+  const prodLocalColor = 'var(--needs-human)';
   const previewColor = '#a855f7';
   const modeColor =
     info.mode === 'DEV'
-      ? 'var(--color-accent)'
+      ? 'var(--primary)'
       : info.mode === 'PREVIEW'
         ? previewColor
         : info.mode === 'PROD-LOCAL'
           ? prodLocalColor
-          : 'var(--color-text-2)';
+          : 'var(--muted-foreground)';
   const tintColor =
     info.mode === 'DEV'
-      ? 'var(--color-accent)'
+      ? 'var(--primary)'
       : info.mode === 'PREVIEW'
         ? previewColor
         : info.mode === 'PROD-LOCAL'
           ? prodLocalColor
-          : 'var(--color-text-3)';
+          : 'var(--text-3)';
   const bg = `color-mix(in srgb, ${tintColor} 5%, transparent)`;
-  const border = `color-mix(in srgb, ${tintColor} 20%, transparent)`;
 
   const btnStyle = {
     color: modeColor,
@@ -113,10 +114,16 @@ export function DevInfoBar(): React.ReactElement | null {
       <DevInspector active={inspecting} onHover={setHoveredName} />
       <div
         data-dev-toolbar
-        className="flex shrink-0 items-center gap-4 border-t px-4 py-1 font-mono text-[11px]"
-        style={{ borderColor: border, background: bg, color: modeColor }}
+        className="flex shrink-0 items-center gap-4 px-4 py-1 font-mono text-[11px]"
+        style={{ background: bg, color: modeColor }}
       >
-        <span className="font-semibold">{info.mode}</span>
+        <Badge
+          variant="outline"
+          className="px-1.5 py-0 text-[11px] font-semibold"
+          style={{ color: modeColor }}
+        >
+          {info.mode}
+        </Badge>
         <span className="text-text-3">v{info.version}</span>
         <span className="text-text-3">
           <span className="text-text-4">port:</span>
@@ -141,36 +148,37 @@ export function DevInfoBar(): React.ReactElement | null {
         <div className="ml-auto flex items-center gap-2">
           {inspecting && hoveredName && (
             <span
-              style={{
-                color: 'color-mix(in srgb, var(--color-accent) 70%, transparent)',
-                fontSize: 11,
-              }}
-              className="font-mono"
+              style={{ color: 'color-mix(in srgb, var(--primary) 70%, transparent)' }}
+              className="font-mono text-[11px]"
             >
               {hoveredName}
             </span>
           )}
-          <button
+          <Button
+            variant="ghost"
+            size="xs"
             onClick={() => setInspecting((v) => !v)}
             className={btnClass}
             style={{
               ...btnStyle,
               opacity: inspecting ? 1 : undefined,
-              color: inspecting ? 'var(--color-accent)' : modeColor,
+              color: inspecting ? 'var(--primary)' : modeColor,
             }}
           >
             {inspecting ? '● Inspect' : 'Inspect'}
-          </button>
-          <span className="text-text-4" style={{ fontSize: 11 }}>
+          </Button>
+          <span className="text-[11px] text-text-4">
             {inspecting ? '⇧A copy · Esc exit' : '⇧A'}
           </span>
-          <button
+          <Button
+            variant="ghost"
+            size="xs"
             onClick={() => window.mandoAPI?.toggleDevTools()}
             className={btnClass}
             style={btnStyle}
           >
             DevTools
-          </button>
+          </Button>
         </div>
       </div>
     </>

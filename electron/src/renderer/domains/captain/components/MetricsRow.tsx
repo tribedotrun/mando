@@ -10,7 +10,8 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from '#renderer/global/components/DropdownMenu';
+} from '#renderer/components/ui/dropdown-menu';
+import { Button } from '#renderer/components/ui/button';
 
 type WorkerPhase = 'active' | 'reviewing' | 'merging' | 'stale';
 
@@ -25,26 +26,26 @@ const PHASE_COLORS: Record<
   { dot: string; text: string; duration: string; label?: string }
 > = {
   active: {
-    dot: 'var(--color-success)',
-    text: 'var(--color-text-2)',
-    duration: 'var(--color-text-3)',
+    dot: 'var(--success)',
+    text: 'var(--muted-foreground)',
+    duration: 'var(--text-3)',
   },
   reviewing: {
-    dot: 'var(--color-accent)',
-    text: 'var(--color-accent)',
-    duration: 'var(--color-accent)',
+    dot: 'var(--primary)',
+    text: 'var(--primary)',
+    duration: 'var(--primary)',
     label: 'reviewing',
   },
   merging: {
-    dot: 'var(--color-text-2)',
-    text: 'var(--color-text-2)',
-    duration: 'var(--color-text-2)',
+    dot: 'var(--muted-foreground)',
+    text: 'var(--muted-foreground)',
+    duration: 'var(--muted-foreground)',
     label: 'merging',
   },
   stale: {
-    dot: 'var(--color-stale)',
-    text: 'var(--color-stale)',
-    duration: 'var(--color-stale)',
+    dot: 'var(--stale)',
+    text: 'var(--stale)',
+    duration: 'var(--stale)',
     label: 'stale',
   },
 };
@@ -70,53 +71,28 @@ function WorkerRow({
   const durationColor = colors.duration;
 
   return (
-    <div
-      className="group relative flex items-center"
-      style={{ padding: '4px 16px', gap: 10, minHeight: 26 }}
-    >
+    <div className="group relative flex min-h-[26px] items-center gap-2.5 px-4 py-1">
       {/* Status dot */}
       <span
         aria-hidden="true"
-        style={{
-          width: 4,
-          height: 4,
-          borderRadius: '50%',
-          background: dotColor,
-          flexShrink: 0,
-        }}
+        className="h-1 w-1 shrink-0 rounded-full"
+        style={{ background: dotColor }}
       />
 
       {/* Task name */}
-      <span
-        className="min-w-0 flex-1 truncate"
-        style={{ fontSize: 12, color: textColor, lineHeight: '16px' }}
-        title={worker.title}
-      >
+      <span className="min-w-0 flex-1 truncate text-[12px] leading-4" style={{ color: textColor }}>
         {worker.title}
       </span>
 
       {/* Project */}
-      <span
-        className="shrink-0 truncate"
-        style={{
-          fontSize: 11,
-          color: 'var(--color-text-4)',
-          lineHeight: '14px',
-          maxWidth: 80,
-        }}
-      >
+      <span className="max-w-[80px] shrink-0 truncate text-[11px] leading-[14px] text-text-4">
         {shortRepo(worker.project)}
       </span>
 
       {/* Duration */}
       <span
-        className="shrink-0 text-right"
-        style={{
-          fontSize: 11,
-          color: durationColor,
-          lineHeight: '14px',
-          width: 48,
-        }}
+        className="w-12 shrink-0 text-right text-[11px] leading-[14px]"
+        style={{ color: durationColor }}
       >
         {fmtRuntime(
           phase === 'reviewing' || phase === 'merging'
@@ -127,14 +103,7 @@ function WorkerRow({
 
       {/* Phase indicator */}
       {colors.label && (
-        <span
-          style={{
-            fontSize: 11,
-            color: dotColor,
-            lineHeight: '14px',
-            flexShrink: 0,
-          }}
-        >
+        <span className="shrink-0 text-[11px] leading-[14px]" style={{ color: dotColor }}>
           {colors.label}
         </span>
       )}
@@ -142,30 +111,20 @@ function WorkerRow({
       {hasActions && (
         <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
           <DropdownMenuTrigger asChild>
-            <button
+            <Button
+              variant="ghost"
+              size="icon-xs"
               aria-label="Worker actions"
-              className="shrink-0 rounded opacity-0 transition-opacity group-hover:opacity-100"
-              style={{
-                width: 20,
-                height: 20,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                background: 'transparent',
-                border: 'none',
-                color: 'var(--color-text-2)',
-                cursor: 'pointer',
-                ...(menuOpen ? { opacity: 1 } : {}),
-              }}
+              className={`shrink-0 opacity-0 transition-opacity group-hover:opacity-100 ${menuOpen ? 'opacity-100' : ''}`}
             >
               <MoreVertical size={10} />
-            </button>
+            </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
             {onNudge && <DropdownMenuItem onSelect={() => onNudge(worker)}>Nudge</DropdownMenuItem>}
             {onStop && (
               <DropdownMenuItem
-                destructive
+                variant="destructive"
                 disabled={stopping}
                 onSelect={async (event) => {
                   event.preventDefault();
@@ -222,23 +181,15 @@ export function MetricsRow({
   const staleCount = staleWorkers.length;
 
   return (
-    <div data-testid="metrics-row" style={{ marginBottom: 12 }}>
+    <div data-testid="metrics-row" className="mb-3">
       {/* Collapsed pill, shown when collapsed or when no workers */}
       {(!expanded || workers.length === 0) &&
         (workers.length > 0 ? (
-          <button
+          <Button
+            variant="ghost"
             onClick={() => setExpanded(true)}
             aria-label="Expand workers panel"
-            className="flex items-center"
-            style={{
-              background: 'var(--color-surface-1)',
-              border: '1px solid var(--color-border-subtle)',
-              borderRadius: 6,
-              padding: '4px 16px',
-              gap: 12,
-              cursor: 'pointer',
-              color: 'var(--color-text-3)',
-            }}
+            className="flex h-auto w-auto items-center gap-3 rounded-md bg-card px-4 py-1 text-text-3"
           >
             <HeaderContent
               activeCount={activeCount}
@@ -248,19 +199,9 @@ export function MetricsRow({
               rateLimitSecs={rateLimitSecs}
               expanded={false}
             />
-          </button>
+          </Button>
         ) : (
-          <div
-            className="flex items-center"
-            style={{
-              background: 'var(--color-surface-1)',
-              border: '1px solid var(--color-border-subtle)',
-              borderRadius: 6,
-              padding: '4px 16px',
-              gap: 12,
-              color: 'var(--color-text-3)',
-            }}
-          >
+          <div className="flex items-center gap-3 rounded-md bg-card px-4 py-1 text-text-3">
             <HeaderContent
               activeCount={0}
               reviewingCount={0}
@@ -274,26 +215,13 @@ export function MetricsRow({
 
       {/* Expanded strip, only when there are workers to show */}
       {expanded && workers.length > 0 && (
-        <div
-          style={{
-            background: 'var(--color-surface-1)',
-            borderRadius: 6,
-            overflow: 'hidden',
-          }}
-        >
+        <div className="overflow-hidden rounded-md bg-card">
           {/* Strip header */}
-          <button
+          <Button
+            variant="ghost"
             onClick={() => setExpanded(false)}
             aria-label="Collapse workers panel"
-            className="flex w-full items-center"
-            style={{
-              padding: '8px 16px',
-              gap: 12,
-              cursor: 'pointer',
-              background: 'none',
-              border: 'none',
-              color: 'var(--color-text-3)',
-            }}
+            className="flex h-auto w-full items-center gap-3 rounded-none border-none bg-transparent px-4 py-2 text-text-3"
           >
             <HeaderContent
               activeCount={activeCount}
@@ -303,7 +231,7 @@ export function MetricsRow({
               rateLimitSecs={rateLimitSecs}
               expanded={true}
             />
-          </button>
+          </Button>
 
           {/* Active workers */}
           {activeWorkers.map((w) => (
@@ -332,7 +260,7 @@ export function MetricsRow({
           ))}
 
           {/* Bottom padding */}
-          <div style={{ height: 4 }} />
+          <div className="h-1" />
         </div>
       )}
     </div>
@@ -357,44 +285,26 @@ function HeaderContent({
   return (
     <>
       <span className="text-label text-text-3">Workers</span>
-      <span style={{ fontSize: 12, color: 'var(--color-success)', lineHeight: '16px' }}>
-        {activeCount} active
-      </span>
+      <span className="text-[12px] leading-4 text-success">{activeCount} active</span>
       {reviewingCount > 0 && (
-        <span style={{ fontSize: 12, color: 'var(--color-accent)', lineHeight: '16px' }}>
-          {reviewingCount} reviewing
-        </span>
+        <span className="text-[12px] leading-4 text-primary">{reviewingCount} reviewing</span>
       )}
       {mergingCount > 0 && (
-        <span style={{ fontSize: 12, color: 'var(--color-text-2)', lineHeight: '16px' }}>
-          {mergingCount} merging
-        </span>
+        <span className="text-[12px] leading-4 text-muted-foreground">{mergingCount} merging</span>
       )}
       {staleCount > 0 && (
-        <span
-          style={{
-            fontSize: 12,
-            fontWeight: 600,
-            color: 'var(--color-stale)',
-            lineHeight: '16px',
-          }}
-        >
-          {staleCount} stale
-        </span>
+        <span className="text-[12px] font-semibold leading-4 text-stale">{staleCount} stale</span>
       )}
       {rateLimitSecs > 0 && (
-        <span style={{ fontSize: 12, color: 'var(--color-text-4)', lineHeight: '16px' }}>
+        <span className="text-[12px] leading-4 text-text-4">
           paused ~{ceilMinutes(rateLimitSecs)}m
         </span>
       )}
-      <span style={{ flex: 1 }} />
+      <span className="flex-1" />
       {(activeCount > 0 || reviewingCount > 0 || mergingCount > 0 || staleCount > 0) && (
         <ChevronDown
           size={10}
-          style={{
-            transform: expanded ? 'rotate(180deg)' : 'rotate(0)',
-            transition: 'transform 150ms',
-          }}
+          className={`transition-transform duration-150 ${expanded ? 'rotate-180' : ''}`}
         />
       )}
     </>

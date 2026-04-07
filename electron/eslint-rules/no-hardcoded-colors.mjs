@@ -2,11 +2,11 @@
 export default {
   meta: {
     type: 'problem',
-    docs: { description: 'Ban hardcoded colors in inline style objects. Use var(--color-*) tokens.' },
+    docs: { description: 'Ban hardcoded colors in inline style objects. Use CSS variable tokens.' },
     messages: {
-      hex: 'Hardcoded hex color "{{value}}" in style prop "{{prop}}". Use a var(--color-*) token.',
-      rgb: 'Hardcoded rgb/rgba in style prop "{{prop}}". Use a var(--color-*) token or color-mix().',
-      named: 'Named color "{{value}}" in style prop "{{prop}}". Use a var(--color-*) token.',
+      hex: 'Hardcoded hex color "{{value}}" in style prop "{{prop}}". Use a var(--*) token.',
+      rgb: 'Hardcoded rgb/rgba in style prop "{{prop}}". Use a var(--*) token or color-mix().',
+      named: 'Named color "{{value}}" in style prop "{{prop}}". Use a var(--*) token.',
     },
   },
   create(context) {

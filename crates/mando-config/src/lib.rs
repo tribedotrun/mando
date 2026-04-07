@@ -2,6 +2,7 @@
 
 pub mod error;
 pub mod loader;
+pub mod logo;
 pub mod paths;
 pub mod settings;
 pub mod skills;
@@ -12,6 +13,7 @@ pub mod workflow_validate;
 // Convenience re-exports.
 pub use error::ConfigError;
 pub use loader::{get_config_path, load_config, save_config};
+pub use logo::{backfill_project_logos, detect_project_logo};
 pub use paths::{
     active_captain_runtime_paths, bin_dir, captain_lock_path, cc_streams_dir, data_dir,
     detect_github_repo, expand_tilde, first_project_path, images_dir, logs_dir,

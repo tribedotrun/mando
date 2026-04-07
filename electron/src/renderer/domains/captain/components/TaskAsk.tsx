@@ -6,6 +6,8 @@ import { QAChat } from '#renderer/global/components/QAChat';
 import type { QAEntry } from '#renderer/global/components/QAChat';
 import type { TaskItem } from '#renderer/types';
 import { prLabel, prHref, getErrorMessage } from '#renderer/utils';
+import { Button } from '#renderer/components/ui/button';
+import { Tooltip, TooltipTrigger, TooltipContent } from '#renderer/components/ui/tooltip';
 
 interface Props {
   item: TaskItem;
@@ -56,38 +58,37 @@ export function TaskAsk({ item, onBack }: Props): React.ReactElement {
 
   const header = (
     <div className="mb-3 flex items-center gap-2">
-      <button onClick={onBack} className="rounded px-3 py-1 text-xs text-text-2">
+      <Button variant="ghost" size="xs" onClick={onBack}>
         &larr; Back
-      </button>
-      <span className="font-mono text-xs text-accent">#{item.id}</span>
-      <span className="truncate max-w-xs font-mono text-xs text-text-3">{item.title}</span>
+      </Button>
+      <span className="font-mono text-xs text-primary">#{item.id}</span>
+      <span className="max-w-xs truncate font-mono text-xs text-text-3">{item.title}</span>
       <span className="ml-1 font-mono text-[0.6rem] text-text-4">[{item.status}]</span>
       {item.pr && (item.github_repo || item.project) && (
         <a
           href={prHref(item.pr, (item.github_repo ?? item.project)!)}
           target="_blank"
           rel="noopener noreferrer"
-          className="ml-auto font-mono text-xs no-underline hover:underline text-accent"
+          className="ml-auto font-mono text-xs text-primary no-underline hover:underline"
         >
           {prLabel(item.pr)}
         </a>
       )}
       {hasAskSession && (
-        <button
-          onClick={handleEndSession}
-          disabled={endingSession}
-          className="rounded px-2 py-1 text-label disabled:opacity-40"
-          style={{
-            background: 'none',
-            border: '1px solid var(--color-border-subtle)',
-            color: 'var(--color-text-4)',
-            cursor: endingSession ? 'default' : 'pointer',
-            marginLeft: item.pr ? '0' : 'auto',
-          }}
-          title="End ask session (next question starts fresh)"
-        >
-          {endingSession ? '...' : 'End session'}
-        </button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="outline"
+              size="xs"
+              onClick={handleEndSession}
+              disabled={endingSession}
+              className={item.pr ? '' : 'ml-auto'}
+            >
+              {endingSession ? '...' : 'End session'}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>End ask session (next question starts fresh)</TooltipContent>
+        </Tooltip>
       )}
     </div>
   );
@@ -95,7 +96,7 @@ export function TaskAsk({ item, onBack }: Props): React.ReactElement {
   return (
     <QAChat
       testId="task-ask"
-      style={{ minHeight: '60vh' }}
+      className="min-h-[60vh]"
       header={header}
       history={history}
       pending={pending}
@@ -104,18 +105,18 @@ export function TaskAsk({ item, onBack }: Props): React.ReactElement {
       placeholder="Ask about this item..."
       historyClassName="mb-3 rounded p-3 max-h-[55vh]"
       historyStyle={{
-        border: '1px solid var(--color-border)',
-        background: 'var(--color-surface-2)',
+        border: '1px solid var(--border)',
+        background: 'var(--muted)',
       }}
       userBubbleStyle={{
-        background: 'var(--color-accent-wash)',
-        border: '1px solid var(--color-accent-wash)',
-        color: 'var(--color-accent-hover)',
+        background: 'var(--accent)',
+        border: '1px solid var(--accent)',
+        color: 'var(--primary-hover)',
       }}
       assistantBubbleStyle={{
-        background: 'var(--color-surface-3)',
-        border: '1px solid var(--color-border-subtle)',
-        color: 'var(--color-text-1)',
+        background: 'var(--secondary)',
+        border: '1px solid var(--input)',
+        color: 'var(--foreground)',
       }}
       bubbleClassName="max-w-[85%] whitespace-pre-wrap"
     />

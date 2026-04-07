@@ -1,9 +1,14 @@
 import React, { useState } from 'react';
-import { cardStyle, inputStyle, labelStyle, inputCls, labelCls } from '#renderer/styles';
+import { Card, CardContent } from '#renderer/components/ui/card';
+import { Input } from '#renderer/components/ui/input';
+import { Label } from '#renderer/components/ui/label';
+import { Badge } from '#renderer/components/ui/badge';
+import { Button } from '#renderer/components/ui/button';
 import { useSettingsStore } from '#renderer/domains/settings/stores/settingsStore';
 import type { ScoutConfig } from '#renderer/domains/settings/stores/settingsStore';
 
 const EMPTY_SCOUT: ScoutConfig = {};
+
 function TagInput({
   label,
   values,
@@ -27,30 +32,24 @@ function TagInput({
 
   return (
     <div>
-      <label className={labelCls} style={labelStyle}>
-        {label}
-      </label>
+      <Label className="mb-1.5 text-xs text-muted-foreground">{label}</Label>
       <div className="mb-2 flex flex-wrap gap-2">
         {values.map((v) => (
-          <span
-            key={v}
-            className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs bg-surface-2 text-text-2"
-          >
+          <Badge key={v} variant="secondary" className="gap-1 text-xs">
             {v}
-            <button
+            <Button
+              variant="ghost"
+              size="icon-xs"
               onClick={() => onChange(values.filter((x) => x !== v))}
-              className="ml-0.5 opacity-60 hover:opacity-100"
-              style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer' }}
+              className="ml-0.5 h-3 w-3 opacity-60 hover:opacity-100"
             >
               x
-            </button>
-          </span>
+            </Button>
+          </Badge>
         ))}
       </div>
       <div className="flex gap-2">
-        <input
-          className={inputCls}
-          style={inputStyle}
+        <Input
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && add()}
@@ -86,21 +85,15 @@ export function SettingsScout(): React.ReactElement {
 
   return (
     <div data-testid="settings-scout">
-      <h2 className="text-lg font-semibold text-text-1" style={{ marginBottom: 24 }}>
-        Scout
-      </h2>
+      <h2 className="mb-6 text-lg font-semibold text-foreground">Scout</h2>
 
-      <div style={cardStyle}>
-        <div className="space-y-4">
+      <Card className="py-4">
+        <CardContent className="space-y-4">
           <div>
-            <label className={labelCls} style={labelStyle}>
-              Firecrawl API Key
-            </label>
-            <input
+            <Label className="mb-1.5 text-xs text-muted-foreground">Firecrawl API Key</Label>
+            <Input
               data-testid="scout-firecrawl-key"
               type="password"
-              className={inputCls}
-              style={inputStyle}
               value={firecrawlKey}
               onChange={(e) => {
                 updateEnv('FIRECRAWL_API_KEY', e.target.value);
@@ -108,19 +101,15 @@ export function SettingsScout(): React.ReactElement {
               }}
               placeholder="fc-..."
             />
-            <p className="mt-1 text-xs text-text-3">
+            <p className="mt-1 text-xs text-muted-foreground">
               Used for web scraping when processing scout items.
             </p>
           </div>
 
           <div>
-            <label className={labelCls} style={labelStyle}>
-              Your Role
-            </label>
-            <input
+            <Label className="mb-1.5 text-xs text-muted-foreground">Your Role</Label>
+            <Input
               data-testid="scout-role"
-              className={inputCls}
-              style={inputStyle}
               value={userCtx.role ?? ''}
               onChange={(e) => {
                 updateUserContext({ role: e.target.value }, true);
@@ -149,8 +138,8 @@ export function SettingsScout(): React.ReactElement {
             onChange={(v) => updateInterests({ low: v })}
             placeholder="e.g. Marketing, growth hacking"
           />
-        </div>
-      </div>
+        </CardContent>
+      </Card>
     </div>
   );
 }

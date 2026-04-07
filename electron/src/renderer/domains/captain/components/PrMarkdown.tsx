@@ -1,5 +1,15 @@
 import React, { useRef, useState } from 'react';
 import { ImageLightbox } from '#renderer/domains/captain/components/ImageLightbox';
+import {
+  Table,
+  TableHeader,
+  TableBody,
+  TableRow,
+  TableHead,
+  TableCell,
+} from '#renderer/components/ui/table';
+import { CodeBlock } from '#renderer/components/ui/code-block';
+import { Separator } from '#renderer/components/ui/separator';
 
 export function PrMarkdown({ text }: { text: string }): React.ReactElement {
   const [lightbox, setLightbox] = useState<{ images: string[]; index: number } | null>(null);
@@ -18,6 +28,7 @@ export function PrMarkdown({ text }: { text: string }): React.ReactElement {
 
     // Fenced code block
     if (line.trimStart().startsWith('```')) {
+      const langTag = line.trimStart().slice(3).trim();
       const codeLines: string[] = [];
       i++;
       let foundClose = false;
@@ -31,25 +42,20 @@ export function PrMarkdown({ text }: { text: string }): React.ReactElement {
         i++;
       }
       if (!foundClose && codeLines.length === 0) {
-        // Lone ``` with no closing — treat as regular text
+        // Lone ``` with no closing -- treat as regular text
         elements.push(
-          <div key={elements.length} className="py-1 text-[12px] text-text-1">
+          <div key={elements.length} className="py-1 text-[12px] text-foreground">
             {line}
           </div>,
         );
         continue;
       }
       elements.push(
-        <pre
+        <CodeBlock
           key={elements.length}
-          className="my-2 overflow-x-auto rounded bg-surface-2 p-3 text-[11px] leading-relaxed text-text-1"
-          style={{
-            border: '1px solid var(--color-border-subtle)',
-            fontFamily: 'var(--font-mono)',
-          }}
-        >
-          {codeLines.join('\n')}
-        </pre>,
+          code={codeLines.join('\n')}
+          language={langTag || 'text'}
+        />,
       );
       continue;
     }
@@ -76,29 +82,29 @@ export function PrMarkdown({ text }: { text: string }): React.ReactElement {
           .map((c) => c.trim()),
       );
       elements.push(
-        <div key={elements.length} className="my-2 overflow-x-auto">
-          <table className="w-full text-caption" style={{ borderCollapse: 'collapse' }}>
-            <thead>
-              <tr style={{ borderBottom: '1px solid var(--color-border)' }}>
+        <div key={elements.length} className="my-2">
+          <Table className="text-caption">
+            <TableHeader>
+              <TableRow>
                 {headerCells.map((h, ci) => (
-                  <th key={ci} className="px-3 py-1 text-left font-medium text-text-1">
+                  <TableHead key={ci} className="h-auto px-3 py-1 text-caption font-medium">
                     {renderInline(h)}
-                  </th>
+                  </TableHead>
                 ))}
-              </tr>
-            </thead>
-            <tbody>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {rows.map((row, ri) => (
-                <tr key={ri} style={{ borderBottom: '1px solid var(--color-border-subtle)' }}>
+                <TableRow key={ri}>
                   {row.map((cell, ci) => (
-                    <td key={ci} className="px-3 py-1 text-text-2">
+                    <TableCell key={ci} className="px-3 py-1 text-muted-foreground">
                       {renderInline(cell)}
-                    </td>
+                    </TableCell>
                   ))}
-                </tr>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         </div>,
       );
       continue;
@@ -106,13 +112,7 @@ export function PrMarkdown({ text }: { text: string }): React.ReactElement {
 
     // Horizontal rule
     if (/^---+$|^\*\*\*+$|^___+$/.test(line.trim())) {
-      elements.push(
-        <hr
-          key={elements.length}
-          className="my-3"
-          style={{ border: 'none', borderTop: '1px solid var(--color-border-subtle)' }}
-        />,
-      );
+      elements.push(<Separator key={elements.length} className="my-3" />);
       i++;
       continue;
     }
@@ -120,7 +120,7 @@ export function PrMarkdown({ text }: { text: string }): React.ReactElement {
     // Headings
     if (line.startsWith('#### ')) {
       elements.push(
-        <div key={elements.length} className="mt-3 mb-1 text-[12px] font-semibold text-text-1">
+        <div key={elements.length} className="mt-3 mb-1 text-[12px] font-semibold text-foreground">
           {renderInline(line.slice(5))}
         </div>,
       );
@@ -129,7 +129,7 @@ export function PrMarkdown({ text }: { text: string }): React.ReactElement {
     }
     if (line.startsWith('### ')) {
       elements.push(
-        <div key={elements.length} className="mt-3 mb-1 text-[13px] font-semibold text-text-1">
+        <div key={elements.length} className="mt-3 mb-1 text-[13px] font-semibold text-foreground">
           {renderInline(line.slice(4))}
         </div>,
       );
@@ -138,7 +138,7 @@ export function PrMarkdown({ text }: { text: string }): React.ReactElement {
     }
     if (line.startsWith('## ')) {
       elements.push(
-        <div key={elements.length} className="mt-4 mb-1.5 text-body font-semibold text-text-1">
+        <div key={elements.length} className="mt-4 mb-1.5 text-body font-semibold text-foreground">
           {renderInline(line.slice(3))}
         </div>,
       );
@@ -147,7 +147,7 @@ export function PrMarkdown({ text }: { text: string }): React.ReactElement {
     }
     if (line.startsWith('# ')) {
       elements.push(
-        <div key={elements.length} className="mt-4 mb-2 text-subheading text-text-1">
+        <div key={elements.length} className="mt-4 mb-2 text-subheading text-foreground">
           {renderInline(line.slice(2))}
         </div>,
       );
@@ -162,13 +162,13 @@ export function PrMarkdown({ text }: { text: string }): React.ReactElement {
       if (admonition) {
         const type = admonition[1];
         const admonitionColors: Record<string, string> = {
-          NOTE: 'var(--color-accent)',
-          TIP: 'var(--color-success)',
-          IMPORTANT: 'var(--color-accent)',
-          WARNING: 'var(--color-stale)',
-          CAUTION: 'var(--color-error)',
+          NOTE: 'var(--primary)',
+          TIP: 'var(--success)',
+          IMPORTANT: 'var(--primary)',
+          WARNING: 'var(--stale)',
+          CAUTION: 'var(--destructive)',
         };
-        const color = admonitionColors[type] ?? 'var(--color-border)';
+        const color = admonitionColors[type] ?? 'var(--border)';
         // Collect continuation lines
         const bodyLines: string[] = [];
         const afterTag = content.slice(admonition[0].length).trim();
@@ -191,7 +191,7 @@ export function PrMarkdown({ text }: { text: string }): React.ReactElement {
               {type}
             </div>
             {bodyLines.map((bl, bi) => (
-              <div key={bi} className="text-text-2">
+              <div key={bi} className="text-muted-foreground">
                 {renderInline(bl)}
               </div>
             ))}
@@ -209,10 +209,7 @@ export function PrMarkdown({ text }: { text: string }): React.ReactElement {
       elements.push(
         <div
           key={elements.length}
-          className="my-1 pl-3 text-[12px] italic text-text-3"
-          style={{
-            borderLeft: '2px solid var(--color-border)',
-          }}
+          className="my-1 border-l-2 border-muted-foreground/30 pl-3 text-[12px] italic text-text-3"
         >
           {bqLines.map((bl, bi) => (
             <div key={bi}>{renderInline(bl)}</div>
@@ -231,14 +228,14 @@ export function PrMarkdown({ text }: { text: string }): React.ReactElement {
           <span
             className="mt-0.5 inline-block h-3.5 w-3.5 shrink-0 rounded-sm text-center text-label leading-[14px]"
             style={{
-              border: '1px solid var(--color-border)',
-              background: checked ? 'var(--color-accent)' : 'transparent',
-              color: checked ? 'var(--color-bg)' : 'transparent',
+              border: '1px solid var(--border)',
+              background: checked ? 'var(--primary)' : 'transparent',
+              color: checked ? 'var(--background)' : 'transparent',
             }}
           >
             {checked ? '✓' : ''}
           </span>
-          <span className="text-text-1">{renderInline(checkMatch[3])}</span>
+          <span className="text-foreground">{renderInline(checkMatch[3])}</span>
         </div>,
       );
       i++;
@@ -251,7 +248,7 @@ export function PrMarkdown({ text }: { text: string }): React.ReactElement {
       elements.push(
         <div key={elements.length} className="flex gap-2 py-1 pl-2 text-[12px]">
           <span className="text-text-3">&bull;</span>
-          <span className="text-text-1">{renderInline(ulMatch[2])}</span>
+          <span className="text-foreground">{renderInline(ulMatch[2])}</span>
         </div>,
       );
       i++;
@@ -265,7 +262,7 @@ export function PrMarkdown({ text }: { text: string }): React.ReactElement {
       elements.push(
         <div key={elements.length} className="flex gap-2 py-1 pl-2 text-[12px]">
           <span className="w-4 shrink-0 text-right text-text-3">{num}.</span>
-          <span className="text-text-1">{renderInline(olMatch[2])}</span>
+          <span className="text-foreground">{renderInline(olMatch[2])}</span>
         </div>,
       );
       i++;
@@ -283,7 +280,7 @@ export function PrMarkdown({ text }: { text: string }): React.ReactElement {
     elements.push(
       <div
         key={elements.length}
-        className="break-words py-1 text-[12px] leading-relaxed text-text-1"
+        className="break-words py-1 text-[12px] leading-relaxed text-foreground"
       >
         {renderInline(line)}
       </div>,
@@ -343,13 +340,12 @@ function renderInline(text: string): React.ReactNode {
             src={imgUrl}
             alt={match[1]}
             data-lightbox-src={imgUrl}
-            className="my-1 max-w-full cursor-pointer rounded transition-opacity hover:opacity-80"
-            style={{ maxHeight: 300, border: '1px solid var(--color-border-subtle)' }}
+            className="my-1 max-h-[300px] max-w-full cursor-pointer rounded transition-opacity hover:opacity-80"
           />,
         );
       } else {
         parts.push(
-          <span key={key++} className="text-text-3" style={{ fontStyle: 'italic' }}>
+          <span key={key++} className="italic text-text-3">
             [{match[1] || 'image'}]
           </span>,
         );
@@ -365,12 +361,12 @@ function renderInline(text: string): React.ReactNode {
             href={linkUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="text-accent hover:underline"
+            className="text-primary hover:underline"
           >
             {match[3]}
           </a>
         ) : (
-          <span key={key++} className="text-accent">
+          <span key={key++} className="text-primary">
             {match[3]}
           </span>
         ),
@@ -378,7 +374,7 @@ function renderInline(text: string): React.ReactNode {
     } else if (match[5]) {
       // Bold
       parts.push(
-        <strong key={key++} className="text-text-1" style={{ fontWeight: 600 }}>
+        <strong key={key++} className="font-semibold text-foreground">
           {match[5]}
         </strong>,
       );
@@ -388,11 +384,7 @@ function renderInline(text: string): React.ReactNode {
     } else if (match[7]) {
       // Inline code
       parts.push(
-        <code
-          key={key++}
-          className="rounded bg-surface-3 px-1 py-1 text-[11px]"
-          style={{ fontFamily: 'var(--font-mono)' }}
-        >
+        <code key={key++} className="rounded bg-secondary px-1 py-1 font-mono text-[11px]">
           {match[7]}
         </code>,
       );
@@ -422,12 +414,12 @@ function renderInline(text: string): React.ReactNode {
             href={aHref}
             target="_blank"
             rel="noopener noreferrer"
-            className="text-accent hover:underline"
+            className="text-primary hover:underline"
           >
             {match[12]}
           </a>
         ) : (
-          <span key={key++} className="text-accent">
+          <span key={key++} className="text-primary">
             {match[12]}
           </span>
         ),
@@ -442,11 +434,10 @@ function renderInline(text: string): React.ReactNode {
             src={imgSrc}
             alt=""
             data-lightbox-src={imgSrc}
-            className="my-1 max-w-full cursor-pointer rounded transition-opacity hover:opacity-80"
-            style={{ maxHeight: 300, border: '1px solid var(--color-border-subtle)' }}
+            className="my-1 max-h-[300px] max-w-full cursor-pointer rounded transition-opacity hover:opacity-80"
           />
         ) : (
-          <span key={key++} className="text-text-3" style={{ fontStyle: 'italic' }}>
+          <span key={key++} className="italic text-text-3">
             [image]
           </span>
         ),

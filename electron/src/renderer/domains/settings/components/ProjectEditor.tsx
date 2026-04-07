@@ -1,5 +1,14 @@
 import React, { useState } from 'react';
-import { inputStyle, labelStyle, inputCls, labelCls } from '#renderer/styles';
+import { Card, CardContent } from '#renderer/components/ui/card';
+import { Input } from '#renderer/components/ui/input';
+import { Textarea } from '#renderer/components/ui/textarea';
+import { Label } from '#renderer/components/ui/label';
+import { Button } from '#renderer/components/ui/button';
+import {
+  Collapsible,
+  CollapsibleTrigger,
+  CollapsibleContent,
+} from '#renderer/components/ui/collapsible';
 import { useSettingsStore } from '#renderer/domains/settings/stores/settingsStore';
 import type { ProjectConfig } from '#renderer/domains/settings/stores/settingsStore';
 import { shortRepo } from '#renderer/utils';
@@ -76,243 +85,190 @@ export function ProjectEditor({
     onSave(pathKey, updated);
   };
 
-  const focusStyle = {
-    ...inputStyle,
-    '--tw-ring-color': 'var(--color-accent)',
-  } as React.CSSProperties;
-
   return (
-    <div
-      className="space-y-4 rounded-lg p-5"
-      style={{
-        border: '1px solid var(--color-border)',
-        background: 'var(--color-surface-1)',
-      }}
-    >
-      <h4 className="text-sm font-medium text-text-1">
-        {isNew ? 'Add Project' : `Edit ${project.name || initialPathKey}`}
-      </h4>
+    <Card className="py-4">
+      <CardContent className="space-y-4">
+        <h4 className="text-sm font-medium text-foreground">
+          {isNew ? 'Add Project' : `Edit ${project.name || initialPathKey}`}
+        </h4>
 
-      {isNew && (
-        <div>
-          <label className={labelCls} style={labelStyle}>
-            Local Path
-          </label>
-          <input
-            data-testid="project-path-input"
-            className={inputCls}
-            style={focusStyle}
-            value={projectPath}
-            onChange={(e) => handlePathChange(e.target.value)}
-            placeholder="/Users/you/projects/repo"
-          />
-        </div>
-      )}
-
-      <div>
-        <label className={labelCls} style={labelStyle}>
-          Name
-        </label>
-        <input
-          data-testid="project-name-input"
-          className={inputCls}
-          style={{
-            ...focusStyle,
-            ...(nameConflict ? { borderColor: 'var(--color-error)' } : {}),
-          }}
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="mando"
-        />
-        {nameConflict && (
-          <p className="mt-1 text-xs text-error">A project with this name already exists.</p>
+        {isNew && (
+          <div>
+            <Label className="mb-1.5 text-xs text-muted-foreground">Local Path</Label>
+            <Input
+              data-testid="project-path-input"
+              value={projectPath}
+              onChange={(e) => handlePathChange(e.target.value)}
+              placeholder="/Users/you/projects/repo"
+            />
+          </div>
         )}
-      </div>
 
-      {!isNew && (
         <div>
-          <label className={labelCls} style={labelStyle}>
-            Logo
-          </label>
-          <div className="flex items-center gap-3">
-            {logoFile && (
-              <img
-                src={buildUrl(`/api/images/${logoFile}`)}
-                alt=""
-                width={24}
-                height={24}
-                className="shrink-0 rounded object-contain"
-                onError={(e) => {
-                  (e.target as HTMLImageElement).style.display = 'none';
-                }}
-              />
-            )}
-            <button
-              type="button"
-              disabled={detectingLogo}
-              onClick={async () => {
-                setDetectingLogo(true);
-                setDetectError(null);
-                try {
-                  const res = await apiPatch<{ logo?: string | null }>(
-                    `/api/projects/${encodeURIComponent(project.name)}`,
-                    { redetect_logo: true },
-                  );
-                  setLogoFile(res.logo ?? null);
-                  await reloadConfig();
-                } catch (err) {
-                  setDetectError(err instanceof Error ? err.message : 'Detection failed');
-                } finally {
-                  setDetectingLogo(false);
-                }
-              }}
-              className="rounded-md px-3 py-1 text-xs"
-              style={{
-                border: '1px solid var(--color-border)',
-                color: 'var(--color-text-2)',
-                opacity: detectingLogo ? 0.5 : 1,
-              }}
-            >
-              {detectingLogo ? 'Detecting...' : logoFile ? 'Re-detect' : 'Detect logo'}
-            </button>
-            {detectError && <span className="text-xs text-error">{detectError}</span>}
-            {!logoFile && !detectingLogo && !detectError && (
-              <span className="text-xs text-text-3">No logo detected</span>
-            )}
-          </div>
+          <Label className="mb-1.5 text-xs text-muted-foreground">Name</Label>
+          <Input
+            data-testid="project-name-input"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="mando"
+            aria-invalid={nameConflict || undefined}
+          />
+          {nameConflict && (
+            <p className="mt-1 text-xs text-destructive">
+              A project with this name already exists.
+            </p>
+          )}
         </div>
-      )}
 
-      {!isNew && (
+        {!isNew && (
+          <div>
+            <Label className="mb-1.5 text-xs text-muted-foreground">Logo</Label>
+            <div className="flex items-center gap-3">
+              {logoFile && (
+                <img
+                  src={buildUrl(`/api/images/${logoFile}`)}
+                  alt=""
+                  width={24}
+                  height={24}
+                  className="shrink-0 rounded object-contain"
+                  onError={(e) => {
+                    (e.target as HTMLImageElement).style.display = 'none';
+                  }}
+                />
+              )}
+              <Button
+                variant="outline"
+                size="xs"
+                disabled={detectingLogo}
+                onClick={async () => {
+                  setDetectingLogo(true);
+                  setDetectError(null);
+                  try {
+                    const res = await apiPatch<{ logo?: string | null }>(
+                      `/api/projects/${encodeURIComponent(project.name)}`,
+                      { redetect_logo: true },
+                    );
+                    setLogoFile(res.logo ?? null);
+                    await reloadConfig();
+                  } catch (err) {
+                    setDetectError(err instanceof Error ? err.message : 'Detection failed');
+                  } finally {
+                    setDetectingLogo(false);
+                  }
+                }}
+              >
+                {detectingLogo ? 'Detecting...' : logoFile ? 'Re-detect' : 'Detect logo'}
+              </Button>
+              {detectError && <span className="text-xs text-destructive">{detectError}</span>}
+              {!logoFile && !detectingLogo && !detectError && (
+                <span className="text-xs text-muted-foreground">No logo detected</span>
+              )}
+            </div>
+          </div>
+        )}
+
+        {!isNew && (
+          <div>
+            <Label className="mb-1.5 text-xs text-muted-foreground">Local Path (read-only)</Label>
+            <Input
+              data-testid="project-path-input"
+              value={projectPath}
+              disabled
+              className="opacity-60"
+            />
+          </div>
+        )}
+
         <div>
-          <label className={labelCls} style={labelStyle}>
-            Local Path (read-only)
-          </label>
-          <input
-            data-testid="project-path-input"
-            className={`${inputCls} opacity-60`}
-            style={focusStyle}
-            value={projectPath}
-            disabled
+          <Label className="mb-1.5 text-xs text-muted-foreground">
+            GitHub Repo (auto-detected, optional)
+          </Label>
+          <Input
+            data-testid="project-github-repo-input"
+            value={githubRepo}
+            onChange={(e) => setGithubRepo(e.target.value)}
+            placeholder="owner/repo"
           />
         </div>
-      )}
 
-      <div>
-        <label className={labelCls} style={labelStyle}>
-          GitHub Repo (auto-detected, optional)
-        </label>
-        <input
-          data-testid="project-github-repo-input"
-          className={inputCls}
-          style={focusStyle}
-          value={githubRepo}
-          onChange={(e) => setGithubRepo(e.target.value)}
-          placeholder="owner/repo"
-        />
-      </div>
-
-      <div>
-        <label className={labelCls} style={labelStyle}>
-          Aliases (comma-separated)
-        </label>
-        <input
-          className={inputCls}
-          style={focusStyle}
-          value={aliases}
-          onChange={(e) => setAliases(e.target.value)}
-          placeholder="mdo, mnd"
-        />
-      </div>
-
-      <div>
-        <label className={labelCls} style={labelStyle}>
-          Worker Preamble
-        </label>
-        <textarea
-          data-testid="project-preamble-input"
-          className={`${inputCls} h-20 resize-none`}
-          style={focusStyle}
-          value={preamble}
-          onChange={(e) => setPreamble(e.target.value)}
-          placeholder="Instructions prepended to worker prompts..."
-        />
-      </div>
-
-      <div>
-        <label className={labelCls} style={labelStyle}>
-          Scout Summary
-        </label>
-        <input
-          className={inputCls}
-          style={focusStyle}
-          value={scoutSummary}
-          onChange={(e) => setScoutSummary(e.target.value)}
-          placeholder="Auto-generated from project metadata"
-        />
-        <p className="mt-1 text-xs text-text-3">
-          Describes this project to Scout for context-aware analysis.
-        </p>
-      </div>
-
-      {/* Hooks */}
-      <details className="group">
-        <summary className="cursor-pointer text-xs font-medium text-text-2">
-          Hooks (optional)
-        </summary>
-        <div className="mt-3 space-y-3">
-          <div>
-            <label className={labelCls} style={labelStyle}>
-              pre_spawn
-            </label>
-            <input
-              className={inputCls}
-              style={focusStyle}
-              value={preSpawn}
-              onChange={(e) => setPreSpawn(e.target.value)}
-              placeholder="path/to/script.sh"
-            />
-          </div>
-          <div>
-            <label className={labelCls} style={labelStyle}>
-              worker_teardown
-            </label>
-            <input
-              className={inputCls}
-              style={focusStyle}
-              value={workerTeardown}
-              onChange={(e) => setWorkerTeardown(e.target.value)}
-              placeholder="path/to/script.sh"
-            />
-          </div>
-          <div>
-            <label className={labelCls} style={labelStyle}>
-              post_merge
-            </label>
-            <input
-              className={inputCls}
-              style={focusStyle}
-              value={postMerge}
-              onChange={(e) => setPostMerge(e.target.value)}
-              placeholder="path/to/script.sh"
-            />
-          </div>
+        <div>
+          <Label className="mb-1.5 text-xs text-muted-foreground">Aliases (comma-separated)</Label>
+          <Input
+            value={aliases}
+            onChange={(e) => setAliases(e.target.value)}
+            placeholder="mdo, mnd"
+          />
         </div>
-      </details>
 
-      <div className="flex items-center gap-3 pt-2">
-        <button
-          data-testid="project-save-btn"
-          onClick={handleSubmit}
-          disabled={!name.trim() || !projectPath.trim() || nameConflict}
-          className="rounded-md px-4 py-2 text-sm font-medium bg-accent text-bg disabled:opacity-40"
-        >
-          {isNew ? 'Add' : 'Save'}
-        </button>
-        <button onClick={onCancel} className="rounded-md px-4 py-2 text-sm text-text-2">
-          Cancel
-        </button>
-      </div>
-    </div>
+        <div>
+          <Label className="mb-1.5 text-xs text-muted-foreground">Worker Preamble</Label>
+          <Textarea
+            data-testid="project-preamble-input"
+            className="h-20 resize-none"
+            value={preamble}
+            onChange={(e) => setPreamble(e.target.value)}
+            placeholder="Instructions prepended to worker prompts..."
+          />
+        </div>
+
+        <div>
+          <Label className="mb-1.5 text-xs text-muted-foreground">Scout Summary</Label>
+          <Input
+            value={scoutSummary}
+            onChange={(e) => setScoutSummary(e.target.value)}
+            placeholder="Auto-generated from project metadata"
+          />
+          <p className="mt-1 text-xs text-muted-foreground">
+            Describes this project to Scout for context-aware analysis.
+          </p>
+        </div>
+
+        {/* Hooks */}
+        <Collapsible className="group">
+          <CollapsibleTrigger className="cursor-pointer text-xs font-medium text-muted-foreground">
+            Hooks (optional)
+          </CollapsibleTrigger>
+          <CollapsibleContent className="mt-3 space-y-3">
+            <div>
+              <Label className="mb-1.5 text-xs text-muted-foreground">pre_spawn</Label>
+              <Input
+                value={preSpawn}
+                onChange={(e) => setPreSpawn(e.target.value)}
+                placeholder="path/to/script.sh"
+              />
+            </div>
+            <div>
+              <Label className="mb-1.5 text-xs text-muted-foreground">worker_teardown</Label>
+              <Input
+                value={workerTeardown}
+                onChange={(e) => setWorkerTeardown(e.target.value)}
+                placeholder="path/to/script.sh"
+              />
+            </div>
+            <div>
+              <Label className="mb-1.5 text-xs text-muted-foreground">post_merge</Label>
+              <Input
+                value={postMerge}
+                onChange={(e) => setPostMerge(e.target.value)}
+                placeholder="path/to/script.sh"
+              />
+            </div>
+          </CollapsibleContent>
+        </Collapsible>
+
+        <div className="flex items-center gap-3 pt-2">
+          <Button
+            data-testid="project-save-btn"
+            onClick={handleSubmit}
+            disabled={!name.trim() || !projectPath.trim() || nameConflict}
+          >
+            {isNew ? 'Add' : 'Save'}
+          </Button>
+          <Button variant="ghost" onClick={onCancel}>
+            Cancel
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
   );
 }

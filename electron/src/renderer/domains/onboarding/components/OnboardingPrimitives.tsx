@@ -1,4 +1,5 @@
 import React from 'react';
+import { Button } from '#renderer/components/ui/button';
 
 export function SetupLayout({
   step,
@@ -15,53 +16,32 @@ export function SetupLayout({
   children: React.ReactNode;
 } & Omit<React.HTMLAttributes<HTMLDivElement>, 'title'>): React.ReactElement {
   return (
-    <div className="relative flex h-full bg-bg" {...rest}>
+    <div className="relative flex h-full bg-background" {...rest}>
       <div
         className="absolute inset-x-0 top-0 z-10 h-8"
         style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
       />
-      <div
-        className="flex flex-col justify-center"
-        style={{
-          width: 300,
-          padding: '0 40px',
-          paddingBottom: 80,
-          background: 'var(--color-surface-1)',
-          borderRight: '1px solid var(--color-border-subtle)',
-          flexShrink: 0,
-        }}
-      >
+      <div className="flex w-[300px] shrink-0 flex-col justify-center bg-card px-10 pb-20">
         {step != null && total != null && (
-          <div style={{ marginBottom: 24 }}>
-            <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
+          <div className="mb-6">
+            <div className="mb-2.5 flex gap-1.5">
               {Array.from({ length: total }, (_, i) => (
                 <div
                   key={i}
-                  style={{
-                    width: 36,
-                    height: 3,
-                    borderRadius: 4,
-                    background: i < step ? 'var(--color-accent)' : 'var(--color-border)',
-                  }}
+                  className={`h-[3px] w-9 rounded ${i < step ? 'bg-primary' : 'bg-border'}`}
                 />
               ))}
             </div>
-            <span className="text-label text-text-3">
+            <span className="text-label text-muted-foreground">
               Step {step} of {total}
             </span>
           </div>
         )}
-        <h2 className="text-heading text-text-1" style={{ marginBottom: 8 }}>
-          {title}
-        </h2>
-        {subtitle && (
-          <p className="text-body text-text-3" style={{ lineHeight: 1.6 }}>
-            {subtitle}
-          </p>
-        )}
+        <h2 className="mb-2 text-heading text-foreground">{title}</h2>
+        {subtitle && <p className="text-body leading-relaxed text-muted-foreground">{subtitle}</p>}
       </div>
-      <div className="flex flex-1 items-center" style={{ padding: '0 64px', paddingBottom: 80 }}>
-        <div style={{ width: '100%', maxWidth: 480 }}>{children}</div>
+      <div className="flex flex-1 items-center px-16 pb-20">
+        <div className="w-full max-w-[480px]">{children}</div>
       </div>
     </div>
   );
@@ -69,16 +49,11 @@ export function SetupLayout({
 
 export function CheckRow({ ok, label }: { ok: boolean; label: string }): React.ReactElement {
   return (
-    <div className="flex items-center" style={{ gap: 8 }}>
-      <span style={{ color: ok ? 'var(--color-success)' : 'var(--color-error)', fontSize: 13 }}>
-        {ok ? '✓' : '✗'}
+    <div className="flex items-center gap-2">
+      <span className={`text-[13px] ${ok ? 'text-success' : 'text-destructive'}`}>
+        {ok ? '\u2713' : '\u2717'}
       </span>
-      <span
-        className="text-body"
-        style={{ color: ok ? 'var(--color-text-1)' : 'var(--color-error)' }}
-      >
-        {label}
-      </span>
+      <span className={`text-body ${ok ? 'text-foreground' : 'text-destructive'}`}>{label}</span>
     </div>
   );
 }
@@ -91,9 +66,9 @@ export function GhostButton({
   children: React.ReactNode;
 }): React.ReactElement {
   return (
-    <button onClick={onClick} className="btn btn-text">
+    <Button variant="ghost" onClick={onClick}>
       {children}
-    </button>
+    </Button>
   );
 }
 
@@ -107,14 +82,9 @@ export function OutlineButton({
   children: React.ReactNode;
 }): React.ReactElement {
   return (
-    <button
-      onClick={onClick}
-      disabled={disabled}
-      className="btn btn-ghost"
-      style={{ flexShrink: 0 }}
-    >
+    <Button variant="outline" onClick={onClick} disabled={disabled} className="shrink-0">
       {children}
-    </button>
+    </Button>
   );
 }
 
@@ -128,8 +98,8 @@ export function PrimaryButton({
   children: React.ReactNode;
 }): React.ReactElement {
   return (
-    <button onClick={onClick} disabled={disabled} className="btn btn-primary">
+    <Button onClick={onClick} disabled={disabled}>
       {children}
-    </button>
+    </Button>
   );
 }

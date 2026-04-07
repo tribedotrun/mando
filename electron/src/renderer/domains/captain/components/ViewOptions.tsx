@@ -7,7 +7,8 @@ import {
   DropdownMenuContent,
   DropdownMenuCheckboxItem,
   DropdownMenuLabel,
-} from '#renderer/global/components/DropdownMenu';
+} from '#renderer/components/ui/dropdown-menu';
+import { Button } from '#renderer/components/ui/button';
 
 export function ViewOptions(): React.ReactElement {
   const { showArchived, setShowArchived } = useTaskStore();
@@ -15,13 +16,14 @@ export function ViewOptions(): React.ReactElement {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <button
+        <Button
+          variant="ghost"
+          size="icon-xs"
           aria-label="View options"
-          title="View options"
-          className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-button border-none bg-transparent text-text-3 transition-colors hover:bg-surface-3 data-[state=open]:bg-surface-3 data-[state=open]:text-text-1"
+          className="text-muted-foreground data-[state=open]:bg-secondary data-[state=open]:text-foreground"
         >
           <SlidersHorizontal size={16} />
-        </button>
+        </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="min-w-[200px]">
         <DropdownMenuLabel>View options</DropdownMenuLabel>

@@ -3,6 +3,8 @@ import type { TimelineEvent } from '#renderer/types';
 import { relativeTime } from '#renderer/utils';
 import { StatusIcon } from '#renderer/domains/captain/components/TaskActions';
 import { PrIcon } from '#renderer/domains/captain/components/TaskIcons';
+import { Button } from '#renderer/components/ui/button';
+import { Commit } from '#renderer/components/ui/commit';
 
 /** Map timeline event types to StatusIcon status strings. */
 const EVENT_ICON_MAP: Record<string, string> = {
@@ -44,7 +46,7 @@ function reopenLabel(data: Record<string, unknown>): string {
 /** Keys to always exclude from expanded detail view. */
 const HIDDEN_KEYS = new Set(['session_id', 'source', 'item_id', 'task_id']);
 
-/** Values that add no information — skip them in detail view. */
+/** Values that add no information -- skip them in detail view. */
 function isUselessValue(value: unknown): boolean {
   if (value === null || value === undefined || value === '') return true;
   const s = String(value).trim();
@@ -52,6 +54,17 @@ function isUselessValue(value: unknown): boolean {
   // Single-word uppercase status that duplicates the event type
   if (/^[A-Z_]+$/.test(s) && s.length < 40) return true;
   return false;
+}
+
+/** Detect a hex SHA (7-40 chars). */
+const SHA_RE = /^[0-9a-f]{7,40}$/i;
+
+/** Check if a key name suggests a commit SHA. */
+function isShaField(key: string, value: string): boolean {
+  const k = key.toLowerCase();
+  return (
+    (k.includes('sha') || k.includes('commit') || k.includes('head')) && SHA_RE.test(value.trim())
+  );
 }
 
 /** Get useful detail entries from event data. */
@@ -95,8 +108,16 @@ export function TaskTimeline({
         return (
           <div key={`${event.timestamp}-${i}`} className="mb-0.5">
             <div
-              className={`flex items-center gap-2 rounded-md px-2 py-1 transition-colors${hasDetails ? ' cursor-pointer' : ''} hover:bg-surface-2`}
+              role={hasDetails ? 'button' : undefined}
+              tabIndex={hasDetails ? 0 : undefined}
+              className={`flex items-center gap-2 rounded-md px-2 py-1 transition-colors hover:bg-muted${hasDetails ? ' cursor-pointer active:bg-muted/80' : ''}`}
               onClick={() => hasDetails && setExpandedIdx(isExpanded ? null : i)}
+              onKeyDown={(e) => {
+                if (hasDetails && (e.key === 'Enter' || e.key === ' ')) {
+                  e.preventDefault();
+                  setExpandedIdx(isExpanded ? null : i);
+                }
+              }}
             >
               {/* Icon */}
               <span className="flex w-4 shrink-0 items-center justify-center">
@@ -106,7 +127,7 @@ export function TaskTimeline({
                   <StatusIcon status={EVENT_ICON_MAP[event.event_type] ?? 'queued'} />
                 )}
               </span>
-              <span className="text-caption font-medium text-text-1">
+              <span className="text-caption font-medium text-foreground">
                 {event.event_type === 'worker_reopened'
                   ? reopenLabel(event.data)
                   : event.event_type.replace(/_/g, ' ')}
@@ -115,25 +136,28 @@ export function TaskTimeline({
                 {event.summary}
               </span>
               {showTranscript && (
-                <button
+                <Button
+                  variant="ghost"
+                  size="xs"
                   onClick={(e) => {
                     e.stopPropagation();
                     onTranscriptClick(sessionId, event);
                   }}
-                  className="shrink-0 cursor-pointer rounded border-none bg-transparent px-1.5 py-0.5 text-caption text-accent hover:bg-accent-wash"
+                  className="shrink-0 text-primary"
                 >
                   transcript
-                </button>
+                </Button>
               )}
               <span className="shrink-0 text-caption text-text-4">
                 {relativeTime(event.timestamp)}
               </span>
             </div>
             {isExpanded && hasDetails && (
-              <div className="ml-6 mt-1 break-words rounded-md bg-surface-2 px-3 py-2 text-caption text-text-2">
+              <div className="ml-6 mt-1 break-words rounded-md bg-muted px-3 py-2 text-caption text-muted-foreground">
                 {details.map(([k, v]) => (
                   <div key={k} className="mb-0.5">
-                    <span className="text-text-4">{k}:</span> {v}
+                    <span className="text-text-4">{k}:</span>{' '}
+                    {isShaField(k, v) ? <Commit hash={v} message="" /> : v}
                   </div>
                 ))}
               </div>

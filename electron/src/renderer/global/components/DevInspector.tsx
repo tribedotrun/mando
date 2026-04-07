@@ -305,8 +305,8 @@ export function DevInspector({
           position: 'fixed',
           display: 'none',
           pointerEvents: 'none',
-          border: '2px solid var(--color-accent)',
-          background: 'var(--color-accent-wash)',
+          border: '2px solid var(--primary)',
+          background: 'var(--accent)',
           borderRadius: 4,
           zIndex: 99998,
           transition: 'all 50ms ease-out',
@@ -318,8 +318,8 @@ export function DevInspector({
           position: 'fixed',
           display: 'none',
           pointerEvents: 'none',
-          background: 'var(--color-accent)',
-          color: 'var(--color-bg)',
+          background: 'var(--primary)',
+          color: 'var(--background)',
           fontSize: 11,
           fontFamily: 'monospace',
           padding: '2px 6px',
@@ -335,30 +335,19 @@ export function DevInspector({
             position: 'fixed',
             bottom: 32,
             right: 16,
-            background: 'var(--color-bg-2, #1a1a2e)',
-            border: '1px solid var(--color-border, #333)',
+            background: 'var(--muted)',
+            border: '1px solid var(--border)',
             borderRadius: 6,
             padding: '4px 8px',
             zIndex: 100000,
             fontFamily: 'monospace',
             fontSize: 11,
-            color: 'var(--color-text-3)',
+            color: 'var(--text-3)',
             pointerEvents: 'none',
           }}
         >
-          <span className="text-success" style={{ fontSize: 11 }}>
-            ✓ copied
-          </span>
-          <span
-            style={{
-              maxWidth: 300,
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-            }}
-          >
-            {toast}
-          </span>
+          <span className="text-[11px] text-success">✓ copied</span>
+          <span className="max-w-[300px] truncate">{toast}</span>
         </div>
       )}
     </>

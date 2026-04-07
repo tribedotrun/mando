@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { Maximize2, X } from 'lucide-react';
+import { Maximize2 } from 'lucide-react';
 import type { SessionEntry } from '#renderer/types';
 import { CopyBtn } from '#renderer/global/components/CopyBtn';
 import { fmtMs } from '#renderer/utils';
@@ -15,8 +15,12 @@ import {
   SectionRow,
   StructuredOutputBlock,
 } from '#renderer/domains/sessions/components/TranscriptBlocks';
+import { Button } from '#renderer/components/ui/button';
 
-// Built-in CC tool names — fallback when format-based check is ambiguous.
+import { ScrollArea } from '#renderer/components/ui/scroll-area';
+import { Skeleton } from '#renderer/components/ui/skeleton';
+
+// Built-in CC tool names -- fallback when format-based check is ambiguous.
 // Source: github.com/anthropics/claude-code -> src/tools/ (getAllBaseTools).
 // Update when CC adds new tools; stale list degrades gracefully (format check covers most cases).
 const CC_TOOLS = new Set([
@@ -66,7 +70,7 @@ function isKnownTool(name: string): boolean {
   return CC_TOOLS.has(name) || name.startsWith('mcp__');
 }
 
-// ── Parser ──
+// -- Parser --
 
 function parseTranscript(markdown: string): TranscriptSection[] {
   if (!markdown?.trim()) return [];
@@ -125,7 +129,7 @@ function parseTurnBody(body: string): ContentBlock[] {
     const line = lines[i];
 
     // Tool block: **ToolName** ...
-    // Primary: format-based — Rust renderer emits two spaces after **Name**
+    // Primary: format-based -- Rust renderer emits two spaces after **Name**
     // (with optional modifiers like (bg)), or nothing (code fence on next line).
     // Fallback: known CC tool name or mcp_ prefix.
     const toolMatch = line.match(/^\*\*([\w.-]+)\*\*(.*)$/);
@@ -188,7 +192,7 @@ function parseTurnBody(body: string): ContentBlock[] {
       continue;
     }
 
-    // Initial context — skip entirely (internal plumbing)
+    // Initial context -- skip entirely (internal plumbing)
     if (line.startsWith('**Initial context:**')) {
       if (i + 1 < lines.length && lines[i + 1].startsWith('```')) {
         i += 2;
@@ -208,7 +212,7 @@ function parseTurnBody(body: string): ContentBlock[] {
   return blocks;
 }
 
-// ── Main export ──
+// -- Main export --
 
 interface Props {
   markdown: string;
@@ -221,7 +225,7 @@ export function TranscriptViewer({ markdown }: Props): React.ReactElement {
   const visibleSections = sections.filter((s) => s.kind !== 'queue-op' && s.kind !== 'session-end');
 
   if (visibleSections.length === 0) {
-    return <div className="text-[11px] text-text-3">No transcript content</div>;
+    return <div className="text-[11px] text-muted-foreground">No transcript content</div>;
   }
 
   // Hoist StructuredOutput blocks to the top of the transcript.
@@ -244,7 +248,7 @@ export function TranscriptViewer({ markdown }: Props): React.ReactElement {
   );
 }
 
-// ── Transcript Sidebar (used by TaskDetailView) ──
+// -- Transcript Sidebar (used by TaskDetailView) --
 
 interface TranscriptSidebarProps {
   session: { entry: SessionEntry; markdown: string | null; loading: boolean };
@@ -264,21 +268,12 @@ export function TranscriptSidebar({
   const subtitle = sessionSubtitle(s);
 
   return (
-    <div
-      className="flex h-full w-[440px] shrink-0 flex-col"
-      style={{
-        background: 'var(--color-surface-2)',
-        borderLeft: '1px solid var(--color-border-subtle)',
-      }}
-    >
+    <div className="flex h-full w-[440px] shrink-0 flex-col bg-muted">
       {/* Header */}
-      <div
-        className="flex items-center gap-2 px-4 py-3"
-        style={{ borderBottom: '1px solid var(--color-border-subtle)' }}
-      >
+      <div className="flex items-center gap-2 px-4 py-3">
         <div className="min-w-0 flex-1">
-          <div className="truncate text-caption font-medium text-text-1">{sessionTitle(s)}</div>
-          <div className="flex gap-2 text-label text-text-3">
+          <div className="truncate text-caption font-medium text-foreground">{sessionTitle(s)}</div>
+          <div className="flex gap-2 text-label text-muted-foreground">
             {subtitle && <span>{subtitle}</span>}
             {s.model && <span>{s.model}</span>}
             {s.duration_ms != null && s.duration_ms > 0 && <span>{fmtMs(s.duration_ms)}</span>}
@@ -286,47 +281,30 @@ export function TranscriptSidebar({
         </div>
         <CopyBtn text={resumeCmd} label="-r" />
         {onExpand && (
-          <button
-            onClick={onExpand}
-            title="Expand to full view"
-            className="flex items-center justify-center rounded-md transition-colors hover:bg-surface-3"
-            style={{
-              width: 24,
-              height: 24,
-              color: 'var(--color-text-3)',
-              background: 'none',
-              border: 'none',
-              cursor: 'pointer',
-            }}
-          >
+          <Button variant="ghost" size="icon-xs" onClick={onExpand}>
             <Maximize2 size={14} strokeWidth={1.5} />
-          </button>
+          </Button>
         )}
-        <button
-          onClick={onClose}
-          className="flex items-center justify-center rounded-md transition-colors hover:bg-surface-3"
-          style={{
-            width: 24,
-            height: 24,
-            color: 'var(--color-text-3)',
-            background: 'none',
-            border: 'none',
-            cursor: 'pointer',
-          }}
-        >
-          <X size={14} strokeWidth={1.5} />
-        </button>
+        <Button variant="ghost" size="icon-xs" onClick={onClose}>
+          <span className="sr-only">Close</span>
+          &#x2715;
+        </Button>
       </div>
       {/* Transcript content */}
-      <div className="flex-1 overflow-auto px-4 py-3">
+      <ScrollArea className="flex-1 px-4 py-3">
         {session.loading ? (
-          <div className="text-caption text-text-3">Loading transcript&hellip;</div>
+          <div className="space-y-3">
+            <Skeleton className="h-4 w-3/4" />
+            <Skeleton className="h-4 w-1/2" />
+            <Skeleton className="h-4 w-full" />
+            <Skeleton className="h-4 w-2/3" />
+          </div>
         ) : session.markdown ? (
           <TranscriptViewer markdown={session.markdown} />
         ) : (
-          <div className="text-caption text-text-3">No transcript available</div>
+          <div className="text-caption text-muted-foreground">No transcript available</div>
         )}
-      </div>
+      </ScrollArea>
     </div>
   );
 }

@@ -5,7 +5,8 @@ import {
   getNotificationsEnabled,
   setNotificationsEnabled,
 } from '#renderer/global/hooks/useDesktopNotifications';
-import { Switch } from '#renderer/global/components/Switch';
+import { Switch } from '#renderer/components/ui/switch';
+import { Button } from '#renderer/components/ui/button';
 import { useMountEffect } from '#renderer/global/hooks/useMountEffect';
 import { toast } from 'sonner';
 import { useSettingsStore } from '#renderer/domains/settings/stores/settingsStore';
@@ -14,8 +15,8 @@ const CHANNELS = ['stable', 'beta'] as const;
 
 function SettingsRow({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div className="flex items-center justify-between" style={{ padding: '10px 0', minHeight: 40 }}>
-      <span className="text-body text-text-1">{label}</span>
+    <div className="flex min-h-[40px] items-center justify-between py-2.5">
+      <span className="text-body text-foreground">{label}</span>
       <div className="flex items-center">{children}</div>
     </div>
   );
@@ -116,13 +117,11 @@ export function SettingsGeneral(): React.ReactElement {
 
   return (
     <div data-testid="settings-general">
-      <h2 className="text-heading text-text-1" style={{ marginBottom: 24 }}>
-        General
-      </h2>
+      <h2 className="mb-6 text-heading text-foreground">General</h2>
 
       <SettingsRow label="Version">
         <span className="flex items-center gap-3">
-          <span className="text-code text-text-1">{appVersion || '\u2014'}</span>
+          <span className="text-code text-foreground">{appVersion || '\u2014'}</span>
           <UpdateCheckButton
             status={updateCheckStatus}
             onCheckError={() => setUpdateCheckStatus('error')}
@@ -140,7 +139,7 @@ export function SettingsGeneral(): React.ReactElement {
 
       <SettingsRow label="Open app at login">
         <Switch
-          testId="start-at-login-toggle"
+          data-testid="start-at-login-toggle"
           checked={openAtLogin}
           onCheckedChange={toggleLoginItem}
         />
@@ -148,7 +147,7 @@ export function SettingsGeneral(): React.ReactElement {
 
       <SettingsRow label="Desktop notifications">
         <Switch
-          testId="notifications-toggle"
+          data-testid="notifications-toggle"
           checked={notificationsEnabled}
           onCheckedChange={toggleNotifications}
         />
@@ -169,14 +168,16 @@ function UpdateCheckButton({
   const [installing, setInstalling] = useState(false);
 
   if (status === 'checking') {
-    return <span className="text-caption text-text-3">Checking…</span>;
+    return <span className="text-caption text-muted-foreground">Checking...</span>;
   }
   if (status === 'up-to-date') {
     return <span className="text-caption text-success">Up to date</span>;
   }
   if (status === 'update-available') {
     return (
-      <button
+      <Button
+        variant="link"
+        size="xs"
         disabled={installing}
         onClick={() => {
           setInstalling(true);
@@ -188,38 +189,29 @@ function UpdateCheckButton({
             })
             .finally(() => setInstalling(false));
         }}
-        className="text-caption transition-colors"
-        style={{
-          color: 'var(--color-accent)',
-          background: 'none',
-          border: 'none',
-          cursor: installing ? 'default' : 'pointer',
-          padding: 0,
-          textDecoration: 'underline',
-          textUnderlineOffset: 2,
-          opacity: installing ? 0.6 : 1,
-        }}
+        className={`text-caption text-primary ${installing ? 'opacity-60' : ''}`}
       >
-        {installing ? 'Installing…' : 'Update ready — install'}
-      </button>
+        {installing ? 'Installing...' : 'Update ready \u2014 install'}
+      </Button>
     );
   }
   if (status === 'error') {
-    return <span className="text-caption text-error">Check failed</span>;
+    return <span className="text-caption text-destructive">Check failed</span>;
   }
   if (status === 'install-error') {
-    return <span className="text-caption text-error">Install failed</span>;
+    return <span className="text-caption text-destructive">Install failed</span>;
   }
   return (
-    <button
+    <Button
+      variant="link"
+      size="xs"
       onClick={() => {
         window.mandoAPI.updates.checkForUpdates().catch(onCheckError);
       }}
-      className="cursor-pointer border-none bg-transparent p-0 text-caption text-text-3 underline transition-colors hover:text-text-1"
-      style={{ textUnderlineOffset: 2 }}
+      className="text-caption text-muted-foreground hover:text-foreground"
     >
       Check for updates
-    </button>
+    </Button>
   );
 }
 
@@ -233,34 +225,23 @@ function SegmentedControl({
   onChange: (v: string) => void;
 }) {
   return (
-    <div
-      data-testid="update-channel-select"
-      className="flex"
-      style={{
-        borderRadius: 'var(--radius-button)',
-        border: '1px solid var(--color-border)',
-        overflow: 'hidden',
-      }}
-    >
-      {options.map((opt, index) => {
+    <div data-testid="update-channel-select" className="flex overflow-hidden rounded-md bg-muted">
+      {options.map((opt) => {
         const active = value === opt;
         return (
-          <button
+          <Button
             key={opt}
+            variant="ghost"
+            size="sm"
             onClick={() => onChange(opt)}
-            className="text-[13px] transition-colors"
-            style={{
-              padding: '4px 16px',
-              background: active ? 'var(--color-surface-3)' : 'transparent',
-              color: active ? 'var(--color-text-1)' : 'var(--color-text-2)',
-              fontWeight: active ? 500 : 400,
-              border: 'none',
-              borderRight: index === options.length - 1 ? 'none' : '1px solid var(--color-border)',
-              cursor: 'pointer',
-            }}
+            className={`h-auto rounded-none px-4 py-1 text-[13px] transition-colors ${
+              active
+                ? 'bg-secondary font-medium text-foreground'
+                : 'bg-transparent font-normal text-muted-foreground'
+            }`}
           >
             {opt.charAt(0).toUpperCase() + opt.slice(1)}
-          </button>
+          </Button>
         );
       })}
     </div>

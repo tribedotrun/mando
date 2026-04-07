@@ -5,12 +5,14 @@ import { PrMarkdown } from '#renderer/domains/captain/components/PrMarkdown';
 import { useTaskAsk } from '#renderer/global/hooks/useTaskAsk';
 import type { AskHistoryEntry, TaskItem } from '#renderer/types';
 import { shortTs } from '#renderer/utils';
+import { Button } from '#renderer/components/ui/button';
+import { Skeleton } from '#renderer/components/ui/skeleton';
 
 export interface QAHandle {
   ask: (question: string) => void;
 }
 
-/* ── Active Q&A View (replaces tabs when asking) ── */
+/* -- Active Q&A View (replaces tabs when asking) -- */
 
 interface ActiveQAProps {
   item: TaskItem;
@@ -61,17 +63,14 @@ export function ActiveQAView({
   return (
     <>
       {/* Back link */}
-      <button
+      <Button
+        variant="ghost"
+        size="xs"
         onClick={onBack}
-        className="mb-3 flex shrink-0 items-center gap-2 text-caption text-text-3"
-        style={{
-          background: 'none',
-          border: 'none',
-          cursor: 'pointer',
-        }}
+        className="mb-3 shrink-0 text-muted-foreground"
       >
         &larr; Back to task
-      </button>
+      </Button>
 
       {/* Messages, scrollable */}
       <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto pr-2">
@@ -89,7 +88,7 @@ export function ActiveQAView({
   );
 }
 
-/* ── Q&A History Tab (read-only view in tabs) ── */
+/* -- Q&A History Tab (read-only view in tabs) -- */
 
 export function QAHistoryTab({ item }: { item: TaskItem }): React.ReactElement {
   const {
@@ -106,7 +105,7 @@ export function QAHistoryTab({ item }: { item: TaskItem }): React.ReactElement {
 
   if (isError) {
     return (
-      <div className="text-caption text-error">
+      <div className="text-caption text-destructive">
         Failed to load Q&A history{error instanceof Error ? `: ${error.message}` : ''}
       </div>
     );
@@ -114,8 +113,9 @@ export function QAHistoryTab({ item }: { item: TaskItem }): React.ReactElement {
 
   if (isPending) {
     return (
-      <div className="text-caption" style={{ color: 'var(--color-text-3)' }}>
-        Loading Q&A history...
+      <div className="space-y-3">
+        <Skeleton className="h-4 w-3/4" />
+        <Skeleton className="h-4 w-1/2" />
       </div>
     );
   }
@@ -133,7 +133,7 @@ export function QAHistoryTab({ item }: { item: TaskItem }): React.ReactElement {
   );
 }
 
-/* ── Shared message component ── */
+/* -- Shared message component -- */
 
 function QAMessage({ entry }: { entry: AskHistoryEntry }): React.ReactElement {
   const isHuman = entry.role === 'human';
@@ -146,10 +146,10 @@ function QAMessage({ entry }: { entry: AskHistoryEntry }): React.ReactElement {
           className="text-label"
           style={{
             color: isError
-              ? 'var(--color-error)'
+              ? 'var(--destructive)'
               : isHuman
-                ? 'var(--color-needs-human)'
-                : 'var(--color-accent)',
+                ? 'var(--needs-human)'
+                : 'var(--primary)',
           }}
         >
           {isError ? 'Error' : isHuman ? 'You' : 'Agent'}
@@ -160,19 +160,19 @@ function QAMessage({ entry }: { entry: AskHistoryEntry }): React.ReactElement {
         className="rounded-lg px-4 py-3 text-body leading-relaxed"
         style={{
           background: isError
-            ? 'color-mix(in srgb, var(--color-error) 10%, transparent)'
+            ? 'color-mix(in srgb, var(--destructive) 10%, transparent)'
             : isHuman
-              ? 'var(--color-accent-wash)'
-              : 'var(--color-surface-2)',
+              ? 'var(--accent)'
+              : 'var(--muted)',
           color: isError
-            ? 'var(--color-error)'
+            ? 'var(--destructive)'
             : isHuman
-              ? 'var(--color-text-1)'
-              : 'var(--color-text-2)',
+              ? 'var(--foreground)'
+              : 'var(--muted-foreground)',
         }}
       >
         {isHuman ? (
-          <span style={{ whiteSpace: 'pre-wrap' }}>{entry.content}</span>
+          <span className="whitespace-pre-wrap">{entry.content}</span>
         ) : (
           <PrMarkdown text={entry.content} />
         )}

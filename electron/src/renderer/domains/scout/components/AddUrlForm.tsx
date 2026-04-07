@@ -1,11 +1,7 @@
 import React, { useState } from 'react';
 import { useScoutStore } from '#renderer/domains/scout/stores/scoutStore';
-
-const inputStyle: React.CSSProperties = {
-  borderColor: 'var(--color-border)',
-  background: 'var(--color-surface-2)',
-  color: 'var(--color-text-1)',
-};
+import { Button } from '#renderer/components/ui/button';
+import { Input } from '#renderer/components/ui/input';
 
 export function AddUrlForm(): React.ReactElement {
   const [isOpen, setIsOpen] = useState(false);
@@ -28,50 +24,41 @@ export function AddUrlForm(): React.ReactElement {
 
   if (!isOpen) {
     return (
-      <button
-        data-testid="add-url-btn"
-        onClick={() => setIsOpen(true)}
-        className="rounded px-4 py-2 text-sm font-medium text-bg bg-accent"
-      >
+      <Button data-testid="add-url-btn" size="sm" onClick={() => setIsOpen(true)}>
         + Add URL
-      </button>
+      </Button>
     );
   }
 
   return (
     <form onSubmit={handleSubmit} className="flex items-center gap-2">
-      <input
+      <Input
         data-testid="url-input"
         type="text"
         placeholder="https://..."
         value={url}
         onChange={(e) => setUrl(e.target.value)}
-        className="rounded border px-3 py-2 text-sm focus:outline-none"
-        style={inputStyle}
+        className="h-8 text-sm"
       />
-      <input
+      <Input
         type="text"
         placeholder="Title (optional)"
         value={title}
         onChange={(e) => setTitle(e.target.value)}
-        className="rounded border px-3 py-2 text-sm focus:outline-none"
-        style={inputStyle}
+        className="h-8 text-sm"
       />
-      <button
+      <Button
         data-testid="submit-url-btn"
         type="submit"
+        size="sm"
         disabled={!url.trim()}
-        className="rounded px-4 py-2 text-sm font-medium text-bg disabled:opacity-50 bg-success"
+        className="bg-success text-background hover:bg-success/90"
       >
         Add
-      </button>
-      <button
-        type="button"
-        onClick={() => setIsOpen(false)}
-        className="rounded px-3 py-2 text-sm text-text-2"
-      >
+      </Button>
+      <Button variant="ghost" size="sm" type="button" onClick={() => setIsOpen(false)}>
         Cancel
-      </button>
+      </Button>
     </form>
   );
 }

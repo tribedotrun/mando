@@ -12,6 +12,18 @@ import type { ScoutItem } from '#renderer/types';
 import { getErrorMessage } from '#renderer/utils';
 import { useProjects } from '#renderer/domains/settings';
 import log from '#renderer/logger';
+import { Button } from '#renderer/components/ui/button';
+import { Input } from '#renderer/components/ui/input';
+import { Badge } from '#renderer/components/ui/badge';
+import { Separator } from '#renderer/components/ui/separator';
+import { Skeleton } from '#renderer/components/ui/skeleton';
+import { Card, CardContent } from '#renderer/components/ui/card';
+import {
+  Collapsible,
+  CollapsibleTrigger,
+  CollapsibleContent,
+} from '#renderer/components/ui/collapsible';
+import { Combobox } from '#renderer/components/ui/combobox';
 
 interface Props {
   itemId: number;
@@ -101,8 +113,12 @@ export function ScoutReader({ itemId, onBack, onAsk, qaOpen }: Props): React.Rea
 
   if (loading) {
     return (
-      <div data-testid="scout-reader" className="flex items-center gap-2 py-16 justify-center">
-        <span className="text-xs text-text-3">Loading...</span>
+      <div data-testid="scout-reader" className="mx-auto max-w-[720px] space-y-4 py-8">
+        <Skeleton className="h-6 w-48" />
+        <Skeleton className="h-4 w-32" />
+        <Skeleton className="h-4 w-full" />
+        <Skeleton className="h-4 w-3/4" />
+        <Skeleton className="h-4 w-2/3" />
       </div>
     );
   }
@@ -110,10 +126,10 @@ export function ScoutReader({ itemId, onBack, onAsk, qaOpen }: Props): React.Rea
   if (error || !item) {
     return (
       <div data-testid="scout-reader">
-        <button onClick={onBack} className="mb-3 rounded px-3 py-1 text-xs text-text-2">
+        <Button variant="ghost" size="sm" onClick={onBack} className="mb-3">
           &larr; Back
-        </button>
-        <div className="text-xs text-error">{error ?? `Item #${itemId} not found`}</div>
+        </Button>
+        <div className="text-xs text-destructive">{error ?? `Item #${itemId} not found`}</div>
       </div>
     );
   }
@@ -122,82 +138,52 @@ export function ScoutReader({ itemId, onBack, onAsk, qaOpen }: Props): React.Rea
     <div data-testid="scout-reader" className={qaOpen ? '' : 'mx-auto max-w-[720px]'}>
       {/* Nav bar */}
       <div
-        className="sticky top-0 z-10 mb-4 flex items-center gap-2 py-2 backdrop-blur-sm border-b"
+        className="sticky top-0 z-10 mb-4 flex items-center gap-2 py-2 backdrop-blur-sm"
         style={{
-          background: 'color-mix(in srgb, var(--color-bg) 90%, transparent)',
-          borderColor: 'var(--color-surface-2)',
+          background: 'color-mix(in srgb, var(--background) 90%, transparent)',
         }}
       >
-        <button onClick={onBack} className="rounded px-3 py-1 text-xs text-text-2">
+        <Button variant="ghost" size="sm" onClick={onBack}>
           &larr; Back
-        </button>
-        <span className="text-xs truncate max-w-[300px] text-text-3">{displayTitle}</span>
+        </Button>
+        <span className="max-w-[300px] truncate text-xs text-muted-foreground">{displayTitle}</span>
         <div className="ml-auto flex items-center gap-1">
-          <button
-            onClick={onAsk}
-            className="rounded px-3 py-1 text-xs"
-            style={
-              qaOpen
-                ? {
-                    background: 'var(--color-accent-wash)',
-                    color: 'var(--color-accent)',
-                  }
-                : { color: 'var(--color-text-2)' }
-            }
-          >
+          <Button variant={qaOpen ? 'secondary' : 'ghost'} size="sm" onClick={onAsk}>
             Ask
-          </button>
+          </Button>
           {(item.status === 'processed' ||
             item.status === 'saved' ||
             item.status === 'archived') && (
-            <button
+            <Button
+              variant={actOpen ? 'secondary' : 'ghost'}
+              size="sm"
               onClick={() => {
                 setActOpen(!actOpen);
                 setActResult(null);
               }}
-              className="rounded px-3 py-1 text-xs"
-              style={
-                actOpen
-                  ? {
-                      background: 'var(--color-accent-wash)',
-                      color: 'var(--color-accent)',
-                    }
-                  : { color: 'var(--color-text-2)' }
-              }
             >
               Act
-            </button>
+            </Button>
           )}
-          <button
-            onClick={handlePublish}
-            className="rounded px-3 py-1 text-xs text-text-2"
-            disabled={publishing}
-          >
-            {publishing ? 'Publishing…' : telegraphUrl ? 'Open article' : 'Publish'}
-          </button>
-          <button
+          <Button variant="ghost" size="sm" onClick={handlePublish} disabled={publishing}>
+            {publishing ? 'Publishing...' : telegraphUrl ? 'Open article' : 'Publish'}
+          </Button>
+          <Button
+            variant={sessionsOpen ? 'secondary' : 'ghost'}
+            size="sm"
             onClick={() => setSessionsOpen((value) => !value)}
-            className="rounded px-3 py-1 text-xs"
-            style={
-              sessionsOpen
-                ? { background: 'var(--color-accent-wash)', color: 'var(--color-accent)' }
-                : { color: 'var(--color-text-2)' }
-            }
           >
             Sessions
-          </button>
-          <a
-            href={item.url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="rounded px-3 py-1 text-xs text-text-2"
-          >
-            Source
-          </a>
+          </Button>
+          <Button variant="ghost" size="sm" asChild>
+            <a href={item.url} target="_blank" rel="noopener noreferrer">
+              Source
+            </a>
+          </Button>
         </div>
       </div>
 
-      {/* Act form — directly below nav bar */}
+      {/* Act form */}
       {actOpen && (
         <ScoutActForm
           projects={projects}
@@ -212,59 +198,51 @@ export function ScoutReader({ itemId, onBack, onAsk, qaOpen }: Props): React.Rea
       )}
 
       {sessionsOpen && (
-        <div
-          className="mb-5 rounded-lg border p-3"
-          style={{
-            borderColor: 'var(--color-border)',
-            background: 'var(--color-surface-1)',
-          }}
-        >
-          <div className="mb-2 text-label text-text-4">Scout sessions</div>
-          {sessionsQuery.isLoading ? (
-            <div className="text-xs text-text-4">Loading sessions…</div>
-          ) : sessionsQuery.error ? (
-            <div className="text-xs text-error">
-              {getErrorMessage(sessionsQuery.error, 'Failed to load sessions')}
-            </div>
-          ) : (sessionsQuery.data?.length ?? 0) === 0 ? (
-            <div className="text-xs text-text-4">No linked sessions.</div>
-          ) : (
-            <div className="space-y-2">
-              {sessionsQuery.data?.map((session) => (
-                <div
-                  key={session.session_id}
-                  className="flex items-center justify-between gap-3 rounded border px-3 py-2"
-                  style={{
-                    borderColor: 'var(--color-border-subtle)',
-                    background: 'var(--color-surface-2)',
-                  }}
-                >
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate text-xs font-medium text-text-2">
-                      {session.session_id}
+        <Card className="mb-5 py-3">
+          <CardContent className="space-y-2 px-4">
+            <div className="text-label text-muted-foreground">Scout sessions</div>
+            {sessionsQuery.isLoading ? (
+              <div className="space-y-2">
+                <Skeleton className="h-10 w-full" />
+                <Skeleton className="h-10 w-full" />
+              </div>
+            ) : sessionsQuery.error ? (
+              <div className="text-xs text-destructive">
+                {getErrorMessage(sessionsQuery.error, 'Failed to load sessions')}
+              </div>
+            ) : (sessionsQuery.data?.length ?? 0) === 0 ? (
+              <div className="text-xs text-muted-foreground">No linked sessions.</div>
+            ) : (
+              <div className="space-y-2">
+                {sessionsQuery.data?.map((session) => (
+                  <div
+                    key={session.session_id}
+                    className="flex items-center justify-between gap-3 rounded-md bg-muted px-3 py-2"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-xs font-medium text-muted-foreground">
+                        {session.session_id}
+                      </div>
+                      <div className="text-[11px] text-muted-foreground">
+                        {session.caller} · {session.status}
+                      </div>
                     </div>
-                    <div className="text-[11px] text-text-4">
-                      {session.caller} · {session.status}
-                    </div>
+                    <div className="text-[11px] text-muted-foreground">{session.created_at}</div>
                   </div>
-                  <div className="text-[11px] text-text-4">{session.created_at}</div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
       )}
 
       {/* Title block */}
       <div className="mb-5">
-        <h1 className="text-lg font-semibold leading-snug mb-2 text-text-1">{displayTitle}</h1>
-        <div className="flex items-center gap-3 font-mono text-xs text-text-3">
-          <span
-            className="rounded border px-1.5 py-0.5 text-label"
-            style={{ borderColor: 'var(--color-border)' }}
-          >
+        <h1 className="mb-2 text-lg font-semibold leading-snug text-foreground">{displayTitle}</h1>
+        <div className="flex items-center gap-3 font-mono text-xs text-muted-foreground">
+          <Badge variant="outline" className="text-[10px]">
             {item.item_type ?? 'blog'}
-          </span>
+          </Badge>
           {item.relevance != null && (
             <span>
               R:{item.relevance} Q:{item.quality}
@@ -284,18 +262,26 @@ export function ScoutReader({ itemId, onBack, onAsk, qaOpen }: Props): React.Rea
         />
       )}
 
+      <Separator className="my-4" />
+
       {/* Article */}
       <div>
         {articleLoading && (
-          <div className="text-xs text-center py-12 text-text-3">Loading article...</div>
+          <div className="space-y-3 py-8">
+            <Skeleton className="h-4 w-full" />
+            <Skeleton className="h-4 w-5/6" />
+            <Skeleton className="h-4 w-4/6" />
+            <Skeleton className="h-4 w-full" />
+            <Skeleton className="h-4 w-3/4" />
+          </div>
         )}
         {article && (
-          <div className="prose-scout text-sm leading-relaxed text-text-1">
+          <div className="prose-scout text-sm leading-relaxed text-foreground">
             <Markdown>{article}</Markdown>
           </div>
         )}
         {!article && !articleLoading && (
-          <div className="text-xs text-center py-8 text-text-3">
+          <div className="py-8 text-center text-xs text-muted-foreground">
             No article content. Process the item first.
           </div>
         )}
@@ -314,22 +300,22 @@ function ScoutSummary({
   onToggle: () => void;
 }): React.ReactElement {
   return (
-    <div className="mb-5">
-      <button onClick={onToggle} className="flex items-center gap-2 mb-2 text-label text-text-3">
+    <Collapsible open={summaryOpen} onOpenChange={onToggle} className="mb-5">
+      <CollapsibleTrigger className="flex items-center gap-2 text-label text-muted-foreground">
         <span className="text-[0.6rem]">{summaryOpen ? '\u25BC' : '\u25B6'}</span>
         Process Summary
-      </button>
-      {summaryOpen && (
+      </CollapsibleTrigger>
+      <CollapsibleContent>
         <div
-          className="border-l-2 pl-4 text-xs leading-relaxed prose-scout text-text-1"
+          className="prose-scout mt-2 border-l-2 pl-4 text-xs leading-relaxed text-foreground"
           style={{
-            borderColor: 'color-mix(in srgb, var(--color-accent) 30%, transparent)',
+            borderColor: 'color-mix(in srgb, var(--primary) 30%, transparent)',
           }}
         >
           <Markdown>{summary}</Markdown>
         </div>
-      )}
-    </div>
+      </CollapsibleContent>
+    </Collapsible>
   );
 }
 
@@ -353,39 +339,24 @@ function ScoutActForm({
   onAct: () => void;
 }): React.ReactElement {
   return (
-    <div
-      className="mb-5 rounded-lg p-4 bg-surface-2"
-      style={{ border: '1px solid var(--color-border)' }}
-    >
-      <div className="flex flex-col gap-3">
+    <Card className="mb-5 py-3">
+      <CardContent className="flex flex-col gap-3 px-4">
         <div className="flex items-center gap-2">
           {projects.length > 1 && (
-            <select
+            <Combobox
               value={actProject}
-              onChange={(e) => setActProject(e.target.value)}
-              className="shrink-0 rounded-md px-2.5 py-1.5 text-xs"
-              style={{
-                border: '1px solid var(--color-border)',
-                background: 'var(--color-surface-3)',
-                color: 'var(--color-text-1)',
-              }}
-            >
-              <option value="">Select project...</option>
-              {projects.map((p) => (
-                <option key={p} value={p}>
-                  {p}
-                </option>
-              ))}
-            </select>
+              onValueChange={setActProject}
+              options={projects.map((p) => ({ value: p, label: p }))}
+              placeholder="Select project..."
+              searchPlaceholder="Search projects..."
+              emptyText="No projects found."
+              className="shrink-0 text-xs"
+            />
           )}
-          {projects.length === 1 && (
-            <span className="shrink-0 rounded-md bg-surface-3 px-2.5 py-1.5 text-xs font-medium text-text-2">
-              {projects[0]}
-            </span>
-          )}
+          {projects.length === 1 && <Badge variant="secondary">{projects[0]}</Badge>}
         </div>
         <div className="flex items-center gap-2">
-          <input
+          <Input
             type="text"
             value={actPrompt}
             onChange={(e) => setActPrompt(e.target.value)}
@@ -393,23 +364,14 @@ function ScoutActForm({
               if (e.key === 'Enter' && actProject && !acting) onAct();
             }}
             placeholder="What should the task focus on? (optional)"
-            className="min-w-0 flex-1 rounded-md px-2.5 py-1.5 text-xs focus:outline-none"
-            style={{
-              border: '1px solid var(--color-border)',
-              background: 'var(--color-surface-3)',
-              color: 'var(--color-text-1)',
-            }}
+            className="h-8 min-w-0 flex-1 text-xs"
           />
-          <button
-            onClick={onAct}
-            disabled={!actProject || acting}
-            className="shrink-0 rounded-md bg-accent px-4 py-1.5 text-xs font-medium text-bg disabled:opacity-40"
-          >
+          <Button size="sm" onClick={onAct} disabled={!actProject || acting}>
             {acting ? 'Creating...' : 'Create Task'}
-          </button>
+          </Button>
         </div>
-        {actResult && <div className="text-xs text-text-2">{actResult}</div>}
-      </div>
-    </div>
+        {actResult && <div className="text-xs text-muted-foreground">{actResult}</div>}
+      </CardContent>
+    </Card>
   );
 }

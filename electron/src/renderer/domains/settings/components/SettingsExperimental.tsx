@@ -1,7 +1,9 @@
 import React from 'react';
+import { Card, CardContent } from '#renderer/components/ui/card';
+import { Separator } from '#renderer/components/ui/separator';
 import { useSettingsStore } from '#renderer/domains/settings/stores/settingsStore';
 import type { FeaturesConfig } from '#renderer/domains/settings/stores/settingsStore';
-import { Switch } from '#renderer/global/components/Switch';
+import { Switch } from '#renderer/components/ui/switch';
 
 const EMPTY_FEATURES: FeaturesConfig = {};
 
@@ -26,46 +28,37 @@ export function SettingsExperimental(): React.ReactElement {
 
   return (
     <div data-testid="settings-experimental">
-      <h2 className="text-lg font-semibold text-text-1">Experimental</h2>
-      <p className="mt-1 text-sm text-text-3" style={{ marginBottom: 24 }}>
+      <h2 className="text-lg font-semibold text-foreground">Experimental</h2>
+      <p className="mb-6 mt-1 text-sm text-muted-foreground">
         Alpha features. These may change or be removed at any time.
       </p>
 
-      <div
-        style={{
-          borderRadius: 'var(--radius-panel)',
-          border: '1px solid var(--color-border)',
-          background: 'var(--color-surface-1)',
-          overflow: 'hidden',
-        }}
-      >
+      <Card className="py-0">
         {FLAGS.map((flag, i) => {
           const on = !!features[flag.key];
           return (
-            <div
-              key={flag.key}
-              style={i > 0 ? { borderTop: '1px solid var(--color-border-subtle)' } : undefined}
-            >
-              <div className="flex items-center justify-between" style={{ padding: '14px 20px' }}>
-                <div style={{ paddingRight: 16 }}>
-                  <h3 className="text-sm font-medium text-text-1">{flag.label}</h3>
-                  <p className="text-xs text-text-3" style={{ marginTop: 2 }}>
-                    {flag.description}
-                  </p>
+            <React.Fragment key={flag.key}>
+              {i > 0 && <Separator />}
+              <CardContent className="py-3.5">
+                <div className="flex items-center justify-between">
+                  <div className="pr-4">
+                    <h3 className="text-sm font-medium text-foreground">{flag.label}</h3>
+                    <p className="mt-0.5 text-xs text-muted-foreground">{flag.description}</p>
+                  </div>
+                  <Switch
+                    data-testid={`experimental-${flag.key}`}
+                    checked={on}
+                    onCheckedChange={(checked) => {
+                      updateSection('features', { [flag.key]: checked });
+                      save();
+                    }}
+                  />
                 </div>
-                <Switch
-                  testId={`experimental-${flag.key}`}
-                  checked={on}
-                  onCheckedChange={(checked) => {
-                    updateSection('features', { [flag.key]: checked });
-                    save();
-                  }}
-                />
-              </div>
-            </div>
+              </CardContent>
+            </React.Fragment>
           );
         })}
-      </div>
+      </Card>
     </div>
   );
 }

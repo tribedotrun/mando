@@ -1,18 +1,22 @@
 import React, { useState, useCallback, useRef } from 'react';
-import { MoreHorizontal, Pencil, Trash2 } from 'lucide-react';
+import { MoreHorizontal, Pencil, Trash2, Plus, ChevronRight } from 'lucide-react';
 import { buildUrl } from '#renderer/global/hooks/useApi';
 import {
   DropdownMenu,
   DropdownMenuTrigger,
   DropdownMenuContent,
   DropdownMenuItem,
-} from '#renderer/global/components/DropdownMenu';
+} from '#renderer/components/ui/dropdown-menu';
 import {
   Dialog,
   DialogContent,
   DialogTitle,
   DialogDescription,
-} from '#renderer/global/components/Dialog';
+} from '#renderer/components/ui/dialog';
+import { Button } from '#renderer/components/ui/button';
+import { Input } from '#renderer/components/ui/input';
+import { Checkbox } from '#renderer/components/ui/checkbox';
+import type { TaskItem } from '#renderer/types';
 
 interface SidebarProjectItemProps {
   name: string;
@@ -22,6 +26,9 @@ interface SidebarProjectItemProps {
   onSelect: () => void;
   onRename: (oldName: string, newName: string) => Promise<void>;
   onRemove: (name: string) => Promise<void>;
+  onNewTerminal?: (project: string) => void;
+  tasks?: TaskItem[];
+  onOpenTask?: (taskId: number) => void;
 }
 
 export function SidebarProjectItem({
@@ -32,12 +39,16 @@ export function SidebarProjectItem({
   onSelect,
   onRename,
   onRemove,
+  onNewTerminal,
+  tasks = [],
+  onOpenTask,
 }: SidebarProjectItemProps): React.ReactElement {
   const [menuOpen, setMenuOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
   const [pending, setPending] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const [renameValue, setRenameValue] = useState(name);
   const submittedRef = useRef(false);
 
@@ -68,8 +79,7 @@ export function SidebarProjectItem({
 
   return (
     <div
-      className="sidebar-project-item"
-      style={{ position: 'relative' }}
+      className="sidebar-project-item relative"
       data-menu-open={menuOpen || undefined}
       onContextMenu={(e) => {
         e.preventDefault();
@@ -77,14 +87,8 @@ export function SidebarProjectItem({
       }}
     >
       {renaming ? (
-        <div
-          style={{
-            padding: '4px 10px',
-            borderRadius: 6,
-            background: active ? 'var(--color-surface-2)' : 'transparent',
-          }}
-        >
-          <input
+        <div className={`rounded-md px-1.5 py-1 ${active ? 'bg-muted' : 'bg-transparent'}`}>
+          <Input
             ref={inputRefCb}
             value={renameValue}
             onChange={(e) => setRenameValue(e.target.value)}
@@ -93,34 +97,24 @@ export function SidebarProjectItem({
               if (e.key === 'Escape') cancelRename();
             }}
             onBlur={submitRename}
-            className="w-full text-[13px]"
-            style={{
-              background: 'var(--color-surface-3)',
-              color: 'var(--color-text-1)',
-              border: '1px solid var(--color-accent)',
-              borderRadius: 4,
-              padding: '2px 6px',
-              outline: 'none',
-              fontWeight: 400,
-            }}
+            className="h-7 w-full rounded border-primary bg-secondary px-1.5 text-[13px] font-normal"
           />
         </div>
       ) : (
         <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
-          <button
-            onClick={onSelect}
-            className="flex w-full items-center justify-between text-[13px] transition-colors"
-            style={{
-              background: active ? 'var(--color-surface-2)' : 'transparent',
-              color: active ? 'var(--color-text-1)' : 'var(--color-text-2)',
-              fontWeight: active ? 500 : 400,
-              padding: '6px 10px',
-              borderRadius: 6,
-              border: 'none',
-              cursor: 'pointer',
+          <Button
+            variant="ghost"
+            onClick={() => {
+              onSelect();
+              setExpanded((v) => !v);
             }}
+            className={`flex h-auto w-full items-center justify-between rounded-md px-1.5 py-1.5 text-[13px] transition-colors ${active ? 'bg-muted font-medium text-foreground' : 'bg-transparent font-normal text-muted-foreground'}`}
           >
             <span className="flex min-w-0 items-center gap-1.5">
+              <ChevronRight
+                size={10}
+                className={`shrink-0 transition-transform duration-150 ${expanded ? 'rotate-90' : ''}`}
+              />
               {logo && (
                 <img
                   key={logo}
@@ -136,6 +130,24 @@ export function SidebarProjectItem({
               )}
               <span className="truncate">{name}</span>
             </span>
+            {onNewTerminal && (
+              <span
+                role="button"
+                tabIndex={-1}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onNewTerminal(name);
+                }}
+                title="New terminal"
+                className="sidebar-project-dots size-5 shrink-0 items-center justify-center rounded transition-colors hover:bg-muted-foreground/10 hover:text-text-2"
+                style={{
+                  color: 'var(--color-text-3)',
+                  cursor: 'pointer',
+                }}
+              >
+                <Plus size={14} />
+              </span>
+            )}
             <DropdownMenuTrigger asChild>
               <span
                 role="button"
@@ -143,24 +155,13 @@ export function SidebarProjectItem({
                 onClick={(e) => {
                   e.stopPropagation();
                 }}
-                className="sidebar-project-dots shrink-0 items-center justify-center transition-colors hover:text-text-2"
-                style={{
-                  width: 20,
-                  height: 20,
-                  borderRadius: 4,
-                  color: 'var(--color-text-3)',
-                }}
+                className="sidebar-project-dots size-5 shrink-0 items-center justify-center rounded text-text-3 transition-colors hover:text-muted-foreground"
               >
                 <MoreHorizontal size={14} />
               </span>
             </DropdownMenuTrigger>
-            <span
-              className="sidebar-project-count shrink-0"
-              style={{ fontSize: 11, color: 'var(--color-text-3)', marginLeft: 4 }}
-            >
-              {count}
-            </span>
-          </button>
+            <span className="shrink-0 text-[11px] text-text-4">{count > 0 ? count : ''}</span>
+          </Button>
           <DropdownMenuContent align="end" className="min-w-[130px]">
             <DropdownMenuItem
               onSelect={() => {
@@ -173,7 +174,7 @@ export function SidebarProjectItem({
               Rename
             </DropdownMenuItem>
             <DropdownMenuItem
-              destructive
+              variant="destructive"
               onSelect={() => {
                 setConfirmed(false);
                 setConfirmOpen(true);
@@ -201,7 +202,7 @@ export function SidebarProjectItem({
             {count > 0 ? (
               <>
                 &ldquo;{name}&rdquo; and{' '}
-                <strong className="text-text-2">
+                <strong className="text-muted-foreground">
                   {count} {count === 1 ? 'task' : 'tasks'}
                 </strong>{' '}
                 belonging to it will be permanently deleted. Project files on disk are not affected.
@@ -215,29 +216,30 @@ export function SidebarProjectItem({
           </DialogDescription>
 
           {count > 0 && (
-            <label className="mb-4 flex cursor-pointer items-center gap-2 text-[13px] text-text-2">
-              <input
-                type="checkbox"
+            <label className="mb-4 flex cursor-pointer items-center gap-2 text-[13px] text-muted-foreground">
+              <Checkbox
                 checked={confirmed}
-                onChange={(e) => setConfirmed(e.target.checked)}
-                style={{ accentColor: 'var(--color-error)' }}
+                onCheckedChange={(checked) => setConfirmed(checked === true)}
               />
               I understand this cannot be undone
             </label>
           )}
 
           <div className="flex justify-end gap-2">
-            <button
+            <Button
+              variant="outline"
+              size="sm"
               onClick={() => {
                 setConfirmOpen(false);
                 setConfirmed(false);
               }}
               disabled={pending}
-              className="cursor-pointer rounded-md border border-border bg-transparent px-3.5 py-1.5 text-[13px] text-text-2 disabled:cursor-default disabled:opacity-50"
             >
               Cancel
-            </button>
-            <button
+            </Button>
+            <Button
+              variant="destructive"
+              size="sm"
               onClick={async () => {
                 setPending(true);
                 try {
@@ -249,17 +251,32 @@ export function SidebarProjectItem({
                 }
               }}
               disabled={(count > 0 && !confirmed) || pending}
-              className="cursor-pointer rounded-md border-none bg-error px-3.5 py-1.5 text-[13px] text-bg disabled:cursor-default disabled:opacity-50"
             >
               {pending
                 ? 'Deleting...'
                 : count > 0
                   ? `Delete project and ${count} ${count === 1 ? 'task' : 'tasks'}`
                   : 'Remove'}
-            </button>
+            </Button>
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Expanded task list */}
+      {expanded && tasks.length > 0 && (
+        <div className="ml-4 flex flex-col gap-0.5 pb-1 pt-0.5">
+          {tasks.map((task) => (
+            <button
+              key={task.id}
+              onClick={() => onOpenTask?.(task.id)}
+              className="flex w-full items-center gap-1.5 rounded px-2 py-1 text-left text-[12px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              style={{ background: 'none', border: 'none', cursor: 'pointer' }}
+            >
+              <span className="truncate">{task.title}</span>
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

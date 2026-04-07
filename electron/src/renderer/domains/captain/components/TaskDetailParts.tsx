@@ -8,7 +8,8 @@ import {
   DropdownMenuTrigger,
   DropdownMenuContent,
   DropdownMenuItem,
-} from '#renderer/global/components/DropdownMenu';
+} from '#renderer/components/ui/dropdown-menu';
+import { Button } from '#renderer/components/ui/button';
 
 export function ActionButton({
   label,
@@ -20,18 +21,9 @@ export function ActionButton({
   accent?: boolean;
 }): React.ReactElement {
   return (
-    <button
-      onClick={onClick}
-      className="rounded-md px-4 py-1 text-[13px] font-medium"
-      style={{
-        background: accent ? 'var(--color-accent)' : 'transparent',
-        color: accent ? 'var(--color-bg)' : 'var(--color-text-2)',
-        border: accent ? 'none' : '1px solid var(--color-border)',
-        cursor: 'pointer',
-      }}
-    >
+    <Button variant={accent ? 'default' : 'outline'} size="sm" onClick={onClick}>
       {label}
-    </button>
+    </Button>
   );
 }
 
@@ -70,31 +62,20 @@ export function DetailOverflowMenu({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <button
-          aria-label="More info"
-          className="flex items-center justify-center rounded-md transition-colors hover:bg-surface-2"
-          style={{
-            width: 28,
-            height: 28,
-            background: 'transparent',
-            color: 'var(--color-text-3)',
-            border: 'none',
-            cursor: 'pointer',
-          }}
-        >
+        <Button variant="ghost" size="icon-xs" aria-label="More info">
           <MoreIcon />
-        </button>
+        </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="min-w-[220px]">
         {item.context && onViewContext && (
           <DropdownMenuItem onSelect={onViewContext}>
-            <AlignLeft size={12} color="var(--color-text-3)" />
+            <AlignLeft size={12} color="var(--text-3)" />
             View task brief
           </DropdownMenuItem>
         )}
         {entries.map(({ label, value }) => (
           <DropdownMenuItem key={label} onSelect={() => copyToClipboard(value)}>
-            <Copy size={12} color="var(--color-text-3)" />
+            <Copy size={12} color="var(--text-3)" />
             {label}
           </DropdownMenuItem>
         ))}

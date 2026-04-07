@@ -123,7 +123,7 @@ pub(crate) async fn is_pr_branch_ahead(repo: &str, pr_number: &str) -> Result<bo
 }
 
 /// Close an open PR without merging.
-pub(crate) async fn close_pr(repo: &str, pr_number: &str) -> Result<()> {
+pub async fn close_pr(repo: &str, pr_number: &str) -> Result<()> {
     run_gh(&["pr", "close", pr_number, "--repo", repo]).await?;
     Ok(())
 }

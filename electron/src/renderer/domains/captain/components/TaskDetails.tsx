@@ -4,6 +4,7 @@ import { apiPost } from '#renderer/domains/captain/hooks/useApi';
 import { useSettingsStore } from '#renderer/domains/settings';
 import { toast } from 'sonner';
 import { getErrorMessage } from '#renderer/utils';
+import { Button } from '#renderer/components/ui/button';
 
 export function TaskEmptyState(): React.ReactElement {
   const projects = useSettingsStore((s) => s.config.captain?.projects);
@@ -14,7 +15,7 @@ export function TaskEmptyState(): React.ReactElement {
     if (adding) return;
 
     // Run the picker outside the loading state so the button doesn't flash
-    // "Adding…" while the user is still browsing. Errors from the picker
+    // "Adding..." while the user is still browsing. Errors from the picker
     // itself (IPC failure) are surfaced as a toast.
     let dir: string | null;
     try {
@@ -38,8 +39,8 @@ export function TaskEmptyState(): React.ReactElement {
 
   return (
     <div className="flex flex-col items-center justify-center py-16">
-      <ClipboardCheck size={48} color="var(--color-text-4)" strokeWidth={1} className="mb-4" />
-      <span className="text-subheading mb-1 text-text-2">
+      <ClipboardCheck size={48} color="var(--text-4)" strokeWidth={1} className="mb-4" />
+      <span className="text-subheading mb-1 text-muted-foreground">
         {hasProjects ? 'No tasks yet' : 'Add a project to get started'}
       </span>
       <span className="text-body mb-4 text-text-3">
@@ -48,21 +49,9 @@ export function TaskEmptyState(): React.ReactElement {
           : 'Mando needs a project folder to manage tasks.'}
       </span>
       {!hasProjects && (
-        <button
-          onClick={handleAddProject}
-          disabled={adding}
-          className="text-[13px] font-semibold transition-colors hover:brightness-110 active:brightness-90 disabled:opacity-50"
-          style={{
-            padding: '8px 20px',
-            borderRadius: 'var(--radius-button)',
-            background: 'var(--color-accent)',
-            color: 'var(--color-bg)',
-            border: 'none',
-            cursor: adding ? 'default' : 'pointer',
-          }}
-        >
-          {adding ? 'Adding…' : 'Add project'}
-        </button>
+        <Button onClick={handleAddProject} disabled={adding}>
+          {adding ? 'Adding...' : 'Add project'}
+        </Button>
       )}
     </div>
   );

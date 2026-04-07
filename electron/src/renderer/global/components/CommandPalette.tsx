@@ -1,5 +1,4 @@
 import React, { useRef } from 'react';
-import { Command } from 'cmdk';
 import {
   Plus,
   GitMerge,
@@ -10,9 +9,19 @@ import {
   Target,
   RefreshCw,
   Settings,
-  Search,
 } from 'lucide-react';
 import { useMountEffect } from '#renderer/global/hooks/useMountEffect';
+import {
+  Command,
+  CommandInput,
+  CommandList,
+  CommandEmpty,
+  CommandGroup,
+  CommandItem,
+  CommandShortcut,
+  CommandSeparator,
+} from '#renderer/components/ui/command';
+import { Kbd, KbdGroup } from '#renderer/components/ui/kbd';
 
 interface Props {
   open: boolean;
@@ -102,27 +111,16 @@ const ACTION_COMMANDS: CommandDef[] = [
   },
 ];
 
-function ShortcutBadge({ shortcut }: { shortcut: string }): React.ReactElement {
+function ShortcutKeys({ shortcut }: { shortcut: string }): React.ReactElement {
   const parts = shortcut.split(/\s+/);
   return (
-    <span className="flex items-center gap-1">
-      {parts.map((part, i) => (
-        <kbd
-          key={i}
-          className="inline-flex items-center justify-center rounded bg-surface-3 text-text-3"
-          style={{
-            fontSize: 11,
-            fontWeight: 500,
-            lineHeight: '14px',
-            minWidth: 20,
-            padding: '2px 6px',
-            textAlign: 'center',
-          }}
-        >
-          {part}
-        </kbd>
-      ))}
-    </span>
+    <CommandShortcut>
+      <KbdGroup>
+        {parts.map((part, i) => (
+          <Kbd key={i}>{part}</Kbd>
+        ))}
+      </KbdGroup>
+    </CommandShortcut>
   );
 }
 
@@ -136,16 +134,11 @@ function CommandRow({
   onSelect: () => void;
 }): React.ReactElement {
   return (
-    <Command.Item
-      value={cmd.name}
-      onSelect={onSelect}
-      className="mx-2 flex cursor-pointer items-center gap-3 rounded px-3 py-2 data-[selected=true]:bg-surface-3"
-      style={{ borderRadius: 4 }}
-    >
-      <span className="shrink-0 text-text-3">{cmd.icon}</span>
-      <span className="text-body flex-1 text-text-2">{cmd.name}</span>
-      {cmd.shortcut && <ShortcutBadge shortcut={cmd.shortcut} />}
-    </Command.Item>
+    <CommandItem value={cmd.name} onSelect={onSelect}>
+      <span className="shrink-0 text-muted-foreground">{cmd.icon}</span>
+      <span className="flex-1">{cmd.name}</span>
+      {cmd.shortcut && <ShortcutKeys shortcut={cmd.shortcut} />}
+    </CommandItem>
   );
 }
 
@@ -171,18 +164,13 @@ function CommandPaletteInner({
 
   return (
     <div
-      className="fixed inset-0 z-[300] flex items-start justify-center pt-[20vh] bg-overlay"
+      className="fixed inset-0 z-[300] flex items-start justify-center bg-overlay pt-[20vh]"
       data-command-palette
       onClick={(e) => e.target === e.currentTarget && onClose()}
     >
       <Command
         shouldFilter={true}
-        className="flex max-h-[60vh] w-[480px] flex-col overflow-hidden"
-        style={{
-          background: 'var(--color-surface-2)',
-          border: '1px solid var(--color-border)',
-          borderRadius: 8,
-        }}
+        className="w-[480px] !h-auto max-h-[60vh] rounded-lg bg-popover shadow-lg"
         onKeyDown={(e: React.KeyboardEvent) => {
           if (e.key === 'Escape') {
             e.preventDefault();
@@ -190,85 +178,46 @@ function CommandPaletteInner({
           }
         }}
       >
-        {/* Search input */}
-        <div
-          className="flex items-center gap-3 px-4"
-          style={{ borderBottom: '1px solid var(--color-border)', height: 48 }}
-        >
-          <Search size={16} className="text-text-3" style={{ flexShrink: 0 }} />
-          <Command.Input
-            ref={inputRef}
-            placeholder="Type a command..."
-            className="text-body flex-1 bg-transparent text-text-1 outline-none"
-          />
-          <kbd
-            className="rounded bg-surface-3 text-text-3"
-            style={{
-              fontSize: 11,
-              fontWeight: 500,
-              padding: '2px 6px',
-            }}
-          >
-            ESC
-          </kbd>
-        </div>
+        <CommandInput ref={inputRef} placeholder="Type a command..." />
 
-        {/* Results */}
-        <Command.List className="flex-1 overflow-y-auto py-2">
-          <Command.Empty>
-            <div className="text-body px-4 py-6 text-center text-text-3">No commands found</div>
-          </Command.Empty>
+        <CommandList className="max-h-[50vh]">
+          <CommandEmpty>No commands found</CommandEmpty>
 
-          <Command.Group
-            heading="RECENT"
-            className="[&_[cmdk-group-heading]]:text-label [&_[cmdk-group-heading]]:px-4 [&_[cmdk-group-heading]]:pb-1 [&_[cmdk-group-heading]]:pt-3 [&_[cmdk-group-heading]]:text-text-4"
-          >
+          <CommandGroup heading="Recent">
             {RECENT_COMMANDS.map((cmd) => (
               <CommandRow key={cmd.id} cmd={cmd} onSelect={() => handleSelect(cmd.id)} />
             ))}
-          </Command.Group>
+          </CommandGroup>
 
-          <Command.Group
-            heading="NAVIGATION"
-            className="[&_[cmdk-group-heading]]:text-label [&_[cmdk-group-heading]]:px-4 [&_[cmdk-group-heading]]:pb-1 [&_[cmdk-group-heading]]:pt-3 [&_[cmdk-group-heading]]:text-text-4"
-          >
+          <CommandSeparator />
+
+          <CommandGroup heading="Navigation">
             {NAVIGATION_COMMANDS.map((cmd) => (
               <CommandRow key={cmd.id} cmd={cmd} onSelect={() => handleSelect(cmd.id)} />
             ))}
-          </Command.Group>
+          </CommandGroup>
 
-          <Command.Group
-            heading="ACTIONS"
-            className="[&_[cmdk-group-heading]]:text-label [&_[cmdk-group-heading]]:px-4 [&_[cmdk-group-heading]]:pb-1 [&_[cmdk-group-heading]]:pt-3 [&_[cmdk-group-heading]]:text-text-4"
-          >
+          <CommandSeparator />
+
+          <CommandGroup heading="Actions">
             {ACTION_COMMANDS.map((cmd) => (
               <CommandRow key={cmd.id} cmd={cmd} onSelect={() => handleSelect(cmd.id)} />
             ))}
-          </Command.Group>
-        </Command.List>
+          </CommandGroup>
+        </CommandList>
 
         {/* Footer */}
-        <div
-          className="text-caption flex items-center justify-center gap-1 px-4 text-text-4"
-          style={{
-            height: 36,
-            borderTop: '1px solid var(--color-border)',
-          }}
-        >
-          <span>
-            <kbd className="text-text-3">&uarr;&darr;</kbd> navigate
+        <div className="flex items-center justify-center gap-3 px-4 py-2 text-xs text-muted-foreground">
+          <span className="flex items-center gap-1">
+            <Kbd>&uarr;&darr;</Kbd> navigate
           </span>
-          <span className="text-text-4" style={{ margin: '0 6px' }}>
-            &middot;
+          <span className="text-text-4">&middot;</span>
+          <span className="flex items-center gap-1">
+            <Kbd>&crarr;</Kbd> select
           </span>
-          <span>
-            <kbd className="text-text-3">&crarr;</kbd> select
-          </span>
-          <span className="text-text-4" style={{ margin: '0 6px' }}>
-            &middot;
-          </span>
-          <span>
-            <kbd className="text-text-3">esc</kbd> close
+          <span className="text-text-4">&middot;</span>
+          <span className="flex items-center gap-1">
+            <Kbd>esc</Kbd> close
           </span>
         </div>
       </Command>

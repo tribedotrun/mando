@@ -1,5 +1,6 @@
 import React, { useState, useCallback } from 'react';
 import { Check, ChevronDown } from 'lucide-react';
+import { Button } from '#renderer/components/ui/button';
 import { useSettingsStore } from '#renderer/domains/settings';
 import { useMountEffect } from '#renderer/global/hooks/useMountEffect';
 import log from '#renderer/logger';
@@ -147,29 +148,21 @@ export function SetupChecklist({ onDismiss, onMinimize }: SetupChecklistProps): 
   if (!loaded) return <div />;
 
   return (
-    <div style={{ padding: 12 }}>
-      <h2 className="text-[13px] font-semibold text-text-1" style={{ marginBottom: 10 }}>
-        Get started with Mando
-      </h2>
+    <div className="p-3">
+      <h2 className="mb-2.5 text-[13px] font-semibold text-foreground">Get started with Mando</h2>
 
-      {/* Progress bar — each segment maps to its step */}
-      <div className="flex" style={{ gap: 1, marginBottom: 12 }}>
+      {/* Progress bar */}
+      <div className="mb-3 flex gap-px">
         {steps.map((_, i) => (
           <div
             key={i}
-            style={{
-              flex: 1,
-              height: 3,
-              borderRadius: 4,
-              background: steps[i].completed ? 'var(--color-success)' : 'var(--color-surface-3)',
-              transition: 'background 0.3s ease',
-            }}
+            className={`h-[3px] flex-1 rounded transition-colors duration-300 ${steps[i].completed ? 'bg-success' : 'bg-secondary'}`}
           />
         ))}
       </div>
 
       {/* Steps */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+      <div className="flex flex-col">
         {steps.map((step) => (
           <StepRow
             key={step.id}
@@ -183,41 +176,31 @@ export function SetupChecklist({ onDismiss, onMinimize }: SetupChecklistProps): 
       </div>
 
       {/* Footer */}
-      <div className="flex items-center justify-between" style={{ marginTop: 12 }}>
-        <span className="text-[11px] text-text-3">
+      <div className="mt-3 flex items-center justify-between">
+        <span className="text-[11px] text-muted-foreground">
           {completedCount} of {steps.length} complete
         </span>
         {allComplete ? (
-          <button
+          <Button
+            size="sm"
             onClick={onDismiss}
-            className="btn"
-            style={{
-              background: 'var(--color-success)',
-              color: 'var(--color-bg)',
-              fontWeight: 600,
-              border: 'none',
-            }}
+            className="bg-success font-semibold text-background hover:bg-success/90"
           >
             Done
-          </button>
+          </Button>
         ) : (
-          <button onClick={onMinimize ?? onDismiss} className="btn btn-ghost">
+          <Button variant="ghost" size="sm" onClick={onMinimize ?? onDismiss}>
             Later
-          </button>
+          </Button>
         )}
       </div>
     </div>
   );
 }
 
-// -- Step row — grid layout for guaranteed column alignment --
+// -- Step row --
 
-const STEP_GRID: React.CSSProperties = {
-  display: 'grid',
-  gridTemplateColumns: '16px 1fr 14px',
-  columnGap: 8,
-  alignItems: 'center',
-};
+const STEP_GRID = 'grid grid-cols-[16px_1fr_14px] items-center gap-x-2';
 
 function StepRow({
   step,
@@ -234,27 +217,15 @@ function StepRow({
 }): React.ReactElement {
   return (
     <div>
-      {/* Step header — 3-column grid: [indicator] [title] [chevron] */}
-      <button
-        style={{
-          ...STEP_GRID,
-          width: '100%',
-          padding: '8px 0',
-          background: 'transparent',
-          border: 'none',
-          cursor: step.expandable ? 'pointer' : 'default',
-        }}
+      {/* Step header */}
+      <Button
+        variant="ghost"
+        className={`${STEP_GRID} h-auto w-full rounded-none py-2 ${step.expandable ? 'cursor-pointer' : 'cursor-default'}`}
         onClick={onToggle}
       >
         <StepIndicator completed={step.completed} />
         <span
-          className="text-[12px]"
-          style={{
-            color: step.completed ? 'var(--color-text-3)' : 'var(--color-text-1)',
-            textDecoration: step.completed ? 'line-through' : 'none',
-            fontWeight: step.completed ? 400 : 500,
-            textAlign: 'left',
-          }}
+          className={`text-left text-[12px] ${step.completed ? 'font-normal text-muted-foreground line-through' : 'font-medium text-foreground'}`}
         >
           {step.title}
         </span>
@@ -262,28 +233,17 @@ function StepRow({
           {step.expandable && !step.completed && (
             <ChevronDown
               size={12}
-              color="var(--color-text-3)"
-              style={{
-                transform: expanded ? 'rotate(180deg)' : 'none',
-                transition: 'transform 0.15s ease',
-                opacity: 0.5,
-              }}
+              className={`text-muted-foreground opacity-50 transition-transform duration-150 ${expanded ? 'rotate-180' : ''}`}
             />
           )}
         </span>
-      </button>
+      </Button>
 
-      {/* Expanded content — spans columns 2-3 to align with title */}
+      {/* Expanded content */}
       {expanded && (
-        <div
-          style={{
-            ...STEP_GRID,
-            alignItems: 'start',
-            paddingBottom: 8,
-          }}
-        >
+        <div className={`${STEP_GRID} items-start pb-2`}>
           <span />
-          <div style={{ gridColumn: '2 / -1' }}>
+          <div className="col-[2/-1]">
             {step.id === 'claude-code' && (
               <ClaudeCodeContent recheckClaude={recheckClaude} checkResult={claudeResult} />
             )}
@@ -299,23 +259,10 @@ function StepRow({
 function StepIndicator({ completed }: { completed: boolean }): React.ReactElement {
   if (completed) {
     return (
-      <div
-        className="flex shrink-0 items-center justify-center"
-        style={{ width: 16, height: 16, borderRadius: 8, background: 'var(--color-success)' }}
-      >
-        <Check size={9} color="var(--color-bg)" strokeWidth={3} />
+      <div className="flex size-4 shrink-0 items-center justify-center rounded-full bg-success">
+        <Check size={9} color="var(--background)" strokeWidth={3} />
       </div>
     );
   }
-  return (
-    <div
-      style={{
-        width: 16,
-        height: 16,
-        borderRadius: 8,
-        border: '1.5px solid var(--color-border)',
-        flexShrink: 0,
-      }}
-    />
-  );
+  return <div className="size-4 shrink-0 rounded-full bg-muted-foreground/20" />;
 }

@@ -1,5 +1,6 @@
 import React from 'react';
 import log from '#renderer/logger';
+import { Button } from '#renderer/components/ui/button';
 
 interface ErrorBoundaryProps {
   children: React.ReactNode;
@@ -27,27 +28,21 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
   render() {
     if (this.state.error) {
       return (
-        <div
-          className="rounded-lg border bg-error-bg p-6"
-          style={{
-            borderColor: 'color-mix(in srgb, var(--color-error) 50%, transparent)',
-          }}
-        >
-          <h3 className="text-sm font-medium text-error">
+        <div className="flex flex-col gap-3 rounded-lg bg-destructive/10 p-6">
+          <h3 className="text-sm font-medium text-destructive">
             {this.props.fallbackLabel || 'Component'} failed to render
           </h3>
-          <pre className="mt-2 whitespace-pre-wrap text-xs text-error" style={{ opacity: 0.7 }}>
+          <pre className="whitespace-pre-wrap text-xs text-destructive/70">
             {this.state.error.message}
           </pre>
-          <button
+          <Button
+            variant="ghost"
+            size="xs"
             onClick={() => this.setState({ error: null })}
-            className="mt-3 rounded-md px-3 py-1.5 text-xs text-error"
-            style={{
-              backgroundColor: 'color-mix(in srgb, var(--color-error) 40%, transparent)',
-            }}
+            className="w-fit bg-destructive/20 text-destructive hover:bg-destructive/30"
           >
             Retry
-          </button>
+          </Button>
         </div>
       );
     }
