@@ -4,6 +4,10 @@ import type { SessionEntry } from '#renderer/types';
 import { TranscriptViewer } from '#renderer/domains/sessions/components/TranscriptViewer';
 import { fmtDuration, copyToClipboard } from '#renderer/utils';
 import { sessionTitle } from '#renderer/domains/sessions/components/SessionsHelpers';
+import { Button } from '#renderer/components/ui/button';
+
+import { ScrollArea } from '#renderer/components/ui/scroll-area';
+import { Skeleton } from '#renderer/components/ui/skeleton';
 
 interface Props {
   session: SessionEntry;
@@ -73,49 +77,40 @@ export function SessionDetailPanel({
   }
 
   return (
-    <div data-testid="session-detail" className="flex h-full flex-col" style={{ minHeight: 0 }}>
+    <div data-testid="session-detail" className="flex min-h-0 h-full flex-col">
       {/* Header bar */}
       <div className="flex items-center gap-2 pb-4">
-        <button
-          onClick={onClose}
-          className="shrink-0 rounded p-1"
-          style={{
-            color: 'var(--color-text-3)',
-            background: 'none',
-            border: 'none',
-            cursor: 'pointer',
-          }}
-          title="Back to sessions"
-        >
+        <Button variant="ghost" size="icon-xs" onClick={onClose}>
           <ChevronLeft size={16} />
-        </button>
+        </Button>
         <div className="min-w-0 flex-1">
-          <div className="truncate text-subheading text-text-1">{title}</div>
-          <div className="mt-0.5 flex min-w-0 items-center gap-2 text-caption text-text-3">
+          <div className="truncate text-subheading text-foreground">{title}</div>
+          <div className="mt-0.5 flex min-w-0 items-center gap-2 text-caption text-muted-foreground">
             {subtitleParts}
           </div>
         </div>
-        <button
-          ref={copyRef}
-          onClick={copyResume}
-          className="shrink-0 whitespace-nowrap rounded border px-3 py-1.5 text-xs"
-          style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-2)' }}
-        >
+        <Button ref={copyRef} variant="outline" size="sm" onClick={copyResume}>
           resume
-        </button>
+        </Button>
       </div>
 
-      {/* Transcript — scrollable area */}
-      <div className="flex-1 overflow-auto rounded-lg px-5 py-4 bg-surface-1">
+      {/* Transcript -- scrollable area */}
+      <ScrollArea className="flex-1 rounded-lg bg-card px-5 py-4">
         {loading ? (
-          <div className="text-body text-text-3">Loading transcript...</div>
+          <div className="space-y-3">
+            <Skeleton className="h-5 w-48" />
+            <Skeleton className="h-4 w-full" />
+            <Skeleton className="h-4 w-3/4" />
+            <Skeleton className="h-4 w-5/6" />
+            <Skeleton className="h-20 w-full" />
+            <Skeleton className="h-4 w-2/3" />
+          </div>
         ) : error ? (
           <div
-            className="rounded border px-3 py-2 text-body"
+            className="rounded-md px-3 py-2 text-body"
             style={{
-              borderColor: 'color-mix(in srgb, var(--color-error) 30%, transparent)',
-              background: 'color-mix(in srgb, var(--color-error) 10%, transparent)',
-              color: 'var(--color-error)',
+              background: 'color-mix(in srgb, var(--destructive) 10%, transparent)',
+              color: 'var(--destructive)',
             }}
           >
             {error}
@@ -123,9 +118,9 @@ export function SessionDetailPanel({
         ) : markdown ? (
           <TranscriptViewer markdown={markdown} />
         ) : (
-          <div className="text-body text-text-3">No transcript available</div>
+          <div className="text-body text-muted-foreground">No transcript available</div>
         )}
-      </div>
+      </ScrollArea>
     </div>
   );
 }

@@ -13,10 +13,11 @@ members = [
     "cli",
     "crates/mando-cc",
     "crates/mando-db",
+    "crates/mando-terminal",
 ]
 
 [workspace.package]
-version = "0.1.14"
+version = "0.1.15-beta.0"
 edition = "2021"
 license = "Apache-2.0"
 repository = "https://github.com/tribedotrun/mando"
@@ -64,3 +65,4 @@ mando-cc = { path = "crates/mando-cc" }
 mando-readability = { path = "crates/mando-readability" }
 mando-db = { path = "crates/mando-db" }
 mando-gateway = { path = "crates/mando-gateway" }
+mando-terminal = { path = "crates/mando-terminal" }

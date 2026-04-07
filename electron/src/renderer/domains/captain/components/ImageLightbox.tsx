@@ -1,6 +1,7 @@
 import React, { useCallback, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight, X } from 'lucide-react';
 import { useMountEffect } from '#renderer/global/hooks/useMountEffect';
+import { Button } from '#renderer/components/ui/button';
 
 interface Props {
   images: string[];
@@ -21,7 +22,7 @@ function formatZoomPercent(zoom: number): string {
   return `${(zoom * 100) | 0}%`;
 }
 
-const CONTROL_BG = 'color-mix(in srgb, var(--color-text-1) 10%, transparent)';
+const CONTROL_BG = 'color-mix(in srgb, var(--foreground) 10%, transparent)';
 
 export function ImageLightbox({ images, index, onClose, onNavigate }: Props): React.ReactElement {
   const safeIndex =
@@ -140,25 +141,27 @@ export function ImageLightbox({ images, index, onClose, onNavigate }: Props): Re
       aria-label="Image viewer"
       tabIndex={-1}
       className="fixed inset-0 z-[200] flex items-center justify-center"
-      style={{ background: 'color-mix(in srgb, var(--color-bg) 95%, transparent)' }}
+      style={{ background: 'color-mix(in srgb, var(--background) 95%, transparent)' }}
       onClick={handleBackdropClick}
       onKeyDown={handleKeyDown}
     >
       {/* Close button */}
-      <button
+      <Button
+        variant="ghost"
+        size="icon-sm"
         onClick={onClose}
-        className="fixed right-4 top-4 z-[201] flex h-8 w-8 items-center justify-center rounded-full text-text-1"
+        className="fixed right-4 top-4 z-[201] rounded-full text-foreground"
         style={{ background: CONTROL_BG }}
         aria-label="Close"
       >
         <X size={14} strokeWidth={2} />
-      </button>
+      </Button>
 
       {/* Counter */}
       {multi && (
         <div
-          className="fixed left-1/2 top-4 z-[201] -translate-x-1/2 rounded-full px-3 py-1 text-[12px]"
-          style={{ background: CONTROL_BG, color: 'var(--color-text-2)' }}
+          className="fixed left-1/2 top-4 z-[201] -translate-x-1/2 rounded-full px-3 py-1 text-[12px] text-muted-foreground"
+          style={{ background: CONTROL_BG }}
         >
           {safeIndex + 1} / {images.length}
         </div>
@@ -166,33 +169,37 @@ export function ImageLightbox({ images, index, onClose, onNavigate }: Props): Re
 
       {/* Prev button */}
       {multi && hasPrev && (
-        <button
+        <Button
+          variant="ghost"
+          size="icon"
           onClick={() => navigate(-1)}
-          className="fixed left-4 top-1/2 z-[201] flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full"
-          style={{ background: CONTROL_BG, color: 'var(--color-text-1)' }}
+          className="fixed left-4 top-1/2 z-[201] -translate-y-1/2 rounded-full text-foreground"
+          style={{ background: CONTROL_BG }}
           aria-label="Previous image"
         >
           <ChevronLeft size={16} strokeWidth={2} />
-        </button>
+        </Button>
       )}
 
       {/* Next button */}
       {multi && hasNext && (
-        <button
+        <Button
+          variant="ghost"
+          size="icon"
           onClick={() => navigate(1)}
-          className="fixed right-4 top-1/2 z-[201] flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full"
-          style={{ background: CONTROL_BG, color: 'var(--color-text-1)' }}
+          className="fixed right-4 top-1/2 z-[201] -translate-y-1/2 rounded-full text-foreground"
+          style={{ background: CONTROL_BG }}
           aria-label="Next image"
         >
           <ChevronRight size={16} strokeWidth={2} />
-        </button>
+        </Button>
       )}
 
       {/* Zoom indicator */}
       {zoom > 1 && (
         <div
-          className="fixed bottom-4 left-1/2 z-[201] -translate-x-1/2 rounded-full px-3 py-1 text-[12px]"
-          style={{ background: CONTROL_BG, color: 'var(--color-text-2)' }}
+          className="fixed bottom-4 left-1/2 z-[201] -translate-x-1/2 rounded-full px-3 py-1 text-[12px] text-muted-foreground"
+          style={{ background: CONTROL_BG }}
         >
           {formatZoomPercent(zoom)}
         </div>
@@ -200,10 +207,7 @@ export function ImageLightbox({ images, index, onClose, onNavigate }: Props): Re
 
       {/* Image */}
       {imgError ? (
-        <div
-          className="flex items-center justify-center rounded-lg px-8 py-6 text-[14px]"
-          style={{ background: 'var(--color-surface-2)', color: 'var(--color-text-3)' }}
-        >
+        <div className="flex items-center justify-center rounded-lg bg-muted px-8 py-6 text-[14px] text-text-3">
           Image could not be loaded
         </div>
       ) : (

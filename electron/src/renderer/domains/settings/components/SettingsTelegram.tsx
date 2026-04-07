@@ -1,11 +1,14 @@
 import React from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { apiGet } from '#renderer/domains/settings/hooks/useApi';
-import { cardStyle, inputStyle, labelStyle, inputCls, labelCls } from '#renderer/styles';
+import { Card, CardContent } from '#renderer/components/ui/card';
+import { Input } from '#renderer/components/ui/input';
+import { Label } from '#renderer/components/ui/label';
+import { Skeleton } from '#renderer/components/ui/skeleton';
 import { useSettingsStore } from '#renderer/domains/settings/stores/settingsStore';
 import { toast } from 'sonner';
 import type { TelegramConfig } from '#renderer/domains/settings/stores/settingsStore';
-import { Switch } from '#renderer/global/components/Switch';
+import { Switch } from '#renderer/components/ui/switch';
 
 interface TelegramHealth {
   enabled: boolean;
@@ -20,56 +23,45 @@ interface TelegramHealth {
 function StatusDot({ color }: { color: string }): React.ReactElement {
   return (
     <span
-      style={{
-        display: 'inline-block',
-        width: 8,
-        height: 8,
-        borderRadius: '50%',
-        backgroundColor: color,
-        marginRight: 6,
-        flexShrink: 0,
-      }}
+      className="mr-1.5 inline-block size-2 shrink-0 rounded-full"
+      style={{ backgroundColor: color }}
     />
   );
 }
 
 function RuntimeStatus({ health }: { health: TelegramHealth | undefined }): React.ReactElement {
   if (!health) {
-    return (
-      <span className="text-xs" style={{ color: 'var(--color-text-3)' }}>
-        Loading...
-      </span>
-    );
+    return <Skeleton className="h-4 w-16" />;
   }
   if (!health.enabled) {
     return (
-      <span className="text-xs flex items-center" style={{ color: 'var(--color-text-3)' }}>
-        <StatusDot color="var(--color-text-3)" />
+      <span className="flex items-center text-xs text-muted-foreground">
+        <StatusDot color="var(--muted-foreground)" />
         Disabled
       </span>
     );
   }
   if (health.degraded) {
     return (
-      <span className="text-xs flex items-center" style={{ color: 'var(--color-warning)' }}>
-        <StatusDot color="var(--color-warning)" />
-        Degraded{health.lastError ? ` — ${health.lastError}` : ''}
+      <span className="flex items-center text-xs text-warning">
+        <StatusDot color="var(--warning)" />
+        Degraded{health.lastError ? ` \u2014 ${health.lastError}` : ''}
       </span>
     );
   }
   if (health.running) {
     return (
-      <span className="text-xs flex items-center" style={{ color: 'var(--color-success)' }}>
-        <StatusDot color="var(--color-success)" />
+      <span className="flex items-center text-xs text-success">
+        <StatusDot color="var(--success)" />
         Running
         {health.restartCount > 0 ? ` (${health.restartCount} restarts)` : ''}
       </span>
     );
   }
   return (
-    <span className="text-xs flex items-center" style={{ color: 'var(--color-error)' }}>
-      <StatusDot color="var(--color-error)" />
-      Stopped{health.lastError ? ` — ${health.lastError}` : ''}
+    <span className="flex items-center text-xs text-destructive">
+      <StatusDot color="var(--destructive)" />
+      Stopped{health.lastError ? ` \u2014 ${health.lastError}` : ''}
     </span>
   );
 }
@@ -92,83 +84,79 @@ export function SettingsTelegram(): React.ReactElement {
 
   return (
     <div data-testid="settings-telegram" className="space-y-8">
-      <h2 className="text-lg font-semibold text-text-1">Telegram</h2>
+      <h2 className="text-lg font-semibold text-foreground">Telegram</h2>
 
       <div className="space-y-6">
         {/* Runtime status */}
-        <div style={cardStyle}>
-          <div className="flex items-center justify-between">
-            <span className="text-sm font-medium" style={{ color: 'var(--color-text-2)' }}>
-              Status
-            </span>
-            <RuntimeStatus health={health} />
-          </div>
-        </div>
+        <Card className="py-4">
+          <CardContent>
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-medium text-muted-foreground">Status</span>
+              <RuntimeStatus health={health} />
+            </div>
+          </CardContent>
+        </Card>
 
         {/* Enable toggle */}
-        <div style={cardStyle}>
-          <div className="flex items-center justify-between">
-            <div>
-              <h3 className="text-sm font-medium text-text-2">Enabled</h3>
+        <Card className="py-4">
+          <CardContent>
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-medium text-muted-foreground">Enabled</h3>
+              </div>
+              <Switch
+                data-testid="telegram-enabled"
+                checked={!!telegram.enabled}
+                onCheckedChange={async () => {
+                  const enabling = !telegram.enabled;
+                  updateTelegram({ enabled: enabling });
+                  const result = await save();
+                  if (!result.ok) {
+                    updateTelegram({ enabled: !enabling });
+                    toast.error(result.error ?? 'Failed to update Telegram settings');
+                  }
+                }}
+              />
             </div>
-            <Switch
-              testId="telegram-enabled"
-              checked={!!telegram.enabled}
-              onCheckedChange={async () => {
-                const enabling = !telegram.enabled;
-                updateTelegram({ enabled: enabling });
-                const result = await save();
-                if (!result.ok) {
-                  updateTelegram({ enabled: !enabling });
-                  toast.error(result.error ?? 'Failed to update Telegram settings');
-                }
-              }}
-            />
-          </div>
-        </div>
+          </CardContent>
+        </Card>
 
         {/* Credentials */}
-        <div style={cardStyle}>
-          <h3 className="mb-4 text-sm font-medium text-text-2">Credentials</h3>
-          <div className="space-y-4">
-            <div>
-              <label className={labelCls} style={labelStyle}>
-                Bot Token
-              </label>
-              <input
-                data-testid="telegram-bot-token"
-                type="text"
-                className={inputCls}
-                style={inputStyle}
-                value={botToken}
-                onChange={(e) => {
-                  updateEnv('TELEGRAM_MANDO_BOT_TOKEN', e.target.value);
-                  scheduleSave();
-                }}
-                placeholder="123456:ABC-DEF..."
-              />
+        <Card className="py-4">
+          <CardContent>
+            <h3 className="mb-4 text-sm font-medium text-muted-foreground">Credentials</h3>
+            <div className="space-y-4">
+              <div>
+                <Label className="mb-1.5 text-xs text-muted-foreground">Bot Token</Label>
+                <Input
+                  data-testid="telegram-bot-token"
+                  type="text"
+                  value={botToken}
+                  onChange={(e) => {
+                    updateEnv('TELEGRAM_MANDO_BOT_TOKEN', e.target.value);
+                    scheduleSave();
+                  }}
+                  placeholder="123456:ABC-DEF..."
+                />
+              </div>
+              <div>
+                <Label className="mb-1.5 text-xs text-muted-foreground">Owner</Label>
+                <p className="mb-1.5 text-xs text-muted-foreground">
+                  Auto-detected when you /start the bot. Override here if needed.
+                </p>
+                <Input
+                  data-testid="telegram-owner-id"
+                  value={telegram.owner ?? ''}
+                  onChange={(e) => {
+                    updateTelegram({ owner: e.target.value });
+                    scheduleSave();
+                  }}
+                  placeholder="Auto-detected on first /start"
+                />
+              </div>
             </div>
-            <div>
-              <label className={labelCls} style={labelStyle}>
-                Owner
-              </label>
-              <p className="mb-1.5 text-xs text-text-3">
-                Auto-detected when you /start the bot. Override here if needed.
-              </p>
-              <input
-                data-testid="telegram-owner-id"
-                className={inputCls}
-                style={inputStyle}
-                value={telegram.owner ?? ''}
-                onChange={(e) => {
-                  updateTelegram({ owner: e.target.value });
-                  scheduleSave();
-                }}
-                placeholder="Auto-detected on first /start"
-              />
-            </div>
-          </div>
-        </div>
+          </CardContent>
+        </Card>
       </div>
     </div>
   );

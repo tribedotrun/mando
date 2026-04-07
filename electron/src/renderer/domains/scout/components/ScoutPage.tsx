@@ -16,6 +16,8 @@ import {
 } from '#renderer/domains/scout/hooks/useApi';
 import { toast } from 'sonner';
 import { getErrorMessage, indexNext, indexPrev } from '#renderer/utils';
+import { Button } from '#renderer/components/ui/button';
+import { Input } from '#renderer/components/ui/input';
 
 const USER_SETTABLE = ['pending', 'processed', 'saved', 'archived'];
 const TYPES = ['all', 'github', 'youtube', 'arxiv', 'other'] as const;
@@ -194,13 +196,7 @@ export function ScoutPage({ active = true }: { active?: boolean } = {}): React.R
           />
         </div>
         {qaEverOpened && (
-          <div
-            className={`w-[380px] shrink-0 ${qaOpen ? '' : 'hidden'}`}
-            style={{
-              borderLeft: '1px solid var(--color-border)',
-              background: 'var(--color-surface-1)',
-            }}
-          >
+          <div className={`w-[380px] shrink-0 bg-card ${qaOpen ? '' : 'hidden'}`}>
             <ScoutQA key={activeItemId} itemId={activeItemId} onClose={() => setQaOpen(false)} />
           </div>
         )}
@@ -209,83 +205,56 @@ export function ScoutPage({ active = true }: { active?: boolean } = {}): React.R
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+    <div className="flex flex-col gap-4">
       {/* Row 1: Title + count */}
       <div className="flex items-baseline justify-between">
         <div className="flex items-baseline gap-3">
-          <h2 className="text-heading text-text-1">Scout</h2>
+          <h2 className="text-heading text-foreground">Scout</h2>
           <span className="text-caption text-text-3">{total} items</span>
         </div>
         <div className="flex items-center gap-2">
-          <button
+          <Button
+            variant="outline"
+            size="sm"
             onClick={() => setResearchModalOpen(true)}
             disabled={researchPending}
-            className="rounded-md px-3 py-1.5 text-[12px] font-medium disabled:opacity-50"
-            style={{
-              background: 'var(--color-surface-2)',
-              color: 'var(--color-text-2)',
-              border: '1px solid var(--color-border)',
-              cursor: researchPending ? 'default' : 'pointer',
-            }}
           >
-            {researchPending ? 'Researching…' : 'Research'}
-          </button>
+            {researchPending ? 'Researching...' : 'Research'}
+          </Button>
           <AddUrlForm />
         </div>
       </div>
 
       {/* Row 2: Search */}
-      <div className="flex items-center gap-3">
-        <div className="flex flex-1 items-center gap-2" style={{ position: 'relative' }}>
-          <Search
-            size={14}
-            color="var(--color-text-3)"
-            strokeWidth={1.5}
-            style={{
-              position: 'absolute',
-              left: 10,
-              top: '50%',
-              transform: 'translateY(-50%)',
-              pointerEvents: 'none',
-            }}
-          />
-          <input
-            ref={searchRef}
-            type="text"
-            value={searchInput}
-            onChange={(e) => handleSearchChange(e.target.value)}
-            placeholder="Search..."
-            className="w-full rounded-md text-[13px] focus:outline-none"
-            style={{
-              background: 'var(--color-surface-2)',
-              color: 'var(--color-text-1)',
-              border: '1px solid var(--color-border-subtle)',
-              padding: '8px 12px 8px 32px',
-            }}
-          />
-        </div>
+      <div className="relative flex items-center gap-3">
+        <Search
+          size={14}
+          className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground"
+          strokeWidth={1.5}
+        />
+        <Input
+          ref={searchRef}
+          type="text"
+          value={searchInput}
+          onChange={(e) => handleSearchChange(e.target.value)}
+          placeholder="Search..."
+          className="h-9 pl-8 text-[13px]"
+        />
       </div>
 
       {/* Row 3: Type filter */}
-      <div className="flex items-center" style={{ gap: 4 }}>
+      <div className="flex items-center gap-1">
         {TYPES.map((t) => {
-          const active = typeFilter === t;
+          const isActive = typeFilter === t;
           return (
-            <button
+            <Button
               key={t}
+              variant={isActive ? 'default' : 'secondary'}
+              size="xs"
               onClick={() => handleTypeChange(t)}
-              className="text-[12px] font-medium transition-colors"
-              style={{
-                background: active ? 'var(--color-accent)' : 'var(--color-surface-2)',
-                color: active ? 'var(--color-bg)' : 'var(--color-text-3)',
-                padding: '4px 10px',
-                borderRadius: 6,
-                border: 'none',
-                cursor: 'pointer',
-              }}
             >
               {t}
-            </button>
+            </Button>
           );
         })}
       </div>
@@ -308,25 +277,25 @@ export function ScoutPage({ active = true }: { active?: boolean } = {}): React.R
       {/* Pagination */}
       {pages > 1 && (
         <div className="flex items-center justify-center gap-2 pt-2">
-          <button
+          <Button
+            variant="outline"
+            size="sm"
             onClick={() => handlePageChange(page - 1)}
             disabled={page === 0}
-            className="rounded-md px-2.5 py-1 text-[13px] disabled:opacity-30"
-            style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-2)' }}
           >
             Prev
-          </button>
-          <span className="text-code tabular-nums text-text-3">
+          </Button>
+          <span className="text-code tabular-nums text-muted-foreground">
             {page + 1} / {pages}
           </span>
-          <button
+          <Button
+            variant="outline"
+            size="sm"
             onClick={() => handlePageChange(page + 1)}
             disabled={page >= pages - 1}
-            className="rounded-md px-2.5 py-1 text-[13px] disabled:opacity-30"
-            style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-2)' }}
           >
             Next
-          </button>
+          </Button>
         </div>
       )}
 
@@ -344,7 +313,7 @@ export function ScoutPage({ active = true }: { active?: boolean } = {}): React.R
           title="Scout research"
           placeholder="What should Scout research? (e.g. Rust async runtime fairness)"
           buttonLabel="Research"
-          pendingLabel="Researching…"
+          pendingLabel="Researching..."
           isPending={researchPending}
           onSubmit={(topic) => {
             void runResearch(topic);

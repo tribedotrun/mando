@@ -208,6 +208,35 @@ pub(crate) async fn post_task_rework(
     // Close any active ask session — the worktree will be destroyed.
     crate::routes_task_ask::close_ask_session(&state, id).await;
 
+    // Capture old PR info before rework clears it. We close the PR on GitHub
+    // only AFTER rework_item succeeds, so a validation failure (e.g. task is
+    // in CaptainReviewing) doesn't leave an irreversibly closed PR.
+    let old_pr_info: Option<(String, String)> = {
+        let store = state.task_store.read().await;
+        match store.find_by_id(id).await {
+            Ok(Some(item)) => {
+                let pr_num = item
+                    .pr
+                    .as_deref()
+                    .and_then(mando_types::task::extract_pr_number)
+                    .map(|s| s.to_string());
+                let config = state.config.load_full();
+                let repo = mando_config::resolve_github_repo(item.project.as_deref(), &config);
+                pr_num.zip(repo)
+            }
+            Err(e) => {
+                tracing::warn!(
+                    module = "gateway",
+                    task_id = id,
+                    error = %e,
+                    "failed to read task for PR close during rework"
+                );
+                None
+            }
+            _ => None,
+        }
+    };
+
     let store = state.task_store.write().await;
     mando_captain::runtime::dashboard::rework_item(&store, id, &body.feedback)
         .await
@@ -227,6 +256,21 @@ pub(crate) async fn post_task_rework(
             store.pool(),
         )
         .await;
+    }
+    // Drop the write lock before the external GitHub CLI call.
+    drop(store);
+
+    // Close the old PR on GitHub after rework succeeds.
+    if let Some((pr_num, repo)) = old_pr_info {
+        if let Err(e) = mando_captain::io::github::close_pr(&repo, &pr_num).await {
+            tracing::warn!(
+                module = "gateway",
+                task_id = id,
+                pr = %pr_num,
+                error = %e,
+                "failed to close old PR during rework — continuing anyway"
+            );
+        }
     }
     state.bus.send(
         mando_types::BusEvent::Tasks,

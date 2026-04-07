@@ -283,14 +283,31 @@ fn merge_task_changes(
         .as_object()
         .ok_or_else(|| anyhow::anyhow!("changed task snapshot must be a JSON object"))?;
 
-    let mut merged_obj = task_snapshot(current)?
+    let current_snapshot = task_snapshot(current)?;
+    let current_obj = current_snapshot
         .as_object()
-        .cloned()
         .ok_or_else(|| anyhow::anyhow!("current task snapshot must be a JSON object"))?;
 
+    let mut merged_obj = current_obj.clone();
+
+    // Apply tick modifications: keys present in changed that differ from base.
     for (key, changed_value) in changed_obj {
         if base_obj.get(key) != Some(changed_value) {
             merged_obj.insert(key.clone(), changed_value.clone());
+        }
+    }
+
+    // Apply tick deletions: keys present in base but absent in changed were
+    // cleared to None by the tick (Option fields with `skip_serializing_if`
+    // are omitted when None). Honor the clear unless the human concurrently
+    // changed the field to a different value.
+    for key in base_obj.keys() {
+        if !changed_obj.contains_key(key) {
+            // The tick cleared this field. Preserve the clear unless the human
+            // concurrently modified it (current differs from base).
+            if current_obj.get(key) == base_obj.get(key) {
+                merged_obj.remove(key);
+            }
         }
     }
 
@@ -430,5 +447,71 @@ mod tests {
         let found = store.find_by_id(id).await.unwrap().unwrap();
         assert_eq!(found.status, ItemStatus::Queued);
         assert_eq!(found.context.as_deref(), Some("human-edit"));
+    }
+
+    /// Regression test: when the tick clears an Option field to None (e.g.
+    /// rework clearing `pr`), the 3-way merge must persist the deletion
+    /// even though `skip_serializing_if` omits the key from the JSON.
+    #[tokio::test]
+    async fn merge_propagates_field_cleared_to_none() {
+        let store = test_store().await;
+        let mut task = Task::new("Rework merge test");
+        task.pr = Some("594".into());
+        task.worker = Some("worker-1".into());
+        let id = store.add(task).await.unwrap();
+        let original = store.find_by_id(id).await.unwrap().unwrap();
+        assert_eq!(original.pr.as_deref(), Some("594"));
+        let snapshots = HashMap::from([(id, task_snapshot(&original).unwrap())]);
+
+        // Simulate transition_rework_to_queued clearing fields.
+        let mut tick_copy = original.clone();
+        tick_copy.status = ItemStatus::Queued;
+        tick_copy.pr = None;
+        tick_copy.worker = None;
+
+        store
+            .merge_changed_items(&snapshots, &[tick_copy])
+            .await
+            .unwrap();
+
+        let found = store.find_by_id(id).await.unwrap().unwrap();
+        assert_eq!(found.status, ItemStatus::Queued);
+        assert!(found.pr.is_none(), "pr must be cleared, got {:?}", found.pr);
+        assert!(
+            found.worker.is_none(),
+            "worker must be cleared, got {:?}",
+            found.worker
+        );
+    }
+
+    /// When the tick clears a field but a human concurrently set it to a
+    /// new value, the human's value wins (it is more recent).
+    #[tokio::test]
+    async fn merge_clear_preserves_concurrent_human_set() {
+        let store = test_store().await;
+        let mut task = Task::new("Concurrent set vs clear");
+        task.pr = Some("594".into());
+        let id = store.add(task).await.unwrap();
+        let original = store.find_by_id(id).await.unwrap().unwrap();
+        let snapshots = HashMap::from([(id, task_snapshot(&original).unwrap())]);
+
+        // Tick clears pr.
+        let mut tick_copy = original.clone();
+        tick_copy.pr = None;
+
+        // Human concurrently sets pr to a new value.
+        store
+            .update_fields(id, &serde_json::json!({"pr": "607"}))
+            .await
+            .unwrap();
+
+        store
+            .merge_changed_items(&snapshots, &[tick_copy])
+            .await
+            .unwrap();
+
+        let found = store.find_by_id(id).await.unwrap().unwrap();
+        // Human's update should win since they changed it concurrently.
+        assert_eq!(found.pr.as_deref(), Some("607"));
     }
 }

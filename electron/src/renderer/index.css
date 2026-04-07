@@ -1,5 +1,7 @@
 @import 'tailwindcss';
 
+@custom-variant dark (&);
+
 /* ── Geist variable fonts ── */
 @font-face {
   font-family: 'Geist';
@@ -17,83 +19,111 @@
   font-style: normal;
 }
 
-/* ── Tailwind v4 theme ── */
-@theme {
-  /* Surfaces */
-  --color-bg: #0c0b10;
-  --color-surface-1: #141320;
-  --color-surface-2: #1c1a28;
-  --color-surface-3: #252332;
+/* ── shadcn/ui theme (Tailwind v4) ── */
+@theme inline {
+  /* Standard shadcn tokens */
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
 
-  /* Borders */
-  --color-border: #302d40;
-  --color-border-subtle: #28253a;
+  /* Mando semantic tokens */
+  --color-success: var(--success);
+  --color-success-bg: var(--success-bg);
+  --color-stale: var(--stale);
+  --color-stale-bg: var(--stale-bg);
+  --color-needs-human: var(--needs-human);
+  --color-needs-human-bg: var(--needs-human-bg);
+  --color-review: var(--review);
+  --color-review-bg: var(--review-bg);
+  --color-destructive-bg: var(--destructive-bg);
+  --color-merged-bg: var(--merged-bg);
+  --color-border-destructive: var(--border-destructive);
+  --color-overlay: var(--overlay);
+  --color-primary-hover: var(--primary-hover);
+  --color-primary-pressed: var(--primary-pressed);
+  --color-text-3: var(--text-3);
+  --color-text-4: var(--text-4);
 
-  /* Text */
-  --color-text-1: #e4e0f0;
-  --color-text-2: #9b94b8;
-  --color-text-3: #6a6380;
-  --color-text-4: #4a4560;
-
-  /* Accent */
-  --color-accent: #8a63d2;
-  --color-accent-hover: #a382e0;
-  --color-accent-pressed: #6a5ad4;
-  --color-accent-wash: #8a63d214;
-
-  /* Semantics */
-  --color-success: #4caf6a;
-  --color-error: #cf5b4b;
-  --color-stale: #d4a017;
-  --color-needs-human: #ea580c;
-  --color-review: #8a63d2;
-
-  /* Semantic badges (12% opacity backgrounds) */
-  --color-success-bg: #4caf6a1f;
-  --color-error-bg: #cf5b4b1f;
-  --color-stale-bg: #d4a0171f;
-  --color-needs-human-bg: #ea580c1f;
-  --color-review-bg: #8a63d21f;
-  --color-merged-bg: #9b94b814;
-
-  /* Destructive button border */
-  --color-border-destructive: #402d30;
-
-  /* Overlay */
-  --color-overlay: #0c0b10b8;
-
-  /* Spacing (4pt grid) */
-  --spacing-1: 4px;
-  --spacing-2: 8px;
-  --spacing-3: 12px;
-  --spacing-4: 16px;
-  --spacing-5: 24px;
-  --spacing-6: 32px;
-
-  /* Radius */
-  --radius-row: 4px;
-  --radius-panel: 8px;
-  --radius-hero: 10px;
-  --radius-button: 6px;
+  /* Radius scale */
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
 
   /* Fonts */
   --font-sans: 'Geist', -apple-system, BlinkMacSystemFont, sans-serif;
   --font-mono: 'Geist Mono', ui-monospace, monospace;
 }
 
-/* ── Base ── */
 :root {
   color-scheme: dark;
+
+  /* shadcn core */
+  --background: #0c0b10;
+  --foreground: #e4e0f0;
+  --card: #141320;
+  --card-foreground: #e4e0f0;
+  --popover: #1c1a28;
+  --popover-foreground: #e4e0f0;
+  --primary: #8a63d2;
+  --primary-foreground: #0c0b10;
+  --secondary: #252332;
+  --secondary-foreground: #9b94b8;
+  --muted: #1c1a28;
+  --muted-foreground: #9b94b8;
+  --accent: #8a63d214;
+  --accent-foreground: #e4e0f0;
+  --destructive: #cf5b4b;
+  --destructive-foreground: #e4e0f0;
+  --border: #302d40;
+  --input: #28253a;
+  --ring: #8a63d2;
+  --radius: 0.5rem;
+
+  /* Mando semantic */
+  --success: #4caf6a;
+  --success-bg: #4caf6a1f;
+  --stale: #d4a017;
+  --stale-bg: #d4a0171f;
+  --needs-human: #ea580c;
+  --needs-human-bg: #ea580c1f;
+  --review: #8a63d2;
+  --review-bg: #8a63d21f;
+  --destructive-bg: #cf5b4b1f;
+  --merged-bg: #9b94b814;
+  --border-destructive: #402d30;
+  --overlay: #0c0b10b8;
+  --primary-hover: #a382e0;
+  --primary-pressed: #6a5ad4;
+  --text-3: #6a6380;
+  --text-4: #4a4560;
 }
 
+/* ── Base ── */
 body {
   margin: 0;
   font-family: var(--font-sans);
   font-size: 14px;
   font-weight: 400;
   line-height: 22px;
-  background: var(--color-bg);
-  color: var(--color-text-1);
+  background: var(--background);
+  color: var(--foreground);
   overflow: hidden;
   -webkit-font-smoothing: antialiased;
 }
@@ -149,79 +179,6 @@ body {
   line-height: 18px;
 }
 
-/* ── Button variants ── */
-.btn {
-  font-family: var(--font-sans);
-  font-size: 13px;
-  border-radius: var(--radius-button);
-  padding: 8px 20px;
-  cursor: pointer;
-  transition:
-    background-color 150ms ease,
-    border-color 150ms ease,
-    color 150ms ease;
-}
-.btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-.btn:focus-visible {
-  outline: 2px solid var(--color-accent);
-  outline-offset: -2px;
-}
-
-.btn-primary {
-  background: var(--color-accent);
-  border: none;
-  color: var(--color-bg);
-  font-weight: 600;
-}
-.btn-primary:hover:not(:disabled) {
-  background: var(--color-accent-hover);
-}
-.btn-primary:active:not(:disabled) {
-  background: var(--color-accent-pressed);
-}
-
-.btn-ghost {
-  background: transparent;
-  border: 1px solid var(--color-border);
-  color: var(--color-text-2);
-  font-weight: 500;
-}
-.btn-ghost:hover:not(:disabled) {
-  background: var(--color-surface-3);
-}
-.btn-ghost:active:not(:disabled) {
-  background: var(--color-surface-2);
-}
-
-.btn-destructive {
-  background: transparent;
-  border: 1px solid var(--color-border-destructive);
-  color: var(--color-error);
-  font-weight: 500;
-}
-.btn-destructive:hover:not(:disabled) {
-  background: var(--color-error-bg);
-}
-.btn-destructive:active:not(:disabled) {
-  background: color-mix(in srgb, var(--color-error) 15%, transparent);
-}
-
-.btn-text {
-  background: transparent;
-  border: none;
-  color: var(--color-text-2);
-  font-weight: 500;
-}
-.btn-text:hover:not(:disabled) {
-  color: var(--color-text-1);
-}
-.btn-text:active:not(:disabled) {
-  color: var(--color-text-3);
-}
-
 /* ── Scrollbar ── */
 ::-webkit-scrollbar {
   width: 6px;
@@ -232,12 +189,12 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--color-border);
+  background: var(--border);
   border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--color-text-4);
+  background: var(--text-4);
 }
 
 /* ── Focus ring ── */
@@ -245,7 +202,7 @@ input:not([type='checkbox']):not([type='radio']):focus-visible,
 textarea:focus-visible,
 select:focus-visible {
   outline: none;
-  border-color: var(--color-text-3);
+  border-color: var(--text-3);
 }
 
 /* ── Form inputs: opt out of drag region so text is selectable ── */
@@ -259,14 +216,14 @@ select {
 
 /* ── Selection ── */
 ::selection {
-  background: var(--color-accent-wash);
+  background: var(--accent);
 }
 
 /* ── Scout markdown prose ── */
 .prose-scout h1,
 .prose-scout h2,
 .prose-scout h3 {
-  color: var(--color-text-1);
+  color: var(--foreground);
   font-weight: 600;
   margin-top: 1.5em;
   margin-bottom: 0.5em;
@@ -285,24 +242,24 @@ select {
 }
 
 .prose-scout p {
-  color: var(--color-text-2);
+  color: var(--muted-foreground);
   margin-bottom: 0.75em;
 }
 
 .prose-scout strong {
-  color: var(--color-text-1);
+  color: var(--foreground);
   font-weight: 600;
 }
 
 .prose-scout em {
-  color: var(--color-text-2);
+  color: var(--muted-foreground);
 }
 
 .prose-scout ul,
 .prose-scout ol {
   padding-left: 1.25em;
   margin-bottom: 0.75em;
-  color: var(--color-text-2);
+  color: var(--muted-foreground);
 }
 
 .prose-scout li {
@@ -317,27 +274,27 @@ select {
 }
 
 .prose-scout blockquote {
-  border-left: 2px solid var(--color-border);
+  border-left: 2px solid var(--border);
   padding-left: 0.75em;
-  color: var(--color-text-3);
+  color: var(--text-3);
   margin: 0.75em 0;
 }
 
 .prose-scout code {
   font-family: var(--font-mono);
-  background: var(--color-surface-2);
+  background: var(--muted);
   padding: 0.15em 0.35em;
-  border-radius: var(--radius-row);
+  border-radius: var(--radius-sm);
   font-size: 13px;
 }
 
 .prose-scout pre {
-  background: var(--color-surface-1);
+  background: var(--card);
   padding: 0.75em;
-  border-radius: var(--radius-panel);
+  border-radius: var(--radius-lg);
   overflow-x: auto;
   margin-bottom: 0.75em;
-  border: 1px solid var(--color-border-subtle);
+  border: 1px solid var(--input);
 }
 
 .prose-scout pre code {
@@ -346,16 +303,16 @@ select {
 }
 
 .prose-scout a {
-  color: var(--color-accent);
+  color: var(--primary);
   text-decoration: none;
 }
 .prose-scout a:hover {
-  color: var(--color-accent-hover);
+  color: var(--primary-hover);
   text-decoration: underline;
 }
 
 .prose-scout hr {
-  border-color: var(--color-border);
+  border-color: var(--border);
   margin: 1.25em 0;
 }
 
@@ -392,20 +349,14 @@ select {
   transform: scale(0.98);
 }
 
-/* ── Sidebar project item: show dots on hover, hide count ── */
+/* ── Sidebar project item: dots/plus always visible, subtle until hover ── */
 .sidebar-project-item .sidebar-project-dots {
-  display: none;
-}
-.sidebar-project-item .sidebar-project-count {
-  display: inline;
+  display: inline-flex;
+  opacity: 0;
 }
 .sidebar-project-item:hover .sidebar-project-dots,
 .sidebar-project-item[data-menu-open] .sidebar-project-dots {
-  display: inline-flex;
-}
-.sidebar-project-item:hover .sidebar-project-count,
-.sidebar-project-item[data-menu-open] .sidebar-project-count {
-  display: none;
+  opacity: 1;
 }
 
 /* ── Transition defaults ── */

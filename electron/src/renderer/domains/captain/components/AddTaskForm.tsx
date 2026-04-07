@@ -1,21 +1,18 @@
 import React, { useRef, useState } from 'react';
 import { Paperclip } from 'lucide-react';
-import { inputStyle, inputCls } from '#renderer/styles';
 import { useDraft } from '#renderer/global/hooks/useDraft';
 import { useMountEffect } from '#renderer/global/hooks/useMountEffect';
 import { useProjects } from '#renderer/domains/settings';
 import { useBulkCreateStore } from '#renderer/domains/captain/stores/bulkCreateStore';
 import { useTaskStore } from '#renderer/domains/captain/stores/taskStore';
 import { bulkTextareaRows, getErrorMessage, shortRepo } from '#renderer/utils';
+import { Button } from '#renderer/components/ui/button';
+
+import { Combobox } from '#renderer/components/ui/combobox';
 
 const LAST_PROJECT_KEY = 'mando:lastProject';
 const DRAFT_BULK_KEY = 'mando:draft:newTask:bulk';
 const DRAFT_PROJECT_KEY = 'mando:draft:newTask:project';
-const titleInputCls = `${inputCls} resize-none`;
-const projectSelectCls = 'rounded-md px-3 py-2 text-label';
-const footerButtonCls =
-  'px-4 py-2 text-[13px] font-semibold transition-colors hover:bg-accent-hover active:bg-accent-pressed disabled:opacity-40';
-const bulkToggleCls = 'rounded-md px-2 py-0.5 text-label transition-colors';
 
 interface Props {
   open: boolean;
@@ -34,7 +31,7 @@ function AddTaskFormInner({
   const hasDraft = title !== '';
   const [bulk, setBulk] = useState(() => hasDraft && localStorage.getItem(DRAFT_BULK_KEY) === '1');
   // The health API returns project display names (not paths), and the sidebar
-  // filter is also a display name — so initialProject can be used directly.
+  // filter is also a display name -- so initialProject can be used directly.
   // When restoring a draft, the draft-specific project takes precedence.
   const [project, setProject] = useState(() => {
     if (hasDraft) {
@@ -105,8 +102,9 @@ function AddTaskFormInner({
   };
 
   const handleProjectChange = (value: string) => {
-    setProject(value);
-    if (value) {
+    const resolved = value === '__all__' ? '' : value;
+    setProject(resolved);
+    if (resolved) {
       localStorage.setItem(LAST_PROJECT_KEY, value);
       localStorage.setItem(DRAFT_PROJECT_KEY, value);
     } else {
@@ -179,19 +177,14 @@ function AddTaskFormInner({
         role="dialog"
         aria-modal="true"
         aria-label="New task"
-        className="flex max-h-[90vh] w-[640px] max-w-[92vw] flex-col overflow-hidden"
-        style={{
-          background: 'var(--color-surface-1)',
-          border: '1px solid var(--color-border-subtle)',
-          borderRadius: 'var(--radius-hero)',
-          boxShadow: '0 24px 64px #00000099, 0 4px 16px #00000066',
-        }}
+        className="flex max-h-[90vh] w-[640px] max-w-[92vw] flex-col overflow-hidden rounded-xl bg-card shadow-2xl"
       >
         <div className="px-5 pb-2 pt-5">
           <div className="flex items-center justify-between">
-            <div className="text-heading text-text-1">New task</div>
-            <button
-              type="button"
+            <div className="text-heading text-foreground">New task</div>
+            <Button
+              variant={bulk ? 'outline' : 'secondary'}
+              size="xs"
               onClick={() =>
                 setBulk((b) => {
                   const next = !b;
@@ -200,15 +193,10 @@ function AddTaskFormInner({
                   return next;
                 })
               }
-              className={bulkToggleCls}
-              style={{
-                background: bulk ? 'var(--color-accent-wash)' : 'var(--color-surface-2)',
-                color: bulk ? 'var(--color-accent)' : 'var(--color-text-3)',
-                border: `1px solid ${bulk ? 'var(--color-accent)' : 'var(--color-border-subtle)'}`,
-              }}
+              className={bulk ? 'text-primary' : ''}
             >
               Bulk
-            </button>
+            </Button>
           </div>
         </div>
 
@@ -216,11 +204,9 @@ function AddTaskFormInner({
           <div className="space-y-4">
             {submitError && (
               <div
-                className="rounded-lg px-3 py-2 text-[13px]"
+                className="rounded-lg px-3 py-2 text-[13px] text-foreground"
                 style={{
-                  background: 'color-mix(in srgb, var(--color-error) 16%, transparent)',
-                  border: '1px solid color-mix(in srgb, var(--color-error) 35%, transparent)',
-                  color: 'var(--color-text-1)',
+                  background: 'color-mix(in srgb, var(--destructive) 16%, transparent)',
                 }}
               >
                 {submitError}
@@ -240,25 +226,16 @@ function AddTaskFormInner({
                     : 'What needs to be done?'
                 }
                 rows={textareaRows}
-                className={titleInputCls}
-                style={{ ...inputStyle, caretColor: 'var(--color-accent)' }}
+                className="w-full resize-none rounded-md bg-muted px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
+                style={{ caretColor: 'var(--primary)' }}
               />
             </div>
 
             {!bulk && preview && image && (
-              <div
-                className="rounded-xl border p-3"
-                style={{ borderColor: 'var(--color-border-subtle)' }}
-              >
+              <div className="rounded-xl bg-muted p-3">
                 <div className="mb-2 text-label text-text-4">Reference image</div>
                 <div className="flex items-start gap-3">
-                  <div
-                    className="flex h-20 w-20 shrink-0 items-center justify-center rounded-md"
-                    style={{
-                      border: '1px solid var(--color-border)',
-                      background: 'var(--color-surface-2)',
-                    }}
-                  >
+                  <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-md bg-secondary">
                     <img
                       src={preview}
                       alt={image.name}
@@ -266,18 +243,10 @@ function AddTaskFormInner({
                     />
                   </div>
                   <div className="min-w-0 flex-1">
-                    <div className="truncate text-[13px] text-text-2">{image.name}</div>
-                    <button
-                      type="button"
-                      onClick={removeImage}
-                      className="mt-2 rounded-md px-2.5 py-1 text-[12px]"
-                      style={{
-                        color: 'var(--color-text-2)',
-                        border: '1px solid var(--color-border)',
-                      }}
-                    >
+                    <div className="truncate text-[13px] text-muted-foreground">{image.name}</div>
+                    <Button variant="outline" size="xs" className="mt-2" onClick={removeImage}>
                       Remove image
-                    </button>
+                    </Button>
                   </div>
                 </div>
               </div>
@@ -285,31 +254,24 @@ function AddTaskFormInner({
           </div>
         </div>
 
-        <div
-          className="flex shrink-0 items-center justify-between gap-4 border-t px-5 py-3"
-          style={{ borderColor: 'var(--color-border-subtle)' }}
-        >
+        <div className="flex shrink-0 items-center justify-between gap-4 px-5 py-3">
           <div className="flex min-w-0 items-center gap-2">
             {projects.length > 0 && (
-              <select
+              <Combobox
                 data-testid="task-project-select"
                 value={effectiveProject}
-                onChange={(e) => handleProjectChange(e.target.value)}
-                aria-label="Select project"
-                className={projectSelectCls}
-                style={{
-                  background: 'var(--color-surface-2)',
-                  border: '1px solid var(--color-border-subtle)',
-                  color: 'var(--color-text-2)',
-                }}
-              >
-                {projects.length > 1 && <option value="">Project…</option>}
-                {projects.map((item) => (
-                  <option key={item} value={item}>
-                    {shortRepo(item).toUpperCase()}
-                  </option>
-                ))}
-              </select>
+                onValueChange={handleProjectChange}
+                options={[
+                  ...(projects.length > 1 ? [{ value: '__all__', label: 'All projects' }] : []),
+                  ...projects.map((item) => ({
+                    value: item,
+                    label: shortRepo(item).toUpperCase(),
+                  })),
+                ]}
+                placeholder="Project..."
+                searchPlaceholder="Search projects..."
+                emptyText="No projects found."
+              />
             )}
 
             {!bulk && (
@@ -325,15 +287,15 @@ function AddTaskFormInner({
                     e.target.value = '';
                   }}
                 />
-                <button
-                  type="button"
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
                   onClick={() => fileRef.current?.click()}
-                  className="flex h-9 w-9 items-center justify-center rounded-md transition-colors hover:bg-surface-3 text-text-3"
                   aria-label="Attach image"
-                  title="Attach image (or paste)"
+                  className="text-muted-foreground"
                 >
                   <Paperclip size={16} />
-                </button>
+                </Button>
               </>
             )}
 
@@ -343,19 +305,13 @@ function AddTaskFormInner({
           </div>
 
           <div className="flex items-center gap-3">
-            <button
+            <Button
               data-testid="submit-task-btn"
               onClick={() => void handleSubmit()}
               disabled={!canSubmit}
-              className={footerButtonCls}
-              style={{
-                color: 'var(--color-bg)',
-                borderRadius: 'var(--radius-button)',
-                background: 'var(--color-accent)',
-              }}
             >
-              {submitting ? 'Working…' : 'Create'}
-            </button>
+              {submitting ? 'Working...' : 'Create'}
+            </Button>
           </div>
         </div>
       </div>

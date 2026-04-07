@@ -3,26 +3,9 @@ import { useSettingsStore } from '#renderer/domains/settings';
 import { toast } from 'sonner';
 import log from '#renderer/logger';
 import { getErrorMessage } from '#renderer/utils';
-import { inputClsCompact, inputStyleSubtle } from '#renderer/styles';
+import { Input } from '#renderer/components/ui/input';
+import { Button } from '#renderer/components/ui/button';
 import { useTelegramTokenValidator } from '#renderer/global/hooks/useTelegramTokenValidator';
-
-const btnCls = 'text-[11px] font-medium disabled:opacity-40';
-const primaryBtn: React.CSSProperties = {
-  padding: '8px 20px',
-  borderRadius: 6,
-  background: 'var(--color-accent)',
-  color: 'var(--color-bg)',
-  border: 'none',
-  cursor: 'pointer',
-};
-const ghostBtn: React.CSSProperties = {
-  padding: '8px 20px',
-  borderRadius: 6,
-  border: '1px solid var(--color-border)',
-  background: 'transparent',
-  color: 'var(--color-text-2)',
-  cursor: 'pointer',
-};
 
 export interface ClaudeCheckResult {
   installed: boolean;
@@ -43,43 +26,44 @@ export function ClaudeCodeContent({
   const checking = checkResult === null;
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-      <p className="text-xs text-text-2" style={{ lineHeight: '16px' }}>
+    <div className="flex flex-col gap-2">
+      <p className="text-xs leading-4 text-muted-foreground">
         Mando uses Claude Code to run AI agents. Install it, then verify below.
       </p>
 
       {checkResult?.checkFailed && (
         <StatusLine
           ok={false}
-          label={`Check failed: ${checkResult.error ?? 'Unknown error'} — retry`}
+          label={`Check failed: ${checkResult.error ?? 'Unknown error'} \u2014 retry`}
         />
       )}
 
       {checkResult?.installed && !checkResult.checkFailed && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+        <div className="flex flex-col gap-1">
           {checkResult.version && (
-            <span className="text-[11px] text-text-3">{checkResult.version}</span>
+            <span className="text-[11px] text-muted-foreground">{checkResult.version}</span>
           )}
           <StatusLine
             ok={checkResult.works}
-            label={checkResult.works ? 'Responding' : 'Not responding — check your API key'}
+            label={checkResult.works ? 'Responding' : 'Not responding \u2014 check your API key'}
           />
         </div>
       )}
 
-      <div className="flex items-center" style={{ gap: 6 }}>
-        <a
-          href="https://code.claude.com/docs/en/overview"
-          target="_blank"
-          rel="noopener noreferrer"
-          className={btnCls}
-          style={{ ...primaryBtn, textDecoration: 'none', display: 'inline-block' }}
-        >
-          Install Claude Code
-        </a>
-        <button onClick={recheckClaude} disabled={checking} className={btnCls} style={ghostBtn}>
-          {checking ? 'Checking…' : 'Check'}
-        </button>
+      <div className="flex items-center gap-1.5">
+        <Button size="xs" asChild>
+          <a
+            href="https://code.claude.com/docs/en/overview"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="no-underline"
+          >
+            Install Claude Code
+          </a>
+        </Button>
+        <Button variant="outline" size="xs" onClick={recheckClaude} disabled={checking}>
+          {checking ? 'Checking\u2026' : 'Check'}
+        </Button>
       </div>
     </div>
   );
@@ -109,23 +93,22 @@ export function TelegramContent(): React.ReactElement {
   const canSave = !!token.trim() && !validating;
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-      <p className="text-xs text-text-2" style={{ lineHeight: '16px' }}>
+    <div className="flex flex-col gap-2">
+      <p className="text-xs leading-4 text-muted-foreground">
         Create a bot via{' '}
         <a
           href="https://t.me/BotFather"
           target="_blank"
           rel="noopener noreferrer"
-          className="text-accent"
+          className="text-primary"
         >
           @BotFather
         </a>{' '}
         and paste the token below.
       </p>
-      <input
+      <Input
         type="text"
-        className={inputClsCompact}
-        style={inputStyleSubtle}
+        className="text-xs"
         value={token}
         onChange={(e) => {
           setToken(e.target.value);
@@ -133,24 +116,19 @@ export function TelegramContent(): React.ReactElement {
         }}
         placeholder="Bot token"
       />
-      {result?.botUsername && <StatusLine ok label={`Connected — @${result.botUsername}`} />}
+      {result?.botUsername && <StatusLine ok label={`Connected \u2014 @${result.botUsername}`} />}
       {result?.error && <StatusLine ok={false} label={result.error} />}
       <div>
-        <button
-          onClick={handleSave}
-          disabled={!canSave}
-          className={btnCls}
-          style={{ ...primaryBtn, cursor: canSave ? 'pointer' : 'default' }}
-        >
-          {validating ? 'Validating…' : 'Enable'}
-        </button>
+        <Button size="xs" onClick={handleSave} disabled={!canSave}>
+          {validating ? 'Validating\u2026' : 'Enable'}
+        </Button>
       </div>
     </div>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Project — minimal inline form to add a project path
+// Project
 // ---------------------------------------------------------------------------
 
 export function ProjectContent(): React.ReactElement {
@@ -180,9 +158,9 @@ export function ProjectContent(): React.ReactElement {
 
   return (
     <div>
-      <button onClick={handlePick} disabled={adding} className={btnCls} style={primaryBtn}>
-        {adding ? 'Adding…' : 'Choose folder'}
-      </button>
+      <Button size="xs" onClick={handlePick} disabled={adding}>
+        {adding ? 'Adding\u2026' : 'Choose folder'}
+      </Button>
     </div>
   );
 }
@@ -193,11 +171,8 @@ export function ProjectContent(): React.ReactElement {
 
 function StatusLine({ ok, label }: { ok: boolean; label: string }): React.ReactElement {
   return (
-    <span
-      className="text-[11px]"
-      style={{ color: ok ? 'var(--color-success)' : 'var(--color-error)', lineHeight: '14px' }}
-    >
-      {ok ? '✓' : '✗'} {label}
+    <span className={`text-[11px] leading-[14px] ${ok ? 'text-success' : 'text-destructive'}`}>
+      {ok ? '\u2713' : '\u2717'} {label}
     </span>
   );
 }

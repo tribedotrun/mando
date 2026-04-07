@@ -26,6 +26,7 @@ mod routes_task_actions;
 mod routes_task_ask;
 mod routes_task_detail;
 mod routes_tasks;
+mod routes_terminal;
 mod routes_ui;
 mod routes_worktrees;
 mod scout_notify;
@@ -65,6 +66,7 @@ pub struct AppState {
     pub task_store: Arc<RwLock<mando_captain::io::task_store::TaskStore>>,
     pub db: Arc<mando_db::Db>,
     pub qa_session_mgr: Arc<mando_scout::runtime::qa::QaSessionManager>,
+    pub terminal_host: Arc<mando_terminal::TerminalHost>,
     pub start_time: Instant,
     pub listen_port: u16,
     /// When true, all CC invocations use sonnet instead of the configured model.

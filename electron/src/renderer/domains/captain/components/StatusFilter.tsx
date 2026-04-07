@@ -4,6 +4,7 @@ import { ACTION_NEEDED_STATUSES, IN_PROGRESS_STATUSES } from '#renderer/types';
 import { useTaskStore } from '#renderer/domains/captain/stores/taskStore';
 import { useProjectFilterPaths } from '#renderer/domains/settings';
 import { ViewOptions } from '#renderer/domains/captain/components/ViewOptions';
+import { Button } from '#renderer/components/ui/button';
 
 type FilterKey = ItemStatus | 'action-needed' | 'in-progress-group' | null;
 
@@ -61,8 +62,7 @@ export function StatusFilter({ projectFilter }: Props): React.ReactElement {
       data-testid="status-filter"
       role="tablist"
       aria-label="Filter tasks by status"
-      className="flex items-center"
-      style={{ borderBottom: '1px solid var(--color-border-subtle)', gap: 0 }}
+      className="flex items-center gap-0"
     >
       {TABS.map(({ key, label }) => {
         const active = statusFilter === key;
@@ -70,40 +70,24 @@ export function StatusFilter({ projectFilter }: Props): React.ReactElement {
         if (key !== null && count === 0) return null;
 
         return (
-          <button
+          <Button
             key={label}
+            variant="ghost"
             onClick={() => setFilter(key)}
             role="tab"
             aria-selected={active}
-            className="text-body transition-colors"
-            style={{
-              whiteSpace: 'nowrap',
-              background: 'transparent',
-              color: active ? 'var(--color-text-1)' : 'var(--color-text-2)',
-              fontWeight: active ? 500 : 400,
-              padding: '8px 12px',
-              border: 'none',
-              borderBottomWidth: 2,
-              borderBottomStyle: 'solid',
-              borderBottomColor: active ? 'var(--color-accent)' : 'transparent',
-              cursor: 'pointer',
-              marginBottom: -1,
-            }}
+            className={`text-body whitespace-nowrap rounded-none bg-transparent px-3 py-2 transition-colors -mb-px border-b-2 ${active ? 'border-primary font-medium text-foreground' : 'border-transparent font-normal text-muted-foreground'}`}
           >
             {label}
             <span
-              className="ml-1"
-              style={{
-                fontSize: 12,
-                color: active ? 'var(--color-text-2)' : 'var(--color-text-3)',
-              }}
+              className={`ml-1 text-[12px] ${active ? 'text-muted-foreground' : 'text-text-3'}`}
             >
               {count}
             </span>
-          </button>
+          </Button>
         );
       })}
-      <div className="ml-auto" style={{ paddingRight: 4 }}>
+      <div className="ml-auto pr-1">
         <ViewOptions />
       </div>
     </div>

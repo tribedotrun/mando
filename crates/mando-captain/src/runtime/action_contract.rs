@@ -324,7 +324,14 @@ pub async fn reopen_item(
             item.intervention_count = new_count as i64;
             item.reopen_seq += 1;
             item.status = ItemStatus::Queued;
+            // Clear stale fields so the next dispatch starts fresh.
+            item.pr = None;
+            item.worker = None;
+            item.worktree = None;
+            item.branch = None;
             item.worker_started_at = None;
+            item.session_ids.worker = None;
+            item.session_ids.ask = None;
             item.last_activity_at = Some(mando_types::now_rfc3339());
             let _ = emit_reopen_event(item, reopen_source, feedback, "queued", pool).await;
             return Ok(ReopenOutcome::QueuedFallback);
@@ -360,9 +367,20 @@ pub async fn reopen_item(
                 item.intervention_count = new_count as i64;
                 item.reopen_seq += 1;
                 item.status = ItemStatus::Queued;
-                item.worker_started_at = None;
                 item.last_activity_at = Some(mando_types::now_rfc3339());
+                // Emit event before clearing worker fields so the timeline
+                // records which worker/session failed.
                 let _ = emit_reopen_event(item, reopen_source, feedback, "queued", pool).await;
+                // Clear stale worker fields so the next dispatch starts fresh.
+                // Without this, pr discovery is blocked (pr.is_some() skips it)
+                // and the task permanently references the old PR.
+                item.pr = None;
+                item.worker = None;
+                item.worktree = None;
+                item.branch = None;
+                item.worker_started_at = None;
+                item.session_ids.worker = None;
+                item.session_ids.ask = None;
                 Ok(ReopenOutcome::QueuedFallback)
             } else {
                 Err(e)

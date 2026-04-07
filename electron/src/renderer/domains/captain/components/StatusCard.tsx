@@ -1,4 +1,5 @@
 import React, { useState, useCallback } from 'react';
+import { Clock } from 'lucide-react';
 import type { TaskItem, ClarifierQuestion, SessionSummary } from '#renderer/types';
 import { answerClarification } from '#renderer/domains/captain/hooks/useApi';
 import { useDraftRecord } from '#renderer/global/hooks/useDraft';
@@ -7,6 +8,8 @@ import { toast } from 'sonner';
 import log from '#renderer/logger';
 import { clarifyResultToToast, fmtDuration, getErrorMessage, relativeTime } from '#renderer/utils';
 import { PrIcon } from '#renderer/domains/captain/components/TaskIcons';
+import { Button } from '#renderer/components/ui/button';
+import { Textarea } from '#renderer/components/ui/textarea';
 
 interface Props {
   item: TaskItem;
@@ -15,17 +18,17 @@ interface Props {
   clarifierQuestions: ClarifierQuestion[] | null;
 }
 
-/* ── Variant renderers ── */
+/* -- Variant renderers -- */
 
 function StreamingCard({ item, sessions }: Pick<Props, 'item' | 'sessions'>) {
   const active = sessions.find((s) => s.status === 'running');
   const dur = active ? (active.duration_ms ?? 0) / 1000 : 0;
   return (
-    <CardShell color="var(--color-success)">
-      <StatusDot color="var(--color-success)" pulse />
-      <span className="text-body font-medium text-text-1">Streaming</span>
+    <CardShell color="var(--success)">
+      <StatusDot color="var(--success)" pulse />
+      <span className="text-body font-medium text-foreground">Streaming</span>
       <Sep />
-      <span className="text-caption text-text-2">
+      <span className="text-caption text-muted-foreground">
         {item.worker ?? 'Worker'} &middot; {dur > 0 ? fmtDuration(dur) : 'starting'}
       </span>
     </CardShell>
@@ -34,30 +37,33 @@ function StreamingCard({ item, sessions }: Pick<Props, 'item' | 'sessions'>) {
 
 function QueuedCard() {
   return (
-    <CardShell color="var(--color-text-4)">
-      <span className="text-body text-text-3">&#9719; Queued</span>
+    <CardShell color="var(--text-4)">
+      <Clock size={14} className="text-text-3" />
+      <span className="text-body text-text-3">Queued</span>
     </CardShell>
   );
 }
 
 function CaptainReviewingCard({ label }: { label: string }) {
   return (
-    <CardShell color="var(--color-accent)">
-      <StatusDot color="var(--color-accent)" pulse />
-      <span className="text-body font-medium text-text-1">{label}</span>
+    <CardShell color="var(--primary)">
+      <StatusDot color="var(--primary)" pulse />
+      <span className="text-body font-medium text-foreground">{label}</span>
     </CardShell>
   );
 }
 
 function AwaitingReviewCard({ item }: { item: TaskItem }) {
   return (
-    <CardShell color="var(--color-success)">
-      <StatusDot color="var(--color-success)" />
-      <span className="text-body font-medium text-text-1">Ready for review</span>
+    <CardShell color="var(--success)">
+      <StatusDot color="var(--success)" />
+      <span className="text-body font-medium text-foreground">Ready for review</span>
       {item.pr && (
         <>
           <Sep />
-          <span className="text-caption text-text-2">PR {item.pr.replace(/.*\/pull\//, '#')}</span>
+          <span className="text-caption text-muted-foreground">
+            PR {item.pr.replace(/.*\/pull\//, '#')}
+          </span>
         </>
       )}
     </CardShell>
@@ -68,31 +74,26 @@ function EscalatedCard({ item }: { item: TaskItem }) {
   const [expanded, setExpanded] = useState(false);
   const preview = item.escalation_report?.slice(0, 120) ?? '';
   return (
-    <CardShell color="var(--color-error)">
+    <CardShell color="var(--destructive)">
       <div className="flex w-full flex-col gap-1">
         <div className="flex items-center gap-2">
-          <StatusDot color="var(--color-error)" />
-          <span className="text-body font-medium text-text-1">Escalated</span>
+          <StatusDot color="var(--destructive)" />
+          <span className="text-body font-medium text-foreground">Escalated</span>
         </div>
         {preview && (
-          <div className="text-caption text-text-2">
+          <div className="text-caption text-muted-foreground">
             &ldquo;{expanded ? item.escalation_report : preview}
             {!expanded && (item.escalation_report?.length ?? 0) > 120 ? '...' : ''}
             &rdquo;
             {(item.escalation_report?.length ?? 0) > 120 && (
-              <button
+              <Button
+                variant="link"
+                size="xs"
+                className="ml-1 h-auto p-0"
                 onClick={() => setExpanded((v) => !v)}
-                className="ml-1 text-accent"
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  cursor: 'pointer',
-                  padding: 0,
-                  fontSize: 'inherit',
-                }}
               >
                 {expanded ? 'Less' : 'Full report'}
-              </button>
+              </Button>
             )}
           </div>
         )}
@@ -148,7 +149,7 @@ function NeedsClarificationCard({
 
   if (completed) {
     return (
-      <CardShell color="var(--color-success)">
+      <CardShell color="var(--success)">
         <span className="text-body font-medium text-success">{completed}</span>
       </CardShell>
     );
@@ -158,26 +159,23 @@ function NeedsClarificationCard({
     <div
       className="rounded-lg px-4 py-3"
       style={{
-        background: 'color-mix(in srgb, var(--color-needs-human) 6%, transparent)',
-        border: '1px solid color-mix(in srgb, var(--color-needs-human) 20%, transparent)',
+        background: 'color-mix(in srgb, var(--needs-human) 6%, transparent)',
+        border: '1px solid color-mix(in srgb, var(--needs-human) 20%, transparent)',
       }}
     >
       <div className="mb-3 flex items-center gap-2">
-        <StatusDot color="var(--color-needs-human)" />
-        <span className="text-body font-medium text-text-1">Needs your input</span>
+        <StatusDot color="var(--needs-human)" />
+        <span className="text-body font-medium text-foreground">Needs your input</span>
       </div>
 
       <div className="space-y-3">
         {unanswered.map((q, i) => (
           <div key={i}>
-            <div className="mb-1 break-words text-body leading-snug text-text-1">
+            <div className="mb-1 break-words text-body leading-snug text-foreground">
               <span className="text-text-3">{i + 1}.</span> {q.question}
             </div>
-            <textarea
-              className="w-full resize-none rounded-md bg-surface-2 px-3 py-2 text-body leading-snug text-text-1 focus:outline-none"
-              style={{
-                border: '1px solid var(--color-border-subtle)',
-              }}
+            <Textarea
+              className="min-h-0 w-full resize-none bg-muted text-body leading-snug"
               rows={1}
               placeholder="Your answer..."
               value={answers[i] ?? ''}
@@ -194,26 +192,13 @@ function NeedsClarificationCard({
         ))}
       </div>
 
-      <div
-        className="mt-3 flex items-center justify-between rounded-lg bg-surface-2 px-3 py-2"
-        style={{
-          border: '1px solid var(--color-border-subtle)',
-        }}
-      >
+      <div className="mt-3 flex items-center justify-between rounded-lg bg-muted px-3 py-2">
         <span className="text-caption text-text-3">
           {filledCount} of {unanswered.length} answered
         </span>
-        <button
-          onClick={handleSubmit}
-          disabled={filledCount === 0 || pending}
-          className="rounded-md bg-accent px-4 py-1.5 text-caption font-medium text-bg disabled:opacity-40"
-          style={{
-            border: 'none',
-            cursor: filledCount === 0 || pending ? 'default' : 'pointer',
-          }}
-        >
+        <Button onClick={handleSubmit} disabled={filledCount === 0 || pending} size="sm">
           {pending ? 'Submitting...' : `Submit (${filledCount})`}
-        </button>
+        </Button>
       </div>
     </div>
   );
@@ -221,13 +206,13 @@ function NeedsClarificationCard({
 
 function FailedCard({ item }: { item: TaskItem }) {
   return (
-    <CardShell color="var(--color-error)">
-      <StatusDot color="var(--color-error)" />
-      <span className="text-body font-medium text-text-1">
+    <CardShell color="var(--destructive)">
+      <StatusDot color="var(--destructive)" />
+      <span className="text-body font-medium text-foreground">
         {item.status === 'errored' ? 'Failed' : 'Rework'}
       </span>
       <Sep />
-      <span className="text-caption text-text-2">
+      <span className="text-caption text-muted-foreground">
         {item.intervention_count > 0 && `${item.intervention_count} interventions`}
       </span>
     </CardShell>
@@ -236,7 +221,7 @@ function FailedCard({ item }: { item: TaskItem }) {
 
 function MergedCard({ item, sessions }: Pick<Props, 'item' | 'sessions'>) {
   return (
-    <CardShell color="var(--color-text-4)">
+    <CardShell color="var(--text-4)">
       {item.status === 'merged' && <PrIcon state="merged" />}
       <span className="text-body text-text-3">
         {item.status === 'merged'
@@ -254,7 +239,7 @@ function MergedCard({ item, sessions }: Pick<Props, 'item' | 'sessions'>) {
   );
 }
 
-/* ── Main export ── */
+/* -- Main export -- */
 
 export function StatusCard({ item, sessions, clarifierQuestions }: Props): React.ReactElement {
   const s = item.status;
@@ -264,9 +249,9 @@ export function StatusCard({ item, sessions, clarifierQuestions }: Props): React
   }
   if (s === 'needs-clarification') {
     return (
-      <CardShell color="var(--color-needs-human)">
-        <StatusDot color="var(--color-needs-human)" />
-        <span className="text-body font-medium text-text-1">Needs your input</span>
+      <CardShell color="var(--needs-human)">
+        <StatusDot color="var(--needs-human)" />
+        <span className="text-body font-medium text-foreground">Needs your input</span>
       </CardShell>
     );
   }
@@ -281,7 +266,7 @@ export function StatusCard({ item, sessions, clarifierQuestions }: Props): React
   if (s === 'errored' || s === 'rework') return <FailedCard item={item} />;
   if (s === 'handed-off') {
     return (
-      <CardShell color="var(--color-text-3)">
+      <CardShell color="var(--text-3)">
         <span className="text-body text-text-3">Handed off</span>
       </CardShell>
     );
@@ -291,7 +276,7 @@ export function StatusCard({ item, sessions, clarifierQuestions }: Props): React
   return <MergedCard item={item} sessions={sessions} />;
 }
 
-/* ── Shared primitives ── */
+/* -- Shared primitives -- */
 
 function CardShell({
   color,

@@ -6,15 +6,17 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from '#renderer/global/components/DropdownMenu';
+} from '#renderer/components/ui/dropdown-menu';
+import { Button } from '#renderer/components/ui/button';
+import { Tooltip, TooltipTrigger, TooltipContent } from '#renderer/components/ui/tooltip';
 
 /* ── Status indicator ── */
 
 /** Human-action states get a subtle inline label before the title */
 export const ACTION_LABELS: Record<string, { color: string; label: string }> = {
-  'awaiting-review': { color: 'var(--color-success)', label: 'Review' },
-  escalated: { color: 'var(--color-error)', label: 'Escalated' },
-  'needs-clarification': { color: 'var(--color-needs-human)', label: 'Needs input' },
+  'awaiting-review': { color: 'var(--success)', label: 'Review' },
+  escalated: { color: 'var(--destructive)', label: 'Escalated' },
+  'needs-clarification': { color: 'var(--needs-human)', label: 'Needs input' },
 };
 
 /** Human-readable tooltip for each status */
@@ -38,7 +40,7 @@ export const STATUS_TOOLTIP: Record<string, string> = {
 
 const S = 16; // icon size
 
-/** Dotted circle — queued / new (not started) */
+/** Dotted circle -- queued / new (not started) */
 function IconQueued() {
   return (
     <svg width={S} height={S} viewBox="0 0 16 16" fill="none">
@@ -46,7 +48,7 @@ function IconQueued() {
         cx="8"
         cy="8"
         r="6"
-        stroke="var(--color-text-3)"
+        stroke="var(--text-3)"
         strokeWidth="1.5"
         strokeDasharray="2.5 2.5"
       />
@@ -54,41 +56,41 @@ function IconQueued() {
   );
 }
 
-/** Half-filled circle — in progress / clarifying */
+/** Half-filled circle -- in progress / clarifying */
 function IconWorking() {
   return (
     <svg width={S} height={S} viewBox="0 0 16 16" fill="none">
-      <circle cx="8" cy="8" r="6" stroke="var(--color-accent)" strokeWidth="1.5" />
-      <path d="M8 2a6 6 0 0 1 0 12V2z" fill="var(--color-accent)" />
+      <circle cx="8" cy="8" r="6" stroke="var(--primary)" strokeWidth="1.5" />
+      <path d="M8 2a6 6 0 0 1 0 12V2z" fill="var(--primary)" />
     </svg>
   );
 }
 
-/** Three-quarter circle — captain reviewing (almost done) */
+/** Three-quarter circle -- captain reviewing (almost done) */
 function IconReviewing() {
   return (
     <svg width={S} height={S} viewBox="0 0 16 16" fill="none">
-      <circle cx="8" cy="8" r="6" stroke="var(--color-accent)" strokeWidth="1.5" />
-      <path d="M8 2a6 6 0 0 1 0 12A6 6 0 0 1 2 8h6V2z" fill="var(--color-accent)" />
+      <circle cx="8" cy="8" r="6" stroke="var(--primary)" strokeWidth="1.5" />
+      <path d="M8 2a6 6 0 0 1 0 12A6 6 0 0 1 2 8h6V2z" fill="var(--primary)" />
     </svg>
   );
 }
 
-/** Half circle orange — rework */
+/** Half circle orange -- rework */
 function IconRework() {
   return (
     <svg width={S} height={S} viewBox="0 0 16 16" fill="none">
-      <circle cx="8" cy="8" r="6" stroke="var(--color-stale)" strokeWidth="1.5" />
-      <path d="M8 2a6 6 0 0 1 0 12V2z" fill="var(--color-stale)" />
+      <circle cx="8" cy="8" r="6" stroke="var(--stale)" strokeWidth="1.5" />
+      <path d="M8 2a6 6 0 0 1 0 12V2z" fill="var(--stale)" />
     </svg>
   );
 }
 
-/** Open circle — handed off (parked) */
+/** Open circle -- handed off (parked) */
 function IconHandedOff() {
   return (
     <svg width={S} height={S} viewBox="0 0 16 16" fill="none">
-      <circle cx="8" cy="8" r="6" stroke="var(--color-text-3)" strokeWidth="1.5" />
+      <circle cx="8" cy="8" r="6" stroke="var(--text-3)" strokeWidth="1.5" />
     </svg>
   );
 }
@@ -100,27 +102,31 @@ const ICON_MAP: Record<string, () => React.ReactElement> = {
   'in-progress': IconWorking,
   'captain-reviewing': IconReviewing,
   'captain-merging': IconReviewing,
-  'awaiting-review': () => <CircleDot size={S} color="var(--color-success)" />,
-  escalated: () => <CircleAlert size={S} color="var(--color-error)" />,
-  'needs-clarification': () => <CircleHelp size={S} color="var(--color-needs-human)" />,
+  'awaiting-review': () => <CircleDot size={S} color="var(--success)" />,
+  escalated: () => <CircleAlert size={S} color="var(--destructive)" />,
+  'needs-clarification': () => <CircleHelp size={S} color="var(--needs-human)" />,
   rework: IconRework,
   'handed-off': IconHandedOff,
-  errored: () => <CircleX size={S} color="var(--color-error)" />,
-  merged: () => <CircleCheck size={S} color="var(--color-success)" />,
-  'completed-no-pr': () => <CircleCheck size={S} color="var(--color-success)" />,
-  canceled: () => <Ban size={S} color="var(--color-text-4)" />,
+  errored: () => <CircleX size={S} color="var(--destructive)" />,
+  merged: () => <CircleCheck size={S} color="var(--success)" />,
+  'completed-no-pr': () => <CircleCheck size={S} color="var(--success)" />,
+  canceled: () => <Ban size={S} color="var(--text-4)" />,
 };
 
 export function StatusIcon({ status }: { status: string }): React.ReactElement {
   const Icon = ICON_MAP[status] ?? IconQueued;
+  const tip = STATUS_TOOLTIP[status] ?? status;
   return (
-    <span
-      className="inline-flex shrink-0 items-center justify-center"
-      style={{ width: 16 }}
-      title={STATUS_TOOLTIP[status] ?? status}
-    >
-      <Icon />
-    </span>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className="inline-flex w-4 shrink-0 items-center justify-center">
+          <Icon />
+        </span>
+      </TooltipTrigger>
+      <TooltipContent side="right" className="text-xs">
+        {tip}
+      </TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -139,20 +145,15 @@ export function ActionBtn({
 }): React.ReactElement {
   const isDisabled = disabled || pending;
   return (
-    <button
+    <Button
       data-testid={testId}
+      variant="outline"
+      size="xs"
       onClick={onClick}
       disabled={isDisabled}
-      className="shrink-0 rounded px-2 py-1 text-label transition-colors disabled:opacity-40"
-      style={{
-        background: 'transparent',
-        color: 'var(--color-text-2)',
-        border: '1px solid var(--color-border-subtle)',
-        cursor: isDisabled ? 'default' : 'pointer',
-      }}
     >
       {pending ? '...' : label}
-    </button>
+    </Button>
   );
 }
 
@@ -192,7 +193,7 @@ export function TaskOverflowMenu({
         {showAnswer && <DropdownMenuItem onSelect={onAnswer}>Answer</DropdownMenuItem>}
         {showRework && <DropdownMenuItem onSelect={onRework}>Rework (new PR)</DropdownMenuItem>}
         {showHandoff && <DropdownMenuItem onSelect={onHandoff}>Hand off to human</DropdownMenuItem>}
-        <DropdownMenuItem destructive onSelect={onCancel}>
+        <DropdownMenuItem variant="destructive" onSelect={onCancel}>
           Cancel task
         </DropdownMenuItem>
       </DropdownMenuContent>

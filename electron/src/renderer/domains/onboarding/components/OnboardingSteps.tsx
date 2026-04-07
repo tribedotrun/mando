@@ -1,4 +1,5 @@
 import React, { useCallback } from 'react';
+import { Input } from '#renderer/components/ui/input';
 import {
   SetupLayout,
   CheckRow,
@@ -6,17 +7,7 @@ import {
   OutlineButton,
   PrimaryButton,
 } from '#renderer/domains/onboarding/components/OnboardingPrimitives';
-import { inputClsCompact, inputStyleSubtleFlex } from '#renderer/styles';
 import { useTelegramTokenValidator } from '#renderer/global/hooks/useTelegramTokenValidator';
-
-const FORM_CARD: React.CSSProperties = {
-  padding: '28px 28px',
-  borderRadius: 'var(--radius-panel)',
-  background: 'var(--color-surface-2)',
-  border: '1px solid var(--color-border-subtle)',
-  boxShadow: '0 1px 4px rgba(0, 0, 0, 0.2)',
-  marginBottom: 40,
-};
 
 // ---- Telegram setup ----
 
@@ -57,25 +48,24 @@ export function TelegramScreen({
       title="Telegram"
       subtitle="Notifications and remote control from your phone."
     >
-      <div style={FORM_CARD}>
-        <p className="text-caption text-text-3" style={{ marginBottom: 24, lineHeight: 1.5 }}>
+      <div className="mb-10 rounded-lg bg-muted px-7 py-7 shadow-sm">
+        <p className="mb-6 text-caption leading-relaxed text-muted-foreground">
           Open{' '}
           <a
             href="https://t.me/BotFather"
             target="_blank"
             rel="noopener noreferrer"
-            className="text-accent"
+            className="text-primary"
           >
             @BotFather
           </a>{' '}
-          in Telegram and send <code className="text-text-2">/newbot</code>. Give it a display name
-          and a username ending in &ldquo;bot&rdquo;. Copy the token.
+          in Telegram and send <code className="text-muted-foreground">/newbot</code>. Give it a
+          display name and a username ending in &ldquo;bot&rdquo;. Copy the token.
         </p>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <div className="flex items-center" style={{ gap: 8 }}>
-            <input
-              className={inputClsCompact}
-              style={{ ...inputStyleSubtleFlex, fontSize: 13 }}
+        <div className="flex flex-col gap-2">
+          <div className="flex items-center gap-2">
+            <Input
+              className="flex-1 text-[13px]"
               value={token}
               onChange={(e) => {
                 onTokenChange(e.target.value);
@@ -84,7 +74,7 @@ export function TelegramScreen({
               placeholder="Bot token"
             />
             <OutlineButton onClick={validate} disabled={!token.trim() || validating}>
-              <span style={{ display: 'inline-block', minWidth: 52, textAlign: 'center' }}>
+              <span className="inline-block min-w-[52px] text-center">
                 {validating ? 'Connecting\u2026' : 'Connect'}
               </span>
             </OutlineButton>
@@ -95,28 +85,19 @@ export function TelegramScreen({
       </div>
 
       {error && (
-        <div
-          className="text-caption"
-          style={{
-            marginBottom: 16,
-            padding: '6px 12px',
-            borderRadius: 'var(--radius-row)',
-            background: 'var(--color-error-bg)',
-            color: 'var(--color-error)',
-          }}
-        >
+        <div className="mb-4 rounded-sm bg-destructive/10 px-3 py-1.5 text-caption text-destructive">
           {error}
         </div>
       )}
 
-      <div className="flex items-center" style={{ justifyContent: 'space-between' }}>
-        <div className="flex items-center" style={{ gap: 12 }}>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
           {!finishing && <GhostButton onClick={onBack}>Back</GhostButton>}
           {!tgResult?.botUsername && !finishing && <GhostButton onClick={onSkip}>Skip</GhostButton>}
         </div>
-        <div className="flex items-center" style={{ gap: 12 }}>
+        <div className="flex items-center gap-3">
           {finishing && progressMsg && (
-            <span className="text-caption text-text-3">{progressMsg}</span>
+            <span className="text-caption text-muted-foreground">{progressMsg}</span>
           )}
           <PrimaryButton onClick={onNext} disabled={finishing || !tgResult?.botUsername}>
             {finishing ? 'Setting up\u2026' : 'Finish Setup'}

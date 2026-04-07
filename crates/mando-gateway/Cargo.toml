@@ -42,6 +42,8 @@ mando-cc.workspace = true
 mando-db.workspace = true
 sqlx.workspace = true
 mando-telegram = { path = "../mando-telegram" }
+mando-terminal.workspace = true
+async-stream = "0.3"
 base64 = "0.22"
 bytes = "1"
 toml = "0.8"

@@ -33,16 +33,30 @@ import {
   InfoTab,
   ContextModal,
 } from '#renderer/domains/captain/components/TaskDetailTabs';
+import { Button } from '#renderer/components/ui/button';
+import { Tabs, TabsList, TabsTrigger } from '#renderer/components/ui/tabs';
+import { useSettingsStore } from '#renderer/domains/settings';
 
-type DetailTab = 'timeline' | 'pr' | 'sessions' | 'info' | 'qa';
+type DetailTab = 'timeline' | 'pr' | 'sessions' | 'info' | 'qa' | 'terminal';
 
 interface Props {
   item: TaskItem;
   onBack: () => void;
   onMerge?: () => void;
+  onOpenTerminal?: (opts: {
+    project: string;
+    cwd: string;
+    label: string;
+    resumeSessionId?: string;
+  }) => void;
 }
 
-export function TaskDetailView({ item, onBack, onMerge }: Props): React.ReactElement {
+export function TaskDetailView({
+  item,
+  onBack,
+  onMerge,
+  onOpenTerminal,
+}: Props): React.ReactElement {
   const [activeTab, setActiveTab] = useState<DetailTab>('pr');
   const [transcriptSession, setTranscriptSession] = useState<{
     entry: SessionEntry;
@@ -238,13 +252,43 @@ export function TaskDetailView({ item, onBack, onMerge }: Props): React.ReactEle
     setActiveQA(false);
   }, []);
 
-  // Tab definitions, always include Q&A to avoid tab bar reflow.
+  const openTerminalPage = useCallback(
+    (resumeId?: string) => {
+      if (!onOpenTerminal || !item.project) return;
+      let cwd = item.worktree;
+      if (!cwd) {
+        const cfg = useSettingsStore.getState().config;
+        const pc = cfg.captain?.projects
+          ? Object.values(cfg.captain.projects).find((p) => p.name === item.project)
+          : undefined;
+        cwd = pc?.path;
+      }
+      if (!cwd) {
+        toast.error(`No working directory for task "${item.title}"`);
+        return;
+      }
+      onOpenTerminal({
+        project: item.project,
+        cwd,
+        label: item.title,
+        resumeSessionId: resumeId,
+      });
+    },
+    [onOpenTerminal, item.project, item.worktree, item.title],
+  );
+
+  const handleResumeSession = useCallback(
+    (sessionId: string) => openTerminalPage(sessionId),
+    [openTerminalPage],
+  );
+
   const tabs: { key: DetailTab; label: string }[] = [
     { key: 'pr', label: 'PR' },
     { key: 'timeline', label: 'Timeline' },
     { key: 'sessions', label: 'Sessions' },
     { key: 'info', label: 'Info' },
     { key: 'qa', label: 'Q&A' },
+    { key: 'terminal', label: 'Terminal' },
   ];
 
   const showMerge = onMerge && item.pr && item.project && item.status === 'awaiting-review';
@@ -259,20 +303,16 @@ export function TaskDetailView({ item, onBack, onMerge }: Props): React.ReactEle
           <div className="pb-3">
             {/* Title row, back, title, and actions inline */}
             <div className="mb-1 flex items-start gap-3">
-              <button
+              <Button
+                variant="ghost"
+                size="xs"
                 onClick={onBack}
-                className="mt-1.5 shrink-0 text-caption"
-                style={{
-                  color: 'var(--color-text-3)',
-                  background: 'none',
-                  border: 'none',
-                  cursor: 'pointer',
-                }}
+                className="mt-1.5 shrink-0 text-muted-foreground"
               >
                 &larr;
-              </button>
+              </Button>
               <div className="min-w-0 flex-1">
-                <h1 className="break-words text-heading font-semibold leading-snug text-text-1">
+                <h1 className="break-words text-heading font-semibold leading-snug text-foreground">
                   {item.title}
                 </h1>
                 {/* Metadata */}
@@ -285,28 +325,19 @@ export function TaskDetailView({ item, onBack, onMerge }: Props): React.ReactEle
                       href={prHref(item.pr, (item.github_repo ?? item.project)!)}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="text-caption no-underline hover:underline text-accent"
+                      className="text-caption text-primary no-underline hover:underline"
                     >
                       {prLabel(item.pr)}
                     </a>
                   )}
-                  {item.no_pr && <span className="text-caption text-accent">Findings only</span>}
+                  {item.no_pr && <span className="text-caption text-primary">Findings only</span>}
                 </div>
               </div>
               <div className="flex shrink-0 items-center gap-2">
                 {showMerge && (
-                  <button
-                    onClick={onMerge}
-                    className="rounded-md px-4 py-1.5 text-caption font-semibold"
-                    style={{
-                      background: 'var(--color-accent)',
-                      color: 'var(--color-bg)',
-                      border: 'none',
-                      cursor: 'pointer',
-                    }}
-                  >
+                  <Button onClick={onMerge} size="sm">
                     Merge
-                  </button>
+                  </Button>
                 )}
                 {(item.branch || item.worktree || item.plan || item.context) && (
                   <DetailOverflowMenu item={item} onViewContext={() => setContextModalOpen(true)} />
@@ -332,41 +363,33 @@ export function TaskDetailView({ item, onBack, onMerge }: Props): React.ReactEle
               />
             </div>
           ) : (
-            <>
-              {/* Tabs, sticky within scroll */}
-              <div
-                className="sticky top-0 z-10 ml-6 flex gap-0"
-                style={{
-                  borderBottom: '1px solid var(--color-border-subtle)',
-                  background: 'var(--color-bg)',
-                }}
-              >
-                {tabs.map((tab) => {
-                  const isActive = tab.key === activeTab;
-                  return (
-                    <button
+            <Tabs
+              value={activeTab}
+              onValueChange={(v) => {
+                if (v === 'terminal') {
+                  openTerminalPage();
+                } else {
+                  setActiveTab(v as DetailTab);
+                }
+              }}
+              className="ml-6 gap-0"
+            >
+              <div className="sticky top-0 z-10 bg-background">
+                <TabsList variant="line" className="h-auto gap-0">
+                  {tabs.map((tab) => (
+                    <TabsTrigger
                       key={tab.key}
-                      onClick={() => setActiveTab(tab.key)}
-                      className="rounded-t px-3 py-1.5 text-caption font-medium transition-colors hover:bg-surface-2"
-                      style={{
-                        color: isActive ? 'var(--color-text-1)' : 'var(--color-text-3)',
-                        background: 'none',
-                        border: 'none',
-                        borderBottom: isActive
-                          ? '2px solid var(--color-accent)'
-                          : '2px solid transparent',
-                        cursor: 'pointer',
-                        marginBottom: -1,
-                      }}
+                      value={tab.key}
+                      className="px-3 py-1.5 text-caption font-medium"
                     >
                       {tab.label}
-                    </button>
-                  );
-                })}
+                    </TabsTrigger>
+                  ))}
+                </TabsList>
               </div>
 
               {/* Tab content */}
-              <div className="ml-6 break-words pt-4 pr-2">
+              <div className="break-words pr-2 pt-4">
                 {activeTab === 'timeline' && (
                   <TimelineTab events={events} onTranscriptClick={handleTranscriptClick} />
                 )}
@@ -382,13 +405,14 @@ export function TaskDetailView({ item, onBack, onMerge }: Props): React.ReactEle
                   <SessionsTab
                     sessions={sessions}
                     onSessionClick={handleSessionClick}
+                    onResumeSession={handleResumeSession}
                     taskId={item.id}
                   />
                 )}
                 {activeTab === 'info' && <InfoTab item={item} />}
                 {activeTab === 'qa' && <QAHistoryTab item={item} />}
               </div>
-            </>
+            </Tabs>
           )}
         </div>
 
@@ -409,7 +433,7 @@ export function TaskDetailView({ item, onBack, onMerge }: Props): React.ReactEle
 
       {/* Full-screen transcript overlay */}
       {transcriptSession && transcriptFullScreen && (
-        <div className="fixed inset-0 z-[300] bg-bg">
+        <div className="fixed inset-0 z-[300] bg-background">
           <div className="h-full p-6">
             <SessionDetailPanel
               session={transcriptSession.entry}

@@ -1,13 +1,18 @@
 import React from 'react';
+import { Card, CardHeader, CardTitle, CardContent, CardFooter } from '#renderer/components/ui/card';
+import { Kbd } from '#renderer/components/ui/kbd';
+import { Separator } from '#renderer/components/ui/separator';
+import { Button } from '#renderer/components/ui/button';
+
 interface ShortcutEntry {
   keys: string[];
   label: string;
 }
 
 const GENERAL: ShortcutEntry[] = [
-  { keys: ['⌘', 'K'], label: 'Command palette' },
-  { keys: ['⌘', ','], label: 'Settings' },
-  { keys: ['⌘', 'N'], label: 'New task' },
+  { keys: ['\u2318', 'K'], label: 'Command palette' },
+  { keys: ['\u2318', ','], label: 'Settings' },
+  { keys: ['\u2318', 'N'], label: 'New task' },
   { keys: ['?'], label: 'Shortcut reference' },
   { keys: ['Esc'], label: 'Close / deselect' },
   { keys: ['/'], label: 'Focus search' },
@@ -28,7 +33,7 @@ const ACTIONS: ShortcutEntry[] = [
   { keys: ['M'], label: 'Merge PR' },
   { keys: ['S'], label: 'Change status' },
   { keys: ['R'], label: 'Restart / rework' },
-  { keys: ['⌘', 'Enter'], label: 'Submit form' },
+  { keys: ['\u2318', 'Enter'], label: 'Submit form' },
 ];
 
 interface Props {
@@ -45,49 +50,38 @@ export function ShortcutOverlay({ open, onClose }: Props): React.ReactElement | 
       data-shortcut-overlay
       onClick={onClose}
     >
-      <div
-        className="w-[640px] max-w-[90vw] rounded-lg border shadow-xl"
-        style={{
-          background: 'var(--color-surface-2)',
-          borderColor: 'var(--color-border)',
-        }}
+      <Card
+        className="w-[640px] max-w-[90vw] gap-0 rounded-lg border py-0 shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Header */}
-        <div
-          className="flex items-center justify-between border-b px-5 py-3"
-          style={{ borderColor: 'var(--color-border)' }}
-        >
-          <span className="text-body font-semibold text-text-1">Keyboard shortcuts</span>
-          <button
-            onClick={onClose}
-            className="text-lg leading-none"
-            style={{
-              color: 'var(--color-text-3)',
-              background: 'none',
-              border: 'none',
-              cursor: 'pointer',
-            }}
-          >
-            &times;
-          </button>
-        </div>
+        <CardHeader className="px-5 py-3">
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-sm">Keyboard shortcuts</CardTitle>
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              onClick={onClose}
+              className="text-lg leading-none text-muted-foreground hover:text-foreground"
+            >
+              &times;
+            </Button>
+          </div>
+        </CardHeader>
 
-        {/* Columns */}
-        <div className="grid grid-cols-3 gap-6 px-5 py-4">
+        <Separator />
+
+        <CardContent className="grid grid-cols-3 gap-6 px-5 py-4">
           <ShortcutColumn title="General" entries={GENERAL} />
           <ShortcutColumn title="Navigation" entries={NAVIGATION} />
           <ShortcutColumn title="Actions" entries={ACTIONS} />
-        </div>
+        </CardContent>
 
-        {/* Footer */}
-        <div
-          className="text-caption border-t px-5 py-2.5"
-          style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-4)' }}
-        >
-          Press <Kbd>Esc</Kbd> to close
-        </div>
-      </div>
+        <Separator />
+
+        <CardFooter className="px-5 py-2.5 text-xs text-text-4">
+          Press <Kbd className="mx-1">Esc</Kbd> to close
+        </CardFooter>
+      </Card>
     </div>
   );
 }
@@ -105,7 +99,7 @@ function ShortcutColumn({
       <div className="space-y-1.5">
         {entries.map((entry, i) => (
           <div key={i} className="flex items-center justify-between gap-2">
-            <span className="text-caption text-text-2">{entry.label}</span>
+            <span className="text-caption text-muted-foreground">{entry.label}</span>
             <span className="flex shrink-0 items-center gap-1">
               {entry.keys.map((key, ki) => (
                 <Kbd key={ki}>{key}</Kbd>
@@ -115,21 +109,5 @@ function ShortcutColumn({
         ))}
       </div>
     </div>
-  );
-}
-
-function Kbd({ children }: { children: React.ReactNode }): React.ReactElement {
-  return (
-    <kbd
-      className="inline-flex items-center justify-center rounded bg-surface-3 px-1.5 py-0.5 text-[10px] font-medium text-text-2"
-      style={{
-        border: '1px solid var(--color-border)',
-        fontFamily: 'var(--font-mono, Geist Mono, monospace)',
-        minWidth: 20,
-        textAlign: 'center',
-      }}
-    >
-      {children}
-    </kbd>
   );
 }

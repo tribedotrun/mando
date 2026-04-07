@@ -1,5 +1,14 @@
 import React from 'react';
 import type { ItemStatus } from '#renderer/types';
+import { Button } from '#renderer/components/ui/button';
+import { Separator } from '#renderer/components/ui/separator';
+import {
+  Select,
+  SelectTrigger,
+  SelectValue,
+  SelectContent,
+  SelectItem,
+} from '#renderer/components/ui/select';
 
 const ALL_STATUSES: ItemStatus[] = [
   'new',
@@ -40,60 +49,41 @@ export function BulkBar({
   return (
     <div
       data-testid="bulk-bar"
-      className="fixed bottom-12 left-1/2 z-50 flex -translate-x-1/2 items-center gap-3 rounded-lg px-4 py-2 shadow-lg"
-      style={{
-        background: 'var(--color-surface-2)',
-        border: '1px solid var(--color-accent)',
-      }}
+      className="fixed bottom-12 left-1/2 z-50 flex -translate-x-1/2 items-center gap-3 rounded-lg bg-muted px-4 py-2 shadow-lg"
     >
-      <span className="text-code tabular-nums text-accent">{count} selected</span>
+      <span className="text-code tabular-nums text-primary">{count} selected</span>
       {onBulkStatus && (
         <>
-          <div className="h-4 w-px bg-border" />
-          <select
-            onChange={(e) => {
-              if (e.target.value) onBulkStatus(e.target.value);
-              e.target.value = '';
-            }}
-            defaultValue=""
-            aria-label="Set status for selected items"
-            className="rounded-md px-2 py-1 text-[12px]"
-            style={{
-              background: 'var(--color-surface-3)',
-              color: 'var(--color-text-2)',
-              border: '1px solid var(--color-border)',
+          <Separator orientation="vertical" className="h-4" />
+          <Select
+            value=""
+            onValueChange={(value) => {
+              if (value) onBulkStatus(value);
             }}
           >
-            <option value="" disabled>
-              set status...
-            </option>
-            {statusList.map((s) => (
-              <option key={s} value={s}>
-                {s}
-              </option>
-            ))}
-          </select>
+            <SelectTrigger
+              size="sm"
+              aria-label="Set status for selected items"
+              className="bg-secondary text-[12px] text-muted-foreground"
+            >
+              <SelectValue placeholder="set status..." />
+            </SelectTrigger>
+            <SelectContent>
+              {statusList.map((s) => (
+                <SelectItem key={s} value={s}>
+                  {s}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </>
       )}
-      <button
-        onClick={onDelete}
-        className="rounded-md px-3 py-1 text-[12px] font-medium"
-        style={{
-          background: 'transparent',
-          color: 'var(--color-error)',
-          border: '1px solid var(--color-border-destructive)',
-          borderRadius: 'var(--radius-button)',
-        }}
-      >
+      <Button variant="destructive" size="xs" onClick={onDelete}>
         Delete
-      </button>
-      <button
-        onClick={onCancel}
-        className="rounded-md px-3 py-1 text-[12px] text-text-3"
-        style={{ border: '1px solid var(--color-border)' }}
-      >
+      </Button>
+      <Button variant="outline" size="xs" onClick={onCancel}>
         Clear
-      </button>
+      </Button>
     </div>
   );
 }

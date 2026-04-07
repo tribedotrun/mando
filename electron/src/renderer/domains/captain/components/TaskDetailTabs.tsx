@@ -9,12 +9,26 @@ import { formatCallerLabel, buildSessionSequence, SessionDot } from '#renderer/d
 import {
   Dialog,
   DialogContent,
+  DialogHeader,
   DialogTitle,
   DialogClose,
-} from '#renderer/global/components/Dialog';
-import { Spinner } from '#renderer/global/components/Spinner';
+} from '#renderer/components/ui/dialog';
+import {
+  Collapsible,
+  CollapsibleTrigger,
+  CollapsibleContent,
+} from '#renderer/components/ui/collapsible';
+import {
+  Tooltip,
+  TooltipTrigger,
+  TooltipContent,
+  TooltipProvider,
+} from '#renderer/components/ui/tooltip';
+import { Separator } from '#renderer/components/ui/separator';
+import { Button } from '#renderer/components/ui/button';
+import { Skeleton } from '#renderer/components/ui/skeleton';
 
-/* ── Timeline tab ── */
+/* -- Timeline tab -- */
 
 export function TimelineTab({
   events,
@@ -27,7 +41,7 @@ export function TimelineTab({
   return <TaskTimeline events={reversed} onTranscriptClick={onTranscriptClick} />;
 }
 
-/* ── PR tab ── */
+/* -- PR tab -- */
 
 export function PrTab({
   item,
@@ -54,12 +68,10 @@ export function PrTab({
   }
   if (prPending && !prBody) {
     return (
-      <div
-        className="flex items-center gap-2 text-caption text-text-3"
-        style={{ minHeight: '120px' }}
-      >
-        <Spinner size={12} color="var(--color-text-4)" borderWidth={1.5} />
-        Loading PR info...
+      <div className="min-h-[120px] space-y-3">
+        <Skeleton className="h-4 w-3/4" />
+        <Skeleton className="h-4 w-1/2" />
+        <Skeleton className="h-4 w-2/3" />
       </div>
     );
   }
@@ -75,15 +87,17 @@ export function PrTab({
   );
 }
 
-/* ── Sessions tab ── */
+/* -- Sessions tab -- */
 
 export function SessionsTab({
   sessions,
   onSessionClick,
+  onResumeSession,
   taskId,
 }: {
   sessions: SessionSummary[];
   onSessionClick: (s: SessionSummary) => void;
+  onResumeSession?: (sessionId: string) => void;
   taskId: number;
 }): React.ReactElement {
   if (sessions.length === 0) {
@@ -119,11 +133,12 @@ export function SessionsTab({
         const title = seq ? `${label} #${seq}` : label;
 
         return (
-          <button
+          <div
             key={s.session_id}
+            role="button"
+            tabIndex={0}
             onClick={() => onSessionClick(s)}
-            className="mb-1 flex w-full items-center gap-2 rounded-md px-2 py-2 text-left hover:bg-surface-2"
-            style={{ background: 'none', border: 'none', cursor: 'pointer' }}
+            className="mb-1 flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-2 text-left hover:bg-muted"
           >
             <SessionDot status={s.status} />
             <div className="min-w-0 flex-1">
@@ -139,15 +154,27 @@ export function SessionsTab({
                 )}
               </div>
             </div>
-            <span className="text-caption text-text-4">{s.status}</span>
-          </button>
+            <span className="text-[11px] text-text-4">{s.status}</span>
+            {onResumeSession && (
+              <Button
+                variant="outline"
+                size="xs"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onResumeSession(s.session_id);
+                }}
+                className="ml-1"
+                title="Resume this session in a terminal"
+              >
+                Resume
+              </Button>
+            )}
+          </div>
         );
       })}
 
-      <div
-        className="mt-2 flex items-center gap-2 border-t pt-3 text-caption text-text-3"
-        style={{ borderColor: 'var(--color-border-subtle)' }}
-      >
+      <Separator className="mt-2" />
+      <div className="flex items-center gap-2 pt-3 text-caption text-text-3">
         {sessions.length} sessions
         {totalDuration > 0 && <span>&middot; {fmtDuration(totalDuration / 1000)}</span>}
       </div>
@@ -155,7 +182,7 @@ export function SessionsTab({
   );
 }
 
-/* ── Info tab ── */
+/* -- Info tab -- */
 
 export function InfoTab({ item }: { item: TaskItem }): React.ReactElement {
   const [contextExpanded, setContextExpanded] = useState(false);
@@ -163,16 +190,10 @@ export function InfoTab({ item }: { item: TaskItem }): React.ReactElement {
 
   return (
     <div className="space-y-4">
-      {/* ── Details grid ── */}
-      <div
-        className="grid gap-x-4 gap-y-2 rounded-lg bg-surface-2 px-4 py-3"
-        style={{
-          gridTemplateColumns: 'auto 1fr',
-          alignItems: 'baseline',
-        }}
-      >
+      {/* -- Details grid -- */}
+      <div className="grid grid-cols-[auto_1fr] items-baseline gap-x-4 gap-y-2 rounded-lg bg-muted px-4 py-3">
         <span className="text-caption text-text-4">ID</span>
-        <span className="text-body text-text-2">#{item.id}</span>
+        <span className="text-body text-muted-foreground">#{item.id}</span>
 
         {item.branch && (
           <>
@@ -196,10 +217,10 @@ export function InfoTab({ item }: { item: TaskItem }): React.ReactElement {
         )}
       </div>
 
-      {/* ── Content group ── */}
+      {/* -- Content group -- */}
       {item.original_prompt && (
         <InfoSection label="Original Request">
-          <p className="text-body leading-relaxed text-text-2">{item.original_prompt}</p>
+          <p className="text-body leading-relaxed text-muted-foreground">{item.original_prompt}</p>
         </InfoSection>
       )}
 
@@ -211,9 +232,9 @@ export function InfoTab({ item }: { item: TaskItem }): React.ReactElement {
           onToggle={() => setEscalationExpanded((v) => !v)}
         >
           <pre
-            className="whitespace-pre-wrap break-words rounded-md bg-surface-2 p-3 text-code text-text-1"
+            className="whitespace-pre-wrap break-words rounded-md bg-muted p-3 text-code text-foreground"
             style={{
-              border: '1px solid color-mix(in srgb, var(--color-error) 30%, transparent)',
+              border: '1px solid color-mix(in srgb, var(--destructive) 30%, transparent)',
             }}
           >
             {item.escalation_report}
@@ -262,61 +283,56 @@ function CollapsibleSection({
   children: React.ReactNode;
 }): React.ReactElement {
   return (
-    <div>
-      <button
-        onClick={onToggle}
-        className="mb-2 flex items-center gap-2 text-label text-text-4"
-        style={{
-          background: 'none',
-          border: 'none',
-          cursor: 'pointer',
-          padding: 0,
-        }}
-      >
-        <ChevronRight
-          size={8}
-          style={{
-            transition: 'transform 150ms',
-            transform: expanded ? 'rotate(90deg)' : 'none',
-          }}
-        />
-        {label}
-      </button>
-      {expanded && children}
-    </div>
+    <Collapsible open={expanded} onOpenChange={onToggle}>
+      <CollapsibleTrigger asChild>
+        <Button variant="ghost" size="xs" className="mb-2 gap-2 p-0 text-label text-text-4">
+          <ChevronRight
+            size={8}
+            className={`transition-transform duration-150 ${expanded ? 'rotate-90' : ''}`}
+          />
+          {label}
+        </Button>
+      </CollapsibleTrigger>
+      <CollapsibleContent>{children}</CollapsibleContent>
+    </Collapsible>
   );
 }
 
 function CopyValue({ value, display }: { value: string; display?: string }): React.ReactElement {
   const [copied, setCopied] = useState(false);
   return (
-    <button
-      onClick={async () => {
-        const ok = await copyToClipboard(value);
-        if (ok) {
-          setCopied(true);
-          setTimeout(() => setCopied(false), 1200);
-        }
-      }}
-      className="inline-flex items-center gap-2 text-left text-code text-text-2 hover:opacity-80"
-      style={{
-        background: 'none',
-        border: 'none',
-        cursor: 'pointer',
-        padding: 0,
-      }}
-    >
+    <span className="inline-flex items-center gap-2 text-code text-muted-foreground">
       <span className="min-w-0 break-all">{display ?? value}</span>
-      {copied ? (
-        <Check size={12} color="var(--color-success)" />
-      ) : (
-        <Copy size={12} color="var(--color-text-4)" />
-      )}
-    </button>
+      <TooltipProvider>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              onClick={async () => {
+                const ok = await copyToClipboard(value);
+                if (ok) {
+                  setCopied(true);
+                  setTimeout(() => setCopied(false), 1200);
+                }
+              }}
+              className="h-5 w-5"
+            >
+              {copied ? (
+                <Check size={12} color="var(--success)" />
+              ) : (
+                <Copy size={12} color="var(--text-4)" />
+              )}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>{copied ? 'Copied!' : 'Copy'}</TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+    </span>
   );
 }
 
-/* ── Context modal ── */
+/* -- Context modal -- */
 
 export function ContextModal({
   context,
@@ -334,21 +350,17 @@ export function ContextModal({
     >
       <DialogContent
         data-testid="context-modal"
-        className="flex w-[560px] max-w-[90vw] flex-col"
-        style={{ maxHeight: '70vh', padding: 0 }}
+        className="flex max-h-[70vh] w-[560px] max-w-[90vw] flex-col p-0"
+        showCloseButton={false}
       >
         <div className="flex shrink-0 items-center justify-between px-5 pt-4 pb-3">
-          <DialogTitle className="mb-0">Context</DialogTitle>
-          <DialogClose
-            className="flex items-center justify-center rounded text-text-3 cursor-pointer"
-            style={{
-              width: 24,
-              height: 24,
-              background: 'none',
-              border: 'none',
-            }}
-          >
-            <X size={14} />
+          <DialogHeader className="flex-1">
+            <DialogTitle className="mb-0">Context</DialogTitle>
+          </DialogHeader>
+          <DialogClose asChild>
+            <Button variant="ghost" size="icon-xs">
+              <X size={14} />
+            </Button>
           </DialogClose>
         </div>
         <div className="overflow-y-auto px-5 pb-5">

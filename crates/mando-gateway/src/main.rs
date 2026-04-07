@@ -89,6 +89,17 @@ async fn main() {
     let task_store = mando_captain::io::task_store::TaskStore::new(db.pool().clone());
     let task_store_arc = Arc::new(RwLock::new(task_store));
 
+    // Backfill project logos for projects added before logo auto-detection.
+    let config = {
+        let mut cfg = config;
+        if mando_config::backfill_project_logos(&mut cfg) {
+            if let Err(e) = mando_config::save_config(&cfg, None) {
+                tracing::warn!(module = "startup", error = %e, "failed to save backfilled logos");
+            }
+        }
+        cfg
+    };
+
     let config_arc = Arc::new(ArcSwap::from_pointee(config.clone()));
     let config_write_mu = Arc::new(tokio::sync::Mutex::new(()));
     let (tick_tx, _) = tokio::sync::watch::channel(
@@ -181,6 +192,7 @@ async fn main() {
         task_store: task_store_arc,
         db,
         qa_session_mgr: mando_scout::runtime::qa::default_session_manager(),
+        terminal_host: Arc::new(mando_terminal::TerminalHost::new()),
         start_time,
         listen_port: port,
         dev_mode: args.dev,
@@ -281,6 +293,7 @@ async fn main() {
     let qa_mgr = state.qa_session_mgr.clone();
     let tg_rt = state.telegram_runtime.clone();
     let ui_rt = state.ui_runtime.clone();
+    let terminal_host = state.terminal_host.clone();
     let tracker = state.task_tracker.clone();
     let cancel = state.cancellation_token.clone();
     let app = mando_gateway::server::build_router(state);
@@ -318,6 +331,9 @@ async fn main() {
     // forget work gets a clean exit.
     tracker.close();
     tracker.wait().await;
+
+    // Kill all terminal PTY sessions.
+    terminal_host.shutdown();
 
     // Shut down persistent Q&A sessions (kills CC child processes).
     qa_mgr.shutdown().await;

@@ -5,6 +5,9 @@ import { askScout, fetchScoutItem } from '#renderer/domains/scout/hooks/useApi';
 import { QAChat } from '#renderer/global/components/QAChat';
 import type { QAEntry } from '#renderer/global/components/QAChat';
 import { getErrorMessage } from '#renderer/utils';
+import { Button } from '#renderer/components/ui/button';
+
+import { Separator } from '#renderer/components/ui/separator';
 
 interface Props {
   itemId: number;
@@ -52,14 +55,11 @@ export function ScoutQA({ itemId, onClose }: Props): React.ReactElement {
     item?.title || (item?.status === 'pending' ? 'Pending processing\u2026' : 'Untitled');
 
   const header = (
-    <div
-      className="flex items-center gap-2 border-b px-4 py-3"
-      style={{ borderColor: 'var(--color-border)' }}
-    >
-      <span className="text-xs font-medium truncate flex-1 text-text-1">{title}</span>
-      <button onClick={onClose} className="rounded p-1 text-text-3" title="Close Q&A">
+    <div className="flex items-center gap-2 px-4 py-3">
+      <span className="flex-1 truncate text-xs font-medium text-foreground">{title}</span>
+      <Button variant="ghost" size="icon-xs" onClick={onClose}>
         &times;
-      </button>
+      </Button>
     </div>
   );
 
@@ -67,19 +67,16 @@ export function ScoutQA({ itemId, onClose }: Props): React.ReactElement {
     suggestions.length > 0 ? (
       <div className="flex flex-wrap gap-1.5 px-4 pb-2">
         {suggestions.map((s) => (
-          <button
+          <Button
             key={s}
+            variant="outline"
+            size="xs"
             onClick={() => handleAsk(s)}
             disabled={pending}
-            className="rounded-full px-2.5 py-1 text-xs transition-colors"
-            style={{
-              background: 'color-mix(in srgb, var(--color-accent) 10%, transparent)',
-              color: 'var(--color-accent)',
-              border: '1px solid color-mix(in srgb, var(--color-accent) 20%, transparent)',
-            }}
+            className="rounded-full"
           >
             {s}
-          </button>
+          </Button>
         ))}
       </div>
     ) : null;
@@ -88,7 +85,12 @@ export function ScoutQA({ itemId, onClose }: Props): React.ReactElement {
     <QAChat
       testId="scout-qa"
       className="flex h-full flex-col"
-      header={header}
+      header={
+        <>
+          {header}
+          <Separator />
+        </>
+      }
       footer={footer}
       history={history}
       pending={pending}
@@ -97,22 +99,15 @@ export function ScoutQA({ itemId, onClose }: Props): React.ReactElement {
       placeholder="Ask about this article..."
       renderAnswer={(text) => <Markdown>{text}</Markdown>}
       historyClassName="px-4 py-3"
-      formClassName="border-t px-4 py-3"
-      formStyle={{ borderColor: 'var(--color-border)' }}
+      formClassName="px-4 py-3"
       userBubbleStyle={{
-        background: 'color-mix(in srgb, var(--color-accent) 15%, transparent)',
-        borderWidth: 1,
-        borderStyle: 'solid',
-        borderColor: 'color-mix(in srgb, var(--color-accent) 30%, transparent)',
-        color: 'var(--color-accent-hover)',
+        background: 'color-mix(in srgb, var(--primary) 15%, transparent)',
+        color: 'var(--primary-hover)',
         whiteSpace: 'pre-wrap',
       }}
       assistantBubbleStyle={{
-        background: 'color-mix(in srgb, var(--color-surface-3) 50%, transparent)',
-        borderWidth: 1,
-        borderStyle: 'solid',
-        borderColor: 'color-mix(in srgb, var(--color-border) 50%, transparent)',
-        color: 'var(--color-text-1)',
+        background: 'color-mix(in srgb, var(--secondary) 50%, transparent)',
+        color: 'var(--foreground)',
       }}
       bubbleClassName="max-w-[90%]"
     />

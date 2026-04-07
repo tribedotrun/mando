@@ -13,6 +13,7 @@ import { useMountEffect } from '#renderer/global/hooks/useMountEffect';
 import { toast } from 'sonner';
 import { getErrorMessage } from '#renderer/utils';
 import { RetryButton } from '#renderer/domains/captain/components/RetryButton';
+import { Skeleton } from '#renderer/components/ui/skeleton';
 import type { SSEConnectionStatus } from '#renderer/types';
 
 // ---------------------------------------------------------------------------
@@ -188,31 +189,22 @@ export function DataProvider({ children }: { children: React.ReactNode }): React
 
   if (!initialized) {
     return (
-      <div className="flex h-screen items-center justify-center bg-bg text-text-3">
-        <span className="text-body">Loading...</span>
+      <div className="flex h-screen items-center justify-center bg-background">
+        <div className="flex flex-col items-center gap-3">
+          <Skeleton className="h-5 w-32" />
+          <Skeleton className="h-4 w-20" />
+        </div>
       </div>
     );
   }
 
   if (initError) {
     return (
-      <div
-        className="flex h-screen flex-col items-center justify-center gap-3 bg-bg text-text-1"
-        style={{ padding: 24 }}
-      >
-        <span className="text-heading text-error">Could not connect to daemon</span>
-        <span className="text-body text-text-3">{initError}</span>
+      <div className="flex h-screen flex-col items-center justify-center gap-3 bg-background p-6 text-foreground">
+        <span className="text-heading text-destructive">Could not connect to daemon</span>
+        <span className="text-body text-muted-foreground">{initError}</span>
         <RetryButton
-          className="text-label"
-          style={{
-            marginTop: 8,
-            padding: '6px 16px',
-            background: 'var(--color-accent)',
-            color: 'var(--color-bg)',
-            border: 'none',
-            borderRadius: 6,
-            cursor: 'pointer',
-          }}
+          className="mt-2 inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
           onRetry={() => window.mandoAPI.restartDaemon().finally(() => window.location.reload())}
         />
       </div>
@@ -245,11 +237,7 @@ function OnboardingPlaceholder(): React.ReactElement {
       });
   });
   if (loadError) {
-    return (
-      <div className="text-error" style={{ padding: 24 }}>
-        Failed to load onboarding. Restart the app.
-      </div>
-    );
+    return <div className="p-6 text-destructive">Failed to load onboarding. Restart the app.</div>;
   }
   if (!OnboardingWizard) return <div />;
   return <OnboardingWizard />;

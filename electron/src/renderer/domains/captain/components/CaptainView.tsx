@@ -127,18 +127,17 @@ export function CaptainView({
   }
 
   return (
-    <div className="flex flex-col" style={{ height: '100%' }}>
+    <div className="flex h-full flex-col">
       <MetricsRow
         onNudge={handleNudgeWorker}
         onStopWorker={(worker) => actions.handleHandoff(worker.id)}
       />
       <StatusFilter projectFilter={projectFilter} />
 
-      <div className="min-h-0 flex-1" style={{ paddingTop: 4 }}>
+      <div className="min-h-0 flex-1 pt-1">
         <TaskTable
           selectedIds={actions.selectedIds}
           onToggleSelect={actions.toggleSelect}
-          onToggleSelectAll={actions.toggleSelectAll}
           onMerge={actions.setMergeItem}
           onReopen={actions.setReopenItem}
           onRework={actions.setReworkItem}

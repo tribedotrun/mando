@@ -4,14 +4,15 @@ import {
   useBulkCreateStore,
   type BulkCreatePhase,
 } from '#renderer/domains/captain/stores/bulkCreateStore';
+import { Button } from '#renderer/components/ui/button';
 import { Spinner } from '#renderer/global/components/Spinner';
 
 function progressText(phase: BulkCreatePhase): string {
   switch (phase.step) {
     case 'parsing':
-      return 'Parsing tasks…';
+      return 'Parsing tasks...';
     case 'creating':
-      return `Adding ${phase.done}/${phase.total}…`;
+      return `Adding ${phase.done}/${phase.total}...`;
     case 'done':
       return `Added ${phase.count} task${phase.count === 1 ? '' : 's'}`;
     case 'error':
@@ -39,41 +40,27 @@ export function BulkCreateProgress(): React.ReactElement | null {
         }
       `}</style>
       <div
-        className="fixed z-[350] flex items-center gap-2 rounded-lg px-4 py-2"
-        style={{
-          bottom: 16,
-          left: 16,
-          background: 'var(--color-surface-2)',
-          border: '1px solid var(--color-border-subtle)',
-          boxShadow: '0 8px 24px #00000066',
-          animation: 'bulk-in 200ms ease-out',
-        }}
+        className="fixed bottom-4 left-4 z-[350] flex items-center gap-2 rounded-lg bg-muted px-4 py-2 shadow-xl"
+        style={{ animation: 'bulk-in 200ms ease-out' }}
       >
         {isActive && <Spinner />}
 
         <span
-          className="text-[13px] font-medium"
-          style={{ color: isError ? 'var(--color-error)' : 'var(--color-text-1)' }}
+          className={`text-[13px] font-medium ${isError ? 'text-destructive' : 'text-foreground'}`}
         >
           {progressText(phase)}
         </span>
 
         {!isActive && (
-          <button
+          <Button
+            variant="ghost"
+            size="icon-xs"
             onClick={dismiss}
-            className="flex items-center justify-center"
-            style={{
-              color: 'var(--color-text-3)',
-              cursor: 'pointer',
-              background: 'none',
-              border: 'none',
-              padding: 0,
-              marginLeft: 2,
-            }}
             aria-label="Dismiss"
+            className="ml-0.5"
           >
             <X size={14} />
-          </button>
+          </Button>
         )}
       </div>
     </>

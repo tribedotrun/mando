@@ -10,6 +10,9 @@ import { SettingsTelegram } from '#renderer/domains/settings/components/Settings
 import { SettingsScout } from '#renderer/domains/settings/components/SettingsScout';
 import { SettingsExperimental } from '#renderer/domains/settings/components/SettingsExperimental';
 import { SettingsAbout } from '#renderer/domains/settings/components/SettingsAbout';
+import { Button } from '#renderer/components/ui/button';
+import { Skeleton } from '#renderer/components/ui/skeleton';
+
 export type SettingsSection =
   | 'general'
   | 'projects'
@@ -86,77 +89,61 @@ export function SettingsPage({
 
   if (loading) {
     return (
-      <div className="flex h-full items-center justify-center text-text-3">Loading settings...</div>
+      <div className="flex h-full items-center justify-center">
+        <div className="flex flex-col items-center gap-3">
+          <Skeleton className="h-5 w-32" />
+          <Skeleton className="h-4 w-20" />
+        </div>
+      </div>
     );
   }
 
   return (
     <div data-testid="settings-page" className="flex h-full">
-      <aside
-        className="flex w-[200px] shrink-0 flex-col"
-        style={{
-          borderRight: '1px solid var(--color-border-subtle)',
-          background: 'var(--color-surface-1)',
-          paddingTop: 38,
-          paddingBottom: 16,
-          paddingLeft: 12,
-          paddingRight: 12,
-        }}
-      >
-        <button
+      <aside className="flex w-[200px] shrink-0 flex-col bg-card pb-4 pl-3 pr-3 pt-[38px]">
+        <Button
           data-testid="settings-back"
+          variant="ghost"
+          size="sm"
           onClick={onBack}
-          className="flex items-center transition-colors"
-          style={{
-            gap: 8,
-            color: 'var(--color-text-1)',
-            background: 'transparent',
-            border: 'none',
-            cursor: 'pointer',
-            padding: '0 0 16px 0',
-            fontSize: 14,
-            fontWeight: 500,
-          }}
+          className="mb-4 justify-start gap-2 px-0 text-sm font-medium text-foreground"
         >
           <ChevronLeft size={14} />
           Settings
-        </button>
+        </Button>
 
-        <nav className="flex flex-1 flex-col overflow-y-auto" style={{ gap: 1 }}>
+        <nav className="flex flex-1 flex-col gap-0.5 overflow-y-auto">
           {navItems.map((item) => {
             const active = section === item.id;
             return (
-              <button
+              <Button
                 key={item.id}
                 data-testid={`settings-nav-${item.id}`}
+                variant="ghost"
+                size="sm"
                 onClick={() => setSection(item.id)}
-                className="flex w-full items-center text-[13px] transition-colors"
-                style={{
-                  background: active ? 'var(--color-surface-2)' : 'transparent',
-                  color: active ? 'var(--color-text-1)' : 'var(--color-text-2)',
-                  fontWeight: active ? 500 : 400,
-                  padding: '8px 8px',
-                  borderRadius: 6,
-                  border: 'none',
-                  cursor: 'pointer',
-                }}
+                className={`w-full justify-start text-[13px] ${
+                  active
+                    ? 'bg-muted font-medium text-foreground'
+                    : 'font-normal text-muted-foreground'
+                }`}
               >
                 {item.label}
-              </button>
+              </Button>
             );
           })}
         </nav>
 
         {(error || saveSuccess) && (
-          <div style={{ paddingTop: 12, borderTop: '1px solid var(--color-border-subtle)' }}>
-            {error && <p className="text-xs text-error">{error}</p>}
+          <div className="pt-3">
+            {error && <p className="text-xs text-destructive">{error}</p>}
             {saveSuccess && <p className="text-xs text-success">Saved</p>}
           </div>
         )}
       </aside>
 
-      <main className="flex-1 overflow-y-auto" style={{ padding: '38px 32px 24px' }}>
-        <div style={{ maxWidth: 720 }}>
+      <main className="flex-1 overflow-y-auto px-8 pb-6 pt-[38px]">
+        <div className="max-w-[720px]">
           <ErrorBoundary key={section} fallbackLabel={section}>
             <SettingsPanel section={section} />
           </ErrorBoundary>

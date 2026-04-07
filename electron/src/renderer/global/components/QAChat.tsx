@@ -1,4 +1,7 @@
 import React, { useCallback, useRef, useState } from 'react';
+import { Button } from '#renderer/components/ui/button';
+import { ScrollArea } from '#renderer/components/ui/scroll-area';
+import { Textarea } from '#renderer/components/ui/textarea';
 
 export interface QAEntry {
   role: 'user' | 'assistant';
@@ -83,25 +86,25 @@ export function QAChat({
   );
 
   const defaultUserStyle: React.CSSProperties = {
-    background: 'var(--color-accent-wash)',
-    border: '1px solid var(--color-accent-wash)',
-    color: 'var(--color-accent-hover)',
+    background: 'var(--accent)',
+    border: '1px solid var(--accent)',
+    color: 'var(--primary-hover)',
     whiteSpace: 'pre-wrap',
   };
 
   const defaultAssistantStyle: React.CSSProperties = {
-    background: 'var(--color-surface-3)',
-    border: '1px solid var(--color-border-subtle)',
-    color: 'var(--color-text-1)',
+    background: 'var(--secondary)',
+    border: '1px solid var(--input)',
+    color: 'var(--foreground)',
   };
 
   return (
     <div data-testid={testId} className={className} style={style}>
       {header}
 
-      <div className={`flex-1 overflow-y-auto ${historyClassName}`} style={historyStyle}>
+      <ScrollArea className={`flex-1 ${historyClassName}`} style={historyStyle}>
         {history.length === 0 && (
-          <div className="text-center py-8 text-xs text-text-3">{placeholder}</div>
+          <div className="py-8 text-center text-xs text-text-3">{placeholder}</div>
         )}
         {history.map((entry, i) => (
           <div key={i} className={`mb-3 ${entry.role === 'user' ? 'text-right' : 'text-left'}`}>
@@ -123,7 +126,7 @@ export function QAChat({
           </div>
         )}
         <div ref={chatEndRef} />
-      </div>
+      </ScrollArea>
 
       {footer}
 
@@ -132,7 +135,7 @@ export function QAChat({
         className={`flex items-end gap-2 ${formClassName}`}
         style={formStyle}
       >
-        <textarea
+        <Textarea
           ref={textareaRef}
           value={question}
           onChange={(e) => {
@@ -147,22 +150,13 @@ export function QAChat({
             }
           }}
           placeholder={placeholder}
-          className="flex-1 resize-none rounded px-3 py-2 text-sm placeholder-text-3 focus:outline-none"
-          style={{
-            border: '1px solid var(--color-border)',
-            background: 'var(--color-surface-2)',
-            color: 'var(--color-text-1)',
-          }}
+          className="min-h-0 flex-1 resize-none bg-muted"
           rows={1}
           autoFocus
         />
-        <button
-          type="submit"
-          disabled={pending || !question.trim()}
-          className="rounded bg-accent px-4 py-2 text-xs font-medium text-bg disabled:opacity-50"
-        >
+        <Button type="submit" size="sm" disabled={pending || !question.trim()}>
           Ask
-        </button>
+        </Button>
       </form>
     </div>
   );

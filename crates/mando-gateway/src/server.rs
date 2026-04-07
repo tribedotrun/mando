@@ -29,6 +29,7 @@ use crate::routes_task_actions;
 use crate::routes_task_ask;
 use crate::routes_task_detail;
 use crate::routes_tasks;
+use crate::routes_terminal;
 use crate::routes_ui;
 use crate::routes_worktrees;
 use crate::sse;
@@ -81,6 +82,7 @@ fn protected_routes() -> Router<AppState> {
         .merge(worktree_routes())
         .merge(project_routes())
         .merge(ai_routes())
+        .merge(routes_terminal::routes())
         .merge(ui_routes())
         .route("/api/health/system", get(routes_captain::get_health_system))
         .route("/api/health/ui", get(routes_ui::get_ui_health))
@@ -358,6 +360,17 @@ where
 
     let bus_arc = Arc::new(bus);
 
+    // Backfill project logos for projects added before logo auto-detection.
+    let config = {
+        let mut cfg = config;
+        if mando_config::backfill_project_logos(&mut cfg) {
+            if let Err(e) = mando_config::save_config(&cfg, None) {
+                tracing::warn!(module = "startup", error = %e, "failed to save backfilled logos");
+            }
+        }
+        cfg
+    };
+
     let db = mando_db::Db::open(&runtime_paths.task_db_path).await?;
     let db = Arc::new(db);
     let task_store = mando_captain::io::task_store::TaskStore::new(db.pool().clone());
@@ -438,6 +451,7 @@ where
         task_store: task_store_arc,
         db,
         qa_session_mgr: mando_scout::runtime::qa::default_session_manager(),
+        terminal_host: Arc::new(mando_terminal::TerminalHost::new()),
         start_time: std::time::Instant::now(),
         listen_port: port,
         dev_mode: false,
@@ -461,6 +475,7 @@ where
         );
     }
 
+    let terminal_host = state.terminal_host.clone();
     let tracker = state.task_tracker.clone();
     let cancel = state.cancellation_token.clone();
     let app = build_router(state);
@@ -476,6 +491,7 @@ where
         .with_graceful_shutdown(graceful)
         .await?;
 
+    terminal_host.shutdown();
     tracker.close();
     tracker.wait().await;
     Ok(())

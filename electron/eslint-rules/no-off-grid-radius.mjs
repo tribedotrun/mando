@@ -5,7 +5,7 @@ export default {
     docs: { description: 'Ban borderRadius values not in design system tokens.' },
     messages: {
       offGrid:
-        'borderRadius {{value}} is not a design token. Use 4 (row), 6 (button), 8 (panel), 10 (hero), or "50%".',
+        'borderRadius {{value}} is not a design token. Use 4 (sm), 6 (md), 8 (lg), 10 (xl), or "50%".',
     },
   },
   create(context) {

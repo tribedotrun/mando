@@ -48,6 +48,7 @@ export default defineConfig({
           'vendor-react': ['react', 'react-dom'],
           'vendor-query': ['@tanstack/react-query'],
           'vendor-markdown': ['react-markdown'],
+          'vendor-radix': ['radix-ui'],
         },
       },
     },

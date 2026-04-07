@@ -1,5 +1,8 @@
 import React, { useState } from 'react';
+import { Copy, Check } from 'lucide-react';
 import { copyToClipboard } from '#renderer/utils';
+import { Button } from '#renderer/components/ui/button';
+import { Tooltip, TooltipTrigger, TooltipContent } from '#renderer/components/ui/tooltip';
 
 interface Props {
   text: string;
@@ -19,15 +22,14 @@ export function CopyBtn({ text, label, className }: Props): React.ReactElement {
     }
   };
   return (
-    <button
-      onClick={copy}
-      className={className ?? 'rounded border px-2 py-1 text-label'}
-      style={
-        className ? undefined : { borderColor: 'var(--color-border)', color: 'var(--color-text-2)' }
-      }
-      title={text}
-    >
-      {copied ? 'ok' : label}
-    </button>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button variant="ghost" size="icon-xs" onClick={copy} className={className}>
+          {copied ? <Check size={12} /> : <Copy size={12} />}
+          <span className="sr-only">{copied ? 'Copied' : label}</span>
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>{copied ? 'Copied!' : label}</TooltipContent>
+    </Tooltip>
   );
 }

@@ -15,7 +15,9 @@ import {
   DropdownMenuTrigger,
   DropdownMenuContent,
   DropdownMenuCheckboxItem,
-} from '#renderer/global/components/DropdownMenu';
+} from '#renderer/components/ui/dropdown-menu';
+import { Button } from '#renderer/components/ui/button';
+import { Textarea } from '#renderer/components/ui/textarea';
 
 type Action = 'ask' | 'reopen' | 'rework';
 
@@ -42,7 +44,7 @@ export function TaskActionBar({ item, onAsk }: Props): React.ReactElement | null
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const taskFetch = useTaskStore((s) => s.fetch);
   const queryClient = useQueryClient();
-  // Sync selected action when task status changes — only when there are valid actions.
+  // Sync selected action when task status changes -- only when there are valid actions.
   if (available.length > 0 && !available.includes(selectedAction)) {
     setSelectedAction(defaultAction);
   }
@@ -85,7 +87,7 @@ export function TaskActionBar({ item, onAsk }: Props): React.ReactElement | null
     [text, handleSubmit],
   );
 
-  // Determine visibility — hidden states still reserve no space via height collapse.
+  // Determine visibility -- hidden states still reserve no space via height collapse.
   const isFinalized = FINALIZED_STATUSES.includes(item.status);
   const hidden =
     isFinalized ||
@@ -103,26 +105,13 @@ export function TaskActionBar({ item, onAsk }: Props): React.ReactElement | null
 
   return (
     <div
-      className="shrink-0"
-      style={{
-        maxHeight: hidden ? 0 : '200px',
-        opacity: hidden ? 0 : 1,
-        overflow: hidden ? 'hidden' : 'visible',
-        transition: 'max-height 150ms ease, opacity 150ms ease',
-        borderTop: hidden ? 'none' : '1px solid var(--color-border-subtle)',
-      }}
+      className={`shrink-0 border-t-0 transition-[max-height,opacity] duration-150 ease-in-out ${hidden ? 'max-h-0 overflow-hidden opacity-0' : 'max-h-[200px] overflow-visible opacity-100'}`}
     >
       <div className="px-4 pt-3 pb-3">
-        <div
-          className="flex items-end gap-2 rounded-lg px-3 py-2"
-          style={{
-            background: 'var(--color-surface-2)',
-            border: '1px solid var(--color-border-subtle)',
-          }}
-        >
-          <textarea
+        <div className="flex items-end gap-2 rounded-lg bg-muted px-3 py-2">
+          <Textarea
             ref={textareaRef}
-            className="min-h-[20px] max-h-[120px] flex-1 resize-none overflow-y-auto bg-transparent py-1 text-body leading-snug text-text-1 focus:outline-none"
+            className="min-h-[20px] max-h-[120px] flex-1 resize-none overflow-y-auto border-none bg-transparent py-1 text-body leading-snug text-foreground shadow-none focus-visible:ring-0"
             rows={1}
             placeholder={config.placeholder}
             value={text}
@@ -138,23 +127,15 @@ export function TaskActionBar({ item, onAsk }: Props): React.ReactElement | null
           {hasMultipleActions && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <button
+                <Button
+                  variant="ghost"
+                  size="xs"
                   disabled={!!pendingAction}
-                  className="flex shrink-0 items-center gap-1"
-                  style={{
-                    background: 'none',
-                    border: 'none',
-                    color: 'var(--color-text-2)',
-                    fontSize: '13px',
-                    fontWeight: 500,
-                    cursor: pendingAction ? 'default' : 'pointer',
-                    padding: '4px 8px',
-                    lineHeight: '18px',
-                  }}
+                  className="shrink-0 gap-1 text-muted-foreground"
                 >
                   {config.label}
-                  <ChevronDown size={10} style={{ opacity: 0.6 }} />
-                </button>
+                  <ChevronDown size={10} className="opacity-60" />
+                </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent side="top" align="start" className="min-w-[120px]">
                 {available.map((action) => (
@@ -171,20 +152,12 @@ export function TaskActionBar({ item, onAsk }: Props): React.ReactElement | null
           )}
 
           {/* Circular send button */}
-          <button
+          <Button
             onClick={handleSubmit}
             disabled={!canSubmit}
-            className="flex shrink-0 items-center justify-center"
-            style={{
-              width: '28px',
-              height: '28px',
-              borderRadius: '50%',
-              background: showAccent ? 'var(--color-accent)' : 'var(--color-surface-3)',
-              color: showAccent ? 'var(--color-bg)' : 'var(--color-text-3)',
-              border: 'none',
-              cursor: canSubmit ? 'pointer' : 'default',
-              transition: 'background 150ms ease, color 150ms ease',
-            }}
+            variant={showAccent ? 'default' : 'secondary'}
+            size="icon-xs"
+            className="shrink-0 rounded-full transition-colors"
           >
             {isLoading ? (
               <svg className="animate-spin" width="14" height="14" viewBox="0 0 14 14" fill="none">
@@ -199,7 +172,7 @@ export function TaskActionBar({ item, onAsk }: Props): React.ReactElement | null
             ) : (
               <ArrowUp size={14} strokeWidth={2} />
             )}
-          </button>
+          </Button>
         </div>
       </div>
     </div>

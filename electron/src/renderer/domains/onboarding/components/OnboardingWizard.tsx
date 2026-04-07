@@ -2,6 +2,7 @@ import React, { useState, useCallback } from 'react';
 import { useMountEffect } from '#renderer/global/hooks/useMountEffect';
 import type { MandoConfig } from '#renderer/domains/settings';
 import heroImg from '#renderer/assets/hero.png';
+import { Button } from '#renderer/components/ui/button';
 import {
   SetupLayout,
   GhostButton,
@@ -24,9 +25,9 @@ type CCResult = {
 } | null;
 
 const BULLETS = [
-  'Your backlog runs itself — tasks get picked up, reviewed, and delivered as pull requests with visual evidence.',
+  'Your backlog runs itself \u2014 tasks get picked up, reviewed, and delivered as pull requests with visual evidence.',
   'Run tasks across multiple projects at once. Each gets its own isolated workspace.',
-  'Stay current — relevant articles, repos, and podcasts become actionable tasks tailored to your stack.',
+  'Stay current \u2014 relevant articles, repos, and podcasts become actionable tasks tailored to your stack.',
 ];
 
 export function OnboardingWizard(): React.ReactElement {
@@ -128,64 +129,37 @@ export function OnboardingWizard(): React.ReactElement {
 
 function WelcomeScreen({ onStart }: { onStart: () => void }): React.ReactElement {
   return (
-    <div data-testid="onboarding-wizard" className="relative flex h-full bg-bg">
+    <div data-testid="onboarding-wizard" className="relative flex h-full bg-background">
       <div
         className="absolute inset-x-0 top-0 z-10 h-8"
         style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
       />
-      <div
-        className="flex flex-col justify-center"
-        style={{ width: 460, padding: 48, flexShrink: 0 }}
-      >
-        <div style={{ marginBottom: 24 }}>
-          <h1 className="text-display text-text-1">Mando</h1>
-          <p
-            className="text-subheading text-text-2"
-            style={{ marginTop: 8, letterSpacing: '0.01em' }}
-          >
+      <div className="flex w-[460px] shrink-0 flex-col justify-center p-12">
+        <div className="mb-6">
+          <h1 className="text-display text-foreground">Mando</h1>
+          <p className="mt-2 text-subheading tracking-wide text-muted-foreground">
             Manage tasks, not agents.
           </p>
         </div>
-        <ul className="flex flex-col" style={{ gap: 24, listStyle: 'none', padding: 0, margin: 0 }}>
+        <ul className="m-0 flex list-none flex-col gap-6 p-0">
           {BULLETS.map((text, i) => (
-            <li key={i} className="flex" style={{ gap: 12 }}>
-              <span
-                style={{
-                  width: 6,
-                  height: 6,
-                  borderRadius: 4,
-                  background: 'var(--color-accent)',
-                  flexShrink: 0,
-                  marginTop: 6,
-                }}
-              />
-              <span className="text-body text-text-1" style={{ lineHeight: 1.5 }}>
-                {text}
-              </span>
+            <li key={i} className="flex gap-3">
+              <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-primary" />
+              <span className="text-body leading-relaxed text-foreground">{text}</span>
             </li>
           ))}
         </ul>
-        <div style={{ paddingTop: 40 }}>
-          <button data-testid="onboarding-next" onClick={onStart} className="btn btn-primary">
+        <div className="pt-10">
+          <Button data-testid="onboarding-next" onClick={onStart}>
             Get Started
-          </button>
+          </Button>
         </div>
       </div>
-      <div
-        className="flex flex-1 items-center justify-center"
-        style={{ overflow: 'hidden', padding: '24px 24px 24px 0' }}
-      >
+      <div className="flex flex-1 items-center justify-center overflow-hidden pb-6 pl-0 pr-6 pt-6">
         <img
           src={heroImg}
           alt="Mando captain view"
-          style={{
-            width: '100%',
-            height: 'auto',
-            objectFit: 'contain',
-            borderRadius: 'var(--radius-panel)',
-            border: '1px solid var(--color-border-subtle)',
-            boxShadow: '0 8px 32px rgba(0, 0, 0, 0.35)',
-          }}
+          className="h-auto w-full rounded-lg object-contain shadow-[0_8px_32px_rgba(0,0,0,0.35)]"
         />
       </div>
     </div>
@@ -237,38 +211,17 @@ function ClaudeCheckScreen({
       title="Claude Code"
       subtitle="Required to run Mando."
     >
-      <div
-        className="flex flex-col"
-        style={{
-          gap: 12,
-          padding: '28px 28px',
-          borderRadius: 'var(--radius-panel)',
-          background: 'var(--color-surface-2)',
-          border: '1px solid var(--color-border-subtle)',
-          boxShadow: '0 1px 4px rgba(0, 0, 0, 0.2)',
-          marginBottom: 40,
-        }}
-      >
+      <div className="mb-10 flex flex-col gap-3 rounded-lg bg-muted px-7 py-7 shadow-sm">
         {checking && (
-          <div className="flex items-center" style={{ gap: 10 }}>
-            <span
-              className="animate-spin"
-              style={{
-                width: 14,
-                height: 14,
-                borderRadius: 8,
-                border: '2px solid var(--color-accent)',
-                borderTopColor: 'transparent',
-                flexShrink: 0,
-              }}
-            />
-            <span className="text-body text-text-3">Checking…</span>
+          <div className="flex items-center gap-2.5">
+            <span className="size-3.5 animate-spin shrink-0 rounded-full border-2 border-primary border-t-transparent" />
+            <span className="text-body text-muted-foreground">Checking...</span>
           </div>
         )}
         {result && !checking && result.checkFailed && (
           <StatusCheck
             ok={false}
-            label={`Check failed: ${result.error ?? 'Unknown error'} — retry`}
+            label={`Check failed: ${result.error ?? 'Unknown error'} \u2014 retry`}
           />
         )}
         {result && !checking && !result.checkFailed && (
@@ -285,13 +238,13 @@ function ClaudeCheckScreen({
       </div>
 
       {result && !result.checkFailed && !result.installed && !checking && (
-        <p className="text-body text-text-2" style={{ marginBottom: 24 }}>
+        <p className="mb-6 text-body text-muted-foreground">
           Install Claude Code from{' '}
           <a
             href="https://code.claude.com/docs/en/overview"
             target="_blank"
             rel="noopener noreferrer"
-            className="text-accent"
+            className="text-primary"
           >
             the docs
           </a>
@@ -299,12 +252,12 @@ function ClaudeCheckScreen({
         </p>
       )}
 
-      <div className="flex items-center" style={{ justifyContent: 'space-between' }}>
-        <div className="flex items-center" style={{ gap: 12 }}>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
           <GhostButton onClick={onBack}>Back</GhostButton>
           {!passed && (
             <OutlineButton onClick={runCheck} disabled={checking}>
-              {checking ? 'Checking…' : 'Re-check'}
+              {checking ? 'Checking...' : 'Re-check'}
             </OutlineButton>
           )}
         </div>
@@ -326,31 +279,14 @@ function StatusCheck({
   detail?: string | null;
 }): React.ReactElement {
   return (
-    <div className="flex items-center" style={{ gap: 10 }}>
+    <div className="flex items-center gap-2.5">
       <span
-        style={{
-          width: 16,
-          height: 16,
-          borderRadius: 8,
-          background: ok ? 'var(--color-success)' : 'var(--color-error)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          flexShrink: 0,
-          fontSize: 11,
-          color: 'var(--color-bg)',
-          fontWeight: 700,
-        }}
+        className={`flex size-4 shrink-0 items-center justify-center rounded-full text-[11px] font-bold text-background ${ok ? 'bg-success' : 'bg-destructive'}`}
       >
-        {ok ? '✓' : '✗'}
+        {ok ? '\u2713' : '\u2717'}
       </span>
-      <span
-        className="text-body"
-        style={{ color: ok ? 'var(--color-text-1)' : 'var(--color-error)' }}
-      >
-        {label}
-      </span>
-      {detail && <span className="text-caption text-text-3">{detail}</span>}
+      <span className={`text-body ${ok ? 'text-foreground' : 'text-destructive'}`}>{label}</span>
+      {detail && <span className="text-caption text-muted-foreground">{detail}</span>}
     </div>
   );
 }

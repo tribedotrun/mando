@@ -1,0 +1,122 @@
+import { buildUrl } from '#renderer/api';
+import log from '#renderer/logger';
+
+export interface TerminalSessionInfo {
+  id: string;
+  project: string;
+  cwd: string;
+  agent: 'claude' | 'codex';
+  running: boolean;
+  exit_code: number | null;
+}
+
+export interface CreateTerminalParams {
+  project: string;
+  cwd: string;
+  agent: 'claude' | 'codex';
+  resume_session_id?: string;
+  size?: { rows: number; cols: number };
+}
+
+export async function createTerminal(params: CreateTerminalParams): Promise<TerminalSessionInfo> {
+  const res = await fetch(buildUrl('/api/terminal'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+  });
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`createTerminal failed: ${err}`);
+  }
+  return res.json();
+}
+
+export async function listTerminals(): Promise<TerminalSessionInfo[]> {
+  const res = await fetch(buildUrl('/api/terminal'));
+  if (!res.ok) throw new Error('listTerminals failed');
+  return res.json();
+}
+
+export async function getTerminal(id: string): Promise<TerminalSessionInfo> {
+  const res = await fetch(buildUrl(`/api/terminal/${id}`));
+  if (!res.ok) throw new Error('getTerminal failed');
+  return res.json();
+}
+
+export async function writeTerminal(id: string, data: string): Promise<void> {
+  const encoder = new TextEncoder();
+  const bytes = encoder.encode(data);
+  const binary = Array.from(bytes)
+    .map((b) => String.fromCharCode(b))
+    .join('');
+  const encoded = btoa(binary);
+  const res = await fetch(buildUrl(`/api/terminal/${id}/write`), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ data: encoded }),
+  });
+  if (!res.ok) {
+    log.warn('terminal write failed', { id, status: res.status });
+  }
+}
+
+export async function writeTerminalBytes(id: string, bytes: Uint8Array): Promise<void> {
+  const binary = Array.from(bytes)
+    .map((b) => String.fromCharCode(b))
+    .join('');
+  const encoded = btoa(binary);
+  const res = await fetch(buildUrl(`/api/terminal/${id}/write`), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ data: encoded }),
+  });
+  if (!res.ok) {
+    log.warn('terminal write failed', { id, status: res.status });
+  }
+}
+
+export async function resizeTerminal(id: string, rows: number, cols: number): Promise<void> {
+  const res = await fetch(buildUrl(`/api/terminal/${id}/resize`), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ rows, cols }),
+  });
+  if (!res.ok) {
+    log.warn('terminal resize failed', { id, status: res.status });
+  }
+}
+
+export async function deleteTerminal(id: string): Promise<void> {
+  await fetch(buildUrl(`/api/terminal/${id}`), { method: 'DELETE' });
+}
+
+export function connectTerminalStream(
+  id: string,
+  onOutput: (data: Uint8Array) => void,
+  onExit: (code: number | null) => void,
+  onError?: (err: Event) => void,
+): EventSource {
+  const url = buildUrl(`/api/terminal/${id}/stream`);
+  const es = new EventSource(url);
+
+  es.addEventListener('output', (e: MessageEvent) => {
+    const raw = atob(e.data);
+    const bytes = new Uint8Array(raw.length);
+    for (let i = 0; i < raw.length; i++) {
+      bytes[i] = raw.charCodeAt(i);
+    }
+    onOutput(bytes);
+  });
+
+  es.addEventListener('exit', (e: MessageEvent) => {
+    const data = JSON.parse(e.data);
+    onExit(data.code ?? null);
+    es.close();
+  });
+
+  es.onerror = (e) => {
+    onError?.(e);
+  };
+
+  return es;
+}

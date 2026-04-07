@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { FileText, List, Settings, Plus, FolderPlus, ChevronUp } from 'lucide-react';
+import { FileText, List, Settings, Plus, FolderPlus, ChevronUp, PanelLeft } from 'lucide-react';
 import log from '#renderer/logger';
 import { pct } from '#renderer/utils';
 import { useTaskStore } from '#renderer/domains/captain';
@@ -7,6 +7,9 @@ import { useSettingsStore } from '#renderer/domains/settings';
 import { SetupChecklist } from '#renderer/domains/onboarding';
 import { SidebarProjectItem } from '#renderer/global/components/SidebarProjectItem';
 import { useMountEffect } from '#renderer/global/hooks/useMountEffect';
+import { Button } from '#renderer/components/ui/button';
+import { ScrollArea } from '#renderer/components/ui/scroll-area';
+import { Separator } from '#renderer/components/ui/separator';
 
 export type Tab = 'captain' | 'scout' | 'sessions';
 
@@ -30,6 +33,10 @@ interface Props {
   onProjectFilter: (project: string | null) => void;
   setupProgress: SetupProgress | null;
   setupActive: boolean;
+  collapsed: boolean;
+  onToggleCollapse: () => void;
+  onNewTerminal?: (project: string) => void;
+  onOpenTask?: (taskId: number) => void;
 }
 
 const NAV_ITEMS: { id: Tab; label: string; Icon: React.FC }[] = [
@@ -58,7 +65,8 @@ function UpdateButton(): React.ReactElement | null {
   if (!updateReady) return null;
 
   return (
-    <button
+    <Button
+      size="xs"
       disabled={installing}
       onClick={() => {
         setInstalling(true);
@@ -70,21 +78,11 @@ function UpdateButton(): React.ReactElement | null {
           })
           .finally(() => setInstalling(false));
       }}
-      className="text-label absolute right-3 top-3 rounded-md px-2 py-1"
-      style={
-        {
-          background: 'var(--color-accent)',
-          color: 'var(--color-bg)',
-          border: 'none',
-          cursor: installing ? 'default' : 'pointer',
-          opacity: installing ? 0.6 : 1,
-          WebkitAppRegion: 'no-drag',
-          zIndex: 20,
-        } as React.CSSProperties
-      }
+      className="absolute right-3 top-3 z-20"
+      style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
     >
-      {installing ? 'Installing…' : 'Update'}
-    </button>
+      {installing ? 'Installing\u2026' : 'Update'}
+    </Button>
   );
 }
 
@@ -102,7 +100,11 @@ export function Sidebar({
   onProjectFilter,
   setupProgress,
   setupActive,
-}: Props): React.ReactElement {
+  collapsed,
+  onToggleCollapse,
+  onNewTerminal,
+  onOpenTask,
+}: Props): React.ReactElement | null {
   const items = useTaskStore((s) => s.items);
 
   const scoutEnabled = useSettingsStore((s) => !!s.config.features?.scout);
@@ -110,8 +112,6 @@ export function Sidebar({
 
   const configProjects = useSettingsStore((s) => s.config.captain?.projects);
 
-  // Map config project paths → display names, so task.project (a path) resolves
-  // to the human-readable name from config.
   const pathToName = React.useMemo(() => {
     const map: Record<string, string> = {};
     if (configProjects) {
@@ -125,20 +125,21 @@ export function Sidebar({
     return map;
   }, [configProjects]);
 
-  const projectCounts = React.useMemo(() => {
+  const { projectCounts, projectTasks } = React.useMemo(() => {
     const counts: Record<string, number> = {};
+    const tasks: Record<string, typeof items> = {};
     for (const item of items) {
       if (item.project) {
-        const name = pathToName[item.project] ?? item.project;
-        counts[name] = (counts[name] || 0) + 1;
+        const pName = pathToName[item.project] ?? item.project;
+        counts[pName] = (counts[pName] || 0) + 1;
+        (tasks[pName] ??= []).push(item);
       }
     }
-    return counts;
+    return { projectCounts: counts, projectTasks: tasks };
   }, [items, pathToName]);
 
   const projects = React.useMemo(() => {
     const names = new Set(Object.keys(projectCounts));
-    // Include configured projects even if they have no tasks yet
     if (configProjects) {
       for (const proj of Object.values(configProjects)) {
         if (proj.name) names.add(proj.name);
@@ -159,108 +160,91 @@ export function Sidebar({
 
   const homeActive = activeTab === 'captain' && !projectFilter;
 
+  if (collapsed) {
+    return null;
+  }
+
   return (
-    <aside
-      className="relative flex w-[200px] shrink-0 flex-col"
-      style={{
-        background: 'var(--color-surface-1)',
-        borderRight: '1px solid var(--color-border-subtle)',
-        paddingTop: 48,
-        paddingBottom: 16,
-        paddingLeft: 12,
-        paddingRight: 12,
-      }}
-    >
+    <aside className="relative flex w-[200px] shrink-0 flex-col bg-card px-2 pb-4 pt-12">
       <UpdateButton />
 
-      {/* New task — primary action */}
-      <button
+      {/* Collapse toggle */}
+      <Button
+        variant="ghost"
+        size="icon-xs"
+        onClick={onToggleCollapse}
+        title="Toggle sidebar (Cmd+B)"
+        className="absolute left-[70px] top-3 z-20 text-text-3 hover:text-text-2"
+        style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+      >
+        <PanelLeft size={14} />
+      </Button>
+
+      {/* New task */}
+      <Button
         onClick={onNewTask}
-        className="sidebar-new-task flex w-full items-center gap-2 rounded-button border-none bg-accent px-3 py-2 text-[13px] font-semibold text-bg hover:bg-accent-hover active:bg-accent-pressed"
-        style={{ cursor: 'pointer' }}
+        className="sidebar-new-task w-full gap-2"
+        size="sm"
         data-testid="add-task-btn"
       >
         <Plus size={14} strokeWidth={2} />
         New task
-      </button>
+      </Button>
 
       {/* Nav items */}
-      <nav
-        className="flex flex-col"
-        aria-label="Main navigation"
-        style={{ paddingTop: 16, gap: 4 }}
-      >
+      <nav className="flex flex-col gap-1 pt-4" aria-label="Main navigation">
         {visibleNav.map(({ id, label, Icon }) => {
           const active = activeTab === id && !projectFilter;
           return (
-            <button
+            <Button
               key={id}
+              variant="ghost"
+              size="sm"
               data-testid={`${id}-tab`}
               onClick={() => {
                 onTabChange(id);
                 onProjectFilter(null);
               }}
-              className="flex items-center gap-2 text-[13px] transition-colors"
-              style={{
-                background: active ? 'var(--color-surface-2)' : 'transparent',
-                color: active ? 'var(--color-text-1)' : 'var(--color-text-2)',
-                fontWeight: active ? 500 : 400,
-                padding: '8px 8px',
-                borderRadius: 6,
-                border: 'none',
-                cursor: 'pointer',
-              }}
+              className={`w-full justify-start gap-2 text-[13px] ${
+                active
+                  ? 'bg-muted font-medium text-foreground'
+                  : 'font-normal text-muted-foreground'
+              }`}
             >
               <Icon />
               {label}
-            </button>
+            </Button>
           );
         })}
       </nav>
 
       {/* Projects section */}
-      <div className="flex-1 overflow-auto" style={{ paddingTop: 24 }}>
-        <div
-          className="text-label flex w-full items-center"
-          style={{ padding: '0 0 0 10px', marginBottom: 8 }}
-        >
-          <button
+      <ScrollArea className="flex-1 pt-6">
+        <div className="text-label mb-2 flex w-full items-center pl-1.5">
+          <Button
+            variant="ghost"
+            size="xs"
             data-testid="home-tab"
             onClick={() => {
               onTabChange('captain');
               onProjectFilter(null);
             }}
-            className="flex-1 text-left transition-colors"
-            style={{
-              color: homeActive ? 'var(--color-text-2)' : 'var(--color-text-3)',
-              background: 'transparent',
-              border: 'none',
-              cursor: 'pointer',
-              padding: 0,
-            }}
+            className={`h-auto flex-1 justify-start p-0 text-left transition-colors ${homeActive ? 'text-muted-foreground' : 'text-text-3'}`}
           >
             Projects
-          </button>
-          <button
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon-xs"
             data-testid="add-project-sidebar-btn"
             onClick={onAddProject}
-            title="Add a new project"
-            className="ml-auto flex items-center justify-center text-text-3 transition-colors hover:text-text-2"
-            style={{
-              width: 20,
-              height: 20,
-              background: 'transparent',
-              border: 'none',
-              cursor: 'pointer',
-              borderRadius: 4,
-              padding: 0,
-            }}
+            className="ml-auto text-text-3 hover:text-muted-foreground"
           >
             <FolderPlus size={14} />
-          </button>
+          </Button>
         </div>
         {projects.length > 0 && (
-          <div className="flex flex-col" style={{ gap: 4 }}>
+          <div className="flex flex-col gap-1">
             {projects.map((pName) => {
               const isActive = projectFilter === pName;
               return (
@@ -276,31 +260,28 @@ export function Sidebar({
                   }}
                   onRename={onRenameProject}
                   onRemove={onRemoveProject}
+                  onNewTerminal={onNewTerminal}
+                  tasks={projectTasks[pName] ?? []}
+                  onOpenTask={onOpenTask}
                 />
               );
             })}
           </div>
         )}
-      </div>
+      </ScrollArea>
 
       {/* Settings */}
-      <div style={{ borderTop: '1px solid var(--color-border-subtle)', paddingTop: 12 }}>
-        <button
-          data-testid="settings-gear"
-          onClick={onOpenSettings}
-          className="flex w-full items-center gap-2 text-[13px] transition-colors"
-          style={{
-            color: 'var(--color-text-3)',
-            padding: '4px 10px',
-            background: 'transparent',
-            border: 'none',
-            cursor: 'pointer',
-          }}
-        >
-          <Settings size={16} />
-          Settings
-        </button>
-      </div>
+      <Separator className="my-3" />
+      <Button
+        variant="ghost"
+        size="sm"
+        data-testid="settings-gear"
+        onClick={onOpenSettings}
+        className="w-full justify-start gap-2 text-[13px] font-normal text-text-3"
+      >
+        <Settings size={16} />
+        Settings
+      </Button>
 
       {/* Setup trigger + popover */}
       {setupProgress && (
@@ -333,61 +314,35 @@ function SetupTrigger({
   const progressPct = pct(progress.completed, progress.total);
 
   return (
-    <div style={{ position: 'relative', marginTop: 8 }}>
+    <div className="relative mt-2">
       {/* Popover card */}
       {active && (
         <div
           data-testid="setup-popover"
-          style={{
-            position: 'absolute',
-            bottom: 'calc(100% + 6px)',
-            left: 0,
-            width: 300,
-            maxHeight: 420,
-            overflowY: 'auto',
-            borderRadius: 8,
-            background: 'var(--color-surface-2)',
-            border: '1px solid var(--color-border-subtle)',
-            boxShadow: '0 -4px 20px rgba(0,0,0,0.5)',
-            zIndex: 200,
-          }}
+          className="absolute bottom-[calc(100%+6px)] left-0 z-[200] w-[300px] max-h-[420px] overflow-y-auto rounded-lg bg-muted shadow-[0_-4px_20px_rgba(0,0,0,0.5)]"
         >
           <SetupChecklist onDismiss={onDismiss} onMinimize={onToggle} />
         </div>
       )}
 
       {/* Trigger bar */}
-      <button
+      <Button
+        variant="ghost"
         data-testid="setup-trigger"
         onClick={onToggle}
         aria-label={`${active ? 'Hide' : 'Show'} setup checklist, ${progressPct}% complete`}
         aria-expanded={active}
-        className="flex w-full items-center transition-colors"
-        style={{
-          padding: '8px 10px',
-          borderRadius: 6,
-          background: active ? 'var(--color-surface-2)' : 'transparent',
-          border: 'none',
-          cursor: 'pointer',
-          gap: 8,
-        }}
+        className={`flex h-auto w-full items-center gap-2 rounded-md px-2.5 py-2 transition-colors ${active ? 'bg-muted' : 'bg-transparent'}`}
       >
         {/* Mini progress ring */}
-        <svg width="16" height="16" viewBox="0 0 20 20" style={{ flexShrink: 0 }}>
+        <svg width="16" height="16" viewBox="0 0 20 20" className="shrink-0">
+          <circle cx="10" cy="10" r="8" fill="none" stroke="var(--secondary)" strokeWidth="2" />
           <circle
             cx="10"
             cy="10"
             r="8"
             fill="none"
-            stroke="var(--color-surface-3)"
-            strokeWidth="2"
-          />
-          <circle
-            cx="10"
-            cy="10"
-            r="8"
-            fill="none"
-            stroke="var(--color-accent)"
+            stroke="var(--primary)"
             strokeWidth="2"
             strokeDasharray={`${(progressPct / 100) * 50.3} 50.3`}
             strokeLinecap="round"
@@ -395,27 +350,20 @@ function SetupTrigger({
           />
         </svg>
         <div className="flex flex-1 flex-col items-start">
-          <span className="text-[12px] font-medium text-text-1">
-            Get started{' '}
-            <span className="text-text-3" style={{ fontWeight: 400 }}>
-              {progressPct}%
-            </span>
+          <span className="text-[12px] font-medium text-foreground">
+            Get started <span className="font-normal text-text-3">{progressPct}%</span>
           </span>
-          <span className="text-caption truncate text-text-3" style={{ maxWidth: 120 }}>
+          <span className="text-caption max-w-[120px] truncate text-text-3">
             {progress.currentStep}
           </span>
         </div>
         <ChevronUp
           size={12}
-          color="var(--color-text-3)"
+          color="var(--text-3)"
           strokeWidth={2.5}
-          style={{
-            transform: active ? 'rotate(180deg)' : 'none',
-            transition: 'transform 0.15s',
-            flexShrink: 0,
-          }}
+          className={`shrink-0 transition-transform duration-150 ${active ? 'rotate-180' : ''}`}
         />
-      </button>
+      </Button>
     </div>
   );
 }

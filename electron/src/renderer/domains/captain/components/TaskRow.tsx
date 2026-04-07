@@ -1,0 +1,210 @@
+import React, { useCallback, useState } from 'react';
+import type { Row } from '@tanstack/react-table';
+import { useTaskStore } from '#renderer/domains/captain/stores/taskStore';
+import { toast } from 'sonner';
+import type { TaskItem } from '#renderer/types';
+import {
+  prLabel,
+  prHref,
+  prState,
+  canMerge,
+  canReopen,
+  canAskTerminal,
+  getErrorMessage,
+} from '#renderer/utils';
+import { MergeBtn, PrIcon, MoreIcon } from '#renderer/domains/captain/components/TaskIcons';
+import {
+  StatusIcon,
+  ACTION_LABELS,
+  ActionBtn,
+  TaskOverflowMenu,
+} from '#renderer/domains/captain/components/TaskActions';
+import { archiveItem, unarchiveItem } from '#renderer/domains/captain/hooks/useApi';
+import { Checkbox } from '#renderer/components/ui/checkbox';
+import { Button } from '#renderer/components/ui/button';
+
+export interface TaskRowCallbacks {
+  onToggleSelect: (id: number) => void;
+  onMerge: (item: TaskItem) => void;
+  onReopen: (item: TaskItem) => void;
+  onRework: (item: TaskItem) => void;
+  onAsk: (item: TaskItem) => void;
+  onAccept: (id: number) => void;
+  acceptPendingId?: number | null;
+  onHandoff: (id: number) => void;
+  onCancel: (id: number) => void;
+  onRetry: (id: number) => void;
+  onAnswer: (item: TaskItem) => void;
+  onOpenDetail?: (item: TaskItem) => void;
+}
+
+interface TaskRowProps {
+  row: Row<TaskItem>;
+  focused: boolean;
+  scrollRef?: (node: HTMLElement | null) => void;
+  callbacks: TaskRowCallbacks;
+}
+
+export const TaskRow = React.memo(function TaskRow({
+  row,
+  focused,
+  scrollRef,
+  callbacks,
+}: TaskRowProps): React.ReactElement {
+  const item = row.original;
+  const selected = row.getIsSelected();
+  const refetchTasks = useTaskStore((s) => s.fetch);
+  const isFinalized =
+    item.status === 'merged' || item.status === 'completed-no-pr' || item.status === 'canceled';
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [archivePending, setArchivePending] = useState(false);
+
+  const handleArchive = useCallback(async () => {
+    setArchivePending(true);
+    try {
+      await archiveItem(item.id);
+      refetchTasks();
+    } catch (err) {
+      toast.error(getErrorMessage(err, 'Archive failed'));
+      refetchTasks();
+    } finally {
+      setArchivePending(false);
+    }
+  }, [item.id, refetchTasks]);
+
+  const handleUnarchive = useCallback(async () => {
+    setArchivePending(true);
+    try {
+      await unarchiveItem(item.id);
+      refetchTasks();
+    } catch (err) {
+      toast.error(getErrorMessage(err, 'Unarchive failed'));
+      refetchTasks();
+    } finally {
+      setArchivePending(false);
+    }
+  }, [item.id, refetchTasks]);
+
+  return (
+    <div
+      ref={scrollRef}
+      data-testid="task-row"
+      data-focused={focused || undefined}
+      className={`group relative flex cursor-pointer items-center gap-2.5 rounded px-3 py-2 ${selected ? 'bg-accent' : 'bg-card'} ${isFinalized ? 'opacity-55' : ''} ${focused ? 'outline-2 outline-primary -outline-offset-2' : ''} ${menuOpen ? 'z-20' : ''}`}
+      onClick={(e) => {
+        if ((e.target as HTMLElement).closest('[data-actions]')) return;
+        callbacks.onOpenDetail?.(item);
+      }}
+    >
+      {/* Col: checkbox, overlays the status icon on hover/select */}
+      <span className="status-icon-wrapper relative h-4 w-4 shrink-0">
+        <span
+          className={`absolute inset-0 flex items-center justify-center transition-opacity ${selected ? 'opacity-0' : 'group-hover:opacity-0'}`}
+        >
+          <StatusIcon status={item.status} />
+        </span>
+        <span
+          className={`absolute inset-0 z-[1] flex items-center justify-center transition-opacity group-hover:opacity-100 ${selected ? 'opacity-100' : 'opacity-0'}`}
+        >
+          <Checkbox
+            checked={selected}
+            aria-label={`Select "${item.title}"`}
+            onCheckedChange={() => callbacks.onToggleSelect(item.id)}
+            onClick={(e) => e.stopPropagation()}
+          />
+        </span>
+      </span>
+
+      {/* Col: title + badges, title truncates, badges never compress */}
+      <span className="flex min-w-0 flex-1 items-center gap-1.5 text-[14px] leading-[18px]">
+        <span className={`min-w-0 truncate ${isFinalized ? 'text-text-3' : 'text-foreground'}`}>
+          {ACTION_LABELS[item.status] && (
+            <span
+              className="mr-1.5 text-[12px] font-medium"
+              style={{ color: ACTION_LABELS[item.status].color }}
+            >
+              {ACTION_LABELS[item.status].label}
+              {' \u00b7 '}
+            </span>
+          )}
+          {item.session_ids?.ask && (
+            <span className="mr-1.5 text-[11px] font-medium text-primary opacity-85">
+              Q&A
+              {' \u00b7 '}
+            </span>
+          )}
+          {item.title}
+        </span>
+        {item.pr && (item.github_repo || item.project) && (
+          <a
+            href={prHref(item.pr, (item.github_repo ?? item.project)!)}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex shrink-0 items-center gap-0.5 rounded bg-secondary px-1 font-mono text-[11px] text-text-3 no-underline hover:underline"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <PrIcon state={prState(item.status)} />
+            {prLabel(item.pr)}
+          </a>
+        )}
+      </span>
+
+      {/* Actions, inline flex item, hidden until hover via CSS */}
+      <div
+        data-actions
+        data-menu-open={menuOpen || undefined}
+        className="action-zone flex shrink-0 items-center gap-1.5"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {canMerge(item) && <MergeBtn onClick={() => callbacks.onMerge(item)} />}
+        {item.status === 'awaiting-review' && !item.pr && (
+          <ActionBtn
+            label="Accept"
+            onClick={() => callbacks.onAccept(item.id)}
+            testId="accept-btn"
+            pending={callbacks.acceptPendingId === item.id}
+          />
+        )}
+        {item.status === 'needs-clarification' && (
+          <ActionBtn label="Answer" onClick={() => callbacks.onAnswer(item)} testId="answer-btn" />
+        )}
+        {canReopen(item) && (
+          <ActionBtn label="Reopen" onClick={() => callbacks.onReopen(item)} testId="reopen-btn" />
+        )}
+        {isFinalized &&
+          (item.archived_at ? (
+            <ActionBtn
+              label="Unarchive"
+              onClick={handleUnarchive}
+              testId="unarchive-btn"
+              pending={archivePending}
+            />
+          ) : (
+            <ActionBtn
+              label="Archive"
+              onClick={handleArchive}
+              testId="archive-btn"
+              pending={archivePending}
+            />
+          ))}
+        {canAskTerminal(item) && <ActionBtn label="Ask" onClick={() => callbacks.onAsk(item)} />}
+        {!isFinalized && (
+          <TaskOverflowMenu
+            item={item}
+            open={menuOpen}
+            onOpenChange={setMenuOpen}
+            onRework={() => callbacks.onRework(item)}
+            onHandoff={() => callbacks.onHandoff(item.id)}
+            onCancel={() => callbacks.onCancel(item.id)}
+            onRetry={() => callbacks.onRetry(item.id)}
+            onAnswer={() => callbacks.onAnswer(item)}
+          >
+            <Button variant="outline" size="icon-xs" aria-label="More actions">
+              <MoreIcon />
+            </Button>
+          </TaskOverflowMenu>
+        )}
+      </div>
+    </div>
+  );
+});

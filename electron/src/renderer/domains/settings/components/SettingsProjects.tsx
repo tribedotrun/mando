@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
-import { cardStyle } from '#renderer/styles';
+import { Card, CardContent } from '#renderer/components/ui/card';
+import { Button } from '#renderer/components/ui/button';
+import { Badge } from '#renderer/components/ui/badge';
 import { ProjectEditor } from '#renderer/domains/settings/components/ProjectEditor';
 import { useSettingsStore } from '#renderer/domains/settings/stores/settingsStore';
 import type { ProjectConfig } from '#renderer/domains/settings/stores/settingsStore';
@@ -19,11 +21,11 @@ export function SettingsProjects(): React.ReactElement {
 
   return (
     <div data-testid="settings-projects" className="space-y-8">
-      <h2 className="text-lg font-semibold text-text-1">Projects</h2>
+      <h2 className="text-lg font-semibold text-foreground">Projects</h2>
 
       <div className="space-y-4">
         {pathKeys.length === 0 && (
-          <p className="text-sm text-text-3">No projects configured yet.</p>
+          <p className="text-sm text-muted-foreground">No projects configured yet.</p>
         )}
 
         {pathKeys.map((pathKey) => {
@@ -46,74 +48,73 @@ export function SettingsProjects(): React.ReactElement {
           }
           const displayName = project.name || pathKey;
           return (
-            <div key={pathKey} data-testid={`project-card-${displayName}`} style={cardStyle}>
-              <div className="flex items-start justify-between">
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    {project.logo && (
-                      <img
-                        src={buildUrl(`/api/images/${project.logo}`)}
-                        alt=""
-                        width={20}
-                        height={20}
-                        className="shrink-0 rounded object-contain"
-                        onError={(e) => {
-                          (e.target as HTMLImageElement).style.display = 'none';
-                        }}
-                      />
+            <Card key={pathKey} data-testid={`project-card-${displayName}`} className="py-4">
+              <CardContent>
+                <div className="flex items-start justify-between">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      {project.logo && (
+                        <img
+                          src={buildUrl(`/api/images/${project.logo}`)}
+                          alt=""
+                          width={20}
+                          height={20}
+                          className="shrink-0 rounded object-contain"
+                          onError={(e) => {
+                            (e.target as HTMLImageElement).style.display = 'none';
+                          }}
+                        />
+                      )}
+                      <h3 className="text-sm font-semibold text-foreground">{displayName}</h3>
+                    </div>
+                    <p className="mt-1 truncate font-mono text-xs text-muted-foreground">
+                      {project.path}
+                    </p>
+                    {project.scoutSummary && (
+                      <p className="mt-1 text-xs text-muted-foreground">{project.scoutSummary}</p>
                     )}
-                    <h3 className="text-sm font-semibold text-text-1">{displayName}</h3>
+                    {project.githubRepo && (
+                      <p className="mt-1 text-xs text-muted-foreground">{project.githubRepo}</p>
+                    )}
+                    {project.aliases && project.aliases.length > 0 && (
+                      <div className="mt-2 flex flex-wrap gap-1">
+                        {project.aliases.map((a) => (
+                          <Badge key={a} variant="secondary" className="text-xs">
+                            {a}
+                          </Badge>
+                        ))}
+                      </div>
+                    )}
+                    {project.hooks && Object.keys(project.hooks).length > 0 && (
+                      <div className="mt-2 text-xs text-muted-foreground">
+                        Hooks: {Object.keys(project.hooks).join(', ')}
+                      </div>
+                    )}
                   </div>
-                  <p className="mt-1 truncate font-mono text-xs text-text-3">{project.path}</p>
-                  {project.scoutSummary && (
-                    <p className="mt-1 text-xs text-text-2">{project.scoutSummary}</p>
-                  )}
-                  {project.githubRepo && (
-                    <p className="mt-1 text-xs text-text-3">{project.githubRepo}</p>
-                  )}
-                  {project.aliases && project.aliases.length > 0 && (
-                    <div className="mt-2 flex flex-wrap gap-1">
-                      {project.aliases.map((a) => (
-                        <span
-                          key={a}
-                          className="rounded bg-surface-2 px-2 py-0.5 text-xs text-text-2"
-                        >
-                          {a}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                  {project.hooks && Object.keys(project.hooks).length > 0 && (
-                    <div className="mt-2 text-xs text-text-3">
-                      Hooks: {Object.keys(project.hooks).join(', ')}
-                    </div>
-                  )}
+                  <div className="ml-4 flex items-center gap-2">
+                    <Button
+                      data-testid={`project-edit-${displayName}`}
+                      variant="ghost"
+                      size="xs"
+                      onClick={() => setEditing(pathKey)}
+                    >
+                      Edit
+                    </Button>
+                    <Button
+                      data-testid={`project-remove-${displayName}`}
+                      variant="destructive"
+                      size="xs"
+                      onClick={() => {
+                        removeProject(pathKey);
+                        save();
+                      }}
+                    >
+                      Remove
+                    </Button>
+                  </div>
                 </div>
-                <div className="ml-4 flex items-center gap-2">
-                  <button
-                    data-testid={`project-edit-${displayName}`}
-                    onClick={() => setEditing(pathKey)}
-                    className="rounded-md px-3 py-1 text-xs text-text-2"
-                  >
-                    Edit
-                  </button>
-                  <button
-                    data-testid={`project-remove-${displayName}`}
-                    onClick={() => {
-                      removeProject(pathKey);
-                      save();
-                    }}
-                    className="rounded-md px-3 py-1 text-xs"
-                    style={{
-                      color: 'var(--color-error)',
-                      border: '1px solid var(--color-border-destructive)',
-                    }}
-                  >
-                    Remove
-                  </button>
-                </div>
-              </div>
-            </div>
+              </CardContent>
+            </Card>
           );
         })}
       </div>

@@ -22,6 +22,16 @@ import {
   SessionsEmptyState,
   SessionDot,
 } from '#renderer/domains/sessions/components/SessionsHelpers';
+import { Button } from '#renderer/components/ui/button';
+import { Skeleton } from '#renderer/components/ui/skeleton';
+import {
+  Table,
+  TableHeader,
+  TableBody,
+  TableRow,
+  TableHead,
+  TableCell,
+} from '#renderer/components/ui/table';
 
 const PER_PAGE = 50;
 const CATEGORY_ORDER = [
@@ -54,7 +64,7 @@ export function SessionsCard({ active = true }: { active?: boolean } = {}): Reac
     queryFn: () => fetchSessions(page, PER_PAGE, filterCategory || undefined),
     placeholderData: keepPreviousData,
   });
-  // Track whether we've ever loaded data — suppress loading text on category switches
+  // Track whether we've ever loaded data -- suppress loading text on category switches
   const hasLoadedRef = useRef(false);
   if (sessionsData) hasLoadedRef.current = true;
 
@@ -69,7 +79,7 @@ export function SessionsCard({ active = true }: { active?: boolean } = {}): Reac
   const [showFilterMenu, setShowFilterMenu] = useState(false);
   const isFiltered = filterStatus !== 'all';
 
-  // Clamp focusedIndex inline — derived from sessions.length
+  // Clamp focusedIndex inline -- derived from sessions.length
   const clampedFocusedIndex =
     sessions.length === 0
       ? -1
@@ -175,51 +185,36 @@ export function SessionsCard({ active = true }: { active?: boolean } = {}): Reac
   }
 
   return (
-    <div data-testid="sessions-card" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+    <div data-testid="sessions-card" className="flex flex-col gap-4">
       {/* Header */}
       <div className="flex items-baseline justify-between">
-        <h2 className="text-heading text-text-1">Sessions</h2>
+        <h2 className="text-heading text-foreground">Sessions</h2>
       </div>
 
-      {/* Filters — category pills + status filter (hidden when no sessions) */}
+      {/* Filters -- category pills + status filter (hidden when no sessions) */}
       {allTotal > 0 && (
         <div className="flex items-center justify-between">
           {sortedCats.length > 0 && (
-            <div className="flex items-center flex-wrap" style={{ gap: 4 }}>
-              <button
+            <div className="flex flex-wrap items-center gap-1">
+              <Button
+                variant={!filterCategory ? 'default' : 'secondary'}
+                size="xs"
                 onClick={() => handleCatClick('')}
                 aria-label="Show all session categories"
-                className="text-[12px] font-medium transition-colors"
-                style={{
-                  background: !filterCategory ? 'var(--color-accent)' : 'var(--color-surface-2)',
-                  color: !filterCategory ? 'var(--color-bg)' : 'var(--color-text-3)',
-                  padding: '4px 10px',
-                  borderRadius: 6,
-                  border: 'none',
-                  cursor: 'pointer',
-                }}
               >
                 all <span className="ml-0.5 opacity-60">{allTotal}</span>
-              </button>
+              </Button>
               {sortedCats.map((cat) => (
-                <button
+                <Button
                   key={cat}
+                  variant={filterCategory === cat ? 'default' : 'secondary'}
+                  size="xs"
                   onClick={() => handleCatClick(cat)}
                   aria-label={`Filter by ${cat}`}
-                  className="text-[12px] font-medium transition-colors"
-                  style={{
-                    background:
-                      filterCategory === cat ? 'var(--color-accent)' : 'var(--color-surface-2)',
-                    color: filterCategory === cat ? 'var(--color-bg)' : 'var(--color-text-3)',
-                    padding: '4px 10px',
-                    borderRadius: 6,
-                    border: 'none',
-                    cursor: 'pointer',
-                  }}
                 >
                   {cat}
                   <span className="ml-0.5 opacity-60">{categories[cat]}</span>
-                </button>
+                </Button>
               ))}
             </div>
           )}
@@ -233,32 +228,27 @@ export function SessionsCard({ active = true }: { active?: boolean } = {}): Reac
             open={showFilterMenu}
             onOpenChange={setShowFilterMenu}
           >
-            <button
-              className="flex items-center transition-colors"
-              style={{
-                padding: '4px 6px',
-                borderRadius: 6,
-                border: 'none',
-                cursor: 'pointer',
-                background: isFiltered ? 'var(--color-surface-3)' : 'transparent',
-                color: isFiltered ? 'var(--color-text-1)' : 'var(--color-text-4)',
-                gap: 4,
-              }}
-              title="Filter by status"
+            <Button
+              variant={isFiltered ? 'secondary' : 'ghost'}
+              size="icon-xs"
               aria-label="Filter by status"
             >
               <Filter size={14} />
-              {isFiltered && <span style={{ fontSize: 11 }}>{filterStatus}</span>}
-            </button>
+              {isFiltered && <span className="text-[11px]">{filterStatus}</span>}
+            </Button>
           </StatusFilterMenu>
         </div>
       )}
 
-      {/* Content — only show loading text on first-ever fetch, not category switches */}
+      {/* Content -- only show loading skeletons on first-ever fetch, not category switches */}
       {loading && !hasLoadedRef.current ? (
-        <div className="py-8 text-center text-body text-text-3">Loading sessions...</div>
+        <div className="space-y-2 py-4">
+          {Array.from({ length: 5 }).map((_, i) => (
+            <Skeleton key={i} className="h-10 w-full" />
+          ))}
+        </div>
       ) : error ? (
-        <div className="py-8 text-center text-body text-error">{error}</div>
+        <div className="py-8 text-center text-body text-destructive">{error}</div>
       ) : sessions.length === 0 ? (
         <SessionsEmptyState />
       ) : (
@@ -273,27 +263,27 @@ export function SessionsCard({ active = true }: { active?: boolean } = {}): Reac
       {/* Pagination */}
       {totalPages > 1 && (
         <div className="flex items-center justify-center gap-2 pt-2">
-          <button
+          <Button
+            variant="outline"
+            size="sm"
             onClick={() => setPage((p) => clamp(p - 1, 1, totalPages))}
             disabled={page <= 1}
             aria-label="Previous page"
-            className="rounded-md px-2.5 py-1 text-[13px] disabled:opacity-30"
-            style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-2)' }}
           >
             Prev
-          </button>
-          <span className="text-code tabular-nums text-text-3">
+          </Button>
+          <span className="text-code tabular-nums text-muted-foreground">
             {page} / {totalPages}
           </span>
-          <button
+          <Button
+            variant="outline"
+            size="sm"
             onClick={() => setPage((p) => clamp(p + 1, 1, totalPages))}
             disabled={page >= totalPages}
             aria-label="Next page"
-            className="rounded-md px-2.5 py-1 text-[13px] disabled:opacity-30"
-            style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-2)' }}
           >
             Next
-          </button>
+          </Button>
         </div>
       )}
     </div>
@@ -314,70 +304,53 @@ function SessionsList({
   const scrollRef = useScrollIntoViewRef();
 
   return (
-    <div className="flex flex-col" style={{ gap: 1 }}>
-      {/* Header */}
-      <div
-        className="flex items-center"
-        style={{ padding: '6px 12px', borderBottom: '1px solid var(--color-border-subtle)' }}
-      >
-        <span className="text-label shrink-0 text-text-4" style={{ width: 20 }} />
-        <span className="text-label flex-1 text-text-4">Session</span>
-        <span className="text-label text-text-4" style={{ width: 72, textAlign: 'right' }}>
-          Time
-        </span>
-      </div>
+    <Table>
+      <TableHeader>
+        <TableRow className="hover:bg-transparent">
+          <TableHead className="w-5" />
+          <TableHead>Session</TableHead>
+          <TableHead className="w-[72px] text-right">Time</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {sessions.map((s, idx) => {
+          const seq = sessionSeq.get(s.session_id);
+          const title = seq ? `${sessionTitle(s)} #${seq}` : sessionTitle(s);
+          const subtitle = sessionSubtitle(s);
 
-      {sessions.map((s, idx) => {
-        const seq = sessionSeq.get(s.session_id);
-        const title = seq ? `${sessionTitle(s)} #${seq}` : sessionTitle(s);
-        const subtitle = sessionSubtitle(s);
-
-        return (
-          <div
-            ref={idx === focusedIndex ? scrollRef : undefined}
-            key={s.session_id}
-            data-focused={idx === focusedIndex || undefined}
-            role="button"
-            aria-label={`Open session ${title}`}
-            className="flex cursor-pointer items-center"
-            style={{
-              paddingBlock: 8,
-              paddingInline: 12,
-              gap: 12,
-              background: 'var(--color-surface-1)',
-              borderRadius: 'var(--radius-row)',
-              outline: idx === focusedIndex ? '2px solid var(--color-accent)' : 'none',
-              outlineOffset: -2,
-            }}
-            onClick={() => openSession(s)}
-          >
-            {/* Status dot */}
-            <span className="shrink-0" style={{ width: 8 }}>
-              <SessionDot status={s.status} />
-            </span>
-
-            {/* Title + subtitle */}
-            <span className="min-w-0 flex-1 flex items-baseline gap-2" title={s.session_id}>
-              <span className="shrink-0" style={{ fontSize: 13, color: 'var(--color-text-1)' }}>
-                {title}
-              </span>
-              {subtitle && (
-                <span className="truncate" style={{ fontSize: 11, color: 'var(--color-text-4)' }}>
-                  {subtitle}
-                </span>
-              )}
-            </span>
-
-            {/* Time */}
-            <span
-              className="shrink-0 text-right tabular-nums"
-              style={{ fontSize: 11, color: 'var(--color-text-3)', width: 72 }}
+          return (
+            <TableRow
+              ref={idx === focusedIndex ? scrollRef : undefined}
+              key={s.session_id}
+              data-focused={idx === focusedIndex || undefined}
+              className={`cursor-pointer ${idx === focusedIndex ? 'outline outline-2 outline-primary -outline-offset-2' : ''}`}
+              onClick={() => openSession(s)}
             >
-              {s.created_at ? relativeTime(s.created_at) : '\u2014'}
-            </span>
-          </div>
-        );
-      })}
-    </div>
+              {/* Status dot */}
+              <TableCell className="w-5 pr-0">
+                <SessionDot status={s.status} />
+              </TableCell>
+
+              {/* Title + subtitle */}
+              <TableCell>
+                <span className="flex min-w-0 items-baseline gap-2">
+                  <span className="shrink-0 text-[13px] text-foreground">{title}</span>
+                  {subtitle && (
+                    <span className="truncate text-[11px] text-muted-foreground">{subtitle}</span>
+                  )}
+                </span>
+              </TableCell>
+
+              {/* Time */}
+              <TableCell className="text-right">
+                <span className="tabular-nums text-[11px] text-muted-foreground">
+                  {s.created_at ? relativeTime(s.created_at) : '\u2014'}
+                </span>
+              </TableCell>
+            </TableRow>
+          );
+        })}
+      </TableBody>
+    </Table>
   );
 }
