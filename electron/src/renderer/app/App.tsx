@@ -28,6 +28,12 @@ import { useTaskStore } from '#renderer/domains/captain/stores/taskStore';
 import { apiPost, apiPatch, apiDel } from '#renderer/api';
 import { toast } from 'sonner';
 import { getErrorMessage } from '#renderer/utils';
+import { usePanelRef, useDefaultLayout } from 'react-resizable-panels';
+import {
+  ResizablePanelGroup,
+  ResizablePanel,
+  ResizableHandle,
+} from '#renderer/components/ui/resizable';
 import log from '#renderer/logger';
 
 export function App(): React.ReactElement {
@@ -41,6 +47,11 @@ export function App(): React.ReactElement {
   const [detailItemId, setDetailItemId] = useState<number | null>(null);
   const [setupActive, setSetupActive] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const sidebarPanelRef = usePanelRef();
+  const { defaultLayout, onLayoutChanged } = useDefaultLayout({
+    id: 'sidebar-layout',
+    storage: localStorage,
+  });
   const [terminalPage, setTerminalPage] = useState<{
     project: string;
     cwd: string;
@@ -121,11 +132,19 @@ export function App(): React.ReactElement {
     setTerminalPage({ project, cwd: pc.path, label: `${project} / terminal` });
   }, []);
 
+  const toggleSidebar = useCallback(() => {
+    const panel = sidebarPanelRef.current;
+    if (panel) {
+      if (panel.isCollapsed()) panel.expand();
+      else panel.collapse();
+    }
+  }, []);
+
   useMountEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 'b') {
         e.preventDefault();
-        setSidebarCollapsed((v) => !v);
+        toggleSidebar();
       }
     };
     document.addEventListener('keydown', onKey);
@@ -315,132 +334,142 @@ export function App(): React.ReactElement {
           </div>
         )}
 
-        <div className="flex min-h-0 flex-1">
-          {sidebarCollapsed && (
-            <div
-              onClick={() => setSidebarCollapsed(false)}
-              title="Expand sidebar (Cmd+B)"
-              className="w-1 shrink-0 cursor-pointer bg-border-subtle transition-colors hover:bg-surface-2"
-            />
-          )}
-
-          {/* Sidebar */}
-          <Sidebar
-            activeTab={activeTab}
-            onTabChange={setActiveTab}
-            onNewTask={() => {
-              setActiveTab('captain');
-              setCreateTaskOpen(true);
-            }}
-            onOpenSettings={() => {
-              setSettingsSection('general');
-              setShowSettings(true);
-            }}
-            onAddProject={async () => {
-              const dir = await window.mandoAPI.selectDirectory();
-              if (!dir) return;
-              try {
-                await apiPost('/api/projects', { path: dir });
-                useSettingsStore.getState().load();
-              } catch (err) {
-                toast.error(getErrorMessage(err, 'Failed to add project'));
-              }
-            }}
-            onRenameProject={async (oldName, newName) => {
-              try {
-                await apiPatch(`/api/projects/${encodeURIComponent(oldName)}`, {
-                  rename: newName,
-                });
-                await useSettingsStore.getState().load();
-                setProjectFilter((prev) => (prev === oldName ? newName : prev));
-                toast.success(`Renamed to "${newName}"`);
-              } catch (err) {
-                toast.error(getErrorMessage(err, 'Failed to rename project'));
-              }
-            }}
-            onRemoveProject={async (name) => {
-              try {
-                const res = await apiDel<{ ok: boolean; deleted_tasks: number }>(
-                  `/api/projects/${encodeURIComponent(name)}`,
-                );
-                await useSettingsStore.getState().load();
-                if (res.deleted_tasks > 0) {
-                  await useTaskStore.getState().fetch();
+        <ResizablePanelGroup
+          orientation="horizontal"
+          defaultLayout={defaultLayout}
+          onLayoutChanged={onLayoutChanged}
+          className="min-h-0 flex-1"
+        >
+          <ResizablePanel
+            id="sidebar"
+            panelRef={sidebarPanelRef}
+            defaultSize="200px"
+            minSize="160px"
+            maxSize="400px"
+            collapsible
+            collapsedSize="32px"
+            onResize={(size) => setSidebarCollapsed(size.inPixels < 33)}
+          >
+            <Sidebar
+              activeTab={activeTab}
+              onTabChange={setActiveTab}
+              onNewTask={() => {
+                setActiveTab('captain');
+                setCreateTaskOpen(true);
+              }}
+              onOpenSettings={() => {
+                setSettingsSection('general');
+                setShowSettings(true);
+              }}
+              onAddProject={async () => {
+                const dir = await window.mandoAPI.selectDirectory();
+                if (!dir) return;
+                try {
+                  await apiPost('/api/projects', { path: dir });
+                  useSettingsStore.getState().load();
+                } catch (err) {
+                  toast.error(getErrorMessage(err, 'Failed to add project'));
                 }
-                setProjectFilter((prev) => (prev === name ? null : prev));
-                const taskMsg =
-                  res.deleted_tasks > 0
-                    ? ` and ${res.deleted_tasks} task${res.deleted_tasks !== 1 ? 's' : ''}`
-                    : '';
-                toast.success(`Deleted "${name}"${taskMsg}`);
-              } catch (err) {
-                toast.error(getErrorMessage(err, 'Failed to remove project'));
-              }
-            }}
-            onToggleSetup={() => setSetupActive((v) => !v)}
-            onDismissSetup={handleDismissSetup}
-            projectFilter={projectFilter}
-            onProjectFilter={setProjectFilter}
-            setupProgress={setupProgress}
-            setupActive={setupActive}
-            collapsed={sidebarCollapsed}
-            onToggleCollapse={() => setSidebarCollapsed((v) => !v)}
-            onNewTerminal={handleNewTerminal}
-            onOpenTask={(id) => setDetailItemId(id)}
-          />
-
-          {/* Main content, always visible, popover floats above from sidebar */}
-          <main className="relative flex-1 overflow-hidden bg-background">
-            {terminalPage && (
-              <div className="absolute inset-0 z-[2] overflow-hidden bg-background pt-[38px]">
-                <TerminalPage
-                  project={terminalPage.project}
-                  cwd={terminalPage.cwd}
-                  label={terminalPage.label}
-                  resumeSessionId={terminalPage.resumeSessionId}
-                  onResumeConsumed={() =>
-                    setTerminalPage((p) => (p ? { ...p, resumeSessionId: null } : null))
+              }}
+              onRenameProject={async (oldName, newName) => {
+                try {
+                  await apiPatch(`/api/projects/${encodeURIComponent(oldName)}`, {
+                    rename: newName,
+                  });
+                  await useSettingsStore.getState().load();
+                  setProjectFilter((prev) => (prev === oldName ? newName : prev));
+                  toast.success(`Renamed to "${newName}"`);
+                } catch (err) {
+                  toast.error(getErrorMessage(err, 'Failed to rename project'));
+                }
+              }}
+              onRemoveProject={async (name) => {
+                try {
+                  const res = await apiDel<{ ok: boolean; deleted_tasks: number }>(
+                    `/api/projects/${encodeURIComponent(name)}`,
+                  );
+                  await useSettingsStore.getState().load();
+                  if (res.deleted_tasks > 0) {
+                    await useTaskStore.getState().fetch();
                   }
-                  onBack={() => setTerminalPage(null)}
-                />
-              </div>
-            )}
+                  setProjectFilter((prev) => (prev === name ? null : prev));
+                  const taskMsg =
+                    res.deleted_tasks > 0
+                      ? ` and ${res.deleted_tasks} task${res.deleted_tasks !== 1 ? 's' : ''}`
+                      : '';
+                  toast.success(`Deleted "${name}"${taskMsg}`);
+                } catch (err) {
+                  toast.error(getErrorMessage(err, 'Failed to remove project'));
+                }
+              }}
+              onToggleSetup={() => setSetupActive((v) => !v)}
+              onDismissSetup={handleDismissSetup}
+              projectFilter={projectFilter}
+              onProjectFilter={setProjectFilter}
+              setupProgress={setupProgress}
+              setupActive={setupActive}
+              collapsed={sidebarCollapsed}
+              onToggleCollapse={toggleSidebar}
+              onNewTerminal={handleNewTerminal}
+              onOpenTask={(id) => setDetailItemId(id)}
+            />
+          </ResizablePanel>
 
-            {/* All tabs stay mounted and stacked. Active tab sits on top via
+          <ResizableHandle />
+
+          <ResizablePanel id="main" minSize="50%">
+            <main className="relative h-full overflow-hidden bg-background">
+              {terminalPage && (
+                <div className="absolute inset-0 z-[2] overflow-hidden bg-background pt-[38px]">
+                  <TerminalPage
+                    project={terminalPage.project}
+                    cwd={terminalPage.cwd}
+                    label={terminalPage.label}
+                    resumeSessionId={terminalPage.resumeSessionId}
+                    onResumeConsumed={() =>
+                      setTerminalPage((p) => (p ? { ...p, resumeSessionId: null } : null))
+                    }
+                    onBack={() => setTerminalPage(null)}
+                  />
+                </div>
+              )}
+
+              {/* All tabs stay mounted and stacked. Active tab sits on top via
                 z-index; inactive tabs are behind the opaque background, no
                 visibility/display changes, so CSS transitions can't flash. */}
-            {(['captain', 'scout', 'sessions'] as const).map((tab) => {
-              const isActive = activeTab === tab;
-              return (
-                <div
-                  key={tab}
-                  className={`absolute inset-0 overflow-auto bg-background px-8 pb-6 pt-[38px]${isActive ? ' z-[1]' : ' z-0 pointer-events-none'}`}
-                >
-                  {tab === 'captain' && (
-                    <ErrorBoundary fallbackLabel="Captain view">
-                      <CaptainView
-                        projectFilter={projectFilter}
-                        onCreateTask={openCreateTask}
-                        onOpenDetail={(item) => setDetailItemId(item.id)}
-                        active={isActive}
-                      />
-                    </ErrorBoundary>
-                  )}
-                  {tab === 'scout' && (
-                    <ErrorBoundary fallbackLabel="Scout view">
-                      <ScoutPage active={isActive} />
-                    </ErrorBoundary>
-                  )}
-                  {tab === 'sessions' && (
-                    <ErrorBoundary fallbackLabel="Sessions view">
-                      <SessionsCard active={isActive} />
-                    </ErrorBoundary>
-                  )}
-                </div>
-              );
-            })}
-          </main>
-        </div>
+              {(['captain', 'scout', 'sessions'] as const).map((tab) => {
+                const isActive = activeTab === tab;
+                return (
+                  <div
+                    key={tab}
+                    className={`absolute inset-0 overflow-auto bg-background px-8 pb-6 pt-[38px]${isActive ? ' z-[1]' : ' z-0 pointer-events-none'}`}
+                  >
+                    {tab === 'captain' && (
+                      <ErrorBoundary fallbackLabel="Captain view">
+                        <CaptainView
+                          projectFilter={projectFilter}
+                          onCreateTask={openCreateTask}
+                          onOpenDetail={(item) => setDetailItemId(item.id)}
+                          active={isActive}
+                        />
+                      </ErrorBoundary>
+                    )}
+                    {tab === 'scout' && (
+                      <ErrorBoundary fallbackLabel="Scout view">
+                        <ScoutPage active={isActive} />
+                      </ErrorBoundary>
+                    )}
+                    {tab === 'sessions' && (
+                      <ErrorBoundary fallbackLabel="Sessions view">
+                        <SessionsCard active={isActive} />
+                      </ErrorBoundary>
+                    )}
+                  </div>
+                );
+              })}
+            </main>
+          </ResizablePanel>
+        </ResizablePanelGroup>
       </div>
 
       <DevInfoBar />

@@ -12,7 +12,12 @@ import {
   canAskTerminal,
   getErrorMessage,
 } from '#renderer/utils';
-import { MergeBtn, PrIcon, MoreIcon } from '#renderer/domains/captain/components/TaskIcons';
+import {
+  ArchiveBtn,
+  MergeBtn,
+  PrIcon,
+  MoreIcon,
+} from '#renderer/domains/captain/components/TaskIcons';
 import {
   StatusIcon,
   ACTION_LABELS,
@@ -171,22 +176,13 @@ export const TaskRow = React.memo(function TaskRow({
         {canReopen(item) && (
           <ActionBtn label="Reopen" onClick={() => callbacks.onReopen(item)} testId="reopen-btn" />
         )}
-        {isFinalized &&
-          (item.archived_at ? (
-            <ActionBtn
-              label="Unarchive"
-              onClick={handleUnarchive}
-              testId="unarchive-btn"
-              pending={archivePending}
-            />
-          ) : (
-            <ActionBtn
-              label="Archive"
-              onClick={handleArchive}
-              testId="archive-btn"
-              pending={archivePending}
-            />
-          ))}
+        {isFinalized && (
+          <ArchiveBtn
+            onClick={item.archived_at ? handleUnarchive : handleArchive}
+            pending={archivePending}
+            unarchive={!!item.archived_at}
+          />
+        )}
         {canAskTerminal(item) && <ActionBtn label="Ask" onClick={() => callbacks.onAsk(item)} />}
         {!isFinalized && (
           <TaskOverflowMenu

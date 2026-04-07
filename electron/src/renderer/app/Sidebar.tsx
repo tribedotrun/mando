@@ -161,11 +161,24 @@ export function Sidebar({
   const homeActive = activeTab === 'captain' && !projectFilter;
 
   if (collapsed) {
-    return null;
+    return (
+      <div className="flex h-full w-full items-start justify-center bg-card pt-3">
+        <Button
+          variant="ghost"
+          size="icon-xs"
+          onClick={onToggleCollapse}
+          title="Expand sidebar (Cmd+B)"
+          className="text-text-3 hover:text-text-2"
+          style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+        >
+          <PanelLeft size={14} />
+        </Button>
+      </div>
+    );
   }
 
   return (
-    <aside className="relative flex w-[200px] shrink-0 flex-col bg-card px-2 pb-4 pt-12">
+    <aside className="relative flex h-full flex-col bg-card px-2 pb-4 pt-12">
       <UpdateButton />
 
       {/* Collapse toggle */}

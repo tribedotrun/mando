@@ -221,8 +221,8 @@ fn html_to_telegraph_nodes(html: &str) -> Vec<Value> {
             "p"
         };
 
-        // Strip all HTML tags to get plain text.
-        let text = super::strip_html_tags(segment);
+        // Strip all HTML tags to get plain text, then decode HTML entities.
+        let text = unescape(&super::strip_html_tags(segment));
         let trimmed = text.trim();
         if !trimmed.is_empty() {
             nodes.push(json!({"tag": tg_tag, "children": [trimmed]}));
@@ -230,7 +230,9 @@ fn html_to_telegraph_nodes(html: &str) -> Vec<Value> {
     }
 
     if nodes.is_empty() {
-        nodes.push(json!({"tag": "p", "children": [super::strip_html_tags(html).trim()]}));
+        nodes.push(
+            json!({"tag": "p", "children": [unescape(&super::strip_html_tags(html)).trim()]}),
+        );
     }
     nodes
 }
@@ -314,6 +316,15 @@ fn escape(text: &str) -> String {
         .replace('"', "&quot;")
 }
 
+/// Reverse `escape()` — decode HTML entities back to plain characters.
+/// `&amp;` must be decoded last to avoid double-decoding (e.g. `&amp;quot;` → `&quot;` → `"`).
+fn unescape(text: &str) -> String {
+    text.replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&amp;", "&")
+}
+
 fn inline_fmt(text: &str) -> String {
     let mut s = escape(text);
     // Bold
@@ -383,5 +394,23 @@ mod tests {
             cached_url_if_fresh(&cache, "Correct Title", "# Correct Title\n\nChanged"),
             None
         );
+    }
+
+    #[test]
+    fn html_entities_decoded_in_telegraph_nodes() {
+        let md = "He said \"hello\" & she said \"goodbye\"";
+        let html = markdown_to_telegraph_html(md);
+        let nodes = html_to_telegraph_nodes(&html);
+
+        assert_eq!(nodes.len(), 1);
+        let text = nodes[0]["children"][0].as_str().unwrap();
+        assert_eq!(text, "He said \"hello\" & she said \"goodbye\"");
+    }
+
+    #[test]
+    fn unescape_reverses_escape() {
+        let original = "quotes: \"x\" & <tags> ok";
+        let escaped = escape(original);
+        assert_eq!(unescape(&escaped), original);
     }
 }

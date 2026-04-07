@@ -1,12 +1,11 @@
 //! Rebase worker management and PR status checking — extracted from mergeability.
 
 use anyhow::Result;
-use mando_config::settings::Config;
-use mando_config::workflow::CaptainWorkflow;
 use mando_types::Task;
 
 use crate::biz::merge_logic;
-use crate::runtime::notify::Notifier;
+
+pub(super) use super::rebase_spawn::handle_conflict;
 
 pub(super) enum MergeStatus {
     Merged,
@@ -96,14 +95,15 @@ pub(super) async fn reap_dead_rebase_workers(items: &mut [Task], pool: &sqlx::Sq
             false
         };
 
+        // Log success/failure but do NOT mutate item fields yet —
+        // rebase_head_sha must be preserved for correct re-evaluation
+        // if finalization is retried on the next tick.
         if succeeded {
             tracing::info!(
                 module = "captain",
                 worker = %rw,
-                "rebase worker succeeded (SHA changed), resetting retries"
+                "rebase worker succeeded (SHA changed)"
             );
-            item.rebase_retries = 0;
-            item.rebase_head_sha = None;
         } else {
             tracing::info!(
                 module = "captain",
@@ -120,22 +120,44 @@ pub(super) async fn reap_dead_rebase_workers(items: &mut [Task], pool: &sqlx::Sq
         } else {
             mando_types::SessionStatus::Failed
         };
+        let mut session_finalized = true;
         let found_sid =
             match mando_db::queries::sessions::find_session_id_by_worker_name(pool, &rw).await {
                 Ok(Some(sid)) => {
-                    let cwd = wt.to_string();
-                    let task_id = item.id.to_string();
-                    if let Err(e) = crate::io::headless_cc::log_session_completion(
-                        pool, &sid, &cwd, "rebase", &rw, &task_id, status,
-                    )
-                    .await
-                    {
-                        tracing::warn!(
+                    // Check stream state to decide whether to finalize now or
+                    // retry next tick. Only retry when the result event hasn't
+                    // been written yet AND the stream file exists (CC is still
+                    // buffering). Finalize immediately when:
+                    //  - stream file missing (CC crashed before creating it)
+                    //  - result event present but duration_ms absent (write done)
+                    //  - result event present with duration_ms (happy path)
+                    let stream_path = mando_config::stream_path_for_session(&sid);
+                    let cost_info = mando_cc::get_stream_cost(&stream_path);
+                    let should_retry = cost_info.is_none() && stream_path.exists();
+
+                    if !should_retry {
+                        let cwd = wt.to_string();
+                        let task_id = item.id.to_string();
+                        if let Err(e) = crate::io::headless_cc::log_session_completion(
+                            pool, &sid, &cwd, "rebase", &rw, &task_id, status,
+                        )
+                        .await
+                        {
+                            tracing::warn!(
+                                module = "captain",
+                                session_id = %sid,
+                                error = %e,
+                                "failed to log rebase session completion"
+                            );
+                        }
+                    } else {
+                        tracing::info!(
                             module = "captain",
                             session_id = %sid,
-                            error = %e,
-                            "failed to log rebase session completion"
+                            worker = %rw,
+                            "rebase session stream has no result event yet — retrying next tick"
                         );
+                        session_finalized = false;
                     }
                     Some(sid)
                 }
@@ -158,317 +180,212 @@ pub(super) async fn reap_dead_rebase_workers(items: &mut [Task], pool: &sqlx::Sq
                 }
             };
 
-        // Unregister PID for both worker_name and session_id keys.
-        if let Err(e) = crate::io::pid_registry::unregister(&rw) {
-            tracing::warn!(module = "captain", worker = %rw, %e, "pid_registry unregister failed on rebase completion");
+        if session_finalized {
+            // Apply rebase outcome mutations only after finalization is
+            // confirmed. If retried, rebase_head_sha must be intact for
+            // correct re-evaluation of did_rebase_succeed().
+            if succeeded {
+                item.rebase_retries = 0;
+                item.rebase_head_sha = None;
+            }
+            // Rebase lifecycle done: unregister both PIDs and clear worker.
+            if let Err(e) = crate::io::pid_registry::unregister(&rw) {
+                tracing::warn!(module = "captain", worker = %rw, %e, "pid_registry unregister failed on rebase completion");
+            }
+            if let Some(ref sid) = found_sid {
+                let _ = crate::io::pid_registry::unregister(sid);
+            }
+            item.rebase_worker = None;
+        } else {
+            // Stream not yet flushed: keep rebase_worker set so the reaper
+            // retries next tick (prevents duplicate spawn via
+            // items_needing_rebase_check). Unregister session_id PID so the
+            // same-tick reconciler L1 doesn't terminate with wrong status.
+            if let Some(ref sid) = found_sid {
+                let _ = crate::io::pid_registry::unregister(sid);
+            }
         }
-        if let Some(ref sid) = found_sid {
-            let _ = crate::io::pid_registry::unregister(sid);
-        }
-        item.rebase_worker = None;
     }
 }
 
-/// Handle a conflicted PR — spawn a rebase worker or declare exhaustion.
-#[allow(clippy::too_many_arguments)]
-pub(super) async fn handle_conflict(
-    items: &mut [Task],
-    idx: usize,
-    pr: &str,
-    config: &Config,
-    workflow: &CaptainWorkflow,
-    notifier: &Notifier,
-    alerts: &mut Vec<String>,
-    pool: &sqlx::SqlitePool,
-) {
-    let item = &items[idx];
-    let rebase_retries = item.rebase_retries as u32;
-    let max_rebase_retries = workflow.agent.max_rebase_retries;
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-    if rebase_retries >= max_rebase_retries {
-        let item = &mut items[idx];
-        let snap = super::action_contract::ReviewFieldsSnapshot::capture(item);
-        let saved_rebase_worker = item.rebase_worker.clone();
-        item.rebase_worker = Some("failed".into());
-        let title = mando_shared::telegram_format::escape_html(&item.title);
+    /// Set MANDO_DATA_DIR to a temp directory for isolation, returning the path.
+    fn isolate_data_dir() -> std::path::PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("mando-rebase-test-{}", mando_uuid::Uuid::v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::env::set_var("MANDO_DATA_DIR", &dir);
+        dir
+    }
 
-        // Route through CaptainReviewing (rebase_fail trigger) instead of
-        // escalating directly — invariant 1: Escalated only via CaptainReviewing verdict.
-        super::action_contract::reset_review_retry(
-            item,
-            mando_types::task::ReviewTrigger::RebaseFail,
-        );
+    async fn test_pool() -> sqlx::SqlitePool {
+        let db = mando_db::Db::open_in_memory().await.unwrap();
+        db.pool().clone()
+    }
 
-        let event = mando_types::timeline::TimelineEvent {
-            event_type: mando_types::timeline::TimelineEventType::CaptainReviewStarted,
-            timestamp: mando_types::now_rfc3339(),
-            actor: "captain".to_string(),
-            summary: format!(
-                "Rebase failed after {} retries (PR {}) — captain reviewing",
-                max_rebase_retries, pr
-            ),
-            data: serde_json::json!({
-                "pr": pr,
-                "retries": max_rebase_retries,
-                "reason": "rebase_exhausted",
-            }),
-        };
-        match mando_db::queries::tasks::persist_status_transition(
-            pool,
-            item,
-            snap.status.as_str(),
-            &event,
+    #[tokio::test]
+    async fn reap_defers_when_stream_cost_missing() {
+        let data_dir = isolate_data_dir();
+        let pool = test_pool().await;
+
+        // Create a session_id and worker_name.
+        let session_id = mando_uuid::Uuid::v4().to_string();
+        let worker_name = "mando-rebase-42";
+
+        // Insert a "running" session in the DB.
+        crate::io::headless_cc::log_running_session(
+            &pool,
+            &session_id,
+            std::path::Path::new("/tmp"),
+            "rebase",
+            worker_name,
+            "99",
+            false,
         )
         .await
-        {
-            Ok(true) => {
-                let msg = format!(
-                    "\u{274c} Rebase failed (PR {}, {} retries): <b>{}</b> — captain reviewing",
-                    pr, max_rebase_retries, title,
-                );
-                alerts.push(msg.clone());
-                notifier.critical(&msg).await;
-            }
-            Ok(false) => {
-                tracing::info!(
-                    module = "captain",
-                    "rebase exhausted transition already applied"
-                );
-            }
-            Err(e) => {
-                snap.restore(item);
-                item.rebase_worker = saved_rebase_worker;
-                tracing::error!(module = "captain", error = %e, "persist failed for rebase exhausted");
-            }
-        }
-        return;
-    }
+        .unwrap();
 
-    // Check exponential backoff: don't spawn if not enough time has passed.
-    let delay = merge_logic::rebase_delay(rebase_retries, workflow.agent.rebase_base_delay_s);
-    if !delay.is_zero() {
-        if let Some(ref last_activity) = item.last_activity_at {
-            match time::OffsetDateTime::parse(
-                last_activity,
-                &time::format_description::well_known::Rfc3339,
-            ) {
-                Ok(last) => {
-                    let elapsed_secs = (time::OffsetDateTime::now_utc() - last)
-                        .whole_seconds()
-                        .max(0) as u64;
-                    if elapsed_secs < delay.as_secs() {
-                        tracing::debug!(
-                            module = "captain",
-                            pr = %pr,
-                            delay_s = delay.as_secs(),
-                            elapsed = elapsed_secs,
-                            "rebase backoff, waiting"
-                        );
-                        return;
-                    }
-                }
-                Err(e) => {
-                    tracing::warn!(
-                        module = "captain",
-                        pr = %pr,
-                        last_activity = %last_activity,
-                        error = %e,
-                        "failed to parse last_activity_at for backoff — spawning immediately"
-                    );
-                }
-            }
-        }
-    }
+        // Register a dead PID for the worker name (PID 999999 is not alive).
+        crate::io::pid_registry::register(worker_name, mando_types::Pid::new(999999)).unwrap();
+        crate::io::pid_registry::register(&session_id, mando_types::Pid::new(999999)).unwrap();
 
-    // Spawn rebase worker.
-    let project_name = item.project.as_deref().unwrap_or("");
-    let Some((_, project_config)) =
-        mando_config::resolve_project_config(Some(project_name), config)
-    else {
-        tracing::warn!(
-            module = "captain",
-            pr = %pr,
-            project = project_name,
-            "skipping rebase — no project config found"
+        // Create a stream file WITHOUT duration_ms (no result event at all).
+        let streams_dir = data_dir.join("state/cc-streams");
+        std::fs::create_dir_all(&streams_dir).unwrap();
+        let stream_file = streams_dir.join(format!("{session_id}.jsonl"));
+        std::fs::write(&stream_file, r#"{"type":"system","subtype":"init"}"#).unwrap();
+
+        // Build a task with rebase_worker set.
+        let mut task = Task::new("Test rebase defer");
+        task.id = 99;
+        task.rebase_worker = Some(worker_name.to_string());
+        let mut items = vec![task];
+
+        // First reap: stream has no result event, should DEFER.
+        reap_dead_rebase_workers(&mut items, &pool).await;
+
+        // rebase_worker should NOT be cleared (deferred).
+        assert!(
+            items[0].rebase_worker.is_some(),
+            "rebase_worker should stay set when stream cost is missing"
         );
-        return;
-    };
 
-    let repo_path = mando_config::expand_tilde(&project_config.path);
-    let default_branch_raw = match crate::io::git::default_branch(&repo_path).await {
-        Ok(db) => db,
-        Err(e) => {
-            tracing::warn!(
-                module = "captain",
-                pr = %pr,
-                repo = %repo_path.display(),
-                error = %e,
-                "skipping rebase; default_branch lookup failed"
-            );
-            return;
-        }
-    };
-    let default_branch = default_branch_raw
-        .strip_prefix("origin/")
-        .unwrap_or(&default_branch_raw)
-        .to_string();
-    let branch = item.branch.as_deref().unwrap_or("");
-    let pr_num = mando_types::task::extract_pr_number(pr)
-        .unwrap_or(pr.trim_start_matches('#'))
-        .to_string();
+        // Session should still be "running" in the DB.
+        let sid = mando_db::queries::sessions::find_session_id_by_worker_name(&pool, worker_name)
+            .await
+            .unwrap();
+        assert_eq!(
+            sid.as_deref(),
+            Some(session_id.as_str()),
+            "session should still be findable as running"
+        );
 
-    tracing::info!(
-        module = "captain",
-        pr = %pr,
-        retry = rebase_retries + 1,
-        "spawning rebase worker"
-    );
+        // session_id PID should be unregistered (blocks same-tick reconciler).
+        assert!(
+            crate::io::pid_registry::get_pid(&session_id).is_none(),
+            "session_id PID should be unregistered to block reconciler L1"
+        );
 
-    let rebase_tmpl = workflow
-        .prompts
-        .get("rebase_worker")
-        .cloned()
-        .unwrap_or_else(|| {
-            "Rebase {{ branch }} onto origin/{{ default_branch }}. PR #{{ pr_num }}.".into()
-        });
-    let attempt_str = (rebase_retries + 1).to_string();
-    let max_retries_str = max_rebase_retries.to_string();
-    let rebase_vars: rustc_hash::FxHashMap<&str, &str> = [
-        ("branch", branch),
-        ("default_branch", default_branch.as_str()),
-        ("pr_num", pr_num.as_str()),
-        ("attempt", attempt_str.as_str()),
-        ("max_retries", max_retries_str.as_str()),
-    ]
-    .into_iter()
-    .collect();
-    let prompt = match mando_config::render_template(&rebase_tmpl, &rebase_vars) {
-        Ok(p) => p,
-        Err(e) => {
-            tracing::error!(module = "captain", error = %e, "failed to render rebase_worker template");
-            return;
-        }
-    };
+        // Now add a result event WITH duration_ms to the stream file.
+        std::fs::write(
+            &stream_file,
+            [
+                r#"{"type":"system","subtype":"init"}"#,
+                r#"{"type":"result","subtype":"success","total_cost_usd":0.02,"duration_ms":5000}"#,
+            ]
+            .join("\n"),
+        )
+        .unwrap();
 
-    let wt = item.worktree.as_deref().unwrap_or("");
-    let wt_path = mando_config::expand_tilde(wt);
+        // Re-register worker PID (reaper needs it for the retry).
+        // worker_name PID was kept from first pass; re-register session_id for
+        // the finalize path (log_session_completion reads cost via session_id).
+        // In production, the session_id PID would already be unregistered;
+        // finalization works because log_session_completion uses the session_id
+        // string directly, not the PID registry.
 
-    // Abort any stale rebase left over from a prior crashed worker.
-    if !wt.is_empty() {
-        let abort = tokio::process::Command::new("git")
-            .args(["rebase", "--abort"])
-            .current_dir(&wt_path)
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status()
-            .await;
-        if let Ok(s) = abort {
-            if s.success() {
-                tracing::info!(
-                    module = "captain",
-                    pr = %pr,
-                    "aborted stale rebase before spawning worker"
-                );
-            }
-        }
+        // Second reap: stream now has duration_ms, should FINALIZE.
+        reap_dead_rebase_workers(&mut items, &pool).await;
+
+        // rebase_worker should be cleared (finalized).
+        assert!(
+            items[0].rebase_worker.is_none(),
+            "rebase_worker should be cleared after finalization"
+        );
+
+        // Check DB for duration_ms and correct status.
+        let row = mando_db::queries::sessions::session_by_id(&pool, &session_id)
+            .await
+            .unwrap()
+            .expect("session should exist");
+        assert_eq!(
+            row.duration_ms,
+            Some(5000),
+            "duration_ms should be persisted after finalization"
+        );
+        // No worktree set -> SHA check returns false -> status should be Failed.
+        assert_eq!(
+            row.status, "failed",
+            "status should reflect SHA-based outcome"
+        );
+
+        // Cleanup.
+        let _ = std::fs::remove_dir_all(&data_dir);
     }
 
-    // Record HEAD SHA *after* abort so we get the stable branch tip, not a mid-rebase commit.
-    let head_sha = if !wt.is_empty() {
-        match crate::io::git::head_sha(&wt_path).await {
-            Ok(sha) => Some(sha),
-            Err(e) => {
-                tracing::warn!(
-                    module = "captain",
-                    pr = %pr,
-                    error = %e,
-                    "failed to record baseline HEAD SHA — success detection disabled for this attempt"
-                );
-                None
-            }
-        }
-    } else {
-        None
-    };
+    /// Verify that rebase_head_sha is preserved across retry ticks so a
+    /// successful rebase is not misclassified as failed on the second pass.
+    #[tokio::test]
+    async fn reap_preserves_head_sha_across_retry() {
+        let data_dir = isolate_data_dir();
+        let pool = test_pool().await;
 
-    let session_name = format!("mando-rebase-{}", pr_num);
-    let session_id = mando_uuid::Uuid::v4().to_string();
+        let session_id = mando_uuid::Uuid::v4().to_string();
+        let worker_name = "mando-rebase-77";
 
-    match crate::io::process_manager::spawn_worker_process(
-        &prompt,
-        &wt_path,
-        &workflow.models.worker,
-        &session_id,
-        &std::collections::HashMap::new(),
-        workflow.models.fallback.as_deref(),
-    )
-    .await
-    {
-        Ok((pid, _)) => {
-            // Register under both session_name (for reap_dead_rebase_workers
-            // lifecycle) and session_id (for session reconciler + terminator).
-            if let Err(e) = crate::io::pid_registry::register(&session_name, pid) {
-                tracing::warn!(module = "captain", worker = %session_name, %e, "pid_registry register failed");
-            }
-            if let Err(e) = crate::io::pid_registry::register(&session_id, pid) {
-                tracing::warn!(module = "captain", session_id = %session_id, %e, "pid_registry register (session_id) failed");
-            }
-            // Log "running" session entry so the UI shows it immediately.
-            if let Err(e) = crate::io::headless_cc::log_running_session(
-                pool,
-                &session_id,
-                &wt_path,
-                "rebase",
-                &session_name,
-                &items[idx].id.to_string(),
-                false,
-            )
-            .await
-            {
-                tracing::warn!(
-                    module = "captain",
-                    session_id = %session_id,
-                    error = %e,
-                    "failed to log rebase session"
-                );
-            }
-            let item = &mut items[idx];
-            item.rebase_worker = Some(session_name.clone());
-            item.rebase_retries = merge_logic::next_rebase_retry(item) as i64;
-            item.rebase_head_sha = head_sha;
-            item.last_activity_at = Some(
-                time::OffsetDateTime::now_utc()
-                    .format(&time::format_description::well_known::Rfc3339)
-                    .unwrap_or_default(),
-            );
-            tracing::info!(
-                module = "captain",
-                worker = %session_name,
-                pid = %pid,
-                "rebase worker spawned"
-            );
-            let _ = super::timeline_emit::emit_for_task(
-                item,
-                mando_types::timeline::TimelineEventType::RebaseTriggered,
-                &format!(
-                    "Rebase worker {} spawned (attempt {}/{})",
-                    session_name,
-                    rebase_retries + 1,
-                    max_rebase_retries
-                ),
-                serde_json::json!({
-                    "worker": session_name,
-                    "session_id": session_id,
-                    "pr": pr,
-                    "attempt": rebase_retries + 1,
-                    "max_retries": max_rebase_retries,
-                }),
-                pool,
-            )
-            .await;
-        }
-        Err(e) => {
-            alerts.push(format!("Rebase spawn failed for PR {pr}: {e}"));
-        }
+        crate::io::headless_cc::log_running_session(
+            &pool,
+            &session_id,
+            std::path::Path::new("/tmp"),
+            "rebase",
+            worker_name,
+            "88",
+            false,
+        )
+        .await
+        .unwrap();
+
+        crate::io::pid_registry::register(worker_name, mando_types::Pid::new(999999)).unwrap();
+        crate::io::pid_registry::register(&session_id, mando_types::Pid::new(999999)).unwrap();
+
+        let streams_dir = data_dir.join("state/cc-streams");
+        std::fs::create_dir_all(&streams_dir).unwrap();
+        let stream_file = streams_dir.join(format!("{session_id}.jsonl"));
+        // No result event -> retry path.
+        std::fs::write(&stream_file, r#"{"type":"system","subtype":"init"}"#).unwrap();
+
+        let mut task = Task::new("Test SHA preservation");
+        task.id = 88;
+        task.rebase_worker = Some(worker_name.to_string());
+        // Set a known SHA that matches nothing (simulates pre-rebase baseline).
+        task.rebase_head_sha = Some("abc123".to_string());
+
+        let mut items = vec![task];
+
+        // First reap: no stream result -> retry.
+        reap_dead_rebase_workers(&mut items, &pool).await;
+
+        // rebase_head_sha must be preserved for correct re-evaluation.
+        assert_eq!(
+            items[0].rebase_head_sha.as_deref(),
+            Some("abc123"),
+            "rebase_head_sha must survive the retry so did_rebase_succeed works correctly next tick"
+        );
+
+        // Cleanup.
+        let _ = std::fs::remove_dir_all(&data_dir);
     }
 }
