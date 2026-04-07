@@ -17,6 +17,7 @@ import { Button } from '#renderer/components/ui/button';
 import { Input } from '#renderer/components/ui/input';
 import { Checkbox } from '#renderer/components/ui/checkbox';
 import type { TaskItem } from '#renderer/types';
+import { compactRelativeTime } from '#renderer/utils';
 
 interface SidebarProjectItemProps {
   name: string;

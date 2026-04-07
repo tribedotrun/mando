@@ -358,4 +358,65 @@ mod tests {
             std::env::temp_dir().join(format!("mando-cc-missing-{}.jsonl", std::process::id()));
         assert_eq!(get_stream_file_size(&missing), 0);
     }
+
+    #[test]
+    fn stream_cost_with_duration() {
+        let dir = std::env::temp_dir().join("mando-cc-test-cost-dur");
+        std::fs::create_dir_all(&dir).ok();
+        let path = dir.join("test.jsonl");
+
+        let content = [
+            r#"{"type":"system","subtype":"init"}"#,
+            r#"{"type":"result","subtype":"success","total_cost_usd":0.05,"duration_ms":12345}"#,
+        ]
+        .join("\n");
+        std::fs::write(&path, &content).unwrap();
+
+        let info = get_stream_cost(&path).unwrap();
+        assert_eq!(info.cost_usd, Some(0.05));
+        assert_eq!(info.duration_ms, Some(12345));
+
+        std::fs::remove_file(&path).ok();
+        std::fs::remove_dir(&dir).ok();
+    }
+
+    #[test]
+    fn stream_cost_missing_duration() {
+        let dir = std::env::temp_dir().join("mando-cc-test-cost-nodur");
+        std::fs::create_dir_all(&dir).ok();
+        let path = dir.join("test.jsonl");
+
+        let content = [
+            r#"{"type":"system","subtype":"init"}"#,
+            r#"{"type":"result","subtype":"success","total_cost_usd":0.03}"#,
+        ]
+        .join("\n");
+        std::fs::write(&path, &content).unwrap();
+
+        let info = get_stream_cost(&path).unwrap();
+        assert_eq!(info.cost_usd, Some(0.03));
+        assert!(info.duration_ms.is_none());
+
+        std::fs::remove_file(&path).ok();
+        std::fs::remove_dir(&dir).ok();
+    }
+
+    #[test]
+    fn stream_cost_no_result_event() {
+        let dir = std::env::temp_dir().join("mando-cc-test-cost-noresult");
+        std::fs::create_dir_all(&dir).ok();
+        let path = dir.join("test.jsonl");
+
+        let content = [
+            r#"{"type":"system","subtype":"init"}"#,
+            r#"{"type":"assistant","message":"working"}"#,
+        ]
+        .join("\n");
+        std::fs::write(&path, &content).unwrap();
+
+        assert!(get_stream_cost(&path).is_none());
+
+        std::fs::remove_file(&path).ok();
+        std::fs::remove_dir(&dir).ok();
+    }
 }
