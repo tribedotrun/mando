@@ -1,6 +1,6 @@
 import React, { useState, useCallback } from 'react';
 import { useSettingsStore } from '#renderer/domains/settings';
-import { useToastStore } from '#renderer/global/stores/toastStore';
+import { toast } from 'sonner';
 import { getErrorMessage } from '#renderer/utils';
 import { inputClsCompact, inputStyleSubtle } from '#renderer/styles';
 import { useTelegramTokenValidator } from '#renderer/global/hooks/useTelegramTokenValidator';
@@ -44,7 +44,7 @@ export function ClaudeCodeContent({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-      <p className="text-xs" style={{ color: 'var(--color-text-2)', lineHeight: '16px' }}>
+      <p className="text-xs text-text-2" style={{ lineHeight: '16px' }}>
         Mando uses Claude Code to run AI agents. Install it, then verify below.
       </p>
 
@@ -58,9 +58,7 @@ export function ClaudeCodeContent({
       {checkResult?.installed && !checkResult.checkFailed && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
           {checkResult.version && (
-            <span className="text-[11px]" style={{ color: 'var(--color-text-3)' }}>
-              {checkResult.version}
-            </span>
+            <span className="text-[11px] text-text-3">{checkResult.version}</span>
           )}
           <StatusLine
             ok={checkResult.works}
@@ -114,9 +112,7 @@ export function TelegramContent(): React.ReactElement {
     } catch (reinstallErr) {
       log.warn('[Setup] TG launchd reinstall failed', reinstallErr);
       setServiceWarning('Service install pending, restart Mando');
-      useToastStore
-        .getState()
-        .add('error', getErrorMessage(reinstallErr, 'Failed to install Telegram service'));
+      toast.error(getErrorMessage(reinstallErr, 'Failed to install Telegram service'));
     }
   }, [token, validate, updateEnv, updateTelegram, save]);
 
@@ -124,13 +120,13 @@ export function TelegramContent(): React.ReactElement {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-      <p className="text-xs" style={{ color: 'var(--color-text-2)', lineHeight: '16px' }}>
+      <p className="text-xs text-text-2" style={{ lineHeight: '16px' }}>
         Create a bot via{' '}
         <a
           href="https://t.me/BotFather"
           target="_blank"
           rel="noopener noreferrer"
-          style={{ color: 'var(--color-accent)' }}
+          className="text-accent"
         >
           @BotFather
         </a>{' '}
@@ -178,7 +174,7 @@ export function ProjectContent(): React.ReactElement {
       dir = await window.mandoAPI.selectDirectory();
     } catch (err) {
       log.warn('[Setup] selectDirectory failed', err);
-      useToastStore.getState().add('error', getErrorMessage(err, 'Failed to open folder picker'));
+      toast.error(getErrorMessage(err, 'Failed to open folder picker'));
       return;
     }
     if (!dir) return;
@@ -187,7 +183,7 @@ export function ProjectContent(): React.ReactElement {
       await addProject({ name: '', path: dir });
     } catch (err) {
       log.warn('[Setup] addProject failed', err);
-      useToastStore.getState().add('error', getErrorMessage(err, 'Failed to add project'));
+      toast.error(getErrorMessage(err, 'Failed to add project'));
     } finally {
       setAdding(false);
     }

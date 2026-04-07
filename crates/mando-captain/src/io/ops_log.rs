@@ -68,7 +68,10 @@ pub(crate) fn save_ops_log(log: &OpsLog, path: &Path) -> Result<()> {
 }
 
 /// Begin a new operation. Returns the op_id.
-#[cfg(test)]
+///
+/// Available for production use (e.g. merge WAL entries created by captain);
+/// currently exercised only in tests and the reconciler test fixtures.
+#[allow(dead_code)]
 pub(crate) fn begin_op(log: &mut OpsLog, op_type: &str, params: serde_json::Value) -> String {
     let op_id = mando_uuid::Uuid::v4().to_string();
     log.entries.push(OpEntry {

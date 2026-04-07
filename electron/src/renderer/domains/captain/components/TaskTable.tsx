@@ -1,7 +1,7 @@
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import { useScrollIntoViewRef } from '#renderer/global/hooks/useScrollIntoViewRef';
 import { useTaskStore } from '#renderer/domains/captain/stores/taskStore';
-import { useToastStore } from '#renderer/global/stores/toastStore';
+import { toast } from 'sonner';
 import { useFilteredTasks } from '#renderer/domains/captain/hooks/useFilteredTasks';
 import type { TaskItem } from '#renderer/types';
 import {
@@ -21,7 +21,7 @@ import {
   ACTION_LABELS,
   STATUS_TOOLTIP,
   ActionBtn,
-  OverflowMenu,
+  TaskOverflowMenu,
 } from '#renderer/domains/captain/components/TaskActions';
 import { archiveItem, unarchiveItem } from '#renderer/domains/captain/hooks/useApi';
 
@@ -67,18 +67,10 @@ export function TaskTable(props: Props): React.ReactElement {
   const scrollRef = useScrollIntoViewRef();
 
   if (loading && items.length === 0) {
-    return (
-      <div className="py-8 text-center text-body" style={{ color: 'var(--color-text-3)' }}>
-        Loading...
-      </div>
-    );
+    return <div className="py-8 text-center text-body text-text-3">Loading...</div>;
   }
   if (error) {
-    return (
-      <div className="py-8 text-center text-body" style={{ color: 'var(--color-error)' }}>
-        {error}
-      </div>
-    );
+    return <div className="py-8 text-center text-body text-error">{error}</div>;
   }
   if (items.length === 0) {
     return <TaskEmptyState />;
@@ -155,7 +147,6 @@ const TaskRow = React.memo(function TaskRow({
     item.status === 'merged' || item.status === 'completed-no-pr' || item.status === 'canceled';
   const [menuOpen, setMenuOpen] = useState(false);
   const [archivePending, setArchivePending] = useState(false);
-  const menuTriggerRef = useRef<HTMLButtonElement>(null);
 
   const handleArchive = useCallback(async () => {
     setArchivePending(true);
@@ -163,7 +154,7 @@ const TaskRow = React.memo(function TaskRow({
       await archiveItem(item.id);
       refetchTasks();
     } catch (err) {
-      useToastStore.getState().add('error', getErrorMessage(err, 'Archive failed'));
+      toast.error(getErrorMessage(err, 'Archive failed'));
       refetchTasks();
     } finally {
       setArchivePending(false);
@@ -176,7 +167,7 @@ const TaskRow = React.memo(function TaskRow({
       await unarchiveItem(item.id);
       refetchTasks();
     } catch (err) {
-      useToastStore.getState().add('error', getErrorMessage(err, 'Unarchive failed'));
+      toast.error(getErrorMessage(err, 'Unarchive failed'));
       refetchTasks();
     } finally {
       setArchivePending(false);
@@ -275,6 +266,20 @@ const TaskRow = React.memo(function TaskRow({
               {' \u00b7 '}
             </span>
           )}
+          {item.session_ids?.ask && (
+            <span
+              style={{
+                fontSize: 11,
+                fontWeight: 500,
+                color: 'var(--color-accent)',
+                marginRight: 6,
+                opacity: 0.85,
+              }}
+            >
+              Q&A
+              {' \u00b7 '}
+            </span>
+          )}
           {item.title}
         </span>
         {item.pr && (item.github_repo || item.project) && (
@@ -339,13 +344,18 @@ const TaskRow = React.memo(function TaskRow({
           ))}
         {canAskTerminal(item) && <ActionBtn label="Ask" onClick={actions.onAsk} />}
         {!isFinalized && (
-          <>
+          <TaskOverflowMenu
+            item={item}
+            open={menuOpen}
+            onOpenChange={setMenuOpen}
+            onRework={actions.onRework}
+            onHandoff={actions.onHandoff}
+            onCancel={actions.onCancel}
+            onRetry={actions.onRetry}
+            onAnswer={actions.onAnswer}
+          >
             <button
-              ref={menuTriggerRef}
-              onClick={() => setMenuOpen((v) => !v)}
               aria-label="More actions"
-              aria-haspopup="menu"
-              aria-expanded={menuOpen}
               className="flex shrink-0 items-center justify-center rounded transition-colors"
               style={{
                 width: 24,
@@ -358,19 +368,7 @@ const TaskRow = React.memo(function TaskRow({
             >
               <MoreIcon />
             </button>
-            {menuOpen && (
-              <OverflowMenu
-                item={item}
-                triggerRef={menuTriggerRef}
-                onRework={actions.onRework}
-                onHandoff={actions.onHandoff}
-                onCancel={actions.onCancel}
-                onRetry={actions.onRetry}
-                onAnswer={actions.onAnswer}
-                onClose={() => setMenuOpen(false)}
-              />
-            )}
-          </>
+          </TaskOverflowMenu>
         )}
       </div>
     </div>

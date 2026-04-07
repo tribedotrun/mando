@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import log from '#renderer/logger';
-import { useToastStore } from '#renderer/global/stores/toastStore';
+import { toast } from 'sonner';
 import { useTaskStore } from '#renderer/domains/captain/stores/taskStore';
 import { useSelection } from '#renderer/domains/captain/hooks/useSelection';
 import { invalidateTaskDetail } from '#renderer/queryClient';
@@ -48,8 +48,6 @@ export function useTaskActions() {
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const { selectedIds, toggleSelect, toggleSelectAll, clearSelection } = useSelection();
 
-  const toast = useToastStore.getState;
-
   /** Optimistic update + API call + refresh; toast on error. */
   async function optimisticAction(
     id: number,
@@ -63,10 +61,10 @@ export function useTaskActions() {
       await fn();
       taskFetch();
       invalidateTaskDetail(queryClient, id);
-      if (successMsg) toast().add('success', successMsg);
+      if (successMsg) toast.success(successMsg);
     } catch (err) {
       taskFetch();
-      toast().add('error', getErrorMessage(err, errLabel));
+      toast.error(getErrorMessage(err, errLabel));
     }
   }
 
@@ -132,16 +130,13 @@ export function useTaskActions() {
       if (wt) {
         const copied = await copyToClipboard(wt);
         if (copied) {
-          toast().add(
-            'success',
-            'Handed off, worktree path copied. Open a terminal and run Claude there.',
-          );
+          toast.success('Handed off, worktree path copied. Open a terminal and run Claude there.');
         }
       } else {
-        toast().add('success', 'Task handed off');
+        toast.success('Task handed off');
       }
     } catch (err) {
-      toast().add('error', getErrorMessage(err, 'Handoff failed'));
+      toast.error(getErrorMessage(err, 'Handoff failed'));
     }
   };
 
@@ -159,7 +154,7 @@ export function useTaskActions() {
       setDeleteModalOpen(false);
       if (result.warnings?.length) {
         for (const w of result.warnings) {
-          toast().add('error', w);
+          toast.error(w);
         }
       }
     } catch (err) {
@@ -190,11 +185,12 @@ export function useTaskActions() {
       const result = await answerClarificationText(id, answer);
       taskFetch();
       const { variant, msg } = clarifyResultToToast(result.status);
-      toast().add(variant, msg);
+      const fn = variant === 'success' ? toast.success : toast.info;
+      fn(msg);
       return true;
     } catch (err) {
       taskFetch();
-      toast().add('error', getErrorMessage(err, 'Answer failed'));
+      toast.error(getErrorMessage(err, 'Answer failed'));
       return false;
     } finally {
       setAnswerPending(false);
@@ -206,10 +202,10 @@ export function useTaskActions() {
     try {
       await nudgeWorker(id, message);
       taskFetch();
-      toast().add('success', `Nudged task #${id}`);
+      toast.success(`Nudged task #${id}`);
       return true;
     } catch (err) {
-      toast().add('error', getErrorMessage(err, 'Nudge failed'));
+      toast.error(getErrorMessage(err, 'Nudge failed'));
       return false;
     } finally {
       setNudgePending(false);

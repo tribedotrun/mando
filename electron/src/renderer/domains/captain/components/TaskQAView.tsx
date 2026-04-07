@@ -63,9 +63,8 @@ export function ActiveQAView({
       {/* Back link */}
       <button
         onClick={onBack}
-        className="mb-3 flex shrink-0 items-center gap-2 text-caption"
+        className="mb-3 flex shrink-0 items-center gap-2 text-caption text-text-3"
         style={{
-          color: 'var(--color-text-3)',
           background: 'none',
           border: 'none',
           cursor: 'pointer',
@@ -77,18 +76,14 @@ export function ActiveQAView({
       {/* Messages, scrollable */}
       <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto pr-2">
         {messages.length === 0 && !pending && (
-          <div className="py-8 text-center text-caption" style={{ color: 'var(--color-text-3)' }}>
+          <div className="py-8 text-center text-caption text-text-3">
             Ask a question about this task
           </div>
         )}
         {messages.map((entry, i) => (
           <QAMessage key={`${entry.timestamp}-${i}`} entry={entry} />
         ))}
-        {pending && (
-          <div className="py-3 text-caption" style={{ color: 'var(--color-text-3)' }}>
-            Thinking...
-          </div>
-        )}
+        {pending && <div className="py-3 text-caption text-text-3">Thinking...</div>}
       </div>
     </>
   );
@@ -99,6 +94,7 @@ export function ActiveQAView({
 export function QAHistoryTab({ item }: { item: TaskItem }): React.ReactElement {
   const {
     data: serverHistory,
+    isPending,
     isError,
     error,
   } = useQuery({
@@ -110,18 +106,22 @@ export function QAHistoryTab({ item }: { item: TaskItem }): React.ReactElement {
 
   if (isError) {
     return (
-      <div className="text-caption" style={{ color: 'var(--color-error)' }}>
+      <div className="text-caption text-error">
         Failed to load Q&A history{error instanceof Error ? `: ${error.message}` : ''}
       </div>
     );
   }
 
-  if (messages.length === 0) {
+  if (isPending) {
     return (
       <div className="text-caption" style={{ color: 'var(--color-text-3)' }}>
-        No Q&A history yet
+        Loading Q&A history...
       </div>
     );
+  }
+
+  if (messages.length === 0) {
+    return <div className="text-caption text-text-3">No Q&A history yet</div>;
   }
 
   return (
@@ -154,9 +154,7 @@ function QAMessage({ entry }: { entry: AskHistoryEntry }): React.ReactElement {
         >
           {isError ? 'Error' : isHuman ? 'You' : 'Agent'}
         </span>
-        <span className="text-label" style={{ color: 'var(--color-text-4)' }}>
-          {shortTs(entry.timestamp)}
-        </span>
+        <span className="text-label text-text-4">{shortTs(entry.timestamp)}</span>
       </div>
       <div
         className="rounded-lg px-4 py-3 text-body leading-relaxed"

@@ -15,7 +15,7 @@ export function SetupLayout({
   children: React.ReactNode;
 } & Omit<React.HTMLAttributes<HTMLDivElement>, 'title'>): React.ReactElement {
   return (
-    <div className="relative flex h-full" style={{ background: 'var(--color-bg)' }} {...rest}>
+    <div className="relative flex h-full bg-bg" {...rest}>
       <div
         className="absolute inset-x-0 top-0 z-10 h-8"
         style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
@@ -46,16 +46,16 @@ export function SetupLayout({
                 />
               ))}
             </div>
-            <span className="text-label" style={{ color: 'var(--color-text-3)' }}>
+            <span className="text-label text-text-3">
               Step {step} of {total}
             </span>
           </div>
         )}
-        <h2 className="text-heading" style={{ color: 'var(--color-text-1)', marginBottom: 8 }}>
+        <h2 className="text-heading text-text-1" style={{ marginBottom: 8 }}>
           {title}
         </h2>
         {subtitle && (
-          <p className="text-body" style={{ color: 'var(--color-text-3)', lineHeight: 1.6 }}>
+          <p className="text-body text-text-3" style={{ lineHeight: 1.6 }}>
             {subtitle}
           </p>
         )}

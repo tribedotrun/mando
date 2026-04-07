@@ -156,6 +156,11 @@ pub(crate) async fn run_git(cwd: &Path, args: &[&str]) -> Result<String> {
     Ok(stdout)
 }
 
+/// Get the current branch name of a worktree.
+pub async fn current_branch(wt_path: &Path) -> Result<String> {
+    run_git(wt_path, &["rev-parse", "--abbrev-ref", "HEAD"]).await
+}
+
 /// Get the HEAD SHA of a worktree (short form).
 pub(crate) async fn head_sha(cwd: &Path) -> Result<String> {
     run_git(cwd, &["rev-parse", "--short", "HEAD"]).await

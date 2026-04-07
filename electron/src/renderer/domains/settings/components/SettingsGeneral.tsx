@@ -5,9 +5,9 @@ import {
   getNotificationsEnabled,
   setNotificationsEnabled,
 } from '#renderer/global/hooks/useDesktopNotifications';
-import { ToggleSwitch } from '#renderer/global/components/ToggleSwitch';
+import { Switch } from '#renderer/global/components/Switch';
 import { useMountEffect } from '#renderer/global/hooks/useMountEffect';
-import { useToastStore } from '#renderer/global/stores/toastStore';
+import { toast } from 'sonner';
 import { useSettingsStore } from '#renderer/domains/settings/stores/settingsStore';
 
 const CHANNELS = ['stable', 'beta'] as const;
@@ -15,9 +15,7 @@ const CHANNELS = ['stable', 'beta'] as const;
 function SettingsRow({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="flex items-center justify-between" style={{ padding: '10px 0', minHeight: 40 }}>
-      <span className="text-body" style={{ color: 'var(--color-text-1)' }}>
-        {label}
-      </span>
+      <span className="text-body text-text-1">{label}</span>
       <div className="flex items-center">{children}</div>
     </div>
   );
@@ -87,7 +85,7 @@ export function SettingsGeneral(): React.ReactElement {
     } catch (err) {
       log.error('[SettingsGeneral] channel change failed:', err);
       setChannelOverride(null);
-      useToastStore.getState().add('error', 'Failed to change update channel');
+      toast.error('Failed to change update channel');
     }
   };
 
@@ -104,7 +102,7 @@ export function SettingsGeneral(): React.ReactElement {
     if (!result.ok) {
       log.warn('[SettingsGeneral] login-item save failed:', result.error);
       update({ startAtLogin: !next });
-      useToastStore.getState().add('error', result.error ?? 'Failed to save login setting');
+      toast.error(result.error ?? 'Failed to save login setting');
       return;
     }
     try {
@@ -112,21 +110,19 @@ export function SettingsGeneral(): React.ReactElement {
     } catch (err) {
       log.error('[SettingsGeneral] login item IPC failed:', err);
       update({ startAtLogin: !next });
-      useToastStore.getState().add('error', 'Failed to change login setting');
+      toast.error('Failed to change login setting');
     }
   };
 
   return (
     <div data-testid="settings-general">
-      <h2 className="text-heading" style={{ color: 'var(--color-text-1)', marginBottom: 24 }}>
+      <h2 className="text-heading text-text-1" style={{ marginBottom: 24 }}>
         General
       </h2>
 
       <SettingsRow label="Version">
         <span className="flex items-center gap-3">
-          <span className="text-code" style={{ color: 'var(--color-text-1)' }}>
-            {appVersion || '\u2014'}
-          </span>
+          <span className="text-code text-text-1">{appVersion || '\u2014'}</span>
           <UpdateCheckButton
             status={updateCheckStatus}
             onCheckError={() => setUpdateCheckStatus('error')}
@@ -143,18 +139,18 @@ export function SettingsGeneral(): React.ReactElement {
       </SettingsRow>
 
       <SettingsRow label="Start at login">
-        <ToggleSwitch
+        <Switch
           testId="start-at-login-toggle"
           checked={startAtLogin}
-          onChange={toggleLoginItem}
+          onCheckedChange={toggleLoginItem}
         />
       </SettingsRow>
 
       <SettingsRow label="Desktop notifications">
-        <ToggleSwitch
+        <Switch
           testId="notifications-toggle"
           checked={notificationsEnabled}
-          onChange={toggleNotifications}
+          onCheckedChange={toggleNotifications}
         />
       </SettingsRow>
     </div>
@@ -173,18 +169,10 @@ function UpdateCheckButton({
   const [installing, setInstalling] = useState(false);
 
   if (status === 'checking') {
-    return (
-      <span className="text-caption" style={{ color: 'var(--color-text-3)' }}>
-        Checking…
-      </span>
-    );
+    return <span className="text-caption text-text-3">Checking…</span>;
   }
   if (status === 'up-to-date') {
-    return (
-      <span className="text-caption" style={{ color: 'var(--color-success)' }}>
-        Up to date
-      </span>
-    );
+    return <span className="text-caption text-success">Up to date</span>;
   }
   if (status === 'update-available') {
     return (
@@ -217,25 +205,17 @@ function UpdateCheckButton({
     );
   }
   if (status === 'error') {
-    return (
-      <span className="text-caption" style={{ color: 'var(--color-error)' }}>
-        Check failed
-      </span>
-    );
+    return <span className="text-caption text-error">Check failed</span>;
   }
   if (status === 'install-error') {
-    return (
-      <span className="text-caption" style={{ color: 'var(--color-error)' }}>
-        Install failed
-      </span>
-    );
+    return <span className="text-caption text-error">Install failed</span>;
   }
   return (
     <button
       onClick={() => {
         window.mandoAPI.updates.checkForUpdates().catch(onCheckError);
       }}
-      className="cursor-pointer border-none bg-transparent p-0 text-caption text-[var(--color-text-3)] underline transition-colors hover:text-[var(--color-text-1)]"
+      className="cursor-pointer border-none bg-transparent p-0 text-caption text-text-3 underline transition-colors hover:text-text-1"
       style={{ textUnderlineOffset: 2 }}
     >
       Check for updates

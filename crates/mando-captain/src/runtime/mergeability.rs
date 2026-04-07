@@ -66,7 +66,7 @@ pub(crate) async fn check_done_mergeability(
 
     // Reap dead rebase workers. If the process exited, detect whether it
     // succeeded (SHA changed) before clearing `rebase_worker`.
-    reap_dead_rebase_workers(items).await;
+    reap_dead_rebase_workers(items, pool).await;
 
     let candidates = merge_logic::items_needing_rebase_check(items);
 
@@ -197,31 +197,53 @@ async fn apply_terminal_from_github(
     notifier: &Notifier,
     pool: &sqlx::SqlitePool,
 ) {
+    let prev_status = item.status;
     item.status = new_status;
-    let msg = format!(
-        "{} {} (PR {}): <b>{}</b>",
-        emoji,
-        verb_present,
-        pr,
-        mando_shared::telegram_format::escape_html(&item.title)
-    );
-    notifier.high(&msg).await;
-    tracing::info!(
-        module = "captain",
-        title = %item.title,
-        pr = %pr,
-        verb_past = verb_past,
-        "item {}",
-        verb_past
-    );
-    let _ = super::timeline_emit::emit_for_task(
-        item,
+    let event = mando_types::timeline::TimelineEvent {
         event_type,
-        &format!("PR {pr} {verb_past} on GitHub"),
-        serde_json::json!({ "pr": pr }),
+        timestamp: mando_types::now_rfc3339(),
+        actor: "captain".to_string(),
+        summary: format!("PR {pr} {verb_past} on GitHub"),
+        data: serde_json::json!({ "pr": pr }),
+    };
+    match mando_db::queries::tasks::persist_status_transition(
         pool,
+        item,
+        prev_status.as_str(),
+        &event,
     )
-    .await;
+    .await
+    {
+        Ok(true) => {
+            let msg = format!(
+                "{} {} (PR {}): <b>{}</b>",
+                emoji,
+                verb_present,
+                pr,
+                mando_shared::telegram_format::escape_html(&item.title)
+            );
+            notifier.high(&msg).await;
+            tracing::info!(
+                module = "captain",
+                title = %item.title,
+                pr = %pr,
+                verb_past = verb_past,
+                "item {}",
+                verb_past
+            );
+        }
+        Ok(false) => {
+            tracing::info!(
+                module = "captain",
+                item_id = item.id,
+                "terminal from GitHub already applied"
+            );
+        }
+        Err(e) => {
+            item.status = prev_status;
+            tracing::error!(module = "captain", item_id = item.id, error = %e, "persist failed for terminal from GitHub");
+        }
+    }
 }
 
 async fn apply_merged(

@@ -1,9 +1,10 @@
 import React, { useCallback, useRef, useState } from 'react';
 import Markdown from 'react-markdown';
+import { FileText } from 'lucide-react';
 import type { ScoutItem } from '#renderer/types';
 import { fetchScoutItem, updateScoutStatus } from '#renderer/domains/scout/hooks/useApi';
 import { useScrollIntoViewRef } from '#renderer/global/hooks/useScrollIntoViewRef';
-import { useToastStore } from '#renderer/global/stores/toastStore';
+import { toast } from 'sonner';
 import { getErrorMessage } from '#renderer/utils';
 import log from '#renderer/logger';
 
@@ -85,9 +86,7 @@ export function ScoutTable({
       await updateScoutStatus(id, status);
       onRefresh();
     } catch (err) {
-      useToastStore
-        .getState()
-        .add('error', `Status update failed: ${getErrorMessage(err, 'unknown error')}`);
+      toast.error(`Status update failed: ${getErrorMessage(err, 'unknown error')}`);
     }
     setEditingId(null);
   };
@@ -95,27 +94,9 @@ export function ScoutTable({
   if (items.length === 0) {
     return (
       <div data-testid="scout-table" className="flex flex-col items-center justify-center py-16">
-        <svg width="48" height="48" viewBox="0 0 48 48" fill="none" className="mb-4">
-          <rect
-            x="10"
-            y="6"
-            width="28"
-            height="36"
-            rx="4"
-            stroke="var(--color-text-4)"
-            strokeWidth="1.5"
-          />
-          <path
-            d="M18 16h12M18 22h8M18 28h10"
-            stroke="var(--color-text-4)"
-            strokeWidth="1.5"
-            strokeLinecap="round"
-          />
-        </svg>
-        <span className="text-subheading mb-1" style={{ color: 'var(--color-text-2)' }}>
-          No scout items yet
-        </span>
-        <span className="text-body mb-4" style={{ color: 'var(--color-text-3)' }}>
+        <FileText size={48} color="var(--color-text-4)" strokeWidth={1.5} className="mb-4" />
+        <span className="text-subheading mb-1 text-text-2">No scout items yet</span>
+        <span className="text-body mb-4 text-text-3">
           Add a URL to start building your scout feed.
         </span>
       </div>
@@ -188,7 +169,7 @@ export function ScoutTable({
                 }}
                 title={item.url}
               >
-                <span className="truncate text-[13px]" style={{ color: 'var(--color-text-1)' }}>
+                <span className="truncate text-[13px] text-text-1">
                   {item.title || (item.status === 'pending' ? 'Pending...' : 'Untitled')}
                 </span>
                 {domain && (

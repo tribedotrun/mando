@@ -9,6 +9,17 @@ use mando_types::SessionStatus;
 
 use crate::caller::{CallerGroup, SessionCaller};
 
+/// Column list for SessionRow queries — single source of truth.
+const SELECT_COLS: &str = "\
+    session_id, created_at, caller, cwd, model, status, \
+    cost_usd, duration_ms, resumed, turn_count, \
+    task_id, scout_item_id, worker_name";
+
+fn select_sessions_sql() -> &'static str {
+    static SQL: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    SQL.get_or_init(|| format!("SELECT {SELECT_COLS} FROM cc_sessions"))
+}
+
 /// A session row from the unified sessions table.
 #[derive(Debug, Clone, sqlx::FromRow, serde::Serialize)]
 pub struct SessionRow {
@@ -178,16 +189,15 @@ pub async fn list_sessions(
             let total: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM cc_sessions")
                 .fetch_one(pool)
                 .await?;
-            let rows: Vec<SessionRow> = sqlx::query_as(
-                "SELECT session_id, created_at, caller, cwd, model, status,
-                        cost_usd, duration_ms, resumed, turn_count,
-                        task_id, scout_item_id, worker_name
-                 FROM cc_sessions ORDER BY created_at DESC LIMIT ? OFFSET ?",
-            )
-            .bind(per_page as i64)
-            .bind(offset as i64)
-            .fetch_all(pool)
-            .await?;
+            let sql = format!(
+                "{} ORDER BY created_at DESC LIMIT ? OFFSET ?",
+                select_sessions_sql()
+            );
+            let rows: Vec<SessionRow> = sqlx::query_as(&sql)
+                .bind(per_page as i64)
+                .bind(offset as i64)
+                .fetch_all(pool)
+                .await?;
             (rows, total as usize)
         }
         Some((_, params)) if params.is_empty() => (Vec::new(), 0),
@@ -200,11 +210,8 @@ pub async fn list_sessions(
             let total: i64 = q.fetch_one(pool).await?;
 
             let select_sql = format!(
-                "SELECT session_id, created_at, caller, cwd, model, status,
-                        cost_usd, duration_ms, resumed, turn_count,
-                        task_id, scout_item_id, worker_name
-                 FROM cc_sessions WHERE {where_clause}
-                 ORDER BY created_at DESC LIMIT ? OFFSET ?"
+                "{} WHERE {where_clause} ORDER BY created_at DESC LIMIT ? OFFSET ?",
+                select_sessions_sql()
             );
             let mut q = sqlx::query_as::<_, SessionRow>(&select_sql);
             for p in params {
@@ -221,15 +228,11 @@ pub async fn list_sessions(
 
 /// List all sessions linked to a task.
 pub async fn list_sessions_for_task(pool: &SqlitePool, task_id: &str) -> Result<Vec<SessionRow>> {
-    let rows: Vec<SessionRow> = sqlx::query_as(
-        "SELECT session_id, created_at, caller, cwd, model, status,
-                cost_usd, duration_ms, resumed, turn_count,
-                task_id, scout_item_id, worker_name
-         FROM cc_sessions WHERE task_id = ? ORDER BY created_at DESC",
-    )
-    .bind(task_id)
-    .fetch_all(pool)
-    .await?;
+    let sql = format!(
+        "{} WHERE task_id = ? ORDER BY created_at DESC",
+        select_sessions_sql()
+    );
+    let rows: Vec<SessionRow> = sqlx::query_as(&sql).bind(task_id).fetch_all(pool).await?;
     Ok(rows)
 }
 
@@ -238,15 +241,11 @@ pub async fn list_sessions_for_scout_item(
     pool: &SqlitePool,
     item_id: i64,
 ) -> Result<Vec<SessionRow>> {
-    let rows: Vec<SessionRow> = sqlx::query_as(
-        "SELECT session_id, created_at, caller, cwd, model, status,
-                cost_usd, duration_ms, resumed, turn_count,
-                task_id, scout_item_id, worker_name
-         FROM cc_sessions WHERE scout_item_id = ? ORDER BY created_at DESC",
-    )
-    .bind(item_id)
-    .fetch_all(pool)
-    .await?;
+    let sql = format!(
+        "{} WHERE scout_item_id = ? ORDER BY created_at DESC",
+        select_sessions_sql()
+    );
+    let rows: Vec<SessionRow> = sqlx::query_as(&sql).bind(item_id).fetch_all(pool).await?;
     Ok(rows)
 }
 
@@ -320,28 +319,21 @@ pub async fn update_session_status_with_cost(
 
 /// Get a single session by ID.
 pub async fn session_by_id(pool: &SqlitePool, session_id: &str) -> Result<Option<SessionRow>> {
-    let row: Option<SessionRow> = sqlx::query_as(
-        "SELECT session_id, created_at, caller, cwd, model, status,
-                cost_usd, duration_ms, resumed, turn_count,
-                task_id, scout_item_id, worker_name
-         FROM cc_sessions WHERE session_id = ?",
-    )
-    .bind(session_id)
-    .fetch_optional(pool)
-    .await?;
+    let sql = format!("{} WHERE session_id = ?", select_sessions_sql());
+    let row: Option<SessionRow> = sqlx::query_as(&sql)
+        .bind(session_id)
+        .fetch_optional(pool)
+        .await?;
     Ok(row)
 }
 
 /// List sessions with NULL cost (for startup cost reconciliation).
 pub async fn list_sessions_missing_cost(pool: &SqlitePool) -> Result<Vec<SessionRow>> {
-    let rows: Vec<SessionRow> = sqlx::query_as(
-        "SELECT session_id, created_at, caller, cwd, model, status,
-                cost_usd, duration_ms, resumed, turn_count,
-                task_id, scout_item_id, worker_name
-         FROM cc_sessions WHERE cost_usd IS NULL AND status != 'running'",
-    )
-    .fetch_all(pool)
-    .await?;
+    let sql = format!(
+        "{} WHERE cost_usd IS NULL AND status != 'running'",
+        select_sessions_sql()
+    );
+    let rows: Vec<SessionRow> = sqlx::query_as(&sql).fetch_all(pool).await?;
     Ok(rows)
 }
 
@@ -358,14 +350,8 @@ pub async fn is_session_running(pool: &SqlitePool, session_id: &str) -> Result<b
 
 /// List all sessions currently marked as running (for tick reconciliation).
 pub async fn list_running_sessions(pool: &SqlitePool) -> Result<Vec<SessionRow>> {
-    let rows: Vec<SessionRow> = sqlx::query_as(
-        "SELECT session_id, created_at, caller, cwd, model, status,
-                cost_usd, duration_ms, resumed, turn_count,
-                task_id, scout_item_id, worker_name
-         FROM cc_sessions WHERE status = 'running'",
-    )
-    .fetch_all(pool)
-    .await?;
+    let sql = format!("{} WHERE status = 'running'", select_sessions_sql());
+    let rows: Vec<SessionRow> = sqlx::query_as(&sql).fetch_all(pool).await?;
     Ok(rows)
 }
 
@@ -374,16 +360,26 @@ pub async fn list_running_sessions_for_task(
     pool: &SqlitePool,
     task_id: &str,
 ) -> Result<Vec<SessionRow>> {
-    let rows: Vec<SessionRow> = sqlx::query_as(
-        "SELECT session_id, created_at, caller, cwd, model, status,
-                cost_usd, duration_ms, resumed, turn_count,
-                task_id, scout_item_id, worker_name
-         FROM cc_sessions WHERE task_id = ? AND status = 'running'",
-    )
-    .bind(task_id)
-    .fetch_all(pool)
-    .await?;
+    let sql = format!(
+        "{} WHERE task_id = ? AND status = 'running'",
+        select_sessions_sql()
+    );
+    let rows: Vec<SessionRow> = sqlx::query_as(&sql).bind(task_id).fetch_all(pool).await?;
     Ok(rows)
+}
+
+/// Find session_id for a running session by worker_name.
+pub async fn find_session_id_by_worker_name(
+    pool: &SqlitePool,
+    worker_name: &str,
+) -> Result<Option<String>> {
+    let row: Option<(String,)> = sqlx::query_as(
+        "SELECT session_id FROM cc_sessions WHERE worker_name = ? AND status = 'running' LIMIT 1",
+    )
+    .bind(worker_name)
+    .fetch_optional(pool)
+    .await?;
+    Ok(row.map(|(sid,)| sid))
 }
 
 #[cfg(test)]

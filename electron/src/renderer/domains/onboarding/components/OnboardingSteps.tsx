@@ -58,21 +58,18 @@ export function TelegramScreen({
       subtitle="Notifications and remote control from your phone."
     >
       <div style={FORM_CARD}>
-        <p
-          className="text-caption"
-          style={{ color: 'var(--color-text-3)', marginBottom: 24, lineHeight: 1.5 }}
-        >
+        <p className="text-caption text-text-3" style={{ marginBottom: 24, lineHeight: 1.5 }}>
           Open{' '}
           <a
             href="https://t.me/BotFather"
             target="_blank"
             rel="noopener noreferrer"
-            style={{ color: 'var(--color-accent)' }}
+            className="text-accent"
           >
             @BotFather
           </a>{' '}
-          in Telegram and send <code style={{ color: 'var(--color-text-2)' }}>/newbot</code>. Give
-          it a display name and a username ending in &ldquo;bot&rdquo;. Copy the token.
+          in Telegram and send <code className="text-text-2">/newbot</code>. Give it a display name
+          and a username ending in &ldquo;bot&rdquo;. Copy the token.
         </p>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           <div className="flex items-center" style={{ gap: 8 }}>
@@ -119,9 +116,7 @@ export function TelegramScreen({
         </div>
         <div className="flex items-center" style={{ gap: 12 }}>
           {finishing && progressMsg && (
-            <span className="text-caption" style={{ color: 'var(--color-text-3)' }}>
-              {progressMsg}
-            </span>
+            <span className="text-caption text-text-3">{progressMsg}</span>
           )}
           <PrimaryButton onClick={onNext} disabled={finishing || !tgResult?.botUsername}>
             {finishing ? 'Setting up\u2026' : 'Finish Setup'}

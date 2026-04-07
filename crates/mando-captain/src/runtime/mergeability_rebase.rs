@@ -61,7 +61,7 @@ pub(super) async fn check_pr_mergeable(pr: &str, repo: &str) -> Result<MergeStat
 /// Reap dead rebase workers and detect success via SHA comparison.
 ///
 /// Uses pid_registry for PID lookup.
-pub(super) async fn reap_dead_rebase_workers(items: &mut [Task]) {
+pub(super) async fn reap_dead_rebase_workers(items: &mut [Task], pool: &sqlx::SqlitePool) {
     for item in items.iter_mut() {
         let rw = match &item.rebase_worker {
             Some(rw) if rw != "failed" => rw.clone(),
@@ -113,9 +113,57 @@ pub(super) async fn reap_dead_rebase_workers(items: &mut [Task]) {
             );
         }
 
-        // Unregister PID for the worker_name key (registered at spawn time).
+        // Mark session as completed/failed in the DB, and collect session_id
+        // for PID unregistration.
+        let status = if succeeded {
+            mando_types::SessionStatus::Stopped
+        } else {
+            mando_types::SessionStatus::Failed
+        };
+        let found_sid =
+            match mando_db::queries::sessions::find_session_id_by_worker_name(pool, &rw).await {
+                Ok(Some(sid)) => {
+                    let cwd = wt.to_string();
+                    let task_id = item.id.to_string();
+                    if let Err(e) = crate::io::headless_cc::log_session_completion(
+                        pool, &sid, &cwd, "rebase", &rw, &task_id, status,
+                    )
+                    .await
+                    {
+                        tracing::warn!(
+                            module = "captain",
+                            session_id = %sid,
+                            error = %e,
+                            "failed to log rebase session completion"
+                        );
+                    }
+                    Some(sid)
+                }
+                Ok(None) => {
+                    tracing::debug!(
+                        module = "captain",
+                        worker = %rw,
+                        "no running session found for rebase worker — skipping completion log"
+                    );
+                    None
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        module = "captain",
+                        worker = %rw,
+                        error = %e,
+                        "failed to look up rebase session by worker_name"
+                    );
+                    None
+                }
+            };
+
+        // Unregister PID for both worker_name and session_id keys.
         if let Err(e) = crate::io::pid_registry::unregister(&rw) {
             tracing::warn!(module = "captain", worker = %rw, %e, "pid_registry unregister failed on rebase completion");
+        }
+        if let Some(ref sid) = found_sid {
+            let _ = crate::io::pid_registry::unregister(sid);
         }
         item.rebase_worker = None;
     }
@@ -139,6 +187,8 @@ pub(super) async fn handle_conflict(
 
     if rebase_retries >= max_rebase_retries {
         let item = &mut items[idx];
+        let snap = super::action_contract::ReviewFieldsSnapshot::capture(item);
+        let saved_rebase_worker = item.rebase_worker.clone();
         item.rebase_worker = Some("failed".into());
         let title = mando_shared::telegram_format::escape_html(&item.title);
 
@@ -149,28 +199,48 @@ pub(super) async fn handle_conflict(
             mando_types::task::ReviewTrigger::RebaseFail,
         );
 
-        let _ = super::timeline_emit::emit_for_task(
-            item,
-            mando_types::timeline::TimelineEventType::CaptainReviewStarted,
-            &format!(
+        let event = mando_types::timeline::TimelineEvent {
+            event_type: mando_types::timeline::TimelineEventType::CaptainReviewStarted,
+            timestamp: mando_types::now_rfc3339(),
+            actor: "captain".to_string(),
+            summary: format!(
                 "Rebase failed after {} retries (PR {}) — captain reviewing",
                 max_rebase_retries, pr
             ),
-            serde_json::json!({
+            data: serde_json::json!({
                 "pr": pr,
                 "retries": max_rebase_retries,
                 "reason": "rebase_exhausted",
             }),
+        };
+        match mando_db::queries::tasks::persist_status_transition(
             pool,
+            item,
+            snap.status.as_str(),
+            &event,
         )
-        .await;
-
-        let msg = format!(
-            "\u{274c} Rebase failed (PR {}, {} retries): <b>{}</b> — captain reviewing",
-            pr, max_rebase_retries, title,
-        );
-        alerts.push(msg.clone());
-        notifier.critical(&msg).await;
+        .await
+        {
+            Ok(true) => {
+                let msg = format!(
+                    "\u{274c} Rebase failed (PR {}, {} retries): <b>{}</b> — captain reviewing",
+                    pr, max_rebase_retries, title,
+                );
+                alerts.push(msg.clone());
+                notifier.critical(&msg).await;
+            }
+            Ok(false) => {
+                tracing::info!(
+                    module = "captain",
+                    "rebase exhausted transition already applied"
+                );
+            }
+            Err(e) => {
+                snap.restore(item);
+                item.rebase_worker = saved_rebase_worker;
+                tracing::error!(module = "captain", error = %e, "persist failed for rebase exhausted");
+            }
+        }
         return;
     }
 
@@ -335,10 +405,32 @@ pub(super) async fn handle_conflict(
     .await
     {
         Ok((pid, _)) => {
-            // Register by session_name (not session_id) so reap_dead_rebase_workers
-            // looks up by worker name and unregisters it on completion.
+            // Register under both session_name (for reap_dead_rebase_workers
+            // lifecycle) and session_id (for session reconciler + terminator).
             if let Err(e) = crate::io::pid_registry::register(&session_name, pid) {
                 tracing::warn!(module = "captain", worker = %session_name, %e, "pid_registry register failed");
+            }
+            if let Err(e) = crate::io::pid_registry::register(&session_id, pid) {
+                tracing::warn!(module = "captain", session_id = %session_id, %e, "pid_registry register (session_id) failed");
+            }
+            // Log "running" session entry so the UI shows it immediately.
+            if let Err(e) = crate::io::headless_cc::log_running_session(
+                pool,
+                &session_id,
+                &wt_path,
+                "rebase",
+                &session_name,
+                &items[idx].id.to_string(),
+                false,
+            )
+            .await
+            {
+                tracing::warn!(
+                    module = "captain",
+                    session_id = %session_id,
+                    error = %e,
+                    "failed to log rebase session"
+                );
             }
             let item = &mut items[idx];
             item.rebase_worker = Some(session_name.clone());

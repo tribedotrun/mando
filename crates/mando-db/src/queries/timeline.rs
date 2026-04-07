@@ -5,6 +5,9 @@ use sqlx::SqlitePool;
 
 use mando_types::timeline::{TimelineEvent, TimelineEventType};
 
+pub(crate) const INSERT_COLS: &str =
+    "task_id, event_type, timestamp, actor, summary, data, dedupe_key";
+
 #[derive(sqlx::FromRow)]
 struct TimelineRow {
     event_type: String,
@@ -30,7 +33,7 @@ impl TimelineRow {
 }
 
 /// Serialize a `TimelineEventType` to its string representation for DB storage.
-fn event_type_to_string(et: TimelineEventType) -> Result<String> {
+pub fn event_type_to_string(et: TimelineEventType) -> Result<String> {
     Ok(serde_json::to_value(et)?
         .as_str()
         .unwrap_or("status_changed")
@@ -38,19 +41,24 @@ fn event_type_to_string(et: TimelineEventType) -> Result<String> {
 }
 
 /// Append an event to a task's timeline.
+///
+/// Generates a unique dedupe key from `{task_id}-{event_type}-{timestamp}`.
+/// For events that need stronger idempotency (status transitions), use
+/// `persist_status_transition` instead which includes a status guard.
 pub async fn append(pool: &SqlitePool, task_id: i64, event: &TimelineEvent) -> Result<()> {
     let event_type_str = event_type_to_string(event.event_type)?;
     let data_str = serde_json::to_string(&event.data)?;
-    sqlx::query(
-        "INSERT INTO timeline_events (task_id, event_type, timestamp, actor, summary, data)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-    )
+    let dedupe_key = format!("{}-{}-{}", task_id, event_type_str, event.timestamp);
+    sqlx::query(&format!(
+        "INSERT INTO timeline_events ({INSERT_COLS}) VALUES (?, ?, ?, ?, ?, ?, ?)"
+    ))
     .bind(task_id)
     .bind(&event_type_str)
     .bind(&event.timestamp)
     .bind(&event.actor)
     .bind(&event.summary)
     .bind(&data_str)
+    .bind(&dedupe_key)
     .execute(pool)
     .await?;
     Ok(())
@@ -138,9 +146,14 @@ pub async fn bulk_insert(pool: &SqlitePool, task_id: i64, events: &[TimelineEven
     for event in events {
         let event_type_str = event_type_to_string(event.event_type)?;
         let data_str = serde_json::to_string(&event.data)?;
+        let dedupe_key = format!(
+            "{}-{}-backfill-{}",
+            task_id, event_type_str, event.timestamp
+        );
         sqlx::query(
-            "INSERT INTO timeline_events (task_id, event_type, timestamp, actor, summary, data)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            "INSERT INTO timeline_events \
+             (task_id, event_type, timestamp, actor, summary, data, dedupe_key) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
         )
         .bind(task_id)
         .bind(&event_type_str)
@@ -148,6 +161,7 @@ pub async fn bulk_insert(pool: &SqlitePool, task_id: i64, events: &[TimelineEven
         .bind(&event.actor)
         .bind(&event.summary)
         .bind(&data_str)
+        .bind(&dedupe_key)
         .execute(&mut *tx)
         .await?;
     }

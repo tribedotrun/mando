@@ -26,5 +26,6 @@ regex = { workspace = true }
 mando-db.workspace = true
 sqlx.workspace = true
 rustc-hash.workspace = true
+tokio-util.workspace = true
 futures = "0.3"
 libc = "0.2"

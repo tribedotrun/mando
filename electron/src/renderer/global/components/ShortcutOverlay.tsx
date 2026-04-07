@@ -41,9 +41,8 @@ export function ShortcutOverlay({ open, onClose }: Props): React.ReactElement | 
 
   return (
     <div
-      className="fixed inset-0 z-[300] flex items-center justify-center"
+      className="fixed inset-0 z-[300] flex items-center justify-center bg-overlay"
       data-shortcut-overlay
-      style={{ background: 'var(--color-overlay)' }}
       onClick={onClose}
     >
       <div
@@ -59,9 +58,7 @@ export function ShortcutOverlay({ open, onClose }: Props): React.ReactElement | 
           className="flex items-center justify-between border-b px-5 py-3"
           style={{ borderColor: 'var(--color-border)' }}
         >
-          <span className="text-body font-semibold" style={{ color: 'var(--color-text-1)' }}>
-            Keyboard shortcuts
-          </span>
+          <span className="text-body font-semibold text-text-1">Keyboard shortcuts</span>
           <button
             onClick={onClose}
             className="text-lg leading-none"
@@ -104,15 +101,11 @@ function ShortcutColumn({
 }): React.ReactElement {
   return (
     <div>
-      <div className="text-label mb-2" style={{ color: 'var(--color-text-4)' }}>
-        {title}
-      </div>
+      <div className="text-label mb-2 text-text-4">{title}</div>
       <div className="space-y-1.5">
         {entries.map((entry, i) => (
           <div key={i} className="flex items-center justify-between gap-2">
-            <span className="text-caption" style={{ color: 'var(--color-text-2)' }}>
-              {entry.label}
-            </span>
+            <span className="text-caption text-text-2">{entry.label}</span>
             <span className="flex shrink-0 items-center gap-1">
               {entry.keys.map((key, ki) => (
                 <Kbd key={ki}>{key}</Kbd>
@@ -128,11 +121,9 @@ function ShortcutColumn({
 function Kbd({ children }: { children: React.ReactNode }): React.ReactElement {
   return (
     <kbd
-      className="inline-flex items-center justify-center rounded px-1.5 py-0.5 text-[10px] font-medium"
+      className="inline-flex items-center justify-center rounded bg-surface-3 px-1.5 py-0.5 text-[10px] font-medium text-text-2"
       style={{
-        background: 'var(--color-surface-3)',
         border: '1px solid var(--color-border)',
-        color: 'var(--color-text-2)',
         fontFamily: 'var(--font-mono, Geist Mono, monospace)',
         minWidth: 20,
         textAlign: 'center',

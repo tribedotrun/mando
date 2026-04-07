@@ -5,13 +5,9 @@ pub(super) static TICK_RUNNING: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
 
 /// RAII guard that clears the TICK_RUNNING flag on drop.
-pub(super) struct TickGuard;
+pub(super) struct TickRunningGuard;
 
-pub(super) fn acquire_tick_guard() -> anyhow::Result<TickGuard> {
-    Ok(TickGuard)
-}
-
-impl Drop for TickGuard {
+impl Drop for TickRunningGuard {
     fn drop(&mut self) {
         TICK_RUNNING.store(false, std::sync::atomic::Ordering::Release);
     }

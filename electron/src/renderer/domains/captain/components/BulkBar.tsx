@@ -46,12 +46,10 @@ export function BulkBar({
         border: '1px solid var(--color-accent)',
       }}
     >
-      <span className="text-code tabular-nums" style={{ color: 'var(--color-accent)' }}>
-        {count} selected
-      </span>
+      <span className="text-code tabular-nums text-accent">{count} selected</span>
       {onBulkStatus && (
         <>
-          <div className="h-4 w-px" style={{ background: 'var(--color-border)' }} />
+          <div className="h-4 w-px bg-border" />
           <select
             onChange={(e) => {
               if (e.target.value) onBulkStatus(e.target.value);
@@ -91,8 +89,8 @@ export function BulkBar({
       </button>
       <button
         onClick={onCancel}
-        className="rounded-md px-3 py-1 text-[12px]"
-        style={{ color: 'var(--color-text-3)', border: '1px solid var(--color-border)' }}
+        className="rounded-md px-3 py-1 text-[12px] text-text-3"
+        style={{ border: '1px solid var(--color-border)' }}
       >
         Clear
       </button>

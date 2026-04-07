@@ -492,9 +492,9 @@ dependencies = [
 
 [[package]]
 name = "fastrand"
-version = "2.4.0"
+version = "2.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a043dc74da1e37d6afe657061213aa6f425f855399a11d3463c6ecccc4dfda1f"
+checksum = "9f1f227452a390804cdb637b74a86990f2a7d7ba4b7d5693aac9b4dd6defd8d6"
 
 [[package]]
 name = "find-msvc-tools"
@@ -1216,7 +1216,7 @@ checksum = "c41e0c4fef86961ac6d6f8a82609f55f31b05e4fce149ac5710e439df7619ba4"
 
 [[package]]
 name = "mando-captain"
-version = "0.1.13-beta.1"
+version = "0.1.13"
 dependencies = [
  "anyhow",
  "futures",
@@ -1237,12 +1237,13 @@ dependencies = [
  "thiserror",
  "time",
  "tokio",
+ "tokio-util",
  "tracing",
 ]
 
 [[package]]
 name = "mando-cc"
-version = "0.1.13-beta.1"
+version = "0.1.13"
 dependencies = [
  "anyhow",
  "libc",
@@ -1258,7 +1259,7 @@ dependencies = [
 
 [[package]]
 name = "mando-cli"
-version = "0.1.13-beta.1"
+version = "0.1.13"
 dependencies = [
  "anyhow",
  "clap",
@@ -1274,7 +1275,7 @@ dependencies = [
 
 [[package]]
 name = "mando-config"
-version = "0.1.13-beta.1"
+version = "0.1.13"
 dependencies = [
  "anyhow",
  "iana-time-zone",
@@ -1290,7 +1291,7 @@ dependencies = [
 
 [[package]]
 name = "mando-db"
-version = "0.1.13-beta.1"
+version = "0.1.13"
 dependencies = [
  "anyhow",
  "mando-config",
@@ -1306,7 +1307,7 @@ dependencies = [
 
 [[package]]
 name = "mando-gateway"
-version = "0.1.13-beta.1"
+version = "0.1.13"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -1346,14 +1347,14 @@ dependencies = [
 
 [[package]]
 name = "mando-readability"
-version = "0.1.13-beta.1"
+version = "0.1.13"
 dependencies = [
  "html5ever",
 ]
 
 [[package]]
 name = "mando-scout"
-version = "0.1.13-beta.1"
+version = "0.1.13"
 dependencies = [
  "anyhow",
  "mando-captain",
@@ -1379,7 +1380,7 @@ dependencies = [
 
 [[package]]
 name = "mando-shared"
-version = "0.1.13-beta.1"
+version = "0.1.13"
 dependencies = [
  "anyhow",
  "mando-config",
@@ -1396,7 +1397,7 @@ dependencies = [
 
 [[package]]
 name = "mando-telegram"
-version = "0.1.13-beta.1"
+version = "0.1.13"
 dependencies = [
  "anyhow",
  "clap",
@@ -1416,7 +1417,7 @@ dependencies = [
 
 [[package]]
 name = "mando-types"
-version = "0.1.13-beta.1"
+version = "0.1.13"
 dependencies = [
  "mando-uuid",
  "serde",
@@ -1427,7 +1428,7 @@ dependencies = [
 
 [[package]]
 name = "mando-uuid"
-version = "0.1.13-beta.1"
+version = "0.1.13"
 dependencies = [
  "getrandom 0.2.17",
 ]

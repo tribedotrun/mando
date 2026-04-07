@@ -89,7 +89,7 @@ export function ProjectEditor({
         background: 'var(--color-surface-1)',
       }}
     >
-      <h4 className="text-sm font-medium" style={{ color: 'var(--color-text-1)' }}>
+      <h4 className="text-sm font-medium text-text-1">
         {isNew ? 'Add Project' : `Edit ${project.name || initialPathKey}`}
       </h4>
 
@@ -125,9 +125,7 @@ export function ProjectEditor({
           placeholder="mando"
         />
         {nameConflict && (
-          <p className="mt-1 text-xs" style={{ color: 'var(--color-error)' }}>
-            A project with this name already exists.
-          </p>
+          <p className="mt-1 text-xs text-error">A project with this name already exists.</p>
         )}
       </div>
 
@@ -177,15 +175,9 @@ export function ProjectEditor({
             >
               {detectingLogo ? 'Detecting...' : logoFile ? 'Re-detect' : 'Detect logo'}
             </button>
-            {detectError && (
-              <span className="text-xs" style={{ color: 'var(--color-error)' }}>
-                {detectError}
-              </span>
-            )}
+            {detectError && <span className="text-xs text-error">{detectError}</span>}
             {!logoFile && !detectingLogo && !detectError && (
-              <span className="text-xs" style={{ color: 'var(--color-text-3)' }}>
-                No logo detected
-              </span>
+              <span className="text-xs text-text-3">No logo detected</span>
             )}
           </div>
         </div>
@@ -258,17 +250,14 @@ export function ProjectEditor({
           onChange={(e) => setScoutSummary(e.target.value)}
           placeholder="Auto-generated from project metadata"
         />
-        <p className="mt-1 text-xs" style={{ color: 'var(--color-text-3)' }}>
+        <p className="mt-1 text-xs text-text-3">
           Describes this project to Scout for context-aware analysis.
         </p>
       </div>
 
       {/* Hooks */}
       <details className="group">
-        <summary
-          className="cursor-pointer text-xs font-medium"
-          style={{ color: 'var(--color-text-2)' }}
-        >
+        <summary className="cursor-pointer text-xs font-medium text-text-2">
           Hooks (optional)
         </summary>
         <div className="mt-3 space-y-3">
@@ -316,16 +305,11 @@ export function ProjectEditor({
           data-testid="project-save-btn"
           onClick={handleSubmit}
           disabled={!name.trim() || !projectPath.trim() || nameConflict}
-          className="rounded-md px-4 py-2 text-sm font-medium disabled:opacity-40"
-          style={{ background: 'var(--color-accent)', color: 'var(--color-bg)' }}
+          className="rounded-md px-4 py-2 text-sm font-medium bg-accent text-bg disabled:opacity-40"
         >
           {isNew ? 'Add' : 'Save'}
         </button>
-        <button
-          onClick={onCancel}
-          className="rounded-md px-4 py-2 text-sm"
-          style={{ color: 'var(--color-text-2)' }}
-        >
+        <button onClick={onCancel} className="rounded-md px-4 py-2 text-sm text-text-2">
           Cancel
         </button>
       </div>

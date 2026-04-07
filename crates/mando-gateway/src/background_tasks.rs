@@ -86,6 +86,7 @@ pub fn spawn_auto_tick(state: &AppState, tick_interval_s: u64) {
                             Some(&tick_bus),
                             true,
                             &tick_store,
+                            &cancel,
                         )
                         .await
                         {

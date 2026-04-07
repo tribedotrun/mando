@@ -126,7 +126,8 @@ pub async fn handle(bot: &TelegramBot, chat_id: &str, args: &str) -> Result<()> 
     lines.push(format!("\u{1f4ca} <b>Tasks</b> ({} items)", display.len()));
     lines.push(summary_parts.join(" "));
 
-    let mut merge_buttons: Vec<serde_json::Value> = Vec::new();
+    let mut action_buttons: Vec<serde_json::Value> = Vec::new();
+    let mut view_ids: Vec<i64> = Vec::new();
 
     // Group by repo
     let mut by_repo: std::collections::BTreeMap<String, Vec<&mando_types::Task>> =
@@ -184,41 +185,60 @@ pub async fn handle(bot: &TelegramBot, chat_id: &str, args: &str) -> Result<()> 
                     ItemStatus::AwaitingReview => {
                         if let Some(ref pr) = item.pr {
                             let pr_num = pr.trim_start_matches('#');
-                            merge_buttons.push(json!([{
+                            action_buttons.push(json!([{
                                 "text": format!("Merge PR #{pr_num}"),
                                 "callback_data": format!("merge:{id}"),
                             }]));
                         } else {
-                            merge_buttons.push(json!([{
+                            action_buttons.push(json!([{
                                 "text": format!("\u{2705} Accept \u{2014} {title_short}"),
                                 "callback_data": format!("accept:{id}"),
                             }]));
                         }
                     }
                     ItemStatus::NeedsClarification => {
-                        merge_buttons.push(json!([{
+                        action_buttons.push(json!([{
                             "text": format!("\u{1f4ac} Answer \u{2014} {title_short}"),
                             "callback_data": format!("answer:{id}"),
                         }]));
                     }
                     ItemStatus::Errored => {
-                        merge_buttons.push(json!([{
+                        action_buttons.push(json!([{
                             "text": format!("\u{1f504} Retry \u{2014} {title_short}"),
                             "callback_data": format!("retry:{id}"),
                         }]));
                     }
                     _ => {}
                 }
+
+                view_ids.push(id);
             }
         }
+    }
+
+    // Per-task detail buttons — ID only to keep the keyboard compact.
+    // 5 per row, capped at 15 to stay within Telegram's 100-button limit.
+    const MAX_VIEW_BUTTONS: usize = 15;
+    let capped = &view_ids[..view_ids.len().min(MAX_VIEW_BUTTONS)];
+    for row in capped.chunks(5) {
+        let btns: Vec<serde_json::Value> = row
+            .iter()
+            .map(|id| {
+                json!({
+                    "text": format!("#{id}"),
+                    "callback_data": format!("view:{id}"),
+                })
+            })
+            .collect();
+        action_buttons.push(serde_json::Value::Array(btns));
     }
 
     let text = lines.join("\n");
     let chunks = split_message(&text, 3800);
 
     for (i, chunk) in chunks.iter().enumerate() {
-        let markup = if i == 0 && !merge_buttons.is_empty() {
-            Some(json!({"inline_keyboard": merge_buttons}))
+        let markup = if i == 0 && !action_buttons.is_empty() {
+            Some(json!({"inline_keyboard": action_buttons}))
         } else {
             None
         };

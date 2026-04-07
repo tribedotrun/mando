@@ -299,9 +299,24 @@ async fn test_spawn_review_preserves_existing_review_fail_count() {
     item.review_fail_count = 4;
     item.worktree = Some(worktree.to_string_lossy().to_string());
 
+    // Insert the task into the DB so persist_status_transition's guard can match.
+    let store = crate::io::task_store::TaskStore::new(pool.clone());
+    let id = store.add(item.clone()).await.unwrap();
+    item.id = id;
+    // Re-set status after insert (add() may normalize it).
+    store
+        .update(id, |t| {
+            t.status = mando_types::task::ItemStatus::CaptainReviewing;
+            t.review_fail_count = 4;
+        })
+        .await
+        .unwrap();
+    item.status = mando_types::task::ItemStatus::CaptainReviewing;
+
     spawn_review(
         &mut item,
         "retry",
+        None, // already CaptainReviewing in DB
         &mando_config::Config::default(),
         &workflow,
         &notifier,

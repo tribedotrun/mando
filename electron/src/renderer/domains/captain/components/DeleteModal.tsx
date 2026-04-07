@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import type { TaskItem } from '#renderer/types';
-import { useFocusTrap } from '#renderer/global/hooks/useFocusTrap';
+import { Dialog, DialogContent, DialogTitle } from '#renderer/global/components/Dialog';
 
 interface Props {
   items: TaskItem[];
@@ -23,26 +23,11 @@ export function DeleteModal({
   const hasPr = safe.some((b) => b.pr);
 
   const [closePr, setClosePr] = useState(false);
-  const { ref: dialogRef, handleKeyDown } = useFocusTrap(onCancel);
 
   return (
-    <div
-      data-testid="delete-modal"
-      role="dialog"
-      aria-modal="true"
-      aria-label="Delete Items"
-      className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60"
-      onClick={(e) => e.target === e.currentTarget && onCancel()}
-      onKeyDown={handleKeyDown}
-    >
-      <div
-        ref={dialogRef}
-        className="max-h-[80vh] w-[440px] max-w-[90vw] overflow-y-auto rounded-lg p-5"
-        style={{ background: 'var(--color-surface-2)', border: '1px solid var(--color-border)' }}
-      >
-        <h3 className="text-subheading mb-3" style={{ color: 'var(--color-text-1)' }}>
-          Delete Items
-        </h3>
+    <Dialog open={true} onOpenChange={() => onCancel()}>
+      <DialogContent data-testid="delete-modal" className="max-h-[80vh] overflow-y-auto">
+        <DialogTitle>Delete Items</DialogTitle>
 
         <ul className="mb-3 max-h-[180px] overflow-y-auto">
           {safe.map((b) => (
@@ -72,10 +57,7 @@ export function DeleteModal({
         </ul>
 
         {hasPr && (
-          <div
-            className="mb-3 flex flex-col gap-2 rounded-md px-3 py-2"
-            style={{ background: 'var(--color-surface-3)' }}
-          >
+          <div className="mb-3 flex flex-col gap-2 rounded-md px-3 py-2 bg-surface-3">
             <label className="flex cursor-pointer items-center gap-2 text-[13px]">
               <input
                 type="checkbox"
@@ -83,18 +65,13 @@ export function DeleteModal({
                 onChange={(e) => setClosePr(e.target.checked)}
                 style={{ accentColor: 'var(--color-accent)' }}
               />
-              <span style={{ color: 'var(--color-text-2)' }}>Close associated PRs</span>
+              <span className="text-text-2">Close associated PRs</span>
             </label>
           </div>
         )}
 
         {error && (
-          <p
-            className="mb-2 rounded-md px-3 py-2 text-[13px]"
-            style={{ background: 'var(--color-error-bg)', color: 'var(--color-error)' }}
-          >
-            {error}
-          </p>
+          <p className="mb-2 rounded-md px-3 py-2 text-[13px] bg-error-bg text-error">{error}</p>
         )}
 
         <div className="flex justify-end gap-2">
@@ -122,7 +99,7 @@ export function DeleteModal({
             {deleting ? 'Deleting...' : `Delete ${safe.length} item${safe.length !== 1 ? 's' : ''}`}
           </button>
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }

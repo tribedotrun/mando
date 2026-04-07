@@ -2,7 +2,7 @@ import React from 'react';
 import { cardStyle } from '#renderer/styles';
 import { useSettingsStore } from '#renderer/domains/settings/stores/settingsStore';
 import type { CaptainConfig } from '#renderer/domains/settings/stores/settingsStore';
-import { ToggleSwitch } from '#renderer/global/components/ToggleSwitch';
+import { Switch } from '#renderer/global/components/Switch';
 
 const EMPTY_CAPTAIN: CaptainConfig = {};
 
@@ -13,25 +13,23 @@ export function SettingsCaptain(): React.ReactElement {
 
   return (
     <div data-testid="settings-captain">
-      <h2 className="text-heading" style={{ color: 'var(--color-text-1)', marginBottom: 4 }}>
+      <h2 className="text-heading text-text-1" style={{ marginBottom: 4 }}>
         Captain
       </h2>
-      <p className="text-caption" style={{ color: 'var(--color-text-3)', marginBottom: 24 }}>
+      <p className="text-caption text-text-3" style={{ marginBottom: 24 }}>
         Ticks every 30 seconds to check task progress, review PRs, and intervene when needed.
       </p>
 
       <div style={cardStyle}>
         <div className="flex items-center justify-between">
           <div>
-            <h3 className="text-sm font-medium" style={{ color: 'var(--color-text-2)' }}>
-              Auto Tick
-            </h3>
+            <h3 className="text-sm font-medium text-text-2">Auto Tick</h3>
           </div>
-          <ToggleSwitch
+          <Switch
             testId="captain-auto-tick"
             checked={!!captain.autoSchedule}
-            onChange={() => {
-              updateSection('captain', { autoSchedule: !captain.autoSchedule });
+            onCheckedChange={(checked) => {
+              updateSection('captain', { autoSchedule: checked });
               save();
             }}
           />

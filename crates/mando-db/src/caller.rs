@@ -21,6 +21,7 @@ pub enum SessionCaller {
     ScoutQa,
     ScoutResearch,
     ScoutAct,
+    Rebase,
 }
 
 /// Display group — used for UI category chips and aggregation.
@@ -32,6 +33,7 @@ pub enum CallerGroup {
     CaptainOps,
     TodoParser,
     Scout,
+    Rebase,
 }
 
 impl SessionCaller {
@@ -51,6 +53,7 @@ impl SessionCaller {
             Self::ScoutQa => "scout-qa",
             Self::ScoutResearch => "scout-research",
             Self::ScoutAct => "scout-act",
+            Self::Rebase => "rebase",
         }
     }
 
@@ -70,6 +73,7 @@ impl SessionCaller {
             "scout-qa" => Some(Self::ScoutQa),
             "scout-research" => Some(Self::ScoutResearch),
             "scout-act" => Some(Self::ScoutAct),
+            "rebase" => Some(Self::Rebase),
             // Prefixed callers: session key includes an embedded ID but maps
             // to the same logical caller for grouping/display.
             s if s.starts_with("parse-todos-") => Some(Self::ParseTodos),
@@ -93,6 +97,7 @@ impl SessionCaller {
             | Self::ScoutQa
             | Self::ScoutResearch
             | Self::ScoutAct => CallerGroup::Scout,
+            Self::Rebase => CallerGroup::Rebase,
         }
     }
 
@@ -112,6 +117,7 @@ impl SessionCaller {
             Self::ScoutQa,
             Self::ScoutResearch,
             Self::ScoutAct,
+            Self::Rebase,
         ]
     }
 
@@ -147,6 +153,7 @@ impl CallerGroup {
             Self::CaptainOps => "captain-ops",
             Self::TodoParser => "todo-parser",
             Self::Scout => "scout",
+            Self::Rebase => "rebase",
         }
     }
 }

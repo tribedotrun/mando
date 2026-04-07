@@ -1,7 +1,8 @@
 import React, { useCallback, useState } from 'react';
+import { ClipboardCheck } from 'lucide-react';
 import { apiPost } from '#renderer/domains/captain/hooks/useApi';
 import { useSettingsStore } from '#renderer/domains/settings';
-import { useToastStore } from '#renderer/global/stores/toastStore';
+import { toast } from 'sonner';
 import { getErrorMessage } from '#renderer/utils';
 
 export function TaskEmptyState(): React.ReactElement {
@@ -19,7 +20,7 @@ export function TaskEmptyState(): React.ReactElement {
     try {
       dir = await window.mandoAPI.selectDirectory();
     } catch (err) {
-      useToastStore.getState().add('error', getErrorMessage(err, 'Directory picker failed'));
+      toast.error(getErrorMessage(err, 'Directory picker failed'));
       return;
     }
     if (!dir) return;
@@ -29,7 +30,7 @@ export function TaskEmptyState(): React.ReactElement {
       await apiPost('/api/projects', { path: dir });
       useSettingsStore.getState().load();
     } catch (err) {
-      useToastStore.getState().add('error', getErrorMessage(err, 'Failed to add project'));
+      toast.error(getErrorMessage(err, 'Failed to add project'));
     } finally {
       setAdding(false);
     }
@@ -37,28 +38,11 @@ export function TaskEmptyState(): React.ReactElement {
 
   return (
     <div className="flex flex-col items-center justify-center py-16">
-      <svg width="48" height="48" viewBox="0 0 48 48" fill="none" className="mb-4">
-        <rect
-          x="8"
-          y="8"
-          width="32"
-          height="32"
-          rx="6"
-          stroke="var(--color-text-4)"
-          strokeWidth="1.5"
-        />
-        <path
-          d="M18 24l4 4 8-8"
-          stroke="var(--color-text-4)"
-          strokeWidth="1.5"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-      </svg>
-      <span className="text-subheading mb-1" style={{ color: 'var(--color-text-2)' }}>
+      <ClipboardCheck size={48} color="var(--color-text-4)" strokeWidth={1} className="mb-4" />
+      <span className="text-subheading mb-1 text-text-2">
         {hasProjects ? 'No tasks yet' : 'Add a project to get started'}
       </span>
-      <span className="text-body mb-4" style={{ color: 'var(--color-text-3)' }}>
+      <span className="text-body mb-4 text-text-3">
         {hasProjects
           ? 'Create a task and Captain will pick it up automatically.'
           : 'Mando needs a project folder to manage tasks.'}

@@ -99,6 +99,8 @@ impl Db {
 const MIGRATIONS: &[(i64, &str)] = &[
     (1, include_str!("../migrations/001_initial.sql")),
     (2, include_str!("../migrations/002_drop_linear.sql")),
+    (3, include_str!("../migrations/003_timeline_dedup.sql")),
+    (4, include_str!("../migrations/004_drop_branch.sql")),
 ];
 
 #[cfg(test)]

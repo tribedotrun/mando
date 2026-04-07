@@ -13,7 +13,6 @@ import {
 } from '#renderer/domains/settings/components/SettingsPage';
 import { DevInfoBar } from '#renderer/global/components/DevInfoBar';
 import { CommandPalette } from '#renderer/global/components/CommandPalette';
-import { ToastContainer } from '#renderer/global/components/ToastContainer';
 import { BulkCreateProgress } from '#renderer/domains/captain/components/BulkCreateProgress';
 import { CreateTaskModal } from '#renderer/domains/captain/components/AddTaskForm';
 import { MergeModal } from '#renderer/domains/captain/components/MergeModal';
@@ -24,7 +23,7 @@ import { ErrorBoundary } from '#renderer/global/components/ErrorBoundary';
 import { useSettingsStore } from '#renderer/domains/settings/stores/settingsStore';
 import { useTaskStore } from '#renderer/domains/captain/stores/taskStore';
 import { apiPost, apiPatch, apiDel } from '#renderer/api';
-import { useToastStore } from '#renderer/global/stores/toastStore';
+import { toast } from 'sonner';
 import { getErrorMessage } from '#renderer/utils';
 
 const SETUP_TOTAL = 3;
@@ -188,7 +187,7 @@ export function App(): React.ReactElement {
 
   if (detailItem) {
     return (
-      <div className="flex h-screen flex-col" style={{ background: 'var(--color-bg)' }}>
+      <div className="flex h-screen flex-col bg-bg">
         <div className="h-8 shrink-0" style={{ WebkitAppRegion: 'drag' } as React.CSSProperties} />
         <div className="flex-1 overflow-hidden px-8 py-4">
           <ErrorBoundary fallbackLabel="Task detail">
@@ -223,14 +222,13 @@ export function App(): React.ReactElement {
           initialProject={projectFilter}
         />
         <ShortcutOverlay open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
-        <ToastContainer />
         <BulkCreateProgress />
       </div>
     );
   }
 
   return (
-    <div className="relative flex h-screen flex-col" style={{ background: 'var(--color-bg)' }}>
+    <div className="relative flex h-screen flex-col bg-bg">
       {/* Title bar drag region, absolute so it doesn't push content down */}
       <div
         className="absolute inset-x-0 top-0 z-10 h-8"
@@ -258,23 +256,15 @@ export function App(): React.ReactElement {
         {/* Disconnected banner, mt-8 clears absolute drag region */}
         {sseStatus === 'disconnected' && (
           <div
-            className="flex shrink-0 items-center gap-3 px-4 mt-8"
+            className="flex shrink-0 items-center gap-3 px-4 mt-8 bg-surface-1"
             style={{
               height: 40,
-              background: 'var(--color-surface-1)',
               borderBottom: '1px solid var(--color-border-subtle)',
             }}
           >
-            <span
-              className="h-2 w-2 shrink-0 rounded-full"
-              style={{ background: 'var(--color-stale)' }}
-            />
-            <span className="text-body font-medium" style={{ color: 'var(--color-text-1)' }}>
-              Daemon disconnected
-            </span>
-            <span className="text-caption" style={{ color: 'var(--color-text-3)' }}>
-              Reconnecting&hellip;
-            </span>
+            <span className="h-2 w-2 shrink-0 rounded-full bg-stale" />
+            <span className="text-body font-medium text-text-1">Daemon disconnected</span>
+            <span className="text-caption text-text-3">Reconnecting&hellip;</span>
             <span className="flex-1" />
             <RetryButton
               className="rounded-md px-3 py-1 text-[13px] font-medium"
@@ -325,9 +315,7 @@ export function App(): React.ReactElement {
                 await apiPost('/api/projects', { path: dir });
                 useSettingsStore.getState().load();
               } catch (err) {
-                useToastStore
-                  .getState()
-                  .add('error', getErrorMessage(err, 'Failed to add project'));
+                toast.error(getErrorMessage(err, 'Failed to add project'));
               }
             }}
             onRenameProject={async (oldName, newName) => {
@@ -337,11 +325,9 @@ export function App(): React.ReactElement {
                 });
                 await useSettingsStore.getState().load();
                 setProjectFilter((prev) => (prev === oldName ? newName : prev));
-                useToastStore.getState().add('success', `Renamed to "${newName}"`);
+                toast.success(`Renamed to "${newName}"`);
               } catch (err) {
-                useToastStore
-                  .getState()
-                  .add('error', getErrorMessage(err, 'Failed to rename project'));
+                toast.error(getErrorMessage(err, 'Failed to rename project'));
               }
             }}
             onRemoveProject={async (name) => {
@@ -358,11 +344,9 @@ export function App(): React.ReactElement {
                   res.deleted_tasks > 0
                     ? ` and ${res.deleted_tasks} task${res.deleted_tasks !== 1 ? 's' : ''}`
                     : '';
-                useToastStore.getState().add('success', `Deleted "${name}"${taskMsg}`);
+                toast.success(`Deleted "${name}"${taskMsg}`);
               } catch (err) {
-                useToastStore
-                  .getState()
-                  .add('error', getErrorMessage(err, 'Failed to remove project'));
+                toast.error(getErrorMessage(err, 'Failed to remove project'));
               }
             }}
             onToggleSetup={() => setSetupActive((v) => !v)}
@@ -374,10 +358,7 @@ export function App(): React.ReactElement {
           />
 
           {/* Main content, always visible, popover floats above from sidebar */}
-          <main
-            className="relative flex-1 overflow-hidden"
-            style={{ background: 'var(--color-bg)' }}
-          >
+          <main className="relative flex-1 overflow-hidden bg-bg">
             {/* All tabs stay mounted and stacked. Active tab sits on top via
                 z-index; inactive tabs are behind the opaque background, no
                 visibility/display changes, so CSS transitions can't flash. */}
@@ -386,10 +367,9 @@ export function App(): React.ReactElement {
               return (
                 <div
                   key={tab}
-                  className="absolute inset-0 overflow-auto"
+                  className="absolute inset-0 overflow-auto bg-bg"
                   style={{
                     padding: '38px 32px 24px',
-                    background: 'var(--color-bg)',
                     zIndex: isActive ? 1 : 0,
                     pointerEvents: isActive ? undefined : 'none',
                   }}
@@ -435,7 +415,6 @@ export function App(): React.ReactElement {
         initialProject={projectFilter}
       />
       <ShortcutOverlay open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
-      <ToastContainer />
       <BulkCreateProgress />
     </div>
   );

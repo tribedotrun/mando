@@ -18,13 +18,25 @@ use mando_shared::EventBus;
 use mando_types::captain::{TickMode, TickResult};
 use mando_types::task::ItemStatus;
 use tokio::sync::RwLock;
+use tokio_util::sync::CancellationToken;
 
+use super::tick_guard::{TickRunningGuard, TICK_RUNNING};
+use super::tick_spawn::default_tick_result;
+pub use super::tick_spawn::{spawn_worker_for_item, ItemSpawnResult};
 use crate::io::{health_store, task_store, task_store::TaskStore};
 use crate::runtime::{mergeability, review_phase, spawn_phase};
 
-use super::tick_guard::{acquire_tick_guard, TICK_RUNNING};
-use super::tick_spawn::default_tick_result;
-pub use super::tick_spawn::{spawn_worker_for_item, ItemSpawnResult};
+/// SIGTERM cancellation checkpoint -- returns a Skipped result when cancelled.
+fn cancelled_result(cancel: &CancellationToken, phase: &str) -> Option<TickResult> {
+    if !cancel.is_cancelled() {
+        return None;
+    }
+    tracing::info!(module = "captain", "tick cancelled after {phase}");
+    Some(TickResult {
+        mode: TickMode::Skipped,
+        ..default_tick_result()
+    })
+}
 
 /// Run a single captain tick cycle (with concurrency guard).
 /// Takes an Arc<RwLock> and manages locking internally — brief lock at start
@@ -36,6 +48,7 @@ pub(crate) async fn run_captain_tick(
     bus: Option<&EventBus>,
     emit_notifications: bool,
     store_lock: &Arc<RwLock<TaskStore>>,
+    cancel: &CancellationToken,
 ) -> Result<TickResult> {
     // Generate a per-tick trace ID for cross-process log correlation.
     let tick_id = mando_uuid::Uuid::v4().short();
@@ -51,19 +64,8 @@ pub(crate) async fn run_captain_tick(
             ..default_tick_result()
         });
     }
-    let _guard = match acquire_tick_guard() {
-        Ok(guard) => guard,
-        Err(e) => {
-            TICK_RUNNING.store(false, std::sync::atomic::Ordering::Release);
-            tracing::warn!(module = "captain", tick_id = %tick_id, error = %e, "captain tick lock held elsewhere, skipping");
-            return Ok(TickResult {
-                mode: TickMode::Skipped,
-                tick_id: Some(tick_id),
-                error: Some(e.to_string()),
-                ..default_tick_result()
-            });
-        }
-    };
+    // RAII guard: clears TICK_RUNNING on drop (normal exit or panic).
+    let _guard = TickRunningGuard;
     let _file_lock = match crate::io::captain_lock::try_acquire() {
         Ok(lock) => lock,
         Err(e) => {
@@ -84,6 +86,7 @@ pub(crate) async fn run_captain_tick(
         bus,
         emit_notifications,
         store_lock,
+        cancel,
     )
     .instrument(span)
     .await?;
@@ -99,6 +102,7 @@ async fn run_captain_tick_inner(
     bus: Option<&EventBus>,
     emit_notifications: bool,
     store_lock: &Arc<RwLock<TaskStore>>,
+    cancel: &CancellationToken,
 ) -> Result<TickResult> {
     let mode = if dry_run {
         TickMode::DryRun
@@ -142,9 +146,12 @@ async fn run_captain_tick_inner(
             store.pool().clone(),
         )
     };
-    // Snapshot item IDs + serialized state so we only write back items the tick changed.
-    // Serialization failure is a schema bug, not a runtime glitch; propagate so
-    // the tick surfaces the problem instead of silently dropping items.
+    // Sync branch from worktrees before snapshotting (mando-pr renames branches).
+    if !dry_run {
+        super::tick_branch_sync::sync_branches(&mut items).await;
+    }
+
+    // Snapshot item state so we only write back items the tick changed.
     let mut pre_tick_snapshot: std::collections::HashMap<i64, serde_json::Value> =
         std::collections::HashMap::with_capacity(items.len());
     for it in items.iter() {
@@ -202,14 +209,12 @@ async fn run_captain_tick_inner(
     super::tick_persist::flush_discovered_prs(&items, &pre_tick_snapshot, store_lock, &mut alerts)
         .await;
 
+    // ── SIGTERM checkpoint: between §2 GATHER and §3 CLASSIFY ─────────
+    if let Some(r) = cancelled_result(cancel, "GATHER phase") {
+        return Ok(r);
+    }
+
     // ── §3 CLASSIFY — single pass over all non-terminal items ─────────
-    //
-    // InProgress items go through deterministic classifier + LLM review.
-    // Crash detection is folded in: dead process + work not done = Nudge.
-    // AwaitingReview items go through mergeability checks.
-    // Other non-terminal statuses (Rework, New, Queued, Clarifying,
-    // NeedsClarification, CaptainReviewing) are handled in the dispatch
-    // phase below.
 
     let classify_result = super::tick_classify::classify_and_update_health(
         &worker_contexts,
@@ -221,12 +226,6 @@ async fn run_captain_tick_inner(
     let actions_to_execute = classify_result.actions_to_execute;
     dry_actions.extend(classify_result.dry_actions);
 
-    // Crash detection — folded into classify. Dead process with incomplete work
-    // is handled by the deterministic classifier as a Nudge ("continue") action.
-    // The detect_crashed_workers phase is no longer needed as a separate step.
-
-    // Mergeability — folded into classify. AwaitingReview items are checked
-    // for merge conflicts, CI status, and review threads in the same pass.
     if !dry_run {
         if let Err(e) = mergeability::check_done_mergeability(
             &mut items,
@@ -300,6 +299,11 @@ async fn run_captain_tick_inner(
         .await;
     }
 
+    // ── SIGTERM checkpoint: between §3 CLASSIFY and §4 EXECUTE ─────────
+    if let Some(r) = cancelled_result(cancel, "CLASSIFY phase") {
+        return Ok(r);
+    }
+
     // ── §4 EXECUTE — all actions ──────────────────────────────────────
 
     if !dry_run {
@@ -366,7 +370,12 @@ async fn run_captain_tick_inner(
                 resource_limits,
                 &pool,
             )
-            .await?;
+            .await;
+        }
+
+        // ── SIGTERM checkpoint: between §4 EXECUTE and write-back ───────
+        if let Some(r) = cancelled_result(cancel, "EXECUTE phase") {
+            return Ok(r);
         }
 
         // Brief write lock: only write back items the tick actually modified.

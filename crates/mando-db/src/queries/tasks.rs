@@ -9,6 +9,12 @@ use mando_types::task::{Task, TaskRouting};
 
 use super::tasks_row::{RoutingRow, TaskRow};
 
+// Re-export persist helpers so `queries::tasks::persist_*` paths keep working.
+pub use super::tasks_persist::{
+    persist_clarify_result, persist_clarify_start, persist_merge_spawn, persist_spawn,
+    persist_status_transition,
+};
+
 type SqliteQuery<'q> = Query<'q, Sqlite, SqliteArguments<'q>>;
 
 /// Explicit column list matching [`TaskRow`] fields — avoids `SELECT *` which
@@ -16,7 +22,7 @@ type SqliteQuery<'q> = Query<'q, Sqlite, SqliteArguments<'q>>;
 /// removed column slots.
 const SELECT_COLS: &str = "\
     id, title, status, project, worker, resource, context, original_prompt, \
-    created_at, worktree, branch, pr, worker_started_at, intervention_count, \
+    created_at, worktree, pr, worker_started_at, intervention_count, \
     captain_review_trigger, session_ids, last_activity_at, plan, no_pr, \
     worker_seq, reopen_seq, reopen_source, images, review_fail_count, \
     clarifier_fail_count, spawn_fail_count, merge_fail_count, \
@@ -58,47 +64,76 @@ pub async fn routing(pool: &SqlitePool) -> Result<Vec<TaskRouting>> {
 
 // ── Column list constants ────────────────────────────────────────────────────
 
-const INSERT_COLS: &str = "title, status, project, worker, resource, context,
-    original_prompt, created_at, worktree, branch, pr, worker_started_at,
-    intervention_count, captain_review_trigger, session_ids,
-    last_activity_at, plan, no_pr, worker_seq, reopen_seq,
-    reopen_source, images, review_fail_count, clarifier_fail_count, spawn_fail_count,
-    merge_fail_count, escalation_report, source, archived_at, github_repo";
+/// Single source of truth for writable task columns.
+/// Order must match the `.bind()` calls in [`bind_task_write_fields`].
+const WRITE_COLS: &[&str] = &[
+    "title",
+    "status",
+    "project",
+    "worker",
+    "resource",
+    "context",
+    "original_prompt",
+    "created_at",
+    "worktree",
+    "pr",
+    "worker_started_at",
+    "intervention_count",
+    "captain_review_trigger",
+    "session_ids",
+    "last_activity_at",
+    "plan",
+    "no_pr",
+    "worker_seq",
+    "reopen_seq",
+    "reopen_source",
+    "images",
+    "review_fail_count",
+    "clarifier_fail_count",
+    "spawn_fail_count",
+    "merge_fail_count",
+    "escalation_report",
+    "source",
+    "archived_at",
+    "github_repo",
+];
 
-const INSERT_PLACEHOLDERS: &str =
-    "?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30";
-
-const INSERT_WITH_ID_PLACEHOLDERS: &str =
-    "?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31";
-
-const UPDATE_SET: &str = "title=?1, status=?2, project=?3, worker=?4, resource=?5,
-    context=?6, original_prompt=?7, created_at=?8, worktree=?9, branch=?10, pr=?11,
-    worker_started_at=?12, intervention_count=?13, captain_review_trigger=?14,
-    session_ids=?15, last_activity_at=?16, plan=?17,
-    no_pr=?18, worker_seq=?19, reopen_seq=?20, reopen_source=?21, images=?22,
-    review_fail_count=?23, clarifier_fail_count=?24, spawn_fail_count=?25, merge_fail_count=?26,
-    escalation_report=?27, source=?28, archived_at=?29, github_repo=?30";
 fn insert_task_sql() -> &'static str {
     static SQL: OnceLock<String> = OnceLock::new();
-    SQL.get_or_init(|| format!("INSERT INTO tasks ({INSERT_COLS}) VALUES ({INSERT_PLACEHOLDERS})"))
-        .as_str()
+    SQL.get_or_init(|| {
+        let cols = WRITE_COLS.join(", ");
+        let placeholders = vec!["?"; WRITE_COLS.len()].join(", ");
+        format!("INSERT INTO tasks ({cols}) VALUES ({placeholders})")
+    })
 }
 
 fn insert_task_with_id_sql() -> &'static str {
     static SQL: OnceLock<String> = OnceLock::new();
     SQL.get_or_init(|| {
-        format!("INSERT INTO tasks (id, {INSERT_COLS}) VALUES ({INSERT_WITH_ID_PLACEHOLDERS})")
+        let cols = WRITE_COLS.join(", ");
+        let placeholders = vec!["?"; WRITE_COLS.len() + 1].join(", ");
+        format!("INSERT INTO tasks (id, {cols}) VALUES ({placeholders})")
     })
-    .as_str()
+}
+
+/// Generate `col1=?, col2=?, ...` SET clause from WRITE_COLS.
+pub(crate) fn update_set_clause() -> String {
+    WRITE_COLS
+        .iter()
+        .map(|c| format!("{c}=?"))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 fn update_task_sql() -> &'static str {
     static SQL: OnceLock<String> = OnceLock::new();
-    SQL.get_or_init(|| format!("UPDATE tasks SET {UPDATE_SET} WHERE id=?31"))
-        .as_str()
+    SQL.get_or_init(|| format!("UPDATE tasks SET {} WHERE id=?", update_set_clause()))
 }
 
-fn bind_task_write_fields<'q>(query: SqliteQuery<'q>, task: &'q Task) -> SqliteQuery<'q> {
+pub(crate) fn bind_task_write_fields<'q>(
+    query: SqliteQuery<'q>,
+    task: &'q Task,
+) -> SqliteQuery<'q> {
     let trigger_str = task
         .captain_review_trigger
         .map(|trigger| trigger.as_str().to_string());
@@ -113,7 +148,6 @@ fn bind_task_write_fields<'q>(query: SqliteQuery<'q>, task: &'q Task) -> SqliteQ
         .bind(&task.original_prompt)
         .bind(&task.created_at)
         .bind(&task.worktree)
-        .bind(&task.branch)
         .bind(&task.pr)
         .bind(&task.worker_started_at)
         .bind(task.intervention_count)
@@ -253,91 +287,6 @@ pub async fn merge_changed_items(
         }
     }
     tx.commit().await?;
-    Ok(())
-}
-
-/// Immediately persist critical worker fields after spawn.
-///
-/// Writes critical worker fields so the DB reflects the running worker
-/// even if captain crashes before tick-end merge.
-pub async fn persist_spawn(pool: &SqlitePool, task: &Task) -> Result<()> {
-    sqlx::query(
-        "UPDATE tasks SET status=?, worker=?, session_ids=?, worker_started_at=?, \
-         branch=?, worktree=?, plan=? \
-         WHERE id=? AND status NOT IN ('merged','completed-no-pr','canceled')",
-    )
-    .bind(task.status.as_str())
-    .bind(&task.worker)
-    .bind(task.session_ids.to_json())
-    .bind(&task.worker_started_at)
-    .bind(&task.branch)
-    .bind(&task.worktree)
-    .bind(&task.plan)
-    .bind(task.id)
-    .execute(pool)
-    .await?;
-    Ok(())
-}
-
-/// Immediately persist merge session fields so the DB reflects the running
-/// merge session even if captain crashes before tick-end write-back.
-pub async fn persist_merge_spawn(pool: &SqlitePool, task: &Task) -> Result<()> {
-    let result = sqlx::query(
-        "UPDATE tasks SET session_ids=?, last_activity_at=? \
-         WHERE id=? AND status = 'captain-merging'",
-    )
-    .bind(task.session_ids.to_json())
-    .bind(&task.last_activity_at)
-    .bind(task.id)
-    .execute(pool)
-    .await?;
-    anyhow::ensure!(
-        result.rows_affected() > 0,
-        "persist_merge_spawn: 0 rows affected for task {} — status changed concurrently",
-        task.id,
-    );
-    Ok(())
-}
-
-/// Immediately persist clarifier result fields so the DB reflects the
-/// enriched context even if captain crashes before tick-end merge.
-pub async fn persist_clarify_result(pool: &SqlitePool, task: &Task) -> Result<()> {
-    let trigger_str = task.captain_review_trigger.map(|t| t.as_str().to_string());
-    sqlx::query(
-        "UPDATE tasks SET status=?, context=?, title=?, session_ids=?, project=?, \
-         no_pr=?, resource=?, clarifier_fail_count=?, last_activity_at=?, \
-         captain_review_trigger=?, review_fail_count=? \
-         WHERE id=? AND status IN ('clarifying','needs-clarification')",
-    )
-    .bind(task.status.as_str())
-    .bind(&task.context)
-    .bind(&task.title)
-    .bind(task.session_ids.to_json())
-    .bind(&task.project)
-    .bind(task.no_pr as i64)
-    .bind(&task.resource)
-    .bind(task.clarifier_fail_count)
-    .bind(&task.last_activity_at)
-    .bind(&trigger_str)
-    .bind(task.review_fail_count)
-    .bind(task.id)
-    .execute(pool)
-    .await?;
-    Ok(())
-}
-
-/// Persist clarifier start fields immediately so the UI reflects the running
-/// clarifier while it's still in progress.
-pub async fn persist_clarify_start(pool: &SqlitePool, task: &Task) -> Result<()> {
-    sqlx::query(
-        "UPDATE tasks SET status=?, session_ids=? \
-         WHERE id=? AND status NOT IN ('merged','completed-no-pr','canceled')",
-    )
-    .bind(task.status.as_str())
-    .bind(task.session_ids.to_json())
-    .bind(task.id)
-    .execute(pool)
-    .await?;
     Ok(())
 }
 

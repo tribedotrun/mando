@@ -1,4 +1,5 @@
 import React, { useRef, useState } from 'react';
+import { Paperclip } from 'lucide-react';
 import { inputStyle, inputCls } from '#renderer/styles';
 import { useDraft } from '#renderer/global/hooks/useDraft';
 import { useMountEffect } from '#renderer/global/hooks/useMountEffect';
@@ -13,7 +14,7 @@ const DRAFT_PROJECT_KEY = 'mando:draft:newTask:project';
 const titleInputCls = `${inputCls} resize-none`;
 const projectSelectCls = 'rounded-md px-3 py-2 text-label';
 const footerButtonCls =
-  'px-4 py-2 text-[13px] font-semibold transition-colors hover:bg-[var(--color-accent-hover)] active:bg-[var(--color-accent-pressed)] disabled:opacity-40';
+  'px-4 py-2 text-[13px] font-semibold transition-colors hover:bg-accent-hover active:bg-accent-pressed disabled:opacity-40';
 const bulkToggleCls = 'rounded-md px-2 py-0.5 text-label transition-colors';
 
 interface Props {
@@ -170,8 +171,7 @@ function AddTaskFormInner({
 
   return (
     <div
-      className="fixed inset-0 z-[200] flex items-center justify-center"
-      style={{ background: 'var(--color-overlay)' }}
+      className="fixed inset-0 z-[200] flex items-center justify-center bg-overlay"
       onClick={(e) => e.target === e.currentTarget && onClose()}
       onKeyDown={handleKeyDown}
     >
@@ -189,9 +189,7 @@ function AddTaskFormInner({
       >
         <div className="px-5 pb-2 pt-5">
           <div className="flex items-center justify-between">
-            <div className="text-heading" style={{ color: 'var(--color-text-1)' }}>
-              New task
-            </div>
+            <div className="text-heading text-text-1">New task</div>
             <button
               type="button"
               onClick={() =>
@@ -252,9 +250,7 @@ function AddTaskFormInner({
                 className="rounded-xl border p-3"
                 style={{ borderColor: 'var(--color-border-subtle)' }}
               >
-                <div className="mb-2 text-label" style={{ color: 'var(--color-text-4)' }}>
-                  Reference image
-                </div>
+                <div className="mb-2 text-label text-text-4">Reference image</div>
                 <div className="flex items-start gap-3">
                   <div
                     className="flex h-20 w-20 shrink-0 items-center justify-center rounded-md"
@@ -270,9 +266,7 @@ function AddTaskFormInner({
                     />
                   </div>
                   <div className="min-w-0 flex-1">
-                    <div className="truncate text-[13px]" style={{ color: 'var(--color-text-2)' }}>
-                      {image.name}
-                    </div>
+                    <div className="truncate text-[13px] text-text-2">{image.name}</div>
                     <button
                       type="button"
                       onClick={removeImage}
@@ -334,31 +328,17 @@ function AddTaskFormInner({
                 <button
                   type="button"
                   onClick={() => fileRef.current?.click()}
-                  className="flex h-9 w-9 items-center justify-center rounded-md transition-colors hover:bg-[var(--color-surface-3)]"
-                  style={{ color: 'var(--color-text-3)' }}
+                  className="flex h-9 w-9 items-center justify-center rounded-md transition-colors hover:bg-surface-3 text-text-3"
                   aria-label="Attach image"
                   title="Attach image (or paste)"
                 >
-                  <svg
-                    width="15"
-                    height="15"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.5"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" />
-                  </svg>
+                  <Paperclip size={16} />
                 </button>
               </>
             )}
 
             {projectRequired && !effectiveProject && (
-              <span className="text-[12px]" style={{ color: 'var(--color-stale)' }}>
-                Choose a project.
-              </span>
+              <span className="text-[12px] text-stale">Choose a project.</span>
             )}
           </div>
 

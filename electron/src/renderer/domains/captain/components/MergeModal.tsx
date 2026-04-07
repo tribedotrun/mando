@@ -1,7 +1,7 @@
 import React, { useCallback } from 'react';
-import { useFocusTrap } from '#renderer/global/hooks/useFocusTrap';
 import type { TaskItem } from '#renderer/types';
 import { prLabel, shortRepo } from '#renderer/utils';
+import { Dialog, DialogContent, DialogTitle } from '#renderer/global/components/Dialog';
 
 interface Props {
   item: TaskItem;
@@ -22,41 +22,20 @@ export function MergeModal({
   const guardedCancel = useCallback(() => {
     if (!pending) onCancel();
   }, [onCancel, pending]);
-  const { ref: dialogRef, handleKeyDown } = useFocusTrap(guardedCancel);
 
   return (
-    <div
-      data-testid="merge-modal"
-      role="dialog"
-      aria-modal="true"
-      aria-label={`Merge ${shortRepo(item.project)} PR ${prLabel(item.pr ?? '')}`}
-      className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60"
-      onClick={(e) => e.target === e.currentTarget && !pending && onCancel()}
-      onKeyDown={handleKeyDown}
-    >
-      <div
-        ref={dialogRef}
-        className="w-[440px] max-w-[90vw] rounded-[8px] p-5"
-        style={{ background: 'var(--color-surface-2)', border: '1px solid var(--color-border)' }}
-      >
-        <h3 className="text-subheading mb-3" style={{ color: 'var(--color-text-1)' }}>
+    <Dialog open={true} onOpenChange={guardedCancel}>
+      <DialogContent data-testid="merge-modal" className="rounded-[8px]">
+        <DialogTitle>
           Merge {shortRepo(item.project)} PR {prLabel(item.pr ?? '')}
-        </h3>
+        </DialogTitle>
 
         <div className="mb-4">
-          <p
-            className="text-body truncate"
-            style={{ color: 'var(--color-text-2)' }}
-            title={item.title}
-          >
+          <p className="text-body truncate text-text-2" title={item.title}>
             {item.title}
           </p>
           {item.branch && (
-            <p
-              className="text-code mt-1 truncate"
-              style={{ color: 'var(--color-text-3)' }}
-              title={item.branch}
-            >
+            <p className="text-code mt-1 truncate text-text-3" title={item.branch}>
               {item.branch}
             </p>
           )}
@@ -73,9 +52,7 @@ export function MergeModal({
             {result.message}
           </div>
         ) : (
-          <p className="text-caption mb-4" style={{ color: 'var(--color-text-3)' }}>
-            Captain will check CI and squash merge
-          </p>
+          <p className="text-caption mb-4 text-text-3">Captain will check CI and squash merge</p>
         )}
 
         <div className="flex justify-end gap-2">
@@ -110,14 +87,13 @@ export function MergeModal({
           {result && !result.ok && (
             <button
               onClick={onCancel}
-              className="rounded-[6px] px-5 py-2 text-[13px] font-medium"
-              style={{ color: 'var(--color-text-2)' }}
+              className="rounded-[6px] px-5 py-2 text-[13px] font-medium text-text-2"
             >
               Dismiss
             </button>
           )}
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }

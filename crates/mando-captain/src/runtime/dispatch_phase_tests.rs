@@ -32,8 +32,7 @@ async fn dispatch_dry_run() {
         &HashMap::new(),
         &pool,
     )
-    .await
-    .unwrap();
+    .await;
 
     assert_eq!(result, 1);
     assert_eq!(dry.len(), 1);
@@ -66,8 +65,7 @@ async fn dispatch_full_slots() {
         &HashMap::new(),
         &pool,
     )
-    .await
-    .unwrap();
+    .await;
 
     assert_eq!(result, 10);
     assert!(dry.is_empty());
@@ -109,8 +107,7 @@ async fn dispatch_dry_run_reserves_resource_between_items() {
         &resource_limits,
         &pool,
     )
-    .await
-    .unwrap();
+    .await;
 
     assert_eq!(result, 1);
     assert_eq!(dry.len(), 1);

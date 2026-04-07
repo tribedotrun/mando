@@ -2,6 +2,7 @@
 
 pub mod action;
 mod action_sessions;
+pub mod detail;
 pub mod health;
 pub mod help;
 pub mod status;

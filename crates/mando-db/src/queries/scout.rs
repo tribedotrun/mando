@@ -4,6 +4,16 @@ use anyhow::{bail, Result};
 use mando_types::{ScoutItem, ScoutStatus};
 use sqlx::SqlitePool;
 
+/// Column list for ItemRow queries - single source of truth.
+const SELECT_COLS: &str = "\
+    id, url, type, title, status, relevance, quality, \
+    date_added, date_processed, added_by, error_count, source_name, date_published";
+
+fn select_items_sql() -> &'static str {
+    static SQL: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    SQL.get_or_init(|| format!("SELECT {SELECT_COLS} FROM scout_items"))
+}
+
 /// Query parameters for listing scout items.
 #[derive(Debug, Default)]
 pub struct ListQuery {
@@ -48,74 +58,44 @@ pub async fn add_item(
 
 /// Get item by ID.
 pub async fn get_item(pool: &SqlitePool, id: i64) -> Result<Option<ScoutItem>> {
-    let row: Option<ItemRow> = sqlx::query_as(
-        "SELECT id, url, type, title, status, relevance, quality,
-                date_added, date_processed, added_by, error_count, source_name, date_published
-         FROM scout_items WHERE id = ?",
-    )
-    .bind(id)
-    .fetch_optional(pool)
-    .await?;
+    let sql = format!("{} WHERE id = ?", select_items_sql());
+    let row: Option<ItemRow> = sqlx::query_as(&sql).bind(id).fetch_optional(pool).await?;
     Ok(row.map(|r| r.into_item()))
 }
 
 /// Get item by URL.
 pub async fn get_item_by_url(pool: &SqlitePool, url: &str) -> Result<Option<ScoutItem>> {
-    let row: Option<ItemRow> = sqlx::query_as(
-        "SELECT id, url, type, title, status, relevance, quality,
-                date_added, date_processed, added_by, error_count, source_name, date_published
-         FROM scout_items WHERE url = ?",
-    )
-    .bind(url)
-    .fetch_optional(pool)
-    .await?;
+    let sql = format!("{} WHERE url = ?", select_items_sql());
+    let row: Option<ItemRow> = sqlx::query_as(&sql).bind(url).fetch_optional(pool).await?;
     Ok(row.map(|r| r.into_item()))
 }
 
 /// List items, optionally filtered by status.
 pub async fn list_items(pool: &SqlitePool, status: Option<&str>) -> Result<Vec<ScoutItem>> {
-    let rows: Vec<ItemRow> = match status {
-        Some("all") => {
-            sqlx::query_as(
-                "SELECT id, url, type, title, status, relevance, quality,
-                        date_added, date_processed, added_by, error_count, source_name, date_published
-                 FROM scout_items ORDER BY id",
-            )
-            .fetch_all(pool)
-            .await?
-        }
-        Some(s) => {
-            sqlx::query_as(
-                "SELECT id, url, type, title, status, relevance, quality,
-                        date_added, date_processed, added_by, error_count, source_name, date_published
-                 FROM scout_items WHERE status = ? ORDER BY id",
-            )
-            .bind(s)
-            .fetch_all(pool)
-            .await?
-        }
-        None => {
-            sqlx::query_as(
-                "SELECT id, url, type, title, status, relevance, quality,
-                        date_added, date_processed, added_by, error_count, source_name, date_published
-                 FROM scout_items WHERE status NOT IN ('archived', 'saved', 'error') ORDER BY id",
-            )
-            .fetch_all(pool)
-            .await?
-        }
+    let base = select_items_sql();
+    let (sql, bind_status) = match status {
+        Some("all") => (format!("{base} ORDER BY id"), None),
+        Some(s) => (format!("{base} WHERE status = ? ORDER BY id"), Some(s)),
+        None => (
+            format!("{base} WHERE status NOT IN ('archived', 'saved', 'error') ORDER BY id"),
+            None,
+        ),
     };
+    let mut q = sqlx::query_as::<_, ItemRow>(&sql);
+    if let Some(s) = bind_status {
+        q = q.bind(s);
+    }
+    let rows = q.fetch_all(pool).await?;
     Ok(rows.into_iter().map(|r| r.into_item()).collect())
 }
 
 /// List processable items.
 pub async fn list_processable(pool: &SqlitePool) -> Result<Vec<ScoutItem>> {
-    let rows: Vec<ItemRow> = sqlx::query_as(
-        "SELECT id, url, type, title, status, relevance, quality,
-                date_added, date_processed, added_by, error_count, source_name, date_published
-         FROM scout_items WHERE status = 'pending' ORDER BY id",
-    )
-    .fetch_all(pool)
-    .await?;
+    let sql = format!(
+        "{} WHERE status = 'pending' ORDER BY id",
+        select_items_sql()
+    );
+    let rows: Vec<ItemRow> = sqlx::query_as(&sql).fetch_all(pool).await?;
     Ok(rows.into_iter().map(|r| r.into_item()).collect())
 }
 
@@ -161,9 +141,8 @@ pub async fn query_items_paginated(
 
     // Data query with LIMIT/OFFSET.
     let select_sql = format!(
-        "SELECT id, url, type, title, status, relevance, quality,
-                date_added, date_processed, added_by, error_count, source_name, date_published
-         FROM scout_items {where_clause} ORDER BY id DESC LIMIT ? OFFSET ?"
+        "{} {where_clause} ORDER BY id DESC LIMIT ? OFFSET ?",
+        select_items_sql()
     );
     let mut q = sqlx::query_as::<_, ItemRow>(&select_sql);
     if let Some(s) = status {
@@ -315,7 +294,7 @@ pub async fn item_titles(
 
 /// Increment error count and set status to error.
 pub async fn increment_error_count(pool: &SqlitePool, id: i64) -> Result<()> {
-    sqlx::query(
+    let result = sqlx::query(
         "UPDATE scout_items
          SET error_count = COALESCE(error_count, 0) + 1, status = 'error'
          WHERE id = ?",
@@ -323,6 +302,9 @@ pub async fn increment_error_count(pool: &SqlitePool, id: i64) -> Result<()> {
     .bind(id)
     .execute(pool)
     .await?;
+    if result.rows_affected() == 0 {
+        bail!("item #{id} not found");
+    }
     Ok(())
 }
 

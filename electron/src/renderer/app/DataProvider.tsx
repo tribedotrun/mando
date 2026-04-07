@@ -10,7 +10,7 @@ import {
   parseNotification,
 } from '#renderer/global/hooks/useDesktopNotifications';
 import { useMountEffect } from '#renderer/global/hooks/useMountEffect';
-import { useToastStore } from '#renderer/global/stores/toastStore';
+import { toast } from 'sonner';
 import { getErrorMessage } from '#renderer/utils';
 import { RetryButton } from '#renderer/domains/captain/components/RetryButton';
 import type { SSEConnectionStatus } from '#renderer/types';
@@ -103,14 +103,10 @@ export function DataProvider({ children }: { children: React.ReactNode }): React
 
         if (failures.length >= 2) {
           log.error('[DataProvider] initial seed failed for all stores:', failures);
-          useToastStore
-            .getState()
-            .add('error', `Failed to load initial data: ${failures[0].message}`);
+          toast.error(`Failed to load initial data: ${failures[0].message}`);
         } else if (failures.length === 1) {
           log.warn('[DataProvider] initial seed had partial failures:', failures);
-          useToastStore
-            .getState()
-            .add('error', `Failed to load ${failures[0].label}: ${failures[0].message}`);
+          toast.error(`Failed to load ${failures[0].label}: ${failures[0].message}`);
         }
         sseRef.current = connectSSE(
           (event) => {
@@ -138,8 +134,8 @@ export function DataProvider({ children }: { children: React.ReactNode }): React
                 const payload = parseNotification(event);
                 if (payload) {
                   if (payload.kind?.type === 'RateLimited') {
-                    const variant = payload.kind.status === 'rejected' ? 'error' : 'info';
-                    useToastStore.getState().add(variant, payload.message);
+                    const fn = payload.kind.status === 'rejected' ? toast.error : toast.info;
+                    fn(payload.message);
                   }
                 } else if (event.data) {
                   log.warn('[DataProvider] unexpected notification shape:', event.data);
@@ -150,7 +146,7 @@ export function DataProvider({ children }: { children: React.ReactNode }): React
                 // Gateway broadcast lagged. Refetch everything to recover from
                 // missed deltas; surface a toast so the user knows what happened.
                 log.warn('[DataProvider] SSE resync requested, refetching all data');
-                useToastStore.getState().add('info', 'Connection caught up, reloading data');
+                toast.info('Connection caught up, reloading data');
                 refetchAll();
                 break;
             }
@@ -178,9 +174,7 @@ export function DataProvider({ children }: { children: React.ReactNode }): React
     };
     init();
     const onObsDegraded = () => {
-      useToastStore
-        .getState()
-        .add('error', 'Observability pipeline degraded — logs not being sent');
+      toast.error('Observability pipeline degraded — logs not being sent');
     };
     window.addEventListener(OBS_DEGRADED_EVENT, onObsDegraded);
     return () => {
@@ -194,10 +188,7 @@ export function DataProvider({ children }: { children: React.ReactNode }): React
 
   if (!initialized) {
     return (
-      <div
-        className="flex h-screen items-center justify-center"
-        style={{ background: 'var(--color-bg)', color: 'var(--color-text-3)' }}
-      >
+      <div className="flex h-screen items-center justify-center bg-bg text-text-3">
         <span className="text-body">Loading...</span>
       </div>
     );
@@ -206,15 +197,11 @@ export function DataProvider({ children }: { children: React.ReactNode }): React
   if (initError) {
     return (
       <div
-        className="flex h-screen flex-col items-center justify-center gap-3"
-        style={{ background: 'var(--color-bg)', color: 'var(--color-text-1)', padding: 24 }}
+        className="flex h-screen flex-col items-center justify-center gap-3 bg-bg text-text-1"
+        style={{ padding: 24 }}
       >
-        <span className="text-heading" style={{ color: 'var(--color-error)' }}>
-          Could not connect to daemon
-        </span>
-        <span className="text-body" style={{ color: 'var(--color-text-3)' }}>
-          {initError}
-        </span>
+        <span className="text-heading text-error">Could not connect to daemon</span>
+        <span className="text-body text-text-3">{initError}</span>
         <RetryButton
           className="text-label"
           style={{
@@ -259,7 +246,7 @@ function OnboardingPlaceholder(): React.ReactElement {
   });
   if (loadError) {
     return (
-      <div style={{ padding: 24, color: 'var(--color-error)' }}>
+      <div className="text-error" style={{ padding: 24 }}>
         Failed to load onboarding. Restart the app.
       </div>
     );

@@ -56,18 +56,8 @@ export function ScoutQA({ itemId, onClose }: Props): React.ReactElement {
       className="flex items-center gap-2 border-b px-4 py-3"
       style={{ borderColor: 'var(--color-border)' }}
     >
-      <span
-        className="text-xs font-medium truncate flex-1"
-        style={{ color: 'var(--color-text-1)' }}
-      >
-        {title}
-      </span>
-      <button
-        onClick={onClose}
-        className="rounded p-1"
-        style={{ color: 'var(--color-text-3)' }}
-        title="Close Q&A"
-      >
+      <span className="text-xs font-medium truncate flex-1 text-text-1">{title}</span>
+      <button onClick={onClose} className="rounded p-1 text-text-3" title="Close Q&A">
         &times;
       </button>
     </div>

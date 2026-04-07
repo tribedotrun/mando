@@ -1,5 +1,6 @@
 import React, { useState, useCallback, useRef } from 'react';
 import { useQuery, keepPreviousData } from '@tanstack/react-query';
+import { Filter } from 'lucide-react';
 import { fetchSessions, fetchTranscript } from '#renderer/domains/sessions/hooks/useApi';
 import { useViewKeyHandler } from '#renderer/global/hooks/useKeyboardShortcuts';
 import { useScrollIntoViewRef } from '#renderer/global/hooks/useScrollIntoViewRef';
@@ -28,6 +29,7 @@ const CATEGORY_ORDER = [
   'clarifier',
   'captain-review',
   'captain-ops',
+  'rebase',
   'todo-parser',
   'scout',
   'system',
@@ -65,7 +67,6 @@ export function SessionsCard({ active = true }: { active?: boolean } = {}): Reac
   const sessionSeqMap = React.useMemo(() => buildSessionSequence(allSessions), [allSessions]);
 
   const [showFilterMenu, setShowFilterMenu] = useState(false);
-  const filterBtnRef = React.useRef<HTMLButtonElement>(null);
   const isFiltered = filterStatus !== 'all';
 
   // Clamp focusedIndex inline — derived from sessions.length
@@ -177,9 +178,7 @@ export function SessionsCard({ active = true }: { active?: boolean } = {}): Reac
     <div data-testid="sessions-card" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       {/* Header */}
       <div className="flex items-baseline justify-between">
-        <h2 className="text-heading" style={{ color: 'var(--color-text-1)' }}>
-          Sessions
-        </h2>
+        <h2 className="text-heading text-text-1">Sessions</h2>
       </div>
 
       {/* Filters — category pills + status filter (hidden when no sessions) */}
@@ -225,10 +224,16 @@ export function SessionsCard({ active = true }: { active?: boolean } = {}): Reac
             </div>
           )}
 
-          <div style={{ position: 'relative' }}>
+          <StatusFilterMenu
+            value={filterStatus}
+            onChange={(v) => {
+              setFilterStatus(v);
+              setShowFilterMenu(false);
+            }}
+            open={showFilterMenu}
+            onOpenChange={setShowFilterMenu}
+          >
             <button
-              ref={filterBtnRef}
-              onClick={() => setShowFilterMenu((v) => !v)}
               className="flex items-center transition-colors"
               style={{
                 padding: '4px 6px',
@@ -242,39 +247,18 @@ export function SessionsCard({ active = true }: { active?: boolean } = {}): Reac
               title="Filter by status"
               aria-label="Filter by status"
             >
-              <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-                <path
-                  d="M2 4h12M4 8h8M6 12h4"
-                  stroke="currentColor"
-                  strokeWidth="1.5"
-                  strokeLinecap="round"
-                />
-              </svg>
+              <Filter size={14} />
               {isFiltered && <span style={{ fontSize: 11 }}>{filterStatus}</span>}
             </button>
-            {showFilterMenu && (
-              <StatusFilterMenu
-                value={filterStatus}
-                onChange={(v) => {
-                  setFilterStatus(v);
-                  setShowFilterMenu(false);
-                }}
-                onClose={() => setShowFilterMenu(false)}
-              />
-            )}
-          </div>
+          </StatusFilterMenu>
         </div>
       )}
 
       {/* Content — only show loading text on first-ever fetch, not category switches */}
       {loading && !hasLoadedRef.current ? (
-        <div className="py-8 text-center text-body" style={{ color: 'var(--color-text-3)' }}>
-          Loading sessions...
-        </div>
+        <div className="py-8 text-center text-body text-text-3">Loading sessions...</div>
       ) : error ? (
-        <div className="py-8 text-center text-body" style={{ color: 'var(--color-error)' }}>
-          {error}
-        </div>
+        <div className="py-8 text-center text-body text-error">{error}</div>
       ) : sessions.length === 0 ? (
         <SessionsEmptyState />
       ) : (
@@ -298,7 +282,7 @@ export function SessionsCard({ active = true }: { active?: boolean } = {}): Reac
           >
             Prev
           </button>
-          <span className="text-code tabular-nums" style={{ color: 'var(--color-text-3)' }}>
+          <span className="text-code tabular-nums text-text-3">
             {page} / {totalPages}
           </span>
           <button
@@ -336,14 +320,9 @@ function SessionsList({
         className="flex items-center"
         style={{ padding: '6px 12px', borderBottom: '1px solid var(--color-border-subtle)' }}
       >
-        <span className="text-label shrink-0" style={{ color: 'var(--color-text-4)', width: 20 }} />
-        <span className="text-label flex-1" style={{ color: 'var(--color-text-4)' }}>
-          Session
-        </span>
-        <span
-          className="text-label"
-          style={{ color: 'var(--color-text-4)', width: 72, textAlign: 'right' }}
-        >
+        <span className="text-label shrink-0 text-text-4" style={{ width: 20 }} />
+        <span className="text-label flex-1 text-text-4">Session</span>
+        <span className="text-label text-text-4" style={{ width: 72, textAlign: 'right' }}>
           Time
         </span>
       </div>

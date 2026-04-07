@@ -56,10 +56,19 @@ pub(crate) async fn trigger_captain_review(
             return;
         }
     };
+    let db_status = it.status.as_str().to_string();
     super::action_contract::reset_review_retry(it, trigger_enum);
 
-    if let Err(e) =
-        super::captain_review::spawn_review(it, trigger, config, workflow, notifier, pool).await
+    if let Err(e) = super::captain_review::spawn_review(
+        it,
+        trigger,
+        Some(&db_status),
+        config,
+        workflow,
+        notifier,
+        pool,
+    )
+    .await
     {
         tracing::error!(
             module = "captain",

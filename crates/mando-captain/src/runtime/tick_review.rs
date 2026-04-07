@@ -42,6 +42,7 @@ pub(super) async fn poll_reviewing_items(
             if let Err(e) = captain_review::spawn_review(
                 item,
                 trigger.as_str(),
+                None, // already CaptainReviewing in DB
                 config,
                 workflow,
                 notifier,

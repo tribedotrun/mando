@@ -1,4 +1,5 @@
 import React from 'react';
+import { Monitor } from 'lucide-react';
 import type { SessionEntry, SessionSummary, TaskItem, TimelineEvent } from '#renderer/types';
 
 /** Status → dot color for session list rows. */
@@ -31,6 +32,7 @@ const CALLER_MAP: Record<string, string> = {
   clarify_resolved: 'clarifier',
   clarify_question: 'clarifier',
   human_ask: 'task-ask',
+  rebase_triggered: 'rebase',
 };
 
 /**
@@ -101,6 +103,7 @@ const CALLER_LABELS: Record<string, string> = {
   'scout-qa': 'Q&A',
   'scout-research': 'research',
   'scout-act': 'act',
+  rebase: 'rebase',
 };
 
 export function formatCallerLabel(caller: string): string {
@@ -129,27 +132,8 @@ export function sessionSubtitle(s: SessionEntry): string | null {
 export function SessionsEmptyState(): React.ReactElement {
   return (
     <div className="flex flex-col items-center justify-center py-16">
-      <svg width="48" height="48" viewBox="0 0 48 48" fill="none" className="mb-4">
-        <rect
-          x="6"
-          y="10"
-          width="36"
-          height="28"
-          rx="4"
-          stroke="var(--color-text-4)"
-          strokeWidth="1.5"
-        />
-        <path
-          d="M14 20h8M14 26h5"
-          stroke="var(--color-text-4)"
-          strokeWidth="1.5"
-          strokeLinecap="round"
-        />
-        <circle cx="35" cy="19" r="2" stroke="var(--color-text-4)" strokeWidth="1.5" />
-      </svg>
-      <span className="text-subheading" style={{ color: 'var(--color-text-2)' }}>
-        No sessions yet
-      </span>
+      <Monitor size={48} color="var(--color-text-4)" strokeWidth={1} className="mb-4" />
+      <span className="text-subheading text-text-2">No sessions yet</span>
     </div>
   );
 }

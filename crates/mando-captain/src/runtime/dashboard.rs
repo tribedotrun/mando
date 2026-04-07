@@ -108,6 +108,7 @@ pub async fn trigger_captain_tick(
     bus: Option<&mando_shared::EventBus>,
     emit_notifications: bool,
     store_lock: &std::sync::Arc<tokio::sync::RwLock<TaskStore>>,
+    cancel: &tokio_util::sync::CancellationToken,
 ) -> Result<serde_json::Value> {
     let result = super::tick::run_captain_tick(
         config,
@@ -116,6 +117,7 @@ pub async fn trigger_captain_tick(
         bus,
         emit_notifications,
         store_lock,
+        cancel,
     )
     .await?;
     Ok(crate::biz::tick_summary::tick_result_to_json(&result))

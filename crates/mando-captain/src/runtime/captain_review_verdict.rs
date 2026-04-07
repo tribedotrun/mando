@@ -11,123 +11,10 @@ use mando_types::SessionStatus;
 
 use sqlx::SqlitePool;
 
+use super::captain_review_helpers::{escaped_title, inline_resume_worker};
 use super::notify::Notifier;
 use super::timeline_emit;
 use crate::biz::spawn_logic;
-
-pub(crate) fn escaped_title(item: &Task) -> String {
-    mando_shared::telegram_format::escape_html(&item.title)
-}
-
-/// Inline resume of a worker process with feedback. Shared by `nudge` and
-/// `reset_budget` verdict handlers. Kills old process, checks for broken
-/// stream, resumes with feedback, updates health state and session log.
-///
-/// Returns `true` if the worker was successfully resumed.
-async fn inline_resume_worker(
-    item: &Task,
-    feedback: &str,
-    workflow: &CaptainWorkflow,
-    pool: &SqlitePool,
-) -> bool {
-    let (Some(w), Some(sid), Some(wt)) = (&item.worker, &item.session_ids.worker, &item.worktree)
-    else {
-        warn!(
-            module = "captain",
-            item_id = item.id,
-            "verdict resume has no worker/session/worktree; next tick will handle"
-        );
-        return false;
-    };
-
-    let stream_path = mando_config::stream_path_for_session(sid);
-    if mando_cc::stream_has_broken_session(&stream_path) {
-        warn!(
-            module = "captain", worker = %w,
-            "verdict skipped resume; stream is broken, next tick will handle"
-        );
-        return false;
-    }
-
-    let old_pid = crate::io::pid_lookup::resolve_pid(sid, w).unwrap_or(mando_types::Pid::new(0));
-    if old_pid.as_u32() > 0 {
-        if let Err(e) = mando_cc::kill_process(old_pid).await {
-            warn!(
-                module = "captain", worker = %w, pid = %old_pid, error = %e,
-                "failed to kill old process before verdict resume"
-            );
-        }
-    }
-
-    let wt_path = mando_config::expand_tilde(wt);
-    let stream_size_before = mando_cc::get_stream_file_size(&stream_path);
-    let env = std::collections::HashMap::new();
-    match crate::io::process_manager::resume_worker_process(
-        feedback,
-        &wt_path,
-        &workflow.models.worker,
-        sid,
-        &env,
-        workflow.models.fallback.as_deref(),
-    )
-    .await
-    {
-        Ok((pid, _)) => {
-            if let Err(e) = crate::io::pid_registry::register(sid, pid) {
-                warn!(module = "captain", worker = %w, %e, "pid_registry register failed");
-            }
-            // Health-state bookkeeping must not abort: the worker is already
-            // running. Degrade gracefully on failure instead of double-resuming.
-            let health_path = mando_config::worker_health_path();
-            match crate::io::health_store::load_health_state(&health_path) {
-                Ok(mut hstate) => {
-                    crate::io::health_store::set_health_field(
-                        &mut hstate,
-                        w,
-                        "pid",
-                        serde_json::json!(pid),
-                    );
-                    crate::io::health_store::set_health_field(
-                        &mut hstate,
-                        w,
-                        "stream_size_at_spawn",
-                        serde_json::json!(stream_size_before),
-                    );
-                    if let Err(e) =
-                        crate::io::health_store::save_health_state(&health_path, &hstate)
-                    {
-                        warn!(module = "captain", worker = %w, error = %e,
-                            "failed to persist health after verdict resume");
-                    }
-                }
-                Err(e) => {
-                    warn!(module = "captain", worker = %w, error = %e,
-                        "failed to load health state after verdict resume; skipping bookkeeping");
-                }
-            }
-            if let Err(e) = crate::io::headless_cc::log_running_session(
-                pool,
-                sid,
-                &wt_path,
-                "worker",
-                w,
-                &item.id.to_string(),
-                true,
-            )
-            .await
-            {
-                warn!(module = "captain", worker = %w, %e,
-                    "failed to log running session after verdict resume");
-            }
-            true
-        }
-        Err(e) => {
-            warn!(module = "captain", worker = %w, error = %e,
-                "verdict resume failed; next tick will retry");
-            false
-        }
-    }
-}
 
 /// Apply a captain review verdict to an item.
 pub async fn apply_verdict(
@@ -144,6 +31,7 @@ pub async fn apply_verdict(
 
     let data = serde_json::json!({ "action": verdict.action, "feedback": verdict.feedback });
     let title = escaped_title(item);
+    let prev_status = item.status;
 
     // Outcome tracking. log_stopped_after tells the post-match block to mark
     // the worker session stopped (covers ship/escalate/retry_clarifier/other).
@@ -151,66 +39,99 @@ pub async fn apply_verdict(
     // tick can retry the same verdict.
     let mut log_stopped_after = false;
     let mut clear_review_fields = true;
+    // Track whether the atomic persist succeeded so we can skip post-match
+    // side effects on idempotent skip or DB error.
+    let mut transition_applied = true;
 
     match verdict.action.as_str() {
         "ship" => {
             let is_no_pr = item.no_pr;
             item.status = spawn_logic::ship_status(is_no_pr);
-            let (event, msg_suffix) = if is_no_pr {
+            let (event_type, msg_suffix) = if is_no_pr {
                 (TimelineEventType::CompletedNoPr, "completed (no PR)")
             } else {
                 (TimelineEventType::AwaitingReview, "ready for review")
             };
-            let _ = timeline_emit::emit_for_task(
-                item,
-                event,
-                &format!("Captain approved; {msg_suffix}"),
+            let event = mando_types::timeline::TimelineEvent {
+                event_type,
+                timestamp: mando_types::now_rfc3339(),
+                actor: "captain".to_string(),
+                summary: format!("Captain approved; {msg_suffix}"),
                 data,
+            };
+            match mando_db::queries::tasks::persist_status_transition(
                 pool,
+                item,
+                prev_status.as_str(),
+                &event,
             )
-            .await;
-            notifier
-                .high(&format!(
-                    "\u{2705} Captain approved <b>{title}</b>; {msg_suffix}"
-                ))
-                .await;
-            log_stopped_after = true;
+            .await
+            {
+                Ok(true) => {
+                    notifier
+                        .high(&format!(
+                            "\u{2705} Captain approved <b>{title}</b>; {msg_suffix}"
+                        ))
+                        .await;
+                }
+                Ok(false) => {
+                    transition_applied = false;
+                }
+                Err(e) => {
+                    item.status = prev_status;
+                    transition_applied = false;
+                    tracing::error!(module = "captain", item_id = item.id, error = %e, "persist failed for ship verdict");
+                }
+            }
+            log_stopped_after = transition_applied;
         }
         "nudge" => {
             item.status = ItemStatus::InProgress;
             item.intervention_count += 1;
-            // Reset timeout clock so the worker gets a fresh window after review.
             item.worker_started_at = Some(mando_types::now_rfc3339());
-            let _ = timeline_emit::emit_for_task(
-                item,
-                TimelineEventType::CaptainReviewVerdict,
-                &format!("Captain nudge: {}", verdict.feedback),
+            let event = mando_types::timeline::TimelineEvent {
+                event_type: TimelineEventType::CaptainReviewVerdict,
+                timestamp: mando_types::now_rfc3339(),
+                actor: "captain".to_string(),
+                summary: format!("Captain nudge: {}", verdict.feedback),
                 data,
+            };
+            match mando_db::queries::tasks::persist_status_transition(
                 pool,
+                item,
+                prev_status.as_str(),
+                &event,
             )
-            .await;
-            notifier
-                .normal(&format!("\u{1f4ac} Captain nudge on <b>{title}</b>"))
-                .await;
-
-            // Store AI-generated feedback so the next nudge_item() call uses it
-            // instead of a generic template if the inline resume below fails.
-            if let Some(ref w) = item.worker {
-                crate::io::health_store::persist_health_field(
-                    w,
-                    "pending_ai_feedback",
-                    serde_json::json!(verdict.feedback),
-                    "failed to persist AI nudge feedback; worker will receive generic template instead",
-                );
+            .await
+            {
+                Ok(true) => {
+                    notifier
+                        .normal(&format!("\u{1f4ac} Captain nudge on <b>{title}</b>"))
+                        .await;
+                }
+                Ok(false) => {
+                    transition_applied = false;
+                }
+                Err(e) => {
+                    item.status = prev_status;
+                    item.intervention_count -= 1;
+                    transition_applied = false;
+                    tracing::error!(module = "captain", item_id = item.id, error = %e, "persist failed for nudge verdict");
+                }
             }
 
-            // Resume the worker process inline so the next tick sees a live
-            // process (Rule 2 skip) instead of a dead one (Rule 3 broken).
-            // clear_review_fields stays false until we confirm the resume
-            // succeeded; failed resumes leave the verdict session ID intact
-            // so the next tick can retry.
-            if !inline_resume_worker(item, &verdict.feedback, workflow, pool).await {
-                clear_review_fields = false;
+            if transition_applied {
+                if let Some(ref w) = item.worker {
+                    crate::io::health_store::persist_health_field(
+                        w,
+                        "pending_ai_feedback",
+                        serde_json::json!(verdict.feedback),
+                        "failed to persist AI nudge feedback; worker will receive generic template instead",
+                    );
+                }
+                if !inline_resume_worker(item, &verdict.feedback, workflow, pool).await {
+                    clear_review_fields = false;
+                }
             }
         }
         "respawn" => {
@@ -231,6 +152,15 @@ pub async fn apply_verdict(
                     warn!(module = "captain", %e, "failed to log session completion on respawn");
                 }
             }
+            // Snapshot fields that will be cleared, so we can rollback on error.
+            let saved_worker_sid = item.session_ids.worker.clone();
+            let saved_ask_sid = item.session_ids.ask.clone();
+            let saved_worker = item.worker.clone();
+            let saved_worktree = item.worktree.clone();
+            let saved_branch = item.branch.clone();
+            let saved_pr = item.pr.clone();
+            let saved_worker_started = item.worker_started_at.clone();
+
             item.status = ItemStatus::Queued;
             item.session_ids.worker = None;
             item.session_ids.ask = None;
@@ -239,126 +169,227 @@ pub async fn apply_verdict(
             item.branch = None;
             item.pr = None;
             item.worker_started_at = None;
-            let _ = timeline_emit::emit_for_task(
-                item,
-                TimelineEventType::CaptainReviewVerdict,
-                &format!("Captain respawn: {}", verdict.feedback),
+            let event = mando_types::timeline::TimelineEvent {
+                event_type: TimelineEventType::CaptainReviewVerdict,
+                timestamp: mando_types::now_rfc3339(),
+                actor: "captain".to_string(),
+                summary: format!("Captain respawn: {}", verdict.feedback),
                 data,
+            };
+            match mando_db::queries::tasks::persist_status_transition(
                 pool,
+                item,
+                prev_status.as_str(),
+                &event,
             )
-            .await;
-            notifier
-                .normal(&format!("\u{1f504} Captain respawning <b>{title}</b>"))
-                .await;
+            .await
+            {
+                Ok(true) => {
+                    notifier
+                        .normal(&format!("\u{1f504} Captain respawning <b>{title}</b>"))
+                        .await;
+                }
+                Ok(false) => {
+                    transition_applied = false;
+                }
+                Err(e) => {
+                    // Full rollback of all cleared fields.
+                    item.status = prev_status;
+                    item.session_ids.worker = saved_worker_sid;
+                    item.session_ids.ask = saved_ask_sid;
+                    item.worker = saved_worker;
+                    item.worktree = saved_worktree;
+                    item.branch = saved_branch;
+                    item.pr = saved_pr;
+                    item.worker_started_at = saved_worker_started;
+                    transition_applied = false;
+                    tracing::error!(module = "captain", item_id = item.id, error = %e, "persist failed for respawn verdict");
+                }
+            }
         }
         "escalate" => {
             item.status = ItemStatus::Escalated;
             item.escalation_report = verdict.report.clone();
-            let _ = timeline_emit::emit_for_task(
-                item,
-                TimelineEventType::Escalated,
-                &format!("Escalated: {}", verdict.feedback),
+            let event = mando_types::timeline::TimelineEvent {
+                event_type: TimelineEventType::Escalated,
+                timestamp: mando_types::now_rfc3339(),
+                actor: "captain".to_string(),
+                summary: format!("Escalated: {}", verdict.feedback),
                 data,
+            };
+            match mando_db::queries::tasks::persist_status_transition(
                 pool,
+                item,
+                prev_status.as_str(),
+                &event,
             )
-            .await;
-            notifier
-                .critical(&format!(
-                    "\u{1f6a8} Escalated <b>{title}</b>: {}",
-                    mando_shared::telegram_format::escape_html(&verdict.feedback),
-                ))
-                .await;
-            log_stopped_after = true;
+            .await
+            {
+                Ok(true) => {
+                    notifier
+                        .critical(&format!(
+                            "\u{1f6a8} Escalated <b>{title}</b>: {}",
+                            mando_shared::telegram_format::escape_html(&verdict.feedback),
+                        ))
+                        .await;
+                }
+                Ok(false) => {
+                    transition_applied = false;
+                }
+                Err(e) => {
+                    item.status = prev_status;
+                    item.escalation_report = None;
+                    transition_applied = false;
+                    tracing::error!(module = "captain", item_id = item.id, error = %e, "persist failed for escalate verdict");
+                }
+            }
+            log_stopped_after = transition_applied;
         }
         "retry_clarifier" => {
-            // Route through the async initial clarification flow (dispatch_clarify)
-            // rather than the blocking reclarify path.
+            let saved_clarifier_sid = item.session_ids.clarifier.clone();
+            let saved_clarifier_fail = item.clarifier_fail_count;
+            let saved_worker_started = item.worker_started_at.clone();
+
             item.status = ItemStatus::New;
             item.session_ids.clarifier = None;
             item.clarifier_fail_count = 0;
             item.worker_started_at = None;
-            let _ = timeline_emit::emit_for_task(
-                item,
-                TimelineEventType::CaptainReviewVerdict,
-                &format!("Retry clarifier: {}", verdict.feedback),
+            let event = mando_types::timeline::TimelineEvent {
+                event_type: TimelineEventType::CaptainReviewVerdict,
+                timestamp: mando_types::now_rfc3339(),
+                actor: "captain".to_string(),
+                summary: format!("Retry clarifier: {}", verdict.feedback),
                 data,
+            };
+            match mando_db::queries::tasks::persist_status_transition(
                 pool,
+                item,
+                prev_status.as_str(),
+                &event,
             )
-            .await;
-            notifier
-                .normal(&format!("\u{1f501} Retrying clarifier for <b>{title}</b>"))
-                .await;
-            log_stopped_after = true;
+            .await
+            {
+                Ok(true) => {
+                    notifier
+                        .normal(&format!("\u{1f501} Retrying clarifier for <b>{title}</b>"))
+                        .await;
+                }
+                Ok(false) => {
+                    transition_applied = false;
+                }
+                Err(e) => {
+                    item.status = prev_status;
+                    item.session_ids.clarifier = saved_clarifier_sid;
+                    item.clarifier_fail_count = saved_clarifier_fail;
+                    item.worker_started_at = saved_worker_started;
+                    transition_applied = false;
+                    tracing::error!(module = "captain", item_id = item.id, error = %e, "persist failed for retry_clarifier verdict");
+                }
+            }
+            log_stopped_after = transition_applied;
         }
         "reset_budget" => {
-            // Captain overrides the intervention budget and nudges the worker
-            // with fresh instructions. This is the captain's authority to
-            // unblock tasks that exhausted their budget due to false alarms
-            // or recoverable issues.
             let old_count = item.intervention_count;
             item.intervention_count = 0;
             item.status = ItemStatus::InProgress;
             item.worker_started_at = Some(mando_types::now_rfc3339());
-            let _ = timeline_emit::emit_for_task(
-                item,
-                TimelineEventType::CaptainReviewVerdict,
-                &format!(
+            let event = mando_types::timeline::TimelineEvent {
+                event_type: TimelineEventType::CaptainReviewVerdict,
+                timestamp: mando_types::now_rfc3339(),
+                actor: "captain".to_string(),
+                summary: format!(
                     "Captain reset budget ({old_count} -> 0) and nudged: {}",
                     verdict.feedback
                 ),
                 data,
+            };
+            match mando_db::queries::tasks::persist_status_transition(
                 pool,
+                item,
+                prev_status.as_str(),
+                &event,
             )
-            .await;
-            notifier
-                .normal(&format!(
-                    "\u{1f504} Captain reset budget on <b>{title}</b> ({old_count} \u{2192} 0)"
-                ))
-                .await;
-
-            // Clear repeated-nudge circuit breaker so the fresh budget
-            // doesn't immediately re-trigger a review loop.
-            if let Some(ref w) = item.worker {
-                crate::io::health_store::persist_health_field(
-                    w,
-                    "nudge_reason_consecutive",
-                    serde_json::json!(0),
-                    "failed to reset nudge circuit breaker after reset_budget",
-                );
-                crate::io::health_store::persist_health_field(
-                    w,
-                    "last_nudge_reason",
-                    serde_json::json!(null),
-                    "failed to clear last nudge reason after reset_budget",
-                );
-                crate::io::health_store::persist_health_field(
-                    w,
-                    "pending_ai_feedback",
-                    serde_json::json!(verdict.feedback),
-                    "failed to persist AI feedback after reset_budget; worker will receive generic template instead",
-                );
+            .await
+            {
+                Ok(true) => {
+                    notifier
+                        .normal(&format!(
+                            "\u{1f504} Captain reset budget on <b>{title}</b> ({old_count} \u{2192} 0)"
+                        ))
+                        .await;
+                }
+                Ok(false) => {
+                    transition_applied = false;
+                }
+                Err(e) => {
+                    item.status = prev_status;
+                    item.intervention_count = old_count;
+                    transition_applied = false;
+                    tracing::error!(module = "captain", item_id = item.id, error = %e, "persist failed for reset_budget verdict");
+                }
             }
-            if !inline_resume_worker(item, &verdict.feedback, workflow, pool).await {
-                clear_review_fields = false;
+
+            if transition_applied {
+                if let Some(ref w) = item.worker {
+                    crate::io::health_store::persist_health_field(
+                        w,
+                        "nudge_reason_consecutive",
+                        serde_json::json!(0),
+                        "failed to reset nudge circuit breaker after reset_budget",
+                    );
+                    crate::io::health_store::persist_health_field(
+                        w,
+                        "last_nudge_reason",
+                        serde_json::json!(null),
+                        "failed to clear last nudge reason after reset_budget",
+                    );
+                    crate::io::health_store::persist_health_field(
+                        w,
+                        "pending_ai_feedback",
+                        serde_json::json!(verdict.feedback),
+                        "failed to persist AI feedback after reset_budget; worker will receive generic template instead",
+                    );
+                }
+                if !inline_resume_worker(item, &verdict.feedback, workflow, pool).await {
+                    clear_review_fields = false;
+                }
             }
         }
         other => {
             warn!(module = "captain", action = %other, "unknown verdict action, escalating");
             item.status = ItemStatus::Escalated;
-            let _ = timeline_emit::emit_for_task(
-                item,
-                TimelineEventType::Escalated,
-                &format!("Unknown verdict '{other}', escalated"),
+            let event = mando_types::timeline::TimelineEvent {
+                event_type: TimelineEventType::Escalated,
+                timestamp: mando_types::now_rfc3339(),
+                actor: "captain".to_string(),
+                summary: format!("Unknown verdict '{other}', escalated"),
                 data,
+            };
+            match mando_db::queries::tasks::persist_status_transition(
                 pool,
+                item,
+                prev_status.as_str(),
+                &event,
             )
-            .await;
-            notifier
-                .critical(&format!(
-                    "\u{1f6a8} Unknown verdict on <b>{title}</b>, escalated"
-                ))
-                .await;
-            log_stopped_after = true;
+            .await
+            {
+                Ok(true) => {
+                    notifier
+                        .critical(&format!(
+                            "\u{1f6a8} Unknown verdict on <b>{title}</b>, escalated"
+                        ))
+                        .await;
+                }
+                Ok(false) => {
+                    transition_applied = false;
+                }
+                Err(e) => {
+                    item.status = prev_status;
+                    transition_applied = false;
+                    tracing::error!(module = "captain", item_id = item.id, error = %e, "persist failed for unknown verdict");
+                }
+            }
+            log_stopped_after = transition_applied;
         }
     }
 
@@ -377,10 +408,7 @@ pub async fn apply_verdict(
         }
     }
 
-    if clear_review_fields {
-        // Clear review fields only after successful application so that a
-        // failed nudge resume leaves the session ID intact for retry on the
-        // next tick.
+    if clear_review_fields && transition_applied {
         item.captain_review_trigger = None;
         item.session_ids.review = None;
         item.review_fail_count = 0;
@@ -400,6 +428,9 @@ pub async fn handle_review_error(
     notifier: &Notifier,
     pool: &SqlitePool,
 ) {
+    let prev_status = item.status;
+    let saved_trigger = item.captain_review_trigger;
+    let saved_review_sid = item.session_ids.review.clone();
     *review_fail_count += 1;
     item.session_ids.review = None;
     let max = workflow.agent.max_review_retries;
@@ -408,24 +439,50 @@ pub async fn handle_review_error(
     if *review_fail_count >= max {
         item.status = ItemStatus::Errored;
         item.captain_review_trigger = None;
-        let _ = timeline_emit::emit_for_task(
-            item,
-            TimelineEventType::Errored,
-            &format!(
+        let event = mando_types::timeline::TimelineEvent {
+            event_type: TimelineEventType::Errored,
+            timestamp: mando_types::now_rfc3339(),
+            actor: "captain".to_string(),
+            summary: format!(
                 "Captain review failed {}/{max} times: {error}",
                 review_fail_count
             ),
-            err_data,
+            data: err_data,
+        };
+        match mando_db::queries::tasks::persist_status_transition(
             pool,
+            item,
+            prev_status.as_str(),
+            &event,
         )
-        .await;
-        notifier
-            .critical(&format!(
-                "\u{274c} Captain review failed for <b>{}</b>: {error}",
-                escaped_title(item),
-            ))
-            .await;
+        .await
+        {
+            Ok(true) => {
+                notifier
+                    .critical(&format!(
+                        "\u{274c} Captain review failed for <b>{}</b>: {error}",
+                        escaped_title(item),
+                    ))
+                    .await;
+            }
+            Ok(false) => {
+                tracing::info!(
+                    module = "captain",
+                    item_id = item.id,
+                    "review error transition already applied"
+                );
+            }
+            Err(e) => {
+                item.status = prev_status;
+                item.captain_review_trigger = saved_trigger;
+                item.session_ids.review = saved_review_sid;
+                *review_fail_count -= 1;
+                tracing::error!(module = "captain", item_id = item.id, error = %e, "persist failed for review error");
+            }
+        }
     } else {
+        // Stay in CaptainReviewing -- will retry on next tick.
+        // No status transition, so use regular timeline emit.
         warn!(module = "captain", fail_count = *review_fail_count, %max, %error,
             "captain review failed, will retry");
         let _ = timeline_emit::emit_for_task(
