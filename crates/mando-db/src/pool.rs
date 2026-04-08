@@ -23,7 +23,8 @@ impl Db {
             .create_if_missing(true)
             .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal)
             .busy_timeout(std::time::Duration::from_secs(5))
-            .synchronous(sqlx::sqlite::SqliteSynchronous::Normal);
+            .synchronous(sqlx::sqlite::SqliteSynchronous::Normal)
+            .foreign_keys(true);
 
         let pool = SqlitePoolOptions::new()
             .max_connections(8)
@@ -38,7 +39,9 @@ impl Db {
 
     /// Open an in-memory database (for tests).
     pub async fn open_in_memory() -> Result<Self> {
-        let options = SqliteConnectOptions::new().filename(":memory:");
+        let options = SqliteConnectOptions::new()
+            .filename(":memory:")
+            .foreign_keys(true);
 
         let pool = SqlitePoolOptions::new()
             .max_connections(1)
@@ -101,6 +104,11 @@ const MIGRATIONS: &[(i64, &str)] = &[
     (2, include_str!("../migrations/002_drop_linear.sql")),
     (3, include_str!("../migrations/003_timeline_dedup.sql")),
     (4, include_str!("../migrations/004_drop_branch.sql")),
+    (5, include_str!("../migrations/005_workbenches.sql")),
+    (6, include_str!("../migrations/006_audit_cleanup.sql")),
+    (7, include_str!("../migrations/007_projects_table.sql")),
+    (8, include_str!("../migrations/008_projects_full.sql")),
+    (9, include_str!("../migrations/009_cleanup_fks.sql")),
 ];
 
 #[cfg(test)]

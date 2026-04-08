@@ -19,7 +19,7 @@ pub(crate) fn to_picker_state(chat_id: &str, items: &[&mando_types::Task]) -> Pi
                         .and_then(|v| v.as_str().map(String::from))
                         .unwrap_or_else(|| format!("{:?}", it.status)),
                 ),
-                has_pr: it.pr.as_ref().is_some_and(|p| !p.is_empty()),
+                has_pr: it.pr_number.is_some(),
             })
             .collect(),
         selected: std::collections::HashSet::new(),

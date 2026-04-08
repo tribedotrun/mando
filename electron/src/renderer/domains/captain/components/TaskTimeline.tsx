@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import type { TimelineEvent } from '#renderer/types';
-import { relativeTime } from '#renderer/utils';
-import { StatusIcon } from '#renderer/domains/captain/components/TaskActions';
-import { PrIcon } from '#renderer/domains/captain/components/TaskIcons';
+import { relativeTime, localizeMeta } from '#renderer/utils';
+import { StatusIcon } from '#renderer/global/components/StatusIndicator';
+import { PrIcon } from '#renderer/global/components/icons';
 import { Button } from '#renderer/components/ui/button';
 import { Commit } from '#renderer/components/ui/commit';
 
@@ -76,7 +76,7 @@ function getUsefulDetails(data: Record<string, unknown>): [string, string][] {
       // Shorten GitHub URLs to repo#number format
       const prMatch = display.match(/github\.com\/([^/]+\/[^/]+)\/pull\/(\d+)/);
       if (prMatch) display = `${prMatch[1]}#${prMatch[2]}`;
-      return [k, display] as [string, string];
+      return [k, localizeMeta(display)] as [string, string];
     });
 }
 
@@ -133,7 +133,7 @@ export function TaskTimeline({
                   : event.event_type.replace(/_/g, ' ')}
               </span>
               <span className="min-w-0 flex-1 truncate text-caption text-text-3">
-                {event.summary}
+                {localizeMeta(event.summary)}
               </span>
               {showTranscript && (
                 <Button
@@ -143,7 +143,7 @@ export function TaskTimeline({
                     e.stopPropagation();
                     onTranscriptClick(sessionId, event);
                   }}
-                  className="shrink-0 text-primary"
+                  className="shrink-0 text-muted-foreground"
                 >
                   transcript
                 </Button>

@@ -3,6 +3,7 @@ import { useSettingsStore } from '#renderer/domains/settings/stores/settingsStor
 import type { SetupProgress } from '#renderer/app/Sidebar';
 
 const SETUP_TOTAL = 3;
+const AUTO_HIDE_DELAY_MS = 3_000;
 
 const STEP_NAMES = ['Install Claude Code', 'Connect Telegram for remote control', 'Add a project'];
 
@@ -30,7 +31,7 @@ export function useSetupProgress(): SetupProgress | null {
   // Schedule auto-hide 3s after reaching 100%. Zustand selector re-renders
   // trigger this on every config change, so the timer is set exactly once.
   if (allDone && !hidden && timerRef.current === undefined) {
-    timerRef.current = setTimeout(() => setHidden(true), 3000);
+    timerRef.current = setTimeout(() => setHidden(true), AUTO_HIDE_DELAY_MS);
   }
   if (!allDone && timerRef.current !== undefined) {
     clearTimeout(timerRef.current);

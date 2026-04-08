@@ -215,13 +215,8 @@ pub(crate) async fn post_task_rework(
         let store = state.task_store.read().await;
         match store.find_by_id(id).await {
             Ok(Some(item)) => {
-                let pr_num = item
-                    .pr
-                    .as_deref()
-                    .and_then(mando_types::task::extract_pr_number)
-                    .map(|s| s.to_string());
-                let config = state.config.load_full();
-                let repo = mando_config::resolve_github_repo(item.project.as_deref(), &config);
+                let pr_num = item.pr_number.map(|n| n.to_string());
+                let repo = item.github_repo.clone();
                 pr_num.zip(repo)
             }
             Err(e) => {

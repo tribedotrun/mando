@@ -12,7 +12,7 @@ pub(crate) fn items_needing_rebase_check(items: &[Task]) -> Vec<usize> {
         .enumerate()
         .filter(|(_, item)| {
             item.status == ItemStatus::AwaitingReview
-                && item.pr.is_some()
+                && item.pr_number.is_some()
                 && item.rebase_worker.is_none()
         })
         .map(|(i, _)| i)
@@ -27,7 +27,7 @@ pub(crate) fn items_needing_merge_watch(items: &[Task]) -> Vec<usize> {
     items
         .iter()
         .enumerate()
-        .filter(|(_, item)| item.status == ItemStatus::HandedOff && item.pr.is_some())
+        .filter(|(_, item)| item.status == ItemStatus::HandedOff && item.pr_number.is_some())
         .map(|(i, _)| i)
         .collect()
 }
@@ -70,7 +70,7 @@ mod tests {
     fn make_pr_item(status: ItemStatus) -> Task {
         let mut item = Task::new("Test");
         item.status = status;
-        item.pr = Some("42".into());
+        item.pr_number = Some(42);
         item
     }
 

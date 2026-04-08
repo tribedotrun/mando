@@ -1,13 +1,15 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { apiGet } from '#renderer/domains/settings/hooks/useApi';
 import { Card, CardContent } from '#renderer/components/ui/card';
 import { Input } from '#renderer/components/ui/input';
 import { Label } from '#renderer/components/ui/label';
 import { Skeleton } from '#renderer/components/ui/skeleton';
-import { useSettingsStore } from '#renderer/domains/settings/stores/settingsStore';
+import {
+  useSettingsStore,
+  type TelegramConfig,
+} from '#renderer/domains/settings/stores/settingsStore';
 import { toast } from 'sonner';
-import type { TelegramConfig } from '#renderer/domains/settings/stores/settingsStore';
 import { Switch } from '#renderer/components/ui/switch';
 
 interface TelegramHealth {
@@ -76,6 +78,8 @@ export function SettingsTelegram(): React.ReactElement {
   const save = useSettingsStore((s) => s.save);
   const scheduleSave = useSettingsStore((s) => s.scheduleSave);
 
+  const [savingEnabled, setSavingEnabled] = useState(false);
+
   const { data: health } = useQuery<TelegramHealth>({
     queryKey: ['health', 'telegram'],
     queryFn: () => apiGet<TelegramHealth>('/api/health/telegram'),
@@ -107,14 +111,23 @@ export function SettingsTelegram(): React.ReactElement {
               <Switch
                 data-testid="telegram-enabled"
                 checked={!!telegram.enabled}
-                onCheckedChange={async () => {
+                disabled={savingEnabled}
+                onCheckedChange={() => {
+                  setSavingEnabled(true);
                   const enabling = !telegram.enabled;
                   updateTelegram({ enabled: enabling });
-                  const result = await save();
-                  if (!result.ok) {
-                    updateTelegram({ enabled: !enabling });
-                    toast.error(result.error ?? 'Failed to update Telegram settings');
-                  }
+                  void save()
+                    .then((result) => {
+                      if (!result.ok) {
+                        updateTelegram({ enabled: !enabling });
+                        toast.error(result.error ?? 'Failed to update Telegram settings');
+                      }
+                    })
+                    .catch(() => {
+                      updateTelegram({ enabled: !enabling });
+                      toast.error('Failed to update Telegram settings');
+                    })
+                    .finally(() => setSavingEnabled(false));
                 }}
               />
             </div>

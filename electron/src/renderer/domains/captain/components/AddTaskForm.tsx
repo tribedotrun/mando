@@ -3,12 +3,13 @@ import { Paperclip } from 'lucide-react';
 import { useDraft } from '#renderer/global/hooks/useDraft';
 import { useMountEffect } from '#renderer/global/hooks/useMountEffect';
 import { useProjects } from '#renderer/domains/settings';
-import { useBulkCreateStore } from '#renderer/domains/captain/stores/bulkCreateStore';
-import { useTaskStore } from '#renderer/domains/captain/stores/taskStore';
-import { bulkTextareaRows, getErrorMessage, shortRepo } from '#renderer/utils';
+import { useTaskCreateStore } from '#renderer/domains/captain/stores/bulkCreateStore';
+import { bulkTextareaRows, shortRepo } from '#renderer/utils';
 import { Button } from '#renderer/components/ui/button';
 
 import { Combobox } from '#renderer/components/ui/combobox';
+
+const AUTOFOCUS_DELAY_MS = 50;
 
 const LAST_PROJECT_KEY = 'mando:lastProject';
 const DRAFT_BULK_KEY = 'mando:draft:newTask:bulk';
@@ -43,14 +44,14 @@ function AddTaskFormInner({
   const [image, setImage] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
-  const [submitting, setSubmitting] = useState(false);
 
   const titleRef = useRef(title);
   titleRef.current = title;
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
-  const add = useTaskStore((s) => s.add);
-  const startBulk = useBulkCreateStore((s) => s.start);
+  const startSingle = useTaskCreateStore((s) => s.startSingle);
+  const startBulk = useTaskCreateStore((s) => s.startBulk);
+  const createPhase = useTaskCreateStore((s) => s.phase);
 
   const projects = useProjects();
 
@@ -61,7 +62,7 @@ function AddTaskFormInner({
   const textareaRows = bulk ? bulkTextareaRows(title.split('\n').length + 1) : 5;
 
   useMountEffect(() => {
-    setTimeout(() => inputRef.current?.focus(), 50);
+    setTimeout(() => inputRef.current?.focus(), AUTOFOCUS_DELAY_MS);
     return () => {
       if (!titleRef.current.trim()) {
         localStorage.removeItem(DRAFT_BULK_KEY);
@@ -113,9 +114,10 @@ function AddTaskFormInner({
     }
   };
 
-  const canSubmit = !submitting && !!trimmedTitle && (!projectRequired || !!effectiveProject);
+  const canSubmit =
+    !!trimmedTitle && (!projectRequired || !!effectiveProject) && createPhase === 'idle';
 
-  const handleSubmit = async () => {
+  const handleSubmit = () => {
     if (!trimmedTitle) return;
     if (projectRequired && !effectiveProject) {
       setSubmitError('Select a project before handing work to Mando.');
@@ -126,33 +128,21 @@ function AddTaskFormInner({
 
     if (bulk) {
       startBulk(trimmedTitle, effectiveProject || undefined);
-      resetForm();
-      onClose();
-      return;
-    }
-
-    setSubmitting(true);
-    setSubmitError(null);
-    try {
-      await add({
+    } else {
+      startSingle({
         title: trimmedTitle,
         project: effectiveProject || undefined,
         images: image ? [image] : undefined,
       });
-
-      resetForm();
-      onClose();
-    } catch (err) {
-      setSubmitError(getErrorMessage(err, 'Failed to create task'));
-    } finally {
-      setSubmitting(false);
     }
+    resetForm();
+    onClose();
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.metaKey && e.key === 'Enter') {
       e.preventDefault();
-      void handleSubmit();
+      handleSubmit();
     }
     if (e.key === 'Escape') onClose();
   };
@@ -193,7 +183,7 @@ function AddTaskFormInner({
                   return next;
                 })
               }
-              className={bulk ? 'text-primary' : ''}
+              className={bulk ? 'text-foreground' : ''}
             >
               Bulk
             </Button>
@@ -227,7 +217,7 @@ function AddTaskFormInner({
                 }
                 rows={textareaRows}
                 className="w-full resize-none rounded-md bg-muted px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
-                style={{ caretColor: 'var(--primary)' }}
+                style={{ caretColor: 'var(--foreground)' }}
               />
             </div>
 
@@ -262,10 +252,9 @@ function AddTaskFormInner({
                 value={effectiveProject}
                 onValueChange={handleProjectChange}
                 options={[
-                  ...(projects.length > 1 ? [{ value: '__all__', label: 'All projects' }] : []),
                   ...projects.map((item) => ({
                     value: item,
-                    label: shortRepo(item).toUpperCase(),
+                    label: shortRepo(item),
                   })),
                 ]}
                 placeholder="Project..."
@@ -305,12 +294,8 @@ function AddTaskFormInner({
           </div>
 
           <div className="flex items-center gap-3">
-            <Button
-              data-testid="submit-task-btn"
-              onClick={() => void handleSubmit()}
-              disabled={!canSubmit}
-            >
-              {submitting ? 'Working...' : 'Create'}
+            <Button data-testid="submit-task-btn" onClick={handleSubmit} disabled={!canSubmit}>
+              Create
             </Button>
           </div>
         </div>

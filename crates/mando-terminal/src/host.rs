@@ -46,6 +46,7 @@ impl TerminalHost {
             req.agent,
             req.resume_session_id.as_deref(),
             size,
+            &req.extra_env,
         )?;
         let mut sessions = self.sessions.lock().expect("sessions lock");
         if sessions.len() >= Self::MAX_SESSIONS {

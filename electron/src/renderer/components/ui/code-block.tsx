@@ -52,6 +52,8 @@ async function highlight(code: string, lang: string): Promise<string | null> {
 }
 
 // Map common language aliases to what shiki expects
+const COPY_FEEDBACK_MS = 1500;
+
 const LANG_ALIASES: Record<string, string> = {
   ts: 'typescript',
   js: 'javascript',
@@ -89,11 +91,15 @@ export function CodeBlock({
     gcTime: 5 * 60 * 1000,
   });
 
-  const handleCopy = async () => {
-    await navigator.clipboard.writeText(code);
-    setCopied(true);
-    clearTimeout(timerRef.current);
-    timerRef.current = setTimeout(() => setCopied(false), 1500);
+  const handleCopy = () => {
+    void navigator.clipboard
+      .writeText(code)
+      .then(() => {
+        setCopied(true);
+        clearTimeout(timerRef.current);
+        timerRef.current = setTimeout(() => setCopied(false), COPY_FEEDBACK_MS);
+      })
+      .catch((err) => console.error('Clipboard write failed', err));
   };
 
   return (
@@ -116,7 +122,7 @@ export function CodeBlock({
       </div>
 
       {/* Code content */}
-      <div className="overflow-x-auto px-3 pb-3 pt-1 font-mono text-[11px] leading-relaxed">
+      <div className="min-w-0 overflow-x-auto px-3 pb-3 pt-1 font-mono text-[11px] leading-relaxed">
         {html ? (
           <div
             className="shiki-wrapper [&_.shiki]:!bg-transparent [&_pre]:!bg-transparent [&_code]:!bg-transparent"

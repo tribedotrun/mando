@@ -9,6 +9,9 @@ pub(crate) struct ReviewFieldsSnapshot {
     pub captain_review_trigger: Option<mando_types::task::ReviewTrigger>,
     pub review_session_id: Option<String>,
     pub review_fail_count: i64,
+    pub clarifier_fail_count: i64,
+    pub spawn_fail_count: i64,
+    pub merge_fail_count: i64,
     pub last_activity_at: Option<String>,
 }
 
@@ -20,6 +23,9 @@ impl ReviewFieldsSnapshot {
             captain_review_trigger: item.captain_review_trigger,
             review_session_id: item.session_ids.review.clone(),
             review_fail_count: item.review_fail_count,
+            clarifier_fail_count: item.clarifier_fail_count,
+            spawn_fail_count: item.spawn_fail_count,
+            merge_fail_count: item.merge_fail_count,
             last_activity_at: item.last_activity_at.clone(),
         }
     }
@@ -30,6 +36,9 @@ impl ReviewFieldsSnapshot {
         item.captain_review_trigger = self.captain_review_trigger;
         item.session_ids.review = self.review_session_id;
         item.review_fail_count = self.review_fail_count;
+        item.clarifier_fail_count = self.clarifier_fail_count;
+        item.spawn_fail_count = self.spawn_fail_count;
+        item.merge_fail_count = self.merge_fail_count;
         item.last_activity_at = self.last_activity_at;
     }
 }

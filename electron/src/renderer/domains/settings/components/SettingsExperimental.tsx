@@ -1,8 +1,10 @@
 import React from 'react';
 import { Card, CardContent } from '#renderer/components/ui/card';
 import { Separator } from '#renderer/components/ui/separator';
-import { useSettingsStore } from '#renderer/domains/settings/stores/settingsStore';
-import type { FeaturesConfig } from '#renderer/domains/settings/stores/settingsStore';
+import {
+  useSettingsStore,
+  type FeaturesConfig,
+} from '#renderer/domains/settings/stores/settingsStore';
 import { Switch } from '#renderer/components/ui/switch';
 
 const EMPTY_FEATURES: FeaturesConfig = {};
@@ -50,7 +52,7 @@ export function SettingsExperimental(): React.ReactElement {
                     checked={on}
                     onCheckedChange={(checked) => {
                       updateSection('features', { [flag.key]: checked });
-                      save();
+                      void save();
                     }}
                   />
                 </div>

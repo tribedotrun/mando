@@ -160,7 +160,7 @@ async fn build_snapshot(state: &AppState) -> anyhow::Result<serde_json::Value> {
                     "project": task.project,
                     "worktree": task.worktree,
                     "branch": task.branch,
-                    "pr": task.pr,
+                    "pr_number": task.pr_number,
                     "started_at": task.worker_started_at,
                     "last_activity_at": task.last_activity_at,
                     "cc_session_id": task.session_ids.worker,

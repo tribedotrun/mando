@@ -6,8 +6,7 @@ import { reopenItem, reworkItem } from '#renderer/domains/captain/hooks/useApi';
 import { useDraft } from '#renderer/global/hooks/useDraft';
 import { useTaskStore } from '#renderer/domains/captain/stores/taskStore';
 import { toast } from 'sonner';
-import type { TaskItem } from '#renderer/types';
-import { FINALIZED_STATUSES } from '#renderer/types';
+import { FINALIZED_STATUSES, type TaskItem } from '#renderer/types';
 import { canReopen, canRework, canAskAny, getErrorMessage } from '#renderer/utils';
 import { invalidateTaskDetail } from '#renderer/queryClient';
 import {
@@ -63,8 +62,8 @@ export function TaskActionBar({ item, onAsk }: Props): React.ReactElement | null
       }
       if (selectedAction === 'reopen') await reopenItem(item.id, trimmed);
       else if (selectedAction === 'rework') await reworkItem(item.id, trimmed);
-      taskFetch();
-      invalidateTaskDetail(queryClient, item.id);
+      void taskFetch();
+      void invalidateTaskDetail(queryClient, item.id);
       const msg = selectedAction === 'reopen' ? 'Task reopened' : 'Rework requested';
       toast.success(msg);
       clearTextDraft();
@@ -81,7 +80,7 @@ export function TaskActionBar({ item, onAsk }: Props): React.ReactElement | null
     (e: React.KeyboardEvent) => {
       if (e.key === 'Enter' && e.metaKey && text.trim()) {
         e.preventDefault();
-        handleSubmit();
+        void handleSubmit();
       }
     },
     [text, handleSubmit],
@@ -111,7 +110,7 @@ export function TaskActionBar({ item, onAsk }: Props): React.ReactElement | null
         <div className="flex items-end gap-2 rounded-lg bg-muted px-3 py-2">
           <Textarea
             ref={textareaRef}
-            className="min-h-[20px] max-h-[120px] flex-1 resize-none overflow-y-auto border-none bg-transparent py-1 text-body leading-snug text-foreground shadow-none focus-visible:ring-0"
+            className="min-h-[20px] max-h-[120px] flex-1 resize-none overflow-y-auto border-0 bg-transparent py-1 text-body leading-snug text-foreground shadow-none [scrollbar-width:none] focus-visible:ring-0 dark:bg-transparent"
             rows={1}
             placeholder={config.placeholder}
             value={text}
@@ -153,7 +152,7 @@ export function TaskActionBar({ item, onAsk }: Props): React.ReactElement | null
 
           {/* Circular send button */}
           <Button
-            onClick={handleSubmit}
+            onClick={() => void handleSubmit()}
             disabled={!canSubmit}
             variant={showAccent ? 'default' : 'secondary'}
             size="icon-xs"

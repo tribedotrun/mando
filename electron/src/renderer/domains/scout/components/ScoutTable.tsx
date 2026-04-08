@@ -4,6 +4,7 @@ import { FileText } from 'lucide-react';
 import type { ScoutItem } from '#renderer/types';
 import { fetchScoutItem, updateScoutStatus } from '#renderer/domains/scout/hooks/useApi';
 import { useScrollIntoViewRef } from '#renderer/global/hooks/useScrollIntoViewRef';
+import { EmptyState } from '#renderer/global/components/EmptyState';
 import { toast } from 'sonner';
 import { getErrorMessage } from '#renderer/utils';
 import log from '#renderer/logger';
@@ -50,23 +51,26 @@ const TYPE_BADGE: Record<
 
 const USER_SETTABLE = ['pending', 'processed', 'saved', 'archived'];
 
-interface Props {
-  items: ScoutItem[];
-  selectedIds: Set<number>;
+export interface ScoutTableCallbacks {
   onToggleSelect: (id: number) => void;
   onSelect: (id: number) => void;
   onRefresh: () => void;
+}
+
+interface Props {
+  items: ScoutItem[];
+  selectedIds: Set<number>;
+  callbacks: ScoutTableCallbacks;
   focusedIndex?: number;
 }
 
 export function ScoutTable({
   items,
   selectedIds,
-  onToggleSelect,
-  onSelect,
-  onRefresh,
+  callbacks,
   focusedIndex = -1,
 }: Props): React.ReactElement {
+  const { onToggleSelect, onSelect, onRefresh } = callbacks;
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [summaryCache, setSummaryCache] = useState<Record<number, string>>({});
   const [summaryErrors, setSummaryErrors] = useState<Record<number, string>>({});
@@ -108,24 +112,26 @@ export function ScoutTable({
     [expandedId, summaryCache],
   );
 
-  const handleStatusChange = async (id: number, status: string) => {
-    try {
-      await updateScoutStatus(id, status);
-      onRefresh();
-    } catch (err) {
-      toast.error(`Status update failed: ${getErrorMessage(err, 'unknown error')}`);
-    }
-    setEditingId(null);
+  const handleStatusChange = (id: number, status: string) => {
+    void (async () => {
+      try {
+        await updateScoutStatus(id, status);
+        onRefresh();
+      } catch (err) {
+        toast.error(`Status update failed: ${getErrorMessage(err, 'unknown error')}`);
+      }
+      setEditingId(null);
+    })();
   };
 
   if (items.length === 0) {
     return (
-      <div data-testid="scout-table" className="flex flex-col items-center justify-center py-16">
-        <FileText size={48} color="var(--text-4)" strokeWidth={1.5} className="mb-4" />
-        <span className="text-subheading mb-1 text-muted-foreground">No scout items yet</span>
-        <span className="text-body mb-4 text-text-3">
-          Add a URL to start building your scout feed.
-        </span>
+      <div data-testid="scout-table">
+        <EmptyState
+          icon={<FileText size={48} color="var(--text-4)" strokeWidth={1.5} />}
+          heading="No scout items yet"
+          description="Add a URL to start building your scout feed."
+        />
       </div>
     );
   }
@@ -160,8 +166,8 @@ export function ScoutTable({
                   data-testid="scout-row"
                   data-focused={isFocused || undefined}
                   data-state={sel ? 'selected' : undefined}
-                  className={`cursor-pointer ${isFocused ? 'outline outline-2 outline-primary -outline-offset-2' : ''}`}
-                  onClick={() => hasSummary && toggleExpand(item.id, hasSummary)}
+                  className={`cursor-pointer ${isFocused ? 'outline outline-2 outline-ring -outline-offset-2' : ''}`}
+                  onClick={() => hasSummary && void toggleExpand(item.id, hasSummary)}
                 >
                   <TableCell>
                     <Checkbox

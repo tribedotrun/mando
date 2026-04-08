@@ -144,11 +144,49 @@ pub(crate) async fn post_worktrees(
         .await
         .map_err(internal_error)?;
 
+    // Create a workbench row for manual worktrees.
+    let project_id = mando_db::queries::projects::upsert(
+        state.db.pool(),
+        project_key,
+        &project_cfg.path,
+        project_cfg.github_repo.as_deref(),
+    )
+    .await
+    .map_err(internal_error)?;
+    let wb_title = mando_types::workbench::workbench_title_now();
+    let wb = mando_types::Workbench::new(
+        project_id,
+        project_key.to_string(),
+        wt_path.to_string_lossy().to_string(),
+        wb_title,
+    );
+    let wb_id = match mando_db::queries::workbenches::insert(state.db.pool(), &wb).await {
+        Ok(id) => Some(id),
+        Err(e) => {
+            tracing::warn!(
+                module = "worktrees",
+                path = %wt_path.display(),
+                error = %e,
+                "workbench insert failed after worktree creation; cleaning up orphan worktree"
+            );
+            if let Err(rm_err) = git::remove_worktree(&project_path, &wt_path).await {
+                tracing::warn!(
+                    module = "worktrees",
+                    path = %wt_path.display(),
+                    error = %rm_err,
+                    "failed to clean up orphan worktree after workbench insert failure"
+                );
+            }
+            return Err(internal_error(e));
+        }
+    };
+
     Ok(Json(json!({
         "ok": true,
         "path": wt_path.to_string_lossy(),
         "branch": branch,
         "project": project_key,
+        "workbenchId": wb_id,
     })))
 }
 

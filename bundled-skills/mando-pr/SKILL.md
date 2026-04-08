@@ -13,7 +13,7 @@ description: Commit, push, create PR, and tag AI reviewers. Use when ready to op
 
 2. **Verify wiring and UI surfacing**: Review `git diff origin/main..HEAD` and confirm: (a) every new public function, route handler, component, config field, and CLI/TG command is called, registered, rendered, or read from a user-facing entry point; (b) every user-visible feature added to the daemon, API, captain, CLI, or Telegram has a corresponding Electron UI update (view, indicator, setting, notification, or SSE event). Fix any gaps before proceeding.
 
-3. **Commit & push**: Stage changes, commit with a descriptive message, and `git push -u origin HEAD`
+3. **Commit & push**: Stage changes, commit with a descriptive message, and `git push`
 
 4. **Rename branch if needed** (MUST happen before PR creation — renaming after closes the PR):
 
@@ -39,7 +39,7 @@ description: Commit, push, create PR, and tag AI reviewers. Use when ready to op
    <mando-dev test / mando-dev check results — confirms nothing broke>
 
    ### E2E verification
-   <Bespoke steps exercising the exact new behavior against a running system (no mocks). Include commands run + observed output in text. Do NOT paste screenshots or images here — visual evidence belongs in the Evidence section added by mando-pr-summary. If not yet performed, leave empty — mando-pr-summary will flag it.>
+   <Bespoke steps exercising the exact new behavior against a running system (no mocks). Include commands run + observed output. If not yet performed, leave empty — mando-pr-summary will flag it.>
    EOF
 
    gh pr create --title "..." --body-file /tmp/pr-body.md
@@ -80,8 +80,8 @@ description: Commit, push, create PR, and tag AI reviewers. Use when ready to op
    python3 ~/.claude/skills/mando-pr/pr_status.py <pr_number>
    ```
 
-   - `UNADDRESSED COMMENTS` → fix ALL issues, reply to EACH comment, commit & push with `git add . && git commit -m "..." && git push -u origin HEAD`
-   - `[FAIL]` CI checks → inspect, fix code, commit & push with `git add . && git commit -m "..." && git push -u origin HEAD`
+   - `UNADDRESSED COMMENTS` → fix ALL issues, reply to EACH comment, commit & push with `git add . && git commit -m "..." && git push`
+   - `[FAIL]` CI checks → inspect, fix code, commit & push with `git add . && git commit -m "..." && git push`
    - `[WAIT]` or `ALL CLEAR` → proceed to step 10
 
    **If not `--fast`**: internal review + monitoring loop.
@@ -107,7 +107,7 @@ description: Commit, push, create PR, and tag AI reviewers. Use when ready to op
       echo "$HEAD" > "$REVIEW_FILE"
       ```
 
-   b. **Fix all internal issues**: Address problems, commit & push with `git add . && git commit -m "..." && git push -u origin HEAD`. Repeat review if significant changes were made.
+   b. **Fix all internal issues**: Address problems, commit & push with `git add . && git commit -m "..." && git push`. Repeat review if significant changes were made.
 
    c. **Monitor PR status** (loop until all clear):
 
@@ -118,12 +118,12 @@ description: Commit, push, create PR, and tag AI reviewers. Use when ready to op
       **Exit codes**: `0` = all clear, `1` = has issues (details in stdout).
 
       **Loop logic** (repeat until exit 0):
-      - `[FAIL]` CI checks → inspect, fix code, commit & push with `git add . && git commit -m "..." && git push -u origin HEAD`, re-trigger CI (see below), re-check
+      - `[FAIL]` CI checks → inspect, fix code, commit & push with `git add . && git commit -m "..." && git push`, re-trigger CI (see below), re-check
       - `UNADDRESSED COMMENTS` → fix ALL issues, reply to EACH comment (see below), commit & push, re-trigger CI (see below), re-check
       - `[WAIT]` CI or reviewers pending → sleep 10s, re-check
       - `ALL CLEAR` → proceed to step 10
 
-   d. **Consolidate** remaining issues into a table with Reviewer, Issue, and Location columns. Fix all in ONE commit with `git add . && git commit -m "..." && git push -u origin HEAD`.
+   d. **Consolidate** remaining issues into a table with Reviewer, Issue, and Location columns. Fix all in ONE commit with `git add . && git commit -m "..." && git push`.
 
    **Replying to review comments** (both modes — required for each unaddressed comment):
 
@@ -141,7 +141,7 @@ description: Commit, push, create PR, and tag AI reviewers. Use when ready to op
     git status --short
     ```
 
-    If there are unstaged changes, modified files, or untracked files (screenshots, temp files, build artifacts): commit them with `git add . && git commit -m "..." && git push -u origin HEAD` or delete them. A dirty worktree means forgotten work or leaked artifacts. Do NOT proceed until `git status` is clean.
+    If there are unstaged changes, modified files, or untracked files (screenshots, temp files, build artifacts): commit them with `git add . && git commit -m "..." && git push` or delete them. A dirty worktree means forgotten work or leaked artifacts. Do NOT proceed until `git status` is clean.
 
 ## Notes
 

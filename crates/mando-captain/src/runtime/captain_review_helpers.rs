@@ -103,7 +103,7 @@ pub(super) async fn inline_resume_worker(
                 &wt_path,
                 "worker",
                 w,
-                &item.id.to_string(),
+                Some(item.id),
                 true,
             )
             .await

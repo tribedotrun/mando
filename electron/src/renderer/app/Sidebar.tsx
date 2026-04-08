@@ -1,9 +1,11 @@
 import React, { useState } from 'react';
-import { FileText, List, Settings, Plus, FolderPlus, ChevronUp, PanelLeft } from 'lucide-react';
+import { FileText, List, Settings, SquarePen, FolderPlus, ChevronUp } from 'lucide-react';
 import log from '#renderer/logger';
 import { pct } from '#renderer/utils';
 import { useTaskStore } from '#renderer/domains/captain';
 import { useSettingsStore } from '#renderer/domains/settings';
+import { useTerminalStore } from '#renderer/domains/terminal/stores/terminalStore';
+import { useWorkbenchStore } from '#renderer/domains/terminal/stores/workbenchStore';
 import { SetupChecklist } from '#renderer/domains/onboarding';
 import { SidebarProjectItem } from '#renderer/global/components/SidebarProjectItem';
 import { useMountEffect } from '#renderer/global/hooks/useMountEffect';
@@ -33,10 +35,11 @@ interface Props {
   onProjectFilter: (project: string | null) => void;
   setupProgress: SetupProgress | null;
   setupActive: boolean;
-  collapsed: boolean;
-  onToggleCollapse: () => void;
+  activeTerminalCwd?: string | null;
   onNewTerminal?: (project: string) => void;
   onOpenTask?: (taskId: number) => void;
+  onOpenTerminalSession?: (worktree: { project: string; cwd: string }) => void;
+  onArchiveWorkbench?: (id: number) => void;
 }
 
 const NAV_ITEMS: { id: Tab; label: string; Icon: React.FC }[] = [
@@ -100,12 +103,19 @@ export function Sidebar({
   onProjectFilter,
   setupProgress,
   setupActive,
-  collapsed,
-  onToggleCollapse,
+  activeTerminalCwd,
   onNewTerminal,
   onOpenTask,
+  onOpenTerminalSession,
+  onArchiveWorkbench,
 }: Props): React.ReactElement | null {
   const items = useTaskStore((s) => s.items);
+  const fetchTerminals = useTerminalStore((s) => s.fetch);
+  const fetchWorkbenches = useWorkbenchStore((s) => s.fetch);
+  useMountEffect(() => {
+    void fetchTerminals();
+    void fetchWorkbenches();
+  });
 
   const scoutEnabled = useSettingsStore((s) => !!s.config.features?.scout);
   const visibleNav = scoutEnabled ? NAV_ITEMS : NAV_ITEMS.filter((i) => i.id !== 'scout');
@@ -124,6 +134,16 @@ export function Sidebar({
     }
     return map;
   }, [configProjects]);
+
+  const workbenches = useWorkbenchStore((s) => s.workbenches);
+  const projectWorktrees = React.useMemo(() => {
+    const map: Record<string, { id: number; cwd: string; name: string }[]> = {};
+    for (const wb of workbenches) {
+      const projName = pathToName[wb.project] ?? wb.project;
+      (map[projName] ??= []).push({ id: wb.id, cwd: wb.worktree, name: wb.title });
+    }
+    return map;
+  }, [workbenches, pathToName]);
 
   const { projectCounts, projectTasks } = React.useMemo(() => {
     const counts: Record<string, number> = {};
@@ -160,52 +180,22 @@ export function Sidebar({
 
   const homeActive = activeTab === 'captain' && !projectFilter;
 
-  if (collapsed) {
-    return (
-      <div className="flex h-full w-full items-start justify-center bg-card pt-3">
-        <Button
-          variant="ghost"
-          size="icon-xs"
-          onClick={onToggleCollapse}
-          title="Expand sidebar (Cmd+B)"
-          className="text-text-3 hover:text-text-2"
-          style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
-        >
-          <PanelLeft size={14} />
-        </Button>
-      </div>
-    );
-  }
-
   return (
-    <aside className="relative flex h-full flex-col bg-card px-2 pb-4 pt-12">
+    <aside className="relative flex h-full flex-col overflow-hidden bg-card px-2 pb-4 pt-12">
       <UpdateButton />
 
-      {/* Collapse toggle */}
-      <Button
-        variant="ghost"
-        size="icon-xs"
-        onClick={onToggleCollapse}
-        title="Toggle sidebar (Cmd+B)"
-        className="absolute left-[70px] top-3 z-20 text-text-3 hover:text-text-2"
-        style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
-      >
-        <PanelLeft size={14} />
-      </Button>
-
       {/* New task */}
-      <Button
+      <button
         onClick={onNewTask}
-        className="sidebar-new-task w-full gap-2"
-        size="sm"
+        className="sidebar-new-task flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground"
         data-testid="add-task-btn"
       >
-        <Plus size={14} strokeWidth={2} />
+        <SquarePen size={16} strokeWidth={1.5} />
         New task
-      </Button>
+      </button>
 
       {/* Nav items */}
-      <nav className="flex flex-col gap-1 pt-4" aria-label="Main navigation">
+      <nav className="flex flex-col gap-1 pt-1" aria-label="Main navigation">
         {visibleNav.map(({ id, label, Icon }) => {
           const active = activeTab === id && !projectFilter;
           return (
@@ -232,7 +222,7 @@ export function Sidebar({
       </nav>
 
       {/* Projects section */}
-      <ScrollArea className="flex-1 pt-6">
+      <ScrollArea className="min-h-0 flex-1 pt-6">
         <div className="text-label mb-2 flex w-full items-center pl-1.5">
           <Button
             variant="ghost"
@@ -275,7 +265,11 @@ export function Sidebar({
                   onRemove={onRemoveProject}
                   onNewTerminal={onNewTerminal}
                   tasks={projectTasks[pName] ?? []}
+                  worktrees={projectWorktrees[pName] ?? []}
+                  activeWorktreeCwd={activeTerminalCwd}
+                  onOpenWorktree={onOpenTerminalSession}
                   onOpenTask={onOpenTask}
+                  onArchiveWorkbench={onArchiveWorkbench}
                 />
               );
             })}
@@ -355,7 +349,7 @@ function SetupTrigger({
             cy="10"
             r="8"
             fill="none"
-            stroke="var(--primary)"
+            stroke="var(--foreground)"
             strokeWidth="2"
             strokeDasharray={`${(progressPct / 100) * 50.3} 50.3`}
             strokeLinecap="round"

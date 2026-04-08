@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react';
 import { TerminalView } from '#renderer/domains/terminal/components/TerminalView';
-import { useTerminalStore } from '#renderer/domains/terminal/store';
+import { useTerminalStore } from '#renderer/domains/terminal/stores/terminalStore';
 import { X, Plus, Circle, ArrowRight } from 'lucide-react';
 
 interface StandaloneTerminalProps {
@@ -33,17 +33,20 @@ export function StandaloneTerminal({
   );
 
   const handleCloseTab = useCallback(
-    async (id: string) => {
-      await removeSession(id);
-      if (activeTab === id) {
-        const remaining = relevantSessions.filter((s) => s.id !== id);
-        setActiveTab(remaining.length > 0 ? remaining[0].id : null);
-      }
+    (id: string) => {
+      void removeSession(id)
+        .then(() => {
+          if (activeTab === id) {
+            const remaining = relevantSessions.filter((s) => s.id !== id);
+            setActiveTab(remaining.length > 0 ? remaining[0].id : null);
+          }
+        })
+        .catch((err) => console.error('Failed to close tab', err));
     },
     [activeTab, relevantSessions, removeSession],
   );
 
-  const handleAdopt = useCallback(async () => {
+  const handleAdopt = useCallback(() => {
     setAdopting(true);
     onAdopt?.(cwd);
   }, [cwd, onAdopt]);
@@ -78,10 +81,10 @@ export function StandaloneTerminal({
           }}
         >
           <div style={{ display: 'flex', gap: 8 }}>
-            <button className="btn btn-primary" onClick={() => handleNewTerminal('claude')}>
+            <button className="btn btn-primary" onClick={() => void handleNewTerminal('claude')}>
               + Claude terminal
             </button>
-            <button className="btn btn-secondary" onClick={() => handleNewTerminal('codex')}>
+            <button className="btn btn-secondary" onClick={() => void handleNewTerminal('codex')}>
               + Codex terminal
             </button>
           </div>
@@ -171,13 +174,13 @@ export function StandaloneTerminal({
               style={{ opacity: 0.5, cursor: 'pointer' }}
               onClick={(e) => {
                 e.stopPropagation();
-                handleCloseTab(s.id);
+                void handleCloseTab(s.id);
               }}
             />
           </div>
         ))}
         <button
-          onClick={() => handleNewTerminal('claude')}
+          onClick={() => void handleNewTerminal('claude')}
           style={{
             background: 'none',
             border: 'none',

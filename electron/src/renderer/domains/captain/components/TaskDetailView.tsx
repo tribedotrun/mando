@@ -10,8 +10,13 @@ import {
   fetchPrSummary,
   fetchAskHistory,
 } from '#renderer/domains/captain/hooks/useApi';
-import type { TaskItem, SessionEntry, SessionSummary, TimelineEvent } from '#renderer/types';
-import { FINALIZED_STATUSES } from '#renderer/types';
+import {
+  FINALIZED_STATUSES,
+  type TaskItem,
+  type SessionEntry,
+  type SessionSummary,
+  type TimelineEvent,
+} from '#renderer/types';
 import { shortRepo, prLabel, prHref, extractClarifierQuestions } from '#renderer/utils';
 import {
   TranscriptSidebar,
@@ -43,12 +48,7 @@ interface Props {
   item: TaskItem;
   onBack: () => void;
   onMerge?: () => void;
-  onOpenTerminal?: (opts: {
-    project: string;
-    cwd: string;
-    label: string;
-    resumeSessionId?: string;
-  }) => void;
+  onOpenTerminal?: (opts: { project: string; cwd: string; resumeSessionId?: string }) => void;
 }
 
 export function TaskDetailView({
@@ -148,7 +148,7 @@ export function TaskDetailView({
       }
       return data;
     },
-    enabled: !!item.pr,
+    enabled: !!item.pr_number,
     staleTime: isFinalized ? Infinity : 30_000,
     initialData: () => {
       if (!isFinalized) return undefined;
@@ -244,6 +244,7 @@ export function TaskDetailView({
       qaRef.current.ask(question);
     } else {
       setActiveQA(true);
+      setTranscriptSession(null);
       setPendingQuestion(question);
     }
   }, []);
@@ -270,7 +271,6 @@ export function TaskDetailView({
       onOpenTerminal({
         project: item.project,
         cwd,
-        label: item.title,
         resumeSessionId: resumeId,
       });
     },
@@ -291,7 +291,7 @@ export function TaskDetailView({
     { key: 'terminal', label: 'Terminal' },
   ];
 
-  const showMerge = onMerge && item.pr && item.project && item.status === 'awaiting-review';
+  const showMerge = onMerge && item.pr_number && item.project && item.status === 'awaiting-review';
 
   return (
     <div className="flex h-full flex-col">
@@ -320,17 +320,19 @@ export function TaskDetailView({
                   {item.project && (
                     <span className="text-caption text-text-3">{shortRepo(item.project)}</span>
                   )}
-                  {item.pr && (item.github_repo || item.project) && (
+                  {item.pr_number && (item.github_repo || item.project) && (
                     <a
-                      href={prHref(item.pr, (item.github_repo ?? item.project)!)}
+                      href={prHref(item.pr_number, (item.github_repo ?? item.project)!)}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="text-caption text-primary no-underline hover:underline"
+                      className="text-caption text-muted-foreground no-underline hover:underline"
                     >
-                      {prLabel(item.pr)}
+                      {prLabel(item.pr_number)}
                     </a>
                   )}
-                  {item.no_pr && <span className="text-caption text-primary">Findings only</span>}
+                  {item.no_pr && (
+                    <span className="text-caption text-muted-foreground">Findings only</span>
+                  )}
                 </div>
               </div>
               <div className="flex shrink-0 items-center gap-2">
@@ -391,14 +393,17 @@ export function TaskDetailView({
               {/* Tab content */}
               <div className="break-words pr-2 pt-4">
                 {activeTab === 'timeline' && (
-                  <TimelineTab events={events} onTranscriptClick={handleTranscriptClick} />
+                  <TimelineTab
+                    events={events}
+                    onTranscriptClick={(...args) => void handleTranscriptClick(...args)}
+                  />
                 )}
                 {activeTab === 'pr' && (
                   <PrTab
                     item={item}
                     prBody={prBody}
                     prPending={prPending}
-                    onRefresh={() => refetchPr()}
+                    onRefresh={() => void refetchPr()}
                   />
                 )}
                 {activeTab === 'sessions' && (

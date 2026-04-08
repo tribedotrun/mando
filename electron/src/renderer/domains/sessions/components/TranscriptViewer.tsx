@@ -7,13 +7,11 @@ import {
   sessionTitle,
   sessionSubtitle,
 } from '#renderer/domains/sessions/components/SessionsHelpers';
-import type {
-  TranscriptSection,
-  ContentBlock,
-} from '#renderer/domains/sessions/components/TranscriptBlocks';
 import {
   SectionRow,
   StructuredOutputBlock,
+  type TranscriptSection,
+  type ContentBlock,
 } from '#renderer/domains/sessions/components/TranscriptBlocks';
 import { Button } from '#renderer/components/ui/button';
 
@@ -237,7 +235,7 @@ export function TranscriptViewer({ markdown }: Props): React.ReactElement {
   );
 
   return (
-    <div className="space-y-0.5">
+    <div className="min-w-0 space-y-0.5 [overflow-wrap:anywhere]">
       {hoisted.map((block, i) => (
         <StructuredOutputBlock key={`hoist-${i}`} block={block} />
       ))}
@@ -291,7 +289,7 @@ export function TranscriptSidebar({
         </Button>
       </div>
       {/* Transcript content */}
-      <ScrollArea className="flex-1 px-4 py-3">
+      <ScrollArea className="min-h-0 flex-1 px-4 py-3">
         {session.loading ? (
           <div className="space-y-3">
             <Skeleton className="h-4 w-3/4" />

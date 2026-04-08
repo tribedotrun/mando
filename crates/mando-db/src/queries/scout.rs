@@ -313,13 +313,13 @@ pub async fn increment_error_count(pool: &SqlitePool, id: i64) -> Result<()> {
 #[derive(sqlx::FromRow)]
 struct ItemRow {
     id: i64,
-    url: Option<String>,
-    r#type: Option<String>,
+    url: String,
+    r#type: String,
     title: Option<String>,
     status: Option<String>,
     relevance: Option<i64>,
     quality: Option<i64>,
-    date_added: Option<String>,
+    date_added: String,
     date_processed: Option<String>,
     added_by: Option<String>,
     error_count: Option<i64>,
@@ -333,13 +333,13 @@ impl ItemRow {
         let status = parse_status(&status_str);
         ScoutItem {
             id: self.id,
-            url: self.url.unwrap_or_default(),
-            item_type: self.r#type.unwrap_or_else(|| "other".into()),
+            url: self.url,
+            item_type: self.r#type,
             title: self.title,
             status,
             relevance: self.relevance,
             quality: self.quality,
-            date_added: self.date_added.unwrap_or_default(),
+            date_added: self.date_added,
             date_processed: self.date_processed,
             added_by: self.added_by,
             error_count: self.error_count.unwrap_or(0),

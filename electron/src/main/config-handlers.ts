@@ -3,8 +3,7 @@
  */
 import fs from 'fs';
 import path from 'path';
-import type { IpcMainInvokeEvent } from 'electron';
-import { shell } from 'electron';
+import { shell, type IpcMainInvokeEvent } from 'electron';
 import log from '#main/logger';
 import { handleTrusted } from '#main/ipc-security';
 import { installCliAndPlists } from '#main/launchd';

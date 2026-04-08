@@ -8,6 +8,7 @@ mod captain_merge_poll;
 mod captain_merge_spawn;
 pub mod captain_review;
 mod captain_review_check;
+mod captain_review_error;
 mod captain_review_helpers;
 mod captain_review_verdict;
 pub mod clarifier;
@@ -60,6 +61,7 @@ pub(crate) fn revert_to_queued(item: &mut mando_types::Task) {
     item.session_ids.worker = None;
     item.session_ids.ask = None;
     item.worktree = None;
+    item.workbench_id = None;
     item.branch = None;
     item.worker_started_at = None;
 }

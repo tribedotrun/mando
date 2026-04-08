@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
+import { localizeMeta } from '#renderer/utils';
 import { PrMarkdown } from '#renderer/domains/captain';
 import { Badge } from '#renderer/components/ui/badge';
 import { Button } from '#renderer/components/ui/button';
@@ -25,31 +26,17 @@ export type ContentBlock =
   | { type: 'tool'; name: string; label: string; body: string; lang?: string }
   | { type: 'results'; content: string };
 
-// -- Timestamp helpers --
-
-function localizeTimestamp(ts: string): string {
-  const d = new Date(ts);
-  if (Number.isNaN(d.getTime())) return ts;
-  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-}
-
-function localizeMeta(meta: string): string {
-  return meta.replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z?/g, (m) =>
-    localizeTimestamp(m),
-  );
-}
-
 // -- Tool colors --
 
 const TOOL_COLORS: Record<string, string> = {
   Bash: 'var(--success)',
-  Read: 'var(--primary)',
+  Read: 'var(--muted-foreground)',
   Edit: 'var(--stale)',
   Write: 'var(--stale)',
   Grep: 'var(--muted-foreground)',
   Glob: 'var(--muted-foreground)',
   Agent: '#e879a0',
-  Skill: 'var(--primary)',
+  Skill: 'var(--muted-foreground)',
   Error: 'var(--destructive)',
   StructuredOutput: 'var(--success)',
 };
@@ -187,14 +174,14 @@ export function StructuredOutputBlock({
   }
 
   return (
-    <div className="my-2 space-y-2 rounded-md bg-muted px-3 py-2">
+    <div className="my-2 min-w-0 space-y-2 overflow-hidden rounded-md bg-muted px-3 py-2">
       {header}
       {Object.entries(parsed).map(([key, value]) => {
         const text = typeof value === 'string' ? value : JSON.stringify(value, null, 2);
         return (
-          <div key={key}>
+          <div key={key} className="min-w-0">
             <div className="text-label mb-0.5 font-semibold text-muted-foreground">{key}</div>
-            <div className="text-caption leading-relaxed text-foreground">
+            <div className="min-w-0 text-caption leading-relaxed text-foreground [overflow-wrap:anywhere]">
               <PrMarkdown text={text} />
             </div>
           </div>

@@ -184,7 +184,9 @@ impl TaskStore {
                 cost_usd: entry.cost_usd,
                 duration_ms: entry.duration_ms,
                 resumed: entry.resumed,
-                task_id: (!entry.task_id.is_empty()).then_some(entry.task_id.as_str()),
+                task_id: (!entry.task_id.is_empty())
+                    .then(|| entry.task_id.parse::<i64>().ok())
+                    .flatten(),
                 scout_item_id: None,
                 worker_name: (!entry.worker_name.is_empty()).then_some(entry.worker_name.as_str()),
             },
@@ -203,7 +205,7 @@ impl TaskStore {
 
     pub async fn list_sessions_for_task(
         &self,
-        task_id: &str,
+        task_id: i64,
     ) -> Result<Vec<mando_db::queries::sessions::SessionRow>> {
         sessions::list_sessions_for_task(&self.pool, task_id)
             .await
@@ -334,7 +336,18 @@ mod tests {
 
     async fn test_store() -> TaskStore {
         let db = mando_db::Db::open_in_memory().await.unwrap();
+        // Seed a test project so FK constraints are satisfied.
+        mando_db::queries::projects::upsert(db.pool(), "test", "", None)
+            .await
+            .unwrap();
         TaskStore::new(db.pool().clone())
+    }
+
+    fn test_task(title: &str) -> Task {
+        let mut t = Task::new(title);
+        t.project_id = 1;
+        t.project = "test".into();
+        t
     }
 
     #[tokio::test]
@@ -347,21 +360,20 @@ mod tests {
     #[tokio::test]
     async fn add_and_find() {
         let store = test_store().await;
-        let mut task = Task::new("Test task");
+        let mut task = test_task("Test task");
         task.status = ItemStatus::New;
-        task.project = Some("org/repo".into());
         let id = store.add(task).await.unwrap();
         assert!(id > 0);
 
         let found = store.find_by_id(id).await.unwrap().unwrap();
         assert_eq!(found.title, "Test task");
-        assert_eq!(found.project.as_deref(), Some("org/repo"));
+        assert_eq!(found.project.as_str(), "test");
     }
 
     #[tokio::test]
     async fn update_task() {
         let store = test_store().await;
-        let task = Task::new("Update me");
+        let task = test_task("Update me");
         let id = store.add(task).await.unwrap();
 
         store
@@ -375,7 +387,7 @@ mod tests {
     #[tokio::test]
     async fn remove_task() {
         let store = test_store().await;
-        let id = store.add(Task::new("Remove me")).await.unwrap();
+        let id = store.add(test_task("Remove me")).await.unwrap();
         assert!(store.remove(id).await.unwrap());
         assert!(store.find_by_id(id).await.unwrap().is_none());
     }
@@ -383,10 +395,10 @@ mod tests {
     #[tokio::test]
     async fn status_counts() {
         let store = test_store().await;
-        let mut t1 = Task::new("A");
+        let mut t1 = test_task("A");
         t1.status = ItemStatus::New;
         store.add(t1).await.unwrap();
-        let mut t2 = Task::new("B");
+        let mut t2 = test_task("B");
         t2.status = ItemStatus::Queued;
         store.add(t2).await.unwrap();
 
@@ -398,7 +410,7 @@ mod tests {
     #[tokio::test]
     async fn update_fields_rejects_invalid_status() {
         let store = test_store().await;
-        let id = store.add(Task::new("Strict task")).await.unwrap();
+        let id = store.add(test_task("Strict task")).await.unwrap();
 
         let err = store
             .update_fields(id, &serde_json::json!({"status": "not-a-real-status"}))
@@ -413,7 +425,7 @@ mod tests {
     #[tokio::test]
     async fn update_fields_rejects_invalid_numeric_field() {
         let store = test_store().await;
-        let id = store.add(Task::new("Strict number")).await.unwrap();
+        let id = store.add(test_task("Strict number")).await.unwrap();
 
         let err = store
             .update_fields(id, &serde_json::json!({"intervention_count": "oops"}))
@@ -428,7 +440,7 @@ mod tests {
     #[tokio::test]
     async fn merge_changed_items_preserves_concurrent_human_edits() {
         let store = test_store().await;
-        let id = store.add(Task::new("Concurrent edit")).await.unwrap();
+        let id = store.add(test_task("Concurrent edit")).await.unwrap();
         let original = store.find_by_id(id).await.unwrap().unwrap();
         let snapshots = HashMap::from([(id, task_snapshot(&original).unwrap())]);
 
@@ -450,23 +462,23 @@ mod tests {
     }
 
     /// Regression test: when the tick clears an Option field to None (e.g.
-    /// rework clearing `pr`), the 3-way merge must persist the deletion
+    /// rework clearing `pr_number`), the 3-way merge must persist the deletion
     /// even though `skip_serializing_if` omits the key from the JSON.
     #[tokio::test]
     async fn merge_propagates_field_cleared_to_none() {
         let store = test_store().await;
-        let mut task = Task::new("Rework merge test");
-        task.pr = Some("594".into());
+        let mut task = test_task("Rework merge test");
+        task.pr_number = Some(594);
         task.worker = Some("worker-1".into());
         let id = store.add(task).await.unwrap();
         let original = store.find_by_id(id).await.unwrap().unwrap();
-        assert_eq!(original.pr.as_deref(), Some("594"));
+        assert_eq!(original.pr_number, Some(594));
         let snapshots = HashMap::from([(id, task_snapshot(&original).unwrap())]);
 
         // Simulate transition_rework_to_queued clearing fields.
         let mut tick_copy = original.clone();
         tick_copy.status = ItemStatus::Queued;
-        tick_copy.pr = None;
+        tick_copy.pr_number = None;
         tick_copy.worker = None;
 
         store
@@ -476,7 +488,11 @@ mod tests {
 
         let found = store.find_by_id(id).await.unwrap().unwrap();
         assert_eq!(found.status, ItemStatus::Queued);
-        assert!(found.pr.is_none(), "pr must be cleared, got {:?}", found.pr);
+        assert!(
+            found.pr_number.is_none(),
+            "pr_number must be cleared, got {:?}",
+            found.pr_number
+        );
         assert!(
             found.worker.is_none(),
             "worker must be cleared, got {:?}",
@@ -489,19 +505,19 @@ mod tests {
     #[tokio::test]
     async fn merge_clear_preserves_concurrent_human_set() {
         let store = test_store().await;
-        let mut task = Task::new("Concurrent set vs clear");
-        task.pr = Some("594".into());
+        let mut task = test_task("Concurrent set vs clear");
+        task.pr_number = Some(594);
         let id = store.add(task).await.unwrap();
         let original = store.find_by_id(id).await.unwrap().unwrap();
         let snapshots = HashMap::from([(id, task_snapshot(&original).unwrap())]);
 
-        // Tick clears pr.
+        // Tick clears pr_number.
         let mut tick_copy = original.clone();
-        tick_copy.pr = None;
+        tick_copy.pr_number = None;
 
-        // Human concurrently sets pr to a new value.
+        // Human concurrently sets pr_number to a new value.
         store
-            .update_fields(id, &serde_json::json!({"pr": "607"}))
+            .update_fields(id, &serde_json::json!({"pr_number": 607}))
             .await
             .unwrap();
 
@@ -512,6 +528,6 @@ mod tests {
 
         let found = store.find_by_id(id).await.unwrap().unwrap();
         // Human's update should win since they changed it concurrently.
-        assert_eq!(found.pr.as_deref(), Some("607"));
+        assert_eq!(found.pr_number, Some(607));
     }
 }

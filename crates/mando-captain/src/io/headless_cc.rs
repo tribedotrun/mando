@@ -14,7 +14,7 @@ pub struct SessionLogEntry<'a> {
     pub cost_usd: Option<f64>,
     pub duration_ms: Option<u64>,
     pub resumed: bool,
-    pub task_id: &'a str,
+    pub task_id: Option<i64>,
     pub status: SessionStatus,
     pub worker_name: &'a str,
 }
@@ -41,7 +41,7 @@ pub async fn log_cc_session(pool: &SqlitePool, entry: &SessionLogEntry<'_>) -> R
             cost_usd: entry.cost_usd,
             duration_ms: entry.duration_ms.map(|d| d as i64),
             resumed: entry.resumed,
-            task_id: non_empty(entry.task_id),
+            task_id: entry.task_id,
             scout_item_id: None,
             worker_name: non_empty(entry.worker_name),
         },
@@ -57,7 +57,7 @@ pub(crate) async fn log_running_session(
     cwd: &Path,
     caller: &str,
     worker_name: &str,
-    task_id: &str,
+    task_id: Option<i64>,
     resumed: bool,
 ) -> Result<()> {
     log_cc_session(
@@ -84,7 +84,7 @@ pub(crate) async fn log_session_completion(
     cwd: &str,
     caller: &str,
     worker_name: &str,
-    task_id: &str,
+    task_id: Option<i64>,
     status: SessionStatus,
 ) -> Result<()> {
     // Read cost/duration from the stream file. Use update_session_status_with_cost
@@ -138,7 +138,7 @@ pub(crate) async fn log_cc_result(
     result: &mando_cc::CcResult,
     cwd: &Path,
     caller: &str,
-    task_id: &str,
+    task_id: Option<i64>,
 ) -> Result<()> {
     log_cc_session(
         pool,
@@ -163,7 +163,7 @@ pub(crate) async fn log_cc_failure(
     session_id: &str,
     cwd: &Path,
     caller: &str,
-    task_id: &str,
+    task_id: Option<i64>,
 ) -> Result<()> {
     log_cc_session(
         pool,
@@ -191,16 +191,8 @@ pub(crate) async fn log_item_session(
 ) -> Result<()> {
     if let Some(ref sid) = item.session_ids.worker {
         let cwd = item.worktree.as_deref().unwrap_or("");
-        log_session_completion(
-            pool,
-            sid,
-            cwd,
-            "worker",
-            worker_name,
-            &item.id.to_string(),
-            status,
-        )
-        .await?;
+        log_session_completion(pool, sid, cwd, "worker", worker_name, Some(item.id), status)
+            .await?;
     }
     Ok(())
 }

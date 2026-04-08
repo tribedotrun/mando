@@ -89,14 +89,13 @@ async fn main() {
     let task_store = mando_captain::io::task_store::TaskStore::new(db.pool().clone());
     let task_store_arc = Arc::new(RwLock::new(task_store));
 
-    // Backfill project logos for projects added before logo auto-detection.
+    // Seed projects from config.json into DB (first run only), then load
+    // all projects from DB back into config so the DB is the source of truth.
     let config = {
         let mut cfg = config;
-        if mando_config::backfill_project_logos(&mut cfg) {
-            if let Err(e) = mando_config::save_config(&cfg, None) {
-                tracing::warn!(module = "startup", error = %e, "failed to save backfilled logos");
-            }
-        }
+        mando_db::queries::projects::startup_sync(db.pool(), &mut cfg)
+            .await
+            .expect("fatal: failed to sync projects from DB");
         cfg
     };
 
@@ -208,8 +207,14 @@ async fn main() {
             .start_monitor(&state.task_tracker, state.cancellation_token.clone());
     }
 
+    // Set up CC session hook (writes script + syncs settings.json).
+    mando_gateway::hooks::setup_session_hooks();
+
     // Spawn captain auto-tick loop (always runs; respects auto_schedule dynamically).
     mando_gateway::background_tasks::spawn_auto_tick(&state, state.config_manager.subscribe_tick());
+
+    // Spawn workbench cleanup (5 min after startup, removes worktrees archived > 30 days).
+    mando_gateway::background_tasks::spawn_workbench_cleanup(&state);
 
     if !args.no_telegram {
         if let Err(err) = state.telegram_runtime.configure(&config).await {

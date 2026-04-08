@@ -315,7 +315,7 @@ async fn reconcile_merge(
             Some(id) => Some(id),
             None => match store.load_all().await {
                 Ok(tasks) => {
-                    let pr_num = match mando_types::task::extract_pr_number(pr) {
+                    let pr_num = match mando_types::task::parse_pr_number(pr) {
                         Some(n) => n,
                         None => {
                             tracing::warn!(module = "reconciler", pr = %pr, "unparseable PR ref in merge WAL — abandoning");
@@ -325,11 +325,7 @@ async fn reconcile_merge(
                     };
                     tasks
                         .iter()
-                        .find(|t| {
-                            t.pr.as_deref().is_some_and(|stored| {
-                                mando_types::task::extract_pr_number(stored) == Some(pr_num)
-                            })
-                        })
+                        .find(|t| t.pr_number == Some(pr_num))
                         .map(|t| t.id)
                 }
 

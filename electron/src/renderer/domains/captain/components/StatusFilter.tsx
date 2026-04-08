@@ -1,6 +1,5 @@
 import React from 'react';
-import type { ItemStatus } from '#renderer/types';
-import { ACTION_NEEDED_STATUSES, IN_PROGRESS_STATUSES } from '#renderer/types';
+import { ACTION_NEEDED_STATUSES, IN_PROGRESS_STATUSES, type ItemStatus } from '#renderer/types';
 import { useTaskStore } from '#renderer/domains/captain/stores/taskStore';
 import { useProjectFilterPaths } from '#renderer/domains/settings';
 import { ViewOptions } from '#renderer/domains/captain/components/ViewOptions';
@@ -76,7 +75,7 @@ export function StatusFilter({ projectFilter }: Props): React.ReactElement {
             onClick={() => setFilter(key)}
             role="tab"
             aria-selected={active}
-            className={`text-body whitespace-nowrap rounded-none bg-transparent px-3 py-2 transition-colors -mb-px border-b-2 ${active ? 'border-primary font-medium text-foreground' : 'border-transparent font-normal text-muted-foreground'}`}
+            className={`text-body whitespace-nowrap rounded-none bg-transparent px-3 py-2 transition-colors -mb-px border-b-2 ${active ? 'border-foreground font-medium text-foreground' : 'border-transparent font-normal text-muted-foreground'}`}
           >
             {label}
             <span

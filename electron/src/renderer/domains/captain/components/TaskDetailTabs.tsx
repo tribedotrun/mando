@@ -28,6 +28,9 @@ import { Separator } from '#renderer/components/ui/separator';
 import { Button } from '#renderer/components/ui/button';
 import { Skeleton } from '#renderer/components/ui/skeleton';
 
+const REFRESH_INDICATOR_MS = 1500;
+const COPY_FEEDBACK_MS = 1200;
+
 /* -- Timeline tab -- */
 
 export function TimelineTab({
@@ -60,10 +63,10 @@ export function PrTab({
     if (!onRefresh || refreshing) return;
     setRefreshing(true);
     onRefresh();
-    setTimeout(() => setRefreshing(false), 1500);
+    setTimeout(() => setRefreshing(false), REFRESH_INDICATOR_MS);
   };
 
-  if (!item.pr) {
+  if (!item.pr_number) {
     return <div className="text-caption text-text-3">No PR associated with this task</div>;
   }
   if (prPending && !prBody) {
@@ -300,6 +303,7 @@ function CollapsibleSection({
 
 function CopyValue({ value, display }: { value: string; display?: string }): React.ReactElement {
   const [copied, setCopied] = useState(false);
+  const [copying, setCopying] = useState(false);
   return (
     <span className="inline-flex items-center gap-2 text-code text-muted-foreground">
       <span className="min-w-0 break-all">{display ?? value}</span>
@@ -309,12 +313,17 @@ function CopyValue({ value, display }: { value: string; display?: string }): Rea
             <Button
               variant="ghost"
               size="icon-xs"
-              onClick={async () => {
-                const ok = await copyToClipboard(value);
-                if (ok) {
-                  setCopied(true);
-                  setTimeout(() => setCopied(false), 1200);
-                }
+              disabled={copying}
+              onClick={() => {
+                setCopying(true);
+                void copyToClipboard(value)
+                  .then((ok) => {
+                    if (ok) {
+                      setCopied(true);
+                      setTimeout(() => setCopied(false), COPY_FEEDBACK_MS);
+                    }
+                  })
+                  .finally(() => setCopying(false));
               }}
               className="h-5 w-5"
             >
@@ -363,7 +372,7 @@ export function ContextModal({
             </Button>
           </DialogClose>
         </div>
-        <div className="overflow-y-auto px-5 pb-5">
+        <div className="min-w-0 overflow-y-auto px-5 pb-5 [overflow-wrap:anywhere]">
           <PrMarkdown text={context} />
         </div>
       </DialogContent>

@@ -18,14 +18,14 @@ use super::tasks::{bind_task_write_fields, update_set_clause};
 pub async fn persist_spawn(pool: &SqlitePool, task: &Task) -> Result<()> {
     sqlx::query(
         "UPDATE tasks SET status=?, worker=?, session_ids=?, worker_started_at=?, \
-         worktree=?, plan=? \
+         workbench_id=?, plan=? \
          WHERE id=? AND status NOT IN ('merged','completed-no-pr','canceled')",
     )
     .bind(task.status.as_str())
     .bind(&task.worker)
     .bind(task.session_ids.to_json())
     .bind(&task.worker_started_at)
-    .bind(&task.worktree)
+    .bind(task.workbench_id)
     .bind(&task.plan)
     .bind(task.id)
     .execute(pool)
@@ -73,7 +73,7 @@ pub async fn persist_clarify_start(pool: &SqlitePool, task: &Task) -> Result<()>
 pub async fn persist_clarify_result(pool: &SqlitePool, task: &Task) -> Result<()> {
     let trigger_str = task.captain_review_trigger.map(|t| t.as_str().to_string());
     sqlx::query(
-        "UPDATE tasks SET status=?, context=?, title=?, session_ids=?, project=?, \
+        "UPDATE tasks SET status=?, context=?, title=?, session_ids=?, project_id=?, \
          no_pr=?, resource=?, clarifier_fail_count=?, last_activity_at=?, \
          captain_review_trigger=?, review_fail_count=? \
          WHERE id=? AND status IN ('clarifying','needs-clarification')",
@@ -82,7 +82,7 @@ pub async fn persist_clarify_result(pool: &SqlitePool, task: &Task) -> Result<()
     .bind(&task.context)
     .bind(&task.title)
     .bind(task.session_ids.to_json())
-    .bind(&task.project)
+    .bind(task.project_id)
     .bind(task.no_pr as i64)
     .bind(&task.resource)
     .bind(task.clarifier_fail_count)

@@ -66,12 +66,9 @@ pub(crate) async fn gather_worker_contexts(
         let seconds_active = seconds_since(item.worker_started_at.as_deref())?;
 
         // Build PR discovery args if needed.
-        let discover_pr = if item.pr.is_none() {
+        let discover_pr = if item.pr_number.is_none() {
             item.branch.as_deref().and_then(|branch| {
-                let repo = item
-                    .project
-                    .as_deref()
-                    .and_then(|name| mando_config::resolve_project_config(Some(name), config))
+                let repo = mando_config::resolve_project_config(Some(&item.project), config)
                     .and_then(|(_, pc)| pc.github_repo.clone())?;
                 Some((repo, branch.to_string()))
             })
@@ -80,7 +77,7 @@ pub(crate) async fn gather_worker_contexts(
         };
 
         // Resolve the GitHub repo slug from config for short PR ref resolution.
-        let github_repo = mando_config::resolve_github_repo(item.project.as_deref(), config);
+        let github_repo = mando_config::resolve_github_repo(Some(&item.project), config);
 
         work.push(GatherWork {
             item_idx: idx,
@@ -92,7 +89,7 @@ pub(crate) async fn gather_worker_contexts(
             prev_cpu_time_s,
             seconds_active,
             discover_pr,
-            existing_pr: item.pr.clone(),
+            existing_pr_number: item.pr_number,
             item_title: item.title.clone(),
             github_repo,
             branch: item.branch.clone(),
@@ -114,16 +111,18 @@ pub(crate) async fn gather_worker_contexts(
     // Phase 3: apply discovered PRs back and assemble contexts.
     let mut contexts = Vec::with_capacity(work.len());
     for (w, result) in work.iter().zip(results) {
-        // Write discovered PR back to item.
-        if let Some(ref pr_url) = result.discovered_pr {
-            items[w.item_idx].pr = Some(pr_url.clone());
+        // Write discovered PR number back to item.
+        if let Some(pr_num) = result.discovered_pr_number {
+            items[w.item_idx].pr_number = Some(pr_num);
         }
 
-        let pr = result
-            .discovered_pr
-            .as_ref()
-            .or(w.existing_pr.as_ref())
-            .cloned();
+        let effective_pr_number = result.discovered_pr_number.or(w.existing_pr_number);
+        let pr = effective_pr_number.map(|n| {
+            w.github_repo
+                .as_deref()
+                .map(|repo| mando_types::task::pr_url(repo, n))
+                .unwrap_or_else(|| mando_types::task::pr_label(n))
+        });
 
         let has_reopen_ack = if w.reopen_seq > 0 {
             check_reopen_ack(
@@ -180,7 +179,7 @@ struct GatherWork {
     seconds_active: f64,
     /// (repo, branch) if PR discovery is needed.
     discover_pr: Option<(String, String)>,
-    existing_pr: Option<String>,
+    existing_pr_number: Option<i64>,
     item_title: String,
     github_repo: Option<String>,
     branch: Option<String>,
@@ -192,7 +191,7 @@ struct GatherWork {
 
 /// Async results from phase 2 for each worker.
 struct GatherResult {
-    discovered_pr: Option<String>,
+    discovered_pr_number: Option<i64>,
     pr_data: PrData,
     cpu_time_s: Option<f64>,
 }
@@ -207,32 +206,32 @@ async fn gather_one_async(w: &GatherWork) -> GatherResult {
     };
 
     // PR discovery.
-    let discovered_pr = if let Some((ref repo, ref branch)) = w.discover_pr {
-        let pr_url = github::discover_pr_for_branch(repo, branch).await;
-        if let Some(ref url) = pr_url {
+    let discovered_pr_number = if let Some((ref repo, ref branch)) = w.discover_pr {
+        let pr_num = github::discover_pr_for_branch(repo, branch).await;
+        if let Some(num) = pr_num {
             tracing::info!(
                 module = "captain",
                 worker = %w.worker_name,
-                pr = %url,
+                pr = num,
                 "discovered PR for branch"
             );
         }
-        pr_url
+        pr_num
     } else {
         None
     };
 
     // Build a minimal Task to pass to fetch_pr_data.
-    let effective_pr = discovered_pr.as_ref().or(w.existing_pr.as_ref()).cloned();
+    let effective_pr_number = discovered_pr_number.or(w.existing_pr_number);
     let stub = Task {
-        pr: effective_pr,
-        project: w.github_repo.clone(),
+        pr_number: effective_pr_number,
+        github_repo: w.github_repo.clone(),
         ..Task::new("")
     };
     let pr_data = fetch_pr_data(&stub).await;
 
     GatherResult {
-        discovered_pr,
+        discovered_pr_number,
         pr_data,
         cpu_time_s,
     }
@@ -256,33 +255,28 @@ pub struct PrData {
 
 /// Fetch PR data from GitHub. Returns default values on failure (non-fatal).
 pub(crate) async fn fetch_pr_data(item: &Task) -> PrData {
-    let pr_url = match &item.pr {
-        Some(pr) => pr,
+    let pr_num = match item.pr_number {
+        Some(n) => n,
         None => return PrData::default(),
     };
 
-    // Parse repo and PR number from URL like "https://github.com/owner/repo/pull/123",
-    // or resolve short refs like "#12" using the task's project field.
-    let parts: Vec<&str> = pr_url.trim_end_matches('/').split('/').collect();
-    let (repo, pr_number_str) = if parts.len() >= 5 {
-        let repo = format!("{}/{}", parts[parts.len() - 4], parts[parts.len() - 3]);
-        let num = parts[parts.len() - 1];
-        (repo, num.to_string())
-    } else if let Some(num) = mando_types::task::extract_pr_number(pr_url) {
-        // Short ref (bare number or "#12") — resolve using task.project.
-        if let Some(project) = &item.project {
-            (project.clone(), num.to_string())
-        } else {
-            tracing::warn!(
-                module = "captain",
-                pr = %pr_url,
-                "short PR ref with no project — cannot resolve"
-            );
-            return PrData::default();
+    // Resolve repo slug from github_repo (populated via JOIN) or project config.
+    let repo = match &item.github_repo {
+        Some(r) if !r.is_empty() => r.clone(),
+        _ => {
+            if !item.project.is_empty() {
+                item.project.clone()
+            } else {
+                tracing::warn!(
+                    module = "captain",
+                    pr_number = pr_num,
+                    "PR number with no github_repo — cannot fetch PR data"
+                );
+                return PrData::default();
+            }
         }
-    } else {
-        return PrData::default();
     };
+    let pr_number_str = pr_num.to_string();
 
     match github::fetch_pr_status(&repo, &pr_number_str).await {
         Ok(status) => {
@@ -291,32 +285,33 @@ pub(crate) async fn fetch_pr_data(item: &Task) -> PrData {
             let ahead = github::is_pr_branch_ahead(&repo, &pr_number_str)
                 .await
                 .unwrap_or_else(|e| {
-                    tracing::warn!(module = "captain", pr_url = %pr_url, error = %e, "branch-ahead check failed");
+                    tracing::warn!(module = "captain", pr_number = pr_num, error = %e, "branch-ahead check failed");
                     degraded = true;
                     false
                 });
 
-            let pr_num: u32 = pr_number_str.parse().unwrap_or(0);
+            let pr_num_u32: u32 = pr_number_str.parse().unwrap_or(0);
 
             // Compute PR hygiene from structured thread/comment data.
             let mut comment_bodies: Vec<String> = Vec::new();
-            let (hygiene_unresolved, hygiene_unreplied, unaddressed) = if pr_num > 0 {
-                let thread_counts = match github_pr::get_pr_review_threads(&repo, pr_num).await {
+            let (hygiene_unresolved, hygiene_unreplied, unaddressed) = if pr_num_u32 > 0 {
+                let thread_counts = match github_pr::get_pr_review_threads(&repo, pr_num_u32).await
+                {
                     Ok(threads) => review_marshal::thread_hygiene(&threads, &status.author),
                     Err(e) => {
-                        tracing::warn!(module = "captain", pr = pr_num, error = %e, "GraphQL review threads fetch failed, falling back to zeros");
+                        tracing::warn!(module = "captain", pr = pr_num_u32, error = %e, "GraphQL review threads fetch failed, falling back to zeros");
                         degraded = true;
                         (status.unresolved_threads, status.unreplied_threads)
                     }
                 };
                 let issue_count = if status.comments > 0 {
-                    match github_pr::get_pr_comments(&repo, pr_num).await {
+                    match github_pr::get_pr_comments(&repo, pr_num_u32).await {
                         Ok(comments) => {
                             comment_bodies = comments.iter().map(|c| c.body.clone()).collect();
                             review_marshal::issue_comment_hygiene(&comments, &status.author)
                         }
                         Err(e) => {
-                            tracing::warn!(module = "captain", pr = pr_num, error = %e, "issue comments fetch failed, falling back to zero");
+                            tracing::warn!(module = "captain", pr = pr_num_u32, error = %e, "issue comments fetch failed, falling back to zero");
                             degraded = true;
                             0
                         }
@@ -344,7 +339,7 @@ pub(crate) async fn fetch_pr_data(item: &Task) -> PrData {
             }
         }
         Err(e) => {
-            tracing::warn!(module = "captain", pr_url = %pr_url, error = %e, "failed to fetch PR status");
+            tracing::warn!(module = "captain", pr_number = pr_num, error = %e, "failed to fetch PR status");
             PrData {
                 degraded: true,
                 ..PrData::default()
@@ -389,11 +384,11 @@ pub(crate) async fn build_single_context(
 
     let seconds_active = seconds_since(item.worker_started_at.as_deref())?;
 
-    // Resolve github repo slug for short PR ref resolution.
-    let github_repo = mando_config::resolve_github_repo(item.project.as_deref(), config);
+    // Resolve github repo slug for PR data fetch.
+    let github_repo = mando_config::resolve_github_repo(Some(&item.project), config);
     let stub = Task {
-        pr: item.pr.clone(),
-        project: github_repo,
+        pr_number: item.pr_number,
+        github_repo: github_repo.clone(),
         ..Task::new("")
     };
     let pr_data = fetch_pr_data(&stub).await;
@@ -408,12 +403,18 @@ pub(crate) async fn build_single_context(
         true
     };
 
+    let pr_str = item.pr_number.map(|n| {
+        github_repo
+            .as_deref()
+            .map(|repo| mando_types::task::pr_url(repo, n))
+            .unwrap_or_else(|| mando_types::task::pr_label(n))
+    });
     let ctx = WorkerContext {
         session_name: worker_name.to_string(),
         item_title: item.title.clone(),
         status: "in-progress".into(),
         branch: item.branch.clone(),
-        pr: item.pr.clone(),
+        pr: pr_str,
         pr_ci_status: pr_data.ci_status,
         pr_comments: pr_data.comments,
         unresolved_threads: pr_data.unresolved_threads,

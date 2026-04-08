@@ -27,7 +27,7 @@ export function SettingsAbout(): React.ReactElement {
           href="https://github.com/tribedotrun/mando"
           target="_blank"
           rel="noopener noreferrer"
-          className="text-body text-primary"
+          className="text-body text-muted-foreground hover:text-foreground"
         >
           GitHub
         </a>

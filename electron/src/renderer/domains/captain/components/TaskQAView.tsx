@@ -8,6 +8,8 @@ import { shortTs } from '#renderer/utils';
 import { Button } from '#renderer/components/ui/button';
 import { Skeleton } from '#renderer/components/ui/skeleton';
 
+const SCROLL_DELAY_MS = 50;
+
 export interface QAHandle {
   ask: (question: string) => void;
 }
@@ -35,7 +37,7 @@ export function ActiveQAView({
 
   const scrollToBottom = useCallback(() => {
     const el = scrollRef.current;
-    if (el) setTimeout(() => (el.scrollTop = el.scrollHeight), 50);
+    if (el) setTimeout(() => (el.scrollTop = el.scrollHeight), SCROLL_DELAY_MS);
   }, []);
 
   const doAsk = useCallback(
@@ -54,8 +56,8 @@ export function ActiveQAView({
   if (pendingQuestion && !consumedRef.current) {
     consumedRef.current = true;
     // Schedule after mount so doAsk runs with valid refs.
-    Promise.resolve().then(() => {
-      doAsk(pendingQuestion);
+    void Promise.resolve().then(() => {
+      void doAsk(pendingQuestion).catch((err) => console.error('Ask failed', err));
       onPendingConsumed?.();
     });
   }
@@ -149,7 +151,7 @@ function QAMessage({ entry }: { entry: AskHistoryEntry }): React.ReactElement {
               ? 'var(--destructive)'
               : isHuman
                 ? 'var(--needs-human)'
-                : 'var(--primary)',
+                : 'var(--review)',
           }}
         >
           {isError ? 'Error' : isHuman ? 'You' : 'Agent'}

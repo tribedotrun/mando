@@ -77,7 +77,7 @@ function createWindow(): void {
   });
 
   const url = rendererUrl ?? `http://127.0.0.1:${rendererPort}/index.html`;
-  mainWindow.loadURL(url);
+  void mainWindow.loadURL(url);
 
   // Open external URLs in system browser; allow app-local (127.0.0.1) URLs
   const isAppLocal = (url: string) => {
@@ -94,7 +94,7 @@ function createWindow(): void {
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (!isAppLocal(url)) {
       if (isWebUrl(url)) {
-        shell.openExternal(url);
+        void shell.openExternal(url);
       }
       return { action: 'deny' };
     }
@@ -106,7 +106,7 @@ function createWindow(): void {
     if (url !== currentUrl && !isAppLocal(url)) {
       e.preventDefault();
       if (isWebUrl(url)) {
-        shell.openExternal(url);
+        void shell.openExternal(url);
       }
     }
   });
@@ -262,7 +262,7 @@ registerConfigHandlers();
 // App lifecycle
 // ---------------------------------------------------------------------------
 
-app.whenReady().then(async () => {
+void app.whenReady().then(async () => {
   log.initialize();
   log.info('mando-electron starting');
 
@@ -359,7 +359,7 @@ app.on('window-all-closed', () => {
   }
 });
 
-app.on('before-quit', async () => {
+app.on('before-quit', () => {
   isQuitting = true;
   setIsQuitting(true);
   globalShortcut.unregisterAll();

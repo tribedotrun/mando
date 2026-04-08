@@ -17,7 +17,7 @@ pub async fn triage_pending_review(
         .iter()
         .filter(|it| {
             it.status == mando_types::task::ItemStatus::AwaitingReview
-                && it.pr.is_some()
+                && it.pr_number.is_some()
                 && match item_id {
                     Some(id) => it.id.to_string() == *id,
                     None => true,
@@ -33,26 +33,19 @@ pub async fn triage_pending_review(
     let mut github_repo_map: std::collections::HashMap<String, String> =
         std::collections::HashMap::new();
     for it in &pending {
-        let project_name = it.project.as_deref().unwrap_or("");
-        let project_config = it
-            .project
-            .as_deref()
-            .and_then(|name| mando_config::resolve_project_config(Some(name), config))
-            .map(|(_, pc)| pc);
+        let project_name = it.project.as_str();
+        let project_config = if it.project.is_empty() {
+            None
+        } else {
+            mando_config::resolve_project_config(Some(&it.project), config).map(|(_, pc)| pc)
+        };
         let github_repo = project_config
             .and_then(|pc| pc.github_repo.clone())
             .unwrap_or_default();
         let classify_rules = project_config
             .map(|pc| pc.classify_rules.as_slice())
             .unwrap_or_default();
-        let pr_str = it.pr.as_deref().unwrap_or("");
-        let pr_num: i64 = pr_str
-            .trim_start_matches('#')
-            .trim_start_matches("https://github.com/")
-            .rsplit('/')
-            .next()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(0);
+        let pr_num: i64 = it.pr_number.unwrap_or(0);
 
         if pr_num == 0 {
             continue;

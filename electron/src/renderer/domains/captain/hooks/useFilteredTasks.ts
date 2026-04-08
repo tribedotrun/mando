@@ -1,9 +1,8 @@
 import { useMemo } from 'react';
 import { useTaskStore } from '#renderer/domains/captain/stores/taskStore';
 import { useProjectFilterPaths } from '#renderer/domains/settings';
-import type { TaskItem } from '#renderer/types';
+import { ACTION_NEEDED_STATUSES, IN_PROGRESS_STATUSES, type TaskItem } from '#renderer/types';
 import { sortTaskItems } from '#renderer/utils';
-import { ACTION_NEEDED_STATUSES, IN_PROGRESS_STATUSES } from '#renderer/types';
 
 /**
  * Derives a filtered + sorted task list from stable store slices.

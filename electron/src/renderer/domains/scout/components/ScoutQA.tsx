@@ -2,8 +2,7 @@ import React, { useCallback, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import Markdown from 'react-markdown';
 import { askScout, fetchScoutItem } from '#renderer/domains/scout/hooks/useApi';
-import { QAChat } from '#renderer/global/components/QAChat';
-import type { QAEntry } from '#renderer/global/components/QAChat';
+import { QAChat, type QAEntry } from '#renderer/global/components/QAChat';
 import { getErrorMessage } from '#renderer/utils';
 import { Button } from '#renderer/components/ui/button';
 
@@ -71,7 +70,7 @@ export function ScoutQA({ itemId, onClose }: Props): React.ReactElement {
             key={s}
             variant="outline"
             size="xs"
-            onClick={() => handleAsk(s)}
+            onClick={() => void handleAsk(s)}
             disabled={pending}
             className="rounded-full"
           >
@@ -95,13 +94,13 @@ export function ScoutQA({ itemId, onClose }: Props): React.ReactElement {
       history={history}
       pending={pending}
       scrollRef={scrollRef}
-      onAsk={handleAsk}
+      onAsk={(q) => void handleAsk(q)}
       placeholder="Ask about this article..."
       renderAnswer={(text) => <Markdown>{text}</Markdown>}
       historyClassName="px-4 py-3"
       formClassName="px-4 py-3"
       userBubbleStyle={{
-        background: 'color-mix(in srgb, var(--primary) 15%, transparent)',
+        background: 'color-mix(in srgb, var(--muted-foreground) 10%, transparent)',
         color: 'var(--primary-hover)',
         whiteSpace: 'pre-wrap',
       }}

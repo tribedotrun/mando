@@ -100,7 +100,7 @@ export function TelegramContent(): React.ReactElement {
           href="https://t.me/BotFather"
           target="_blank"
           rel="noopener noreferrer"
-          className="text-primary"
+          className="text-foreground"
         >
           @BotFather
         </a>{' '}
@@ -119,7 +119,7 @@ export function TelegramContent(): React.ReactElement {
       {result?.botUsername && <StatusLine ok label={`Connected \u2014 @${result.botUsername}`} />}
       {result?.error && <StatusLine ok={false} label={result.error} />}
       <div>
-        <Button size="xs" onClick={handleSave} disabled={!canSave}>
+        <Button size="xs" onClick={() => void handleSave()} disabled={!canSave}>
           {validating ? 'Validating\u2026' : 'Enable'}
         </Button>
       </div>
@@ -158,7 +158,7 @@ export function ProjectContent(): React.ReactElement {
 
   return (
     <div>
-      <Button size="xs" onClick={handlePick} disabled={adding}>
+      <Button size="xs" onClick={() => void handlePick()} disabled={adding}>
         {adding ? 'Adding\u2026' : 'Choose folder'}
       </Button>
     </div>

@@ -142,11 +142,11 @@ export function CaptainView({
           onReopen={actions.setReopenItem}
           onRework={actions.setReworkItem}
           onAsk={setAskItem}
-          onAccept={actions.handleAccept}
+          onAccept={(id) => void actions.handleAccept(id)}
           acceptPendingId={actions.acceptPendingId}
-          onHandoff={actions.handleHandoff}
-          onCancel={actions.handleCancel}
-          onRetry={actions.handleRetry}
+          onHandoff={(id) => void actions.handleHandoff(id)}
+          onCancel={(id) => void actions.handleCancel(id)}
+          onRetry={(id) => void actions.handleRetry(id)}
           onAnswer={handleAnswerItem}
           onOpenDetail={onOpenDetail}
           projectFilter={projectFilter}
@@ -163,7 +163,7 @@ export function CaptainView({
       {actions.mergeItem && (
         <MergeModal
           item={actions.mergeItem}
-          onConfirm={actions.handleMerge}
+          onConfirm={(...args) => void actions.handleMerge(...args)}
           onCancel={() => actions.setMergeItem(null)}
           pending={actions.mergePending}
           result={actions.mergeResult}
@@ -178,7 +178,7 @@ export function CaptainView({
           buttonLabel="Reopen"
           pendingLabel="Reopening..."
           isPending={actions.reopenPending}
-          onSubmit={(fb) => actions.handleReopen(actions.reopenItem!.id, fb)}
+          onSubmit={(fb) => void actions.handleReopen(actions.reopenItem!.id, fb)}
           onCancel={() => actions.setReopenItem(null)}
         />
       )}
@@ -192,7 +192,7 @@ export function CaptainView({
           buttonLabel="Rework"
           pendingLabel="Reworking..."
           isPending={actions.reworkPending}
-          onSubmit={(fb) => actions.handleRework(actions.reworkItem!.id, fb)}
+          onSubmit={(fb) => void actions.handleRework(actions.reworkItem!.id, fb)}
           onCancel={() => actions.setReworkItem(null)}
         />
       )}
@@ -201,7 +201,7 @@ export function CaptainView({
           items={actions.selectedItems}
           deleting={actions.deleting}
           error={actions.deleteError}
-          onConfirm={actions.handleBulkDelete}
+          onConfirm={(opts) => void actions.handleBulkDelete(opts)}
           onCancel={() => actions.setDeleteModalOpen(false)}
         />
       )}
@@ -214,9 +214,10 @@ export function CaptainView({
           buttonLabel="Send"
           pendingLabel="Sending…"
           isPending={actions.answerPending}
-          onSubmit={async (answer) => {
-            const ok = await actions.handleAnswer(answerItem.id, answer);
-            if (ok) setAnswerItem(null);
+          onSubmit={(answer) => {
+            void actions.handleAnswer(answerItem.id, answer).then((ok) => {
+              if (ok) setAnswerItem(null);
+            });
           }}
           onCancel={() => setAnswerItem(null)}
         />
@@ -231,9 +232,10 @@ export function CaptainView({
           buttonLabel="Nudge"
           pendingLabel="Nudging…"
           isPending={actions.nudgePending}
-          onSubmit={async (msg) => {
-            const ok = await actions.handleNudge(nudgeWorker.id, msg);
-            if (ok) setNudgeWorker(null);
+          onSubmit={(msg) => {
+            void actions.handleNudge(nudgeWorker.id, msg).then((ok) => {
+              if (ok) setNudgeWorker(null);
+            });
           }}
           onCancel={() => setNudgeWorker(null)}
         />

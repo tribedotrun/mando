@@ -1,5 +1,10 @@
-import type { TaskItem, TimelineEvent, ClarifierQuestion, ItemStatus } from '#renderer/types';
-import { FINALIZED_STATUSES } from '#renderer/types';
+import {
+  FINALIZED_STATUSES,
+  type TaskItem,
+  type TimelineEvent,
+  type ClarifierQuestion,
+  type ItemStatus,
+} from '#renderer/types';
 import { toast } from 'sonner';
 import log from '#renderer/logger';
 
@@ -10,28 +15,22 @@ export function shortRepo(project?: string): string {
 }
 
 /* ── PR display helpers ── */
-const PR_URL_RE = /\/pull\/(\d+)/;
 
-/** Normalize a PR value (full URL or #number) to a short `#N` label. */
-export function prLabel(pr: string): string {
-  const m = pr.match(PR_URL_RE);
-  if (m) return `#${m[1]}`;
-  return pr.startsWith('#') ? pr : `#${pr}`;
+/** Format a numeric PR number as a short `#N` label. */
+export function prLabel(prNumber: number): string {
+  return `#${prNumber}`;
 }
 
-/** Build a GitHub PR href from a PR ref + GitHub repo slug. Always reconstructs
- *  the URL from the slug so stale full URLs (e.g. after a repo rename) are corrected. */
-export function prHref(pr: string, githubRepo: string): string {
-  const m = pr.match(PR_URL_RE);
-  const num = m ? m[1] : pr.replace('#', '');
-  return `https://github.com/${githubRepo}/pull/${num}`;
+/** Build a GitHub PR href from a numeric PR number + GitHub repo slug. */
+export function prHref(prNumber: number, githubRepo: string): string {
+  return `https://github.com/${githubRepo}/pull/${prNumber}`;
 }
 
 /* ── Task status predicates ── */
 
 /** Whether a task can be merged (has PR + project, awaiting review). */
 export function canMerge(t: TaskItem): boolean {
-  return !!t.pr && !!t.project && t.status === 'awaiting-review';
+  return !!t.pr_number && !!t.project && t.status === 'awaiting-review';
 }
 
 /** Whether a task can be reopened (terminal or review states). */
@@ -136,6 +135,20 @@ export function extractClarifierQuestions(
   return null;
 }
 
+/** Convert an ISO timestamp string to local time (e.g. "02:45:12 PM"). */
+export function localizeTimestamp(ts: string): string {
+  const d = new Date(ts);
+  if (Number.isNaN(d.getTime())) return ts;
+  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
+/** Replace all ISO timestamp patterns in arbitrary text with localized times. */
+export function localizeMeta(text: string): string {
+  return text.replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?/g, (m) =>
+    localizeTimestamp(m),
+  );
+}
+
 /** Human-readable relative time from an ISO timestamp (e.g. "3m ago", "in 2h"). */
 export function relativeTime(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
@@ -150,6 +163,25 @@ export function relativeTime(iso: string): string {
   if (hours < 24) return future ? `in ${hours}h` : `${hours}h ago`;
   const days = Math.floor(hours / 24);
   return future ? `in ${days}d` : `${days}d ago`;
+}
+
+/** Compact relative time without "ago" suffix (e.g. "4d", "1mo", "2h"). */
+export function compactRelativeTime(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  if (Number.isNaN(diff)) return '';
+  const abs = Math.abs(diff);
+  const seconds = Math.floor(abs / 1000);
+  if (seconds < 60) return 'now';
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `${days}d`;
+  const months = Math.floor(days / 30);
+  if (months < 12) return `${months}mo`;
+  const years = Math.floor(days / 365);
+  return `${years}y`;
 }
 
 /** Short timestamp: "Mar 27, 02:45 PM". Returns em-dash for empty/invalid. */

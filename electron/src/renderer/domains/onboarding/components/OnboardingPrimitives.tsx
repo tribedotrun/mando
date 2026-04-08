@@ -28,7 +28,7 @@ export function SetupLayout({
               {Array.from({ length: total }, (_, i) => (
                 <div
                   key={i}
-                  className={`h-[3px] w-9 rounded ${i < step ? 'bg-primary' : 'bg-border'}`}
+                  className={`h-[3px] w-9 rounded ${i < step ? 'bg-foreground' : 'bg-border'}`}
                 />
               ))}
             </div>

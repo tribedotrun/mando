@@ -112,7 +112,7 @@ pub(crate) async fn reclarify_items(
                 cost_usd: None,
                 duration_ms: None,
                 resumed: item.session_ids.clarifier.is_some(),
-                task_id: &item.id.to_string(),
+                task_id: Some(item.id),
                 status: mando_types::SessionStatus::Running,
                 worker_name: "",
             },
@@ -134,7 +134,7 @@ pub(crate) async fn reclarify_items(
         let hint = hint.to_string();
         let session_id_for_panic = session_id.clone();
         let cwd_for_failure = cwd.clone();
-        let task_id = task.id.to_string();
+        let task_id_num = task.id;
 
         tokio::spawn(async move {
             let result = AssertUnwindSafe(async {
@@ -164,7 +164,7 @@ pub(crate) async fn reclarify_items(
                             &session_id,
                             &cwd_for_failure,
                             "clarifier",
-                            &task_id,
+                            Some(task_id_num),
                         )
                         .await
                         {

@@ -3,6 +3,8 @@ import { Button } from '#renderer/components/ui/button';
 import { ScrollArea } from '#renderer/components/ui/scroll-area';
 import { Textarea } from '#renderer/components/ui/textarea';
 
+const SCROLL_DELAY_MS = 50;
+
 export interface QAEntry {
   role: 'user' | 'assistant';
   text: string;
@@ -66,7 +68,7 @@ export function QAChat({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const scrollToBottom = useCallback(() => {
-    setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
+    setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }), SCROLL_DELAY_MS);
   }, []);
 
   // Expose scrollToBottom to parent via ref.
@@ -102,7 +104,7 @@ export function QAChat({
     <div data-testid={testId} className={className} style={style}>
       {header}
 
-      <ScrollArea className={`flex-1 ${historyClassName}`} style={historyStyle}>
+      <ScrollArea className={`min-h-0 flex-1 ${historyClassName}`} style={historyStyle}>
         {history.length === 0 && (
           <div className="py-8 text-center text-xs text-text-3">{placeholder}</div>
         )}
@@ -150,7 +152,7 @@ export function QAChat({
             }
           }}
           placeholder={placeholder}
-          className="min-h-0 flex-1 resize-none bg-muted"
+          className="min-h-0 flex-1 resize-none overflow-y-auto border-0 bg-muted shadow-none [scrollbar-width:none] focus-visible:ring-0 dark:bg-muted"
           rows={1}
           autoFocus
         />

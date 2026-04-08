@@ -6,6 +6,11 @@ import noOffGridRadius from './eslint-rules/no-off-grid-radius.mjs';
 import noApiInComponents from './eslint-rules/no-api-in-components.mjs';
 import noBusinessLogicInUi from './eslint-rules/no-business-logic-in-ui.mjs';
 import noNetworkInUi from './eslint-rules/no-network-in-ui.mjs';
+import noFireAndForget from './eslint-rules/no-fire-and-forget.mjs';
+import noMagicTimeouts from './eslint-rules/no-magic-timeouts.mjs';
+import noDirectDomMutation from './eslint-rules/no-direct-dom-mutation.mjs';
+import noDuplicateImports from './eslint-rules/no-duplicate-imports.mjs';
+import noSelfImport from './eslint-rules/no-self-import.mjs';
 
 // ── Shared patterns ──
 
@@ -23,7 +28,7 @@ const BAN_RENDERER = {
 };
 
 // Domain names for import isolation
-const DOMAINS = ['captain', 'scout', 'sessions', 'settings', 'onboarding'];
+const DOMAINS = ['captain', 'scout', 'sessions', 'settings', 'onboarding', 'terminal'];
 
 // Build patterns that ban importing another domain's internals (stores/hooks/components)
 // but allow barrel imports (#renderer/domains/{domain} or #renderer/domains/{domain}/index)
@@ -40,6 +45,28 @@ export default tseslint.config(
   eslint.configs.recommended,
   ...tseslint.configs.recommended,
 
+  // ══════════════════════════════════════════════════════════════
+  //  TYPESCRIPT-ESLINT TYPE-CHECKED (cherry-picked)
+  // ══════════════════════════════════════════════════════════════
+  {
+    files: ['src/**/*.ts', 'src/**/*.tsx'],
+    languageOptions: {
+      parserOptions: {
+        projectService: true,
+        tsconfigRootDir: import.meta.dirname,
+      },
+    },
+    rules: {
+      '@typescript-eslint/no-floating-promises': 'error',
+      '@typescript-eslint/no-misused-promises': 'error',
+      '@typescript-eslint/await-thenable': 'error',
+    },
+  },
+
+  // ══════════════════════════════════════════════════════════════
+  //  CUSTOM PLUGINS
+  // ══════════════════════════════════════════════════════════════
+
   // ── Register custom plugins ──
   {
     plugins: {
@@ -55,6 +82,15 @@ export default tseslint.config(
           'no-api-in-components': noApiInComponents,
           'no-business-logic-in-ui': noBusinessLogicInUi,
           'no-network-in-ui': noNetworkInUi,
+        },
+      },
+      mando: {
+        rules: {
+          'no-fire-and-forget': noFireAndForget,
+          'no-magic-timeouts': noMagicTimeouts,
+          'no-direct-dom-mutation': noDirectDomMutation,
+          'no-duplicate-imports': noDuplicateImports,
+          'no-self-import': noSelfImport,
         },
       },
     },
@@ -115,9 +151,9 @@ export default tseslint.config(
   {
     files: ['src/renderer/**/*.ts', 'src/renderer/**/*.tsx'],
     rules: {
-      'design-system/no-hardcoded-colors': 'warn',
-      'design-system/no-off-scale-font-size': 'warn',
-      'design-system/no-off-grid-radius': 'warn',
+      'design-system/no-hardcoded-colors': 'error',
+      'design-system/no-off-scale-font-size': 'error',
+      'design-system/no-off-grid-radius': 'error',
     },
   },
 
@@ -125,9 +161,28 @@ export default tseslint.config(
   {
     files: ['src/renderer/**/components/**/*.tsx'],
     rules: {
-      'arch/no-api-in-components': 'warn',
-      'arch/no-business-logic-in-ui': 'warn',
-      'arch/no-network-in-ui': 'warn',
+      'arch/no-api-in-components': 'error',
+      'arch/no-business-logic-in-ui': 'error',
+      'arch/no-network-in-ui': 'error',
+    },
+  },
+
+  // ── Mando custom rules (all source files) ──
+  {
+    files: ['src/**/*.ts', 'src/**/*.tsx'],
+    rules: {
+      'mando/no-fire-and-forget': 'error',
+      'mando/no-magic-timeouts': 'error',
+      'mando/no-duplicate-imports': 'error',
+      'mando/no-self-import': 'error',
+    },
+  },
+
+  // ── DOM mutation ban (renderer only) ──
+  {
+    files: ['src/renderer/**/*.ts', 'src/renderer/**/*.tsx'],
+    rules: {
+      'mando/no-direct-dom-mutation': 'error',
     },
   },
 

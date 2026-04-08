@@ -9,8 +9,10 @@ import {
   CollapsibleTrigger,
   CollapsibleContent,
 } from '#renderer/components/ui/collapsible';
-import { useSettingsStore } from '#renderer/domains/settings/stores/settingsStore';
-import type { ProjectConfig } from '#renderer/domains/settings/stores/settingsStore';
+import {
+  useSettingsStore,
+  type ProjectConfig,
+} from '#renderer/domains/settings/stores/settingsStore';
 import { shortRepo } from '#renderer/utils';
 import { apiPatch, buildUrl } from '#renderer/domains/settings/hooks/useApi';
 
@@ -44,6 +46,23 @@ export function ProjectEditor({
   const [preSpawn, setPreSpawn] = useState(project.hooks?.pre_spawn || '');
   const [workerTeardown, setWorkerTeardown] = useState(project.hooks?.worker_teardown || '');
   const [postMerge, setPostMerge] = useState(project.hooks?.post_merge || '');
+
+  const handleDetectLogo = async () => {
+    setDetectingLogo(true);
+    setDetectError(null);
+    try {
+      const res = await apiPatch<{ logo?: string | null }>(
+        `/api/projects/${encodeURIComponent(project.name)}`,
+        { redetect_logo: true },
+      );
+      setLogoFile(res.logo ?? null);
+      await reloadConfig();
+    } catch (err) {
+      setDetectError(err instanceof Error ? err.message : 'Detection failed');
+    } finally {
+      setDetectingLogo(false);
+    }
+  };
 
   // Auto-populate name from path when adding a new project.
   const handlePathChange = (value: string) => {
@@ -140,22 +159,7 @@ export function ProjectEditor({
                 variant="outline"
                 size="xs"
                 disabled={detectingLogo}
-                onClick={async () => {
-                  setDetectingLogo(true);
-                  setDetectError(null);
-                  try {
-                    const res = await apiPatch<{ logo?: string | null }>(
-                      `/api/projects/${encodeURIComponent(project.name)}`,
-                      { redetect_logo: true },
-                    );
-                    setLogoFile(res.logo ?? null);
-                    await reloadConfig();
-                  } catch (err) {
-                    setDetectError(err instanceof Error ? err.message : 'Detection failed');
-                  } finally {
-                    setDetectingLogo(false);
-                  }
-                }}
+                onClick={() => void handleDetectLogo()}
               >
                 {detectingLogo ? 'Detecting...' : logoFile ? 'Re-detect' : 'Detect logo'}
               </Button>

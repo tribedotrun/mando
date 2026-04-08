@@ -21,16 +21,23 @@ type SqliteQuery<'q> = Query<'q, Sqlite, SqliteArguments<'q>>;
 /// can break after `ALTER TABLE DROP COLUMN` due to sqlx type-inference on
 /// removed column slots.
 const SELECT_COLS: &str = "\
-    id, title, status, project, worker, resource, context, original_prompt, \
-    created_at, worktree, pr, worker_started_at, intervention_count, \
-    captain_review_trigger, session_ids, last_activity_at, plan, no_pr, \
-    worker_seq, reopen_seq, reopen_source, images, review_fail_count, \
-    clarifier_fail_count, spawn_fail_count, merge_fail_count, \
-    escalation_report, source, archived_at, github_repo";
+    t.id, t.title, t.status, t.project_id, p.name AS project, \
+    t.worker, t.resource, t.context, t.original_prompt, \
+    t.created_at, t.workbench_id, w.worktree, t.pr_number, t.worker_started_at, \
+    t.intervention_count, t.captain_review_trigger, t.session_ids, t.last_activity_at, \
+    t.plan, t.no_pr, t.worker_seq, t.reopen_seq, t.reopen_source, t.images, \
+    t.review_fail_count, t.clarifier_fail_count, t.spawn_fail_count, t.merge_fail_count, \
+    t.escalation_report, t.source, t.archived_at, p.github_repo";
 
 fn select_tasks_sql() -> &'static str {
     static SQL: OnceLock<String> = OnceLock::new();
-    SQL.get_or_init(|| format!("SELECT {SELECT_COLS} FROM tasks"))
+    SQL.get_or_init(|| {
+        format!(
+            "SELECT {SELECT_COLS} FROM tasks t \
+             JOIN projects p ON p.id = t.project_id \
+             LEFT JOIN workbenches w ON w.id = t.workbench_id"
+        )
+    })
 }
 
 /// Fetch a single task by ID.
@@ -40,7 +47,7 @@ pub async fn find_by_id(pool: &SqlitePool, id: i64) -> Result<Option<Task>> {
 
 /// Load all non-archived tasks.
 pub async fn load_all(pool: &SqlitePool) -> Result<Vec<Task>> {
-    let sql = format!("{} WHERE archived_at IS NULL", select_tasks_sql());
+    let sql = format!("{} WHERE t.archived_at IS NULL", select_tasks_sql());
     let rows: Vec<TaskRow> = sqlx::query_as(&sql).fetch_all(pool).await?;
     rows.into_iter().map(|r| r.into_task()).collect()
 }
@@ -54,8 +61,9 @@ pub async fn load_all_with_archived(pool: &SqlitePool) -> Result<Vec<Task>> {
 /// Load routing-level fields only (lighter query).
 pub async fn routing(pool: &SqlitePool) -> Result<Vec<TaskRouting>> {
     let rows: Vec<RoutingRow> = sqlx::query_as(
-        "SELECT id, title, status, project, worker, resource
-         FROM tasks WHERE archived_at IS NULL",
+        "SELECT t.id, t.title, t.status, t.project_id, p.name AS project, t.worker, t.resource
+         FROM tasks t JOIN projects p ON p.id = t.project_id
+         WHERE t.archived_at IS NULL",
     )
     .fetch_all(pool)
     .await?;
@@ -69,14 +77,14 @@ pub async fn routing(pool: &SqlitePool) -> Result<Vec<TaskRouting>> {
 const WRITE_COLS: &[&str] = &[
     "title",
     "status",
-    "project",
+    "project_id",
     "worker",
     "resource",
     "context",
     "original_prompt",
     "created_at",
-    "worktree",
-    "pr",
+    "workbench_id",
+    "pr_number",
     "worker_started_at",
     "intervention_count",
     "captain_review_trigger",
@@ -95,7 +103,6 @@ const WRITE_COLS: &[&str] = &[
     "escalation_report",
     "source",
     "archived_at",
-    "github_repo",
 ];
 
 fn insert_task_sql() -> &'static str {
@@ -141,14 +148,14 @@ pub(crate) fn bind_task_write_fields<'q>(
     query
         .bind(&task.title)
         .bind(task.status.as_str())
-        .bind(&task.project)
+        .bind(task.project_id)
         .bind(&task.worker)
         .bind(&task.resource)
         .bind(&task.context)
         .bind(&task.original_prompt)
         .bind(&task.created_at)
-        .bind(&task.worktree)
-        .bind(&task.pr)
+        .bind(task.workbench_id)
+        .bind(task.pr_number)
         .bind(&task.worker_started_at)
         .bind(task.intervention_count)
         .bind(trigger_str)
@@ -167,7 +174,6 @@ pub(crate) fn bind_task_write_fields<'q>(
         .bind(&task.escalation_report)
         .bind(&task.source)
         .bind(&task.archived_at)
-        .bind(&task.github_repo)
 }
 
 /// Insert a new task (auto-ID).
@@ -183,12 +189,25 @@ pub async fn update_task(pool: &SqlitePool, task: &Task) -> Result<bool> {
     update_task_exec(pool, task).await
 }
 
-/// Delete a task by ID.
+/// Delete a task and its dependent rows (timeline_events, ask_history).
+///
+/// `task_rebase_state` cascades via FK; `cc_sessions` are cleaned up by
+/// `task_cleanup::cleanup_task` before this function is called.
 pub async fn remove(pool: &SqlitePool, id: i64) -> Result<bool> {
+    let mut tx = pool.begin().await?;
+    sqlx::query("DELETE FROM timeline_events WHERE task_id = ?")
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query("DELETE FROM ask_history WHERE task_id = ?")
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
     let result = sqlx::query("DELETE FROM tasks WHERE id = ?")
         .bind(id)
-        .execute(pool)
+        .execute(&mut *tx)
         .await?;
+    tx.commit().await?;
     Ok(result.rows_affected() > 0)
 }
 
@@ -360,7 +379,7 @@ async fn find_by_id_exec<'e>(
     exec: impl sqlx::Executor<'e, Database = sqlx::Sqlite>,
     id: i64,
 ) -> Result<Option<Task>> {
-    let sql = format!("{} WHERE id = ?", select_tasks_sql());
+    let sql = format!("{} WHERE t.id = ?", select_tasks_sql());
     let row: Option<TaskRow> = sqlx::query_as(&sql).bind(id).fetch_optional(exec).await?;
     row.map(|r| r.into_task()).transpose()
 }

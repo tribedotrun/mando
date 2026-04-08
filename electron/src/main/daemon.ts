@@ -16,6 +16,12 @@ import {
   kickstartDaemon,
 } from '#main/launchd';
 
+// -- Timing constants --
+const POLL_DELAY_MS = 200;
+const SIGTERM_POLL_MS = 250;
+const SIGKILL_SETTLE_MS = 500;
+const HEALTH_MONITOR_INTERVAL_MS = 10_000;
+
 // -- Connection state --
 export type ConnectionState = 'connecting' | 'connected' | 'disconnected' | 'updating';
 let connectionState: ConnectionState = 'connecting';
@@ -218,7 +224,7 @@ async function waitForDaemon(timeoutMs = 15000): Promise<boolean> {
       reconnectAttempts = 0;
       return true;
     }
-    await new Promise((r) => setTimeout(r, 200));
+    await new Promise((r) => setTimeout(r, POLL_DELAY_MS));
   }
   return false;
 }
@@ -227,53 +233,57 @@ function scheduleReconnect(): void {
   if (reconnectTimer) return;
   if (isQuittingRef) return;
 
-  reconnectTimer = setTimeout(async () => {
-    reconnectTimer = null;
-    invalidateDiscoveryCache();
+  reconnectTimer = setTimeout(() => {
+    void (async () => {
+      reconnectTimer = null;
+      invalidateDiscoveryCache();
 
-    const result = await healthCheck();
-    if (result.healthy) {
-      setConnectionState('connected');
-      reconnectDelay = 1000;
-      reconnectAttempts = 0;
-      return;
-    }
+      const result = await healthCheck();
+      if (result.healthy) {
+        setConnectionState('connected');
+        reconnectDelay = 1000;
+        reconnectAttempts = 0;
+        return;
+      }
 
-    reconnectAttempts++;
+      reconnectAttempts++;
 
-    // After several failed reconnects, the daemon may be stuck (launchd
-    // throttling a crash-loop, or service loaded but not running).
-    // Kickstart tells launchd to start it immediately, bypassing throttle.
-    if (reconnectAttempts === KICKSTART_AFTER_ATTEMPTS && !process.env.MANDO_EXTERNAL_GATEWAY) {
-      log.info('[daemon] reconnect attempts exhausted — kickstarting via launchd');
-      kickstartDaemon();
-    }
+      // After several failed reconnects, the daemon may be stuck (launchd
+      // throttling a crash-loop, or service loaded but not running).
+      // Kickstart tells launchd to start it immediately, bypassing throttle.
+      if (reconnectAttempts === KICKSTART_AFTER_ATTEMPTS && !process.env.MANDO_EXTERNAL_GATEWAY) {
+        log.info('[daemon] reconnect attempts exhausted — kickstarting via launchd');
+        kickstartDaemon();
+      }
 
-    reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY);
-    setConnectionState('disconnected');
-    scheduleReconnect();
+      reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY);
+      setConnectionState('disconnected');
+      scheduleReconnect();
+    })();
   }, reconnectDelay);
 }
 
 export function startHealthMonitor(): void {
-  healthMonitorInterval = setInterval(async () => {
-    if (isQuittingRef) return;
-    if (connectionState === 'updating') return;
+  healthMonitorInterval = setInterval(() => {
+    void (async () => {
+      if (isQuittingRef) return;
+      if (connectionState === 'updating') return;
 
-    const result = await healthCheck();
-    if (result.healthy && connectionState !== 'connected') {
-      // Daemon came back — invalidate cached port/token in case it restarted on a different port.
-      invalidateDiscoveryCache();
-      setConnectionState('connected');
-      reconnectDelay = 1000;
-      reconnectAttempts = 0;
-    } else if (!result.healthy && connectionState === 'connected') {
-      // Daemon went away — invalidate so next reconnect discovers the new port.
-      invalidateDiscoveryCache();
-      setConnectionState('disconnected');
-      scheduleReconnect();
-    }
-  }, 10000);
+      const result = await healthCheck();
+      if (result.healthy && connectionState !== 'connected') {
+        // Daemon came back — invalidate cached port/token in case it restarted on a different port.
+        invalidateDiscoveryCache();
+        setConnectionState('connected');
+        reconnectDelay = 1000;
+        reconnectAttempts = 0;
+      } else if (!result.healthy && connectionState === 'connected') {
+        // Daemon went away — invalidate so next reconnect discovers the new port.
+        invalidateDiscoveryCache();
+        setConnectionState('disconnected');
+        scheduleReconnect();
+      }
+    })();
+  }, HEALTH_MONITOR_INTERVAL_MS);
 }
 
 // ---------------------------------------------------------------------------
@@ -349,14 +359,14 @@ async function killDaemonByPid(pid: number, dataDir: string): Promise<boolean> {
       log.warn(`[daemon] unexpected error checking pid ${pid}:`, err);
       break;
     }
-    await new Promise((r) => setTimeout(r, 250));
+    await new Promise((r) => setTimeout(r, SIGTERM_POLL_MS));
   }
 
   // Force-kill if still alive.
   try {
     process.kill(pid, 0);
     process.kill(pid, 'SIGKILL');
-    await new Promise((r) => setTimeout(r, 500));
+    await new Promise((r) => setTimeout(r, SIGKILL_SETTLE_MS));
   } catch (err: unknown) {
     // ESRCH means the process is already dead, which is what we want.
     // Log any other error (e.g. EPERM) so we don't silently hide failures.

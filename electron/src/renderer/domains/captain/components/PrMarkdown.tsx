@@ -162,9 +162,9 @@ export function PrMarkdown({ text }: { text: string }): React.ReactElement {
       if (admonition) {
         const type = admonition[1];
         const admonitionColors: Record<string, string> = {
-          NOTE: 'var(--primary)',
-          TIP: 'var(--success)',
-          IMPORTANT: 'var(--primary)',
+          NOTE: 'var(--muted-foreground)',
+          TIP: 'var(--muted-foreground)',
+          IMPORTANT: 'var(--muted-foreground)',
           WARNING: 'var(--stale)',
           CAUTION: 'var(--destructive)',
         };
@@ -181,7 +181,7 @@ export function PrMarkdown({ text }: { text: string }): React.ReactElement {
         elements.push(
           <div
             key={elements.length}
-            className="my-2 rounded px-3 py-2 text-[12px]"
+            className="my-2 rounded px-3 py-2 text-[12px] [overflow-wrap:anywhere]"
             style={{
               background: `color-mix(in srgb, ${color} 8%, transparent)`,
               border: `1px solid color-mix(in srgb, ${color} 25%, transparent)`,
@@ -229,7 +229,7 @@ export function PrMarkdown({ text }: { text: string }): React.ReactElement {
             className="mt-0.5 inline-block h-3.5 w-3.5 shrink-0 rounded-sm text-center text-label leading-[14px]"
             style={{
               border: '1px solid var(--border)',
-              background: checked ? 'var(--primary)' : 'transparent',
+              background: checked ? 'var(--foreground)' : 'transparent',
               color: checked ? 'var(--background)' : 'transparent',
             }}
           >
@@ -361,12 +361,12 @@ function renderInline(text: string): React.ReactNode {
             href={linkUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="text-primary hover:underline"
+            className="text-muted-foreground hover:text-foreground hover:underline"
           >
             {match[3]}
           </a>
         ) : (
-          <span key={key++} className="text-primary">
+          <span key={key++} className="text-muted-foreground">
             {match[3]}
           </span>
         ),
@@ -384,7 +384,10 @@ function renderInline(text: string): React.ReactNode {
     } else if (match[7]) {
       // Inline code
       parts.push(
-        <code key={key++} className="rounded bg-secondary px-1 py-1 font-mono text-[11px]">
+        <code
+          key={key++}
+          className="break-all rounded bg-secondary px-1 py-1 font-mono text-[11px]"
+        >
           {match[7]}
         </code>,
       );
@@ -414,12 +417,12 @@ function renderInline(text: string): React.ReactNode {
             href={aHref}
             target="_blank"
             rel="noopener noreferrer"
-            className="text-primary hover:underline"
+            className="text-muted-foreground hover:text-foreground hover:underline"
           >
             {match[12]}
           </a>
         ) : (
-          <span key={key++} className="text-primary">
+          <span key={key++} className="text-muted-foreground">
             {match[12]}
           </span>
         ),

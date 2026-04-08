@@ -22,17 +22,17 @@ const SKILLS: &[BundledSkill] = &[
         files: &[
             (
                 "SKILL.md",
-                include_str!("../../../skills/mando-pr/SKILL.md"),
+                include_str!("../../../bundled-skills/mando-pr/SKILL.md"),
                 false,
             ),
             (
                 "pr_status.py",
-                include_str!("../../../skills/mando-pr/pr_status.py"),
+                include_str!("../../../bundled-skills/mando-pr/pr_status.py"),
                 false,
             ),
             (
                 "gh_async.py",
-                include_str!("../../../skills/mando-pr/gh_async.py"),
+                include_str!("../../../bundled-skills/mando-pr/gh_async.py"),
                 false,
             ),
         ],
@@ -42,12 +42,12 @@ const SKILLS: &[BundledSkill] = &[
         files: &[
             (
                 "SKILL.md",
-                include_str!("../../../skills/mando-pr-summary/SKILL.md"),
+                include_str!("../../../bundled-skills/mando-pr-summary/SKILL.md"),
                 false,
             ),
             (
                 "fix-diagram.py",
-                include_str!("../../../skills/mando-pr-summary/fix-diagram.py"),
+                include_str!("../../../bundled-skills/mando-pr-summary/fix-diagram.py"),
                 false,
             ),
         ],
@@ -91,6 +91,8 @@ pub fn sync_bundled_skills() {
 }
 
 /// Write content to a file only if it differs from what's on disk.
+/// Uses atomic write (temp file + rename) to prevent Claude Code from
+/// reading a partially-written file during daemon restart.
 /// Returns `true` if the file was written.
 fn write_if_changed(path: &Path, content: &str, executable: bool) -> bool {
     let needs_write = match fs::read_to_string(path) {
@@ -99,8 +101,14 @@ fn write_if_changed(path: &Path, content: &str, executable: bool) -> bool {
     };
 
     if needs_write {
-        if let Err(e) = fs::write(path, content) {
-            warn!("cannot write {}: {e}", path.display());
+        let tmp = path.with_extension("tmp");
+        if let Err(e) = fs::write(&tmp, content) {
+            warn!("cannot write {}: {e}", tmp.display());
+            return false;
+        }
+        if let Err(e) = fs::rename(&tmp, path) {
+            warn!("cannot rename {} -> {}: {e}", tmp.display(), path.display());
+            let _ = fs::remove_file(&tmp);
             return false;
         }
     }

@@ -31,7 +31,7 @@ export function AddUrlForm(): React.ReactElement {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="flex items-center gap-2">
+    <form onSubmit={(e) => void handleSubmit(e)} className="flex items-center gap-2">
       <Input
         data-testid="url-input"
         type="text"

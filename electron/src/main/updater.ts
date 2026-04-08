@@ -470,8 +470,14 @@ export function setupAutoUpdate(): void {
   }
 
   // Schedule periodic checks
-  checkTimer = setTimeout(() => checkAndDownload(), INITIAL_CHECK_DELAY_MS);
-  checkInterval = setInterval(() => checkAndDownload(), UPDATE_CHECK_INTERVAL_MS);
+  checkTimer = setTimeout(
+    () => void checkAndDownload().catch((err) => log.error('Update check failed', err)),
+    INITIAL_CHECK_DELAY_MS,
+  );
+  checkInterval = setInterval(
+    () => void checkAndDownload().catch((err) => log.error('Update check failed', err)),
+    UPDATE_CHECK_INTERVAL_MS,
+  );
 }
 
 export function cleanupAutoUpdate(): void {

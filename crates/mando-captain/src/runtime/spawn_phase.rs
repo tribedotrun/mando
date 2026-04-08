@@ -113,7 +113,7 @@ async fn execute_ship(
     if let Some(wt) = &it.worktree {
         let wt_path = mando_config::expand_tilde(wt);
         if let Some((_, project_config)) =
-            mando_config::resolve_project_config(it.project.as_deref(), config)
+            mando_config::resolve_project_config(Some(&it.project), config)
         {
             if let Err(e) = crate::io::hooks::teardown(&project_config.hooks, &wt_path).await {
                 tracing::warn!(module = "captain", worker = %action.worker, error = %e, "teardown hook failed");
@@ -126,13 +126,16 @@ async fn execute_ship(
     let is_no_pr = it.no_pr;
     it.status = spawn_logic::ship_status(is_no_pr);
 
-    let pr_label = it.pr.as_deref().map(mando_shared::helpers::pr_short_label);
+    let pr_label_str = it.pr_number.map(mando_shared::helpers::pr_short_label);
     let event = mando_types::timeline::TimelineEvent {
         event_type: mando_types::timeline::TimelineEventType::AwaitingReview,
         timestamp: mando_types::now_rfc3339(),
         actor: "captain".to_string(),
-        summary: format!("Worker done ({})", pr_label.as_deref().unwrap_or("no PR")),
-        data: serde_json::json!({"worker": action.worker, "session_id": it.session_ids.worker, "pr": it.pr}),
+        summary: format!(
+            "Worker done ({})",
+            pr_label_str.as_deref().unwrap_or("no PR")
+        ),
+        data: serde_json::json!({"worker": action.worker, "session_id": it.session_ids.worker, "pr_number": it.pr_number}),
     };
     match mando_db::queries::tasks::persist_status_transition(
         pool,
@@ -153,7 +156,7 @@ async fn execute_ship(
             {
                 tracing::warn!(module = "captain", worker = %action.worker, %e, "failed to log stopped worker session");
             }
-            let pr_ref = pr_label.as_deref().unwrap_or("no PR");
+            let pr_ref = pr_label_str.as_deref().unwrap_or("no PR");
             let msg = format!(
                 "\u{2705} Awaiting review ({}): <b>{}</b>",
                 pr_ref,

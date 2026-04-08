@@ -6,6 +6,9 @@ fn test_workflow() -> CaptainWorkflow {
 
 async fn test_store_lock(_dir: &std::path::Path) -> Arc<RwLock<TaskStore>> {
     let db = mando_db::Db::open_in_memory().await.unwrap();
+    mando_db::queries::projects::upsert(db.pool(), "test", "", None)
+        .await
+        .unwrap();
     let store = TaskStore::new(db.pool().clone());
     Arc::new(RwLock::new(store))
 }
@@ -35,6 +38,8 @@ async fn tick_dry_run_does_not_mutate() {
     {
         let store = store_lock.write().await;
         let mut t = mando_types::Task::new("Test task");
+        t.project_id = 1;
+        t.project = "test".into();
         t.status = ItemStatus::New;
         store.add(t).await.unwrap();
     }
@@ -82,9 +87,13 @@ async fn tick_live_retries_clarifier_on_failure() {
 
     {
         let store = store_lock.write().await;
+        let acme_id = mando_db::queries::projects::upsert(store.pool(), "acme/widgets", "", None)
+            .await
+            .unwrap();
         let mut t = mando_types::Task::new("Lifecycle test item");
+        t.project_id = acme_id;
+        t.project = "acme/widgets".into();
         t.status = ItemStatus::New;
-        t.project = Some("acme/widgets".into());
         store.add(t).await.unwrap();
     }
     let wf = test_workflow();

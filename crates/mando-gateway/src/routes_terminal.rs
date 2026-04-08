@@ -39,6 +39,8 @@ pub(crate) struct CreateBody {
     pub resume_session_id: Option<String>,
     #[serde(default)]
     pub size: Option<TerminalSize>,
+    #[serde(default, alias = "terminalId")]
+    pub terminal_id: Option<String>,
 }
 
 pub(crate) async fn post_terminal_create(
@@ -52,12 +54,21 @@ pub(crate) async fn post_terminal_create(
             "cwd must be an existing directory",
         ));
     }
+    // Inject Mando env vars so the CC session hook can call back.
+    let mut extra_env = std::collections::HashMap::new();
+    extra_env.insert("MANDO_PORT".to_string(), state.listen_port.to_string());
+    let auth_token = crate::auth::ensure_auth_token();
+    extra_env.insert("MANDO_AUTH_TOKEN".to_string(), auth_token);
+    if let Some(ref tid) = body.terminal_id {
+        extra_env.insert("MANDO_TERMINAL_ID".to_string(), tid.clone());
+    }
     let req = mando_terminal::CreateRequest {
         project: body.project,
         cwd,
         agent: body.agent,
         resume_session_id: body.resume_session_id,
         size: body.size,
+        extra_env,
     };
     let session = state.terminal_host.create(req).map_err(|e| {
         error_response(

@@ -63,33 +63,29 @@ pub(crate) async fn poll_merging_items(
     let mut escalate_unresolved: Vec<(usize, String)> = Vec::new();
     for &idx in &needs_spawn {
         let item = &items[idx];
-        let Some(pr_ref) = item.pr.as_deref() else {
-            escalate_unresolved.push((idx, "item has no PR ref".to_string()));
+        let Some(pr_num) = item.pr_number else {
+            escalate_unresolved.push((idx, "item has no PR number".to_string()));
             continue;
         };
-        let repo = mando_config::resolve_github_repo(item.project.as_deref(), config);
-        let pr_num = mando_types::task::extract_pr_number(pr_ref);
-        match (repo, pr_num) {
-            (Some(repo), Some(pr_num)) if !repo.is_empty() => {
+        let repo = item
+            .github_repo
+            .clone()
+            .or_else(|| mando_config::resolve_github_repo(Some(&item.project), config));
+        match repo {
+            Some(repo) if !repo.is_empty() => {
                 checks.push(MergeCheck {
                     idx,
                     repo,
                     pr_num: pr_num.to_string(),
                 });
             }
-            (None, _) => escalate_unresolved.push((
+            None => escalate_unresolved.push((
                 idx,
-                format!(
-                    "cannot resolve github_repo for project {:?}",
-                    item.project.as_deref().unwrap_or("<unset>")
-                ),
+                format!("cannot resolve github_repo for project {:?}", item.project),
             )),
-            (_, None) => escalate_unresolved
-                .push((idx, format!("cannot extract PR number from ref {pr_ref:?}"))),
-            (Some(repo), Some(_)) if repo.is_empty() => {
+            Some(_) => {
                 escalate_unresolved.push((idx, "resolved github_repo is empty string".to_string()))
             }
-            _ => unreachable!(),
         }
     }
     // Push the escalations forward so they are handled in the normal flow.
@@ -177,10 +173,12 @@ pub(crate) async fn poll_merging_items(
 
         // Stream file has no result. Before falling through to the timeout,
         // queue a GitHub API check to see if the PR was already merged.
-        if let Some(pr_ref) = item.pr.as_deref() {
-            let repo = mando_config::resolve_github_repo(item.project.as_deref(), config);
-            let pr_num = mando_types::task::extract_pr_number(pr_ref);
-            if let (Some(repo), Some(pr_num)) = (repo, pr_num) {
+        if let Some(pr_num) = item.pr_number {
+            let repo = item
+                .github_repo
+                .clone()
+                .or_else(|| mando_config::resolve_github_repo(Some(&item.project), config));
+            if let Some(repo) = repo {
                 if !repo.is_empty() {
                     pending_github_check.push((idx, repo, pr_num.to_string()));
                     continue;

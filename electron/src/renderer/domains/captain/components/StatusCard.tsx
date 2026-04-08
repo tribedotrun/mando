@@ -7,7 +7,8 @@ import { useTaskStore } from '#renderer/domains/captain/stores/taskStore';
 import { toast } from 'sonner';
 import log from '#renderer/logger';
 import { clarifyResultToToast, fmtDuration, getErrorMessage, relativeTime } from '#renderer/utils';
-import { PrIcon } from '#renderer/domains/captain/components/TaskIcons';
+import { PrIcon } from '#renderer/global/components/icons';
+import { CardShell, StatusDot, Sep } from '#renderer/global/components/CardShell';
 import { Button } from '#renderer/components/ui/button';
 import { Textarea } from '#renderer/components/ui/textarea';
 
@@ -24,8 +25,8 @@ function StreamingCard({ item, sessions }: Pick<Props, 'item' | 'sessions'>) {
   const active = sessions.find((s) => s.status === 'running');
   const dur = active ? (active.duration_ms ?? 0) / 1000 : 0;
   return (
-    <CardShell color="var(--success)">
-      <StatusDot color="var(--success)" pulse />
+    <CardShell color="var(--review)">
+      <StatusDot color="var(--review)" pulse />
       <span className="text-body font-medium text-foreground">Streaming</span>
       <Sep />
       <span className="text-caption text-muted-foreground">
@@ -46,8 +47,8 @@ function QueuedCard() {
 
 function CaptainReviewingCard({ label }: { label: string }) {
   return (
-    <CardShell color="var(--primary)">
-      <StatusDot color="var(--primary)" pulse />
+    <CardShell color="var(--review)">
+      <StatusDot color="var(--review)" pulse />
       <span className="text-body font-medium text-foreground">{label}</span>
     </CardShell>
   );
@@ -55,15 +56,13 @@ function CaptainReviewingCard({ label }: { label: string }) {
 
 function AwaitingReviewCard({ item }: { item: TaskItem }) {
   return (
-    <CardShell color="var(--success)">
-      <StatusDot color="var(--success)" />
+    <CardShell color="var(--muted-foreground)">
+      <StatusDot color="var(--muted-foreground)" />
       <span className="text-body font-medium text-foreground">Ready for review</span>
-      {item.pr && (
+      {item.pr_number && (
         <>
           <Sep />
-          <span className="text-caption text-muted-foreground">
-            PR {item.pr.replace(/.*\/pull\//, '#')}
-          </span>
+          <span className="text-caption text-muted-foreground">PR #{item.pr_number}</span>
         </>
       )}
     </CardShell>
@@ -133,7 +132,7 @@ function NeedsClarificationCard({
     setPending(true);
     try {
       const result = await answerClarification(taskId, payload);
-      taskFetch();
+      void taskFetch();
       const { variant, msg } = clarifyResultToToast(result.status);
       const fn = variant === 'success' ? toast.success : toast.info;
       fn(msg);
@@ -149,8 +148,8 @@ function NeedsClarificationCard({
 
   if (completed) {
     return (
-      <CardShell color="var(--success)">
-        <span className="text-body font-medium text-success">{completed}</span>
+      <CardShell color="var(--muted-foreground)">
+        <span className="text-body font-medium text-muted-foreground">{completed}</span>
       </CardShell>
     );
   }
@@ -184,7 +183,7 @@ function NeedsClarificationCard({
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && e.metaKey && filledCount > 0) {
                   e.preventDefault();
-                  handleSubmit();
+                  void handleSubmit();
                 }
               }}
             />
@@ -196,7 +195,11 @@ function NeedsClarificationCard({
         <span className="text-caption text-text-3">
           {filledCount} of {unanswered.length} answered
         </span>
-        <Button onClick={handleSubmit} disabled={filledCount === 0 || pending} size="sm">
+        <Button
+          onClick={() => void handleSubmit()}
+          disabled={filledCount === 0 || pending}
+          size="sm"
+        >
           {pending ? 'Submitting...' : `Submit (${filledCount})`}
         </Button>
       </div>
@@ -274,39 +277,4 @@ export function StatusCard({ item, sessions, clarifierQuestions }: Props): React
 
   // merged, completed-no-pr, canceled
   return <MergedCard item={item} sessions={sessions} />;
-}
-
-/* -- Shared primitives -- */
-
-function CardShell({
-  color,
-  children,
-}: {
-  color: string;
-  children: React.ReactNode;
-}): React.ReactElement {
-  return (
-    <div
-      className="flex items-center gap-2 rounded-lg px-4 py-3"
-      style={{
-        background: `color-mix(in srgb, ${color} 6%, transparent)`,
-        border: `1px solid color-mix(in srgb, ${color} 20%, transparent)`,
-      }}
-    >
-      {children}
-    </div>
-  );
-}
-
-function StatusDot({ color, pulse }: { color: string; pulse?: boolean }): React.ReactElement {
-  return (
-    <span
-      className={`inline-block h-2 w-2 shrink-0 rounded-full${pulse ? ' animate-pulse' : ''}`}
-      style={{ background: color }}
-    />
-  );
-}
-
-function Sep(): React.ReactElement {
-  return <span className="text-caption text-text-4">&middot;</span>;
 }

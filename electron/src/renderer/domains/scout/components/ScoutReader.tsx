@@ -165,7 +165,12 @@ export function ScoutReader({ itemId, onBack, onAsk, qaOpen }: Props): React.Rea
               Act
             </Button>
           )}
-          <Button variant="ghost" size="sm" onClick={handlePublish} disabled={publishing}>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => void handlePublish()}
+            disabled={publishing}
+          >
             {publishing ? 'Publishing...' : telegraphUrl ? 'Open article' : 'Publish'}
           </Button>
           <Button
@@ -193,7 +198,7 @@ export function ScoutReader({ itemId, onBack, onAsk, qaOpen }: Props): React.Rea
           setActPrompt={setActPrompt}
           acting={acting}
           actResult={actResult}
-          onAct={handleAct}
+          onAct={() => void handleAct()}
         />
       )}
 
@@ -309,7 +314,7 @@ function ScoutSummary({
         <div
           className="prose-scout mt-2 border-l-2 pl-4 text-xs leading-relaxed text-foreground"
           style={{
-            borderColor: 'color-mix(in srgb, var(--primary) 30%, transparent)',
+            borderColor: 'var(--border)',
           }}
         >
           <Markdown>{summary}</Markdown>
@@ -366,7 +371,7 @@ function ScoutActForm({
             placeholder="What should the task focus on? (optional)"
             className="h-8 min-w-0 flex-1 text-xs"
           />
-          <Button size="sm" onClick={onAct} disabled={!actProject || acting}>
+          <Button size="sm" onClick={() => void onAct()} disabled={!actProject || acting}>
             {acting ? 'Creating...' : 'Create Task'}
           </Button>
         </div>

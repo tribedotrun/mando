@@ -2,9 +2,9 @@ import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { ChevronDown, MoreVertical } from 'lucide-react';
 import { fetchWorkers } from '#renderer/domains/captain/hooks/useApi';
-import { fmtRuntime, ceilMinutes } from '#renderer/utils';
+import { fmtRuntime, ceilMinutes, shortRepo } from '#renderer/utils';
 import type { WorkerDetail } from '#renderer/types';
-import { shortRepo } from '#renderer/utils';
+import { StatusDot } from '#renderer/global/components/CardShell';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -26,14 +26,14 @@ const PHASE_COLORS: Record<
   { dot: string; text: string; duration: string; label?: string }
 > = {
   active: {
-    dot: 'var(--success)',
+    dot: 'var(--foreground)',
     text: 'var(--muted-foreground)',
     duration: 'var(--text-3)',
   },
   reviewing: {
-    dot: 'var(--primary)',
-    text: 'var(--primary)',
-    duration: 'var(--primary)',
+    dot: 'var(--review)',
+    text: 'var(--review)',
+    duration: 'var(--review)',
     label: 'reviewing',
   },
   merging: {
@@ -73,11 +73,7 @@ function WorkerRow({
   return (
     <div className="group relative flex min-h-[26px] items-center gap-2.5 px-4 py-1">
       {/* Status dot */}
-      <span
-        aria-hidden="true"
-        className="h-1 w-1 shrink-0 rounded-full"
-        style={{ background: dotColor }}
-      />
+      <StatusDot color={dotColor} size="sm" />
 
       {/* Task name */}
       <span className="min-w-0 flex-1 truncate text-[12px] leading-4" style={{ color: textColor }}>
@@ -126,12 +122,16 @@ function WorkerRow({
               <DropdownMenuItem
                 variant="destructive"
                 disabled={stopping}
-                onSelect={async (event) => {
+                onSelect={(event) => {
                   event.preventDefault();
                   setStopping(true);
-                  try {
-                    await onStop(worker);
-                  } finally {
+                  const result = onStop(worker);
+                  if (result instanceof Promise) {
+                    void result.finally(() => {
+                      setStopping(false);
+                      setMenuOpen(false);
+                    });
+                  } else {
                     setStopping(false);
                     setMenuOpen(false);
                   }
@@ -285,9 +285,9 @@ function HeaderContent({
   return (
     <>
       <span className="text-label text-text-3">Workers</span>
-      <span className="text-[12px] leading-4 text-success">{activeCount} active</span>
+      <span className="text-[12px] leading-4 text-foreground">{activeCount} active</span>
       {reviewingCount > 0 && (
-        <span className="text-[12px] leading-4 text-primary">{reviewingCount} reviewing</span>
+        <span className="text-[12px] leading-4 text-review">{reviewingCount} reviewing</span>
       )}
       {mergingCount > 0 && (
         <span className="text-[12px] leading-4 text-muted-foreground">{mergingCount} merging</span>

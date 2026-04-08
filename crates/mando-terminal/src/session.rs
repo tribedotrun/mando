@@ -32,6 +32,7 @@ impl TerminalSession {
         agent: Agent,
         resume_session_id: Option<&str>,
         size: TerminalSize,
+        extra_env: &std::collections::HashMap<String, String>,
     ) -> anyhow::Result<Arc<Self>> {
         let pty_system = native_pty_system();
         let pty_size = PtySize {
@@ -56,6 +57,9 @@ impl TerminalSession {
         cmd.cwd(&cwd);
         cmd.env("TERM", "xterm-256color");
         cmd.env("MANDO_TERMINAL", "1");
+        for (key, val) in extra_env {
+            cmd.env(key, val);
+        }
 
         let mut child = pair.slave.spawn_command(cmd)?;
         drop(pair.slave);

@@ -33,12 +33,15 @@ pub(crate) async fn check_done_mergeability(
             .filter(|(_, it)| {
                 (it.status == mando_types::task::ItemStatus::AwaitingReview
                     || it.status == mando_types::task::ItemStatus::HandedOff)
-                    && it.pr.is_none()
+                    && it.pr_number.is_none()
                     && it.branch.is_some()
             })
             .filter_map(|(i, it)| {
                 let branch = it.branch.clone()?;
-                let repo = mando_config::resolve_github_repo(it.project.as_deref(), config)?;
+                let repo = it
+                    .github_repo
+                    .clone()
+                    .or_else(|| mando_config::resolve_github_repo(Some(&it.project), config))?;
                 Some((i, repo, branch))
             })
             .collect();
@@ -50,15 +53,15 @@ pub(crate) async fn check_done_mergeability(
                 .collect();
             let results = futures::future::join_all(futs).await;
 
-            for ((idx, _, _), pr_url) in discover_jobs.iter().zip(results) {
-                if let Some(url) = pr_url {
+            for ((idx, _, _), pr_num) in discover_jobs.iter().zip(results) {
+                if let Some(num) = pr_num {
                     tracing::info!(
                         module = "captain",
                         title = %items[*idx].title,
-                        pr = %url,
+                        pr_number = num,
                         "discovered PR in mergeability phase"
                     );
-                    items[*idx].pr = Some(url);
+                    items[*idx].pr_number = Some(num);
                 }
             }
         }
@@ -75,18 +78,21 @@ pub(crate) async fn check_done_mergeability(
         .iter()
         .filter_map(|&idx| {
             let item = &items[idx];
-            let pr = item.pr.clone()?;
-            let repo = mando_config::resolve_github_repo(item.project.as_deref(), config).or_else(
-                || {
+            let pr_num = item.pr_number?;
+            let repo = item
+                .github_repo
+                .clone()
+                .or_else(|| mando_config::resolve_github_repo(Some(&item.project), config))
+                .or_else(|| {
                     tracing::debug!(
                         module = "captain",
                         title = %item.title,
-                        project = ?item.project,
-                        "skipping mergeability check — no github_repo configured"
+                        project = %item.project,
+                        "skipping mergeability check — no github_repo"
                     );
                     None
-                },
-            )?;
+                })?;
+            let pr = mando_types::task::pr_url(&repo, pr_num);
             Some((idx, pr, repo))
         })
         .collect();
@@ -129,8 +135,12 @@ pub(crate) async fn check_done_mergeability(
         .iter()
         .filter_map(|&idx| {
             let item = &items[idx];
-            let pr = item.pr.clone()?;
-            let repo = mando_config::resolve_github_repo(item.project.as_deref(), config)?;
+            let pr_num = item.pr_number?;
+            let repo = item
+                .github_repo
+                .clone()
+                .or_else(|| mando_config::resolve_github_repo(Some(&item.project), config))?;
+            let pr = mando_types::task::pr_url(&repo, pr_num);
             Some((idx, pr, repo))
         })
         .collect();

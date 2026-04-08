@@ -74,7 +74,7 @@ export function DetailOverflowMenu({
           </DropdownMenuItem>
         )}
         {entries.map(({ label, value }) => (
-          <DropdownMenuItem key={label} onSelect={() => copyToClipboard(value)}>
+          <DropdownMenuItem key={label} onSelect={() => void copyToClipboard(value)}>
             <Copy size={12} color="var(--text-3)" />
             {label}
           </DropdownMenuItem>

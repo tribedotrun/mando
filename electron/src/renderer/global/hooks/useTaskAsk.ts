@@ -51,7 +51,7 @@ export function useTaskAsk(itemId: number): UseTaskAskResult {
           ...prev,
           { role: 'assistant', content: data.answer, timestamp: new Date().toISOString() },
         ]);
-        queryClient.invalidateQueries({ queryKey: ['task-ask-history', itemId] });
+        void queryClient.invalidateQueries({ queryKey: ['task-ask-history', itemId] });
       } catch (err) {
         log.warn('[useTaskAsk] ask failed:', err);
         setLocalMessages((prev) => [

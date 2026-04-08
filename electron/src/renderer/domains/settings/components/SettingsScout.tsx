@@ -4,8 +4,10 @@ import { Input } from '#renderer/components/ui/input';
 import { Label } from '#renderer/components/ui/label';
 import { Badge } from '#renderer/components/ui/badge';
 import { Button } from '#renderer/components/ui/button';
-import { useSettingsStore } from '#renderer/domains/settings/stores/settingsStore';
-import type { ScoutConfig } from '#renderer/domains/settings/stores/settingsStore';
+import {
+  useSettingsStore,
+  type ScoutConfig,
+} from '#renderer/domains/settings/stores/settingsStore';
 
 const EMPTY_SCOUT: ScoutConfig = {};
 
@@ -74,13 +76,13 @@ export function SettingsScout(): React.ReactElement {
   const updateInterests = (patch: Record<string, unknown>, debounce = false) => {
     updateSection('scout', { interests: { ...interests, ...patch } });
     if (debounce) scheduleSave();
-    else save();
+    else void save();
   };
 
   const updateUserContext = (patch: Record<string, unknown>, debounce = false) => {
     updateSection('scout', { userContext: { ...userCtx, ...patch } });
     if (debounce) scheduleSave();
-    else save();
+    else void save();
   };
 
   return (

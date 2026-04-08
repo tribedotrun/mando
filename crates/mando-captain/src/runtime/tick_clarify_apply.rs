@@ -58,7 +58,17 @@ pub(super) async fn apply_clarifier_result(
                 if let Some(repo) = result.repo.filter(|r| !r.trim().is_empty()) {
                     match mando_config::resolve_project_config(Some(&repo), config) {
                         Some((_, pc)) => {
-                            item.project = Some(pc.name.clone());
+                            if let Ok(id) = mando_db::queries::projects::upsert(
+                                pool,
+                                &pc.name,
+                                &pc.path,
+                                pc.github_repo.as_deref(),
+                            )
+                            .await
+                            {
+                                item.project_id = id;
+                            }
+                            item.project = pc.name.clone();
                         }
                         None => {
                             tracing::error!(

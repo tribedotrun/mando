@@ -19,6 +19,7 @@ interface ViewEntry {
   handler: ViewKeyHandler;
   activeRef: React.RefObject<boolean>;
 }
+const G_SEQUENCE_TIMEOUT_MS = 500;
 const viewHandlers = new Set<ViewEntry>();
 
 function dispatchToActiveView(key: string, e: KeyboardEvent): void {
@@ -147,7 +148,7 @@ export function useGlobalKeyboard(config: GlobalKeyboardConfig): void {
         gPendingRef.current = true;
         gTimerRef.current = setTimeout(() => {
           gPendingRef.current = false;
-        }, 500);
+        }, G_SEQUENCE_TIMEOUT_MS);
         return;
       }
 

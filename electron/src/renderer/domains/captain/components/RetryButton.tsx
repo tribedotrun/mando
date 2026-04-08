@@ -35,7 +35,7 @@ export function RetryButton({
         setRetrying(true);
         const result = onRetry();
         if (result instanceof Promise) {
-          result.finally(() => setRetrying(false));
+          void result.finally(() => setRetrying(false));
         }
       }}
     >

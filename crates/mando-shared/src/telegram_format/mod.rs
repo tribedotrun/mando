@@ -121,10 +121,12 @@ fn format_item_line_with_repo(
     let title = escape_html(&item.title);
 
     let repo_suffix = if include_repo {
-        item.project
-            .as_deref()
-            .map(|r| format!(" ({})", escape_html(r)))
-            .unwrap_or_default()
+        let p = &item.project;
+        if p.is_empty() {
+            String::new()
+        } else {
+            format!(" ({})", escape_html(p))
+        }
     } else {
         String::new()
     };
@@ -137,29 +139,14 @@ fn format_item_line_with_repo(
         .unwrap_or_default();
 
     let pr_link = item
-        .pr
-        .as_deref()
-        .filter(|p| !p.is_empty())
-        .map(|pr_ref| {
-            // Extract PR number — handle both "#123" and full URL ".../pull/123"
-            let num = pr_ref
-                .rsplit('/')
-                .next()
-                .unwrap_or(pr_ref)
-                .trim_start_matches('#');
+        .pr_number
+        .map(|num| {
             let label = format!("PR #{num}");
-            // Build GitHub URL if we have the repo slug
-            let url = if pr_ref.starts_with("http") {
-                pr_ref.to_string()
-            } else {
-                github_repo
-                    .map(|repo| format!("https://github.com/{repo}/pull/{num}"))
-                    .unwrap_or_default()
-            };
-            if url.is_empty() {
-                format!(" | {label}")
-            } else {
+            if let Some(repo) = github_repo {
+                let url = mando_types::task::pr_url(repo, num);
                 format!(" | {}", hyperlink(&label, &url))
+            } else {
+                format!(" | {label}")
             }
         })
         .unwrap_or_default();
@@ -258,7 +245,7 @@ mod tests {
     fn format_item_line_with_repo() {
         let mut item = Task::new("Add feature");
         item.status = ItemStatus::Queued;
-        item.project = Some("mando".into());
+        item.project = "mando".into();
         let line = format_item_line(&item, true);
         assert!(line.contains("(mando)"));
     }
@@ -269,7 +256,7 @@ mod tests {
         item.status = ItemStatus::InProgress;
         item.id = 12;
         item.worker = Some("mando-w-12".into());
-        item.pr = Some("396".into());
+        item.pr_number = Some(396);
         let line = super::format_item_line_with_repo(&item, false, Some("acme/widgets"));
         assert!(line.contains("mando-w-12"), "should include worker name");
         assert!(line.contains("PR #396"), "should include PR number");

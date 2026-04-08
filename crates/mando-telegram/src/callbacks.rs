@@ -151,32 +151,17 @@ async fn handle_todo_project(
             tracing::warn!(module = "telegram", error = %e, "message send failed");
         }
 
-        // State holds raw text in a single item for multi-line, or a real
-        // single-line title. Check if AI parsing is needed.
-        let is_multi_line = state.items.len() == 1
-            && state.items[0]
-                .title
-                .lines()
-                .filter(|l| !l.trim().is_empty())
-                .count()
-                > 1;
-
-        if is_multi_line {
-            let raw = &state.items[0].title;
-            let photo = state.items[0].photo_file_id.clone();
-            crate::commands::todo::ai_parse_and_create(bot, cid, raw, Some(&name), photo).await?;
-        } else {
-            // Single-line item — assign project and create directly.
-            let items: Vec<crate::bot::TodoItem> = state
-                .items
-                .into_iter()
-                .map(|mut item| {
-                    item.project = Some(name.clone());
-                    item
-                })
-                .collect();
-            crate::callback_actions::add_todo_items(bot, cid, &items).await?;
-        }
+        // Route all items (single or multi-line) through AI for title normalization.
+        let Some(first) = state.items.first() else {
+            tracing::warn!(
+                module = "telegram",
+                "todo_project callback: empty items state"
+            );
+            return Ok(());
+        };
+        let raw = &first.title;
+        let photo = first.photo_file_id.clone();
+        crate::commands::todo::ai_parse_and_create(bot, cid, raw, Some(&name), photo).await?;
     } else {
         bot.api()
             .answer_callback_query(cb_id, Some("Expired"))

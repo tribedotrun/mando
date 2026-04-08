@@ -18,10 +18,12 @@ pub(crate) async fn cleanup_task(
 ) -> Result<Vec<String>> {
     let mut warnings: Vec<String> = Vec::new();
 
-    let repo_path = item.project.as_deref().and_then(|name| {
-        mando_config::resolve_project_config(Some(name), config)
+    let repo_path = if item.project.is_empty() {
+        None
+    } else {
+        mando_config::resolve_project_config(Some(&item.project), config)
             .map(|(_, pc)| mando_config::expand_tilde(&pc.path))
-    });
+    };
 
     {
         let cc_sid = item.session_ids.worker.as_deref().unwrap_or("");
@@ -145,16 +147,15 @@ pub(crate) async fn cleanup_task(
     }
 
     {
-        let id_str = item.id.to_string();
-        match mando_db::queries::sessions::delete_sessions_for_task(pool, &id_str).await {
+        match mando_db::queries::sessions::delete_sessions_for_task(pool, item.id).await {
             Ok(n) => {
                 if n > 0 {
                     tracing::info!(module = "cleanup", item_id = %item.id, deleted = n, "purged session entries");
                 }
             }
             Err(e) => {
-                let msg = format!("delete_sessions_for_task {}: {e}", id_str);
-                tracing::warn!(module = "cleanup", task_id = %id_str, error = %e, "failed to delete sessions");
+                let msg = format!("delete_sessions_for_task {}: {e}", item.id);
+                tracing::warn!(module = "cleanup", task_id = %item.id, error = %e, "failed to delete sessions");
                 warnings.push(msg);
             }
         }
@@ -162,38 +163,31 @@ pub(crate) async fn cleanup_task(
 
     // Close GitHub PR if requested
     if opts.close_pr {
-        if let Some(ref pr) = item.pr {
-            match mando_types::task::extract_pr_number(pr) {
-                Some(pr_num) => {
-                    // Prefer stored github_repo (captured at creation time), fall back to config
-                    let repo = item.github_repo.clone().or_else(|| {
-                        item.project
-                            .as_deref()
-                            .and_then(|name| mando_config::resolve_github_repo(Some(name), config))
-                    });
-                    match repo {
-                        Some(repo) => match super::github::close_pr(&repo, pr_num).await {
-                            Ok(()) => {
-                                tracing::info!(module = "cleanup", pr = %pr, repo = %repo, "closed PR");
-                            }
-                            Err(e) => {
-                                let msg = format!("Failed to close PR {pr}: {e}");
-                                tracing::warn!(module = "cleanup", pr = %pr, error = %e, "failed to close PR");
-                                warnings.push(msg);
-                            }
-                        },
-                        None => {
-                            let msg = format!(
-                                "Cannot close PR {pr}: no github_repo configured for project"
-                            );
-                            tracing::warn!(module = "cleanup", pr = %pr, "{}", msg);
-                            warnings.push(msg);
-                        }
-                    }
+        if let Some(pr_num) = item.pr_number {
+            let pr_num_str = pr_num.to_string();
+            // Prefer stored github_repo (populated via JOIN), fall back to config
+            let repo = item.github_repo.clone().or_else(|| {
+                if item.project.is_empty() {
+                    None
+                } else {
+                    mando_config::resolve_github_repo(Some(&item.project), config)
                 }
+            });
+            match repo {
+                Some(repo) => match super::github::close_pr(&repo, &pr_num_str).await {
+                    Ok(()) => {
+                        tracing::info!(module = "cleanup", pr_number = pr_num, repo = %repo, "closed PR");
+                    }
+                    Err(e) => {
+                        let msg = format!("Failed to close PR #{pr_num}: {e}");
+                        tracing::warn!(module = "cleanup", pr_number = pr_num, error = %e, "failed to close PR");
+                        warnings.push(msg);
+                    }
+                },
                 None => {
-                    let msg = format!("Cannot close PR: malformed ref \"{pr}\"");
-                    tracing::warn!(module = "cleanup", pr = %pr, "{}", msg);
+                    let msg =
+                        format!("Cannot close PR #{pr_num}: no github_repo configured for project");
+                    tracing::warn!(module = "cleanup", pr_number = pr_num, "{}", msg);
                     warnings.push(msg);
                 }
             }

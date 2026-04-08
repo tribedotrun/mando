@@ -13,7 +13,6 @@ use sqlx::SqlitePool;
 
 use super::captain_review_helpers::{escaped_title, inline_resume_worker};
 use super::notify::Notifier;
-use super::timeline_emit;
 use crate::biz::spawn_logic;
 
 /// Apply a captain review verdict to an item.
@@ -144,7 +143,7 @@ pub async fn apply_verdict(
                     cwd,
                     "worker",
                     &worker_name,
-                    &item.id.to_string(),
+                    Some(item.id),
                     SessionStatus::Stopped,
                 )
                 .await
@@ -157,8 +156,9 @@ pub async fn apply_verdict(
             let saved_ask_sid = item.session_ids.ask.clone();
             let saved_worker = item.worker.clone();
             let saved_worktree = item.worktree.clone();
+            let saved_workbench_id = item.workbench_id;
             let saved_branch = item.branch.clone();
-            let saved_pr = item.pr.clone();
+            let saved_pr = item.pr_number;
             let saved_worker_started = item.worker_started_at.clone();
 
             item.status = ItemStatus::Queued;
@@ -166,8 +166,9 @@ pub async fn apply_verdict(
             item.session_ids.ask = None;
             item.worker = None;
             item.worktree = None;
+            item.workbench_id = None;
             item.branch = None;
-            item.pr = None;
+            item.pr_number = None;
             item.worker_started_at = None;
             let event = mando_types::timeline::TimelineEvent {
                 event_type: TimelineEventType::CaptainReviewVerdict,
@@ -199,8 +200,9 @@ pub async fn apply_verdict(
                     item.session_ids.ask = saved_ask_sid;
                     item.worker = saved_worker;
                     item.worktree = saved_worktree;
+                    item.workbench_id = saved_workbench_id;
                     item.branch = saved_branch;
-                    item.pr = saved_pr;
+                    item.pr_number = saved_pr;
                     item.worker_started_at = saved_worker_started;
                     transition_applied = false;
                     tracing::error!(module = "captain", item_id = item.id, error = %e, "persist failed for respawn verdict");
@@ -415,83 +417,4 @@ pub async fn apply_verdict(
     }
 
     Ok(())
-}
-
-/// Handle review error (CC crashed/timed out).
-///
-/// Retry up to `max_review_retries`, then mark Errored.
-pub async fn handle_review_error(
-    item: &mut Task,
-    error: &str,
-    review_fail_count: &mut u32,
-    workflow: &CaptainWorkflow,
-    notifier: &Notifier,
-    pool: &SqlitePool,
-) {
-    let prev_status = item.status;
-    let saved_trigger = item.captain_review_trigger;
-    let saved_review_sid = item.session_ids.review.clone();
-    *review_fail_count += 1;
-    item.session_ids.review = None;
-    let max = workflow.agent.max_review_retries;
-    let err_data = serde_json::json!({ "error": error, "fail_count": *review_fail_count });
-
-    if *review_fail_count >= max {
-        item.status = ItemStatus::Errored;
-        item.captain_review_trigger = None;
-        let event = mando_types::timeline::TimelineEvent {
-            event_type: TimelineEventType::Errored,
-            timestamp: mando_types::now_rfc3339(),
-            actor: "captain".to_string(),
-            summary: format!(
-                "Captain review failed {}/{max} times: {error}",
-                review_fail_count
-            ),
-            data: err_data,
-        };
-        match mando_db::queries::tasks::persist_status_transition(
-            pool,
-            item,
-            prev_status.as_str(),
-            &event,
-        )
-        .await
-        {
-            Ok(true) => {
-                notifier
-                    .critical(&format!(
-                        "\u{274c} Captain review failed for <b>{}</b>: {error}",
-                        escaped_title(item),
-                    ))
-                    .await;
-            }
-            Ok(false) => {
-                tracing::info!(
-                    module = "captain",
-                    item_id = item.id,
-                    "review error transition already applied"
-                );
-            }
-            Err(e) => {
-                item.status = prev_status;
-                item.captain_review_trigger = saved_trigger;
-                item.session_ids.review = saved_review_sid;
-                *review_fail_count -= 1;
-                tracing::error!(module = "captain", item_id = item.id, error = %e, "persist failed for review error");
-            }
-        }
-    } else {
-        // Stay in CaptainReviewing -- will retry on next tick.
-        // No status transition, so use regular timeline emit.
-        warn!(module = "captain", fail_count = *review_fail_count, %max, %error,
-            "captain review failed, will retry");
-        let _ = timeline_emit::emit_for_task(
-            item,
-            TimelineEventType::CaptainReviewVerdict,
-            &format!("Review attempt {}/{max} failed: {error}", review_fail_count),
-            err_data,
-            pool,
-        )
-        .await;
-    }
 }

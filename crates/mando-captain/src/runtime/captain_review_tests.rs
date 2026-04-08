@@ -294,7 +294,14 @@ async fn test_spawn_review_preserves_existing_review_fail_count() {
         std::env::temp_dir().join(format!("mando-captain-review-test-{}", std::process::id()));
     std::fs::create_dir_all(&worktree).unwrap();
 
+    // Seed a test project so FK constraints are satisfied.
+    mando_db::queries::projects::upsert(&pool, "test", "", None)
+        .await
+        .unwrap();
+
     let mut item = Task::new("test");
+    item.project_id = 1;
+    item.project = "test".into();
     item.status = mando_types::task::ItemStatus::CaptainReviewing;
     item.review_fail_count = 4;
     item.worktree = Some(worktree.to_string_lossy().to_string());
@@ -343,18 +350,16 @@ async fn test_review_failure_budget_moves_item_to_errored_on_fifth_attempt() {
     item.captain_review_trigger = Some(mando_types::task::ReviewTrigger::Retry);
     item.session_ids.review = Some("review-session".into());
 
-    let mut fail_count = item.review_fail_count as u32;
     handle_review_error(
         &mut item,
         "review session timed out without producing a verdict",
-        &mut fail_count,
         &workflow,
         &notifier,
         &pool,
     )
     .await;
 
-    assert_eq!(fail_count, 5);
+    assert_eq!(item.review_fail_count, 5);
     assert_eq!(item.status, mando_types::task::ItemStatus::Errored);
     assert!(item.session_ids.review.is_none());
     assert!(item.captain_review_trigger.is_none());

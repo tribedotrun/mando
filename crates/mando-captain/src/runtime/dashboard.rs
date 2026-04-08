@@ -58,12 +58,23 @@ pub async fn add_task(
         }
     };
 
-    let github_repo = mando_config::resolve_github_repo(resolved_project.as_deref(), config);
+    // Resolve project_id, upserting into the projects table if needed.
+    let (project_id, project_name) = if let Some(ref name) = resolved_project {
+        let resolved = mando_config::resolve_project_config(Some(name), config);
+        let (path, github_repo) = match resolved {
+            Some((_, pc)) => (pc.path.as_str(), pc.github_repo.as_deref()),
+            None => ("", None),
+        };
+        let id = mando_db::queries::projects::upsert(store.pool(), name, path, github_repo).await?;
+        (id, name.clone())
+    } else {
+        (0, String::new())
+    };
 
     let mut new_task = mando_types::Task::new(&clean_title);
     new_task.status = ItemStatus::New;
-    new_task.project = resolved_project;
-    new_task.github_repo = github_repo;
+    new_task.project_id = project_id;
+    new_task.project = project_name;
     new_task.original_prompt = Some(title.to_string());
     new_task.created_at = Some(mando_types::now_rfc3339());
     new_task.source = source.map(String::from);
@@ -148,12 +159,9 @@ pub async fn cancel_item(store: &TaskStore, id: i64, pool: &sqlx::SqlitePool) ->
     // Terminate ALL running sessions for this task. If we can't enumerate
     // them we must NOT mark the task canceled; otherwise live processes
     // would be orphaned while the UI shows them as stopped.
-    let numeric_id = id.to_string();
-    let running = mando_db::queries::sessions::list_running_sessions_for_task(pool, &numeric_id)
+    let running = mando_db::queries::sessions::list_running_sessions_for_task(pool, id)
         .await
-        .with_context(|| {
-            format!("cancel_item: failed to list running sessions for task {numeric_id}")
-        })?;
+        .with_context(|| format!("cancel_item: failed to list running sessions for task {id}"))?;
     for row in &running {
         crate::io::session_terminate::terminate_session(
             pool,
@@ -261,20 +269,19 @@ pub async fn stop_all_workers(store: &TaskStore, pool: &sqlx::SqlitePool) -> Res
 
 /// Transition an item to CaptainMerging. The captain tick will spawn an AI
 /// session to check CI, trigger it if needed, and merge when green.
-pub async fn merge_pr(store: &TaskStore, pr_number: &str, repo: &str) -> Result<serde_json::Value> {
-    // Normalize any input format (#N, bare N, full URL) to a bare number string.
-    let num = mando_types::task::extract_pr_number(pr_number)
-        .ok_or_else(|| anyhow::anyhow!("invalid PR reference: {pr_number}"))?;
-    let url_suffix = format!("/pull/{num}");
+pub async fn merge_pr(
+    store: &TaskStore,
+    pr_number: i64,
+    project: &str,
+) -> Result<serde_json::Value> {
     let items = store.load_all().await?;
     let item = items
         .iter()
         .find(|it| {
-            it.pr
-                .as_deref()
-                .is_some_and(|pr| pr == num || (pr.contains(repo) && pr.ends_with(&url_suffix)))
+            it.pr_number == Some(pr_number)
+                && (project.is_empty() || it.project.eq_ignore_ascii_case(project))
         })
-        .ok_or_else(|| anyhow::anyhow!("no task found for PR #{num} in {repo}"))?;
+        .ok_or_else(|| anyhow::anyhow!("no task found for PR #{pr_number} in {project}"))?;
 
     anyhow::ensure!(
         item.status == ItemStatus::AwaitingReview || item.status == ItemStatus::HandedOff,

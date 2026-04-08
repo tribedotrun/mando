@@ -41,6 +41,7 @@ export interface CaptainConfig {
   autoSchedule?: boolean;
   tickIntervalS?: number;
   tz?: string;
+  defaultTerminalAgent?: 'claude' | 'codex';
   projects?: Record<string, ProjectConfig>;
 }
 
@@ -80,6 +81,10 @@ export interface MandoConfig {
 }
 
 // ---- Store ----
+
+const SAVE_SUCCESS_DISPLAY_MS = 2000;
+const DEBOUNCE_SAVE_MS = 1500;
+const ADD_PROJECT_SUCCESS_MS = 2000;
 
 let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -165,7 +170,7 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
       const result = await window.mandoAPI.saveConfig(JSON.stringify(config, null, 2));
       if (result.ok) {
         set({ saving: false, saveSuccess: true });
-        setTimeout(() => set({ saveSuccess: false }), 2000);
+        setTimeout(() => set({ saveSuccess: false }), SAVE_SUCCESS_DISPLAY_MS);
         return { ok: true };
       }
       const message = `Daemon unreachable, retry (${result.message})`;
@@ -182,8 +187,8 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
     if (debounceTimer) clearTimeout(debounceTimer);
     debounceTimer = setTimeout(() => {
       debounceTimer = null;
-      get().save();
-    }, 1500);
+      void get().save();
+    }, DEBOUNCE_SAVE_MS);
   },
 
   update: (patch) => {
@@ -209,7 +214,7 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
       // Reload config from daemon to pick up auto-detected fields.
       await get().load();
       set({ saving: false, saveSuccess: true });
-      setTimeout(() => set({ saveSuccess: false }), 2000);
+      setTimeout(() => set({ saveSuccess: false }), ADD_PROJECT_SUCCESS_MS);
       return result;
     } catch (err) {
       set({ saving: false, error: getErrorMessage(err, 'Failed to add project') });
