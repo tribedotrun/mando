@@ -5,19 +5,25 @@ use mando_types::session_ids::SessionIds;
 use mando_types::task::{ItemStatus, Task, TaskRouting};
 
 /// sqlx row type for the full task table.
+/// SELECT includes JOINed columns: project (from projects.name),
+/// worktree (from workbenches), github_repo (from projects).
 #[derive(sqlx::FromRow)]
 pub(super) struct TaskRow {
     pub id: i64,
     pub title: String,
     pub status: String,
-    pub project: Option<String>,
+    pub project_id: i64,
+    /// JOINed from projects.name
+    pub project: String,
     pub worker: Option<String>,
     pub resource: Option<String>,
     pub context: Option<String>,
     pub original_prompt: Option<String>,
     pub created_at: Option<String>,
+    pub workbench_id: Option<i64>,
+    /// JOINed from workbenches.worktree
     pub worktree: Option<String>,
-    pub pr: Option<String>,
+    pub pr_number: Option<i64>,
     pub worker_started_at: Option<String>,
     pub intervention_count: i64,
     pub captain_review_trigger: Option<String>,
@@ -36,6 +42,7 @@ pub(super) struct TaskRow {
     pub escalation_report: Option<String>,
     pub source: Option<String>,
     pub archived_at: Option<String>,
+    /// JOINed from projects.github_repo
     pub github_repo: Option<String>,
 }
 
@@ -59,15 +66,17 @@ impl TaskRow {
             id: self.id,
             title: self.title,
             status,
+            project_id: self.project_id,
             project: self.project,
             worker: self.worker,
             resource: self.resource,
             context: self.context,
             original_prompt: self.original_prompt,
             created_at: self.created_at,
+            workbench_id: self.workbench_id,
             worktree: self.worktree,
             branch: None,
-            pr: self.pr,
+            pr_number: self.pr_number,
             worker_started_at: self.worker_started_at,
             intervention_count: self.intervention_count,
             captain_review_trigger,
@@ -99,7 +108,8 @@ pub(super) struct RoutingRow {
     pub id: i64,
     pub title: String,
     pub status: String,
-    pub project: Option<String>,
+    pub project_id: i64,
+    pub project: String,
     pub worker: Option<String>,
     pub resource: Option<String>,
 }
@@ -117,6 +127,7 @@ impl RoutingRow {
             id: self.id,
             title: self.title,
             status,
+            project_id: self.project_id,
             project: self.project,
             worker: self.worker,
             resource: self.resource,

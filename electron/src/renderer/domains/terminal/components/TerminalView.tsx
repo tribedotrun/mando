@@ -18,7 +18,7 @@ export function TerminalView({ sessionId, onExit }: TerminalViewProps) {
       {!isConnected && (
         <div className="absolute top-1 right-2 z-10 text-caption text-text-3">Disconnected</div>
       )}
-      <div ref={containerRef} className="h-full w-full p-2" />
+      <div ref={containerRef} className="h-full w-full p-2 pb-8" />
     </div>
   );
 }

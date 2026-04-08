@@ -41,14 +41,22 @@ export interface TaskItem {
   project?: string;
   github_repo?: string;
   branch?: string;
-  pr?: string;
+  pr_number?: number;
+  project_id?: number;
   worker?: string;
-  session_ids?: { worker?: string; review?: string; clarifier?: string; ask?: string };
+  session_ids?: {
+    worker?: string;
+    review?: string;
+    clarifier?: string;
+    merge?: string;
+    ask?: string;
+  };
   intervention_count: number;
   captain_review_trigger?: string;
   escalation_report?: string;
   context?: string;
   original_prompt?: string;
+  workbench_id?: number;
   worktree?: string;
   plan?: string;
   no_pr?: boolean;
@@ -57,10 +65,14 @@ export interface TaskItem {
   created_at?: string;
   last_activity_at?: string;
   worker_started_at?: string;
+  worker_seq: number;
+  reopen_seq: number;
+  reopen_source?: string;
   review_fail_count: number;
   clarifier_fail_count: number;
   spawn_fail_count: number;
   merge_fail_count: number;
+  source?: string;
   archived_at?: string;
 }
 
@@ -79,7 +91,7 @@ export interface WorkerDetail {
   cc_session_id?: string | null;
   worker?: string;
   worktree?: string;
-  pr?: string | null;
+  pr_number?: number | null;
   started_at?: string;
   last_activity_at?: string;
   intervention_count?: number;
@@ -141,7 +153,7 @@ export interface SessionEntry {
   task_title?: string;
   scout_item_title?: string;
   github_repo?: string;
-  pr?: string;
+  pr_number?: number;
   worktree?: string;
   branch?: string;
   resume_cwd?: string;
@@ -212,7 +224,7 @@ export interface TickResult {
 }
 
 export interface PrSummaryResponse {
-  pr: string;
+  pr_number: number;
   summary: string | null;
 }
 

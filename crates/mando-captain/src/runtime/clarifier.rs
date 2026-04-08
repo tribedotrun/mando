@@ -65,7 +65,7 @@ pub(crate) async fn run_clarification(
             cost_usd: result.cost_usd,
             duration_ms: result.duration_ms,
             resumed: false,
-            task_id: &task_id,
+            task_id: Some(item.id),
             status: mando_types::SessionStatus::Stopped,
             worker_name: "",
         },
@@ -99,7 +99,7 @@ pub(crate) async fn run_clarification(
             &schema,
             &cwd,
             workflow,
-            &task_id,
+            Some(item.id),
             &item.title,
             pool,
         )
@@ -185,11 +185,11 @@ pub(crate) fn resolve_clarifier_cwd(
     item: &Task,
     config: &mando_config::Config,
 ) -> Result<std::path::PathBuf> {
-    match mando_config::resolve_project_config(item.project.as_deref(), config) {
+    match mando_config::resolve_project_config(Some(&item.project), config) {
         Some((_key, proj)) => Ok(mando_config::expand_tilde(&proj.path)),
         None => Err(anyhow::anyhow!(
             "could not resolve project {:?} for clarifier cwd on item {:?}",
-            item.project.as_deref().unwrap_or("<unset>"),
+            item.project,
             item.title
         )),
     }
@@ -201,7 +201,7 @@ fn build_clarifier_prompt(
     workflow: &CaptainWorkflow,
 ) -> anyhow::Result<String> {
     let context = item.context.as_deref().unwrap_or("none");
-    let repo = item.project.as_deref().unwrap_or("");
+    let repo = item.project.as_str();
 
     let mut resource_names: Vec<&str> = vec!["cc"];
     for key in workflow.agent.resource_limits.keys() {
@@ -361,7 +361,7 @@ pub async fn answer_and_reclarify(
             cost_usd: result.cost_usd,
             duration_ms: result.duration_ms,
             resumed,
-            task_id: &task_id,
+            task_id: Some(item.id),
             status: mando_types::SessionStatus::Stopped,
             worker_name: "",
         },

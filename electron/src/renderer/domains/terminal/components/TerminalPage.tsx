@@ -1,16 +1,15 @@
 import { useCallback, useRef, useState } from 'react';
 import { useMountEffect } from '#renderer/global/hooks/useMountEffect';
 import { TerminalView } from '#renderer/domains/terminal/components/TerminalView';
-import { useTerminalStore } from '#renderer/domains/terminal/store';
-import { X, Plus, Circle, ArrowLeft } from 'lucide-react';
+import { useTerminalStore } from '#renderer/domains/terminal/stores/terminalStore';
+import { useSettingsStore } from '#renderer/domains/settings';
+import { X, Plus, Circle } from 'lucide-react';
 import { toast } from 'sonner';
 import log from '#renderer/logger';
 
 interface TerminalPageProps {
   project: string;
   cwd: string;
-  label: string;
-  onBack: () => void;
   resumeSessionId?: string | null;
   onResumeConsumed?: () => void;
 }
@@ -23,8 +22,6 @@ const AGENTS = [
 export function TerminalPage({
   project,
   cwd,
-  label,
-  onBack,
   resumeSessionId,
   onResumeConsumed,
 }: TerminalPageProps) {
@@ -36,27 +33,35 @@ export function TerminalPage({
     fetch: fetchSessions,
   } = useTerminalStore();
   const [activeTab, setActiveTab] = useState<string | null>(null);
-  const resumedRef = useRef(false);
+  const initRef = useRef(false);
+
+  const defaultAgent = useSettingsStore((s) => s.config.captain?.defaultTerminalAgent ?? 'claude');
 
   useMountEffect(() => {
-    fetchSessions().then(() => {
-      const store = useTerminalStore.getState();
-      const relevant = store.sessions.filter((s) => s.project === project && s.cwd === cwd);
-      if (relevant.length > 0 && !activeTab) {
-        setActiveTab(relevant[relevant.length - 1].id);
-      }
-    });
-  });
+    // Guard against React 18 StrictMode double-fire.
+    if (initRef.current) return;
+    initRef.current = true;
 
-  useMountEffect(() => {
-    if (!resumeSessionId || resumedRef.current) return;
-    resumedRef.current = true;
-    addSession({ project, cwd, agent: 'claude', resume_session_id: resumeSessionId })
-      .then((session) => {
-        setActiveTab(session.id);
-        onResumeConsumed?.();
+    if (resumeSessionId) {
+      void addSession({ project, cwd, agent: 'claude', resume_session_id: resumeSessionId })
+        .then((session) => {
+          setActiveTab(session.id);
+          onResumeConsumed?.();
+        })
+        .catch((e) => log.error('Failed to resume terminal session', e));
+      return;
+    }
+    void fetchSessions()
+      .then(() => {
+        const store = useTerminalStore.getState();
+        const relevant = store.sessions.filter((s) => s.project === project && s.cwd === cwd);
+        if (relevant.length > 0) {
+          setActiveTab(relevant[relevant.length - 1].id);
+        } else {
+          void handleNewTerminal(defaultAgent);
+        }
       })
-      .catch((e) => log.error('Failed to resume terminal session', e));
+      .catch((err) => log.error('Failed to fetch sessions', err));
   });
 
   const relevantSessions = sessions.filter((s) => s.project === project && s.cwd === cwd);
@@ -94,20 +99,6 @@ export function TerminalPage({
 
   return (
     <div className="flex h-full flex-col bg-bg">
-      {/* Header: back + label + agent presets */}
-      <div className="flex shrink-0 items-center gap-3 px-4 pt-2 pb-1">
-        <button
-          onClick={onBack}
-          className="flex items-center gap-1 text-caption text-text-3 hover:text-text-2"
-          style={{ background: 'none', border: 'none', cursor: 'pointer' }}
-        >
-          <ArrowLeft size={14} />
-        </button>
-        <span className="text-body font-medium text-text-1">{label}</span>
-        <span className="flex-1" />
-        <span className="text-caption text-text-3">{cwd}</span>
-      </div>
-
       {/* Terminal sub-tabs + agent presets */}
       <div className="flex shrink-0 items-center px-4" style={{ height: 36 }}>
         {/* Open session tabs */}
@@ -138,7 +129,7 @@ export function TerminalPage({
               style={{ cursor: 'pointer' }}
               onClick={(e) => {
                 e.stopPropagation();
-                handleCloseTab(s.id);
+                void handleCloseTab(s.id);
               }}
             />
           </div>
@@ -151,7 +142,7 @@ export function TerminalPage({
         {AGENTS.map((agent) => (
           <button
             key={agent.id}
-            onClick={() => handleNewTerminal(agent.id)}
+            onClick={() => void handleNewTerminal(agent.id)}
             className="flex cursor-pointer items-center gap-1.5 rounded px-2.5 py-1 text-caption text-text-3 transition-colors hover:bg-surface-2 hover:text-text-2"
             style={{ background: 'none', border: 'none' }}
           >

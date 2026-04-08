@@ -26,8 +26,9 @@ use crate::io::evidence;
 #[cfg(test)]
 pub(crate) use super::captain_review_check::validate_verdict;
 pub(crate) use super::captain_review_check::{check_review, check_review_failed};
+pub use super::captain_review_error::handle_review_error;
 use super::captain_review_helpers::escaped_title;
-pub use super::captain_review_verdict::{apply_verdict, handle_review_error};
+pub use super::captain_review_verdict::apply_verdict;
 
 /// Structured verdict from a captain review CC session.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -162,6 +163,7 @@ pub(crate) async fn spawn_review(
     let worker_name_owned = item.worker.as_deref().unwrap_or("unknown").to_string();
 
     let task_id = item.id.to_string();
+    let task_id_num = item.id;
     let session_id = mando_uuid::Uuid::v4().to_string();
     item.session_ids.review = Some(session_id.clone());
 
@@ -216,7 +218,7 @@ pub(crate) async fn spawn_review(
         &cwd,
         "captain-review-async",
         "",
-        &item.id.to_string(),
+        Some(item.id),
         false,
     )
     .await
@@ -351,7 +353,7 @@ pub(crate) async fn spawn_review(
                     &result,
                     &cwd,
                     "captain-review-async",
-                    &task_id,
+                    Some(task_id_num),
                 )
                 .await {
                     warn!(module = "captain", %session_id, %e, "log_cc_result failed");
@@ -374,7 +376,7 @@ pub(crate) async fn spawn_review(
                     &session_id,
                     &cwd,
                     "captain-review-async",
-                    &task_id,
+                    Some(task_id_num),
                 )
                 .await {
                     warn!(module = "captain", %session_id, %e2, "log_cc_failure failed");

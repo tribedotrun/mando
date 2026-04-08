@@ -13,6 +13,7 @@ import { useCallback, useRef } from 'react';
 import type { NotificationPayload, NotifyLevel, SSEEvent } from '#renderer/types';
 
 const STORAGE_KEY = 'mando:desktop-notifications-enabled';
+const DEDUP_WINDOW_MS = 5000;
 
 /** Check if the user has enabled desktop notifications (default: true). */
 export function getNotificationsEnabled(): boolean {
@@ -78,7 +79,7 @@ export function useDesktopNotifications(): {
       recentKeysRef.current.add(taskKey);
       setTimeout(() => {
         recentKeysRef.current.delete(taskKey);
-      }, 5000);
+      }, DEDUP_WINDOW_MS);
     }
 
     window.mandoAPI.showNotification(payload);

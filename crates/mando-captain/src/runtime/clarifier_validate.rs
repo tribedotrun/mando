@@ -65,7 +65,7 @@ pub(crate) async fn retry_with_correction(
     schema: &serde_json::Value,
     cwd: &std::path::Path,
     workflow: &CaptainWorkflow,
-    task_id: &str,
+    task_id: Option<i64>,
     item_title: &str,
     pool: &sqlx::SqlitePool,
 ) -> Result<ClarifierResult> {
@@ -76,20 +76,18 @@ pub(crate) async fn retry_with_correction(
          Please provide your complete output again with a valid `repo` value."
     );
 
-    let result = CcOneShot::run(
-        &correction_prompt,
-        CcConfig::builder()
-            .model(&workflow.models.clarifier)
-            .timeout(workflow.agent.clarifier_timeout_s)
-            .caller("clarifier-retry")
-            .task_id(task_id)
-            .cwd(cwd)
-            .resume(session_id)
-            .allowed_tools(vec!["Read".into(), "Glob".into(), "Grep".into()])
-            .json_schema(schema.clone())
-            .build(),
-    )
-    .await?;
+    let mut builder = CcConfig::builder()
+        .model(&workflow.models.clarifier)
+        .timeout(workflow.agent.clarifier_timeout_s)
+        .caller("clarifier-retry")
+        .cwd(cwd)
+        .resume(session_id)
+        .allowed_tools(vec!["Read".into(), "Glob".into(), "Grep".into()])
+        .json_schema(schema.clone());
+    if let Some(tid) = task_id {
+        builder = builder.task_id(tid.to_string());
+    }
+    let result = CcOneShot::run(&correction_prompt, builder.build()).await?;
 
     if let Err(e) = crate::io::headless_cc::log_cc_session(
         pool,

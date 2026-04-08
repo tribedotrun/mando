@@ -1,9 +1,8 @@
 import { create } from 'zustand';
 import type { ScoutItem } from '#renderer/types';
-import { fetchScoutItems, addScoutUrl } from '#renderer/api';
+import { fetchScoutItems, addScoutUrl, type ScoutQueryParams } from '#renderer/api';
 import { createMutate, getErrorMessage } from '#renderer/utils';
 import { createFetchGenerationGuard } from '#renderer/global/stores/utils';
-import type { ScoutQueryParams } from '#renderer/api';
 
 interface ScoutStore {
   items: ScoutItem[];
@@ -63,7 +62,7 @@ export const useScoutStore = create<ScoutStore>((set, getState) => {
     setQuery: (params: Partial<ScoutQueryParams>) => {
       const current = getState().query;
       const merged = { ...current, ...params, page: params.page ?? 0 };
-      getState().fetch(merged);
+      void getState().fetch(merged);
     },
 
     add: (url, title) => mutate(() => addScoutUrl(url, title), 'Failed to add URL'),

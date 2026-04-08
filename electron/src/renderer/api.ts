@@ -74,6 +74,7 @@ const MAX_ERROR_BATCH = 200;
 const MAX_FLUSH_RETRIES = 5;
 const BASE_RETRY_MS = 5_000;
 const MAX_RETRY_MS = 60_000;
+const FLUSH_DELAY_MS = 5_000;
 
 /** Fired once when the client-logs flush exceeds MAX_FLUSH_RETRIES consecutive failures. */
 export const OBS_DEGRADED_EVENT = 'mando:obs-degraded';
@@ -88,7 +89,7 @@ function queueError(level: string, message: string, context?: unknown): void {
   });
 
   if (!batchTimer) {
-    batchTimer = setTimeout(flushErrors, 5000);
+    batchTimer = setTimeout(() => void flushErrors(), FLUSH_DELAY_MS);
   }
 }
 
@@ -126,7 +127,7 @@ async function flushErrors(): Promise<void> {
     errorBatch.push(...entries.slice(0, MAX_ERROR_BATCH - errorBatch.length));
     if (!batchTimer && errorBatch.length > 0) {
       const delay = Math.min(BASE_RETRY_MS * 2 ** flushFailures, MAX_RETRY_MS);
-      batchTimer = setTimeout(flushErrors, delay);
+      batchTimer = setTimeout(() => void flushErrors(), delay);
     }
   }
 }
@@ -191,8 +192,8 @@ export interface AddTaskInput {
   images?: File[];
 }
 
-export const parseBulkTodos = (text: string) =>
-  apiPost<{ items: string[] }>('/api/ai/parse-todos', { text });
+export const parseTodos = (text: string, project?: string) =>
+  apiPost<{ items: string[] }>('/api/ai/parse-todos', { text, project });
 
 export async function addTask(input: AddTaskInput): Promise<TaskItem> {
   const form = new FormData();
@@ -283,8 +284,8 @@ export const fetchAskHistory = (id: number) =>
   apiGet<AskHistoryResponse>(`/api/tasks/${id}/history`);
 
 // Merge PR
-export const mergePr = (pr: string, project: string) =>
-  apiPost<{ ok: boolean; message: string }>('/api/tasks/merge', { pr, project });
+export const mergePr = (prNumber: number, project: string) =>
+  apiPost<{ ok: boolean; message: string }>('/api/tasks/merge', { pr_number: prNumber, project });
 
 // PR Summary
 export const fetchPrSummary = (id: number) =>

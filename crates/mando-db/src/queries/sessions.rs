@@ -33,7 +33,7 @@ pub struct SessionRow {
     pub duration_ms: Option<i64>,
     pub resumed: i64,
     pub turn_count: i64,
-    pub task_id: Option<String>,
+    pub task_id: Option<i64>,
     pub scout_item_id: Option<i64>,
     pub worker_name: Option<String>,
 }
@@ -61,7 +61,7 @@ pub struct SessionUpsert<'a> {
     pub cost_usd: Option<f64>,
     pub duration_ms: Option<i64>,
     pub resumed: bool,
-    pub task_id: Option<&'a str>,
+    pub task_id: Option<i64>,
     pub scout_item_id: Option<i64>,
     pub worker_name: Option<&'a str>,
 }
@@ -227,7 +227,7 @@ pub async fn list_sessions(
 }
 
 /// List all sessions linked to a task.
-pub async fn list_sessions_for_task(pool: &SqlitePool, task_id: &str) -> Result<Vec<SessionRow>> {
+pub async fn list_sessions_for_task(pool: &SqlitePool, task_id: i64) -> Result<Vec<SessionRow>> {
     let sql = format!(
         "{} WHERE task_id = ? ORDER BY created_at DESC",
         select_sessions_sql()
@@ -250,7 +250,7 @@ pub async fn list_sessions_for_scout_item(
 }
 
 /// Delete all sessions linked to a task.
-pub async fn delete_sessions_for_task(pool: &SqlitePool, task_id: &str) -> Result<u64> {
+pub async fn delete_sessions_for_task(pool: &SqlitePool, task_id: i64) -> Result<u64> {
     let result = sqlx::query("DELETE FROM cc_sessions WHERE task_id = ?")
         .bind(task_id)
         .execute(pool)
@@ -358,7 +358,7 @@ pub async fn list_running_sessions(pool: &SqlitePool) -> Result<Vec<SessionRow>>
 /// List running sessions for a specific task (for cancel cleanup).
 pub async fn list_running_sessions_for_task(
     pool: &SqlitePool,
-    task_id: &str,
+    task_id: i64,
 ) -> Result<Vec<SessionRow>> {
     let sql = format!(
         "{} WHERE task_id = ? AND status = 'running'",
@@ -407,7 +407,7 @@ mod tests {
                 cost_usd: Some(1.5),
                 duration_ms: Some(30000),
                 resumed: false,
-                task_id: Some("task-1"),
+                task_id: Some(1),
                 scout_item_id: None,
                 worker_name: Some("main-v1"),
             },
@@ -438,7 +438,7 @@ mod tests {
                 cost_usd: Some(1.0),
                 duration_ms: Some(10000),
                 resumed: false,
-                task_id: Some("task-1"),
+                task_id: Some(1),
                 scout_item_id: None,
                 worker_name: None,
             },
@@ -527,7 +527,7 @@ mod tests {
                 cost_usd: Some(2.0),
                 duration_ms: None,
                 resumed: false,
-                task_id: Some("t1"),
+                task_id: Some(1),
                 scout_item_id: None,
                 worker_name: Some("w1"),
             },
@@ -574,7 +574,7 @@ mod tests {
                 cost_usd: None,
                 duration_ms: None,
                 resumed: false,
-                task_id: Some("t1"),
+                task_id: Some(1),
                 scout_item_id: None,
                 worker_name: None,
             },

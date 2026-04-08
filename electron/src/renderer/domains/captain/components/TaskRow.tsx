@@ -12,18 +12,10 @@ import {
   canAskTerminal,
   getErrorMessage,
 } from '#renderer/utils';
-import {
-  ArchiveBtn,
-  MergeBtn,
-  PrIcon,
-  MoreIcon,
-} from '#renderer/domains/captain/components/TaskIcons';
-import {
-  StatusIcon,
-  ACTION_LABELS,
-  ActionBtn,
-  TaskOverflowMenu,
-} from '#renderer/domains/captain/components/TaskActions';
+import { ArchiveBtn, MergeBtn, MoreIcon } from '#renderer/domains/captain/components/TaskIcons';
+import { PrIcon } from '#renderer/global/components/icons';
+import { StatusIcon, ACTION_LABELS } from '#renderer/global/components/StatusIndicator';
+import { ActionBtn, TaskOverflowMenu } from '#renderer/domains/captain/components/TaskActions';
 import { archiveItem, unarchiveItem } from '#renderer/domains/captain/hooks/useApi';
 import { Checkbox } from '#renderer/components/ui/checkbox';
 import { Button } from '#renderer/components/ui/button';
@@ -68,10 +60,10 @@ export const TaskRow = React.memo(function TaskRow({
     setArchivePending(true);
     try {
       await archiveItem(item.id);
-      refetchTasks();
+      void refetchTasks();
     } catch (err) {
       toast.error(getErrorMessage(err, 'Archive failed'));
-      refetchTasks();
+      void refetchTasks();
     } finally {
       setArchivePending(false);
     }
@@ -81,10 +73,10 @@ export const TaskRow = React.memo(function TaskRow({
     setArchivePending(true);
     try {
       await unarchiveItem(item.id);
-      refetchTasks();
+      void refetchTasks();
     } catch (err) {
       toast.error(getErrorMessage(err, 'Unarchive failed'));
-      refetchTasks();
+      void refetchTasks();
     } finally {
       setArchivePending(false);
     }
@@ -95,7 +87,7 @@ export const TaskRow = React.memo(function TaskRow({
       ref={scrollRef}
       data-testid="task-row"
       data-focused={focused || undefined}
-      className={`group relative flex cursor-pointer items-center gap-2.5 rounded px-3 py-2 ${selected ? 'bg-accent' : 'bg-card'} ${isFinalized ? 'opacity-55' : ''} ${focused ? 'outline-2 outline-primary -outline-offset-2' : ''} ${menuOpen ? 'z-20' : ''}`}
+      className={`group relative flex cursor-pointer items-center gap-2.5 rounded px-3 py-2 ${selected ? 'bg-accent' : 'bg-card'} ${isFinalized ? 'opacity-55' : ''} ${focused ? 'outline-2 outline-ring -outline-offset-2' : ''} ${menuOpen ? 'z-20' : ''}`}
       onClick={(e) => {
         if ((e.target as HTMLElement).closest('[data-actions]')) return;
         callbacks.onOpenDetail?.(item);
@@ -133,23 +125,23 @@ export const TaskRow = React.memo(function TaskRow({
             </span>
           )}
           {item.session_ids?.ask && (
-            <span className="mr-1.5 text-[11px] font-medium text-primary opacity-85">
+            <span className="mr-1.5 text-[11px] font-medium text-muted-foreground opacity-85">
               Q&A
               {' \u00b7 '}
             </span>
           )}
           {item.title}
         </span>
-        {item.pr && (item.github_repo || item.project) && (
+        {item.pr_number && (item.github_repo || item.project) && (
           <a
-            href={prHref(item.pr, (item.github_repo ?? item.project)!)}
+            href={prHref(item.pr_number, (item.github_repo ?? item.project)!)}
             target="_blank"
             rel="noopener noreferrer"
             className="inline-flex shrink-0 items-center gap-0.5 rounded bg-secondary px-1 font-mono text-[11px] text-text-3 no-underline hover:underline"
             onClick={(e) => e.stopPropagation()}
           >
             <PrIcon state={prState(item.status)} />
-            {prLabel(item.pr)}
+            {prLabel(item.pr_number)}
           </a>
         )}
       </span>
@@ -162,7 +154,7 @@ export const TaskRow = React.memo(function TaskRow({
         onClick={(e) => e.stopPropagation()}
       >
         {canMerge(item) && <MergeBtn onClick={() => callbacks.onMerge(item)} />}
-        {item.status === 'awaiting-review' && !item.pr && (
+        {item.status === 'awaiting-review' && !item.pr_number && (
           <ActionBtn
             label="Accept"
             onClick={() => callbacks.onAccept(item.id)}
@@ -178,7 +170,7 @@ export const TaskRow = React.memo(function TaskRow({
         )}
         {isFinalized && (
           <ArchiveBtn
-            onClick={item.archived_at ? handleUnarchive : handleArchive}
+            onClick={() => void (item.archived_at ? handleUnarchive() : handleArchive())}
             pending={archivePending}
             unarchive={!!item.archived_at}
           />

@@ -6,6 +6,7 @@
 pub mod auth;
 pub mod background_tasks;
 pub mod config_manager;
+pub mod hooks;
 pub mod instance;
 pub mod middleware;
 pub(crate) mod response;
@@ -28,6 +29,7 @@ mod routes_task_detail;
 mod routes_tasks;
 mod routes_terminal;
 mod routes_ui;
+mod routes_workbenches;
 mod routes_worktrees;
 mod scout_notify;
 pub mod server;

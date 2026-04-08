@@ -84,7 +84,7 @@ export function SettingsPage({
   }, [scoutEnabled]);
 
   useMountEffect(() => {
-    load();
+    void load();
   });
 
   if (loading) {

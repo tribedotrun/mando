@@ -17,8 +17,9 @@ pub struct TaskRouting {
     pub id: i64,
     pub title: String,
     pub status: ItemStatus,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub project: Option<String>,
+    pub project_id: i64,
+    #[serde(default)]
+    pub project: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub worker: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -31,8 +32,11 @@ pub struct Task {
     pub id: i64,
     pub title: String,
     pub status: ItemStatus,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub project: Option<String>,
+    /// DB column: `project_id INTEGER NOT NULL REFERENCES projects(id)`.
+    pub project_id: i64,
+    /// Project name -- populated via JOIN on projects table, not a DB column.
+    #[serde(default)]
+    pub project: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub worker: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -44,11 +48,16 @@ pub struct Task {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub created_at: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workbench_id: Option<i64>,
+    /// Worktree path -- not a DB column on tasks; populated via JOIN on
+    /// workbenches.  Kept on the struct so existing read-sites work unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub worktree: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub branch: Option<String>,
+    /// PR number (integer). Stored as `pr_number INTEGER` in DB.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub pr: Option<String>,
+    pub pr_number: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub worker_started_at: Option<String>,
     #[serde(default)]
@@ -85,6 +94,7 @@ pub struct Task {
     pub source: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub archived_at: Option<String>,
+    /// GitHub repo slug -- populated via JOIN on projects table, not a DB column.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub github_repo: Option<String>,
     #[serde(skip)]
@@ -95,49 +105,49 @@ pub struct Task {
     pub rebase_head_sha: Option<String>,
 }
 
-/// Extract the bare PR number from any format: full URL, `#N`, or bare `N`.
-/// Returns `None` for empty/unparseable input.
-pub fn extract_pr_number(pr: &str) -> Option<&str> {
+/// Parse a PR reference from any format (full URL, `#N`, bare `N`) into an integer.
+pub fn parse_pr_number(pr: &str) -> Option<i64> {
     // Full URL: …/pull/123 or …/pull/123/files
     if let Some(idx) = pr.rfind("/pull/") {
         let after = &pr[idx + 6..];
         let num_end = after
             .find(|c: char| !c.is_ascii_digit())
             .unwrap_or(after.len());
-        let num = &after[..num_end];
-        if !num.is_empty() {
-            return Some(num);
-        }
+        return after[..num_end].parse().ok();
     }
     // #N or bare N
-    let stripped = pr.trim_start_matches('#');
-    if !stripped.is_empty() && stripped.chars().all(|c| c.is_ascii_digit()) {
-        return Some(stripped);
-    }
-    None
+    pr.trim_start_matches('#').parse().ok()
 }
 
-/// Normalize a PR reference to a bare number string from any input (full URL, `#N`, bare `N`).
-pub fn normalize_pr(pr: &str) -> Option<String> {
-    extract_pr_number(pr).map(|n| n.to_string())
+/// Format a PR number as a short label: `#123`.
+pub fn pr_label(pr_number: i64) -> String {
+    format!("#{pr_number}")
+}
+
+/// Build a full GitHub PR URL from a repo slug and PR number.
+pub fn pr_url(github_repo: &str, pr_number: i64) -> String {
+    format!("https://github.com/{github_repo}/pull/{pr_number}")
 }
 
 impl Task {
-    /// Create a minimal task with just a title. ID is 0 (placeholder until INSERT).
+    /// Create a minimal task with just a title. ID and project_id are 0
+    /// (placeholders until INSERT / project resolution).
     pub fn new(title: impl Into<String>) -> Self {
         Self {
             id: 0,
             title: title.into(),
             status: ItemStatus::New,
-            project: None,
+            project_id: 0,
+            project: String::new(),
             worker: None,
             resource: None,
             context: None,
             original_prompt: None,
             created_at: None,
+            workbench_id: None,
             worktree: None,
             branch: None,
-            pr: None,
+            pr_number: None,
             worker_started_at: None,
             intervention_count: 0,
             captain_review_trigger: None,
@@ -170,6 +180,7 @@ impl Task {
             id: self.id,
             title: self.title.clone(),
             status: self.status,
+            project_id: self.project_id,
             project: self.project.clone(),
             worker: self.worker.clone(),
             resource: self.resource.clone(),
@@ -192,7 +203,7 @@ impl Task {
                 self.status = status;
                 self.last_activity_at = Some(crate::now_rfc3339());
             }
-            "project" => self.project = Some(expect_string_field(key, value)?.to_string()),
+            "project_id" => self.project_id = expect_i64_field(key, value)?,
             "worker" => self.worker = Some(expect_string_field(key, value)?.to_string()),
             "resource" => self.resource = Some(expect_string_field(key, value)?.to_string()),
             "context" => self.context = Some(expect_string_field(key, value)?.to_string()),
@@ -200,12 +211,8 @@ impl Task {
                 self.original_prompt = Some(expect_string_field(key, value)?.to_string())
             }
             "created_at" => self.created_at = Some(expect_string_field(key, value)?.to_string()),
-            "worktree" => self.worktree = Some(expect_string_field(key, value)?.to_string()),
-            "branch" => self.branch = Some(expect_string_field(key, value)?.to_string()),
-            "pr" => {
-                let raw = expect_string_field(key, value)?;
-                self.pr = Some(normalize_pr(raw).unwrap_or_else(|| raw.to_string()));
-            }
+            "workbench_id" => self.workbench_id = Some(expect_i64_field(key, value)?),
+            "pr_number" => self.pr_number = Some(expect_i64_field(key, value)?),
             "worker_started_at" => {
                 self.worker_started_at = Some(expect_string_field(key, value)?.to_string())
             }
@@ -246,6 +253,9 @@ impl Task {
                     }
                 })?;
             }
+            // Legacy fields -- no longer DB columns, accepted as no-ops for
+            // backward compat with older PATCH payloads.
+            "worktree" | "branch" | "pr" | "github_repo" => {}
             _ => return Err(TaskUpdateError::UnknownField(key.into())),
         }
         Ok(())
@@ -254,15 +264,14 @@ impl Task {
     /// Clear a field by name (set to None/default).
     pub fn clear_field(&mut self, key: &str) -> Result<(), TaskUpdateError> {
         match key {
-            "project" => self.project = None,
+            "project" | "project_id" => return Err(TaskUpdateError::FieldCannotBeNull(key.into())),
             "worker" => self.worker = None,
             "resource" => self.resource = None,
             "context" => self.context = None,
             "original_prompt" => self.original_prompt = None,
             "created_at" => self.created_at = None,
-            "worktree" => self.worktree = None,
-            "branch" => self.branch = None,
-            "pr" => self.pr = None,
+            "workbench_id" => self.workbench_id = None,
+            "pr_number" => self.pr_number = None,
             "worker_started_at" => self.worker_started_at = None,
             "intervention_count" => self.intervention_count = 0,
             "captain_review_trigger" => self.captain_review_trigger = None,
@@ -281,6 +290,8 @@ impl Task {
             "source" => self.source = None,
             "session_ids" => self.session_ids = SessionIds::default(),
             "title" | "status" => return Err(TaskUpdateError::FieldCannotBeNull(key.into())),
+            // Legacy fields -- accepted as no-ops (see set_field).
+            "worktree" | "branch" | "pr" | "github_repo" => {}
             _ => return Err(TaskUpdateError::UnknownField(key.into())),
         }
         Ok(())
@@ -292,65 +303,48 @@ mod tests {
     use super::*;
 
     #[test]
-    fn extract_pr_number_full_url() {
+    fn parse_pr_number_full_url() {
         assert_eq!(
-            extract_pr_number("https://github.com/acme/widgets/pull/116"),
-            Some("116")
+            parse_pr_number("https://github.com/acme/widgets/pull/116"),
+            Some(116)
         );
     }
 
     #[test]
-    fn extract_pr_number_trailing_slash() {
+    fn parse_pr_number_trailing_path() {
         assert_eq!(
-            extract_pr_number("https://github.com/acme/widgets/pull/42/"),
-            Some("42")
+            parse_pr_number("https://github.com/acme/widgets/pull/123/files"),
+            Some(123)
         );
     }
 
     #[test]
-    fn extract_pr_number_trailing_path() {
+    fn parse_pr_number_short_ref() {
+        assert_eq!(parse_pr_number("#334"), Some(334));
+    }
+
+    #[test]
+    fn parse_pr_number_bare_number() {
+        assert_eq!(parse_pr_number("99"), Some(99));
+    }
+
+    #[test]
+    fn parse_pr_number_invalid() {
+        assert_eq!(parse_pr_number(""), None);
+        assert_eq!(parse_pr_number("#"), None);
+        assert_eq!(parse_pr_number("not-a-number"), None);
+    }
+
+    #[test]
+    fn pr_label_format() {
+        assert_eq!(pr_label(42), "#42");
+    }
+
+    #[test]
+    fn pr_url_format() {
         assert_eq!(
-            extract_pr_number("https://github.com/acme/widgets/pull/123/files"),
-            Some("123")
+            pr_url("acme/widgets", 42),
+            "https://github.com/acme/widgets/pull/42"
         );
-        assert_eq!(
-            extract_pr_number("https://github.com/acme/widgets/pull/99/commits"),
-            Some("99")
-        );
-    }
-
-    #[test]
-    fn extract_pr_number_short_ref() {
-        assert_eq!(extract_pr_number("#334"), Some("334"));
-    }
-
-    #[test]
-    fn extract_pr_number_bare_number() {
-        assert_eq!(extract_pr_number("99"), Some("99"));
-    }
-
-    #[test]
-    fn extract_pr_number_invalid() {
-        assert_eq!(extract_pr_number(""), None);
-        assert_eq!(extract_pr_number("#"), None);
-        assert_eq!(extract_pr_number("not-a-number"), None);
-    }
-
-    #[test]
-    fn normalize_pr_from_url() {
-        assert_eq!(
-            normalize_pr("https://github.com/acme/widgets/pull/42"),
-            Some("42".into())
-        );
-    }
-
-    #[test]
-    fn normalize_pr_already_short() {
-        assert_eq!(normalize_pr("#7"), Some("7".into()));
-    }
-
-    #[test]
-    fn normalize_pr_bare_number() {
-        assert_eq!(normalize_pr("363"), Some("363".into()));
     }
 }

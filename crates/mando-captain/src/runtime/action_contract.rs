@@ -200,7 +200,7 @@ pub async fn nudge_item(
                 &wt_path,
                 "worker",
                 &worker,
-                &item.id.to_string(),
+                Some(item.id),
                 true,
             )
             .await
@@ -325,9 +325,10 @@ pub async fn reopen_item(
             item.reopen_seq += 1;
             item.status = ItemStatus::Queued;
             // Clear stale fields so the next dispatch starts fresh.
-            item.pr = None;
+            item.pr_number = None;
             item.worker = None;
             item.worktree = None;
+            item.workbench_id = None;
             item.branch = None;
             item.worker_started_at = None;
             item.session_ids.worker = None;
@@ -339,6 +340,7 @@ pub async fn reopen_item(
         bail!("item missing worker/session/worktree — cannot reopen");
     }
 
+    let old_worktree = item.worktree.clone();
     match spawner_lifecycle::reopen_worker(item, config, feedback, workflow, pool).await {
         Ok(result) => {
             item.intervention_count = new_count as i64;
@@ -348,7 +350,19 @@ pub async fn reopen_item(
             item.session_ids.worker = Some(result.session_id);
             item.session_ids.ask = None;
             item.branch = Some(result.branch);
-            item.worktree = Some(result.worktree);
+            item.worktree = Some(result.worktree.clone());
+            // If the worktree changed (broken-session fallback spawned a fresh
+            // one), the old workbench_id is stale. Look up the workbench for
+            // the new worktree path so the task points at the right row.
+            let worktree_changed = old_worktree.as_deref() != Some(&result.worktree);
+            if worktree_changed {
+                item.workbench_id =
+                    mando_db::queries::workbenches::find_by_worktree(pool, &result.worktree)
+                        .await
+                        .ok()
+                        .flatten()
+                        .map(|wb| wb.id);
+            }
             // Reset timeout clock so the worker gets a fresh window after reopen.
             item.worker_started_at = Some(mando_types::now_rfc3339());
             item.last_activity_at = item.worker_started_at.clone();
@@ -374,9 +388,10 @@ pub async fn reopen_item(
                 // Clear stale worker fields so the next dispatch starts fresh.
                 // Without this, pr discovery is blocked (pr.is_some() skips it)
                 // and the task permanently references the old PR.
-                item.pr = None;
+                item.pr_number = None;
                 item.worker = None;
                 item.worktree = None;
+                item.workbench_id = None;
                 item.branch = None;
                 item.worker_started_at = None;
                 item.session_ids.worker = None;

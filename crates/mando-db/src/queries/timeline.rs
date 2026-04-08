@@ -89,13 +89,17 @@ pub async fn load_last_n(pool: &SqlitePool, task_id: i64, n: i64) -> Result<Vec<
 }
 
 /// Check if a backfill marker exists for a task.
+///
+/// Uses the UNIQUE dedupe_key index for an O(1) lookup instead of scanning
+/// the JSON `data` column. The marker's dedupe_key is always
+/// `"{task_id}-status_changed-backfill-"` (empty timestamp).
 pub async fn has_backfill_marker(pool: &SqlitePool, task_id: i64) -> Result<bool> {
-    let exists: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM timeline_events WHERE task_id = ? AND data LIKE '%\"source\":\"backfill\"%' LIMIT 1)",
-    )
-    .bind(task_id)
-    .fetch_one(pool)
-    .await?;
+    let dedupe_key = format!("{task_id}-status_changed-backfill-");
+    let exists: bool =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM timeline_events WHERE dedupe_key = ?)")
+            .bind(&dedupe_key)
+            .fetch_one(pool)
+            .await?;
     Ok(exists)
 }
 

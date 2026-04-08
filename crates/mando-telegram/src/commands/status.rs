@@ -133,7 +133,11 @@ pub async fn handle(bot: &TelegramBot, chat_id: &str, args: &str) -> Result<()> 
     let mut by_repo: std::collections::BTreeMap<String, Vec<&mando_types::Task>> =
         std::collections::BTreeMap::new();
     for item in &display {
-        let project = item.project.as_deref().unwrap_or("unknown");
+        let project = if item.project.is_empty() {
+            "unknown"
+        } else {
+            &item.project
+        };
         by_repo.entry(project.to_string()).or_default().push(item);
     }
 
@@ -166,12 +170,10 @@ pub async fn handle(bot: &TelegramBot, chat_id: &str, args: &str) -> Result<()> 
                     .map(|w| format!(" | {}", escape_html(w)))
                     .unwrap_or_default();
                 let pr_part = item
-                    .pr
-                    .as_deref()
-                    .filter(|p| !p.is_empty())
-                    .map(|pr_ref| {
+                    .pr_number
+                    .map(|pr_num| {
                         let link = mando_shared::helpers::pr_html_link(
-                            pr_ref,
+                            pr_num,
                             item.github_repo.as_deref(),
                         );
                         format!(" | {link}")
@@ -183,8 +185,7 @@ pub async fn handle(bot: &TelegramBot, chat_id: &str, args: &str) -> Result<()> 
                 let title_short = super::truncate(&item.title, 30);
                 match status {
                     ItemStatus::AwaitingReview => {
-                        if let Some(ref pr) = item.pr {
-                            let pr_num = pr.trim_start_matches('#');
+                        if let Some(pr_num) = item.pr_number {
                             action_buttons.push(json!([{
                                 "text": format!("Merge PR #{pr_num}"),
                                 "callback_data": format!("merge:{id}"),

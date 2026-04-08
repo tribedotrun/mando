@@ -21,6 +21,8 @@ import {
 import type { TaskItem, ItemStatus } from '#renderer/types';
 import { getErrorMessage, copyToClipboard, clarifyResultToToast } from '#renderer/utils';
 
+const MERGE_SUCCESS_DISMISS_MS = 1200;
+
 export function useTaskActions() {
   const taskFetch = useTaskStore((s) => s.fetch);
   const taskItems = useTaskStore((s) => s.items);
@@ -59,35 +61,35 @@ export function useTaskActions() {
     optimisticUpdate(id, { status: optimisticStatus });
     try {
       await fn();
-      taskFetch();
-      invalidateTaskDetail(queryClient, id);
+      void taskFetch();
+      void invalidateTaskDetail(queryClient, id);
       if (successMsg) toast.success(successMsg);
     } catch (err) {
-      taskFetch();
+      void taskFetch();
       toast.error(getErrorMessage(err, errLabel));
     }
   }
 
-  const handleMerge = async (itemId: number, pr: string, project: string) => {
+  const handleMerge = async (itemId: number, prNumber: number, project: string) => {
     setMergePending(true);
     setMergeResult(null);
     optimisticUpdate(itemId, { status: 'captain-merging' });
     try {
-      await mergePr(pr, project);
+      await mergePr(prNumber, project);
       setMergeResult({ ok: true, message: 'Captain will check CI and merge' });
       triggerTick().catch((err) => {
         log.warn('[tasks] post-merge tick trigger failed:', err);
       });
-      taskFetch();
-      invalidateTaskDetail(queryClient, itemId);
+      void taskFetch();
+      void invalidateTaskDetail(queryClient, itemId);
       setTimeout(() => {
         setMergeItem(null);
         setMergeResult(null);
-      }, 1200);
+      }, MERGE_SUCCESS_DISMISS_MS);
     } catch (err) {
       optimisticUpdate(itemId, { status: 'awaiting-review' });
       setMergeResult({ ok: false, message: getErrorMessage(err, 'Merge failed') });
-      taskFetch();
+      void taskFetch();
     } finally {
       setMergePending(false);
     }
@@ -134,8 +136,8 @@ export function useTaskActions() {
     optimisticUpdate(id, { status: 'handed-off' });
     try {
       await handoffItem(id);
-      taskFetch();
-      invalidateTaskDetail(queryClient, id);
+      void taskFetch();
+      void invalidateTaskDetail(queryClient, id);
       const wt = taskItems.find((b) => b.id === id)?.worktree;
       if (wt) {
         const copied = await copyToClipboard(wt);
@@ -146,7 +148,7 @@ export function useTaskActions() {
         toast.success('Task handed off');
       }
     } catch (err) {
-      taskFetch();
+      void taskFetch();
       toast.error(getErrorMessage(err, 'Handoff failed'));
     }
   };
@@ -161,7 +163,7 @@ export function useTaskActions() {
       });
       const result = await deleteItems(ids, opts);
       clearSelection();
-      taskFetch();
+      void taskFetch();
       setDeleteModalOpen(false);
       if (result.warnings?.length) {
         for (const w of result.warnings) {
@@ -194,13 +196,13 @@ export function useTaskActions() {
     setAnswerPending(true);
     try {
       const result = await answerClarificationText(id, answer);
-      taskFetch();
+      void taskFetch();
       const { variant, msg } = clarifyResultToToast(result.status);
       const fn = variant === 'success' ? toast.success : toast.info;
       fn(msg);
       return true;
     } catch (err) {
-      taskFetch();
+      void taskFetch();
       toast.error(getErrorMessage(err, 'Answer failed'));
       return false;
     } finally {
@@ -212,7 +214,7 @@ export function useTaskActions() {
     setNudgePending(true);
     try {
       await nudgeWorker(id, message);
-      taskFetch();
+      void taskFetch();
       toast.success(`Nudged task #${id}`);
       return true;
     } catch (err) {

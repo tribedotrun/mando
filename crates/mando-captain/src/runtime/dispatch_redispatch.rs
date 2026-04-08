@@ -75,9 +75,11 @@ pub(crate) async fn redispatch_newly_queued(
                             item.status = ItemStatus::InProgress;
                             item.worker = Some(spawn_result.session_name.clone());
                             item.branch = Some(spawn_result.branch);
-                            item.worktree = Some(spawn_result.worktree);
+                            item.worktree = Some(spawn_result.worktree.clone());
+                            item.workbench_id = spawn_result.workbench_id;
                             item.worker_started_at = Some(spawn_result.started_at);
                             item.session_ids.worker = Some(spawn_result.session_id);
+                            item.plan = spawn_result.plan;
                             item.spawn_fail_count = 0;
                             *active_workers += 1;
                             let resource = item

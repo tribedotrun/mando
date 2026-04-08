@@ -1,5 +1,43 @@
-import { buildUrl } from '#renderer/api';
+import { buildUrl, apiGet, apiPatch, apiPost } from '#renderer/api';
 import log from '#renderer/logger';
+
+// ---------------------------------------------------------------------------
+// Workbenches
+// ---------------------------------------------------------------------------
+
+export interface WorkbenchItem {
+  id: number;
+  project: string;
+  worktree: string;
+  title: string;
+  createdAt: string;
+  archivedAt?: string | null;
+  deletedAt?: string | null;
+}
+
+export async function fetchWorkbenches(): Promise<WorkbenchItem[]> {
+  const res = await apiGet<{ workbenches: WorkbenchItem[] }>('/api/workbenches');
+  return res.workbenches;
+}
+
+export function archiveWorkbench(id: number): Promise<WorkbenchItem> {
+  return apiPatch<WorkbenchItem>(`/api/workbenches/${id}`, { archived: true });
+}
+
+// ---------------------------------------------------------------------------
+// Worktrees
+// ---------------------------------------------------------------------------
+
+export interface CreateWorktreeResult {
+  ok: boolean;
+  path: string;
+  branch: string;
+  project: string;
+}
+
+export function createWorktree(project: string, name?: string): Promise<CreateWorktreeResult> {
+  return apiPost<CreateWorktreeResult>('/api/worktrees', { project, name });
+}
 
 export interface TerminalSessionInfo {
   id: string;

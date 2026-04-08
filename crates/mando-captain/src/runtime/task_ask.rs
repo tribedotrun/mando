@@ -31,8 +31,19 @@ pub fn build_initial_prompt(
     vars.insert("title", item.title.as_str());
     vars.insert("id", item_id);
     vars.insert("status", status_str.as_str());
-    vars.insert("project", item.project.as_deref().unwrap_or("none"));
-    vars.insert("pr", item.pr.as_deref().unwrap_or("none"));
+    vars.insert(
+        "project",
+        if item.project.is_empty() {
+            "none"
+        } else {
+            &item.project
+        },
+    );
+    let pr_str = item
+        .pr_number
+        .map(|n| n.to_string())
+        .unwrap_or_else(|| "none".to_string());
+    vars.insert("pr", &pr_str);
     vars.insert("branch", item.branch.as_deref().unwrap_or("none"));
     vars.insert("context", item.context.as_deref().unwrap_or("none"));
     vars.insert("timeline", timeline_text);

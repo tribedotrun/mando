@@ -31,6 +31,7 @@ use crate::routes_task_detail;
 use crate::routes_tasks;
 use crate::routes_terminal;
 use crate::routes_ui;
+use crate::routes_workbenches;
 use crate::routes_worktrees;
 use crate::sse;
 use crate::static_files;
@@ -80,6 +81,7 @@ fn protected_routes() -> Router<AppState> {
         .merge(config_routes())
         .merge(channel_routes())
         .merge(worktree_routes())
+        .merge(routes_workbenches::routes())
         .merge(project_routes())
         .merge(ai_routes())
         .merge(routes_terminal::routes())
@@ -162,17 +164,12 @@ fn task_routes() -> Router<AppState> {
             post(routes_task_actions::post_task_unarchive),
         )
 }
-
 fn captain_routes() -> Router<AppState> {
     Router::new()
         .route("/api/captain/tick", post(routes_captain::post_captain_tick))
         .route(
             "/api/captain/triage",
             post(routes_captain::post_captain_triage),
-        )
-        .route(
-            "/api/captain/merge",
-            post(routes_captain::post_captain_merge),
         )
         .route("/api/captain/stop", post(routes_captain::post_captain_stop))
         .route(
@@ -190,7 +187,6 @@ fn captain_routes() -> Router<AppState> {
             post(routes_captain::post_worker_kill),
         )
 }
-
 fn scout_routes() -> Router<AppState> {
     Router::new()
         .route("/api/scout/items", get(routes_scout::get_scout_items))
@@ -235,7 +231,6 @@ fn scout_routes() -> Router<AppState> {
             post(routes_scout_bulk::post_scout_bulk_delete),
         )
 }
-
 fn session_routes() -> Router<AppState> {
     Router::new()
         .route("/api/sessions", get(routes_sessions::get_sessions))
@@ -337,10 +332,10 @@ fn ui_routes() -> Router<AppState> {
 }
 
 pub async fn start_server(
-    config: mando_config::Config,
+    cfg: mando_config::Config,
     bus: mando_shared::EventBus,
 ) -> anyhow::Result<()> {
-    start_server_with(config, bus, std::future::pending::<()>(), false).await
+    start_server_with(cfg, bus, std::future::pending::<()>(), false).await
 }
 
 /// Full `start_server` with explicit shutdown signal and unsafe-start gate.
@@ -360,19 +355,15 @@ where
 
     let bus_arc = Arc::new(bus);
 
-    // Backfill project logos for projects added before logo auto-detection.
+    let db = mando_db::Db::open(&runtime_paths.task_db_path).await?;
+    let db = Arc::new(db);
+
     let config = {
         let mut cfg = config;
-        if mando_config::backfill_project_logos(&mut cfg) {
-            if let Err(e) = mando_config::save_config(&cfg, None) {
-                tracing::warn!(module = "startup", error = %e, "failed to save backfilled logos");
-            }
-        }
+        mando_db::queries::projects::startup_sync(db.pool(), &mut cfg).await?;
         cfg
     };
 
-    let db = mando_db::Db::open(&runtime_paths.task_db_path).await?;
-    let db = Arc::new(db);
     let task_store = mando_captain::io::task_store::TaskStore::new(db.pool().clone());
     let task_store_arc = Arc::new(RwLock::new(task_store));
     let config_arc = Arc::new(ArcSwap::from_pointee(config));

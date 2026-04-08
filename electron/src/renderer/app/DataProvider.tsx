@@ -5,6 +5,7 @@ import { initBaseUrl, connectSSE, OBS_DEGRADED_EVENT } from '#renderer/api';
 import log from '#renderer/logger';
 import { useTaskStore } from '#renderer/domains/captain/stores/taskStore';
 import { useScoutStore } from '#renderer/domains/scout/stores/scoutStore';
+import { useWorkbenchStore } from '#renderer/domains/terminal';
 import {
   useDesktopNotifications,
   parseNotification,
@@ -15,6 +16,8 @@ import { getErrorMessage } from '#renderer/utils';
 import { RetryButton } from '#renderer/domains/captain/components/RetryButton';
 import { Skeleton } from '#renderer/components/ui/skeleton';
 import type { SSEConnectionStatus } from '#renderer/types';
+
+const POLL_INTERVAL_MS = 30_000;
 
 // ---------------------------------------------------------------------------
 // Context — exposes SSE status + sessions refresh trigger to consumers
@@ -49,14 +52,15 @@ export function DataProvider({ children }: { children: React.ReactNode }): React
 
   const taskFetch = useTaskStore((s) => s.fetch);
   const scoutFetch = useScoutStore((s) => s.fetch);
+  const workbenchFetch = useWorkbenchStore((s) => s.fetch);
   const { processEvent: processNotification } = useDesktopNotifications();
 
   const startPolling = useCallback(() => {
     if (pollingRef.current) return;
     pollingRef.current = setInterval(() => {
-      taskFetch();
-      queryClient.invalidateQueries({ queryKey: ['sessions'] });
-    }, 30_000);
+      void taskFetch();
+      void queryClient.invalidateQueries({ queryKey: ['sessions'] });
+    }, POLL_INTERVAL_MS);
   }, [taskFetch]);
 
   const stopPolling = useCallback(() => {
@@ -68,10 +72,11 @@ export function DataProvider({ children }: { children: React.ReactNode }): React
 
   /** Refetch all stores — used on SSE reconnect to clear stale data. */
   const refetchAll = useCallback(() => {
-    taskFetch();
-    scoutFetch();
-    queryClient.invalidateQueries();
-  }, [taskFetch, scoutFetch]);
+    void taskFetch();
+    void scoutFetch();
+    void workbenchFetch();
+    void queryClient.invalidateQueries();
+  }, [taskFetch, scoutFetch, workbenchFetch]);
 
   useMountEffect(() => {
     const init = async () => {
@@ -86,7 +91,7 @@ export function DataProvider({ children }: { children: React.ReactNode }): React
           }
         }
         // Seed initial data — partial failures are OK, SSE will fill gaps
-        const seedResults = await Promise.allSettled([taskFetch(), scoutFetch()]);
+        const seedResults = await Promise.allSettled([taskFetch(), scoutFetch(), workbenchFetch()]);
         const rejected = seedResults
           .map((r, i) => ({ r, label: i === 0 ? 'tasks' : 'scout' }))
           .filter(({ r }) => r.status === 'rejected');
@@ -113,23 +118,24 @@ export function DataProvider({ children }: { children: React.ReactNode }): React
           (event) => {
             switch (event.event) {
               case 'tasks':
-                taskFetch();
-                queryClient.invalidateQueries({ queryKey: ['metrics-workers'] });
+                void taskFetch();
+                void workbenchFetch();
+                void queryClient.invalidateQueries({ queryKey: ['metrics-workers'] });
                 invalidateTaskDetail(queryClient);
                 break;
               case 'scout':
-                scoutFetch();
-                queryClient.invalidateQueries({ queryKey: ['scout'] });
+                void scoutFetch();
+                void queryClient.invalidateQueries({ queryKey: ['scout'] });
                 break;
               case 'status':
-                taskFetch();
-                queryClient.invalidateQueries({ queryKey: ['status'] });
-                queryClient.invalidateQueries({ queryKey: ['metrics-workers'] });
+                void taskFetch();
+                void queryClient.invalidateQueries({ queryKey: ['status'] });
+                void queryClient.invalidateQueries({ queryKey: ['metrics-workers'] });
                 invalidateTaskDetail(queryClient);
                 break;
               case 'sessions':
-                queryClient.invalidateQueries({ queryKey: ['sessions'] });
-                queryClient.invalidateQueries({ queryKey: ['task-detail-timeline'] });
+                void queryClient.invalidateQueries({ queryKey: ['sessions'] });
+                void queryClient.invalidateQueries({ queryKey: ['task-detail-timeline'] });
                 break;
               case 'notification': {
                 const payload = parseNotification(event);
@@ -173,7 +179,7 @@ export function DataProvider({ children }: { children: React.ReactNode }): React
         setInitialized(true);
       }
     };
-    init();
+    void init();
     const onObsDegraded = () => {
       toast.error('Observability pipeline degraded — logs not being sent');
     };
@@ -204,8 +210,10 @@ export function DataProvider({ children }: { children: React.ReactNode }): React
         <span className="text-heading text-destructive">Could not connect to daemon</span>
         <span className="text-body text-muted-foreground">{initError}</span>
         <RetryButton
-          className="mt-2 inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
-          onRetry={() => window.mandoAPI.restartDaemon().finally(() => window.location.reload())}
+          className="mt-2 inline-flex items-center justify-center rounded-md bg-foreground px-4 py-2 text-sm font-medium text-background hover:bg-foreground/90"
+          onRetry={() =>
+            void window.mandoAPI.restartDaemon().finally(() => window.location.reload())
+          }
         />
       </div>
     );

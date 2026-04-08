@@ -1,7 +1,7 @@
 import { useCallback, useRef, useState } from 'react';
 import { useMountEffect } from '#renderer/global/hooks/useMountEffect';
 import { TerminalView } from '#renderer/domains/terminal/components/TerminalView';
-import { useTerminalStore } from '#renderer/domains/terminal/store';
+import { useTerminalStore } from '#renderer/domains/terminal/stores/terminalStore';
 import { X, Plus, Terminal, Circle } from 'lucide-react';
 import { toast } from 'sonner';
 import log from '#renderer/logger';
@@ -30,7 +30,7 @@ export function TerminalTab({ project, cwd, resumeSessionId, onResumeConsumed }:
 
   // Hydrate existing sessions from daemon on mount, auto-select last session.
   useMountEffect(() => {
-    fetchSessions().then(() => {
+    void fetchSessions().then(() => {
       const store = useTerminalStore.getState();
       const relevant = store.sessions.filter((s) => s.project === project && s.cwd === cwd);
       if (relevant.length > 0 && !activeTab) {
@@ -43,7 +43,7 @@ export function TerminalTab({ project, cwd, resumeSessionId, onResumeConsumed }:
   useMountEffect(() => {
     if (!resumeSessionId || resumedRef.current) return;
     resumedRef.current = true;
-    addSession({
+    void addSession({
       project,
       cwd,
       agent: 'claude',
@@ -73,12 +73,15 @@ export function TerminalTab({ project, cwd, resumeSessionId, onResumeConsumed }:
   );
 
   const handleCloseTab = useCallback(
-    async (id: string) => {
-      await removeSession(id);
-      if (activeTab === id) {
-        const remaining = relevantSessions.filter((s) => s.id !== id);
-        setActiveTab(remaining.length > 0 ? remaining[0].id : null);
-      }
+    (id: string) => {
+      void removeSession(id)
+        .then(() => {
+          if (activeTab === id) {
+            const remaining = relevantSessions.filter((s) => s.id !== id);
+            setActiveTab(remaining.length > 0 ? remaining[0].id : null);
+          }
+        })
+        .catch((err) => console.error('Failed to close tab', err));
     },
     [activeTab, relevantSessions, removeSession],
   );
@@ -109,14 +112,14 @@ export function TerminalTab({ project, cwd, resumeSessionId, onResumeConsumed }:
         <div style={{ display: 'flex', gap: 8 }}>
           <button
             className="btn btn-primary"
-            onClick={() => handleNewTerminal('claude')}
+            onClick={() => void handleNewTerminal('claude')}
             style={{ fontSize: 13 }}
           >
             + Claude terminal
           </button>
           <button
             className="btn btn-secondary"
-            onClick={() => handleNewTerminal('codex')}
+            onClick={() => void handleNewTerminal('codex')}
             style={{ fontSize: 13 }}
           >
             + Codex terminal
@@ -156,13 +159,13 @@ export function TerminalTab({ project, cwd, resumeSessionId, onResumeConsumed }:
               style={{ opacity: 0.5, cursor: 'pointer' }}
               onClick={(e) => {
                 e.stopPropagation();
-                handleCloseTab(s.id);
+                void handleCloseTab(s.id);
               }}
             />
           </div>
         ))}
         <button
-          onClick={() => handleNewTerminal('claude')}
+          onClick={() => void handleNewTerminal('claude')}
           style={{
             background: 'none',
             border: 'none',

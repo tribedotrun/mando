@@ -84,7 +84,7 @@ export function DevInfoBar(): React.ReactElement | null {
   const previewColor = '#a855f7';
   const modeColor =
     info.mode === 'DEV'
-      ? 'var(--primary)'
+      ? 'var(--muted-foreground)'
       : info.mode === 'PREVIEW'
         ? previewColor
         : info.mode === 'PROD-LOCAL'
@@ -92,7 +92,7 @@ export function DevInfoBar(): React.ReactElement | null {
           : 'var(--muted-foreground)';
   const tintColor =
     info.mode === 'DEV'
-      ? 'var(--primary)'
+      ? 'var(--muted-foreground)'
       : info.mode === 'PREVIEW'
         ? previewColor
         : info.mode === 'PROD-LOCAL'
@@ -148,7 +148,7 @@ export function DevInfoBar(): React.ReactElement | null {
         <div className="ml-auto flex items-center gap-2">
           {inspecting && hoveredName && (
             <span
-              style={{ color: 'color-mix(in srgb, var(--primary) 70%, transparent)' }}
+              style={{ color: 'color-mix(in srgb, var(--muted-foreground) 70%, transparent)' }}
               className="font-mono text-[11px]"
             >
               {hoveredName}
@@ -162,7 +162,7 @@ export function DevInfoBar(): React.ReactElement | null {
             style={{
               ...btnStyle,
               opacity: inspecting ? 1 : undefined,
-              color: inspecting ? 'var(--primary)' : modeColor,
+              color: inspecting ? 'var(--muted-foreground)' : modeColor,
             }}
           >
             {inspecting ? '● Inspect' : 'Inspect'}
@@ -173,7 +173,7 @@ export function DevInfoBar(): React.ReactElement | null {
           <Button
             variant="ghost"
             size="xs"
-            onClick={() => window.mandoAPI?.toggleDevTools()}
+            onClick={() => void window.mandoAPI?.toggleDevTools()}
             className={btnClass}
             style={btnStyle}
           >

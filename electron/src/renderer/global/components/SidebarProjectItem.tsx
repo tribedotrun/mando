@@ -1,5 +1,13 @@
 import React, { useState, useCallback, useRef } from 'react';
-import { MoreHorizontal, Pencil, Trash2, Plus, ChevronRight } from 'lucide-react';
+import {
+  MoreHorizontal,
+  Pencil,
+  Trash2,
+  SquarePen,
+  ChevronRight,
+  Archive,
+  Terminal,
+} from 'lucide-react';
 import { buildUrl } from '#renderer/global/hooks/useApi';
 import {
   DropdownMenu,
@@ -18,6 +26,13 @@ import { Input } from '#renderer/components/ui/input';
 import { Checkbox } from '#renderer/components/ui/checkbox';
 import type { TaskItem } from '#renderer/types';
 import { compactRelativeTime } from '#renderer/utils';
+import { StatusIcon } from '#renderer/global/components/StatusIndicator';
+
+interface SidebarWorktree {
+  id?: number;
+  cwd: string;
+  name: string;
+}
 
 interface SidebarProjectItemProps {
   name: string;
@@ -30,6 +45,10 @@ interface SidebarProjectItemProps {
   onNewTerminal?: (project: string) => void;
   tasks?: TaskItem[];
   onOpenTask?: (taskId: number) => void;
+  worktrees?: SidebarWorktree[];
+  activeWorktreeCwd?: string | null;
+  onOpenWorktree?: (worktree: { project: string; cwd: string }) => void;
+  onArchiveWorkbench?: (id: number) => void;
 }
 
 export function SidebarProjectItem({
@@ -43,13 +62,20 @@ export function SidebarProjectItem({
   onNewTerminal,
   tasks = [],
   onOpenTask,
+  worktrees = [],
+  activeWorktreeCwd,
+  onOpenWorktree,
+  onArchiveWorkbench,
 }: SidebarProjectItemProps): React.ReactElement {
   const [menuOpen, setMenuOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
   const [pending, setPending] = useState(false);
-  const [expanded, setExpanded] = useState(false);
+  const hasActiveWt = worktrees?.some((wt) => wt.cwd === activeWorktreeCwd) ?? false;
+  const [expanded, setExpanded] = useState(hasActiveWt);
+  // Auto-expand when this project gains the active workbench.
+  if (hasActiveWt && !expanded) setExpanded(true);
   const [renameValue, setRenameValue] = useState(name);
   const submittedRef = useRef(false);
 
@@ -80,7 +106,7 @@ export function SidebarProjectItem({
 
   return (
     <div
-      className="sidebar-project-item relative"
+      className="sidebar-project-item relative min-w-0 overflow-hidden"
       data-menu-open={menuOpen || undefined}
       onContextMenu={(e) => {
         e.preventDefault();
@@ -94,11 +120,11 @@ export function SidebarProjectItem({
             value={renameValue}
             onChange={(e) => setRenameValue(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === 'Enter') submitRename();
+              if (e.key === 'Enter') void submitRename();
               if (e.key === 'Escape') cancelRename();
             }}
-            onBlur={submitRename}
-            className="h-7 w-full rounded border-primary bg-secondary px-1.5 text-[13px] font-normal"
+            onBlur={() => void submitRename()}
+            className="h-7 w-full rounded border-ring bg-secondary px-1.5 text-[13px] font-normal"
           />
         </div>
       ) : (
@@ -131,37 +157,35 @@ export function SidebarProjectItem({
               )}
               <span className="truncate">{name}</span>
             </span>
-            {onNewTerminal && (
-              <span
-                role="button"
-                tabIndex={-1}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onNewTerminal(name);
-                }}
-                title="New terminal"
-                className="sidebar-project-dots size-5 shrink-0 items-center justify-center rounded transition-colors hover:bg-muted-foreground/10 hover:text-text-2"
-                style={{
-                  color: 'var(--color-text-3)',
-                  cursor: 'pointer',
-                }}
-              >
-                <Plus size={14} />
-              </span>
-            )}
-            <DropdownMenuTrigger asChild>
-              <span
-                role="button"
-                tabIndex={-1}
-                onClick={(e) => {
-                  e.stopPropagation();
-                }}
-                className="sidebar-project-dots size-5 shrink-0 items-center justify-center rounded text-text-3 transition-colors hover:text-muted-foreground"
-              >
-                <MoreHorizontal size={14} />
-              </span>
-            </DropdownMenuTrigger>
-            <span className="shrink-0 text-[11px] text-text-4">{count > 0 ? count : ''}</span>
+            <span className="sidebar-project-dots flex shrink-0 items-center gap-1">
+              <DropdownMenuTrigger asChild>
+                <span
+                  role="button"
+                  tabIndex={-1}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                  }}
+                  className="flex size-5 items-center justify-center rounded text-text-3 transition-colors hover:text-muted-foreground"
+                >
+                  <MoreHorizontal size={14} />
+                </span>
+              </DropdownMenuTrigger>
+              {onNewTerminal && (
+                <span
+                  role="button"
+                  tabIndex={-1}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onNewTerminal(name);
+                  }}
+                  title="New terminal"
+                  className="flex size-5 items-center justify-center rounded text-text-3 transition-colors hover:bg-muted-foreground/10 hover:text-text-2"
+                  style={{ cursor: 'pointer' }}
+                >
+                  <SquarePen size={14} />
+                </span>
+              )}
+            </span>
           </Button>
           <DropdownMenuContent align="end" className="min-w-[130px]">
             <DropdownMenuItem
@@ -241,15 +265,17 @@ export function SidebarProjectItem({
             <Button
               variant="destructive"
               size="sm"
-              onClick={async () => {
+              onClick={() => {
                 setPending(true);
-                try {
-                  await onRemove(name);
-                  setConfirmOpen(false);
-                  setConfirmed(false);
-                } finally {
-                  setPending(false);
-                }
+                void onRemove(name)
+                  .then(() => {
+                    setConfirmOpen(false);
+                    setConfirmed(false);
+                  })
+                  .catch((err) => console.error('Remove project failed', err))
+                  .finally(() => {
+                    setPending(false);
+                  });
               }}
               disabled={(count > 0 && !confirmed) || pending}
             >
@@ -263,19 +289,58 @@ export function SidebarProjectItem({
         </DialogContent>
       </Dialog>
 
-      {/* Expanded task list */}
-      {expanded && tasks.length > 0 && (
+      {/* Expanded children: tasks + worktrees */}
+      {expanded && (tasks.length > 0 || worktrees.length > 0) && (
         <div className="ml-4 flex flex-col gap-0.5 pb-1 pt-0.5">
           {tasks.map((task) => (
             <button
               key={task.id}
               onClick={() => onOpenTask?.(task.id)}
-              className="flex w-full items-center gap-1.5 rounded px-2 py-1 text-left text-[12px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              className="flex w-full items-center gap-2 rounded px-2 py-1 text-left text-[12px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
               style={{ background: 'none', border: 'none', cursor: 'pointer' }}
             >
-              <span className="truncate">{task.title}</span>
+              <StatusIcon status={task.status} />
+              <span className="min-w-0 flex-1 truncate">{task.title}</span>
+              {(task.last_activity_at || task.created_at) && (
+                <span className="shrink-0 text-[11px] text-text-3">
+                  {compactRelativeTime((task.last_activity_at || task.created_at)!)}
+                </span>
+              )}
             </button>
           ))}
+          {worktrees.map((wt) => {
+            const isActive = activeWorktreeCwd === wt.cwd;
+            return (
+              <button
+                key={wt.cwd}
+                onClick={() => onOpenWorktree?.({ project: name, cwd: wt.cwd })}
+                className={`sidebar-workbench-item group flex w-full items-center gap-2 rounded px-2 py-1 text-left text-[12px] transition-colors hover:bg-muted hover:text-foreground ${isActive ? 'bg-muted font-medium text-foreground' : 'text-muted-foreground'}`}
+                style={{
+                  background: isActive ? undefined : 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                }}
+              >
+                <Terminal size={11} className="shrink-0 text-text-3" />
+                <span className="min-w-0 flex-1 truncate">{wt.name}</span>
+                {wt.id != null && onArchiveWorkbench && (
+                  <span
+                    role="button"
+                    tabIndex={-1}
+                    title="Archive workbench"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onArchiveWorkbench(wt.id!);
+                    }}
+                    className="hidden shrink-0 items-center justify-center rounded text-text-3 transition-colors hover:text-muted-foreground group-hover:flex"
+                    style={{ cursor: 'pointer' }}
+                  >
+                    <Archive size={11} />
+                  </span>
+                )}
+              </button>
+            );
+          })}
         </div>
       )}
     </div>

@@ -50,7 +50,6 @@ pub(crate) async fn get_tasks(
     State(state): State<AppState>,
     Query(query): Query<TaskListQuery>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    let config = state.config.load_full();
     let store = state.task_store.read().await;
     let items = if query.include_archived.unwrap_or(false) {
         store
@@ -61,7 +60,7 @@ pub(crate) async fn get_tasks(
         store.load_all().await.map_err(internal_error)?
     };
     let count = items.len();
-    let mut items_json: Vec<Value> = items
+    let items_json: Vec<Value> = items
         .iter()
         .map(serde_json::to_value)
         .collect::<Result<Vec<_>, _>>()
@@ -71,15 +70,6 @@ pub(crate) async fn get_tasks(
                 &format!("serialization failed: {e}"),
             )
         })?;
-    // Backfill github_repo from config for tasks created before the column was added
-    for (i, item) in items.iter().enumerate() {
-        if item.github_repo.is_none() {
-            let github_repo = crate::resolve_github_repo(item.project.as_deref(), &config);
-            if let Some(obj) = items_json[i].as_object_mut() {
-                obj.insert("github_repo".to_string(), json!(github_repo));
-            }
-        }
-    }
     Ok(Json(json!({
         "items": items_json,
         "count": count,
@@ -317,7 +307,7 @@ pub(crate) async fn delete_task_items(
 
 #[derive(Deserialize)]
 pub(crate) struct MergeBody {
-    pub pr: String,
+    pub pr_number: i64,
     pub project: String,
 }
 
@@ -327,7 +317,7 @@ pub(crate) async fn post_task_merge(
     Json(body): Json<MergeBody>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let store = state.task_store.read().await;
-    match mando_captain::runtime::dashboard::merge_pr(&store, &body.pr, &body.project).await {
+    match mando_captain::runtime::dashboard::merge_pr(&store, body.pr_number, &body.project).await {
         Ok(val) => Ok(Json(val)),
         Err(e) => Err(error_response(
             StatusCode::INTERNAL_SERVER_ERROR,

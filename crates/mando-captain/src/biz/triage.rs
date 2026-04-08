@@ -528,7 +528,10 @@ mod tests {
         );
         // Docs
         assert_eq!(classify_file("CLAUDE.md", &rules), "docs");
-        assert_eq!(classify_file("docs/design-system.md", &rules), "docs");
+        assert_eq!(
+            classify_file(".claude/skills/s-ui-design/SKILL.md", &rules),
+            "skill"
+        );
         // Config
         assert_eq!(classify_file("Cargo.toml", &rules), "config");
         assert_eq!(

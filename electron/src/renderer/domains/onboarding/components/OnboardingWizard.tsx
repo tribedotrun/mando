@@ -49,7 +49,7 @@ export function OnboardingWizard(): React.ReactElement {
       env.TELEGRAM_MANDO_BOT_TOKEN = tgToken.trim();
     }
     if (Object.keys(env).length > 0) config.env = env;
-    window.mandoAPI.saveConfigLocal(JSON.stringify(config, null, 2)).catch((e) => {
+    void window.mandoAPI.saveConfigLocal(JSON.stringify(config, null, 2)).catch((e) => {
       log.error('Failed to save onboarding progress:', e);
       toast.error(getErrorMessage(e, 'Failed to save onboarding progress'));
     });
@@ -112,11 +112,11 @@ export function OnboardingWizard(): React.ReactElement {
       onBack={() => setStep('claude-check')}
       onNext={() => {
         saveProgress();
-        finishSetup();
+        void finishSetup();
       }}
       onSkip={() => {
         setTgToken('');
-        finishSetup('');
+        void finishSetup('');
       }}
       error={error}
       finishing={step === 'finishing'}
@@ -144,7 +144,7 @@ function WelcomeScreen({ onStart }: { onStart: () => void }): React.ReactElement
         <ul className="m-0 flex list-none flex-col gap-6 p-0">
           {BULLETS.map((text, i) => (
             <li key={i} className="flex gap-3">
-              <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-primary" />
+              <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-foreground" />
               <span className="text-body leading-relaxed text-foreground">{text}</span>
             </li>
           ))}
@@ -198,7 +198,7 @@ function ClaudeCheckScreen({
   }, []);
 
   useMountEffect(() => {
-    runCheck();
+    void runCheck();
   });
 
   const passed = result?.installed === true && result.works === true;
@@ -214,7 +214,7 @@ function ClaudeCheckScreen({
       <div className="mb-10 flex flex-col gap-3 rounded-lg bg-muted px-7 py-7 shadow-sm">
         {checking && (
           <div className="flex items-center gap-2.5">
-            <span className="size-3.5 animate-spin shrink-0 rounded-full border-2 border-primary border-t-transparent" />
+            <span className="size-3.5 animate-spin shrink-0 rounded-full border-2 border-foreground border-t-transparent" />
             <span className="text-body text-muted-foreground">Checking...</span>
           </div>
         )}
@@ -244,7 +244,7 @@ function ClaudeCheckScreen({
             href="https://code.claude.com/docs/en/overview"
             target="_blank"
             rel="noopener noreferrer"
-            className="text-primary"
+            className="text-foreground"
           >
             the docs
           </a>
@@ -256,7 +256,7 @@ function ClaudeCheckScreen({
         <div className="flex items-center gap-3">
           <GhostButton onClick={onBack}>Back</GhostButton>
           {!passed && (
-            <OutlineButton onClick={runCheck} disabled={checking}>
+            <OutlineButton onClick={() => void runCheck()} disabled={checking}>
               {checking ? 'Checking...' : 'Re-check'}
             </OutlineButton>
           )}

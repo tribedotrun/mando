@@ -28,6 +28,8 @@
 //!     cleanup to delete a live session. `cleanup_expired` now holds the
 //!     sync map lock through the entire check-and-remove for each key.
 
+mod lifecycle;
+
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -45,7 +47,7 @@ fn make_session_entry<'a>(
     cwd: &'a Path,
     model: &'a str,
     caller: &'a str,
-    task_id: &'a str,
+    task_id: Option<i64>,
     resumed: bool,
 ) -> crate::io::headless_cc::SessionLogEntry<'a> {
     crate::io::headless_cc::SessionLogEntry {
@@ -134,7 +136,7 @@ impl CcSessionManager {
         idle_ttl: Duration,
         call_timeout: Duration,
     ) -> Result<CcResult> {
-        self.start_with_item(key, prompt, cwd, model, idle_ttl, call_timeout, "")
+        self.start_with_item(key, prompt, cwd, model, idle_ttl, call_timeout, None)
             .await
     }
 
@@ -148,7 +150,7 @@ impl CcSessionManager {
         model: Option<&str>,
         idle_ttl: Duration,
         call_timeout: Duration,
-        task_id: &str,
+        task_id: Option<i64>,
     ) -> Result<CcResult> {
         // Serialize same-key starts. Different keys run in parallel.
         let key_mu = self.key_lock(key);
@@ -177,7 +179,7 @@ impl CcSessionManager {
         // file). The per-key lock prevents a concurrent start / follow_up
         // from observing a half-closed state.
         self.close(key);
-        self.start_locked(key, prompt, cwd, model, idle_ttl, call_timeout, "")
+        self.start_locked(key, prompt, cwd, model, idle_ttl, call_timeout, None)
             .await
     }
 
@@ -191,19 +193,17 @@ impl CcSessionManager {
         model: Option<&str>,
         idle_ttl: Duration,
         call_timeout: Duration,
-        task_id: &str,
+        task_id: Option<i64>,
     ) -> Result<CcResult> {
-        let result = CcOneShot::run(
-            prompt,
-            CcConfig::builder()
-                .model(model.unwrap_or(&self.default_model))
-                .cwd(cwd)
-                .timeout(call_timeout)
-                .caller(key)
-                .task_id(task_id)
-                .build(),
-        )
-        .await?;
+        let mut builder = CcConfig::builder()
+            .model(model.unwrap_or(&self.default_model))
+            .cwd(cwd)
+            .timeout(call_timeout)
+            .caller(key);
+        if let Some(tid) = task_id {
+            builder = builder.task_id(tid.to_string());
+        }
+        let result = CcOneShot::run(prompt, builder.build()).await?;
 
         crate::io::headless_cc::log_cc_session(
             &self.pool,
@@ -268,7 +268,7 @@ impl CcSessionManager {
 
         crate::io::headless_cc::log_cc_session(
             &self.pool,
-            &make_session_entry(&result, cwd, &self.default_model, key, "", true),
+            &make_session_entry(&result, cwd, &self.default_model, key, None, true),
         )
         .await?;
 
@@ -317,163 +317,6 @@ impl CcSessionManager {
         self.close(key);
     }
 
-    /// Check if a session exists and is not expired.
-    pub fn has_session(&self, key: &str) -> bool {
-        use time::format_description::well_known::Rfc3339;
-        let sessions = self.sessions_lock();
-        sessions.get(key).is_some_and(|s| {
-            time::OffsetDateTime::parse(&s.last_active, &Rfc3339)
-                .map_err(|e| {
-                    tracing::error!(module = "cc-session", key = %key, error = %e, "unparseable last_active on persisted session; treating as expired")
-                })
-                .ok()
-                .is_some_and(|t| {
-                    let elapsed = (time::OffsetDateTime::now_utc() - t).as_seconds_f64() as u64;
-                    elapsed < s.idle_ttl_s
-                })
-        })
-    }
-
-    /// Remove all expired sessions (idle beyond their TTL).
-    ///
-    /// Re-checks expiry under the sync `sessions` lock for each key
-    /// immediately before removal, so a session refreshed by a concurrent
-    /// `follow_up` between scan and remove cannot be deleted.
-    pub fn cleanup_expired(&self) -> usize {
-        use time::format_description::well_known::Rfc3339;
-
-        fn is_expired(s: &CcSession) -> bool {
-            time::OffsetDateTime::parse(&s.last_active, &Rfc3339)
-                .ok()
-                .is_none_or(|t| {
-                    let elapsed = (time::OffsetDateTime::now_utc() - t).as_seconds_f64() as u64;
-                    elapsed >= s.idle_ttl_s
-                })
-        }
-
-        // Phase 1: drain expired entries from the map under a single lock.
-        // Holding the lock across the iterate+remove keeps the removal
-        // atomic with the expiry recheck — no concurrent refresh can slip
-        // in between the check and the remove.
-        let removed: Vec<(String, CcSession)> = {
-            let mut sessions = self.sessions_lock();
-            let keys: Vec<String> = sessions
-                .iter()
-                .filter(|(_, s)| is_expired(s))
-                .map(|(k, _)| k.clone())
-                .collect();
-            keys.into_iter()
-                .filter_map(|k| {
-                    // Re-check under the same lock — a concurrent
-                    // `follow_up` holding the per-key async mutex could
-                    // NOT have refreshed yet (it would need the sync lock
-                    // to write), so this check is authoritative.
-                    match sessions.get(&k) {
-                        Some(s) if is_expired(s) => sessions.remove(&k).map(|s| (k, s)),
-                        _ => None,
-                    }
-                })
-                .collect()
-        };
-
-        let count = removed.len();
-        // Phase 2: best-effort file cleanup for the entries we actually
-        // removed. Safe to release the sync lock for I/O: the key has
-        // been removed from the map, so any concurrent caller with the
-        // same key either sees "no session" (start will create a new
-        // file after we finish deleting the old one — correct) or holds
-        // the per-key async mutex (their write to `sessions` and persist
-        // will happen after us).
-        for (key, _) in &removed {
-            let path = self.session_path(key);
-            if let Err(e) = std::fs::remove_file(&path) {
-                if e.kind() != std::io::ErrorKind::NotFound {
-                    warn!(module = "cc-session", key = %key, error = %e, "failed to remove expired session file");
-                }
-            }
-            info!(module = "cc-session", key = %key, "expired session cleaned up");
-        }
-
-        // Also prune idle per-key mutexes that no one is holding — their
-        // only reason to exist is to serialize live callers. Safe because
-        // any future caller will recreate the mutex on demand.
-        {
-            let mut locks = self
-                .key_locks
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
-            locks.retain(|_, mu| Arc::strong_count(mu) > 1);
-        }
-
-        count
-    }
-
-    /// Recover sessions from disk on restart. Returns recovered count and
-    /// corrupt-file count so callers can surface both.
-    pub fn recover(&self) -> RecoverStats {
-        let dir = &self.state_dir;
-        if !dir.is_dir() {
-            return RecoverStats::default();
-        }
-        let mut stats = RecoverStats::default();
-        match std::fs::read_dir(dir) {
-            Ok(entries) => {
-                for entry in entries {
-                    let entry = match entry {
-                        Ok(e) => e,
-                        Err(e) => {
-                            warn!(module = "cc-session", error = %e, "failed to read directory entry during recovery");
-                            stats.corrupt += 1;
-                            continue;
-                        }
-                    };
-                    let path = entry.path();
-                    if path.extension().and_then(|e| e.to_str()) != Some("json") {
-                        continue;
-                    }
-                    let data = match std::fs::read_to_string(&path) {
-                        Ok(d) => d,
-                        Err(e) => {
-                            warn!(module = "cc-session", path = %path.display(), error = %e, "failed to read session file during recovery");
-                            stats.corrupt += 1;
-                            continue;
-                        }
-                    };
-                    match serde_json::from_str::<CcSession>(&data) {
-                        Ok(session) => {
-                            let key = path
-                                .file_stem()
-                                .and_then(|s| s.to_str())
-                                .unwrap_or("")
-                                .to_string();
-                            if !key.is_empty() {
-                                let mut sessions = self.sessions_lock();
-                                sessions.insert(key, session);
-                                stats.recovered += 1;
-                            }
-                        }
-                        Err(e) => {
-                            warn!(module = "cc-session", path = %path.display(), error = %e, "corrupt session file during recovery");
-                            stats.corrupt += 1;
-                        }
-                    }
-                }
-            }
-            Err(e) => {
-                warn!(module = "cc-session", dir = %dir.display(), error = %e, "failed to read session directory during recovery");
-            }
-        }
-        if stats.recovered > 0 || stats.corrupt > 0 {
-            info!(
-                module = "cc-session",
-                recovered = stats.recovered,
-                corrupt = stats.corrupt,
-                "recovered sessions from disk"
-            );
-        }
-        stats
-    }
-
     fn session_path(&self, key: &str) -> PathBuf {
         self.state_dir.join(format!("{}.json", key))
     }
@@ -484,17 +327,5 @@ impl CcSessionManager {
         let json = serde_json::to_string_pretty(session)?;
         std::fs::write(path, json)?;
         Ok(())
-    }
-}
-
-impl Drop for CcSessionManager {
-    fn drop(&mut self) {
-        let count = self.sessions.get_mut().map(|m| m.len()).unwrap_or(0);
-        if count > 0 {
-            warn!(
-                module = "cc-session",
-                count, "dropping manager with active sessions"
-            );
-        }
     }
 }

@@ -1,6 +1,10 @@
 import { create } from 'zustand';
-import type { TerminalSessionInfo } from '#renderer/api-terminal';
-import { listTerminals, createTerminal, deleteTerminal } from '#renderer/api-terminal';
+import {
+  listTerminals,
+  createTerminal,
+  deleteTerminal,
+  type TerminalSessionInfo,
+} from '#renderer/api-terminal';
 import log from '#renderer/logger';
 
 interface TerminalState {

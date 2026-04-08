@@ -33,11 +33,11 @@ export function useTerminal({ sessionId, onExit }: UseTerminalOptions): UseTermi
       fontSize: 13,
       fontFamily: 'SF Mono, Menlo, monospace',
       theme: {
-        background: '#0c0b10',
-        foreground: '#e0e0e0',
-        cursor: '#e0e0e0',
-        selectionBackground: '#3a3a5a',
-        black: '#0c0b10',
+        background: '#0a0a0a',
+        foreground: '#e5e5e5',
+        cursor: '#e5e5e5',
+        selectionBackground: '#3a3a3a',
+        black: '#0a0a0a',
         red: '#ff5555',
         green: '#50fa7b',
         yellow: '#f1fa8c',
@@ -69,10 +69,19 @@ export function useTerminal({ sessionId, onExit }: UseTerminalOptions): UseTermi
     termRef.current = term;
     fitAddonRef.current = fitAddon;
 
+    // Send measured size to backend immediately so the PTY matches the
+    // actual container before Claude Code starts rendering its status bar.
+    const { rows, cols } = term;
+    void resizeTerminal(sessionId, rows, cols).catch((err) =>
+      log.warn('Initial resize failed', err),
+    );
+
     // Send user input to daemon.
     const inputDisposable = term.onData((data) => {
       const encoder = new TextEncoder();
-      writeTerminalBytes(sessionId, encoder.encode(data));
+      void writeTerminalBytes(sessionId, encoder.encode(data)).catch((err) =>
+        log.warn('Terminal write failed', err),
+      );
     });
 
     // Binary input (for things like Ctrl+C raw bytes).
@@ -81,7 +90,9 @@ export function useTerminal({ sessionId, onExit }: UseTerminalOptions): UseTermi
       for (let i = 0; i < data.length; i++) {
         bytes[i] = data.charCodeAt(i);
       }
-      writeTerminalBytes(sessionId, bytes);
+      void writeTerminalBytes(sessionId, bytes).catch((err) =>
+        log.warn('Terminal binary write failed', err),
+      );
     });
 
     // Connect SSE stream for output.
@@ -104,7 +115,7 @@ export function useTerminal({ sessionId, onExit }: UseTerminalOptions): UseTermi
     const resizeObs = new ResizeObserver(() => {
       fitAddon.fit();
       const { rows, cols } = term;
-      resizeTerminal(sessionId, rows, cols);
+      void resizeTerminal(sessionId, rows, cols).catch((err) => log.warn('Resize failed', err));
     });
     resizeObs.observe(containerRef.current);
 

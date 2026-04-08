@@ -20,16 +20,16 @@ pub(crate) async fn flush_discovered_prs(
     let mut any_failure = false;
 
     for item in items {
-        let pr = match &item.pr {
-            Some(pr) => pr.clone(),
+        let pr_num = match item.pr_number {
+            Some(n) => n,
             None => continue,
         };
 
         let had_pr = pre_tick_snapshot
             .get(&item.id)
-            .and_then(|snapshot| snapshot.get("pr"))
-            .and_then(|v| v.as_str())
-            .is_some_and(|pr| !pr.is_empty());
+            .and_then(|snapshot| snapshot.get("pr_number"))
+            .and_then(|v| v.as_i64())
+            .is_some();
         if had_pr {
             continue;
         }
@@ -37,7 +37,7 @@ pub(crate) async fn flush_discovered_prs(
         let store = store_lock.write().await;
         match store
             .update(item.id, |t| {
-                t.pr = Some(pr.clone());
+                t.pr_number = Some(pr_num);
             })
             .await
         {
@@ -45,7 +45,7 @@ pub(crate) async fn flush_discovered_prs(
                 tracing::info!(
                     module = "captain",
                     id = item.id,
-                    pr = %pr,
+                    pr_number = pr_num,
                     "persisted discovered PR"
                 );
             }
@@ -54,7 +54,7 @@ pub(crate) async fn flush_discovered_prs(
                 tracing::warn!(
                     module = "captain",
                     id = item.id,
-                    pr = %pr,
+                    pr_number = pr_num,
                     error = %e,
                     "failed to persist discovered PR"
                 );

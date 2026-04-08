@@ -78,8 +78,8 @@ pub(crate) async fn get_sessions(
                     github_repo.map(Value::String).unwrap_or(Value::Null),
                 );
                 // Enrich with task title.
-                if let Some(tid) = e.task_id.as_deref() {
-                    if let Some(title) = task_titles.get(tid) {
+                if let Some(tid) = e.task_id {
+                    if let Some(title) = task_titles.get(&tid.to_string()) {
                         map.insert("task_title".into(), Value::String(title.clone()));
                     }
                 }

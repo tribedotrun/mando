@@ -8,14 +8,10 @@ use serde_json::{json, Value};
 use crate::response::{error_response, internal_error};
 use crate::AppState;
 
-/// Resolve (repo, pr_number) from a PR ref + project name via config.
-fn resolve_pr(
-    pr: &str,
-    project: Option<&str>,
-    config: &mando_config::Config,
-) -> Option<(String, u32)> {
-    let num = mando_types::task::extract_pr_number(pr)?.parse().ok()?;
-    Some((crate::resolve_github_repo(project, config)?, num))
+/// Resolve (repo, pr_number) from the task's integer PR number + github_repo.
+fn resolve_pr(pr_number: i64, github_repo: Option<&str>) -> Option<(String, u32)> {
+    let num: u32 = pr_number.try_into().ok()?;
+    Some((github_repo?.to_string(), num))
 }
 
 /// Resolve a string ID to a numeric task ID.
@@ -74,11 +70,11 @@ pub(crate) async fn get_task_sessions(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    let _id_num: i64 = resolve_task_id(&id)?;
+    let id_num: i64 = resolve_task_id(&id)?;
     let store = state.task_store.read().await;
 
     let sessions = store
-        .list_sessions_for_task(&id)
+        .list_sessions_for_task(id_num)
         .await
         .map_err(internal_error)?;
 
@@ -110,7 +106,7 @@ pub(crate) async fn get_task_pr_summary(
     Path(id): Path<String>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     // Read store, extract what we need, then drop the guard before network I/O.
-    let (pr_ref, project) = {
+    let (pr_number, github_repo) = {
         let store = state.task_store.read().await;
         let id_num: i64 = resolve_task_id(&id)?;
         let item = store
@@ -120,20 +116,19 @@ pub(crate) async fn get_task_pr_summary(
             .ok_or_else(|| {
                 error_response(StatusCode::NOT_FOUND, &format!("item {id} not found"))
             })?;
-        (item.pr.clone().unwrap_or_default(), item.project.clone())
+        (item.pr_number, item.github_repo.clone())
     };
 
     // Fetch PR body outside the read lock.
-    let config = state.config.load();
-    let (summary, summary_error) =
-        if let Some((repo, num)) = resolve_pr(&pr_ref, project.as_deref(), &config) {
+    let (summary, summary_error) = if let Some(pr_num) = pr_number {
+        if let Some((repo, num)) = resolve_pr(pr_num, github_repo.as_deref()) {
             match mando_captain::io::github_pr::get_pr_body(&repo, num).await {
                 Ok(body) if !body.is_empty() => (Some(body), None),
                 Ok(_) => (None, None),
                 Err(e) => {
                     tracing::warn!(
                         task_id = %id,
-                        pr = %pr_ref,
+                        pr_number = pr_num,
                         error = %e,
                         "failed to fetch PR body from GitHub"
                     );
@@ -141,15 +136,19 @@ pub(crate) async fn get_task_pr_summary(
                 }
             }
         } else {
-            if !pr_ref.is_empty() {
-                tracing::debug!(pr = %pr_ref, "cannot resolve PR repo, skipping body fetch");
-            }
+            tracing::debug!(
+                pr_number = pr_num,
+                "cannot resolve PR repo, skipping body fetch"
+            );
             (None, None)
-        };
+        }
+    } else {
+        (None, None)
+    };
 
     Ok(Json(json!({
         "id": id,
-        "pr": pr_ref,
+        "pr_number": pr_number,
         "summary": summary,
         "summary_error": summary_error,
     })))

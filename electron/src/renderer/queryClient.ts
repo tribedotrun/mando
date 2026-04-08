@@ -25,12 +25,12 @@ export const queryClient = new QueryClient({
  */
 export function invalidateTaskDetail(client: QC, id?: number): void {
   if (id != null) {
-    client.invalidateQueries({ queryKey: ['task-detail-timeline', id] });
-    client.invalidateQueries({ queryKey: ['task-detail-pr', id] });
-    client.invalidateQueries({ queryKey: ['task-ask-history', id] });
+    void client.invalidateQueries({ queryKey: ['task-detail-timeline', id] });
+    void client.invalidateQueries({ queryKey: ['task-detail-pr', id] });
+    void client.invalidateQueries({ queryKey: ['task-ask-history', id] });
   } else {
-    client.invalidateQueries({ queryKey: ['task-detail-timeline'] });
-    client.invalidateQueries({ queryKey: ['task-detail-pr'] });
-    client.invalidateQueries({ queryKey: ['task-ask-history'] });
+    void client.invalidateQueries({ queryKey: ['task-detail-timeline'] });
+    void client.invalidateQueries({ queryKey: ['task-detail-pr'] });
+    void client.invalidateQueries({ queryKey: ['task-ask-history'] });
   }
 }

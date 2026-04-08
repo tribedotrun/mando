@@ -41,19 +41,17 @@ pub(crate) async fn spawn_merge(
             )
         })?;
 
-    let pr_ref = item
-        .pr
-        .as_deref()
+    let pr_num = item
+        .pr_number
         .ok_or_else(|| anyhow::anyhow!("cannot merge item without a PR"))?;
 
-    let pr_number = mando_types::task::extract_pr_number(pr_ref)
-        .ok_or_else(|| anyhow::anyhow!("cannot extract PR number from: {}", pr_ref))?
-        .to_string();
+    let pr_number = pr_num.to_string();
 
-    let repo =
-        mando_config::resolve_github_repo(item.project.as_deref(), config).ok_or_else(|| {
-            anyhow::anyhow!("no github_repo configured for project {:?}", item.project)
-        })?;
+    let repo = item
+        .github_repo
+        .clone()
+        .or_else(|| mando_config::resolve_github_repo(Some(&item.project), config))
+        .ok_or_else(|| anyhow::anyhow!("no github_repo for project {:?}", item.project))?;
 
     let pr_url = format!("https://github.com/{repo}/pull/{pr_number}");
 
@@ -71,6 +69,7 @@ pub(crate) async fn spawn_merge(
     item.last_activity_at = Some(mando_types::now_rfc3339());
 
     let task_id = item.id.to_string();
+    let task_id_num = item.id;
     let session_id = mando_uuid::Uuid::v4().to_string();
     item.session_ids.merge = Some(session_id.clone());
 
@@ -155,7 +154,7 @@ pub(crate) async fn spawn_merge(
                 &cwd,
                 "captain-merge-async",
                 "",
-                &task_id,
+                Some(task_id_num),
                 false,
             )
             .await
@@ -192,7 +191,7 @@ pub(crate) async fn spawn_merge(
                     &result,
                     &cwd,
                     "captain-merge-async",
-                    &task_id,
+                    Some(task_id_num),
                 )
                 .await {
                     warn!(module = "captain", %session_id, %e, "log_cc_result failed");
@@ -218,7 +217,7 @@ pub(crate) async fn spawn_merge(
                     &session_id,
                     &cwd,
                     "captain-merge-async",
-                    &task_id,
+                    Some(task_id_num),
                 )
                 .await {
                     warn!(module = "captain", %session_id, %e2, "log_cc_failure failed");

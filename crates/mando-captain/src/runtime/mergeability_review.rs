@@ -27,7 +27,9 @@ pub(crate) async fn check_done_review_threads(
         .iter()
         .enumerate()
         .filter(|(_, it)| {
-            it.status == ItemStatus::AwaitingReview && it.pr.is_some() && it.worktree.is_some()
+            it.status == ItemStatus::AwaitingReview
+                && it.pr_number.is_some()
+                && it.worktree.is_some()
         })
         .map(|(i, _)| i)
         .collect();
@@ -40,10 +42,10 @@ pub(crate) async fn check_done_review_threads(
 
         // Build a stub with the resolved github_repo slug so fetch_pr_data
         // can resolve short PR refs like "#334" to the correct repo.
-        let github_repo = mando_config::resolve_github_repo(items[idx].project.as_deref(), config);
+        let github_repo = mando_config::resolve_github_repo(Some(&items[idx].project), config);
         let stub = Task {
-            pr: items[idx].pr.clone(),
-            project: github_repo,
+            pr_number: items[idx].pr_number,
+            github_repo,
             ..Task::new("")
         };
         let pr_data = super::review_phase::fetch_pr_data(&stub).await;

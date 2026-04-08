@@ -1,4 +1,4 @@
-//! Background task spawners — captain auto-tick loop.
+//! Background task spawners — captain auto-tick loop + workbench cleanup.
 
 use std::panic::AssertUnwindSafe;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -7,6 +7,9 @@ use std::time::Duration;
 use futures_util::FutureExt;
 use tokio::sync::watch;
 use tracing::info;
+
+use sqlx::SqlitePool;
+use tracing::warn;
 
 use crate::AppState;
 
@@ -208,4 +211,74 @@ pub fn spawn_auto_tick(state: &AppState, tick_rx: watch::Receiver<Duration>) {
             }
         }
     });
+}
+
+/// Spawn the workbench cleanup job: waits 5 minutes after startup, then
+/// removes worktree directories and layout JSONs for workbenches that have
+/// been archived for more than 30 days.  DB rows are kept (deleted_at set)
+/// as audit trail.
+pub fn spawn_workbench_cleanup(state: &AppState) {
+    let pool = state.db.pool().clone();
+    let cancel = state.cancellation_token.clone();
+    state.task_tracker.spawn(async move {
+        tokio::select! {
+            _ = tokio::time::sleep(Duration::from_secs(300)) => {}
+            _ = cancel.cancelled() => { return; }
+        }
+        if let Err(e) = run_workbench_cleanup(&pool).await {
+            warn!(module = "cleanup", error = %e, "workbench cleanup failed");
+        }
+    });
+}
+
+async fn run_workbench_cleanup(pool: &SqlitePool) -> anyhow::Result<()> {
+    let stale = mando_db::queries::workbenches::stale_archived(pool, 30).await?;
+    if stale.is_empty() {
+        return Ok(());
+    }
+    info!(
+        module = "cleanup",
+        count = stale.len(),
+        "cleaning up stale archived workbenches"
+    );
+    for wb in &stale {
+        let wt_path = std::path::Path::new(&wb.worktree);
+        if wt_path.exists() {
+            // Resolve the repo path by reading the .git file inside the worktree
+            // (it contains "gitdir: <repo>/.git/worktrees/<name>").
+            let repo_result = tokio::process::Command::new("git")
+                .args(["rev-parse", "--git-common-dir"])
+                .current_dir(wt_path)
+                .output()
+                .await;
+            let repo_path = repo_result.ok().and_then(|o| {
+                if o.status.success() {
+                    let git_dir = String::from_utf8_lossy(&o.stdout).trim().to_string();
+                    std::path::Path::new(&git_dir)
+                        .parent()
+                        .map(|p| p.to_path_buf())
+                } else {
+                    None
+                }
+            });
+            if let Some(repo) = repo_path {
+                if let Err(e) = mando_captain::io::git::remove_worktree(&repo, wt_path).await {
+                    warn!(module = "cleanup", worktree = %wb.worktree, error = %e, "git worktree remove failed");
+                } else {
+                    info!(module = "cleanup", worktree = %wb.worktree, "removed git worktree");
+                }
+            } else if let Err(e) = tokio::fs::remove_dir_all(wt_path).await {
+                warn!(module = "cleanup", worktree = %wb.worktree, error = %e, "failed to remove worktree directory");
+            }
+        }
+        let layout_path = mando_types::data_dir()
+            .join("workbenches")
+            .join(format!("{}.json", wb.id));
+        if layout_path.exists() {
+            let _ = tokio::fs::remove_file(&layout_path).await;
+        }
+        mando_db::queries::workbenches::mark_deleted(pool, wb.id).await?;
+        info!(module = "cleanup", id = wb.id, title = %wb.title, "workbench marked deleted");
+    }
+    Ok(())
 }

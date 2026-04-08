@@ -41,8 +41,7 @@ pub(crate) async fn backfill_if_needed(item: &Task, pool: &sqlx::SqlitePool) {
         }
     };
 
-    let item_id_str = item.id.to_string();
-    let sessions = load_item_sessions(pool, &item_id_str).await;
+    let sessions = load_item_sessions(pool, item.id).await;
     let events = build_events_for_item(item, &sessions);
 
     // Deduplicate by (event_type, session_id).
@@ -181,7 +180,7 @@ fn session_to_event_type(session: &SessionEntry) -> (TimelineEventType, String) 
 }
 
 /// Load sessions for a single task from the unified DB.
-async fn load_item_sessions(pool: &sqlx::SqlitePool, task_id: &str) -> Vec<SessionEntry> {
+async fn load_item_sessions(pool: &sqlx::SqlitePool, task_id: i64) -> Vec<SessionEntry> {
     match mando_db::queries::sessions::list_sessions_for_task(pool, task_id).await {
         Ok(rows) => rows.into_iter().map(session_row_to_entry).collect(),
         Err(e) => {
@@ -204,7 +203,7 @@ fn session_row_to_entry(row: mando_db::queries::sessions::SessionRow) -> Session
         duration_ms: row.duration_ms,
         title: String::new(),
         project: String::new(),
-        task_id: row.task_id.unwrap_or_default(),
+        task_id: row.task_id.map(|id| id.to_string()).unwrap_or_default(),
         worker_name: row.worker_name.unwrap_or_default(),
         status: row.status,
     }

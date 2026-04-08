@@ -1,5 +1,4 @@
-import type { IpcMainEvent, IpcMainInvokeEvent, WebFrameMain } from 'electron';
-import { ipcMain } from 'electron';
+import { ipcMain, type IpcMainEvent, type IpcMainInvokeEvent, type WebFrameMain } from 'electron';
 import log from '#main/logger';
 
 const trustedOrigins = new Set<string>();

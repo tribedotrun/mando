@@ -128,8 +128,8 @@ pub async fn close_pr(repo: &str, pr_number: &str) -> Result<()> {
     Ok(())
 }
 
-/// Discover an open PR for a branch. Returns the PR URL if found.
-pub(crate) async fn discover_pr_for_branch(repo: &str, branch: &str) -> Option<String> {
+/// Discover an open PR for a branch. Returns the PR number if found.
+pub(crate) async fn discover_pr_for_branch(repo: &str, branch: &str) -> Option<i64> {
     let output = match tokio::process::Command::new("gh")
         .args([
             "pr", "list", "--repo", repo, "--head", branch, "--state", "open", "--json", "url",
@@ -169,5 +169,5 @@ pub(crate) async fn discover_pr_for_branch(repo: &str, branch: &str) -> Option<S
     };
     arr.first()
         .and_then(|v| v["url"].as_str())
-        .and_then(mando_types::task::normalize_pr)
+        .and_then(mando_types::task::parse_pr_number)
 }

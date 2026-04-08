@@ -75,44 +75,51 @@
   color-scheme: dark;
 
   /* shadcn core */
-  --background: #0c0b10;
-  --foreground: #e4e0f0;
-  --card: #141320;
-  --card-foreground: #e4e0f0;
-  --popover: #1c1a28;
-  --popover-foreground: #e4e0f0;
-  --primary: #8a63d2;
-  --primary-foreground: #0c0b10;
-  --secondary: #252332;
-  --secondary-foreground: #9b94b8;
-  --muted: #1c1a28;
-  --muted-foreground: #9b94b8;
-  --accent: #8a63d214;
-  --accent-foreground: #e4e0f0;
+  --background: #0a0a0a;
+  --foreground: #e5e5e5;
+  --card: #141414;
+  --card-foreground: #e5e5e5;
+  --popover: #1c1c1c;
+  --popover-foreground: #e5e5e5;
+  --primary: #e5e5e5;
+  --primary-foreground: #0a0a0a;
+  --secondary: #262626;
+  --secondary-foreground: #a0a0a0;
+  --muted: #1c1c1c;
+  --muted-foreground: #a0a0a0;
+  --accent: #ffffff0f;
+  --accent-foreground: #e5e5e5;
   --destructive: #cf5b4b;
-  --destructive-foreground: #e4e0f0;
-  --border: #302d40;
-  --input: #28253a;
-  --ring: #8a63d2;
+  --destructive-foreground: #e5e5e5;
+  --border: #2e2e2e;
+  --input: #2a2a2a;
+  --ring: #888888;
   --radius: 0.5rem;
 
   /* Mando semantic */
   --success: #4caf6a;
   --success-bg: #4caf6a1f;
-  --stale: #d4a017;
-  --stale-bg: #d4a0171f;
+  --stale: #b8a060;
+  --stale-bg: #b8a0601f;
   --needs-human: #ea580c;
   --needs-human-bg: #ea580c1f;
   --review: #8a63d2;
   --review-bg: #8a63d21f;
   --destructive-bg: #cf5b4b1f;
-  --merged-bg: #9b94b814;
+  --merged-bg: #a0a0a014;
   --border-destructive: #402d30;
-  --overlay: #0c0b10b8;
-  --primary-hover: #a382e0;
-  --primary-pressed: #6a5ad4;
-  --text-3: #6a6380;
-  --text-4: #4a4560;
+  --overlay: #0a0a0ab8;
+  --primary-hover: #d4d4d4;
+  --primary-pressed: #b0b0b0;
+  --text-3: #666666;
+  --text-4: #444444;
+
+  /* Motion tokens */
+  --duration-fast: 100ms;
+  --duration-normal: 150ms;
+  --duration-slow: 250ms;
+  --ease-default: ease;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 /* ── Base ── */
@@ -303,11 +310,11 @@ select {
 }
 
 .prose-scout a {
-  color: var(--primary);
+  color: var(--muted-foreground);
   text-decoration: none;
 }
 .prose-scout a:hover {
-  color: var(--primary-hover);
+  color: var(--foreground);
   text-decoration: underline;
 }
 
@@ -349,6 +356,12 @@ select {
   transform: scale(0.98);
 }
 
+/* ── Sidebar scroll area: override Radix's display:table on viewport child ── */
+aside [data-slot='scroll-area-viewport'] > div {
+  display: block !important;
+  min-width: unset !important;
+}
+
 /* ── Sidebar project item: dots/plus always visible, subtle until hover ── */
 .sidebar-project-item .sidebar-project-dots {
   display: inline-flex;
@@ -359,9 +372,27 @@ select {
   opacity: 1;
 }
 
-/* ── Transition defaults ── */
+/* ── Motion tokens ── */
 .transition-colors {
   transition-property: color, background-color, border-color;
-  transition-duration: 150ms;
-  transition-timing-function: ease;
+  transition-duration: var(--duration-normal);
+  transition-timing-function: var(--ease-default);
+}
+
+.transition-fade {
+  transition-property: opacity;
+  transition-duration: var(--duration-fast);
+  transition-timing-function: var(--ease-default);
+}
+
+.transition-expand {
+  transition-property: max-height, opacity;
+  transition-duration: var(--duration-normal);
+  transition-timing-function: var(--ease-out);
+}
+
+.transition-transform-fast {
+  transition-property: transform;
+  transition-duration: var(--duration-fast);
+  transition-timing-function: var(--ease-out);
 }

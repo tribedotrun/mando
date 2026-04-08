@@ -1,10 +1,9 @@
 //! AI-powered utility endpoints (todo parsing, etc.).
 
-use std::time::Duration;
-
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::Json;
+use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -22,11 +21,10 @@ pub struct ParseTodosResponse {
     pub items: Vec<String>,
 }
 
-/// `POST /api/ai/parse-todos` — parse free-form text into individual task titles.
+/// `POST /api/ai/parse-todos` -- parse free-form text into individual task titles.
 ///
-/// Constraint: number of returned items ≤ number of non-empty input lines.
-/// AI may merge consecutive lines that describe a single task but never splits
-/// a single line into multiple tasks.
+/// All input (single-line or multi-line) goes through AI for title cleanup.
+/// Constraint: number of returned items <= number of non-empty input lines.
 pub async fn post_parse_todos(
     State(state): State<AppState>,
     Json(body): Json<ParseTodosRequest>,
@@ -42,29 +40,19 @@ pub async fn post_parse_todos(
         .filter(|l| !l.is_empty())
         .count();
 
-    // Fast path: single non-empty line → single task, no AI call.
-    if line_count <= 1 {
-        return Ok(Json(ParseTodosResponse {
-            items: vec![text.to_string()],
-        }));
+    let wf = state.captain_workflow.load();
+    let model = &wf.models.todo_parse;
+    let timeout = wf.agent.todo_parse_timeout_s;
+    let idle_ttl = wf.agent.todo_parse_idle_ttl_s;
+
+    let mut vars: FxHashMap<&str, String> = FxHashMap::default();
+    vars.insert("text", text.to_string());
+    vars.insert("line_count", line_count.to_string());
+    if let Some(ref p) = body.project {
+        vars.insert("project", p.clone());
     }
-
-    let project_context = body
-        .project
-        .as_deref()
-        .map(|p| format!("\n\nProject context: these tasks are for the \"{p}\" project.\n"))
-        .unwrap_or_default();
-
-    let prompt = format!(
-        "Parse this text into individual task titles for a todo list.{project_context}\n\
-         Rules:\n\
-         - Each task must be a clear, concise one-line title\n\
-         - You may merge consecutive lines that describe the same task\n\
-         - Never split a single line into multiple tasks\n\
-         - Return at most {line_count} items\n\
-         - Return ONLY a JSON array of strings, no other text\n\n\
-         Text:\n{text}"
-    );
+    let prompt = mando_config::render_prompt("todo_parse", &wf.prompts, &vars)
+        .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e))?;
 
     let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/tmp"));
 
@@ -76,10 +64,10 @@ pub async fn post_parse_todos(
             &session_key,
             &prompt,
             &cwd,
-            Some("sonnet"),
-            Duration::from_secs(60),
-            Duration::from_secs(30),
-            "",
+            Some(model),
+            idle_ttl,
+            timeout,
+            None,
         )
         .await
         .map_err(internal_error)?;

@@ -140,7 +140,7 @@ pub(crate) async fn post_task_ask(
             Some(&workflow.models.captain),
             std::time::Duration::from_secs(3600),
             std::time::Duration::from_secs(120),
-            &task_id_str,
+            Some(id),
         )
         .await
         .map_err(crate::response::internal_error)?

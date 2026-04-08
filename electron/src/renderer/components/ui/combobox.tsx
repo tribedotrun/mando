@@ -40,18 +40,21 @@ export function Combobox({
   'data-testid': testId,
 }: ComboboxProps): React.ReactElement {
   const [open, setOpen] = React.useState(false);
+  const triggerRef = React.useRef<HTMLButtonElement>(null);
   const selectedLabel = options.find((o) => o.value === value)?.label;
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <Button
+          ref={triggerRef}
           variant="outline"
           role="combobox"
           aria-expanded={open}
           data-testid={testId}
           className={cn(
-            'w-fit justify-between gap-2 bg-muted text-label font-normal text-muted-foreground',
+            'w-fit justify-between gap-2 bg-muted text-label font-normal',
+            selectedLabel ? 'text-foreground' : 'text-muted-foreground',
             className,
           )}
         >
@@ -59,7 +62,11 @@ export function Combobox({
           <ChevronDownIcon className="size-4 shrink-0 opacity-50" />
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="w-[200px] p-0" align="start">
+      <PopoverContent
+        className="z-[201] p-0"
+        align="start"
+        style={{ minWidth: triggerRef.current?.offsetWidth ?? 200 }}
+      >
         <Command>
           <CommandInput placeholder={searchPlaceholder} />
           <CommandList>
@@ -70,6 +77,7 @@ export function Combobox({
                   key={option.value}
                   value={option.value}
                   keywords={[option.label]}
+                  className="text-foreground"
                   onSelect={() => {
                     onValueChange(option.value);
                     setOpen(false);

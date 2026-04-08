@@ -1,10 +1,12 @@
-import React, { useRef } from 'react';
+import React, { useRef, useState } from 'react';
 import { ChevronLeft } from 'lucide-react';
 import type { SessionEntry } from '#renderer/types';
 import { TranscriptViewer } from '#renderer/domains/sessions/components/TranscriptViewer';
 import { fmtDuration, copyToClipboard } from '#renderer/utils';
 import { sessionTitle } from '#renderer/domains/sessions/components/SessionsHelpers';
 import { Button } from '#renderer/components/ui/button';
+
+const COPY_FEEDBACK_MS = 1200;
 
 import { ScrollArea } from '#renderer/components/ui/scroll-area';
 import { Skeleton } from '#renderer/components/ui/skeleton';
@@ -42,19 +44,23 @@ export function SessionDetailPanel({
   sequenceNum,
 }: Props): React.ReactElement {
   const copyRef = useRef<HTMLButtonElement>(null);
+  const [copyLabel, setCopyLabel] = useState('resume');
+  const [copying, setCopying] = useState(false);
 
   const durationSec = session.duration_ms != null ? session.duration_ms / 1000 : undefined;
   const baseTitle = sessionTitle(session);
   const title = sequenceNum ? `${baseTitle} #${sequenceNum}` : baseTitle;
 
-  const copyResume = async () => {
-    const ok = await copyToClipboard(resumeCmd);
-    if (ok && copyRef.current) {
-      copyRef.current.textContent = 'copied!';
-      setTimeout(() => {
-        if (copyRef.current) copyRef.current.textContent = 'resume';
-      }, 1200);
-    }
+  const copyResume = () => {
+    setCopying(true);
+    void copyToClipboard(resumeCmd)
+      .then((ok) => {
+        if (ok) {
+          setCopyLabel('copied!');
+          setTimeout(() => setCopyLabel('resume'), COPY_FEEDBACK_MS);
+        }
+      })
+      .finally(() => setCopying(false));
   };
 
   const subtitleParts: React.ReactNode[] = [];
@@ -89,13 +95,13 @@ export function SessionDetailPanel({
             {subtitleParts}
           </div>
         </div>
-        <Button ref={copyRef} variant="outline" size="sm" onClick={copyResume}>
-          resume
+        <Button ref={copyRef} variant="outline" size="sm" onClick={copyResume} disabled={copying}>
+          {copyLabel}
         </Button>
       </div>
 
       {/* Transcript -- scrollable area */}
-      <ScrollArea className="flex-1 rounded-lg bg-card px-5 py-4">
+      <ScrollArea className="min-h-0 flex-1 rounded-lg bg-card px-5 py-4">
         {loading ? (
           <div className="space-y-3">
             <Skeleton className="h-5 w-48" />

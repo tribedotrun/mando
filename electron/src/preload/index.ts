@@ -156,7 +156,7 @@ contextBridge.exposeInMainWorld('mandoAPI', {
   // DevTools
   toggleDevTools: () => ipcRenderer.invoke('toggle-devtools'),
   // Logs
-  openLogsFolder: () => ipcRenderer.invoke('open-logs-folder'),
+  openLogsFolder: () => void ipcRenderer.invoke('open-logs-folder'),
   // Launchd (macOS)
   launchd: {
     reinstall: () => ipcRenderer.invoke('launchd:reinstall'),

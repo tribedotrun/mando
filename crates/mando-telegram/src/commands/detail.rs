@@ -40,17 +40,17 @@ pub async fn handle_view(bot: &TelegramBot, chat_id: &str, mid: i64, task_id: &s
     ));
 
     let mut meta = vec![format!("<b>{}</b>", escape_html(task.status.as_str()))];
-    if let Some(ref p) = task.project {
-        meta.push(escape_html(p));
+    if !task.project.is_empty() {
+        meta.push(escape_html(&task.project));
     }
     if let Some(ref w) = task.worker {
         meta.push(escape_html(w));
     }
     lines.push(meta.join(" | "));
 
-    if let Some(ref pr) = task.pr {
+    if let Some(pr_num) = task.pr_number {
         lines.push(mando_shared::helpers::pr_html_link(
-            pr,
+            pr_num,
             task.github_repo.as_deref(),
         ));
     }
@@ -97,7 +97,7 @@ pub async fn handle_view(bot: &TelegramBot, chat_id: &str, mid: i64, task_id: &s
     }
 
     // ── Keyboard ────────────────────────────────────────────────────
-    let has_pr = task.pr.as_deref().is_some_and(|p| !p.is_empty());
+    let has_pr = task.pr_number.is_some();
     let mut buttons =
         crate::commands::action::action_buttons(&task.id.to_string(), task.status, has_pr);
     buttons.push(vec![

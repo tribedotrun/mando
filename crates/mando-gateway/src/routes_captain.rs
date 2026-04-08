@@ -151,47 +151,6 @@ pub(crate) async fn post_captain_triage(
     }
 }
 
-#[derive(Deserialize)]
-pub(crate) struct MergeBody {
-    pub pr_num: String,
-    pub project: Option<String>,
-}
-
-/// POST /api/captain/merge
-pub(crate) async fn post_captain_merge(
-    State(state): State<AppState>,
-    Json(body): Json<MergeBody>,
-) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    let config = state.config.load_full();
-    let github_repo = match &body.project {
-        Some(r) => mando_config::resolve_project_config(Some(r), &config)
-            .and_then(|(_, pc)| pc.github_repo.clone()),
-        None => config
-            .captain
-            .projects
-            .values()
-            .next()
-            .and_then(|pc| pc.github_repo.clone()),
-    };
-    let github_repo = match github_repo {
-        Some(r) => r,
-        None => {
-            return Err(error_response(
-                StatusCode::BAD_REQUEST,
-                "no GitHub repo configured for this project — cannot merge",
-            ))
-        }
-    };
-    let store = state.task_store.read().await;
-    match mando_captain::runtime::dashboard::merge_pr(&store, &body.pr_num, &github_repo).await {
-        Ok(val) => Ok(Json(val)),
-        Err(e) => Err(error_response(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            &e.to_string(),
-        )),
-    }
-}
-
 /// POST /api/captain/stop
 pub(crate) async fn post_captain_stop(
     State(state): State<AppState>,
@@ -303,7 +262,6 @@ pub(crate) async fn post_worker_kill(
 pub(crate) async fn get_workers(
     State(state): State<AppState>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    let config = state.config.load_full();
     let workflow = state.captain_workflow.load_full();
     let store = state.task_store.read().await;
     let all_items = store.load_all().await.map_err(|e| {
@@ -351,7 +309,7 @@ pub(crate) async fn get_workers(
                 .and_then(|v| v.get("last_action"))
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
-            let github_repo = crate::resolve_github_repo(task.project.as_deref(), &config);
+            let github_repo = task.github_repo.as_deref();
             let stream_stale_s: Option<f64> = task
                 .session_ids
                 .worker
@@ -385,7 +343,7 @@ pub(crate) async fn get_workers(
                 "github_repo": github_repo,
                 "worktree": task.worktree,
                 "branch": task.branch,
-                "pr": task.pr,
+                "pr_number": task.pr_number,
                 "started_at": task.worker_started_at,
                 "last_activity_at": task.last_activity_at,
                 "cc_session_id": task.session_ids.worker,
@@ -410,7 +368,6 @@ pub(crate) async fn get_worker(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    let config = state.config.load_full();
     let store = state.task_store.read().await;
 
     // Search by worker name, cc_session_id, or item id across indices + details.
@@ -449,24 +406,21 @@ pub(crate) async fn get_worker(
     };
 
     match full_item {
-        Some(it) => {
-            let github_repo = crate::resolve_github_repo(it.project.as_deref(), &config);
-            Ok(Json(json!({
-                "id": it.id,
-                "title": it.title,
-                "status": it.status,
-                "worker": it.worker,
-                "project": it.project,
-                "github_repo": github_repo,
-                "worktree": it.worktree,
-                "branch": it.branch,
-                "pr": it.pr,
-                "started_at": it.worker_started_at,
-                "last_activity_at": it.last_activity_at,
-                "cc_session_id": it.session_ids.worker,
-                "intervention_count": it.intervention_count,
-            })))
-        }
+        Some(it) => Ok(Json(json!({
+            "id": it.id,
+            "title": it.title,
+            "status": it.status,
+            "worker": it.worker,
+            "project": it.project,
+            "github_repo": it.github_repo,
+            "worktree": it.worktree,
+            "branch": it.branch,
+            "pr_number": it.pr_number,
+            "started_at": it.worker_started_at,
+            "last_activity_at": it.last_activity_at,
+            "cc_session_id": it.session_ids.worker,
+            "intervention_count": it.intervention_count,
+        }))),
         None => Err(error_response(
             StatusCode::NOT_FOUND,
             &format!("worker {id} not found"),

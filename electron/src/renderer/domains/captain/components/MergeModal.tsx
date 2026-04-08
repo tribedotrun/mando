@@ -13,7 +13,7 @@ import { Button } from '#renderer/components/ui/button';
 
 interface Props {
   item: TaskItem;
-  onConfirm: (itemId: number, pr: string, project: string) => void;
+  onConfirm: (itemId: number, prNumber: number, project: string) => void;
   onCancel: () => void;
   pending: boolean;
   result: { ok: boolean; message: string } | null;
@@ -36,7 +36,7 @@ export function MergeModal({
       <DialogContent data-testid="merge-modal" showCloseButton={false}>
         <DialogHeader>
           <DialogTitle>
-            Merge {shortRepo(item.project)} PR {prLabel(item.pr ?? '')}
+            Merge {shortRepo(item.project)} PR {item.pr_number ? prLabel(item.pr_number) : ''}
           </DialogTitle>
           <DialogDescription className="truncate" title={item.title}>
             {item.title}
@@ -68,7 +68,7 @@ export function MergeModal({
                 Cancel
               </Button>
               <Button
-                onClick={() => onConfirm(item.id, item.pr ?? '', item.project ?? '')}
+                onClick={() => onConfirm(item.id, item.pr_number ?? 0, item.project ?? '')}
                 disabled={pending || !!result}
               >
                 {pending ? 'Starting...' : 'Merge'}

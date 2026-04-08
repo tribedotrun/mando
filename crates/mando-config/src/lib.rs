@@ -7,6 +7,7 @@ pub mod paths;
 pub mod settings;
 pub mod skills;
 pub mod workflow;
+pub mod workflow_render;
 pub mod workflow_scout;
 pub mod workflow_validate;
 

@@ -59,11 +59,11 @@ pub(crate) async fn spawn_worker(
         };
 
     // Copy plan briefs into worktree if they exist (blocking fs → spawn_blocking).
-    {
+    let discovered_plan = {
         let item_clone = item.clone();
         let wt_clone = wt_path.clone();
-        tokio::task::spawn_blocking(move || copy_plan_briefs(&item_clone, &wt_clone)).await??;
-    }
+        tokio::task::spawn_blocking(move || copy_plan_briefs(&item_clone, &wt_clone)).await??
+    };
 
     // Run pre_spawn hook.
     let hook_env = HashMap::new();
@@ -99,7 +99,7 @@ pub(crate) async fn spawn_worker(
         .caller("worker")
         .task_id(item.id.to_string())
         .worker_name(&session_name)
-        .project(item.project.as_deref().unwrap_or(""));
+        .project(&item.project);
     if let Some(ref fb) = workflow.models.fallback {
         cc_builder = cc_builder.fallback_model(fb);
     }
@@ -116,7 +116,7 @@ pub(crate) async fn spawn_worker(
             caller: "worker",
             task_id: &item.id.to_string(),
             worker_name: &session_name,
-            project: item.project.as_deref().unwrap_or(""),
+            project: &item.project,
             cwd: &wt_path.display().to_string(),
         },
         "running",
@@ -132,7 +132,7 @@ pub(crate) async fn spawn_worker(
         &wt_path,
         "worker",
         &session_name,
-        &item.id.to_string(),
+        Some(item.id),
         false,
     )
     .await?;
@@ -152,6 +152,7 @@ pub(crate) async fn spawn_worker(
         branch,
         worktree: wt_path.to_string_lossy().into_owned(),
         stream_path,
+        plan: discovered_plan.or_else(|| item.plan.clone()),
     })
 }
 
@@ -163,6 +164,8 @@ pub struct SpawnResult {
     pub branch: String,
     pub worktree: String,
     pub stream_path: PathBuf,
+    /// Worktree-relative path to the plan/brief file, if one was found.
+    pub plan: Option<String>,
 }
 
 fn next_worker_slot(state_dir: &std::path::Path) -> Result<u64> {
@@ -248,12 +251,13 @@ fn branch_slot(branch: &str) -> Option<u64> {
 ///
 /// Copies any files related to the item's plan path. Only copies
 /// files that don't already exist in the destination (idempotent).
+/// Returns the worktree-relative brief path if one was found, or `None`.
 /// Returns `Err` on filesystem failure so spawn_worker can abort cleanly
 /// rather than starting a worker with missing plan files.
-fn copy_plan_briefs(item: &Task, wt_path: &std::path::Path) -> Result<()> {
+fn copy_plan_briefs(item: &Task, wt_path: &std::path::Path) -> Result<Option<String>> {
     let plans_dir = mando_config::state_dir().join("plans");
     if !plans_dir.exists() {
-        return Ok(());
+        return Ok(None);
     }
 
     let briefs_dir = wt_path.join(".ai").join("briefs");
@@ -265,6 +269,7 @@ fn copy_plan_briefs(item: &Task, wt_path: &std::path::Path) -> Result<()> {
     let id = &item.id.to_string();
     let brief_file = plans_dir.join(format!("item-{id}.md"));
     if brief_file.is_file() {
+        let relative = format!(".ai/briefs/item-{id}.md");
         let dst = briefs_dir.join(format!("item-{id}.md"));
         if !dst.exists() {
             std::fs::copy(&brief_file, &dst).with_context(|| {
@@ -275,8 +280,9 @@ fn copy_plan_briefs(item: &Task, wt_path: &std::path::Path) -> Result<()> {
                 )
             })?;
         }
+        return Ok(Some(relative));
     }
-    Ok(())
+    Ok(None)
 }
 
 fn prepare_initial_worker_prompt(

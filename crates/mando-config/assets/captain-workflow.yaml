@@ -8,6 +8,7 @@ models:
   worker: "default"
   captain: "default"
   clarifier: "default"
+  todo_parse: "default"
 
 agent:
   max_concurrent: 10
@@ -24,6 +25,8 @@ agent:
   worker_timeout_s: 21600
   max_repeated_nudges: 3
   clarifier_timeout_s: 1800
+  todo_parse_timeout_s: 300
+  todo_parse_idle_ttl_s: 120
 
 # ── Prompt Templates ─────────────────────────────────────────────────────────
 
@@ -302,6 +305,19 @@ prompts:
     {{ human_response }}
 
     Update the context and decide if the item is ready or still needs clarification.
+
+  todo_parse: |
+    Parse this text into individual task titles for a todo list.
+    {% if project %}Project context: these tasks are for the "{{ project }}" project.{% endif %}
+    Rules:
+    - Each task must be a clear, concise one-line title (imperative form, max 80 chars)
+    - You may merge consecutive lines that describe the same task
+    - Never split a single line into multiple tasks
+    - Return at most {{ line_count }} items
+    - Return ONLY a JSON array of strings, no other text
+
+    Text:
+    {{ text }}
 
   captain_review: |
     You are the Captain reviewing a worker's output. Produce a single verdict.

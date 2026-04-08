@@ -2,8 +2,7 @@ import React, { useCallback, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import log from '#renderer/logger';
 import { askTask, endAskSession } from '#renderer/domains/captain/hooks/useApi';
-import { QAChat } from '#renderer/global/components/QAChat';
-import type { QAEntry } from '#renderer/global/components/QAChat';
+import { QAChat, type QAEntry } from '#renderer/global/components/QAChat';
 import type { TaskItem } from '#renderer/types';
 import { prLabel, prHref, getErrorMessage } from '#renderer/utils';
 import { Button } from '#renderer/components/ui/button';
@@ -27,7 +26,7 @@ export function TaskAsk({ item, onBack }: Props): React.ReactElement {
       try {
         const data = await askTask(item.id, q);
         setHistory((prev) => [...prev, { role: 'assistant', text: data.answer }]);
-        queryClient.invalidateQueries({ queryKey: ['tasks'] });
+        void queryClient.invalidateQueries({ queryKey: ['tasks'] });
       } catch (err) {
         setHistory((prev) => [
           ...prev,
@@ -50,7 +49,7 @@ export function TaskAsk({ item, onBack }: Props): React.ReactElement {
       log.warn('[TaskAsk] end session failed:', err);
     } finally {
       setEndingSession(false);
-      queryClient.invalidateQueries({ queryKey: ['tasks'] });
+      void queryClient.invalidateQueries({ queryKey: ['tasks'] });
     }
   }, [item.id, queryClient]);
 
@@ -61,17 +60,17 @@ export function TaskAsk({ item, onBack }: Props): React.ReactElement {
       <Button variant="ghost" size="xs" onClick={onBack}>
         &larr; Back
       </Button>
-      <span className="font-mono text-xs text-primary">#{item.id}</span>
+      <span className="font-mono text-xs text-muted-foreground">#{item.id}</span>
       <span className="max-w-xs truncate font-mono text-xs text-text-3">{item.title}</span>
       <span className="ml-1 font-mono text-[0.6rem] text-text-4">[{item.status}]</span>
-      {item.pr && (item.github_repo || item.project) && (
+      {item.pr_number && (item.github_repo || item.project) && (
         <a
-          href={prHref(item.pr, (item.github_repo ?? item.project)!)}
+          href={prHref(item.pr_number, (item.github_repo ?? item.project)!)}
           target="_blank"
           rel="noopener noreferrer"
-          className="ml-auto font-mono text-xs text-primary no-underline hover:underline"
+          className="ml-auto font-mono text-xs text-muted-foreground no-underline hover:underline"
         >
-          {prLabel(item.pr)}
+          {prLabel(item.pr_number)}
         </a>
       )}
       {hasAskSession && (
@@ -80,9 +79,9 @@ export function TaskAsk({ item, onBack }: Props): React.ReactElement {
             <Button
               variant="outline"
               size="xs"
-              onClick={handleEndSession}
+              onClick={() => void handleEndSession()}
               disabled={endingSession}
-              className={item.pr ? '' : 'ml-auto'}
+              className={item.pr_number ? '' : 'ml-auto'}
             >
               {endingSession ? '...' : 'End session'}
             </Button>
@@ -101,7 +100,7 @@ export function TaskAsk({ item, onBack }: Props): React.ReactElement {
       history={history}
       pending={pending}
       scrollRef={scrollRef}
-      onAsk={handleAsk}
+      onAsk={(q) => void handleAsk(q)}
       placeholder="Ask about this item..."
       historyClassName="mb-3 rounded p-3 max-h-[55vh]"
       historyStyle={{

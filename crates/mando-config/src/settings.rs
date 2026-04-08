@@ -135,6 +135,7 @@ pub struct CaptainConfig {
     pub auto_schedule: bool,
     pub tick_interval_s: u64,
     pub tz: String,
+    pub default_terminal_agent: String,
     pub projects: HashMap<String, ProjectConfig>,
     #[serde(skip)]
     pub task_db_path: String,
@@ -150,6 +151,7 @@ impl Default for CaptainConfig {
             auto_schedule: false,
             tick_interval_s: 30,
             tz: iana_time_zone::get_timezone().unwrap_or_else(|_| "UTC".into()),
+            default_terminal_agent: "claude".into(),
             projects: HashMap::new(),
             task_db_path: crate::paths::data_dir()
                 .join("mando.db")

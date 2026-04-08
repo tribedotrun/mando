@@ -1,38 +1,21 @@
 //! Shared utility functions — PR label normalization, JSON file I/O,
 //! and path sanitization.
 
-/// Normalize a PR value to a short `#N` label.
+/// Format a PR number as a short `#N` label.
 ///
-/// Accepts either a full GitHub URL (`https://github.com/.../pull/123`)
-/// or a short reference (`#123`, `123`). Always returns `#N`.
-pub fn pr_short_label(pr: &str) -> String {
-    match mando_types::task::extract_pr_number(pr) {
-        Some(n) => format!("#{n}"),
-        None => pr.to_string(),
-    }
+/// Delegates to `mando_types::task::pr_label`.
+pub fn pr_short_label(pr_number: i64) -> String {
+    mando_types::task::pr_label(pr_number)
 }
 
-/// Build a clickable Telegram HTML hyperlink for a PR.
+/// Build a clickable Telegram HTML hyperlink for a PR number.
 ///
-/// If `pr` is a full URL, extracts the number and links to the URL.
-/// If `pr` is a bare number (or `#N`), constructs a GitHub URL from `github_repo`
-/// (e.g. `"owner/repo"`). Returns plain `PR #N` only when no URL can be built.
-pub fn pr_html_link(pr: &str, github_repo: Option<&str>) -> String {
-    let num = match mando_types::task::extract_pr_number(pr) {
-        Some(n) => n,
-        None => return crate::telegram_format::escape_html(pr),
-    };
-    let label = crate::telegram_format::escape_html(&format!("PR #{num}"));
-    // Full URL already present — use it directly.
-    if pr.starts_with("http") {
-        return format!(
-            "<a href=\"{}\">{label}</a>",
-            crate::telegram_format::escape_html(pr),
-        );
-    }
-    // Construct URL from github_repo if available.
+/// Constructs a GitHub URL from `github_repo` (e.g. `"owner/repo"`) when
+/// available. Returns plain `PR #N` when no URL can be built.
+pub fn pr_html_link(pr_number: i64, github_repo: Option<&str>) -> String {
+    let label = crate::telegram_format::escape_html(&format!("PR #{pr_number}"));
     if let Some(repo) = github_repo {
-        let url = format!("https://github.com/{repo}/pull/{num}");
+        let url = mando_types::task::pr_url(repo, pr_number);
         return format!(
             "<a href=\"{}\">{label}</a>",
             crate::telegram_format::escape_html(&url),
@@ -153,35 +136,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn pr_short_label_from_url() {
-        assert_eq!(
-            pr_short_label("https://github.com/org/repo/pull/123"),
-            "#123"
-        );
+    fn pr_short_label_formats_number() {
+        assert_eq!(pr_short_label(123), "#123");
     }
 
     #[test]
-    fn pr_short_label_from_hash() {
-        assert_eq!(pr_short_label("#42"), "#42");
-    }
-
-    #[test]
-    fn pr_short_label_from_bare_number() {
-        assert_eq!(pr_short_label("99"), "#99");
-    }
-
-    #[test]
-    fn pr_html_link_full_url() {
-        let link = pr_html_link("https://github.com/org/repo/pull/123", None);
-        assert_eq!(
-            link,
-            "<a href=\"https://github.com/org/repo/pull/123\">PR #123</a>"
-        );
-    }
-
-    #[test]
-    fn pr_html_link_bare_number_with_repo() {
-        let link = pr_html_link("504", Some("tribedotrun/mando"));
+    fn pr_html_link_with_repo() {
+        let link = pr_html_link(504, Some("tribedotrun/mando"));
         assert_eq!(
             link,
             "<a href=\"https://github.com/tribedotrun/mando/pull/504\">PR #504</a>"
@@ -189,17 +150,8 @@ mod tests {
     }
 
     #[test]
-    fn pr_html_link_hash_ref_with_repo() {
-        let link = pr_html_link("#42", Some("acme/widgets"));
-        assert_eq!(
-            link,
-            "<a href=\"https://github.com/acme/widgets/pull/42\">PR #42</a>"
-        );
-    }
-
-    #[test]
-    fn pr_html_link_bare_number_no_repo() {
-        let link = pr_html_link("99", None);
+    fn pr_html_link_no_repo() {
+        let link = pr_html_link(99, None);
         assert_eq!(link, "PR #99");
     }
 }

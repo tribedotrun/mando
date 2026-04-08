@@ -55,7 +55,7 @@ export function TelegramScreen({
             href="https://t.me/BotFather"
             target="_blank"
             rel="noopener noreferrer"
-            className="text-primary"
+            className="text-foreground"
           >
             @BotFather
           </a>{' '}
@@ -73,7 +73,7 @@ export function TelegramScreen({
               }}
               placeholder="Bot token"
             />
-            <OutlineButton onClick={validate} disabled={!token.trim() || validating}>
+            <OutlineButton onClick={() => void validate()} disabled={!token.trim() || validating}>
               <span className="inline-block min-w-[52px] text-center">
                 {validating ? 'Connecting\u2026' : 'Connect'}
               </span>

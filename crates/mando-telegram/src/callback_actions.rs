@@ -40,22 +40,14 @@ pub(crate) async fn merge(bot: &TelegramBot, cid: &str, item_id: &str) -> Result
         .await
         .ok_or_else(|| anyhow::anyhow!("item #{item_id} not found"))?;
 
-    let pr = item
-        .pr
-        .as_deref()
+    let pr_num = item
+        .pr_number
         .ok_or_else(|| anyhow::anyhow!("item #{item_id} has no PR"))?;
-    let repo = item
-        .project
-        .as_deref()
-        .ok_or_else(|| anyhow::anyhow!("item #{item_id} has no project"))?;
-
-    // Extract PR number from URL or bare number.
-    let pr_number = pr.rsplit('/').next().unwrap_or(pr).trim_start_matches('#');
 
     match gw
         .post(
-            paths::CAPTAIN_MERGE,
-            &json!({"pr_num": pr_number, "project": repo}),
+            paths::TASKS_MERGE,
+            &json!({"pr_number": pr_num, "project": &item.project}),
         )
         .await
     {

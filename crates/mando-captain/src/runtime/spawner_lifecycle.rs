@@ -134,7 +134,7 @@ pub(crate) async fn reopen_worker(
     let resume_msg = mando_config::render_prompt("reopen_resume", &workflow.prompts, &vars)
         .map_err(|e| anyhow::anyhow!(e))?;
 
-    let item_id = &item.id.to_string();
+    let item_id = Some(item.id);
 
     // Record stream file size before resume for zero-byte detection.
     let stream_size_before = mando_cc::get_stream_file_size(&stream_path);
@@ -218,7 +218,7 @@ pub(crate) async fn reopen_worker(
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 fn resolve_project<'a>(item: &Task, config: &'a Config) -> Result<(&'a str, &'a ProjectConfig)> {
-    mando_config::resolve_project_config(item.project.as_deref(), config)
+    mando_config::resolve_project_config(Some(&item.project), config)
         .ok_or_else(|| anyhow::anyhow!("no project config for item '{}'", item.title))
 }
 

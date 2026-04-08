@@ -1,4 +1,8 @@
 //! /api/projects/* route handlers — project CRUD.
+//!
+//! Source of truth: `projects` DB table. After every DB write the in-memory
+//! config is reloaded from the DB and persisted to config.json so that the
+//! rest of the system (captain, scouts, etc.) sees the change immediately.
 
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
@@ -6,72 +10,64 @@ use axum::Json;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use crate::response::error_response;
+use mando_db::queries::projects as db;
+
+use crate::response::{error_response, internal_error};
 use crate::AppState;
 
-/// Conflict error raised when a project name or path already exists.
-#[derive(Debug)]
-struct ProjectConflict(String);
-
-impl std::fmt::Display for ProjectConflict {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-
-impl std::error::Error for ProjectConflict {}
-
-/// Resolve a project from config by name or alias (case-insensitive).
-fn resolve_project_key(
-    config: &mando_config::Config,
+/// Resolve a project from the DB by name or alias.
+/// Returns the full `ProjectRow` or a 404 HTTP error.
+async fn resolve_project(
+    state: &AppState,
     identifier: &str,
-) -> Result<String, (StatusCode, Json<Value>)> {
-    let id_lower = identifier.to_lowercase();
-    for (k, v) in &config.captain.projects {
-        if v.name.to_lowercase() == id_lower
-            || v.aliases.iter().any(|a| a.to_lowercase() == id_lower)
-        {
-            return Ok(k.clone());
-        }
-    }
-    Err(error_response(
-        StatusCode::NOT_FOUND,
-        &format!("project not found: {identifier}"),
-    ))
+) -> Result<db::ProjectRow, (StatusCode, Json<Value>)> {
+    db::resolve(state.db.pool(), identifier)
+        .await
+        .map_err(internal_error)?
+        .ok_or_else(|| {
+            error_response(
+                StatusCode::NOT_FOUND,
+                &format!("project not found: {identifier}"),
+            )
+        })
 }
 
-/// Map an `anyhow::Error` from `config_manager.update()` into an HTTP error.
-/// [`ProjectConflict`] errors become 409; everything else is 500.
-fn update_err(e: anyhow::Error) -> (StatusCode, Json<Value>) {
-    if e.downcast_ref::<ProjectConflict>().is_some() {
-        return error_response(StatusCode::CONFLICT, &format!("{e}"));
-    }
-    error_response(
-        StatusCode::INTERNAL_SERVER_ERROR,
-        &format!("save failed: {e}"),
-    )
+/// After a DB write, reload all projects from the DB into the in-memory
+/// config and persist to config.json. This keeps every subsystem in sync.
+async fn reload_config_from_db(state: &AppState) -> Result<(), (StatusCode, Json<Value>)> {
+    let mut cfg = state.config.load_full().as_ref().clone();
+    db::load_into_config(state.db.pool(), &mut cfg)
+        .await
+        .map_err(internal_error)?;
+    state
+        .config_manager
+        .replace(cfg)
+        .await
+        .map_err(internal_error)?;
+    Ok(())
 }
 
 /// GET /api/projects — list all projects.
-pub(crate) async fn get_projects(State(state): State<AppState>) -> Json<Value> {
-    let config = state.config.load_full();
-    let projects: Vec<Value> = config
-        .captain
-        .projects
+pub(crate) async fn get_projects(
+    State(state): State<AppState>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let rows = db::list(state.db.pool()).await.map_err(internal_error)?;
+    let projects: Vec<Value> = rows
         .iter()
-        .map(|(key, pc)| {
+        .map(|row| {
+            let aliases: Vec<String> = serde_json::from_str(&row.aliases).unwrap_or_default();
             json!({
-                "key": key,
-                "name": pc.name,
-                "path": pc.path,
-                "githubRepo": pc.github_repo,
-                "logo": pc.logo,
-                "aliases": pc.aliases,
+                "key": row.path,
+                "name": row.name,
+                "path": row.path,
+                "githubRepo": row.github_repo,
+                "logo": row.logo,
+                "aliases": aliases,
             })
         })
         .collect();
 
-    Json(json!({ "projects": projects }))
+    Ok(Json(json!({ "projects": projects })))
 }
 
 #[derive(Deserialize)]
@@ -98,7 +94,6 @@ pub(crate) async fn post_projects(
     }
 
     let abs_path_str = abs_path.to_string_lossy().into_owned();
-    let key = abs_path_str.clone();
 
     // Default name to folder basename if not provided.
     let name = match &body.name {
@@ -142,7 +137,28 @@ pub(crate) async fn post_projects(
         ));
     }
 
-    // Auto-generate scout summary and logo (async I/O, before lock).
+    // Check for duplicate name or path in DB.
+    let pool = state.db.pool();
+    if let Some(_existing) = db::find_by_name(pool, &name)
+        .await
+        .map_err(internal_error)?
+    {
+        return Err(error_response(
+            StatusCode::CONFLICT,
+            &format!("project name already exists: {name}"),
+        ));
+    }
+    if let Some(_existing) = db::find_by_path(pool, &abs_path_str)
+        .await
+        .map_err(internal_error)?
+    {
+        return Err(error_response(
+            StatusCode::CONFLICT,
+            &format!("project already exists at path: {abs_path_str}"),
+        ));
+    }
+
+    // Auto-generate scout summary and logo.
     let scout_summary = detect_project_summary(&abs_path).await;
     let logo = detect_project_logo(&abs_path, &name);
 
@@ -156,30 +172,9 @@ pub(crate) async fn post_projects(
         ..Default::default()
     };
 
-    // Atomically check duplicates and insert under write lock.
-    state
-        .config_manager
-        .update(|cfg| {
-            if cfg.captain.projects.contains_key(&key) {
-                return Err(
-                    ProjectConflict(format!("project already exists at path: {key}")).into(),
-                );
-            }
-            let name_lower = name.to_lowercase();
-            for v in cfg.captain.projects.values() {
-                if v.name.to_lowercase() == name_lower {
-                    return Err(ProjectConflict(format!(
-                        "project name already exists: {}",
-                        v.name
-                    ))
-                    .into());
-                }
-            }
-            cfg.captain.projects.insert(key.clone(), pc.clone());
-            Ok(())
-        })
-        .await
-        .map_err(update_err)?;
+    let row = db::config_to_row(&pc);
+    db::upsert_full(pool, &row).await.map_err(internal_error)?;
+    reload_config_from_db(&state).await?;
 
     Ok(Json(json!({
         "ok": true,
@@ -208,70 +203,53 @@ pub(crate) async fn patch_project(
     Path(name): Path<String>,
     Json(body): Json<EditProjectBody>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    // Early 404 check (racy, but avoids holding the lock for the common case).
-    let config = state.config.load_full();
-    let _ = resolve_project_key(&config, &name)?;
+    let mut row = resolve_project(&state, &name).await?;
+    let pool = state.db.pool();
 
-    let logo = std::sync::Arc::new(std::sync::Mutex::new(None::<Option<String>>));
-    let logo_out = logo.clone();
+    // Check rename uniqueness.
+    if let Some(ref new_name) = body.rename {
+        if let Some(existing) = db::find_by_name(pool, new_name)
+            .await
+            .map_err(internal_error)?
+        {
+            if existing.id != row.id {
+                return Err(error_response(
+                    StatusCode::CONFLICT,
+                    &format!("project name already exists: {new_name}"),
+                ));
+            }
+        }
+        row.name = new_name.clone();
+    }
 
-    state
-        .config_manager
-        .update(|cfg| {
-            let key = resolve_project_key(cfg, &name)
-                .map_err(|(_, j)| anyhow::anyhow!("{}", j.0["error"]))?;
+    if body.clear_github_repo == Some(true) {
+        row.github_repo = None;
+    } else if let Some(ref repo) = body.github_repo {
+        row.github_repo = Some(repo.clone());
+    }
+    if let Some(ref aliases) = body.aliases {
+        row.aliases = serde_json::to_string(aliases).unwrap_or_else(|_| "[]".into());
+    }
+    if let Some(ref preamble) = body.preamble {
+        row.worker_preamble = preamble.clone();
+    }
+    if let Some(ref check_cmd) = body.check_command {
+        row.check_command = check_cmd.clone();
+    }
+    if let Some(ref summary) = body.scout_summary {
+        row.scout_summary = summary.clone();
+    }
+    if body.redetect_logo == Some(true) {
+        let project_path = std::path::Path::new(&row.path);
+        row.logo = detect_project_logo(project_path, &row.name);
+    }
 
-            if let Some(ref new_name) = body.rename {
-                let new_lower = new_name.to_lowercase();
-                for (k, v) in &cfg.captain.projects {
-                    if *k != key && v.name.to_lowercase() == new_lower {
-                        return Err(ProjectConflict(format!(
-                            "project name already exists: {}",
-                            v.name
-                        ))
-                        .into());
-                    }
-                }
-            }
-
-            let pc = cfg
-                .captain
-                .projects
-                .get_mut(&key)
-                .ok_or_else(|| anyhow::anyhow!("project vanished"))?;
-
-            if let Some(ref new_name) = body.rename {
-                pc.name = new_name.clone();
-            }
-            if body.clear_github_repo == Some(true) {
-                pc.github_repo = None;
-            } else if let Some(ref repo) = body.github_repo {
-                pc.github_repo = Some(repo.clone());
-            }
-            if let Some(ref aliases) = body.aliases {
-                pc.aliases = aliases.clone();
-            }
-            if let Some(ref preamble) = body.preamble {
-                pc.worker_preamble = preamble.clone();
-            }
-            if let Some(ref check_cmd) = body.check_command {
-                pc.check_command = check_cmd.clone();
-            }
-            if let Some(ref summary) = body.scout_summary {
-                pc.scout_summary = summary.clone();
-            }
-            if body.redetect_logo == Some(true) {
-                let project_path = std::path::Path::new(&pc.path);
-                pc.logo = detect_project_logo(project_path, &pc.name);
-            }
-
-            *logo_out.lock().unwrap() = Some(pc.logo.clone());
-            Ok(())
-        })
+    let logo = row.logo.clone();
+    db::update(pool, row.id, &row)
         .await
-        .map_err(update_err)?;
+        .map_err(internal_error)?;
+    reload_config_from_db(&state).await?;
 
-    let logo = logo.lock().unwrap().clone().flatten();
     Ok(Json(json!({ "ok": true, "logo": logo })))
 }
 
@@ -280,33 +258,26 @@ pub(crate) async fn delete_project(
     State(state): State<AppState>,
     Path(name): Path<String>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    let config = state.config.load_full();
-    let key = resolve_project_key(&config, &name)?;
+    let row = resolve_project(&state, &name).await?;
+    let aliases: Vec<String> = serde_json::from_str(&row.aliases).unwrap_or_default();
 
     // Collect all identifiers tasks might use to reference this project.
-    let mut identifiers = vec![key.clone()];
-    if let Some(pc) = config.captain.projects.get(&key) {
-        identifiers.push(pc.name.clone());
-        identifiers.extend(pc.aliases.iter().cloned());
-        if pc.path != key {
-            identifiers.push(pc.path.clone());
-        }
-    }
+    let mut identifiers = vec![row.path.clone(), row.name.clone()];
+    identifiers.extend(aliases);
 
-    // Cascade-delete tasks belonging to this project (async I/O, before lock).
+    // Cascade-delete tasks belonging to this project.
+    let config = state.config.load_full();
     let store = state.task_store.read().await;
-    let all_tasks = store.load_all_with_archived().await.map_err(|e| {
-        error_response(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            &format!("task load failed: {e}"),
-        )
-    })?;
+    let all_tasks = store
+        .load_all_with_archived()
+        .await
+        .map_err(internal_error)?;
     let task_ids: Vec<i64> = all_tasks
         .iter()
         .filter(|t| {
-            t.project
-                .as_ref()
-                .is_some_and(|p| identifiers.iter().any(|id| id.eq_ignore_ascii_case(p)))
+            identifiers
+                .iter()
+                .any(|id| id.eq_ignore_ascii_case(&t.project))
         })
         .map(|t| t.id)
         .collect();
@@ -316,27 +287,17 @@ pub(crate) async fn delete_project(
         let opts = mando_captain::io::task_cleanup::CleanupOptions { close_pr: false };
         mando_captain::runtime::dashboard::delete_tasks(&config, &store, &task_ids, &opts)
             .await
-            .map_err(|e| {
-                error_response(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    &format!("task cleanup failed: {e}"),
-                )
-            })?;
+            .map_err(internal_error)?;
         state.bus.send(
             mando_types::BusEvent::Tasks,
             Some(json!({"action": "delete"})),
         );
     }
 
-    // Atomically remove the project under write lock.
-    state
-        .config_manager
-        .update(|cfg| {
-            cfg.captain.projects.remove(&key);
-            Ok(())
-        })
+    db::delete(state.db.pool(), row.id)
         .await
-        .map_err(update_err)?;
+        .map_err(internal_error)?;
+    reload_config_from_db(&state).await?;
 
     Ok(Json(json!({ "ok": true, "deleted_tasks": deleted_tasks })))
 }

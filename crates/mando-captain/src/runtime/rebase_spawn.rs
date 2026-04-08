@@ -119,7 +119,7 @@ pub(super) async fn handle_conflict(
     }
 
     // Spawn rebase worker.
-    let project_name = item.project.as_deref().unwrap_or("");
+    let project_name = item.project.as_str();
     let Some((_, project_config)) =
         mando_config::resolve_project_config(Some(project_name), config)
     else {
@@ -151,9 +151,9 @@ pub(super) async fn handle_conflict(
         .unwrap_or(&default_branch_raw)
         .to_string();
     let branch = item.branch.as_deref().unwrap_or("");
-    let pr_num = mando_types::task::extract_pr_number(pr)
-        .unwrap_or(pr.trim_start_matches('#'))
-        .to_string();
+    let pr_num = mando_types::task::parse_pr_number(pr)
+        .map(|n| n.to_string())
+        .unwrap_or_else(|| pr.trim_start_matches('#').to_string());
 
     tracing::info!(
         module = "captain",
@@ -258,7 +258,7 @@ pub(super) async fn handle_conflict(
                 &wt_path,
                 "rebase",
                 &session_name,
-                &items[idx].id.to_string(),
+                Some(items[idx].id),
                 false,
             )
             .await

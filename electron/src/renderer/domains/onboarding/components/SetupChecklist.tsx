@@ -31,7 +31,7 @@ function useStepStates() {
       const store = useSettingsStore.getState();
       if (!store.config.features?.claudeCodeVerified) {
         store.updateSection('features', { claudeCodeVerified: true });
-        store.save();
+        void store.save();
       }
     }
   }, []);
@@ -112,7 +112,7 @@ export function SetupChecklist({ onDismiss, onMinimize }: SetupChecklistProps): 
   const [userExpandedStep, setUserExpandedStep] = useState<StepId | null>(null);
 
   useMountEffect(() => {
-    if (!loaded) load();
+    if (!loaded) void load();
   });
 
   const steps: StepDef[] = [

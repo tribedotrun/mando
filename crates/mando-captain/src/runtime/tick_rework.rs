@@ -62,8 +62,9 @@ pub(super) fn transition_rework_to_queued(items: &mut [Task], alerts: &mut Vec<S
         item.status = ItemStatus::Queued;
         item.worker = None;
         item.worktree = None;
+        item.workbench_id = None;
         item.branch = None;
-        item.pr = None;
+        item.pr_number = None;
         item.worker_started_at = None;
         item.session_ids.worker = None;
         item.session_ids.ask = None;

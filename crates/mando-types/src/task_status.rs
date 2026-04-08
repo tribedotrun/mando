@@ -66,7 +66,7 @@ pub const FINALIZED: [ItemStatus; 3] = [
     ItemStatus::Canceled,
 ];
 
-/// Statuses from which an item can be reworked (fresh worktree + new worker)
+/// Statuses from which an item can be reworked (same worktree, new branch + new worker)
 /// or reopened (resume existing session). Currently identical; separate names
 /// kept for semantic clarity in call sites.
 pub const ACTIONABLE_TERMINAL: [ItemStatus; 4] = [

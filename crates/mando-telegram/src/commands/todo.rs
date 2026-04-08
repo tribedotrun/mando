@@ -1,7 +1,6 @@
-//! `/todo` command — add tasks with AI-powered bulk parsing.
+//! `/todo` command -- add tasks with AI-powered parsing.
 //!
-//! Single line: create one task directly (fast path).
-//! Multi-line: AI parses into individual tasks. All tasks share one project.
+//! All input (single or multi-line) goes through AI for title normalization.
 //! If project can't be inferred, user picks via inline keyboard first.
 
 use crate::bot::{TelegramBot, TodoItem};
@@ -27,7 +26,7 @@ pub async fn handle(bot: &mut TelegramBot, chat_id: &str, args: &str) -> Result<
     execute_todo(bot, chat_id, args).await
 }
 
-/// Process todo text — single line goes direct, multi-line uses AI parsing.
+/// Process todo text -- all input goes through AI parsing.
 pub async fn execute_todo(bot: &mut TelegramBot, chat_id: &str, raw_text: &str) -> Result<()> {
     execute_todo_with_photo(bot, chat_id, raw_text, None).await
 }
@@ -58,7 +57,7 @@ pub async fn execute_todo_with_photo(
         None
     };
 
-    // --- Single line: fast path, create directly ---
+    // --- Single line: AI-parse the title before creating ---
     if lines.len() == 1 {
         let (matched_slug, cleaned) = mando_config::match_project_by_prefix(lines[0], &projects);
         let project = matched_slug.or(single_project);
@@ -94,12 +93,8 @@ pub async fn execute_todo_with_photo(
             return Ok(());
         }
 
-        let items = vec![TodoItem {
-            title,
-            project,
-            photo_file_id,
-        }];
-        crate::callback_actions::add_todo_items(bot, chat_id, &items).await?;
+        // Route through AI for title normalization.
+        ai_parse_and_create(bot, chat_id, &title, project.as_deref(), photo_file_id).await?;
         return Ok(());
     }
 

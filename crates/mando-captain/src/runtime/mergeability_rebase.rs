@@ -137,9 +137,14 @@ pub(super) async fn reap_dead_rebase_workers(items: &mut [Task], pool: &sqlx::Sq
 
                     if !should_retry {
                         let cwd = wt.to_string();
-                        let task_id = item.id.to_string();
                         if let Err(e) = crate::io::headless_cc::log_session_completion(
-                            pool, &sid, &cwd, "rebase", &rw, &task_id, status,
+                            pool,
+                            &sid,
+                            &cwd,
+                            "rebase",
+                            &rw,
+                            Some(item.id),
+                            status,
                         )
                         .await
                         {
@@ -242,7 +247,7 @@ mod tests {
             std::path::Path::new("/tmp"),
             "rebase",
             worker_name,
-            "99",
+            Some(99),
             false,
         )
         .await
@@ -352,7 +357,7 @@ mod tests {
             std::path::Path::new("/tmp"),
             "rebase",
             worker_name,
-            "88",
+            Some(88),
             false,
         )
         .await

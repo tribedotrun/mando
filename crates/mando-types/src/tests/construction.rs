@@ -1,4 +1,4 @@
-//! Tests for mando-types.
+//! Construction tests -- every type can be instantiated.
 
 use std::collections::HashMap;
 
@@ -7,10 +7,6 @@ use crate::{
     Action, ActionKind, AskHistoryEntry, BusEvent, ItemStatus, NotifyLevel, ScoutItem, ScoutStatus,
     SessionEntry, Task, TickMode, TickResult, TimelineEvent, TimelineEventType, WorkerContext,
 };
-
-// -----------------------------------------------------------------------
-// Construction tests — every type can be instantiated
-// -----------------------------------------------------------------------
 
 #[test]
 fn construct_task() {
@@ -28,6 +24,7 @@ fn construct_item_status_all_variants() {
         ItemStatus::Queued,
         ItemStatus::InProgress,
         ItemStatus::CaptainReviewing,
+        ItemStatus::CaptainMerging,
         ItemStatus::AwaitingReview,
         ItemStatus::Rework,
         ItemStatus::HandedOff,
@@ -37,7 +34,7 @@ fn construct_item_status_all_variants() {
         ItemStatus::CompletedNoPr,
         ItemStatus::Canceled,
     ];
-    assert_eq!(statuses.len(), 14);
+    assert_eq!(statuses.len(), 15);
 }
 
 #[test]
@@ -176,10 +173,6 @@ fn construct_session_entry() {
     assert_eq!(entry.session_id, "abc-123");
 }
 
-// -----------------------------------------------------------------------
-// ItemStatus — status group membership
-// -----------------------------------------------------------------------
-
 #[test]
 fn item_status_has_15_values() {
     assert_eq!(crate::task::ALL_STATUSES.len(), 15);
@@ -220,10 +213,6 @@ fn status_method_helpers() {
     assert!(!ItemStatus::InProgress.is_finalized());
 }
 
-// -----------------------------------------------------------------------
-// NotifyLevel — integer ordering
-// -----------------------------------------------------------------------
-
 #[test]
 fn notify_level_ordering() {
     assert!(NotifyLevel::Low < NotifyLevel::Normal);
@@ -237,191 +226,4 @@ fn notify_level_values() {
     assert_eq!(NotifyLevel::Normal.value(), 20);
     assert_eq!(NotifyLevel::High.value(), 30);
     assert_eq!(NotifyLevel::Critical.value(), 40);
-}
-
-// -----------------------------------------------------------------------
-// Serde round-trip tests
-// -----------------------------------------------------------------------
-
-#[test]
-fn serde_item_status_kebab_case() {
-    assert_eq!(
-        serde_json::to_string(&ItemStatus::InProgress).unwrap(),
-        "\"in-progress\""
-    );
-    assert_eq!(
-        serde_json::to_string(&ItemStatus::Escalated).unwrap(),
-        "\"escalated\""
-    );
-    assert_eq!(
-        serde_json::to_string(&ItemStatus::AwaitingReview).unwrap(),
-        "\"awaiting-review\""
-    );
-    assert_eq!(
-        serde_json::to_string(&ItemStatus::HandedOff).unwrap(),
-        "\"handed-off\""
-    );
-    assert_eq!(
-        serde_json::to_string(&ItemStatus::CompletedNoPr).unwrap(),
-        "\"completed-no-pr\""
-    );
-    assert_eq!(serde_json::to_string(&ItemStatus::New).unwrap(), "\"new\"");
-    assert_eq!(
-        serde_json::to_string(&ItemStatus::CaptainReviewing).unwrap(),
-        "\"captain-reviewing\""
-    );
-    assert_eq!(
-        serde_json::to_string(&ItemStatus::Errored).unwrap(),
-        "\"errored\""
-    );
-    assert_eq!(
-        serde_json::to_string(&ItemStatus::NeedsClarification).unwrap(),
-        "\"needs-clarification\""
-    );
-    assert_eq!(
-        serde_json::to_string(&ItemStatus::Queued).unwrap(),
-        "\"queued\""
-    );
-}
-
-#[test]
-fn serde_item_status_round_trip() {
-    for status in crate::task::ALL_STATUSES {
-        let json = serde_json::to_string(&status).unwrap();
-        let parsed: ItemStatus = serde_json::from_str(&json).unwrap();
-        assert_eq!(status, parsed);
-    }
-}
-
-#[test]
-fn serde_task_round_trip() {
-    let mut item = Task::new("Test item");
-    item.status = ItemStatus::InProgress;
-    item.project = Some("acme/widgets".into());
-    item.intervention_count = 5;
-
-    let json = serde_json::to_string(&item).unwrap();
-    let parsed: Task = serde_json::from_str(&json).unwrap();
-
-    assert_eq!(parsed.title, "Test item");
-    assert_eq!(parsed.status, ItemStatus::InProgress);
-    assert_eq!(parsed.project, Some("acme/widgets".into()));
-    assert_eq!(parsed.intervention_count, 5);
-    assert!(!parsed.status.is_finalized());
-}
-
-#[test]
-fn serde_bus_event_lowercase() {
-    assert_eq!(
-        serde_json::to_string(&BusEvent::Tasks).unwrap(),
-        "\"tasks\""
-    );
-    assert_eq!(
-        serde_json::to_string(&BusEvent::Scout).unwrap(),
-        "\"scout\""
-    );
-    assert_eq!(
-        serde_json::to_string(&BusEvent::Sessions).unwrap(),
-        "\"sessions\""
-    );
-
-    let parsed: BusEvent = serde_json::from_str("\"status\"").unwrap();
-    assert_eq!(parsed, BusEvent::Status);
-}
-
-#[test]
-fn serde_scout_processed_notification_round_trip() {
-    use crate::events::{NotificationKind, NotificationPayload};
-    let payload = NotificationPayload {
-        message: "📰 Test".into(),
-        level: NotifyLevel::Normal,
-        kind: NotificationKind::ScoutProcessed {
-            scout_id: 42,
-            title: "Test".into(),
-            relevance: 80,
-            quality: 90,
-            source_name: Some("Blog".into()),
-            telegraph_url: Some("https://telegra.ph/t".into()),
-        },
-        task_key: Some("scout:42".into()),
-        reply_markup: None,
-    };
-    let json = serde_json::to_string(&payload).unwrap();
-    let parsed: NotificationPayload = serde_json::from_str(&json).unwrap();
-    assert_eq!(parsed.message, payload.message);
-    assert!(matches!(
-        &parsed.kind,
-        NotificationKind::ScoutProcessed {
-            scout_id: 42,
-            relevance: 80,
-            quality: 90,
-            ..
-        }
-    ));
-}
-
-#[test]
-fn serde_action_kind_kebab() {
-    assert_eq!(
-        serde_json::to_string(&ActionKind::Ship).unwrap(),
-        "\"ship\""
-    );
-    assert_eq!(
-        serde_json::to_string(&ActionKind::CaptainReview).unwrap(),
-        "\"captain-review\""
-    );
-    assert_eq!(
-        serde_json::to_string(&ActionKind::Skip).unwrap(),
-        "\"skip\""
-    );
-}
-
-#[test]
-fn serde_timeline_event_type_round_trip() {
-    let types = [
-        TimelineEventType::Created,
-        TimelineEventType::ClarifyStarted,
-        TimelineEventType::WorkerSpawned,
-        TimelineEventType::AwaitingReview,
-        TimelineEventType::Escalated,
-        TimelineEventType::CaptainReviewStarted,
-        TimelineEventType::CaptainReviewVerdict,
-    ];
-    for t in types {
-        let json = serde_json::to_string(&t).unwrap();
-        let parsed: TimelineEventType = serde_json::from_str(&json).unwrap();
-        assert_eq!(t, parsed);
-    }
-}
-
-#[test]
-fn serde_scout_status_round_trip() {
-    let statuses = [
-        ScoutStatus::Pending,
-        ScoutStatus::Fetched,
-        ScoutStatus::Processed,
-        ScoutStatus::Saved,
-        ScoutStatus::Archived,
-        ScoutStatus::Error,
-    ];
-    for s in statuses {
-        let json = serde_json::to_string(&s).unwrap();
-        let parsed: ScoutStatus = serde_json::from_str(&json).unwrap();
-        assert_eq!(s, parsed);
-    }
-}
-
-#[test]
-fn serde_notify_level_round_trip() {
-    let levels = [
-        NotifyLevel::Low,
-        NotifyLevel::Normal,
-        NotifyLevel::High,
-        NotifyLevel::Critical,
-    ];
-    for l in levels {
-        let json = serde_json::to_string(&l).unwrap();
-        let parsed: NotifyLevel = serde_json::from_str(&json).unwrap();
-        assert_eq!(l, parsed);
-    }
 }

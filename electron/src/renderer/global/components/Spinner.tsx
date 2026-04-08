@@ -8,7 +8,7 @@ interface SpinnerProps {
 
 export function Spinner({
   size = 14,
-  color = 'var(--primary)',
+  color = 'var(--muted-foreground)',
   borderWidth = 2,
 }: SpinnerProps): React.ReactElement {
   return (

@@ -30,7 +30,7 @@ export function DeleteModal({
   const inProgress = items.filter((b) => b.status === 'in-progress');
   const safe = items.filter((b) => b.status !== 'in-progress');
   const canDelete = safe.length > 0;
-  const hasPr = safe.some((b) => b.pr);
+  const hasPr = safe.some((b) => b.pr_number);
 
   const [closePr, setClosePr] = useState(false);
 

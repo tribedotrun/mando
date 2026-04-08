@@ -2,13 +2,12 @@ import React, { useCallback, useRef, useState } from 'react';
 import { Search } from 'lucide-react';
 import { useScoutStore } from '#renderer/domains/scout/stores/scoutStore';
 import { useViewKeyHandler } from '#renderer/global/hooks/useKeyboardShortcuts';
-import { useSelection } from '#renderer/domains/captain';
+import { useSelection, BulkBar, FeedbackModal } from '#renderer/domains/captain';
 import { ScoutTable } from '#renderer/domains/scout/components/ScoutTable';
 import { AddUrlForm } from '#renderer/domains/scout/components/AddUrlForm';
 import { ScoutStatusTabs } from '#renderer/domains/scout/components/ScoutStatusTabs';
 import { ScoutReader } from '#renderer/domains/scout/components/ScoutReader';
 import { ScoutQA } from '#renderer/domains/scout/components/ScoutQA';
-import { BulkBar, FeedbackModal } from '#renderer/domains/captain';
 import {
   bulkUpdateScout,
   bulkDeleteScout,
@@ -21,6 +20,7 @@ import { Input } from '#renderer/components/ui/input';
 
 const USER_SETTABLE = ['pending', 'processed', 'saved', 'archived'];
 const TYPES = ['all', 'github', 'youtube', 'arxiv', 'other'] as const;
+const SEARCH_DEBOUNCE_MS = 300;
 
 export function ScoutPage({ active = true }: { active?: boolean } = {}): React.ReactElement {
   const {
@@ -126,7 +126,7 @@ export function ScoutPage({ active = true }: { active?: boolean } = {}): React.R
       clearTimeout(debounceRef.current);
       debounceRef.current = setTimeout(() => {
         setQuery({ q: value || undefined, page: 0 });
-      }, 300);
+      }, SEARCH_DEBOUNCE_MS);
     },
     [setQuery],
   );
@@ -164,10 +164,13 @@ export function ScoutPage({ active = true }: { active?: boolean } = {}): React.R
     }
   };
 
-  const handleBulkStatus = (status: string) =>
-    runBulkAction((ids) => bulkUpdateScout(ids, { status }));
+  const handleBulkStatus = (status: string) => {
+    void runBulkAction((ids) => bulkUpdateScout(ids, { status }));
+  };
 
-  const handleBulkDelete = () => runBulkAction(bulkDeleteScout);
+  const handleBulkDelete = () => {
+    void runBulkAction(bulkDeleteScout);
+  };
 
   const openReader = (id: number) => {
     setActiveItemId(id);
@@ -268,9 +271,11 @@ export function ScoutPage({ active = true }: { active?: boolean } = {}): React.R
       <ScoutTable
         items={items}
         selectedIds={selectedIds}
-        onToggleSelect={toggleSelect}
-        onSelect={openReader}
-        onRefresh={() => scoutFetch()}
+        callbacks={{
+          onToggleSelect: toggleSelect,
+          onSelect: openReader,
+          onRefresh: () => void scoutFetch(),
+        }}
         focusedIndex={clampedFocusedIndex}
       />
 

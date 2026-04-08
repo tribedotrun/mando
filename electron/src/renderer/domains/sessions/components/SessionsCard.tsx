@@ -92,7 +92,7 @@ export function SessionsCard({ active = true }: { active?: boolean } = {}): Reac
     setTranscript(null);
     setTranscriptError(null);
     setTranscriptLoading(true);
-    fetchTranscript(s.session_id)
+    void fetchTranscript(s.session_id)
       .then((res) => {
         setTranscript(res.markdown);
         setTranscriptLoading(false);
@@ -146,7 +146,7 @@ export function SessionsCard({ active = true }: { active?: boolean } = {}): Reac
           const s = sessions[clampedFocusedIndex];
           if (s) {
             e.preventDefault();
-            copyToClipboard(resumeCmd(s), 'Command copied');
+            void copyToClipboard(resumeCmd(s), 'Command copied');
           }
           break;
         }
@@ -323,7 +323,7 @@ function SessionsList({
               ref={idx === focusedIndex ? scrollRef : undefined}
               key={s.session_id}
               data-focused={idx === focusedIndex || undefined}
-              className={`cursor-pointer ${idx === focusedIndex ? 'outline outline-2 outline-primary -outline-offset-2' : ''}`}
+              className={`cursor-pointer ${idx === focusedIndex ? 'outline outline-2 outline-ring -outline-offset-2' : ''}`}
               onClick={() => openSession(s)}
             >
               {/* Status dot */}

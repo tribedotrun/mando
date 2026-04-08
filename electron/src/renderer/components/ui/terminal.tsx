@@ -3,6 +3,8 @@ import Ansi from 'ansi-to-react';
 import { Check, Copy } from 'lucide-react';
 import { cn } from '#renderer/cn';
 
+const COPY_FEEDBACK_MS = 1500;
+
 interface TerminalProps {
   output: string;
   className?: string;
@@ -12,11 +14,15 @@ export function Terminal({ output, className }: TerminalProps): React.ReactEleme
   const [copied, setCopied] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
-  const handleCopy = async () => {
-    await navigator.clipboard.writeText(output);
-    setCopied(true);
-    clearTimeout(timerRef.current);
-    timerRef.current = setTimeout(() => setCopied(false), 1500);
+  const handleCopy = () => {
+    void navigator.clipboard
+      .writeText(output)
+      .then(() => {
+        setCopied(true);
+        clearTimeout(timerRef.current);
+        timerRef.current = setTimeout(() => setCopied(false), COPY_FEEDBACK_MS);
+      })
+      .catch((err) => console.error('Clipboard write failed', err));
   };
 
   return (
@@ -37,7 +43,7 @@ export function Terminal({ output, className }: TerminalProps): React.ReactEleme
       </div>
 
       {/* Terminal output */}
-      <div className="overflow-x-auto px-3 pb-3 pt-1 font-mono text-[11px] leading-relaxed">
+      <div className="min-w-0 overflow-x-auto px-3 pb-3 pt-1 font-mono text-[11px] leading-relaxed">
         <pre className="whitespace-pre-wrap text-foreground">
           <Ansi>{output}</Ansi>
         </pre>

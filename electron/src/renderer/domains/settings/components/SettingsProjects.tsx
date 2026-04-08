@@ -3,8 +3,10 @@ import { Card, CardContent } from '#renderer/components/ui/card';
 import { Button } from '#renderer/components/ui/button';
 import { Badge } from '#renderer/components/ui/badge';
 import { ProjectEditor } from '#renderer/domains/settings/components/ProjectEditor';
-import { useSettingsStore } from '#renderer/domains/settings/stores/settingsStore';
-import type { ProjectConfig } from '#renderer/domains/settings/stores/settingsStore';
+import {
+  useSettingsStore,
+  type ProjectConfig,
+} from '#renderer/domains/settings/stores/settingsStore';
 import { buildUrl } from '#renderer/domains/settings/hooks/useApi';
 
 const EMPTY_PROJECTS: Record<string, ProjectConfig> = {};
@@ -39,7 +41,7 @@ export function SettingsProjects(): React.ReactElement {
                 existingProjects={projects}
                 onSave={(k, r) => {
                   updateProject(k, r);
-                  save();
+                  void save();
                   setEditing(null);
                 }}
                 onCancel={() => setEditing(null)}
@@ -106,7 +108,7 @@ export function SettingsProjects(): React.ReactElement {
                       size="xs"
                       onClick={() => {
                         removeProject(pathKey);
-                        save();
+                        void save();
                       }}
                     >
                       Remove

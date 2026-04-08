@@ -163,7 +163,10 @@ pub(crate) async fn apply_merge_result(
         }
         _ => {
             // escalate or unknown → Escalated (from CaptainMerging verdict — captain-managed)
-            let pr_ref = item.pr.as_deref().unwrap_or("unknown");
+            let pr_ref = item
+                .pr_number
+                .map(mando_types::task::pr_label)
+                .unwrap_or_else(|| "unknown".to_string());
             let has_conflicts = item.rebase_worker.as_deref().is_some_and(|w| w == "failed");
             let fail_count = item.merge_fail_count;
             let report = format!(
@@ -242,7 +245,10 @@ pub(crate) async fn handle_merge_error(
 
     if fail_count >= max_retries {
         // Build enriched report with actionable context.
-        let pr_ref = item.pr.as_deref().unwrap_or("unknown");
+        let pr_ref = item
+            .pr_number
+            .map(mando_types::task::pr_label)
+            .unwrap_or_else(|| "unknown".to_string());
         let has_conflicts = item.rebase_worker.as_deref().is_some_and(|w| w == "failed");
         let report = format!(
             "## Merge failure report\n\

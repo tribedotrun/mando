@@ -215,6 +215,8 @@ function removeGlobals() {
   delete (window as any).__devInspectorCopy;
 }
 
+const TOAST_DISPLAY_MS = 2000;
+
 export function DevInspector({
   active,
   onHover,
@@ -226,6 +228,7 @@ export function DevInspector({
   const labelRef = useRef<HTMLDivElement>(null);
   const hoveredRef = useRef<HTMLElement | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  const [labelText, setLabelText] = useState<string | null>(null);
 
   const activeRef = useRef(active);
   activeRef.current = active;
@@ -258,7 +261,7 @@ export function DevInspector({
           labelRef.current.style.display = 'block';
           labelRef.current.style.top = `${rect.top - 22 < 0 ? 0 : rect.top - 22}px`;
           labelRef.current.style.left = `${rect.left}px`;
-          labelRef.current.textContent = owner.name;
+          setLabelText(owner.name);
           onHoverRef.current(owner.name);
           return;
         }
@@ -282,7 +285,7 @@ export function DevInspector({
     const ok = await copyToClipboard(JSON.stringify(info));
     if (ok) {
       setToast(`${info.component}${info.context.title ? ' — ' + info.context.title : ''}`);
-      setTimeout(() => setToast(null), 2000);
+      setTimeout(() => setToast(null), TOAST_DISPLAY_MS);
     }
   };
 
@@ -305,7 +308,7 @@ export function DevInspector({
           position: 'fixed',
           display: 'none',
           pointerEvents: 'none',
-          border: '2px solid var(--primary)',
+          border: '2px solid var(--ring)',
           background: 'var(--accent)',
           borderRadius: 4,
           zIndex: 99998,
@@ -318,7 +321,7 @@ export function DevInspector({
           position: 'fixed',
           display: 'none',
           pointerEvents: 'none',
-          background: 'var(--primary)',
+          background: 'var(--foreground)',
           color: 'var(--background)',
           fontSize: 11,
           fontFamily: 'monospace',
@@ -327,7 +330,9 @@ export function DevInspector({
           zIndex: 99999,
           whiteSpace: 'nowrap',
         }}
-      />
+      >
+        {labelText}
+      </div>
       {toast && (
         <div
           className="flex items-center gap-2"

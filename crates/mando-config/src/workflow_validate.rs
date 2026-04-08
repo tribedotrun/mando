@@ -17,6 +17,7 @@ const REQUIRED_CAPTAIN_PROMPTS: &[&str] = &[
     "reopen_resume",
     "review_reopen_message",
     "captain_merge",
+    "todo_parse",
 ];
 
 /// Required nudge keys for captain workflow.

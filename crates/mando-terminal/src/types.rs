@@ -46,6 +46,9 @@ pub struct CreateRequest {
     pub resume_session_id: Option<String>,
     #[serde(default)]
     pub size: Option<TerminalSize>,
+    /// Extra environment variables injected into the PTY process.
+    #[serde(default)]
+    pub extra_env: std::collections::HashMap<String, String>,
 }
 
 #[derive(Debug, Clone, Serialize)]

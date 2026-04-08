@@ -13,6 +13,8 @@ pub mod task;
 pub mod task_status;
 pub mod task_update;
 pub mod timeline;
+pub mod workbench;
+pub mod workbench_layout;
 
 // Re-exports for convenience.
 pub use ask_history::AskHistoryEntry;
@@ -24,8 +26,13 @@ pub use rebase_state::{RebaseState, RebaseStatus};
 pub use scout::{ScoutItem, ScoutStatus};
 pub use session::{SessionEntry, SessionStatus};
 pub use session_ids::SessionIds;
-pub use task::{ItemStatus, ReviewTrigger, Task, TaskRouting, TaskUpdateError};
+pub use task::{
+    parse_pr_number, pr_label, pr_url, ItemStatus, ReviewTrigger, Task, TaskRouting,
+    TaskUpdateError,
+};
 pub use timeline::{TimelineEvent, TimelineEventType};
+pub use workbench::Workbench;
+pub use workbench_layout::WorkbenchLayout;
 
 /// Parse a string item/task ID to i64 with a caller-supplied label used in
 /// the error message. Shared by CLI commands and the Telegram bot so both

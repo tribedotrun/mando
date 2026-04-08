@@ -11,6 +11,8 @@ import { useMountEffect } from '#renderer/global/hooks/useMountEffect';
 import { toast } from 'sonner';
 import { useSettingsStore } from '#renderer/domains/settings/stores/settingsStore';
 
+const STATUS_CLEAR_MS = 4000;
+
 const CHANNELS = ['stable', 'beta'] as const;
 
 function SettingsRow({ label, children }: { label: string; children: React.ReactNode }) {
@@ -34,6 +36,8 @@ export function SettingsGeneral(): React.ReactElement {
   const [channelOverride, setChannelOverride] = useState<string | null>(null);
   const [notificationsEnabled, setNotifState] = useState(getNotificationsEnabled);
   const [updateCheckStatus, setUpdateCheckStatus] = useState<UpdateCheckStatus>('idle');
+  const [savingChannel, setSavingChannel] = useState(false);
+  const [savingLoginItem, setSavingLoginItem] = useState(false);
   const clearTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const openAtLogin = useSettingsStore((s) => s.config.ui?.openAtLogin ?? false);
   const update = useSettingsStore((s) => s.update);
@@ -61,11 +65,11 @@ export function SettingsGeneral(): React.ReactElement {
     });
     window.mandoAPI.updates.onUpdateNoUpdate(() => {
       setUpdateCheckStatus('up-to-date');
-      clearTimerRef.current = setTimeout(() => setUpdateCheckStatus('idle'), 4000);
+      clearTimerRef.current = setTimeout(() => setUpdateCheckStatus('idle'), STATUS_CLEAR_MS);
     });
     window.mandoAPI.updates.onUpdateCheckError(() => {
       setUpdateCheckStatus('error');
-      clearTimerRef.current = setTimeout(() => setUpdateCheckStatus('idle'), 4000);
+      clearTimerRef.current = setTimeout(() => setUpdateCheckStatus('idle'), STATUS_CLEAR_MS);
     });
     window.mandoAPI.updates.onUpdateCheckDone(({ found }) => {
       if (found) setUpdateCheckStatus('update-available');
@@ -79,15 +83,17 @@ export function SettingsGeneral(): React.ReactElement {
   const appVersion = systemInfo?.appVersion ?? '';
   const updateChannel = channelOverride ?? systemInfo?.channel ?? 'stable';
 
-  const handleChannelChange = async (channel: string) => {
+  const handleChannelChange = (channel: string) => {
+    setSavingChannel(true);
     setChannelOverride(channel);
-    try {
-      await window.mandoAPI.updates.setChannel(channel);
-    } catch (err) {
-      log.error('[SettingsGeneral] channel change failed:', err);
-      setChannelOverride(null);
-      toast.error('Failed to change update channel');
-    }
+    void window.mandoAPI.updates
+      .setChannel(channel)
+      .catch((err: unknown) => {
+        log.error('[SettingsGeneral] channel change failed:', err);
+        setChannelOverride(null);
+        toast.error('Failed to change update channel');
+      })
+      .finally(() => setSavingChannel(false));
   };
 
   const toggleNotifications = () => {
@@ -96,23 +102,29 @@ export function SettingsGeneral(): React.ReactElement {
     setNotifState(next);
   };
 
-  const toggleLoginItem = async () => {
+  const toggleLoginItem = () => {
+    setSavingLoginItem(true);
     const next = !openAtLogin;
     update({ ui: { ...(useSettingsStore.getState().config.ui || {}), openAtLogin: next } });
-    const result = await save();
-    if (!result.ok) {
-      log.warn('[SettingsGeneral] login-item save failed:', result.error);
-      update({ ui: { ...(useSettingsStore.getState().config.ui || {}), openAtLogin: !next } });
-      toast.error(result.error ?? 'Failed to save login setting');
-      return;
-    }
-    try {
-      await window.mandoAPI.setLoginItem(next);
-    } catch (err) {
-      log.error('[SettingsGeneral] login item IPC failed:', err);
-      update({ ui: { ...(useSettingsStore.getState().config.ui || {}), openAtLogin: !next } });
-      toast.error('Failed to change login setting');
-    }
+    void (async () => {
+      try {
+        const result = await save();
+        if (!result.ok) {
+          log.warn('[SettingsGeneral] login-item save failed:', result.error);
+          update({ ui: { ...(useSettingsStore.getState().config.ui || {}), openAtLogin: !next } });
+          toast.error(result.error ?? 'Failed to save login setting');
+          return;
+        }
+        await window.mandoAPI.setLoginItem(next);
+      } catch (err) {
+        log.error('[SettingsGeneral] login item IPC failed:', err);
+        update({ ui: { ...(useSettingsStore.getState().config.ui || {}), openAtLogin: !next } });
+        void save();
+        toast.error('Failed to change login setting');
+      } finally {
+        setSavingLoginItem(false);
+      }
+    })();
   };
 
   return (
@@ -127,14 +139,22 @@ export function SettingsGeneral(): React.ReactElement {
             onCheckError={() => setUpdateCheckStatus('error')}
             onInstallError={() => {
               setUpdateCheckStatus('install-error');
-              clearTimerRef.current = setTimeout(() => setUpdateCheckStatus('idle'), 4000);
+              clearTimerRef.current = setTimeout(
+                () => setUpdateCheckStatus('idle'),
+                STATUS_CLEAR_MS,
+              );
             }}
           />
         </span>
       </SettingsRow>
 
       <SettingsRow label="Update channel">
-        <SegmentedControl options={CHANNELS} value={updateChannel} onChange={handleChannelChange} />
+        <SegmentedControl
+          options={CHANNELS}
+          value={updateChannel}
+          onChange={handleChannelChange}
+          disabled={savingChannel}
+        />
       </SettingsRow>
 
       <SettingsRow label="Open app at login">
@@ -142,6 +162,7 @@ export function SettingsGeneral(): React.ReactElement {
           data-testid="start-at-login-toggle"
           checked={openAtLogin}
           onCheckedChange={toggleLoginItem}
+          disabled={savingLoginItem}
         />
       </SettingsRow>
 
@@ -189,7 +210,7 @@ function UpdateCheckButton({
             })
             .finally(() => setInstalling(false));
         }}
-        className={`text-caption text-primary ${installing ? 'opacity-60' : ''}`}
+        className={`text-caption text-muted-foreground ${installing ? 'opacity-60' : ''}`}
       >
         {installing ? 'Installing...' : 'Update ready \u2014 install'}
       </Button>
@@ -219,10 +240,12 @@ function SegmentedControl({
   options,
   value,
   onChange,
+  disabled,
 }: {
   options: readonly string[];
   value: string;
   onChange: (v: string) => void;
+  disabled?: boolean;
 }) {
   return (
     <div data-testid="update-channel-select" className="flex overflow-hidden rounded-md bg-muted">
@@ -233,6 +256,7 @@ function SegmentedControl({
             key={opt}
             variant="ghost"
             size="sm"
+            disabled={disabled}
             onClick={() => onChange(opt)}
             className={`h-auto rounded-none px-4 py-1 text-[13px] transition-colors ${
               active

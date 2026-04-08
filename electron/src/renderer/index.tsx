@@ -1,7 +1,8 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
+import { RouterProvider } from '@tanstack/react-router';
 import { DataProvider } from '#renderer/app/DataProvider';
-import { App } from '#renderer/app/App';
+import { router } from '#renderer/app/router';
 import { ErrorBoundary } from '#renderer/global/components/ErrorBoundary';
 import { Toaster } from '#renderer/components/ui/sonner';
 import { TooltipProvider } from '#renderer/components/ui/tooltip';
@@ -17,7 +18,7 @@ root.render(
       <TooltipProvider>
         <Toaster />
         <DataProvider>
-          <App />
+          <RouterProvider router={router} />
         </DataProvider>
       </TooltipProvider>
     </ErrorBoundary>

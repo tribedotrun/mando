@@ -20,13 +20,14 @@ export function Commit({
 }: CommitProps): React.ReactElement {
   const shortHash = hash.slice(0, 7);
 
-  const copyHash = async () => {
-    try {
-      await navigator.clipboard.writeText(hash);
-      toast.success('Copied SHA');
-    } catch {
-      toast.error('Failed to copy');
-    }
+  const copyHash = () => {
+    void navigator.clipboard
+      .writeText(hash)
+      .then(
+        () => toast.success('Copied SHA'),
+        () => toast.error('Failed to copy'),
+      )
+      .catch((err) => console.error('Clipboard write failed', err));
   };
 
   return (
@@ -35,7 +36,7 @@ export function Commit({
         type="button"
         onClick={copyHash}
         title="Copy full SHA"
-        className="rounded bg-muted px-1 py-0.5 font-mono text-[11px] text-primary transition-colors hover:bg-muted/80 active:bg-muted/60"
+        className="rounded bg-muted px-1 py-0.5 font-mono text-[11px] text-muted-foreground transition-colors hover:bg-muted/80 active:bg-muted/60"
       >
         {shortHash}
       </button>
