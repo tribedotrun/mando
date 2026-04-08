@@ -52,7 +52,19 @@ const config: ForgeConfig = {
         },
   },
   makers: [
-    new MakerDMG({ name: appName, icon: './assets/icon.icns' }),
+    new MakerDMG({
+      name: appName,
+      icon: './assets/icon.icns',
+      background: './assets/dmg-background.png',
+      'icon-size': 80,
+      contents: [
+        { x: 180, y: 170, type: 'file', path: '' },
+        { x: 480, y: 170, type: 'link', path: '/Applications' },
+      ],
+      additionalDMGOptions: {
+        window: { size: { width: 660, height: 400 }, position: { x: 200, y: 120 } },
+      },
+    }),
     new MakerZIP({}, ['darwin']),
   ],
   publishers: [
