@@ -55,7 +55,6 @@ const config: ForgeConfig = {
     new MakerDMG({
       name: appName,
       icon: './assets/icon.icns',
-      background: './assets/dmg-background.png',
       'icon-size': 80,
       contents: [
         { x: 180, y: 170, type: 'file', path: '' },
