@@ -17,6 +17,8 @@ pub enum BusEvent {
     Sessions,
     #[serde(rename = "notification")]
     Notification,
+    #[serde(rename = "workbenches")]
+    Workbenches,
     #[serde(rename = "config")]
     Config,
 }

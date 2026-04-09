@@ -5,15 +5,16 @@ import { TerminalPage } from '#renderer/domains/terminal/components/TerminalPage
 import { WorkspacePreparing } from '#renderer/domains/terminal/components/WorkspacePreparing';
 import { ErrorBoundary } from '#renderer/global/components/ErrorBoundary';
 import { useMountEffect } from '#renderer/global/hooks/useMountEffect';
-import { toast } from 'sonner';
+import log from '#renderer/logger';
 
 export function TerminalPageRoute(): React.ReactElement {
   const search = useRouterState({
     select: (s) => s.location.search as { project: string; cwd?: string; resume?: string },
   });
 
-  // Key on project+resume only. Adding cwd after worktree creation must NOT remount.
-  const key = `${search.project}:${search.resume ?? ''}`;
+  // Key on the full terminal target so switching worktrees in the same project
+  // remounts onto the correct session set, including restored placeholders.
+  const key = `${search.project}:${search.cwd ?? ''}:${search.resume ?? ''}`;
   return <TerminalPageInner key={key} search={search} />;
 }
 
@@ -26,9 +27,9 @@ function TerminalPageInner({
   const { terminalPage, setTerminalPage, openNewTerminal, cancelPreparing } = useWorktreeTerminal();
 
   useMountEffect(() => {
+    log.info('[terminal-route] mount', { project: search.project, cwd: search.cwd });
     if (!search.project) {
-      toast.error('No project selected');
-      void navigate({ to: '/captain', replace: true });
+      log.warn('[terminal-route] project empty after beforeLoad guard — race condition');
       return;
     }
     if (search.cwd) {

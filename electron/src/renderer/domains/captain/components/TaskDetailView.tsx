@@ -18,14 +18,17 @@ import {
   type TimelineEvent,
   type MandoConfig,
 } from '#renderer/types';
-import { prLabel, prHref, extractClarifierQuestions } from '#renderer/utils';
+import { extractClarifierQuestions } from '#renderer/utils';
 import {
   TranscriptSidebar,
   SessionDetailPanel,
   buildSessionsFromTimeline,
 } from '#renderer/domains/sessions';
 import { TaskActionBar } from '#renderer/domains/captain/components/TaskActionBar';
-import { StatusCard } from '#renderer/domains/captain/components/StatusCard';
+import {
+  EscalatedReportTab,
+  ClarificationTab,
+} from '#renderer/domains/captain/components/StatusCard';
 import {
   ActiveQAView,
   QAHistoryTab,
@@ -49,24 +52,30 @@ import {
 } from '#renderer/components/ui/tooltip';
 import { queryKeys } from '#renderer/queryKeys';
 
-type DetailTab = 'timeline' | 'pr' | 'sessions' | 'info' | 'qa' | 'terminal';
+type DetailTab =
+  | 'escalated'
+  | 'respond'
+  | 'timeline'
+  | 'pr'
+  | 'sessions'
+  | 'info'
+  | 'qa'
+  | 'terminal';
 const REFRESH_INDICATOR_MS = 1500;
 
 interface Props {
   item: TaskItem;
   onBack: () => void;
-  onMerge?: () => void;
   onOpenTerminal?: (opts: { project: string; cwd: string; resumeSessionId?: string }) => void;
 }
 
-export function TaskDetailView({
-  item,
-  onBack,
-  onMerge,
-  onOpenTerminal,
-}: Props): React.ReactElement {
+export function TaskDetailView({ item, onBack, onOpenTerminal }: Props): React.ReactElement {
   const qc = useQueryClient();
-  const [activeTab, setActiveTab] = useState<DetailTab>('pr');
+  const [activeTab, setActiveTab] = useState<DetailTab>(() => {
+    if (item.status === 'escalated') return 'escalated';
+    if (item.status === 'needs-clarification') return 'respond';
+    return 'pr';
+  });
   const [prRefreshing, setPrRefreshing] = useState(false);
   const [transcriptSession, setTranscriptSession] = useState<{
     entry: SessionEntry;
@@ -300,16 +309,38 @@ export function TaskDetailView({
     [openTerminalPage],
   );
 
-  const tabs: { key: DetailTab; label: string }[] = [
-    { key: 'pr', label: 'PR' },
-    { key: 'timeline', label: 'Timeline' },
-    { key: 'sessions', label: 'Sessions' },
-    { key: 'info', label: 'Info' },
-    { key: 'qa', label: 'Q&A' },
-    { key: 'terminal', label: 'Terminal' },
-  ];
+  // Dynamic action tabs that appear at the front when status demands it.
+  const showEscalated = item.status === 'escalated';
+  const showRespond =
+    item.status === 'needs-clarification' &&
+    clarifierQuestions != null &&
+    clarifierQuestions.length > 0;
 
-  const showMerge = onMerge && item.pr_number && item.project && item.status === 'awaiting-review';
+  const tabs = useMemo(() => {
+    const base: { key: DetailTab; label: string; accent?: boolean }[] = [
+      { key: 'pr', label: 'PR' },
+      { key: 'timeline', label: 'Timeline' },
+      { key: 'sessions', label: 'Sessions' },
+      { key: 'info', label: 'Info' },
+      { key: 'qa', label: 'Q&A' },
+      { key: 'terminal', label: 'Terminal' },
+    ];
+    if (showRespond) base.unshift({ key: 'respond', label: 'Respond', accent: true });
+    if (showEscalated) base.unshift({ key: 'escalated', label: 'Report', accent: true });
+    return base;
+  }, [showEscalated, showRespond]);
+
+  // Auto-select action tabs when status transitions (not on mount -- useState init handles that).
+  const prevStatus = useRef(item.status);
+  if (item.status !== prevStatus.current) {
+    prevStatus.current = item.status;
+    if (showEscalated) setActiveTab('escalated');
+    else if (showRespond) setActiveTab('respond');
+  }
+
+  // If the active tab disappears (status changed), fall back to PR.
+  const validKeys = tabs.map((t) => t.key);
+  const effectiveTab = validKeys.includes(activeTab) ? activeTab : 'pr';
 
   return (
     <div className="flex h-full flex-col">
@@ -317,46 +348,6 @@ export function TaskDetailView({
       <div className="flex min-h-0 flex-1">
         {/* Left column, entire column scrolls together */}
         <div className="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden">
-          {/* Header */}
-          <div className="pb-3">
-            {/* Title row and actions inline */}
-            <div className="mb-1 flex items-start gap-3">
-              <div className="min-w-0 flex-1">
-                <h1 className="break-words text-heading font-semibold leading-snug text-foreground">
-                  {item.title}
-                </h1>
-                {/* Metadata */}
-                <div className="mt-0.5 flex flex-wrap items-center gap-2">
-                  {item.pr_number && (item.github_repo || item.project) && (
-                    <a
-                      href={prHref(item.pr_number, (item.github_repo ?? item.project)!)}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-caption text-muted-foreground no-underline hover:underline"
-                    >
-                      {prLabel(item.pr_number)}
-                    </a>
-                  )}
-                  {item.no_pr && (
-                    <span className="text-caption text-muted-foreground">Findings only</span>
-                  )}
-                </div>
-              </div>
-              {showMerge && (
-                <div className="flex shrink-0 items-center gap-2">
-                  <Button onClick={onMerge} size="sm">
-                    Merge
-                  </Button>
-                </div>
-              )}
-            </div>
-
-            {/* Status card */}
-            <div className="mt-3 ml-6">
-              <StatusCard item={item} sessions={sessions} clarifierQuestions={clarifierQuestions} />
-            </div>
-          </div>
-
           {/* Active Q&A mode, replaces tabs */}
           {activeQA ? (
             <div className="flex min-h-0 flex-1 flex-col">
@@ -370,7 +361,7 @@ export function TaskDetailView({
             </div>
           ) : (
             <Tabs
-              value={activeTab}
+              value={effectiveTab}
               onValueChange={(v) => {
                 if (v === 'terminal') {
                   openTerminalPage();
@@ -378,7 +369,7 @@ export function TaskDetailView({
                   setActiveTab(v as DetailTab);
                 }
               }}
-              className="ml-6 gap-0"
+              className="gap-0"
             >
               <div className="sticky top-0 z-10 flex items-center justify-between bg-background">
                 <TabsList variant="line" className="h-auto gap-0">
@@ -386,13 +377,18 @@ export function TaskDetailView({
                     <TabsTrigger
                       key={tab.key}
                       value={tab.key}
-                      className="px-3 py-1.5 text-caption font-medium"
+                      className={
+                        tab.accent
+                          ? 'px-3 py-1.5 text-caption font-medium text-[var(--needs-human)]'
+                          : 'px-3 py-1.5 text-caption font-medium'
+                      }
                     >
+                      {tab.accent && <span className="mr-1">!</span>}
                       {tab.label}
                     </TabsTrigger>
                   ))}
                 </TabsList>
-                {activeTab === 'pr' && item.pr_number && (
+                {effectiveTab === 'pr' && item.pr_number && (
                   <TooltipProvider delayDuration={300}>
                     <Tooltip>
                       <TooltipTrigger asChild>
@@ -421,14 +417,20 @@ export function TaskDetailView({
 
               {/* Tab content */}
               <div className="break-words pr-2 pt-4">
-                {activeTab === 'timeline' && (
+                {effectiveTab === 'escalated' && <EscalatedReportTab item={item} />}
+                {effectiveTab === 'respond' && clarifierQuestions && (
+                  <ClarificationTab taskId={item.id} questions={clarifierQuestions} />
+                )}
+                {effectiveTab === 'timeline' && (
                   <TimelineTab
                     events={events}
                     onTranscriptClick={(...args) => void handleTranscriptClick(...args)}
                   />
                 )}
-                {activeTab === 'pr' && <PrTab item={item} prBody={prBody} prPending={prPending} />}
-                {activeTab === 'sessions' && (
+                {effectiveTab === 'pr' && (
+                  <PrTab item={item} prBody={prBody} prPending={prPending} />
+                )}
+                {effectiveTab === 'sessions' && (
                   <SessionsTab
                     sessions={sessions}
                     onSessionClick={handleSessionClick}
@@ -436,8 +438,8 @@ export function TaskDetailView({
                     taskId={item.id}
                   />
                 )}
-                {activeTab === 'info' && <InfoTab item={item} />}
-                {activeTab === 'qa' && <QAHistoryTab item={item} />}
+                {effectiveTab === 'info' && <InfoTab item={item} />}
+                {effectiveTab === 'qa' && <QAHistoryTab item={item} />}
               </div>
             </Tabs>
           )}

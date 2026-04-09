@@ -120,7 +120,8 @@ async fn reconcile_worker_timeouts(pool: &sqlx::SqlitePool) {
 /// Backfill cost/duration for sessions that were interrupted before
 /// `log_cc_result` ran. Reads the stream `.meta.json` sidecar for each
 /// session with NULL cost and applies any cost/duration found there.
-/// Uses set-if-null semantics so repeated startups never double-count.
+/// The `cost_usd IS NULL` filter in `list_sessions_missing_cost` ensures
+/// each session is reconciled at most once per startup.
 async fn reconcile_session_costs(pool: &sqlx::SqlitePool) {
     let sessions = match mando_db::queries::sessions::list_sessions_missing_cost(pool).await {
         Ok(rows) => rows,
@@ -181,6 +182,7 @@ async fn reconcile_session_costs(pool: &sqlx::SqlitePool) {
             mando_types::SessionStatus::Stopped,
             cost,
             duration_ms,
+            None,
         )
         .await
         {

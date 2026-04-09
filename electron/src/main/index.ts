@@ -30,6 +30,7 @@ import {
 } from '#main/daemon';
 import { createTrayIcon, createDockIcon } from '#main/icons';
 import { registerNotificationHandlers } from '#main/notifications';
+import { registerTerminalBridgeHandlers } from '#main/terminal-bridge';
 import { setupAutoUpdate, applyPendingUpdateIfAny, cleanupAutoUpdate } from '#main/updater';
 import { getAppInfo } from '#main/app-info';
 import { startRendererServer } from '#main/renderer-server';
@@ -265,6 +266,7 @@ registerSetupValidationHandlers();
 
 // Config read/write, onboarding setup-complete, launchd — see config-handlers.ts
 registerConfigHandlers();
+registerTerminalBridgeHandlers();
 
 // ---------------------------------------------------------------------------
 // App lifecycle

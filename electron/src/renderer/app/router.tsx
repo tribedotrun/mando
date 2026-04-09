@@ -13,6 +13,7 @@ import { ScoutPage } from '#renderer/app/routes/ScoutPage';
 import { SessionsPage } from '#renderer/app/routes/SessionsPage';
 import { TerminalPageRoute } from '#renderer/app/routes/TerminalPageRoute';
 import { SettingsPageRoute } from '#renderer/app/routes/SettingsPageRoute';
+import log from '#renderer/logger';
 
 // ---------------------------------------------------------------------------
 // Route tree
@@ -67,6 +68,12 @@ const terminalRoute = createRoute({
     cwd: z.string().optional().catch(undefined),
     resume: z.string().optional().catch(undefined),
   }),
+  beforeLoad: ({ search, navigate }) => {
+    if (!(search as { project: string }).project) {
+      log.warn('[terminal-route] beforeLoad: empty project, redirecting', search);
+      throw navigate({ to: '/captain', replace: true });
+    }
+  },
   component: TerminalPageRoute,
 });
 

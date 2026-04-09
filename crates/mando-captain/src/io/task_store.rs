@@ -192,6 +192,7 @@ impl TaskStore {
                     .flatten(),
                 scout_item_id: None,
                 worker_name: (!entry.worker_name.is_empty()).then_some(entry.worker_name.as_str()),
+                resumed_at: None,
             },
         )
         .await

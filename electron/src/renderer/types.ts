@@ -150,6 +150,7 @@ export interface SessionEntry {
   scout_item_id?: number | null;
   task_id: string | null;
   worker_name: string | null;
+  resumed_at?: string | null;
   status: SessionStatus;
   task_title?: string;
   scout_item_title?: string;

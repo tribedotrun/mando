@@ -434,7 +434,7 @@ where
         task_store: task_store_arc,
         db,
         qa_session_mgr: mando_scout::runtime::qa::default_session_manager(),
-        terminal_host: Arc::new(mando_terminal::TerminalHost::new()),
+        terminal_host: Arc::new(mando_terminal::TerminalHost::new(mando_config::data_dir())),
         start_time: std::time::Instant::now(),
         listen_port: port,
         dev_mode: false,

@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 pub type SessionId = String;
@@ -19,6 +20,14 @@ impl Default for TerminalSize {
     fn default() -> Self {
         Self { rows: 24, cols: 80 }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SessionState {
+    Live,
+    Restored,
+    Exited,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -46,9 +55,14 @@ pub struct CreateRequest {
     pub resume_session_id: Option<String>,
     #[serde(default)]
     pub size: Option<TerminalSize>,
-    /// Extra environment variables injected into the PTY process.
+    /// Extra environment variables from config.json env.
     #[serde(default)]
-    pub extra_env: std::collections::HashMap<String, String>,
+    pub config_env: HashMap<String, String>,
+    /// Explicit terminal-scoped environment variables injected last.
+    #[serde(default)]
+    pub terminal_env: HashMap<String, String>,
+    #[serde(default)]
+    pub terminal_id: Option<String>,
     /// Extra CLI arguments parsed from config (shell-split).
     #[serde(default)]
     pub extra_args: Vec<String>,
@@ -57,10 +71,18 @@ pub struct CreateRequest {
 #[derive(Debug, Clone, Serialize)]
 pub struct SessionInfo {
     pub id: SessionId,
+    pub rev: u64,
     pub project: String,
     pub cwd: PathBuf,
     pub agent: Agent,
     pub running: bool,
     pub exit_code: Option<u32>,
-    pub rev: u64,
+    pub state: SessionState,
+    pub restored: bool,
+    #[serde(rename = "createdAt")]
+    pub created_at: String,
+    #[serde(rename = "endedAt")]
+    pub ended_at: Option<String>,
+    #[serde(rename = "terminalId")]
+    pub terminal_id: Option<String>,
 }

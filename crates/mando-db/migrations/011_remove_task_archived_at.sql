@@ -1,5 +1,8 @@
 -- Remove archived_at from tasks. Archive is solely a workbench concern.
 -- Migrate any task-level archived_at to the parent workbench first.
+-- Disable FK enforcement during table rebuild (timeline_events, ask_history
+-- reference tasks; DROP TABLE would fail with FK enabled).
+PRAGMA foreign_keys = OFF;
 
 UPDATE workbenches
 SET archived_at = (
@@ -89,3 +92,6 @@ CREATE INDEX IF NOT EXISTS idx_tasks_status     ON tasks(status);
 CREATE INDEX IF NOT EXISTS idx_tasks_worker     ON tasks(worker);
 CREATE INDEX IF NOT EXISTS idx_tasks_source     ON tasks(source);
 CREATE INDEX IF NOT EXISTS idx_tasks_project_id ON tasks(project_id);
+
+-- Re-enable FK enforcement.
+PRAGMA foreign_keys = ON;

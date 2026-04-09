@@ -7,6 +7,7 @@ import {
   ChevronRight,
   Archive,
   Terminal,
+  Pin,
 } from 'lucide-react';
 import { buildUrl } from '#renderer/global/hooks/useApi';
 import {
@@ -24,7 +25,7 @@ import {
 import { Button } from '#renderer/components/ui/button';
 import { Input } from '#renderer/components/ui/input';
 import { Checkbox } from '#renderer/components/ui/checkbox';
-import type { TaskItem } from '#renderer/types';
+import { FINALIZED_STATUSES, type TaskItem } from '#renderer/types';
 import { compactRelativeTime } from '#renderer/utils';
 import { StatusIcon } from '#renderer/global/components/StatusIndicator';
 
@@ -47,6 +48,7 @@ interface SidebarProjectItemProps {
   activeWorktreeCwd?: string | null;
   onOpenWorktree?: (worktree: { project: string; cwd: string }) => void;
   onArchiveWorkbench?: (id: number) => void;
+  onPinWorkbench?: (id: number) => void;
 }
 
 export function SidebarProjectItem({
@@ -62,6 +64,7 @@ export function SidebarProjectItem({
   activeWorktreeCwd,
   onOpenWorktree,
   onArchiveWorkbench,
+  onPinWorkbench,
 }: SidebarProjectItemProps): React.ReactElement {
   const [menuOpen, setMenuOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
@@ -286,25 +289,71 @@ export function SidebarProjectItem({
 
       {/* Expanded children: tasks + worktrees */}
       {expanded && (tasks.length > 0 || worktrees.length > 0) && (
-        <div className="ml-4 flex flex-col gap-0.5 pb-1 pt-0.5">
-          {tasks.map((task) => (
-            <button
-              key={task.id}
-              onClick={() => onOpenTask?.(task.id)}
-              className="flex w-full items-center gap-2 rounded px-2 py-1 text-left text-[12px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-              style={{ background: 'none', border: 'none', cursor: 'pointer' }}
-            >
-              <StatusIcon status={task.status} />
-              <span className="min-w-0 flex-1 truncate">{task.title}</span>
-              {(task.last_activity_at || task.created_at) && (
-                <span className="shrink-0 text-[11px] text-text-3">
-                  {compactRelativeTime((task.last_activity_at || task.created_at)!)}
+        <div className="flex flex-col gap-0.5 pb-1 pt-0.5">
+          {tasks.map((task) => {
+            const canArchive =
+              task.workbench_id != null &&
+              onArchiveWorkbench &&
+              FINALIZED_STATUSES.includes(task.status);
+            const canPin = task.workbench_id != null && onPinWorkbench;
+            return (
+              <button
+                key={task.id}
+                onClick={() => onOpenTask?.(task.id)}
+                className="group flex w-full items-center gap-2 rounded px-2 py-1 text-left text-[12px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                style={{ background: 'none', border: 'none', cursor: 'pointer' }}
+              >
+                <span className="relative shrink-0 translate-y-px">
+                  <span className={canPin ? 'group-hover:invisible' : ''}>
+                    <StatusIcon status={task.status} />
+                  </span>
+                  {canPin && (
+                    <span
+                      role="button"
+                      tabIndex={-1}
+                      title="Pin workbench"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onPinWorkbench!(task.workbench_id!);
+                      }}
+                      className="absolute inset-0 hidden items-center justify-center text-text-3 transition-colors hover:text-muted-foreground group-hover:flex"
+                      style={{ cursor: 'pointer' }}
+                    >
+                      <Pin size={12} />
+                    </span>
+                  )}
                 </span>
-              )}
-            </button>
-          ))}
+                <span className="min-w-0 flex-1 truncate">{task.title}</span>
+                <span className="flex shrink-0 items-center gap-1">
+                  {(task.last_activity_at || task.created_at) && (
+                    <span
+                      className={`text-[11px] text-text-3 ${canArchive ? 'group-hover:hidden' : ''}`}
+                    >
+                      {compactRelativeTime((task.last_activity_at || task.created_at)!)}
+                    </span>
+                  )}
+                  {canArchive && (
+                    <span
+                      role="button"
+                      tabIndex={-1}
+                      title="Archive workbench"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onArchiveWorkbench!(task.workbench_id!);
+                      }}
+                      className="hidden shrink-0 items-center justify-center rounded text-text-3 transition-colors hover:text-muted-foreground group-hover:flex"
+                      style={{ cursor: 'pointer' }}
+                    >
+                      <Archive size={11} />
+                    </span>
+                  )}
+                </span>
+              </button>
+            );
+          })}
           {worktrees.map((wt) => {
             const isActive = activeWorktreeCwd === wt.cwd;
+            const canPinWt = wt.id != null && onPinWorkbench;
             return (
               <button
                 key={wt.cwd}
@@ -316,23 +365,45 @@ export function SidebarProjectItem({
                   cursor: 'pointer',
                 }}
               >
-                <Terminal size={11} className="shrink-0 text-text-3" />
+                <span className="relative inline-flex w-4 shrink-0 items-center justify-center">
+                  <Terminal
+                    size={11}
+                    className={`text-text-3 ${canPinWt ? 'group-hover:invisible' : ''}`}
+                  />
+                  {canPinWt && (
+                    <span
+                      role="button"
+                      tabIndex={-1}
+                      title="Pin workbench"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onPinWorkbench!(wt.id!);
+                      }}
+                      className="absolute inset-0 hidden items-center justify-center text-text-3 transition-colors hover:text-muted-foreground group-hover:flex"
+                      style={{ cursor: 'pointer' }}
+                    >
+                      <Pin size={12} />
+                    </span>
+                  )}
+                </span>
                 <span className="min-w-0 flex-1 truncate">{wt.name}</span>
-                {wt.id != null && onArchiveWorkbench && (
-                  <span
-                    role="button"
-                    tabIndex={-1}
-                    title="Archive workbench"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onArchiveWorkbench(wt.id!);
-                    }}
-                    className="hidden shrink-0 items-center justify-center rounded text-text-3 transition-colors hover:text-muted-foreground group-hover:flex"
-                    style={{ cursor: 'pointer' }}
-                  >
-                    <Archive size={11} />
-                  </span>
-                )}
+                <span className="flex shrink-0 items-center gap-0.5">
+                  {wt.id != null && onArchiveWorkbench && (
+                    <span
+                      role="button"
+                      tabIndex={-1}
+                      title="Archive workbench"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onArchiveWorkbench(wt.id!);
+                      }}
+                      className="hidden items-center justify-center rounded text-text-3 transition-colors hover:text-muted-foreground group-hover:flex"
+                      style={{ cursor: 'pointer' }}
+                    >
+                      <Archive size={11} />
+                    </span>
+                  )}
+                </span>
               </button>
             );
           })}

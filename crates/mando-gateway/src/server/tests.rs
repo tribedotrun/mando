@@ -1,7 +1,20 @@
 use super::*;
 use crate::AppState;
+use base64::Engine;
+use std::path::PathBuf;
+
+fn test_data_dir() -> PathBuf {
+    let data_dir =
+        std::env::temp_dir().join(format!("mando-gw-terminal-test-{}", mando_uuid::Uuid::v4()));
+    std::fs::create_dir_all(&data_dir).unwrap();
+    data_dir
+}
 
 async fn test_state() -> AppState {
+    test_state_with_data_dir(test_data_dir()).await
+}
+
+async fn test_state_with_data_dir(data_dir: PathBuf) -> AppState {
     let config = mando_config::Config::default();
     let runtime_paths = mando_config::resolve_captain_runtime_paths(&config);
     mando_config::set_active_captain_runtime_paths(runtime_paths.clone());
@@ -44,7 +57,7 @@ async fn test_state() -> AppState {
         task_store: Arc::new(RwLock::new(task_store)),
         db,
         qa_session_mgr: mando_scout::runtime::qa::default_session_manager(),
-        terminal_host: Arc::new(mando_terminal::TerminalHost::new()),
+        terminal_host: Arc::new(mando_terminal::TerminalHost::new(data_dir)),
         start_time: std::time::Instant::now(),
         listen_port: 0,
         dev_mode: false,
@@ -60,9 +73,7 @@ async fn test_state() -> AppState {
     }
 }
 
-#[tokio::test]
-async fn health_endpoint() {
-    let state = test_state().await;
+async fn spawn_app(state: AppState) -> std::net::SocketAddr {
     let app = build_router(state);
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -72,9 +83,50 @@ async fn health_endpoint() {
         axum::serve(listener, app).await.unwrap();
     });
 
-    let url = format!("http://{addr}/api/health");
-    // Give server a moment to start.
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    addr
+}
+
+fn authed_client() -> reqwest::Client {
+    let token = crate::auth::ensure_auth_token();
+    let mut headers = reqwest::header::HeaderMap::new();
+    headers.insert(
+        reqwest::header::AUTHORIZATION,
+        format!("Bearer {token}").parse().unwrap(),
+    );
+    reqwest::Client::builder()
+        .default_headers(headers)
+        .build()
+        .unwrap()
+}
+
+fn seed_terminal_history(data_dir: &std::path::Path, id: &str, _output: &[u8], clean_exit: bool) {
+    let session_dir = data_dir.join("terminal-history").join(id);
+    std::fs::create_dir_all(&session_dir).unwrap();
+    let meta = serde_json::json!({
+        "id": id,
+        "project": "mando",
+        "cwd": data_dir,
+        "agent": "claude",
+        "terminal_id": "wb:test",
+        "created_at": "2026-04-08T00:00:00Z",
+        "ended_at": clean_exit.then_some("2026-04-08T00:05:00Z"),
+        "exit_code": clean_exit.then_some(0),
+        "size": { "rows": 24, "cols": 80 },
+        "state": if clean_exit { "exited" } else { "live" }
+    });
+    std::fs::write(
+        session_dir.join("meta.json"),
+        serde_json::to_vec_pretty(&meta).unwrap(),
+    )
+    .unwrap();
+    // scrollback.bin no longer persisted; output param is ignored for restored sessions
+}
+
+#[tokio::test]
+async fn health_endpoint() {
+    let addr = spawn_app(test_state().await).await;
+    let url = format!("http://{addr}/api/health");
 
     let resp = reqwest::get(&url).await.unwrap();
     assert_eq!(resp.status(), 200);
@@ -85,17 +137,7 @@ async fn health_endpoint() {
 
 #[tokio::test]
 async fn cors_headers_present() {
-    let state = test_state().await;
-    let app = build_router(state);
-
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-
-    tokio::spawn(async move {
-        axum::serve(listener, app).await.unwrap();
-    });
-
-    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    let addr = spawn_app(test_state().await).await;
 
     let client = reqwest::Client::new();
     let origin = "http://127.0.0.1:15173";
@@ -114,4 +156,58 @@ async fn cors_headers_present() {
 
     let credentials = resp.headers().get("access-control-allow-credentials");
     assert_eq!(credentials, None);
+}
+
+#[tokio::test]
+async fn terminal_list_and_stream_restore_unclean_history() {
+    let data_dir = test_data_dir();
+    seed_terminal_history(&data_dir, "restore-1", b"hello restored", false);
+    let addr = spawn_app(test_state_with_data_dir(data_dir).await).await;
+    let client = authed_client();
+
+    let sessions: serde_json::Value = client
+        .get(format!("http://{addr}/api/terminal"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(sessions.as_array().unwrap().len(), 1);
+    assert_eq!(sessions[0]["state"], "restored");
+    assert_eq!(sessions[0]["restored"], true);
+
+    let body = client
+        .get(format!("http://{addr}/api/terminal/restore-1/stream"))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    // Restored sessions have no scrollback in output_buf, so only the exit event is emitted
+    assert!(!body.contains("event: output"));
+    assert!(body.contains("event: exit"));
+}
+
+#[tokio::test]
+async fn terminal_stream_replay_zero_skips_snapshot_for_restored_history() {
+    let data_dir = test_data_dir();
+    seed_terminal_history(&data_dir, "restore-2", b"skip me", false);
+    let addr = spawn_app(test_state_with_data_dir(data_dir).await).await;
+    let client = authed_client();
+
+    let body = client
+        .get(format!(
+            "http://{addr}/api/terminal/restore-2/stream?replay=0"
+        ))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(!body.contains("event: output"));
+    assert!(!body.contains(&base64::engine::general_purpose::STANDARD.encode("skip me")));
+    assert!(body.contains("event: exit"));
 }

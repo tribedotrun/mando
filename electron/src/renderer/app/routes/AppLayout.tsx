@@ -60,6 +60,12 @@ export function AppLayout(): React.ReactElement {
         ? ((s.location.search as { cwd?: string }).cwd ?? null)
         : null,
   });
+  const activeTaskId = useRouterState({
+    select: (s) => {
+      const m = s.location.pathname.match(/^\/captain\/tasks\/(\d+)/);
+      return m ? Number(m[1]) : null;
+    },
+  });
 
   // Derive activeTab from current route
   const activeTab: Tab = matchRoute({ to: '/scout', fuzzy: true })
@@ -141,7 +147,6 @@ export function AppLayout(): React.ReactElement {
               void navigate({ to: routes[tab] });
             }}
             onNewTask={() => {
-              void navigate({ to: '/captain' });
               useUIStore.getState().openCreateTask();
             }}
             onOpenSettings={() =>
@@ -195,6 +200,7 @@ export function AppLayout(): React.ReactElement {
               void navigate({ to: '/captain/tasks/$taskId', params: { taskId: String(id) } })
             }
             activeTerminalCwd={activeTerminalCwd}
+            activeTaskId={activeTaskId}
             onOpenTerminalSession={(session) =>
               void navigate({
                 to: '/terminal',

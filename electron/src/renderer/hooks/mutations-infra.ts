@@ -5,6 +5,7 @@ import {
   createTerminal,
   deleteTerminal,
   archiveWorkbench,
+  pinWorkbench,
   type CreateTerminalParams,
   type TerminalSessionInfo,
   type WorkbenchItem,
@@ -178,6 +179,38 @@ export function useProjectRemove() {
     },
     onSettled: () => {
       void qc.invalidateQueries({ queryKey: queryKeys.config.all });
+    },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// useWorkbenchPin
+// ---------------------------------------------------------------------------
+
+export function useWorkbenchPin() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (vars: { id: number; pinned: boolean }) => pinWorkbench(vars.id, vars.pinned),
+    onMutate: async (vars) => {
+      await qc.cancelQueries({ queryKey: queryKeys.workbenches.list() });
+      const prev = qc.getQueryData<WorkbenchItem[]>(queryKeys.workbenches.list());
+      qc.setQueryData<WorkbenchItem[]>(queryKeys.workbenches.list(), (old) =>
+        old?.map((wb) =>
+          wb.id === vars.id
+            ? { ...wb, pinnedAt: vars.pinned ? new Date().toISOString() : null, rev: wb.rev + 1 }
+            : wb,
+        ),
+      );
+      return { prev };
+    },
+    onSuccess: (data) => {
+      qc.setQueryData<WorkbenchItem[]>(queryKeys.workbenches.list(), (old) =>
+        old?.map((wb) => (wb.id === data.id ? data : wb)),
+      );
+    },
+    onError: (_err, vars, context) => {
+      if (context?.prev) qc.setQueryData(queryKeys.workbenches.list(), context.prev);
+      toast.error(vars.pinned ? 'Failed to pin workbench' : 'Failed to unpin workbench');
     },
   });
 }

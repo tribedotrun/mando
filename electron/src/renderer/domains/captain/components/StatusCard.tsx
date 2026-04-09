@@ -1,104 +1,15 @@
 import React, { useState, useCallback } from 'react';
-import { Clock } from 'lucide-react';
 import type { TaskItem, ClarifierQuestion, SessionSummary } from '#renderer/types';
 import { answerClarification } from '#renderer/domains/captain/hooks/useApi';
 import { useDraftRecord } from '#renderer/global/hooks/useDraft';
 import { toast } from 'sonner';
 import log from '#renderer/logger';
-import { clarifyResultToToast, fmtDuration, getErrorMessage, relativeTime } from '#renderer/utils';
-import { PrIcon } from '#renderer/global/components/icons';
-import { CardShell, StatusDot, Sep } from '#renderer/global/components/CardShell';
+import { clarifyResultToToast, fmtDuration, getErrorMessage } from '#renderer/utils';
+import { CardShell, StatusDot } from '#renderer/global/components/CardShell';
 import { Button } from '#renderer/components/ui/button';
 import { Textarea } from '#renderer/components/ui/textarea';
 
-interface Props {
-  item: TaskItem;
-  sessions: SessionSummary[];
-  /** Structured questions from latest clarify_question timeline event. */
-  clarifierQuestions: ClarifierQuestion[] | null;
-}
-
-/* -- Variant renderers -- */
-
-function StreamingCard({ item, sessions }: Pick<Props, 'item' | 'sessions'>) {
-  const active = sessions.find((s) => s.status === 'running');
-  const dur = active ? (active.duration_ms ?? 0) / 1000 : 0;
-  return (
-    <CardShell color="var(--success)">
-      <StatusDot color="var(--success)" pulse />
-      <span className="text-body font-medium text-foreground">Streaming</span>
-      <Sep />
-      <span className="text-caption text-muted-foreground">
-        {item.worker ?? 'Worker'} &middot; {dur > 0 ? fmtDuration(dur) : 'starting'}
-      </span>
-    </CardShell>
-  );
-}
-
-function QueuedCard() {
-  return (
-    <CardShell color="var(--text-4)">
-      <Clock size={14} className="text-text-3" />
-      <span className="text-body text-text-3">Queued</span>
-    </CardShell>
-  );
-}
-
-function CaptainReviewingCard({ label }: { label: string }) {
-  return (
-    <CardShell color="var(--success)">
-      <StatusDot color="var(--success)" pulse />
-      <span className="text-body font-medium text-foreground">{label}</span>
-    </CardShell>
-  );
-}
-
-function AwaitingReviewCard({ item }: { item: TaskItem }) {
-  return (
-    <CardShell color="var(--review)">
-      <StatusDot color="var(--review)" />
-      <span className="text-body font-medium text-foreground">Ready for review</span>
-      {item.pr_number && (
-        <>
-          <Sep />
-          <span className="text-caption text-muted-foreground">PR #{item.pr_number}</span>
-        </>
-      )}
-    </CardShell>
-  );
-}
-
-function EscalatedCard({ item }: { item: TaskItem }) {
-  const [expanded, setExpanded] = useState(false);
-  const preview = item.escalation_report?.slice(0, 120) ?? '';
-  return (
-    <CardShell color="var(--destructive)">
-      <div className="flex w-full flex-col gap-1">
-        <div className="flex items-center gap-2">
-          <StatusDot color="var(--destructive)" />
-          <span className="text-body font-medium text-foreground">Escalated</span>
-        </div>
-        {preview && (
-          <div className="text-caption text-muted-foreground">
-            &ldquo;{expanded ? item.escalation_report : preview}
-            {!expanded && (item.escalation_report?.length ?? 0) > 120 ? '...' : ''}
-            &rdquo;
-            {(item.escalation_report?.length ?? 0) > 120 && (
-              <Button
-                variant="link"
-                size="xs"
-                className="ml-1 h-auto p-0"
-                onClick={() => setExpanded((v) => !v)}
-              >
-                {expanded ? 'Less' : 'Full report'}
-              </Button>
-            )}
-          </div>
-        )}
-      </div>
-    </CardShell>
-  );
-}
+/* -- Clarification card (used as tab content) -- */
 
 function NeedsClarificationCard({
   taskId,
@@ -205,74 +116,90 @@ function NeedsClarificationCard({
   );
 }
 
-function FailedCard({ item }: { item: TaskItem }) {
-  return (
-    <CardShell color="var(--destructive)">
-      <StatusDot color="var(--destructive)" />
-      <span className="text-body font-medium text-foreground">
-        {item.status === 'errored' ? 'Failed' : 'Rework'}
-      </span>
-      <Sep />
-      <span className="text-caption text-muted-foreground">
-        {item.intervention_count > 0 && `${item.intervention_count} interventions`}
-      </span>
-    </CardShell>
-  );
+/* -- Inline header badge (compact, single-line) -- */
+
+interface HeaderBadgeProps {
+  item: TaskItem;
+  sessions: SessionSummary[];
 }
 
-function MergedCard({ item, sessions }: Pick<Props, 'item' | 'sessions'>) {
-  return (
-    <CardShell color="var(--text-4)">
-      {item.status === 'merged' && <PrIcon state="merged" />}
-      <span className="text-body text-text-3">
-        {item.status === 'merged'
-          ? 'Merged'
-          : item.status === 'canceled'
-            ? 'Canceled'
-            : 'Completed'}
-      </span>
-      <Sep />
-      <span className="text-caption text-text-3">
-        {item.last_activity_at && relativeTime(item.last_activity_at)}
-        {sessions.length > 0 && ` · ${sessions.length} sessions`}
-      </span>
-    </CardShell>
-  );
-}
-
-/* -- Main export -- */
-
-export function StatusCard({ item, sessions, clarifierQuestions }: Props): React.ReactElement {
+export function HeaderStatusBadge({ item, sessions }: HeaderBadgeProps): React.ReactElement {
   const s = item.status;
 
-  if (s === 'needs-clarification' && clarifierQuestions && clarifierQuestions.length > 0) {
-    return <NeedsClarificationCard taskId={item.id} questions={clarifierQuestions} />;
-  }
-  if (s === 'needs-clarification') {
+  if (s === 'in-progress' || s === 'clarifying') {
+    const active = sessions.find((ss) => ss.status === 'running');
+    const dur = active ? (active.duration_ms ?? 0) / 1000 : 0;
     return (
-      <CardShell color="var(--needs-human)">
-        <StatusDot color="var(--needs-human)" />
-        <span className="text-body font-medium text-foreground">Needs your input</span>
-      </CardShell>
+      <Badge color="var(--success)" pulse>
+        Streaming{dur > 0 ? ` ${fmtDuration(dur)}` : ''}
+      </Badge>
     );
   }
-
-  if (s === 'in-progress' || s === 'clarifying')
-    return <StreamingCard item={item} sessions={sessions} />;
-  if (s === 'new' || s === 'queued') return <QueuedCard />;
-  if (s === 'captain-reviewing') return <CaptainReviewingCard label="Captain reviewing" />;
-  if (s === 'captain-merging') return <CaptainReviewingCard label="Captain merging" />;
-  if (s === 'awaiting-review') return <AwaitingReviewCard item={item} />;
-  if (s === 'escalated') return <EscalatedCard item={item} />;
-  if (s === 'errored' || s === 'rework') return <FailedCard item={item} />;
-  if (s === 'handed-off') {
+  if (s === 'new' || s === 'queued') return <Badge color="var(--text-4)">Queued</Badge>;
+  if (s === 'captain-reviewing')
     return (
-      <CardShell color="var(--text-3)">
-        <span className="text-body text-text-3">Handed off</span>
-      </CardShell>
+      <Badge color="var(--success)" pulse>
+        Reviewing
+      </Badge>
     );
-  }
-
-  // merged, completed-no-pr, canceled
-  return <MergedCard item={item} sessions={sessions} />;
+  if (s === 'captain-merging')
+    return (
+      <Badge color="var(--success)" pulse>
+        Merging
+      </Badge>
+    );
+  if (s === 'awaiting-review') return <Badge color="var(--review)">Ready for review</Badge>;
+  if (s === 'escalated') return <Badge color="var(--destructive)">Escalated</Badge>;
+  if (s === 'needs-clarification') return <Badge color="var(--needs-human)">Needs input</Badge>;
+  if (s === 'errored') return <Badge color="var(--destructive)">Failed</Badge>;
+  if (s === 'rework') return <Badge color="var(--destructive)">Rework</Badge>;
+  if (s === 'handed-off') return <Badge color="var(--text-3)">Handed off</Badge>;
+  if (s === 'merged') return <Badge color="var(--text-4)">Merged</Badge>;
+  if (s === 'canceled') return <Badge color="var(--text-4)">Canceled</Badge>;
+  return <Badge color="var(--text-4)">Completed</Badge>;
 }
+
+function Badge({
+  color,
+  pulse,
+  children,
+}: {
+  color: string;
+  pulse?: boolean;
+  children: React.ReactNode;
+}): React.ReactElement {
+  return (
+    <span
+      className="flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-0.5"
+      style={{
+        background: `color-mix(in srgb, ${color} 10%, transparent)`,
+        border: `1px solid color-mix(in srgb, ${color} 25%, transparent)`,
+      }}
+    >
+      <StatusDot color={color} pulse={pulse} size="sm" />
+      <span className="text-caption font-medium" style={{ color }}>
+        {children}
+      </span>
+    </span>
+  );
+}
+
+/* -- Tab content for escalated report -- */
+
+export function EscalatedReportTab({ item }: { item: TaskItem }): React.ReactElement {
+  return (
+    <div className="space-y-3">
+      {item.escalation_report ? (
+        <div className="whitespace-pre-wrap text-body leading-relaxed text-foreground">
+          {item.escalation_report}
+        </div>
+      ) : (
+        <div className="text-body text-muted-foreground">No escalation report available.</div>
+      )}
+    </div>
+  );
+}
+
+/* -- Tab content for clarification (re-export for use in tabs) -- */
+
+export { NeedsClarificationCard as ClarificationTab };

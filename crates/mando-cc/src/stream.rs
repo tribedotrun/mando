@@ -243,13 +243,14 @@ pub fn get_last_stream_event_type(stream_path: &Path) -> Option<String> {
     None
 }
 
-/// Cost and duration extracted from a stream result event.
+/// Cost, duration, and turn count extracted from a stream result event.
 pub struct StreamCostInfo {
     pub cost_usd: Option<f64>,
     pub duration_ms: Option<u64>,
+    pub num_turns: Option<i64>,
 }
 
-/// Extract cost and duration from the result event in a JSONL stream file.
+/// Extract cost, duration, and turn count from the result event in a JSONL stream file.
 ///
 /// Returns `None` if the stream file is missing or has no result event.
 pub fn get_stream_cost(stream_path: &Path) -> Option<StreamCostInfo> {
@@ -257,6 +258,7 @@ pub fn get_stream_cost(stream_path: &Path) -> Option<StreamCostInfo> {
     Some(StreamCostInfo {
         cost_usd: result.get("total_cost_usd").and_then(|v| v.as_f64()),
         duration_ms: result.get("duration_ms").and_then(|v| v.as_u64()),
+        num_turns: result.get("num_turns").and_then(|v| v.as_i64()),
     })
 }
 

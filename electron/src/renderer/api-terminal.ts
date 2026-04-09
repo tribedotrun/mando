@@ -12,6 +12,7 @@ export interface WorkbenchItem {
   worktree: string;
   title: string;
   createdAt: string;
+  pinnedAt?: string | null;
   archivedAt?: string | null;
   deletedAt?: string | null;
 }
@@ -23,6 +24,10 @@ export async function fetchWorkbenches(): Promise<WorkbenchItem[]> {
 
 export function archiveWorkbench(id: number): Promise<WorkbenchItem> {
   return apiPatch<WorkbenchItem>(`/api/workbenches/${id}`, { archived: true });
+}
+
+export function pinWorkbench(id: number, pinned: boolean): Promise<WorkbenchItem> {
+  return apiPatch<WorkbenchItem>(`/api/workbenches/${id}`, { pinned });
 }
 
 // ---------------------------------------------------------------------------
@@ -48,6 +53,11 @@ export interface TerminalSessionInfo {
   agent: 'claude' | 'codex';
   running: boolean;
   exit_code: number | null;
+  state?: 'live' | 'restored' | 'exited';
+  restored?: boolean;
+  createdAt?: string;
+  endedAt?: string | null;
+  terminalId?: string | null;
 }
 
 export interface CreateTerminalParams {
@@ -134,9 +144,14 @@ export function connectTerminalStream(
   id: string,
   onOutput: (data: Uint8Array) => void,
   onExit: (code: number | null) => void,
+  onOpen?: () => void,
   onError?: (err: Event) => void,
+  options?: { replay?: boolean },
 ): EventSource {
-  const url = buildUrl(`/api/terminal/${id}/stream`);
+  const params = new URLSearchParams();
+  if (options?.replay === false) params.set('replay', '0');
+  const query = params.size > 0 ? `?${params.toString()}` : '';
+  const url = buildUrl(`/api/terminal/${id}/stream${query}`);
   const es = new EventSource(url);
 
   es.addEventListener('output', (e: MessageEvent) => {
@@ -153,6 +168,10 @@ export function connectTerminalStream(
     onExit(data.code ?? null);
     es.close();
   });
+
+  es.onopen = () => {
+    onOpen?.();
+  };
 
   es.onerror = (e) => {
     onError?.(e);

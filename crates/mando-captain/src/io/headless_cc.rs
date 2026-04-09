@@ -29,11 +29,18 @@ fn non_empty(s: &str) -> Option<&str> {
 }
 
 pub async fn log_cc_session(pool: &SqlitePool, entry: &SessionLogEntry<'_>) -> Result<()> {
+    // On resume: pass "" for created_at (preserve original), set resumed_at to now.
+    // On initial insert: set created_at to now, leave resumed_at as None.
+    let (created_at, resumed_at) = if entry.resumed {
+        (String::new(), Some(mando_types::now_rfc3339()))
+    } else {
+        (mando_types::now_rfc3339(), None)
+    };
     mando_db::queries::sessions::upsert_session(
         pool,
         &mando_db::queries::sessions::SessionUpsert {
             session_id: entry.session_id,
-            created_at: &mando_types::now_rfc3339(),
+            created_at: &created_at,
             caller: entry.caller,
             cwd: &entry.cwd.display().to_string(),
             model: entry.model,
@@ -44,6 +51,7 @@ pub async fn log_cc_session(pool: &SqlitePool, entry: &SessionLogEntry<'_>) -> R
             task_id: entry.task_id,
             scout_item_id: None,
             worker_name: non_empty(entry.worker_name),
+            resumed_at: resumed_at.as_deref(),
         },
     )
     .await
@@ -81,20 +89,27 @@ pub(crate) async fn log_running_session(
 pub(crate) async fn log_session_completion(
     pool: &SqlitePool,
     session_id: &str,
-    cwd: &str,
-    caller: &str,
-    worker_name: &str,
-    task_id: Option<i64>,
+    _cwd: &str,
+    _caller: &str,
+    _worker_name: &str,
+    _task_id: Option<i64>,
     status: SessionStatus,
 ) -> Result<()> {
-    // Read cost/duration from the stream file. Use update_session_status_with_cost
-    // (set-if-null) instead of upsert_session (cumulative) to avoid double-counting
-    // when this function is called multiple times for the same session.
+    // Guard: skip cost write if session is already stopped to prevent
+    // double-counting under ADD semantics.
+    if !mando_db::queries::sessions::is_session_running(pool, session_id).await? {
+        return Ok(());
+    }
+
     let stream_path = mando_config::stream_path_for_session(session_id);
     let cost_info = mando_cc::get_stream_cost(&stream_path);
-    let (cost_usd, duration_ms) = match &cost_info {
-        Some(info) => (info.cost_usd, info.duration_ms.map(|d| d as i64)),
-        None => (None, None),
+    let (cost_usd, duration_ms, num_turns) = match &cost_info {
+        Some(info) => (
+            info.cost_usd,
+            info.duration_ms.map(|d| d as i64),
+            info.num_turns,
+        ),
+        None => (None, None, None),
     };
 
     if let Err(e) = mando_db::queries::sessions::update_session_status_with_cost(
@@ -103,6 +118,7 @@ pub(crate) async fn log_session_completion(
         status,
         cost_usd,
         duration_ms,
+        num_turns,
     )
     .await
     {
@@ -114,23 +130,7 @@ pub(crate) async fn log_session_completion(
         );
     }
 
-    let cwd_path = Path::new(cwd);
-    log_cc_session(
-        pool,
-        &SessionLogEntry {
-            session_id,
-            cwd: cwd_path,
-            model: "",
-            caller,
-            cost_usd: None,
-            duration_ms: None,
-            resumed: false,
-            task_id,
-            status,
-            worker_name,
-        },
-    )
-    .await
+    Ok(())
 }
 
 pub(crate) async fn log_cc_result(

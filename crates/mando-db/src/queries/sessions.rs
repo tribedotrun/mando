@@ -13,7 +13,7 @@ use crate::caller::{CallerGroup, SessionCaller};
 const SELECT_COLS: &str = "\
     session_id, created_at, caller, cwd, model, status, \
     cost_usd, duration_ms, resumed, turn_count, \
-    task_id, scout_item_id, worker_name";
+    task_id, scout_item_id, worker_name, resumed_at";
 
 fn select_sessions_sql() -> &'static str {
     static SQL: std::sync::OnceLock<String> = std::sync::OnceLock::new();
@@ -36,6 +36,7 @@ pub struct SessionRow {
     pub task_id: Option<i64>,
     pub scout_item_id: Option<i64>,
     pub worker_name: Option<String>,
+    pub resumed_at: Option<String>,
 }
 
 impl SessionRow {
@@ -64,6 +65,7 @@ pub struct SessionUpsert<'a> {
     pub task_id: Option<i64>,
     pub scout_item_id: Option<i64>,
     pub worker_name: Option<&'a str>,
+    pub resumed_at: Option<&'a str>,
 }
 
 /// Upsert a session with cumulative cost tracking.
@@ -72,8 +74,9 @@ pub struct SessionUpsert<'a> {
 pub async fn upsert_session(pool: &SqlitePool, input: &SessionUpsert<'_>) -> Result<()> {
     sqlx::query(
         "INSERT INTO cc_sessions (session_id, created_at, caller, cwd, model, status,
-            cost_usd, duration_ms, resumed, turn_count, task_id, scout_item_id, worker_name)
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 1, ?10, ?11, ?12)
+            cost_usd, duration_ms, resumed, turn_count, task_id, scout_item_id, worker_name,
+            resumed_at)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 0, ?10, ?11, ?12, ?13)
         ON CONFLICT(session_id) DO UPDATE SET
             created_at = CASE WHEN excluded.created_at != '' THEN excluded.created_at ELSE cc_sessions.created_at END,
             caller = CASE WHEN excluded.caller != '' THEN excluded.caller ELSE cc_sessions.caller END,
@@ -99,7 +102,8 @@ pub async fn upsert_session(pool: &SqlitePool, input: &SessionUpsert<'_>) -> Res
             END,
             task_id = COALESCE(excluded.task_id, cc_sessions.task_id),
             scout_item_id = COALESCE(excluded.scout_item_id, cc_sessions.scout_item_id),
-            worker_name = COALESCE(excluded.worker_name, cc_sessions.worker_name)",
+            worker_name = COALESCE(excluded.worker_name, cc_sessions.worker_name),
+            resumed_at = CASE WHEN excluded.resumed_at IS NOT NULL THEN excluded.resumed_at ELSE cc_sessions.resumed_at END",
     )
     .bind(input.session_id)
     .bind(input.created_at)
@@ -113,6 +117,7 @@ pub async fn upsert_session(pool: &SqlitePool, input: &SessionUpsert<'_>) -> Res
     .bind(input.task_id)
     .bind(input.scout_item_id)
     .bind(input.worker_name)
+    .bind(input.resumed_at)
     .execute(pool)
     .await?;
     Ok(())
@@ -289,28 +294,42 @@ pub async fn update_session_status(
     Ok(())
 }
 
-/// Update status and backfill cost/duration from stream data.
+/// Update status and accumulate cost/duration from stream data.
 ///
-/// Cost and duration use "set if currently null" semantics so repeated
-/// calls (e.g. reconciliation after a prior completion write) never
-/// double-count.
+/// Cost and duration use ADD semantics to accumulate across resume cycles.
+/// Callers must guard against double-calling for the same segment (e.g.
+/// `terminate_session` checks `is_session_running` before calling).
 pub async fn update_session_status_with_cost(
     pool: &SqlitePool,
     session_id: &str,
     status: SessionStatus,
     cost_usd: Option<f64>,
     duration_ms: Option<i64>,
+    num_turns: Option<i64>,
 ) -> Result<()> {
     sqlx::query(
         "UPDATE cc_sessions SET
             status = ?1,
-            cost_usd = CASE WHEN cost_usd IS NULL THEN ?2 ELSE cost_usd END,
-            duration_ms = CASE WHEN duration_ms IS NULL THEN ?3 ELSE duration_ms END
-         WHERE session_id = ?4",
+            cost_usd = CASE
+                WHEN ?2 IS NOT NULL AND cost_usd IS NOT NULL THEN cost_usd + ?2
+                WHEN ?2 IS NOT NULL THEN ?2
+                ELSE cost_usd
+            END,
+            duration_ms = CASE
+                WHEN ?3 IS NOT NULL AND duration_ms IS NOT NULL THEN duration_ms + ?3
+                WHEN ?3 IS NOT NULL THEN ?3
+                ELSE duration_ms
+            END,
+            turn_count = CASE
+                WHEN ?4 IS NOT NULL THEN turn_count + ?4
+                ELSE turn_count
+            END
+         WHERE session_id = ?5",
     )
     .bind(status.as_str())
     .bind(cost_usd)
     .bind(duration_ms)
+    .bind(num_turns)
     .bind(session_id)
     .execute(pool)
     .await?;
@@ -410,6 +429,7 @@ mod tests {
                 task_id: Some(1),
                 scout_item_id: None,
                 worker_name: Some("main-v1"),
+                resumed_at: None,
             },
         )
         .await
@@ -419,7 +439,7 @@ mod tests {
         assert_eq!(total, 1);
         assert_eq!(rows[0].session_id, "s1");
         assert_eq!(rows[0].cost_usd, Some(1.5));
-        assert_eq!(rows[0].turn_count, 1);
+        assert_eq!(rows[0].turn_count, 0);
     }
 
     #[tokio::test]
@@ -441,6 +461,7 @@ mod tests {
                 task_id: Some(1),
                 scout_item_id: None,
                 worker_name: None,
+                resumed_at: None,
             },
         )
         .await
@@ -462,6 +483,7 @@ mod tests {
                 task_id: None,
                 scout_item_id: None,
                 worker_name: None,
+                resumed_at: None,
             },
         )
         .await
@@ -470,7 +492,7 @@ mod tests {
         let (rows, _) = list_sessions(&pool, 1, 50, None).await.unwrap();
         assert_eq!(rows[0].cost_usd, Some(1.5)); // 1.0 + 0.5
         assert_eq!(rows[0].duration_ms, Some(15000)); // 10000 + 5000
-        assert_eq!(rows[0].turn_count, 2);
+        assert_eq!(rows[0].turn_count, 1);
         assert_eq!(rows[0].resumed, 1);
     }
 
@@ -492,6 +514,7 @@ mod tests {
                 task_id: None,
                 scout_item_id: Some(1),
                 worker_name: None,
+                resumed_at: None,
             },
         )
         .await
@@ -511,6 +534,7 @@ mod tests {
                 task_id: None,
                 scout_item_id: Some(1),
                 worker_name: None,
+                resumed_at: None,
             },
         )
         .await
@@ -530,6 +554,7 @@ mod tests {
                 task_id: Some(1),
                 scout_item_id: None,
                 worker_name: Some("w1"),
+                resumed_at: None,
             },
         )
         .await
@@ -558,6 +583,7 @@ mod tests {
                 task_id: None,
                 scout_item_id: Some(1),
                 worker_name: None,
+                resumed_at: None,
             },
         )
         .await
@@ -577,6 +603,7 @@ mod tests {
                 task_id: Some(1),
                 scout_item_id: None,
                 worker_name: None,
+                resumed_at: None,
             },
         )
         .await
@@ -605,6 +632,7 @@ mod tests {
                 task_id: None,
                 scout_item_id: Some(42),
                 worker_name: None,
+                resumed_at: None,
             },
         )
         .await
@@ -624,6 +652,7 @@ mod tests {
                 task_id: None,
                 scout_item_id: Some(42),
                 worker_name: None,
+                resumed_at: None,
             },
         )
         .await
@@ -643,6 +672,7 @@ mod tests {
                 task_id: None,
                 scout_item_id: None,
                 worker_name: None,
+                resumed_at: None,
             },
         )
         .await

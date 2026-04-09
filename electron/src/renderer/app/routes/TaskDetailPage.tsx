@@ -37,14 +37,9 @@ export function TaskDetailPage(): React.ReactElement {
   }
 
   return (
-    <div className="h-full px-8 py-4">
+    <div className="h-full pl-4 pr-8 py-4">
       <ErrorBoundary fallbackLabel="Task detail">
-        <TaskDetailView
-          item={item}
-          onBack={handleBack}
-          onMerge={() => useUIStore.getState().setMergeItem(item)}
-          onOpenTerminal={handleOpenTerminal}
-        />
+        <TaskDetailView item={item} onBack={handleBack} onOpenTerminal={handleOpenTerminal} />
       </ErrorBoundary>
     </div>
   );

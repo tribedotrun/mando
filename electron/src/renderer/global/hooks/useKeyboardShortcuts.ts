@@ -86,13 +86,15 @@ export function useGlobalKeyboard(config: GlobalKeyboardConfig): void {
       const s = stateRef.current;
 
       // ── Meta combos (always active) ──
-      if (e.metaKey) {
-        if (e.key === 'k') {
+      const modKey = e.metaKey || e.ctrlKey;
+      if (modKey) {
+        const normalizedKey = e.key.toLowerCase();
+        if (e.metaKey && normalizedKey === 'k') {
           e.preventDefault();
           s.onTogglePalette();
           return;
         }
-        if (e.key === ',') {
+        if (e.metaKey && e.key === ',') {
           e.preventDefault();
           s.onOpenSettings();
           return;
@@ -107,9 +109,16 @@ export function useGlobalKeyboard(config: GlobalKeyboardConfig): void {
           s.onGoForward();
           return;
         }
-        if (e.key === 'b') {
+        if (normalizedKey === 'b') {
           e.preventDefault();
           s.onToggleSidebar();
+          return;
+        }
+        if (normalizedKey === 'f') {
+          if (isInputFocused()) return;
+          if (s.paletteOpen || s.shortcutsOpen || s.showSettings || s.modalOpen) return;
+          e.preventDefault();
+          dispatchToActiveView('Mod+f', e);
           return;
         }
         return;

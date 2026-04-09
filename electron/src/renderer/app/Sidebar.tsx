@@ -11,15 +11,18 @@ import {
   ArrowRight,
 } from 'lucide-react';
 import log from '#renderer/logger';
-import { pct } from '#renderer/utils';
+import { pct, sortTaskItems } from '#renderer/utils';
 import { useTaskList, useWorkbenchList, useConfig } from '#renderer/hooks/queries';
+import { useWorkbenchPin } from '#renderer/hooks/mutations';
 import { SetupChecklist } from '#renderer/domains/onboarding';
 import { SidebarProjectItem } from '#renderer/global/components/SidebarProjectItem';
+import { SidebarPinnedSection } from '#renderer/global/components/SidebarPinnedSection';
 import { useMountEffect } from '#renderer/global/hooks/useMountEffect';
 import { Button } from '#renderer/components/ui/button';
 import { ScrollArea } from '#renderer/components/ui/scroll-area';
 import { Tooltip, TooltipTrigger, TooltipContent } from '#renderer/components/ui/tooltip';
 import { Kbd } from '#renderer/components/ui/kbd';
+import type { TaskItem } from '#renderer/types';
 
 export type Tab = 'captain' | 'scout' | 'sessions';
 
@@ -44,6 +47,7 @@ interface Props {
   setupProgress: SetupProgress | null;
   setupActive: boolean;
   activeTerminalCwd?: string | null;
+  activeTaskId?: number | null;
   onNewTerminal?: (project: string) => void;
   onOpenTask?: (taskId: number) => void;
   onOpenTerminalSession?: (worktree: { project: string; cwd: string }) => void;
@@ -115,6 +119,7 @@ export function Sidebar({
   setupProgress,
   setupActive,
   activeTerminalCwd,
+  activeTaskId,
   onNewTerminal,
   onOpenTask,
   onOpenTerminalSession,
@@ -126,6 +131,7 @@ export function Sidebar({
   const { data: taskData } = useTaskList();
   const items = taskData?.items ?? [];
   const { data: workbenches = [] } = useWorkbenchList();
+  const pinMut = useWorkbenchPin();
 
   const { data: _config } = useConfig();
   const scoutEnabled = !!_config?.features?.scout;
@@ -146,30 +152,59 @@ export function Sidebar({
     return map;
   }, [configProjects]);
 
+  // Build a map from workbench ID to its task (if any).
+  const wbTaskMap = React.useMemo(() => {
+    const map = new Map<number, TaskItem>();
+    for (const task of items) {
+      if (task.workbench_id) map.set(task.workbench_id, task);
+    }
+    return map;
+  }, [items]);
+
+  // Pinned workbenches: sorted by pinnedAt DESC (most recent first).
+  const pinnedItems = React.useMemo(() => {
+    return workbenches
+      .filter((wb) => wb.pinnedAt && !wb.archivedAt)
+      .sort((a, b) => (b.pinnedAt! > a.pinnedAt! ? 1 : b.pinnedAt! < a.pinnedAt! ? -1 : 0))
+      .map((wb) => ({
+        wb,
+        task: wbTaskMap.get(wb.id),
+        project: pathToName[wb.project] ?? wb.project,
+      }));
+  }, [workbenches, wbTaskMap, pathToName]);
+
+  const pinnedWbIds = React.useMemo(() => new Set(pinnedItems.map((p) => p.wb.id)), [pinnedItems]);
+
   const projectWorktrees = React.useMemo(() => {
-    // Only show workbenches that don't have a task attached (terminal-only) and aren't archived.
+    // Only show workbenches that don't have a task attached (terminal-only),
+    // aren't archived, and aren't pinned (pinned shown in their own section).
     const taskWbIds = new Set(items.filter((t) => t.workbench_id).map((t) => t.workbench_id));
     const map: Record<string, { id: number; cwd: string; name: string }[]> = {};
     for (const wb of workbenches) {
-      if (taskWbIds.has(wb.id) || wb.archivedAt) continue;
+      if (taskWbIds.has(wb.id) || wb.archivedAt || pinnedWbIds.has(wb.id)) continue;
       const projName = pathToName[wb.project] ?? wb.project;
       (map[projName] ??= []).push({ id: wb.id, cwd: wb.worktree, name: wb.title });
     }
     return map;
-  }, [workbenches, pathToName, items]);
+  }, [workbenches, pathToName, items, pinnedWbIds]);
 
   const { projectCounts, projectTasks } = React.useMemo(() => {
     const counts: Record<string, number> = {};
     const tasks: Record<string, typeof items> = {};
     for (const item of items) {
       if (item.project) {
+        // Exclude tasks whose workbench is pinned (shown in pinned section).
+        if (item.workbench_id && pinnedWbIds.has(item.workbench_id)) continue;
         const pName = pathToName[item.project] ?? item.project;
         counts[pName] = (counts[pName] || 0) + 1;
         (tasks[pName] ??= []).push(item);
       }
     }
+    for (const [key, arr] of Object.entries(tasks)) {
+      tasks[key] = sortTaskItems(arr);
+    }
     return { projectCounts: counts, projectTasks: tasks };
-  }, [items, pathToName]);
+  }, [items, pathToName, pinnedWbIds]);
 
   const projects = React.useMemo(() => {
     const names = new Set(Object.keys(projectCounts));
@@ -257,88 +292,107 @@ export function Sidebar({
 
       <UpdateButton />
 
-      {/* New task */}
-      <button
-        onClick={onNewTask}
-        className="sidebar-new-task flex w-full items-center gap-2.5 rounded-md px-1.5 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground"
-        data-testid="add-task-btn"
-      >
-        <SquarePen size={16} strokeWidth={1.5} />
-        New task
-      </button>
+      <ScrollArea className="min-h-0 flex-1">
+        {/* New task */}
+        <button
+          onClick={onNewTask}
+          className="sidebar-new-task flex w-full items-center gap-2 rounded-md px-1.5 py-2 text-[13px] text-muted-foreground transition-colors hover:text-foreground"
+          data-testid="add-task-btn"
+        >
+          <SquarePen size={16} strokeWidth={1.5} />
+          New task
+        </button>
 
-      {/* Nav items */}
-      <nav className="flex flex-col gap-1 pt-1" aria-label="Main navigation">
-        {visibleNav.map(({ id, label, Icon }) => {
-          const active = activeTab === id && !projectFilter;
-          return (
-            <Button
-              key={id}
-              variant="ghost"
-              size="sm"
-              data-testid={`${id}-tab`}
-              onClick={() => onTabChange(id)}
-              className={`w-full justify-start gap-2 px-1.5 has-[>svg]:px-1.5 text-[13px] ${
-                active
-                  ? 'bg-muted font-medium text-foreground'
-                  : 'font-normal text-muted-foreground'
-              }`}
-            >
-              <Icon />
-              {label}
-            </Button>
-          );
-        })}
-      </nav>
+        {/* Nav items */}
+        <nav className="flex flex-col gap-1 pt-1" aria-label="Main navigation">
+          {visibleNav.map(({ id, label, Icon }) => {
+            const active = activeTab === id && !projectFilter;
+            return (
+              <Button
+                key={id}
+                variant="ghost"
+                size="sm"
+                data-testid={`${id}-tab`}
+                onClick={() => onTabChange(id)}
+                className={`w-full justify-start gap-2 px-1.5 has-[>svg]:px-1.5 text-[13px] ${
+                  active
+                    ? 'bg-muted font-medium text-foreground'
+                    : 'font-normal text-muted-foreground'
+                }`}
+              >
+                <Icon />
+                {label}
+              </Button>
+            );
+          })}
+        </nav>
 
-      {/* Projects section */}
-      <ScrollArea className="min-h-0 flex-1 pt-6">
-        <div className="text-label mb-2 flex w-full items-center pl-1.5">
-          <Button
-            variant="ghost"
-            size="xs"
-            data-testid="home-tab"
-            onClick={() => {
-              onTabChange('captain');
-              onProjectFilter(null);
-            }}
-            className={`h-auto flex-1 justify-start p-0 text-left transition-colors ${homeActive ? 'text-muted-foreground' : 'text-text-3'}`}
-          >
-            Projects
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon-xs"
-            data-testid="add-project-sidebar-btn"
-            onClick={onAddProject}
-            className="ml-auto text-text-3 hover:text-muted-foreground"
-          >
-            <FolderPlus size={14} />
-          </Button>
-        </div>
-        {projects.length > 0 && (
-          <div className="flex flex-col gap-1">
-            {projects.map((pName) => {
-              return (
-                <SidebarProjectItem
-                  key={pName}
-                  name={pName}
-                  logo={projectLogos[pName]}
-                  count={projectCounts[pName] ?? 0}
-                  onRename={onRenameProject}
-                  onRemove={onRemoveProject}
-                  onNewTerminal={onNewTerminal}
-                  tasks={projectTasks[pName] ?? []}
-                  worktrees={projectWorktrees[pName] ?? []}
-                  activeWorktreeCwd={activeTerminalCwd}
-                  onOpenWorktree={onOpenTerminalSession}
-                  onOpenTask={onOpenTask}
-                  onArchiveWorkbench={onArchiveWorkbench}
-                />
-              );
-            })}
+        {/* Pinned workbenches */}
+        {pinnedItems.length > 0 && (
+          <div className="pt-6">
+            <SidebarPinnedSection
+              items={pinnedItems}
+              activeTerminalCwd={activeTerminalCwd}
+              activeTaskId={activeTaskId}
+              onOpenTask={onOpenTask}
+              onOpenTerminalSession={onOpenTerminalSession}
+              onUnpin={(id) => !pinMut.isPending && pinMut.mutate({ id, pinned: false })}
+            />
           </div>
         )}
+
+        {/* Projects section */}
+        <div className={pinnedItems.length > 0 ? 'pt-3' : 'pt-6'}>
+          <div className="text-label mb-2 flex w-full items-center pl-1.5">
+            <Button
+              variant="ghost"
+              size="xs"
+              data-testid="home-tab"
+              onClick={() => {
+                onTabChange('captain');
+                onProjectFilter(null);
+              }}
+              className={`h-auto flex-1 justify-start p-0 text-left transition-colors ${homeActive ? 'text-muted-foreground' : 'text-text-3'}`}
+            >
+              Projects
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              data-testid="add-project-sidebar-btn"
+              onClick={onAddProject}
+              className="ml-auto text-text-3 hover:text-muted-foreground"
+            >
+              <FolderPlus size={14} />
+            </Button>
+          </div>
+          {projects.length > 0 && (
+            <div className="flex flex-col gap-1">
+              {projects.map((pName) => {
+                return (
+                  <SidebarProjectItem
+                    key={pName}
+                    name={pName}
+                    logo={projectLogos[pName]}
+                    count={projectCounts[pName] ?? 0}
+                    onRename={onRenameProject}
+                    onRemove={onRemoveProject}
+                    onNewTerminal={onNewTerminal}
+                    tasks={projectTasks[pName] ?? []}
+                    worktrees={projectWorktrees[pName] ?? []}
+                    activeWorktreeCwd={activeTerminalCwd}
+                    onOpenWorktree={onOpenTerminalSession}
+                    onOpenTask={onOpenTask}
+                    onArchiveWorkbench={onArchiveWorkbench}
+                    onPinWorkbench={(id) =>
+                      !pinMut.isPending && pinMut.mutate({ id, pinned: true })
+                    }
+                  />
+                );
+              })}
+            </div>
+          )}
+        </div>
       </ScrollArea>
 
       {/* Settings */}

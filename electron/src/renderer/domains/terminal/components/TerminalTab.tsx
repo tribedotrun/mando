@@ -2,6 +2,7 @@ import { useCallback, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useMountEffect } from '#renderer/global/hooks/useMountEffect';
 import { TerminalView } from '#renderer/domains/terminal/components/TerminalView';
+import { isRestoredTerminalSession } from '#renderer/domains/terminal/runtime/terminalSession';
 import { useTerminalList, type TerminalSessionInfo } from '#renderer/hooks/queries';
 import { useTerminalCreate, useTerminalDelete } from '#renderer/hooks/mutations';
 import { queryKeys } from '#renderer/queryKeys';
@@ -109,6 +110,40 @@ export function TerminalTab({ project, cwd, resumeSessionId, onResumeConsumed }:
     },
     [queryClient],
   );
+  const handleStartShell = useCallback(
+    async (sessionId: string) => {
+      const session = relevantSessions.find((s) => s.id === sessionId);
+      if (!session) return;
+      try {
+        const next = await createMutation.mutateAsync({
+          project: session.project,
+          cwd: session.cwd,
+          agent: session.agent,
+          ...(session.agent === 'claude' ? { resume_session_id: '' } : {}),
+        });
+        setActiveTab(next.id);
+        await deleteMutation.mutateAsync({ id: sessionId });
+      } catch (err) {
+        log.error('Failed to replace restored terminal', err);
+        toast.error(err instanceof Error ? err.message : 'Failed to start terminal');
+      }
+    },
+    [createMutation, deleteMutation, relevantSessions],
+  );
+
+  const activeSession = activeTab
+    ? (relevantSessions.find((session) => session.id === activeTab) ?? null)
+    : null;
+
+  const autoResumeRef = useRef<string | null>(null);
+  if (
+    activeSession &&
+    isRestoredTerminalSession(activeSession) &&
+    autoResumeRef.current !== activeSession.id
+  ) {
+    autoResumeRef.current = activeSession.id;
+    queueMicrotask(() => void handleStartShell(activeSession.id));
+  }
 
   // Empty state: no active terminals.
   if (relevantSessions.length === 0 && !activeTab) {
@@ -167,7 +202,17 @@ export function TerminalTab({ project, cwd, resumeSessionId, onResumeConsumed }:
               color: activeTab === s.id ? 'var(--text-1)' : 'var(--text-3)',
             }}
           >
-            <Circle size={6} fill={s.running ? 'var(--green)' : 'var(--text-4)'} stroke="none" />
+            <Circle
+              size={6}
+              fill={
+                s.running
+                  ? 'var(--green)'
+                  : isRestoredTerminalSession(s)
+                    ? 'var(--accent)'
+                    : 'var(--text-4)'
+              }
+              stroke="none"
+            />
             <span>
               {s.agent} {s.id.slice(0, 6)}
             </span>
@@ -201,11 +246,11 @@ export function TerminalTab({ project, cwd, resumeSessionId, onResumeConsumed }:
 
       {/* Active terminal */}
       <div className="min-h-0 flex-1">
-        {activeTab && (
+        {activeSession && (
           <TerminalView
-            key={activeTab}
-            sessionId={activeTab}
-            onExit={(code) => handleExit(activeTab, code)}
+            key={activeSession.id}
+            session={activeSession}
+            onExit={(code) => handleExit(activeSession.id, code)}
           />
         )}
       </div>

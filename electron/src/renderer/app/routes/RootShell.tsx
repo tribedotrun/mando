@@ -91,9 +91,8 @@ export function RootShell(): React.ReactElement {
   );
 
   const openCreateTask = useCallback(() => {
-    void navigate({ to: '/captain' });
     useUIStore.getState().openCreateTask();
-  }, [navigate]);
+  }, []);
 
   // Global keyboard shortcuts
   useGlobalKeyboard({
