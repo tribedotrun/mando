@@ -80,8 +80,31 @@ impl Db {
 
         for (version, sql) in MIGRATIONS {
             if *version > current {
+                // PRAGMA foreign_keys is a no-op inside a transaction, so
+                // disable FKs before the tx for migrations that need it.
+                let needs_fk_off = sql.contains("PRAGMA foreign_keys = OFF");
+                if needs_fk_off {
+                    sqlx::query("PRAGMA foreign_keys = OFF")
+                        .execute(&self.pool)
+                        .await?;
+                }
+
+                // Strip PRAGMA foreign_keys statements from the SQL since
+                // they're handled outside the transaction.
+                let cleaned = if needs_fk_off {
+                    sql.lines()
+                        .filter(|l| {
+                            let t = l.trim().to_lowercase();
+                            !t.starts_with("pragma foreign_keys")
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                } else {
+                    sql.to_string()
+                };
+
                 let mut tx = self.pool.begin().await?;
-                sqlx::raw_sql(sql)
+                sqlx::raw_sql(&cleaned)
                     .execute(&mut *tx)
                     .await
                     .with_context(|| format!("migration v{version} failed"))?;
@@ -90,6 +113,12 @@ impl Db {
                     .execute(&mut *tx)
                     .await?;
                 tx.commit().await?;
+
+                if needs_fk_off {
+                    sqlx::query("PRAGMA foreign_keys = ON")
+                        .execute(&self.pool)
+                        .await?;
+                }
                 tracing::info!(version, "migration applied");
             }
         }
@@ -110,6 +139,12 @@ const MIGRATIONS: &[(i64, &str)] = &[
     (8, include_str!("../migrations/008_projects_full.sql")),
     (9, include_str!("../migrations/009_cleanup_fks.sql")),
     (10, include_str!("../migrations/010_rev_column.sql")),
+    (
+        11,
+        include_str!("../migrations/011_remove_task_archived_at.sql"),
+    ),
+    (12, include_str!("../migrations/012_workbench_pinned.sql")),
+    (13, include_str!("../migrations/013_session_resumed_at.sql")),
 ];
 
 #[cfg(test)]

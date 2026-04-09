@@ -1,24 +1,42 @@
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 
-use tracing::info;
+use tracing::{info, warn};
 
+use crate::env::ShellEnvResolver;
+use crate::history::TerminalHistoryStore;
 use crate::session::TerminalSession;
 use crate::types::{CreateRequest, SessionId, SessionInfo, TerminalSize};
 
-/// Manages all active terminal sessions. Thread-safe via interior mutability.
+/// Manages all active and restorable terminal sessions.
 pub struct TerminalHost {
     sessions: std::sync::Mutex<HashMap<SessionId, Arc<TerminalSession>>>,
+    history: Arc<TerminalHistoryStore>,
+    env: Arc<ShellEnvResolver>,
 }
 
 impl TerminalHost {
-    pub fn new() -> Self {
+    const MAX_SESSIONS: usize = 20;
+
+    pub fn new(data_dir: PathBuf) -> Self {
+        let history = Arc::new(TerminalHistoryStore::new(data_dir));
+        let env = Arc::new(ShellEnvResolver::new());
+        let sessions = history
+            .load_sessions()
+            .into_iter()
+            .map(|meta| {
+                let id = meta.id.clone();
+                let session = TerminalSession::restored(meta, history.clone());
+                (id, session)
+            })
+            .collect();
         Self {
-            sessions: std::sync::Mutex::new(HashMap::new()),
+            sessions: std::sync::Mutex::new(sessions),
+            history,
+            env,
         }
     }
-
-    const MAX_SESSIONS: usize = 20;
 
     pub fn create(&self, req: CreateRequest) -> anyhow::Result<Arc<TerminalSession>> {
         let sessions = self.sessions.lock().expect("sessions lock");
@@ -30,18 +48,23 @@ impl TerminalHost {
             );
         }
         drop(sessions);
+
         let id = mando_uuid::Uuid::v4().to_string();
         info!(
             session = id,
             project = req.project,
             agent = %req.agent,
             cwd = %req.cwd.display(),
+            terminal_id = ?req.terminal_id,
             "spawning terminal session"
         );
-        let session = TerminalSession::spawn(id.clone(), req)?;
+
+        let session =
+            TerminalSession::spawn(id.clone(), req, self.history.clone(), self.env.clone())?;
         let mut sessions = self.sessions.lock().expect("sessions lock");
         if sessions.len() >= Self::MAX_SESSIONS {
             let _ = session.kill();
+            let _ = session.delete_history();
             anyhow::bail!(
                 "terminal session limit reached ({}/{})",
                 sessions.len(),
@@ -65,7 +88,7 @@ impl TerminalHost {
             .lock()
             .expect("sessions lock")
             .values()
-            .map(|s| s.info())
+            .map(|session| session.info())
             .collect()
     }
 
@@ -82,9 +105,12 @@ impl TerminalHost {
 
     pub fn remove(&self, id: &str) -> Option<Arc<TerminalSession>> {
         let session = self.sessions.lock().expect("sessions lock").remove(id);
-        if let Some(ref s) = session {
-            if s.is_running() {
-                let _ = s.kill();
+        if let Some(ref session) = session {
+            if session.is_running() {
+                let _ = session.kill();
+            }
+            if let Err(err) = session.delete_history() {
+                warn!(session = id, error = %err, "failed to delete terminal history");
             }
         }
         session
@@ -110,16 +136,10 @@ impl TerminalHost {
             .collect();
         for (id, session) in sessions {
             if session.is_running() {
-                if let Err(e) = session.kill() {
-                    tracing::warn!(session = id, error = %e, "failed to kill session on shutdown");
+                if let Err(err) = session.kill() {
+                    warn!(session = id, error = %err, "failed to kill session on shutdown");
                 }
             }
         }
-    }
-}
-
-impl Default for TerminalHost {
-    fn default() -> Self {
-        Self::new()
     }
 }

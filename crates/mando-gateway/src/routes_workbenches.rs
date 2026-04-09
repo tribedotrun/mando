@@ -79,6 +79,8 @@ pub(crate) struct PatchWorkbenchBody {
     pub title: Option<String>,
     #[serde(default)]
     pub archived: Option<bool>,
+    #[serde(default)]
+    pub pinned: Option<bool>,
 }
 
 pub(crate) async fn patch_workbench(
@@ -88,7 +90,7 @@ pub(crate) async fn patch_workbench(
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let pool = state.db.pool();
 
-    let wb = mando_db::queries::workbenches::find_by_id(pool, id)
+    mando_db::queries::workbenches::find_by_id(pool, id)
         .await
         .map_err(internal_error)?
         .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "workbench not found"))?;
@@ -109,11 +111,38 @@ pub(crate) async fn patch_workbench(
                 .map_err(internal_error)?;
         }
     }
+    if let Some(pinned) = body.pinned {
+        let affected = if pinned {
+            mando_db::queries::workbenches::pin(pool, id)
+                .await
+                .map_err(internal_error)?
+        } else {
+            mando_db::queries::workbenches::unpin(pool, id)
+                .await
+                .map_err(internal_error)?
+        };
+        if !affected {
+            return Err(error_response(
+                StatusCode::CONFLICT,
+                if pinned {
+                    "workbench cannot be pinned (archived or deleted)"
+                } else {
+                    "workbench not found"
+                },
+            ));
+        }
+    }
 
     let updated = mando_db::queries::workbenches::find_by_id(pool, id)
         .await
         .map_err(internal_error)?
-        .unwrap_or(wb);
+        .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "workbench not found after update"))?;
+
+    state.bus.send(
+        mando_types::BusEvent::Workbenches,
+        Some(json!({ "action": "updated", "item": updated })),
+    );
+
     Ok(Json(json!(updated)))
 }
 

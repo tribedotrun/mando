@@ -31,6 +31,7 @@ export {
   useTerminalCreate,
   useTerminalDelete,
   useWorkbenchArchive,
+  useWorkbenchPin,
   useConfigSave,
   useProjectAdd,
   useProjectRemove,

@@ -2,10 +2,11 @@ import { useCallback, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useMountEffect } from '#renderer/global/hooks/useMountEffect';
 import { TerminalView } from '#renderer/domains/terminal/components/TerminalView';
+import { isRestoredTerminalSession } from '#renderer/domains/terminal/runtime/terminalSession';
 import { useTerminalList, useConfig, type TerminalSessionInfo } from '#renderer/hooks/queries';
 import { useTerminalCreate, useTerminalDelete } from '#renderer/hooks/mutations';
 import { queryKeys } from '#renderer/queryKeys';
-import { X, Plus, Circle } from 'lucide-react';
+import { X, Plus, Circle, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import log from '#renderer/logger';
 
@@ -32,22 +33,23 @@ export function TerminalPage({
   const deleteMutation = useTerminalDelete();
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState<string | null>(null);
+  const [startingShellForId, setStartingShellForId] = useState<string | null>(null);
   const [exitStates, setExitStates] = useState<
     Record<string, { running: boolean; exit_code: number | null }>
   >({});
+  const [resumePending, setResumePending] = useState(!!resumeSessionId);
   const initRef = useRef(false);
 
-  const { data: _cfg } = useConfig();
-  const defaultAgent = _cfg?.captain?.defaultTerminalAgent ?? 'claude';
+  const { data: config } = useConfig();
+  const defaultAgent = config?.captain?.defaultTerminalAgent ?? 'claude';
 
-  // Merge exit states into sessions for rendering.
-  const sessionsWithExitState = sessions.map((s) => {
-    const override = exitStates[s.id];
-    return override ? { ...s, ...override } : s;
+  const sessionsWithExitState = sessions.map((session) => {
+    const override = exitStates[session.id];
+    return override ? { ...session, ...override } : session;
   });
 
   const relevantSessions = sessionsWithExitState.filter(
-    (s) => s.project === project && s.cwd === cwd,
+    (session) => session.project === project && session.cwd === cwd,
   );
 
   const handleNewTerminal = useCallback(
@@ -55,42 +57,53 @@ export function TerminalPage({
       try {
         const session = await createMutation.mutateAsync({ project, cwd, agent });
         setActiveTab(session.id);
-      } catch (e) {
-        log.error('Failed to create terminal', e);
-        toast.error(e instanceof Error ? e.message : 'Failed to create terminal');
+      } catch (err) {
+        log.error('Failed to create terminal', err);
+        toast.error(err instanceof Error ? err.message : 'Failed to create terminal');
       }
     },
-    [project, cwd, createMutation],
+    [createMutation, cwd, project],
   );
 
-  // Init: resume or auto-select/create on mount once sessions are loaded.
   useMountEffect(() => {
     if (initRef.current) return;
     initRef.current = true;
 
     if (resumeSessionId) {
+      setResumePending(true);
       createMutation.mutate(
         { project, cwd, agent: 'claude', resume_session_id: resumeSessionId },
         {
           onSuccess: (session) => {
+            setResumePending(false);
             setActiveTab(session.id);
             onResumeConsumed?.();
           },
-          onError: (e) => log.error('Failed to resume terminal session', e),
+          onError: (err) => {
+            setResumePending(false);
+            log.error('Failed to resume terminal session', err);
+            onResumeConsumed?.();
+          },
         },
       );
     }
   });
 
-  // Once sessions load, auto-select last relevant or create a new one (render-time).
   const autoSelectedRef = useRef(false);
-  if (!autoSelectedRef.current && !activeTab && !resumeSessionId && sessions.length > 0) {
-    const relevant = sessions.filter((s) => s.project === project && s.cwd === cwd);
+  if (
+    !autoSelectedRef.current &&
+    !activeTab &&
+    !resumeSessionId &&
+    !resumePending &&
+    sessions.length > 0
+  ) {
+    const relevant = sessions.filter(
+      (session) => session.project === project && session.cwd === cwd,
+    );
     autoSelectedRef.current = true;
     if (relevant.length > 0) {
       setActiveTab(relevant[relevant.length - 1].id);
     } else {
-      // Cannot call async handler during render; schedule for next microtask.
       queueMicrotask(() => void handleNewTerminal(defaultAgent));
     }
   }
@@ -102,68 +115,114 @@ export function TerminalPage({
         {
           onSuccess: () => {
             if (activeTab === id) {
-              const remaining = relevantSessions.filter((s) => s.id !== id);
+              const remaining = relevantSessions.filter((session) => session.id !== id);
               setActiveTab(remaining.length > 0 ? remaining[0].id : null);
             }
           },
         },
       );
     },
-    [activeTab, relevantSessions, deleteMutation],
+    [activeTab, deleteMutation, relevantSessions],
+  );
+
+  const handleStartShell = useCallback(
+    async (sessionId: string) => {
+      const session = relevantSessions.find((candidate) => candidate.id === sessionId);
+      if (!session) return;
+
+      setStartingShellForId(sessionId);
+      try {
+        const next = await createMutation.mutateAsync({
+          project: session.project,
+          cwd: session.cwd,
+          agent: session.agent,
+          ...(session.agent === 'claude' ? { resume_session_id: '' } : {}),
+        });
+        setActiveTab(next.id);
+        await deleteMutation.mutateAsync({ id: sessionId });
+      } catch (err) {
+        log.error('Failed to replace restored terminal', err);
+        toast.error(err instanceof Error ? err.message : 'Failed to start terminal');
+      } finally {
+        setStartingShellForId((current) => (current === sessionId ? null : current));
+      }
+    },
+    [createMutation, deleteMutation, relevantSessions],
   );
 
   const handleExit = useCallback(
     (id: string, code: number | null) => {
       setExitStates((prev) => ({ ...prev, [id]: { running: false, exit_code: code } }));
       queryClient.setQueryData<TerminalSessionInfo[]>(queryKeys.terminals.list(), (old) =>
-        old?.map((s) => (s.id === id ? { ...s, running: false, exit_code: code } : s)),
+        old?.map((session) =>
+          session.id === id ? { ...session, running: false, exit_code: code } : session,
+        ),
       );
     },
     [queryClient],
   );
 
+  const activeSession = activeTab
+    ? (relevantSessions.find((session) => session.id === activeTab) ?? null)
+    : null;
+
+  const autoResumeRef = useRef<string | null>(null);
+  if (
+    activeSession &&
+    isRestoredTerminalSession(activeSession) &&
+    autoResumeRef.current !== activeSession.id &&
+    !startingShellForId
+  ) {
+    autoResumeRef.current = activeSession.id;
+    queueMicrotask(() => void handleStartShell(activeSession.id));
+  }
+
   return (
     <div className="flex h-full flex-col bg-bg">
-      {/* Terminal sub-tabs + agent presets */}
       <div className="flex shrink-0 items-center px-4" style={{ height: 36 }}>
-        {/* Open session tabs */}
-        {relevantSessions.map((s) => (
+        {relevantSessions.map((session) => (
           <div
-            key={s.id}
-            onClick={() => setActiveTab(s.id)}
+            key={session.id}
+            onClick={() => setActiveTab(session.id)}
             className="flex cursor-pointer items-center gap-1.5 px-3"
             style={{
               height: '100%',
               borderBottom:
-                activeTab === s.id ? '2px solid var(--color-accent)' : '2px solid transparent',
-              color: activeTab === s.id ? 'var(--color-text-1)' : 'var(--color-text-3)',
+                activeTab === session.id
+                  ? '2px solid var(--color-accent)'
+                  : '2px solid transparent',
+              color: activeTab === session.id ? 'var(--color-text-1)' : 'var(--color-text-3)',
               fontSize: 13,
             }}
           >
             <Circle
               size={6}
-              fill={s.running ? 'var(--color-success)' : 'var(--color-text-4)'}
+              fill={
+                session.running
+                  ? 'var(--color-success)'
+                  : isRestoredTerminalSession(session)
+                    ? 'var(--color-accent)'
+                    : 'var(--color-text-4)'
+              }
               stroke="none"
             />
             <span>
-              {s.agent} {s.id.slice(0, 6)}
+              {session.agent} {session.id.slice(0, 6)}
             </span>
             <X
               size={12}
               className="opacity-40 hover:opacity-100"
               style={{ cursor: 'pointer' }}
-              onClick={(e) => {
-                e.stopPropagation();
-                void handleCloseTab(s.id);
+              onClick={(event) => {
+                event.stopPropagation();
+                void handleCloseTab(session.id);
               }}
             />
           </div>
         ))}
 
-        {/* Separator */}
         {relevantSessions.length > 0 && <div className="mx-2 h-4 border-l border-border-subtle" />}
 
-        {/* Agent presets */}
         {AGENTS.map((agent) => (
           <button
             key={agent.id}
@@ -177,14 +236,18 @@ export function TerminalPage({
         ))}
       </div>
 
-      {/* Terminal content */}
       <div className="min-h-0 flex-1">
-        {activeTab ? (
+        {activeSession ? (
           <TerminalView
-            key={activeTab}
-            sessionId={activeTab}
-            onExit={(code) => handleExit(activeTab, code)}
+            key={activeSession.id}
+            session={activeSession}
+            onExit={(code) => handleExit(activeSession.id, code)}
           />
+        ) : resumePending ? (
+          <div className="flex h-full items-center justify-center gap-2 text-caption text-text-3">
+            <Loader2 size={14} className="animate-spin" />
+            Resuming session...
+          </div>
         ) : (
           <div className="flex h-full items-center justify-center text-caption text-text-3">
             Select an agent above to start a terminal

@@ -39,7 +39,7 @@ description: Commit, push, create PR, and tag AI reviewers. Use when ready to op
    <mando-dev test / mando-dev check results — confirms nothing broke>
 
    ### E2E verification
-   <Bespoke steps exercising the exact new behavior against a running system (no mocks). Include commands run + observed output. If not yet performed, leave empty — mando-pr-summary will flag it.>
+   <Bespoke steps exercising the exact new behavior against a running system (no mocks). Include commands run + observed output (text only — no screenshots or images here; visuals belong in the Evidence section managed by mando-pr-summary). If not yet performed, leave empty — mando-pr-summary will flag it.>
    EOF
 
    gh pr create --title "..." --body-file /tmp/pr-body.md
@@ -120,7 +120,8 @@ description: Commit, push, create PR, and tag AI reviewers. Use when ready to op
       **Loop logic** (repeat until exit 0):
       - `[FAIL]` CI checks → inspect, fix code, commit & push with `git add . && git commit -m "..." && git push`, re-trigger CI (see below), re-check
       - `UNADDRESSED COMMENTS` → fix ALL issues, reply to EACH comment (see below), commit & push, re-trigger CI (see below), re-check
-      - `[WAIT]` CI or reviewers pending → sleep 10s, re-check
+      - `[WAIT]` required CI pending → sleep 10s, re-check
+      - `[INFO]` non-blocking checks (review bots) → ignore, do NOT wait
       - `ALL CLEAR` → proceed to step 10
 
    d. **Consolidate** remaining issues into a table with Reviewer, Issue, and Location columns. Fix all in ONE commit with `git add . && git commit -m "..." && git push`.

@@ -63,6 +63,10 @@ export interface MandoAPI {
   toggleDevTools: () => Promise<void>;
   // Logs
   openLogsFolder: () => void;
+  // Terminal desktop bridge
+  openExternalUrl: (url: string) => Promise<void>;
+  resolveLocalPath: (input: string, cwd: string) => Promise<string | null>;
+  openLocalPath: (path: string) => Promise<void>;
   // Open paths
   openDataDir: () => void;
   openConfigFile: () => void;
@@ -148,6 +152,11 @@ contextBridge.exposeInMainWorld('mandoAPI', {
   toggleDevTools: () => ipcRenderer.invoke('toggle-devtools'),
   // Logs
   openLogsFolder: () => void ipcRenderer.invoke('open-logs-folder'),
+  // Terminal desktop bridge
+  openExternalUrl: (url: string) => ipcRenderer.invoke('terminal:open-external-url', url),
+  resolveLocalPath: (input: string, cwd: string) =>
+    ipcRenderer.invoke('terminal:resolve-local-path', input, cwd),
+  openLocalPath: (path: string) => ipcRenderer.invoke('terminal:open-local-path', path),
   // Open paths
   openDataDir: () => void ipcRenderer.invoke('open-data-dir'),
   openConfigFile: () => void ipcRenderer.invoke('open-config-file'),

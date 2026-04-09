@@ -42,6 +42,8 @@ pub struct Workbench {
     pub title: String,
     pub created_at: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pinned_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub archived_at: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub deleted_at: Option<String>,
@@ -58,6 +60,7 @@ impl Workbench {
             worktree,
             title,
             created_at: crate::now_rfc3339(),
+            pinned_at: None,
             archived_at: None,
             deleted_at: None,
             rev: 1,

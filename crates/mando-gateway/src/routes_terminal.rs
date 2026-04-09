@@ -1,15 +1,15 @@
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::sse::{Event, KeepAlive, Sse};
+use axum::routing::{get, post};
 use axum::Json;
+use axum::Router;
 use base64::Engine;
 use futures_util::stream::Stream;
 use serde::Deserialize;
 use serde_json::{json, Value};
+use std::collections::HashMap;
 use std::convert::Infallible;
-
-use axum::routing::{get, post};
-use axum::Router;
 
 use crate::response::error_response;
 use crate::AppState;
@@ -54,29 +54,33 @@ pub(crate) async fn post_terminal_create(
             "cwd must be an existing directory",
         ));
     }
-    // Inject Mando env vars so the CC session hook can call back.
-    let mut extra_env = std::collections::HashMap::new();
-    extra_env.insert("MANDO_PORT".to_string(), state.listen_port.to_string());
+
+    let mut terminal_env = HashMap::new();
+    terminal_env.insert("MANDO_PORT".to_string(), state.listen_port.to_string());
     let auth_token = crate::auth::ensure_auth_token();
-    extra_env.insert("MANDO_AUTH_TOKEN".to_string(), auth_token);
+    terminal_env.insert("MANDO_AUTH_TOKEN".to_string(), auth_token);
     if let Some(ref tid) = body.terminal_id {
-        extra_env.insert("MANDO_TERMINAL_ID".to_string(), tid.clone());
+        terminal_env.insert("MANDO_TERMINAL_ID".to_string(), tid.clone());
     }
+
     let cfg = state.config.load();
     let args_str = match &body.agent {
-        Agent::Claude => &cfg.captain.claude_terminal_args,
-        Agent::Codex => &cfg.captain.codex_terminal_args,
+        Agent::Claude => cfg.captain.claude_terminal_args.clone(),
+        Agent::Codex => cfg.captain.codex_terminal_args.clone(),
     };
-    let extra_args = shell_words::split(args_str).map_err(|e| {
+    let config_env = cfg.env.clone();
+    drop(cfg);
+
+    let extra_args = shell_words::split(&args_str).map_err(|e| {
         error_response(
             StatusCode::BAD_REQUEST,
             &format!("malformed terminal args: {e}"),
         )
     })?;
+
     let project_name = body.project.clone();
     let cwd_str = cwd.to_string_lossy().to_string();
 
-    // Resolve project from DB (source of truth). Create minimal record if missing.
     let project_id = match mando_db::queries::projects::find_by_name(state.db.pool(), &project_name)
         .await
     {
@@ -97,8 +101,6 @@ pub(crate) async fn post_terminal_create(
         }
     };
 
-    // Create workbench so the terminal appears in the sidebar.
-    // Skip if resuming an existing session OR a workbench already exists for this cwd.
     let wb_id = if body.resume_session_id.is_none() {
         let existing = mando_db::queries::workbenches::find_by_worktree(state.db.pool(), &cwd_str)
             .await
@@ -130,13 +132,14 @@ pub(crate) async fn post_terminal_create(
         agent: body.agent,
         resume_session_id: body.resume_session_id,
         size: body.size,
-        extra_env,
+        config_env,
+        terminal_env,
+        terminal_id: body.terminal_id,
         extra_args,
     };
     let session = match state.terminal_host.create(req) {
         Ok(s) => s,
         Err(e) => {
-            // Clean up workbench if terminal spawn failed.
             if let Some(id) = wb_id {
                 let _ = mando_db::queries::workbenches::archive(state.db.pool(), id).await;
             }
@@ -156,7 +159,7 @@ pub(crate) async fn get_terminal_list(State(state): State<AppState>) -> Json<Val
 
 #[derive(Deserialize)]
 pub(crate) struct WriteBody {
-    pub data: String, // base64-encoded
+    pub data: String,
 }
 
 pub(crate) async fn post_terminal_write(
@@ -171,7 +174,7 @@ pub(crate) async fn post_terminal_write(
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(&body.data)
         .map_err(|e| error_response(StatusCode::BAD_REQUEST, &format!("invalid base64: {e}")))?;
-    session.write_input(&bytes).map_err(|e| {
+    session.write_input(&bytes).await.map_err(|e| {
         error_response(
             StatusCode::INTERNAL_SERVER_ERROR,
             &format!("write failed: {e}"),
@@ -202,31 +205,50 @@ pub(crate) async fn delete_terminal(
     Ok(Json(json!({"ok": true})))
 }
 
+#[derive(Deserialize, Default)]
+pub(crate) struct StreamQuery {
+    #[serde(default)]
+    pub replay: Option<u8>,
+}
+
 pub(crate) async fn get_terminal_stream(
     State(state): State<AppState>,
     Path(id): Path<String>,
+    axum::extract::Query(query): axum::extract::Query<StreamQuery>,
 ) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, (StatusCode, Json<Value>)> {
     let session = state
         .terminal_host
         .get(&id)
         .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "terminal session not found"))?;
     let mut rx = session.subscribe();
-    let snapshot = session.snapshot();
+    let replay = query.replay.unwrap_or(1) != 0;
+    let snapshot = if replay {
+        session.snapshot()
+    } else {
+        Vec::new()
+    };
+    let initial_state = session.state();
+    let initial_exit_code = session.exit_code();
 
     let stream = async_stream::stream! {
-        // Replay buffered output so late subscribers see startup content.
         if !snapshot.is_empty() {
             let b64 = base64::engine::general_purpose::STANDARD.encode(&snapshot);
             yield Ok(Event::default().event("output").data(b64));
+        }
+
+        if initial_state != mando_terminal::SessionState::Live {
+            let event = Event::default()
+                .event("exit")
+                .data(json!({"code": initial_exit_code}).to_string());
+            yield Ok(event);
+            return;
         }
 
         loop {
             match rx.recv().await {
                 Ok(mando_terminal::TerminalEvent::Output(data)) => {
                     let b64 = base64::engine::general_purpose::STANDARD.encode(&data);
-                    let event = Event::default()
-                        .event("output")
-                        .data(b64);
+                    let event = Event::default().event("output").data(b64);
                     yield Ok(event);
                 }
                 Ok(mando_terminal::TerminalEvent::Exit { code }) => {
@@ -239,9 +261,7 @@ pub(crate) async fn get_terminal_stream(
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
                     tracing::warn!(session = id, lagged = n, "terminal stream lagged");
                 }
-                Err(tokio::sync::broadcast::error::RecvError::Closed) => {
-                    break;
-                }
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
             }
         }
     };

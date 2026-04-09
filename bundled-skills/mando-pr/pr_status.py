@@ -135,6 +135,8 @@ async def check_status(
     has_issues = False
 
     # --- CI ---
+    # Only checks whose name starts with "checks" are required CI.
+    # Review bots (Greptile, Devin, CodeRabbit, Codex) are informational.
     print(f"PR #{pr} ({owner}/{repo}) head: {head_sha[:8]}\n")
     print("CI:")
     if runs:
@@ -143,14 +145,21 @@ async def check_status(
             name = r.get("name", "?")
             status = r.get("status", "?")
             conclusion = r.get("conclusion", "?")
+            required = name.startswith("checks")
             if status != "completed":
-                print(f"  [WAIT] {name}")
-                has_issues = True
+                if required:
+                    print(f"  [WAIT] {name}")
+                    has_issues = True
+                else:
+                    print(f"  [INFO] {name} (pending, non-blocking)")
             elif conclusion in ("success", "skipped", "neutral"):
                 print(f"  [PASS] {name}")
             else:
-                print(f"  [FAIL] {name}: {conclusion}")
-                has_issues = True
+                if required:
+                    print(f"  [FAIL] {name}: {conclusion}")
+                    has_issues = True
+                else:
+                    print(f"  [INFO] {name}: {conclusion} (non-blocking)")
     else:
         print("  (no checks detected)")
 

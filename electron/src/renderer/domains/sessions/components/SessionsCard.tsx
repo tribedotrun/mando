@@ -24,14 +24,7 @@ import {
 } from '#renderer/domains/sessions/components/SessionsHelpers';
 import { Button } from '#renderer/components/ui/button';
 import { Skeleton } from '#renderer/components/ui/skeleton';
-import {
-  Table,
-  TableHeader,
-  TableBody,
-  TableRow,
-  TableHead,
-  TableCell,
-} from '#renderer/components/ui/table';
+import { Table, TableBody, TableRow, TableCell } from '#renderer/components/ui/table';
 
 const PER_PAGE = 50;
 const CATEGORY_ORDER = [
@@ -305,13 +298,6 @@ function SessionsList({
 
   return (
     <Table>
-      <TableHeader>
-        <TableRow className="hover:bg-transparent">
-          <TableHead className="w-5" />
-          <TableHead>Session</TableHead>
-          <TableHead className="w-[72px] text-right">Time</TableHead>
-        </TableRow>
-      </TableHeader>
       <TableBody>
         {sessions.map((s, idx) => {
           const seq = sessionSeq.get(s.session_id);

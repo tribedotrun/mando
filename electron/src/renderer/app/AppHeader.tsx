@@ -1,11 +1,19 @@
 import React, { useRef, useState } from 'react';
+import { cn } from '#renderer/cn';
 import { useRouterState } from '@tanstack/react-router';
 import { useTaskList, useWorkbenchList } from '#renderer/hooks/queries';
-import { FolderGit2, ChevronDown, Copy } from 'lucide-react';
+import { GitBranch, ChevronDown, Copy } from 'lucide-react';
 import { FinderIcon, CursorIcon } from '#renderer/global/components/icons';
 import { DetailOverflowMenu } from '#renderer/domains/captain/components/TaskDetailParts';
+import { HeaderStatusBadge } from '#renderer/domains/captain/components/StatusCard';
+import { buildSessionsFromTimeline } from '#renderer/domains/sessions';
 import { useMountEffect } from '#renderer/global/hooks/useMountEffect';
-import type { TaskItem } from '#renderer/types';
+import type { TaskItem, SessionSummary } from '#renderer/types';
+import { queryKeys } from '#renderer/queryKeys';
+import { useQuery } from '@tanstack/react-query';
+import { fetchTimeline, fetchItemSessions } from '#renderer/domains/captain/hooks/useApi';
+import { useUIStore } from '#renderer/app/uiStore';
+import { Button } from '#renderer/components/ui/button';
 import { copyToClipboard, getErrorMessage } from '#renderer/utils';
 import { toast } from 'sonner';
 import { Kbd } from '#renderer/components/ui/kbd';
@@ -82,44 +90,106 @@ export function AppHeader(): React.ReactElement {
     return () => document.removeEventListener('keydown', onKey);
   });
 
+  // Fetch sessions for the status badge when viewing a task.
+  const taskId = ctx?.task?.id ?? null;
+  const { data: timelineData } = useQuery({
+    queryKey: taskId != null ? queryKeys.tasks.timeline(taskId) : ['noop'],
+    queryFn: async () => {
+      const [tl, sess] = await Promise.all([fetchTimeline(taskId!), fetchItemSessions(taskId!)]);
+      const map: Record<string, SessionSummary> = {};
+      for (const s of sess.sessions) map[s.session_id] = s;
+      return { events: tl.events, sessionMap: map, sessions: sess.sessions };
+    },
+    enabled: !!taskId,
+  });
+  const sessions = React.useMemo(
+    () =>
+      ctx?.task && timelineData
+        ? buildSessionsFromTimeline(timelineData.events, timelineData.sessionMap, ctx.task)
+        : [],
+    [ctx?.task, timelineData],
+  );
+
   if (!ctx) {
     return (
       <div className="h-10 shrink-0" style={{ WebkitAppRegion: 'drag' } as React.CSSProperties} />
     );
   }
 
+  const hasTask = !!ctx.task;
+
   return (
     <div
-      className="flex h-10 shrink-0 items-center gap-3 border-b border-border px-8"
+      className={cn(
+        'flex shrink-0 flex-col justify-center border-b border-border px-6',
+        hasTask ? 'py-2' : 'h-10',
+      )}
       style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
     >
-      {ctx.worktreeName && (
-        <span
-          className="flex items-center gap-1.5 text-caption text-foreground"
-          style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
-        >
-          <FolderGit2 size={13} className="shrink-0 text-muted-foreground" />
-          <span className="truncate">{ctx.worktreeName}</span>
-        </span>
-      )}
-
-      {ctx.projectName && <span className="text-caption text-text-3">{ctx.projectName}</span>}
-
-      <span className="flex-1" />
-
-      <div
-        className="flex items-center gap-2"
-        style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
-      >
-        {ctx.task &&
-          (ctx.task.branch || ctx.task.worktree || ctx.task.plan || ctx.task.context) && (
-            <DetailOverflowMenu
-              item={ctx.task}
-              onViewContext={() => document.dispatchEvent(new CustomEvent('mando:view-task-brief'))}
-            />
+      {hasTask ? (
+        <>
+          {/* Row 1: title + actions */}
+          <div className="flex items-center gap-3">
+            <span className="min-w-0 truncate text-body font-medium text-foreground">
+              {ctx.task!.title}
+            </span>
+            <span className="flex-1" />
+            <div
+              className="flex shrink-0 items-center gap-2"
+              style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+            >
+              {ctx.task!.pr_number &&
+                ctx.task!.project &&
+                ctx.task!.status === 'awaiting-review' && (
+                  <Button size="sm" onClick={() => useUIStore.getState().setMergeItem(ctx.task!)}>
+                    Merge
+                  </Button>
+                )}
+              {ctx.worktreePath && <OpenMenu worktreePath={ctx.worktreePath} />}
+              {(ctx.task!.branch || ctx.task!.worktree || ctx.task!.plan || ctx.task!.context) && (
+                <DetailOverflowMenu
+                  item={ctx.task!}
+                  onViewContext={() =>
+                    document.dispatchEvent(new CustomEvent('mando:view-task-brief'))
+                  }
+                />
+              )}
+            </div>
+          </div>
+          {/* Row 2: status + project + worktree */}
+          <div className="mt-2 flex items-center gap-2 text-caption text-text-3">
+            <HeaderStatusBadge item={ctx.task!} sessions={sessions} />
+            {ctx.projectName && <span>{ctx.projectName}</span>}
+            {ctx.projectName && ctx.worktreeName && <span>&middot;</span>}
+            {ctx.worktreeName && (
+              <span className="flex items-center gap-1">
+                <GitBranch size={11} className="shrink-0" />
+                {ctx.worktreeName}
+              </span>
+            )}
+          </div>
+        </>
+      ) : (
+        /* Non-task pages: single-line layout */
+        <div className="flex items-center gap-3">
+          {ctx.worktreeName && (
+            <span
+              className="flex items-center gap-1.5 text-caption text-text-3"
+              style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+            >
+              <GitBranch size={12} className="shrink-0" />
+              <span>{ctx.worktreeName}</span>
+            </span>
           )}
-        {ctx.worktreePath && <OpenMenu worktreePath={ctx.worktreePath} />}
-      </div>
+          {ctx.projectName && <span className="text-caption text-text-3">{ctx.projectName}</span>}
+          <span className="flex-1" />
+          {ctx.worktreePath && (
+            <div style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
+              <OpenMenu worktreePath={ctx.worktreePath} />
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

@@ -191,7 +191,7 @@ async fn main() {
         task_store: task_store_arc,
         db,
         qa_session_mgr: mando_scout::runtime::qa::default_session_manager(),
-        terminal_host: Arc::new(mando_terminal::TerminalHost::new()),
+        terminal_host: Arc::new(mando_terminal::TerminalHost::new(mando_config::data_dir())),
         start_time,
         listen_port: port,
         dev_mode: args.dev,
@@ -351,17 +351,17 @@ async fn main() {
 
 /// Bind with retry and exponential backoff (1s, 2s, 4s, 8s, 16s).
 ///
-/// Sets SO_REUSEADDR + SO_REUSEPORT so the new process can bind even when the
-/// previous socket is still in TIME_WAIT.  If all attempts fail, exits cleanly
-/// (no panic) so launchd can retry without a crash-loop counter.
+/// Sets SO_REUSEADDR so the new process can bind even when the previous socket
+/// is still in TIME_WAIT.  Does NOT set SO_REUSEPORT -- that would let two
+/// daemons bind the same port simultaneously (kernel load-balances between
+/// them), defeating single-instance enforcement.  If all attempts fail, exits
+/// cleanly (no panic) so launchd can retry without a crash-loop counter.
 async fn bind_with_retry(addr: SocketAddr) -> tokio::net::TcpListener {
     const MAX_ATTEMPTS: u32 = 5;
 
     for attempt in 1..=MAX_ATTEMPTS {
         let socket = tokio::net::TcpSocket::new_v4().expect("socket creation failed");
         socket.set_reuseaddr(true).expect("SO_REUSEADDR failed");
-        #[cfg(unix)]
-        socket.set_reuseport(true).expect("SO_REUSEPORT failed");
 
         match socket.bind(addr) {
             Ok(()) => match socket.listen(1024) {

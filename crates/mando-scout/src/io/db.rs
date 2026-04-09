@@ -114,6 +114,7 @@ impl ScoutDb {
                 task_id: None,
                 scout_item_id: Some(item_id),
                 worker_name: None,
+                resumed_at: None,
             },
         )
         .await

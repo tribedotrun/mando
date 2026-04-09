@@ -1,6 +1,7 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { TerminalView } from '#renderer/domains/terminal/components/TerminalView';
+import { isRestoredTerminalSession } from '#renderer/domains/terminal/runtime/terminalSession';
 import { useTerminalList, type TerminalSessionInfo } from '#renderer/hooks/queries';
 import { useTerminalCreate, useTerminalDelete } from '#renderer/hooks/mutations';
 import { queryKeys } from '#renderer/queryKeys';
@@ -27,17 +28,18 @@ export function StandaloneTerminal({
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState<string | null>(null);
   const [adopting, setAdopting] = useState(false);
+  const [startingShellForId, setStartingShellForId] = useState<string | null>(null);
   const [exitStates, setExitStates] = useState<
     Record<string, { running: boolean; exit_code: number | null }>
   >({});
 
-  const sessionsWithExitState = sessions.map((s) => {
-    const override = exitStates[s.id];
-    return override ? { ...s, ...override } : s;
+  const sessionsWithExitState = sessions.map((session) => {
+    const override = exitStates[session.id];
+    return override ? { ...session, ...override } : session;
   });
 
   const relevantSessions = sessionsWithExitState.filter(
-    (s) => s.project === project && s.cwd === cwd,
+    (session) => session.project === project && session.cwd === cwd,
   );
 
   const handleNewTerminal = useCallback(
@@ -45,7 +47,7 @@ export function StandaloneTerminal({
       const session = await createMutation.mutateAsync({ project, cwd, agent });
       setActiveTab(session.id);
     },
-    [project, cwd, createMutation],
+    [createMutation, cwd, project],
   );
 
   const handleCloseTab = useCallback(
@@ -55,7 +57,7 @@ export function StandaloneTerminal({
         {
           onSuccess: () => {
             if (activeTab === id) {
-              const remaining = relevantSessions.filter((s) => s.id !== id);
+              const remaining = relevantSessions.filter((session) => session.id !== id);
               setActiveTab(remaining.length > 0 ? remaining[0].id : null);
             }
           },
@@ -63,7 +65,7 @@ export function StandaloneTerminal({
         },
       );
     },
-    [activeTab, relevantSessions, deleteMutation],
+    [activeTab, deleteMutation, relevantSessions],
   );
 
   const handleAdopt = useCallback(() => {
@@ -71,7 +73,45 @@ export function StandaloneTerminal({
     onAdopt?.(cwd);
   }, [cwd, onAdopt]);
 
-  // Auto-create first terminal if none exist.
+  const handleStartShell = useCallback(
+    async (sessionId: string) => {
+      const session = relevantSessions.find((candidate) => candidate.id === sessionId);
+      if (!session) return;
+
+      setStartingShellForId(sessionId);
+      try {
+        const next = await createMutation.mutateAsync({
+          project: session.project,
+          cwd: session.cwd,
+          agent: session.agent,
+          ...(session.agent === 'claude' ? { resume_session_id: '' } : {}),
+        });
+        setActiveTab(next.id);
+        await deleteMutation.mutateAsync({ id: sessionId });
+      } catch (err) {
+        console.error('Failed to replace restored terminal', err);
+      } finally {
+        setStartingShellForId((current) => (current === sessionId ? null : current));
+      }
+    },
+    [createMutation, deleteMutation, relevantSessions],
+  );
+
+  const activeSession = activeTab
+    ? (relevantSessions.find((session) => session.id === activeTab) ?? null)
+    : null;
+
+  const autoResumeRef = useRef<string | null>(null);
+  if (
+    activeSession &&
+    isRestoredTerminalSession(activeSession) &&
+    autoResumeRef.current !== activeSession.id &&
+    !startingShellForId
+  ) {
+    autoResumeRef.current = activeSession.id;
+    queueMicrotask(() => void handleStartShell(activeSession.id));
+  }
+
   if (relevantSessions.length === 0 && !activeTab) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -115,7 +155,6 @@ export function StandaloneTerminal({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      {/* Header */}
       <div
         style={{
           display: 'flex',
@@ -157,7 +196,6 @@ export function StandaloneTerminal({
         </div>
       </div>
 
-      {/* Terminal sub-tabs */}
       <div
         style={{
           display: 'flex',
@@ -169,10 +207,10 @@ export function StandaloneTerminal({
           fontSize: 12,
         }}
       >
-        {relevantSessions.map((s) => (
+        {relevantSessions.map((session) => (
           <div
-            key={s.id}
-            onClick={() => setActiveTab(s.id)}
+            key={session.id}
+            onClick={() => setActiveTab(session.id)}
             style={{
               display: 'flex',
               alignItems: 'center',
@@ -181,20 +219,30 @@ export function StandaloneTerminal({
               height: '100%',
               cursor: 'pointer',
               borderBottom:
-                activeTab === s.id ? '2px solid var(--accent)' : '2px solid transparent',
-              color: activeTab === s.id ? 'var(--text-1)' : 'var(--text-3)',
+                activeTab === session.id ? '2px solid var(--accent)' : '2px solid transparent',
+              color: activeTab === session.id ? 'var(--text-1)' : 'var(--text-3)',
             }}
           >
-            <Circle size={6} fill={s.running ? 'var(--green)' : 'var(--text-4)'} stroke="none" />
+            <Circle
+              size={6}
+              fill={
+                session.running
+                  ? 'var(--green)'
+                  : isRestoredTerminalSession(session)
+                    ? 'var(--accent)'
+                    : 'var(--text-4)'
+              }
+              stroke="none"
+            />
             <span>
-              {s.agent} {s.id.slice(0, 6)}
+              {session.agent} {session.id.slice(0, 6)}
             </span>
             <X
               size={12}
               style={{ opacity: 0.5, cursor: 'pointer' }}
-              onClick={(e) => {
-                e.stopPropagation();
-                void handleCloseTab(s.id);
+              onClick={(event) => {
+                event.stopPropagation();
+                void handleCloseTab(session.id);
               }}
             />
           </div>
@@ -217,20 +265,21 @@ export function StandaloneTerminal({
         </button>
       </div>
 
-      {/* Active terminal */}
       <div style={{ flex: 1, minHeight: 0 }}>
-        {activeTab && (
+        {activeSession && (
           <TerminalView
-            key={activeTab}
-            sessionId={activeTab}
+            key={activeSession.id}
+            session={activeSession}
             onExit={(code) => {
               setExitStates((prev) => ({
                 ...prev,
-                [activeTab]: { running: false, exit_code: code },
+                [activeSession.id]: { running: false, exit_code: code },
               }));
               queryClient.setQueryData<TerminalSessionInfo[]>(queryKeys.terminals.list(), (old) =>
-                old?.map((s) =>
-                  s.id === activeTab ? { ...s, running: false, exit_code: code } : s,
+                old?.map((session) =>
+                  session.id === activeSession.id
+                    ? { ...session, running: false, exit_code: code }
+                    : session,
                 ),
               );
             }}

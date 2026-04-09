@@ -5,7 +5,7 @@
 //! - `daemon.port` — port the daemon is listening on (production)
 //! - `daemon-dev.port` — port the daemon is listening on (dev mode, `--dev` flag)
 //!
-//! `check_and_write_pid` kills stale daemons (PID file or port occupant) before writing our PID.
+//! `check_and_write_pid` refuses to start if another daemon is already running (PID file or port occupant).
 
 use std::fs;
 use std::path::PathBuf;
@@ -25,8 +25,9 @@ fn port_path(dev: bool) -> PathBuf {
 
 /// Ensure no other mando-gw is running, then write our PID.
 ///
-/// If a stale mando-gw process is found (PID file or port occupant), kill it.
-/// If the process on the port is NOT mando-gw, bail — don't kill unrelated processes.
+/// If a live mando-gw is found (PID file or port occupant), refuse to start.
+/// Lifecycle scripts (`mando-dev stop/restart`) handle killing -- the daemon
+/// itself never kills a sibling.
 pub fn check_and_write_pid(port: u16) -> anyhow::Result<()> {
     let path = pid_path();
 
@@ -34,34 +35,23 @@ pub fn check_and_write_pid(port: u16) -> anyhow::Result<()> {
     if let Ok(contents) = fs::read_to_string(&path) {
         if let Ok(pid) = contents.trim().parse::<u32>() {
             if pid != std::process::id() && is_process_alive(pid) {
-                let mando = is_mando_process(pid)?;
-                if mando {
-                    eprintln!("killing stale daemon (pid {pid}) before starting");
-                    kill_process(pid);
-                } else {
-                    anyhow::bail!(
-                        "PID file points to non-mando process (pid {pid}). \
-                         Remove {} manually.",
-                        path.display()
-                    );
-                }
+                anyhow::bail!(
+                    "another daemon is already running (pid {pid}). \
+                     Stop it first with mando-dev stop"
+                );
             }
         }
+        // PID file exists but process is dead -- stale file, clean up.
         fs::remove_file(&path).ok();
     }
 
     // No PID file but port might be occupied (e.g. rm -rf ~/.mando while daemon was running).
     if let Some(pid) = find_port_occupant(port) {
         if pid != std::process::id() {
-            let mando = is_mando_process(pid)?;
-            if mando {
-                eprintln!("killing stale daemon on port {port} (pid {pid})");
-                kill_process(pid);
-            } else {
-                anyhow::bail!(
-                    "port {port} is occupied by another process (pid {pid}, not mando-gw)"
-                );
-            }
+            anyhow::bail!(
+                "port {port} is already occupied (pid {pid}). \
+                 Stop it first with mando-dev stop"
+            );
         }
     }
 
@@ -101,45 +91,6 @@ fn is_process_alive(pid: u32) -> bool {
         .status()
         .map(|s| s.success())
         .unwrap_or(false)
-}
-
-/// Send SIGTERM, wait briefly, then SIGKILL if still alive.
-fn kill_process(pid: u32) {
-    if let Err(e) = std::process::Command::new("kill")
-        .arg(pid.to_string())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-    {
-        tracing::warn!(pid, error = %e, "SIGTERM to stale daemon failed");
-    }
-    std::thread::sleep(std::time::Duration::from_millis(500));
-    if is_process_alive(pid) {
-        if let Err(e) = std::process::Command::new("kill")
-            .args(["-9", &pid.to_string()])
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status()
-        {
-            tracing::warn!(pid, error = %e, "SIGKILL to stale daemon failed");
-        }
-    }
-}
-
-/// Check if a PID belongs to a mando-gw process (or "mando-daemon" in prod).
-/// Returns an error if `ps` fails — the operator must decide whether to force
-/// a restart. Previously this silently returned `false`, which could kill
-/// unrelated processes when `ps` was unavailable.
-fn is_mando_process(pid: u32) -> anyhow::Result<bool> {
-    let output = std::process::Command::new("ps")
-        .args(["-o", "comm=", "-p", &pid.to_string()])
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
-        .output()
-        .map_err(|e| anyhow::anyhow!("ps lookup for pid {pid} failed: {e}"))?;
-    let comm = String::from_utf8_lossy(&output.stdout);
-    let name = comm.trim();
-    Ok(name.contains("mando-gw") || name.contains("mando-daemon") || name.contains("Mando Daemon"))
 }
 
 /// Find the PID of a process listening on a TCP port (macOS lsof).

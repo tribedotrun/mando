@@ -10,6 +10,7 @@ struct Row {
     worktree: String,
     title: String,
     created_at: String,
+    pinned_at: Option<String>,
     archived_at: Option<String>,
     deleted_at: Option<String>,
     rev: i64,
@@ -24,6 +25,7 @@ impl Row {
             worktree: self.worktree,
             title: self.title,
             created_at: self.created_at,
+            pinned_at: self.pinned_at,
             archived_at: self.archived_at,
             deleted_at: self.deleted_at,
             rev: self.rev,
@@ -33,7 +35,7 @@ impl Row {
 
 const SELECT: &str = "\
     w.id, w.project_id, p.name AS project, w.worktree, w.title, \
-    w.created_at, w.archived_at, w.deleted_at, w.rev";
+    w.created_at, w.pinned_at, w.archived_at, w.deleted_at, w.rev";
 
 fn select_sql() -> &'static str {
     static SQL: std::sync::OnceLock<String> = std::sync::OnceLock::new();
@@ -99,11 +101,13 @@ pub async fn load_all(pool: &SqlitePool) -> Result<Vec<Workbench>> {
 
 pub async fn archive(pool: &SqlitePool, id: i64) -> Result<bool> {
     let now = mando_types::now_rfc3339();
-    let result = sqlx::query("UPDATE workbenches SET archived_at = ?, rev = rev + 1 WHERE id = ?")
-        .bind(&now)
-        .bind(id)
-        .execute(pool)
-        .await?;
+    let result = sqlx::query(
+        "UPDATE workbenches SET archived_at = ?, pinned_at = NULL, rev = rev + 1 WHERE id = ?",
+    )
+    .bind(&now)
+    .bind(id)
+    .execute(pool)
+    .await?;
     Ok(result.rows_affected() > 0)
 }
 
@@ -120,6 +124,27 @@ pub async fn mark_deleted(pool: &SqlitePool, id: i64) -> Result<bool> {
     let now = mando_types::now_rfc3339();
     let result = sqlx::query("UPDATE workbenches SET deleted_at = ?, rev = rev + 1 WHERE id = ?")
         .bind(&now)
+        .bind(id)
+        .execute(pool)
+        .await?;
+    Ok(result.rows_affected() > 0)
+}
+
+pub async fn pin(pool: &SqlitePool, id: i64) -> Result<bool> {
+    let now = mando_types::now_rfc3339();
+    let result = sqlx::query(
+        "UPDATE workbenches SET pinned_at = ?, rev = rev + 1 \
+         WHERE id = ? AND archived_at IS NULL AND deleted_at IS NULL",
+    )
+    .bind(&now)
+    .bind(id)
+    .execute(pool)
+    .await?;
+    Ok(result.rows_affected() > 0)
+}
+
+pub async fn unpin(pool: &SqlitePool, id: i64) -> Result<bool> {
+    let result = sqlx::query("UPDATE workbenches SET pinned_at = NULL, rev = rev + 1 WHERE id = ?")
         .bind(id)
         .execute(pool)
         .await?;
@@ -145,7 +170,7 @@ pub async fn archive_terminal(pool: &SqlitePool, grace_secs: u64) -> Result<usiz
 
     let result = sqlx::query(
         "UPDATE workbenches SET archived_at = ?, rev = rev + 1
-         WHERE archived_at IS NULL AND deleted_at IS NULL
+         WHERE archived_at IS NULL AND deleted_at IS NULL AND pinned_at IS NULL
            AND id IN (
              SELECT workbench_id FROM tasks
              WHERE workbench_id IS NOT NULL

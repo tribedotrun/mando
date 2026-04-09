@@ -46,13 +46,17 @@ pub async fn terminate_session(
     // 3. Read cost/duration from stream file before updating DB.
     let stream_path = mando_config::stream_path_for_session(session_id);
     let cost_info = mando_cc::get_stream_cost(&stream_path);
-    let (cost_usd, duration_ms) = match &cost_info {
-        Some(info) => (info.cost_usd, info.duration_ms.map(|d| d as i64)),
-        None => (None, None),
+    let (cost_usd, duration_ms, num_turns) = match &cost_info {
+        Some(info) => (
+            info.cost_usd,
+            info.duration_ms.map(|d| d as i64),
+            info.num_turns,
+        ),
+        None => (None, None, None),
     };
 
     // 4. Update cc_sessions status + cost. DB failure must not block local
-    //    cleanup — a stale DB row is recoverable via reconciliation, but a
+    //    cleanup -- a stale DB row is recoverable via reconciliation, but a
     //    leaked PID or health entry is not.
     let db_ok = match mando_db::queries::sessions::update_session_status_with_cost(
         pool,
@@ -60,6 +64,7 @@ pub async fn terminate_session(
         new_status,
         cost_usd,
         duration_ms,
+        num_turns,
     )
     .await
     {
