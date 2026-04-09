@@ -1,20 +1,21 @@
 import { useMemo } from 'react';
-import { useTaskStore } from '#renderer/domains/captain/stores/taskStore';
+import { useTaskList } from '#renderer/hooks/queries';
+import { useTaskFilters } from '#renderer/domains/captain/stores/taskFilters';
 import { useProjectFilterPaths } from '#renderer/domains/settings';
 import { ACTION_NEEDED_STATUSES, IN_PROGRESS_STATUSES, type TaskItem } from '#renderer/types';
 import { sortTaskItems } from '#renderer/utils';
 
 /**
- * Derives a filtered + sorted task list from stable store slices.
+ * Derives a filtered + sorted task list from React Query + filter store.
  *
- * Selects items, statusFilter, and showArchived individually so that
- * useSyncExternalStore never sees an unstable snapshot (which would
- * cause an infinite re-render loop in React 19).
+ * Reads items from useTaskList (React Query) and filter state from the
+ * lightweight useTaskFilters Zustand store.
  */
 export function useFilteredTasks(projectFilter?: string | null): TaskItem[] {
-  const items = useTaskStore((s) => s.items);
-  const statusFilter = useTaskStore((s) => s.statusFilter);
-  const showArchived = useTaskStore((s) => s.showArchived);
+  const { data: taskData } = useTaskList();
+  const items = taskData?.items ?? [];
+  const statusFilter = useTaskFilters((s) => s.statusFilter);
+  const showArchived = useTaskFilters((s) => s.showArchived);
   const filterPaths = useProjectFilterPaths(projectFilter);
 
   return useMemo(() => {

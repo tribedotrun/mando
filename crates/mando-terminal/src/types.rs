@@ -49,6 +49,9 @@ pub struct CreateRequest {
     /// Extra environment variables injected into the PTY process.
     #[serde(default)]
     pub extra_env: std::collections::HashMap<String, String>,
+    /// Extra CLI arguments parsed from config (shell-split).
+    #[serde(default)]
+    pub extra_args: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -59,4 +62,5 @@ pub struct SessionInfo {
     pub agent: Agent,
     pub running: bool,
     pub exit_code: Option<u32>,
+    pub rev: u64,
 }

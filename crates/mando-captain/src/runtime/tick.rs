@@ -433,6 +433,7 @@ async fn run_captain_tick_inner(
 
     // ── §5 POST — persist, SSE, prune ─────────────────────────────────
 
+    let affected_task_ids: Vec<i64> = items.iter().map(|t| t.id).collect();
     super::tick_post::run_post_phase(
         dry_run,
         &health_path,
@@ -440,6 +441,7 @@ async fn run_captain_tick_inner(
         &removed_workers,
         &notifier,
         bus,
+        &affected_task_ids,
     )
     .await?;
 

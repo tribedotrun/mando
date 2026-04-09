@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { Card, CardContent } from '#renderer/components/ui/card';
 import { Input } from '#renderer/components/ui/input';
 import { Textarea } from '#renderer/components/ui/textarea';
@@ -9,10 +10,8 @@ import {
   CollapsibleTrigger,
   CollapsibleContent,
 } from '#renderer/components/ui/collapsible';
-import {
-  useSettingsStore,
-  type ProjectConfig,
-} from '#renderer/domains/settings/stores/settingsStore';
+import type { ProjectConfig } from '#renderer/types';
+import { queryKeys } from '#renderer/queryKeys';
 import { shortRepo } from '#renderer/utils';
 import { apiPatch, buildUrl } from '#renderer/domains/settings/hooks/useApi';
 
@@ -33,7 +32,7 @@ export function ProjectEditor({
   onCancel,
   isNew,
 }: ProjectEditorProps): React.ReactElement {
-  const reloadConfig = useSettingsStore((s) => s.load);
+  const qc = useQueryClient();
   const [name, setName] = useState(project.name || '');
   const [logoFile, setLogoFile] = useState(project.logo || null);
   const [detectingLogo, setDetectingLogo] = useState(false);
@@ -56,7 +55,7 @@ export function ProjectEditor({
         { redetect_logo: true },
       );
       setLogoFile(res.logo ?? null);
-      await reloadConfig();
+      void qc.invalidateQueries({ queryKey: queryKeys.config.all });
     } catch (err) {
       setDetectError(err instanceof Error ? err.message : 'Detection failed');
     } finally {

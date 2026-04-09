@@ -45,6 +45,7 @@ mando-telegram = { path = "../mando-telegram" }
 mando-terminal.workspace = true
 rustc-hash.workspace = true
 async-stream = "0.3"
+shell-words = "1"
 base64 = "0.22"
 bytes = "1"
 toml = "0.8"

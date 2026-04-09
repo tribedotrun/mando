@@ -1,14 +1,14 @@
-import React, { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import React, { useCallback, useRef, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiGet } from '#renderer/domains/settings/hooks/useApi';
 import { Card, CardContent } from '#renderer/components/ui/card';
 import { Input } from '#renderer/components/ui/input';
 import { Label } from '#renderer/components/ui/label';
 import { Skeleton } from '#renderer/components/ui/skeleton';
-import {
-  useSettingsStore,
-  type TelegramConfig,
-} from '#renderer/domains/settings/stores/settingsStore';
+import { useConfig } from '#renderer/hooks/queries';
+import { useConfigSave } from '#renderer/hooks/mutations';
+import { queryKeys } from '#renderer/queryKeys';
+import type { MandoConfig, TelegramConfig } from '#renderer/types';
 import { toast } from 'sonner';
 import { Switch } from '#renderer/components/ui/switch';
 
@@ -69,22 +69,40 @@ function RuntimeStatus({ health }: { health: TelegramHealth | undefined }): Reac
 }
 
 const EMPTY_TELEGRAM: TelegramConfig = {};
+const DEBOUNCE_MS = 1500;
 
 export function SettingsTelegram(): React.ReactElement {
-  const telegram = useSettingsStore((s) => s.config.channels?.telegram ?? EMPTY_TELEGRAM);
-  const botToken = useSettingsStore((s) => s.config.env?.TELEGRAM_MANDO_BOT_TOKEN ?? '');
-  const updateTelegram = useSettingsStore((s) => s.updateTelegram);
-  const updateEnv = useSettingsStore((s) => s.updateEnv);
-  const save = useSettingsStore((s) => s.save);
-  const scheduleSave = useSettingsStore((s) => s.scheduleSave);
+  const { data: config } = useConfig();
+  const saveMut = useConfigSave();
+  const qc = useQueryClient();
+  const telegram = config?.channels?.telegram ?? EMPTY_TELEGRAM;
+  const botToken = config?.env?.TELEGRAM_MANDO_BOT_TOKEN ?? '';
 
   const [savingEnabled, setSavingEnabled] = useState(false);
+  const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   const { data: health } = useQuery<TelegramHealth>({
     queryKey: ['health', 'telegram'],
     queryFn: () => apiGet<TelegramHealth>('/api/health/telegram'),
     refetchInterval: 10_000,
   });
+
+  const buildConfigRef = useRef<(() => MandoConfig) | null>(null);
+
+  const scheduleSave = useCallback(
+    (buildConfig: () => MandoConfig) => {
+      buildConfigRef.current = buildConfig;
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      debounceRef.current = setTimeout(() => {
+        debounceRef.current = undefined;
+        if (buildConfigRef.current) {
+          saveMut.mutate(buildConfigRef.current());
+          buildConfigRef.current = null;
+        }
+      }, DEBOUNCE_MS);
+    },
+    [saveMut],
+  );
 
   return (
     <div data-testid="settings-telegram" className="space-y-8">
@@ -114,20 +132,21 @@ export function SettingsTelegram(): React.ReactElement {
                 disabled={savingEnabled}
                 onCheckedChange={() => {
                   setSavingEnabled(true);
+                  const current = qc.getQueryData<MandoConfig>(queryKeys.config.current()) ?? {};
                   const enabling = !telegram.enabled;
-                  updateTelegram({ enabled: enabling });
-                  void save()
-                    .then((result) => {
-                      if (!result.ok) {
-                        updateTelegram({ enabled: !enabling });
-                        toast.error(result.error ?? 'Failed to update Telegram settings');
-                      }
-                    })
-                    .catch(() => {
-                      updateTelegram({ enabled: !enabling });
+                  const updated: MandoConfig = {
+                    ...current,
+                    channels: {
+                      ...current.channels,
+                      telegram: { ...(current.channels?.telegram || {}), enabled: enabling },
+                    },
+                  };
+                  saveMut.mutate(updated, {
+                    onError: () => {
                       toast.error('Failed to update Telegram settings');
-                    })
-                    .finally(() => setSavingEnabled(false));
+                    },
+                    onSettled: () => setSavingEnabled(false),
+                  });
                 }}
               />
             </div>
@@ -146,8 +165,15 @@ export function SettingsTelegram(): React.ReactElement {
                   type="text"
                   value={botToken}
                   onChange={(e) => {
-                    updateEnv('TELEGRAM_MANDO_BOT_TOKEN', e.target.value);
-                    scheduleSave();
+                    const val = e.target.value;
+                    scheduleSave(() => {
+                      const current =
+                        qc.getQueryData<MandoConfig>(queryKeys.config.current()) ?? {};
+                      return {
+                        ...current,
+                        env: { ...(current.env || {}), TELEGRAM_MANDO_BOT_TOKEN: val },
+                      };
+                    });
                   }}
                   placeholder="123456:ABC-DEF..."
                 />
@@ -161,8 +187,21 @@ export function SettingsTelegram(): React.ReactElement {
                   data-testid="telegram-owner-id"
                   value={telegram.owner ?? ''}
                   onChange={(e) => {
-                    updateTelegram({ owner: e.target.value });
-                    scheduleSave();
+                    const val = e.target.value;
+                    scheduleSave(() => {
+                      const current =
+                        qc.getQueryData<MandoConfig>(queryKeys.config.current()) ?? {};
+                      return {
+                        ...current,
+                        channels: {
+                          ...current.channels,
+                          telegram: {
+                            ...(current.channels?.telegram || {}),
+                            owner: val,
+                          },
+                        },
+                      };
+                    });
                   }}
                   placeholder="Auto-detected on first /start"
                 />

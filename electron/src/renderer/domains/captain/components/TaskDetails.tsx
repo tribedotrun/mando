@@ -1,14 +1,18 @@
 import React, { useCallback, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { ClipboardCheck } from 'lucide-react';
 import { apiPost } from '#renderer/domains/captain/hooks/useApi';
-import { useSettingsStore } from '#renderer/domains/settings';
+import { useConfig } from '#renderer/hooks/queries';
+import { queryKeys } from '#renderer/queryKeys';
 import { toast } from 'sonner';
 import { getErrorMessage } from '#renderer/utils';
 import { Button } from '#renderer/components/ui/button';
 import { EmptyState } from '#renderer/global/components/EmptyState';
 
 export function TaskEmptyState(): React.ReactElement {
-  const projects = useSettingsStore((s) => s.config.captain?.projects);
+  const { data: config } = useConfig();
+  const qc = useQueryClient();
+  const projects = config?.captain?.projects;
   const hasProjects = projects && Object.keys(projects).length > 0;
   const [adding, setAdding] = useState(false);
 
@@ -27,13 +31,13 @@ export function TaskEmptyState(): React.ReactElement {
     setAdding(true);
     try {
       await apiPost('/api/projects', { path: dir });
-      void useSettingsStore.getState().load();
+      void qc.invalidateQueries({ queryKey: queryKeys.config.all });
     } catch (err) {
       toast.error(getErrorMessage(err, 'Failed to add project'));
     } finally {
       setAdding(false);
     }
-  }, [adding]);
+  }, [adding, qc]);
 
   return (
     <EmptyState

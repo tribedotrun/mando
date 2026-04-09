@@ -1,15 +1,17 @@
-import React, { useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { Card, CardContent } from '#renderer/components/ui/card';
 import { Input } from '#renderer/components/ui/input';
 import { Label } from '#renderer/components/ui/label';
 import { Badge } from '#renderer/components/ui/badge';
 import { Button } from '#renderer/components/ui/button';
-import {
-  useSettingsStore,
-  type ScoutConfig,
-} from '#renderer/domains/settings/stores/settingsStore';
+import { useConfig } from '#renderer/hooks/queries';
+import { useConfigSave } from '#renderer/hooks/mutations';
+import { queryKeys } from '#renderer/queryKeys';
+import type { MandoConfig, ScoutConfig } from '#renderer/types';
 
 const EMPTY_SCOUT: ScoutConfig = {};
+const DEBOUNCE_MS = 1500;
 
 function TagInput({
   label,
@@ -63,26 +65,70 @@ function TagInput({
 }
 
 export function SettingsScout(): React.ReactElement {
-  const scout = useSettingsStore((s) => s.config.scout ?? EMPTY_SCOUT);
-  const firecrawlKey = useSettingsStore((s) => s.config.env?.FIRECRAWL_API_KEY ?? '');
-  const updateSection = useSettingsStore((s) => s.updateSection);
-  const updateEnv = useSettingsStore((s) => s.updateEnv);
-  const save = useSettingsStore((s) => s.save);
-  const scheduleSave = useSettingsStore((s) => s.scheduleSave);
+  const { data: config } = useConfig();
+  const saveMut = useConfigSave();
+  const qc = useQueryClient();
+  const scout = config?.scout ?? EMPTY_SCOUT;
+  const firecrawlKey = config?.env?.FIRECRAWL_API_KEY ?? '';
 
   const interests = scout.interests ?? {};
   const userCtx = scout.userContext ?? {};
+  const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+
+  const saveNow = useCallback(
+    (updated: MandoConfig) => {
+      saveMut.mutate(updated);
+    },
+    [saveMut],
+  );
+
+  const buildConfigRef = useRef<(() => MandoConfig) | null>(null);
+
+  const scheduleSave = useCallback(
+    (buildConfig: () => MandoConfig) => {
+      buildConfigRef.current = buildConfig;
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      debounceRef.current = setTimeout(() => {
+        debounceRef.current = undefined;
+        if (buildConfigRef.current) {
+          saveMut.mutate(buildConfigRef.current());
+          buildConfigRef.current = null;
+        }
+      }, DEBOUNCE_MS);
+    },
+    [saveMut],
+  );
+
+  const buildScoutUpdate = (scoutPatch: Partial<ScoutConfig>): MandoConfig => {
+    const current = qc.getQueryData<MandoConfig>(queryKeys.config.current()) ?? {};
+    return {
+      ...current,
+      scout: { ...(current.scout || {}), ...scoutPatch },
+    };
+  };
 
   const updateInterests = (patch: Record<string, unknown>, debounce = false) => {
-    updateSection('scout', { interests: { ...interests, ...patch } });
-    if (debounce) scheduleSave();
-    else void save();
+    if (debounce) {
+      scheduleSave(() => {
+        const latest = qc.getQueryData<MandoConfig>(queryKeys.config.current()) ?? {};
+        const latestInterests = latest.scout?.interests ?? {};
+        return buildScoutUpdate({ interests: { ...latestInterests, ...patch } });
+      });
+    } else {
+      saveNow(buildScoutUpdate({ interests: { ...interests, ...patch } }));
+    }
   };
 
   const updateUserContext = (patch: Record<string, unknown>, debounce = false) => {
-    updateSection('scout', { userContext: { ...userCtx, ...patch } });
-    if (debounce) scheduleSave();
-    else void save();
+    if (debounce) {
+      scheduleSave(() => {
+        const latest = qc.getQueryData<MandoConfig>(queryKeys.config.current()) ?? {};
+        const latestCtx = latest.scout?.userContext ?? {};
+        return buildScoutUpdate({ userContext: { ...latestCtx, ...patch } });
+      });
+    } else {
+      saveNow(buildScoutUpdate({ userContext: { ...userCtx, ...patch } }));
+    }
   };
 
   return (
@@ -98,8 +144,14 @@ export function SettingsScout(): React.ReactElement {
               type="password"
               value={firecrawlKey}
               onChange={(e) => {
-                updateEnv('FIRECRAWL_API_KEY', e.target.value);
-                scheduleSave();
+                const val = e.target.value;
+                scheduleSave(() => {
+                  const current = qc.getQueryData<MandoConfig>(queryKeys.config.current()) ?? {};
+                  return {
+                    ...current,
+                    env: { ...(current.env || {}), FIRECRAWL_API_KEY: val },
+                  };
+                });
               }}
               placeholder="fc-..."
             />

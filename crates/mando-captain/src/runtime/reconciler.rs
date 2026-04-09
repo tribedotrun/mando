@@ -367,12 +367,32 @@ async fn reconcile_merge(
         if let Some((_, project_config)) = mando_config::resolve_project_config(Some(repo), config)
         {
             let repo_path = mando_config::expand_tilde(&project_config.path);
-            if let Err(e) = crate::io::hooks::post_merge(
-                &project_config.hooks,
-                &repo_path,
-                &std::collections::HashMap::new(),
-            )
-            .await
+            let mut hook_env = std::collections::HashMap::new();
+            // Resolve the task's worktree path using the item_id from the WAL entry.
+            // This is scoped to the exact task, avoiding PR number collisions across repos.
+            let store = TaskStore::new(pool.clone());
+            match item_id.parse::<i64>() {
+                Ok(id) if id > 0 => match store.find_by_id(id).await {
+                    Ok(Some(task)) => {
+                        if let Some(ref wt) = task.worktree {
+                            hook_env.insert("MANDO_WORKTREE".to_string(), wt.clone());
+                        } else {
+                            tracing::debug!(module = "reconciler", pr = %pr, item_id = %item_id, "task has no worktree field");
+                        }
+                    }
+                    Ok(None) => {
+                        tracing::debug!(module = "reconciler", pr = %pr, item_id = %item_id, "task not found for worktree resolution");
+                    }
+                    Err(e) => {
+                        tracing::warn!(module = "reconciler", pr = %pr, item_id = %item_id, error = %e, "failed to load task for worktree resolution");
+                    }
+                },
+                _ => {
+                    tracing::debug!(module = "reconciler", pr = %pr, item_id = %item_id, "invalid item_id, skipping worktree resolution");
+                }
+            }
+            if let Err(e) =
+                crate::io::hooks::post_merge(&project_config.hooks, &repo_path, &hook_env).await
             {
                 tracing::warn!(
                     module = "reconciler",

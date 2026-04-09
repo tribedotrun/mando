@@ -1,6 +1,7 @@
 import React, { useCallback, useImperativeHandle, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { fetchAskHistory } from '#renderer/domains/captain/hooks/useApi';
+import { queryKeys } from '#renderer/queryKeys';
 import { PrMarkdown } from '#renderer/domains/captain/components/PrMarkdown';
 import { useTaskAsk } from '#renderer/global/hooks/useTaskAsk';
 import type { AskHistoryEntry, TaskItem } from '#renderer/types';
@@ -99,7 +100,7 @@ export function QAHistoryTab({ item }: { item: TaskItem }): React.ReactElement {
     isError,
     error,
   } = useQuery({
-    queryKey: ['task-ask-history', item.id],
+    queryKey: queryKeys.tasks.askHistory(item.id),
     queryFn: () => fetchAskHistory(item.id),
   });
 
@@ -151,7 +152,7 @@ function QAMessage({ entry }: { entry: AskHistoryEntry }): React.ReactElement {
               ? 'var(--destructive)'
               : isHuman
                 ? 'var(--needs-human)'
-                : 'var(--review)',
+                : 'var(--success)',
           }}
         >
           {isError ? 'Error' : isHuman ? 'You' : 'Agent'}

@@ -1,5 +1,9 @@
 import React, { useState, useCallback } from 'react';
-import { useSettingsStore } from '#renderer/domains/settings';
+import { useQueryClient } from '@tanstack/react-query';
+import { useConfig } from '#renderer/hooks/queries';
+import { useConfigSave, useProjectAdd } from '#renderer/hooks/mutations';
+import { queryKeys } from '#renderer/queryKeys';
+import type { MandoConfig } from '#renderer/types';
 import { toast } from 'sonner';
 import log from '#renderer/logger';
 import { getErrorMessage } from '#renderer/utils';
@@ -74,10 +78,10 @@ export function ClaudeCodeContent({
 // ---------------------------------------------------------------------------
 
 export function TelegramContent(): React.ReactElement {
-  const existingToken = useSettingsStore((s) => s.config.env?.TELEGRAM_MANDO_BOT_TOKEN ?? '');
-  const updateTelegram = useSettingsStore((s) => s.updateTelegram);
-  const updateEnv = useSettingsStore((s) => s.updateEnv);
-  const save = useSettingsStore((s) => s.save);
+  const { data: config } = useConfig();
+  const saveMut = useConfigSave();
+  const qc = useQueryClient();
+  const existingToken = config?.env?.TELEGRAM_MANDO_BOT_TOKEN ?? '';
 
   const [token, setToken] = useState(existingToken);
   const { validating, result, validate, reset: resetResult } = useTelegramTokenValidator();
@@ -85,10 +89,17 @@ export function TelegramContent(): React.ReactElement {
   const handleSave = useCallback(async () => {
     const ok = await validate(token);
     if (!ok) return;
-    updateEnv('TELEGRAM_MANDO_BOT_TOKEN', token.trim());
-    updateTelegram({ enabled: true });
-    await save();
-  }, [token, validate, updateEnv, updateTelegram, save]);
+    const current = qc.getQueryData<MandoConfig>(queryKeys.config.current()) ?? {};
+    const updated: MandoConfig = {
+      ...current,
+      env: { ...(current.env || {}), TELEGRAM_MANDO_BOT_TOKEN: token.trim() },
+      channels: {
+        ...current.channels,
+        telegram: { ...(current.channels?.telegram || {}), enabled: true },
+      },
+    };
+    saveMut.mutate(updated);
+  }, [token, validate, saveMut, qc]);
 
   const canSave = !!token.trim() && !validating;
 
@@ -132,7 +143,7 @@ export function TelegramContent(): React.ReactElement {
 // ---------------------------------------------------------------------------
 
 export function ProjectContent(): React.ReactElement {
-  const addProject = useSettingsStore((s) => s.addProject);
+  const addProjectMut = useProjectAdd();
   const [adding, setAdding] = useState(false);
 
   const handlePick = useCallback(async () => {
@@ -147,14 +158,14 @@ export function ProjectContent(): React.ReactElement {
     if (!dir) return;
     setAdding(true);
     try {
-      await addProject({ name: '', path: dir });
+      await addProjectMut.mutateAsync({ path: dir });
     } catch (err) {
       log.warn('[Setup] addProject failed', err);
       toast.error(getErrorMessage(err, 'Failed to add project'));
     } finally {
       setAdding(false);
     }
-  }, [addProject]);
+  }, [addProjectMut]);
 
   return (
     <div>

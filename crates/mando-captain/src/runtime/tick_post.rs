@@ -19,6 +19,7 @@ pub(crate) async fn run_post_phase(
     removed_workers: &[String],
     notifier: &super::notify::Notifier,
     bus: Option<&EventBus>,
+    affected_task_ids: &[i64],
 ) -> Result<()> {
     if !dry_run {
         let mut fresh = health_store::load_health_state(health_path)
@@ -48,9 +49,12 @@ pub(crate) async fn run_post_phase(
         bus.send(BusEvent::Tasks, None);
         bus.send(
             BusEvent::Status,
-            Some(serde_json::json!({"action": "tick"})),
+            Some(serde_json::json!({"action": "tick", "affected_task_ids": affected_task_ids})),
         );
-        bus.send(BusEvent::Sessions, None);
+        bus.send(
+            BusEvent::Sessions,
+            Some(serde_json::json!({"affected_task_ids": affected_task_ids})),
+        );
     }
 
     Ok(())

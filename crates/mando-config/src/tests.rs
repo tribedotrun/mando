@@ -63,16 +63,10 @@ fn parse_full_config() {
     assert_eq!(cfg.gateway.dashboard.host, "0.0.0.0");
     assert_eq!(cfg.gateway.dashboard.port, 8080);
 
-    // Captain
+    // Captain (projects are serde(skip) -- loaded from DB, not config.json)
     assert!(cfg.captain.auto_schedule);
     assert_eq!(cfg.captain.tick_interval_s, 60);
-    let project = cfg.captain.projects.get("/code/repo").unwrap();
-    assert_eq!(project.name, "repo");
-    assert_eq!(project.path, "/code/repo");
-    assert_eq!(project.github_repo, Some("org/repo".to_string()));
-    assert_eq!(project.aliases, vec!["rp", "repo"]);
-    assert_eq!(project.hooks.get("pre_spawn").unwrap(), "echo hi");
-    assert_eq!(project.worker_preamble, "be careful");
+    assert!(cfg.captain.projects.is_empty());
 
     // Env
     assert_eq!(cfg.env.get("TELEGRAM_MANDO_BOT_TOKEN").unwrap(), "tok-123");

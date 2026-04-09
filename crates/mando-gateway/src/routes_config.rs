@@ -125,6 +125,21 @@ pub(crate) async fn put_config(
         }
     };
 
+    // Projects live in the DB, not config.json. Repopulate the in-memory
+    // cache from the DB after every config replacement so project data
+    // isn't wiped by the serde(skip) on CaptainConfig.projects.
+    {
+        let old_projects = state.config.load_full().captain.projects.clone();
+        let mut cfg = state.config.load_full().as_ref().clone();
+        if let Err(e) =
+            mando_db::queries::projects::load_into_config(state.db.pool(), &mut cfg).await
+        {
+            tracing::warn!(module = "config", error = %e, "failed to reload projects after config save");
+            cfg.captain.projects = old_projects;
+        }
+        state.config.store(std::sync::Arc::new(cfg));
+    }
+
     let committed_config = state.config_manager.load_full();
     if matches!(
         change,
@@ -253,6 +268,19 @@ pub(crate) async fn post_config_setup(
                     .into_response();
             }
         };
+
+        // Projects live in the DB, not config.json. Repopulate after replace.
+        {
+            let old_projects = state.config.load_full().captain.projects.clone();
+            let mut cfg = state.config.load_full().as_ref().clone();
+            if let Err(e) =
+                mando_db::queries::projects::load_into_config(state.db.pool(), &mut cfg).await
+            {
+                tracing::warn!(module = "config", error = %e, "failed to reload projects after setup");
+                cfg.captain.projects = old_projects;
+            }
+            state.config.store(std::sync::Arc::new(cfg));
+        }
 
         if matches!(
             change,

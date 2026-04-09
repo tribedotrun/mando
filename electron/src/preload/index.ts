@@ -20,17 +20,8 @@ export interface MandoAPI {
   }>;
   hasConfig: () => Promise<boolean>;
   readConfig: () => Promise<string>;
-  saveConfig: (
-    config: string,
-  ) => Promise<
-    { ok: true; via: 'daemon' } | { ok: false; reason: 'daemon unreachable'; message: string }
-  >;
-  addProject: (body: string) => Promise<{
-    ok: boolean;
-    name: string;
-    path: string;
-    githubRepo: string;
-  }>;
+  // saveConfig removed — renderer calls PUT /api/config directly
+  // addProject removed — renderer calls POST /api/projects directly
   saveConfigLocal: (config: string) => Promise<boolean>;
   setupComplete: (config: string) => Promise<{
     ok: boolean;
@@ -72,10 +63,9 @@ export interface MandoAPI {
   toggleDevTools: () => Promise<void>;
   // Logs
   openLogsFolder: () => void;
-  // Launchd (macOS)
-  launchd: {
-    reinstall: () => Promise<boolean>;
-  };
+  // Open paths
+  openInFinder: (dir: string) => Promise<void>;
+  openInCursor: (dir: string) => Promise<void>;
 }
 
 contextBridge.exposeInMainWorld('mandoAPI', {
@@ -90,8 +80,7 @@ contextBridge.exposeInMainWorld('mandoAPI', {
   appInfo: () => ipcRenderer.invoke('get-app-info'),
   hasConfig: () => ipcRenderer.invoke('has-config'),
   readConfig: () => ipcRenderer.invoke('read-config'),
-  saveConfig: (config: string) => ipcRenderer.invoke('save-config', config),
-  addProject: (body: string) => ipcRenderer.invoke('add-project', body),
+  // saveConfig and addProject removed — renderer calls daemon HTTP directly
   saveConfigLocal: (config: string) => ipcRenderer.invoke('save-config-local', config),
   setupComplete: (config: string) => ipcRenderer.invoke('setup-complete', config),
   onSetupProgress: (callback: (step: string) => void) => {
@@ -157,8 +146,7 @@ contextBridge.exposeInMainWorld('mandoAPI', {
   toggleDevTools: () => ipcRenderer.invoke('toggle-devtools'),
   // Logs
   openLogsFolder: () => void ipcRenderer.invoke('open-logs-folder'),
-  // Launchd (macOS)
-  launchd: {
-    reinstall: () => ipcRenderer.invoke('launchd:reinstall'),
-  },
+  // Open paths
+  openInFinder: (dir: string) => ipcRenderer.invoke('open-in-finder', dir) as Promise<void>,
+  openInCursor: (dir: string) => ipcRenderer.invoke('open-in-cursor', dir) as Promise<void>,
 } satisfies MandoAPI);

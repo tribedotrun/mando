@@ -2,6 +2,7 @@ import { useCallback, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import log from '#renderer/logger';
 import { askTask, fetchAskHistory } from '#renderer/api';
+import { queryKeys } from '#renderer/queryKeys';
 import type { AskHistoryEntry } from '#renderer/types';
 import { getErrorMessage } from '#renderer/utils';
 
@@ -22,7 +23,7 @@ export function useTaskAsk(itemId: number): UseTaskAskResult {
   const queryClient = useQueryClient();
 
   const { data: serverHistory } = useQuery({
-    queryKey: ['task-ask-history', itemId],
+    queryKey: queryKeys.tasks.askHistory(itemId),
     queryFn: () => fetchAskHistory(itemId),
   });
 
@@ -51,7 +52,7 @@ export function useTaskAsk(itemId: number): UseTaskAskResult {
           ...prev,
           { role: 'assistant', content: data.answer, timestamp: new Date().toISOString() },
         ]);
-        void queryClient.invalidateQueries({ queryKey: ['task-ask-history', itemId] });
+        void queryClient.invalidateQueries({ queryKey: queryKeys.tasks.askHistory(itemId) });
       } catch (err) {
         log.warn('[useTaskAsk] ask failed:', err);
         setLocalMessages((prev) => [

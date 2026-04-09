@@ -78,10 +78,19 @@ pub(crate) async fn reopen_worker(
         .worker
         .clone()
         .ok_or_else(|| anyhow::anyhow!("no cc_session_id for reopen"))?;
-    let branch = item
-        .branch
-        .clone()
-        .ok_or_else(|| anyhow::anyhow!("no branch for reopen"))?;
+    // Read branch live from the worktree — item.branch is not persisted in the
+    // DB and is only populated during captain ticks by tick_branch_sync.  HTTP
+    // handlers load the task fresh from DB where branch is always None.
+    let wt_expanded = mando_config::expand_tilde(&wt_path);
+    let branch = git::current_branch(&wt_expanded)
+        .await
+        .with_context(|| format!("failed to read branch from worktree {}", wt_path))?;
+    if branch == "HEAD" {
+        anyhow::bail!(
+            "worktree {} is in detached HEAD state — cannot reopen",
+            wt_path
+        );
+    }
 
     // Kill existing worker.
     let pid = pid_registry::get_pid(&cc_sid).unwrap_or(mando_types::Pid::new(0));
@@ -92,10 +101,9 @@ pub(crate) async fn reopen_worker(
     }
 
     // Write reopen context.
-    let wt = mando_config::expand_tilde(&wt_path);
     let reopen_seq = item.reopen_seq + 1;
     write_context_file(
-        &wt,
+        &wt_expanded,
         "captain-reopen-context.md",
         &format!(
             "# Captain Reopen (seq={})\n\nReview feedback:\n{}\n\nAddress the feedback, then post an ack comment: `[Mando] Reopen #{} addressed: <summary>`\n",
@@ -141,7 +149,7 @@ pub(crate) async fn reopen_worker(
 
     match process_manager::resume_worker_process(
         &resume_msg,
-        &wt,
+        &wt_expanded,
         model,
         &cc_sid,
         &env,
@@ -174,7 +182,7 @@ pub(crate) async fn reopen_worker(
             crate::io::headless_cc::log_running_session(
                 pool,
                 &cc_sid,
-                &wt,
+                &wt_expanded,
                 "worker",
                 &session_name,
                 item_id,

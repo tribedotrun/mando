@@ -14,45 +14,45 @@ use mando_captain::io::git;
 use crate::response::{error_response, internal_error};
 use crate::AppState;
 
-/// Resolve a project from config by name or alias (case-insensitive).
-fn resolve_project<'a>(
-    config: &'a mando_config::Config,
+/// Resolve a project from DB by name or alias.
+async fn resolve_project_db(
+    pool: &sqlx::SqlitePool,
     name: Option<&str>,
-) -> Result<(&'a str, &'a mando_config::settings::ProjectConfig), (StatusCode, Json<Value>)> {
-    let projects = &config.captain.projects;
-    match name {
-        Some(name) => {
-            let name_lower = name.to_lowercase();
-            for (k, v) in projects {
-                if v.name.to_lowercase() == name_lower
-                    || v.aliases.iter().any(|a| a.to_lowercase() == name_lower)
-                {
-                    return Ok((k.as_str(), v));
-                }
-            }
-            Err(error_response(
-                StatusCode::NOT_FOUND,
-                &format!("project not found: {name}"),
-            ))
-        }
-        None => Err(error_response(
-            StatusCode::BAD_REQUEST,
-            "project name required",
-        )),
-    }
+) -> Result<mando_db::queries::projects::ProjectRow, (StatusCode, Json<Value>)> {
+    let name =
+        name.ok_or_else(|| error_response(StatusCode::BAD_REQUEST, "project name required"))?;
+    mando_db::queries::projects::resolve(pool, name)
+        .await
+        .map_err(|e| {
+            error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                &format!("project lookup failed: {e}"),
+            )
+        })?
+        .ok_or_else(|| error_response(StatusCode::NOT_FOUND, &format!("project not found: {name}")))
 }
 
 /// Find the project that owns a worktree path by checking the central worktrees dir.
 /// Uses longest-prefix-wins to handle overlapping repo names (e.g. `foo` vs `foo-bar`).
-fn find_project_for_worktree(config: &mando_config::Config, wt_path: &Path) -> Option<PathBuf> {
+async fn find_project_for_worktree(pool: &sqlx::SqlitePool, wt_path: &Path) -> Option<PathBuf> {
     let wt_dir = git::worktrees_dir();
     if !wt_path.starts_with(&wt_dir) {
         return None;
     }
     let wt_name = wt_path.file_name().and_then(|n| n.to_str())?;
+    let projects = match mando_db::queries::projects::list(pool).await {
+        Ok(p) => p,
+        Err(e) => {
+            tracing::error!(error = %e, "failed to list projects for worktree lookup");
+            return None;
+        }
+    };
     let mut best: Option<(usize, PathBuf)> = None;
-    for pc in config.captain.projects.values() {
-        let project_path = mando_config::expand_tilde(&pc.path);
+    for row in &projects {
+        if row.path.is_empty() {
+            continue;
+        }
+        let project_path = mando_config::expand_tilde(&row.path);
         let prefix = format!("{}-", repo_dir_name(&project_path));
         if wt_name.starts_with(&prefix) && best.as_ref().is_none_or(|(len, _)| prefix.len() > *len)
         {
@@ -82,20 +82,20 @@ pub(crate) async fn post_worktrees(
     State(state): State<AppState>,
     Json(body): Json<CreateWorktreeBody>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    let config = state.config.load_full();
-    let (project_key, project_cfg) = resolve_project(&config, body.project.as_deref())?;
-    let project_path = mando_config::expand_tilde(&project_cfg.path);
+    let project_row = resolve_project_db(state.db.pool(), body.project.as_deref()).await?;
+    let project_path = mando_config::expand_tilde(&project_row.path);
 
     let suffix = match &body.name {
         Some(n) => n.clone(),
         None => {
             let now = OffsetDateTime::now_utc();
             format!(
-                "{:02}{:02}-{:02}{:02}",
+                "{:02}{:02}-{:02}{:02}{:02}",
                 now.month() as u8,
                 now.day(),
                 now.hour(),
-                now.minute()
+                now.minute(),
+                now.second()
             )
         }
     };
@@ -144,19 +144,11 @@ pub(crate) async fn post_worktrees(
         .await
         .map_err(internal_error)?;
 
-    // Create a workbench row for manual worktrees.
-    let project_id = mando_db::queries::projects::upsert(
-        state.db.pool(),
-        project_key,
-        &project_cfg.path,
-        project_cfg.github_repo.as_deref(),
-    )
-    .await
-    .map_err(internal_error)?;
-    let wb_title = mando_types::workbench::workbench_title_now();
+    // Create a workbench row — use the suffix as the title (e.g. "0408-1625").
+    let wb_title = suffix.clone();
     let wb = mando_types::Workbench::new(
-        project_id,
-        project_key.to_string(),
+        project_row.id,
+        project_row.name.clone(),
         wt_path.to_string_lossy().to_string(),
         wb_title,
     );
@@ -185,7 +177,7 @@ pub(crate) async fn post_worktrees(
         "ok": true,
         "path": wt_path.to_string_lossy(),
         "branch": branch,
-        "project": project_key,
+        "project": project_row.name,
         "workbenchId": wb_id,
     })))
 }
@@ -194,16 +186,21 @@ pub(crate) async fn post_worktrees(
 pub(crate) async fn get_worktrees(
     State(state): State<AppState>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    let config = state.config.load_full();
+    let projects = mando_db::queries::projects::list(state.db.pool())
+        .await
+        .map_err(internal_error)?;
     let mut worktrees = Vec::new();
 
-    for (project_name, pc) in &config.captain.projects {
-        let project_path = mando_config::expand_tilde(&pc.path);
+    for row in &projects {
+        if row.path.is_empty() {
+            continue;
+        }
+        let project_path = mando_config::expand_tilde(&row.path);
         match git::list_worktrees(&project_path).await {
             Ok(paths) => {
                 for p in paths {
                     worktrees.push(json!({
-                        "project": project_name,
+                        "project": row.name,
                         "path": p.to_string_lossy(),
                     }));
                 }
@@ -211,7 +208,7 @@ pub(crate) async fn get_worktrees(
             Err(e) => {
                 tracing::warn!(
                     module = "worktrees",
-                    project = project_name.as_str(),
+                    project = row.name.as_str(),
                     error = %e,
                     "failed to list worktrees"
                 );
@@ -226,11 +223,16 @@ pub(crate) async fn get_worktrees(
 pub(crate) async fn post_worktrees_prune(
     State(state): State<AppState>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    let config = state.config.load_full();
+    let projects = mando_db::queries::projects::list(state.db.pool())
+        .await
+        .map_err(internal_error)?;
     let mut pruned = Vec::new();
 
-    for (project_name, pc) in &config.captain.projects {
-        let project_path = mando_config::expand_tilde(&pc.path);
+    for row in &projects {
+        if row.path.is_empty() {
+            continue;
+        }
+        let project_path = mando_config::expand_tilde(&row.path);
         let output = tokio::process::Command::new("git")
             .args(["worktree", "prune"])
             .current_dir(&project_path)
@@ -239,13 +241,13 @@ pub(crate) async fn post_worktrees_prune(
 
         match output {
             Ok(o) if o.status.success() => {
-                pruned.push(project_name.clone());
+                pruned.push(row.name.clone());
             }
             Ok(o) => {
                 let stderr = String::from_utf8_lossy(&o.stderr);
                 tracing::warn!(
                     module = "worktrees",
-                    project = project_name.as_str(),
+                    project = row.name.as_str(),
                     stderr = %stderr.trim(),
                     "git worktree prune failed"
                 );
@@ -253,7 +255,7 @@ pub(crate) async fn post_worktrees_prune(
             Err(e) => {
                 tracing::warn!(
                     module = "worktrees",
-                    project = project_name.as_str(),
+                    project = row.name.as_str(),
                     error = %e,
                     "git worktree prune failed"
                 );
@@ -274,12 +276,13 @@ pub(crate) async fn post_worktrees_remove(
     State(state): State<AppState>,
     Json(body): Json<RemoveWorktreeBody>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    let config = state.config.load_full();
     let wt_path = PathBuf::from(&body.path);
 
-    let repo_path = find_project_for_worktree(&config, &wt_path).ok_or_else(|| {
-        error_response(StatusCode::NOT_FOUND, "no project owns this worktree path")
-    })?;
+    let repo_path = find_project_for_worktree(state.db.pool(), &wt_path)
+        .await
+        .ok_or_else(|| {
+            error_response(StatusCode::NOT_FOUND, "no project owns this worktree path")
+        })?;
 
     git::remove_worktree(&repo_path, &wt_path)
         .await
@@ -299,7 +302,9 @@ pub(crate) async fn post_worktrees_cleanup(
     State(state): State<AppState>,
     Json(body): Json<CleanupBody>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    let config = state.config.load_full();
+    let projects = mando_db::queries::projects::list(state.db.pool())
+        .await
+        .map_err(internal_error)?;
     let mut orphans = Vec::new();
     let mut removed = Vec::new();
 
@@ -307,8 +312,11 @@ pub(crate) async fn post_worktrees_cleanup(
     let mut all_tracked = std::collections::HashSet::new();
     let mut project_prefixes = Vec::new();
     let mut prune_errors: Vec<Value> = Vec::new();
-    for pc in config.captain.projects.values() {
-        let project_path = mando_config::expand_tilde(&pc.path);
+    for row in &projects {
+        if row.path.is_empty() {
+            continue;
+        }
+        let project_path = mando_config::expand_tilde(&row.path);
         let prefix = format!("{}-", repo_dir_name(&project_path));
 
         if !body.dry_run {
@@ -323,24 +331,24 @@ pub(crate) async fn post_worktrees_cleanup(
                     let stderr = String::from_utf8_lossy(&o.stderr).trim().to_string();
                     tracing::warn!(
                         module = "worktrees",
-                        project = %pc.name,
+                        project = %row.name,
                         stderr = %stderr,
                         "git worktree prune (cleanup) failed"
                     );
                     prune_errors.push(json!({
-                        "project": pc.name,
+                        "project": row.name,
                         "error": stderr,
                     }));
                 }
                 Err(e) => {
                     tracing::warn!(
                         module = "worktrees",
-                        project = %pc.name,
+                        project = %row.name,
                         error = %e,
                         "git worktree prune (cleanup) failed"
                     );
                     prune_errors.push(json!({
-                        "project": pc.name,
+                        "project": row.name,
                         "error": e.to_string(),
                     }));
                 }
@@ -355,7 +363,7 @@ pub(crate) async fn post_worktrees_cleanup(
             Err(e) => {
                 tracing::warn!(
                     module = "worktrees",
-                    project = %pc.name,
+                    project = %row.name,
                     error = %e,
                     "failed to list worktrees, skipping project in orphan scan"
                 );

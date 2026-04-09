@@ -8,7 +8,7 @@ import {
   useReactTable,
 } from '@tanstack/react-table';
 import { useScrollIntoViewRef } from '#renderer/global/hooks/useScrollIntoViewRef';
-import { useTaskStore } from '#renderer/domains/captain/stores/taskStore';
+import { useTaskList } from '#renderer/hooks/queries';
 import { useFilteredTasks } from '#renderer/domains/captain/hooks/useFilteredTasks';
 import type { TaskItem } from '#renderer/types';
 import { TaskEmptyState } from '#renderer/domains/captain/components/TaskDetails';
@@ -61,8 +61,8 @@ export function TaskTable(props: Props): React.ReactElement {
     projectFilter,
     focusedIndex = -1,
   } = props;
-  const loading = useTaskStore((s) => s.loading);
-  const error = useTaskStore((s) => s.error);
+  const { isLoading: loading, error: queryError } = useTaskList();
+  const error = queryError ? String(queryError) : null;
   const items = useFilteredTasks(projectFilter);
   const scrollRef = useScrollIntoViewRef();
 

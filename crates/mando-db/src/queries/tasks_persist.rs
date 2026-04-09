@@ -18,7 +18,7 @@ use super::tasks::{bind_task_write_fields, update_set_clause};
 pub async fn persist_spawn(pool: &SqlitePool, task: &Task) -> Result<()> {
     sqlx::query(
         "UPDATE tasks SET status=?, worker=?, session_ids=?, worker_started_at=?, \
-         workbench_id=?, plan=? \
+         workbench_id=?, plan=?, rev = rev + 1 \
          WHERE id=? AND status NOT IN ('merged','completed-no-pr','canceled')",
     )
     .bind(task.status.as_str())
@@ -37,7 +37,7 @@ pub async fn persist_spawn(pool: &SqlitePool, task: &Task) -> Result<()> {
 /// merge session even if captain crashes before tick-end write-back.
 pub async fn persist_merge_spawn(pool: &SqlitePool, task: &Task) -> Result<()> {
     let result = sqlx::query(
-        "UPDATE tasks SET session_ids=?, last_activity_at=? \
+        "UPDATE tasks SET session_ids=?, last_activity_at=?, rev = rev + 1 \
          WHERE id=? AND status = 'captain-merging'",
     )
     .bind(task.session_ids.to_json())
@@ -57,7 +57,7 @@ pub async fn persist_merge_spawn(pool: &SqlitePool, task: &Task) -> Result<()> {
 /// clarifier while it's still in progress.
 pub async fn persist_clarify_start(pool: &SqlitePool, task: &Task) -> Result<()> {
     sqlx::query(
-        "UPDATE tasks SET status=?, session_ids=? \
+        "UPDATE tasks SET status=?, session_ids=?, rev = rev + 1 \
          WHERE id=? AND status NOT IN ('merged','completed-no-pr','canceled')",
     )
     .bind(task.status.as_str())
@@ -75,7 +75,7 @@ pub async fn persist_clarify_result(pool: &SqlitePool, task: &Task) -> Result<()
     sqlx::query(
         "UPDATE tasks SET status=?, context=?, title=?, session_ids=?, project_id=?, \
          no_pr=?, resource=?, clarifier_fail_count=?, last_activity_at=?, \
-         captain_review_trigger=?, review_fail_count=? \
+         captain_review_trigger=?, review_fail_count=?, rev = rev + 1 \
          WHERE id=? AND status IN ('clarifying','needs-clarification')",
     )
     .bind(task.status.as_str())

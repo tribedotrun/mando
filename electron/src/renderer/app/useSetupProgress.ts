@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useSettingsStore } from '#renderer/domains/settings/stores/settingsStore';
+import { useConfig } from '#renderer/hooks/queries';
 import type { SetupProgress } from '#renderer/app/Sidebar';
 
 const SETUP_TOTAL = 3;
@@ -13,23 +13,21 @@ const STEP_NAMES = ['Install Claude Code', 'Connect Telegram for remote control'
  * We mark CC as done only after the checklist has validated it (stored in features).
  */
 export function useSetupProgress(): SetupProgress | null {
-  const config = useSettingsStore((s) => s.config);
-  const loaded = useSettingsStore((s) => s.loaded);
-  const dismissed = config.features?.setupDismissed ?? false;
+  const { data: config, isLoading } = useConfig();
+  const dismissed = config?.features?.setupDismissed ?? false;
   const [hidden, setHidden] = useState(false);
   const timerRef = React.useRef<ReturnType<typeof setTimeout>>(undefined);
 
-  const hasProject = Object.keys(config.captain?.projects ?? {}).length > 0;
+  const hasProject = Object.keys(config?.captain?.projects ?? {}).length > 0;
   const done = [
-    !!config.features?.claudeCodeVerified,
-    !!(config.channels?.telegram?.enabled && config.env?.TELEGRAM_MANDO_BOT_TOKEN),
+    !!config?.features?.claudeCodeVerified,
+    !!(config?.channels?.telegram?.enabled && config?.env?.TELEGRAM_MANDO_BOT_TOKEN),
     hasProject,
   ];
   const completed = done.filter(Boolean).length;
   const allDone = completed === SETUP_TOTAL;
 
-  // Schedule auto-hide 3s after reaching 100%. Zustand selector re-renders
-  // trigger this on every config change, so the timer is set exactly once.
+  // Schedule auto-hide 3s after reaching 100%.
   if (allDone && !hidden && timerRef.current === undefined) {
     timerRef.current = setTimeout(() => setHidden(true), AUTO_HIDE_DELAY_MS);
   }
@@ -38,7 +36,7 @@ export function useSetupProgress(): SetupProgress | null {
     timerRef.current = undefined;
   }
 
-  if (!loaded || dismissed || hidden) return null;
+  if (isLoading || !config || dismissed || hidden) return null;
 
   const firstIncomplete = done.findIndex((d) => !d);
   const stepLabel = firstIncomplete >= 0 ? STEP_NAMES[firstIncomplete] : 'All done!';

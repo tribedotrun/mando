@@ -179,7 +179,8 @@ pub(crate) async fn dispatch_new_work(
         }
     }
     if needs_live_refresh {
-        emit_live_refresh(bus);
+        let dispatched_ids: Vec<i64> = already_dispatched.iter().copied().collect();
+        emit_live_refresh(bus, &dispatched_ids);
     }
     // Dispatch new items to clarifier (parallel).
     super::dispatch_clarify::clarify_new_items(
@@ -233,10 +234,13 @@ pub(crate) async fn dispatch_new_work(
     active_workers
 }
 
-fn emit_live_refresh(bus: Option<&EventBus>) {
+fn emit_live_refresh(bus: Option<&EventBus>, affected_task_ids: &[i64]) {
     if let Some(bus) = bus {
         bus.send(BusEvent::Tasks, None);
-        bus.send(BusEvent::Sessions, None);
+        bus.send(
+            BusEvent::Sessions,
+            Some(serde_json::json!({"affected_task_ids": affected_task_ids})),
+        );
     }
 }
 

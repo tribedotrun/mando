@@ -66,6 +66,7 @@ export function useTerminal({ sessionId, onExit }: UseTerminalOptions): UseTermi
     }
 
     fitAddon.fit();
+    term.focus();
     termRef.current = term;
     fitAddonRef.current = fitAddon;
 

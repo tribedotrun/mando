@@ -3,7 +3,6 @@ import { Clock } from 'lucide-react';
 import type { TaskItem, ClarifierQuestion, SessionSummary } from '#renderer/types';
 import { answerClarification } from '#renderer/domains/captain/hooks/useApi';
 import { useDraftRecord } from '#renderer/global/hooks/useDraft';
-import { useTaskStore } from '#renderer/domains/captain/stores/taskStore';
 import { toast } from 'sonner';
 import log from '#renderer/logger';
 import { clarifyResultToToast, fmtDuration, getErrorMessage, relativeTime } from '#renderer/utils';
@@ -25,8 +24,8 @@ function StreamingCard({ item, sessions }: Pick<Props, 'item' | 'sessions'>) {
   const active = sessions.find((s) => s.status === 'running');
   const dur = active ? (active.duration_ms ?? 0) / 1000 : 0;
   return (
-    <CardShell color="var(--review)">
-      <StatusDot color="var(--review)" pulse />
+    <CardShell color="var(--success)">
+      <StatusDot color="var(--success)" pulse />
       <span className="text-body font-medium text-foreground">Streaming</span>
       <Sep />
       <span className="text-caption text-muted-foreground">
@@ -47,8 +46,8 @@ function QueuedCard() {
 
 function CaptainReviewingCard({ label }: { label: string }) {
   return (
-    <CardShell color="var(--review)">
-      <StatusDot color="var(--review)" pulse />
+    <CardShell color="var(--success)">
+      <StatusDot color="var(--success)" pulse />
       <span className="text-body font-medium text-foreground">{label}</span>
     </CardShell>
   );
@@ -56,8 +55,8 @@ function CaptainReviewingCard({ label }: { label: string }) {
 
 function AwaitingReviewCard({ item }: { item: TaskItem }) {
   return (
-    <CardShell color="var(--muted-foreground)">
-      <StatusDot color="var(--muted-foreground)" />
+    <CardShell color="var(--review)">
+      <StatusDot color="var(--review)" />
       <span className="text-body font-medium text-foreground">Ready for review</span>
       {item.pr_number && (
         <>
@@ -120,7 +119,6 @@ function NeedsClarificationCard({
   );
   const [pending, setPending] = useState(false);
   const [completed, setCompleted] = useState<string | null>(null);
-  const taskFetch = useTaskStore((s) => s.fetch);
   const filledCount = unanswered.filter((_, i) => answers[i]?.trim()).length;
 
   const handleSubmit = useCallback(async () => {
@@ -132,7 +130,7 @@ function NeedsClarificationCard({
     setPending(true);
     try {
       const result = await answerClarification(taskId, payload);
-      void taskFetch();
+      // SSE handles cache update
       const { variant, msg } = clarifyResultToToast(result.status);
       const fn = variant === 'success' ? toast.success : toast.info;
       fn(msg);
@@ -144,7 +142,7 @@ function NeedsClarificationCard({
     } finally {
       setPending(false);
     }
-  }, [answers, unanswered, taskId, taskFetch, clearAnswersDraft]);
+  }, [answers, unanswered, taskId, clearAnswersDraft]);
 
   if (completed) {
     return (

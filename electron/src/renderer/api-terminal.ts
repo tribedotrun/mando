@@ -7,6 +7,7 @@ import log from '#renderer/logger';
 
 export interface WorkbenchItem {
   id: number;
+  rev: number;
   project: string;
   worktree: string;
   title: string;
@@ -41,6 +42,7 @@ export function createWorktree(project: string, name?: string): Promise<CreateWo
 
 export interface TerminalSessionInfo {
   id: string;
+  rev: number;
   project: string;
   cwd: string;
   agent: 'claude' | 'codex';

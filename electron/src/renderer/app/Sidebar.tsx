@@ -1,17 +1,23 @@
 import React, { useState } from 'react';
-import { FileText, List, Settings, SquarePen, FolderPlus, ChevronUp } from 'lucide-react';
+import {
+  FileText,
+  List,
+  Settings,
+  SquarePen,
+  FolderPlus,
+  ChevronUp,
+  PanelLeft,
+  ArrowLeft,
+  ArrowRight,
+} from 'lucide-react';
 import log from '#renderer/logger';
 import { pct } from '#renderer/utils';
-import { useTaskStore } from '#renderer/domains/captain';
-import { useSettingsStore } from '#renderer/domains/settings';
-import { useTerminalStore } from '#renderer/domains/terminal/stores/terminalStore';
-import { useWorkbenchStore } from '#renderer/domains/terminal/stores/workbenchStore';
+import { useTaskList, useWorkbenchList, useConfig } from '#renderer/hooks/queries';
 import { SetupChecklist } from '#renderer/domains/onboarding';
 import { SidebarProjectItem } from '#renderer/global/components/SidebarProjectItem';
 import { useMountEffect } from '#renderer/global/hooks/useMountEffect';
 import { Button } from '#renderer/components/ui/button';
 import { ScrollArea } from '#renderer/components/ui/scroll-area';
-import { Separator } from '#renderer/components/ui/separator';
 
 export type Tab = 'captain' | 'scout' | 'sessions';
 
@@ -40,6 +46,9 @@ interface Props {
   onOpenTask?: (taskId: number) => void;
   onOpenTerminalSession?: (worktree: { project: string; cwd: string }) => void;
   onArchiveWorkbench?: (id: number) => void;
+  onToggleSidebar?: () => void;
+  onGoBack?: () => void;
+  onGoForward?: () => void;
 }
 
 const NAV_ITEMS: { id: Tab; label: string; Icon: React.FC }[] = [
@@ -108,19 +117,19 @@ export function Sidebar({
   onOpenTask,
   onOpenTerminalSession,
   onArchiveWorkbench,
+  onToggleSidebar,
+  onGoBack,
+  onGoForward,
 }: Props): React.ReactElement | null {
-  const items = useTaskStore((s) => s.items);
-  const fetchTerminals = useTerminalStore((s) => s.fetch);
-  const fetchWorkbenches = useWorkbenchStore((s) => s.fetch);
-  useMountEffect(() => {
-    void fetchTerminals();
-    void fetchWorkbenches();
-  });
+  const { data: taskData } = useTaskList();
+  const items = taskData?.items ?? [];
+  const { data: workbenches = [] } = useWorkbenchList();
 
-  const scoutEnabled = useSettingsStore((s) => !!s.config.features?.scout);
+  const { data: _config } = useConfig();
+  const scoutEnabled = !!_config?.features?.scout;
   const visibleNav = scoutEnabled ? NAV_ITEMS : NAV_ITEMS.filter((i) => i.id !== 'scout');
 
-  const configProjects = useSettingsStore((s) => s.config.captain?.projects);
+  const configProjects = _config?.captain?.projects;
 
   const pathToName = React.useMemo(() => {
     const map: Record<string, string> = {};
@@ -135,15 +144,17 @@ export function Sidebar({
     return map;
   }, [configProjects]);
 
-  const workbenches = useWorkbenchStore((s) => s.workbenches);
   const projectWorktrees = React.useMemo(() => {
+    // Only show workbenches that don't have a task attached (terminal-only).
+    const taskWbIds = new Set(items.filter((t) => t.workbench_id).map((t) => t.workbench_id));
     const map: Record<string, { id: number; cwd: string; name: string }[]> = {};
     for (const wb of workbenches) {
+      if (taskWbIds.has(wb.id)) continue;
       const projName = pathToName[wb.project] ?? wb.project;
       (map[projName] ??= []).push({ id: wb.id, cwd: wb.worktree, name: wb.title });
     }
     return map;
-  }, [workbenches, pathToName]);
+  }, [workbenches, pathToName, items]);
 
   const { projectCounts, projectTasks } = React.useMemo(() => {
     const counts: Record<string, number> = {};
@@ -181,13 +192,46 @@ export function Sidebar({
   const homeActive = activeTab === 'captain' && !projectFilter;
 
   return (
-    <aside className="relative flex h-full flex-col overflow-hidden bg-card px-2 pb-4 pt-12">
+    <aside className="relative flex h-full flex-col overflow-hidden bg-card px-1.5 pb-4">
+      {/* Window controls toolbar (next to traffic lights) */}
+      <div
+        className="flex h-[38px] shrink-0 items-start pl-[70px] pt-[10px]"
+        style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
+      >
+        <div
+          className="flex items-center gap-1"
+          style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+        >
+          <button
+            onClick={onToggleSidebar}
+            className="flex h-6 w-6 items-center justify-center rounded text-text-3 transition-colors hover:text-muted-foreground"
+            title="Toggle sidebar"
+          >
+            <PanelLeft size={14} />
+          </button>
+          <button
+            onClick={onGoBack}
+            className="flex h-6 w-6 items-center justify-center rounded text-text-3 transition-colors hover:text-muted-foreground"
+            title="Go back"
+          >
+            <ArrowLeft size={14} />
+          </button>
+          <button
+            onClick={onGoForward}
+            className="flex h-6 w-6 items-center justify-center rounded text-text-3 transition-colors hover:text-muted-foreground"
+            title="Go forward"
+          >
+            <ArrowRight size={14} />
+          </button>
+        </div>
+      </div>
+
       <UpdateButton />
 
       {/* New task */}
       <button
         onClick={onNewTask}
-        className="sidebar-new-task flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground"
+        className="sidebar-new-task flex w-full items-center gap-2.5 rounded-md px-1.5 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground"
         data-testid="add-task-btn"
       >
         <SquarePen size={16} strokeWidth={1.5} />
@@ -204,11 +248,8 @@ export function Sidebar({
               variant="ghost"
               size="sm"
               data-testid={`${id}-tab`}
-              onClick={() => {
-                onTabChange(id);
-                onProjectFilter(null);
-              }}
-              className={`w-full justify-start gap-2 text-[13px] ${
+              onClick={() => onTabChange(id)}
+              className={`w-full justify-start gap-2 px-1.5 has-[>svg]:px-1.5 text-[13px] ${
                 active
                   ? 'bg-muted font-medium text-foreground'
                   : 'font-normal text-muted-foreground'
@@ -249,18 +290,12 @@ export function Sidebar({
         {projects.length > 0 && (
           <div className="flex flex-col gap-1">
             {projects.map((pName) => {
-              const isActive = projectFilter === pName;
               return (
                 <SidebarProjectItem
                   key={pName}
                   name={pName}
                   logo={projectLogos[pName]}
                   count={projectCounts[pName] ?? 0}
-                  active={isActive}
-                  onSelect={() => {
-                    onTabChange('captain');
-                    onProjectFilter(isActive ? null : pName);
-                  }}
                   onRename={onRenameProject}
                   onRemove={onRemoveProject}
                   onNewTerminal={onNewTerminal}
@@ -278,13 +313,12 @@ export function Sidebar({
       </ScrollArea>
 
       {/* Settings */}
-      <Separator className="my-3" />
       <Button
         variant="ghost"
         size="sm"
         data-testid="settings-gear"
         onClick={onOpenSettings}
-        className="w-full justify-start gap-2 text-[13px] font-normal text-text-3"
+        className="w-full justify-start gap-2 px-1.5 has-[>svg]:px-1.5 text-[13px] font-normal text-text-3"
       >
         <Settings size={16} />
         Settings

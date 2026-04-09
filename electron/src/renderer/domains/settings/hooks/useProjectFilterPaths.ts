@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { useSettingsStore } from '#renderer/domains/settings/stores/settingsStore';
+import { useConfig } from '#renderer/hooks/queries';
 
 /**
  * Resolves a project display name to the set of paths that identify it
@@ -7,7 +7,8 @@ import { useSettingsStore } from '#renderer/domains/settings/stores/settingsStor
  * project filter is active.
  */
 export function useProjectFilterPaths(projectFilter?: string | null): Set<string> | null {
-  const configProjects = useSettingsStore((s) => s.config.captain?.projects);
+  const { data: config } = useConfig();
+  const configProjects = config?.captain?.projects;
 
   return useMemo(() => {
     if (!projectFilter) return null;

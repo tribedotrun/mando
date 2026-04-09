@@ -1,10 +1,11 @@
 import React from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { Card, CardContent } from '#renderer/components/ui/card';
 import { Separator } from '#renderer/components/ui/separator';
-import {
-  useSettingsStore,
-  type FeaturesConfig,
-} from '#renderer/domains/settings/stores/settingsStore';
+import { useConfig } from '#renderer/hooks/queries';
+import { useConfigSave } from '#renderer/hooks/mutations';
+import { queryKeys } from '#renderer/queryKeys';
+import type { MandoConfig, FeaturesConfig } from '#renderer/types';
 import { Switch } from '#renderer/components/ui/switch';
 
 const EMPTY_FEATURES: FeaturesConfig = {};
@@ -24,9 +25,10 @@ const FLAGS: FlagDef[] = [
 ];
 
 export function SettingsExperimental(): React.ReactElement {
-  const features = useSettingsStore((s) => s.config.features ?? EMPTY_FEATURES);
-  const updateSection = useSettingsStore((s) => s.updateSection);
-  const save = useSettingsStore((s) => s.save);
+  const { data: config } = useConfig();
+  const saveMut = useConfigSave();
+  const qc = useQueryClient();
+  const features = config?.features ?? EMPTY_FEATURES;
 
   return (
     <div data-testid="settings-experimental">
@@ -51,8 +53,13 @@ export function SettingsExperimental(): React.ReactElement {
                     data-testid={`experimental-${flag.key}`}
                     checked={on}
                     onCheckedChange={(checked) => {
-                      updateSection('features', { [flag.key]: checked });
-                      void save();
+                      const current =
+                        qc.getQueryData<MandoConfig>(queryKeys.config.current()) ?? {};
+                      const updated: MandoConfig = {
+                        ...current,
+                        features: { ...(current.features || {}), [flag.key]: checked },
+                      };
+                      saveMut.mutate(updated);
                     }}
                   />
                 </div>

@@ -212,6 +212,7 @@ const TASK_API_FIELDS: &[&str] = &[
     "reopen_seq",
     "reopen_source",
     "resource",
+    "rev",
     "review_fail_count",
     "session_ids",
     "source",

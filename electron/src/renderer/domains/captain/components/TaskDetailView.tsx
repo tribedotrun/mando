@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useRef, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useMountEffect } from '#renderer/global/hooks/useMountEffect';
 import log from '#renderer/logger';
 import { toast } from 'sonner';
@@ -16,8 +16,9 @@ import {
   type SessionEntry,
   type SessionSummary,
   type TimelineEvent,
+  type MandoConfig,
 } from '#renderer/types';
-import { shortRepo, prLabel, prHref, extractClarifierQuestions } from '#renderer/utils';
+import { prLabel, prHref, extractClarifierQuestions } from '#renderer/utils';
 import {
   TranscriptSidebar,
   SessionDetailPanel,
@@ -25,7 +26,6 @@ import {
 } from '#renderer/domains/sessions';
 import { TaskActionBar } from '#renderer/domains/captain/components/TaskActionBar';
 import { StatusCard } from '#renderer/domains/captain/components/StatusCard';
-import { DetailOverflowMenu } from '#renderer/domains/captain/components/TaskDetailParts';
 import {
   ActiveQAView,
   QAHistoryTab,
@@ -38,11 +38,19 @@ import {
   InfoTab,
   ContextModal,
 } from '#renderer/domains/captain/components/TaskDetailTabs';
+import { RefreshCw } from 'lucide-react';
 import { Button } from '#renderer/components/ui/button';
 import { Tabs, TabsList, TabsTrigger } from '#renderer/components/ui/tabs';
-import { useSettingsStore } from '#renderer/domains/settings';
+import {
+  Tooltip,
+  TooltipTrigger,
+  TooltipContent,
+  TooltipProvider,
+} from '#renderer/components/ui/tooltip';
+import { queryKeys } from '#renderer/queryKeys';
 
 type DetailTab = 'timeline' | 'pr' | 'sessions' | 'info' | 'qa' | 'terminal';
+const REFRESH_INDICATOR_MS = 1500;
 
 interface Props {
   item: TaskItem;
@@ -57,7 +65,9 @@ export function TaskDetailView({
   onMerge,
   onOpenTerminal,
 }: Props): React.ReactElement {
+  const qc = useQueryClient();
   const [activeTab, setActiveTab] = useState<DetailTab>('pr');
+  const [prRefreshing, setPrRefreshing] = useState(false);
   const [transcriptSession, setTranscriptSession] = useState<{
     entry: SessionEntry;
     markdown: string | null;
@@ -66,6 +76,14 @@ export function TaskDetailView({
   const [transcriptFullScreen, setTranscriptFullScreen] = useState(false);
   const [activeQA, setActiveQA] = useState(false);
   const [contextModalOpen, setContextModalOpen] = useState(false);
+
+  // Listen for header overflow menu triggering "View task brief"
+  useMountEffect(() => {
+    const handler = () => setContextModalOpen(true);
+    document.addEventListener('mando:view-task-brief', handler);
+    return () => document.removeEventListener('mando:view-task-brief', handler);
+  });
+
   const qaRef = useRef<QAHandle | null>(null);
   const [pendingQuestion, setPendingQuestion] = useState<string | null>(null);
   const sidebarRef = useRef<HTMLDivElement>(null);
@@ -124,7 +142,7 @@ export function TaskDetailView({
 
   // Data queries.
   const { data: timelineData } = useQuery({
-    queryKey: ['task-detail-timeline', item.id],
+    queryKey: queryKeys.tasks.timeline(item.id),
     queryFn: async () => {
       const [tl, sess] = await Promise.all([fetchTimeline(item.id), fetchItemSessions(item.id)]);
       const map: Record<string, SessionSummary> = {};
@@ -139,7 +157,7 @@ export function TaskDetailView({
     isPending: prPending,
     refetch: refetchPr,
   } = useQuery({
-    queryKey: ['task-detail-pr', item.id],
+    queryKey: queryKeys.tasks.pr(item.id),
     queryFn: async () => {
       const data = await fetchPrSummary(item.id);
       // Persist to disk for finalized tasks.
@@ -166,7 +184,7 @@ export function TaskDetailView({
   });
 
   useQuery({
-    queryKey: ['task-ask-history', item.id],
+    queryKey: queryKeys.tasks.askHistory(item.id),
     queryFn: () => fetchAskHistory(item.id),
   });
   const events = timelineData?.events ?? [];
@@ -258,8 +276,8 @@ export function TaskDetailView({
       if (!onOpenTerminal || !item.project) return;
       let cwd = item.worktree;
       if (!cwd) {
-        const cfg = useSettingsStore.getState().config;
-        const pc = cfg.captain?.projects
+        const cfg = qc.getQueryData<MandoConfig>(queryKeys.config.current());
+        const pc = cfg?.captain?.projects
           ? Object.values(cfg.captain.projects).find((p) => p.name === item.project)
           : undefined;
         cwd = pc?.path;
@@ -274,7 +292,7 @@ export function TaskDetailView({
         resumeSessionId: resumeId,
       });
     },
-    [onOpenTerminal, item.project, item.worktree, item.title],
+    [onOpenTerminal, item.project, item.worktree, item.title, qc],
   );
 
   const handleResumeSession = useCallback(
@@ -301,25 +319,14 @@ export function TaskDetailView({
         <div className="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden">
           {/* Header */}
           <div className="pb-3">
-            {/* Title row, back, title, and actions inline */}
+            {/* Title row and actions inline */}
             <div className="mb-1 flex items-start gap-3">
-              <Button
-                variant="ghost"
-                size="xs"
-                onClick={onBack}
-                className="mt-1.5 shrink-0 text-muted-foreground"
-              >
-                &larr;
-              </Button>
               <div className="min-w-0 flex-1">
                 <h1 className="break-words text-heading font-semibold leading-snug text-foreground">
                   {item.title}
                 </h1>
                 {/* Metadata */}
                 <div className="mt-0.5 flex flex-wrap items-center gap-2">
-                  {item.project && (
-                    <span className="text-caption text-text-3">{shortRepo(item.project)}</span>
-                  )}
                   {item.pr_number && (item.github_repo || item.project) && (
                     <a
                       href={prHref(item.pr_number, (item.github_repo ?? item.project)!)}
@@ -335,16 +342,13 @@ export function TaskDetailView({
                   )}
                 </div>
               </div>
-              <div className="flex shrink-0 items-center gap-2">
-                {showMerge && (
+              {showMerge && (
+                <div className="flex shrink-0 items-center gap-2">
                   <Button onClick={onMerge} size="sm">
                     Merge
                   </Button>
-                )}
-                {(item.branch || item.worktree || item.plan || item.context) && (
-                  <DetailOverflowMenu item={item} onViewContext={() => setContextModalOpen(true)} />
-                )}
-              </div>
+                </div>
+              )}
             </div>
 
             {/* Status card */}
@@ -376,7 +380,7 @@ export function TaskDetailView({
               }}
               className="ml-6 gap-0"
             >
-              <div className="sticky top-0 z-10 bg-background">
+              <div className="sticky top-0 z-10 flex items-center justify-between bg-background">
                 <TabsList variant="line" className="h-auto gap-0">
                   {tabs.map((tab) => (
                     <TabsTrigger
@@ -388,6 +392,31 @@ export function TaskDetailView({
                     </TabsTrigger>
                   ))}
                 </TabsList>
+                {activeTab === 'pr' && item.pr_number && (
+                  <TooltipProvider delayDuration={300}>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="icon-xs"
+                          disabled={prRefreshing}
+                          onClick={() => {
+                            setPrRefreshing(true);
+                            void refetchPr();
+                            setTimeout(() => setPrRefreshing(false), REFRESH_INDICATOR_MS);
+                          }}
+                          className="mr-2 text-text-3 hover:text-text-1"
+                        >
+                          <RefreshCw size={14} className={prRefreshing ? 'animate-spin' : ''} />
+                          <span className="sr-only">Refresh PR</span>
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent side="bottom" className="text-xs">
+                        Refresh PR
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                )}
               </div>
 
               {/* Tab content */}
@@ -398,14 +427,7 @@ export function TaskDetailView({
                     onTranscriptClick={(...args) => void handleTranscriptClick(...args)}
                   />
                 )}
-                {activeTab === 'pr' && (
-                  <PrTab
-                    item={item}
-                    prBody={prBody}
-                    prPending={prPending}
-                    onRefresh={() => void refetchPr()}
-                  />
-                )}
+                {activeTab === 'pr' && <PrTab item={item} prBody={prBody} prPending={prPending} />}
                 {activeTab === 'sessions' && (
                   <SessionsTab
                     sessions={sessions}

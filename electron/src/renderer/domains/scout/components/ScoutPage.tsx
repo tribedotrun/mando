@@ -1,6 +1,8 @@
 import React, { useCallback, useRef, useState } from 'react';
 import { Search } from 'lucide-react';
-import { useScoutStore } from '#renderer/domains/scout/stores/scoutStore';
+import { useScoutList, type ScoutQueryParams } from '#renderer/hooks/queries';
+import { useQueryClient } from '@tanstack/react-query';
+import { queryKeys } from '#renderer/queryKeys';
 import { useViewKeyHandler } from '#renderer/global/hooks/useKeyboardShortcuts';
 import { useSelection, BulkBar, FeedbackModal } from '#renderer/domains/captain';
 import { ScoutTable } from '#renderer/domains/scout/components/ScoutTable';
@@ -21,18 +23,28 @@ import { Input } from '#renderer/components/ui/input';
 const USER_SETTABLE = ['pending', 'processed', 'saved', 'archived'];
 const TYPES = ['all', 'github', 'youtube', 'arxiv', 'other'] as const;
 const SEARCH_DEBOUNCE_MS = 300;
+const DEFAULT_PER_PAGE = 25;
 
 export function ScoutPage({ active = true }: { active?: boolean } = {}): React.ReactElement {
-  const {
-    query,
-    setQuery,
-    items,
-    total,
-    page,
-    pages,
-    statusCounts,
-    fetch: scoutFetch,
-  } = useScoutStore();
+  const [query, setQueryState] = useState<ScoutQueryParams>({
+    status: 'all',
+    per_page: DEFAULT_PER_PAGE,
+  });
+  const queryClient = useQueryClient();
+  const { data } = useScoutList(query);
+  const items = data?.items ?? [];
+  const total = data?.total ?? 0;
+  const page = data?.page ?? 0;
+  const pages = data?.pages ?? 0;
+  const statusCounts = data?.status_counts ?? {};
+
+  const setQuery = useCallback((params: Partial<ScoutQueryParams>) => {
+    setQueryState((prev) => ({ ...prev, ...params, page: params.page ?? 0 }));
+  }, []);
+
+  const scoutFetch = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: queryKeys.scout.all });
+  }, [queryClient]);
   const { selectedIds, toggleSelect, clearSelection } = useSelection();
   const [activeItemId, setActiveItemId] = useState<number | null>(null);
   const [view, setView] = useState<'' | 'read'>('');
@@ -56,7 +68,7 @@ export function ScoutPage({ active = true }: { active?: boolean } = {}): React.R
       setResearchPending(true);
       try {
         const result = await researchScout(topic, true);
-        await scoutFetch();
+        scoutFetch();
         const added = result.added ?? 0;
         const processed = result.processed ?? 0;
         toast.success(`Research added ${added} link(s) and processed ${processed}`);
@@ -158,7 +170,7 @@ export function ScoutPage({ active = true }: { active?: boolean } = {}): React.R
     try {
       await action(ids);
       clearSelection();
-      await scoutFetch();
+      scoutFetch();
     } catch (err) {
       toast.error(getErrorMessage(err, 'Bulk scout action failed'));
     }

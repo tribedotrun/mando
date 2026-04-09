@@ -2,6 +2,10 @@
 
 use serde::{Deserialize, Serialize};
 
+fn default_rev() -> i64 {
+    1
+}
+
 pub use super::task_status::{
     ItemStatus, ReviewTrigger, ACTIONABLE_TERMINAL, ALL_STATUSES, FINALIZED, REOPENABLE, REWORKABLE,
 };
@@ -94,6 +98,8 @@ pub struct Task {
     pub source: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub archived_at: Option<String>,
+    #[serde(default = "default_rev")]
+    pub rev: i64,
     /// GitHub repo slug -- populated via JOIN on projects table, not a DB column.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub github_repo: Option<String>,
@@ -166,6 +172,7 @@ impl Task {
             escalation_report: None,
             source: None,
             archived_at: None,
+            rev: 1,
             github_repo: None,
             rebase_worker: None,
             rebase_retries: 0,

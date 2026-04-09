@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useScoutStore } from '#renderer/domains/scout/stores/scoutStore';
+import { useScoutAdd } from '#renderer/hooks/mutations';
 import { Button } from '#renderer/components/ui/button';
 import { Input } from '#renderer/components/ui/input';
 
@@ -7,18 +7,18 @@ export function AddUrlForm(): React.ReactElement {
   const [isOpen, setIsOpen] = useState(false);
   const [url, setUrl] = useState('');
   const [title, setTitle] = useState('');
-  const add = useScoutStore((s) => s.add);
+  const addMutation = useScoutAdd();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!url.trim()) return;
     try {
-      await add(url.trim(), title.trim() || undefined);
+      await addMutation.mutateAsync({ url: url.trim(), title: title.trim() || undefined });
       setUrl('');
       setTitle('');
       setIsOpen(false);
     } catch {
-      // Error already set in scoutStore
+      // Error surfaced via mutation toast
     }
   };
 

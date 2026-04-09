@@ -1,10 +1,13 @@
-import React, { useCallback } from 'react';
+import React, { useCallback, useRef } from 'react';
 import { Outlet, useNavigate, useRouterState } from '@tanstack/react-router';
+import { useQueryClient } from '@tanstack/react-query';
 import { useMountEffect } from '#renderer/global/hooks/useMountEffect';
 import { useGlobalKeyboard } from '#renderer/global/hooks/useKeyboardShortcuts';
+import { queryKeys } from '#renderer/queryKeys';
+import type { TaskListResponse, MandoConfig } from '#renderer/types';
 import { useTaskActions } from '#renderer/domains/captain/hooks/useTaskActions';
-import { useSettingsStore } from '#renderer/domains/settings/stores/settingsStore';
-import { useTaskStore } from '#renderer/domains/captain/stores/taskStore';
+import { useConfig } from '#renderer/hooks/queries';
+import { useConfigSave } from '#renderer/hooks/mutations';
 import { useUIStore } from '#renderer/app/uiStore';
 import { DevInfoBar } from '#renderer/global/components/DevInfoBar';
 import { CommandPalette } from '#renderer/global/components/CommandPalette';
@@ -18,6 +21,7 @@ const MERGE_DISMISS_DELAY_MS = 1_200;
 
 export function RootShell(): React.ReactElement {
   const navigate = useNavigate();
+  const rqClient = useQueryClient();
   const actions = useTaskActions();
   const paletteOpen = useUIStore((s) => s.paletteOpen);
   const createTaskOpen = useUIStore((s) => s.createTaskOpen);
@@ -31,26 +35,45 @@ export function RootShell(): React.ReactElement {
     select: (s) => (s.location.search as { project?: string }).project ?? null,
   });
 
-  // Load config on mount + eager Claude Code check
-  const settingsLoad = useSettingsStore((s) => s.load);
+  // Eager Claude Code check -- runs once when config is available
+  useConfig(); // ensure config query is active for CC check below
+  const saveMut = useConfigSave();
+  const ccCheckDone = useRef(false);
   useMountEffect(() => {
-    void settingsLoad().then(() => {
-      const store = useSettingsStore.getState();
-      if (store.config.features?.claudeCodeVerified || store.config.features?.setupDismissed)
+    function tryCheck() {
+      if (ccCheckDone.current) return;
+      const cfg = rqClient.getQueryData<MandoConfig>(queryKeys.config.current());
+      if (!cfg) return; // config not loaded yet
+      if (cfg.features?.claudeCodeVerified || cfg.features?.setupDismissed) {
+        ccCheckDone.current = true;
         return;
+      }
+      ccCheckDone.current = true;
       void window.mandoAPI
         ?.checkClaudeCode?.()
         .then((result) => {
           if (result.installed && result.works) {
-            const s = useSettingsStore.getState();
-            if (!s.config.features?.claudeCodeVerified) {
-              s.updateSection('features', { claudeCodeVerified: true });
-              void s.save();
+            const current = rqClient.getQueryData<MandoConfig>(queryKeys.config.current());
+            if (current && !current.features?.claudeCodeVerified) {
+              const updated: MandoConfig = {
+                ...current,
+                features: { ...(current.features || {}), claudeCodeVerified: true },
+              };
+              saveMut.mutate(updated);
             }
           }
         })
         .catch((err) => log.warn('eager CC check failed:', err));
+    }
+
+    // Try immediately in case config is already cached
+    tryCheck();
+
+    // Subscribe to cache updates so we catch config arriving later
+    const unsub = rqClient.getQueryCache().subscribe((event) => {
+      if (event.query.queryKey[0] === 'config') tryCheck();
     });
+    return unsub;
   });
 
   // Map tab names to routes
@@ -104,7 +127,8 @@ export function RootShell(): React.ReactElement {
       if (data.item_id) {
         const id = Number(data.item_id);
         if (!Number.isNaN(id)) {
-          const task = useTaskStore.getState().items.find((t) => t.id === id);
+          const taskData = rqClient.getQueryData<TaskListResponse>(queryKeys.tasks.list());
+          const task = taskData?.items.find((t) => t.id === id);
           if (task) {
             void navigate({ to: '/captain/tasks/$taskId', params: { taskId: String(id) } });
             return;
@@ -142,12 +166,6 @@ export function RootShell(): React.ReactElement {
 
   return (
     <div className="relative flex h-screen flex-col bg-background">
-      {/* Title bar drag region */}
-      <div
-        className="absolute inset-x-0 top-0 z-10 h-8"
-        style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
-      />
-
       {/* Route content */}
       <Outlet />
 

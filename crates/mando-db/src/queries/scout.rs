@@ -7,7 +7,7 @@ use sqlx::SqlitePool;
 /// Column list for ItemRow queries - single source of truth.
 const SELECT_COLS: &str = "\
     id, url, type, title, status, relevance, quality, \
-    date_added, date_processed, added_by, error_count, source_name, date_published";
+    date_added, date_processed, added_by, error_count, source_name, date_published, rev";
 
 fn select_items_sql() -> &'static str {
     static SQL: std::sync::OnceLock<String> = std::sync::OnceLock::new();
@@ -182,7 +182,7 @@ pub async fn count_by_status(
 
 /// Update item status.
 pub async fn update_status(pool: &SqlitePool, id: i64, status: &str) -> Result<()> {
-    let result = sqlx::query("UPDATE scout_items SET status = ? WHERE id = ?")
+    let result = sqlx::query("UPDATE scout_items SET status = ?, rev = rev + 1 WHERE id = ?")
         .bind(status)
         .bind(id)
         .execute(pool)
@@ -204,8 +204,9 @@ pub async fn update_status_if(
         bail!("only_from must not be empty");
     }
     let placeholders: String = only_from.iter().map(|_| "?").collect::<Vec<_>>().join(",");
-    let sql =
-        format!("UPDATE scout_items SET status = ? WHERE id = ? AND status IN ({placeholders})");
+    let sql = format!(
+        "UPDATE scout_items SET status = ?, rev = rev + 1 WHERE id = ? AND status IN ({placeholders})"
+    );
     let mut q = sqlx::query(&sql).bind(status).bind(id);
     for s in only_from {
         q = q.bind(*s);
@@ -229,7 +230,7 @@ pub async fn update_processed(
         "UPDATE scout_items
          SET title = ?, relevance = ?, quality = ?,
              source_name = ?, status = 'processed', date_processed = ?,
-             date_published = ?
+             date_published = ?, rev = rev + 1
          WHERE id = ? AND status IN ('pending', 'fetched', 'error')",
     )
     .bind(title)
@@ -246,7 +247,7 @@ pub async fn update_processed(
 
 /// Set title without changing status.
 pub async fn set_title(pool: &SqlitePool, id: i64, title: &str) -> Result<()> {
-    let result = sqlx::query("UPDATE scout_items SET title = ? WHERE id = ?")
+    let result = sqlx::query("UPDATE scout_items SET title = ?, rev = rev + 1 WHERE id = ?")
         .bind(title)
         .bind(id)
         .execute(pool)
@@ -296,7 +297,7 @@ pub async fn item_titles(
 pub async fn increment_error_count(pool: &SqlitePool, id: i64) -> Result<()> {
     let result = sqlx::query(
         "UPDATE scout_items
-         SET error_count = COALESCE(error_count, 0) + 1, status = 'error'
+         SET error_count = COALESCE(error_count, 0) + 1, status = 'error', rev = rev + 1
          WHERE id = ?",
     )
     .bind(id)
@@ -325,6 +326,7 @@ struct ItemRow {
     error_count: Option<i64>,
     source_name: Option<String>,
     date_published: Option<String>,
+    rev: i64,
 }
 
 impl ItemRow {
@@ -345,6 +347,7 @@ impl ItemRow {
             error_count: self.error_count.unwrap_or(0),
             source_name: self.source_name,
             date_published: self.date_published,
+            rev: self.rev,
         }
     }
 }

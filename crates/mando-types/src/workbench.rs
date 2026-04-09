@@ -1,5 +1,9 @@
 use serde::{Deserialize, Serialize};
 
+fn default_rev() -> i64 {
+    1
+}
+
 /// Human-readable timestamp title for workbenches (e.g., "Apr 8 18:02").
 pub fn workbench_title_now() -> String {
     let now = time::OffsetDateTime::now_utc();
@@ -41,6 +45,8 @@ pub struct Workbench {
     pub archived_at: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub deleted_at: Option<String>,
+    #[serde(default = "default_rev")]
+    pub rev: i64,
 }
 
 impl Workbench {
@@ -54,6 +60,7 @@ impl Workbench {
             created_at: crate::now_rfc3339(),
             archived_at: None,
             deleted_at: None,
+            rev: 1,
         }
     }
 }

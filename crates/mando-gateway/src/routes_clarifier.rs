@@ -190,9 +190,15 @@ pub(crate) async fn post_task_clarify(
                 }
             };
 
+            let updated = store
+                .find_by_id(id)
+                .await
+                .ok()
+                .flatten()
+                .map(|t| serde_json::to_value(&t).unwrap());
             state.bus.send(
                 mando_types::BusEvent::Tasks,
-                Some(json!({"action": "clarify", "id": id})),
+                Some(json!({"action": "updated", "item": updated, "id": id})),
             );
 
             Ok(Json(json!({
@@ -214,9 +220,18 @@ pub(crate) async fn post_task_clarify(
                 error = %e,
                 "inline re-clarification failed — answer saved, status unchanged"
             );
+            let updated = {
+                let store = state.task_store.read().await;
+                store
+                    .find_by_id(id)
+                    .await
+                    .ok()
+                    .flatten()
+                    .map(|t| serde_json::to_value(&t).unwrap())
+            };
             state.bus.send(
                 mando_types::BusEvent::Tasks,
-                Some(json!({"action": "answer", "id": id})),
+                Some(json!({"action": "updated", "item": updated, "id": id})),
             );
             let questions: Option<serde_json::Value> =
                 match mando_db::queries::timeline::latest_clarifier_questions(&pool, id).await {

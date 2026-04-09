@@ -52,6 +52,14 @@ const SKILLS: &[BundledSkill] = &[
             ),
         ],
     },
+    BundledSkill {
+        name: "mando-task",
+        files: &[(
+            "SKILL.md",
+            include_str!("../../../bundled-skills/mando-task/SKILL.md"),
+            false,
+        )],
+    },
 ];
 
 fn claude_skills_dir() -> PathBuf {

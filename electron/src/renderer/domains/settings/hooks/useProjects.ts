@@ -1,13 +1,14 @@
 import { useMemo } from 'react';
-import { useSettingsStore } from '#renderer/domains/settings/stores/settingsStore';
+import { useConfig } from '#renderer/hooks/queries';
 
 /**
- * Returns the sorted list of configured project names. Reads directly from
- * the settings store (kept fresh by load/save) so updates propagate
- * immediately on project add/remove/rename without extra HTTP fetches.
+ * Returns the sorted list of configured project names. Reads from
+ * the React Query config cache (kept fresh by SSE + mutations) so updates
+ * propagate immediately on project add/remove/rename.
  */
 export function useProjects(): string[] {
-  const configProjects = useSettingsStore((s) => s.config.captain?.projects);
+  const { data: config } = useConfig();
+  const configProjects = config?.captain?.projects;
   return useMemo(() => {
     if (!configProjects) return [];
     const names: string[] = [];

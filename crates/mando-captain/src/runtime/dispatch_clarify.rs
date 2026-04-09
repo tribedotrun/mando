@@ -131,7 +131,8 @@ pub(crate) async fn clarify_new_items(
         return;
     }
 
-    emit_live_refresh(bus);
+    let clarified_ids: Vec<i64> = jobs.iter().map(|j| items[j.idx].id).collect();
+    emit_live_refresh(bus, &clarified_ids);
 
     // Phase 2: Spawn all clarifications as detached async tasks.
     // Each task runs the CC session and writes results to the stream file.
@@ -236,9 +237,12 @@ pub(crate) async fn clarify_new_items(
     }
 }
 
-fn emit_live_refresh(bus: Option<&EventBus>) {
+fn emit_live_refresh(bus: Option<&EventBus>, affected_task_ids: &[i64]) {
     if let Some(bus) = bus {
         bus.send(BusEvent::Tasks, None);
-        bus.send(BusEvent::Sessions, None);
+        bus.send(
+            BusEvent::Sessions,
+            Some(serde_json::json!({"affected_task_ids": affected_task_ids})),
+        );
     }
 }

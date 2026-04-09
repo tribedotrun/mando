@@ -1,6 +1,7 @@
 import React from 'react';
 import { ACTION_NEEDED_STATUSES, IN_PROGRESS_STATUSES, type ItemStatus } from '#renderer/types';
-import { useTaskStore } from '#renderer/domains/captain/stores/taskStore';
+import { useTaskList } from '#renderer/hooks/queries';
+import { useTaskFilters } from '#renderer/domains/captain/stores/taskFilters';
 import { useProjectFilterPaths } from '#renderer/domains/settings';
 import { ViewOptions } from '#renderer/domains/captain/components/ViewOptions';
 import { Button } from '#renderer/components/ui/button';
@@ -25,10 +26,11 @@ interface Props {
 }
 
 export function StatusFilter({ projectFilter }: Props): React.ReactElement {
-  const statusFilter = useTaskStore((s) => s.statusFilter);
-  const setFilter = useTaskStore((s) => s.setFilter);
-  const items = useTaskStore((s) => s.items);
-  const showArchived = useTaskStore((s) => s.showArchived);
+  const statusFilter = useTaskFilters((s) => s.statusFilter);
+  const setFilter = useTaskFilters((s) => s.setFilter);
+  const { data: taskData } = useTaskList();
+  const items = taskData?.items ?? [];
+  const showArchived = useTaskFilters((s) => s.showArchived);
   const filterPaths = useProjectFilterPaths(projectFilter);
 
   const filtered = React.useMemo(

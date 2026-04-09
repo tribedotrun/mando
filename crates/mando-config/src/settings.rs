@@ -136,6 +136,11 @@ pub struct CaptainConfig {
     pub tick_interval_s: u64,
     pub tz: String,
     pub default_terminal_agent: String,
+    /// Extra CLI arguments appended when spawning Claude Code terminals.
+    pub claude_terminal_args: String,
+    /// Extra CLI arguments appended when spawning Codex terminals.
+    pub codex_terminal_args: String,
+    #[serde(skip)]
     pub projects: HashMap<String, ProjectConfig>,
     #[serde(skip)]
     pub task_db_path: String,
@@ -152,6 +157,8 @@ impl Default for CaptainConfig {
             tick_interval_s: 30,
             tz: iana_time_zone::get_timezone().unwrap_or_else(|_| "UTC".into()),
             default_terminal_agent: "claude".into(),
+            claude_terminal_args: "--dangerously-skip-permissions".into(),
+            codex_terminal_args: "--full-auto".into(),
             projects: HashMap::new(),
             task_db_path: crate::paths::data_dir()
                 .join("mando.db")

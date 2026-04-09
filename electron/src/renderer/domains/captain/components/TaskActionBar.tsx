@@ -4,7 +4,6 @@ import { useQueryClient } from '@tanstack/react-query';
 import log from '#renderer/logger';
 import { reopenItem, reworkItem } from '#renderer/domains/captain/hooks/useApi';
 import { useDraft } from '#renderer/global/hooks/useDraft';
-import { useTaskStore } from '#renderer/domains/captain/stores/taskStore';
 import { toast } from 'sonner';
 import { FINALIZED_STATUSES, type TaskItem } from '#renderer/types';
 import { canReopen, canRework, canAskAny, getErrorMessage } from '#renderer/utils';
@@ -41,7 +40,6 @@ export function TaskActionBar({ item, onAsk }: Props): React.ReactElement | null
   const [text, setText, clearTextDraft] = useDraft(`mando:draft:action:${item.id}`);
   const [pendingAction, setPendingAction] = useState<Action | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const taskFetch = useTaskStore((s) => s.fetch);
   const queryClient = useQueryClient();
   // Sync selected action when task status changes -- only when there are valid actions.
   if (available.length > 0 && !available.includes(selectedAction)) {
@@ -62,7 +60,7 @@ export function TaskActionBar({ item, onAsk }: Props): React.ReactElement | null
       }
       if (selectedAction === 'reopen') await reopenItem(item.id, trimmed);
       else if (selectedAction === 'rework') await reworkItem(item.id, trimmed);
-      void taskFetch();
+      // SSE handles cache update
       void invalidateTaskDetail(queryClient, item.id);
       const msg = selectedAction === 'reopen' ? 'Task reopened' : 'Rework requested';
       toast.success(msg);
@@ -74,7 +72,7 @@ export function TaskActionBar({ item, onAsk }: Props): React.ReactElement | null
     } finally {
       setPendingAction(null);
     }
-  }, [text, selectedAction, item.id, taskFetch, queryClient, onAsk, clearTextDraft]);
+  }, [text, selectedAction, item.id, queryClient, onAsk, clearTextDraft]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
