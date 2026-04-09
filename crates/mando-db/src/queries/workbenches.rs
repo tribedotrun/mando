@@ -12,6 +12,7 @@ struct Row {
     created_at: String,
     archived_at: Option<String>,
     deleted_at: Option<String>,
+    rev: i64,
 }
 
 impl Row {
@@ -25,13 +26,14 @@ impl Row {
             created_at: self.created_at,
             archived_at: self.archived_at,
             deleted_at: self.deleted_at,
+            rev: self.rev,
         }
     }
 }
 
 const SELECT: &str = "\
     w.id, w.project_id, p.name AS project, w.worktree, w.title, \
-    w.created_at, w.archived_at, w.deleted_at";
+    w.created_at, w.archived_at, w.deleted_at, w.rev";
 
 fn select_sql() -> &'static str {
     static SQL: std::sync::OnceLock<String> = std::sync::OnceLock::new();
@@ -97,7 +99,7 @@ pub async fn load_all(pool: &SqlitePool) -> Result<Vec<Workbench>> {
 
 pub async fn archive(pool: &SqlitePool, id: i64) -> Result<bool> {
     let now = mando_types::now_rfc3339();
-    let result = sqlx::query("UPDATE workbenches SET archived_at = ? WHERE id = ?")
+    let result = sqlx::query("UPDATE workbenches SET archived_at = ?, rev = rev + 1 WHERE id = ?")
         .bind(&now)
         .bind(id)
         .execute(pool)
@@ -106,16 +108,17 @@ pub async fn archive(pool: &SqlitePool, id: i64) -> Result<bool> {
 }
 
 pub async fn unarchive(pool: &SqlitePool, id: i64) -> Result<bool> {
-    let result = sqlx::query("UPDATE workbenches SET archived_at = NULL WHERE id = ?")
-        .bind(id)
-        .execute(pool)
-        .await?;
+    let result =
+        sqlx::query("UPDATE workbenches SET archived_at = NULL, rev = rev + 1 WHERE id = ?")
+            .bind(id)
+            .execute(pool)
+            .await?;
     Ok(result.rows_affected() > 0)
 }
 
 pub async fn mark_deleted(pool: &SqlitePool, id: i64) -> Result<bool> {
     let now = mando_types::now_rfc3339();
-    let result = sqlx::query("UPDATE workbenches SET deleted_at = ? WHERE id = ?")
+    let result = sqlx::query("UPDATE workbenches SET deleted_at = ?, rev = rev + 1 WHERE id = ?")
         .bind(&now)
         .bind(id)
         .execute(pool)
@@ -124,7 +127,7 @@ pub async fn mark_deleted(pool: &SqlitePool, id: i64) -> Result<bool> {
 }
 
 pub async fn update_title(pool: &SqlitePool, id: i64, title: &str) -> Result<bool> {
-    let result = sqlx::query("UPDATE workbenches SET title = ? WHERE id = ?")
+    let result = sqlx::query("UPDATE workbenches SET title = ?, rev = rev + 1 WHERE id = ?")
         .bind(title)
         .bind(id)
         .execute(pool)

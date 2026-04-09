@@ -28,16 +28,23 @@ pub(crate) struct FeedbackBody {
 async fn simple_task_action<Fut>(
     state: &AppState,
     id: i64,
-    action: &'static str,
     work: Fut,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)>
 where
     Fut: Future<Output = anyhow::Result<()>>,
 {
     work.await.map_err(internal_error)?;
+    let store = state.task_store.read().await;
+    let updated = store
+        .find_by_id(id)
+        .await
+        .ok()
+        .flatten()
+        .map(|t| serde_json::to_value(&t).unwrap());
+    drop(store);
     state.bus.send(
         mando_types::BusEvent::Tasks,
-        Some(json!({"action": action, "id": id})),
+        Some(json!({"action": "updated", "item": updated, "id": id})),
     );
     Ok(Json(json!({"ok": true})))
 }
@@ -52,7 +59,6 @@ pub(crate) async fn post_task_accept(
     simple_task_action(
         &state,
         id,
-        "accept",
         mando_captain::runtime::dashboard::accept_item(&store, id),
     )
     .await
@@ -69,7 +75,6 @@ pub(crate) async fn post_task_cancel(
     simple_task_action(
         &state,
         id,
-        "cancel",
         mando_captain::runtime::dashboard::cancel_item(&store, id, pool),
     )
     .await
@@ -110,7 +115,7 @@ pub(crate) async fn post_task_reopen(
 
     state.bus.send(
         mando_types::BusEvent::Tasks,
-        Some(json!({"action": "reopen"})),
+        Some(json!({"action": "updated", "item": serde_json::to_value(&item).unwrap(), "id": id})),
     );
 
     let summary = match outcome {
@@ -267,9 +272,18 @@ pub(crate) async fn post_task_rework(
             );
         }
     }
+    let updated = {
+        let store = state.task_store.read().await;
+        store
+            .find_by_id(id)
+            .await
+            .ok()
+            .flatten()
+            .map(|t| serde_json::to_value(&t).unwrap())
+    };
     state.bus.send(
         mando_types::BusEvent::Tasks,
-        Some(json!({"action": "rework"})),
+        Some(json!({"action": "updated", "item": updated, "id": id})),
     );
     Ok(Json(json!({"ok": true})))
 }
@@ -294,9 +308,15 @@ pub(crate) async fn post_task_retry(
         )
         .await;
     }
+    let updated = store
+        .find_by_id(id)
+        .await
+        .ok()
+        .flatten()
+        .map(|t| serde_json::to_value(&t).unwrap());
     state.bus.send(
         mando_types::BusEvent::Tasks,
-        Some(json!({"action": "retry"})),
+        Some(json!({"action": "updated", "item": updated, "id": id})),
     );
     Ok(Json(json!({"ok": true})))
 }
@@ -306,14 +326,21 @@ pub(crate) async fn post_task_retry(
 async fn archive_toggle(
     state: &AppState,
     id: i64,
-    action: &str,
     db_fn: impl std::future::Future<Output = anyhow::Result<bool>>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     match db_fn.await {
         Ok(true) => {
+            let store = state.task_store.read().await;
+            let updated = store
+                .find_by_id(id)
+                .await
+                .ok()
+                .flatten()
+                .map(|t| serde_json::to_value(&t).unwrap());
+            drop(store);
             state.bus.send(
                 mando_types::BusEvent::Tasks,
-                Some(json!({"action": action, "id": id})),
+                Some(json!({"action": "updated", "item": updated, "id": id})),
             );
             Ok(Json(json!({"ok": true})))
         }
@@ -337,7 +364,6 @@ pub(crate) async fn post_task_archive(
     archive_toggle(
         &state,
         id,
-        "archive",
         mando_db::queries::tasks::archive_by_id(&pool, id),
     )
     .await
@@ -349,13 +375,7 @@ pub(crate) async fn post_task_unarchive(
     axum::extract::Path(id): axum::extract::Path<i64>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let pool = state.task_store.write().await.pool().clone();
-    archive_toggle(
-        &state,
-        id,
-        "unarchive",
-        mando_db::queries::tasks::unarchive(&pool, id),
-    )
-    .await
+    archive_toggle(&state, id, mando_db::queries::tasks::unarchive(&pool, id)).await
 }
 
 /// POST /api/tasks/handoff
@@ -369,7 +389,6 @@ pub(crate) async fn post_task_handoff(
     simple_task_action(
         &state,
         id,
-        "handoff",
         mando_captain::runtime::dashboard::handoff_item(&store, id, pool),
     )
     .await

@@ -13,7 +13,7 @@ const S = 16;
 
 /** Human-action states get a subtle inline label before the title */
 export const ACTION_LABELS: Record<string, { color: string; label: string }> = {
-  'awaiting-review': { color: 'var(--muted-foreground)', label: 'Review' },
+  'awaiting-review': { color: 'var(--review)', label: 'Review' },
   escalated: { color: 'var(--destructive)', label: 'Escalated' },
   'needs-clarification': { color: 'var(--needs-human)', label: 'Needs input' },
 };
@@ -44,7 +44,7 @@ const ICON_MAP: Record<string, () => React.ReactElement> = {
   'in-progress': IconWorking,
   'captain-reviewing': IconReviewing,
   'captain-merging': IconReviewing,
-  'awaiting-review': () => <CircleDot size={S} color="var(--muted-foreground)" />,
+  'awaiting-review': () => <CircleDot size={S} color="var(--review)" />,
   escalated: () => <CircleAlert size={S} color="var(--destructive)" />,
   'needs-clarification': () => <CircleHelp size={S} color="var(--needs-human)" />,
   rework: IconRework,

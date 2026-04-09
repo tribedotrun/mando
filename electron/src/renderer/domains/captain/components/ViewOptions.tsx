@@ -1,6 +1,6 @@
 import React from 'react';
 import { SlidersHorizontal } from 'lucide-react';
-import { useTaskStore } from '#renderer/domains/captain/stores/taskStore';
+import { useTaskFilters } from '#renderer/domains/captain/stores/taskFilters';
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -11,7 +11,8 @@ import {
 import { Button } from '#renderer/components/ui/button';
 
 export function ViewOptions(): React.ReactElement {
-  const { showArchived, setShowArchived } = useTaskStore();
+  const showArchived = useTaskFilters((s) => s.showArchived);
+  const setShowArchived = useTaskFilters((s) => s.setShowArchived);
 
   return (
     <DropdownMenu>

@@ -237,13 +237,7 @@ function HumanSection({ section }: { section: TranscriptSection }): React.ReactE
   return (
     <div>
       <SectionHeader section={section} />
-      <div
-        className="rounded-md py-2 pl-3 pr-3"
-        style={{
-          borderLeft: '2px solid var(--needs-human)',
-          background: 'var(--needs-human-bg)',
-        }}
-      >
+      <div className="rounded-md border border-needs-human/20 bg-needs-human-bg py-2 pl-3 pr-3">
         {textBlocks.map((block, bi) => (
           <div key={bi} className="text-caption leading-relaxed text-foreground">
             <PrMarkdown text={(block as Extract<ContentBlock, { type: 'text' }>).content} />

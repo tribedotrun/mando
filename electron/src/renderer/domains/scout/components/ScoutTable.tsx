@@ -10,14 +10,7 @@ import { getErrorMessage } from '#renderer/utils';
 import log from '#renderer/logger';
 import { Badge } from '#renderer/components/ui/badge';
 import { Button } from '#renderer/components/ui/button';
-import {
-  Table,
-  TableHeader,
-  TableBody,
-  TableRow,
-  TableHead,
-  TableCell,
-} from '#renderer/components/ui/table';
+import { Table, TableBody, TableRow, TableCell } from '#renderer/components/ui/table';
 import { Collapsible, CollapsibleContent } from '#renderer/components/ui/collapsible';
 import { Skeleton } from '#renderer/components/ui/skeleton';
 import { Checkbox } from '#renderer/components/ui/checkbox';
@@ -38,14 +31,11 @@ const STATUS_VARIANT: Record<string, 'default' | 'secondary' | 'destructive' | '
   error: 'destructive',
 };
 
-const TYPE_BADGE: Record<
-  string,
-  { label: string; variant: 'default' | 'secondary' | 'outline' | 'destructive' }
-> = {
-  github: { label: 'GH', variant: 'default' },
-  youtube: { label: 'YT', variant: 'destructive' },
-  arxiv: { label: 'arXiv', variant: 'default' },
-  blog: { label: 'blog', variant: 'secondary' },
+const TYPE_BADGE: Record<string, { label: string; variant: 'outline' }> = {
+  github: { label: 'GH', variant: 'outline' },
+  youtube: { label: 'YT', variant: 'outline' },
+  arxiv: { label: 'arXiv', variant: 'outline' },
+  blog: { label: 'blog', variant: 'outline' },
   other: { label: '', variant: 'outline' },
 };
 
@@ -139,15 +129,6 @@ export function ScoutTable({
   return (
     <div ref={listRef} data-testid="scout-table">
       <Table>
-        <TableHeader>
-          <TableRow className="hover:bg-transparent">
-            <TableHead className="w-8" />
-            <TableHead className="flex-1">Title</TableHead>
-            <TableHead className="w-16 text-center">Type</TableHead>
-            <TableHead className="w-20 text-center">Status</TableHead>
-            <TableHead className="w-24 text-right">Actions</TableHead>
-          </TableRow>
-        </TableHeader>
         <TableBody>
           {items.map((item, idx) => {
             const isExpanded = expandedId === item.id;

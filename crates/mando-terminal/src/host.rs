@@ -31,7 +31,6 @@ impl TerminalHost {
         }
         drop(sessions);
         let id = mando_uuid::Uuid::v4().to_string();
-        let size = req.size.unwrap_or_default();
         info!(
             session = id,
             project = req.project,
@@ -39,15 +38,7 @@ impl TerminalHost {
             cwd = %req.cwd.display(),
             "spawning terminal session"
         );
-        let session = TerminalSession::spawn(
-            id.clone(),
-            req.project,
-            req.cwd,
-            req.agent,
-            req.resume_session_id.as_deref(),
-            size,
-            &req.extra_env,
-        )?;
+        let session = TerminalSession::spawn(id.clone(), req)?;
         let mut sessions = self.sessions.lock().expect("sessions lock");
         if sessions.len() >= Self::MAX_SESSIONS {
             let _ = session.kill();

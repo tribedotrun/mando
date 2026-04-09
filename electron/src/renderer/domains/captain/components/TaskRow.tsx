@@ -1,22 +1,12 @@
 import React, { useCallback, useState } from 'react';
 import type { Row } from '@tanstack/react-table';
-import { useTaskStore } from '#renderer/domains/captain/stores/taskStore';
-import { toast } from 'sonner';
+import { useTaskArchive, useTaskUnarchive } from '#renderer/hooks/mutations';
 import type { TaskItem } from '#renderer/types';
-import {
-  prLabel,
-  prHref,
-  prState,
-  canMerge,
-  canReopen,
-  canAskTerminal,
-  getErrorMessage,
-} from '#renderer/utils';
+import { prLabel, prHref, prState, canMerge, canReopen, canAskTerminal } from '#renderer/utils';
 import { ArchiveBtn, MergeBtn, MoreIcon } from '#renderer/domains/captain/components/TaskIcons';
 import { PrIcon } from '#renderer/global/components/icons';
 import { StatusIcon, ACTION_LABELS } from '#renderer/global/components/StatusIndicator';
 import { ActionBtn, TaskOverflowMenu } from '#renderer/domains/captain/components/TaskActions';
-import { archiveItem, unarchiveItem } from '#renderer/domains/captain/hooks/useApi';
 import { Checkbox } from '#renderer/components/ui/checkbox';
 import { Button } from '#renderer/components/ui/button';
 
@@ -50,37 +40,20 @@ export const TaskRow = React.memo(function TaskRow({
 }: TaskRowProps): React.ReactElement {
   const item = row.original;
   const selected = row.getIsSelected();
-  const refetchTasks = useTaskStore((s) => s.fetch);
+  const archiveMut = useTaskArchive();
+  const unarchiveMut = useTaskUnarchive();
   const isFinalized =
     item.status === 'merged' || item.status === 'completed-no-pr' || item.status === 'canceled';
   const [menuOpen, setMenuOpen] = useState(false);
-  const [archivePending, setArchivePending] = useState(false);
+  const archivePending = archiveMut.isPending || unarchiveMut.isPending;
 
-  const handleArchive = useCallback(async () => {
-    setArchivePending(true);
-    try {
-      await archiveItem(item.id);
-      void refetchTasks();
-    } catch (err) {
-      toast.error(getErrorMessage(err, 'Archive failed'));
-      void refetchTasks();
-    } finally {
-      setArchivePending(false);
-    }
-  }, [item.id, refetchTasks]);
+  const handleArchive = useCallback(() => {
+    archiveMut.mutate({ id: item.id });
+  }, [item.id, archiveMut]);
 
-  const handleUnarchive = useCallback(async () => {
-    setArchivePending(true);
-    try {
-      await unarchiveItem(item.id);
-      void refetchTasks();
-    } catch (err) {
-      toast.error(getErrorMessage(err, 'Unarchive failed'));
-      void refetchTasks();
-    } finally {
-      setArchivePending(false);
-    }
-  }, [item.id, refetchTasks]);
+  const handleUnarchive = useCallback(() => {
+    unarchiveMut.mutate({ id: item.id });
+  }, [item.id, unarchiveMut]);
 
   return (
     <div

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { ChevronDown, MoreVertical } from 'lucide-react';
 import { fetchWorkers } from '#renderer/domains/captain/hooks/useApi';
+import { queryKeys } from '#renderer/queryKeys';
 import { fmtRuntime, ceilMinutes, shortRepo } from '#renderer/utils';
 import type { WorkerDetail } from '#renderer/types';
 import { StatusDot } from '#renderer/global/components/CardShell';
@@ -26,26 +27,26 @@ const PHASE_COLORS: Record<
   { dot: string; text: string; duration: string; label?: string }
 > = {
   active: {
-    dot: 'var(--foreground)',
+    dot: 'var(--success)',
     text: 'var(--muted-foreground)',
     duration: 'var(--text-3)',
   },
   reviewing: {
-    dot: 'var(--review)',
-    text: 'var(--review)',
-    duration: 'var(--review)',
+    dot: 'var(--success)',
+    text: 'var(--success)',
+    duration: 'var(--success)',
     label: 'reviewing',
   },
   merging: {
-    dot: 'var(--muted-foreground)',
-    text: 'var(--muted-foreground)',
-    duration: 'var(--muted-foreground)',
+    dot: 'var(--success)',
+    text: 'var(--success)',
+    duration: 'var(--success)',
     label: 'merging',
   },
   stale: {
-    dot: 'var(--stale)',
-    text: 'var(--stale)',
-    duration: 'var(--stale)',
+    dot: 'var(--text-3)',
+    text: 'var(--text-3)',
+    duration: 'var(--text-3)',
     label: 'stale',
   },
 };
@@ -157,7 +158,7 @@ export function MetricsRow({
   const [expanded, setExpanded] = useState(true);
 
   const { data: workersData } = useQuery({
-    queryKey: ['metrics-workers'],
+    queryKey: queryKeys.workers.list(),
     queryFn: fetchWorkers,
     refetchInterval: 15_000,
   });
@@ -181,7 +182,7 @@ export function MetricsRow({
   const staleCount = staleWorkers.length;
 
   return (
-    <div data-testid="metrics-row" className="mb-3">
+    <div data-testid="metrics-row" className="mb-1.5">
       {/* Collapsed pill, shown when collapsed or when no workers */}
       {(!expanded || workers.length === 0) &&
         (workers.length > 0 ? (
@@ -285,15 +286,15 @@ function HeaderContent({
   return (
     <>
       <span className="text-label text-text-3">Workers</span>
-      <span className="text-[12px] leading-4 text-foreground">{activeCount} active</span>
+      <span className="text-[12px] leading-4 text-success">{activeCount} active</span>
       {reviewingCount > 0 && (
-        <span className="text-[12px] leading-4 text-review">{reviewingCount} reviewing</span>
+        <span className="text-[12px] leading-4 text-success">{reviewingCount} reviewing</span>
       )}
       {mergingCount > 0 && (
-        <span className="text-[12px] leading-4 text-muted-foreground">{mergingCount} merging</span>
+        <span className="text-[12px] leading-4 text-success">{mergingCount} merging</span>
       )}
       {staleCount > 0 && (
-        <span className="text-[12px] font-semibold leading-4 text-stale">{staleCount} stale</span>
+        <span className="text-[12px] leading-4 text-text-3">{staleCount} stale</span>
       )}
       {rateLimitSecs > 0 && (
         <span className="text-[12px] leading-4 text-text-4">

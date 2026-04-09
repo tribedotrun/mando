@@ -27,7 +27,7 @@ const SELECT_COLS: &str = "\
     t.intervention_count, t.captain_review_trigger, t.session_ids, t.last_activity_at, \
     t.plan, t.no_pr, t.worker_seq, t.reopen_seq, t.reopen_source, t.images, \
     t.review_fail_count, t.clarifier_fail_count, t.spawn_fail_count, t.merge_fail_count, \
-    t.escalation_report, t.source, t.archived_at, p.github_repo";
+    t.escalation_report, t.source, t.archived_at, t.rev, p.github_repo";
 
 fn select_tasks_sql() -> &'static str {
     static SQL: OnceLock<String> = OnceLock::new();
@@ -123,13 +123,11 @@ fn insert_task_with_id_sql() -> &'static str {
     })
 }
 
-/// Generate `col1=?, col2=?, ...` SET clause from WRITE_COLS.
+/// Generate `col1=?, col2=?, ..., rev = rev + 1` SET clause from WRITE_COLS.
 pub(crate) fn update_set_clause() -> String {
-    WRITE_COLS
-        .iter()
-        .map(|c| format!("{c}=?"))
-        .collect::<Vec<_>>()
-        .join(", ")
+    let mut parts: Vec<String> = WRITE_COLS.iter().map(|c| format!("{c}=?")).collect();
+    parts.push("rev = rev + 1".into());
+    parts.join(", ")
 }
 
 fn update_task_sql() -> &'static str {
@@ -318,7 +316,7 @@ pub async fn archive_terminal(pool: &SqlitePool, grace_secs: u64) -> Result<usiz
     let now_str = mando_types::now_rfc3339();
 
     let result = sqlx::query(
-        "UPDATE tasks SET archived_at = ?
+        "UPDATE tasks SET archived_at = ?, rev = rev + 1
          WHERE archived_at IS NULL
            AND status IN ('merged', 'completed-no-pr', 'canceled')
            AND (COALESCE(last_activity_at, created_at) IS NULL
@@ -341,7 +339,7 @@ pub async fn archive_by_id(pool: &SqlitePool, id: i64) -> Result<bool> {
     let now = time::OffsetDateTime::now_utc()
         .format(&time::format_description::well_known::Rfc3339)
         .unwrap_or_default();
-    let result = sqlx::query("UPDATE tasks SET archived_at = ? WHERE id = ?")
+    let result = sqlx::query("UPDATE tasks SET archived_at = ?, rev = rev + 1 WHERE id = ?")
         .bind(&now)
         .bind(id)
         .execute(pool)
@@ -351,7 +349,7 @@ pub async fn archive_by_id(pool: &SqlitePool, id: i64) -> Result<bool> {
 
 /// Un-archive a task (set archived_at back to NULL).
 pub async fn unarchive(pool: &SqlitePool, id: i64) -> Result<bool> {
-    let result = sqlx::query("UPDATE tasks SET archived_at = NULL WHERE id = ?")
+    let result = sqlx::query("UPDATE tasks SET archived_at = NULL, rev = rev + 1 WHERE id = ?")
         .bind(id)
         .execute(pool)
         .await?;

@@ -177,6 +177,10 @@ export function apiPatch<T>(apiPath: string, body: unknown): Promise<T> {
   return apiRequest<T>('PATCH', apiPath, body);
 }
 
+export function apiPut<T>(apiPath: string, body: unknown): Promise<T> {
+  return apiRequest<T>('PUT', apiPath, body);
+}
+
 export function apiDel<T>(apiPath: string): Promise<T> {
   return apiRequest<T>('DELETE', apiPath);
 }

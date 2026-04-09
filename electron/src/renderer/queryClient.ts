@@ -1,4 +1,5 @@
 import { QueryClient, type QueryClient as QC } from '@tanstack/react-query';
+import { queryKeys } from '#renderer/queryKeys';
 
 export const queryClient = new QueryClient({
   defaultOptions: {
@@ -20,17 +21,15 @@ export const queryClient = new QueryClient({
 /**
  * Invalidate the query caches that back the task detail view
  * (timeline + PR summary + Q&A history).
- * Pass `id` to scope to a single task, or omit to invalidate for all tasks
- * (used by the SSE handler which fans out broadly).
+ * Pass `id` to scope to a single task, or omit to invalidate for all tasks.
  */
 export function invalidateTaskDetail(client: QC, id?: number): void {
   if (id != null) {
-    void client.invalidateQueries({ queryKey: ['task-detail-timeline', id] });
-    void client.invalidateQueries({ queryKey: ['task-detail-pr', id] });
-    void client.invalidateQueries({ queryKey: ['task-ask-history', id] });
+    void client.invalidateQueries({ queryKey: queryKeys.tasks.timeline(id) });
+    void client.invalidateQueries({ queryKey: queryKeys.tasks.pr(id) });
+    void client.invalidateQueries({ queryKey: queryKeys.tasks.askHistory(id) });
   } else {
-    void client.invalidateQueries({ queryKey: ['task-detail-timeline'] });
-    void client.invalidateQueries({ queryKey: ['task-detail-pr'] });
-    void client.invalidateQueries({ queryKey: ['task-ask-history'] });
+    // Invalidate all task sub-queries (timeline, pr, ask-history for every task)
+    void client.invalidateQueries({ queryKey: queryKeys.tasks.all });
   }
 }

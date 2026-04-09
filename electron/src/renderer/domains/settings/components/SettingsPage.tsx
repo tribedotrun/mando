@@ -1,7 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { ChevronLeft } from 'lucide-react';
-import { useSettingsStore } from '#renderer/domains/settings/stores/settingsStore';
-import { useMountEffect } from '#renderer/global/hooks/useMountEffect';
+import { useConfig } from '#renderer/hooks/queries';
 import { ErrorBoundary } from '#renderer/global/components/ErrorBoundary';
 import { SettingsGeneral } from '#renderer/domains/settings/components/SettingsGeneral';
 import { SettingsProjects } from '#renderer/domains/settings/components/SettingsProjects';
@@ -65,11 +64,8 @@ export function SettingsPage({
   initialSection = 'general',
 }: SettingsPageProps): React.ReactElement {
   const [section, setSection] = useState<SettingsSection>(initialSection);
-  const load = useSettingsStore((s) => s.load);
-  const loading = useSettingsStore((s) => s.loading);
-  const error = useSettingsStore((s) => s.error);
-  const saveSuccess = useSettingsStore((s) => s.saveSuccess);
-  const scoutEnabled = useSettingsStore((s) => !!s.config.features?.scout);
+  const { data: config, isLoading, error } = useConfig();
+  const scoutEnabled = !!config?.features?.scout;
   const navItems = useMemo(() => {
     let items = BASE_NAV_ITEMS;
     if (scoutEnabled) {
@@ -83,11 +79,7 @@ export function SettingsPage({
     return items;
   }, [scoutEnabled]);
 
-  useMountEffect(() => {
-    void load();
-  });
-
-  if (loading) {
+  if (isLoading) {
     return (
       <div className="flex h-full items-center justify-center">
         <div className="flex flex-col items-center gap-3">
@@ -99,7 +91,11 @@ export function SettingsPage({
   }
 
   return (
-    <div data-testid="settings-page" className="flex h-full">
+    <div data-testid="settings-page" className="relative flex h-full">
+      <div
+        className="absolute inset-x-0 top-0 z-10 h-[38px]"
+        style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
+      />
       <aside className="flex w-[200px] shrink-0 flex-col bg-card pb-4 pl-3 pr-3 pt-[38px]">
         <Button
           data-testid="settings-back"
@@ -134,10 +130,11 @@ export function SettingsPage({
           })}
         </nav>
 
-        {(error || saveSuccess) && (
+        {error && (
           <div className="pt-3">
-            {error && <p className="text-xs text-destructive">{error}</p>}
-            {saveSuccess && <p className="text-xs text-success">Saved</p>}
+            <p className="text-xs text-destructive">
+              {error instanceof Error ? error.message : 'Failed to load config'}
+            </p>
           </div>
         )}
       </aside>

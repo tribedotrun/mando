@@ -1,17 +1,30 @@
 import React from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { Card, CardContent } from '#renderer/components/ui/card';
-import {
-  useSettingsStore,
-  type CaptainConfig,
-} from '#renderer/domains/settings/stores/settingsStore';
+import { useConfig } from '#renderer/hooks/queries';
+import { useConfigSave } from '#renderer/hooks/mutations';
+import { queryKeys } from '#renderer/queryKeys';
+import type { MandoConfig, CaptainConfig } from '#renderer/types';
 import { Switch } from '#renderer/components/ui/switch';
 
 const EMPTY_CAPTAIN: CaptainConfig = {};
+const CLAUDE_ARGS_DEFAULT = '--dangerously-skip-permissions';
+const CODEX_ARGS_DEFAULT = '--full-auto';
 
 export function SettingsCaptain(): React.ReactElement {
-  const captain = useSettingsStore((s) => s.config.captain ?? EMPTY_CAPTAIN);
-  const updateSection = useSettingsStore((s) => s.updateSection);
-  const save = useSettingsStore((s) => s.save);
+  const { data: config } = useConfig();
+  const saveMut = useConfigSave();
+  const qc = useQueryClient();
+  const captain = config?.captain ?? EMPTY_CAPTAIN;
+
+  const saveSection = (patch: Partial<CaptainConfig>) => {
+    const current = qc.getQueryData<MandoConfig>(queryKeys.config.current()) ?? {};
+    const updated: MandoConfig = {
+      ...current,
+      captain: { ...(current.captain || {}), ...patch },
+    };
+    saveMut.mutate(updated);
+  };
 
   return (
     <div data-testid="settings-captain">
@@ -30,8 +43,7 @@ export function SettingsCaptain(): React.ReactElement {
               data-testid="captain-auto-tick"
               checked={!!captain.autoSchedule}
               onCheckedChange={(checked) => {
-                updateSection('captain', { autoSchedule: checked });
-                void save();
+                saveSection({ autoSchedule: checked });
               }}
             />
           </div>
@@ -42,16 +54,37 @@ export function SettingsCaptain(): React.ReactElement {
             <select
               value={captain.defaultTerminalAgent ?? 'claude'}
               onChange={(e) => {
-                updateSection('captain', {
+                saveSection({
                   defaultTerminalAgent: e.target.value as 'claude' | 'codex',
                 });
-                void save();
               }}
               className="rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground"
             >
               <option value="claude">Claude Code</option>
               <option value="codex">Codex</option>
             </select>
+          </div>
+          <div>
+            <h3 className="text-sm font-medium text-muted-foreground">Claude Code Args</h3>
+            <input
+              data-testid="captain-claude-terminal-args"
+              type="text"
+              value={captain.claudeTerminalArgs ?? CLAUDE_ARGS_DEFAULT}
+              onChange={(e) => saveSection({ claudeTerminalArgs: e.target.value })}
+              placeholder={CLAUDE_ARGS_DEFAULT}
+              className="mt-1 w-full rounded-md border border-border bg-background px-3 py-1.5 font-mono text-sm text-foreground"
+            />
+          </div>
+          <div>
+            <h3 className="text-sm font-medium text-muted-foreground">Codex Args</h3>
+            <input
+              data-testid="captain-codex-terminal-args"
+              type="text"
+              value={captain.codexTerminalArgs ?? CODEX_ARGS_DEFAULT}
+              onChange={(e) => saveSection({ codexTerminalArgs: e.target.value })}
+              placeholder={CODEX_ARGS_DEFAULT}
+              className="mt-1 w-full rounded-md border border-border bg-background px-3 py-1.5 font-mono text-sm text-foreground"
+            />
           </div>
         </CardContent>
       </Card>

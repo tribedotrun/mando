@@ -1,21 +1,23 @@
 import React, { useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { Card, CardContent } from '#renderer/components/ui/card';
 import { Button } from '#renderer/components/ui/button';
 import { Badge } from '#renderer/components/ui/badge';
 import { ProjectEditor } from '#renderer/domains/settings/components/ProjectEditor';
-import {
-  useSettingsStore,
-  type ProjectConfig,
-} from '#renderer/domains/settings/stores/settingsStore';
+import { useConfig } from '#renderer/hooks/queries';
+import { useConfigSave, useProjectRemove } from '#renderer/hooks/mutations';
+import { queryKeys } from '#renderer/queryKeys';
+import type { MandoConfig, ProjectConfig } from '#renderer/types';
 import { buildUrl } from '#renderer/domains/settings/hooks/useApi';
 
 const EMPTY_PROJECTS: Record<string, ProjectConfig> = {};
 
 export function SettingsProjects(): React.ReactElement {
-  const projects = useSettingsStore((s) => s.config.captain?.projects ?? EMPTY_PROJECTS);
-  const updateProject = useSettingsStore((s) => s.updateProject);
-  const removeProject = useSettingsStore((s) => s.removeProject);
-  const save = useSettingsStore((s) => s.save);
+  const { data: config } = useConfig();
+  const saveMut = useConfigSave();
+  const removeMut = useProjectRemove();
+  const qc = useQueryClient();
+  const projects = config?.captain?.projects ?? EMPTY_PROJECTS;
 
   const [editing, setEditing] = useState<string | null>(null);
 
@@ -40,8 +42,15 @@ export function SettingsProjects(): React.ReactElement {
                 project={project}
                 existingProjects={projects}
                 onSave={(k, r) => {
-                  updateProject(k, r);
-                  void save();
+                  const current = qc.getQueryData<MandoConfig>(queryKeys.config.current()) ?? {};
+                  const updated: MandoConfig = {
+                    ...current,
+                    captain: {
+                      ...(current.captain || {}),
+                      projects: { ...(current.captain?.projects || {}), [k]: r },
+                    },
+                  };
+                  saveMut.mutate(updated);
                   setEditing(null);
                 }}
                 onCancel={() => setEditing(null)}
@@ -107,8 +116,7 @@ export function SettingsProjects(): React.ReactElement {
                       variant="destructive"
                       size="xs"
                       onClick={() => {
-                        removeProject(pathKey);
-                        void save();
+                        removeMut.mutate({ pathKey });
                       }}
                     >
                       Remove

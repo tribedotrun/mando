@@ -1,7 +1,11 @@
 import React, { useState, useCallback } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { Check, ChevronDown } from 'lucide-react';
 import { Button } from '#renderer/components/ui/button';
-import { useSettingsStore } from '#renderer/domains/settings';
+import { useConfig } from '#renderer/hooks/queries';
+import { useConfigSave } from '#renderer/hooks/mutations';
+import { queryKeys } from '#renderer/queryKeys';
+import type { MandoConfig } from '#renderer/types';
 import { useMountEffect } from '#renderer/global/hooks/useMountEffect';
 import log from '#renderer/logger';
 import { getErrorMessage } from '#renderer/utils';
@@ -22,19 +26,27 @@ interface SetupChecklistProps {
 let cachedClaudeCheck: ClaudeCheckResult | null = null;
 
 function useStepStates() {
-  const config = useSettingsStore((s) => s.config);
-  const hasBotToken = useSettingsStore((s) => !!s.config.env?.TELEGRAM_MANDO_BOT_TOKEN);
+  const { data: config } = useConfig();
+  const saveMut = useConfigSave();
+  const qc = useQueryClient();
+  const hasBotToken = !!config?.env?.TELEGRAM_MANDO_BOT_TOKEN;
   const [claudeResult, setClaudeResult] = useState<ClaudeCheckResult | null>(cachedClaudeCheck);
 
-  const persistClaudeOk = useCallback((result: ClaudeCheckResult) => {
-    if (result.installed && result.works) {
-      const store = useSettingsStore.getState();
-      if (!store.config.features?.claudeCodeVerified) {
-        store.updateSection('features', { claudeCodeVerified: true });
-        void store.save();
+  const persistClaudeOk = useCallback(
+    (result: ClaudeCheckResult) => {
+      if (result.installed && result.works) {
+        if (!config?.features?.claudeCodeVerified) {
+          const current = qc.getQueryData<MandoConfig>(queryKeys.config.current()) ?? {};
+          const updated: MandoConfig = {
+            ...current,
+            features: { ...(current.features || {}), claudeCodeVerified: true },
+          };
+          saveMut.mutate(updated);
+        }
       }
-    }
-  }, []);
+    },
+    [config?.features?.claudeCodeVerified, saveMut, qc],
+  );
 
   useMountEffect(() => {
     if (cachedClaudeCheck !== null) return;
@@ -85,14 +97,14 @@ function useStepStates() {
 
   const claudeOk =
     (claudeResult?.installed === true && claudeResult.works === true) ||
-    config.features?.claudeCodeVerified === true;
+    config?.features?.claudeCodeVerified === true;
 
   return {
     claudeResult,
     claudeOk,
     recheckClaude,
-    hasProject: Object.keys(config.captain?.projects ?? {}).length > 0,
-    hasTelegram: !!(config.channels?.telegram?.enabled && hasBotToken),
+    hasProject: Object.keys(config?.captain?.projects ?? {}).length > 0,
+    hasTelegram: !!(config?.channels?.telegram?.enabled && hasBotToken),
   };
 }
 
@@ -106,14 +118,9 @@ interface StepDef {
 }
 
 export function SetupChecklist({ onDismiss, onMinimize }: SetupChecklistProps): React.ReactElement {
-  const loaded = useSettingsStore((s) => s.loaded);
-  const load = useSettingsStore((s) => s.load);
+  const { data: config, isLoading } = useConfig();
   const states = useStepStates();
   const [userExpandedStep, setUserExpandedStep] = useState<StepId | null>(null);
-
-  useMountEffect(() => {
-    if (!loaded) void load();
-  });
 
   const steps: StepDef[] = [
     {
@@ -145,7 +152,7 @@ export function SetupChecklist({ onDismiss, onMinimize }: SetupChecklistProps): 
     setUserExpandedStep((prev) => (prev === id ? null : id));
   }, []);
 
-  if (!loaded) return <div />;
+  if (isLoading || !config) return <div />;
 
   return (
     <div className="p-3">

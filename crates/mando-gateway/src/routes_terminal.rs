@@ -62,6 +62,68 @@ pub(crate) async fn post_terminal_create(
     if let Some(ref tid) = body.terminal_id {
         extra_env.insert("MANDO_TERMINAL_ID".to_string(), tid.clone());
     }
+    let cfg = state.config.load();
+    let args_str = match &body.agent {
+        Agent::Claude => &cfg.captain.claude_terminal_args,
+        Agent::Codex => &cfg.captain.codex_terminal_args,
+    };
+    let extra_args = shell_words::split(args_str).map_err(|e| {
+        error_response(
+            StatusCode::BAD_REQUEST,
+            &format!("malformed terminal args: {e}"),
+        )
+    })?;
+    let project_name = body.project.clone();
+    let cwd_str = cwd.to_string_lossy().to_string();
+
+    // Resolve project from DB (source of truth). Create minimal record if missing.
+    let project_id = match mando_db::queries::projects::find_by_name(state.db.pool(), &project_name)
+        .await
+    {
+        Ok(Some(row)) => row.id,
+        Ok(None) => mando_db::queries::projects::upsert(state.db.pool(), &project_name, "", None)
+            .await
+            .map_err(|e| {
+                error_response(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    &format!("failed to create project: {e}"),
+                )
+            })?,
+        Err(e) => {
+            return Err(error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                &format!("project lookup failed: {e}"),
+            ));
+        }
+    };
+
+    // Create workbench so the terminal appears in the sidebar.
+    // Skip if resuming an existing session OR a workbench already exists for this cwd.
+    let wb_id = if body.resume_session_id.is_none() {
+        let existing = mando_db::queries::workbenches::find_by_worktree(state.db.pool(), &cwd_str)
+            .await
+            .ok()
+            .flatten();
+        if existing.is_some() {
+            None
+        } else {
+            let title = mando_types::workbench::workbench_title_now();
+            let wb = mando_types::Workbench::new(project_id, project_name, cwd_str, title);
+            Some(
+                mando_db::queries::workbenches::insert(state.db.pool(), &wb)
+                    .await
+                    .map_err(|e| {
+                        error_response(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            &format!("failed to create workbench: {e}"),
+                        )
+                    })?,
+            )
+        }
+    } else {
+        None
+    };
+
     let req = mando_terminal::CreateRequest {
         project: body.project,
         cwd,
@@ -69,13 +131,22 @@ pub(crate) async fn post_terminal_create(
         resume_session_id: body.resume_session_id,
         size: body.size,
         extra_env,
+        extra_args,
     };
-    let session = state.terminal_host.create(req).map_err(|e| {
-        error_response(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            &format!("failed to create terminal: {e}"),
-        )
-    })?;
+    let session = match state.terminal_host.create(req) {
+        Ok(s) => s,
+        Err(e) => {
+            // Clean up workbench if terminal spawn failed.
+            if let Some(id) = wb_id {
+                let _ = mando_db::queries::workbenches::archive(state.db.pool(), id).await;
+            }
+            return Err(error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                &format!("failed to create terminal: {e}"),
+            ));
+        }
+    };
+
     Ok(Json(json!(session.info())))
 }
 

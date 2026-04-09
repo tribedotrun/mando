@@ -1,8 +1,10 @@
 import { useCallback, useRef, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { useMountEffect } from '#renderer/global/hooks/useMountEffect';
 import { TerminalView } from '#renderer/domains/terminal/components/TerminalView';
-import { useTerminalStore } from '#renderer/domains/terminal/stores/terminalStore';
-import { useSettingsStore } from '#renderer/domains/settings';
+import { useTerminalList, useConfig, type TerminalSessionInfo } from '#renderer/hooks/queries';
+import { useTerminalCreate, useTerminalDelete } from '#renderer/hooks/mutations';
+import { queryKeys } from '#renderer/queryKeys';
 import { X, Plus, Circle } from 'lucide-react';
 import { toast } from 'sonner';
 import log from '#renderer/logger';
@@ -25,76 +27,99 @@ export function TerminalPage({
   resumeSessionId,
   onResumeConsumed,
 }: TerminalPageProps) {
-  const {
-    sessions,
-    addSession,
-    removeSession,
-    updateSession,
-    fetch: fetchSessions,
-  } = useTerminalStore();
+  const { data: sessions = [] } = useTerminalList();
+  const createMutation = useTerminalCreate();
+  const deleteMutation = useTerminalDelete();
+  const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState<string | null>(null);
+  const [exitStates, setExitStates] = useState<
+    Record<string, { running: boolean; exit_code: number | null }>
+  >({});
   const initRef = useRef(false);
 
-  const defaultAgent = useSettingsStore((s) => s.config.captain?.defaultTerminalAgent ?? 'claude');
+  const { data: _cfg } = useConfig();
+  const defaultAgent = _cfg?.captain?.defaultTerminalAgent ?? 'claude';
 
-  useMountEffect(() => {
-    // Guard against React 18 StrictMode double-fire.
-    if (initRef.current) return;
-    initRef.current = true;
-
-    if (resumeSessionId) {
-      void addSession({ project, cwd, agent: 'claude', resume_session_id: resumeSessionId })
-        .then((session) => {
-          setActiveTab(session.id);
-          onResumeConsumed?.();
-        })
-        .catch((e) => log.error('Failed to resume terminal session', e));
-      return;
-    }
-    void fetchSessions()
-      .then(() => {
-        const store = useTerminalStore.getState();
-        const relevant = store.sessions.filter((s) => s.project === project && s.cwd === cwd);
-        if (relevant.length > 0) {
-          setActiveTab(relevant[relevant.length - 1].id);
-        } else {
-          void handleNewTerminal(defaultAgent);
-        }
-      })
-      .catch((err) => log.error('Failed to fetch sessions', err));
+  // Merge exit states into sessions for rendering.
+  const sessionsWithExitState = sessions.map((s) => {
+    const override = exitStates[s.id];
+    return override ? { ...s, ...override } : s;
   });
 
-  const relevantSessions = sessions.filter((s) => s.project === project && s.cwd === cwd);
+  const relevantSessions = sessionsWithExitState.filter(
+    (s) => s.project === project && s.cwd === cwd,
+  );
 
   const handleNewTerminal = useCallback(
     async (agent: 'claude' | 'codex') => {
       try {
-        const session = await addSession({ project, cwd, agent });
+        const session = await createMutation.mutateAsync({ project, cwd, agent });
         setActiveTab(session.id);
       } catch (e) {
         log.error('Failed to create terminal', e);
         toast.error(e instanceof Error ? e.message : 'Failed to create terminal');
       }
     },
-    [project, cwd, addSession],
+    [project, cwd, createMutation],
   );
 
+  // Init: resume or auto-select/create on mount once sessions are loaded.
+  useMountEffect(() => {
+    if (initRef.current) return;
+    initRef.current = true;
+
+    if (resumeSessionId) {
+      createMutation.mutate(
+        { project, cwd, agent: 'claude', resume_session_id: resumeSessionId },
+        {
+          onSuccess: (session) => {
+            setActiveTab(session.id);
+            onResumeConsumed?.();
+          },
+          onError: (e) => log.error('Failed to resume terminal session', e),
+        },
+      );
+    }
+  });
+
+  // Once sessions load, auto-select last relevant or create a new one (render-time).
+  const autoSelectedRef = useRef(false);
+  if (!autoSelectedRef.current && !activeTab && !resumeSessionId && sessions.length > 0) {
+    const relevant = sessions.filter((s) => s.project === project && s.cwd === cwd);
+    autoSelectedRef.current = true;
+    if (relevant.length > 0) {
+      setActiveTab(relevant[relevant.length - 1].id);
+    } else {
+      // Cannot call async handler during render; schedule for next microtask.
+      queueMicrotask(() => void handleNewTerminal(defaultAgent));
+    }
+  }
+
   const handleCloseTab = useCallback(
-    async (id: string) => {
-      await removeSession(id);
-      if (activeTab === id) {
-        const remaining = relevantSessions.filter((s) => s.id !== id);
-        setActiveTab(remaining.length > 0 ? remaining[0].id : null);
-      }
+    (id: string) => {
+      deleteMutation.mutate(
+        { id },
+        {
+          onSuccess: () => {
+            if (activeTab === id) {
+              const remaining = relevantSessions.filter((s) => s.id !== id);
+              setActiveTab(remaining.length > 0 ? remaining[0].id : null);
+            }
+          },
+        },
+      );
     },
-    [activeTab, relevantSessions, removeSession],
+    [activeTab, relevantSessions, deleteMutation],
   );
 
   const handleExit = useCallback(
     (id: string, code: number | null) => {
-      updateSession(id, { running: false, exit_code: code });
+      setExitStates((prev) => ({ ...prev, [id]: { running: false, exit_code: code } }));
+      queryClient.setQueryData<TerminalSessionInfo[]>(queryKeys.terminals.list(), (old) =>
+        old?.map((s) => (s.id === id ? { ...s, running: false, exit_code: code } : s)),
+      );
     },
-    [updateSession],
+    [queryClient],
   );
 
   return (

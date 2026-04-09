@@ -13,10 +13,6 @@ use crate::response::{error_response, internal_error, not_found_or_internal};
 use crate::scout_notify::{emit_scout_process_failed, emit_scout_processed};
 use crate::AppState;
 
-// ---------------------------------------------------------------
-// Query params
-// ---------------------------------------------------------------
-
 #[derive(Deserialize, Default)]
 pub(crate) struct ScoutQuery {
     pub status: Option<String>,
@@ -80,10 +76,6 @@ pub(crate) async fn get_scout_article(
         .map_err(not_found_or_internal)
 }
 
-// ---------------------------------------------------------------
-// POST endpoints
-// ---------------------------------------------------------------
-
 #[derive(Deserialize)]
 pub(crate) struct AddScoutBody {
     pub url: String,
@@ -104,9 +96,15 @@ pub(crate) async fn post_scout_items(
     let pool = state.db.pool();
     match mando_scout::add_scout_item(pool, &body.url, body.title.as_deref()).await {
         Ok(val) => {
-            state
-                .bus
-                .send(mando_types::BusEvent::Scout, Some(json!({"action": "add"})));
+            let scout_payload = if let Some(id) = val["id"].as_i64() {
+                mando_scout::get_scout_item(pool, id).await.ok()
+            } else {
+                None
+            };
+            state.bus.send(
+                mando_types::BusEvent::Scout,
+                Some(json!({"action": "created", "item": scout_payload, "id": val["id"]})),
+            );
 
             // Auto-process newly added items in the background. Panic-safe:
             // AssertUnwindSafe + catch_unwind ensures an auto-process failure
@@ -129,9 +127,10 @@ pub(crate) async fn post_scout_items(
                                 emit_scout_process_failed(&bus, id, &url_owned, &e.to_string());
                                 return;
                             }
+                            let scout_payload = mando_scout::get_scout_item(&pool, id).await.ok();
                             bus.send(
                                 mando_types::BusEvent::Scout,
-                                Some(json!({"action": "process"})),
+                                Some(json!({"action": "updated", "item": scout_payload, "id": id})),
                             );
 
                             emit_scout_processed(&bus, &pool, id).await;
@@ -172,14 +171,18 @@ pub(crate) async fn post_scout_process(
         .await
         .map_err(internal_error)?;
 
-    state.bus.send(
-        mando_types::BusEvent::Scout,
-        Some(json!({"action": "process"})),
-    );
-
-    // Notify for each processed item.
     if let Some(id) = body.id {
+        let scout_payload = mando_scout::get_scout_item(pool, id).await.ok();
+        state.bus.send(
+            mando_types::BusEvent::Scout,
+            Some(json!({"action": "updated", "item": scout_payload, "id": id})),
+        );
         emit_scout_processed(&state.bus, state.db.pool(), id).await;
+    } else {
+        state.bus.send(
+            mando_types::BusEvent::Scout,
+            Some(json!({"action": "updated"})),
+        );
     }
 
     Ok(Json(val))
@@ -403,9 +406,19 @@ pub(crate) async fn post_scout_act(
     .await
     .map_err(internal_error)?;
 
+    let task_payload = if let Some(id) = val["id"].as_i64() {
+        store
+            .find_by_id(id)
+            .await
+            .ok()
+            .flatten()
+            .map(|t| serde_json::to_value(&t).unwrap())
+    } else {
+        None
+    };
     state.bus.send(
         mando_types::BusEvent::Tasks,
-        Some(serde_json::json!({"action": "add"})),
+        Some(serde_json::json!({"action": "created", "item": task_payload, "id": val["id"]})),
     );
 
     Ok(Json(serde_json::json!({
@@ -442,9 +455,10 @@ pub(crate) async fn patch_scout_item(
             };
             error_response(status, &msg)
         })?;
+    let scout_payload = mando_scout::get_scout_item(pool, id).await.ok();
     state.bus.send(
         mando_types::BusEvent::Scout,
-        Some(json!({"action": "update", "id": id})),
+        Some(json!({"action": "updated", "item": scout_payload, "id": id})),
     );
     Ok(Json(json!({"ok": true})))
 }
@@ -464,7 +478,7 @@ pub(crate) async fn delete_scout_item(
         .map_err(not_found_or_internal)?;
     state.bus.send(
         mando_types::BusEvent::Scout,
-        Some(json!({"action": "delete", "id": id})),
+        Some(json!({"action": "deleted", "id": id})),
     );
     Ok(Json(val))
 }

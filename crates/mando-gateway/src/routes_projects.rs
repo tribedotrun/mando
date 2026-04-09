@@ -56,6 +56,8 @@ pub(crate) async fn get_projects(
         .iter()
         .map(|row| {
             let aliases: Vec<String> = serde_json::from_str(&row.aliases).unwrap_or_default();
+            let hooks: serde_json::Map<String, Value> =
+                serde_json::from_str(&row.hooks).unwrap_or_default();
             json!({
                 "key": row.path,
                 "name": row.name,
@@ -63,6 +65,10 @@ pub(crate) async fn get_projects(
                 "githubRepo": row.github_repo,
                 "logo": row.logo,
                 "aliases": aliases,
+                "hooks": hooks,
+                "workerPreamble": row.worker_preamble,
+                "scoutSummary": row.scout_summary,
+                "checkCommand": row.check_command,
             })
         })
         .collect();
@@ -191,6 +197,7 @@ pub(crate) struct EditProjectBody {
     pub github_repo: Option<String>,
     pub clear_github_repo: Option<bool>,
     pub aliases: Option<Vec<String>>,
+    pub hooks: Option<std::collections::HashMap<String, String>>,
     pub preamble: Option<String>,
     pub check_command: Option<String>,
     pub scout_summary: Option<String>,
@@ -229,6 +236,9 @@ pub(crate) async fn patch_project(
     }
     if let Some(ref aliases) = body.aliases {
         row.aliases = serde_json::to_string(aliases).unwrap_or_else(|_| "[]".into());
+    }
+    if let Some(ref hooks) = body.hooks {
+        row.hooks = serde_json::to_string(hooks).unwrap_or_else(|_| "{}".into());
     }
     if let Some(ref preamble) = body.preamble {
         row.worker_preamble = preamble.clone();
@@ -288,10 +298,12 @@ pub(crate) async fn delete_project(
         mando_captain::runtime::dashboard::delete_tasks(&config, &store, &task_ids, &opts)
             .await
             .map_err(internal_error)?;
-        state.bus.send(
-            mando_types::BusEvent::Tasks,
-            Some(json!({"action": "delete"})),
-        );
+        for tid in &task_ids {
+            state.bus.send(
+                mando_types::BusEvent::Tasks,
+                Some(json!({"action": "deleted", "id": tid})),
+            );
+        }
     }
 
     db::delete(state.db.pool(), row.id)

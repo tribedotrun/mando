@@ -1,6 +1,6 @@
 import React, { useCallback } from 'react';
 import { useNavigate, useParams } from '@tanstack/react-router';
-import { useTaskStore } from '#renderer/domains/captain/stores/taskStore';
+import { useTaskList } from '#renderer/hooks/queries';
 import { useUIStore } from '#renderer/app/uiStore';
 import { TaskDetailView } from '#renderer/domains/captain/components/TaskDetailView';
 import { ErrorBoundary } from '#renderer/global/components/ErrorBoundary';
@@ -10,8 +10,8 @@ export function TaskDetailPage(): React.ReactElement {
   const { taskId } = useParams({ strict: false }) as { taskId: string };
   const id = Number(taskId);
 
-  const loading = useTaskStore((s) => s.loading);
-  const item = useTaskStore((s) => s.items.find((t) => t.id === id) ?? null);
+  const { data: taskData, isLoading: loading } = useTaskList();
+  const item = taskData?.items.find((t) => t.id === id) ?? null;
 
   const handleBack = useCallback(() => {
     useUIStore.getState().setMergeItem(null);
@@ -30,7 +30,7 @@ export function TaskDetailPage(): React.ReactElement {
 
   if (!item) {
     return (
-      <div className="flex h-full items-center justify-center pt-[38px] text-muted-foreground">
+      <div className="flex h-full items-center justify-center text-muted-foreground">
         {loading ? 'Loading...' : 'Task not found'}
       </div>
     );

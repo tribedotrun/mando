@@ -219,30 +219,12 @@ pub async fn load_into_config(
     Ok(())
 }
 
-/// Sync projects from config.json into the DB at startup.
-/// Upserts all projects so config fields (aliases, hooks, preamble, etc.)
-/// are backfilled into rows that existed before migration 008.
-pub async fn seed_from_config(
-    pool: &SqlitePool,
-    config: &mando_config::settings::Config,
-) -> Result<()> {
-    for pc in config.captain.projects.values() {
-        if pc.name.is_empty() {
-            continue;
-        }
-        let row = config_to_row(pc);
-        upsert_full(pool, &row).await?;
-    }
-    Ok(())
-}
-
-/// Complete startup sync: seed from config, load from DB, backfill logos,
-/// persist logos back to DB. Replaces the multi-step sequence in server startup.
+/// Load all projects from DB into the in-memory config cache,
+/// backfill missing logos, and persist detected logos back to DB.
 pub async fn startup_sync(
     pool: &SqlitePool,
     config: &mut mando_config::settings::Config,
 ) -> Result<()> {
-    seed_from_config(pool, config).await?;
     load_into_config(pool, config).await?;
     if mando_config::backfill_project_logos(config) {
         for pc in config.captain.projects.values() {

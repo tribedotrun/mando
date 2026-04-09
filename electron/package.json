@@ -1,6 +1,6 @@
 {
   "name": "mando",
-  "version": "0.1.15",
+  "version": "0.1.16-beta.0",
   "description": "Desktop app for managing AI coding agents",
   "license": "Apache-2.0",
   "repository": {
@@ -44,8 +44,8 @@
     "eslint": "^10.0.3",
     "prettier": "^3.8.1",
     "tailwindcss": "^4.1.0",
-    "typescript": "^5.7.0",
-    "typescript-eslint": "^8.57.1",
+    "typescript": "^6.0.2",
+    "typescript-eslint": "^8.58.1",
     "vite": "^6.0.0"
   },
   "imports": {

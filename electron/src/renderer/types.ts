@@ -36,6 +36,7 @@ export const IN_PROGRESS_STATUSES: ItemStatus[] = [
 
 export interface TaskItem {
   id: number;
+  rev: number;
   title: string;
   status: ItemStatus;
   project?: string;
@@ -109,6 +110,7 @@ export interface WorkersResponse {
 
 export interface ScoutItem {
   id: number;
+  rev: number;
   url: string;
   title?: string;
   status: string;
@@ -264,6 +266,96 @@ export interface SSEEvent {
   event: string;
   ts: number;
   data?: unknown;
+}
+
+// ── SSE payload types for item-level sync ──
+
+export type SseAction = 'created' | 'updated' | 'deleted';
+
+/** Tier 1: entity list events carry the changed item */
+export interface SseEntityPayload<T> {
+  action: SseAction;
+  item?: T;
+  id?: number | string;
+}
+
+/** Tier 2: aggregate events carry affected entity IDs */
+export interface SseStatusPayload {
+  action: 'tick' | 'config';
+  affected_task_ids?: number[];
+}
+
+export interface SseSessionsPayload {
+  affected_task_ids?: number[];
+}
+
+/** Snapshot sent on SSE connect -- seeds all caches */
+export interface SseSnapshot {
+  event: 'snapshot';
+  ts: number;
+  data: {
+    tasks: TaskItem[];
+    workers: WorkerDetail[];
+    scout_items: ScoutItem[];
+    terminals: import('#renderer/api-terminal').TerminalSessionInfo[];
+    workbenches: import('#renderer/api-terminal').WorkbenchItem[];
+    config: MandoConfig;
+    daemon: { version: string; uptime: number };
+  };
+}
+
+// ── Config types (matching Rust Config struct, camelCase serde) ──
+
+export interface ProjectConfig {
+  name: string;
+  path: string;
+  githubRepo?: string | null;
+  logo?: string | null;
+  aliases?: string[];
+  hooks?: Record<string, string>;
+  workerPreamble?: string;
+  scoutSummary?: string;
+}
+
+export interface FeaturesConfig {
+  scout?: boolean;
+  setupDismissed?: boolean;
+  claudeCodeVerified?: boolean;
+}
+
+export interface TelegramConfig {
+  enabled?: boolean;
+  owner?: string;
+}
+
+export interface CaptainConfig {
+  autoSchedule?: boolean;
+  tickIntervalS?: number;
+  tz?: string;
+  defaultTerminalAgent?: 'claude' | 'codex';
+  claudeTerminalArgs?: string;
+  codexTerminalArgs?: string;
+  projects?: Record<string, ProjectConfig>;
+}
+
+export interface ScoutConfig {
+  interests?: { high?: string[]; low?: string[] };
+  userContext?: { role?: string; knownDomains?: string[]; explainDomains?: string[] };
+}
+
+export interface UiConfig {
+  openAtLogin?: boolean;
+}
+
+export interface MandoConfig {
+  workspace?: string;
+  ui?: UiConfig;
+  features?: FeaturesConfig;
+  channels?: { telegram?: TelegramConfig };
+  gateway?: { host?: string; port?: number; dashboard?: { host?: string; port?: number } };
+  captain?: CaptainConfig;
+  scout?: ScoutConfig;
+  env?: Record<string, string>;
 }
 
 // ── Desktop notification types (re-exported from shared module) ──

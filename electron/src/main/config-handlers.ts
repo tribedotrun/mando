@@ -3,13 +3,12 @@
  */
 import fs from 'fs';
 import path from 'path';
+import { spawn } from 'child_process';
 import { shell, type IpcMainInvokeEvent } from 'electron';
 import log from '#main/logger';
 import { handleTrusted } from '#main/ipc-security';
 import { installCliAndPlists } from '#main/launchd';
 import { getDataDir, getConfigPath, daemonFetch, ensureDaemon, getAppMode } from '#main/daemon';
-
-class DaemonConfigHttpError extends Error {}
 
 export function registerConfigHandlers(): void {
   handleTrusted('has-config', async () => {
@@ -48,36 +47,7 @@ export function registerConfigHandlers(): void {
     }
   });
 
-  handleTrusted('save-config', async (_: unknown, configJson: string) => {
-    try {
-      const resp = await daemonFetch('/api/config', {
-        method: 'PUT',
-        body: configJson,
-      });
-      if (resp.ok) return { ok: true as const, via: 'daemon' as const };
-      const err = await resp.json().catch(() => ({ error: resp.statusText }));
-      log.error('save-config via daemon failed:', err);
-      throw new DaemonConfigHttpError(err.error || `HTTP ${resp.status}`);
-    } catch (e: unknown) {
-      if (e instanceof DaemonConfigHttpError) {
-        throw e;
-      }
-
-      const message = e instanceof Error ? e.message : String(e);
-      const networkFallback =
-        message.includes('fetch failed') ||
-        message.includes('ECONNREFUSED') ||
-        message.includes('ENOTFOUND') ||
-        message.includes('timed out');
-
-      if (!networkFallback) {
-        throw e;
-      }
-
-      log.error('save-config fetch failed:', message);
-      return { ok: false as const, reason: 'daemon unreachable' as const, message };
-    }
-  });
+  // save-config IPC removed — renderer calls PUT /api/config directly
 
   // Save partial onboarding progress to a separate file. Using config.json
   // would make hasConfig return true and skip the remainder of onboarding.
@@ -155,28 +125,23 @@ export function registerConfigHandlers(): void {
     };
   });
 
-  // -- Launchd IPC handlers (Electron-native) --
-  handleTrusted('add-project', async (_: IpcMainInvokeEvent, bodyJson: string) => {
-    let resp: Awaited<ReturnType<typeof daemonFetch>>;
-    try {
-      resp = await daemonFetch('/api/projects', {
-        method: 'POST',
-        body: bodyJson,
-      });
-    } catch (err: unknown) {
-      log.error('[add-project] daemon unreachable:', err);
-      throw new Error('Daemon is not running. Start the daemon and try again.', { cause: err });
-    }
-    const data = (await resp.json()) as Record<string, unknown>;
-    if (!resp.ok) {
-      throw new Error((data.error as string) || `HTTP ${resp.status}`);
-    }
-    return data;
-  });
+  // add-project IPC removed — renderer calls POST /api/projects directly
+  // launchd:reinstall IPC removed — was never called from renderer
 
-  handleTrusted('launchd:reinstall', () => {
-    installCliAndPlists(getDataDir());
-    return true;
-  });
   handleTrusted('open-logs-folder', () => shell.openPath(path.join(getDataDir(), 'logs')));
+  handleTrusted('open-in-finder', async (_e, dir: string) => {
+    const err = await shell.openPath(dir);
+    if (err) {
+      log.warn(`open-in-finder failed for "${dir}": ${err}`);
+      throw new Error(err);
+    }
+  });
+  handleTrusted('open-in-cursor', (_e, dir: string) => {
+    try {
+      spawn('cursor', [dir], { detached: true, stdio: 'ignore' }).unref();
+    } catch (err) {
+      log.warn('open-in-cursor failed:', err);
+      throw err;
+    }
+  });
 }

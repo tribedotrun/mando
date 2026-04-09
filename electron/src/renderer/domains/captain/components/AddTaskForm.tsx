@@ -3,7 +3,7 @@ import { Paperclip } from 'lucide-react';
 import { useDraft } from '#renderer/global/hooks/useDraft';
 import { useMountEffect } from '#renderer/global/hooks/useMountEffect';
 import { useProjects } from '#renderer/domains/settings';
-import { useTaskCreateStore } from '#renderer/domains/captain/stores/bulkCreateStore';
+import { useTaskCreate, useTaskBulkCreate } from '#renderer/hooks/mutations';
 import { bulkTextareaRows, shortRepo } from '#renderer/utils';
 import { Button } from '#renderer/components/ui/button';
 
@@ -49,9 +49,9 @@ function AddTaskFormInner({
   titleRef.current = title;
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
-  const startSingle = useTaskCreateStore((s) => s.startSingle);
-  const startBulk = useTaskCreateStore((s) => s.startBulk);
-  const createPhase = useTaskCreateStore((s) => s.phase);
+  const createMut = useTaskCreate();
+  const bulkCreateMut = useTaskBulkCreate();
+  const createPhase = createMut.isPending || bulkCreateMut.isPending ? 'active' : 'idle';
 
   const projects = useProjects();
 
@@ -127,9 +127,9 @@ function AddTaskFormInner({
     if (effectiveProject) localStorage.setItem(LAST_PROJECT_KEY, effectiveProject);
 
     if (bulk) {
-      startBulk(trimmedTitle, effectiveProject || undefined);
+      bulkCreateMut.mutate({ text: trimmedTitle, project: effectiveProject || undefined });
     } else {
-      startSingle({
+      createMut.mutate({
         title: trimmedTitle,
         project: effectiveProject || undefined,
         images: image ? [image] : undefined,

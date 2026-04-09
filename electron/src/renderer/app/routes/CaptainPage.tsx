@@ -22,7 +22,7 @@ export function CaptainPage(): React.ReactElement {
   }, []);
 
   return (
-    <div className="absolute inset-0 overflow-auto bg-background px-8 pb-6 pt-[38px]">
+    <div className="absolute inset-0 overflow-auto bg-background px-4 pb-2">
       <ErrorBoundary fallbackLabel="Captain view">
         <CaptainView
           projectFilter={project ?? null}

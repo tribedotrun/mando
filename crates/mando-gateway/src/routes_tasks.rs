@@ -215,9 +215,22 @@ pub(crate) async fn post_task_add(
         val
     };
 
-    state
-        .bus
-        .send(mando_types::BusEvent::Tasks, Some(json!({"action": "add"})));
+    // Reload the created task to include any field updates (context, plan, images).
+    let task_payload = if let Some(id) = val["id"].as_i64() {
+        let store = state.task_store.read().await;
+        store
+            .find_by_id(id)
+            .await
+            .ok()
+            .flatten()
+            .map(|t| serde_json::to_value(&t).unwrap())
+    } else {
+        None
+    };
+    state.bus.send(
+        mando_types::BusEvent::Tasks,
+        Some(json!({"action": "created", "item": task_payload, "id": val["id"]})),
+    );
 
     // Signal the auto-tick loop to run immediately so the new task is
     // dispatched without waiting for the next scheduled interval. The loop
@@ -280,10 +293,12 @@ pub(crate) async fn post_task_delete(
     let store = state.task_store.read().await;
     match mando_captain::runtime::dashboard::delete_tasks(&config, &store, ids, &opts).await {
         Ok(warnings) => {
-            state.bus.send(
-                mando_types::BusEvent::Tasks,
-                Some(json!({"action": "delete"})),
-            );
+            for id in ids {
+                state.bus.send(
+                    mando_types::BusEvent::Tasks,
+                    Some(json!({"action": "deleted", "id": id})),
+                );
+            }
             let mut resp = json!({"ok": true, "deleted": ids.len()});
             if !warnings.is_empty() {
                 resp["warnings"] = json!(warnings);
@@ -340,9 +355,15 @@ pub(crate) async fn patch_task_item(
     let store = state.task_store.read().await;
     match mando_captain::runtime::dashboard::update_task(&store, id_num, &body).await {
         Ok(()) => {
+            let updated = store
+                .find_by_id(id_num)
+                .await
+                .ok()
+                .flatten()
+                .map(|t| serde_json::to_value(&t).unwrap());
             state.bus.send(
                 mando_types::BusEvent::Tasks,
-                Some(json!({"action": "update", "id": id_num})),
+                Some(json!({"action": "updated", "item": updated, "id": id_num})),
             );
             Ok(Json(json!({"ok": true})))
         }

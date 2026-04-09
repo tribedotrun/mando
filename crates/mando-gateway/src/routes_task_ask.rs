@@ -181,9 +181,18 @@ pub(crate) async fn post_task_ask(
         .await
         .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?;
 
+    let updated = {
+        let store = state.task_store.read().await;
+        store
+            .find_by_id(id)
+            .await
+            .ok()
+            .flatten()
+            .map(|t| serde_json::to_value(&t).unwrap())
+    };
     state.bus.send(
         mando_types::BusEvent::Tasks,
-        Some(json!({"action": "ask", "id": id})),
+        Some(json!({"action": "updated", "item": updated, "id": id})),
     );
 
     Ok(Json(json!({
@@ -219,9 +228,15 @@ pub(crate) async fn post_task_ask_end(
         Err(e) => return Err(internal_error(e)),
     }
 
+    let updated = store
+        .find_by_id(id)
+        .await
+        .ok()
+        .flatten()
+        .map(|t| serde_json::to_value(&t).unwrap());
     state.bus.send(
         mando_types::BusEvent::Tasks,
-        Some(json!({"action": "ask_end", "id": id})),
+        Some(json!({"action": "updated", "item": updated, "id": id})),
     );
 
     Ok(Json(json!({"ok": true, "ended": session_key})))

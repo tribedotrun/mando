@@ -1,5 +1,5 @@
 import React, { useRef, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import log from '#renderer/logger';
 import {
   getNotificationsEnabled,
@@ -9,7 +9,10 @@ import { Switch } from '#renderer/components/ui/switch';
 import { Button } from '#renderer/components/ui/button';
 import { useMountEffect } from '#renderer/global/hooks/useMountEffect';
 import { toast } from 'sonner';
-import { useSettingsStore } from '#renderer/domains/settings/stores/settingsStore';
+import { useConfig } from '#renderer/hooks/queries';
+import { useConfigSave } from '#renderer/hooks/mutations';
+import { queryKeys } from '#renderer/queryKeys';
+import type { MandoConfig } from '#renderer/types';
 
 const STATUS_CLEAR_MS = 4000;
 
@@ -39,9 +42,10 @@ export function SettingsGeneral(): React.ReactElement {
   const [savingChannel, setSavingChannel] = useState(false);
   const [savingLoginItem, setSavingLoginItem] = useState(false);
   const clearTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
-  const openAtLogin = useSettingsStore((s) => s.config.ui?.openAtLogin ?? false);
-  const update = useSettingsStore((s) => s.update);
-  const save = useSettingsStore((s) => s.save);
+  const { data: config } = useConfig();
+  const saveMut = useConfigSave();
+  const qc = useQueryClient();
+  const openAtLogin = config?.ui?.openAtLogin ?? false;
 
   const { data: systemInfo } = useQuery({
     queryKey: ['settings', 'general', 'systemInfo'],
@@ -104,27 +108,28 @@ export function SettingsGeneral(): React.ReactElement {
 
   const toggleLoginItem = () => {
     setSavingLoginItem(true);
+    const current = qc.getQueryData<MandoConfig>(queryKeys.config.current()) ?? {};
     const next = !openAtLogin;
-    update({ ui: { ...(useSettingsStore.getState().config.ui || {}), openAtLogin: next } });
-    void (async () => {
-      try {
-        const result = await save();
-        if (!result.ok) {
-          log.warn('[SettingsGeneral] login-item save failed:', result.error);
-          update({ ui: { ...(useSettingsStore.getState().config.ui || {}), openAtLogin: !next } });
-          toast.error(result.error ?? 'Failed to save login setting');
-          return;
-        }
-        await window.mandoAPI.setLoginItem(next);
-      } catch (err) {
-        log.error('[SettingsGeneral] login item IPC failed:', err);
-        update({ ui: { ...(useSettingsStore.getState().config.ui || {}), openAtLogin: !next } });
-        void save();
-        toast.error('Failed to change login setting');
-      } finally {
+    const updated: MandoConfig = { ...current, ui: { ...(current.ui || {}), openAtLogin: next } };
+    saveMut.mutate(updated, {
+      onSuccess: () => {
+        void window.mandoAPI.setLoginItem(next).catch((err) => {
+          log.error('[SettingsGeneral] login item IPC failed:', err);
+          const reverted: MandoConfig = {
+            ...current,
+            ui: { ...(current.ui || {}), openAtLogin: !next },
+          };
+          saveMut.mutate(reverted);
+          toast.error('Failed to change login setting');
+        });
+      },
+      onError: () => {
+        toast.error('Failed to save login setting');
+      },
+      onSettled: () => {
         setSavingLoginItem(false);
-      }
-    })();
+      },
+    });
   };
 
   return (

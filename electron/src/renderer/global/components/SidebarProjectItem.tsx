@@ -38,8 +38,6 @@ interface SidebarProjectItemProps {
   name: string;
   logo?: string | null;
   count: number;
-  active: boolean;
-  onSelect: () => void;
   onRename: (oldName: string, newName: string) => Promise<void>;
   onRemove: (name: string) => Promise<void>;
   onNewTerminal?: (project: string) => void;
@@ -55,8 +53,6 @@ export function SidebarProjectItem({
   name,
   logo,
   count,
-  active,
-  onSelect,
   onRename,
   onRemove,
   onNewTerminal,
@@ -114,7 +110,7 @@ export function SidebarProjectItem({
       }}
     >
       {renaming ? (
-        <div className={`rounded-md px-1.5 py-1 ${active ? 'bg-muted' : 'bg-transparent'}`}>
+        <div className="rounded-md px-1.5 py-1">
           <Input
             ref={inputRefCb}
             value={renameValue}
@@ -132,10 +128,9 @@ export function SidebarProjectItem({
           <Button
             variant="ghost"
             onClick={() => {
-              onSelect();
               setExpanded((v) => !v);
             }}
-            className={`flex h-auto w-full items-center justify-between rounded-md px-1.5 py-1.5 text-[13px] transition-colors ${active ? 'bg-muted font-medium text-foreground' : 'bg-transparent font-normal text-muted-foreground'}`}
+            className="flex h-auto w-full items-center justify-between rounded-md px-1.5 py-1.5 text-[13px] font-normal text-muted-foreground transition-colors"
           >
             <span className="flex min-w-0 items-center gap-1.5">
               <ChevronRight

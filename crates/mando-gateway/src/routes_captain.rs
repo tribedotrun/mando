@@ -219,7 +219,7 @@ pub(crate) async fn post_captain_nudge(
     store.write_task(&item).await.map_err(internal_error)?;
     state.bus.send(
         mando_types::BusEvent::Tasks,
-        Some(json!({"action": "nudge", "id": id})),
+        Some(json!({"action": "updated", "item": serde_json::to_value(&item).unwrap(), "id": id})),
     );
     let cc_sid = item.session_ids.worker.as_deref().unwrap_or("");
     let pid = mando_captain::io::pid_lookup::resolve_pid(cc_sid, &worker_name);

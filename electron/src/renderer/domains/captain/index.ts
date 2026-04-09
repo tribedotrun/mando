@@ -1,4 +1,3 @@
-export { useTaskStore } from '#renderer/domains/captain/stores/taskStore';
 export { useSelection } from '#renderer/domains/captain/hooks/useSelection';
 export { BulkBar } from '#renderer/domains/captain/components/BulkBar';
 export { FeedbackModal } from '#renderer/domains/captain/components/FeedbackModal';

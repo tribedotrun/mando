@@ -12,11 +12,10 @@
     "jsx": "react-jsx",
     "outDir": "dist",
     "rootDir": ".",
-    "baseUrl": ".",
     "paths": {
-      "#renderer/*": ["src/renderer/*"],
-      "#main/*": ["src/main/*"],
-      "#shared/*": ["src/shared/*"],
+      "#renderer/*": ["./src/renderer/*"],
+      "#main/*": ["./src/main/*"],
+      "#shared/*": ["./src/shared/*"],
       "#contracts/*": ["../contracts/*"]
     }
   },

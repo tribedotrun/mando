@@ -28,7 +28,6 @@ import { Separator } from '#renderer/components/ui/separator';
 import { Button } from '#renderer/components/ui/button';
 import { Skeleton } from '#renderer/components/ui/skeleton';
 
-const REFRESH_INDICATOR_MS = 1500;
 const COPY_FEEDBACK_MS = 1200;
 
 /* -- Timeline tab -- */
@@ -50,22 +49,11 @@ export function PrTab({
   item,
   prBody,
   prPending,
-  onRefresh,
 }: {
   item: TaskItem;
   prBody: { summary: string | null } | undefined;
   prPending: boolean;
-  onRefresh?: () => void;
 }): React.ReactElement {
-  const [refreshing, setRefreshing] = useState(false);
-
-  const handleRefresh = () => {
-    if (!onRefresh || refreshing) return;
-    setRefreshing(true);
-    onRefresh();
-    setTimeout(() => setRefreshing(false), REFRESH_INDICATOR_MS);
-  };
-
   if (!item.pr_number) {
     return <div className="text-caption text-text-3">No PR associated with this task</div>;
   }
@@ -81,13 +69,7 @@ export function PrTab({
   if (!prBody?.summary) {
     return <div className="text-caption italic text-text-3">No PR description available</div>;
   }
-  return (
-    <PrSections
-      text={prBody.summary}
-      onRefresh={onRefresh ? handleRefresh : undefined}
-      refreshing={refreshing}
-    />
-  );
+  return <PrSections text={prBody.summary} />;
 }
 
 /* -- Sessions tab -- */

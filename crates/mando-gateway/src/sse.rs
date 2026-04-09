@@ -173,6 +173,27 @@ async fn build_snapshot(state: &AppState) -> anyhow::Result<serde_json::Value> {
             .collect::<Vec<_>>()
     };
 
+    // Workbenches (active, non-archived, non-deleted).
+    let workbenches = match mando_db::queries::workbenches::load_active(state.db.pool()).await {
+        Ok(wbs) => serde_json::to_value(&wbs).unwrap_or_default(),
+        Err(e) => {
+            tracing::warn!(error = %e, "SSE snapshot: failed to load workbenches");
+            serde_json::Value::Array(vec![])
+        }
+    };
+
+    // Terminal sessions (in-memory, from TerminalHost).
+    let terminals = serde_json::to_value(state.terminal_host.list()).unwrap_or_default();
+
+    // Config (current daemon config).
+    let config = match serde_json::to_value(&*state.config.load_full()) {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::warn!(error = %e, "SSE snapshot: failed to serialize config");
+            serde_json::Value::Null
+        }
+    };
+
     // Daemon info.
     let uptime = state.start_time.elapsed().as_secs();
     let ts = std::time::SystemTime::now()
@@ -186,6 +207,9 @@ async fn build_snapshot(state: &AppState) -> anyhow::Result<serde_json::Value> {
         "data": {
             "tasks": tasks,
             "workers": workers,
+            "workbenches": workbenches,
+            "terminals": terminals,
+            "config": config,
             "daemon": {
                 "version": env!("CARGO_PKG_VERSION"),
                 "uptime": uptime,

@@ -1,6 +1,9 @@
 import { useCallback, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { TerminalView } from '#renderer/domains/terminal/components/TerminalView';
-import { useTerminalStore } from '#renderer/domains/terminal/stores/terminalStore';
+import { useTerminalList, type TerminalSessionInfo } from '#renderer/hooks/queries';
+import { useTerminalCreate, useTerminalDelete } from '#renderer/hooks/mutations';
+import { queryKeys } from '#renderer/queryKeys';
 import { X, Plus, Circle, ArrowRight } from 'lucide-react';
 
 interface StandaloneTerminalProps {
@@ -18,32 +21,49 @@ export function StandaloneTerminal({
   onAdopt,
   onClose,
 }: StandaloneTerminalProps) {
-  const { sessions, addSession, removeSession, updateSession } = useTerminalStore();
+  const { data: sessions = [] } = useTerminalList();
+  const createMutation = useTerminalCreate();
+  const deleteMutation = useTerminalDelete();
+  const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState<string | null>(null);
   const [adopting, setAdopting] = useState(false);
+  const [exitStates, setExitStates] = useState<
+    Record<string, { running: boolean; exit_code: number | null }>
+  >({});
 
-  const relevantSessions = sessions.filter((s) => s.project === project && s.cwd === cwd);
+  const sessionsWithExitState = sessions.map((s) => {
+    const override = exitStates[s.id];
+    return override ? { ...s, ...override } : s;
+  });
+
+  const relevantSessions = sessionsWithExitState.filter(
+    (s) => s.project === project && s.cwd === cwd,
+  );
 
   const handleNewTerminal = useCallback(
     async (agent: 'claude' | 'codex') => {
-      const session = await addSession({ project, cwd, agent });
+      const session = await createMutation.mutateAsync({ project, cwd, agent });
       setActiveTab(session.id);
     },
-    [project, cwd, addSession],
+    [project, cwd, createMutation],
   );
 
   const handleCloseTab = useCallback(
     (id: string) => {
-      void removeSession(id)
-        .then(() => {
-          if (activeTab === id) {
-            const remaining = relevantSessions.filter((s) => s.id !== id);
-            setActiveTab(remaining.length > 0 ? remaining[0].id : null);
-          }
-        })
-        .catch((err) => console.error('Failed to close tab', err));
+      deleteMutation.mutate(
+        { id },
+        {
+          onSuccess: () => {
+            if (activeTab === id) {
+              const remaining = relevantSessions.filter((s) => s.id !== id);
+              setActiveTab(remaining.length > 0 ? remaining[0].id : null);
+            }
+          },
+          onError: (err) => console.error('Failed to close tab', err),
+        },
+      );
     },
-    [activeTab, relevantSessions, removeSession],
+    [activeTab, relevantSessions, deleteMutation],
   );
 
   const handleAdopt = useCallback(() => {
@@ -203,7 +223,17 @@ export function StandaloneTerminal({
           <TerminalView
             key={activeTab}
             sessionId={activeTab}
-            onExit={(code) => updateSession(activeTab, { running: false, exit_code: code })}
+            onExit={(code) => {
+              setExitStates((prev) => ({
+                ...prev,
+                [activeTab]: { running: false, exit_code: code },
+              }));
+              queryClient.setQueryData<TerminalSessionInfo[]>(queryKeys.terminals.list(), (old) =>
+                old?.map((s) =>
+                  s.id === activeTab ? { ...s, running: false, exit_code: code } : s,
+                ),
+              );
+            }}
           />
         )}
       </div>

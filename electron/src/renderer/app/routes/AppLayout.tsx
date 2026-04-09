@@ -1,30 +1,37 @@
 import React, { useCallback, useState } from 'react';
 import { Outlet, useNavigate, useMatchRoute, useRouterState } from '@tanstack/react-router';
+import { usePanelRef, useDefaultLayout } from 'react-resizable-panels';
 import { useDataContext } from '#renderer/app/DataProvider';
 import { useUIStore } from '#renderer/app/uiStore';
 import { useSetupProgress } from '#renderer/app/useSetupProgress';
 import { Sidebar, type Tab } from '#renderer/app/Sidebar';
 import { RetryButton } from '#renderer/domains/captain/components/RetryButton';
 import { Button } from '#renderer/components/ui/button';
-import { useSettingsStore } from '#renderer/domains/settings/stores/settingsStore';
-import { useTaskStore } from '#renderer/domains/captain/stores/taskStore';
-import { useWorkbenchStore } from '#renderer/domains/terminal/stores/workbenchStore';
+import { useQueryClient } from '@tanstack/react-query';
+import { useConfigSave, useWorkbenchArchive } from '#renderer/hooks/mutations';
+import { queryKeys } from '#renderer/queryKeys';
+import type { MandoConfig } from '#renderer/types';
 import { apiPost, apiPatch, apiDel } from '#renderer/api';
 import { toast } from 'sonner';
 import { getErrorMessage } from '#renderer/utils';
-import { useDefaultLayout } from 'react-resizable-panels';
 import {
   ResizablePanelGroup,
   ResizablePanel,
   ResizableHandle,
 } from '#renderer/components/ui/resizable';
+import { AppHeader } from '#renderer/app/AppHeader';
+import { router } from '#renderer/app/router';
 
 export function AppLayout(): React.ReactElement {
   const navigate = useNavigate();
+  const sidebarRef = usePanelRef();
   const matchRoute = useMatchRoute();
   const { sseStatus } = useDataContext();
   const [setupActive, setSetupActive] = useState(false);
   const setupProgress = useSetupProgress();
+  const archiveWorkbench = useWorkbenchArchive();
+  const saveMut = useConfigSave();
+  const qc = useQueryClient();
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
     id: 'sidebar-layout',
     storage: localStorage,
@@ -53,18 +60,21 @@ export function AppLayout(): React.ReactElement {
       const dir = await window.mandoAPI.selectDirectory();
       if (!dir) return;
       await apiPost('/api/projects', { path: dir });
-      void useSettingsStore.getState().load();
+      void qc.invalidateQueries({ queryKey: queryKeys.config.all });
     } catch (err) {
       toast.error(getErrorMessage(err, 'Failed to add project'));
     }
-  }, []);
+  }, [qc]);
 
   const handleDismissSetup = useCallback(() => {
     setSetupActive(false);
-    const store = useSettingsStore.getState();
-    store.updateSection('features', { setupDismissed: true });
-    void store.save();
-  }, []);
+    const current = qc.getQueryData<MandoConfig>(queryKeys.config.current()) ?? {};
+    const updated: MandoConfig = {
+      ...current,
+      features: { ...(current.features || {}), setupDismissed: true },
+    };
+    saveMut.mutate(updated);
+  }, [qc, saveMut]);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -98,7 +108,15 @@ export function AppLayout(): React.ReactElement {
         onLayoutChanged={onLayoutChanged}
         className="min-h-0 flex-1"
       >
-        <ResizablePanel id="sidebar" defaultSize="200px" minSize="160px" maxSize="400px">
+        <ResizablePanel
+          panelRef={sidebarRef}
+          id="sidebar"
+          defaultSize="200px"
+          minSize="160px"
+          maxSize="400px"
+          collapsible
+          collapsedSize="0px"
+        >
           <Sidebar
             activeTab={activeTab}
             onTabChange={(tab) => {
@@ -120,7 +138,7 @@ export function AppLayout(): React.ReactElement {
             onRenameProject={async (oldName, newName) => {
               try {
                 await apiPatch(`/api/projects/${encodeURIComponent(oldName)}`, { rename: newName });
-                await useSettingsStore.getState().load();
+                void qc.invalidateQueries({ queryKey: queryKeys.config.all });
                 if (projectFilter === oldName) {
                   void navigate({ to: '/captain', search: { project: newName } });
                 }
@@ -134,8 +152,8 @@ export function AppLayout(): React.ReactElement {
                 const res = await apiDel<{ ok: boolean; deleted_tasks: number }>(
                   `/api/projects/${encodeURIComponent(name)}`,
                 );
-                await useSettingsStore.getState().load();
-                if (res.deleted_tasks > 0) await useTaskStore.getState().fetch();
+                void qc.invalidateQueries({ queryKey: queryKeys.config.all });
+                // SSE handles task list cache update after project deletion
                 if (projectFilter === name) {
                   void navigate({ to: '/captain', search: {} });
                 }
@@ -171,19 +189,27 @@ export function AppLayout(): React.ReactElement {
               })
             }
             onArchiveWorkbench={(id) => {
-              useWorkbenchStore
-                .getState()
-                .archive(id)
-                .catch((err) => toast.error(getErrorMessage(err, 'Failed to archive workbench')));
+              archiveWorkbench.mutate({ id });
             }}
+            onToggleSidebar={() => {
+              const panel = sidebarRef.current;
+              if (!panel) return;
+              if (panel.isCollapsed()) panel.expand();
+              else panel.collapse();
+            }}
+            onGoBack={() => router.history.back()}
+            onGoForward={() => router.history.forward()}
           />
         </ResizablePanel>
 
         <ResizableHandle />
 
         <ResizablePanel id="main" minSize="50%">
-          <main className="relative h-full overflow-hidden bg-background">
-            <Outlet />
+          <main className="flex h-full flex-col overflow-hidden bg-background">
+            <AppHeader />
+            <div className="relative min-h-0 flex-1">
+              <Outlet />
+            </div>
           </main>
         </ResizablePanel>
       </ResizablePanelGroup>

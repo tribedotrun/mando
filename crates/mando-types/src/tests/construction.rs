@@ -53,6 +53,7 @@ fn construct_scout_item() {
         error_count: 0,
         source_name: None,
         date_published: Some("2026-03-10".into()),
+        rev: 1,
     };
     assert_eq!(item.id, 42);
     assert_eq!(item.status, ScoutStatus::Pending);

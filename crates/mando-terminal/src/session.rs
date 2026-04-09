@@ -1,6 +1,6 @@
 use std::io::{Read, Write};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 
 use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
@@ -21,19 +21,22 @@ pub struct TerminalSession {
     output_buf: Arc<std::sync::Mutex<Vec<u8>>>,
     running: Arc<AtomicBool>,
     exit_code: Arc<std::sync::Mutex<Option<u32>>>,
+    rev: Arc<AtomicU64>,
     killer: std::sync::Mutex<Box<dyn ChildKiller + Send + Sync>>,
 }
 
 impl TerminalSession {
-    pub fn spawn(
-        id: SessionId,
-        project: String,
-        cwd: PathBuf,
-        agent: Agent,
-        resume_session_id: Option<&str>,
-        size: TerminalSize,
-        extra_env: &std::collections::HashMap<String, String>,
-    ) -> anyhow::Result<Arc<Self>> {
+    pub fn spawn(id: SessionId, req: super::CreateRequest) -> anyhow::Result<Arc<Self>> {
+        let crate::CreateRequest {
+            project,
+            cwd,
+            agent,
+            resume_session_id,
+            size,
+            extra_env,
+            extra_args,
+        } = req;
+        let size = size.unwrap_or_default();
         let pty_system = native_pty_system();
         let pty_size = PtySize {
             rows: size.rows,
@@ -46,18 +49,27 @@ impl TerminalSession {
         let mut cmd = match &agent {
             Agent::Claude => {
                 let mut c = CommandBuilder::new("claude");
-                if let Some(sid) = resume_session_id {
+                for arg in &extra_args {
+                    c.arg(arg);
+                }
+                if let Some(sid) = &resume_session_id {
                     c.arg("--resume");
                     c.arg(sid);
                 }
                 c
             }
-            Agent::Codex => CommandBuilder::new("codex"),
+            Agent::Codex => {
+                let mut c = CommandBuilder::new("codex");
+                for arg in &extra_args {
+                    c.arg(arg);
+                }
+                c
+            }
         };
         cmd.cwd(&cwd);
         cmd.env("TERM", "xterm-256color");
         cmd.env("MANDO_TERMINAL", "1");
-        for (key, val) in extra_env {
+        for (key, val) in &extra_env {
             cmd.env(key, val);
         }
 
@@ -73,6 +85,8 @@ impl TerminalSession {
         let running = Arc::new(AtomicBool::new(true));
         let exit_code: Arc<std::sync::Mutex<Option<u32>>> = Arc::new(std::sync::Mutex::new(None));
 
+        let rev = Arc::new(AtomicU64::new(1));
+
         let session = Arc::new(Self {
             id: id.clone(),
             project,
@@ -84,6 +98,7 @@ impl TerminalSession {
             output_buf: output_buf.clone(),
             running: running.clone(),
             exit_code: exit_code.clone(),
+            rev: rev.clone(),
             killer: std::sync::Mutex::new(killer),
         });
 
@@ -99,6 +114,7 @@ impl TerminalSession {
         // Child waiter thread: waits for process exit, broadcasts Exit event.
         let exit_arc = exit_code;
         let run2 = running;
+        let rev2 = rev;
         let sid2 = id;
         std::thread::Builder::new()
             .name(format!("pty-wait-{sid2}"))
@@ -107,12 +123,14 @@ impl TerminalSession {
                     let code = status.exit_code();
                     *exit_arc.lock().expect("exit_code lock") = Some(code);
                     run2.store(false, Ordering::SeqCst);
+                    rev2.fetch_add(1, Ordering::SeqCst);
                     let _ = output_tx.send(TerminalEvent::Exit { code: Some(code) });
                     debug!(session = sid2, code, "terminal process exited");
                 }
                 Err(e) => {
                     warn!(session = sid2, error = %e, "terminal wait() failed");
                     run2.store(false, Ordering::SeqCst);
+                    rev2.fetch_add(1, Ordering::SeqCst);
                     let _ = output_tx.send(TerminalEvent::Exit { code: None });
                 }
             })?;
@@ -169,6 +187,7 @@ impl TerminalSession {
             agent: self.agent.clone(),
             running: self.is_running(),
             exit_code: *self.exit_code.lock().expect("exit_code lock"),
+            rev: self.rev.load(Ordering::SeqCst),
         }
     }
 }

@@ -362,14 +362,13 @@ aside [data-slot='scroll-area-viewport'] > div {
   min-width: unset !important;
 }
 
-/* ── Sidebar project item: dots/plus always visible, subtle until hover ── */
+/* ── Sidebar project item: dots hidden until hover ── */
 .sidebar-project-item .sidebar-project-dots {
-  display: inline-flex;
-  opacity: 0;
+  display: none;
 }
 .sidebar-project-item:hover .sidebar-project-dots,
 .sidebar-project-item[data-menu-open] .sidebar-project-dots {
-  opacity: 1;
+  display: inline-flex;
 }
 
 /* ── Motion tokens ── */
