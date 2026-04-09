@@ -321,63 +321,6 @@ pub(crate) async fn post_task_retry(
     Ok(Json(json!({"ok": true})))
 }
 
-/// Shared logic for archive/unarchive: call a DB function returning `Result<bool>`,
-/// emit a bus event on success, and map the result to JSON.
-async fn archive_toggle(
-    state: &AppState,
-    id: i64,
-    db_fn: impl std::future::Future<Output = anyhow::Result<bool>>,
-) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    match db_fn.await {
-        Ok(true) => {
-            let store = state.task_store.read().await;
-            let updated = store
-                .find_by_id(id)
-                .await
-                .ok()
-                .flatten()
-                .map(|t| serde_json::to_value(&t).unwrap());
-            drop(store);
-            state.bus.send(
-                mando_types::BusEvent::Tasks,
-                Some(json!({"action": "updated", "item": updated, "id": id})),
-            );
-            Ok(Json(json!({"ok": true})))
-        }
-        Ok(false) => Err(error_response(
-            StatusCode::NOT_FOUND,
-            &format!("item {id} not found"),
-        )),
-        Err(e) => Err(error_response(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            &e.to_string(),
-        )),
-    }
-}
-
-/// POST /api/tasks/{id}/archive
-pub(crate) async fn post_task_archive(
-    State(state): State<AppState>,
-    axum::extract::Path(id): axum::extract::Path<i64>,
-) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    let pool = state.task_store.write().await.pool().clone();
-    archive_toggle(
-        &state,
-        id,
-        mando_db::queries::tasks::archive_by_id(&pool, id),
-    )
-    .await
-}
-
-/// POST /api/tasks/{id}/unarchive
-pub(crate) async fn post_task_unarchive(
-    State(state): State<AppState>,
-    axum::extract::Path(id): axum::extract::Path<i64>,
-) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    let pool = state.task_store.write().await.pool().clone();
-    archive_toggle(&state, id, mando_db::queries::tasks::unarchive(&pool, id)).await
-}
-
 /// POST /api/tasks/handoff
 pub(crate) async fn post_task_handoff(
     State(state): State<AppState>,

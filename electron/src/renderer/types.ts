@@ -74,7 +74,6 @@ export interface TaskItem {
   spawn_fail_count: number;
   merge_fail_count: number;
   source?: string;
-  archived_at?: string;
 }
 
 export interface TaskListResponse {

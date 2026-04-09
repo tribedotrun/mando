@@ -7,7 +7,6 @@ import { Button } from '#renderer/components/ui/button';
 
 interface DevInfo {
   mode: string;
-  version: string;
   port: string;
   branch: string;
   worktree: string | null;
@@ -66,7 +65,6 @@ export function DevInfoBar(): React.ReactElement | null {
       const port = new URL(gatewayUrl).port;
       const loaded: DevInfo = {
         mode: mode.toUpperCase(),
-        version: __APP_VERSION__,
         port,
         branch: gitInfo.branch,
         worktree: gitInfo.worktree,
@@ -124,7 +122,6 @@ export function DevInfoBar(): React.ReactElement | null {
         >
           {info.mode}
         </Badge>
-        <span className="text-text-3">v{info.version}</span>
         <span className="text-text-3">
           <span className="text-text-4">port:</span>
           {info.port}
@@ -170,6 +167,24 @@ export function DevInfoBar(): React.ReactElement | null {
           <span className="text-[11px] text-text-4">
             {inspecting ? '⇧A copy · Esc exit' : '⇧A'}
           </span>
+          <Button
+            variant="ghost"
+            size="xs"
+            onClick={() => void window.mandoAPI?.openConfigFile()}
+            className={btnClass}
+            style={btnStyle}
+          >
+            Config
+          </Button>
+          <Button
+            variant="ghost"
+            size="xs"
+            onClick={() => void window.mandoAPI?.openDataDir()}
+            className={btnClass}
+            style={btnStyle}
+          >
+            Data Dir
+          </Button>
           <Button
             variant="ghost"
             size="xs"

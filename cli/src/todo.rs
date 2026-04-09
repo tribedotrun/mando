@@ -225,10 +225,6 @@ async fn handle_list(all: bool) -> anyhow::Result<()> {
 
     if let Some(items) = arr {
         for item in items {
-            if !all && item["archived_at"].as_str().is_some() {
-                continue;
-            }
-
             let status = item["status"].as_str().unwrap_or("unknown");
             let id = id_from_value(&item["id"]);
             let project_full = item["project"].as_str().unwrap_or("");

@@ -61,7 +61,7 @@ pub(crate) fn revert_to_queued(item: &mut mando_types::Task) {
     item.session_ids.worker = None;
     item.session_ids.ask = None;
     item.worktree = None;
-    item.workbench_id = None;
+    // workbench_id is permanent — once assigned, never cleared.
     item.branch = None;
     item.worker_started_at = None;
 }

@@ -186,11 +186,17 @@ async fn build_snapshot(state: &AppState) -> anyhow::Result<serde_json::Value> {
     let terminals = serde_json::to_value(state.terminal_host.list()).unwrap_or_default();
 
     // Config (current daemon config).
-    let config = match serde_json::to_value(&*state.config.load_full()) {
-        Ok(v) => v,
-        Err(e) => {
-            tracing::warn!(error = %e, "SSE snapshot: failed to serialize config");
-            serde_json::Value::Null
+    let config = {
+        let cfg = state.config.load_full();
+        match serde_json::to_value(&*cfg) {
+            Ok(mut v) => {
+                crate::routes_config::inject_projects(&cfg, &mut v);
+                v
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "SSE snapshot: failed to serialize config");
+                serde_json::Value::Null
+            }
         }
     };
 

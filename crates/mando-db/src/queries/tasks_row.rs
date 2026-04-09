@@ -41,7 +41,6 @@ pub(super) struct TaskRow {
     pub merge_fail_count: i64,
     pub escalation_report: Option<String>,
     pub source: Option<String>,
-    pub archived_at: Option<String>,
     pub rev: i64,
     /// JOINed from projects.github_repo
     pub github_repo: Option<String>,
@@ -95,7 +94,6 @@ impl TaskRow {
             merge_fail_count: self.merge_fail_count,
             escalation_report: self.escalation_report,
             source: self.source,
-            archived_at: self.archived_at,
             rev: self.rev,
             github_repo: self.github_repo,
             rebase_worker: None,

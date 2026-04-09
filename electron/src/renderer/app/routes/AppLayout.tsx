@@ -4,6 +4,7 @@ import { usePanelRef, useDefaultLayout } from 'react-resizable-panels';
 import { useDataContext } from '#renderer/app/DataProvider';
 import { useUIStore } from '#renderer/app/uiStore';
 import { useSetupProgress } from '#renderer/app/useSetupProgress';
+import { useMountEffect } from '#renderer/global/hooks/useMountEffect';
 import { Sidebar, type Tab } from '#renderer/app/Sidebar';
 import { RetryButton } from '#renderer/domains/captain/components/RetryButton';
 import { Button } from '#renderer/components/ui/button';
@@ -35,6 +36,18 @@ export function AppLayout(): React.ReactElement {
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
     id: 'sidebar-layout',
     storage: localStorage,
+  });
+
+  // Listen for global sidebar toggle shortcut (Cmd+B dispatched from useGlobalKeyboard)
+  useMountEffect(() => {
+    const toggle = () => {
+      const panel = sidebarRef.current;
+      if (!panel) return;
+      if (panel.isCollapsed()) panel.expand();
+      else panel.collapse();
+    };
+    window.addEventListener('mando:toggle-sidebar', toggle);
+    return () => window.removeEventListener('mando:toggle-sidebar', toggle);
   });
 
   // Derive state from URL

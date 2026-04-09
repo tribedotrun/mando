@@ -63,7 +63,7 @@ const terminalRoute = createRoute({
   getParentRoute: () => appLayout,
   path: '/terminal',
   validateSearch: z.object({
-    project: z.string(),
+    project: z.string().catch(''),
     cwd: z.string().optional().catch(undefined),
     resume: z.string().optional().catch(undefined),
   }),

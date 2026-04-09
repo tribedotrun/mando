@@ -64,6 +64,8 @@ export interface MandoAPI {
   // Logs
   openLogsFolder: () => void;
   // Open paths
+  openDataDir: () => void;
+  openConfigFile: () => void;
   openInFinder: (dir: string) => Promise<void>;
   openInCursor: (dir: string) => Promise<void>;
 }
@@ -147,6 +149,8 @@ contextBridge.exposeInMainWorld('mandoAPI', {
   // Logs
   openLogsFolder: () => void ipcRenderer.invoke('open-logs-folder'),
   // Open paths
+  openDataDir: () => void ipcRenderer.invoke('open-data-dir'),
+  openConfigFile: () => void ipcRenderer.invoke('open-config-file'),
   openInFinder: (dir: string) => ipcRenderer.invoke('open-in-finder', dir) as Promise<void>,
   openInCursor: (dir: string) => ipcRenderer.invoke('open-in-cursor', dir) as Promise<void>,
 } satisfies MandoAPI);

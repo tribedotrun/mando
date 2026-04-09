@@ -35,6 +35,14 @@ import { getAppInfo } from '#main/app-info';
 import { startRendererServer } from '#main/renderer-server';
 import { announceUiQuitting, announceUiRegistered } from '#main/ui-lifecycle';
 
+// Isolate Chromium user-data per data-dir so multiple dev/sandbox instances
+// don't fight over ~/Library/Application Support/Electron/.
+// Must run before app.whenReady() — Chromium locks the profile on startup.
+const _dataDir = getDataDir();
+if (getAppMode() !== 'production') {
+  app.setPath('userData', path.join(_dataDir, 'electron-profile'));
+}
+
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let trayAvailable = false;
@@ -359,7 +367,15 @@ app.on('window-all-closed', () => {
   }
 });
 
-app.on('before-quit', () => {
+// In non-production mode, block external quit signals (e.g. Cmd+Q cascade from
+// another Electron instance sharing the same bundle ID). Our tray menu sets
+// isQuitting=true before calling app.quit(), so it still works. SIGTERM from
+// `mando-dev stop` bypasses before-quit entirely.
+app.on('before-quit', (e) => {
+  if (!isQuitting && getAppMode() !== 'production') {
+    e.preventDefault();
+    return;
+  }
   isQuitting = true;
   setIsQuitting(true);
   globalShortcut.unregisterAll();

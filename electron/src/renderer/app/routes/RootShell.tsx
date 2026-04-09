@@ -15,6 +15,7 @@ import { CreateTaskModal } from '#renderer/domains/captain/components/AddTaskFor
 import { MergeModal } from '#renderer/domains/captain/components/MergeModal';
 import { ShortcutOverlay } from '#renderer/global/components/ShortcutOverlay';
 import log from '#renderer/logger';
+import { router } from '#renderer/app/router';
 import type { Tab } from '#renderer/app/Sidebar';
 
 const MERGE_DISMISS_DELAY_MS = 1_200;
@@ -107,6 +108,9 @@ export function RootShell(): React.ReactElement {
       void navigate({ to: '/settings/$section', params: { section: 'general' } });
     }, [navigate]),
     onToggleShortcuts: useUIStore.getState().toggleShortcuts,
+    onGoBack: () => router.history.back(),
+    onGoForward: () => router.history.forward(),
+    onToggleSidebar: () => window.dispatchEvent(new CustomEvent('mando:toggle-sidebar')),
   });
 
   // Main process shortcuts (Cmd+N from menu)

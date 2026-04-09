@@ -1,7 +1,5 @@
 import React from 'react';
-import { Card, CardHeader, CardTitle, CardContent, CardFooter } from '#renderer/components/ui/card';
 import { Kbd } from '#renderer/components/ui/kbd';
-import { Separator } from '#renderer/components/ui/separator';
 import { Button } from '#renderer/components/ui/button';
 
 interface ShortcutEntry {
@@ -15,13 +13,15 @@ const GENERAL: ShortcutEntry[] = [
   { keys: ['\u2318', 'N'], label: 'New task' },
   { keys: ['?'], label: 'Shortcut reference' },
   { keys: ['Esc'], label: 'Close / deselect' },
-  { keys: ['/'], label: 'Focus search' },
 ];
 
 const NAVIGATION: ShortcutEntry[] = [
   { keys: ['G', 'C'], label: 'Go to Captain' },
   { keys: ['G', 'D'], label: 'Go to Scout' },
   { keys: ['G', 'S'], label: 'Go to Sessions' },
+  { keys: ['\u2318', '['], label: 'Back' },
+  { keys: ['\u2318', ']'], label: 'Forward' },
+  { keys: ['\u2318', 'B'], label: 'Toggle sidebar' },
   { keys: ['J'], label: 'Next item' },
   { keys: ['K'], label: 'Previous item' },
   { keys: ['Enter'], label: 'Expand / open' },
@@ -50,38 +50,33 @@ export function ShortcutOverlay({ open, onClose }: Props): React.ReactElement | 
       data-shortcut-overlay
       onClick={onClose}
     >
-      <Card
-        className="w-[640px] max-w-[90vw] gap-0 rounded-lg border py-0 shadow-xl"
+      <div
+        className="w-[660px] max-w-[90vw] rounded-xl bg-card shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
-        <CardHeader className="px-5 py-3">
-          <div className="flex items-center justify-between">
-            <CardTitle className="text-sm">Keyboard shortcuts</CardTitle>
-            <Button
-              variant="ghost"
-              size="icon-xs"
-              onClick={onClose}
-              className="text-lg leading-none text-muted-foreground hover:text-foreground"
-            >
-              &times;
-            </Button>
-          </div>
-        </CardHeader>
+        <div className="flex items-center justify-between px-6 pt-5 pb-1">
+          <h2 className="text-sm font-semibold text-foreground">Keyboard shortcuts</h2>
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            aria-label="Close keyboard shortcuts"
+            onClick={onClose}
+            className="text-text-3 hover:text-foreground"
+          >
+            &times;
+          </Button>
+        </div>
 
-        <Separator />
-
-        <CardContent className="grid grid-cols-3 gap-6 px-5 py-4">
+        <div className="grid grid-cols-3 gap-8 px-6 py-5">
           <ShortcutColumn title="General" entries={GENERAL} />
           <ShortcutColumn title="Navigation" entries={NAVIGATION} />
           <ShortcutColumn title="Actions" entries={ACTIONS} />
-        </CardContent>
+        </div>
 
-        <Separator />
-
-        <CardFooter className="px-5 py-2.5 text-xs text-text-4">
+        <div className="px-6 pb-4 text-xs text-text-4">
           Press <Kbd className="mx-1">Esc</Kbd> to close
-        </CardFooter>
-      </Card>
+        </div>
+      </div>
     </div>
   );
 }
@@ -95,14 +90,16 @@ function ShortcutColumn({
 }): React.ReactElement {
   return (
     <div>
-      <div className="text-label mb-2 text-text-4">{title}</div>
-      <div className="space-y-1.5">
+      <div className="text-label mb-3 text-text-3">{title}</div>
+      <div className="space-y-2.5">
         {entries.map((entry, i) => (
-          <div key={i} className="flex items-center justify-between gap-2">
+          <div key={i} className="flex items-center justify-between gap-3">
             <span className="text-caption text-muted-foreground">{entry.label}</span>
             <span className="flex shrink-0 items-center gap-1">
               {entry.keys.map((key, ki) => (
-                <Kbd key={ki}>{key}</Kbd>
+                <Kbd key={ki} className="bg-secondary">
+                  {key}
+                </Kbd>
               ))}
             </span>
           </div>

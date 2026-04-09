@@ -181,6 +181,7 @@ pub(crate) async fn post_projects(
     let row = db::config_to_row(&pc);
     db::upsert_full(pool, &row).await.map_err(internal_error)?;
     reload_config_from_db(&state).await?;
+    state.bus.send(mando_types::BusEvent::Config, None);
 
     Ok(Json(json!({
         "ok": true,
@@ -259,6 +260,7 @@ pub(crate) async fn patch_project(
         .await
         .map_err(internal_error)?;
     reload_config_from_db(&state).await?;
+    state.bus.send(mando_types::BusEvent::Config, None);
 
     Ok(Json(json!({ "ok": true, "logo": logo })))
 }
@@ -310,6 +312,7 @@ pub(crate) async fn delete_project(
         .await
         .map_err(internal_error)?;
     reload_config_from_db(&state).await?;
+    state.bus.send(mando_types::BusEvent::Config, None);
 
     Ok(Json(json!({ "ok": true, "deleted_tasks": deleted_tasks })))
 }

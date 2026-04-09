@@ -65,6 +65,9 @@ interface GlobalKeyboardConfig {
   onTogglePalette: () => void;
   onOpenSettings: () => void;
   onToggleShortcuts: () => void;
+  onGoBack: () => void;
+  onGoForward: () => void;
+  onToggleSidebar: () => void;
 }
 
 /**
@@ -92,6 +95,21 @@ export function useGlobalKeyboard(config: GlobalKeyboardConfig): void {
         if (e.key === ',') {
           e.preventDefault();
           s.onOpenSettings();
+          return;
+        }
+        if (e.key === '[') {
+          e.preventDefault();
+          s.onGoBack();
+          return;
+        }
+        if (e.key === ']') {
+          e.preventDefault();
+          s.onGoForward();
+          return;
+        }
+        if (e.key === 'b') {
+          e.preventDefault();
+          s.onToggleSidebar();
           return;
         }
         return;

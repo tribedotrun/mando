@@ -328,6 +328,10 @@ export function useSseSync(options?: UseSseSyncOptions): SSEConnectionStatus {
                 break;
               }
 
+              case 'config':
+                void qc.invalidateQueries({ queryKey: queryKeys.config.all });
+                break;
+
               case 'resync':
                 log.warn('[sse] resync — invalidating all caches');
                 void qc.invalidateQueries();

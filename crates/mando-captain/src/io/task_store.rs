@@ -94,8 +94,11 @@ impl TaskStore {
         Ok(())
     }
 
-    pub(crate) async fn archive_terminal(&self, grace: std::time::Duration) -> Result<usize> {
-        tasks::archive_terminal(&self.pool, grace.as_secs()).await
+    pub(crate) async fn archive_terminal_workbenches(
+        &self,
+        grace: std::time::Duration,
+    ) -> Result<usize> {
+        mando_db::queries::workbenches::archive_terminal(&self.pool, grace.as_secs()).await
     }
 
     /// Merge tick-changed items into the store, preserving concurrent human edits.

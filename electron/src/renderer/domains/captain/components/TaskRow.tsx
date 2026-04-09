@@ -1,6 +1,6 @@
 import React, { useCallback, useState } from 'react';
 import type { Row } from '@tanstack/react-table';
-import { useTaskArchive, useTaskUnarchive } from '#renderer/hooks/mutations';
+import { useWorkbenchArchive } from '#renderer/hooks/mutations';
 import type { TaskItem } from '#renderer/types';
 import { prLabel, prHref, prState, canMerge, canReopen, canAskTerminal } from '#renderer/utils';
 import { ArchiveBtn, MergeBtn, MoreIcon } from '#renderer/domains/captain/components/TaskIcons';
@@ -40,20 +40,14 @@ export const TaskRow = React.memo(function TaskRow({
 }: TaskRowProps): React.ReactElement {
   const item = row.original;
   const selected = row.getIsSelected();
-  const archiveMut = useTaskArchive();
-  const unarchiveMut = useTaskUnarchive();
+  const archiveWb = useWorkbenchArchive();
   const isFinalized =
     item.status === 'merged' || item.status === 'completed-no-pr' || item.status === 'canceled';
   const [menuOpen, setMenuOpen] = useState(false);
-  const archivePending = archiveMut.isPending || unarchiveMut.isPending;
 
   const handleArchive = useCallback(() => {
-    archiveMut.mutate({ id: item.id });
-  }, [item.id, archiveMut]);
-
-  const handleUnarchive = useCallback(() => {
-    unarchiveMut.mutate({ id: item.id });
-  }, [item.id, unarchiveMut]);
+    if (item.workbench_id) archiveWb.mutate({ id: item.workbench_id });
+  }, [item.workbench_id, archiveWb]);
 
   return (
     <div
@@ -141,12 +135,8 @@ export const TaskRow = React.memo(function TaskRow({
         {canReopen(item) && (
           <ActionBtn label="Reopen" onClick={() => callbacks.onReopen(item)} testId="reopen-btn" />
         )}
-        {isFinalized && (
-          <ArchiveBtn
-            onClick={() => void (item.archived_at ? handleUnarchive() : handleArchive())}
-            pending={archivePending}
-            unarchive={!!item.archived_at}
-          />
+        {isFinalized && item.workbench_id && (
+          <ArchiveBtn onClick={handleArchive} pending={archiveWb.isPending} />
         )}
         {canAskTerminal(item) && <ActionBtn label="Ask" onClick={() => callbacks.onAsk(item)} />}
         {!isFinalized && (

@@ -198,6 +198,11 @@ export function useWorkbenchArchive() {
       );
       return { prev };
     },
+    onSuccess: () => {
+      // Archiving a workbench changes task visibility -- invalidate the task list
+      // so the archived workbench's tasks disappear from the UI immediately.
+      void qc.invalidateQueries({ queryKey: queryKeys.tasks.all });
+    },
     onError: (_err, _vars, context) => {
       if (context?.prev) qc.setQueryData(queryKeys.workbenches.list(), context.prev);
       toast.error('Failed to archive workbench');

@@ -102,18 +102,22 @@ pub(crate) async fn run_post_cleanup(
     if dry_run {
         return;
     }
-    // Archive terminal tasks that have been finalized longer than the grace period.
+    // Archive workbenches whose tasks have been finalized longer than the grace period.
     {
         let store = store_lock.read().await;
         match store
-            .archive_terminal(workflow.agent.archive_grace_secs)
+            .archive_terminal_workbenches(workflow.agent.archive_grace_secs)
             .await
         {
             Ok(n) if n > 0 => {
-                tracing::info!(module = "captain", archived = n, "archived terminal tasks");
+                tracing::info!(
+                    module = "captain",
+                    archived = n,
+                    "archived terminal workbenches"
+                );
             }
             Err(e) => {
-                tracing::warn!(module = "captain", error = %e, "archive terminal tasks failed");
+                tracing::warn!(module = "captain", error = %e, "archive terminal workbenches failed");
             }
             _ => {}
         }

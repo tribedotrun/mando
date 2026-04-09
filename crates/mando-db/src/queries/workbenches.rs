@@ -135,6 +135,42 @@ pub async fn update_title(pool: &SqlitePool, id: i64, title: &str) -> Result<boo
     Ok(result.rows_affected() > 0)
 }
 
+/// Archive workbenches whose task is in a terminal state and older than `grace_secs`.
+pub async fn archive_terminal(pool: &SqlitePool, grace_secs: u64) -> Result<usize> {
+    let cutoff = time::OffsetDateTime::now_utc() - time::Duration::seconds(grace_secs as i64);
+    let cutoff_str = cutoff
+        .format(&time::format_description::well_known::Rfc3339)
+        .unwrap();
+    let now_str = mando_types::now_rfc3339();
+
+    let result = sqlx::query(
+        "UPDATE workbenches SET archived_at = ?, rev = rev + 1
+         WHERE archived_at IS NULL AND deleted_at IS NULL
+           AND id IN (
+             SELECT workbench_id FROM tasks
+             WHERE workbench_id IS NOT NULL
+             GROUP BY workbench_id
+             HAVING
+               COUNT(CASE WHEN status NOT IN ('merged','completed-no-pr','canceled') THEN 1 END) = 0
+               AND MAX(datetime(COALESCE(last_activity_at, created_at))) <= datetime(?)
+           )",
+    )
+    .bind(&now_str)
+    .bind(&cutoff_str)
+    .execute(pool)
+    .await?;
+
+    let archived = result.rows_affected() as usize;
+    if archived > 0 {
+        tracing::info!(
+            module = "workbench",
+            archived,
+            "terminal workbenches archived"
+        );
+    }
+    Ok(archived)
+}
+
 pub async fn stale_archived(pool: &SqlitePool, older_than_days: i64) -> Result<Vec<Workbench>> {
     let sql = format!(
         "{} WHERE w.archived_at IS NOT NULL \

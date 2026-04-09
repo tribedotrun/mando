@@ -14,8 +14,7 @@ use super::task_update::{expect_boolish_field, expect_i64_field, expect_string_f
 use crate::SessionIds;
 
 /// Routing fields — lightweight struct for captain tick hot path.
-/// Populated from `SELECT id, title, status, project, worker, resource
-/// FROM tasks WHERE archived_at IS NULL`.
+/// Populated from tasks WHERE the owning workbench is not archived.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskRouting {
     pub id: i64,
@@ -96,8 +95,6 @@ pub struct Task {
     pub escalation_report: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub archived_at: Option<String>,
     #[serde(default = "default_rev")]
     pub rev: i64,
     /// GitHub repo slug -- populated via JOIN on projects table, not a DB column.
@@ -171,7 +168,6 @@ impl Task {
             merge_fail_count: 0,
             escalation_report: None,
             source: None,
-            archived_at: None,
             rev: 1,
             github_repo: None,
             rebase_worker: None,
@@ -271,13 +267,14 @@ impl Task {
     /// Clear a field by name (set to None/default).
     pub fn clear_field(&mut self, key: &str) -> Result<(), TaskUpdateError> {
         match key {
-            "project" | "project_id" => return Err(TaskUpdateError::FieldCannotBeNull(key.into())),
+            "project" | "project_id" | "workbench_id" => {
+                return Err(TaskUpdateError::FieldCannotBeNull(key.into()))
+            }
             "worker" => self.worker = None,
             "resource" => self.resource = None,
             "context" => self.context = None,
             "original_prompt" => self.original_prompt = None,
             "created_at" => self.created_at = None,
-            "workbench_id" => self.workbench_id = None,
             "pr_number" => self.pr_number = None,
             "worker_started_at" => self.worker_started_at = None,
             "intervention_count" => self.intervention_count = 0,
