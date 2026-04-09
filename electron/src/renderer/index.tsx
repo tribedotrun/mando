@@ -15,7 +15,7 @@ const root = createRoot(container);
 root.render(
   <React.StrictMode>
     <ErrorBoundary>
-      <TooltipProvider>
+      <TooltipProvider disableHoverableContent>
         <Toaster />
         <DataProvider>
           <RouterProvider router={router} />

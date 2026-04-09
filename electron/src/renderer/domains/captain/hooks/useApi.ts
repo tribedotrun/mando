@@ -5,8 +5,6 @@
  */
 export {
   apiPost,
-  archiveItem,
-  unarchiveItem,
   answerClarification,
   askTask,
   endAskSession,

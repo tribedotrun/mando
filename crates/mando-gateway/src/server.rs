@@ -155,14 +155,6 @@ fn task_routes() -> Router<AppState> {
             "/api/tasks/{id}/clarify",
             post(routes_clarifier::post_task_clarify),
         )
-        .route(
-            "/api/tasks/{id}/archive",
-            post(routes_task_actions::post_task_archive),
-        )
-        .route(
-            "/api/tasks/{id}/unarchive",
-            post(routes_task_actions::post_task_unarchive),
-        )
 }
 fn captain_routes() -> Router<AppState> {
     Router::new()

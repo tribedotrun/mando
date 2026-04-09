@@ -328,12 +328,16 @@ pub async fn reopen_item(
             item.pr_number = None;
             item.worker = None;
             item.worktree = None;
-            item.workbench_id = None;
+            // workbench_id is permanent — once assigned, never cleared.
             item.branch = None;
             item.worker_started_at = None;
             item.session_ids.worker = None;
             item.session_ids.ask = None;
             item.last_activity_at = Some(mando_types::now_rfc3339());
+            // Unarchive the workbench so the queued task stays visible.
+            if let Some(wb_id) = item.workbench_id {
+                let _ = mando_db::queries::workbenches::unarchive(pool, wb_id).await;
+            }
             let _ = emit_reopen_event(item, reopen_source, feedback, "queued", pool).await;
             return Ok(ReopenOutcome::QueuedFallback);
         }
@@ -341,6 +345,10 @@ pub async fn reopen_item(
     }
 
     let old_worktree = item.worktree.clone();
+    // Unarchive the workbench before reopen so the task stays visible.
+    if let Some(wb_id) = item.workbench_id {
+        let _ = mando_db::queries::workbenches::unarchive(pool, wb_id).await;
+    }
     match spawner_lifecycle::reopen_worker(item, config, feedback, workflow, pool).await {
         Ok(result) => {
             item.intervention_count = new_count as i64;
@@ -391,11 +399,15 @@ pub async fn reopen_item(
                 item.pr_number = None;
                 item.worker = None;
                 item.worktree = None;
-                item.workbench_id = None;
+                // workbench_id is permanent — once assigned, never cleared.
                 item.branch = None;
                 item.worker_started_at = None;
                 item.session_ids.worker = None;
                 item.session_ids.ask = None;
+                // Unarchive the workbench so the queued task stays visible.
+                if let Some(wb_id) = item.workbench_id {
+                    let _ = mando_db::queries::workbenches::unarchive(pool, wb_id).await;
+                }
                 Ok(ReopenOutcome::QueuedFallback)
             } else {
                 Err(e)

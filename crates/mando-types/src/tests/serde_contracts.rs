@@ -190,7 +190,6 @@ fn serde_notify_level_round_trip() {
 // -----------------------------------------------------------------------
 
 const TASK_API_FIELDS: &[&str] = &[
-    "archived_at",
     "branch",
     "captain_review_trigger",
     "clarifier_fail_count",
@@ -279,7 +278,6 @@ fn type_contract_task_fields() {
     item.images = Some("i".into());
     item.escalation_report = Some("e".into());
     item.source = Some("s".into());
-    item.archived_at = Some("a".into());
     item.github_repo = Some("g".into());
 
     let json: serde_json::Value = serde_json::to_value(&item).unwrap();

@@ -49,7 +49,18 @@ export type { TerminalSessionInfo };
 export function useTaskList() {
   return useQuery<TaskListResponse>({
     queryKey: queryKeys.tasks.list(),
+    queryFn: () => fetchTasks(),
+  });
+}
+
+/** Fetch all tasks including those with archived workbenches. Separate key
+ *  so SSE patches to the canonical list key are not affected. Only enabled
+ *  when `showArchived` is true. */
+export function useTaskListWithArchived(enabled: boolean) {
+  return useQuery<TaskListResponse>({
+    queryKey: [...queryKeys.tasks.list(), 'with-archived'],
     queryFn: () => fetchTasks(true),
+    enabled,
   });
 }
 

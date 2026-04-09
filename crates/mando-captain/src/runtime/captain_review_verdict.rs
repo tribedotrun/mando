@@ -156,7 +156,6 @@ pub async fn apply_verdict(
             let saved_ask_sid = item.session_ids.ask.clone();
             let saved_worker = item.worker.clone();
             let saved_worktree = item.worktree.clone();
-            let saved_workbench_id = item.workbench_id;
             let saved_branch = item.branch.clone();
             let saved_pr = item.pr_number;
             let saved_worker_started = item.worker_started_at.clone();
@@ -166,7 +165,7 @@ pub async fn apply_verdict(
             item.session_ids.ask = None;
             item.worker = None;
             item.worktree = None;
-            item.workbench_id = None;
+            // workbench_id is permanent — once assigned, never cleared.
             item.branch = None;
             item.pr_number = None;
             item.worker_started_at = None;
@@ -200,7 +199,6 @@ pub async fn apply_verdict(
                     item.session_ids.ask = saved_ask_sid;
                     item.worker = saved_worker;
                     item.worktree = saved_worktree;
-                    item.workbench_id = saved_workbench_id;
                     item.branch = saved_branch;
                     item.pr_number = saved_pr;
                     item.worker_started_at = saved_worker_started;

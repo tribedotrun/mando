@@ -8,8 +8,6 @@ import {
   cancelItem,
   retryItem,
   handoffItem,
-  archiveItem,
-  unarchiveItem,
   reopenItem,
   reworkItem,
   mergePr,
@@ -176,53 +174,7 @@ export function useTaskHandoff() {
 }
 
 // ---------------------------------------------------------------------------
-// 6. useTaskArchive
-// ---------------------------------------------------------------------------
-
-export function useTaskArchive() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (vars: { id: number }) => archiveItem(vars.id),
-    onMutate: async (vars) => {
-      await qc.cancelQueries({ queryKey: queryKeys.tasks.list() });
-      const prev = qc.getQueryData<TaskListResponse>(queryKeys.tasks.list());
-      qc.setQueryData<TaskListResponse>(queryKeys.tasks.list(), (old) =>
-        updateTaskInList(old, vars.id, { archived_at: new Date().toISOString() }),
-      );
-      return { prev };
-    },
-    onError: (_err, _vars, context) => {
-      if (context?.prev) qc.setQueryData(queryKeys.tasks.list(), context.prev);
-      toast.error('Archive failed');
-    },
-  });
-}
-
-// ---------------------------------------------------------------------------
-// 7. useTaskUnarchive
-// ---------------------------------------------------------------------------
-
-export function useTaskUnarchive() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (vars: { id: number }) => unarchiveItem(vars.id),
-    onMutate: async (vars) => {
-      await qc.cancelQueries({ queryKey: queryKeys.tasks.list() });
-      const prev = qc.getQueryData<TaskListResponse>(queryKeys.tasks.list());
-      qc.setQueryData<TaskListResponse>(queryKeys.tasks.list(), (old) =>
-        updateTaskInList(old, vars.id, { archived_at: undefined }),
-      );
-      return { prev };
-    },
-    onError: (_err, _vars, context) => {
-      if (context?.prev) qc.setQueryData(queryKeys.tasks.list(), context.prev);
-      toast.error('Unarchive failed');
-    },
-  });
-}
-
-// ---------------------------------------------------------------------------
-// 8. useTaskReopen
+// 6. useTaskReopen
 // ---------------------------------------------------------------------------
 
 export function useTaskReopen() {

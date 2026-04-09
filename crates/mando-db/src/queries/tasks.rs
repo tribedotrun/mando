@@ -27,7 +27,7 @@ const SELECT_COLS: &str = "\
     t.intervention_count, t.captain_review_trigger, t.session_ids, t.last_activity_at, \
     t.plan, t.no_pr, t.worker_seq, t.reopen_seq, t.reopen_source, t.images, \
     t.review_fail_count, t.clarifier_fail_count, t.spawn_fail_count, t.merge_fail_count, \
-    t.escalation_report, t.source, t.archived_at, t.rev, p.github_repo";
+    t.escalation_report, t.source, t.rev, p.github_repo";
 
 fn select_tasks_sql() -> &'static str {
     static SQL: OnceLock<String> = OnceLock::new();
@@ -45,9 +45,12 @@ pub async fn find_by_id(pool: &SqlitePool, id: i64) -> Result<Option<Task>> {
     find_by_id_exec(pool, id).await
 }
 
-/// Load all non-archived tasks.
+/// Load all non-archived tasks (archive is on workbench, not task).
 pub async fn load_all(pool: &SqlitePool) -> Result<Vec<Task>> {
-    let sql = format!("{} WHERE t.archived_at IS NULL", select_tasks_sql());
+    let sql = format!(
+        "{} WHERE (t.workbench_id IS NULL OR w.archived_at IS NULL AND w.deleted_at IS NULL)",
+        select_tasks_sql()
+    );
     let rows: Vec<TaskRow> = sqlx::query_as(&sql).fetch_all(pool).await?;
     rows.into_iter().map(|r| r.into_task()).collect()
 }
@@ -63,7 +66,8 @@ pub async fn routing(pool: &SqlitePool) -> Result<Vec<TaskRouting>> {
     let rows: Vec<RoutingRow> = sqlx::query_as(
         "SELECT t.id, t.title, t.status, t.project_id, p.name AS project, t.worker, t.resource
          FROM tasks t JOIN projects p ON p.id = t.project_id
-         WHERE t.archived_at IS NULL",
+         LEFT JOIN workbenches w ON w.id = t.workbench_id
+         WHERE (t.workbench_id IS NULL OR w.archived_at IS NULL AND w.deleted_at IS NULL)",
     )
     .fetch_all(pool)
     .await?;
@@ -102,7 +106,6 @@ const WRITE_COLS: &[&str] = &[
     "merge_fail_count",
     "escalation_report",
     "source",
-    "archived_at",
 ];
 
 fn insert_task_sql() -> &'static str {
@@ -171,7 +174,6 @@ pub(crate) fn bind_task_write_fields<'q>(
         .bind(task.merge_fail_count)
         .bind(&task.escalation_report)
         .bind(&task.source)
-        .bind(&task.archived_at)
 }
 
 /// Insert a new task (auto-ID).
@@ -212,7 +214,10 @@ pub async fn remove(pool: &SqlitePool, id: i64) -> Result<bool> {
 /// Status counts for non-archived tasks.
 pub async fn status_counts(pool: &SqlitePool) -> Result<HashMap<String, usize>> {
     let rows: Vec<(String, i64)> = sqlx::query_as(
-        "SELECT status, COUNT(*) FROM tasks WHERE archived_at IS NULL GROUP BY status",
+        "SELECT t.status, COUNT(*) FROM tasks t \
+         LEFT JOIN workbenches w ON w.id = t.workbench_id \
+         WHERE (t.workbench_id IS NULL OR w.archived_at IS NULL AND w.deleted_at IS NULL) \
+         GROUP BY t.status",
     )
     .fetch_all(pool)
     .await?;
@@ -222,7 +227,12 @@ pub async fn status_counts(pool: &SqlitePool) -> Result<HashMap<String, usize>> 
 /// Check if an active (non-terminal) task exists with the given source.
 pub async fn has_active_with_source(pool: &SqlitePool, source: &str) -> Result<bool> {
     let exists: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM tasks WHERE source = ? AND status NOT IN ('merged','completed-no-pr','canceled') AND archived_at IS NULL LIMIT 1)",
+        "SELECT EXISTS(SELECT 1 FROM tasks t \
+         LEFT JOIN workbenches w ON w.id = t.workbench_id \
+         WHERE t.source = ? \
+           AND t.status NOT IN ('merged','completed-no-pr','canceled') \
+           AND (t.workbench_id IS NULL OR w.archived_at IS NULL AND w.deleted_at IS NULL) \
+         LIMIT 1)",
     )
     .bind(source)
     .fetch_one(pool)
@@ -233,7 +243,10 @@ pub async fn has_active_with_source(pool: &SqlitePool, source: &str) -> Result<b
 /// Count of active workers.
 pub async fn active_worker_count(pool: &SqlitePool) -> Result<usize> {
     let count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM tasks WHERE status='in-progress' AND worker IS NOT NULL AND archived_at IS NULL",
+        "SELECT COUNT(*) FROM tasks t \
+         LEFT JOIN workbenches w ON w.id = t.workbench_id \
+         WHERE t.status='in-progress' AND t.worker IS NOT NULL \
+           AND (t.workbench_id IS NULL OR w.archived_at IS NULL AND w.deleted_at IS NULL)",
     )
     .fetch_one(pool)
     .await?;
@@ -243,9 +256,14 @@ pub async fn active_worker_count(pool: &SqlitePool) -> Result<usize> {
 /// Replace all non-archived tasks atomically.
 pub async fn replace_all(pool: &SqlitePool, tasks: &[Task]) -> Result<()> {
     let mut tx = pool.begin().await?;
-    sqlx::query("DELETE FROM tasks WHERE archived_at IS NULL")
-        .execute(&mut *tx)
-        .await?;
+    sqlx::query(
+        "DELETE FROM tasks WHERE id IN (\
+         SELECT t.id FROM tasks t \
+         LEFT JOIN workbenches w ON w.id = t.workbench_id \
+         WHERE t.workbench_id IS NULL OR w.archived_at IS NULL AND w.deleted_at IS NULL)",
+    )
+    .execute(&mut *tx)
+    .await?;
     for task in tasks {
         if task.id > 0 {
             insert_task_with_id_tx(&mut tx, task).await?;
@@ -305,55 +323,6 @@ pub async fn merge_changed_items(
     }
     tx.commit().await?;
     Ok(())
-}
-
-/// Archive terminal tasks older than `grace_secs`.
-pub async fn archive_terminal(pool: &SqlitePool, grace_secs: u64) -> Result<usize> {
-    let cutoff = time::OffsetDateTime::now_utc() - time::Duration::seconds(grace_secs as i64);
-    let cutoff_str = cutoff
-        .format(&time::format_description::well_known::Rfc3339)
-        .unwrap();
-    let now_str = mando_types::now_rfc3339();
-
-    let result = sqlx::query(
-        "UPDATE tasks SET archived_at = ?, rev = rev + 1
-         WHERE archived_at IS NULL
-           AND status IN ('merged', 'completed-no-pr', 'canceled')
-           AND (COALESCE(last_activity_at, created_at) IS NULL
-                OR datetime(COALESCE(last_activity_at, created_at)) <= datetime(?))",
-    )
-    .bind(&now_str)
-    .bind(&cutoff_str)
-    .execute(pool)
-    .await?;
-
-    let archived = result.rows_affected() as usize;
-    if archived > 0 {
-        tracing::info!(module = "task-store", archived, "terminal tasks archived");
-    }
-    Ok(archived)
-}
-
-/// Archive a task (set archived_at to now).
-pub async fn archive_by_id(pool: &SqlitePool, id: i64) -> Result<bool> {
-    let now = time::OffsetDateTime::now_utc()
-        .format(&time::format_description::well_known::Rfc3339)
-        .unwrap_or_default();
-    let result = sqlx::query("UPDATE tasks SET archived_at = ?, rev = rev + 1 WHERE id = ?")
-        .bind(&now)
-        .bind(id)
-        .execute(pool)
-        .await?;
-    Ok(result.rows_affected() > 0)
-}
-
-/// Un-archive a task (set archived_at back to NULL).
-pub async fn unarchive(pool: &SqlitePool, id: i64) -> Result<bool> {
-    let result = sqlx::query("UPDATE tasks SET archived_at = NULL, rev = rev + 1 WHERE id = ?")
-        .bind(id)
-        .execute(pool)
-        .await?;
-    Ok(result.rows_affected() > 0)
 }
 
 async fn insert_task_tx(tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>, task: &Task) -> Result<()> {

@@ -434,7 +434,7 @@ export async function ensureDaemon(dataDir: string): Promise<boolean> {
           'Mando — Cannot Start',
           `Could not stop the existing daemon (PID ${pid}).\n\nKill it manually: kill -9 ${pid}`,
         );
-        app.quit();
+        app.exit(1);
         return false;
       }
     }

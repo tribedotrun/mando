@@ -11,6 +11,10 @@ electron/out/
 dist/
 electron/mando-napi.node
 
+# SQLite WAL files (created at runtime when seed.db is attached)
+*-wal
+*-shm
+
 # Dev runtime state (PIDs, logs, slot)
 .dev/
 

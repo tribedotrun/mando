@@ -5,6 +5,7 @@ import { TerminalPage } from '#renderer/domains/terminal/components/TerminalPage
 import { WorkspacePreparing } from '#renderer/domains/terminal/components/WorkspacePreparing';
 import { ErrorBoundary } from '#renderer/global/components/ErrorBoundary';
 import { useMountEffect } from '#renderer/global/hooks/useMountEffect';
+import { toast } from 'sonner';
 
 export function TerminalPageRoute(): React.ReactElement {
   const search = useRouterState({
@@ -25,6 +26,11 @@ function TerminalPageInner({
   const { terminalPage, setTerminalPage, openNewTerminal, cancelPreparing } = useWorktreeTerminal();
 
   useMountEffect(() => {
+    if (!search.project) {
+      toast.error('No project selected');
+      void navigate({ to: '/captain', replace: true });
+      return;
+    }
     if (search.cwd) {
       setTerminalPage({
         project: search.project,

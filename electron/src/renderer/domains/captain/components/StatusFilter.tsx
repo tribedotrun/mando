@@ -1,6 +1,6 @@
 import React from 'react';
 import { ACTION_NEEDED_STATUSES, IN_PROGRESS_STATUSES, type ItemStatus } from '#renderer/types';
-import { useTaskList } from '#renderer/hooks/queries';
+import { useTaskList, useTaskListWithArchived } from '#renderer/hooks/queries';
 import { useTaskFilters } from '#renderer/domains/captain/stores/taskFilters';
 import { useProjectFilterPaths } from '#renderer/domains/settings';
 import { ViewOptions } from '#renderer/domains/captain/components/ViewOptions';
@@ -28,9 +28,11 @@ interface Props {
 export function StatusFilter({ projectFilter }: Props): React.ReactElement {
   const statusFilter = useTaskFilters((s) => s.statusFilter);
   const setFilter = useTaskFilters((s) => s.setFilter);
-  const { data: taskData } = useTaskList();
-  const items = taskData?.items ?? [];
   const showArchived = useTaskFilters((s) => s.showArchived);
+  const normalList = useTaskList();
+  const archivedList = useTaskListWithArchived(showArchived);
+  const taskData = showArchived ? (archivedList.data ?? normalList.data) : normalList.data;
+  const items = taskData?.items ?? [];
   const filterPaths = useProjectFilterPaths(projectFilter);
 
   const filtered = React.useMemo(
@@ -40,8 +42,7 @@ export function StatusFilter({ projectFilter }: Props): React.ReactElement {
 
   const counts = React.useMemo(() => {
     const c: Record<string, number> = {};
-    const visible = showArchived ? filtered : filtered.filter((i) => !i.archived_at);
-    for (const item of visible) {
+    for (const item of filtered) {
       c[item.status] = (c[item.status] || 0) + 1;
       if (ACTION_NEEDED_STATUSES.includes(item.status)) {
         c['action-needed'] = (c['action-needed'] || 0) + 1;
@@ -51,12 +52,9 @@ export function StatusFilter({ projectFilter }: Props): React.ReactElement {
       }
     }
     return c;
-  }, [filtered, showArchived]);
+  }, [filtered]);
 
-  const totalCount = React.useMemo(
-    () => (showArchived ? filtered.length : filtered.filter((i) => !i.archived_at).length),
-    [filtered, showArchived],
-  );
+  const totalCount = filtered.length;
 
   return (
     <div

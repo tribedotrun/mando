@@ -129,6 +129,8 @@ export function registerConfigHandlers(): void {
   // launchd:reinstall IPC removed — was never called from renderer
 
   handleTrusted('open-logs-folder', () => shell.openPath(path.join(getDataDir(), 'logs')));
+  handleTrusted('open-data-dir', () => shell.openPath(getDataDir()));
+  handleTrusted('open-config-file', () => shell.openPath(getConfigPath()));
   handleTrusted('open-in-finder', async (_e, dir: string) => {
     const err = await shell.openPath(dir);
     if (err) {

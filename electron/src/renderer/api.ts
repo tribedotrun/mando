@@ -233,10 +233,6 @@ export const fetchTimeline = (id: number) => apiGet<TimelineResponse>(`/api/task
 export const fetchItemSessions = (id: number) =>
   apiGet<ItemSessionsResponse>(`/api/tasks/${id}/sessions`);
 
-// Archive / Unarchive
-export const archiveItem = (id: number) => apiPost<{ ok: boolean }>(`/api/tasks/${id}/archive`);
-export const unarchiveItem = (id: number) => apiPost<{ ok: boolean }>(`/api/tasks/${id}/unarchive`);
-
 // Retry / Clarify
 export const retryItem = (id: number) => apiPost<{ ok: boolean }>('/api/tasks/retry', { id });
 

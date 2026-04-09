@@ -18,6 +18,8 @@ import { SidebarProjectItem } from '#renderer/global/components/SidebarProjectIt
 import { useMountEffect } from '#renderer/global/hooks/useMountEffect';
 import { Button } from '#renderer/components/ui/button';
 import { ScrollArea } from '#renderer/components/ui/scroll-area';
+import { Tooltip, TooltipTrigger, TooltipContent } from '#renderer/components/ui/tooltip';
+import { Kbd } from '#renderer/components/ui/kbd';
 
 export type Tab = 'captain' | 'scout' | 'sessions';
 
@@ -145,11 +147,11 @@ export function Sidebar({
   }, [configProjects]);
 
   const projectWorktrees = React.useMemo(() => {
-    // Only show workbenches that don't have a task attached (terminal-only).
+    // Only show workbenches that don't have a task attached (terminal-only) and aren't archived.
     const taskWbIds = new Set(items.filter((t) => t.workbench_id).map((t) => t.workbench_id));
     const map: Record<string, { id: number; cwd: string; name: string }[]> = {};
     for (const wb of workbenches) {
-      if (taskWbIds.has(wb.id)) continue;
+      if (taskWbIds.has(wb.id) || wb.archivedAt) continue;
       const projName = pathToName[wb.project] ?? wb.project;
       (map[projName] ??= []).push({ id: wb.id, cwd: wb.worktree, name: wb.title });
     }
@@ -202,27 +204,54 @@ export function Sidebar({
           className="flex items-center gap-1"
           style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
         >
-          <button
-            onClick={onToggleSidebar}
-            className="flex h-6 w-6 items-center justify-center rounded text-text-3 transition-colors hover:text-muted-foreground"
-            title="Toggle sidebar"
-          >
-            <PanelLeft size={14} />
-          </button>
-          <button
-            onClick={onGoBack}
-            className="flex h-6 w-6 items-center justify-center rounded text-text-3 transition-colors hover:text-muted-foreground"
-            title="Go back"
-          >
-            <ArrowLeft size={14} />
-          </button>
-          <button
-            onClick={onGoForward}
-            className="flex h-6 w-6 items-center justify-center rounded text-text-3 transition-colors hover:text-muted-foreground"
-            title="Go forward"
-          >
-            <ArrowRight size={14} />
-          </button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={onToggleSidebar}
+                className="flex h-6 w-6 items-center justify-center rounded text-text-3 transition-colors hover:text-muted-foreground"
+              >
+                <PanelLeft size={14} />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent
+              side="bottom"
+              className="flex items-center gap-3 px-3 py-2 text-sm font-medium"
+            >
+              Toggle sidebar <Kbd>&#8984;B</Kbd>
+            </TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={onGoBack}
+                className="flex h-6 w-6 items-center justify-center rounded text-text-3 transition-colors hover:text-muted-foreground"
+              >
+                <ArrowLeft size={14} />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent
+              side="bottom"
+              className="flex items-center gap-3 px-3 py-2 text-sm font-medium"
+            >
+              Back <Kbd>&#8984;[</Kbd>
+            </TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={onGoForward}
+                className="flex h-6 w-6 items-center justify-center rounded text-text-3 transition-colors hover:text-muted-foreground"
+              >
+                <ArrowRight size={14} />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent
+              side="bottom"
+              className="flex items-center gap-3 px-3 py-2 text-sm font-medium"
+            >
+              Forward <Kbd>&#8984;]</Kbd>
+            </TooltipContent>
+          </Tooltip>
         </div>
       </div>
 

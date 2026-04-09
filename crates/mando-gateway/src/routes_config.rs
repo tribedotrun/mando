@@ -49,13 +49,30 @@ fn publish_workflows(
     state.scout_workflow.store(Arc::new(dwf));
 }
 
+/// `captain.projects` is `#[serde(skip)]` (DB is source of truth).
+/// After serializing the config, inject the in-memory projects so the
+/// Electron renderer can use them. Called from both GET /api/config and
+/// the SSE snapshot builder.
+pub(crate) fn inject_projects(config: &mando_config::Config, val: &mut Value) {
+    if let Some(captain) = val.get_mut("captain") {
+        let projects: serde_json::Map<String, Value> = config
+            .captain
+            .projects
+            .iter()
+            .map(|(key, pc)| (key.clone(), serde_json::to_value(pc).unwrap_or_default()))
+            .collect();
+        captain["projects"] = Value::Object(projects);
+    }
+}
+
 /// GET /api/config — read current config.
 pub(crate) async fn get_config(State(state): State<AppState>) -> Result<Json<Value>, StatusCode> {
     let config = state.config.load_full();
-    let val = serde_json::to_value(&*config).map_err(|e| {
+    let mut val = serde_json::to_value(&*config).map_err(|e| {
         tracing::error!(error = %e, "failed to serialize config");
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
+    inject_projects(&config, &mut val);
     Ok(Json(val))
 }
 
@@ -150,7 +167,8 @@ pub(crate) async fn put_config(
         }
     }
 
-    // Notify SSE clients.
+    // Notify SSE clients — Config for sidebar/settings, Status for workers.
+    state.bus.send(mando_types::BusEvent::Config, None);
     state.bus.send(mando_types::BusEvent::Status, None);
 
     let configured_paths = mando_config::resolve_captain_runtime_paths(&committed_config);
