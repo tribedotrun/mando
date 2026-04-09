@@ -781,9 +781,9 @@ dependencies = [
 
 [[package]]
 name = "hashbrown"
-version = "0.16.1"
+version = "0.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "841d1cc9bed7f9236f321df977030373f4a4163ae1a7dbfe1a51a2c1a51d9100"
+checksum = "4f467dd6dccf739c208452f8014c75c18bb8301b050ad1cfb27153803edb0f51"
 
 [[package]]
 name = "hashlink"
@@ -1117,12 +1117,12 @@ dependencies = [
 
 [[package]]
 name = "indexmap"
-version = "2.13.1"
+version = "2.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "45a8a2b9cb3e0b0c1803dbb0758ffac5de2f425b23c28f518faabd9d805342ff"
+checksum = "d466e9454f08e4a911e14806c24e16fba1b4c121d1ea474396f396069cf949d9"
 dependencies = [
  "equivalent",
- "hashbrown 0.16.1",
+ "hashbrown 0.17.0",
  "serde",
  "serde_core",
 ]
@@ -1214,14 +1214,14 @@ checksum = "b6d2cec3eae94f9f509c767b45932f1ada8350c4bdb85af2fcab4a3c14807981"
 
 [[package]]
 name = "libredox"
-version = "0.1.15"
+version = "0.1.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7ddbf48fd451246b1f8c2610bd3b4ac0cc6e149d89832867093ab69a17194f08"
+checksum = "e02f3bb43d335493c96bf3fd3a321600bf6bd07ed34bc64118e9293bdffea46c"
 dependencies = [
  "bitflags 2.11.0",
  "libc",
  "plain",
- "redox_syscall 0.7.3",
+ "redox_syscall 0.7.4",
 ]
 
 [[package]]
@@ -1270,7 +1270,7 @@ checksum = "c41e0c4fef86961ac6d6f8a82609f55f31b05e4fce149ac5710e439df7619ba4"
 
 [[package]]
 name = "mando-captain"
-version = "0.1.16-beta.2"
+version = "0.1.16-beta.3"
 dependencies = [
  "anyhow",
  "futures",
@@ -1297,7 +1297,7 @@ dependencies = [
 
 [[package]]
 name = "mando-cc"
-version = "0.1.16-beta.2"
+version = "0.1.16-beta.3"
 dependencies = [
  "anyhow",
  "libc",
@@ -1313,7 +1313,7 @@ dependencies = [
 
 [[package]]
 name = "mando-cli"
-version = "0.1.16-beta.2"
+version = "0.1.16-beta.3"
 dependencies = [
  "anyhow",
  "clap",
@@ -1329,7 +1329,7 @@ dependencies = [
 
 [[package]]
 name = "mando-config"
-version = "0.1.16-beta.2"
+version = "0.1.16-beta.3"
 dependencies = [
  "anyhow",
  "iana-time-zone",
@@ -1345,7 +1345,7 @@ dependencies = [
 
 [[package]]
 name = "mando-db"
-version = "0.1.16-beta.2"
+version = "0.1.16-beta.3"
 dependencies = [
  "anyhow",
  "mando-config",
@@ -1361,7 +1361,7 @@ dependencies = [
 
 [[package]]
 name = "mando-gateway"
-version = "0.1.16-beta.2"
+version = "0.1.16-beta.3"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -1406,14 +1406,14 @@ dependencies = [
 
 [[package]]
 name = "mando-readability"
-version = "0.1.16-beta.2"
+version = "0.1.16-beta.3"
 dependencies = [
  "html5ever",
 ]
 
 [[package]]
 name = "mando-scout"
-version = "0.1.16-beta.2"
+version = "0.1.16-beta.3"
 dependencies = [
  "anyhow",
  "mando-captain",
@@ -1439,7 +1439,7 @@ dependencies = [
 
 [[package]]
 name = "mando-shared"
-version = "0.1.16-beta.2"
+version = "0.1.16-beta.3"
 dependencies = [
  "anyhow",
  "mando-config",
@@ -1456,7 +1456,7 @@ dependencies = [
 
 [[package]]
 name = "mando-telegram"
-version = "0.1.16-beta.2"
+version = "0.1.16-beta.3"
 dependencies = [
  "anyhow",
  "clap",
@@ -1476,7 +1476,7 @@ dependencies = [
 
 [[package]]
 name = "mando-terminal"
-version = "0.1.16-beta.2"
+version = "0.1.16-beta.3"
 dependencies = [
  "anyhow",
  "mando-types",
@@ -1490,7 +1490,7 @@ dependencies = [
 
 [[package]]
 name = "mando-types"
-version = "0.1.16-beta.2"
+version = "0.1.16-beta.3"
 dependencies = [
  "mando-uuid",
  "serde",
@@ -1501,7 +1501,7 @@ dependencies = [
 
 [[package]]
 name = "mando-uuid"
-version = "0.1.16-beta.2"
+version = "0.1.16-beta.3"
 dependencies = [
  "getrandom 0.2.17",
 ]
@@ -2201,9 +2201,9 @@ dependencies = [
 
 [[package]]
 name = "redox_syscall"
-version = "0.7.3"
+version = "0.7.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6ce70a74e890531977d37e532c34d45e9055d2409ed08ddba14529471ed0be16"
+checksum = "f450ad9c3b1da563fb6948a8e0fb0fb9269711c9c73d9ea1de5058c79c8d643a"
 dependencies = [
  "bitflags 2.11.0",
 ]

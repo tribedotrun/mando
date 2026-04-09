@@ -36,6 +36,7 @@ export const queryKeys = {
     all: ['sessions'] as const,
     list: (page: number, category?: string) =>
       ['sessions', 'list', page, category ?? 'all'] as const,
+    transcript: (sessionId: string) => ['sessions', 'transcript', sessionId] as const,
   },
 
   // ── Terminals ──

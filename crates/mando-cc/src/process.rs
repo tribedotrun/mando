@@ -7,6 +7,20 @@ use anyhow::{Context, Result};
 use crate::config::CcConfig;
 use crate::error::CcError;
 
+/// Daemon env vars stripped from worker processes so they don't inherit mode
+/// state that silently changes mando-dev behavior (e.g. MANDO_PROD_MODE
+/// turning `start dev` into prod-local).
+const DAEMON_ENV_STRIP: &[&str] = &[
+    "MANDO_PROD_MODE",
+    "MANDO_APP_MODE",
+    "MANDO_SANDBOX",
+    "MANDO_ELECTRON_BIN",
+    "MANDO_ELECTRON_ENTRYPOINT",
+    "MANDO_ELECTRON_INSPECT_PORT",
+    "MANDO_ELECTRON_CDP_PORT",
+    "MANDO_EXTERNAL_GATEWAY",
+];
+
 /// Spawn a claude subprocess with stream-json input/output.
 ///
 /// Returns `(child, pid, stream_path, stderr_path)`.
@@ -84,6 +98,12 @@ pub(crate) async fn spawn_process(
     // execution). Without this, a silently-dropped SSE connection hangs forever.
     cmd.env("CLAUDE_ENABLE_STREAM_WATCHDOG", "1");
     cmd.env_remove("CLAUDECODE");
+    // Strip daemon-specific env vars so workers don't inherit state that
+    // causes mando-dev commands to silently change mode (e.g. start dev
+    // becoming prod-local when MANDO_PROD_MODE is set).
+    for key in DAEMON_ENV_STRIP {
+        cmd.env_remove(key);
+    }
     if config.caller.starts_with("scout-") {
         cmd.env("DISABLE_LANG_GUARD", "1");
     }
@@ -204,6 +224,9 @@ pub async fn spawn_detached(
     cmd.env("CLAUDE_CODE_EXIT_AFTER_STOP_DELAY", "5000");
     cmd.env("CLAUDE_ENABLE_STREAM_WATCHDOG", "1");
     cmd.env_remove("CLAUDECODE");
+    for key in DAEMON_ENV_STRIP {
+        cmd.env_remove(key);
+    }
     if config.caller.starts_with("scout-") {
         cmd.env("DISABLE_LANG_GUARD", "1");
     }

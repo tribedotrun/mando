@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useRef } from 'react';
 import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import { Filter } from 'lucide-react';
-import { fetchSessions, fetchTranscript } from '#renderer/domains/sessions/hooks/useApi';
+import { fetchSessions } from '#renderer/domains/sessions/hooks/useApi';
 import { useViewKeyHandler } from '#renderer/global/hooks/useKeyboardShortcuts';
 import { useScrollIntoViewRef } from '#renderer/global/hooks/useScrollIntoViewRef';
 import type { SessionEntry } from '#renderer/types';
@@ -13,7 +13,6 @@ import {
   indexPrev,
   relativeTime,
 } from '#renderer/utils';
-import { SessionDetailPanel } from '#renderer/domains/sessions/components/SessionDetailPanel';
 import { StatusFilterMenu } from '#renderer/domains/captain';
 import {
   buildSessionSequence,
@@ -38,14 +37,18 @@ const CATEGORY_ORDER = [
   'system',
 ];
 
-export function SessionsCard({ active = true }: { active?: boolean } = {}): React.ReactElement {
+interface SessionsCardProps {
+  active?: boolean;
+  onOpenSession?: (s: SessionEntry) => void;
+}
+
+export function SessionsCard({
+  active = true,
+  onOpenSession: onOpenSessionProp,
+}: SessionsCardProps = {}): React.ReactElement {
   const [page, setPage] = useState(1);
   const [filterCategory, setFilterCategory] = useState('');
   const [filterStatus, setFilterStatus] = useState<string>('all');
-  const [viewSession, setViewSession] = useState<SessionEntry | null>(null);
-  const [transcript, setTranscript] = useState<string | null>(null);
-  const [transcriptLoading, setTranscriptLoading] = useState(false);
-  const [transcriptError, setTranscriptError] = useState<string | null>(null);
   const [focusedIndex, setFocusedIndex] = useState(-1);
 
   const {
@@ -80,21 +83,12 @@ export function SessionsCard({ active = true }: { active?: boolean } = {}): Reac
         ? sessions.length - 1
         : focusedIndex;
 
-  const openSession = useCallback((s: SessionEntry) => {
-    setViewSession(s);
-    setTranscript(null);
-    setTranscriptError(null);
-    setTranscriptLoading(true);
-    void fetchTranscript(s.session_id)
-      .then((res) => {
-        setTranscript(res.markdown);
-        setTranscriptLoading(false);
-      })
-      .catch((err) => {
-        setTranscriptError(getErrorMessage(err, 'Failed to load transcript'));
-        setTranscriptLoading(false);
-      });
-  }, []);
+  const openSession = useCallback(
+    (s: SessionEntry) => {
+      onOpenSessionProp?.(s);
+    },
+    [onOpenSessionProp],
+  );
 
   const handleCatClick = (cat: string) => {
     setFilterCategory(cat);
@@ -103,21 +97,11 @@ export function SessionsCard({ active = true }: { active?: boolean } = {}): Reac
 
   const resumeCmd = (s: SessionEntry) => {
     const dir = s.resume_cwd || s.cwd;
-    return dir ? `cd ${dir} && claude -r ${s.session_id}` : `claude -r ${s.session_id}`;
+    return dir ? `cd "${dir}" && claude -r ${s.session_id}` : `claude -r ${s.session_id}`;
   };
-
-  const hasDetailOpen = !!viewSession;
 
   const handleKey = useCallback(
     (key: string, e: KeyboardEvent) => {
-      // Escape closes the detail panel when open
-      if (hasDetailOpen) {
-        if (key === 'Escape') {
-          e.preventDefault();
-          setViewSession(null);
-        }
-        return;
-      }
       switch (key) {
         case 'j':
           e.preventDefault();
@@ -151,7 +135,7 @@ export function SessionsCard({ active = true }: { active?: boolean } = {}): Reac
           break;
       }
     },
-    [hasDetailOpen, sessions, clampedFocusedIndex, openSession],
+    [sessions, clampedFocusedIndex, openSession],
   );
 
   useViewKeyHandler(handleKey, active);
@@ -160,21 +144,6 @@ export function SessionsCard({ active = true }: { active?: boolean } = {}): Reac
   const sortedCats = CATEGORY_ORDER.filter((c) => c in categories);
   for (const c of Object.keys(categories)) {
     if (!sortedCats.includes(c)) sortedCats.push(c);
-  }
-
-  // Full-page detail view when a session is selected
-  if (viewSession) {
-    return (
-      <SessionDetailPanel
-        session={viewSession}
-        markdown={transcript}
-        loading={transcriptLoading}
-        error={transcriptError}
-        onClose={() => setViewSession(null)}
-        resumeCmd={resumeCmd(viewSession)}
-        sequenceNum={sessionSeqMap.get(viewSession.session_id)}
-      />
-    );
   }
 
   return (

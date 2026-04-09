@@ -7,8 +7,4 @@ export {
   SessionDot,
   SessionsEmptyState,
 } from '#renderer/domains/sessions/components/SessionsHelpers';
-export {
-  TranscriptViewer,
-  TranscriptSidebar,
-} from '#renderer/domains/sessions/components/TranscriptViewer';
-export { SessionDetailPanel } from '#renderer/domains/sessions/components/SessionDetailPanel';
+export { TranscriptViewer } from '#renderer/domains/sessions/components/TranscriptViewer';

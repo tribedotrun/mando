@@ -11,9 +11,9 @@ use tracing::{debug, warn};
 
 use crate::types::{Agent, CreateRequest, TerminalEvent, TerminalSize};
 
-const MAX_OUTPUT_BUF: usize = 64 * 1024;
+const MAX_OUTPUT_BUF: usize = 2 * 1024 * 1024;
 const OUTPUT_BATCH_SIZE: usize = 16 * 1024;
-const OUTPUT_BATCH_WINDOW: Duration = Duration::from_millis(20);
+const OUTPUT_BATCH_WINDOW: Duration = Duration::from_millis(16);
 
 pub(super) struct BatcherThreadCtx {
     pub session_id: String,
