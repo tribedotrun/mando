@@ -6,24 +6,18 @@ import { toast } from 'sonner';
 import {
   fetchTimeline,
   fetchItemSessions,
-  fetchTranscript,
   fetchPrSummary,
   fetchAskHistory,
 } from '#renderer/domains/captain/hooks/useApi';
 import {
   FINALIZED_STATUSES,
   type TaskItem,
-  type SessionEntry,
   type SessionSummary,
   type TimelineEvent,
   type MandoConfig,
 } from '#renderer/types';
 import { extractClarifierQuestions } from '#renderer/utils';
-import {
-  TranscriptSidebar,
-  SessionDetailPanel,
-  buildSessionsFromTimeline,
-} from '#renderer/domains/sessions';
+import { buildSessionsFromTimeline } from '#renderer/domains/sessions';
 import { TaskActionBar } from '#renderer/domains/captain/components/TaskActionBar';
 import {
   EscalatedReportTab,
@@ -67,9 +61,21 @@ interface Props {
   item: TaskItem;
   onBack: () => void;
   onOpenTerminal?: (opts: { project: string; cwd: string; resumeSessionId?: string }) => void;
+  onOpenTranscript?: (opts: {
+    sessionId: string;
+    caller?: string;
+    cwd?: string;
+    project?: string;
+    taskTitle?: string;
+  }) => void;
 }
 
-export function TaskDetailView({ item, onBack, onOpenTerminal }: Props): React.ReactElement {
+export function TaskDetailView({
+  item,
+  onBack,
+  onOpenTerminal,
+  onOpenTranscript,
+}: Props): React.ReactElement {
   const qc = useQueryClient();
   const [activeTab, setActiveTab] = useState<DetailTab>(() => {
     if (item.status === 'escalated') return 'escalated';
@@ -77,12 +83,6 @@ export function TaskDetailView({ item, onBack, onOpenTerminal }: Props): React.R
     return 'pr';
   });
   const [prRefreshing, setPrRefreshing] = useState(false);
-  const [transcriptSession, setTranscriptSession] = useState<{
-    entry: SessionEntry;
-    markdown: string | null;
-    loading: boolean;
-  } | null>(null);
-  const [transcriptFullScreen, setTranscriptFullScreen] = useState(false);
   const [activeQA, setActiveQA] = useState(false);
   const [contextModalOpen, setContextModalOpen] = useState(false);
 
@@ -95,13 +95,8 @@ export function TaskDetailView({ item, onBack, onOpenTerminal }: Props): React.R
 
   const qaRef = useRef<QAHandle | null>(null);
   const [pendingQuestion, setPendingQuestion] = useState<string | null>(null);
-  const sidebarRef = useRef<HTMLDivElement>(null);
 
   // Refs to avoid stale closures in keydown handler.
-  const transcriptFullScreenRef = useRef(transcriptFullScreen);
-  transcriptFullScreenRef.current = transcriptFullScreen;
-  const transcriptSessionRef = useRef(transcriptSession);
-  transcriptSessionRef.current = transcriptSession;
   const activeQARef = useRef(activeQA);
   activeQARef.current = activeQA;
   const onBackRef = useRef(onBack);
@@ -118,35 +113,14 @@ export function TaskDetailView({ item, onBack, onOpenTerminal }: Props): React.R
       )
         return;
       e.stopPropagation();
-      if (transcriptFullScreenRef.current) {
-        setTranscriptFullScreen(false);
-      } else if (activeQARef.current) {
+      if (activeQARef.current) {
         setActiveQA(false);
-      } else if (transcriptSessionRef.current) {
-        setTranscriptSession(null);
       } else {
         onBackRef.current();
       }
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  });
-
-  // Click-outside to close transcript sidebar.
-  useMountEffect(() => {
-    const onMouseDown = (e: MouseEvent) => {
-      if (!transcriptSessionRef.current || transcriptFullScreenRef.current) return;
-      if (
-        document.querySelector('[role="dialog"]') ||
-        document.querySelector('[data-command-palette]') ||
-        document.querySelector('[data-shortcut-overlay]')
-      )
-        return;
-      if (sidebarRef.current?.contains(e.target as Node)) return;
-      setTranscriptSession(null);
-    };
-    document.addEventListener('mousedown', onMouseDown);
-    return () => document.removeEventListener('mousedown', onMouseDown);
   });
 
   // Data queries.
@@ -208,62 +182,23 @@ export function TaskDetailView({ item, onBack, onOpenTerminal }: Props): React.R
     [events, item.status],
   );
 
-  const handleTranscriptClick = async (sessionId: string, event: TimelineEvent) => {
+  const navigateToTranscript = (sessionId: string, caller?: string, cwd?: string) => {
+    onOpenTranscript?.({
+      sessionId,
+      caller: caller || 'worker',
+      cwd: cwd || item.worktree || undefined,
+      project: item.project || undefined,
+      taskTitle: item.title || undefined,
+    });
+  };
+
+  const handleTranscriptClick = (sessionId: string, _event: TimelineEvent) => {
     const summary = sessionMap[sessionId];
-    const stub: SessionEntry = {
-      session_id: sessionId,
-      created_at: summary?.started_at || event.timestamp,
-      cwd: summary?.cwd || item.worktree || '',
-      model: '',
-      caller: summary?.caller || 'worker',
-      resumed: summary?.resumed ? 1 : 0,
-      task_id: String(item.id),
-      worker_name: summary?.worker_name || '',
-      status: summary?.status || '',
-    };
-    setTranscriptSession({ entry: stub, markdown: null, loading: true });
-    try {
-      const data = await fetchTranscript(sessionId);
-      setTranscriptSession((p) =>
-        p?.entry.session_id === sessionId ? { ...p, markdown: data.markdown, loading: false } : p,
-      );
-    } catch (err) {
-      log.warn('Failed to fetch transcript for session', sessionId, err);
-      toast.error('Transcript unavailable, check daemon logs');
-      setTranscriptSession((p) =>
-        p?.entry.session_id === sessionId ? { ...p, markdown: null, loading: false } : p,
-      );
-    }
+    navigateToTranscript(sessionId, summary?.caller, summary?.cwd || item.worktree);
   };
 
   const handleSessionClick = (s: SessionSummary) => {
-    const stub: SessionEntry = {
-      session_id: s.session_id,
-      created_at: s.started_at || '',
-      cwd: s.cwd || item.worktree || '',
-      model: s.model || '',
-      caller: s.caller || 'worker',
-      resumed: s.resumed ? 1 : 0,
-      task_id: String(item.id),
-      worker_name: s.worker_name || '',
-      status: s.status || '',
-    };
-    setTranscriptSession({ entry: stub, markdown: null, loading: true });
-    fetchTranscript(s.session_id)
-      .then((data) => {
-        setTranscriptSession((p) =>
-          p?.entry.session_id === s.session_id
-            ? { ...p, markdown: data.markdown, loading: false }
-            : p,
-        );
-      })
-      .catch((err) => {
-        log.warn('Failed to fetch transcript:', err);
-        toast.error('Transcript unavailable, check daemon logs');
-        setTranscriptSession((p) =>
-          p?.entry.session_id === s.session_id ? { ...p, markdown: null, loading: false } : p,
-        );
-      });
+    navigateToTranscript(s.session_id, s.caller, s.cwd || item.worktree);
   };
 
   const handleAskFromBar = useCallback((question: string) => {
@@ -271,7 +206,6 @@ export function TaskDetailView({ item, onBack, onOpenTerminal }: Props): React.R
       qaRef.current.ask(question);
     } else {
       setActiveQA(true);
-      setTranscriptSession(null);
       setPendingQuestion(question);
     }
   }, []);
@@ -422,10 +356,7 @@ export function TaskDetailView({ item, onBack, onOpenTerminal }: Props): React.R
                   <ClarificationTab taskId={item.id} questions={clarifierQuestions} />
                 )}
                 {effectiveTab === 'timeline' && (
-                  <TimelineTab
-                    events={events}
-                    onTranscriptClick={(...args) => void handleTranscriptClick(...args)}
-                  />
+                  <TimelineTab events={events} onTranscriptClick={handleTranscriptClick} />
                 )}
                 {effectiveTab === 'pr' && (
                   <PrTab item={item} prBody={prBody} prPending={prPending} />
@@ -444,41 +375,10 @@ export function TaskDetailView({ item, onBack, onOpenTerminal }: Props): React.R
             </Tabs>
           )}
         </div>
-
-        {/* Transcript sidebar */}
-        {transcriptSession && !transcriptFullScreen && (
-          <div ref={sidebarRef} className="flex h-full shrink-0">
-            <TranscriptSidebar
-              session={transcriptSession}
-              onClose={() => setTranscriptSession(null)}
-              onExpand={() => setTranscriptFullScreen(true)}
-            />
-          </div>
-        )}
       </div>
 
       {/* Action bar, pinned at bottom */}
       <TaskActionBar item={item} onAsk={handleAskFromBar} />
-
-      {/* Full-screen transcript overlay */}
-      {transcriptSession && transcriptFullScreen && (
-        <div className="fixed inset-0 z-[300] bg-background">
-          <div className="h-full p-6">
-            <SessionDetailPanel
-              session={transcriptSession.entry}
-              markdown={transcriptSession.markdown}
-              loading={transcriptSession.loading}
-              error={null}
-              onClose={() => setTranscriptFullScreen(false)}
-              resumeCmd={
-                transcriptSession.entry.cwd
-                  ? `cd ${transcriptSession.entry.cwd} && claude --resume ${transcriptSession.entry.session_id}`
-                  : `claude --resume ${transcriptSession.entry.session_id}`
-              }
-            />
-          </div>
-        </div>
-      )}
 
       {/* Context modal */}
       {contextModalOpen && item.context && (

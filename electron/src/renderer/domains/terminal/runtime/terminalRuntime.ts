@@ -3,6 +3,7 @@ import { FitAddon } from '@xterm/addon-fit';
 import { SearchAddon, type ISearchOptions } from '@xterm/addon-search';
 import { WebglAddon } from '@xterm/addon-webgl';
 import { ClipboardAddon } from '@xterm/addon-clipboard';
+import { Unicode11Addon } from '@xterm/addon-unicode11';
 import {
   connectTerminalStream,
   resizeTerminal,
@@ -18,6 +19,8 @@ import log from '#renderer/logger';
 
 const DEFAULT_ROWS = 32;
 const DEFAULT_COLS = 120;
+const SCROLLBACK_LINES = 10_000;
+const RESIZE_DEBOUNCE_MS = 100;
 
 const TERMINAL_THEME = {
   background: '#0a0a0a',
@@ -75,15 +78,9 @@ function binaryBytes(data: string): Uint8Array {
   return bytes;
 }
 
-function isClaudeSoftEnter(session: TerminalSessionInfo, event: KeyboardEvent): boolean {
+function isShiftEnter(event: KeyboardEvent): boolean {
   return (
-    session.agent === 'claude' &&
-    event.type === 'keydown' &&
-    event.key === 'Enter' &&
-    event.shiftKey &&
-    !event.ctrlKey &&
-    !event.altKey &&
-    !event.metaKey
+    event.key === 'Enter' && event.shiftKey && !event.ctrlKey && !event.altKey && !event.metaKey
   );
 }
 
@@ -94,6 +91,7 @@ export class TerminalRuntime {
   private fitAddon: FitAddon | null = null;
   private searchAddon: SearchAddon | null = null;
   private resizeObserver: ResizeObserver | null = null;
+  private resizeTimer: ReturnType<typeof setTimeout> | null = null;
   private eventSource: EventSource | null = null;
   private disposables: IDisposable[] = [];
   private disposed = false;
@@ -118,14 +116,19 @@ export class TerminalRuntime {
       allowProposedApi: true,
       rows: DEFAULT_ROWS,
       cols: DEFAULT_COLS,
+      scrollback: SCROLLBACK_LINES,
+      smoothScrollDuration: 80,
     });
     const fitAddon = new FitAddon();
     const searchAddon = new SearchAddon({ highlightLimit: 500 });
     const clipboardAddon = new ClipboardAddon();
+    const unicodeAddon = new Unicode11Addon();
 
     term.loadAddon(fitAddon);
     term.loadAddon(searchAddon);
     term.loadAddon(clipboardAddon);
+    term.loadAddon(unicodeAddon);
+    term.unicode.activeVersion = '11';
 
     this.term = term;
     this.fitAddon = fitAddon;
@@ -155,6 +158,8 @@ export class TerminalRuntime {
 
   dispose(): void {
     this.disposed = true;
+    if (this.resizeTimer !== null) clearTimeout(this.resizeTimer);
+    this.resizeTimer = null;
     this.resizeObserver?.disconnect();
     this.resizeObserver = null;
     this.eventSource?.close();
@@ -249,12 +254,16 @@ export class TerminalRuntime {
     if (!this.term) return;
 
     this.term.attachCustomKeyEventHandler((event) => {
-      if (!isClaudeSoftEnter(this.session, event)) return true;
+      if (this.session.agent !== 'claude' || !isShiftEnter(event)) return true;
 
-      const encoder = new TextEncoder();
-      void writeTerminalBytes(this.session.id, encoder.encode('\n')).catch((err) =>
-        log.warn('Terminal soft-enter write failed', err),
-      );
+      // Block both keydown AND keypress to prevent xterm from also sending
+      // a bare \r on the keypress event. Only send the sequence on keydown.
+      if (event.type === 'keydown') {
+        const encoder = new TextEncoder();
+        void writeTerminalBytes(this.session.id, encoder.encode('\x1b\r')).catch((err) =>
+          log.warn('Terminal soft-enter write failed', err),
+        );
+      }
       return false;
     });
 
@@ -278,8 +287,12 @@ export class TerminalRuntime {
 
   private bindResize(container: HTMLDivElement): void {
     this.resizeObserver = new ResizeObserver(() => {
-      this.fitAddon?.fit();
-      void this.syncTerminalSize();
+      if (this.resizeTimer !== null) clearTimeout(this.resizeTimer);
+      this.resizeTimer = setTimeout(() => {
+        this.resizeTimer = null;
+        this.fitAddon?.fit();
+        void this.syncTerminalSize();
+      }, RESIZE_DEBOUNCE_MS);
     });
     this.resizeObserver.observe(container);
   }

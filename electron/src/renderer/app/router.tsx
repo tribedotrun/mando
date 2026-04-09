@@ -13,6 +13,7 @@ import { ScoutPage } from '#renderer/app/routes/ScoutPage';
 import { SessionsPage } from '#renderer/app/routes/SessionsPage';
 import { TerminalPageRoute } from '#renderer/app/routes/TerminalPageRoute';
 import { SettingsPageRoute } from '#renderer/app/routes/SettingsPageRoute';
+import { TranscriptPage } from '#renderer/app/routes/TranscriptPage';
 import log from '#renderer/logger';
 
 // ---------------------------------------------------------------------------
@@ -59,6 +60,19 @@ const sessionsRoute = createRoute({
   component: SessionsPage,
 });
 
+// -- Transcript detail --
+const transcriptRoute = createRoute({
+  getParentRoute: () => appLayout,
+  path: '/sessions/$sessionId',
+  validateSearch: z.object({
+    caller: z.string().optional().catch(undefined),
+    cwd: z.string().optional().catch(undefined),
+    project: z.string().optional().catch(undefined),
+    taskTitle: z.string().optional().catch(undefined),
+  }),
+  component: TranscriptPage,
+});
+
 // -- Terminal --
 const terminalRoute = createRoute({
   getParentRoute: () => appLayout,
@@ -99,7 +113,14 @@ const indexRoute = createRoute({
 
 const routeTree = rootRoute.addChildren([
   indexRoute,
-  appLayout.addChildren([captainRoute, taskDetailRoute, scoutRoute, sessionsRoute, terminalRoute]),
+  appLayout.addChildren([
+    captainRoute,
+    taskDetailRoute,
+    scoutRoute,
+    sessionsRoute,
+    transcriptRoute,
+    terminalRoute,
+  ]),
   settingsRoute,
 ]);
 

@@ -27,15 +27,26 @@ struct CooldownState {
     consecutive: u32,
 }
 
+/// Lock the cooldown mutex, recovering from poison. A poisoned mutex means a
+/// thread panicked while holding the lock, but the CooldownState inside is
+/// still usable (it's just timestamps and a counter). Recovering avoids a
+/// permanent captain freeze.
+fn lock_cooldown() -> std::sync::MutexGuard<'static, CooldownState> {
+    COOLDOWN.lock().unwrap_or_else(|poisoned| {
+        tracing::warn!(
+            module = "captain",
+            "rate limit cooldown mutex was poisoned — recovering"
+        );
+        poisoned.into_inner()
+    })
+}
+
 /// Activate cooldown. Called when a rate_limit Rejected event is observed.
 ///
 /// - If `resets_at` is a future unix timestamp: cooldown = (resets_at - now) + buffer.
 /// - Otherwise: exponential backoff based on consecutive activations.
 pub fn activate(resets_at_unix: Option<u64>) {
-    let Ok(mut state) = COOLDOWN.lock() else {
-        tracing::error!("rate limit cooldown mutex poisoned on activate");
-        return;
-    };
+    let mut state = lock_cooldown();
 
     let now_unix = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -71,22 +82,14 @@ pub fn activate(resets_at_unix: Option<u64>) {
 }
 
 /// Check if cooldown is currently active.
-///
-/// Fails closed: returns `true` on mutex poison so spawning is suppressed
-/// when cooldown state is indeterminate.
 pub fn is_active() -> bool {
-    let Ok(state) = COOLDOWN.lock() else {
-        tracing::error!("rate limit cooldown mutex poisoned on is_active — failing closed");
-        return true;
-    };
+    let state = lock_cooldown();
     state.until.is_some_and(|until| Instant::now() < until)
 }
 
 /// Seconds remaining in cooldown (0 if not active).
 pub fn remaining_secs() -> u64 {
-    let Ok(state) = COOLDOWN.lock() else {
-        return 0;
-    };
+    let state = lock_cooldown();
     state
         .until
         .and_then(|until| until.checked_duration_since(Instant::now()))
@@ -96,10 +99,7 @@ pub fn remaining_secs() -> u64 {
 
 /// Clear cooldown — called on recovery (Allowed rate limit status).
 pub fn clear() {
-    let Ok(mut state) = COOLDOWN.lock() else {
-        tracing::error!("rate limit cooldown mutex poisoned on clear");
-        return;
-    };
+    let mut state = lock_cooldown();
     if state.until.is_some() {
         tracing::info!(module = "captain", "rate limit cooldown cleared (recovery)");
     }
@@ -201,18 +201,16 @@ mod tests {
 
         // Simulate consecutive without clearing.
         {
-            let mut state = COOLDOWN.lock().unwrap();
+            let mut state = lock_cooldown();
             state.consecutive = 0;
             state.until = None;
         }
 
-        activate(None); // consecutive=0 → BASE_COOLDOWN_SECS
-        activate(None); // consecutive=1 → won't shorten, but consecutive bumps
+        activate(None); // consecutive=0 -> BASE_COOLDOWN_SECS
+        activate(None); // consecutive=1 -> won't shorten, but consecutive bumps
         activate(None); // consecutive=2
 
-        let Ok(state) = COOLDOWN.lock() else {
-            panic!("mutex poisoned");
-        };
+        let state = lock_cooldown();
         assert!(state.consecutive >= 3);
         drop(state);
 

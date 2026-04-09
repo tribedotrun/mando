@@ -4,6 +4,8 @@
 
 mod tool_render;
 
+use std::collections::{HashMap, HashSet};
+
 use serde_json::Value;
 use tool_render::{detect_path_prefix, render_tool_use};
 
@@ -52,7 +54,7 @@ pub fn jsonl_to_markdown(jsonl_content: &str) -> String {
         // Last-prompt marker
         if msg_type == "last-prompt" {
             let sid = msg.get("sessionId").and_then(Value::as_str).unwrap_or("?");
-            parts.push(format!("\n---\n*Session end: {sid}*\n"));
+            parts.push(format!("\n---\n## *Session end: {sid}*\n"));
             i += 1;
             continue;
         }
@@ -61,16 +63,33 @@ pub fn jsonl_to_markdown(jsonl_content: &str) -> String {
         if (msg_type == "human" || msg_type == "user") && !is_tool_result_msg(msg) {
             let inner = msg.get("message").unwrap_or(msg);
             let text = extract_text_from_content(inner.get("content"));
-            human_num += 1;
-            let label = format!("Prompt #{human_num}");
+            let trimmed = text.trim();
+
+            // Skip noise: local-command caveats and stdout dumps
+            if trimmed.contains("<local-command-caveat>")
+                || trimmed.contains("<local-command-stdout>")
+            {
+                i += 1;
+                continue;
+            }
+
             let ts = msg_str(msg, "timestamp");
             let ts_part = if ts.is_empty() {
                 String::new()
             } else {
                 format!("  `{ts}`")
             };
+
+            // Slash command (e.g. /context, /help)
+            if let Some(cmd) = extract_tag(trimmed, "command-name") {
+                parts.push(format!("---\n## /{cmd}{ts_part}\n"));
+                i += 1;
+                continue;
+            }
+
+            human_num += 1;
+            let label = format!("Prompt #{human_num}");
             parts.push(format!("---\n## {label}{ts_part}\n"));
-            let trimmed = text.trim();
             if !trimmed.is_empty() {
                 parts.push(format!("{trimmed}\n"));
             }
@@ -101,7 +120,30 @@ pub fn jsonl_to_markdown(jsonl_content: &str) -> String {
                 header.push_str(&format!("  `{ts}`"));
             }
             parts.push(format!("{header}\n"));
-            parts.push(turn_parts.join("\n") + "\n");
+
+            // Build error map for inline rendering (tool_use_id -> error text)
+            let error_map: HashMap<&str, &str> = tool_results
+                .iter()
+                .filter(|r| r.is_error)
+                .map(|r| (r.tool_use_id.as_str(), r.text.as_str()))
+                .collect();
+
+            // Render turn parts with errors inline after their tool calls
+            let mut rendered: Vec<String> = Vec::new();
+            let mut rendered_error_ids: HashSet<String> = HashSet::new();
+            for part in &turn_parts {
+                match part {
+                    TurnPart::Text(text) => rendered.push(text.clone()),
+                    TurnPart::Tool { id, markdown } => {
+                        rendered.push(markdown.clone());
+                        if let Some(error_text) = error_map.get(id.as_str()) {
+                            rendered.push(format!("**Error:**\n```\n{error_text}\n```\n"));
+                            rendered_error_ids.insert(id.clone());
+                        }
+                    }
+                }
+            }
+            parts.push(rendered.join("\n") + "\n");
 
             // Tool results summary
             if !tool_results.is_empty() {
@@ -114,11 +156,17 @@ pub fn jsonl_to_markdown(jsonl_content: &str) -> String {
                 };
 
                 parts.push(format!("\n*results: {summary}*\n"));
+
+                // Render any unmatched errors (tool_use_id didn't match a tool block)
+                for r in &tool_results {
+                    if r.is_error && !rendered_error_ids.contains(&r.tool_use_id) {
+                        parts.push(format!("**Error:**\n```\n{}\n```\n", r.text));
+                    }
+                }
+
                 let mut shown_initial = false;
                 for r in &tool_results {
-                    if r.is_error {
-                        parts.push(format!("**Error:**\n```\n{}\n```\n", r.text));
-                    } else if turn_num == 1 && !shown_initial && !r.text.trim().is_empty() {
+                    if !r.is_error && turn_num == 1 && !shown_initial && !r.text.trim().is_empty() {
                         shown_initial = true;
                         parts.push(format!("**Initial context:**\n```\n{}\n```\n", r.text));
                     }
@@ -137,14 +185,20 @@ pub fn jsonl_to_markdown(jsonl_content: &str) -> String {
 struct ToolResult {
     text: String,
     is_error: bool,
+    tool_use_id: String,
+}
+
+enum TurnPart {
+    Text(String),
+    Tool { id: String, markdown: String },
 }
 
 fn consume_turn(
     messages: &[Value],
     start: usize,
     path_prefix: &str,
-) -> (Vec<String>, Vec<ToolResult>, usize) {
-    let mut turn_parts: Vec<String> = Vec::new();
+) -> (Vec<TurnPart>, Vec<ToolResult>, usize) {
+    let mut turn_parts: Vec<TurnPart> = Vec::new();
     let mut tool_results: Vec<ToolResult> = Vec::new();
     let mut i = start;
 
@@ -166,14 +220,22 @@ fn consume_turn(
                                     .unwrap_or("")
                                     .trim();
                                 if !text.is_empty() {
-                                    turn_parts.push(format!("{text}\n"));
+                                    turn_parts.push(TurnPart::Text(format!("{text}\n")));
                                 }
                             }
                             "tool_use" => {
                                 let name =
                                     block.get("name").and_then(|v| v.as_str()).unwrap_or("?");
+                                let id = block
+                                    .get("id")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("")
+                                    .to_string();
                                 let input = block.get("input").cloned().unwrap_or(Value::Null);
-                                turn_parts.push(render_tool_use(name, &input, path_prefix) + "\n");
+                                turn_parts.push(TurnPart::Tool {
+                                    id,
+                                    markdown: render_tool_use(name, &input, path_prefix) + "\n",
+                                });
                             }
                             _ => {}
                         }
@@ -181,7 +243,7 @@ fn consume_turn(
                 } else if let Some(text) = content.as_str() {
                     let trimmed = text.trim();
                     if !trimmed.is_empty() {
-                        turn_parts.push(format!("{trimmed}\n"));
+                        turn_parts.push(TurnPart::Text(format!("{trimmed}\n")));
                     }
                 }
             }
@@ -199,10 +261,16 @@ fn consume_turn(
                             .get("is_error")
                             .and_then(|v| v.as_bool())
                             .unwrap_or(false);
+                        let tool_use_id = block
+                            .get("tool_use_id")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
                         let text = extract_result_text(block.get("content"));
                         tool_results.push(ToolResult {
                             text,
                             is_error: is_err,
+                            tool_use_id,
                         });
                     }
                 }
@@ -219,6 +287,18 @@ fn consume_turn(
 }
 
 // ── Helpers ──
+
+fn extract_tag(text: &str, tag: &str) -> Option<String> {
+    let open = format!("<{tag}>");
+    let close = format!("</{tag}>");
+    let start = text.find(&open)? + open.len();
+    let end = text.find(&close)?;
+    if start <= end {
+        Some(text[start..end].to_string())
+    } else {
+        None
+    }
+}
 
 fn msg_str<'a>(msg: &'a Value, key: &str) -> &'a str {
     msg.get(key).and_then(|v| v.as_str()).unwrap_or("")

@@ -19,7 +19,6 @@ use crate::types::{
 const MAX_INPUT_BYTES: usize = 512 * 1024;
 const INPUT_CHUNK_SIZE: usize = 4096;
 const INPUT_QUEUE_CAPACITY: usize = 128;
-const MAX_OUTPUT_BUF: usize = 64 * 1024;
 
 struct LiveSession {
     input_tx: mpsc::Sender<Vec<u8>>,
@@ -124,7 +123,7 @@ impl TerminalSession {
 
         let pty_system = native_pty_system();
         let pair = pty_system.openpty(pty_size(size))?;
-        let output_buf = Arc::new(std::sync::Mutex::new(Vec::with_capacity(MAX_OUTPUT_BUF)));
+        let output_buf = Arc::new(std::sync::Mutex::new(Vec::with_capacity(64 * 1024)));
         let (output_tx, _) = broadcast::channel(4096);
         let running = Arc::new(AtomicBool::new(true));
         let exit_code = Arc::new(std::sync::Mutex::new(None));

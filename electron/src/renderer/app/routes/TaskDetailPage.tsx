@@ -28,6 +28,28 @@ export function TaskDetailPage(): React.ReactElement {
     [navigate],
   );
 
+  const handleOpenTranscript = useCallback(
+    (opts: {
+      sessionId: string;
+      caller?: string;
+      cwd?: string;
+      project?: string;
+      taskTitle?: string;
+    }) => {
+      void navigate({
+        to: '/sessions/$sessionId',
+        params: { sessionId: opts.sessionId },
+        search: {
+          caller: opts.caller,
+          cwd: opts.cwd,
+          project: opts.project,
+          taskTitle: opts.taskTitle,
+        },
+      });
+    },
+    [navigate],
+  );
+
   if (!item) {
     return (
       <div className="flex h-full items-center justify-center text-muted-foreground">
@@ -39,7 +61,12 @@ export function TaskDetailPage(): React.ReactElement {
   return (
     <div className="h-full pl-4 pr-8 py-4">
       <ErrorBoundary fallbackLabel="Task detail">
-        <TaskDetailView item={item} onBack={handleBack} onOpenTerminal={handleOpenTerminal} />
+        <TaskDetailView
+          item={item}
+          onBack={handleBack}
+          onOpenTerminal={handleOpenTerminal}
+          onOpenTranscript={handleOpenTranscript}
+        />
       </ErrorBoundary>
     </div>
   );

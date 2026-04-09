@@ -90,20 +90,15 @@ export function TerminalPage({
   });
 
   const autoSelectedRef = useRef(false);
-  if (
-    !autoSelectedRef.current &&
-    !activeTab &&
-    !resumeSessionId &&
-    !resumePending &&
-    sessions.length > 0
-  ) {
+  if (!autoSelectedRef.current && !activeTab && !resumeSessionId && !resumePending) {
     const relevant = sessions.filter(
       (session) => session.project === project && session.cwd === cwd,
     );
-    autoSelectedRef.current = true;
     if (relevant.length > 0) {
+      autoSelectedRef.current = true;
       setActiveTab(relevant[relevant.length - 1].id);
-    } else {
+    } else if (sessions.length === 0 || relevant.length === 0) {
+      autoSelectedRef.current = true;
       queueMicrotask(() => void handleNewTerminal(defaultAgent));
     }
   }
