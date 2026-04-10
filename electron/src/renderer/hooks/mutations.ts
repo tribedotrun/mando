@@ -10,6 +10,7 @@ import {
   handoffItem,
   reopenItem,
   reworkItem,
+  askReopen,
   mergePr,
   triggerTick,
   askTask,
@@ -197,6 +198,35 @@ export function useTaskReopen() {
     },
     onSuccess: () => {
       toast.success('Task reopened');
+    },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// 6b. useTaskAskReopen — reopen from Q&A with AI-synthesized feedback
+// ---------------------------------------------------------------------------
+
+export function useTaskAskReopen() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (vars: { id: number }) => askReopen(vars.id),
+    onMutate: async (vars) => {
+      await qc.cancelQueries({ queryKey: queryKeys.tasks.list() });
+      const prev = qc.getQueryData<TaskListResponse>(queryKeys.tasks.list());
+      qc.setQueryData<TaskListResponse>(queryKeys.tasks.list(), (old) =>
+        updateTaskInList(old, vars.id, { status: 'queued' }),
+      );
+      return { prev };
+    },
+    onError: (_err, _vars, context) => {
+      if (context?.prev) qc.setQueryData(queryKeys.tasks.list(), context.prev);
+      toast.error('Reopen from Q&A failed');
+    },
+    onSuccess: () => {
+      toast.success('Task reopened from Q&A');
+    },
+    onSettled: (_data, _err, vars) => {
+      void qc.invalidateQueries({ queryKey: queryKeys.tasks.askHistory(vars.id) });
     },
   });
 }

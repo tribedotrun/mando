@@ -17,11 +17,19 @@ interface TerminalTabProps {
   cwd: string;
   /** If set, auto-resume this CC session on mount. */
   resumeSessionId?: string | null;
+  /** Display name for the resumed session tab. */
+  resumeName?: string | null;
   /** Called after resumeSessionId is consumed to prevent duplicate resumes. */
   onResumeConsumed?: () => void;
 }
 
-export function TerminalTab({ project, cwd, resumeSessionId, onResumeConsumed }: TerminalTabProps) {
+export function TerminalTab({
+  project,
+  cwd,
+  resumeSessionId,
+  resumeName,
+  onResumeConsumed,
+}: TerminalTabProps) {
   const { data: sessions = [] } = useTerminalList();
   const createMutation = useTerminalCreate();
   const deleteMutation = useTerminalDelete();
@@ -47,7 +55,13 @@ export function TerminalTab({ project, cwd, resumeSessionId, onResumeConsumed }:
     if (!resumeSessionId || resumedRef.current) return;
     resumedRef.current = true;
     createMutation.mutate(
-      { project, cwd, agent: 'claude', resume_session_id: resumeSessionId },
+      {
+        project,
+        cwd,
+        agent: 'claude',
+        resume_session_id: resumeSessionId,
+        name: resumeName ?? undefined,
+      },
       {
         onSuccess: (session) => {
           setActiveTab(session.id);
@@ -213,9 +227,7 @@ export function TerminalTab({ project, cwd, resumeSessionId, onResumeConsumed }:
               }
               stroke="none"
             />
-            <span>
-              {s.agent} {s.id.slice(0, 6)}
-            </span>
+            <span>{s.name || `${s.agent} ${s.id.slice(0, 6)}`}</span>
             <X
               size={12}
               style={{ opacity: 0.5, cursor: 'pointer' }}

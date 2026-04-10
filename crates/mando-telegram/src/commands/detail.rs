@@ -4,6 +4,10 @@ use crate::bot::TelegramBot;
 use anyhow::Result;
 use mando_shared::telegram_format::{escape_html, status_icon};
 use serde_json::{json, Value};
+use tracing::warn;
+
+/// Max number of inline photos sent alongside the detail card.
+const MAX_INLINE_PHOTOS: usize = 3;
 
 /// Render a task detail card by editing the given message in place.
 pub async fn handle_view(bot: &TelegramBot, chat_id: &str, mid: i64, task_id: &str) -> Result<()> {
@@ -31,7 +35,7 @@ pub async fn handle_view(bot: &TelegramBot, chat_id: &str, mid: i64, task_id: &s
 
     let mut lines = Vec::new();
 
-    // ── Header ──────────────────────────────────────────────────────
+    // -- Header --
     let icon = status_icon(task.status.as_str());
     lines.push(format!(
         "{icon} <b>#{} {}</b>",
@@ -39,6 +43,7 @@ pub async fn handle_view(bot: &TelegramBot, chat_id: &str, mid: i64, task_id: &s
         escape_html(super::truncate(&task.title, 60)),
     ));
 
+    // -- Meta line: status | project | worker --
     let mut meta = vec![format!("<b>{}</b>", escape_html(task.status.as_str()))];
     if !task.project.is_empty() {
         meta.push(escape_html(&task.project));
@@ -48,6 +53,24 @@ pub async fn handle_view(bot: &TelegramBot, chat_id: &str, mid: i64, task_id: &s
     }
     lines.push(meta.join(" | "));
 
+    // -- Secondary meta: created_at | branch --
+    let mut meta2 = Vec::new();
+    if let Some(ref created) = task.created_at {
+        meta2.push(format!("\u{1f4c5} {}", format_date(created)));
+    }
+    if let Some(ref branch) = task.branch {
+        if !branch.is_empty() {
+            meta2.push(format!(
+                "\u{1f33f} {}",
+                escape_html(super::truncate(branch, 30))
+            ));
+        }
+    }
+    if !meta2.is_empty() {
+        lines.push(meta2.join(" | "));
+    }
+
+    // -- PR link --
     if let Some(pr_num) = task.pr_number {
         lines.push(mando_shared::helpers::pr_html_link(
             pr_num,
@@ -55,26 +78,62 @@ pub async fn handle_view(bot: &TelegramBot, chat_id: &str, mid: i64, task_id: &s
         ));
     }
 
-    // ── Evidence ────────────────────────────────────────────────────
-    render_evidence(&mut lines, &pr_res, task);
+    // -- Original prompt / context --
+    let prompt_text = task
+        .original_prompt
+        .as_deref()
+        .or(task.context.as_deref())
+        .unwrap_or("");
+    if !prompt_text.is_empty() {
+        lines.push(String::new());
+        lines.push(format!(
+            "<i>{}</i>",
+            escape_html(super::truncate(prompt_text, 200)),
+        ));
+    }
 
-    // ── Sessions ────────────────────────────────────────────────────
+    // -- Evidence --
+    let evidence = collect_evidence(&pr_res, task);
+    let evidence_image_urls = match &evidence {
+        EvidenceKind::PrEvidence { text, image_urls } => {
+            lines.push(String::new());
+            lines.push("<b>Evidence</b>".to_string());
+            lines.push(text.clone());
+            image_urls.clone()
+        }
+        EvidenceKind::Escalation(report) => {
+            lines.push(String::new());
+            lines.push("<b>Escalation Report</b>".to_string());
+            lines.push(report.clone());
+            Vec::new()
+        }
+        EvidenceKind::None => {
+            lines.push(String::new());
+            lines.push("<i>No evidence yet</i>".to_string());
+            Vec::new()
+        }
+    };
+
+    // -- Sessions: count | duration | last status --
     if let Ok(ref sess_val) = sessions_res {
         if let Some(sessions) = sess_val["sessions"].as_array() {
             if !sessions.is_empty() {
                 let count = sessions.len();
-                let total_cost: f64 = sessions.iter().filter_map(|s| s["cost_usd"].as_f64()).sum();
-                // Sessions are ordered newest-first (created_at DESC).
+                let total_ms: u64 = sessions
+                    .iter()
+                    .filter_map(|s| s["duration_ms"].as_u64())
+                    .sum();
                 let last_status = escape_html(sessions[0]["status"].as_str().unwrap_or("?"));
                 lines.push(String::new());
                 lines.push(format!(
-                    "<b>Sessions</b>: {count} | ${total_cost:.2} | last: {last_status}",
+                    "<b>Sessions</b>: {count} | {} | last: {last_status}",
+                    format_duration_ms(total_ms),
                 ));
             }
         }
     }
 
-    // ── Timeline (last 5) ───────────────────────────────────────────
+    // -- Timeline (last 5) --
     if let Ok(ref tl_val) = timeline_res {
         if let Some(events) = tl_val["events"].as_array() {
             if !events.is_empty() {
@@ -96,7 +155,7 @@ pub async fn handle_view(bot: &TelegramBot, chat_id: &str, mid: i64, task_id: &s
         }
     }
 
-    // ── Keyboard ────────────────────────────────────────────────────
+    // -- Keyboard --
     let has_pr = task.pr_number.is_some();
     let mut buttons =
         crate::commands::action::action_buttons(&task.id.to_string(), task.status, has_pr);
@@ -122,40 +181,54 @@ pub async fn handle_view(bot: &TelegramBot, chat_id: &str, mid: i64, task_id: &s
     )
     .await?;
 
+    // -- Inline photos (sent as separate messages after the card) --
+    send_inline_photos(bot, chat_id, &evidence_image_urls, task).await;
+
     Ok(())
 }
 
-// ── Evidence rendering ──────────────────────────────────────────────
+// -- Evidence data collection --
 
-fn render_evidence(
-    lines: &mut Vec<String>,
+enum EvidenceKind {
+    /// PR summary evidence with optional inline image URLs.
+    PrEvidence {
+        text: String,
+        image_urls: Vec<String>,
+    },
+    /// Escalation report (text only, no images).
+    Escalation(String),
+    /// Nothing found.
+    None,
+}
+
+fn collect_evidence(
     pr_res: &Result<Value, anyhow::Error>,
     task: &mando_types::Task,
-) {
-    lines.push(String::new());
-
+) -> EvidenceKind {
     if let Ok(ref pr_val) = pr_res {
         let summary = pr_val["summary"].as_str().unwrap_or("");
         if !summary.is_empty() {
-            let evidence = extract_evidence_summary(summary);
-            if !evidence.is_empty() {
-                lines.push("<b>Evidence</b>".to_string());
-                lines.push(evidence);
-                return;
+            let data = extract_evidence_data(summary);
+            if !data.0.is_empty() {
+                return EvidenceKind::PrEvidence {
+                    text: data.0,
+                    image_urls: data.1,
+                };
             }
         }
     }
 
     if let Some(ref report) = task.escalation_report {
-        lines.push("<b>Escalation Report</b>".to_string());
-        lines.push(escape_html(super::truncate(report, 300)));
-    } else {
-        lines.push("<i>No evidence yet</i>".to_string());
+        return EvidenceKind::Escalation(escape_html(super::truncate(report, 300)));
     }
+
+    EvidenceKind::None
 }
 
-fn extract_evidence_summary(body: &str) -> String {
-    let mut parts = Vec::new();
+/// Returns (formatted_text, image_urls). Both are truncated to the same cap.
+fn extract_evidence_data(body: &str) -> (String, Vec<String>) {
+    let mut text_parts = Vec::new();
+    let mut image_urls = Vec::new();
     let mut in_evidence = false;
     let mut evidence_level = 0usize;
     let mut has_code = false;
@@ -183,28 +256,143 @@ fn extract_evidence_summary(body: &str) -> String {
         }
 
         if let Some(url) = extract_md_image_url(trimmed) {
-            parts.push(format!(
+            text_parts.push(format!(
                 "\u{1f5bc} <a href=\"{}\">Screenshot</a>",
                 escape_html(url),
             ));
+            image_urls.push(url.to_string());
         } else if let Some(url) = extract_html_img_src(trimmed) {
-            parts.push(format!(
+            text_parts.push(format!(
                 "\u{1f5bc} <a href=\"{}\">Screenshot</a>",
                 escape_html(url),
             ));
+            image_urls.push(url.to_string());
         } else if !has_video
             && (trimmed.contains(".mp4") || trimmed.contains(".mov") || trimmed.contains(".webm"))
         {
             has_video = true;
-            parts.push("\u{1f3ac} Video evidence".to_string());
+            text_parts.push("\u{1f3ac} Video evidence".to_string());
         } else if !has_code && trimmed.starts_with("```") {
             has_code = true;
-            parts.push("\u{1f4dd} Code evidence".to_string());
+            text_parts.push("\u{1f4dd} Code evidence".to_string());
         }
     }
 
-    parts.truncate(5);
-    parts.join("\n")
+    text_parts.truncate(5);
+    image_urls.truncate(MAX_INLINE_PHOTOS);
+    (text_parts.join("\n"), image_urls)
+}
+
+// -- Inline photo sending --
+
+async fn send_inline_photos(
+    bot: &TelegramBot,
+    chat_id: &str,
+    evidence_urls: &[String],
+    task: &mando_types::Task,
+) {
+    let mut sent = 0usize;
+
+    // 1. Evidence screenshots (public GCS URLs)
+    for url in evidence_urls {
+        if sent >= MAX_INLINE_PHOTOS {
+            break;
+        }
+        if let Err(e) = bot.send_photo_url(chat_id, url, None).await {
+            warn!("Failed to send evidence photo: {e}");
+            continue;
+        }
+        sent += 1;
+    }
+
+    // 2. Task images (local files fetched from gateway)
+    if sent < MAX_INLINE_PHOTOS {
+        if let Some(ref images_str) = task.images {
+            let filenames: Vec<&str> = images_str
+                .split(',')
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .collect();
+            for filename in filenames {
+                if sent >= MAX_INLINE_PHOTOS {
+                    break;
+                }
+                match fetch_image_bytes(bot, filename).await {
+                    Ok(bytes) => {
+                        if let Err(e) = bot.send_photo_bytes(chat_id, bytes, filename, None).await {
+                            warn!("Failed to send task image {filename}: {e}");
+                            continue;
+                        }
+                        sent += 1;
+                    }
+                    Err(e) => {
+                        warn!("Failed to fetch task image {filename}: {e}");
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Fetch image bytes from the gateway's `/api/images/{filename}` endpoint.
+async fn fetch_image_bytes(bot: &TelegramBot, filename: &str) -> Result<Vec<u8>> {
+    let gw = bot.gw();
+    let url = format!("{}/api/images/{}", gw.base_url(), filename);
+    let mut req = gw.client().get(&url);
+    if let Some(token) = gw.token() {
+        req = req.header("Authorization", format!("Bearer {token}"));
+    }
+    let resp = req.send().await?;
+    anyhow::ensure!(
+        resp.status().is_success(),
+        "image fetch returned {}",
+        resp.status()
+    );
+    let bytes = resp.bytes().await?;
+    Ok(bytes.to_vec())
+}
+
+// -- Formatting helpers --
+
+fn format_date(rfc3339: &str) -> String {
+    let date_str = match rfc3339.get(..10) {
+        Some(s) if s.len() == 10 => s,
+        _ => return escape_html(rfc3339),
+    };
+    let parts: Vec<&str> = date_str.split('-').collect();
+    if parts.len() != 3 {
+        return escape_html(date_str);
+    }
+    let month = match parts[1] {
+        "01" => "Jan",
+        "02" => "Feb",
+        "03" => "Mar",
+        "04" => "Apr",
+        "05" => "May",
+        "06" => "Jun",
+        "07" => "Jul",
+        "08" => "Aug",
+        "09" => "Sep",
+        "10" => "Oct",
+        "11" => "Nov",
+        "12" => "Dec",
+        _ => parts[1],
+    };
+    let day = parts[2].trim_start_matches('0');
+    format!("{month} {day}")
+}
+
+fn format_duration_ms(ms: u64) -> String {
+    let secs = ms / 1000;
+    let mins = secs / 60;
+    let hours = mins / 60;
+    if hours > 0 {
+        format!("{}h {}m", hours, mins % 60)
+    } else if mins > 0 {
+        format!("{}m {}s", mins, secs % 60)
+    } else {
+        format!("{}s", secs)
+    }
 }
 
 fn is_evidence_heading(heading: &str) -> bool {

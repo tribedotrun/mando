@@ -11,6 +11,7 @@ export interface TerminalPageState {
   project: string;
   cwd: string;
   resumeSessionId?: string | null;
+  name?: string | null;
   preparing?: boolean;
 }
 

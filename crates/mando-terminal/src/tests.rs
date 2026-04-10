@@ -72,6 +72,7 @@ async fn host_keeps_exited_session_history_distinct_from_restored_sessions() {
             terminal_env: HashMap::from([("MANDO_TERMINAL_ID".into(), "wb:panel".into())]),
             terminal_id: Some("wb:panel".into()),
             extra_args: Vec::new(),
+            name: None,
         })
         .unwrap();
 

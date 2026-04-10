@@ -1,13 +1,15 @@
 import React, { useState, useCallback, useRef } from 'react';
-import { ArrowUp, ChevronDown } from 'lucide-react';
-import { useQueryClient } from '@tanstack/react-query';
+import { ArrowUp, ChevronDown, RotateCcw } from 'lucide-react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import log from '#renderer/logger';
-import { reopenItem, reworkItem } from '#renderer/domains/captain/hooks/useApi';
+import { reopenItem, reworkItem, fetchAskHistory } from '#renderer/domains/captain/hooks/useApi';
+import { useTaskAskReopen } from '#renderer/hooks/mutations';
 import { useDraft } from '#renderer/global/hooks/useDraft';
 import { toast } from 'sonner';
 import { FINALIZED_STATUSES, type TaskItem } from '#renderer/types';
 import { canReopen, canRework, canAskAny, getErrorMessage } from '#renderer/utils';
 import { invalidateTaskDetail } from '#renderer/queryClient';
+import { queryKeys } from '#renderer/queryKeys';
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -16,6 +18,12 @@ import {
 } from '#renderer/components/ui/dropdown-menu';
 import { Button } from '#renderer/components/ui/button';
 import { Textarea } from '#renderer/components/ui/textarea';
+import {
+  Tooltip,
+  TooltipTrigger,
+  TooltipContent,
+  TooltipProvider,
+} from '#renderer/components/ui/tooltip';
 
 type Action = 'ask' | 'reopen' | 'rework';
 
@@ -41,6 +49,7 @@ export function TaskActionBar({ item, onAsk }: Props): React.ReactElement | null
   const [pendingAction, setPendingAction] = useState<Action | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const queryClient = useQueryClient();
+  const askReopenMut = useTaskAskReopen();
   // Sync selected action when task status changes -- only when there are valid actions.
   if (available.length > 0 && !available.includes(selectedAction)) {
     setSelectedAction(defaultAction);
@@ -48,7 +57,7 @@ export function TaskActionBar({ item, onAsk }: Props): React.ReactElement | null
 
   const handleSubmit = useCallback(async () => {
     const trimmed = text.trim();
-    if (!trimmed) return;
+    if (!trimmed || askReopenMut.isPending) return;
     setPendingAction(selectedAction);
     try {
       if (selectedAction === 'ask') {
@@ -96,19 +105,34 @@ export function TaskActionBar({ item, onAsk }: Props): React.ReactElement | null
 
   const config = ACTION_CONFIG[selectedAction];
   const hasMultipleActions = available.length > 1;
-  const isLoading = !!pendingAction;
-  const canSubmit = !hidden && text.trim().length > 0 && !pendingAction;
+  const isLoading = !!pendingAction || askReopenMut.isPending;
+  const canSubmit = !hidden && text.trim().length > 0 && !pendingAction && !askReopenMut.isPending;
   const showAccent = canSubmit || isLoading;
+
+  // "Reopen from Q&A" -- subscribe to ask history reactively.
+  const { data: askHistoryData } = useQuery({
+    queryKey: queryKeys.tasks.askHistory(item.id),
+    queryFn: () => fetchAskHistory(item.id),
+  });
+  const hasSuccessfulQA = askHistoryData?.history?.some(
+    (m) => m.role === 'assistant' && !m.content.startsWith('Error: '),
+  );
+  const showAskReopen =
+    selectedAction === 'ask' &&
+    (item.status === 'awaiting-review' || item.status === 'escalated') &&
+    !!hasSuccessfulQA &&
+    !!item.session_ids?.ask;
 
   return (
     <div
-      className={`shrink-0 border-t-0 transition-[max-height,opacity] duration-150 ease-in-out ${hidden ? 'max-h-0 overflow-hidden opacity-0' : 'max-h-[200px] overflow-visible opacity-100'}`}
+      className={`shrink-0 border-t-0 transition-[max-height,opacity] duration-150 ease-in-out ${hidden ? 'max-h-0 overflow-hidden opacity-0' : 'max-h-[260px] overflow-visible opacity-100'}`}
     >
       <div className="px-4 pt-3 pb-3">
-        <div className="flex items-end gap-2 rounded-lg bg-muted px-3 py-2">
+        <div className="rounded-lg bg-muted px-3 py-2">
+          {/* Text input */}
           <Textarea
             ref={textareaRef}
-            className="min-h-[20px] max-h-[120px] flex-1 resize-none overflow-y-auto border-0 bg-transparent py-1 text-body leading-snug text-foreground shadow-none [scrollbar-width:none] focus-visible:ring-0 dark:bg-transparent"
+            className="min-h-[20px] max-h-[120px] w-full resize-none overflow-y-auto border-0 bg-transparent py-1 text-body leading-snug text-foreground shadow-none [scrollbar-width:none] focus-visible:ring-0 dark:bg-transparent"
             rows={1}
             placeholder={config.placeholder}
             value={text}
@@ -118,58 +142,107 @@ export function TaskActionBar({ item, onAsk }: Props): React.ReactElement | null
               e.target.style.height = e.target.scrollHeight + 'px';
             }}
             onKeyDown={handleKeyDown}
-            disabled={!!pendingAction}
+            disabled={!!pendingAction || askReopenMut.isPending}
           />
 
-          {hasMultipleActions && (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="xs"
-                  disabled={!!pendingAction}
-                  className="shrink-0 gap-1 text-muted-foreground"
-                >
-                  {config.label}
-                  <ChevronDown size={10} className="opacity-60" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent side="top" align="start" className="min-w-[120px]">
-                {available.map((action) => (
-                  <DropdownMenuCheckboxItem
-                    key={action}
-                    checked={action === selectedAction}
-                    onSelect={() => setSelectedAction(action)}
+          {/* Toolbar row: action selector, reopen button, send */}
+          <div className="mt-1.5 flex items-center gap-2">
+            {hasMultipleActions && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="xs"
+                    disabled={!!pendingAction}
+                    className="shrink-0 gap-1 text-muted-foreground"
                   >
-                    {ACTION_CONFIG[action].label}
-                  </DropdownMenuCheckboxItem>
-                ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
-          )}
-
-          {/* Circular send button */}
-          <Button
-            onClick={() => void handleSubmit()}
-            disabled={!canSubmit}
-            variant={showAccent ? 'default' : 'secondary'}
-            size="icon-xs"
-            className="shrink-0 rounded-full transition-colors"
-          >
-            {isLoading ? (
-              <svg className="animate-spin" width="14" height="14" viewBox="0 0 14 14" fill="none">
-                <circle cx="7" cy="7" r="5.5" stroke="currentColor" strokeWidth="2" opacity="0.3" />
-                <path
-                  d="M12.5 7a5.5 5.5 0 0 0-5.5-5.5"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                />
-              </svg>
-            ) : (
-              <ArrowUp size={14} strokeWidth={2} />
+                    {config.label}
+                    <ChevronDown size={10} className="opacity-60" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent side="top" align="start" className="min-w-[120px]">
+                  {available.map((action) => (
+                    <DropdownMenuCheckboxItem
+                      key={action}
+                      checked={action === selectedAction}
+                      onSelect={() => setSelectedAction(action)}
+                    >
+                      {ACTION_CONFIG[action].label}
+                    </DropdownMenuCheckboxItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
             )}
-          </Button>
+
+            {showAskReopen &&
+              (askReopenMut.isPending ? (
+                <Button
+                  variant="outline"
+                  size="xs"
+                  disabled
+                  className="shrink-0 text-muted-foreground"
+                >
+                  <RotateCcw size={12} className="animate-spin" />
+                  Reopening...
+                </Button>
+              ) : (
+                <TooltipProvider delayDuration={300}>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="outline"
+                        size="icon-xs"
+                        onClick={() => askReopenMut.mutate({ id: item.id })}
+                        className="shrink-0 text-muted-foreground"
+                      >
+                        <RotateCcw size={12} />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top" className="text-xs">
+                      Reopen from Q&A
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              ))}
+
+            <div className="flex-1" />
+
+            {/* Send button */}
+            <Button
+              onClick={() => void handleSubmit()}
+              disabled={!canSubmit}
+              variant={showAccent ? 'default' : 'secondary'}
+              size="icon-xs"
+              className="shrink-0 rounded-full transition-colors"
+            >
+              {isLoading ? (
+                <svg
+                  className="animate-spin"
+                  width="14"
+                  height="14"
+                  viewBox="0 0 14 14"
+                  fill="none"
+                >
+                  <circle
+                    cx="7"
+                    cy="7"
+                    r="5.5"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    opacity="0.3"
+                  />
+                  <path
+                    d="M12.5 7a5.5 5.5 0 0 0-5.5-5.5"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                  />
+                </svg>
+              ) : (
+                <ArrowUp size={14} strokeWidth={2} />
+              )}
+            </Button>
+          </div>
         </div>
       </div>
     </div>

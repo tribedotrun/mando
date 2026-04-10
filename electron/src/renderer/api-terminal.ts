@@ -58,6 +58,7 @@ export interface TerminalSessionInfo {
   createdAt?: string;
   endedAt?: string | null;
   terminalId?: string | null;
+  name?: string | null;
 }
 
 export interface CreateTerminalParams {
@@ -66,6 +67,7 @@ export interface CreateTerminalParams {
   agent: 'claude' | 'codex';
   resume_session_id?: string;
   size?: { rows: number; cols: number };
+  name?: string;
 }
 
 export async function createTerminal(params: CreateTerminalParams): Promise<TerminalSessionInfo> {

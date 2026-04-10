@@ -14,6 +14,7 @@ interface TerminalPageProps {
   project: string;
   cwd: string;
   resumeSessionId?: string | null;
+  resumeName?: string | null;
   onResumeConsumed?: () => void;
 }
 
@@ -26,9 +27,10 @@ export function TerminalPage({
   project,
   cwd,
   resumeSessionId,
+  resumeName,
   onResumeConsumed,
 }: TerminalPageProps) {
-  const { data: sessions = [] } = useTerminalList();
+  const { data: sessions = [], isSuccess: sessionsLoaded } = useTerminalList();
   const createMutation = useTerminalCreate();
   const deleteMutation = useTerminalDelete();
   const queryClient = useQueryClient();
@@ -38,6 +40,7 @@ export function TerminalPage({
     Record<string, { running: boolean; exit_code: number | null }>
   >({});
   const [resumePending, setResumePending] = useState(!!resumeSessionId);
+  const [resumeFailed, setResumeFailed] = useState(false);
   const initRef = useRef(false);
 
   const { data: config } = useConfig();
@@ -52,8 +55,12 @@ export function TerminalPage({
     (session) => session.project === project && session.cwd === cwd,
   );
 
+  const autoSelectedRef = useRef(false);
+
   const handleNewTerminal = useCallback(
     async (agent: 'claude' | 'codex') => {
+      setResumeFailed(false);
+      autoSelectedRef.current = true;
       try {
         const session = await createMutation.mutateAsync({ project, cwd, agent });
         setActiveTab(session.id);
@@ -71,26 +78,36 @@ export function TerminalPage({
 
     if (resumeSessionId) {
       setResumePending(true);
-      createMutation.mutate(
-        { project, cwd, agent: 'claude', resume_session_id: resumeSessionId },
-        {
-          onSuccess: (session) => {
-            setResumePending(false);
-            setActiveTab(session.id);
-            onResumeConsumed?.();
-          },
-          onError: (err) => {
-            setResumePending(false);
-            log.error('Failed to resume terminal session', err);
-            onResumeConsumed?.();
-          },
-        },
-      );
+      void (async () => {
+        try {
+          const session = await createMutation.mutateAsync({
+            project,
+            cwd,
+            agent: 'claude',
+            resume_session_id: resumeSessionId,
+            name: resumeName ?? undefined,
+          });
+          setResumePending(false);
+          setActiveTab(session.id);
+          onResumeConsumed?.();
+        } catch (err) {
+          setResumePending(false);
+          setResumeFailed(true);
+          log.error('Failed to resume terminal session', err);
+          onResumeConsumed?.();
+        }
+      })();
     }
   });
 
-  const autoSelectedRef = useRef(false);
-  if (!autoSelectedRef.current && !activeTab && !resumeSessionId && !resumePending) {
+  if (
+    !autoSelectedRef.current &&
+    !activeTab &&
+    !resumeSessionId &&
+    !resumePending &&
+    !resumeFailed &&
+    sessionsLoaded
+  ) {
     const relevant = sessions.filter(
       (session) => session.project === project && session.cwd === cwd,
     );
@@ -201,9 +218,7 @@ export function TerminalPage({
               }
               stroke="none"
             />
-            <span>
-              {session.agent} {session.id.slice(0, 6)}
-            </span>
+            <span>{session.name || `${session.agent} ${session.id.slice(0, 6)}`}</span>
             <X
               size={12}
               className="opacity-40 hover:opacity-100"
@@ -242,6 +257,10 @@ export function TerminalPage({
           <div className="flex h-full items-center justify-center gap-2 text-caption text-text-3">
             <Loader2 size={14} className="animate-spin" />
             Resuming session...
+          </div>
+        ) : resumeFailed ? (
+          <div className="flex h-full items-center justify-center text-caption text-text-3">
+            Session resume failed. Start a new terminal to continue.
           </div>
         ) : (
           <div className="flex h-full items-center justify-center text-caption text-text-3">

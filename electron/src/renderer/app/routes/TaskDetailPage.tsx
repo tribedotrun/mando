@@ -19,10 +19,15 @@ export function TaskDetailPage(): React.ReactElement {
   }, [navigate]);
 
   const handleOpenTerminal = useCallback(
-    (opts: { project: string; cwd: string; resumeSessionId?: string }) => {
+    (opts: { project: string; cwd: string; resumeSessionId?: string; name?: string }) => {
       void navigate({
         to: '/terminal',
-        search: { project: opts.project, cwd: opts.cwd, resume: opts.resumeSessionId },
+        search: {
+          project: opts.project,
+          cwd: opts.cwd,
+          resume: opts.resumeSessionId,
+          name: opts.name,
+        },
       });
     },
     [navigate],

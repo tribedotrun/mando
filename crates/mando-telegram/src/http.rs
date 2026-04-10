@@ -75,6 +75,11 @@ impl GatewayClient {
         self.token.as_deref()
     }
 
+    /// Underlying HTTP client (for raw requests like image fetching).
+    pub fn client(&self) -> &Client {
+        &self.client
+    }
+
     /// GET request to the gateway.
     pub async fn get(&self, path: &str) -> Result<Value> {
         let resp = self

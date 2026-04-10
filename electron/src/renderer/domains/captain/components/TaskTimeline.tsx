@@ -46,6 +46,9 @@ function reopenLabel(data: Record<string, unknown>): string {
 /** Keys to always exclude from expanded detail view. */
 const HIDDEN_KEYS = new Set(['session_id', 'source', 'item_id', 'task_id']);
 
+/** Event types whose summary already contains the worker name, making the worker detail redundant. */
+const WORKER_IN_SUMMARY = new Set(['worker_spawned', 'session_resumed']);
+
 /** Values that add no information -- skip them in detail view. */
 function isUselessValue(value: unknown): boolean {
   if (value === null || value === undefined || value === '') return true;
@@ -68,9 +71,14 @@ function isShaField(key: string, value: string): boolean {
 }
 
 /** Get useful detail entries from event data. */
-function getUsefulDetails(data: Record<string, unknown>): [string, string][] {
+function getUsefulDetails(data: Record<string, unknown>, eventType: string): [string, string][] {
   return Object.entries(data)
-    .filter(([k, v]) => !HIDDEN_KEYS.has(k) && !isUselessValue(v))
+    .filter(
+      ([k, v]) =>
+        !HIDDEN_KEYS.has(k) &&
+        !isUselessValue(v) &&
+        !(k === 'worker' && WORKER_IN_SUMMARY.has(eventType)),
+    )
     .map(([k, v]) => {
       let display = String(v);
       // Shorten GitHub URLs to repo#number format
@@ -101,7 +109,7 @@ export function TaskTimeline({
         const showTranscript = sessionId && !shownSessionIds.has(sessionId);
         if (sessionId) shownSessionIds.add(sessionId);
         const isExpanded = expandedIdx === i;
-        const details = getUsefulDetails(event.data);
+        const details = getUsefulDetails(event.data, event.event_type);
         const hasDetails = details.length > 0;
         const isMerged = event.event_type === 'merged';
 

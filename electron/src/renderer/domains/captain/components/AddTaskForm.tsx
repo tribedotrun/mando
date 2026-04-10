@@ -6,6 +6,7 @@ import { useProjects } from '#renderer/domains/settings';
 import { useTaskCreate, useTaskBulkCreate } from '#renderer/hooks/mutations';
 import { bulkTextareaRows, shortRepo } from '#renderer/utils';
 import { Button } from '#renderer/components/ui/button';
+import { Kbd } from '#renderer/components/ui/kbd';
 
 import { Combobox } from '#renderer/components/ui/combobox';
 
@@ -296,6 +297,7 @@ function AddTaskFormInner({
           <div className="flex items-center gap-3">
             <Button data-testid="submit-task-btn" onClick={handleSubmit} disabled={!canSubmit}>
               Create
+              <Kbd className="bg-primary-foreground/20 text-primary-foreground">⌘↵</Kbd>
             </Button>
           </div>
         </div>
