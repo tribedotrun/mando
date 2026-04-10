@@ -1,44 +1,30 @@
-import React, { useCallback, useImperativeHandle, useRef } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { fetchAskHistory } from '#renderer/domains/captain/hooks/useApi';
-import { queryKeys } from '#renderer/queryKeys';
+import React, { useCallback, useRef } from 'react';
 import { PrMarkdown } from '#renderer/domains/captain/components/PrMarkdown';
 import { useTaskAsk } from '#renderer/global/hooks/useTaskAsk';
 import type { AskHistoryEntry, TaskItem } from '#renderer/types';
 import { shortTs } from '#renderer/utils';
-import { Button } from '#renderer/components/ui/button';
-import { Skeleton } from '#renderer/components/ui/skeleton';
 
 const SCROLL_DELAY_MS = 50;
 
-export interface QAHandle {
-  ask: (question: string) => void;
-}
+/* -- Live Q&A Tab (replaces the old read-only history tab) -- */
 
-/* -- Active Q&A View (replaces tabs when asking) -- */
-
-interface ActiveQAProps {
+interface QATabProps {
   item: TaskItem;
-  qaRef: React.RefObject<QAHandle | null>;
-  onBack: () => void;
-  /** Question passed from the action bar, consumed on mount. */
+  /** Question injected from the action bar; consumed immediately. */
   pendingQuestion?: string | null;
   onPendingConsumed?: () => void;
 }
 
-export function ActiveQAView({
+export function QATab({
   item,
-  qaRef,
-  onBack,
   pendingQuestion,
   onPendingConsumed,
-}: ActiveQAProps): React.ReactElement {
-  const scrollRef = useRef<HTMLDivElement>(null);
+}: QATabProps): React.ReactElement {
+  const bottomRef = useRef<HTMLDivElement>(null);
   const { messages, pending, ask } = useTaskAsk(item.id);
 
   const scrollToBottom = useCallback(() => {
-    const el = scrollRef.current;
-    if (el) setTimeout(() => (el.scrollTop = el.scrollHeight), SCROLL_DELAY_MS);
+    setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), SCROLL_DELAY_MS);
   }, []);
 
   const doAsk = useCallback(
@@ -50,13 +36,13 @@ export function ActiveQAView({
     [ask, scrollToBottom],
   );
 
-  useImperativeHandle(qaRef, () => ({ ask: doAsk }), [doAsk]);
-
-  // Consume pending question from action bar on mount.
-  const consumedRef = useRef(false);
-  if (pendingQuestion && !consumedRef.current) {
-    consumedRef.current = true;
-    // Schedule after mount so doAsk runs with valid refs.
+  // Consume pending question from action bar on render.
+  // Reset when pendingQuestion clears so repeated identical questions are not dropped.
+  const consumedRef = useRef<string | null>(null);
+  if (!pendingQuestion) {
+    consumedRef.current = null;
+  } else if (consumedRef.current !== pendingQuestion) {
+    consumedRef.current = pendingQuestion;
     void Promise.resolve().then(() => {
       void doAsk(pendingQuestion).catch((err) => console.error('Ask failed', err));
       onPendingConsumed?.();
@@ -64,74 +50,17 @@ export function ActiveQAView({
   }
 
   return (
-    <>
-      {/* Back link */}
-      <Button
-        variant="ghost"
-        size="xs"
-        onClick={onBack}
-        className="mb-3 shrink-0 text-muted-foreground"
-      >
-        &larr; Back to task
-      </Button>
-
-      {/* Messages, scrollable */}
-      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto pr-2">
-        {messages.length === 0 && !pending && (
-          <div className="py-8 text-center text-caption text-text-3">
-            Ask a question about this task
-          </div>
-        )}
-        {messages.map((entry, i) => (
-          <QAMessage key={`${entry.timestamp}-${i}`} entry={entry} />
-        ))}
-        {pending && <div className="py-3 text-caption text-text-3">Thinking...</div>}
-      </div>
-    </>
-  );
-}
-
-/* -- Q&A History Tab (read-only view in tabs) -- */
-
-export function QAHistoryTab({ item }: { item: TaskItem }): React.ReactElement {
-  const {
-    data: serverHistory,
-    isPending,
-    isError,
-    error,
-  } = useQuery({
-    queryKey: queryKeys.tasks.askHistory(item.id),
-    queryFn: () => fetchAskHistory(item.id),
-  });
-
-  const messages = serverHistory?.history ?? [];
-
-  if (isError) {
-    return (
-      <div className="text-caption text-destructive">
-        Failed to load Q&A history{error instanceof Error ? `: ${error.message}` : ''}
-      </div>
-    );
-  }
-
-  if (isPending) {
-    return (
-      <div className="space-y-3">
-        <Skeleton className="h-4 w-3/4" />
-        <Skeleton className="h-4 w-1/2" />
-      </div>
-    );
-  }
-
-  if (messages.length === 0) {
-    return <div className="text-caption text-text-3">No Q&A history yet</div>;
-  }
-
-  return (
     <div>
+      {messages.length === 0 && !pending && (
+        <div className="py-8 text-center text-caption text-text-3">
+          Ask a question about this task
+        </div>
+      )}
       {messages.map((entry, i) => (
         <QAMessage key={`${entry.timestamp}-${i}`} entry={entry} />
       ))}
+      {pending && <div className="py-3 text-caption text-text-3">Thinking...</div>}
+      <div ref={bottomRef} />
     </div>
   );
 }

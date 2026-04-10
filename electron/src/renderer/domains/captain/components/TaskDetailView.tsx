@@ -23,11 +23,7 @@ import {
   EscalatedReportTab,
   ClarificationTab,
 } from '#renderer/domains/captain/components/StatusCard';
-import {
-  ActiveQAView,
-  QAHistoryTab,
-  type QAHandle,
-} from '#renderer/domains/captain/components/TaskQAView';
+import { QATab } from '#renderer/domains/captain/components/TaskQAView';
 import {
   TimelineTab,
   PrTab,
@@ -60,7 +56,12 @@ const REFRESH_INDICATOR_MS = 1500;
 interface Props {
   item: TaskItem;
   onBack: () => void;
-  onOpenTerminal?: (opts: { project: string; cwd: string; resumeSessionId?: string }) => void;
+  onOpenTerminal?: (opts: {
+    project: string;
+    cwd: string;
+    resumeSessionId?: string;
+    name?: string;
+  }) => void;
   onOpenTranscript?: (opts: {
     sessionId: string;
     caller?: string;
@@ -83,8 +84,8 @@ export function TaskDetailView({
     return 'pr';
   });
   const [prRefreshing, setPrRefreshing] = useState(false);
-  const [activeQA, setActiveQA] = useState(false);
   const [contextModalOpen, setContextModalOpen] = useState(false);
+  const [pendingQuestion, setPendingQuestion] = useState<string | null>(null);
 
   // Listen for header overflow menu triggering "View task brief"
   useMountEffect(() => {
@@ -93,16 +94,10 @@ export function TaskDetailView({
     return () => document.removeEventListener('mando:view-task-brief', handler);
   });
 
-  const qaRef = useRef<QAHandle | null>(null);
-  const [pendingQuestion, setPendingQuestion] = useState<string | null>(null);
-
-  // Refs to avoid stale closures in keydown handler.
-  const activeQARef = useRef(activeQA);
-  activeQARef.current = activeQA;
   const onBackRef = useRef(onBack);
   onBackRef.current = onBack;
 
-  // Escape key handler, layered dismiss.
+  // Escape key handler.
   useMountEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
@@ -113,11 +108,7 @@ export function TaskDetailView({
       )
         return;
       e.stopPropagation();
-      if (activeQARef.current) {
-        setActiveQA(false);
-      } else {
-        onBackRef.current();
-      }
+      onBackRef.current();
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
@@ -202,29 +193,24 @@ export function TaskDetailView({
   };
 
   const handleAskFromBar = useCallback((question: string) => {
-    if (activeQARef.current && qaRef.current) {
-      qaRef.current.ask(question);
-    } else {
-      setActiveQA(true);
-      setPendingQuestion(question);
-    }
-  }, []);
-
-  const handleQABack = useCallback(() => {
-    setActiveQA(false);
+    setActiveTab('qa');
+    setPendingQuestion(question);
   }, []);
 
   const openTerminalPage = useCallback(
-    (resumeId?: string) => {
+    (resumeId?: string, name?: string) => {
       if (!onOpenTerminal || !item.project) return;
-      let cwd = item.worktree;
-      if (!cwd) {
-        const cfg = qc.getQueryData<MandoConfig>(queryKeys.config.current());
-        const pc = cfg?.captain?.projects
-          ? Object.values(cfg.captain.projects).find((p) => p.name === item.project)
-          : undefined;
-        cwd = pc?.path;
-      }
+
+      const cfg = qc.getQueryData<MandoConfig>(queryKeys.config.current());
+      const projectPath = cfg?.captain?.projects
+        ? Object.values(cfg.captain.projects).find((p) => p.name === item.project)?.path
+        : undefined;
+
+      // For resume, prefer project path: the worktree may have been cleaned up
+      // after merge/completion, and Claude Code resumes by session ID regardless
+      // of cwd. For new sessions, prefer worktree for correct git context.
+      const cwd = resumeId ? (projectPath ?? item.worktree) : (item.worktree ?? projectPath);
+
       if (!cwd) {
         toast.error(`No working directory for task "${item.title}"`);
         return;
@@ -233,13 +219,14 @@ export function TaskDetailView({
         project: item.project,
         cwd,
         resumeSessionId: resumeId,
+        name,
       });
     },
     [onOpenTerminal, item.project, item.worktree, item.title, qc],
   );
 
   const handleResumeSession = useCallback(
-    (sessionId: string) => openTerminalPage(sessionId),
+    (sessionId: string, name?: string) => openTerminalPage(sessionId, name),
     [openTerminalPage],
   );
 
@@ -282,98 +269,89 @@ export function TaskDetailView({
       <div className="flex min-h-0 flex-1">
         {/* Left column, entire column scrolls together */}
         <div className="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden">
-          {/* Active Q&A mode, replaces tabs */}
-          {activeQA ? (
-            <div className="flex min-h-0 flex-1 flex-col">
-              <ActiveQAView
-                item={item}
-                qaRef={qaRef}
-                onBack={handleQABack}
-                pendingQuestion={pendingQuestion}
-                onPendingConsumed={() => setPendingQuestion(null)}
-              />
+          <Tabs
+            value={effectiveTab}
+            onValueChange={(v) => {
+              if (v === 'terminal') {
+                openTerminalPage();
+              } else {
+                setActiveTab(v as DetailTab);
+              }
+            }}
+            className="gap-0"
+          >
+            <div className="sticky top-0 z-10 flex items-center justify-between bg-background">
+              <TabsList variant="line" className="h-auto gap-0">
+                {tabs.map((tab) => (
+                  <TabsTrigger
+                    key={tab.key}
+                    value={tab.key}
+                    className={
+                      tab.accent
+                        ? 'px-3 py-1.5 text-caption font-medium text-[var(--needs-human)]'
+                        : 'px-3 py-1.5 text-caption font-medium'
+                    }
+                  >
+                    {tab.accent && <span className="mr-1">!</span>}
+                    {tab.label}
+                  </TabsTrigger>
+                ))}
+              </TabsList>
+              {effectiveTab === 'pr' && item.pr_number && (
+                <TooltipProvider delayDuration={300}>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon-xs"
+                        disabled={prRefreshing}
+                        onClick={() => {
+                          setPrRefreshing(true);
+                          void refetchPr();
+                          setTimeout(() => setPrRefreshing(false), REFRESH_INDICATOR_MS);
+                        }}
+                        className="mr-2 text-text-3 hover:text-text-1"
+                      >
+                        <RefreshCw size={14} className={prRefreshing ? 'animate-spin' : ''} />
+                        <span className="sr-only">Refresh PR</span>
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom" className="text-xs">
+                      Refresh PR
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              )}
             </div>
-          ) : (
-            <Tabs
-              value={effectiveTab}
-              onValueChange={(v) => {
-                if (v === 'terminal') {
-                  openTerminalPage();
-                } else {
-                  setActiveTab(v as DetailTab);
-                }
-              }}
-              className="gap-0"
-            >
-              <div className="sticky top-0 z-10 flex items-center justify-between bg-background">
-                <TabsList variant="line" className="h-auto gap-0">
-                  {tabs.map((tab) => (
-                    <TabsTrigger
-                      key={tab.key}
-                      value={tab.key}
-                      className={
-                        tab.accent
-                          ? 'px-3 py-1.5 text-caption font-medium text-[var(--needs-human)]'
-                          : 'px-3 py-1.5 text-caption font-medium'
-                      }
-                    >
-                      {tab.accent && <span className="mr-1">!</span>}
-                      {tab.label}
-                    </TabsTrigger>
-                  ))}
-                </TabsList>
-                {effectiveTab === 'pr' && item.pr_number && (
-                  <TooltipProvider delayDuration={300}>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button
-                          variant="ghost"
-                          size="icon-xs"
-                          disabled={prRefreshing}
-                          onClick={() => {
-                            setPrRefreshing(true);
-                            void refetchPr();
-                            setTimeout(() => setPrRefreshing(false), REFRESH_INDICATOR_MS);
-                          }}
-                          className="mr-2 text-text-3 hover:text-text-1"
-                        >
-                          <RefreshCw size={14} className={prRefreshing ? 'animate-spin' : ''} />
-                          <span className="sr-only">Refresh PR</span>
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent side="bottom" className="text-xs">
-                        Refresh PR
-                      </TooltipContent>
-                    </Tooltip>
-                  </TooltipProvider>
-                )}
-              </div>
 
-              {/* Tab content */}
-              <div className="break-words pr-2 pt-4">
-                {effectiveTab === 'escalated' && <EscalatedReportTab item={item} />}
-                {effectiveTab === 'respond' && clarifierQuestions && (
-                  <ClarificationTab taskId={item.id} questions={clarifierQuestions} />
-                )}
-                {effectiveTab === 'timeline' && (
-                  <TimelineTab events={events} onTranscriptClick={handleTranscriptClick} />
-                )}
-                {effectiveTab === 'pr' && (
-                  <PrTab item={item} prBody={prBody} prPending={prPending} />
-                )}
-                {effectiveTab === 'sessions' && (
-                  <SessionsTab
-                    sessions={sessions}
-                    onSessionClick={handleSessionClick}
-                    onResumeSession={handleResumeSession}
-                    taskId={item.id}
-                  />
-                )}
-                {effectiveTab === 'info' && <InfoTab item={item} />}
-                {effectiveTab === 'qa' && <QAHistoryTab item={item} />}
-              </div>
-            </Tabs>
-          )}
+            {/* Tab content */}
+            <div className="break-words pr-2 pt-4">
+              {effectiveTab === 'escalated' && <EscalatedReportTab item={item} />}
+              {effectiveTab === 'respond' && clarifierQuestions && (
+                <ClarificationTab taskId={item.id} questions={clarifierQuestions} />
+              )}
+              {effectiveTab === 'timeline' && (
+                <TimelineTab events={events} onTranscriptClick={handleTranscriptClick} />
+              )}
+              {effectiveTab === 'pr' && <PrTab item={item} prBody={prBody} prPending={prPending} />}
+              {effectiveTab === 'sessions' && (
+                <SessionsTab
+                  sessions={sessions}
+                  onSessionClick={handleSessionClick}
+                  onResumeSession={handleResumeSession}
+                  taskId={item.id}
+                />
+              )}
+              {effectiveTab === 'info' && <InfoTab item={item} />}
+              {effectiveTab === 'qa' && (
+                <QATab
+                  item={item}
+                  pendingQuestion={pendingQuestion}
+                  onPendingConsumed={() => setPendingQuestion(null)}
+                />
+              )}
+            </div>
+          </Tabs>
         </div>
       </div>
 

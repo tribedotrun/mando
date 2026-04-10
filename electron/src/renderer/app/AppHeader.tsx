@@ -2,8 +2,8 @@ import React, { useRef, useState } from 'react';
 import { cn } from '#renderer/cn';
 import { useRouterState } from '@tanstack/react-router';
 import { useTaskList, useWorkbenchList } from '#renderer/hooks/queries';
-import { GitBranch, ChevronDown, Copy } from 'lucide-react';
-import { FinderIcon, CursorIcon } from '#renderer/global/components/icons';
+import { ChevronDown, Copy } from 'lucide-react';
+import { FinderIcon, CursorIcon, PrIcon, MergeIcon } from '#renderer/global/components/icons';
 import { DetailOverflowMenu } from '#renderer/domains/captain/components/TaskDetailParts';
 import { HeaderStatusBadge } from '#renderer/domains/captain/components/StatusCard';
 import { buildSessionsFromTimeline } from '#renderer/domains/sessions';
@@ -14,7 +14,14 @@ import { useQuery } from '@tanstack/react-query';
 import { fetchTimeline, fetchItemSessions } from '#renderer/domains/captain/hooks/useApi';
 import { useUIStore } from '#renderer/app/uiStore';
 import { Button } from '#renderer/components/ui/button';
-import { copyToClipboard, getErrorMessage } from '#renderer/utils';
+import {
+  copyToClipboard,
+  getErrorMessage,
+  prLabel,
+  prHref,
+  prState,
+  sortTaskItems,
+} from '#renderer/utils';
 import { toast } from 'sonner';
 import { Kbd } from '#renderer/components/ui/kbd';
 
@@ -58,20 +65,27 @@ function useWorkbenchCtx(): WorkbenchCtx | null {
 
     if (isTerminal && terminalCwd) {
       const matchedWb = workbenches.find((wb) => wb.worktree === terminalCwd);
+      const candidates =
+        taskData?.items.filter(
+          (t) => t.worktree === terminalCwd || (matchedWb && t.workbench_id === matchedWb.id),
+        ) ?? [];
+      const matchedTask = sortTaskItems(candidates)[0] ?? null;
       return {
         worktreeName: matchedWb?.title ?? terminalCwd.split('/').pop() ?? null,
         worktreePath: terminalCwd,
-        projectName: terminalProject,
-        task: null,
+        projectName: matchedTask?.project ?? matchedWb?.project ?? terminalProject,
+        task: matchedTask,
       };
     }
 
     return null;
-  }, [task, isTerminal, terminalCwd, terminalProject, workbenches]);
+  }, [task, isTerminal, terminalCwd, terminalProject, workbenches, taskData?.items]);
 }
 
 export function AppHeader(): React.ReactElement {
   const ctx = useWorkbenchCtx();
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const isTerminal = pathname === '/terminal';
 
   // Cmd+Shift+C copies the worktree path (ref avoids stale closure)
   const worktreePathRef = useRef(ctx?.worktreePath);
@@ -120,13 +134,10 @@ export function AppHeader(): React.ReactElement {
 
   return (
     <div
-      className={cn(
-        'flex shrink-0 flex-col justify-center border-b border-border px-6',
-        hasTask ? 'py-2' : 'h-10',
-      )}
+      className="flex shrink-0 flex-col justify-center border-b border-border px-6 py-2"
       style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
     >
-      {hasTask ? (
+      {hasTask && (
         <>
           {/* Row 1: title + actions */}
           <div className="flex items-center gap-3">
@@ -141,55 +152,65 @@ export function AppHeader(): React.ReactElement {
               {ctx.task!.pr_number &&
                 ctx.task!.project &&
                 ctx.task!.status === 'awaiting-review' && (
-                  <Button size="sm" onClick={() => useUIStore.getState().setMergeItem(ctx.task!)}>
-                    Merge
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    className="bg-success-bg text-success"
+                    aria-label="Merge"
+                    title="Merge"
+                    onClick={() => useUIStore.getState().setMergeItem(ctx.task!)}
+                  >
+                    <MergeIcon />
                   </Button>
                 )}
               {ctx.worktreePath && <OpenMenu worktreePath={ctx.worktreePath} />}
               {(ctx.task!.branch || ctx.task!.worktree || ctx.task!.plan || ctx.task!.context) && (
                 <DetailOverflowMenu
                   item={ctx.task!}
-                  onViewContext={() =>
-                    document.dispatchEvent(new CustomEvent('mando:view-task-brief'))
+                  onViewContext={
+                    isTerminal
+                      ? undefined
+                      : () => document.dispatchEvent(new CustomEvent('mando:view-task-brief'))
                   }
                 />
               )}
             </div>
           </div>
-          {/* Row 2: status + project + worktree */}
-          <div className="mt-2 flex items-center gap-2 text-caption text-text-3">
-            <HeaderStatusBadge item={ctx.task!} sessions={sessions} />
-            {ctx.projectName && <span>{ctx.projectName}</span>}
-            {ctx.projectName && ctx.worktreeName && <span>&middot;</span>}
-            {ctx.worktreeName && (
-              <span className="flex items-center gap-1">
-                <GitBranch size={11} className="shrink-0" />
-                {ctx.worktreeName}
-              </span>
-            )}
-          </div>
         </>
-      ) : (
-        /* Non-task pages: single-line layout */
-        <div className="flex items-center gap-3">
-          {ctx.worktreeName && (
-            <span
-              className="flex items-center gap-1.5 text-caption text-text-3"
-              style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
-            >
-              <GitBranch size={12} className="shrink-0" />
-              <span>{ctx.worktreeName}</span>
-            </span>
-          )}
-          {ctx.projectName && <span className="text-caption text-text-3">{ctx.projectName}</span>}
-          <span className="flex-1" />
-          {ctx.worktreePath && (
-            <div style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
-              <OpenMenu worktreePath={ctx.worktreePath} />
-            </div>
-          )}
-        </div>
       )}
+      {/* Row 2: status + project + worktree */}
+      <div className={cn('flex items-center gap-2 text-caption text-text-3', hasTask && 'mt-2')}>
+        {hasTask && <HeaderStatusBadge item={ctx.task!} sessions={sessions} />}
+        {ctx.projectName && <span>{ctx.projectName}</span>}
+        {ctx.projectName && ctx.worktreeName && <span>&middot;</span>}
+        {ctx.worktreeName && <span>{ctx.worktreeName}</span>}
+        {hasTask &&
+          (ctx.worktreeName || ctx.projectName) &&
+          ctx.task!.pr_number &&
+          (ctx.task!.github_repo || ctx.task!.project) && <span>&middot;</span>}
+        {hasTask && ctx.task!.pr_number && (ctx.task!.github_repo || ctx.task!.project) && (
+          <a
+            href={prHref(ctx.task!.pr_number, (ctx.task!.github_repo ?? ctx.task!.project)!)}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex shrink-0 items-center gap-0.5 font-mono text-[11px] text-text-3 hover:text-foreground"
+            style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+          >
+            <PrIcon state={prState(ctx.task!.status)} />
+            {prLabel(ctx.task!.pr_number)}
+          </a>
+        )}
+        {!hasTask && (
+          <>
+            <span className="flex-1" />
+            {ctx.worktreePath && (
+              <div style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
+                <OpenMenu worktreePath={ctx.worktreePath} />
+              </div>
+            )}
+          </>
+        )}
+      </div>
     </div>
   );
 }

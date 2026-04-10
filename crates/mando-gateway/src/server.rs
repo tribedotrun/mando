@@ -148,6 +148,10 @@ fn task_routes() -> Router<AppState> {
             post(routes_task_ask::post_task_ask_end),
         )
         .route(
+            "/api/tasks/ask/reopen",
+            post(routes_task_ask::post_task_ask_reopen),
+        )
+        .route(
             "/api/tasks/retry",
             post(routes_task_actions::post_task_retry),
         )

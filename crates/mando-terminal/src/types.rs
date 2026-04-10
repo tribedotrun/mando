@@ -66,6 +66,8 @@ pub struct CreateRequest {
     /// Extra CLI arguments parsed from config (shell-split).
     #[serde(default)]
     pub extra_args: Vec<String>,
+    #[serde(default)]
+    pub name: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -85,4 +87,6 @@ pub struct SessionInfo {
     pub ended_at: Option<String>,
     #[serde(rename = "terminalId")]
     pub terminal_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
 }

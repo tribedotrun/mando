@@ -28,6 +28,15 @@ fn classify_tg_error(e: &anyhow::Error) -> RetryVerdict {
     }
 }
 
+/// Photo source for `sendPhoto`.
+#[derive(Clone)]
+pub enum PhotoInput {
+    /// A public URL that Telegram can download.
+    Url(String),
+    /// Raw bytes to upload via multipart.
+    Bytes { data: Vec<u8>, filename: String },
+}
+
 /// A single bot command descriptor for `setMyCommands`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BotCommand {
@@ -262,6 +271,70 @@ impl TelegramApi {
         Ok(bytes.to_vec())
     }
 
+    /// `sendPhoto` — send a photo via multipart form-data.
+    ///
+    /// `photo` can be a public URL (Telegram downloads it) or raw bytes.
+    /// Returns the Telegram message result.
+    pub async fn send_photo(
+        &self,
+        chat_id: &str,
+        photo: PhotoInput,
+        caption: Option<&str>,
+        parse_mode: Option<&str>,
+    ) -> Result<Value> {
+        let url = self.url("sendPhoto");
+        let chat_id_owned = chat_id.to_string();
+        let caption_owned = caption.map(String::from);
+        let parse_mode_owned = parse_mode.map(String::from);
+
+        retry_on_transient(&tg_retry_config(), classify_tg_error, || {
+            let url = url.clone();
+            let client = self.client.clone();
+            let chat_id = chat_id_owned.clone();
+            let photo = photo.clone();
+            let caption = caption_owned.clone();
+            let parse_mode = parse_mode_owned.clone();
+
+            async move {
+                let mut form = reqwest::multipart::Form::new().text("chat_id", chat_id);
+
+                match photo {
+                    PhotoInput::Url(u) => {
+                        form = form.text("photo", u);
+                    }
+                    PhotoInput::Bytes { data, filename } => {
+                        let mime = mime_from_filename(&filename);
+                        form = form.part(
+                            "photo",
+                            reqwest::multipart::Part::bytes(data)
+                                .file_name(filename)
+                                .mime_str(mime)?,
+                        );
+                    }
+                }
+
+                if let Some(c) = caption {
+                    form = form.text("caption", c);
+                }
+                if let Some(pm) = parse_mode {
+                    form = form.text("parse_mode", pm);
+                }
+
+                let resp: ApiResponse = client
+                    .post(&url)
+                    .multipart(form)
+                    .send()
+                    .await
+                    .context("sendPhoto request failed")?
+                    .json()
+                    .await
+                    .context("sendPhoto response parse failed")?;
+                resp.into_result("sendPhoto")
+            }
+        })
+        .await
+    }
+
     /// `setMyCommands` — register commands in the Telegram command menu.
     ///
     /// Clears any scope-specific overrides (`all_private_chats`, `all_group_chats`)
@@ -275,6 +348,20 @@ impl TelegramApi {
         let body = serde_json::json!({ "commands": commands });
         self.post_with_retry("setMyCommands", &body).await?;
         Ok(())
+    }
+}
+
+fn mime_from_filename(name: &str) -> &'static str {
+    match name
+        .rsplit('.')
+        .next()
+        .map(str::to_ascii_lowercase)
+        .as_deref()
+    {
+        Some("jpg" | "jpeg") => "image/jpeg",
+        Some("gif") => "image/gif",
+        Some("webp") => "image/webp",
+        _ => "image/png",
     }
 }
 

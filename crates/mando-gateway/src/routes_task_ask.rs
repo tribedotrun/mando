@@ -242,6 +242,194 @@ pub(crate) async fn post_task_ask_end(
     Ok(Json(json!({"ok": true, "ended": session_key})))
 }
 
+/// POST /api/tasks/ask/reopen — synthesize Q&A into feedback and reopen.
+///
+/// Sends a follow-up to the active Q&A session asking it to produce a reopen
+/// message, then closes the session and delegates to `action_contract::reopen_item`.
+pub(crate) async fn post_task_ask_reopen(
+    State(state): State<AppState>,
+    Json(body): Json<AskEndBody>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    use mando_types::ItemStatus;
+
+    let id = body.id;
+    let workflow = state.captain_workflow.load_full();
+
+    // ── Load task and guard status ───────────────────────────────────────
+    let (item, pool) = {
+        let store = state.task_store.read().await;
+        let item = store
+            .find_by_id(id)
+            .await
+            .map_err(internal_error)?
+            .ok_or_else(|| {
+                error_response(StatusCode::NOT_FOUND, &format!("item {id} not found"))
+            })?;
+        (item, store.pool().clone())
+    };
+
+    // Only awaiting-review and escalated support both Q&A and reopen.
+    let can_ask_reopen = matches!(
+        item.status,
+        ItemStatus::AwaitingReview | ItemStatus::Escalated
+    );
+    if !can_ask_reopen {
+        return Err(error_response(
+            StatusCode::BAD_REQUEST,
+            &format!("cannot reopen from Q&A in status {:?}", item.status),
+        ));
+    }
+
+    // ── Guard: Q&A history must be non-empty ─────────────────────────────
+    let history = mando_db::queries::ask_history::load(&pool, id)
+        .await
+        .map_err(internal_error)?;
+    if history.is_empty() {
+        return Err(error_response(
+            StatusCode::BAD_REQUEST,
+            "no Q&A history to synthesize — ask at least one question first",
+        ));
+    }
+
+    // ── Resolve worktree cwd (same logic as post_task_ask) ───────────────
+    let cwd = item
+        .worktree
+        .as_deref()
+        .map(mando_config::expand_tilde)
+        .filter(|p| p.is_dir())
+        .or_else(|| {
+            let cfg = state.config.load_full();
+            mando_config::paths::first_project_path(&cfg)
+                .map(|p| mando_config::paths::expand_tilde(&p))
+                .filter(|p| p.is_dir())
+        })
+        .ok_or_else(|| {
+            error_response(
+                StatusCode::BAD_REQUEST,
+                "no worktree or project configured — cannot run synthesis",
+            )
+        })?;
+
+    // ── Synthesize via follow-up to active Q&A session ───────────────────
+    let session_key = format!("task-ask:{id}");
+    let mgr = &state.cc_session_mgr;
+
+    if item.session_ids.ask.is_none() || !mgr.has_session(&session_key) {
+        return Err(error_response(
+            StatusCode::BAD_REQUEST,
+            "no active Q&A session — use the standard reopen action instead",
+        ));
+    }
+
+    let synthesis_prompt = workflow
+        .prompts
+        .get("task_ask_reopen_synthesis")
+        .ok_or_else(|| {
+            error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "task_ask_reopen_synthesis prompt missing from captain-workflow.yaml",
+            )
+        })?
+        .clone();
+
+    let result = mgr
+        .follow_up(&session_key, &synthesis_prompt, &cwd)
+        .await
+        .map_err(internal_error)?;
+    let synthesized_feedback = result.text.clone();
+
+    // ── Reopen the task with synthesized feedback ────────────────────────
+    // Reopen BEFORE closing the ask session so the user keeps their Q&A
+    // context if reopen fails.
+    let config = state.config.load_full();
+    let notifier = crate::captain_notifier(&state, &config);
+    let store = state.task_store.write().await;
+    let mut item = store
+        .find_by_id(id)
+        .await
+        .map_err(internal_error)?
+        .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "item vanished during synthesis"))?;
+
+    let old_session_id = item.session_ids.worker.clone();
+    let outcome = mando_captain::runtime::action_contract::reopen_item(
+        &mut item,
+        "human",
+        &synthesized_feedback,
+        &config,
+        &workflow,
+        &notifier,
+        store.pool(),
+        true,
+    )
+    .await
+    .map_err(internal_error)?;
+    store.write_task(&item).await.map_err(internal_error)?;
+
+    // Close the ask session only after reopen succeeds.
+    close_ask_session(&state, id).await;
+
+    state.bus.send(
+        mando_types::BusEvent::Tasks,
+        Some(json!({"action": "updated", "item": serde_json::to_value(&item).unwrap(), "id": id})),
+    );
+
+    // ── Timeline events ──────────────────────────────────────────────────
+    let summary = format!("Reopened from Q&A: {}", &synthesized_feedback);
+    let _ = mando_captain::runtime::timeline_emit::emit_for_task(
+        &item,
+        mando_types::timeline::TimelineEventType::HumanReopen,
+        &summary,
+        json!({
+            "content": &synthesized_feedback,
+            "source": "ask-reopen",
+            "worker": item.worker,
+            "session_id": item.session_ids.worker,
+        }),
+        store.pool(),
+    )
+    .await;
+
+    if matches!(
+        outcome,
+        mando_captain::runtime::action_contract::ReopenOutcome::Reopened
+    ) {
+        let truly_resumed = old_session_id.is_some() && old_session_id == item.session_ids.worker;
+        let (evt, evt_summary) = if truly_resumed {
+            (
+                mando_types::timeline::TimelineEventType::SessionResumed,
+                format!("Resumed {}", item.worker.as_deref().unwrap_or("worker")),
+            )
+        } else {
+            (
+                mando_types::timeline::TimelineEventType::WorkerSpawned,
+                format!("Spawned {}", item.worker.as_deref().unwrap_or("worker")),
+            )
+        };
+        let _ = mando_captain::runtime::timeline_emit::emit_for_task(
+            &item,
+            evt,
+            &evt_summary,
+            json!({
+                "worker": item.worker,
+                "session_id": item.session_ids.worker,
+            }),
+            store.pool(),
+        )
+        .await;
+
+        let msg = format!(
+            "\u{1f504} Reopened <b>{}</b> from Q&A",
+            mando_shared::telegram_format::escape_html(&item.title),
+        );
+        notifier.normal(&msg).await;
+    }
+
+    Ok(Json(json!({
+        "ok": true,
+        "feedback": synthesized_feedback,
+    })))
+}
+
 /// Close ask session for a task (used by reopen/rework handlers).
 pub(crate) async fn close_ask_session(state: &AppState, task_id: i64) {
     let ask_key = format!("task-ask:{task_id}");

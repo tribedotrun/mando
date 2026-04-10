@@ -234,9 +234,7 @@ export function StandaloneTerminal({
               }
               stroke="none"
             />
-            <span>
-              {session.agent} {session.id.slice(0, 6)}
-            </span>
+            <span>{session.name || `${session.agent} ${session.id.slice(0, 6)}`}</span>
             <X
               size={12}
               style={{ opacity: 0.5, cursor: 'pointer' }}

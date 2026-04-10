@@ -9,7 +9,8 @@ import log from '#renderer/logger';
 
 export function TerminalPageRoute(): React.ReactElement {
   const search = useRouterState({
-    select: (s) => s.location.search as { project: string; cwd?: string; resume?: string },
+    select: (s) =>
+      s.location.search as { project: string; cwd?: string; resume?: string; name?: string },
   });
 
   // Key on the full terminal target so switching worktrees in the same project
@@ -21,7 +22,7 @@ export function TerminalPageRoute(): React.ReactElement {
 function TerminalPageInner({
   search,
 }: {
-  search: { project: string; cwd?: string; resume?: string };
+  search: { project: string; cwd?: string; resume?: string; name?: string };
 }): React.ReactElement {
   const navigate = useNavigate();
   const { terminalPage, setTerminalPage, openNewTerminal, cancelPreparing } = useWorktreeTerminal();
@@ -37,6 +38,7 @@ function TerminalPageInner({
         project: search.project,
         cwd: search.cwd,
         resumeSessionId: search.resume ?? null,
+        name: search.name ?? null,
       });
     } else {
       // Sync cwd into URL once worktree is ready so the sidebar can highlight.
@@ -75,8 +77,9 @@ function TerminalPageInner({
           project={terminalPage.project}
           cwd={terminalPage.cwd}
           resumeSessionId={terminalPage.resumeSessionId}
+          resumeName={terminalPage.name}
           onResumeConsumed={() =>
-            setTerminalPage((p) => (p ? { ...p, resumeSessionId: null } : null))
+            setTerminalPage((p) => (p ? { ...p, resumeSessionId: null, name: null } : null))
           }
         />
       </ErrorBoundary>

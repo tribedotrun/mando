@@ -88,6 +88,7 @@ pub struct TerminalSession {
     cwd: PathBuf,
     agent: Agent,
     terminal_id: Option<String>,
+    name: Option<String>,
     output_tx: broadcast::Sender<TerminalEvent>,
     output_buf: Arc<std::sync::Mutex<Vec<u8>>>,
     state: Arc<std::sync::Mutex<SessionState>>,
@@ -119,6 +120,7 @@ impl TerminalSession {
             exit_code: None,
             size,
             state: SessionState::Live,
+            name: req.name.clone(),
         };
 
         let pty_system = native_pty_system();
@@ -213,6 +215,7 @@ impl TerminalSession {
             cwd: req.cwd,
             agent: req.agent,
             terminal_id: req.terminal_id,
+            name: req.name,
             output_tx: output_tx.clone(),
             output_buf: output_buf.clone(),
             state: state.clone(),
@@ -245,6 +248,7 @@ impl TerminalSession {
             cwd: meta.cwd,
             agent: meta.agent,
             terminal_id: meta.terminal_id,
+            name: meta.name,
             output_tx,
             output_buf: Arc::new(std::sync::Mutex::new(Vec::new())),
             state: Arc::new(std::sync::Mutex::new(restored_state)),
@@ -330,6 +334,7 @@ impl TerminalSession {
             created_at: self.created_at.clone(),
             ended_at: self.ended_at.lock().expect("ended_at lock").clone(),
             terminal_id: self.terminal_id.clone(),
+            name: self.name.clone(),
         }
     }
 

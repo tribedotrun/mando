@@ -18,6 +18,8 @@ pub struct TerminalHistoryMeta {
     pub exit_code: Option<u32>,
     pub size: TerminalSize,
     pub state: SessionState,
+    #[serde(default)]
+    pub name: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -160,6 +162,7 @@ mod tests {
             exit_code: None,
             size: TerminalSize { rows: 24, cols: 80 },
             state: SessionState::Live,
+            name: None,
         }
     }
 

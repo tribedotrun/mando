@@ -393,6 +393,44 @@ impl TelegramBot {
             .await
     }
 
+    /// Send a photo by public URL with an optional HTML caption.
+    pub async fn send_photo_url(
+        &self,
+        chat_id: &str,
+        url: &str,
+        caption: Option<&str>,
+    ) -> Result<Value> {
+        self.api
+            .send_photo(
+                chat_id,
+                crate::api::PhotoInput::Url(url.to_string()),
+                caption,
+                caption.map(|_| "HTML"),
+            )
+            .await
+    }
+
+    /// Send a photo by uploading raw bytes with an optional HTML caption.
+    pub async fn send_photo_bytes(
+        &self,
+        chat_id: &str,
+        data: Vec<u8>,
+        filename: &str,
+        caption: Option<&str>,
+    ) -> Result<Value> {
+        self.api
+            .send_photo(
+                chat_id,
+                crate::api::PhotoInput::Bytes {
+                    data,
+                    filename: filename.to_string(),
+                },
+                caption,
+                caption.map(|_| "HTML"),
+            )
+            .await
+    }
+
     /// Remove the inline keyboard from a message without changing its text.
     pub async fn remove_keyboard(&self, chat_id: &str, mid: i64) -> Result<Value> {
         self.api

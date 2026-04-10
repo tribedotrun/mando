@@ -81,6 +81,7 @@ const terminalRoute = createRoute({
     project: z.string().catch(''),
     cwd: z.string().optional().catch(undefined),
     resume: z.string().optional().catch(undefined),
+    name: z.string().optional().catch(undefined),
   }),
   beforeLoad: ({ search, navigate }) => {
     if (!(search as { project: string }).project) {

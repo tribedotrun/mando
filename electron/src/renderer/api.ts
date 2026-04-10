@@ -279,6 +279,10 @@ export const askTask = (id: number, question: string) =>
 export const endAskSession = (id: number) =>
   apiPost<{ ok: boolean; ended: string }>('/api/tasks/ask/end', { id });
 
+// Reopen from Q&A — synthesize conversation into reopen feedback
+export const askReopen = (id: number) =>
+  apiPost<{ ok: boolean; feedback: string }>('/api/tasks/ask/reopen', { id });
+
 // Task Ask History
 export const fetchAskHistory = (id: number) =>
   apiGet<AskHistoryResponse>(`/api/tasks/${id}/history`);

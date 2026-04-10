@@ -525,6 +525,14 @@ prompts:
 
     Use the codebase to give a thorough, evidence-based answer. Be concise.
 
+  task_ask_reopen_synthesis: |
+    Based on our conversation, produce a concise reopen message for the worker who will fix this task. Include:
+    1. What is wrong or needs to change
+    2. Specific files, functions, or behaviors discussed
+    3. Clear acceptance criteria
+
+    Output ONLY the reopen message. No preamble, no markdown headers, no "here is the message" wrapper.
+
   reopen_resume: |
     Captain reopened you with review feedback (reopen #{{ reopen_seq }}).
     Read captain-reopen-context.md for details. Address the feedback, fix the

@@ -41,6 +41,8 @@ pub(crate) struct CreateBody {
     pub size: Option<TerminalSize>,
     #[serde(default, alias = "terminalId")]
     pub terminal_id: Option<String>,
+    #[serde(default)]
+    pub name: Option<String>,
 }
 
 pub(crate) async fn post_terminal_create(
@@ -136,6 +138,7 @@ pub(crate) async fn post_terminal_create(
         terminal_env,
         terminal_id: body.terminal_id,
         extra_args,
+        name: body.name,
     };
     let session = match state.terminal_host.create(req) {
         Ok(s) => s,
