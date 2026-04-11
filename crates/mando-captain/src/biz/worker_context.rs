@@ -19,6 +19,32 @@ pub(crate) fn has_summary_diagram(ctx: &WorkerContext) -> bool {
     true
 }
 
+/// Check if evidence-head marker in PR body matches the branch HEAD.
+///
+/// Returns true when no reopen has happened (freshness only matters after reopen).
+/// After a reopen, evidence must have a `<!-- evidence-head: <sha> -->` marker
+/// matching the current HEAD.
+pub(crate) fn evidence_is_fresh(ctx: &WorkerContext) -> bool {
+    if ctx.reopen_seq == 0 || ctx.pr_head_sha.is_empty() {
+        return true;
+    }
+    let marker = "<!-- evidence-head: ";
+    let mut last_sha: Option<&str> = None;
+
+    for line in ctx.pr_body.lines() {
+        if let Some(rest) = line.trim().strip_prefix(marker) {
+            if let Some(sha) = rest.strip_suffix(" -->") {
+                last_sha = Some(sha);
+            }
+        }
+    }
+
+    match last_sha {
+        Some(sha) if !sha.is_empty() => ctx.pr_head_sha.starts_with(sha),
+        _ => false,
+    }
+}
+
 /// Check if pr-summary-head marker in PR body matches the branch HEAD.
 fn summary_diagram_is_fresh(ctx: &WorkerContext) -> bool {
     let marker = "<!-- pr-summary-head: ";
@@ -103,11 +129,14 @@ fn section_has_substantive_evidence(section: &str) -> bool {
 }
 
 /// Classify evidence status for captain review context.
-pub(crate) fn evidence_status(pr_body: &str) -> &'static str {
-    if pr_body.is_empty() {
+pub(crate) fn evidence_status(ctx: &WorkerContext) -> &'static str {
+    if ctx.pr_body.is_empty() {
         return "unknown (no PR body)";
     }
-    if !has_no_evidence(pr_body) {
+    if !has_no_evidence(&ctx.pr_body) {
+        if !evidence_is_fresh(ctx) {
+            return "STALE (evidence exists but predates reopen)";
+        }
         return "needs-review (has evidence text, quality unknown)";
     }
     "MISSING"
@@ -115,7 +144,7 @@ pub(crate) fn evidence_status(pr_body: &str) -> &'static str {
 
 /// Format a WorkerContext for LLM captain review input.
 pub(crate) fn format_context(ctx: &WorkerContext) -> String {
-    let evidence_section = evidence_status(&ctx.pr_body);
+    let evidence_section = evidence_status(ctx);
     let stream_stale = match ctx.stream_stale_s {
         Some(s) => format!("{:.0}s", s),
         None => "n/a".to_string(),
@@ -324,15 +353,89 @@ Just some text, no screenshots yet.
     }
 
     #[test]
+    fn evidence_fresh_no_reopen() {
+        let mut ctx = make_ctx();
+        ctx.pr_body = "## Evidence\n![fix](https://example.com/fix.png)".into();
+        ctx.reopen_seq = 0;
+        assert!(evidence_is_fresh(&ctx));
+    }
+
+    #[test]
+    fn evidence_stale_after_reopen_no_marker() {
+        let mut ctx = make_ctx();
+        ctx.pr_body = "## Evidence\n![fix](https://example.com/fix.png)".into();
+        ctx.reopen_seq = 1;
+        ctx.pr_head_sha = "abc123".into();
+        assert!(!evidence_is_fresh(&ctx));
+    }
+
+    #[test]
+    fn evidence_stale_after_reopen_wrong_sha() {
+        let mut ctx = make_ctx();
+        ctx.pr_body =
+            "## Evidence\n![fix](https://example.com/fix.png)\n<!-- evidence-head: def456 -->"
+                .into();
+        ctx.reopen_seq = 1;
+        ctx.pr_head_sha = "abc123".into();
+        assert!(!evidence_is_fresh(&ctx));
+    }
+
+    #[test]
+    fn evidence_fresh_after_reopen_matching_sha() {
+        let mut ctx = make_ctx();
+        ctx.pr_body =
+            "## Evidence\n![fix](https://example.com/fix.png)\n<!-- evidence-head: abc123 -->"
+                .into();
+        ctx.reopen_seq = 1;
+        ctx.pr_head_sha = "abc123def".into();
+        assert!(evidence_is_fresh(&ctx));
+    }
+
+    #[test]
+    fn evidence_stale_when_marker_sha_empty() {
+        let mut ctx = make_ctx();
+        ctx.pr_body =
+            "## Evidence\n![fix](https://example.com/fix.png)\n<!-- evidence-head:  -->".into();
+        ctx.reopen_seq = 1;
+        ctx.pr_head_sha = "abc123".into();
+        assert!(!evidence_is_fresh(&ctx));
+    }
+
+    #[test]
+    fn evidence_fresh_when_head_sha_empty() {
+        let mut ctx = make_ctx();
+        ctx.pr_body = "## Evidence\n![fix](https://example.com/fix.png)".into();
+        ctx.reopen_seq = 1;
+        ctx.pr_head_sha = String::new();
+        assert!(evidence_is_fresh(&ctx));
+    }
+
+    #[test]
     fn evidence_status_missing() {
-        assert_eq!(evidence_status("Just a description"), "MISSING");
+        let mut ctx = make_ctx();
+        ctx.pr_body = "Just a description".into();
+        assert_eq!(evidence_status(&ctx), "MISSING");
     }
 
     #[test]
     fn evidence_status_needs_review() {
+        let mut ctx = make_ctx();
+        ctx.pr_body = "### After\n![fix](https://example.com/fix.png)".into();
         assert_eq!(
-            evidence_status("### After\n![fix](https://example.com/fix.png)"),
+            evidence_status(&ctx),
             "needs-review (has evidence text, quality unknown)"
+        );
+    }
+
+    #[test]
+    fn evidence_status_stale_after_reopen() {
+        let mut ctx = make_ctx();
+        ctx.pr_body = "### After\n![fix](https://example.com/fix.png)".into();
+        ctx.reopen_seq = 1;
+        ctx.pr_head_sha = "abc123".into();
+        assert_eq!(
+            evidence_status(&ctx),
+            "STALE (evidence exists but predates reopen)"
         );
     }
 

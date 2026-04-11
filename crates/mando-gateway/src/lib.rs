@@ -93,6 +93,7 @@ pub fn apply_dev_model_overrides(
     captain_wf.models.worker = DEV_MODEL.into();
     captain_wf.models.captain = DEV_MODEL.into();
     captain_wf.models.clarifier = DEV_MODEL.into();
+    captain_wf.models.todo_parse = DEV_MODEL.into();
     captain_wf.models.fallback = None;
     for model in scout_wf.models.values_mut() {
         *model = DEV_MODEL.into();

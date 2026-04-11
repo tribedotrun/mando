@@ -272,8 +272,8 @@ export const cancelItem = (id: number) => apiPost<{ ok: boolean }>('/api/tasks/c
 export const fetchWorkers = () => apiGet<WorkersResponse>('/api/workers');
 
 // Task Ask (multi-turn: first ask creates session, follow-ups resume)
-export const askTask = (id: number, question: string) =>
-  apiPost<AskResponse>('/api/tasks/ask', { id, question });
+export const askTask = (id: number, question: string, askId?: string) =>
+  apiPost<AskResponse>('/api/tasks/ask', { id, question, ask_id: askId });
 
 // End ask session
 export const endAskSession = (id: number) =>

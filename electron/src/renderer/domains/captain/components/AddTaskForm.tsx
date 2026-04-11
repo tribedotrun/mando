@@ -58,7 +58,7 @@ function AddTaskFormInner({
 
   const savedProject = project && projects.includes(project) ? project : '';
   const effectiveProject = savedProject || (projects.length === 1 ? projects[0] : '');
-  const projectRequired = projects.length > 1;
+  const projectRequired = projects.length !== 1;
   const trimmedTitle = title.trim();
   const textareaRows = bulk ? bulkTextareaRows(title.split('\n').length + 1) : 5;
 

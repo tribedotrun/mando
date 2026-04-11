@@ -13,6 +13,9 @@ use crate::AppState;
 pub(crate) struct AskBody {
     pub id: i64,
     pub question: String,
+    /// Continue an existing conversation. None = start new Q&A session.
+    #[serde(default)]
+    pub ask_id: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -44,24 +47,7 @@ pub(crate) async fn post_task_ask(
         (item, store.pool().clone())
     };
 
-    // Resolve worktree cwd — fall back to first project path if no worktree.
-    let cwd = item
-        .worktree
-        .as_deref()
-        .map(mando_config::expand_tilde)
-        .filter(|p| p.is_dir())
-        .or_else(|| {
-            let cfg = state.config.load_full();
-            mando_config::paths::first_project_path(&cfg)
-                .map(|p| mando_config::paths::expand_tilde(&p))
-                .filter(|p| p.is_dir())
-        })
-        .ok_or_else(|| {
-            error_response(
-                StatusCode::BAD_REQUEST,
-                "no worktree or project configured — cannot run ask session",
-            )
-        })?;
+    let cwd = resolve_ask_cwd(&item, &state)?;
 
     let session_key = format!("task-ask:{id}");
     let mgr = state.cc_session_mgr.clone();
@@ -113,13 +99,39 @@ pub(crate) async fn post_task_ask(
         }
     }
 
-    let result = if should_resume {
-        // Follow-up: resume existing session with just the question.
-        mgr.follow_up(&session_key, &body.question, &cwd)
-            .await
-            .map_err(crate::response::internal_error)?
+    // Generate or reuse ask_id (conversation grouping key).
+    let ask_id = body
+        .ask_id
+        .clone()
+        .unwrap_or_else(|| mando_uuid::Uuid::v4().to_string());
+
+    // The real CC session_id isn't available until start_with_item returns.
+    // Use a clear sentinel so question rows are distinguishable from answer rows.
+    const PENDING_SESSION: &str = "pending";
+
+    // ── Persist question immediately (before CC call) ───────────────────
+    if let Err(e) = mando_captain::runtime::task_ask::persist_question(
+        &pool,
+        id,
+        &ask_id,
+        PENDING_SESSION,
+        &body.question,
+    )
+    .await
+    {
+        return Err(error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            &e.to_string(),
+        ));
+    }
+
+    // Broadcast so the UI shows the question immediately.
+    broadcast_task_update(&state, id).await;
+
+    // ── Run the CC session ──────────────────────────────────────────────
+    let cc_result = if should_resume {
+        mgr.follow_up(&session_key, &body.question, &cwd).await
     } else {
-        // First ask: build initial prompt with full task context.
         let task_id_str = id.to_string();
         let timeline_text = mando_captain::runtime::task_ask::build_timeline_text(&pool, id)
             .await
@@ -138,69 +150,95 @@ pub(crate) async fn post_task_ask(
             &prompt,
             &cwd,
             Some(&workflow.models.captain),
-            std::time::Duration::from_secs(3600),
-            std::time::Duration::from_secs(120),
+            workflow.agent.task_ask_idle_ttl_s,
+            workflow.agent.task_ask_timeout_s,
             Some(id),
         )
         .await
-        .map_err(crate::response::internal_error)?
     };
 
-    // Manager is lock-free (Arc<CcSessionManager>); no drop needed.
     drop(mgr);
 
-    let answer = result.text.clone();
-    let session_id = result.session_id.clone();
+    // ── Handle CC result ────────────────────────────────────────────────
+    match cc_result {
+        Ok(result) => {
+            let answer = result.text.clone();
+            let session_id = result.session_id.clone();
 
-    // Persist session_ids.ask on the task if this is a new session.
-    if !should_resume {
-        let store = state.task_store.write().await;
-        match store.find_by_id(id).await {
-            Ok(Some(mut task)) => {
-                task.session_ids.ask = Some(session_id.clone());
-                if let Err(e) = store.write_task(&task).await {
-                    tracing::warn!(task_id = id, error = %e, "failed to persist session_ids.ask");
+            // Persist session_ids.ask on the task if this is a new session.
+            if !should_resume {
+                let store = state.task_store.write().await;
+                if let Ok(Some(mut task)) = store.find_by_id(id).await {
+                    task.session_ids.ask = Some(session_id.clone());
+                    if let Err(e) = store.write_task(&task).await {
+                        tracing::warn!(task_id = id, error = %e, "failed to persist session_ids.ask");
+                    }
                 }
             }
-            Ok(None) => {
-                tracing::warn!(
-                    task_id = id,
-                    "session_ids.ask persist skipped — task vanished after ask"
-                );
+
+            // Persist the answer + timeline event. Propagate as 500 so the
+            // caller sees the inconsistency instead of receiving an answer
+            // that was never written to history.
+            mando_captain::runtime::task_ask::persist_answer(
+                &pool,
+                id,
+                &ask_id,
+                &session_id,
+                &body.question,
+                &answer,
+            )
+            .await
+            .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?;
+
+            broadcast_task_update(&state, id).await;
+
+            Ok(Json(json!({
+                "id": id,
+                "ask_id": ask_id,
+                "question": body.question,
+                "answer": answer,
+                "session_id": session_id,
+            })))
+        }
+        Err(e) => {
+            let error_msg = e.to_string();
+            tracing::error!(task_id = id, error = %error_msg, "ask CC session failed");
+
+            // Close the broken session so the next ask starts fresh instead
+            // of retrying the dead session indefinitely.
+            state.cc_session_mgr.close(&session_key);
+            {
+                let store = state.task_store.write().await;
+                if let Ok(Some(mut task)) = store.find_by_id(id).await {
+                    if task.session_ids.ask.is_some() {
+                        task.session_ids.ask = None;
+                        let _ = store.write_task(&task).await;
+                    }
+                }
             }
-            Err(e) => {
-                return Err(internal_error(e));
+
+            // Persist the error so it shows in the Q&A tab.
+            if let Err(persist_err) = mando_captain::runtime::task_ask::persist_error(
+                &pool,
+                id,
+                &ask_id,
+                PENDING_SESSION,
+                &body.question,
+                &error_msg,
+            )
+            .await
+            {
+                tracing::error!(task_id = id, error = %persist_err, "failed to persist ask error");
             }
+
+            broadcast_task_update(&state, id).await;
+
+            Err(error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                &error_msg,
+            ))
         }
     }
-
-    // Record Q&A history + timeline event. Propagate as 500 so the caller
-    // sees the DB inconsistency instead of silently continuing (the CC call
-    // succeeded but nothing was persisted).
-    mando_captain::runtime::task_ask::record_ask(&pool, id, &body.question, &answer)
-        .await
-        .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?;
-
-    let updated = {
-        let store = state.task_store.read().await;
-        store
-            .find_by_id(id)
-            .await
-            .ok()
-            .flatten()
-            .map(|t| serde_json::to_value(&t).unwrap())
-    };
-    state.bus.send(
-        mando_types::BusEvent::Tasks,
-        Some(json!({"action": "updated", "item": updated, "id": id})),
-    );
-
-    Ok(Json(json!({
-        "id": id,
-        "question": body.question,
-        "answer": answer,
-        "session_id": session_id,
-    })))
 }
 
 /// POST /api/tasks/ask/end — end the ask session for a task.
@@ -291,24 +329,7 @@ pub(crate) async fn post_task_ask_reopen(
         ));
     }
 
-    // ── Resolve worktree cwd (same logic as post_task_ask) ───────────────
-    let cwd = item
-        .worktree
-        .as_deref()
-        .map(mando_config::expand_tilde)
-        .filter(|p| p.is_dir())
-        .or_else(|| {
-            let cfg = state.config.load_full();
-            mando_config::paths::first_project_path(&cfg)
-                .map(|p| mando_config::paths::expand_tilde(&p))
-                .filter(|p| p.is_dir())
-        })
-        .ok_or_else(|| {
-            error_response(
-                StatusCode::BAD_REQUEST,
-                "no worktree or project configured — cannot run synthesis",
-            )
-        })?;
+    let cwd = resolve_ask_cwd(&item, &state)?;
 
     // ── Synthesize via follow-up to active Q&A session ───────────────────
     let session_key = format!("task-ask:{id}");
@@ -428,6 +449,46 @@ pub(crate) async fn post_task_ask_reopen(
         "ok": true,
         "feedback": synthesized_feedback,
     })))
+}
+
+/// Resolve the working directory for a task's ask session.
+fn resolve_ask_cwd(
+    item: &mando_types::Task,
+    state: &AppState,
+) -> Result<std::path::PathBuf, (StatusCode, Json<Value>)> {
+    item.worktree
+        .as_deref()
+        .map(mando_config::expand_tilde)
+        .filter(|p| p.is_dir())
+        .or_else(|| {
+            let cfg = state.config.load_full();
+            mando_config::paths::first_project_path(&cfg)
+                .map(|p| mando_config::paths::expand_tilde(&p))
+                .filter(|p| p.is_dir())
+        })
+        .ok_or_else(|| {
+            error_response(
+                StatusCode::BAD_REQUEST,
+                "no worktree or project configured — cannot run ask session",
+            )
+        })
+}
+
+/// Broadcast a task update via SSE so the frontend refreshes.
+async fn broadcast_task_update(state: &AppState, id: i64) {
+    let updated = {
+        let store = state.task_store.read().await;
+        store
+            .find_by_id(id)
+            .await
+            .ok()
+            .flatten()
+            .map(|t| serde_json::to_value(&t).unwrap())
+    };
+    state.bus.send(
+        mando_types::BusEvent::Tasks,
+        Some(json!({"action": "updated", "item": updated, "id": id})),
+    );
 }
 
 /// Close ask session for a task (used by reopen/rework handlers).

@@ -7,6 +7,25 @@ use rustc_hash::FxHashMap;
 
 use crate::runtime::notify::Notifier;
 
+/// Check if `<!-- evidence-head: <sha> -->` marker in the PR body matches the given HEAD SHA.
+fn evidence_sha_matches(pr_body: &str, head_sha: &str) -> bool {
+    let marker = "<!-- evidence-head: ";
+    let mut last_sha: Option<&str> = None;
+
+    for line in pr_body.lines() {
+        if let Some(rest) = line.trim().strip_prefix(marker) {
+            if let Some(sha) = rest.strip_suffix(" -->") {
+                last_sha = Some(sha);
+            }
+        }
+    }
+
+    match last_sha {
+        Some(sha) if !sha.is_empty() => head_sha.starts_with(sha),
+        _ => false,
+    }
+}
+
 /// Check pending-review items for unaddressed review comments and CI failures.
 ///
 /// For each pending-review item with a PR and a worker (i.e. can be reopened):
@@ -107,6 +126,8 @@ pub(crate) async fn check_done_review_threads(
             pr_data.unaddressed_issue_comments,
             &pr_data.body,
             workflow,
+            items[idx].reopen_seq,
+            &pr_data.head_sha,
         );
 
         let (reopen_source, message) = match decision {
@@ -195,6 +216,7 @@ pub(crate) async fn check_done_review_threads(
 /// CI failures are handled upstream (CaptainReviewing with ci_failure trigger)
 /// before this function is called. This only handles review comments and
 /// missing evidence.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn classify_review_state(
     _ci_status: Option<&str>,
     unresolved: i64,
@@ -202,13 +224,21 @@ pub(crate) fn classify_review_state(
     unaddressed: i64,
     pr_body: &str,
     workflow: &CaptainWorkflow,
+    reopen_seq: i64,
+    pr_head_sha: &str,
 ) -> Option<(String, String)> {
     let has_comments = unresolved > 0 || unreplied > 0 || unaddressed > 0;
 
     // Check for missing evidence using the same logic as deterministic classifier.
     let missing_evidence = crate::biz::worker_context::has_no_evidence(pr_body);
 
-    if !has_comments && !missing_evidence {
+    // Check for stale evidence: exists but SHA marker doesn't match HEAD after reopen.
+    let stale_evidence = !missing_evidence
+        && reopen_seq > 0
+        && !pr_head_sha.is_empty()
+        && !evidence_sha_matches(pr_body, pr_head_sha);
+
+    if !has_comments && !missing_evidence && !stale_evidence {
         return None;
     }
 
@@ -231,6 +261,7 @@ pub(crate) fn classify_review_state(
         ));
         "review".to_string()
     } else {
+        // missing_evidence or stale_evidence without comments
         "evidence".to_string()
     };
 
@@ -240,6 +271,15 @@ pub(crate) fn classify_review_state(
              static UI changes, recording for interactive/multi-step changes, terminal \
              output under `### After` for non-UI changes. NOT diagrams, ASCII art, or \
              test results alone."
+                .to_string(),
+        );
+    }
+
+    if stale_evidence {
+        parts.push(
+            "PR evidence is stale -- it was captured before the last reopen and no longer \
+             reflects the current code. Recapture evidence to match the latest changes, \
+             then run `/mando-pr-summary` to update the freshness marker."
                 .to_string(),
         );
     }
@@ -267,6 +307,9 @@ mod tests {
 
     /// PR body with valid evidence (heading + image URL).
     const BODY_WITH_EVIDENCE: &str = "### After\n![fix](https://example.com/fix.png)";
+    /// PR body with fresh evidence (heading + image + SHA marker).
+    const BODY_WITH_FRESH_EVIDENCE: &str =
+        "### After\n![fix](https://example.com/fix.png)\n<!-- evidence-head: abc123 -->";
     /// PR body without evidence.
     const BODY_NO_EVIDENCE: &str = "## Summary\nJust a description";
 
@@ -276,26 +319,29 @@ mod tests {
 
     #[test]
     fn clean_pr_returns_none() {
-        let result = classify_review_state(Some("success"), 0, 0, 0, BODY_WITH_EVIDENCE, &wf());
+        let result =
+            classify_review_state(Some("success"), 0, 0, 0, BODY_WITH_EVIDENCE, &wf(), 0, "");
         assert!(result.is_none());
     }
 
     #[test]
     fn pending_ci_returns_none() {
-        let result = classify_review_state(Some("pending"), 0, 0, 0, BODY_WITH_EVIDENCE, &wf());
+        let result =
+            classify_review_state(Some("pending"), 0, 0, 0, BODY_WITH_EVIDENCE, &wf(), 0, "");
         assert!(result.is_none());
     }
 
     #[test]
     fn no_ci_no_comments_returns_none() {
-        let result = classify_review_state(None, 0, 0, 0, BODY_WITH_EVIDENCE, &wf());
+        let result = classify_review_state(None, 0, 0, 0, BODY_WITH_EVIDENCE, &wf(), 0, "");
         assert!(result.is_none());
     }
 
     #[test]
     fn unresolved_threads_trigger_review_reopen() {
         let (source, msg) =
-            classify_review_state(Some("success"), 3, 0, 0, BODY_WITH_EVIDENCE, &wf()).unwrap();
+            classify_review_state(Some("success"), 3, 0, 0, BODY_WITH_EVIDENCE, &wf(), 0, "")
+                .unwrap();
         assert_eq!(source, "review");
         assert!(msg.contains("3 unresolved threads"));
         assert!(!msg.contains("CI"));
@@ -304,7 +350,8 @@ mod tests {
     #[test]
     fn unreplied_threads_trigger_review_reopen() {
         let (source, msg) =
-            classify_review_state(Some("success"), 0, 2, 0, BODY_WITH_EVIDENCE, &wf()).unwrap();
+            classify_review_state(Some("success"), 0, 2, 0, BODY_WITH_EVIDENCE, &wf(), 0, "")
+                .unwrap();
         assert_eq!(source, "review");
         assert!(msg.contains("2 unreplied threads"));
     }
@@ -312,7 +359,8 @@ mod tests {
     #[test]
     fn unaddressed_issue_comments_trigger_review_reopen() {
         let (source, msg) =
-            classify_review_state(Some("success"), 0, 0, 1, BODY_WITH_EVIDENCE, &wf()).unwrap();
+            classify_review_state(Some("success"), 0, 0, 1, BODY_WITH_EVIDENCE, &wf(), 0, "")
+                .unwrap();
         assert_eq!(source, "review");
         assert!(msg.contains("1 unaddressed issue comments"));
     }
@@ -321,16 +369,18 @@ mod tests {
     fn ci_failure_alone_returns_none_handled_upstream() {
         // CI failures are now handled upstream via CaptainReviewing ci_failure trigger.
         // classify_review_state should return None for CI-only failures.
-        let result = classify_review_state(Some("failure"), 0, 0, 0, BODY_WITH_EVIDENCE, &wf());
+        let result =
+            classify_review_state(Some("failure"), 0, 0, 0, BODY_WITH_EVIDENCE, &wf(), 0, "");
         assert!(result.is_none());
     }
 
     #[test]
     fn comments_with_ci_failure_still_triggers_review_reopen() {
-        // Comments take priority — CI failure is handled upstream, but comments
+        // Comments take priority -- CI failure is handled upstream, but comments
         // still trigger a review reopen through classify_review_state.
         let (source, msg) =
-            classify_review_state(Some("failure"), 1, 0, 2, BODY_WITH_EVIDENCE, &wf()).unwrap();
+            classify_review_state(Some("failure"), 1, 0, 2, BODY_WITH_EVIDENCE, &wf(), 0, "")
+                .unwrap();
         assert_eq!(source, "review");
         assert!(msg.contains("1 unresolved threads"));
         assert!(msg.contains("2 unaddressed issue comments"));
@@ -338,14 +388,15 @@ mod tests {
 
     #[test]
     fn no_ci_data_no_comments_returns_none() {
-        let result = classify_review_state(None, 0, 0, 0, BODY_WITH_EVIDENCE, &wf());
+        let result = classify_review_state(None, 0, 0, 0, BODY_WITH_EVIDENCE, &wf(), 0, "");
         assert!(result.is_none());
     }
 
     #[test]
     fn missing_evidence_triggers_reopen() {
         let (source, msg) =
-            classify_review_state(Some("success"), 0, 0, 0, BODY_NO_EVIDENCE, &wf()).unwrap();
+            classify_review_state(Some("success"), 0, 0, 0, BODY_NO_EVIDENCE, &wf(), 0, "")
+                .unwrap();
         assert_eq!(source, "evidence");
         assert!(msg.contains("missing runtime evidence"));
     }
@@ -353,9 +404,73 @@ mod tests {
     #[test]
     fn missing_evidence_with_threads_uses_review_source() {
         let (source, msg) =
-            classify_review_state(Some("success"), 1, 0, 0, BODY_NO_EVIDENCE, &wf()).unwrap();
+            classify_review_state(Some("success"), 1, 0, 0, BODY_NO_EVIDENCE, &wf(), 0, "")
+                .unwrap();
         assert_eq!(source, "review");
         assert!(msg.contains("missing runtime evidence"));
+        assert!(msg.contains("1 unresolved threads"));
+    }
+
+    #[test]
+    fn stale_evidence_triggers_reopen() {
+        // Evidence exists but SHA marker is missing after a reopen.
+        let (source, msg) = classify_review_state(
+            Some("success"),
+            0,
+            0,
+            0,
+            BODY_WITH_EVIDENCE,
+            &wf(),
+            1,
+            "abc123",
+        )
+        .unwrap();
+        assert_eq!(source, "evidence");
+        assert!(msg.contains("stale"));
+    }
+
+    #[test]
+    fn stale_evidence_wrong_sha_triggers_reopen() {
+        // Evidence has SHA marker but it doesn't match HEAD.
+        let body = "### After\n![fix](https://example.com/fix.png)\n<!-- evidence-head: def456 -->";
+        let (source, msg) =
+            classify_review_state(Some("success"), 0, 0, 0, body, &wf(), 1, "abc123").unwrap();
+        assert_eq!(source, "evidence");
+        assert!(msg.contains("stale"));
+    }
+
+    #[test]
+    fn fresh_evidence_after_reopen_returns_none() {
+        // Evidence exists with matching SHA marker after reopen.
+        let result = classify_review_state(
+            Some("success"),
+            0,
+            0,
+            0,
+            BODY_WITH_FRESH_EVIDENCE,
+            &wf(),
+            1,
+            "abc123def",
+        );
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn stale_evidence_with_threads_uses_review_source() {
+        // Both stale evidence and comments: review source takes priority.
+        let (source, msg) = classify_review_state(
+            Some("success"),
+            1,
+            0,
+            0,
+            BODY_WITH_EVIDENCE,
+            &wf(),
+            1,
+            "abc123",
+        )
+        .unwrap();
+        assert_eq!(source, "review");
+        assert!(msg.contains("stale"));
         assert!(msg.contains("1 unresolved threads"));
     }
 }

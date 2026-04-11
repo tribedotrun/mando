@@ -56,7 +56,9 @@ async fn test_state_with_data_dir(data_dir: PathBuf) -> AppState {
         cc_session_mgr: Arc::new(cc_session_mgr),
         task_store: Arc::new(RwLock::new(task_store)),
         db,
-        qa_session_mgr: mando_scout::runtime::qa::default_session_manager(),
+        qa_session_mgr: mando_scout::runtime::qa::session_manager_from_workflow(
+            &mando_config::ScoutWorkflow::compiled_default(),
+        ),
         terminal_host: Arc::new(mando_terminal::TerminalHost::new(data_dir)),
         start_time: std::time::Instant::now(),
         listen_port: 0,

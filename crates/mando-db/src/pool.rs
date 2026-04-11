@@ -145,6 +145,10 @@ const MIGRATIONS: &[(i64, &str)] = &[
     ),
     (12, include_str!("../migrations/012_workbench_pinned.sql")),
     (13, include_str!("../migrations/013_session_resumed_at.sql")),
+    (
+        14,
+        include_str!("../migrations/014_ask_history_sessions.sql"),
+    ),
 ];
 
 #[cfg(test)]

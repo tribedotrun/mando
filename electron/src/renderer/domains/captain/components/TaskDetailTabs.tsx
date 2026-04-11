@@ -82,7 +82,7 @@ export function SessionsTab({
 }: {
   sessions: SessionSummary[];
   onSessionClick: (s: SessionSummary) => void;
-  onResumeSession?: (sessionId: string, name?: string) => void;
+  onResumeSession?: (sessionId: string, name?: string, sessionCwd?: string) => void;
   taskId: number;
 }): React.ReactElement {
   if (sessions.length === 0) {
@@ -147,7 +147,7 @@ export function SessionsTab({
                 onClick={(e) => {
                   e.stopPropagation();
                   const displayName = title + (s.worker_name ? ` (${s.worker_name})` : '');
-                  onResumeSession(s.session_id, displayName);
+                  onResumeSession(s.session_id, displayName, s.cwd);
                 }}
                 className="ml-1"
                 title="Resume this session in a terminal"

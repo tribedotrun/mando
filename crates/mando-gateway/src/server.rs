@@ -426,6 +426,7 @@ where
         );
     }
 
+    let qa_session_mgr = mando_scout::runtime::qa::session_manager_from_workflow(&scout_wf);
     let state = AppState {
         config: config_arc,
         config_manager,
@@ -437,7 +438,7 @@ where
         cc_session_mgr: Arc::new(cc_session_mgr),
         task_store: task_store_arc,
         db,
-        qa_session_mgr: mando_scout::runtime::qa::default_session_manager(),
+        qa_session_mgr,
         terminal_host: Arc::new(mando_terminal::TerminalHost::new(mando_config::data_dir())),
         start_time: std::time::Instant::now(),
         listen_port: port,

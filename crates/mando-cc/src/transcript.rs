@@ -151,18 +151,20 @@ pub fn parse_messages(
 }
 
 /// Get aggregated tool usage for a session.
+///
+/// Scans all lines in the stream (not just the last resume segment) so the
+/// totals reflect the full session lifetime.
 pub fn tool_usage(stream_path: &Path) -> Vec<ToolUsageSummary> {
-    let (content, last_init_idx) = match crate::stream::current_session_lines(stream_path) {
-        Some(c) => c,
-        None => return Vec::new(),
+    let content = match std::fs::read_to_string(stream_path) {
+        Ok(c) => c,
+        Err(_) => return Vec::new(),
     };
 
-    let lines: Vec<&str> = content.lines().collect();
     let mut tools: HashMap<String, (u32, u32)> = HashMap::new();
     // Reverse lookup: tool_use_id → tool name (for attributing errors).
     let mut tool_use_id_to_name: HashMap<String, String> = HashMap::new();
 
-    for line in &lines[last_init_idx..] {
+    for line in content.lines() {
         let val: serde_json::Value = match serde_json::from_str(line) {
             Ok(v) => v,
             Err(e) => {

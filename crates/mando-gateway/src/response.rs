@@ -36,6 +36,17 @@ pub(crate) fn internal_error_with(
     error_response(status, client_msg)
 }
 
+/// Map a task-creation error: project-related bails become 422, everything
+/// else becomes a sanitized 500. Used by both `/api/tasks/add` and scout promote.
+pub(crate) fn map_task_create_error(e: anyhow::Error) -> (StatusCode, Json<Value>) {
+    let msg = e.to_string();
+    if msg.contains("no project configured") || msg.contains("project selection required") {
+        error_response(StatusCode::UNPROCESSABLE_ENTITY, &msg)
+    } else {
+        internal_error(e)
+    }
+}
+
 /// Map an error to 404 if it represents a "record not found" condition,
 /// else 500. The raw error is always logged and only a sanitized message is
 /// returned to the client.

@@ -15,6 +15,9 @@ pub(crate) struct SessionsArgs {
     /// Filter by caller (e.g. "captain", "clarifier")
     #[arg(long)]
     pub caller: Option<String>,
+    /// Filter by task ID
+    #[arg(long, conflicts_with_all = ["last", "caller"])]
+    pub task: Option<i64>,
     /// Output as JSON
     #[arg(long)]
     pub json: bool,
@@ -60,19 +63,26 @@ pub(crate) async fn handle(args: SessionsArgs) -> anyhow::Result<()> {
     }
 
     let client = DaemonClient::discover()?;
-    let mut path = "/api/sessions".to_string();
-    let mut params = vec![];
-    if let Some(n) = args.last {
-        params.push(format!("last={n}"));
-    }
-    if let Some(ref caller) = args.caller {
-        params.push(format!("caller={caller}"));
-    }
-    if !params.is_empty() {
-        path = format!("{path}?{}", params.join("&"));
-    }
 
-    let result = client.get(&path).await?;
+    // Use per-task endpoint when --task is provided.
+    let result = if let Some(task_id) = args.task {
+        client
+            .get(&format!("/api/tasks/{task_id}/sessions"))
+            .await?
+    } else {
+        let mut path = "/api/sessions".to_string();
+        let mut params = vec![];
+        if let Some(n) = args.last {
+            params.push(format!("last={n}"));
+        }
+        if let Some(ref caller) = args.caller {
+            params.push(format!("caller={caller}"));
+        }
+        if !params.is_empty() {
+            path = format!("{path}?{}", params.join("&"));
+        }
+        client.get(&path).await?
+    };
 
     if args.json {
         println!("{}", serde_json::to_string_pretty(&result)?);
@@ -90,7 +100,10 @@ pub(crate) async fn handle(args: SessionsArgs) -> anyhow::Result<()> {
 
     for entry in entries {
         let session_id = entry["session_id"].as_str().unwrap_or("?");
-        let ts = entry["ts"].as_str().unwrap_or("?");
+        let ts = entry["started_at"]
+            .as_str()
+            .or_else(|| entry["ts"].as_str())
+            .unwrap_or("?");
         let caller = entry["caller"].as_str().unwrap_or("?");
         let cost = entry["cost_usd"]
             .as_f64()
@@ -253,6 +266,16 @@ mod tests {
         match cli.cmd {
             TestCmd::Sessions(args) => {
                 assert!(args.json);
+            }
+        }
+    }
+
+    #[test]
+    fn parse_sessions_task() {
+        let cli = TestCli::try_parse_from(["test", "sessions", "--task", "14"]).unwrap();
+        match cli.cmd {
+            TestCmd::Sessions(args) => {
+                assert_eq!(args.task, Some(14));
             }
         }
     }

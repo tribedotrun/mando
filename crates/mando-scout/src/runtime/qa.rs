@@ -56,13 +56,15 @@ struct LiveSession {
 pub struct QaSessionManager {
     sessions: Mutex<HashMap<String, Arc<Mutex<LiveSession>>>>,
     ttl: Duration,
+    qa_timeout: Duration,
 }
 
 impl QaSessionManager {
-    pub fn new(ttl: Duration) -> Self {
+    pub fn new(ttl: Duration, qa_timeout: Duration) -> Self {
         Self {
             sessions: Mutex::new(HashMap::new()),
             ttl,
+            qa_timeout,
         }
     }
 
@@ -114,7 +116,7 @@ impl QaSessionManager {
 
         cc.send_message(&prompt).await?;
 
-        let timeout = Duration::from_secs(120);
+        let timeout = workflow.agent.qa_timeout_s;
         let result = match tokio::time::timeout(timeout, cc.recv_result()).await {
             Ok(Ok(r)) => r,
             Ok(Err(e)) => {
@@ -180,8 +182,7 @@ impl QaSessionManager {
             return self.drop_and_remove(key, format!("send failed: {e}")).await;
         }
 
-        let timeout = Duration::from_secs(120);
-        let result = match tokio::time::timeout(timeout, cc.recv_result()).await {
+        let result = match tokio::time::timeout(self.qa_timeout, cc.recv_result()).await {
             Ok(Ok(r)) => r,
             Ok(Err(e)) => {
                 drop(live);
@@ -190,7 +191,7 @@ impl QaSessionManager {
             Err(_) => {
                 drop(live);
                 return self
-                    .drop_and_remove(key, format!("recv timed out after {timeout:?}"))
+                    .drop_and_remove(key, format!("recv timed out after {:?}", self.qa_timeout))
                     .await;
             }
         };
@@ -287,9 +288,12 @@ async fn close_sessions(arcs: Vec<Arc<Mutex<LiveSession>>>, reason: &str) {
     }
 }
 
-/// Build the default session manager (10 min TTL).
-pub fn default_session_manager() -> Arc<QaSessionManager> {
-    Arc::new(QaSessionManager::new(Duration::from_secs(600)))
+/// Build the session manager from workflow config.
+pub fn session_manager_from_workflow(workflow: &ScoutWorkflow) -> Arc<QaSessionManager> {
+    Arc::new(QaSessionManager::new(
+        workflow.agent.qa_ttl_s,
+        workflow.agent.qa_timeout_s,
+    ))
 }
 
 fn qa_cc_config(
@@ -299,7 +303,7 @@ fn qa_cc_config(
     let model = crate::biz::model_lookup::required_model(workflow, "qa")?;
     let mut builder = mando_cc::CcConfig::builder()
         .model(model)
-        .timeout(Duration::from_secs(120))
+        .timeout(workflow.agent.qa_timeout_s)
         .caller("scout-qa")
         .json_schema(qa_json_schema());
     if let Some(session_id) = resume_session {
@@ -430,7 +434,7 @@ mod tests {
         std::env::set_var("MANDO_DATA_DIR", &temp);
 
         let workflow = ScoutWorkflow::compiled_default();
-        let mgr = QaSessionManager::new(Duration::from_secs(600));
+        let mgr = QaSessionManager::new(Duration::from_secs(600), Duration::from_secs(120));
 
         let first = mgr
             .ask(

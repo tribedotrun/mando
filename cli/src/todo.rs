@@ -46,6 +46,11 @@ pub(crate) enum TodoCommand {
         /// Item ID
         item_id: String,
     },
+    /// Show details for a single task
+    Show {
+        /// Item ID
+        item_id: String,
+    },
     /// List tasks
     List {
         /// Include finalized items
@@ -114,6 +119,7 @@ pub(crate) async fn handle(args: TodoArgs) -> anyhow::Result<()> {
             project,
         } => handle_bulk(items.as_deref(), stdin, project.as_deref()).await,
         TodoCommand::Delete { item_id } => handle_delete(&item_id).await,
+        TodoCommand::Show { item_id } => handle_show(&item_id).await,
         TodoCommand::List { all } => handle_list(all).await,
         TodoCommand::PrSummary { item_id } => handle_pr_summary(&item_id).await,
         TodoCommand::Ask {
@@ -203,6 +209,70 @@ async fn handle_delete(item_id: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
+async fn handle_show(item_id: &str) -> anyhow::Result<()> {
+    let id_num = parse_id(item_id, "item")?;
+    let client = DaemonClient::discover()?;
+    let item = fetch_task_by_id(&client, id_num).await?;
+
+    let status = item["status"].as_str().unwrap_or("?");
+    let title = item["title"].as_str().unwrap_or("?");
+    let project = item["project"].as_str().unwrap_or("?");
+    let worker = item["worker"].as_str().unwrap_or("-");
+    let worktree = item["worktree"].as_str().unwrap_or("-");
+    let pr = item["pr"]
+        .as_str()
+        .map(|v| {
+            let num = v.rsplit('/').next().unwrap_or(v).trim_start_matches('#');
+            format!("#{num}")
+        })
+        .or_else(|| item["pr_number"].as_i64().map(|n| format!("#{n}")))
+        .unwrap_or_else(|| "-".into());
+    let created = item["created_at"].as_str().unwrap_or("?");
+    let last_activity = item["last_activity_at"].as_str().unwrap_or("-");
+    let worker_seq = item["worker_seq"].as_i64().unwrap_or(0);
+    let reopen_seq = item["reopen_seq"].as_i64().unwrap_or(0);
+    let intervention = item["intervention_count"].as_i64().unwrap_or(0);
+
+    println!("Task #{item_id}: {title}");
+    println!("{}", "-".repeat(60));
+    println!("  Status:        {status}");
+    println!("  Project:       {project}");
+    println!("  Worker:        {worker}");
+    println!("  Worktree:      {worktree}");
+    println!("  PR:            {pr}");
+    println!("  Created:       {created}");
+    println!("  Last activity: {last_activity}");
+    println!("  Worker seq:    {worker_seq}");
+    println!("  Reopen seq:    {reopen_seq}");
+    println!("  Interventions: {intervention}");
+
+    // Fetch sessions for this task.
+    let sessions_result = client
+        .get(&format!("/api/tasks/{item_id}/sessions"))
+        .await?;
+    let empty = vec![];
+    let sessions = sessions_result["sessions"].as_array().unwrap_or(&empty);
+    if !sessions.is_empty() {
+        println!("\n  Sessions ({}):", sessions.len());
+        for s in sessions {
+            let sid = s["session_id"].as_str().unwrap_or("?");
+            let caller = s["caller"].as_str().unwrap_or("?");
+            let cost = s["cost_usd"]
+                .as_f64()
+                .map(|c| format!("${c:.2}"))
+                .unwrap_or_else(|| "-".into());
+            let dur = s["duration_ms"]
+                .as_i64()
+                .map(|d| format!("{}s", d / 1000))
+                .unwrap_or_else(|| "-".into());
+            let status = s["status"].as_str().unwrap_or("?");
+            println!("    {sid}  {caller:<22}  {dur:>6}  {cost:>8}  {status}");
+        }
+    }
+
+    Ok(())
+}
+
 async fn handle_list(all: bool) -> anyhow::Result<()> {
     let client = DaemonClient::discover()?;
     let path = if all {
@@ -269,7 +339,7 @@ async fn handle_pr_summary(item_id: &str) -> anyhow::Result<()> {
 /// is not found. The daemon has no single-task-by-id GET endpoint, so we
 /// always list and filter client-side.
 async fn fetch_task_by_id(client: &DaemonClient, id_num: i64) -> anyhow::Result<serde_json::Value> {
-    let resp = client.get("/api/tasks").await?;
+    let resp = client.get("/api/tasks?include_archived=true").await?;
     let arr = resp
         .get("items")
         .and_then(|v| v.as_array())
@@ -520,6 +590,19 @@ mod tests {
                     assert_eq!(item_id, "42")
                 }
                 _ => panic!("expected Delete"),
+            },
+        }
+    }
+
+    #[test]
+    fn parse_todo_show() {
+        let cli = TestCli::try_parse_from(["test", "todo", "show", "14"]).unwrap();
+        match cli.cmd {
+            TestCmd::Todo(args) => match args.command {
+                TodoCommand::Show { item_id } => {
+                    assert_eq!(item_id, "14");
+                }
+                _ => panic!("expected Show"),
             },
         }
     }

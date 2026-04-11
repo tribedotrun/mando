@@ -9,7 +9,7 @@ use axum::Json;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use crate::response::{error_response, internal_error};
+use crate::response::{error_response, internal_error, map_task_create_error};
 use crate::AppState;
 
 /// Extract a text field from a multipart part, returning `Ok(None)` if empty.
@@ -173,6 +173,30 @@ pub(crate) async fn post_task_add(
     }
 
     let config = state.config.load_full();
+
+    // Validate project name before calling add_task so the client gets a 400
+    // with the helpful message instead of a generic 500.
+    if let Some(ref name) = repo {
+        if mando_config::resolve_project_config(Some(name), &config).is_none() {
+            let mut valid: Vec<&str> = config
+                .captain
+                .projects
+                .values()
+                .map(|pc| pc.name.as_str())
+                .collect();
+            valid.sort_unstable();
+            let list = if valid.is_empty() {
+                "(none configured)".to_string()
+            } else {
+                valid.join(", ")
+            };
+            return Err(error_response(
+                StatusCode::BAD_REQUEST,
+                &format!("unknown project {name:?} — valid projects: {list}"),
+            ));
+        }
+    }
+
     let val = {
         let store = state.task_store.read().await;
         let val = mando_captain::runtime::dashboard::add_task(
@@ -183,7 +207,7 @@ pub(crate) async fn post_task_add(
             source.as_deref(),
         )
         .await
-        .map_err(internal_error)?;
+        .map_err(map_task_create_error)?;
 
         if !saved_images.is_empty() || context.is_some() || plan.is_some() || no_pr.is_some() {
             if let Some(id) = val["id"].as_i64() {

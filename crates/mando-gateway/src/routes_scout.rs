@@ -9,9 +9,42 @@ use futures_util::FutureExt;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use crate::response::{error_response, internal_error, not_found_or_internal};
+use crate::response::{
+    error_response, internal_error, map_task_create_error, not_found_or_internal,
+};
 use crate::scout_notify::{emit_scout_process_failed, emit_scout_processed};
 use crate::AppState;
+
+/// Spawn background processing for a newly added scout item.
+///
+/// Mirrors the inline spawn in `post_scout_items` but extracted so
+/// `post_scout_research` can reuse the same pattern.
+fn spawn_scout_processing(state: &AppState, id: i64, url: String) {
+    let config = state.config.load_full();
+    let workflow = state.scout_workflow.load_full();
+    let pool = state.db.pool().clone();
+    let bus = state.bus.clone();
+    state.task_tracker.spawn(async move {
+        let result = AssertUnwindSafe(async {
+            if let Err(e) = mando_scout::process_scout(&config, &pool, Some(id), &workflow).await {
+                tracing::warn!(scout_id = id, error = %e, "auto-process failed");
+                emit_scout_process_failed(&bus, id, &url, &e.to_string());
+                return;
+            }
+            let scout_payload = mando_scout::get_scout_item(&pool, id).await.ok();
+            bus.send(
+                mando_types::BusEvent::Scout,
+                Some(json!({"action": "updated", "item": scout_payload, "id": id})),
+            );
+            emit_scout_processed(&bus, &pool, id).await;
+        })
+        .catch_unwind()
+        .await;
+        if let Err(panic) = result {
+            tracing::error!(scout_id = id, ?panic, "auto-process panicked");
+        }
+    });
+}
 
 #[derive(Deserialize, Default)]
 pub(crate) struct ScoutQuery {
@@ -106,41 +139,9 @@ pub(crate) async fn post_scout_items(
                 Some(json!({"action": "created", "item": scout_payload, "id": val["id"]})),
             );
 
-            // Auto-process newly added items in the background. Panic-safe:
-            // AssertUnwindSafe + catch_unwind ensures an auto-process failure
-            // cannot take down the runtime. Registered with the task tracker
-            // so shutdown awaits in-flight auto-processing before exit.
             if val["added"].as_bool() == Some(true) {
                 if let Some(id) = val["id"].as_i64() {
-                    let config = state.config.load_full();
-                    let workflow = state.scout_workflow.load_full();
-                    let pool = state.db.pool().clone();
-                    let bus = state.bus.clone();
-                    let url_owned = body.url.clone();
-                    state.task_tracker.spawn(async move {
-                        let result = AssertUnwindSafe(async {
-                            if let Err(e) =
-                                mando_scout::process_scout(&config, &pool, Some(id), &workflow)
-                                    .await
-                            {
-                                tracing::warn!(scout_id = id, error = %e, "auto-process failed");
-                                emit_scout_process_failed(&bus, id, &url_owned, &e.to_string());
-                                return;
-                            }
-                            let scout_payload = mando_scout::get_scout_item(&pool, id).await.ok();
-                            bus.send(
-                                mando_types::BusEvent::Scout,
-                                Some(json!({"action": "updated", "item": scout_payload, "id": id})),
-                            );
-
-                            emit_scout_processed(&bus, &pool, id).await;
-                        })
-                        .catch_unwind()
-                        .await;
-                        if let Err(panic) = result {
-                            tracing::error!(scout_id = id, ?panic, "auto-process panicked");
-                        }
-                    });
+                    spawn_scout_processing(&state, id, body.url.clone());
                 }
             }
 
@@ -199,77 +200,72 @@ pub(crate) async fn post_scout_research(
     State(state): State<AppState>,
     Json(body): Json<ResearchBody>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    let config = state.config.load_full();
     let workflow = state.scout_workflow.load_full();
     let pool = state.db.pool().clone();
     let process = body.process.unwrap_or(false);
 
-    let result = async move {
-        let research = mando_scout::runtime::research::run_research(&body.topic, &workflow)
-            .await
-            .map_err(|e| e.to_string())?;
+    let research = mando_scout::runtime::research::run_research(&body.topic, &workflow)
+        .await
+        .map_err(internal_error)?;
 
-        let mut added = 0u64;
-        let mut processed_count = 0u64;
-        let mut errors: Vec<Value> = Vec::new();
-        for link in &research.links {
-            match mando_scout::add_scout_item(&pool, &link.url, Some(&link.title)).await {
-                Ok(val) => {
-                    if val["added"].as_bool() == Some(true) {
-                        added += 1;
+    let mut added_count = 0u64;
+    let mut errors: Vec<Value> = Vec::new();
+    let mut links_json: Vec<Value> = Vec::new();
+
+    for link in &research.links {
+        match mando_scout::add_scout_item(&pool, &link.url, Some(&link.title)).await {
+            Ok(val) => {
+                let id = val["id"].as_i64();
+                let was_added = val["added"].as_bool() == Some(true);
+
+                if was_added {
+                    added_count += 1;
+                    if let Some(id) = id {
+                        let scout_payload = mando_scout::get_scout_item(&pool, id).await.ok();
+                        state.bus.send(
+                            mando_types::BusEvent::Scout,
+                            Some(json!({"action": "created", "item": scout_payload, "id": id})),
+                        );
                         if process {
-                            if let Some(id) = val["id"].as_i64() {
-                                if let Err(e) =
-                                    mando_scout::process_scout(&config, &pool, Some(id), &workflow)
-                                        .await
-                                {
-                                    errors.push(json!({
-                                        "url": link.url,
-                                        "stage": "process",
-                                        "error": e.to_string(),
-                                    }));
-                                } else {
-                                    processed_count += 1;
-                                }
-                            }
+                            spawn_scout_processing(&state, id, link.url.clone());
                         }
                     }
                 }
-                Err(e) => {
-                    errors.push(json!({
-                        "url": link.url,
-                        "stage": "add",
-                        "error": e.to_string(),
-                    }));
-                }
+
+                links_json.push(json!({
+                    "url": link.url,
+                    "title": link.title,
+                    "type": link.link_type,
+                    "reason": link.reason,
+                    "id": id,
+                    "added": was_added,
+                }));
+            }
+            Err(e) => {
+                errors.push(json!({
+                    "url": link.url,
+                    "stage": "add",
+                    "error": e.to_string(),
+                }));
+                links_json.push(json!({
+                    "url": link.url,
+                    "title": link.title,
+                    "type": link.link_type,
+                    "reason": link.reason,
+                    "id": null,
+                    "added": false,
+                }));
             }
         }
-
-        let links_json: Vec<Value> = research
-            .links
-            .iter()
-            .map(|l| {
-                json!({
-                    "url": l.url,
-                    "title": l.title,
-                    "type": l.link_type,
-                    "reason": l.reason,
-                })
-            })
-            .collect();
-
-        Ok::<_, String>(json!({
-            "ok": true,
-            "links": links_json,
-            "added": added,
-            "processed": processed_count,
-            "errors": errors,
-        }))
     }
-    .await
-    .map_err(internal_error)?;
 
-    Ok(Json(result))
+    Ok(Json(json!({
+        "ok": true,
+        "links": links_json,
+        "added": added_count,
+        "processing": added_count > 0 && process,
+        "errors": errors,
+    })))
 }
 
 #[derive(Deserialize)]
@@ -404,7 +400,7 @@ pub(crate) async fn post_scout_act(
         Some("scout"),
     )
     .await
-    .map_err(internal_error)?;
+    .map_err(map_task_create_error)?;
 
     let task_payload = if let Some(id) = val["id"].as_i64() {
         store

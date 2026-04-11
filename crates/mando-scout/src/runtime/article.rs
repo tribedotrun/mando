@@ -1,7 +1,5 @@
 //! Article generation — convert raw content into structured markdown articles.
 
-use std::time::Duration;
-
 use crate::biz::formatting::slugify_title;
 use anyhow::Result;
 use mando_config::workflow::ScoutWorkflow;
@@ -43,7 +41,7 @@ pub async fn generate_article(
         &prompt,
         mando_cc::CcConfig::builder()
             .model(model)
-            .timeout(Duration::from_secs(300))
+            .timeout(workflow.agent.article_timeout_s)
             .caller("scout-article")
             .build(),
     )

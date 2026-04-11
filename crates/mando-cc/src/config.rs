@@ -165,6 +165,10 @@ impl CcConfigBuilder {
         self.0.allowed_tools = Some(t);
         self
     }
+    pub fn disallowed_tools(mut self, t: Vec<String>) -> Self {
+        self.0.disallowed_tools = Some(t);
+        self
+    }
     pub fn max_turns(mut self, n: u32) -> Self {
         self.0.max_turns = Some(n);
         self

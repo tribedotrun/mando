@@ -4,12 +4,12 @@
 //! 1. Spawns a headless CC session with merge instructions
 //! 2. The session checks CI, triggers it if needed, fixes failures, and merges
 //! 3. On subsequent ticks, polls for completion
-//! 4. Applies the result (merged or escalate)
+//! 4. Applies the result (merged or failed → retry)
 
 use serde::{Deserialize, Serialize};
 use tracing::warn;
 
-use mando_config::settings::Config;
+use mando_config::workflow::CaptainWorkflow;
 use mando_types::task::{ItemStatus, Task};
 use mando_types::timeline::TimelineEventType;
 
@@ -32,12 +32,12 @@ pub(super) fn merge_json_schema() -> serde_json::Value {
         "properties": {
             "action": {
                 "type": "string",
-                "enum": ["merged", "escalate"],
-                "description": "merged = PR successfully merged; escalate = could not merge, needs human"
+                "enum": ["merged"],
+                "description": "merged = PR successfully merged"
             },
             "feedback": {
                 "type": "string",
-                "description": "Summary of what was done or why escalation is needed"
+                "description": "Summary of what was done to merge the PR"
             }
         },
         "required": ["action", "feedback"]
@@ -88,7 +88,7 @@ pub(crate) fn check_merge(item: &Task) -> Option<MergeResult> {
             text = t;
         } else {
             return Some(MergeResult {
-                action: "escalate".into(),
+                action: "failed".into(),
                 feedback: "Merge session completed but produced no output".into(),
             });
         }
@@ -97,9 +97,9 @@ pub(crate) fn check_merge(item: &Task) -> Option<MergeResult> {
     match serde_json::from_str::<MergeResult>(&text) {
         Ok(mr) => Some(mr),
         Err(e) => {
-            warn!(module = "captain", %e, "failed to parse merge result, escalating");
+            warn!(module = "captain", %e, "failed to parse merge result");
             Some(MergeResult {
-                action: "escalate".into(),
+                action: "failed".into(),
                 feedback: format!("Failed to parse merge result: {e}"),
             })
         }
@@ -107,11 +107,16 @@ pub(crate) fn check_merge(item: &Task) -> Option<MergeResult> {
 }
 
 /// Apply a merge session result to an item.
+///
+/// "merged" → terminal success. Any other action (including "failed") is
+/// treated as a retryable failure and routed through `handle_merge_error`,
+/// which retries up to `max_merge_retries` before routing to
+/// CaptainReviewing (invariant: Escalated only via CaptainReviewing verdict).
 pub(crate) async fn apply_merge_result(
     item: &mut Task,
     result: &MergeResult,
     notifier: &Notifier,
-    _config: &Config,
+    workflow: &CaptainWorkflow,
     pool: &sqlx::SqlitePool,
 ) {
     let title = mando_shared::telegram_format::escape_html(&item.title);
@@ -162,70 +167,18 @@ pub(crate) async fn apply_merge_result(
             }
         }
         _ => {
-            // escalate or unknown → Escalated (from CaptainMerging verdict — captain-managed)
-            let pr_ref = item
-                .pr_number
-                .map(mando_types::task::pr_label)
-                .unwrap_or_else(|| "unknown".to_string());
-            let has_conflicts = item.rebase_worker.as_deref().is_some_and(|w| w == "failed");
-            let fail_count = item.merge_fail_count;
-            let report = format!(
-                "## Merge escalation report\n\
-                 \n\
-                 - **PR:** {pr_ref}\n\
-                 - **Reason:** {}\n\
-                 - **Conflicts detected:** {has_conflicts}\n\
-                 - **Prior merge failures:** {fail_count}",
-                result.feedback,
-            );
-
-            item.status = ItemStatus::Escalated;
-            item.merge_fail_count = 0;
-            item.escalation_report = Some(report);
-
-            let event = mando_types::timeline::TimelineEvent {
-                event_type: TimelineEventType::Escalated,
-                timestamp: mando_types::now_rfc3339(),
-                actor: "captain".to_string(),
-                summary: format!("Merge escalated: {}", result.feedback),
-                data,
-            };
-            match mando_db::queries::tasks::persist_status_transition(
-                pool,
-                item,
-                prev_status.as_str(),
-                &event,
-            )
-            .await
-            {
-                Ok(true) => {
-                    notifier
-                        .critical(&format!(
-                            "\u{1f6a8} Merge escalated <b>{title}</b>: {}",
-                            mando_shared::telegram_format::escape_html(&result.feedback),
-                        ))
-                        .await;
-                }
-                Ok(false) => {
-                    tracing::info!(
-                        module = "captain",
-                        item_id = item.id,
-                        "merge escalation already applied, skipping"
-                    );
-                }
-                Err(e) => {
-                    item.status = prev_status;
-                    item.escalation_report = None;
-                    tracing::error!(module = "captain", item_id = item.id, error = %e, "persist_status_transition failed for merge escalation");
-                }
-            }
+            // Non-merged result → treat as retryable failure. Route through
+            // handle_merge_error which retries up to max_merge_retries before
+            // routing to CaptainReviewing (never directly to Escalated).
+            let max_retries = workflow.agent.max_merge_retries;
+            handle_merge_error(item, &result.feedback, max_retries, notifier, pool).await;
         }
     }
 }
 
 /// Handle merge session error (CC crashed/timed out).
 ///
-/// Retries up to `max_review_retries` before routing to CaptainReviewing —
+/// Retries up to `max_merge_retries` before routing to CaptainReviewing —
 /// transient failures (GitHub API blips, CC timeouts) are common during merge
 /// operations. When retries are exhausted, routes through CaptainReviewing
 /// with a merge_fail trigger (invariant 1: Escalated only via CaptainReviewing).

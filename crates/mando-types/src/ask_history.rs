@@ -2,10 +2,14 @@
 
 use serde::{Deserialize, Serialize};
 
-/// One Q&A exchange in a task's ask history.
+/// One message in a task's ask history.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AskHistoryEntry {
-    /// "system", "human", or "clarifier"
+    /// Conversation grouping key (UUID, generated per Q&A session).
+    pub ask_id: String,
+    /// CC session that produced this row.
+    pub session_id: String,
+    /// "human", "assistant", or "error"
     pub role: String,
     pub content: String,
     /// ISO 8601 timestamp.

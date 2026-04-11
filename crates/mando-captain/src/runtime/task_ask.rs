@@ -71,36 +71,48 @@ pub async fn build_timeline_text(pool: &sqlx::SqlitePool, task_id: i64) -> Resul
     }
 }
 
-/// Record ask Q&A in history and timeline. Any persistence failure is
-/// propagated so the caller returns 500 to the human instead of silently
-/// leaving the DB inconsistent (history/timeline out of sync with the CC
-/// session).
-pub async fn record_ask(
+/// Persist a human question to ask_history. Called immediately on receipt,
+/// before the CC session runs, so the question survives timeouts/crashes.
+pub async fn persist_question(
     pool: &sqlx::SqlitePool,
     task_id: i64,
+    ask_id: &str,
+    session_id: &str,
     question: &str,
-    answer: &str,
 ) -> Result<()> {
-    let now = mando_types::now_rfc3339();
     mando_db::queries::ask_history::append(
         pool,
         task_id,
         &mando_types::AskHistoryEntry {
+            ask_id: ask_id.into(),
+            session_id: session_id.into(),
             role: "human".into(),
             content: question.into(),
-            timestamp: now.clone(),
+            timestamp: mando_types::now_rfc3339(),
         },
     )
     .await
-    .map_err(|e| anyhow::anyhow!("persist ask question for task {task_id}: {e}"))?;
+    .map_err(|e| anyhow::anyhow!("persist ask question for task {task_id}: {e}"))
+}
 
+/// Persist the assistant answer and emit a HumanAsk timeline event.
+pub async fn persist_answer(
+    pool: &sqlx::SqlitePool,
+    task_id: i64,
+    ask_id: &str,
+    session_id: &str,
+    question: &str,
+    answer: &str,
+) -> Result<()> {
     mando_db::queries::ask_history::append(
         pool,
         task_id,
         &mando_types::AskHistoryEntry {
+            ask_id: ask_id.into(),
+            session_id: session_id.into(),
             role: "assistant".into(),
             content: answer.into(),
-            timestamp: now,
+            timestamp: mando_types::now_rfc3339(),
         },
     )
     .await
@@ -114,6 +126,39 @@ pub async fn record_ask(
         &format!("Asked: {}", truncate_utf8(question, 80)),
         serde_json::json!({"question": question}),
     )
-    .await?;
-    Ok(())
+    .await
+}
+
+/// Persist an error to ask_history and emit a HumanAskFailed timeline event.
+pub async fn persist_error(
+    pool: &sqlx::SqlitePool,
+    task_id: i64,
+    ask_id: &str,
+    session_id: &str,
+    question: &str,
+    error_msg: &str,
+) -> Result<()> {
+    mando_db::queries::ask_history::append(
+        pool,
+        task_id,
+        &mando_types::AskHistoryEntry {
+            ask_id: ask_id.into(),
+            session_id: session_id.into(),
+            role: "error".into(),
+            content: error_msg.into(),
+            timestamp: mando_types::now_rfc3339(),
+        },
+    )
+    .await
+    .map_err(|e| anyhow::anyhow!("persist ask error for task {task_id}: {e}"))?;
+
+    super::timeline_emit::emit(
+        pool,
+        task_id,
+        mando_types::timeline::TimelineEventType::HumanAskFailed,
+        "system",
+        &format!("Ask failed: {}", truncate_utf8(error_msg, 80)),
+        serde_json::json!({"question": question, "error": error_msg}),
+    )
+    .await
 }

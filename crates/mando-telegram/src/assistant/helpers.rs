@@ -66,7 +66,7 @@ pub(crate) async fn add_and_track(
     Ok(())
 }
 
-fn register_pending(pending: &PendingMessages, scout_id: i64, message_id: i64) {
+pub(crate) fn register_pending(pending: &PendingMessages, scout_id: i64, message_id: i64) {
     let key = format!("scout:{scout_id}");
     pending.lock().unwrap().insert(key, message_id);
 }

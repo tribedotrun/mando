@@ -37,7 +37,7 @@ export const InlineTaskCreate = forwardRef<InlineTaskCreateHandle>(
 
     const savedProject = project && projects.includes(project) ? project : '';
     const effectiveProject = savedProject || (projects.length === 1 ? projects[0] : '');
-    const projectRequired = projects.length > 1;
+    const projectRequired = projects.length !== 1;
     const trimmedTitle = title.trim();
 
     useImperativeHandle(ref, () => ({

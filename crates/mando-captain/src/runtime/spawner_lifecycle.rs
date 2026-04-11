@@ -106,7 +106,7 @@ pub(crate) async fn reopen_worker(
         &wt_expanded,
         "captain-reopen-context.md",
         &format!(
-            "# Captain Reopen (seq={})\n\nReview feedback:\n{}\n\nAddress the feedback, then post an ack comment: `[Mando] Reopen #{} addressed: <summary>`\n",
+            "# Captain Reopen (seq={})\n\nReview feedback:\n{}\n\nAddress the feedback, then post an ack comment: `[Mando] Reopen #{} addressed: <summary>`\n\nIf you make code changes, recapture and update PR evidence.\n",
             reopen_seq, feedback, reopen_seq
         ),
     )

@@ -319,6 +319,35 @@ fn nopr_insufficient_output_nudge() {
     assert!(a.reason.unwrap().contains("insufficient"));
 }
 
+// ── Stale evidence after reopen ──
+
+#[test]
+fn stale_evidence_blocks_gates_pass() {
+    let mut ctx = base_ctx();
+    // Evidence exists but no SHA marker, and reopen_seq > 0
+    ctx.pr_body = "## PR Summary\n<!-- pr-summary-head: abc -->\n### After\n![fix](https://example.com/fix.png)".into();
+    ctx.reopen_seq = 1;
+    ctx.pr_head_sha = "abc123".into();
+    let a = classify(&ctx, &base_item(), Some(true));
+    assert_eq!(a.action, ActionKind::Nudge);
+    assert!(
+        a.reason.unwrap().contains("stale"),
+        "expected stale evidence nudge"
+    );
+}
+
+#[test]
+fn fresh_evidence_after_reopen_passes_gates() {
+    let mut ctx = base_ctx();
+    ctx.pr_body = "## PR Summary\n<!-- pr-summary-head: abc -->\n### After\n![fix](https://example.com/fix.png)\n<!-- evidence-head: abc -->"
+        .into();
+    ctx.reopen_seq = 1;
+    ctx.pr_head_sha = "abc123".into();
+    let a = classify(&ctx, &base_item(), Some(true));
+    assert_eq!(a.action, ActionKind::CaptainReview);
+    assert_eq!(a.reason.as_deref(), Some("gates_pass"));
+}
+
 // ── ABR-999 regression: broken session with error result ──
 
 #[test]

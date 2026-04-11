@@ -14,6 +14,14 @@ models:
   qa: "default"
   act: "default"
 
+agent:
+  process_timeout_s: 120
+  article_timeout_s: 300
+  research_timeout_s: 300
+  qa_timeout_s: 120
+  qa_ttl_s: 600
+  act_timeout_s: 60
+
 # interests, user_context, and repos are injected from config.json at load time.
 interests: {}
 user_context: {}
@@ -23,8 +31,7 @@ repos: []
 
 prompts:
   process: |
-    You are a reading triage assistant. Score and summarize this content through
-    the lens of the reader described below.
+    You are a reading triage assistant. Score and summarize this content through the lens of the reader described below.
     {% if user_context %}
 
     ## Reader Context
@@ -57,8 +64,7 @@ prompts:
     - "summary": concise markdown string (MAX 100 words). Focus on non-obvious insights — details, data points, or nuances that a general AI summary would miss. Must cover: (1) What this is about (1-2 sentences), (2) Key insights — specific details, numbers, quotes, or arguments that make this worth reading (3-5 bullets).
 
   synthesize: |
-    You are an editor. Convert this raw {{ url_type }} transcript/content into a
-    well-structured markdown article optimized for reading.
+    You are an editor. Convert this raw {{ url_type }} transcript/content into a well-structured markdown article optimized for reading.
 
     Title: {{ title }}
     Source: {{ url }}
@@ -66,8 +72,7 @@ prompts:
 
     ## Reader Context
     {{ user_context }}
-    When the article covers topics the reader is less familiar with, briefly
-    define key terms on first use (1 sentence, inline).
+    When the article covers topics the reader is less familiar with, briefly define key terms on first use (1 sentence, inline).
     {% endif %}
 
     Rules:
@@ -93,8 +98,7 @@ prompts:
 
     ## Reader Context
     {{ user_context }}
-    Adapt your explanations: skip basics in the reader's known domains, but
-    define terms from unfamiliar domains.
+    Adapt your explanations: skip basics in the reader's known domains, but define terms from unfamiliar domains.
     {% endif %}
 
     ARTICLE SUMMARY:
@@ -139,14 +143,12 @@ prompts:
 
     1. **WebSearch** — fast, built-in web search for discovery. Max 10 searches.
     2. **mando firecrawl** — use for ALL page fetching in research (has timeouts + credit monitoring).
-       Do NOT use WebFetch for research page fetching — it has no timeout and can hang indefinitely
-       when fetching many URLs.
+       Do NOT use WebFetch for research page fetching — it has no timeout and can hang indefinitely when fetching many URLs.
        - Scrape: `mando firecrawl scrape <url>` — prints markdown to stdout
 
     ## Budget
 
-    At most 30 tool calls total. Be efficient — broad searches first, then
-    targeted follow-ups. Do NOT exhaustively search every keyword combo.
+    At most 30 tool calls total. Be efficient — broad searches first, then targeted follow-ups. Do NOT exhaustively search every keyword combo.
 
     ## Search Strategy
 
@@ -178,9 +180,7 @@ prompts:
     Use type "arxiv" for any arxiv.org or ar5iv.labs.arxiv.org URLs. Use "blog" for all other web content.
 
   act: |
-    You are a task generator. Given an article the user just read and a target project,
-    produce a single actionable coding task that applies an insight from the article to
-    the project — or decide the article has nothing actionable for this project.
+    You are a task generator. Given an article the user just read and a target project, produce a single actionable coding task that applies an insight from the article to the project — or decide the article has nothing actionable for this project.
 
     ## Article
 

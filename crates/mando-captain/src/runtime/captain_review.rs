@@ -331,6 +331,7 @@ pub(crate) async fn spawn_review(
             .cwd(cwd.clone())
             .session_id(session_id.clone())
             .allowed_tools(vec!["Read".into()])
+            .disallowed_tools(vec!["Agent".into()])
             .json_schema(verdict_json_schema(&trigger_str))
             .build();
 

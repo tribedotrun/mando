@@ -350,7 +350,7 @@ pub async fn act_on_scout_item(
         &prompt,
         mando_cc::CcConfig::builder()
             .model(model)
-            .timeout(std::time::Duration::from_secs(60))
+            .timeout(workflow.agent.act_timeout_s)
             .caller("scout-act")
             .json_schema(serde_json::json!({
                 "type": "object",
