@@ -57,6 +57,8 @@ pub enum TimelineEventType {
     RateLimited,
     #[serde(rename = "worker_reopened")]
     WorkerReopened,
+    #[serde(rename = "human_ask_failed")]
+    HumanAskFailed,
 }
 
 /// A single event in a task's timeline.

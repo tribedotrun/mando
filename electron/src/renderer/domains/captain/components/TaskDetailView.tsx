@@ -198,7 +198,7 @@ export function TaskDetailView({
   }, []);
 
   const openTerminalPage = useCallback(
-    (resumeId?: string, name?: string) => {
+    (resumeId?: string, name?: string, sessionCwd?: string) => {
       if (!onOpenTerminal || !item.project) return;
 
       const cfg = qc.getQueryData<MandoConfig>(queryKeys.config.current());
@@ -206,10 +206,12 @@ export function TaskDetailView({
         ? Object.values(cfg.captain.projects).find((p) => p.name === item.project)?.path
         : undefined;
 
-      // For resume, prefer project path: the worktree may have been cleaned up
-      // after merge/completion, and Claude Code resumes by session ID regardless
-      // of cwd. For new sessions, prefer worktree for correct git context.
-      const cwd = resumeId ? (projectPath ?? item.worktree) : (item.worktree ?? projectPath);
+      // Resume uses the session's stored cwd -- Claude Code resumes by session
+      // ID, so the directory just needs to exist on disk.
+      // New sessions use the worktree for correct git context.
+      const cwd = resumeId
+        ? sessionCwd || projectPath || item.worktree
+        : (item.worktree ?? projectPath);
 
       if (!cwd) {
         toast.error(`No working directory for task "${item.title}"`);
@@ -226,7 +228,8 @@ export function TaskDetailView({
   );
 
   const handleResumeSession = useCallback(
-    (sessionId: string, name?: string) => openTerminalPage(sessionId, name),
+    (sessionId: string, name?: string, sessionCwd?: string) =>
+      openTerminalPage(sessionId, name, sessionCwd),
     [openTerminalPage],
   );
 

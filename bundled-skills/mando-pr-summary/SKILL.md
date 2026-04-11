@@ -146,6 +146,7 @@ For `## Evidence`, follow the Step 7 hosting decision exactly:
 - replace it only when you have fresh hosted evidence for the current code state
 - preserve existing substantive hosted evidence when no bucket is configured
 - if local visuals are pending manual GitHub upload, write the Step 7 **Action required** note instead of deleting the section
+- always include `<!-- evidence-head: <SHORT_SHA> -->` after evidence content when the section has substantive evidence (images, code blocks, media URLs). Omit the marker when the section is empty or only contains the pending-upload note
 
 Format:
 
@@ -167,6 +168,8 @@ Format:
 ## Evidence
 
 <GCS-hosted visuals, preserved GitHub attachment visuals, runtime output, or the pending-upload note — or omit if none>
+
+<!-- evidence-head: <SHORT_SHA> -->
 
 ### Reviewer Checklist
 

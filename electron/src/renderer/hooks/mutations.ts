@@ -75,8 +75,8 @@ export function useTaskCreate() {
     onSuccess: () => {
       toast.success('Task created');
     },
-    onError: () => {
-      toast.error('Failed to create task');
+    onError: (err: Error) => {
+      toast.error(err.message || 'Failed to create task');
     },
     // SSE handles cache update
   });
@@ -296,7 +296,8 @@ export function useTaskMerge() {
 export function useTaskAsk() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (vars: { id: number; question: string }) => askTask(vars.id, vars.question),
+    mutationFn: async (vars: { id: number; question: string; askId?: string }) =>
+      askTask(vars.id, vars.question, vars.askId),
     onError: () => {
       toast.error('Ask failed');
     },

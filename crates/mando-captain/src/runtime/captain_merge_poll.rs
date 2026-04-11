@@ -21,7 +21,7 @@ pub(crate) async fn poll_merging_items(
     rate_limited: bool,
 ) {
     let merge_timeout = workflow.agent.captain_merge_timeout_s;
-    let max_merge_retries = workflow.agent.max_review_retries;
+    let max_merge_retries = workflow.agent.max_merge_retries;
 
     // Categorize CaptainMerging items by state.
     let mut needs_spawn: Vec<usize> = Vec::new();
@@ -134,7 +134,7 @@ pub(crate) async fn poll_merging_items(
                     action: "merged".into(),
                     feedback: "PR already merged on GitHub; skipped merge session".into(),
                 };
-                apply_merge_result(item, &result, notifier, config, pool).await;
+                apply_merge_result(item, &result, notifier, workflow, pool).await;
             } else {
                 item.last_activity_at = Some(mando_types::now_rfc3339());
                 if let Err(e) = spawn_merge(item, config, workflow, notifier, pool).await {
@@ -167,7 +167,7 @@ pub(crate) async fn poll_merging_items(
     for &idx in &has_session {
         let item = &mut items[idx];
         if let Some(result) = check_merge(item) {
-            apply_merge_result(item, &result, notifier, config, pool).await;
+            apply_merge_result(item, &result, notifier, workflow, pool).await;
             continue;
         }
 
@@ -221,7 +221,7 @@ pub(crate) async fn poll_merging_items(
                     action: "merged".into(),
                     feedback: "PR already merged on GitHub; stream file had no result".into(),
                 };
-                apply_merge_result(item, &result, notifier, config, pool).await;
+                apply_merge_result(item, &result, notifier, workflow, pool).await;
             } else {
                 needs_timeout.push(*idx);
             }

@@ -1,7 +1,5 @@
 //! Research — AI-driven link discovery for a topic.
 
-use std::time::Duration;
-
 use anyhow::Result;
 use mando_config::workflow::ScoutWorkflow;
 use rustc_hash::FxHashMap;
@@ -42,7 +40,7 @@ pub async fn run_research(topic: &str, workflow: &ScoutWorkflow) -> Result<Resea
         &prompt,
         mando_cc::CcConfig::builder()
             .model(model)
-            .timeout(Duration::from_secs(300))
+            .timeout(workflow.agent.research_timeout_s)
             .caller("scout-research")
             .json_schema(serde_json::json!({
                 "type": "object",

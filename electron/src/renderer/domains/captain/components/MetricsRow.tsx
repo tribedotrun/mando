@@ -32,9 +32,9 @@ const PHASE_COLORS: Record<
     duration: 'var(--text-3)',
   },
   reviewing: {
-    dot: 'var(--success)',
-    text: 'var(--success)',
-    duration: 'var(--success)',
+    dot: 'var(--review)',
+    text: 'var(--review)',
+    duration: 'var(--review)',
     label: 'reviewing',
   },
   merging: {
@@ -44,9 +44,9 @@ const PHASE_COLORS: Record<
     label: 'merging',
   },
   stale: {
-    dot: 'var(--text-3)',
-    text: 'var(--text-3)',
-    duration: 'var(--text-3)',
+    dot: 'var(--stale)',
+    text: 'var(--stale)',
+    duration: 'var(--stale)',
     label: 'stale',
   },
 };
@@ -72,7 +72,7 @@ function WorkerRow({
   const durationColor = colors.duration;
 
   return (
-    <div className="group relative flex min-h-[26px] items-center gap-2.5 px-4 py-1">
+    <div className="group relative flex min-h-[26px] items-center gap-2.5 rounded px-4 py-1 transition-colors duration-100 hover:bg-white/[0.03]">
       {/* Status dot */}
       <StatusDot color={dotColor} size="sm" />
 
@@ -190,7 +190,7 @@ export function MetricsRow({
             variant="ghost"
             onClick={() => setExpanded(true)}
             aria-label="Expand workers panel"
-            className="flex h-auto w-auto items-center gap-3 rounded-md bg-card px-4 py-1 text-text-3"
+            className="flex h-auto w-auto items-center gap-3 rounded-md px-4 py-1.5 text-text-3"
           >
             <HeaderContent
               activeCount={activeCount}
@@ -202,7 +202,7 @@ export function MetricsRow({
             />
           </Button>
         ) : (
-          <div className="flex items-center gap-3 rounded-md bg-card px-4 py-1 text-text-3">
+          <div className="flex items-center gap-3 rounded-md px-4 py-1.5 text-text-3">
             <HeaderContent
               activeCount={0}
               reviewingCount={0}
@@ -216,7 +216,7 @@ export function MetricsRow({
 
       {/* Expanded strip, only when there are workers to show */}
       {expanded && workers.length > 0 && (
-        <div className="overflow-hidden rounded-md bg-card">
+        <div className="overflow-hidden rounded-md">
           {/* Strip header */}
           <Button
             variant="ghost"
@@ -233,6 +233,9 @@ export function MetricsRow({
               expanded={true}
             />
           </Button>
+
+          {/* Separator */}
+          <div className="mx-4 border-t border-border/40" />
 
           {/* Active workers */}
           {activeWorkers.map((w) => (
@@ -261,7 +264,7 @@ export function MetricsRow({
           ))}
 
           {/* Bottom padding */}
-          <div className="h-1" />
+          <div className="h-1.5" />
         </div>
       )}
     </div>
@@ -286,15 +289,17 @@ function HeaderContent({
   return (
     <>
       <span className="text-label text-text-3">Workers</span>
-      <span className="text-[12px] leading-4 text-success">{activeCount} active</span>
+      <span className={`text-[12px] leading-4 ${activeCount > 0 ? 'text-success' : 'text-text-4'}`}>
+        {activeCount} active
+      </span>
       {reviewingCount > 0 && (
-        <span className="text-[12px] leading-4 text-success">{reviewingCount} reviewing</span>
+        <span className="text-[12px] leading-4 text-review">{reviewingCount} reviewing</span>
       )}
       {mergingCount > 0 && (
         <span className="text-[12px] leading-4 text-success">{mergingCount} merging</span>
       )}
       {staleCount > 0 && (
-        <span className="text-[12px] leading-4 text-text-3">{staleCount} stale</span>
+        <span className="text-[12px] leading-4 text-stale">{staleCount} stale</span>
       )}
       {rateLimitSecs > 0 && (
         <span className="text-[12px] leading-4 text-text-4">
@@ -305,7 +310,7 @@ function HeaderContent({
       {(activeCount > 0 || reviewingCount > 0 || mergingCount > 0 || staleCount > 0) && (
         <ChevronDown
           size={10}
-          className={`transition-transform duration-150 ${expanded ? 'rotate-180' : ''}`}
+          className={`transition-transform duration-150 ease-out ${expanded ? 'rotate-180' : ''}`}
         />
       )}
     </>

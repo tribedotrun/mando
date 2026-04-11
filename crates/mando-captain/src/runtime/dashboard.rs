@@ -43,10 +43,21 @@ pub async fn add_task(
 ) -> Result<serde_json::Value> {
     let projects = &config.captain.projects;
     let (resolved_project, clean_title) = if let Some(r) = project {
-        let name = mando_config::resolve_project_config(Some(r), config)
-            .map(|(_, pc)| pc.name.clone())
-            .unwrap_or_else(|| r.to_string());
-        (Some(name), title.to_string())
+        let name =
+            mando_config::resolve_project_config(Some(r), config).map(|(_, pc)| pc.name.clone());
+        if name.is_none() {
+            let mut valid: Vec<&str> = projects.values().map(|pc| pc.name.as_str()).collect();
+            valid.sort_unstable();
+            anyhow::bail!(
+                "unknown project {r:?} — valid projects: {}",
+                if valid.is_empty() {
+                    "(none configured)".to_string()
+                } else {
+                    valid.join(", ")
+                }
+            );
+        }
+        (name, title.to_string())
     } else {
         let (matched, cleaned) = mando_config::match_project_by_prefix(title, projects);
         if matched.is_some() {
@@ -68,7 +79,10 @@ pub async fn add_task(
         let id = mando_db::queries::projects::upsert(store.pool(), name, path, github_repo).await?;
         (id, name.clone())
     } else {
-        (0, String::new())
+        if projects.is_empty() {
+            anyhow::bail!("no project configured — add a project before creating tasks");
+        }
+        anyhow::bail!("project selection required — choose a project before creating tasks");
     };
 
     let mut new_task = mando_types::Task::new(&clean_title);

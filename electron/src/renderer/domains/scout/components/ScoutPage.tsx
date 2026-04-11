@@ -70,8 +70,10 @@ export function ScoutPage({ active = true }: { active?: boolean } = {}): React.R
         const result = await researchScout(topic, true);
         scoutFetch();
         const added = result.added ?? 0;
-        const processed = result.processed ?? 0;
-        toast.success(`Research added ${added} link(s) and processed ${processed}`);
+        const msg = result.processing
+          ? `Research added ${added} link(s), processing in background`
+          : `Research added ${added} link(s)`;
+        toast.success(msg);
         setResearchModalOpen(false);
       } catch (err) {
         toast.error(getErrorMessage(err, 'Research failed'));

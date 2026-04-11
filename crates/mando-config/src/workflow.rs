@@ -40,7 +40,9 @@ impl CaptainWorkflow {
     }
 }
 
-pub use super::workflow_scout::{InterestsConfig, ScoutRepo, ScoutWorkflow, UserContextConfig};
+pub use super::workflow_scout::{
+    InterestsConfig, ScoutAgentConfig, ScoutRepo, ScoutWorkflow, UserContextConfig,
+};
 
 fn default_fallback_model() -> Option<String> {
     Some("sonnet[1m]".into())
@@ -118,6 +120,7 @@ pub struct AgentConfig {
     #[serde(with = "duration_seconds")]
     pub captain_merge_timeout_s: std::time::Duration,
     pub max_review_retries: u32,
+    pub max_merge_retries: u32,
     pub max_clarifier_retries: u32,
     pub max_rebase_retries: u32,
     #[serde(with = "duration_seconds")]
@@ -144,6 +147,18 @@ pub struct AgentConfig {
     /// Circuit breaker: route to captain review after this many consecutive
     /// nudges with the identical reason.
     pub max_repeated_nudges: u32,
+    /// Timeout for task-ask CC sessions (user Q&A with worktree access).
+    #[serde(with = "duration_seconds")]
+    pub task_ask_timeout_s: std::time::Duration,
+    /// Idle TTL for task-ask CC sessions before they are reaped.
+    #[serde(with = "duration_seconds")]
+    pub task_ask_idle_ttl_s: std::time::Duration,
+    /// Timeout for ops CC sessions (generic ephemeral sessions).
+    #[serde(with = "duration_seconds")]
+    pub ops_timeout_s: std::time::Duration,
+    /// Idle TTL for ops CC sessions.
+    #[serde(with = "duration_seconds")]
+    pub ops_idle_ttl_s: std::time::Duration,
 }
 
 impl Default for AgentConfig {
@@ -157,6 +172,7 @@ impl Default for AgentConfig {
             captain_review_timeout_s: Duration::from_secs(1200),
             captain_merge_timeout_s: Duration::from_secs(1800),
             max_review_retries: 5,
+            max_merge_retries: 3,
             max_clarifier_retries: 3,
             max_rebase_retries: 5,
             rebase_base_delay_s: Duration::from_secs(30),
@@ -169,6 +185,10 @@ impl Default for AgentConfig {
             evidence_download_timeout_s: Duration::from_secs(30),
             evidence_ffmpeg_timeout_s: Duration::from_secs(30),
             max_repeated_nudges: 3,
+            task_ask_timeout_s: Duration::from_secs(600),
+            task_ask_idle_ttl_s: Duration::from_secs(3600),
+            ops_timeout_s: Duration::from_secs(120),
+            ops_idle_ttl_s: Duration::from_secs(3600),
         }
     }
 }

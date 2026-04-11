@@ -179,6 +179,7 @@ async fn main() {
         port, auth_token,
     ));
 
+    let qa_session_mgr = mando_scout::runtime::qa::session_manager_from_workflow(&scout_wf);
     let state = mando_gateway::AppState {
         config: config_arc.clone(),
         config_manager,
@@ -190,7 +191,7 @@ async fn main() {
         cc_session_mgr: Arc::new(cc_session_mgr),
         task_store: task_store_arc,
         db,
-        qa_session_mgr: mando_scout::runtime::qa::default_session_manager(),
+        qa_session_mgr,
         terminal_host: Arc::new(mando_terminal::TerminalHost::new(mando_config::data_dir())),
         start_time,
         listen_port: port,

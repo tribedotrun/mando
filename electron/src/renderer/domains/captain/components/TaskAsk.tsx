@@ -17,6 +17,7 @@ export function TaskAsk({ item, onBack }: Props): React.ReactElement {
   const [history, setHistory] = useState<QAEntry[]>([]);
   const [pending, setPending] = useState(false);
   const scrollRef = useRef<(() => void) | null>(null);
+  const askIdRef = useRef<string | undefined>(undefined);
   const queryClient = useQueryClient();
 
   const handleAsk = useCallback(
@@ -24,7 +25,8 @@ export function TaskAsk({ item, onBack }: Props): React.ReactElement {
       setHistory((prev) => [...prev, { role: 'user', text: q }]);
       setPending(true);
       try {
-        const data = await askTask(item.id, q);
+        const data = await askTask(item.id, q, askIdRef.current);
+        askIdRef.current = data.ask_id;
         setHistory((prev) => [...prev, { role: 'assistant', text: data.answer }]);
         void queryClient.invalidateQueries({ queryKey: ['tasks'] });
       } catch (err) {
@@ -32,6 +34,8 @@ export function TaskAsk({ item, onBack }: Props): React.ReactElement {
           ...prev,
           { role: 'assistant', text: `Error: ${getErrorMessage(err, 'Failed')}` },
         ]);
+        // Error is persisted server-side; invalidate to show it in Q&A tab.
+        void queryClient.invalidateQueries({ queryKey: ['tasks'] });
       } finally {
         setPending(false);
         scrollRef.current?.();

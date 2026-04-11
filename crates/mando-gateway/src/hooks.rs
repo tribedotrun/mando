@@ -92,12 +92,9 @@ fn sync_claude_settings(hook_path: &Path) -> anyhow::Result<()> {
             })
     });
 
-    // Non-prod environments (dev, sandbox, integration tests) accumulate stale
-    // hook entries because each gets a unique data_dir. Prune entries whose
-    // script no longer exists on disk. Skip this for prod -- it only ever has
-    // one stable entry.
-    let mut dirty = false;
-    if std::env::var("MANDO_DATA_DIR").is_ok() {
+    // Prune stale session-notify entries whose script no longer exists on disk.
+    let mut dirty;
+    {
         let before = arr.len();
         arr.retain(|entry| {
             let is_ours = entry

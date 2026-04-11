@@ -2,6 +2,7 @@
 //! repo context, and the top-level `ScoutWorkflow` struct.
 
 use std::collections::HashMap;
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
@@ -10,10 +11,64 @@ use serde::{Deserialize, Serialize};
 #[serde(default)]
 pub struct ScoutWorkflow {
     pub models: HashMap<String, String>,
+    pub agent: ScoutAgentConfig,
     pub interests: InterestsConfig,
     pub repos: Vec<ScoutRepo>,
     pub user_context: UserContextConfig,
     pub prompts: HashMap<String, String>,
+}
+
+/// Serde adapter that reads/writes a `Duration` as a floating-point seconds value.
+mod duration_seconds {
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use std::time::Duration;
+
+    pub fn serialize<S: Serializer>(d: &Duration, s: S) -> Result<S::Ok, S::Error> {
+        d.as_secs_f64().serialize(s)
+    }
+
+    const MAX_DURATION_SECS: f64 = 1e18;
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Duration, D::Error> {
+        let secs = f64::deserialize(d)?;
+        if !secs.is_finite() || secs > MAX_DURATION_SECS {
+            return Err(serde::de::Error::custom(format!(
+                "duration must be finite and <= {MAX_DURATION_SECS:e} seconds, got {secs}"
+            )));
+        }
+        Ok(Duration::from_secs_f64(secs.max(0.0)))
+    }
+}
+
+/// Timeout configuration for scout CC sessions.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ScoutAgentConfig {
+    #[serde(with = "duration_seconds")]
+    pub process_timeout_s: Duration,
+    #[serde(with = "duration_seconds")]
+    pub article_timeout_s: Duration,
+    #[serde(with = "duration_seconds")]
+    pub research_timeout_s: Duration,
+    #[serde(with = "duration_seconds")]
+    pub qa_timeout_s: Duration,
+    #[serde(with = "duration_seconds")]
+    pub qa_ttl_s: Duration,
+    #[serde(with = "duration_seconds")]
+    pub act_timeout_s: Duration,
+}
+
+impl Default for ScoutAgentConfig {
+    fn default() -> Self {
+        Self {
+            process_timeout_s: Duration::from_secs(120),
+            article_timeout_s: Duration::from_secs(300),
+            research_timeout_s: Duration::from_secs(300),
+            qa_timeout_s: Duration::from_secs(120),
+            qa_ttl_s: Duration::from_secs(600),
+            act_timeout_s: Duration::from_secs(60),
+        }
+    }
 }
 
 impl ScoutWorkflow {

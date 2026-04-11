@@ -160,22 +160,30 @@ pub(crate) fn action_buttons(
     let mut actions: Vec<(&str, &str)> = Vec::new();
 
     match status {
-        ItemStatus::New
-        | ItemStatus::Clarifying
-        | ItemStatus::NeedsClarification
-        | ItemStatus::Queued => {
+        ItemStatus::Clarifying => {
+            actions.push(("\u{1f4ac} Ask", "ask"));
+            actions.push(("\u{270d}\u{fe0f} Input", "input"));
+            actions.push(("\u{274c} Cancel", "cancel"));
+        }
+        ItemStatus::New | ItemStatus::NeedsClarification | ItemStatus::Queued => {
             actions.push(("\u{270d}\u{fe0f} Input", "input"));
             actions.push(("\u{274c} Cancel", "cancel"));
         }
         ItemStatus::InProgress => {
+            actions.push(("\u{1f4ac} Ask", "ask"));
             actions.push(("\u{1f4e3} Nudge", "nudge"));
             actions.push(("\u{1f91d} Handoff", "handoff"));
             actions.push(("\u{274c} Cancel", "cancel"));
         }
-        ItemStatus::CaptainReviewing | ItemStatus::CaptainMerging | ItemStatus::Rework => {
+        ItemStatus::CaptainReviewing | ItemStatus::CaptainMerging => {
+            actions.push(("\u{1f4ac} Ask", "ask"));
+            actions.push(("\u{274c} Cancel", "cancel"));
+        }
+        ItemStatus::Rework => {
             actions.push(("\u{274c} Cancel", "cancel"));
         }
         ItemStatus::AwaitingReview => {
+            actions.push(("\u{1f4ac} Ask", "ask"));
             if has_pr {
                 actions.push(("\u{1f500} Merge", "merge"));
             } else {
@@ -185,6 +193,7 @@ pub(crate) fn action_buttons(
             actions.push(("\u{274c} Cancel", "cancel"));
         }
         ItemStatus::Escalated | ItemStatus::Errored => {
+            actions.push(("\u{1f4ac} Ask", "ask"));
             actions.push(("\u{1f504} Reopen", "reopen"));
             actions.push(("\u{1f501} Rework", "rework"));
             actions.push(("\u{274c} Cancel", "cancel"));

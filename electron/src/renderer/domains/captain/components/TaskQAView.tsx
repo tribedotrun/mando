@@ -69,7 +69,7 @@ export function QATab({
 
 function QAMessage({ entry }: { entry: AskHistoryEntry }): React.ReactElement {
   const isHuman = entry.role === 'human';
-  const isError = !isHuman && entry.content.startsWith('Error: ');
+  const isError = entry.role === 'error';
 
   return (
     <div className="mb-4">

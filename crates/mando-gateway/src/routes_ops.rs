@@ -1,7 +1,5 @@
 //! /api/ops/* route handlers — multi-turn CC sessions (ask, etc.).
 
-use std::time::Duration;
-
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::Json;
@@ -40,6 +38,7 @@ pub(crate) async fn post_ops_start(
     Json(body): Json<OpsStartBody>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let cwd = resolve_cwd(&state)?;
+    let workflow = state.captain_workflow.load_full();
 
     let prompt = body.prompt;
 
@@ -53,8 +52,8 @@ pub(crate) async fn post_ops_start(
             &prompt,
             &cwd,
             body.model.as_deref(),
-            Duration::from_secs(3600),
-            Duration::from_secs(120),
+            workflow.agent.ops_idle_ttl_s,
+            workflow.agent.ops_timeout_s,
         )
         .await
     {

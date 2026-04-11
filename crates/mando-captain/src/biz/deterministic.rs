@@ -15,7 +15,7 @@ use super::deterministic_helpers::{
     action, classify_unresolved_threads, has_substantive_output, is_image_dimension_blocked,
     render_nudge,
 };
-use super::worker_context::{has_no_evidence, has_summary_diagram};
+use super::worker_context::{evidence_is_fresh, has_no_evidence, has_summary_diagram};
 
 /// Deterministic classification. Every input shape produces exactly one
 /// `Action`; there is no fallthrough. Returns `Err` only when a required
@@ -151,6 +151,7 @@ fn quality_gates_pass(
         && ctx.unaddressed_issue_comments == 0
         && has_summary_diagram(ctx)
         && !has_no_evidence(&ctx.pr_body)
+        && evidence_is_fresh(ctx)
     {
         return true;
     }
@@ -184,6 +185,9 @@ fn diagnose_failing_gates(
         }
         if ctx.pr.is_some() && has_no_evidence(&ctx.pr_body) {
             failures.push("missing evidence in PR".into());
+        }
+        if ctx.pr.is_some() && !has_no_evidence(&ctx.pr_body) && !evidence_is_fresh(ctx) {
+            failures.push("stale evidence -- recapture after reopen".into());
         }
         if ctx.unresolved_threads > 0 {
             failures.push(format!("{} unresolved thread(s)", ctx.unresolved_threads));
@@ -260,7 +264,7 @@ fn missing_gate_nudge(
             "PR missing evidence",
         )));
     }
-    // Reopen ack.
+    // Reopen ack (before stale evidence -- worker must address feedback first).
     if !ctx.degraded && ctx.pr.is_some() && !ctx.has_reopen_ack && ctx.reopen_seq > 0 {
         let source = ctx.reopen_source.as_deref();
         let (ack_prefix, context_file, source_label) = match source {
@@ -289,6 +293,20 @@ fn missing_gate_nudge(
             ActionKind::Nudge,
             &msg,
             &format!("reopen #{} pending", ctx.reopen_seq),
+        )));
+    }
+    // Stale evidence (exists but not fresh after reopen).
+    if !ctx.degraded
+        && ctx.pr.is_some()
+        && !has_no_evidence(&ctx.pr_body)
+        && !evidence_is_fresh(ctx)
+    {
+        let msg = render_nudge(nudges, "stale_evidence", &vars)?;
+        return Ok(Some(action(
+            ctx,
+            ActionKind::Nudge,
+            &msg,
+            "PR evidence stale after reopen",
         )));
     }
     // Image dimension blocked.

@@ -232,12 +232,15 @@ export interface PrSummaryResponse {
 
 export interface AskResponse {
   answer: string;
+  ask_id: string;
   session_id?: string;
   suggested_followups?: string[];
 }
 
 export interface AskHistoryEntry {
-  role: 'human' | 'assistant';
+  ask_id: string;
+  session_id: string;
+  role: 'human' | 'assistant' | 'error';
   content: string;
   timestamp: string;
 }

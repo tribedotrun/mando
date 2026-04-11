@@ -108,6 +108,8 @@ fn construct_timeline_event() {
 #[test]
 fn construct_ask_history_entry() {
     let entry = AskHistoryEntry {
+        ask_id: "ask-001".into(),
+        session_id: "sess-001".into(),
         role: "human".into(),
         content: "What does this do?".into(),
         timestamp: "2026-03-16T00:00:00Z".into(),

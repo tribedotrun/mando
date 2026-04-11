@@ -90,7 +90,7 @@ pub async fn process_item(
         &prompt,
         mando_cc::CcConfig::builder()
             .model(model)
-            .timeout(std::time::Duration::from_secs(120))
+            .timeout(workflow.agent.process_timeout_s)
             .caller("scout-process")
             .json_schema(serde_json::json!({
                 "type": "object",

@@ -363,8 +363,8 @@ async fn handle_research(topic: &str, process: bool) -> anyhow::Result<()> {
         if let Some(added) = result["added"].as_u64() {
             println!("{added} added to scout.");
         }
-        if let Some(processed) = result["processed"].as_u64() {
-            println!("{processed} processed.");
+        if result["processing"].as_bool() == Some(true) {
+            println!("Processing in background.");
         }
     } else {
         println!("No links found.");
