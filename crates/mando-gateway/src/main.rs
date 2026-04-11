@@ -217,6 +217,9 @@ async fn main() {
     // Spawn workbench cleanup (5 min after startup, removes worktrees archived > 30 days).
     mando_gateway::background_tasks::spawn_workbench_cleanup(&state);
 
+    // Auto-resume terminal sessions that were alive when the daemon last exited.
+    mando_gateway::background_tasks::spawn_terminal_auto_resume(&state);
+
     if !args.no_telegram {
         if let Err(err) = state.telegram_runtime.configure(&config).await {
             warn!(module = "telegram", error = %err, "failed to start embedded telegram runtime");

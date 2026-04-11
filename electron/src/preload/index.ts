@@ -6,7 +6,12 @@ export interface MandoAPI {
   // App mode: 'production' | 'dev' | 'sandbox'
   appMode: () => Promise<string>;
   // Dev-only: git branch + worktree name
-  devGitInfo: () => Promise<{ branch: string; worktree: string | null; slot: string | null }>;
+  devGitInfo: () => Promise<{
+    branch: string;
+    commit: string;
+    worktree: string | null;
+    slot: string | null;
+  }>;
   // System checks
   checkClaudeCode: () => Promise<{ installed: boolean; version: string | null; works: boolean }>;
   validateTelegramToken: (

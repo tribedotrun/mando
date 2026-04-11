@@ -7,7 +7,7 @@ use tracing::{info, warn};
 use crate::env::ShellEnvResolver;
 use crate::history::TerminalHistoryStore;
 use crate::session::TerminalSession;
-use crate::types::{CreateRequest, SessionId, SessionInfo, TerminalSize};
+use crate::types::{CreateRequest, SessionId, SessionInfo, SessionState, TerminalSize};
 
 /// Manages all active and restorable terminal sessions.
 pub struct TerminalHost {
@@ -125,6 +125,36 @@ impl TerminalHost {
             .cloned()
             .ok_or_else(|| anyhow::anyhow!("session not found: {id}"))?;
         session.resize(size)
+    }
+
+    /// Remove and return all sessions that were alive when the daemon last
+    /// exited (state == Restored). The caller can re-spawn them with
+    /// `--resume` to continue where they left off. History is NOT deleted
+    /// here -- the caller should call [`delete_restored_history`] after
+    /// successfully creating the replacement session.
+    pub fn take_restorable(&self) -> Vec<SessionInfo> {
+        let mut sessions = self.sessions.lock().expect("sessions lock");
+        let restorable_ids: Vec<String> = sessions
+            .iter()
+            .filter(|(_, s)| s.state() == SessionState::Restored)
+            .map(|(id, _)| id.clone())
+            .collect();
+
+        restorable_ids
+            .into_iter()
+            .filter_map(|id| {
+                let session = sessions.remove(&id)?;
+                Some(session.info())
+            })
+            .collect()
+    }
+
+    /// Delete on-disk history for a restored session after its replacement
+    /// has been successfully spawned.
+    pub fn delete_restored_history(&self, id: &str) {
+        if let Err(err) = self.history.delete_session(id) {
+            warn!(session = id, error = %err, "failed to delete restored session history");
+        }
     }
 
     pub fn shutdown(&self) {

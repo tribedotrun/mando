@@ -1,6 +1,14 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { addScoutUrl, bulkUpdateScout, bulkDeleteScout, apiPost, apiPut } from '#renderer/api';
+import {
+  addScoutUrl,
+  bulkUpdateScout,
+  bulkDeleteScout,
+  apiPost,
+  apiPut,
+  apiPatch,
+  apiDel,
+} from '#renderer/api';
 import {
   createTerminal,
   deleteTerminal,
@@ -155,25 +163,49 @@ export function useProjectAdd() {
 }
 
 // ---------------------------------------------------------------------------
+// useProjectEdit
+// ---------------------------------------------------------------------------
+
+export interface ProjectEditInput {
+  /** Current project name (used in the URL path). */
+  currentName: string;
+  rename?: string;
+  github_repo?: string;
+  clear_github_repo?: boolean;
+  aliases?: string[];
+  hooks?: Record<string, string>;
+  preamble?: string;
+  check_command?: string;
+  scout_summary?: string;
+}
+
+export function useProjectEdit() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (vars: ProjectEditInput) => {
+      const { currentName, ...body } = vars;
+      return apiPatch<{ ok: boolean }>(`/api/projects/${encodeURIComponent(currentName)}`, body);
+    },
+    onError: () => {
+      toast.error('Failed to save project');
+    },
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: queryKeys.config.all });
+    },
+  });
+}
+
+// ---------------------------------------------------------------------------
 // useProjectRemove
 // ---------------------------------------------------------------------------
 
 export function useProjectRemove() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (vars: { pathKey: string }) => {
-      const current = qc.getQueryData<MandoConfig>(queryKeys.config.current());
-      if (!current) throw new Error('Config not loaded');
-
-      const projects = { ...(current.captain?.projects ?? {}) };
-      delete projects[vars.pathKey];
-      const updated: MandoConfig = {
-        ...current,
-        captain: { ...current.captain, projects },
-      };
-
-      return apiPut<{ ok: boolean }>('/api/config', updated);
-    },
+    mutationFn: async (vars: { name: string }) =>
+      apiDel<{ ok: boolean; deleted_tasks: number }>(
+        `/api/projects/${encodeURIComponent(vars.name)}`,
+      ),
     onError: () => {
       toast.error('Failed to remove project');
     },

@@ -35,6 +35,7 @@ export {
   useWorkbenchPin,
   useConfigSave,
   useProjectAdd,
+  useProjectEdit,
   useProjectRemove,
 } from '#renderer/hooks/mutations-infra';
 

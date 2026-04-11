@@ -22,6 +22,7 @@ use crate::routes_config;
 use crate::routes_ops;
 use crate::routes_projects;
 use crate::routes_scout;
+use crate::routes_scout_ai;
 use crate::routes_scout_bulk;
 use crate::routes_scout_telegraph;
 use crate::routes_sessions;
@@ -215,9 +216,9 @@ fn scout_routes() -> Router<AppState> {
         .route("/api/scout/process", post(routes_scout::post_scout_process))
         .route(
             "/api/scout/research",
-            post(routes_scout::post_scout_research),
+            post(routes_scout_ai::post_scout_research),
         )
-        .route("/api/scout/ask", post(routes_scout::post_scout_ask))
+        .route("/api/scout/ask", post(routes_scout_ai::post_scout_ask))
         .route(
             "/api/scout/bulk",
             post(routes_scout_bulk::post_scout_bulk_update),

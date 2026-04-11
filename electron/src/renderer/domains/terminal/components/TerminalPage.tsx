@@ -148,7 +148,7 @@ export function TerminalPage({
           project: session.project,
           cwd: session.cwd,
           agent: session.agent,
-          ...(session.agent === 'claude' ? { resume_session_id: '' } : {}),
+          ...(session.agent === 'claude' ? { resume_session_id: session.ccSessionId ?? '' } : {}),
         });
         setActiveTab(next.id);
         await deleteMutation.mutateAsync({ id: sessionId });

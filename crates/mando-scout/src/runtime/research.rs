@@ -10,6 +10,15 @@ pub struct ResearchResult {
     pub links: Vec<ResearchLink>,
 }
 
+/// Output from `run_research` — links plus session metadata for DB recording.
+#[derive(Debug, Clone)]
+pub struct ResearchOutput {
+    pub result: ResearchResult,
+    pub session_id: String,
+    pub cost_usd: Option<f64>,
+    pub duration_ms: Option<u64>,
+}
+
 /// A single discovered link.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ResearchLink {
@@ -21,8 +30,8 @@ pub struct ResearchLink {
     pub reason: String,
 }
 
-/// Run research for a topic, returning discovered links.
-pub async fn run_research(topic: &str, workflow: &ScoutWorkflow) -> Result<ResearchResult> {
+/// Run research for a topic, returning discovered links and session metadata.
+pub async fn run_research(topic: &str, workflow: &ScoutWorkflow) -> Result<ResearchOutput> {
     let interests_high = crate::biz::formatting::bullet_list(&workflow.interests.high);
 
     let user_context_rendered = workflow.user_context.render();
@@ -65,12 +74,18 @@ pub async fn run_research(topic: &str, workflow: &ScoutWorkflow) -> Result<Resea
     )
     .await?;
 
-    if let Some(structured) = result.structured {
-        let parsed: ResearchResult = serde_json::from_value(structured).map_err(|e| {
+    let parsed: ResearchResult = if let Some(structured) = result.structured {
+        serde_json::from_value(structured).map_err(|e| {
             anyhow::anyhow!("failed to parse LLM structured output for research: {e}")
-        })?;
-        return Ok(parsed);
-    }
-    let parsed: ResearchResult = mando_captain::biz::json_parse::parse_llm_json_as(&result.text)?;
-    Ok(parsed)
+        })?
+    } else {
+        mando_captain::biz::json_parse::parse_llm_json_as(&result.text)?
+    };
+
+    Ok(ResearchOutput {
+        result: parsed,
+        session_id: result.session_id,
+        cost_usd: result.cost_usd,
+        duration_ms: result.duration_ms,
+    })
 }

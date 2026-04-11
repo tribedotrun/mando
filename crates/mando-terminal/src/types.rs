@@ -89,4 +89,6 @@ pub struct SessionInfo {
     pub terminal_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", rename = "ccSessionId")]
+    pub cc_session_id: Option<String>,
 }

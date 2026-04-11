@@ -318,6 +318,7 @@ export interface ProjectConfig {
   hooks?: Record<string, string>;
   workerPreamble?: string;
   scoutSummary?: string;
+  checkCommand?: string;
 }
 
 export interface FeaturesConfig {

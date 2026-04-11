@@ -179,7 +179,7 @@ pub async fn ensure_scout_article(
                 .with_context(|| format!("repair article for #{id}"))?;
                 if let Err(e) = db
                     .record_session(
-                        id,
+                        Some(id),
                         &article_result.session_id,
                         "scout-article-repair",
                         article_result.cost_usd,
@@ -369,7 +369,7 @@ pub async fn act_on_scout_item(
 
     if let Err(e) = db
         .record_session(
-            id,
+            Some(id),
             &result.session_id,
             "scout-act",
             result.cost_usd,

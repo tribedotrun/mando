@@ -213,6 +213,138 @@ pub fn spawn_auto_tick(state: &AppState, tick_rx: watch::Receiver<Duration>) {
     });
 }
 
+/// Spawn terminal auto-resume: waits a few seconds for the server to be
+/// fully ready, then re-creates terminals that were alive when the daemon
+/// last exited. Each is re-spawned with `claude --resume` (bare, no
+/// session ID) so Claude Code picks up the most recent session in that CWD.
+pub fn spawn_terminal_auto_resume(state: &AppState) {
+    let terminal_host = state.terminal_host.clone();
+    let config = state.config.clone();
+    let listen_port = state.listen_port;
+    let cancel = state.cancellation_token.clone();
+
+    state.task_tracker.spawn(async move {
+        tokio::select! {
+            _ = tokio::time::sleep(Duration::from_secs(3)) => {}
+            _ = cancel.cancelled() => { return; }
+        }
+
+        let restorable = terminal_host.take_restorable();
+        if restorable.is_empty() {
+            return;
+        }
+
+        let total = restorable.len();
+        info!(
+            module = "terminal",
+            count = total,
+            "auto-resuming terminal sessions"
+        );
+
+        let mut resumed = 0usize;
+        let mut skipped = 0usize;
+        for old in restorable {
+            if cancel.is_cancelled() {
+                info!(module = "terminal", "auto-resume cancelled");
+                return;
+            }
+            if old.cc_session_id.is_none() {
+                info!(
+                    module = "terminal",
+                    session = old.id,
+                    "skipping auto-resume — no CC session ID captured"
+                );
+                skipped += 1;
+                continue;
+            }
+            if !old.cwd.is_dir() {
+                info!(
+                    module = "terminal",
+                    session = old.id,
+                    cwd = %old.cwd.display(),
+                    "skipping auto-resume — cwd no longer exists"
+                );
+                skipped += 1;
+                continue;
+            }
+
+            let cfg = config.load();
+            let args_str = match &old.agent {
+                mando_terminal::Agent::Claude => cfg.captain.claude_terminal_args.clone(),
+                mando_terminal::Agent::Codex => cfg.captain.codex_terminal_args.clone(),
+            };
+            let config_env = cfg.env.clone();
+            drop(cfg);
+
+            let extra_args = match shell_words::split(&args_str) {
+                Ok(args) => args,
+                Err(e) => {
+                    warn!(
+                        module = "terminal",
+                        session = old.id,
+                        error = %e,
+                        "failed to parse terminal args for auto-resume"
+                    );
+                    skipped += 1;
+                    continue;
+                }
+            };
+
+            let mut terminal_env = std::collections::HashMap::new();
+            terminal_env.insert("MANDO_PORT".to_string(), listen_port.to_string());
+            let auth_token = crate::auth::ensure_auth_token();
+            terminal_env.insert("MANDO_AUTH_TOKEN".to_string(), auth_token);
+            if let Some(ref tid) = old.terminal_id {
+                terminal_env.insert("MANDO_TERMINAL_ID".to_string(), tid.clone());
+            }
+
+            let req = mando_terminal::CreateRequest {
+                project: old.project.clone(),
+                cwd: old.cwd.clone(),
+                agent: old.agent.clone(),
+                resume_session_id: old.cc_session_id.clone(),
+                size: None,
+                config_env,
+                terminal_env,
+                terminal_id: old.terminal_id.clone(),
+                extra_args,
+                name: old.name.clone(),
+            };
+
+            match terminal_host.create(req) {
+                Ok(session) => {
+                    terminal_host.delete_restored_history(&old.id);
+                    resumed += 1;
+                    info!(
+                        module = "terminal",
+                        old_id = old.id,
+                        new_id = session.info().id,
+                        project = old.project,
+                        "auto-resumed terminal session"
+                    );
+                }
+                Err(e) => {
+                    warn!(
+                        module = "terminal",
+                        session = old.id,
+                        error = %e,
+                        "failed to auto-resume terminal session"
+                    );
+                }
+            }
+        }
+
+        info!(
+            module = "terminal",
+            total,
+            resumed,
+            skipped,
+            failed = total - resumed - skipped,
+            "terminal auto-resume complete"
+        );
+    });
+}
+
 /// Spawn the workbench cleanup job: waits 5 minutes after startup, then
 /// removes worktree directories and layout JSONs for workbenches that have
 /// been archived for more than 30 days.  DB rows are kept (deleted_at set)
