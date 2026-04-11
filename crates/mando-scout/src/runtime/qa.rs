@@ -26,6 +26,10 @@ pub struct QaResult {
     pub suggested_followups: Vec<String>,
     /// True when the requested session was not found and a fresh one was created.
     pub session_reset: bool,
+    /// Total cost in USD for this turn.
+    pub cost_usd: Option<f64>,
+    /// Duration in milliseconds for this turn.
+    pub duration_ms: Option<u64>,
 }
 
 /// JSON schema for structured Q&A responses.
@@ -353,6 +357,8 @@ fn parse_qa_result(result: &mando_cc::CcResult, ctx_sid: &str) -> QaResult {
         session_id: Some(result.session_id.clone()),
         suggested_followups: followups,
         session_reset: false,
+        cost_usd: result.cost_usd,
+        duration_ms: result.duration_ms,
     };
 
     if let Some(ref structured) = result.structured {

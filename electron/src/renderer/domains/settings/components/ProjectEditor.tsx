@@ -22,6 +22,7 @@ export interface ProjectEditorProps {
   onSave: (pathKey: string, project: ProjectConfig) => void;
   onCancel: () => void;
   isNew?: boolean;
+  saving?: boolean;
 }
 
 export function ProjectEditor({
@@ -31,6 +32,7 @@ export function ProjectEditor({
   onSave,
   onCancel,
   isNew,
+  saving,
 }: ProjectEditorProps): React.ReactElement {
   const qc = useQueryClient();
   const [name, setName] = useState(project.name || '');
@@ -41,6 +43,7 @@ export function ProjectEditor({
   const [githubRepo, setGithubRepo] = useState(project.githubRepo || '');
   const [aliases, setAliases] = useState((project.aliases || []).join(', '));
   const [preamble, setPreamble] = useState(project.workerPreamble || '');
+  const [checkCommand, setCheckCommand] = useState(project.checkCommand || '');
   const [scoutSummary, setScoutSummary] = useState(project.scoutSummary || '');
   const [preSpawn, setPreSpawn] = useState(project.hooks?.pre_spawn || '');
   const [workerTeardown, setWorkerTeardown] = useState(project.hooks?.worker_teardown || '');
@@ -97,6 +100,7 @@ export function ProjectEditor({
         .map((a) => a.trim())
         .filter(Boolean),
       workerPreamble: preamble.trim() || undefined,
+      checkCommand: checkCommand.trim() || undefined,
       scoutSummary: scoutSummary.trim() || undefined,
       hooks: Object.keys(hooks).length > 0 ? hooks : undefined,
     };
@@ -226,6 +230,19 @@ export function ProjectEditor({
           </p>
         </div>
 
+        <div>
+          <Label className="mb-1.5 text-xs text-muted-foreground">Check Command</Label>
+          <Input
+            data-testid="project-check-command-input"
+            value={checkCommand}
+            onChange={(e) => setCheckCommand(e.target.value)}
+            placeholder="mando-dev check"
+          />
+          <p className="mt-1 text-xs text-muted-foreground">
+            Custom quality-gate command run by captain before marking work complete.
+          </p>
+        </div>
+
         {/* Hooks */}
         <Collapsible className="group">
           <CollapsibleTrigger className="cursor-pointer text-xs font-medium text-muted-foreground">
@@ -263,9 +280,9 @@ export function ProjectEditor({
           <Button
             data-testid="project-save-btn"
             onClick={handleSubmit}
-            disabled={!name.trim() || !projectPath.trim() || nameConflict}
+            disabled={!name.trim() || !projectPath.trim() || nameConflict || saving}
           >
-            {isNew ? 'Add' : 'Save'}
+            {saving ? 'Saving...' : isNew ? 'Add' : 'Save'}
           </Button>
           <Button variant="ghost" onClick={onCancel}>
             Cancel

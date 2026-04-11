@@ -242,7 +242,9 @@ handleTrusted('restart-daemon', async () => {
   invalidateDiscoveryCache();
   return ensureDaemon(getDataDir());
 });
-handleTrusted('get-app-mode', () => getAppMode());
+handleTrusted('get-app-mode', () =>
+  process.env.MANDO_HIDE_DEV_BAR === '1' ? 'clean' : getAppMode(),
+);
 handleTrusted('select-directory', async () => {
   const opts = { properties: ['openDirectory' as const], message: 'Select a project folder' };
   const win = BrowserWindow.getFocusedWindow();

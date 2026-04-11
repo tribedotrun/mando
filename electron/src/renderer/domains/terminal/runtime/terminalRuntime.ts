@@ -21,6 +21,9 @@ const DEFAULT_ROWS = 32;
 const DEFAULT_COLS = 120;
 const SCROLLBACK_LINES = 10_000;
 const RESIZE_DEBOUNCE_MS = 100;
+const RECONNECT_BASE_MS = 1000;
+const RECONNECT_MAX_MS = 10_000;
+const RECONNECT_MAX_ATTEMPTS = 10;
 
 const TERMINAL_THEME = {
   background: '#0a0a0a',
@@ -95,6 +98,9 @@ export class TerminalRuntime {
   private eventSource: EventSource | null = null;
   private disposables: IDisposable[] = [];
   private disposed = false;
+  private exited = false;
+  private reconnectAttempt = 0;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private searchState = emptySearchState();
 
   constructor(session: TerminalSessionInfo, callbacks: TerminalRuntimeCallbacks) {
@@ -160,6 +166,8 @@ export class TerminalRuntime {
     this.disposed = true;
     if (this.resizeTimer !== null) clearTimeout(this.resizeTimer);
     this.resizeTimer = null;
+    if (this.reconnectTimer !== null) clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = null;
     this.resizeObserver?.disconnect();
     this.resizeObserver = null;
     this.eventSource?.close();
@@ -298,7 +306,7 @@ export class TerminalRuntime {
   }
 
   private connectStream(replay: boolean): void {
-    if (!this.term) return;
+    if (!this.term || this.disposed) return;
 
     this.callbacks.onConnectionStateChange('connecting');
     this.eventSource?.close();
@@ -312,6 +320,7 @@ export class TerminalRuntime {
         );
       },
       (code) => {
+        this.exited = true;
         this.callbacks.onConnectionStateChange('disconnected');
         if (!isRestoredTerminalSession(this.session)) {
           this.term?.write(
@@ -322,15 +331,43 @@ export class TerminalRuntime {
       },
       () => {
         if (!this.disposed) {
+          this.reconnectAttempt = 0;
           this.callbacks.onConnectionStateChange('connected');
         }
       },
       (err) => {
-        log.warn('Terminal stream errored', err);
+        if (this.disposed || this.exited) return;
+        log.warn('Terminal stream errored, scheduling reconnect', {
+          session: this.session.id,
+          attempt: this.reconnectAttempt,
+          error: err,
+        });
         this.callbacks.onConnectionStateChange('disconnected');
+        this.eventSource?.close();
+        this.eventSource = null;
+        this.scheduleReconnect();
       },
       { replay },
     );
+  }
+
+  private scheduleReconnect(): void {
+    if (this.reconnectTimer !== null || this.disposed || this.exited) return;
+    if (this.reconnectAttempt >= RECONNECT_MAX_ATTEMPTS) {
+      log.warn('Terminal reconnect attempts exhausted', { session: this.session.id });
+      this.term?.write(
+        `\r\n\x1b[90m[Connection lost — close this tab and reopen to reconnect]\x1b[0m\r\n`,
+      );
+      return;
+    }
+    const delay = Math.min(RECONNECT_BASE_MS * 2 ** this.reconnectAttempt, RECONNECT_MAX_MS);
+    this.reconnectAttempt++;
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      if (!this.disposed && !this.exited) {
+        this.connectStream(false);
+      }
+    }, delay);
   }
 
   private async syncTerminalSize(): Promise<void> {

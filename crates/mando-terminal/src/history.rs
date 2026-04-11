@@ -20,6 +20,10 @@ pub struct TerminalHistoryMeta {
     pub state: SessionState,
     #[serde(default)]
     pub name: Option<String>,
+    /// Claude Code session ID captured from `~/.claude/sessions/{pid}.json`.
+    /// Used for `--resume <id>` on auto-resume after daemon restart.
+    #[serde(default)]
+    pub cc_session_id: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -53,6 +57,14 @@ impl TerminalHistoryStore {
         meta.exit_code = exit_code;
         meta.ended_at = Some(ended_at);
         meta.state = SessionState::Exited;
+        self.write_meta(&meta)
+    }
+
+    pub fn set_cc_session_id(&self, id: &str, cc_session_id: String) -> anyhow::Result<()> {
+        let mut meta = self
+            .read_meta(id)?
+            .ok_or_else(|| anyhow::anyhow!("missing terminal history meta for session {id}"))?;
+        meta.cc_session_id = Some(cc_session_id);
         self.write_meta(&meta)
     }
 
@@ -163,6 +175,7 @@ mod tests {
             size: TerminalSize { rows: 24, cols: 80 },
             state: SessionState::Live,
             name: None,
+            cc_session_id: None,
         }
     }
 

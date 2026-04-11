@@ -96,6 +96,7 @@ pub struct TerminalSession {
     rev: Arc<AtomicU64>,
     created_at: String,
     ended_at: Arc<std::sync::Mutex<Option<String>>>,
+    cc_session_id: Arc<std::sync::Mutex<Option<String>>>,
     live: Option<LiveSession>,
     history: Arc<TerminalHistoryStore>,
 }
@@ -121,6 +122,7 @@ impl TerminalSession {
             size,
             state: SessionState::Live,
             name: req.name.clone(),
+            cc_session_id: None,
         };
 
         let pty_system = native_pty_system();
@@ -209,6 +211,29 @@ impl TerminalSession {
             return Err(err);
         }
 
+        // For resumed sessions the CC session ID is already known -- pre-seed
+        // it so chain-resume works across multiple daemon restarts.
+        let resume_id = req
+            .resume_session_id
+            .as_ref()
+            .filter(|s| !s.is_empty())
+            .cloned();
+        let cc_session_id: Arc<std::sync::Mutex<Option<String>>> =
+            Arc::new(std::sync::Mutex::new(resume_id.clone()));
+
+        if let Some(ref sid) = resume_id {
+            if let Err(err) = history.set_cc_session_id(&meta.id, sid.clone()) {
+                warn!(
+                    session = meta.id,
+                    error = %err,
+                    "failed to persist pre-seeded cc_session_id"
+                );
+            }
+        }
+
+        let needs_poll = matches!(req.agent, Agent::Claude) && resume_id.is_none();
+        let cwd_for_poll = req.cwd.clone();
+
         let session = Arc::new(Self {
             id: meta.id.clone(),
             project: req.project,
@@ -223,6 +248,7 @@ impl TerminalSession {
             rev: rev.clone(),
             created_at,
             ended_at: ended_at.clone(),
+            cc_session_id: cc_session_id.clone(),
             live: Some(LiveSession {
                 input_tx,
                 master: std::sync::Mutex::new(pair.master),
@@ -231,6 +257,80 @@ impl TerminalSession {
             }),
             history: history.clone(),
         });
+
+        // Poll for CC conversation session ID by watching the project dir
+        // for new JSONL files. Claude Code stores conversations at
+        // `~/.claude/projects/{key}/{uuid}.jsonl` where the filename UUID
+        // is the session ID accepted by `--resume`.
+        if needs_poll {
+            let session_id_for_poll = meta.id.clone();
+            let history_for_poll = history.clone();
+            let cc_sid = cc_session_id;
+            let _ = std::thread::Builder::new()
+                .name(format!("cc-sid-{session_id_for_poll}"))
+                .spawn(move || {
+                    let home = match dirs::home_dir() {
+                        Some(h) => h,
+                        None => return,
+                    };
+                    // Derive project key: replace non-alphanumeric with -
+                    // (matches Claude Code's sanitizePath regex /[^a-zA-Z0-9]/g)
+                    let cwd_str = cwd_for_poll.to_string_lossy();
+                    let project_key: String = cwd_str
+                        .chars()
+                        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+                        .collect();
+                    let project_dir = home.join(".claude").join("projects").join(&project_key);
+
+                    // Snapshot existing files before claude starts writing.
+                    let existing: std::collections::HashSet<String> =
+                        std::fs::read_dir(&project_dir)
+                            .into_iter()
+                            .flatten()
+                            .flatten()
+                            .filter_map(|e| {
+                                let name = e.file_name().to_string_lossy().to_string();
+                                name.ends_with(".jsonl").then_some(name)
+                            })
+                            .collect();
+
+                    for _ in 0..30 {
+                        std::thread::sleep(std::time::Duration::from_millis(500));
+                        let entries = match std::fs::read_dir(&project_dir) {
+                            Ok(e) => e,
+                            Err(_) => continue,
+                        };
+                        for entry in entries.flatten() {
+                            let name = entry.file_name().to_string_lossy().to_string();
+                            if !name.ends_with(".jsonl") || existing.contains(&name) {
+                                continue;
+                            }
+                            // New JSONL file appeared -- its stem is the CC session ID.
+                            let sid = name.trim_end_matches(".jsonl").to_string();
+                            *cc_sid.lock().expect("cc_session_id lock") = Some(sid.clone());
+                            if let Err(err) = history_for_poll
+                                .set_cc_session_id(&session_id_for_poll, sid.clone())
+                            {
+                                warn!(
+                                    session = session_id_for_poll,
+                                    error = %err,
+                                    "failed to persist cc_session_id"
+                                );
+                            }
+                            debug!(
+                                session = session_id_for_poll,
+                                cc_session_id = sid,
+                                "captured CC session ID"
+                            );
+                            return;
+                        }
+                    }
+                    debug!(
+                        session = session_id_for_poll,
+                        "CC session ID not found after polling"
+                    );
+                });
+        }
 
         Ok(session)
     }
@@ -256,6 +356,7 @@ impl TerminalSession {
             rev: Arc::new(AtomicU64::new(2)),
             created_at: meta.created_at,
             ended_at: Arc::new(std::sync::Mutex::new(meta.ended_at)),
+            cc_session_id: Arc::new(std::sync::Mutex::new(meta.cc_session_id)),
             live: None,
             history,
         })
@@ -335,6 +436,11 @@ impl TerminalSession {
             ended_at: self.ended_at.lock().expect("ended_at lock").clone(),
             terminal_id: self.terminal_id.clone(),
             name: self.name.clone(),
+            cc_session_id: self
+                .cc_session_id
+                .lock()
+                .expect("cc_session_id lock")
+                .clone(),
         }
     }
 

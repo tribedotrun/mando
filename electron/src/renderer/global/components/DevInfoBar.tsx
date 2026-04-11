@@ -9,6 +9,7 @@ interface DevInfo {
   mode: string;
   port: string;
   branch: string;
+  commit: string;
   worktree: string | null;
   slot: string | null;
 }
@@ -60,13 +61,14 @@ export function DevInfoBar(): React.ReactElement | null {
         window.mandoAPI.gatewayUrl(),
         window.mandoAPI.devGitInfo(),
       ]);
-      if (mode === 'production') return;
+      if (mode === 'production' || mode === 'clean') return;
       if (!gatewayUrl) return;
       const port = new URL(gatewayUrl).port;
       const loaded: DevInfo = {
         mode: mode.toUpperCase(),
         port,
         branch: gitInfo.branch,
+        commit: gitInfo.commit,
         worktree: gitInfo.worktree,
         slot: gitInfo.slot,
       };
@@ -135,6 +137,10 @@ export function DevInfoBar(): React.ReactElement | null {
         <span className="text-text-3">
           <span className="text-text-4">branch:</span>
           {info.branch}
+        </span>
+        <span className="text-text-3">
+          <span className="text-text-4">commit:</span>
+          {info.commit}
         </span>
         {info.worktree && (
           <span className="text-text-3">

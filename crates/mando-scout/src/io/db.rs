@@ -89,10 +89,13 @@ impl ScoutDb {
         dq::increment_error_count(&self.pool, id).await
     }
 
-    /// Record a CC session linked to a scout item via the unified sessions table.
+    /// Record a CC session via the unified sessions table.
+    ///
+    /// Pass `Some(id)` for item-level operations (process, article, act, qa)
+    /// or `None` for topic-level operations (research).
     pub async fn record_session(
         &self,
-        item_id: i64,
+        item_id: Option<i64>,
         session_id: &str,
         caller: &str,
         cost_usd: Option<f64>,
@@ -112,7 +115,7 @@ impl ScoutDb {
                 duration_ms: duration_ms.map(|d| d as i64),
                 resumed: false,
                 task_id: None,
-                scout_item_id: Some(item_id),
+                scout_item_id: item_id,
                 worker_name: None,
                 resumed_at: None,
             },
@@ -380,10 +383,10 @@ mod tests {
             .add_item("https://del-sess.com", "other", None)
             .await
             .unwrap();
-        db.record_session(item.id, "ses-1", "test", Some(0.5), Some(1000))
+        db.record_session(Some(item.id), "ses-1", "test", Some(0.5), Some(1000))
             .await
             .unwrap();
-        db.record_session(item.id, "ses-2", "test", None, None)
+        db.record_session(Some(item.id), "ses-2", "test", None, None)
             .await
             .unwrap();
 

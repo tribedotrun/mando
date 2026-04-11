@@ -219,13 +219,9 @@ async fn handle_show(item_id: &str) -> anyhow::Result<()> {
     let project = item["project"].as_str().unwrap_or("?");
     let worker = item["worker"].as_str().unwrap_or("-");
     let worktree = item["worktree"].as_str().unwrap_or("-");
-    let pr = item["pr"]
-        .as_str()
-        .map(|v| {
-            let num = v.rsplit('/').next().unwrap_or(v).trim_start_matches('#');
-            format!("#{num}")
-        })
-        .or_else(|| item["pr_number"].as_i64().map(|n| format!("#{n}")))
+    let pr = item["pr_number"]
+        .as_i64()
+        .map(|n| format!("#{n}"))
         .unwrap_or_else(|| "-".into());
     let created = item["created_at"].as_str().unwrap_or("?");
     let last_activity = item["last_activity_at"].as_str().unwrap_or("-");
@@ -300,18 +296,9 @@ async fn handle_list(all: bool) -> anyhow::Result<()> {
             let project_full = item["project"].as_str().unwrap_or("");
             let project = project_full.rsplit('/').next().unwrap_or(project_full);
             let worker = item["worker"].as_str().unwrap_or("");
-            let pr = item["pr"]
-                .as_str()
-                .map(|v| {
-                    if v.starts_with('#') || v.starts_with("http") {
-                        // Already formatted (#123) or full URL — extract number
-                        let num = v.rsplit('/').next().unwrap_or(v);
-                        let num = num.trim_start_matches('#');
-                        format!("#{num}")
-                    } else {
-                        format!("#{v}")
-                    }
-                })
+            let pr = item["pr_number"]
+                .as_i64()
+                .map(|n| format!("#{n}"))
                 .unwrap_or_default();
             let title = item["title"].as_str().unwrap_or("");
             println!("{id:>4}  {status:<15}  {worker:<20}  {pr:<14}  {project:<8}  {title}");
@@ -325,9 +312,8 @@ async fn handle_pr_summary(item_id: &str) -> anyhow::Result<()> {
     let id_num = parse_id(item_id, "item")?;
     let item = fetch_task_by_id(&client, id_num).await?;
 
-    match item["pr"].as_str() {
-        Some(pr) => {
-            let num = pr.trim_start_matches('#');
+    match item["pr_number"].as_i64() {
+        Some(num) => {
             println!("PR for item #{item_id}: #{num}");
         }
         None => println!("No PR linked to item #{item_id}."),

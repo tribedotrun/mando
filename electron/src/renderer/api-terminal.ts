@@ -59,6 +59,7 @@ export interface TerminalSessionInfo {
   endedAt?: string | null;
   terminalId?: string | null;
   name?: string | null;
+  ccSessionId?: string | null;
 }
 
 export interface CreateTerminalParams {

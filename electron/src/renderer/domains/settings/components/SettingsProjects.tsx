@@ -1,25 +1,33 @@
 import React, { useState } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
 import { Card, CardContent } from '#renderer/components/ui/card';
 import { Button } from '#renderer/components/ui/button';
 import { Badge } from '#renderer/components/ui/badge';
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogCancel,
+  AlertDialogAction,
+} from '#renderer/components/ui/alert-dialog';
 import { ProjectEditor } from '#renderer/domains/settings/components/ProjectEditor';
 import { useConfig } from '#renderer/hooks/queries';
-import { useConfigSave, useProjectRemove } from '#renderer/hooks/mutations';
-import { queryKeys } from '#renderer/queryKeys';
-import type { MandoConfig, ProjectConfig } from '#renderer/types';
+import { useProjectEdit, useProjectRemove } from '#renderer/hooks/mutations';
+import type { ProjectConfig } from '#renderer/types';
 import { buildUrl } from '#renderer/domains/settings/hooks/useApi';
 
 const EMPTY_PROJECTS: Record<string, ProjectConfig> = {};
 
 export function SettingsProjects(): React.ReactElement {
   const { data: config } = useConfig();
-  const saveMut = useConfigSave();
+  const editMut = useProjectEdit();
   const removeMut = useProjectRemove();
-  const qc = useQueryClient();
   const projects = config?.captain?.projects ?? EMPTY_PROJECTS;
 
   const [editing, setEditing] = useState<string | null>(null);
+  const [removing, setRemoving] = useState<string | null>(null);
 
   const pathKeys = Object.keys(projects);
 
@@ -41,17 +49,24 @@ export function SettingsProjects(): React.ReactElement {
                 pathKey={pathKey}
                 project={project}
                 existingProjects={projects}
-                onSave={(k, r) => {
-                  const current = qc.getQueryData<MandoConfig>(queryKeys.config.current()) ?? {};
-                  const updated: MandoConfig = {
-                    ...current,
-                    captain: {
-                      ...(current.captain || {}),
-                      projects: { ...(current.captain?.projects || {}), [k]: r },
+                saving={editMut.isPending}
+                onSave={(_k, updated) => {
+                  const currentName = project.name;
+                  editMut.mutate(
+                    {
+                      currentName,
+                      rename: updated.name !== currentName ? updated.name : undefined,
+                      github_repo: updated.githubRepo || undefined,
+                      clear_github_repo:
+                        !updated.githubRepo && !!project.githubRepo ? true : undefined,
+                      aliases: updated.aliases ?? [],
+                      hooks: updated.hooks ?? {},
+                      preamble: updated.workerPreamble ?? '',
+                      check_command: updated.checkCommand ?? '',
+                      scout_summary: updated.scoutSummary ?? '',
                     },
-                  };
-                  saveMut.mutate(updated);
-                  setEditing(null);
+                    { onSuccess: () => setEditing(null) },
+                  );
                 }}
                 onCancel={() => setEditing(null)}
               />
@@ -115,9 +130,8 @@ export function SettingsProjects(): React.ReactElement {
                       data-testid={`project-remove-${displayName}`}
                       variant="destructive"
                       size="xs"
-                      onClick={() => {
-                        removeMut.mutate({ pathKey });
-                      }}
+                      disabled={removeMut.isPending}
+                      onClick={() => setRemoving(pathKey)}
                     >
                       Remove
                     </Button>
@@ -128,6 +142,35 @@ export function SettingsProjects(): React.ReactElement {
           );
         })}
       </div>
+
+      {removing && projects[removing] && (
+        <AlertDialog open onOpenChange={() => setRemoving(null)}>
+          <AlertDialogContent size="sm">
+            <AlertDialogHeader>
+              <AlertDialogTitle>Remove project</AlertDialogTitle>
+              <AlertDialogDescription>
+                Remove {projects[removing].name}? All tasks belonging to this project will be
+                deleted.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                variant="destructive"
+                disabled={removeMut.isPending}
+                onClick={() => {
+                  removeMut.mutate(
+                    { name: projects[removing].name },
+                    { onSuccess: () => setRemoving(null) },
+                  );
+                }}
+              >
+                {removeMut.isPending ? 'Removing...' : 'Remove'}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      )}
     </div>
   );
 }

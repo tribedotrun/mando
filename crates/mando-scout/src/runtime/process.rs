@@ -112,7 +112,7 @@ pub async fn process_item(
     // Record session for this scout item.
     if let Err(e) = db
         .record_session(
-            id,
+            Some(id),
             &result.session_id,
             "scout-process",
             result.cost_usd,
@@ -203,7 +203,7 @@ pub async fn process_item(
             Ok(article_result) => {
                 if let Err(e) = db
                     .record_session(
-                        id,
+                        Some(id),
                         &article_result.session_id,
                         "scout-article",
                         article_result.cost_usd,

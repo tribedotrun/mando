@@ -20,6 +20,7 @@ mod routes_config;
 mod routes_ops;
 mod routes_projects;
 mod routes_scout;
+mod routes_scout_ai;
 mod routes_scout_bulk;
 mod routes_scout_telegraph;
 mod routes_sessions;

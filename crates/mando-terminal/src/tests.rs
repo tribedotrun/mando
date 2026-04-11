@@ -130,3 +130,75 @@ fn host_marks_unclean_history_as_restored() {
 
     let _ = fs::remove_dir_all(data_dir);
 }
+
+#[test]
+fn take_restorable_returns_only_restored_sessions() {
+    let data_dir = temp_dir("take-restorable");
+    let history_root = data_dir.join("terminal-history");
+
+    // Session A: was live at crash (no ended_at) -> Restored -> should be taken
+    let dir_a = history_root.join("session-a");
+    fs::create_dir_all(&dir_a).unwrap();
+    fs::write(
+        dir_a.join("meta.json"),
+        serde_json::json!({
+            "id": "session-a",
+            "project": "mando",
+            "cwd": data_dir,
+            "agent": "claude",
+            "terminal_id": "wb:1",
+            "created_at": "2026-04-10T00:00:00Z",
+            "ended_at": null,
+            "exit_code": null,
+            "size": { "rows": 24, "cols": 80 },
+            "state": "live",
+            "name": "work-session"
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    // Session B: exited normally -> Exited -> should NOT be taken
+    let dir_b = history_root.join("session-b");
+    fs::create_dir_all(&dir_b).unwrap();
+    fs::write(
+        dir_b.join("meta.json"),
+        serde_json::json!({
+            "id": "session-b",
+            "project": "mando",
+            "cwd": data_dir,
+            "agent": "codex",
+            "terminal_id": "wb:2",
+            "created_at": "2026-04-10T00:00:00Z",
+            "ended_at": "2026-04-10T00:05:00Z",
+            "exit_code": 0,
+            "size": { "rows": 24, "cols": 80 },
+            "state": "exited"
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    let host = TerminalHost::new(data_dir.clone());
+    assert_eq!(host.list().len(), 2);
+
+    let restorable = host.take_restorable();
+    assert_eq!(restorable.len(), 1);
+    assert_eq!(restorable[0].id, "session-a");
+    assert_eq!(restorable[0].project, "mando");
+    assert_eq!(restorable[0].terminal_id.as_deref(), Some("wb:1"));
+    assert_eq!(restorable[0].name.as_deref(), Some("work-session"));
+
+    // Only the exited session should remain
+    let remaining = host.list();
+    assert_eq!(remaining.len(), 1);
+    assert_eq!(remaining[0].id, "session-b");
+    assert_eq!(remaining[0].state, SessionState::Exited);
+
+    // History is NOT deleted by take_restorable (caller does it after
+    // successful replacement), so both dirs still exist on disk.
+    assert!(dir_a.exists());
+    assert!(dir_b.exists());
+
+    let _ = fs::remove_dir_all(data_dir);
+}

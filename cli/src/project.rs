@@ -44,6 +44,9 @@ pub(crate) enum ProjectCommand {
         /// Set worker preamble text
         #[arg(long)]
         preamble: Option<String>,
+        /// Set check command (run after worker completes)
+        #[arg(long)]
+        check_command: Option<String>,
     },
     /// List configured projects
     List,
@@ -64,6 +67,7 @@ pub(crate) async fn handle(args: ProjectArgs) -> Result<()> {
             clear_github_repo,
             alias,
             preamble,
+            check_command,
         } => {
             handle_edit(
                 &name,
@@ -72,6 +76,7 @@ pub(crate) async fn handle(args: ProjectArgs) -> Result<()> {
                 clear_github_repo,
                 alias.as_deref(),
                 preamble.as_deref(),
+                check_command.as_deref(),
             )
             .await
         }
@@ -109,6 +114,7 @@ async fn handle_edit(
     clear_github_repo: bool,
     aliases: Option<&[String]>,
     preamble: Option<&str>,
+    check_command: Option<&str>,
 ) -> Result<()> {
     let client = DaemonClient::discover()?;
     let mut body = json!({});
@@ -126,6 +132,9 @@ async fn handle_edit(
     }
     if let Some(pre) = preamble {
         body["preamble"] = json!(pre);
+    }
+    if let Some(cmd) = check_command {
+        body["check_command"] = json!(cmd);
     }
 
     let encoded = urlencoding::encode(name);

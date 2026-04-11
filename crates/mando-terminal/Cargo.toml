@@ -16,3 +16,4 @@ tracing.workspace = true
 anyhow.workspace = true
 mando-uuid.workspace = true
 mando-types.workspace = true
+dirs = "6"
