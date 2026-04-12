@@ -41,7 +41,7 @@ export const askScout = (id: number, question: string, sessionId?: string) =>
 export const actOnScoutItem = (id: number, project: string, prompt?: string) =>
   apiPost<ActResponse>(`/api/scout/items/${id}/act`, { project, prompt });
 export const researchScout = (topic: string, process = true) =>
-  apiPost<{ links?: unknown[]; added?: number; processing?: boolean }>('/api/scout/research', {
+  apiPost<{ run_id: number }>('/api/scout/research', {
     topic,
     process,
   });

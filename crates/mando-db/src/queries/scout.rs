@@ -7,7 +7,8 @@ use sqlx::SqlitePool;
 /// Column list for ItemRow queries - single source of truth.
 const SELECT_COLS: &str = "\
     id, url, type, title, status, relevance, quality, \
-    date_added, date_processed, added_by, error_count, source_name, date_published, rev";
+    date_added, date_processed, added_by, error_count, source_name, date_published, rev, \
+    research_run_id";
 
 fn select_items_sql() -> &'static str {
     static SQL: std::sync::OnceLock<String> = std::sync::OnceLock::new();
@@ -216,6 +217,7 @@ pub async fn update_status_if(
 }
 
 /// Update processed results.
+#[allow(clippy::too_many_arguments)]
 pub async fn update_processed(
     pool: &SqlitePool,
     id: i64,
@@ -224,13 +226,15 @@ pub async fn update_processed(
     quality: i64,
     source_name: Option<&str>,
     date_published: Option<&str>,
+    summary: &str,
+    article: &str,
 ) -> Result<bool> {
     let now = mando_types::now_rfc3339();
     let result = sqlx::query(
         "UPDATE scout_items
          SET title = ?, relevance = ?, quality = ?,
              source_name = ?, status = 'processed', date_processed = ?,
-             date_published = ?, rev = rev + 1
+             date_published = ?, summary = ?, article = ?, rev = rev + 1
          WHERE id = ? AND status IN ('pending', 'fetched', 'error')",
     )
     .bind(title)
@@ -239,10 +243,45 @@ pub async fn update_processed(
     .bind(source_name)
     .bind(&now)
     .bind(date_published)
+    .bind(summary)
+    .bind(article)
     .bind(id)
     .execute(pool)
     .await?;
     Ok(result.rows_affected() > 0)
+}
+
+/// Fetch the summary text for a scout item.
+pub async fn get_summary(pool: &SqlitePool, id: i64) -> Result<Option<String>> {
+    let row: Option<(Option<String>,)> =
+        sqlx::query_as("SELECT summary FROM scout_items WHERE id = ?")
+            .bind(id)
+            .fetch_optional(pool)
+            .await?;
+    Ok(row.and_then(|(s,)| s))
+}
+
+/// Fetch the article markdown for a scout item.
+pub async fn get_article(pool: &SqlitePool, id: i64) -> Result<Option<String>> {
+    let row: Option<(Option<String>,)> =
+        sqlx::query_as("SELECT article FROM scout_items WHERE id = ?")
+            .bind(id)
+            .fetch_optional(pool)
+            .await?;
+    Ok(row.and_then(|(s,)| s))
+}
+
+/// Replace the article markdown for a scout item.
+pub async fn set_article(pool: &SqlitePool, id: i64, article: &str) -> Result<()> {
+    let result = sqlx::query("UPDATE scout_items SET article = ?, rev = rev + 1 WHERE id = ?")
+        .bind(article)
+        .bind(id)
+        .execute(pool)
+        .await?;
+    if result.rows_affected() == 0 {
+        bail!("item #{id} not found");
+    }
+    Ok(())
 }
 
 /// Set title without changing status.
@@ -327,6 +366,7 @@ struct ItemRow {
     source_name: Option<String>,
     date_published: Option<String>,
     rev: i64,
+    research_run_id: Option<i64>,
 }
 
 impl ItemRow {
@@ -348,8 +388,44 @@ impl ItemRow {
             source_name: self.source_name,
             date_published: self.date_published,
             rev: self.rev,
+            research_run_id: self.research_run_id,
         }
     }
+}
+
+/// Set the research_run_id FK on a scout item.
+pub async fn set_research_run_id(pool: &SqlitePool, id: i64, run_id: i64) -> Result<()> {
+    sqlx::query("UPDATE scout_items SET research_run_id = ?, rev = rev + 1 WHERE id = ?")
+        .bind(run_id)
+        .bind(id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+/// Reset error state for retry: clear error_count, set status to pending.
+pub async fn reset_error_state(pool: &SqlitePool, id: i64) -> Result<()> {
+    sqlx::query(
+        "UPDATE scout_items SET error_count = 0, status = 'pending', rev = rev + 1 WHERE id = ?",
+    )
+    .bind(id)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// Reset items stuck at `fetched` status back to `pending`.
+///
+/// Items reach `fetched` when content is downloaded but processing fails
+/// before `update_processed` completes. Without this, they stay stuck
+/// forever with no title and no retry path.
+pub async fn reset_stale_fetched(pool: &SqlitePool) -> Result<u64> {
+    let result = sqlx::query(
+        "UPDATE scout_items SET status = 'pending', rev = rev + 1 WHERE status = 'fetched'",
+    )
+    .execute(pool)
+    .await?;
+    Ok(result.rows_affected())
 }
 
 fn parse_status(s: &str) -> ScoutStatus {

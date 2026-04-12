@@ -6,7 +6,6 @@ use mando_shared::telegram_format::escape_html;
 
 use super::commands::send_html;
 use super::formatting::{format_swipe_card, swipe_card_kb};
-use super::helpers::register_pending;
 use crate::bot::TelegramBot;
 use crate::gateway_paths as paths;
 
@@ -92,90 +91,44 @@ pub async fn cmd_research(bot: &mut TelegramBot, chat_id: &str, args: &str) -> R
     let message_id = sent["message_id"].as_i64().unwrap_or(0);
 
     let body = serde_json::json!({"topic": topic, "process": true});
-    match bot.gw().post(paths::SCOUT_RESEARCH, &body).await {
+    let post_result = bot.gw().post(paths::SCOUT_RESEARCH, &body).await;
+
+    let error_text: Option<String> = match post_result {
         Ok(result) => {
-            let added = result["added"].as_u64().unwrap_or(0);
-            let links = result["links"].as_array();
-
-            let mut text = format!(
-                "\u{1f50d} Research for <b>{}</b>: found {} links, {added} new\n",
-                escape_html(topic),
-                links.map_or(0, |l| l.len()),
-            );
-
-            if let Some(links) = links {
-                for link in links.iter().take(10) {
-                    let title = link["title"].as_str().unwrap_or("Untitled");
-                    let url = link["url"].as_str().unwrap_or("");
-                    let was_added = link["added"].as_bool() == Some(true);
-                    let status = if was_added {
-                        "processing\u{2026}"
-                    } else {
-                        "exists"
-                    };
-                    text.push_str(&format!(
-                        "\n\u{2022} <a href=\"{}\">{}</a> ({status})",
-                        escape_html(url),
-                        escape_html(title),
-                    ));
-                }
-                if links.len() > 10 {
-                    text.push_str(&format!("\n\u{2026}and {} more", links.len() - 10));
-                }
-            }
-
-            if message_id > 0 {
-                if let Err(e) = bot
-                    .api
-                    .edit_message_text(chat_id, message_id, &text, Some("HTML"), None)
-                    .await
-                {
-                    tracing::warn!(error = %e, "edit failed, sending new message");
-                    let _ = bot
-                        .api
-                        .send_message(chat_id, &text, Some("HTML"), None, true)
-                        .await;
-                }
-            }
-
-            // Send per-item "processing..." messages and register each for
-            // SSE edit-in-place, matching the add_and_track pattern.
-            if let Some(links) = result["links"].as_array() {
-                for link in links {
-                    let was_added = link["added"].as_bool() == Some(true);
-                    let id = link["id"].as_i64().unwrap_or(0);
-                    if was_added && id > 0 {
-                        let item_type = link["type"].as_str().unwrap_or("link");
-                        let msg =
-                            format!("\u{1f4e5} #{id}: {item_type} \u{2014} processing\u{2026}");
-                        if let Ok(sent) = bot
-                            .api
-                            .send_message(chat_id, &msg, Some("HTML"), None, true)
-                            .await
-                        {
-                            let mid = sent["message_id"].as_i64().unwrap_or(0);
-                            if mid > 0 {
-                                register_pending(&bot.pending_scout_msgs, id, mid);
-                            }
-                        }
-                    }
-                }
+            let run_id = result["run_id"].as_i64().unwrap_or(0);
+            if run_id > 0 && message_id > 0 {
+                // Register the "Researching..." message for SSE-driven updates.
+                let key = format!("research:{run_id}");
+                bot.pending_scout_msgs
+                    .lock()
+                    .unwrap()
+                    .insert(key, message_id);
+                None
+            } else {
+                Some(
+                    "\u{274c} Research failed: invalid daemon response (missing run_id)"
+                        .to_string(),
+                )
             }
         }
-        Err(e) => {
-            let text = format!("\u{274c} Research failed: {}", escape_html(&e.to_string()));
-            if message_id > 0 {
-                if let Err(edit_err) = bot
+        Err(e) => Some(format!(
+            "\u{274c} Research failed: {}",
+            escape_html(&e.to_string())
+        )),
+    };
+
+    if let Some(text) = error_text {
+        if message_id > 0 {
+            if let Err(edit_err) = bot
+                .api
+                .edit_message_text(chat_id, message_id, &text, Some("HTML"), None)
+                .await
+            {
+                tracing::warn!(error = %edit_err, "edit failed, sending new message");
+                let _ = bot
                     .api
-                    .edit_message_text(chat_id, message_id, &text, Some("HTML"), None)
-                    .await
-                {
-                    tracing::warn!(error = %edit_err, "edit failed, sending new message");
-                    let _ = bot
-                        .api
-                        .send_message(chat_id, &text, Some("HTML"), None, true)
-                        .await;
-                }
+                    .send_message(chat_id, &text, Some("HTML"), None, true)
+                    .await;
             }
         }
     }

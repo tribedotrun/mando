@@ -37,11 +37,9 @@ pub(super) fn build_command(
             for arg in extra_args {
                 builder.arg(arg);
             }
-            if let Some(session_id) = resume_session_id {
+            if let Some(session_id) = resume_session_id.filter(|s| !s.is_empty()) {
                 builder.arg("--resume");
-                if !session_id.is_empty() {
-                    builder.arg(session_id);
-                }
+                builder.arg(session_id);
             }
             builder
         }

@@ -21,8 +21,6 @@ pub struct WorkbenchLayout {
 #[serde(rename_all = "camelCase")]
 pub struct PanelState {
     pub agent: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cc_session_id: Option<String>,
     pub created_at: u64,
 }
 
@@ -35,7 +33,6 @@ impl WorkbenchLayout {
             panel_id.clone(),
             PanelState {
                 agent: "claude".to_string(),
-                cc_session_id: None,
                 created_at: now_ms,
             },
         );

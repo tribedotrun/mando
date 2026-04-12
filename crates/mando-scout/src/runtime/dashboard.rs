@@ -11,13 +11,11 @@ use serde_json::{json, Value};
 use sqlx::SqlitePool;
 use tracing::{info, warn};
 
-use crate::biz::formatting::slugify_title;
 use crate::biz::url_detect::classify_url;
 use crate::io::db::{ListQuery, ScoutDb};
 use crate::io::file_store;
 use crate::runtime::article::{
-    article_matches_title, build_article_from_summary, build_local_article_if_short,
-    normalize_article_markdown,
+    build_article_from_summary, build_local_article_if_short, normalize_article_markdown,
 };
 
 /// Valid user-settable statuses.
@@ -65,7 +63,7 @@ pub async fn list_scout_items(
     }))
 }
 
-/// Get a single scout item with its summary.
+/// Get a single scout item with its summary + article injected from the DB.
 pub async fn get_scout_item(pool: &SqlitePool, id: i64) -> Result<Value> {
     let db = ScoutDb::new(pool.clone());
     let item = db
@@ -73,23 +71,16 @@ pub async fn get_scout_item(pool: &SqlitePool, id: i64) -> Result<Value> {
         .await?
         .with_context(|| format!("item #{id} not found"))?;
 
-    let slug = slugify_title(item.title.as_deref().unwrap_or("untitled"));
-    let summary = file_store::read_summary_async(id, &slug).await;
+    let summary = db.get_summary(id).await?;
+    let article = db.get_article(id).await?;
 
     let mut val = serde_json::to_value(&item)?;
     if let Some(s) = summary {
         val["summary"] = Value::String(s);
     }
-    if let Some(title) = item.title.as_deref() {
-        let article = file_store::read_article_async(id)
-            .await
-            .filter(|md| article_matches_title(title, md));
-        if let Some(article_md) = article {
-            if let Some(tg_url) =
-                crate::io::telegraph::get_cached_url_if_fresh(id, title, &article_md)
-            {
-                val["telegraphUrl"] = Value::String(tg_url);
-            }
+    if let (Some(title), Some(article_md)) = (item.title.as_deref(), article.as_deref()) {
+        if let Some(tg_url) = crate::io::telegraph::get_cached_url_if_fresh(id, title, article_md) {
+            val["telegraphUrl"] = Value::String(tg_url);
         }
     }
     Ok(val)
@@ -104,9 +95,7 @@ pub async fn get_scout_article(pool: &SqlitePool, id: i64) -> Result<Value> {
         .with_context(|| format!("item #{id} not found"))?;
 
     let title = item.title.clone().unwrap_or_else(|| "Untitled".into());
-    let article = file_store::read_article_async(id)
-        .await
-        .filter(|md| article_matches_title(&title, md));
+    let article = db.get_article(id).await?;
 
     let mut val = json!({
         "id": id,
@@ -136,19 +125,16 @@ pub async fn ensure_scout_article(
         .with_context(|| format!("item #{id} not found"))?;
 
     let title = item.title.clone().unwrap_or_else(|| "Untitled".into());
-    let mut article = file_store::read_article_async(id)
-        .await
-        .filter(|md| article_matches_title(&title, md));
+    let mut article = db.get_article(id).await?;
 
     if article.is_none() && should_repair_article(item.status) {
         let content_path = file_store::content_path(id);
-        let slug = slugify_title(&title);
-        let fallback_summary = file_store::read_summary_async(id, &slug).await;
+        let fallback_summary = db.get_summary(id).await?;
         if let Some(summary_article) =
             fallback_summary.and_then(|summary| build_article_from_summary(&title, &summary))
         {
             info!(id, title = %title, "scout: repairing article from current summary");
-            file_store::write_article_async(id, &summary_article)
+            db.set_article(id, &summary_article)
                 .await
                 .with_context(|| format!("write repaired article for #{id}"))?;
             crate::io::telegraph::invalidate_cache(id);
@@ -191,7 +177,7 @@ pub async fn ensure_scout_article(
                 }
                 normalize_article_markdown(&title, &article_result.text)
             };
-            file_store::write_article_async(id, &normalized)
+            db.set_article(id, &normalized)
                 .await
                 .with_context(|| format!("write repaired article for #{id}"))?;
             crate::io::telegraph::invalidate_cache(id);
@@ -226,11 +212,9 @@ pub async fn add_scout_item(pool: &SqlitePool, url: &str, title: Option<&str>) -
     let url_type = classify_url(url);
     let (item, is_new) = db.add_item(url, url_type.as_str(), None).await?;
 
-    if is_new {
-        if let Some(t) = title {
-            if item.title.is_none() {
-                db.set_title(item.id, t).await?;
-            }
+    if let Some(t) = title {
+        if item.title.is_none() {
+            db.set_title(item.id, t).await?;
         }
     }
 
@@ -246,16 +230,11 @@ pub async fn add_scout_item(pool: &SqlitePool, url: &str, title: Option<&str>) -
 /// Delete a scout item, its cached files, and linked sessions.
 pub async fn delete_scout_item(pool: &SqlitePool, id: i64) -> Result<Value> {
     let db = ScoutDb::new(pool.clone());
-    let item = db.get_item(id).await?;
-    let slug = item
-        .as_ref()
-        .and_then(|i| i.title.as_deref())
-        .map(slugify_title);
     let existed = db.delete_item(id).await?;
     if !existed {
         anyhow::bail!("item #{id} not found");
     }
-    file_store::delete_item_files(id, slug.as_deref());
+    file_store::delete_item_files(id);
     Ok(json!({
         "removed": true,
         "id": id,
@@ -317,10 +296,9 @@ pub async fn act_on_scout_item(
         .with_context(|| format!("item #{id} not found"))?;
 
     let title = item.title.clone().unwrap_or_else(|| "Untitled".into());
-    let slug = slugify_title(item.title.as_deref().unwrap_or("untitled"));
     // Summary is optional context — if missing, the act prompt still works
-    // using title + content. read_summary already logs non-NotFound errors.
-    let summary = file_store::read_summary(id, &slug).unwrap_or_default();
+    // using title + content.
+    let summary = db.get_summary(id).await?.unwrap_or_default();
     let content = file_store::read_content(id)
         .filter(|c| !c.is_empty())
         .with_context(|| format!("item #{id} has no content — process it first"))?;

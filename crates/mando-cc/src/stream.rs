@@ -201,7 +201,7 @@ pub fn has_rate_limit_rejection(stream_path: &Path) -> Option<u64> {
         };
         // Most recent rate_limit_event found — check and return.
         if info.get("status").and_then(|s| s.as_str()) == Some("rejected") {
-            return Some(info.get("resets_at").and_then(|v| v.as_u64()).unwrap_or(0));
+            return Some(info.get("resetsAt").and_then(|v| v.as_u64()).unwrap_or(0));
         }
         return None;
     }

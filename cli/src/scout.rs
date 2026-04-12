@@ -88,13 +88,10 @@ pub(crate) enum ScoutCommand {
         /// Question to ask
         question: Vec<String>,
     },
-    /// Research a topic and discover links
+    /// Research a topic and discover links (auto-processed server-side).
     Research {
         /// Topic to research
         topic: Vec<String>,
-        /// Auto-process discovered links
-        #[arg(long)]
-        process: bool,
     },
     /// Create a task from a scout item
     Act {
@@ -135,9 +132,7 @@ pub(crate) async fn handle(args: ScoutArgs) -> anyhow::Result<()> {
             session,
             question,
         } => handle_ask(id, session.as_deref(), &question.join(" ")).await,
-        ScoutCommand::Research { topic, process } => {
-            handle_research(&topic.join(" "), process).await
-        }
+        ScoutCommand::Research { topic } => handle_research(&topic.join(" ")).await,
         ScoutCommand::Act {
             id,
             project,
@@ -339,37 +334,39 @@ async fn handle_ask(id: i64, session: Option<&str>, question: &str) -> anyhow::R
     Ok(())
 }
 
-async fn handle_research(topic: &str, process: bool) -> anyhow::Result<()> {
+async fn handle_research(topic: &str) -> anyhow::Result<()> {
     let client = DaemonClient::discover()?;
-    let body = json!({"topic": topic, "process": process});
-    println!("Researching: {topic}...\n");
+    let body = json!({"topic": topic, "process": true});
+    println!("Researching: {topic}...");
     let result = client.post("/api/scout/research", &body).await?;
 
-    if let Some(links) = result["links"].as_array() {
-        for (i, link) in links.iter().enumerate() {
-            let url = link["url"].as_str().unwrap_or("?");
-            let title = link["title"].as_str().unwrap_or("(no title)");
-            let ltype = link["type"].as_str().unwrap_or("other");
-            let reason = link["reason"].as_str().unwrap_or("");
-            println!("{}. [{}] {}", i + 1, ltype, title);
-            println!("   {url}");
-            if !reason.is_empty() {
-                println!("   {reason}");
+    let run_id = result["run_id"]
+        .as_i64()
+        .ok_or_else(|| anyhow::anyhow!("no run_id in response"))?;
+    println!("Research started (run #{run_id})\n");
+
+    // Poll until done/failed.
+    loop {
+        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+        let run = client.get(&format!("/api/scout/research/{run_id}")).await?;
+        let status = run["status"].as_str().unwrap_or("running");
+        match status {
+            "done" => {
+                let added = run["added_count"].as_i64().unwrap_or(0);
+                println!("Research complete: {added} link(s) added.");
+                return Ok(());
             }
-            println!();
+            "failed" => {
+                let error = run["error"].as_str().unwrap_or("unknown");
+                anyhow::bail!("Research failed: {error}");
+            }
+            _ => {
+                print!(".");
+                use std::io::Write;
+                std::io::stdout().flush().ok();
+            }
         }
-        let count = links.len();
-        println!("{count} link(s) found.");
-        if let Some(added) = result["added"].as_u64() {
-            println!("{added} added to scout.");
-        }
-        if result["processing"].as_bool() == Some(true) {
-            println!("Processing in background.");
-        }
-    } else {
-        println!("No links found.");
     }
-    Ok(())
 }
 
 async fn handle_act(id: i64, project: &str, prompt: &str) -> anyhow::Result<()> {

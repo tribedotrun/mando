@@ -1,8 +1,12 @@
-//! File I/O for scout summaries and content.
+//! File I/O for scout raw content and Telegraph cache.
+//!
+//! Summaries and articles live in the database (scout_items.summary /
+//! scout_items.article). Only the large raw-content transcript and the
+//! per-item Telegraph URL cache remain on disk.
 //!
 //! Layout:
-//! - `~/.mando/scout/summaries/{id:03d}-{slug}.md`
-//! - `~/.mando/scout/content/{id:03d}-article.md`
+//! - `~/.mando/scout/content/{id:03d}.txt`          — raw fetched content
+//! - `~/.mando/scout/content/{id:03d}-telegraph.json` — Telegraph URL cache
 
 use std::path::{Path, PathBuf};
 
@@ -11,24 +15,19 @@ pub(crate) fn scout_dir() -> PathBuf {
     mando_config::data_dir().join("scout")
 }
 
-/// Summaries directory.
-fn summaries_dir() -> PathBuf {
-    scout_dir().join("summaries")
-}
-
 /// Content directory.
 pub(crate) fn content_dir() -> PathBuf {
     scout_dir().join("content")
 }
 
-/// Path where a summary file should live.
-pub fn summary_path(id: i64, slug: &str) -> PathBuf {
-    summaries_dir().join(format!("{id:03}-{slug}.md"))
-}
-
 /// Path where raw fetched content lives: `{id:03d}.txt`.
 pub fn content_path(id: i64) -> PathBuf {
     content_dir().join(format!("{id:03}.txt"))
+}
+
+/// Path for the Telegraph URL cache: `{id:03d}-telegraph.json`.
+pub fn telegraph_cache_path(id: i64) -> PathBuf {
+    content_dir().join(format!("{id:03}-telegraph.json"))
 }
 
 /// Read a file, returning None if missing. Logs a warning on other errors.
@@ -55,57 +54,7 @@ async fn read_optional_async(path: &std::path::Path) -> Option<String> {
     }
 }
 
-/// Read a summary file, returning None if it doesn't exist.
-pub fn read_summary(id: i64, slug: &str) -> Option<String> {
-    read_optional(&summary_path(id, slug))
-}
-
-/// Async variant of [`read_summary`].
-pub async fn read_summary_async(id: i64, slug: &str) -> Option<String> {
-    read_optional_async(&summary_path(id, slug)).await
-}
-
-/// Write a summary file, creating directories as needed.
-pub fn write_summary(id: i64, slug: &str, content: &str) -> std::io::Result<()> {
-    let path = summary_path(id, slug);
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    std::fs::write(&path, content)
-}
-
-/// Delete all summary files for an item except the current slug.
-pub fn delete_stale_summaries(id: i64, keep_slug: &str) -> std::io::Result<()> {
-    let dir = summaries_dir();
-    let prefix = format!("{id:03}-");
-    let keep_name = format!("{prefix}{keep_slug}.md");
-
-    let entries = match std::fs::read_dir(&dir) {
-        Ok(entries) => entries,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        Err(e) => return Err(e),
-    };
-
-    for entry in entries {
-        let entry = entry?;
-        let name = entry.file_name();
-        let Some(name) = name.to_str() else {
-            continue;
-        };
-        if name.starts_with(&prefix) && name != keep_name {
-            let path = entry.path();
-            if let Err(e) = std::fs::remove_file(&path) {
-                if e.kind() != std::io::ErrorKind::NotFound {
-                    return Err(e);
-                }
-            }
-        }
-    }
-
-    Ok(())
-}
-
-/// Read a content/article file, returning None if it doesn't exist.
+/// Read a raw content file, returning None if it doesn't exist.
 pub fn read_content(id: i64) -> Option<String> {
     read_optional(&content_path(id))
 }
@@ -115,35 +64,20 @@ pub async fn read_content_async(id: i64) -> Option<String> {
     read_optional_async(&content_path(id)).await
 }
 
-/// Read the synthesized article markdown, returning None if it doesn't exist.
-pub fn read_article(id: i64) -> Option<String> {
-    read_optional(&article_path(id))
-}
-
-/// Async variant of [`read_article`].
-pub async fn read_article_async(id: i64) -> Option<String> {
-    read_optional_async(&article_path(id)).await
-}
-
-/// Path for the synthesized article: `{id:03d}-article.md`.
-pub fn article_path(id: i64) -> PathBuf {
-    content_dir().join(format!("{id:03}-article.md"))
-}
-
-/// Path for the Telegraph URL cache: `{id:03d}-telegraph.json`.
-pub fn telegraph_cache_path(id: i64) -> PathBuf {
-    content_dir().join(format!("{id:03}-telegraph.json"))
+/// Write raw content file, creating directories as needed.
+pub fn write_content(id: i64, content: &str) -> std::io::Result<()> {
+    let path = content_path(id);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(&path, content)
 }
 
 /// Delete all cached files for an item. Best-effort — missing files are expected,
-/// but other errors (permissions, I/O) are logged at warn level.
-pub fn delete_item_files(id: i64, slug: Option<&str>) {
+/// other errors (permissions, I/O) are logged at warn level.
+pub fn delete_item_files(id: i64) {
     try_remove(&content_path(id));
-    try_remove(&article_path(id));
     try_remove(&telegraph_cache_path(id));
-    if let Some(slug) = slug {
-        try_remove(&summary_path(id, slug));
-    }
 }
 
 fn try_remove(path: &Path) {
@@ -154,48 +88,9 @@ fn try_remove(path: &Path) {
     }
 }
 
-/// Write synthesized article markdown.
-pub fn write_article(id: i64, article: &str) -> std::io::Result<()> {
-    let path = article_path(id);
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    std::fs::write(&path, article)
-}
-
-/// Async variant of [`write_article`].
-pub async fn write_article_async(id: i64, article: &str) -> std::io::Result<()> {
-    let path = article_path(id);
-    if let Some(parent) = path.parent() {
-        tokio::fs::create_dir_all(parent).await?;
-    }
-    tokio::fs::write(&path, article).await
-}
-
-/// Write raw content file, creating directories as needed.
-pub fn write_content(id: i64, content: &str) -> std::io::Result<()> {
-    let path = content_dir().join(format!("{id:03}.txt"));
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    std::fs::write(&path, content)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // NOTE: We avoid using MANDO_DATA_DIR in tests that do file I/O
-    // because env vars are process-global and race across parallel tests.
-    // Instead we test path formatting with known-good paths and do
-    // direct file I/O in unique temp directories.
-
-    #[test]
-    fn summary_path_format() {
-        let p = summary_path(7, "my-article");
-        let s = p.to_str().unwrap();
-        assert!(s.ends_with("007-my-article.md"));
-    }
 
     #[test]
     fn content_path_format() {
@@ -205,18 +100,9 @@ mod tests {
     }
 
     #[test]
-    fn write_and_read_summary_direct() {
-        let dir = std::env::temp_dir().join(format!("mando-scout-fs-s-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        let sdir = dir.join("summaries");
-        std::fs::create_dir_all(&sdir).unwrap();
-
-        let path = sdir.join("001-test.md");
-        std::fs::write(&path, "Hello summary").unwrap();
-        let content = std::fs::read_to_string(&path).unwrap();
-        assert_eq!(content, "Hello summary");
-
-        let _ = std::fs::remove_dir_all(&dir);
+    fn telegraph_cache_path_format() {
+        let p = telegraph_cache_path(5);
+        assert!(p.to_str().unwrap().ends_with("005-telegraph.json"));
     }
 
     #[test]
@@ -226,7 +112,7 @@ mod tests {
         let cdir = dir.join("content");
         std::fs::create_dir_all(&cdir).unwrap();
 
-        let path = cdir.join("002-article.txt");
+        let path = cdir.join("002.txt");
         std::fs::write(&path, "Raw content here").unwrap();
         let data = std::fs::read_to_string(&path).unwrap();
         assert_eq!(data, "Raw content here");
@@ -236,43 +122,7 @@ mod tests {
 
     #[test]
     fn read_nonexistent_returns_none() {
-        // read_summary/read_content return None for non-existent paths.
-        let p = PathBuf::from("/tmp/mando-scout-nonexistent-abc/x.md");
+        let p = PathBuf::from("/tmp/mando-scout-nonexistent-abc/x.txt");
         assert!(std::fs::read_to_string(&p).ok().is_none());
-    }
-
-    #[test]
-    fn telegraph_cache_path_format() {
-        let p = telegraph_cache_path(5);
-        assert!(p.to_str().unwrap().ends_with("005-telegraph.json"));
-    }
-
-    #[test]
-    fn delete_item_files_removes_all() {
-        let dir = std::env::temp_dir().join(format!("mando-scout-del-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        let cdir = dir.join("content");
-        let sdir = dir.join("summaries");
-        std::fs::create_dir_all(&cdir).unwrap();
-        std::fs::create_dir_all(&sdir).unwrap();
-
-        // Create all 4 file types manually using known paths.
-        let raw = cdir.join("001.txt");
-        let article = cdir.join("001-article.md");
-        let telegraph = cdir.join("001-telegraph.json");
-        let summary = sdir.join("001-test-slug.md");
-        for p in [&raw, &article, &telegraph, &summary] {
-            std::fs::write(p, "data").unwrap();
-        }
-
-        // We can't call delete_item_files directly because it uses scout_dir()
-        // which depends on data_dir(). Instead verify the logic: remove_file on
-        // non-existent paths is silently ignored.
-        for p in [&raw, &article, &telegraph, &summary] {
-            let _ = std::fs::remove_file(p);
-            assert!(!p.exists());
-        }
-
-        let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -56,6 +56,7 @@ impl ScoutDb {
         dq::update_status_if(&self.pool, id, status, only_from).await
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn update_processed(
         &self,
         id: i64,
@@ -64,6 +65,8 @@ impl ScoutDb {
         quality: i64,
         source_name: Option<&str>,
         date_published: Option<&str>,
+        summary: &str,
+        article: &str,
     ) -> Result<bool> {
         dq::update_processed(
             &self.pool,
@@ -73,8 +76,22 @@ impl ScoutDb {
             quality,
             source_name,
             date_published,
+            summary,
+            article,
         )
         .await
+    }
+
+    pub async fn get_summary(&self, id: i64) -> Result<Option<String>> {
+        dq::get_summary(&self.pool, id).await
+    }
+
+    pub async fn get_article(&self, id: i64) -> Result<Option<String>> {
+        dq::get_article(&self.pool, id).await
+    }
+
+    pub async fn set_article(&self, id: i64, article: &str) -> Result<()> {
+        dq::set_article(&self.pool, id, article).await
     }
 
     pub async fn set_title(&self, id: i64, title: &str) -> Result<()> {
@@ -353,6 +370,8 @@ mod tests {
                 85,
                 Some("Blog"),
                 Some("2026-01-15"),
+                "summary body",
+                "# Great Article\n\narticle body",
             )
             .await
             .unwrap();
@@ -366,6 +385,15 @@ mod tests {
         assert_eq!(updated.status, ScoutStatus::Processed);
         assert!(updated.date_processed.is_some());
         assert_eq!(updated.date_published.as_deref(), Some("2026-01-15"));
+
+        assert_eq!(
+            db.get_summary(item.id).await.unwrap().as_deref(),
+            Some("summary body")
+        );
+        assert_eq!(
+            db.get_article(item.id).await.unwrap().as_deref(),
+            Some("# Great Article\n\narticle body")
+        );
     }
 
     #[tokio::test]
@@ -459,7 +487,7 @@ mod tests {
             .add_item("https://cond2.com", "other", None)
             .await
             .unwrap();
-        db.update_processed(item.id, "T", 80, 80, None, None)
+        db.update_processed(item.id, "T", 80, 80, None, None, "sum", "art")
             .await
             .unwrap();
 
@@ -480,7 +508,7 @@ mod tests {
             .await
             .unwrap();
         let changed = db
-            .update_processed(item.id, "First", 90, 85, None, None)
+            .update_processed(item.id, "First", 90, 85, None, None, "sum1", "art1")
             .await
             .unwrap();
         assert!(changed);
@@ -488,7 +516,7 @@ mod tests {
         assert_eq!(first.title.as_deref(), Some("First"));
 
         let changed2 = db
-            .update_processed(item.id, "Second", 50, 50, None, None)
+            .update_processed(item.id, "Second", 50, 50, None, None, "sum2", "art2")
             .await
             .unwrap();
         assert!(!changed2);
@@ -515,6 +543,8 @@ mod tests {
                 60,
                 Some("Blog"),
                 Some("2025-12-01"),
+                "retry sum",
+                "retry art",
             )
             .await
             .unwrap();

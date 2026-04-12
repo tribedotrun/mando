@@ -2,7 +2,7 @@
 
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
-use axum::routing::{get, patch, post};
+use axum::routing::{get, patch};
 use axum::{Json, Router};
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -18,10 +18,6 @@ pub(crate) fn routes() -> Router<AppState> {
         .route(
             "/api/workbenches/{id}/layout",
             patch(patch_workbench_layout),
-        )
-        .route(
-            "/api/terminal/{id}/cc-session",
-            post(post_terminal_cc_session),
         )
 }
 
@@ -211,66 +207,4 @@ fn merge_layout_patch(layout: &mut mando_types::WorkbenchLayout, patch: &Value) 
             }
         }
     }
-}
-
-// ── POST /api/terminal/:id/cc-session ──────────────────────────────────
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct CcSessionBody {
-    pub cc_session_id: String,
-}
-
-pub(crate) async fn post_terminal_cc_session(
-    State(state): State<AppState>,
-    Path(terminal_id): Path<String>,
-    Json(body): Json<CcSessionBody>,
-) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    let parts: Vec<&str> = terminal_id.splitn(2, ':').collect();
-    if parts.len() != 2 {
-        return Err(error_response(
-            StatusCode::BAD_REQUEST,
-            "terminal ID must be wb_id:panel_id",
-        ));
-    }
-    let wb_id: i64 = parts[0].parse().map_err(|_| {
-        error_response(
-            StatusCode::BAD_REQUEST,
-            "invalid workbench ID in terminal ID",
-        )
-    })?;
-    mando_db::queries::workbenches::find_by_id(state.db.pool(), wb_id)
-        .await
-        .map_err(internal_error)?
-        .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "workbench not found"))?;
-    let panel_id = parts[1].to_string();
-    let session_id = body.cc_session_id;
-
-    let found = tokio::task::spawn_blocking(move || {
-        let mut layout = read_layout(wb_id)?;
-        let has_panel = layout.panels.contains_key(&panel_id);
-        if let Some(panel) = layout.panels.get_mut(&panel_id) {
-            panel.cc_session_id = Some(session_id);
-            write_layout(wb_id, &layout)?;
-        }
-        Ok::<bool, anyhow::Error>(has_panel)
-    })
-    .await
-    .map_err(internal_error)?
-    .map_err(internal_error)?;
-
-    if !found {
-        tracing::warn!(
-            module = "workbenches",
-            wb_id,
-            panel_id = %parts[1],
-            "panel not found in layout"
-        );
-        return Err(error_response(
-            StatusCode::NOT_FOUND,
-            "panel not found in workbench layout",
-        ));
-    }
-
-    Ok(Json(json!({"ok": true})))
 }

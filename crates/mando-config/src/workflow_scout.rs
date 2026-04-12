@@ -56,6 +56,13 @@ pub struct ScoutAgentConfig {
     pub qa_ttl_s: Duration,
     #[serde(with = "duration_seconds")]
     pub act_timeout_s: Duration,
+    /// Max links to accept from a single research run.
+    #[serde(default = "default_research_max_items")]
+    pub research_max_items: usize,
+}
+
+fn default_research_max_items() -> usize {
+    10
 }
 
 impl Default for ScoutAgentConfig {
@@ -63,10 +70,11 @@ impl Default for ScoutAgentConfig {
         Self {
             process_timeout_s: Duration::from_secs(120),
             article_timeout_s: Duration::from_secs(300),
-            research_timeout_s: Duration::from_secs(300),
+            research_timeout_s: Duration::from_secs(1800),
             qa_timeout_s: Duration::from_secs(120),
             qa_ttl_s: Duration::from_secs(600),
             act_timeout_s: Duration::from_secs(60),
+            research_max_items: default_research_max_items(),
         }
     }
 }

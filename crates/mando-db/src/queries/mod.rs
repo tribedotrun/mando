@@ -2,6 +2,7 @@ pub mod ask_history;
 pub mod projects;
 pub mod rebase;
 pub mod scout;
+pub mod scout_research;
 pub mod sessions;
 pub mod tasks;
 pub mod tasks_persist;

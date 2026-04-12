@@ -63,26 +63,18 @@ export function ScoutPage({ active = true }: { active?: boolean } = {}): React.R
 
   const inListView = view === '' && !activeItemId;
 
-  const runResearch = useCallback(
-    async (topic: string) => {
-      setResearchPending(true);
-      try {
-        const result = await researchScout(topic, true);
-        scoutFetch();
-        const added = result.added ?? 0;
-        const msg = result.processing
-          ? `Research added ${added} link(s), processing in background`
-          : `Research added ${added} link(s)`;
-        toast.success(msg);
-        setResearchModalOpen(false);
-      } catch (err) {
-        toast.error(getErrorMessage(err, 'Research failed'));
-      } finally {
-        setResearchPending(false);
-      }
-    },
-    [scoutFetch],
-  );
+  const runResearch = useCallback(async (topic: string) => {
+    setResearchPending(true);
+    try {
+      const { run_id } = await researchScout(topic, true);
+      toast.loading(`Researching "${topic}"...`, { id: `scout-research:${run_id}` });
+      setResearchModalOpen(false);
+    } catch (err) {
+      toast.error(getErrorMessage(err, 'Research failed'));
+    } finally {
+      setResearchPending(false);
+    }
+  }, []);
 
   const handleKey = useCallback(
     (key: string, e: KeyboardEvent) => {

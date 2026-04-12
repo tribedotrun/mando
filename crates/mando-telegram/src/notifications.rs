@@ -127,6 +127,92 @@ impl NotificationHandler {
         }
     }
 
+    /// Handle a research lifecycle SSE event (started/progress/completed/failed).
+    pub async fn handle_research(&mut self, data: Value) {
+        let action = data["action"].as_str().unwrap_or("");
+        let run_id = data["run_id"].as_i64().unwrap_or(0);
+        let key = format!("research:{run_id}");
+
+        // Import pre-registered message from cmd_research.
+        if let Some(msg_id) = self.pending.lock().unwrap().remove(&key) {
+            self.task_messages.insert(key.clone(), msg_id);
+        }
+
+        let text = match action {
+            "progress" => {
+                let elapsed = data["elapsed_s"].as_u64().unwrap_or(0);
+                let mins = elapsed / 60;
+                format!("\u{1f50d} Research #{run_id}: {mins}m elapsed\u{2026}")
+            }
+            "completed" => {
+                // Telegram enforces a 4096-char cap on parsed message text.
+                // Leave headroom for the header and per-link formatting so a
+                // run with long titles/URLs can still render without failing
+                // the send/edit call.
+                const TELEGRAM_MAX: usize = 3800;
+                let added = data["added_count"].as_i64().unwrap_or(0);
+                let links = data["links"].as_array();
+                let total = links.map_or(0, |l| l.len());
+                let errors = data["errors"].as_array().map_or(0, |e| e.len());
+
+                let mut msg =
+                    format!("\u{2705} Research #{run_id} complete: {total} links, {added} new");
+                if errors > 0 {
+                    msg.push_str(&format!(", {errors} error(s)"));
+                }
+
+                if let Some(links) = links {
+                    let mut shown = 0usize;
+                    for link in links.iter().take(10) {
+                        let title = link["title"].as_str().unwrap_or("Untitled");
+                        let url = link["url"].as_str().unwrap_or("");
+                        let was_added = link["added"].as_bool() == Some(true);
+                        let status = if was_added { "new" } else { "exists" };
+                        let line = format!(
+                            "\n\u{2022} <a href=\"{}\">{}</a> ({status})",
+                            mando_shared::telegram_format::escape_html(url),
+                            mando_shared::telegram_format::escape_html(title),
+                        );
+                        if msg.len() + line.len() > TELEGRAM_MAX {
+                            break;
+                        }
+                        msg.push_str(&line);
+                        shown += 1;
+                    }
+                    let remaining = total.saturating_sub(shown);
+                    if remaining > 0 {
+                        msg.push_str(&format!("\n\u{2026}and {remaining} more"));
+                    }
+                }
+                msg
+            }
+            "failed" => {
+                let error = data["error"].as_str().unwrap_or("unknown");
+                format!(
+                    "\u{274c} Research #{run_id} failed: {}",
+                    mando_shared::telegram_format::escape_html(error)
+                )
+            }
+            _ => return,
+        };
+
+        // Try edit-in-place first.
+        if let Some(&msg_id) = self.task_messages.get(&key) {
+            match self.edit_message(msg_id, &text, None).await {
+                Ok(_) => return,
+                Err(e) => {
+                    warn!(key, msg_id, "research edit failed: {e:#}");
+                    self.task_messages.remove(&key);
+                }
+            }
+        }
+
+        // Fall back to new message.
+        if let Ok(msg_id) = self.send_message(&text, None).await {
+            self.task_messages.insert(key, msg_id);
+        }
+    }
+
     /// Clear tracked messages (e.g. on reconnect when state may be stale).
     pub fn clear_tracked_messages(&mut self) {
         self.task_messages.clear();

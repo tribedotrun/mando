@@ -160,6 +160,16 @@ export class TerminalRuntime {
     this.bindTerminalInput();
     this.bindResize(container);
     this.connectStream(true);
+
+    // Re-sync after the browser has laid out the container. Covers races where
+    // the initial fit runs before the pane has its final dimensions (e.g. after
+    // a daemon restart when the session ID may have changed mid-mount).
+    requestAnimationFrame(() => {
+      if (!this.disposed && this.fitAddon) {
+        this.fitAddon.fit();
+        void this.syncTerminalSize();
+      }
+    });
   }
 
   dispose(): void {

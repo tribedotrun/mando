@@ -7,13 +7,15 @@ use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use mando_db::queries::projects as db_projects;
+
 use crate::response::{error_response, internal_error};
 use crate::AppState;
 
 #[derive(Deserialize)]
 pub struct ParseTodosRequest {
     pub text: String,
-    pub project: Option<String>,
+    pub project: String,
 }
 
 #[derive(Serialize)]
@@ -45,17 +47,32 @@ pub async fn post_parse_todos(
     let timeout = wf.agent.todo_parse_timeout_s;
     let idle_ttl = wf.agent.todo_parse_idle_ttl_s;
 
+    let pool = state.db.pool();
+    let row = db_projects::resolve(pool, &body.project)
+        .await
+        .map_err(internal_error)?
+        .ok_or_else(|| {
+            error_response(
+                StatusCode::BAD_REQUEST,
+                &format!("unknown project: {}", body.project),
+            )
+        })?;
+    let cwd = mando_config::expand_tilde(&row.path);
+    if !cwd.is_dir() {
+        return Err(error_response(
+            StatusCode::BAD_REQUEST,
+            &format!("project '{}' path is not a directory", row.name),
+        ));
+    }
+
     let mut vars: FxHashMap<&str, String> = FxHashMap::default();
     vars.insert("text", text.to_string());
     vars.insert("line_count", line_count.to_string());
-    if let Some(ref p) = body.project {
-        vars.insert("project", p.clone());
-    }
+    vars.insert("project", row.name);
     let prompt = mando_config::render_prompt("todo_parse", &wf.prompts, &vars)
         .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e))?;
 
-    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/tmp"));
-
+    let max_turns = wf.agent.todo_parse_max_turns;
     let mgr = &state.cc_session_mgr;
     let session_key = format!("parse-todos-{}", mando_uuid::Uuid::v4().short());
 
@@ -68,6 +85,7 @@ pub async fn post_parse_todos(
             idle_ttl,
             timeout,
             None,
+            Some(max_turns),
         )
         .await
         .map_err(internal_error)?;

@@ -133,6 +133,7 @@ pub struct AgentConfig {
     pub todo_parse_timeout_s: std::time::Duration,
     #[serde(with = "duration_seconds")]
     pub todo_parse_idle_ttl_s: std::time::Duration,
+    pub todo_parse_max_turns: u32,
     /// How long an item can sit in NeedsClarification (waiting for human) before
     /// escalating to CaptainReviewing. Much larger than clarifier_timeout_s
     /// because humans respond in hours/days, not seconds.
@@ -180,6 +181,7 @@ impl Default for AgentConfig {
             clarifier_timeout_s: Duration::from_secs(1800),
             todo_parse_timeout_s: Duration::from_secs(300),
             todo_parse_idle_ttl_s: Duration::from_secs(120),
+            todo_parse_max_turns: 10,
             needs_clarification_timeout_s: Duration::from_secs(86400), // 24 hours
             archive_grace_secs: Duration::from_secs(604800),
             evidence_download_timeout_s: Duration::from_secs(30),

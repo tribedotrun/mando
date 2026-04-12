@@ -155,7 +155,7 @@ export function ScoutTable({
                       checked={sel}
                       onCheckedChange={() => onToggleSelect(item.id)}
                       onClick={(e) => e.stopPropagation()}
-                      aria-label={`Select ${item.title || 'Untitled'}`}
+                      aria-label={`Select ${item.title || domain || 'Untitled'}`}
                       className="size-3.5"
                     />
                   </TableCell>
@@ -171,7 +171,8 @@ export function ScoutTable({
                       title={item.url}
                     >
                       <span className="block truncate text-[13px] text-foreground">
-                        {item.title || (item.status === 'pending' ? 'Pending...' : 'Untitled')}
+                        {item.title ||
+                          (item.status === 'pending' ? 'Pending...' : domain || 'Untitled')}
                       </span>
                       {domain && (
                         <span className="block truncate text-[11px] text-muted-foreground">

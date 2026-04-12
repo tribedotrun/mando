@@ -127,6 +127,7 @@ impl CcSessionManager {
     }
 
     /// Start a new CC session. Returns the first response.
+    #[allow(clippy::too_many_arguments)]
     pub async fn start(
         &self,
         key: &str,
@@ -135,9 +136,19 @@ impl CcSessionManager {
         model: Option<&str>,
         idle_ttl: Duration,
         call_timeout: Duration,
+        max_turns: Option<u32>,
     ) -> Result<CcResult> {
-        self.start_with_item(key, prompt, cwd, model, idle_ttl, call_timeout, None)
-            .await
+        self.start_with_item(
+            key,
+            prompt,
+            cwd,
+            model,
+            idle_ttl,
+            call_timeout,
+            None,
+            max_turns,
+        )
+        .await
     }
 
     /// Start a new CC session linked to a task.
@@ -151,12 +162,22 @@ impl CcSessionManager {
         idle_ttl: Duration,
         call_timeout: Duration,
         task_id: Option<i64>,
+        max_turns: Option<u32>,
     ) -> Result<CcResult> {
         // Serialize same-key starts. Different keys run in parallel.
         let key_mu = self.key_lock(key);
         let _key_guard = key_mu.lock().await;
-        self.start_locked(key, prompt, cwd, model, idle_ttl, call_timeout, task_id)
-            .await
+        self.start_locked(
+            key,
+            prompt,
+            cwd,
+            model,
+            idle_ttl,
+            call_timeout,
+            task_id,
+            max_turns,
+        )
+        .await
     }
 
     /// Atomic replace-and-start: close any existing session for `key`, then
@@ -179,7 +200,7 @@ impl CcSessionManager {
         // file). The per-key lock prevents a concurrent start / follow_up
         // from observing a half-closed state.
         self.close(key);
-        self.start_locked(key, prompt, cwd, model, idle_ttl, call_timeout, None)
+        self.start_locked(key, prompt, cwd, model, idle_ttl, call_timeout, None, None)
             .await
     }
 
@@ -194,6 +215,7 @@ impl CcSessionManager {
         idle_ttl: Duration,
         call_timeout: Duration,
         task_id: Option<i64>,
+        max_turns: Option<u32>,
     ) -> Result<CcResult> {
         let mut builder = CcConfig::builder()
             .model(model.unwrap_or(&self.default_model))
@@ -202,6 +224,9 @@ impl CcSessionManager {
             .caller(key);
         if let Some(tid) = task_id {
             builder = builder.task_id(tid.to_string());
+        }
+        if let Some(n) = max_turns {
+            builder = builder.max_turns(n);
         }
         let result = CcOneShot::run(prompt, builder.build()).await?;
 

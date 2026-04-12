@@ -17,10 +17,11 @@ models:
 agent:
   process_timeout_s: 120
   article_timeout_s: 300
-  research_timeout_s: 300
+  research_timeout_s: 1800
   qa_timeout_s: 120
   qa_ttl_s: 600
   act_timeout_s: 60
+  research_max_items: 10
 
 # interests, user_context, and repos are injected from config.json at load time.
 interests: {}
@@ -103,7 +104,6 @@ prompts:
 
     ARTICLE SUMMARY:
     {{ summary }}
-
     {% if raw_content_note %}
 
     ## Original Source Content
@@ -111,8 +111,10 @@ prompts:
     {% endif %}
 
     Rules:
-    {% if raw_content_note %}- You MUST use the Read tool to load the original source file (listed under "Original Source Content" above) BEFORE answering. The structured article is a summary and may omit details — always ground your answer in the original content.
-    {% endif %}- Be concise — this is a chat
+    {% if raw_content_note %}
+    - You MUST use the Read tool to load the original source file (listed under "Original Source Content" above) BEFORE answering. The structured article is a summary and may omit details — always ground your answer in the original content.
+    {% endif %}
+    - Be concise — this is a chat
     - If the answer isn't in the article, say so and offer your own knowledge clearly marked
     - Use markdown formatting sparingly (bold for emphasis, bullets for lists)
 

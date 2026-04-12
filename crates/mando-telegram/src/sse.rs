@@ -28,6 +28,8 @@ pub enum SseEvent {
     Sessions,
     /// Scout changed.
     Scout,
+    /// Research lifecycle event (started/progress/completed/failed).
+    Research(Value),
     /// Reconnected after a connection drop.
     Reconnected,
 }
@@ -208,6 +210,7 @@ fn parse_event_json(json: &Value) -> Option<SseEvent> {
         "status" => Some(SseEvent::Status(wire.data)),
         "sessions" => Some(SseEvent::Sessions),
         "scout" => Some(SseEvent::Scout),
+        "research" => Some(SseEvent::Research(wire.data.unwrap_or(Value::Null))),
         other => {
             tracing::debug!("unknown SSE event type: {other}");
             None
@@ -243,6 +246,9 @@ pub async fn run_notification_loop(
         match event {
             SseEvent::Notification(payload) => {
                 handler.handle(payload).await;
+            }
+            SseEvent::Research(data) => {
+                handler.handle_research(data).await;
             }
             SseEvent::Reconnected => {
                 handler.clear_tracked_messages();

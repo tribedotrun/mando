@@ -229,7 +229,7 @@ export function Sidebar({
   const homeActive = activeTab === 'captain' && !projectFilter;
 
   return (
-    <aside className="relative flex h-full flex-col overflow-hidden bg-card px-1.5 pb-4">
+    <aside className="relative flex h-full flex-col overflow-hidden bg-card px-1.5">
       {/* Window controls toolbar (next to traffic lights) */}
       <div
         className="flex h-[38px] shrink-0 items-start pl-[70px] pt-[10px]"

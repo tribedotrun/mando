@@ -64,7 +64,7 @@ pub async fn run_research(topic: &str, workflow: &ScoutWorkflow) -> Result<Resea
                                 "type": { "type": "string" },
                                 "reason": { "type": "string" }
                             },
-                            "required": ["url", "title"]
+                            "required": ["url", "title", "type", "reason"]
                         }
                     }
                 },

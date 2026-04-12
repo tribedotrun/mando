@@ -28,6 +28,7 @@ agent:
   clarifier_timeout_s: 1800
   todo_parse_timeout_s: 300
   todo_parse_idle_ttl_s: 120
+  todo_parse_max_turns: 10
   task_ask_timeout_s: 600
   task_ask_idle_ttl_s: 3600
   ops_timeout_s: 120
@@ -107,16 +108,16 @@ prompts:
     - Implement the changes. Commit incrementally — small, logical commits.
     - If the repo needs local dependencies or tooling that are missing in the worktree (for example `node_modules` absent or `vite`/`pnpm`/`cargo-nextest` not found), install them in the repo first, record that in the workpad, and then continue. Missing local tooling is not a blocker by itself.
     - Run {{ check_command }} after each change. Fix failures before moving on.
-    {%- if not no_pr %}
+    {% if not no_pr %}
     - **Evidence requirements** — your PR MUST include runtime proof of your changes:
        - Evidence must be **actual runtime output** you captured, NOT diagrams, ASCII art, mockups, or sample output you write by hand. Test results prove correctness but are NOT evidence — you need both.
        - **After evidence is required.** Before evidence is optional (nice-to-have if convenient).
-       - **UI changes**: use the evidence tool for your repo (see Repo-Specific Instructions below). Screenshot for static/single-view changes, recording for multi-step or interactive changes. **Always use an isolated environment** for evidence capture.
+       - **UI changes**: use the evidence tool for your repo (see Repo-Specific Instructions below). Screenshot for static/single-view changes, recording for multi-step or interactive changes. **Always use an isolated environment** for evidence capture. Never use `--visible` — CDP works windowless.
        - **Non-UI changes**: run the relevant command and capture terminal output under an `### After` heading with a code fence.
        - **Self-verify**: after capturing, read the screenshot or extract frames with ffmpeg. If evidence doesn't show the fix working, fix → recapture → verify.
        - **Keep PR evidence current**: if you make code changes after capturing evidence, recapture and update the PR.
        - **Cleanup is required**: if you start a local dev server, preview server, watcher, or any other background helper for verification/evidence, stop it before you finish. Do not leave orphaned background jobs behind. Prefer a cleanup trap (for example `trap 'kill $SERVER_PID' EXIT`) when starting temporary servers.
-    {%- endif %}
+    {% endif %}
     {% if no_pr %}
     - This is a **research/audit task**. Do NOT create a PR. When your analysis is complete, write findings to your workpad at `{{ workpad_path }}` and stop.
     {% else %}
@@ -130,6 +131,7 @@ prompts:
 
     {{ worker_preamble }}
     {% endif %}
+
     {% include "_escape_hatch" %}
 
     {% include "_branch_done" %}
@@ -168,7 +170,7 @@ prompts:
     - [ ] **Findings** — write results to workpad at `{{ workpad_path }}` and stop. No PR needed.
     {% else %}
     - [ ] **PR** — use `/mando-pr --fast` to create or update the PR. Captain will monitor follow-up review/CI state after the handoff. Update workpad with PR link.
-    - [ ] **Evidence** — runtime proof in the PR (after required, before optional). UI: screenshot for static, recording for interactive; always use an isolated/sandbox environment. Non-UI: CLI output under `### After` heading. NOT diagrams or test-only results. Self-verify: read screenshots or extract frames with ffmpeg. Recapture if code changes after evidence.
+    - [ ] **Evidence** — runtime proof in the PR (after required, before optional). UI: screenshot for static, recording for interactive; always use an isolated/sandbox environment; never use `--visible` (CDP works windowless). Non-UI: CLI output under `### After` heading. NOT diagrams or test-only results. Self-verify: read screenshots or extract frames with ffmpeg. Recapture if code changes after evidence.
     - [ ] **Cleanup** — stop any background servers, watchers, or helper processes you started for verification/evidence. No orphaned background jobs may remain when you finish.
     - [ ] **CI** — fix all CI failures, even informational ones. A clean CI is a quality gate, not optional.
     - [ ] **Reviews** — address any reviewer comments
@@ -183,6 +185,7 @@ prompts:
 
     {{ worker_preamble }}
     {% endif %}
+
     {% include "_escape_hatch" %}
 
     {% include "_branch_done" %}
@@ -306,13 +309,26 @@ prompts:
 
   todo_parse: |
     Parse this text into individual task titles for a todo list.
-    {% if project %}Project context: these tasks are for the "{{ project }}" project.{% endif %}
-    Rules:
+    {% if project %}
+    Project context: these tasks are for the "{{ project }}" project.
+    {% endif %}
+
+    ## When to explore code
+
+    If the input is already specific enough that exploring the repository would not change the
+    resulting title (e.g. "add dark mode toggle", "rename UserCard component"), skip exploration
+    and return JSON directly.
+
+    Otherwise -- when the input is vague, ambiguous, or mentions repo-specific files, symbols,
+    modules, or endpoints whose exact names you do not know -- use Read, Grep, and Glob to
+    explore the codebase first so you can produce specific, accurate titles.
+
+    ## Rules
     - Each task must be a clear, concise one-line title (imperative form, max 80 chars)
     - You may merge consecutive lines that describe the same task
     - Never split a single line into multiple tasks
     - Return at most {{ line_count }} items
-    - Return ONLY a JSON array of strings, no other text
+    - Your final output MUST be ONLY a JSON array of strings, no other text
 
     Text:
     {{ text }}
@@ -328,10 +344,11 @@ prompts:
 
     {{ worker_contexts }}
 
+    {% if knowledge_base %}
     ## Knowledge Base
 
     {{ knowledge_base }}
-
+    {% endif %}
     {% if evidence_images %}
     ## Evidence Images
 
@@ -469,10 +486,10 @@ prompts:
     2. If the repo needs local dependencies or tooling that are missing in the worktree (for example `node_modules` absent or `vite`/`pnpm`/`cargo-nextest` not found), install them in the repo first and record that in the workpad
     3. Fix failing tests
     4. Address any remaining items from the handoff note
-    {%- if not no_pr %}
+    {% if not no_pr %}
     5. **Evidence requirements** — your PR MUST include runtime proof:
        - After evidence is **required**. Before evidence is **optional**.
-       - **UI changes**: use the evidence tool for your repo (see Repo-Specific Instructions) — screenshot for static, recording for interactive/multi-step. **Always use an isolated/sandbox environment** for evidence capture.
+       - **UI changes**: use the evidence tool for your repo (see Repo-Specific Instructions) — screenshot for static, recording for interactive/multi-step. **Always use an isolated/sandbox environment** for evidence capture. Never use `--visible` — CDP works windowless.
        - **Non-UI changes**: CLI output under `### After` heading with code fence. NOT diagrams, ASCII art, mockups, or test-only results.
        - **Self-verify**: read the screenshot or extract frames with ffmpeg. Fix → recapture if evidence doesn't show the fix.
        - **Keep current**: recapture and update PR if code changes after evidence.
@@ -480,7 +497,7 @@ prompts:
     6. Create or update the PR using `/mando-pr --fast`. Captain will monitor follow-up review/CI state after the handoff. Update workpad with PR link.
     7. **CI** — fix all CI failures, even informational ones. A clean CI is a quality gate, not optional.
     8. Ensure your branch is ahead of origin/main
-    {%- endif %}
+    {% endif %}
     {% if no_pr %}
     5. Write findings to your workpad at `{{ workpad_path }}` and stop. No PR needed.
     {% endif %}
@@ -490,6 +507,7 @@ prompts:
 
     {{ worker_preamble }}
     {% endif %}
+
     {% include "_escape_hatch" %}
 
     {% include "_branch_done" %}

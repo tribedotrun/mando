@@ -294,16 +294,13 @@ pub fn spawn_terminal_auto_resume(state: &AppState) {
             terminal_env.insert("MANDO_PORT".to_string(), listen_port.to_string());
             let auth_token = crate::auth::ensure_auth_token();
             terminal_env.insert("MANDO_AUTH_TOKEN".to_string(), auth_token);
-            if let Some(ref tid) = old.terminal_id {
-                terminal_env.insert("MANDO_TERMINAL_ID".to_string(), tid.clone());
-            }
 
             let req = mando_terminal::CreateRequest {
                 project: old.project.clone(),
                 cwd: old.cwd.clone(),
                 agent: old.agent.clone(),
                 resume_session_id: old.cc_session_id.clone(),
-                size: None,
+                size: Some(old.size),
                 config_env,
                 terminal_env,
                 terminal_id: old.terminal_id.clone(),

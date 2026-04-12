@@ -1,6 +1,5 @@
 //! Article generation — convert raw content into structured markdown articles.
 
-use crate::biz::formatting::slugify_title;
 use anyhow::Result;
 use mando_config::workflow::ScoutWorkflow;
 use rustc_hash::FxHashMap;
@@ -53,13 +52,6 @@ pub async fn generate_article(
         cost_usd: result.cost_usd,
         duration_ms: result.duration_ms,
     })
-}
-
-/// Whether cached markdown still belongs to the current item title.
-pub fn article_matches_title(title: &str, article_md: &str) -> bool {
-    first_heading(article_md)
-        .map(|heading| slugify_title(heading) == slugify_title(title))
-        .unwrap_or(false)
 }
 
 /// Normalize generated markdown into a stable article shape.
@@ -125,35 +117,11 @@ pub fn build_local_article_if_short(title: &str, url: &str, raw_content: &str) -
     ))
 }
 
-fn first_heading(article_md: &str) -> Option<&str> {
-    for line in article_md.lines() {
-        let trimmed = line.trim();
-        if let Some(rest) = trimmed.strip_prefix("# ") {
-            let heading = rest.trim();
-            if !heading.is_empty() {
-                return Some(heading);
-            }
-        }
-    }
-    None
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
-        article_matches_title, build_article_from_summary, build_local_article_if_short,
-        normalize_article_markdown,
+        build_article_from_summary, build_local_article_if_short, normalize_article_markdown,
     };
-
-    #[test]
-    fn article_matches_title_uses_first_heading() {
-        let article = "# OpenClaw: Self-Hosted AI Assistant Gateway\n\nBody";
-        assert!(article_matches_title(
-            "OpenClaw: Self-Hosted AI Assistant Gateway",
-            article
-        ));
-        assert!(!article_matches_title("Shopify cache design", article));
-    }
 
     #[test]
     fn normalize_article_strips_chatty_preamble_and_rewrites_heading() {

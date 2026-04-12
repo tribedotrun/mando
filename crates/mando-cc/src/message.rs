@@ -272,7 +272,7 @@ impl CcMessage {
                     "rejected" => RateLimitStatus::Rejected,
                     other => RateLimitStatus::Unknown(other.to_string()),
                 };
-                let overage_status_str = info.get("overage_status").and_then(|s| s.as_str());
+                let overage_status_str = info.get("overageStatus").and_then(|s| s.as_str());
                 let overage_status = overage_status_str.map(|s| match s {
                     "allowed" => RateLimitStatus::Allowed,
                     "allowed_warning" => RateLimitStatus::AllowedWarning,
@@ -281,16 +281,16 @@ impl CcMessage {
                 });
                 CcMessage::RateLimit(RateLimitEvent {
                     status,
-                    resets_at: info.get("resets_at").and_then(|v| v.as_u64()),
+                    resets_at: info.get("resetsAt").and_then(|v| v.as_u64()),
                     rate_limit_type: info
-                        .get("rate_limit_type")
+                        .get("rateLimitType")
                         .and_then(|v| v.as_str())
                         .map(String::from),
                     utilization: info.get("utilization").and_then(|v| v.as_f64()),
                     overage_status,
-                    overage_resets_at: info.get("overage_resets_at").and_then(|v| v.as_u64()),
+                    overage_resets_at: info.get("overageResetsAt").and_then(|v| v.as_u64()),
                     overage_disabled_reason: info
-                        .get("overage_disabled_reason")
+                        .get("overageDisabledReason")
                         .and_then(|v| v.as_str())
                         .map(String::from),
                     raw: val,
@@ -465,8 +465,8 @@ mod tests {
             "type": "rate_limit_event",
             "rate_limit_info": {
                 "status": "allowed_warning",
-                "resets_at": 1773273600_u64,
-                "rate_limit_type": "seven_day",
+                "resetsAt": 1773273600_u64,
+                "rateLimitType": "seven_day",
                 "utilization": 0.62
             }
         });
@@ -487,8 +487,8 @@ mod tests {
             "type": "rate_limit_event",
             "rate_limit_info": {
                 "status": "rejected",
-                "resets_at": 1773273600_u64,
-                "rate_limit_type": "five_hour",
+                "resetsAt": 1773273600_u64,
+                "rateLimitType": "five_hour",
                 "utilization": 1.0
             }
         });
@@ -506,12 +506,12 @@ mod tests {
             "type": "rate_limit_event",
             "rate_limit_info": {
                 "status": "rejected",
-                "resets_at": 1773273600_u64,
-                "rate_limit_type": "five_hour",
+                "resetsAt": 1773273600_u64,
+                "rateLimitType": "five_hour",
                 "utilization": 1.0,
-                "overage_status": "allowed_warning",
-                "overage_resets_at": 1773280800_u64,
-                "overage_disabled_reason": null
+                "overageStatus": "allowed_warning",
+                "overageResetsAt": 1773280800_u64,
+                "overageDisabledReason": null
             }
         });
         match CcMessage::parse(val) {

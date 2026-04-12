@@ -24,10 +24,19 @@ pub(crate) fn spawn_scout_processing(state: &AppState, id: i64, url: String) {
     let workflow = state.scout_workflow.load_full();
     let pool = state.db.pool().clone();
     let bus = state.bus.clone();
+    let semaphore = state.scout_processing_semaphore.clone();
     state.task_tracker.spawn(async move {
+        let _permit = semaphore.acquire().await.expect("semaphore not closed");
         let result = AssertUnwindSafe(async {
             if let Err(e) = mando_scout::process_scout(&config, &pool, Some(id), &workflow).await {
                 tracing::warn!(scout_id = id, error = %e, "auto-process failed");
+                // Move to error status so the item is retryable instead of
+                // stuck at fetched forever.
+                if let Err(db_err) =
+                    mando_db::queries::scout::increment_error_count(&pool, id).await
+                {
+                    tracing::error!(scout_id = id, error = %db_err, "failed to increment error count after process failure");
+                }
                 emit_scout_process_failed(&bus, id, &url, &e.to_string());
                 return;
             }

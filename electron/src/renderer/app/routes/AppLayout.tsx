@@ -33,21 +33,40 @@ export function AppLayout(): React.ReactElement {
   const archiveWorkbench = useWorkbenchArchive();
   const saveMut = useConfigSave();
   const qc = useQueryClient();
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
     id: 'sidebar-layout',
     storage: localStorage,
   });
 
+  // Toggle sidebar and explicitly sync collapsed state.
+  // onResize may not fire for programmatic collapse()/expand(), so we set
+  // state directly based on the toggle direction.
+  const handleToggleSidebar = useCallback(() => {
+    const panel = sidebarRef.current;
+    if (!panel) return;
+    if (panel.isCollapsed()) {
+      panel.expand();
+      setSidebarCollapsed(false);
+    } else {
+      panel.collapse();
+      setSidebarCollapsed(true);
+    }
+  }, [sidebarRef]);
+
+  const handleGoBack = useCallback(() => router.history.back(), []);
+  const handleGoForward = useCallback(() => router.history.forward(), []);
+  const handleNewTask = useCallback(() => useUIStore.getState().openCreateTask(), []);
+
+  // Sync initial collapsed state (panel may restore collapsed from localStorage)
+  useMountEffect(() => {
+    if (sidebarRef.current?.isCollapsed()) setSidebarCollapsed(true);
+  });
+
   // Listen for global sidebar toggle shortcut (Cmd+B dispatched from useGlobalKeyboard)
   useMountEffect(() => {
-    const toggle = () => {
-      const panel = sidebarRef.current;
-      if (!panel) return;
-      if (panel.isCollapsed()) panel.expand();
-      else panel.collapse();
-    };
-    window.addEventListener('mando:toggle-sidebar', toggle);
-    return () => window.removeEventListener('mando:toggle-sidebar', toggle);
+    window.addEventListener('mando:toggle-sidebar', handleToggleSidebar);
+    return () => window.removeEventListener('mando:toggle-sidebar', handleToggleSidebar);
   });
 
   // Derive state from URL
@@ -135,6 +154,7 @@ export function AppLayout(): React.ReactElement {
           maxSize="400px"
           collapsible
           collapsedSize="0px"
+          onResize={() => setSidebarCollapsed(sidebarRef.current?.isCollapsed() ?? false)}
         >
           <Sidebar
             activeTab={activeTab}
@@ -210,12 +230,7 @@ export function AppLayout(): React.ReactElement {
             onArchiveWorkbench={(id) => {
               archiveWorkbench.mutate({ id });
             }}
-            onToggleSidebar={() => {
-              const panel = sidebarRef.current;
-              if (!panel) return;
-              if (panel.isCollapsed()) panel.expand();
-              else panel.collapse();
-            }}
+            onToggleSidebar={handleToggleSidebar}
             onGoBack={() => router.history.back()}
             onGoForward={() => router.history.forward()}
           />
@@ -225,7 +240,13 @@ export function AppLayout(): React.ReactElement {
 
         <ResizablePanel id="main" minSize="50%">
           <main className="flex h-full flex-col overflow-hidden bg-background">
-            <AppHeader />
+            <AppHeader
+              sidebarCollapsed={sidebarCollapsed}
+              onToggleSidebar={handleToggleSidebar}
+              onGoBack={handleGoBack}
+              onGoForward={handleGoForward}
+              onNewTask={handleNewTask}
+            />
             <div className="relative min-h-0 flex-1">
               <Outlet />
             </div>

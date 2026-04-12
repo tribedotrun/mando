@@ -69,17 +69,21 @@ async fn host_keeps_exited_session_history_distinct_from_restored_sessions() {
                 ("PATH".into(), path),
                 ("TEST_CONFIG".into(), "config-value".into()),
             ]),
-            terminal_env: HashMap::from([("MANDO_TERMINAL_ID".into(), "wb:panel".into())]),
+            terminal_env: HashMap::new(),
             terminal_id: Some("wb:panel".into()),
             extra_args: Vec::new(),
             name: None,
         })
         .unwrap();
 
+    let session_id = session.info().id;
     session.write_input(b"hello world\n").await.unwrap();
     let (output, exit_code) = collect_until_exit(&session).await;
     let output = String::from_utf8(output).unwrap();
-    assert!(output.contains("READY:config-value|wb:panel"));
+    assert!(
+        output.contains(&format!("READY:config-value|{session_id}")),
+        "expected MANDO_TERMINAL_ID to equal session id, got: {output}"
+    );
     assert!(output.contains("INPUT:hello world"));
     assert_eq!(exit_code, Some(0));
     assert_eq!(session.info().state, SessionState::Exited);

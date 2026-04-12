@@ -362,6 +362,11 @@ aside [data-slot='scroll-area-viewport'] > div {
   min-width: unset !important;
 }
 
+/* ── Sidebar scroll area: hide scrollbar ── */
+aside [data-slot='scroll-area-scrollbar'] {
+  display: none !important;
+}
+
 /* ── Sidebar project item: dots hidden until hover ── */
 .sidebar-project-item .sidebar-project-dots {
   display: none;

@@ -23,12 +23,6 @@ pub async fn create_worktree(
     )
     .await?;
 
-    // New worker branches should not track the base branch (for example
-    // origin/main). Leave them without an upstream until the first
-    // `git push -u origin HEAD`, otherwise plain `git push` tries to update
-    // the default branch and fails with a branch-name mismatch.
-    run_git(wt_path, &["branch", "--unset-upstream"]).await?;
-
     // Copy gitignored local-only files that workers need.
     let local_files: &[&str] = &["claude.local.md", "devtools/mando-dev/dev.env.local"];
     for rel in local_files {
