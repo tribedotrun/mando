@@ -68,6 +68,14 @@ impl TerminalHistoryStore {
         self.write_meta(&meta)
     }
 
+    pub fn update_size(&self, id: &str, size: TerminalSize) -> anyhow::Result<()> {
+        let mut meta = self
+            .read_meta(id)?
+            .ok_or_else(|| anyhow::anyhow!("missing terminal history meta for session {id}"))?;
+        meta.size = size;
+        self.write_meta(&meta)
+    }
+
     pub fn delete_session(&self, id: &str) -> anyhow::Result<()> {
         let dir = self.session_dir(id);
         if dir.exists() {

@@ -35,6 +35,7 @@ mod routes_worktrees;
 mod scout_notify;
 pub mod server;
 mod sse;
+pub mod startup;
 mod static_files;
 pub mod telegram_runtime;
 pub mod telemetry;
@@ -43,7 +44,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use arc_swap::ArcSwap;
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::{Mutex, RwLock, Semaphore};
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 
@@ -83,6 +84,8 @@ pub struct AppState {
     pub cancellation_token: CancellationToken,
     pub telegram_runtime: Arc<telegram_runtime::TelegramRuntime>,
     pub ui_runtime: Arc<ui_runtime::UiRuntime>,
+    /// Limits concurrent scout processing sessions (research, manual add, bulk).
+    pub scout_processing_semaphore: Arc<Semaphore>,
 }
 
 /// Force all workflow models to sonnet (dev mode cost savings).

@@ -149,6 +149,14 @@ const MIGRATIONS: &[(i64, &str)] = &[
         14,
         include_str!("../migrations/014_ask_history_sessions.sql"),
     ),
+    (
+        15,
+        include_str!("../migrations/015_scout_research_runs.sql"),
+    ),
+    (
+        16,
+        include_str!("../migrations/016_scout_summary_article.sql"),
+    ),
 ];
 
 #[cfg(test)]

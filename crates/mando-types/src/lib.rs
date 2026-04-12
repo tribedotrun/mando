@@ -23,7 +23,7 @@ pub use events::{BusEvent, NotificationKind, NotificationPayload};
 pub use notify::NotifyLevel;
 pub use pid::Pid;
 pub use rebase_state::{RebaseState, RebaseStatus};
-pub use scout::{ScoutItem, ScoutStatus};
+pub use scout::{ResearchRunStatus, ScoutItem, ScoutResearchRun, ScoutStatus};
 pub use session::{SessionEntry, SessionStatus};
 pub use session_ids::SessionIds;
 pub use task::{

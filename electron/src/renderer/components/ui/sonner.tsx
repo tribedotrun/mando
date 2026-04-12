@@ -11,6 +11,7 @@ const Toaster = ({ ...props }: ToasterProps) => {
   return (
     <Sonner
       theme="dark"
+      closeButton
       className="toaster group"
       icons={{
         success: <CircleCheckIcon className="size-4" />,
@@ -25,6 +26,10 @@ const Toaster = ({ ...props }: ToasterProps) => {
           '--normal-text': 'var(--popover-foreground)',
           '--normal-border': 'var(--border)',
           '--border-radius': 'var(--radius)',
+          '--gray1': 'var(--popover)',
+          '--gray2': 'var(--border)',
+          '--gray5': 'var(--muted-foreground)',
+          '--gray12': 'var(--popover-foreground)',
         } as React.CSSProperties
       }
       {...props}

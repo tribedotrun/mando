@@ -196,7 +196,7 @@ export interface AddTaskInput {
   images?: File[];
 }
 
-export const parseTodos = (text: string, project?: string) =>
+export const parseTodos = (text: string, project: string) =>
   apiPost<{ items: string[] }>('/api/ai/parse-todos', { text, project });
 
 export async function addTask(input: AddTaskInput): Promise<TaskItem> {

@@ -1,6 +1,7 @@
-//! Process orchestration — fetch content, summarize, update DB.
+//! Process orchestration — fetch content, summarize, persist to DB.
 //!
-//! Pipeline: fetch → extract → summarize → update DB → save summary file.
+//! Pipeline: fetch → extract → summarize → atomic DB update (title + scores
+//! + summary + article + status).
 
 use anyhow::{bail, Context, Result};
 use mando_config::workflow::ScoutWorkflow;
@@ -8,7 +9,7 @@ use mando_config::Config;
 use rustc_hash::FxHashMap;
 use tracing::{info, warn};
 
-use crate::biz::formatting::{bullet_list, slugify_title};
+use crate::biz::formatting::bullet_list;
 use crate::biz::url_detect::classify_url;
 use crate::io::content_fetch::fetch_content;
 use crate::io::db::ScoutDb;
@@ -160,10 +161,7 @@ pub async fn process_item(
         .map(|s| s.to_string())
         .unwrap_or(source);
 
-    // Phase 3: Build files first while the item remains non-processed. This
-    // keeps "processed" synonymous with "readable" across CLI/TG/Electron.
-    let slug = slugify_title(&ai_title);
-
+    // Phase 3: Build summary markdown in memory.
     let date_line = date_published
         .as_deref()
         .map(|d| format!("**Published**: {d}\n"))
@@ -177,10 +175,8 @@ pub async fn process_item(
          {summary_text}\n",
         url_type.as_str(),
     );
-    file_store::write_summary(id, &slug, &summary)
-        .with_context(|| format!("write summary for #{id}"))?;
 
-    // Phase 4: Article generation + Telegraph publish for every processed item.
+    // Phase 4: Article generation.
     let article_md = if let Some(local_article) =
         build_local_article_if_short(&ai_title, &item.url, &content)
     {
@@ -220,10 +216,6 @@ pub async fn process_item(
                 normalize_article_markdown(&ai_title, &article_result.text)
             }
             Err(e) => {
-                // TODO: add a `degraded: true` flag to the persisted article
-                // so the UI can visibly mark this as a degraded rendering.
-                // The Article struct doesn't expose such a field today;
-                // for now we escalate the log level so ops can detect this.
                 tracing::error!(
                     id,
                     error = %e,
@@ -234,17 +226,10 @@ pub async fn process_item(
             }
         }
     };
-    file_store::write_article(id, &article_md)
-        .with_context(|| format!("write article for #{id}"))?;
-    match crate::io::telegraph::publish_article(id, &ai_title, &article_md).await {
-        Ok(url) => info!(id, %url, "process: published to Telegraph"),
-        Err(e) => {
-            warn!(id, %e, "process: Telegraph publish failed (non-fatal)")
-        }
-    }
 
-    // Phase 5: Mark the item processed only after the summary/article files
-    // exist. If another worker raced us, clean up the staged files and fail.
+    // Phase 5: Single atomic UPDATE — title + scores + summary + article +
+    // processed status all commit together. After this point, "processed"
+    // implies the readable payloads are guaranteed present in the row.
     let updated = db
         .update_processed(
             id,
@@ -253,15 +238,21 @@ pub async fn process_item(
             quality,
             Some(&source),
             date_published.as_deref(),
+            &summary,
+            &article_md,
         )
         .await?;
     if !updated {
-        // Another concurrent run already processed this item — its files are
-        // valid and must not be deleted.
         bail!("item #{id} already processed (status guard)");
     }
-    if let Err(e) = file_store::delete_stale_summaries(id, &slug) {
-        warn!(id, %e, "process: failed to delete stale summary files");
+
+    // Telegraph publish is best-effort and runs after the DB commit so a
+    // publish failure never blocks the item from appearing processed.
+    match crate::io::telegraph::publish_article(id, &ai_title, &article_md).await {
+        Ok(url) => info!(id, %url, "process: published to Telegraph"),
+        Err(e) => {
+            warn!(id, %e, "process: Telegraph publish failed (non-fatal)")
+        }
     }
 
     info!(id, title = %ai_title, "process: complete");

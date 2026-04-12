@@ -161,7 +161,7 @@ async fn handle_todo_project(
         };
         let raw = &first.title;
         let photo = first.photo_file_id.clone();
-        crate::commands::todo::ai_parse_and_create(bot, cid, raw, Some(&name), photo).await?;
+        crate::commands::todo::ai_parse_and_create(bot, cid, raw, &name, photo).await?;
     } else {
         bot.api()
             .answer_callback_query(cb_id, Some("Expired"))

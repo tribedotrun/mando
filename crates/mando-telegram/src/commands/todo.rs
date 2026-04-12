@@ -51,6 +51,14 @@ pub async fn execute_todo_with_photo(
     }
 
     let projects = bot.config().read().await.captain.projects.clone();
+    if projects.is_empty() {
+        bot.send_html(
+            chat_id,
+            "\u{26a0}\u{fe0f} No projects configured. Add a project first.",
+        )
+        .await?;
+        return Ok(());
+    }
     let single_project = if projects.len() == 1 {
         projects.values().next().map(|pc| pc.name.clone())
     } else {
@@ -94,7 +102,9 @@ pub async fn execute_todo_with_photo(
         }
 
         // Route through AI for title normalization.
-        ai_parse_and_create(bot, chat_id, &title, project.as_deref(), photo_file_id).await?;
+        // project is always Some here — None case returns early via the picker above.
+        let project = project.expect("project resolved above");
+        ai_parse_and_create(bot, chat_id, &title, &project, photo_file_id).await?;
         return Ok(());
     }
 
@@ -135,8 +145,9 @@ pub async fn execute_todo_with_photo(
         return Ok(());
     }
 
-    // Project known — AI parse and create.
-    ai_parse_and_create(bot, chat_id, raw_text, project.as_deref(), photo_file_id).await
+    // Project known — None case returns early via the picker above.
+    let project = project.expect("project resolved above");
+    ai_parse_and_create(bot, chat_id, raw_text, &project, photo_file_id).await
 }
 
 /// Call gateway AI endpoint to parse text, then create tasks.
@@ -144,7 +155,7 @@ pub(crate) async fn ai_parse_and_create(
     bot: &TelegramBot,
     chat_id: &str,
     raw_text: &str,
-    project: Option<&str>,
+    project: &str,
     photo_file_id: Option<String>,
 ) -> Result<()> {
     bot.send_html(chat_id, "\u{1f9e0} Parsing tasks\u{2026}")
@@ -191,7 +202,7 @@ pub(crate) async fn ai_parse_and_create(
         .enumerate()
         .map(|(i, title)| TodoItem {
             title,
-            project: project.map(String::from),
+            project: Some(project.to_string()),
             photo_file_id: if i == 0 { photo_file_id.clone() } else { None },
         })
         .collect();

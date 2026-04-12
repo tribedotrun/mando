@@ -218,6 +218,10 @@ fn scout_routes() -> Router<AppState> {
             "/api/scout/research",
             post(routes_scout_ai::post_scout_research),
         )
+        .route(
+            "/api/scout/research/{id}",
+            get(routes_scout_ai::get_scout_research_run),
+        )
         .route("/api/scout/ask", post(routes_scout_ai::post_scout_ask))
         .route(
             "/api/scout/bulk",
@@ -383,9 +387,7 @@ where
 
     let config = config_arc.load_full();
 
-    if let Err(e) = mando_captain::io::pid_registry::cleanup_dead() {
-        tracing::warn!(module = "startup", error = %e, "pid_registry cleanup_dead failed");
-    }
+    crate::startup::startup_reconciliation(db.pool()).await;
 
     if let Err(e) =
         mando_captain::runtime::reconciler::reconcile_on_startup(&config, db.pool()).await
@@ -448,6 +450,7 @@ where
         cancellation_token,
         telegram_runtime,
         ui_runtime,
+        scout_processing_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
     };
 
     state

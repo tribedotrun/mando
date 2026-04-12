@@ -128,7 +128,7 @@ function AddTaskFormInner({
     if (effectiveProject) localStorage.setItem(LAST_PROJECT_KEY, effectiveProject);
 
     if (bulk) {
-      bulkCreateMut.mutate({ text: trimmedTitle, project: effectiveProject || undefined });
+      bulkCreateMut.mutate({ text: trimmedTitle, project: effectiveProject });
     } else {
       createMut.mutate({
         title: trimmedTitle,

@@ -4,11 +4,17 @@ use std::path::{Path, PathBuf};
 
 use tracing::{info, warn};
 
-/// Path to the hook script managed by Mando.
+/// Stable path for the Mando session-notify hook script. Lives under
+/// `~/.claude/hooks/` so all daemon modes (prod, dev, sandbox) share a
+/// single script and a single `~/.claude/settings.json` entry. The script
+/// reads `MANDO_PORT` and `MANDO_AUTH_TOKEN` from the process env at call
+/// time, so it naturally routes to whichever daemon spawned the Claude
+/// process, regardless of which daemon most recently wrote the script.
 fn hook_script_path() -> PathBuf {
-    mando_types::data_dir()
+    mando_types::home_dir()
+        .join(".claude")
         .join("hooks")
-        .join("session-notify.sh")
+        .join("mando-session-notify.sh")
 }
 
 /// Path to Claude settings.json.
@@ -21,13 +27,18 @@ fn claude_settings_path() -> PathBuf {
 const HOOK_SCRIPT: &str = r#"#!/bin/bash
 # Mando session hook -- notifies daemon of new CC sessions.
 # Managed by Mando -- do not edit manually.
+LOG="${HOME}/.claude/hooks/mando-session-notify.log"
 [ -z "$MANDO_TERMINAL_ID" ] && exit 0
+if ! command -v jq >/dev/null 2>&1; then
+  echo "$(date -u +%FT%TZ) jq not found on PATH" >>"$LOG"; exit 0
+fi
 SESSION_ID=$(jq -r '.session_id // empty')
 [ -z "$SESSION_ID" ] && exit 0
 curl -sf "http://127.0.0.1:${MANDO_PORT}/api/terminal/${MANDO_TERMINAL_ID}/cc-session" \
   -H "Authorization: Bearer ${MANDO_AUTH_TOKEN}" \
   -H "Content-Type: application/json" \
-  -d "{\"ccSessionId\": \"${SESSION_ID}\"}" 2>/dev/null || true
+  -d "{\"ccSessionId\": \"${SESSION_ID}\"}" 2>>"$LOG" \
+|| echo "$(date -u +%FT%TZ) curl failed for terminal ${MANDO_TERMINAL_ID}" >>"$LOG"
 "#;
 
 /// Write the hook script template to disk (idempotent).
@@ -49,8 +60,11 @@ fn ensure_hook_script() -> anyhow::Result<PathBuf> {
     Ok(path)
 }
 
-/// Ensure the hook script exists in ~/.claude/settings.json under
-/// `hooks.SessionStart`. Does not remove or modify existing hooks.
+/// Ensure `~/.claude/settings.json` has exactly one SessionStart entry for
+/// Mando's session-notify script, pointing at the current data dir. Any
+/// stale `session-notify.sh` entries from other data dirs (dev, sandbox,
+/// old prod paths) are removed so each Claude session only fires one
+/// callback.
 fn sync_claude_settings(hook_path: &Path) -> anyhow::Result<()> {
     let settings_path = claude_settings_path();
     let hook_str = hook_path.to_string_lossy().to_string();
@@ -66,7 +80,6 @@ fn sync_claude_settings(hook_path: &Path) -> anyhow::Result<()> {
         .as_object_mut()
         .ok_or_else(|| anyhow::anyhow!("settings.json root is not an object"))?;
 
-    // Ensure hooks.SessionStart array exists.
     let hooks = obj.entry("hooks").or_insert_with(|| serde_json::json!({}));
     let hooks_obj = hooks
         .as_object_mut()
@@ -78,68 +91,36 @@ fn sync_claude_settings(hook_path: &Path) -> anyhow::Result<()> {
         .as_array_mut()
         .ok_or_else(|| anyhow::anyhow!("SessionStart is not an array"))?;
 
-    // Check if our hook is already present (hooks live inside {hooks: [{command, type}]}).
-    let already_present = arr.iter().any(|entry| {
-        entry
+    arr.retain(|entry| {
+        let is_ours = entry
             .get("hooks")
             .and_then(|h| h.as_array())
             .is_some_and(|inner| {
                 inner.iter().any(|h| {
                     h.get("command")
                         .and_then(|c| c.as_str())
-                        .is_some_and(|s| s.contains(&hook_str))
+                        .is_some_and(|s| s.contains("mando") && s.contains("session-notify"))
                 })
-            })
+            });
+        !is_ours
     });
 
-    // Prune stale session-notify entries whose script no longer exists on disk.
-    let mut dirty;
-    {
-        let before = arr.len();
-        arr.retain(|entry| {
-            let is_ours = entry
-                .get("hooks")
-                .and_then(|h| h.as_array())
-                .is_some_and(|inner| {
-                    inner.iter().any(|h| {
-                        h.get("command")
-                            .and_then(|c| c.as_str())
-                            .is_some_and(|s| s.contains("session-notify.sh"))
-                    })
-                });
-            if !is_ours {
-                return true;
+    arr.push(serde_json::json!({
+        "hooks": [
+            {
+                "type": "command",
+                "command": hook_str
             }
-            entry
-                .get("hooks")
-                .and_then(|h| h.as_array())
-                .and_then(|inner| inner.first())
-                .and_then(|h| h.get("command"))
-                .and_then(|c| c.as_str())
-                .is_some_and(|cmd| Path::new(cmd).exists())
-        });
-        dirty = arr.len() != before;
-    }
+        ]
+    }));
 
-    if !already_present {
-        arr.push(serde_json::json!({
-            "hooks": [
-                {
-                    "type": "command",
-                    "command": hook_str
-                }
-            ]
-        }));
-        dirty = true;
+    if let Some(parent) = settings_path.parent() {
+        std::fs::create_dir_all(parent)?;
     }
-
-    if dirty {
-        if let Some(parent) = settings_path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        let json = serde_json::to_string_pretty(&root)?;
-        std::fs::write(&settings_path, json)?;
-    }
+    let json = serde_json::to_string_pretty(&root)?;
+    let tmp_path = settings_path.with_extension("json.tmp");
+    std::fs::write(&tmp_path, &json)?;
+    std::fs::rename(&tmp_path, &settings_path)?;
 
     Ok(())
 }

@@ -116,6 +116,8 @@ async fn main() {
     let unsafe_start = std::env::var("MANDO_UNSAFE_START")
         .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
         .unwrap_or(false);
+    mando_gateway::startup::startup_reconciliation(db.pool()).await;
+
     if let Err(e) =
         mando_captain::runtime::reconciler::reconcile_on_startup(&config, db.pool()).await
     {
@@ -200,6 +202,7 @@ async fn main() {
         cancellation_token,
         telegram_runtime,
         ui_runtime,
+        scout_processing_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
     };
 
     if !args.no_ui {

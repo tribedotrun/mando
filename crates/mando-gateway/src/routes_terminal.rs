@@ -28,6 +28,10 @@ pub(crate) fn routes() -> Router<AppState> {
         .route("/api/terminal/{id}/write", post(post_terminal_write))
         .route("/api/terminal/{id}/resize", post(post_terminal_resize))
         .route("/api/terminal/{id}/stream", get(get_terminal_stream))
+        .route(
+            "/api/terminal/{id}/cc-session",
+            post(post_terminal_cc_session),
+        )
 }
 
 #[derive(Deserialize)]
@@ -61,9 +65,6 @@ pub(crate) async fn post_terminal_create(
     terminal_env.insert("MANDO_PORT".to_string(), state.listen_port.to_string());
     let auth_token = crate::auth::ensure_auth_token();
     terminal_env.insert("MANDO_AUTH_TOKEN".to_string(), auth_token);
-    if let Some(ref tid) = body.terminal_id {
-        terminal_env.insert("MANDO_TERMINAL_ID".to_string(), tid.clone());
-    }
 
     let cfg = state.config.load();
     let args_str = match &body.agent {
@@ -281,4 +282,37 @@ pub(crate) async fn get_terminal_info(
         .get(&id)
         .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "terminal session not found"))?;
     Ok(Json(json!(session.info())))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct CcSessionBody {
+    pub cc_session_id: String,
+}
+
+/// Callback endpoint hit by the Claude Code SessionStart hook. Records the
+/// Claude conversation session id against the mando terminal session so a
+/// future `--resume` can restore the conversation after a daemon restart.
+pub(crate) async fn post_terminal_cc_session(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(body): Json<CcSessionBody>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    if body.cc_session_id.trim().is_empty() {
+        return Err(error_response(
+            StatusCode::BAD_REQUEST,
+            "cc_session_id must not be empty",
+        ));
+    }
+    let session = state
+        .terminal_host
+        .get(&id)
+        .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "terminal session not found"))?;
+    session.set_cc_session_id(body.cc_session_id).map_err(|e| {
+        error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            &format!("failed to persist cc_session_id: {e}"),
+        )
+    })?;
+    Ok(Json(json!({"ok": true})))
 }

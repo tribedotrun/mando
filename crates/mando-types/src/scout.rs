@@ -87,4 +87,63 @@ pub struct ScoutItem {
     pub date_published: Option<String>,
     #[serde(default = "default_rev")]
     pub rev: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub research_run_id: Option<i64>,
+}
+
+/// Status of a research run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum ResearchRunStatus {
+    #[serde(rename = "running")]
+    Running,
+    #[serde(rename = "done")]
+    Done,
+    #[serde(rename = "failed")]
+    Failed,
+}
+
+impl ResearchRunStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Running => "running",
+            Self::Done => "done",
+            Self::Failed => "failed",
+        }
+    }
+}
+
+impl fmt::Display for ResearchRunStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl FromStr for ResearchRunStatus {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "running" => Ok(Self::Running),
+            "done" => Ok(Self::Done),
+            "failed" => Ok(Self::Failed),
+            _ => Err(format!("unknown research run status: {s}")),
+        }
+    }
+}
+
+/// A scout research run record.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScoutResearchRun {
+    pub id: i64,
+    pub research_prompt: String,
+    pub status: ResearchRunStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
+    #[serde(default)]
+    pub added_count: i64,
+    pub created_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub completed_at: Option<String>,
 }

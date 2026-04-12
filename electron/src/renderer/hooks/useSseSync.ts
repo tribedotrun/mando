@@ -328,6 +328,30 @@ export function useSseSync(options?: UseSseSyncOptions): SSEConnectionStatus {
                 break;
               }
 
+              case 'research': {
+                const rd = event.data as Record<string, unknown> | undefined;
+                if (rd) {
+                  const action = rd.action as string | undefined;
+                  const runId = rd.run_id as number | undefined;
+                  // Key the toast by run_id so concurrent runs don't
+                  // overwrite each other's progress/completion state.
+                  const toastId = runId ? `scout-research:${runId}` : 'scout-research';
+                  if (action === 'completed') {
+                    const added = (rd.added_count as number) ?? 0;
+                    toast.success(`Research complete: ${added} link(s) added`, { id: toastId });
+                    void qc.invalidateQueries({ queryKey: queryKeys.scout.all });
+                  } else if (action === 'failed') {
+                    const err = (rd.error as string) ?? 'Unknown error';
+                    toast.error(`Research failed: ${err}`, { id: toastId });
+                  } else if (action === 'progress') {
+                    const elapsed = rd.elapsed_s as number;
+                    const mins = Math.round(elapsed / 60);
+                    toast.loading(`Researching... (${mins}m elapsed)`, { id: toastId });
+                  }
+                }
+                break;
+              }
+
               case 'config':
                 void qc.invalidateQueries({ queryKey: queryKeys.config.all });
                 break;

@@ -21,6 +21,8 @@ pub enum BusEvent {
     Workbenches,
     #[serde(rename = "config")]
     Config,
+    #[serde(rename = "research")]
+    Research,
 }
 
 /// Consumer-agnostic notification payload.

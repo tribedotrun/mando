@@ -72,6 +72,7 @@ async fn test_state_with_data_dir(data_dir: PathBuf) -> AppState {
         ui_runtime: Arc::new(crate::ui_runtime::UiRuntime::new(
             std::env::temp_dir().join("mando-ui-state-test.json"),
         )),
+        scout_processing_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
     }
 }
 

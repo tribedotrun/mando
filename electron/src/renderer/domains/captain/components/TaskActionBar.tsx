@@ -1,13 +1,11 @@
 import React, { useState, useCallback, useRef } from 'react';
 import { ArrowUp, ChevronDown, RotateCcw } from 'lucide-react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import log from '#renderer/logger';
-import { reopenItem, reworkItem, fetchAskHistory } from '#renderer/domains/captain/hooks/useApi';
-import { useTaskAskReopen } from '#renderer/hooks/mutations';
+import { fetchAskHistory } from '#renderer/domains/captain/hooks/useApi';
+import { useTaskAskReopen, useTaskReopen, useTaskRework } from '#renderer/hooks/mutations';
 import { useDraft } from '#renderer/global/hooks/useDraft';
-import { toast } from 'sonner';
 import { FINALIZED_STATUSES, type TaskItem } from '#renderer/types';
-import { canReopen, canRework, canAskAny, getErrorMessage } from '#renderer/utils';
+import { canReopen, canRework, canAskAny } from '#renderer/utils';
 import { invalidateTaskDetail } from '#renderer/queryClient';
 import { queryKeys } from '#renderer/queryKeys';
 import {
@@ -50,6 +48,8 @@ export function TaskActionBar({ item, onAsk }: Props): React.ReactElement | null
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const queryClient = useQueryClient();
   const askReopenMut = useTaskAskReopen();
+  const reopenMut = useTaskReopen();
+  const reworkMut = useTaskRework();
   // Sync selected action when task status changes -- only when there are valid actions.
   if (available.length > 0 && !available.includes(selectedAction)) {
     setSelectedAction(defaultAction);
@@ -57,7 +57,7 @@ export function TaskActionBar({ item, onAsk }: Props): React.ReactElement | null
 
   const handleSubmit = useCallback(async () => {
     const trimmed = text.trim();
-    if (!trimmed || askReopenMut.isPending) return;
+    if (!trimmed || askReopenMut.isPending || reopenMut.isPending || reworkMut.isPending) return;
     setPendingAction(selectedAction);
     try {
       if (selectedAction === 'ask') {
@@ -67,21 +67,30 @@ export function TaskActionBar({ item, onAsk }: Props): React.ReactElement | null
         setPendingAction(null);
         return;
       }
-      if (selectedAction === 'reopen') await reopenItem(item.id, trimmed);
-      else if (selectedAction === 'rework') await reworkItem(item.id, trimmed);
-      // SSE handles cache update
+      if (selectedAction === 'reopen')
+        await reopenMut.mutateAsync({ id: item.id, feedback: trimmed });
+      else if (selectedAction === 'rework')
+        await reworkMut.mutateAsync({ id: item.id, feedback: trimmed });
       void invalidateTaskDetail(queryClient, item.id);
-      const msg = selectedAction === 'reopen' ? 'Task reopened' : 'Rework requested';
-      toast.success(msg);
+      // toast handled by mutation hooks
       clearTextDraft();
       if (textareaRef.current) textareaRef.current.style.height = 'auto';
-    } catch (err) {
-      log.warn(`[TaskActionBar] ${selectedAction} failed for item ${item.id}:`, err);
-      toast.error(getErrorMessage(err, `${selectedAction} failed`));
+    } catch {
+      // toast handled by mutation hooks
     } finally {
       setPendingAction(null);
     }
-  }, [text, selectedAction, item.id, queryClient, onAsk, clearTextDraft]);
+  }, [
+    text,
+    selectedAction,
+    item.id,
+    queryClient,
+    onAsk,
+    clearTextDraft,
+    askReopenMut,
+    reopenMut,
+    reworkMut,
+  ]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -105,8 +114,9 @@ export function TaskActionBar({ item, onAsk }: Props): React.ReactElement | null
 
   const config = ACTION_CONFIG[selectedAction];
   const hasMultipleActions = available.length > 1;
-  const isLoading = !!pendingAction || askReopenMut.isPending;
-  const canSubmit = !hidden && text.trim().length > 0 && !pendingAction && !askReopenMut.isPending;
+  const isLoading =
+    !!pendingAction || askReopenMut.isPending || reopenMut.isPending || reworkMut.isPending;
+  const canSubmit = !hidden && text.trim().length > 0 && !isLoading;
   const showAccent = canSubmit || isLoading;
 
   // "Reopen from Q&A" -- subscribe to ask history reactively.
@@ -142,7 +152,7 @@ export function TaskActionBar({ item, onAsk }: Props): React.ReactElement | null
               e.target.style.height = e.target.scrollHeight + 'px';
             }}
             onKeyDown={handleKeyDown}
-            disabled={!!pendingAction || askReopenMut.isPending}
+            disabled={isLoading}
           />
 
           {/* Toolbar row: action selector, reopen button, send */}
@@ -153,7 +163,7 @@ export function TaskActionBar({ item, onAsk }: Props): React.ReactElement | null
                   <Button
                     variant="ghost"
                     size="xs"
-                    disabled={!!pendingAction}
+                    disabled={isLoading}
                     className="shrink-0 gap-1 text-muted-foreground"
                   >
                     {config.label}

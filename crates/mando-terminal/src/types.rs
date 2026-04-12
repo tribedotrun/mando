@@ -91,4 +91,7 @@ pub struct SessionInfo {
     pub name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none", rename = "ccSessionId")]
     pub cc_session_id: Option<String>,
+    /// Last-known PTY size, used to restore correct dimensions on auto-resume.
+    #[serde(skip)]
+    pub size: TerminalSize,
 }

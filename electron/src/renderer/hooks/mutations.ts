@@ -402,7 +402,7 @@ export function useTaskClarify() {
 
 export function useTaskBulkCreate() {
   return useMutation({
-    mutationFn: async (vars: { text: string; project?: string }) => {
+    mutationFn: async (vars: { text: string; project: string }) => {
       let titles: string[];
       try {
         const parsed = await parseTodos(vars.text, vars.project);

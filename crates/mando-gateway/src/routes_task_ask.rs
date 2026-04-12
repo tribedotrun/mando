@@ -153,6 +153,7 @@ pub(crate) async fn post_task_ask(
             workflow.agent.task_ask_idle_ttl_s,
             workflow.agent.task_ask_timeout_s,
             Some(id),
+            None,
         )
         .await
     };

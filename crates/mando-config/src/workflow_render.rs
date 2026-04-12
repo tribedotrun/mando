@@ -100,6 +100,9 @@ fn render_named<V: AsRef<str>>(
 
     // Slow path: rebuild the environment. Build fresh strings to own them as 'static.
     let mut env: Environment<'static> = Environment::new();
+    env.set_trim_blocks(true);
+    env.set_lstrip_blocks(true);
+    env.set_keep_trailing_newline(true);
     for (name, content) in templates {
         env.add_template_owned(name.clone(), content.clone())
             .map_err(|e| e.to_string())?;
@@ -156,6 +159,9 @@ pub fn render_initial_prompt<V: AsRef<str>>(
 
 pub fn validate_template_syntax(template: &str) -> Result<(), String> {
     let mut env = Environment::new();
+    env.set_trim_blocks(true);
+    env.set_lstrip_blocks(true);
+    env.set_keep_trailing_newline(true);
     env.add_template("template", template)
         .map(|_| ())
         .map_err(|e| e.to_string())
@@ -166,6 +172,9 @@ fn render_template_value_map(
     vars: &JsonMap<String, JsonValue>,
 ) -> Result<String, String> {
     let mut env = Environment::new();
+    env.set_trim_blocks(true);
+    env.set_lstrip_blocks(true);
+    env.set_keep_trailing_newline(true);
     env.add_template("template", template)
         .map_err(|e| e.to_string())?;
     let tmpl = env.get_template("template").map_err(|e| e.to_string())?;
@@ -325,5 +334,333 @@ mod tests {
     fn coerce_plain_text_stays_string() {
         assert!(coerce_template_scalar("hello").is_string());
         assert!(coerce_template_scalar("ENG-42").is_string());
+    }
+
+    // ── trim_blocks / lstrip_blocks behavior ──────────────────────────
+
+    #[test]
+    fn trim_blocks_strips_tag_trailing_newline() {
+        let tmpl = "before\n{% if show %}\nvisible\n{% endif %}\nafter";
+        let mut vars: FxHashMap<&str, &str> = FxHashMap::default();
+        vars.insert("show", "true");
+        let result = render_template(tmpl, &vars).unwrap();
+        assert_eq!(result, "before\nvisible\nafter");
+    }
+
+    #[test]
+    fn trim_blocks_false_condition_no_blank_lines() {
+        let tmpl = "before\n{% if show %}\nvisible\n{% endif %}\nafter";
+        let vars: FxHashMap<&str, &str> = FxHashMap::default();
+        let result = render_template(tmpl, &vars).unwrap();
+        assert_eq!(result, "before\nafter");
+    }
+
+    #[test]
+    fn lstrip_blocks_strips_leading_whitespace() {
+        let tmpl = "before\n    {% if show %}\nvisible\n    {% endif %}\nafter";
+        let mut vars: FxHashMap<&str, &str> = FxHashMap::default();
+        vars.insert("show", "true");
+        let result = render_template(tmpl, &vars).unwrap();
+        assert_eq!(result, "before\nvisible\nafter");
+    }
+
+    // ── No triple-blank-lines in real workflow templates ───────────────
+
+    fn assert_no_triple_blanks(rendered: &str, context: &str) {
+        for (i, window) in rendered
+            .split('\n')
+            .collect::<Vec<_>>()
+            .windows(3)
+            .enumerate()
+        {
+            let all_blank = window.iter().all(|l| l.trim().is_empty());
+            assert!(
+                !all_blank,
+                "{context}: found 3+ consecutive blank lines at line {i}"
+            );
+        }
+    }
+
+    fn captain_prompts() -> HashMap<String, String> {
+        let wf: crate::CaptainWorkflow =
+            serde_yaml::from_str(include_str!("../assets/captain-workflow.yaml")).unwrap();
+        wf.prompts
+    }
+
+    fn scout_prompts() -> HashMap<String, String> {
+        let wf: crate::workflow_scout::ScoutWorkflow =
+            serde_yaml::from_str(include_str!("../assets/scout-workflow.yaml")).unwrap();
+        wf.prompts
+    }
+
+    #[test]
+    fn worker_initial_no_triple_blanks_with_optionals() {
+        let prompts = captain_prompts();
+        let mut vars: FxHashMap<&str, &str> = FxHashMap::default();
+        vars.insert("title", "Test task");
+        vars.insert("context", "Some context");
+        vars.insert("id", "1");
+        vars.insert("branch", "mando/test-1");
+        vars.insert("no_pr", "false");
+        vars.insert("original_prompt", "fix the bug");
+        vars.insert("worker_preamble", "run sandbox");
+        vars.insert("check_command", "`mando-dev check`");
+        vars.insert("workpad_path", "/tmp/plans/1/workpad.md");
+
+        let rendered = render_prompt("worker_initial", &prompts, &vars).unwrap();
+        assert_no_triple_blanks(&rendered, "worker_initial (all optionals set)");
+    }
+
+    #[test]
+    fn worker_initial_no_triple_blanks_without_optionals() {
+        let prompts = captain_prompts();
+        let mut vars: FxHashMap<&str, &str> = FxHashMap::default();
+        vars.insert("title", "Test task");
+        vars.insert("context", "Some context");
+        vars.insert("id", "1");
+        vars.insert("branch", "mando/test-1");
+        vars.insert("no_pr", "false");
+        vars.insert("original_prompt", "");
+        vars.insert("worker_preamble", "");
+        vars.insert("check_command", "`mando-dev check`");
+        vars.insert("workpad_path", "/tmp/plans/1/workpad.md");
+
+        let rendered = render_prompt("worker_initial", &prompts, &vars).unwrap();
+        assert_no_triple_blanks(&rendered, "worker_initial (no optionals)");
+
+        // Verify include junctions preserve blank line before headers
+        assert!(
+            rendered.contains("what was accomplished\n\n## Instructions"),
+            "missing blank line before ## Instructions (include junction)"
+        );
+        assert!(
+            rendered.contains("escalate to human.\n\n## Branch"),
+            "missing blank line before ## Branch (include junction)"
+        );
+    }
+
+    #[test]
+    fn worker_initial_no_triple_blanks_no_pr() {
+        let prompts = captain_prompts();
+        let mut vars: FxHashMap<&str, &str> = FxHashMap::default();
+        vars.insert("title", "Research task");
+        vars.insert("context", "Some context");
+        vars.insert("id", "2");
+        vars.insert("branch", "mando/research-2");
+        vars.insert("no_pr", "true");
+        vars.insert("original_prompt", "");
+        vars.insert("worker_preamble", "");
+        vars.insert("check_command", "`mando-dev check`");
+        vars.insert("workpad_path", "/tmp/plans/2/workpad.md");
+
+        let rendered = render_prompt("worker_initial", &prompts, &vars).unwrap();
+        assert_no_triple_blanks(&rendered, "worker_initial (no_pr)");
+    }
+
+    #[test]
+    fn captain_review_no_triple_blanks() {
+        let prompts = captain_prompts();
+        let mut vars: FxHashMap<&str, &str> = FxHashMap::default();
+        vars.insert("trigger", "gates_pass");
+        vars.insert("worker_contexts", "Worker did some work");
+        vars.insert("knowledge_base", "");
+        vars.insert("evidence_images", "");
+        vars.insert("is_gates_pass", "true");
+        vars.insert("is_degraded_context", "false");
+        vars.insert("is_timeout", "false");
+        vars.insert("is_broken_session", "false");
+        vars.insert("is_repeated_nudge", "false");
+        vars.insert("is_rebase_fail", "false");
+        vars.insert("is_ci_failure", "false");
+        vars.insert("is_merge_fail", "false");
+        vars.insert("is_budget_exhausted", "false");
+        vars.insert("is_clarifier_fail", "false");
+        vars.insert("intervention_count", "0");
+
+        let rendered = render_prompt("captain_review", &prompts, &vars).unwrap();
+        assert_no_triple_blanks(&rendered, "captain_review (gates_pass)");
+    }
+
+    #[test]
+    fn captain_review_no_triple_blanks_all_false() {
+        let prompts = captain_prompts();
+        let mut vars: FxHashMap<&str, &str> = FxHashMap::default();
+        vars.insert("trigger", "timeout");
+        vars.insert("worker_contexts", "Worker did some work");
+        vars.insert("knowledge_base", "");
+        vars.insert("evidence_images", "");
+        vars.insert("is_gates_pass", "false");
+        vars.insert("is_degraded_context", "false");
+        vars.insert("is_timeout", "true");
+        vars.insert("is_broken_session", "false");
+        vars.insert("is_repeated_nudge", "false");
+        vars.insert("is_rebase_fail", "false");
+        vars.insert("is_ci_failure", "false");
+        vars.insert("is_merge_fail", "false");
+        vars.insert("is_budget_exhausted", "false");
+        vars.insert("is_clarifier_fail", "false");
+        vars.insert("intervention_count", "0");
+
+        let rendered = render_prompt("captain_review", &prompts, &vars).unwrap();
+        assert_no_triple_blanks(&rendered, "captain_review (only timeout)");
+    }
+
+    #[test]
+    fn scout_process_no_triple_blanks() {
+        let prompts = scout_prompts();
+        let mut vars: FxHashMap<&str, &str> = FxHashMap::default();
+        vars.insert("user_context", "AI engineer building tools");
+        vars.insert("interests_high", "AI, Rust");
+        vars.insert("interests_low", "Sports");
+        vars.insert("url_type", "blog");
+        vars.insert("url", "https://example.com");
+        vars.insert("content_path", "/tmp/content.md");
+
+        let rendered = render_prompt("process", &prompts, &vars).unwrap();
+        assert_no_triple_blanks(&rendered, "scout process (with context)");
+    }
+
+    #[test]
+    fn scout_process_no_triple_blanks_no_context() {
+        let prompts = scout_prompts();
+        let mut vars: FxHashMap<&str, &str> = FxHashMap::default();
+        vars.insert("user_context", "");
+        vars.insert("interests_high", "AI, Rust");
+        vars.insert("interests_low", "Sports");
+        vars.insert("url_type", "blog");
+        vars.insert("url", "https://example.com");
+        vars.insert("content_path", "/tmp/content.md");
+
+        let rendered = render_prompt("process", &prompts, &vars).unwrap();
+        assert_no_triple_blanks(&rendered, "scout process (no context)");
+    }
+
+    #[test]
+    fn scout_qa_no_triple_blanks() {
+        let prompts = scout_prompts();
+        let mut vars: FxHashMap<&str, &str> = FxHashMap::default();
+        vars.insert("user_context", "AI engineer");
+        vars.insert("summary", "Article about Rust");
+        vars.insert("raw_content_note", "/tmp/raw.md");
+        vars.insert("question", "What is Rust?");
+
+        let rendered = render_prompt("qa", &prompts, &vars).unwrap();
+        assert_no_triple_blanks(&rendered, "scout qa (with raw_content)");
+    }
+
+    #[test]
+    fn evidence_rendered_output_no_blank_artifacts() {
+        let prompts = captain_prompts();
+
+        // Render worker_initial with all optionals empty (worst case for blank lines)
+        let mut vars: FxHashMap<&str, &str> = FxHashMap::default();
+        vars.insert("title", "Test task");
+        vars.insert("context", "Some context");
+        vars.insert("id", "1");
+        vars.insert("branch", "mando/test-1");
+        vars.insert("no_pr", "false");
+        vars.insert("original_prompt", "");
+        vars.insert("worker_preamble", "");
+        vars.insert("check_command", "`mando-dev check`");
+        vars.insert("workpad_path", "/tmp/plans/1/workpad.md");
+
+        let rendered = render_prompt("worker_initial", &prompts, &vars).unwrap();
+
+        // Print to stdout for evidence capture
+        eprintln!("--- worker_initial (no optionals, no_pr=false) ---");
+        for (i, line) in rendered.lines().enumerate() {
+            let marker = if line.trim().is_empty() { "·" } else { " " };
+            eprintln!("{:3}{marker}| {line}", i + 1);
+        }
+        eprintln!("--- end ---");
+
+        // Count max consecutive blank lines
+        let mut max_consecutive = 0u32;
+        let mut current = 0u32;
+        for line in rendered.lines() {
+            if line.trim().is_empty() {
+                current += 1;
+                max_consecutive = max_consecutive.max(current);
+            } else {
+                current = 0;
+            }
+        }
+        eprintln!("Max consecutive blank lines: {max_consecutive}");
+        assert!(
+            max_consecutive <= 2,
+            "found {max_consecutive} consecutive blank lines"
+        );
+    }
+
+    #[test]
+    fn todo_parse_preserves_line_breaks() {
+        let prompts = captain_prompts();
+        let mut vars: FxHashMap<&str, &str> = FxHashMap::default();
+        vars.insert("project", "mando");
+        vars.insert("line_count", "5");
+        vars.insert("text", "fix the bug\nadd tests");
+
+        let rendered = render_prompt("todo_parse", &prompts, &vars).unwrap();
+        assert!(
+            rendered.contains("project."),
+            "todo_parse: Project context missing"
+        );
+        assert!(
+            rendered.contains("## Rules"),
+            "todo_parse: Rules section missing"
+        );
+    }
+
+    #[test]
+    fn todo_parse_no_project_starts_with_rules() {
+        let prompts = captain_prompts();
+        let mut vars: FxHashMap<&str, &str> = FxHashMap::default();
+        vars.insert("project", "");
+        vars.insert("line_count", "5");
+        vars.insert("text", "fix the bug");
+
+        let rendered = render_prompt("todo_parse", &prompts, &vars).unwrap();
+        assert!(
+            !rendered.contains("Project context"),
+            "todo_parse: Project context shown when project is empty"
+        );
+        assert!(
+            rendered.contains("## Rules"),
+            "todo_parse: Rules section missing"
+        );
+    }
+
+    #[test]
+    fn scout_qa_inline_endif_preserves_content() {
+        let prompts = scout_prompts();
+        let mut vars: FxHashMap<&str, &str> = FxHashMap::default();
+        vars.insert("user_context", "AI engineer");
+        vars.insert("summary", "Article about Rust");
+        vars.insert("raw_content_note", "/tmp/raw.md");
+        vars.insert("question", "What is Rust?");
+
+        let rendered = render_prompt("qa", &prompts, &vars).unwrap();
+        // The inline {% endif %}- pattern should keep both bullets on separate lines
+        assert!(
+            rendered.contains("original content.\n"),
+            "scout qa: Read tool instruction missing trailing newline"
+        );
+        assert!(
+            rendered.contains("- Be concise"),
+            "scout qa: 'Be concise' bullet missing"
+        );
+    }
+
+    #[test]
+    fn scout_qa_no_triple_blanks_no_raw() {
+        let prompts = scout_prompts();
+        let mut vars: FxHashMap<&str, &str> = FxHashMap::default();
+        vars.insert("user_context", "");
+        vars.insert("summary", "Article about Rust");
+        vars.insert("raw_content_note", "");
+        vars.insert("question", "What is Rust?");
+
+        let rendered = render_prompt("qa", &prompts, &vars).unwrap();
+        assert_no_triple_blanks(&rendered, "scout qa (no context, no raw)");
     }
 }

@@ -2,7 +2,7 @@ import React, { useRef, useState } from 'react';
 import { cn } from '#renderer/cn';
 import { useRouterState } from '@tanstack/react-router';
 import { useTaskList, useWorkbenchList } from '#renderer/hooks/queries';
-import { ChevronDown, Copy } from 'lucide-react';
+import { ChevronDown, Copy, PanelLeft, ArrowLeft, ArrowRight, SquarePen } from 'lucide-react';
 import { FinderIcon, CursorIcon, PrIcon, MergeIcon } from '#renderer/global/components/icons';
 import { DetailOverflowMenu } from '#renderer/domains/captain/components/TaskDetailParts';
 import { HeaderStatusBadge } from '#renderer/domains/captain/components/StatusCard';
@@ -14,6 +14,7 @@ import { useQuery } from '@tanstack/react-query';
 import { fetchTimeline, fetchItemSessions } from '#renderer/domains/captain/hooks/useApi';
 import { useUIStore } from '#renderer/app/uiStore';
 import { Button } from '#renderer/components/ui/button';
+import { Tooltip, TooltipTrigger, TooltipContent } from '#renderer/components/ui/tooltip';
 import {
   copyToClipboard,
   getErrorMessage,
@@ -82,7 +83,21 @@ function useWorkbenchCtx(): WorkbenchCtx | null {
   }, [task, isTerminal, terminalCwd, terminalProject, workbenches, taskData?.items]);
 }
 
-export function AppHeader(): React.ReactElement {
+interface AppHeaderProps {
+  sidebarCollapsed?: boolean;
+  onToggleSidebar?: () => void;
+  onGoBack?: () => void;
+  onGoForward?: () => void;
+  onNewTask?: () => void;
+}
+
+export function AppHeader({
+  sidebarCollapsed,
+  onToggleSidebar,
+  onGoBack,
+  onGoForward,
+  onNewTask,
+}: AppHeaderProps): React.ReactElement {
   const ctx = useWorkbenchCtx();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const isTerminal = pathname === '/terminal';
@@ -124,7 +139,39 @@ export function AppHeader(): React.ReactElement {
     [ctx?.task, timelineData],
   );
 
+  // Derive page title for collapsed toolbar (non-task routes)
+  const pageTitle = React.useMemo(() => {
+    if (pathname.startsWith('/captain')) return 'Tasks';
+    if (pathname.startsWith('/scout')) return 'Scout';
+    if (pathname.startsWith('/sessions')) return 'Sessions';
+    if (pathname.startsWith('/settings')) return 'Settings';
+    if (pathname === '/terminal') return 'Terminal';
+    return '';
+  }, [pathname]);
+
+  const navIcons = sidebarCollapsed ? (
+    <CollapsedNavIcons
+      onToggleSidebar={onToggleSidebar}
+      onGoBack={onGoBack}
+      onGoForward={onGoForward}
+      onNewTask={onNewTask}
+    />
+  ) : null;
+
   if (!ctx) {
+    if (sidebarCollapsed) {
+      return (
+        <div
+          className="flex h-[38px] shrink-0 items-start pl-[70px] pt-[10px]"
+          style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
+        >
+          {navIcons}
+          <span className="ml-3 min-w-0 truncate text-body font-medium text-foreground">
+            {pageTitle}
+          </span>
+        </div>
+      );
+    }
     return (
       <div className="h-10 shrink-0" style={{ WebkitAppRegion: 'drag' } as React.CSSProperties} />
     );
@@ -134,52 +181,68 @@ export function AppHeader(): React.ReactElement {
 
   return (
     <div
-      className="flex shrink-0 flex-col justify-center border-b border-border px-6 py-2"
+      className={cn(
+        'flex shrink-0 flex-col justify-center border-b border-border',
+        sidebarCollapsed ? 'pb-2 pr-6 pt-[10px]' : 'px-6 py-2',
+      )}
       style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
     >
-      {hasTask && (
-        <>
-          {/* Row 1: title + actions */}
-          <div className="flex items-center gap-3">
-            <span className="min-w-0 truncate text-body font-medium text-foreground">
-              {ctx.task!.title}
-            </span>
-            <span className="flex-1" />
-            <div
-              className="flex shrink-0 items-center gap-2"
-              style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
-            >
-              {ctx.task!.pr_number &&
-                ctx.task!.project &&
-                ctx.task!.status === 'awaiting-review' && (
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    className="bg-success-bg text-success"
-                    aria-label="Merge"
-                    title="Merge"
-                    onClick={() => useUIStore.getState().setMergeItem(ctx.task!)}
-                  >
-                    <MergeIcon />
-                  </Button>
-                )}
-              {ctx.worktreePath && <OpenMenu worktreePath={ctx.worktreePath} />}
-              {(ctx.task!.branch || ctx.task!.worktree || ctx.task!.plan || ctx.task!.context) && (
-                <DetailOverflowMenu
-                  item={ctx.task!}
-                  onViewContext={
-                    isTerminal
-                      ? undefined
-                      : () => document.dispatchEvent(new CustomEvent('mando:view-task-brief'))
-                  }
-                />
-              )}
-            </div>
+      {hasTask ? (
+        <div className={cn('flex items-center gap-3', sidebarCollapsed && 'pl-[70px]')}>
+          {navIcons}
+          <span className="min-w-0 truncate text-body font-medium text-foreground">
+            {ctx.task!.title}
+          </span>
+          <span className="flex-1" />
+          <div
+            className="flex shrink-0 items-center gap-2"
+            style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+          >
+            {ctx.task!.pr_number && ctx.task!.project && ctx.task!.status === 'awaiting-review' && (
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                className="bg-success-bg text-success"
+                aria-label="Merge"
+                title="Merge"
+                onClick={() => useUIStore.getState().setMergeItem(ctx.task!)}
+              >
+                <MergeIcon />
+              </Button>
+            )}
+            {ctx.worktreePath && <OpenMenu worktreePath={ctx.worktreePath} />}
+            {(ctx.task!.branch || ctx.task!.worktree || ctx.task!.plan || ctx.task!.context) && (
+              <DetailOverflowMenu
+                item={ctx.task!}
+                onViewContext={
+                  isTerminal
+                    ? undefined
+                    : () => document.dispatchEvent(new CustomEvent('mando:view-task-brief'))
+                }
+              />
+            )}
           </div>
-        </>
+        </div>
+      ) : (
+        sidebarCollapsed && (
+          <div className="flex items-center pl-[70px]">
+            {navIcons}
+            {ctx.worktreeName && (
+              <span className="ml-3 min-w-0 truncate text-body font-medium text-foreground">
+                {ctx.worktreeName}
+              </span>
+            )}
+          </div>
+        )
       )}
       {/* Row 2: status + project + worktree */}
-      <div className={cn('flex items-center gap-2 text-caption text-text-3', hasTask && 'mt-2')}>
+      <div
+        className={cn(
+          'flex items-center gap-2 text-caption text-text-3',
+          (hasTask || (sidebarCollapsed && !hasTask)) && 'mt-2',
+          sidebarCollapsed && 'pl-6',
+        )}
+      >
         {hasTask && <HeaderStatusBadge item={ctx.task!} sessions={sessions} />}
         {ctx.projectName && <span>{ctx.projectName}</span>}
         {ctx.projectName && ctx.worktreeName && <span>&middot;</span>}
@@ -211,6 +274,91 @@ export function AppHeader(): React.ReactElement {
           </>
         )}
       </div>
+    </div>
+  );
+}
+
+function CollapsedNavIcons({
+  onToggleSidebar,
+  onGoBack,
+  onGoForward,
+  onNewTask,
+}: {
+  onToggleSidebar?: () => void;
+  onGoBack?: () => void;
+  onGoForward?: () => void;
+  onNewTask?: () => void;
+}): React.ReactElement {
+  return (
+    <div
+      className="flex shrink-0 items-center gap-1"
+      style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+    >
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            onClick={onToggleSidebar}
+            aria-label="Toggle sidebar"
+            className="flex h-6 w-6 items-center justify-center rounded text-text-3 transition-colors hover:text-muted-foreground"
+          >
+            <PanelLeft size={14} />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent
+          side="bottom"
+          className="flex items-center gap-3 px-3 py-2 text-sm font-medium"
+        >
+          Toggle sidebar <Kbd>&#8984;B</Kbd>
+        </TooltipContent>
+      </Tooltip>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            onClick={onGoBack}
+            aria-label="Back"
+            className="flex h-6 w-6 items-center justify-center rounded text-text-3 transition-colors hover:text-muted-foreground"
+          >
+            <ArrowLeft size={14} />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent
+          side="bottom"
+          className="flex items-center gap-3 px-3 py-2 text-sm font-medium"
+        >
+          Back <Kbd>&#8984;[</Kbd>
+        </TooltipContent>
+      </Tooltip>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            onClick={onGoForward}
+            aria-label="Forward"
+            className="flex h-6 w-6 items-center justify-center rounded text-text-3 transition-colors hover:text-muted-foreground"
+          >
+            <ArrowRight size={14} />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent
+          side="bottom"
+          className="flex items-center gap-3 px-3 py-2 text-sm font-medium"
+        >
+          Forward <Kbd>&#8984;]</Kbd>
+        </TooltipContent>
+      </Tooltip>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            onClick={onNewTask}
+            aria-label="New task"
+            className="flex h-6 w-6 items-center justify-center rounded text-text-3 transition-colors hover:text-muted-foreground"
+          >
+            <SquarePen size={14} />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="bottom" className="px-3 py-2 text-sm font-medium">
+          New task
+        </TooltipContent>
+      </Tooltip>
     </div>
   );
 }
