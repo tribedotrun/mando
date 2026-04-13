@@ -12,6 +12,7 @@ pub struct ArticleResult {
     pub session_id: String,
     pub cost_usd: Option<f64>,
     pub duration_ms: Option<u64>,
+    pub credential_id: Option<i64>,
 }
 
 /// Generate a full markdown article from raw content using the workflow's
@@ -22,6 +23,7 @@ pub async fn generate_article(
     url_type: &str,
     content_path: &str,
     workflow: &ScoutWorkflow,
+    pool: &sqlx::SqlitePool,
 ) -> Result<ArticleResult> {
     let user_context_rendered = workflow.user_context.render();
 
@@ -36,13 +38,15 @@ pub async fn generate_article(
         .map_err(|e| anyhow::anyhow!(e))?;
 
     let model = crate::biz::model_lookup::required_model(workflow, "article")?;
+    let credential = mando_captain::runtime::tick_spawn::pick_credential(pool).await;
+    let cred_id = mando_captain::runtime::tick_spawn::credential_id(&credential);
+    let builder = mando_cc::CcConfig::builder()
+        .model(model)
+        .timeout(workflow.agent.article_timeout_s)
+        .caller("scout-article");
     let result = mando_cc::CcOneShot::run(
         &prompt,
-        mando_cc::CcConfig::builder()
-            .model(model)
-            .timeout(workflow.agent.article_timeout_s)
-            .caller("scout-article")
-            .build(),
+        mando_captain::runtime::tick_spawn::with_credential(builder, &credential).build(),
     )
     .await?;
 
@@ -51,6 +55,7 @@ pub async fn generate_article(
         session_id: result.session_id,
         cost_usd: result.cost_usd,
         duration_ms: result.duration_ms,
+        credential_id: cred_id,
     })
 }
 

@@ -232,12 +232,20 @@ pub(super) async fn handle_conflict(
     let session_name = format!("mando-rebase-{}", pr_num);
     let session_id = mando_uuid::Uuid::v4().to_string();
 
+    // Pick credential so the rebase worker participates in load balancing.
+    let credential = super::tick_spawn::pick_credential(pool).await;
+    let cred_id = super::tick_spawn::credential_id(&credential);
+    let mut env: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    if let Some((_id, token)) = &credential {
+        env.insert("CLAUDE_CODE_OAUTH_TOKEN".into(), token.clone());
+    }
+
     match crate::io::process_manager::spawn_worker_process(
         &prompt,
         &wt_path,
         &workflow.models.worker,
         &session_id,
-        &std::collections::HashMap::new(),
+        &env,
         workflow.models.fallback.as_deref(),
     )
     .await
@@ -260,6 +268,7 @@ pub(super) async fn handle_conflict(
                 &session_name,
                 Some(items[idx].id),
                 false,
+                cred_id,
             )
             .await
             {

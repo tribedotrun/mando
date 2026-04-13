@@ -77,6 +77,7 @@ pub(crate) async fn dispatch_new_work(
                             item.worker_started_at = Some(spawn_result.started_at);
                             item.session_ids.worker = Some(spawn_result.session_id);
                             item.plan = spawn_result.plan;
+                            item.pr_number = spawn_result.pr_number;
                             item.spawn_fail_count = 0;
                             active_workers += 1;
                             let resource = item

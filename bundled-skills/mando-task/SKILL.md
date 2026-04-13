@@ -1,6 +1,6 @@
 ---
 name: mando-task
-description: Create a Mando task directly from a Claude Code session. Takes a brief description of what to build or fix, researches the codebase, and queues a well-structured task for captain. Use when you realize mid-session that a separate task needs doing.
+description: Create a Mando task directly from a Claude Code session. Takes a brief description of what to build or fix, researches the codebase, and queues a well-informed task for captain. Use when you realize mid-session that a separate task needs doing.
 ---
 
 The user provides a brief description as the skill argument. If no argument, ask what needs doing.
@@ -9,6 +9,6 @@ The user provides a brief description as the skill argument. If no argument, ask
 
 2. **Resolve project**: run `mando project list`, match against the current repo (`git remote get-url origin`).
 
-3. **Create task**: run `mando todo add "<title>" -p <project> --context "<context>"` -- 2-3 sentences describing what to build or what's wrong, with enough detail for a worker to start.
+3. **Create task**: run `mando todo add "<description>" -p <project>` -- combine the user's request with your research findings into a single description string. Do not split into separate title/context; clarifier handles title extraction and further enrichment.
 
 This creates a NEW task -- it does not hand off the current session.

@@ -108,6 +108,7 @@ pub(crate) async fn clarify_new_items(
                 task_id: Some(item.id),
                 status: mando_types::SessionStatus::Running,
                 worker_name: "",
+                credential_id: None,
             },
         )
         .await

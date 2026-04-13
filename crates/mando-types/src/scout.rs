@@ -4,10 +4,6 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
 
-fn default_rev() -> i64 {
-    1
-}
-
 /// Status of a scout item.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ScoutStatus {
@@ -85,7 +81,7 @@ pub struct ScoutItem {
     pub source_name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub date_published: Option<String>,
-    #[serde(default = "default_rev")]
+    #[serde(default = "crate::default_rev")]
     pub rev: i64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub research_run_id: Option<i64>,

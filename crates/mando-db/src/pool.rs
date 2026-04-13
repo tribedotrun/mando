@@ -157,6 +157,17 @@ const MIGRATIONS: &[(i64, &str)] = &[
         16,
         include_str!("../migrations/016_scout_summary_article.sql"),
     ),
+    (17, include_str!("../migrations/017_credential_email.sql")),
+    (18, include_str!("../migrations/018_task_artifacts.sql")),
+    (19, include_str!("../migrations/019_artifact_redesign.sql")),
+    (
+        20,
+        include_str!("../migrations/020_workbench_last_activity.sql"),
+    ),
+    (
+        21,
+        include_str!("../migrations/021_workbench_pending_title.sql"),
+    ),
 ];
 
 #[cfg(test)]

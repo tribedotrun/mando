@@ -33,6 +33,7 @@ pub(crate) async fn gather_worker_contexts(
     items: &mut [Task],
     config: &Config,
     health_state: &health_store::HealthState,
+    pool: &sqlx::SqlitePool,
 ) -> Result<Vec<WorkerContext>> {
     // Phase 1: collect sync-local data and build async work descriptors.
     let mut work: Vec<GatherWork> = Vec::new();
@@ -97,6 +98,8 @@ pub(crate) async fn gather_worker_contexts(
             no_pr: item.no_pr,
             reopen_seq: item.reopen_seq,
             reopen_source: item.reopen_source.clone(),
+            task_id: item.id,
+            reopened_at: item.reopened_at.clone(),
         });
     }
 
@@ -104,13 +107,20 @@ pub(crate) async fn gather_worker_contexts(
         return Ok(Vec::new());
     }
 
-    // Phase 2: run GitHub API calls in parallel across all workers.
+    // Phase 2: run GitHub API calls AND artifact queries in parallel.
     let futures: Vec<_> = work.iter().map(gather_one_async).collect();
-    let results = futures::future::join_all(futures).await;
+    let artifact_futures: Vec<_> = work
+        .iter()
+        .map(|w| compute_artifact_gates(pool, w.task_id, w.reopen_seq, w.reopened_at.as_deref()))
+        .collect();
+    let (results, artifact_results) = tokio::join!(
+        futures::future::join_all(futures),
+        futures::future::join_all(artifact_futures),
+    );
 
     // Phase 3: apply discovered PRs back and assemble contexts.
     let mut contexts = Vec::with_capacity(work.len());
-    for (w, result) in work.iter().zip(results) {
+    for ((w, result), artifact_gate) in work.iter().zip(results).zip(artifact_results) {
         // Write discovered PR number back to item.
         if let Some(pr_num) = result.discovered_pr_number {
             items[w.item_idx].pr_number = Some(pr_num);
@@ -161,11 +171,17 @@ pub(crate) async fn gather_worker_contexts(
             stream_stale_s: w.stream_stale_s,
             pr_head_sha: result.pr_data.head_sha,
             degraded: result.pr_data.degraded,
+            has_evidence: artifact_gate.has_evidence,
+            evidence_fresh: artifact_gate.evidence_fresh,
+            has_work_summary: artifact_gate.has_work_summary,
+            work_summary_fresh: artifact_gate.work_summary_fresh,
         });
     }
 
     Ok(contexts)
 }
+
+use super::review_phase_artifacts::compute_artifact_gates;
 
 /// Sync-local data collected in phase 1 for each worker.
 struct GatherWork {
@@ -187,6 +203,8 @@ struct GatherWork {
     no_pr: bool,
     reopen_seq: i64,
     reopen_source: Option<String>,
+    task_id: i64,
+    reopened_at: Option<String>,
 }
 
 /// Async results from phase 2 for each worker.
@@ -439,6 +457,12 @@ pub(crate) async fn build_single_context(
         stream_stale_s,
         pr_head_sha: pr_data.head_sha,
         degraded: pr_data.degraded,
+        // Artifact gates are not needed for captain review context
+        // (review uses evidence files directly, not gate booleans).
+        has_evidence: false,
+        evidence_fresh: false,
+        has_work_summary: false,
+        work_summary_fresh: false,
     };
     let formatted = worker_context::format_context(&ctx);
     Ok((ctx, formatted))

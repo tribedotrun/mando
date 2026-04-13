@@ -20,9 +20,6 @@ pub(crate) enum TodoCommand {
         /// Project name
         #[arg(short = 'p', long = "project")]
         project: Option<String>,
-        /// Initial context to attach to the item
-        #[arg(long)]
-        context: Option<String>,
         /// Plan/brief path for planned handoff
         #[arg(long)]
         plan: Option<String>,
@@ -57,11 +54,23 @@ pub(crate) enum TodoCommand {
         #[arg(long)]
         all: bool,
     },
-    /// Show PR summary for an item
-    #[command(name = "pr-summary")]
-    PrSummary {
-        /// Item ID
-        item_id: String,
+    /// Save a work summary for a task
+    #[command(name = "summary")]
+    Summary {
+        /// Item ID (or reads MANDO_TASK_ID from env)
+        item_id: Option<String>,
+        /// Read summary content from a file
+        #[arg(long)]
+        file: Option<String>,
+    },
+    /// Save evidence files for a task
+    #[command(name = "evidence")]
+    Evidence {
+        /// Local file paths to save as evidence
+        files: Vec<String>,
+        /// Per-file caption (one per file, same order)
+        #[arg(long = "caption", num_args = 1)]
+        captions: Vec<String>,
     },
     /// Multi-turn Q&A on an item
     Ask {
@@ -100,19 +109,9 @@ pub(crate) async fn handle(args: TodoArgs) -> anyhow::Result<()> {
         TodoCommand::Add {
             title,
             project,
-            context,
             plan,
             no_pr,
-        } => {
-            handle_add(
-                &title,
-                project.as_deref(),
-                context.as_deref(),
-                plan.as_deref(),
-                no_pr,
-            )
-            .await
-        }
+        } => handle_add(&title, project.as_deref(), plan.as_deref(), no_pr).await,
         TodoCommand::Bulk {
             items,
             stdin,
@@ -121,7 +120,12 @@ pub(crate) async fn handle(args: TodoArgs) -> anyhow::Result<()> {
         TodoCommand::Delete { item_id } => handle_delete(&item_id).await,
         TodoCommand::Show { item_id } => handle_show(&item_id).await,
         TodoCommand::List { all } => handle_list(all).await,
-        TodoCommand::PrSummary { item_id } => handle_pr_summary(&item_id).await,
+        TodoCommand::Summary { item_id, file } => {
+            crate::todo_artifacts::handle_summary(item_id.as_deref(), file.as_deref()).await
+        }
+        TodoCommand::Evidence { files, captions } => {
+            crate::todo_artifacts::handle_evidence(&files, &captions).await
+        }
         TodoCommand::Ask {
             item_id,
             message,
@@ -136,7 +140,6 @@ pub(crate) async fn handle(args: TodoArgs) -> anyhow::Result<()> {
 async fn handle_add(
     title: &str,
     project: Option<&str>,
-    context: Option<&str>,
     plan: Option<&str>,
     no_pr: bool,
 ) -> anyhow::Result<()> {
@@ -146,9 +149,6 @@ async fn handle_add(
         .text("source", "cli");
     if let Some(p) = project {
         form = form.text("project", p.to_string());
-    }
-    if let Some(ctx) = context {
-        form = form.text("context", ctx.to_string());
     }
     if let Some(plan_path) = plan {
         form = form.text("plan", plan_path.to_string());
@@ -303,20 +303,6 @@ async fn handle_list(all: bool) -> anyhow::Result<()> {
             let title = item["title"].as_str().unwrap_or("");
             println!("{id:>4}  {status:<15}  {worker:<20}  {pr:<14}  {project:<8}  {title}");
         }
-    }
-    Ok(())
-}
-
-async fn handle_pr_summary(item_id: &str) -> anyhow::Result<()> {
-    let client = DaemonClient::discover()?;
-    let id_num = parse_id(item_id, "item")?;
-    let item = fetch_task_by_id(&client, id_num).await?;
-
-    match item["pr_number"].as_i64() {
-        Some(num) => {
-            println!("PR for item #{item_id}: #{num}");
-        }
-        None => println!("No PR linked to item #{item_id}."),
     }
     Ok(())
 }
@@ -496,13 +482,11 @@ mod tests {
                 TodoCommand::Add {
                     title,
                     project,
-                    context,
                     plan,
                     no_pr,
                 } => {
                     assert_eq!(title, "Fix bug");
                     assert!(project.is_none());
-                    assert!(context.is_none());
                     assert!(plan.is_none());
                     assert!(!no_pr);
                 }
@@ -534,26 +518,32 @@ mod tests {
             "Ship planned task",
             "--plan",
             "~/.mando/plans/42/brief.md",
-            "--context",
-            "Use the agreed approach",
             "--no-pr",
         ])
         .unwrap();
         match cli.cmd {
             TestCmd::Todo(args) => match args.command {
-                TodoCommand::Add {
-                    plan,
-                    context,
-                    no_pr,
-                    ..
-                } => {
+                TodoCommand::Add { plan, no_pr, .. } => {
                     assert_eq!(plan.as_deref(), Some("~/.mando/plans/42/brief.md"));
-                    assert_eq!(context.as_deref(), Some("Use the agreed approach"));
                     assert!(no_pr);
                 }
                 _ => panic!("expected Add"),
             },
         }
+    }
+
+    #[test]
+    fn parse_todo_add_rejects_context_flag() {
+        // `--context` was removed from the CLI; clap must reject it.
+        let result = TestCli::try_parse_from([
+            "test",
+            "todo",
+            "add",
+            "Fix bug",
+            "--context",
+            "some context",
+        ]);
+        assert!(result.is_err());
     }
 
     #[test]

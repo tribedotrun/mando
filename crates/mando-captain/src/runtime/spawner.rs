@@ -11,15 +11,13 @@ use rustc_hash::FxHashMap;
 
 use crate::io::{git, hooks, pid_registry};
 
+/// Credential to inject into the worker's environment.
+pub(crate) struct WorkerCredential<'a> {
+    pub id: i64,
+    pub token: &'a str,
+}
+
 /// Spawn a new worker for a task.
-///
-/// Steps:
-/// 1. Allocate a worker slot (monotonic counter).
-/// 2. Create git worktree with a new branch.
-/// 3. Run pre_spawn hook.
-/// 4. Render the initial prompt.
-/// 5. Spawn CC subprocess.
-/// 6. Record PID and session ID.
 pub(crate) async fn spawn_worker(
     item: &Task,
     _project_slug: &str,
@@ -27,6 +25,7 @@ pub(crate) async fn spawn_worker(
     _captain_config: &CaptainConfig,
     workflow: &CaptainWorkflow,
     pool: &sqlx::SqlitePool,
+    credential: Option<&WorkerCredential<'_>>,
 ) -> Result<SpawnResult> {
     let repo_path = mando_config::expand_tilde(&project_config.path);
 
@@ -38,14 +37,18 @@ pub(crate) async fn spawn_worker(
     // Fetch origin so we branch off the latest remote HEAD.
     git::fetch_origin(&repo_path).await?;
 
-    // Reuse existing worktree/branch if present (e.g. reopened item), otherwise create new.
+    // Resolve worktree + branch:
+    //   - Reopen: worktree + branch both present → reuse as-is
+    //   - Rework: worktree present, branch cleared → same worktree, new branch from origin/main
+    //   - First spawn: no worktree → create fresh
     let existing_wt = item
         .worktree
         .as_deref()
         .map(mando_config::expand_tilde)
         .filter(|p| p.exists());
-    let (branch, wt_path) =
-        if let (Some(wt), Some(existing_branch)) = (existing_wt, item.branch.as_deref()) {
+    let default_branch = git::default_branch(&repo_path).await?;
+    let (branch, wt_path) = match (existing_wt, item.branch.as_deref()) {
+        (Some(wt), Some(existing_branch)) => {
             tracing::info!(
                 module = "spawner",
                 worktree = %wt.display(),
@@ -53,10 +56,22 @@ pub(crate) async fn spawn_worker(
                 "reusing existing worktree for reopened item"
             );
             (existing_branch.to_string(), wt)
-        } else {
-            let default_branch = git::default_branch(&repo_path).await?;
-            reserve_fresh_worktree(item, &repo_path, &default_branch).await?
-        };
+        }
+        (Some(wt), None) => {
+            // Rework: same worktree, fresh branch from origin/main.
+            let slug = new_slug(item, next_worker_slot(&mando_config::state_dir())?);
+            let branch = format!("mando/{}", slug);
+            tracing::info!(
+                module = "spawner",
+                worktree = %wt.display(),
+                branch = %branch,
+                "rework: resetting existing worktree to new branch"
+            );
+            git::reset_to_new_branch(&wt, &branch, &default_branch).await?;
+            (branch, wt)
+        }
+        _ => reserve_fresh_worktree(item, &repo_path, &default_branch).await?,
+    };
 
     // Copy plan briefs into worktree if they exist (blocking fs → spawn_blocking).
     let discovered_plan = {
@@ -90,6 +105,31 @@ pub(crate) async fn spawn_worker(
         .await??
     };
 
+    // Create draft PR for PR-eligible tasks (scaffold commit + push + gh pr create).
+    let mut draft_pr_number: Option<i64> = None;
+    if !item.no_pr {
+        match super::spawner_pr::create_draft_pr(item, &branch, &wt_path, pool).await {
+            Ok(pr_num) => {
+                draft_pr_number = Some(pr_num);
+                tracing::info!(
+                    module = "spawner",
+                    task_id = item.id,
+                    pr_number = pr_num,
+                    "created draft PR"
+                );
+            }
+            Err(e) => {
+                // Non-fatal: worker still starts, PR discovered later.
+                tracing::warn!(
+                    module = "spawner",
+                    task_id = item.id,
+                    error = %e,
+                    "failed to create draft PR -- worker will start without it"
+                );
+            }
+        }
+    }
+
     // Spawn CC via mando-cc.
     let mut cc_builder = mando_cc::CcConfig::builder()
         .model(&workflow.models.worker)
@@ -99,9 +139,13 @@ pub(crate) async fn spawn_worker(
         .caller("worker")
         .task_id(item.id.to_string())
         .worker_name(&session_name)
-        .project(&item.project);
+        .project(&item.project)
+        .env("MANDO_TASK_ID", item.id.to_string());
     if let Some(ref fb) = workflow.models.fallback {
         cc_builder = cc_builder.fallback_model(fb);
+    }
+    if let Some(cred) = credential {
+        cc_builder = cc_builder.env("CLAUDE_CODE_OAUTH_TOKEN", cred.token);
     }
     let cc_config = cc_builder.build();
 
@@ -134,6 +178,7 @@ pub(crate) async fn spawn_worker(
         &session_name,
         Some(item.id),
         false,
+        credential.map(|c| c.id),
     )
     .await?;
 
@@ -153,6 +198,7 @@ pub(crate) async fn spawn_worker(
         worktree: wt_path.to_string_lossy().into_owned(),
         stream_path,
         plan: discovered_plan.or_else(|| item.plan.clone()),
+        pr_number: draft_pr_number,
     })
 }
 
@@ -166,6 +212,32 @@ pub struct SpawnResult {
     pub stream_path: PathBuf,
     /// Worktree-relative path to the plan/brief file, if one was found.
     pub plan: Option<String>,
+    /// PR number if a draft PR was created during spawn.
+    pub pr_number: Option<i64>,
+}
+
+/// Build the env overrides for a resumed worker process.
+///
+/// Uses the session's original credential if still healthy (not rate-limited,
+/// not expired). Otherwise picks a fresh credential via load balancing.
+/// Returns (env_map, credential_id_used).
+pub(crate) async fn credential_env_for_session(
+    pool: &sqlx::SqlitePool,
+    _session_id: &str,
+) -> (std::collections::HashMap<String, String>, Option<i64>) {
+    let mut env = std::collections::HashMap::new();
+    // Prefer a freshly-picked healthy credential (pick_for_worker filters out
+    // rate-limited ones). This ensures we rotate away from a rate-limited
+    // credential on resume.
+    let fresh = super::tick_spawn::pick_credential(pool).await;
+    if let Some((cid, token)) = fresh {
+        env.insert("CLAUDE_CODE_OAUTH_TOKEN".into(), token);
+        return (env, Some(cid));
+    }
+    // No credentials configured -- fall through to ambient login.
+    // (If all credentials are rate-limited, the tick spawn gate blocks the
+    // reopen before reaching here.)
+    (env, None)
 }
 
 fn next_worker_slot(state_dir: &std::path::Path) -> Result<u64> {

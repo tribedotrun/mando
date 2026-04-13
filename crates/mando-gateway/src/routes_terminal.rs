@@ -32,6 +32,7 @@ pub(crate) fn routes() -> Router<AppState> {
             "/api/terminal/{id}/cc-session",
             post(post_terminal_cc_session),
         )
+        .route("/api/terminal/{id}/activity", post(post_terminal_activity))
 }
 
 #[derive(Deserialize)]
@@ -104,31 +105,55 @@ pub(crate) async fn post_terminal_create(
         }
     };
 
-    let wb_id = if body.resume_session_id.is_none() {
-        let existing = mando_db::queries::workbenches::find_by_worktree(state.db.pool(), &cwd_str)
-            .await
-            .ok()
-            .flatten();
-        if existing.is_some() {
-            None
-        } else {
-            let title = mando_types::workbench::workbench_title_now();
-            let wb = mando_types::Workbench::new(project_id, project_name, cwd_str, title);
-            Some(
-                mando_db::queries::workbenches::insert(state.db.pool(), &wb)
-                    .await
-                    .map_err(|e| {
-                        error_response(
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            &format!("failed to create workbench: {e}"),
-                        )
-                    })?,
+    // Resolve the workbench this terminal session belongs to, creating it
+    // if needed. Spawning a terminal is meaningful user activity, so bump
+    // `last_activity_at` for pre-existing workbenches (new inserts already
+    // have `last_activity_at == created_at`). Broadcast the change so the
+    // sidebar can reorder and pick up the newly created workbench.
+    let existing_wb = mando_db::queries::workbenches::find_by_worktree(state.db.pool(), &cwd_str)
+        .await
+        .map_err(|e| {
+            error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                &format!("workbench lookup failed: {e}"),
             )
+        })?;
+    let (wb_id, touched_wb_id) = match (body.resume_session_id.is_some(), existing_wb.as_ref()) {
+        (false, None) => {
+            let title = mando_types::workbench::workbench_title_now();
+            let wb = mando_types::Workbench::new(
+                project_id,
+                project_name.clone(),
+                cwd_str.clone(),
+                title,
+            );
+            let id = mando_db::queries::workbenches::insert(state.db.pool(), &wb)
+                .await
+                .map_err(|e| {
+                    error_response(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        &format!("failed to create workbench: {e}"),
+                    )
+                })?;
+            (Some(id), Some(id))
         }
-    } else {
-        None
+        (_, Some(wb)) => {
+            let touched = match mando_db::queries::workbenches::touch_activity(
+                state.db.pool(),
+                wb.id,
+            )
+            .await
+            {
+                Ok(t) => t,
+                Err(e) => {
+                    tracing::warn!(workbench_id = wb.id, error = %e, "failed to bump last_activity_at on terminal create");
+                    false
+                }
+            };
+            (None, if touched { Some(wb.id) } else { None })
+        }
+        _ => (None, None),
     };
-
     let req = mando_terminal::CreateRequest {
         project: body.project,
         cwd,
@@ -145,7 +170,9 @@ pub(crate) async fn post_terminal_create(
         Ok(s) => s,
         Err(e) => {
             if let Some(id) = wb_id {
-                let _ = mando_db::queries::workbenches::archive(state.db.pool(), id).await;
+                if let Err(e) = mando_db::queries::workbenches::archive(state.db.pool(), id).await {
+                    tracing::warn!(workbench_id = id, error = %e, "failed to archive workbench after terminal creation failure");
+                }
             }
             return Err(error_response(
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -153,6 +180,33 @@ pub(crate) async fn post_terminal_create(
             ));
         }
     };
+
+    // Broadcast after terminal creation succeeds to avoid ghost sidebar
+    // entries when create fails and the workbench gets archived.
+    if let Some(id) = touched_wb_id {
+        let action = if wb_id.is_some() {
+            "created"
+        } else {
+            "updated"
+        };
+        match mando_db::queries::workbenches::find_by_id(state.db.pool(), id).await {
+            Ok(Some(updated)) => {
+                state.bus.send(
+                    mando_types::BusEvent::Workbenches,
+                    Some(json!({ "action": action, "item": updated })),
+                );
+            }
+            Ok(None) => {
+                tracing::warn!(
+                    workbench_id = id,
+                    "workbench not found after activity touch"
+                );
+            }
+            Err(e) => {
+                tracing::warn!(workbench_id = id, error = %e, "failed to fetch workbench for bus broadcast");
+            }
+        }
+    }
 
     Ok(Json(json!(session.info())))
 }
@@ -308,11 +362,86 @@ pub(crate) async fn post_terminal_cc_session(
         .terminal_host
         .get(&id)
         .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "terminal session not found"))?;
-    session.set_cc_session_id(body.cc_session_id).map_err(|e| {
-        error_response(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            &format!("failed to persist cc_session_id: {e}"),
-        )
-    })?;
+    let cwd = session.info().cwd.to_string_lossy().to_string();
+    session
+        .set_cc_session_id(body.cc_session_id.clone())
+        .map_err(|e| {
+            error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                &format!("failed to persist cc_session_id: {e}"),
+            )
+        })?;
+
+    // Persist auto-title intent to DB so the background reconciliation loop
+    // picks it up. Skips task-backed workbenches (clarifier owns their titles).
+    let pool = state.db.pool();
+    if let Ok(Some(wb)) = mando_db::queries::workbenches::find_by_worktree(pool, &cwd).await {
+        let has_tasks = mando_db::queries::tasks::has_active_for_workbench(pool, wb.id)
+            .await
+            .unwrap_or(false);
+        if !has_tasks {
+            let _ = mando_db::queries::workbenches::set_pending_title_session(
+                pool,
+                wb.id,
+                &body.cc_session_id,
+            )
+            .await;
+        }
+    }
+
     Ok(Json(json!({"ok": true})))
+}
+
+/// Callback endpoint hit by the Claude Code `UserPromptSubmit` hook, once
+/// per user-submitted prompt. Looks up the workbench owning the terminal's
+/// cwd and bumps its `last_activity_at` timestamp, broadcasting on the bus
+/// so the sidebar can reorder immediately.
+pub(crate) async fn post_terminal_activity(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let session = state
+        .terminal_host
+        .get(&id)
+        .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "terminal session not found"))?;
+    let cwd = session.info().cwd.to_string_lossy().to_string();
+    let Some(wb) = mando_db::queries::workbenches::find_by_worktree(state.db.pool(), &cwd)
+        .await
+        .map_err(|e| {
+            error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                &format!("workbench lookup failed: {e}"),
+            )
+        })?
+    else {
+        return Ok(Json(json!({"ok": true, "touched": false})));
+    };
+    let touched = mando_db::queries::workbenches::touch_activity(state.db.pool(), wb.id)
+        .await
+        .map_err(|e| {
+            error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                &format!("touch_activity failed: {e}"),
+            )
+        })?;
+    if touched {
+        match mando_db::queries::workbenches::find_by_id(state.db.pool(), wb.id).await {
+            Ok(Some(updated)) => {
+                state.bus.send(
+                    mando_types::BusEvent::Workbenches,
+                    Some(json!({ "action": "updated", "item": updated })),
+                );
+            }
+            Ok(None) => {
+                tracing::warn!(
+                    workbench_id = wb.id,
+                    "workbench not found after activity touch"
+                );
+            }
+            Err(e) => {
+                tracing::warn!(workbench_id = wb.id, error = %e, "failed to fetch workbench for bus broadcast");
+            }
+        }
+    }
+    Ok(Json(json!({"ok": true, "touched": touched})))
 }

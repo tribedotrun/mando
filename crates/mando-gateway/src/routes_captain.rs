@@ -166,16 +166,22 @@ pub(crate) async fn post_captain_stop(
     }
 }
 
-#[derive(Deserialize)]
-pub(crate) struct NudgeBody {
-    pub item_id: String,
-    pub message: String,
-}
-
-/// POST /api/captain/nudge — send a nudge message to a stuck worker.
+/// POST /api/captain/nudge (JSON or multipart with optional images)
 pub(crate) async fn post_captain_nudge(
     State(state): State<AppState>,
-    Json(body): Json<NudgeBody>,
+    request: axum::extract::Request,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let body = crate::image_upload_ext::extract_nudge(request).await?;
+    let result = post_captain_nudge_inner(&state, &body).await;
+    if result.is_err() {
+        crate::image_upload::cleanup_saved_images(&body.saved_images).await;
+    }
+    result
+}
+
+async fn post_captain_nudge_inner(
+    state: &AppState,
+    body: &crate::image_upload::NudgeWithImages,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let id = body.item_id.parse::<i64>().map_err(|_| {
         error_response(
@@ -185,7 +191,7 @@ pub(crate) async fn post_captain_nudge(
     })?;
     let config = state.config.load_full();
     let workflow = state.captain_workflow.load_full();
-    let notifier = crate::captain_notifier(&state, &config);
+    let notifier = crate::captain_notifier(state, &config);
     let store = state.task_store.read().await;
     let mut item = store
         .find_by_id(id)
@@ -198,10 +204,21 @@ pub(crate) async fn post_captain_nudge(
         .ok_or_else(|| error_response(StatusCode::BAD_REQUEST, "item has no worker"))?;
     let mut alerts = Vec::new();
 
+    // Embed image paths in the nudge message so the CC session can read them.
+    let message = if body.saved_images.is_empty() {
+        body.message.clone()
+    } else {
+        format!(
+            "{}{}",
+            body.message,
+            crate::image_upload::format_image_paths(&body.saved_images)
+        )
+    };
+
     mando_captain::runtime::action_contract::nudge_item(
         &mut item,
-        Some(&body.message),
-        None, // manual nudge — no circuit breaker reason
+        Some(&message),
+        None, // manual nudge -- no circuit breaker reason
         &config,
         &workflow,
         &notifier,
@@ -217,9 +234,26 @@ pub(crate) async fn post_captain_nudge(
     })?;
 
     store.write_task(&item).await.map_err(internal_error)?;
+
+    // Persist images to the task after nudge succeeds.
+    if !body.saved_images.is_empty() {
+        if let Err(e) =
+            crate::image_upload::append_task_images(&store, id, &body.saved_images).await
+        {
+            tracing::warn!(task_id = id, error = ?e, "failed to persist nudge images");
+        }
+    }
+
+    // Re-read the task so the SSE event includes the updated images field.
+    let updated = store
+        .find_by_id(id)
+        .await
+        .ok()
+        .flatten()
+        .map(|t| serde_json::to_value(&t).unwrap());
     state.bus.send(
         mando_types::BusEvent::Tasks,
-        Some(json!({"action": "updated", "item": serde_json::to_value(&item).unwrap(), "id": id})),
+        Some(json!({"action": "updated", "item": updated, "id": id})),
     );
     let cc_sid = item.session_ids.worker.as_deref().unwrap_or("");
     let pid = mando_captain::io::pid_lookup::resolve_pid(cc_sid, &worker_name);
@@ -357,10 +391,34 @@ pub(crate) async fn get_workers(
         })
         .collect();
 
-    let rl_remaining = mando_captain::runtime::rate_limit_cooldown::remaining_secs();
+    let rl_remaining = effective_rate_limit_remaining_secs(&state).await;
     Ok(Json(
         json!({ "workers": workers, "rate_limit_remaining_secs": rl_remaining }),
     ))
+}
+
+/// Effective remaining cooldown seconds for the UI. Resolves to:
+/// - 0 when at least one credential can spawn (or no cooldown is active),
+/// - the earliest credential cooldown when credentials exist but all are cooling down,
+/// - the ambient cooldown when no credentials are configured.
+async fn effective_rate_limit_remaining_secs(state: &AppState) -> u64 {
+    let pool = state.db.pool();
+    let has_credentials = mando_db::queries::credentials::has_any(pool)
+        .await
+        .unwrap_or(false);
+    if !has_credentials {
+        return mando_captain::runtime::ambient_rate_limit::remaining_secs();
+    }
+    let available = mando_db::queries::credentials::pick_for_worker(pool)
+        .await
+        .unwrap_or(None)
+        .is_some();
+    if available {
+        return 0;
+    }
+    mando_db::queries::credentials::earliest_cooldown_remaining_secs(pool)
+        .await
+        .max(0) as u64
 }
 
 /// GET /api/workers/{id}

@@ -13,7 +13,7 @@ use crate::caller::{CallerGroup, SessionCaller};
 const SELECT_COLS: &str = "\
     session_id, created_at, caller, cwd, model, status, \
     cost_usd, duration_ms, resumed, turn_count, \
-    task_id, scout_item_id, worker_name, resumed_at";
+    task_id, scout_item_id, worker_name, resumed_at, credential_id";
 
 fn select_sessions_sql() -> &'static str {
     static SQL: std::sync::OnceLock<String> = std::sync::OnceLock::new();
@@ -37,6 +37,7 @@ pub struct SessionRow {
     pub scout_item_id: Option<i64>,
     pub worker_name: Option<String>,
     pub resumed_at: Option<String>,
+    pub credential_id: Option<i64>,
 }
 
 impl SessionRow {
@@ -66,6 +67,7 @@ pub struct SessionUpsert<'a> {
     pub scout_item_id: Option<i64>,
     pub worker_name: Option<&'a str>,
     pub resumed_at: Option<&'a str>,
+    pub credential_id: Option<i64>,
 }
 
 /// Upsert a session with cumulative cost tracking.
@@ -75,8 +77,8 @@ pub async fn upsert_session(pool: &SqlitePool, input: &SessionUpsert<'_>) -> Res
     sqlx::query(
         "INSERT INTO cc_sessions (session_id, created_at, caller, cwd, model, status,
             cost_usd, duration_ms, resumed, turn_count, task_id, scout_item_id, worker_name,
-            resumed_at)
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 0, ?10, ?11, ?12, ?13)
+            resumed_at, credential_id)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 0, ?10, ?11, ?12, ?13, ?14)
         ON CONFLICT(session_id) DO UPDATE SET
             created_at = CASE WHEN excluded.created_at != '' THEN excluded.created_at ELSE cc_sessions.created_at END,
             caller = CASE WHEN excluded.caller != '' THEN excluded.caller ELSE cc_sessions.caller END,
@@ -103,7 +105,8 @@ pub async fn upsert_session(pool: &SqlitePool, input: &SessionUpsert<'_>) -> Res
             task_id = COALESCE(excluded.task_id, cc_sessions.task_id),
             scout_item_id = COALESCE(excluded.scout_item_id, cc_sessions.scout_item_id),
             worker_name = COALESCE(excluded.worker_name, cc_sessions.worker_name),
-            resumed_at = CASE WHEN excluded.resumed_at IS NOT NULL THEN excluded.resumed_at ELSE cc_sessions.resumed_at END",
+            resumed_at = CASE WHEN excluded.resumed_at IS NOT NULL THEN excluded.resumed_at ELSE cc_sessions.resumed_at END,
+            credential_id = COALESCE(excluded.credential_id, cc_sessions.credential_id)",
     )
     .bind(input.session_id)
     .bind(input.created_at)
@@ -118,6 +121,7 @@ pub async fn upsert_session(pool: &SqlitePool, input: &SessionUpsert<'_>) -> Res
     .bind(input.scout_item_id)
     .bind(input.worker_name)
     .bind(input.resumed_at)
+    .bind(input.credential_id)
     .execute(pool)
     .await?;
     Ok(())
@@ -140,92 +144,96 @@ pub async fn category_counts(pool: &SqlitePool) -> Result<HashMap<String, usize>
     Ok(group_counts)
 }
 
-/// Paginated session listing with optional group filter.
+/// Paginated session listing with optional group and status filters.
 pub async fn list_sessions(
     pool: &SqlitePool,
     page: usize,
     per_page: usize,
     group: Option<&str>,
+    status: Option<&str>,
 ) -> Result<(Vec<SessionRow>, usize)> {
     let per_page = if per_page == 0 { 50 } else { per_page };
     let offset = page.saturating_sub(1) * per_page;
 
-    // Build a WHERE clause for callers in this group.
+    // Accumulate WHERE conditions and bound parameters.
+    let mut where_conditions: Vec<String> = Vec::new();
+    let mut params: Vec<String> = Vec::new();
+
+    // Build caller filter for the requested group.
     // Uses exact matches for canonical callers and LIKE patterns for callers
     // that embed IDs in their keys (e.g. "parse-todos-{uuid}", "task-ask:{id}").
     // This keeps the parameter count bounded by the enum size, not DB cardinality.
-    let caller_where: Option<(String, Vec<String>)> = match group {
-        None => None,
-        Some(g) => {
-            let group_callers: Vec<&SessionCaller> = SessionCaller::all()
-                .iter()
-                .filter(|c| c.group().as_str() == g)
-                .collect();
+    if let Some(g) = group {
+        let group_callers: Vec<&SessionCaller> = SessionCaller::all()
+            .iter()
+            .filter(|c| c.group().as_str() == g)
+            .collect();
 
-            let mut conditions: Vec<String> = Vec::new();
-            let mut params: Vec<String> = Vec::new();
+        let mut caller_conditions: Vec<String> = Vec::new();
 
-            // Exact matches for canonical caller names.
-            let exact: Vec<&str> = group_callers.iter().map(|c| c.as_str()).collect();
-            if !exact.is_empty() {
-                let ph: String = exact.iter().map(|_| "?").collect::<Vec<_>>().join(",");
-                conditions.push(format!("caller IN ({ph})"));
-                params.extend(exact.iter().map(|s| (*s).to_string()));
-            }
+        // Exact matches for canonical caller names.
+        let exact: Vec<&str> = group_callers.iter().map(|c| c.as_str()).collect();
+        if !exact.is_empty() {
+            let ph: String = exact.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+            caller_conditions.push(format!("caller IN ({ph})"));
+            params.extend(exact.iter().map(|s| (*s).to_string()));
+        }
 
-            // LIKE patterns for callers that use key-embedded IDs.
-            for c in &group_callers {
-                if let Some(prefix) = c.like_prefix() {
-                    conditions.push("caller LIKE ?".to_string());
-                    params.push(prefix.to_string());
-                }
-            }
-
-            if conditions.is_empty() {
-                Some(("1=0".to_string(), Vec::new()))
-            } else {
-                Some((conditions.join(" OR "), params))
+        // LIKE patterns for callers that use key-embedded IDs.
+        for c in &group_callers {
+            if let Some(prefix) = c.like_prefix() {
+                caller_conditions.push("caller LIKE ?".to_string());
+                params.push(prefix.to_string());
             }
         }
-    };
 
-    let (rows, total) = match &caller_where {
-        None => {
-            let total: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM cc_sessions")
-                .fetch_one(pool)
-                .await?;
-            let sql = format!(
-                "{} ORDER BY created_at DESC LIMIT ? OFFSET ?",
-                select_sessions_sql()
-            );
-            let rows: Vec<SessionRow> = sqlx::query_as(&sql)
-                .bind(per_page as i64)
-                .bind(offset as i64)
-                .fetch_all(pool)
-                .await?;
-            (rows, total as usize)
+        if caller_conditions.is_empty() {
+            // Unknown group -- return no results.
+            return Ok((Vec::new(), 0));
         }
-        Some((_, params)) if params.is_empty() => (Vec::new(), 0),
-        Some((where_clause, params)) => {
-            let count_sql = format!("SELECT COUNT(*) FROM cc_sessions WHERE {where_clause}");
-            let mut q = sqlx::query_scalar::<_, i64>(&count_sql);
-            for p in params {
-                q = q.bind(p.as_str());
-            }
-            let total: i64 = q.fetch_one(pool).await?;
+        where_conditions.push(format!("({})", caller_conditions.join(" OR ")));
+    }
 
-            let select_sql = format!(
-                "{} WHERE {where_clause} ORDER BY created_at DESC LIMIT ? OFFSET ?",
-                select_sessions_sql()
-            );
-            let mut q = sqlx::query_as::<_, SessionRow>(&select_sql);
-            for p in params {
-                q = q.bind(p.as_str());
-            }
-            q = q.bind(per_page as i64).bind(offset as i64);
-            let rows = q.fetch_all(pool).await?;
-            (rows, total as usize)
+    // Add status filter if requested.
+    if let Some(s) = status {
+        where_conditions.push("status = ?".to_string());
+        params.push(s.to_string());
+    }
+
+    let (rows, total) = if where_conditions.is_empty() {
+        let total: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM cc_sessions")
+            .fetch_one(pool)
+            .await?;
+        let sql = format!(
+            "{} ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            select_sessions_sql()
+        );
+        let rows: Vec<SessionRow> = sqlx::query_as(&sql)
+            .bind(per_page as i64)
+            .bind(offset as i64)
+            .fetch_all(pool)
+            .await?;
+        (rows, total as usize)
+    } else {
+        let where_clause = where_conditions.join(" AND ");
+        let count_sql = format!("SELECT COUNT(*) FROM cc_sessions WHERE {where_clause}");
+        let mut q = sqlx::query_scalar::<_, i64>(&count_sql);
+        for p in &params {
+            q = q.bind(p.as_str());
         }
+        let total: i64 = q.fetch_one(pool).await?;
+
+        let select_sql = format!(
+            "{} WHERE {where_clause} ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            select_sessions_sql()
+        );
+        let mut q = sqlx::query_as::<_, SessionRow>(&select_sql);
+        for p in &params {
+            q = q.bind(p.as_str());
+        }
+        q = q.bind(per_page as i64).bind(offset as i64);
+        let rows = q.fetch_all(pool).await?;
+        (rows, total as usize)
     };
 
     Ok((rows, total))
@@ -356,6 +364,16 @@ pub async fn list_sessions_missing_cost(pool: &SqlitePool) -> Result<Vec<Session
     Ok(rows)
 }
 
+/// Get the credential_id for a session.
+pub async fn get_credential_id(pool: &SqlitePool, session_id: &str) -> Result<Option<i64>> {
+    let row: Option<(Option<i64>,)> =
+        sqlx::query_as("SELECT credential_id FROM cc_sessions WHERE session_id = ?")
+            .bind(session_id)
+            .fetch_optional(pool)
+            .await?;
+    Ok(row.and_then(|r| r.0))
+}
+
 /// Check if a specific session is currently running (single-row query).
 pub async fn is_session_running(pool: &SqlitePool, session_id: &str) -> Result<bool> {
     let count: i64 = sqlx::query_scalar(
@@ -430,12 +448,13 @@ mod tests {
                 scout_item_id: None,
                 worker_name: Some("main-v1"),
                 resumed_at: None,
+                credential_id: None,
             },
         )
         .await
         .unwrap();
 
-        let (rows, total) = list_sessions(&pool, 1, 50, None).await.unwrap();
+        let (rows, total) = list_sessions(&pool, 1, 50, None, None).await.unwrap();
         assert_eq!(total, 1);
         assert_eq!(rows[0].session_id, "s1");
         assert_eq!(rows[0].cost_usd, Some(1.5));
@@ -462,6 +481,7 @@ mod tests {
                 scout_item_id: None,
                 worker_name: None,
                 resumed_at: None,
+                credential_id: None,
             },
         )
         .await
@@ -484,12 +504,13 @@ mod tests {
                 scout_item_id: None,
                 worker_name: None,
                 resumed_at: None,
+                credential_id: None,
             },
         )
         .await
         .unwrap();
 
-        let (rows, _) = list_sessions(&pool, 1, 50, None).await.unwrap();
+        let (rows, _) = list_sessions(&pool, 1, 50, None, None).await.unwrap();
         assert_eq!(rows[0].cost_usd, Some(1.5)); // 1.0 + 0.5
         assert_eq!(rows[0].duration_ms, Some(15000)); // 10000 + 5000
         assert_eq!(rows[0].turn_count, 1);
@@ -515,6 +536,7 @@ mod tests {
                 scout_item_id: Some(1),
                 worker_name: None,
                 resumed_at: None,
+                credential_id: None,
             },
         )
         .await
@@ -535,6 +557,7 @@ mod tests {
                 scout_item_id: Some(1),
                 worker_name: None,
                 resumed_at: None,
+                credential_id: None,
             },
         )
         .await
@@ -555,6 +578,7 @@ mod tests {
                 scout_item_id: None,
                 worker_name: Some("w1"),
                 resumed_at: None,
+                credential_id: None,
             },
         )
         .await
@@ -584,6 +608,7 @@ mod tests {
                 scout_item_id: Some(1),
                 worker_name: None,
                 resumed_at: None,
+                credential_id: None,
             },
         )
         .await
@@ -604,14 +629,70 @@ mod tests {
                 scout_item_id: None,
                 worker_name: None,
                 resumed_at: None,
+                credential_id: None,
             },
         )
         .await
         .unwrap();
 
-        let (rows, total) = list_sessions(&pool, 1, 50, Some("scout")).await.unwrap();
+        let (rows, total) = list_sessions(&pool, 1, 50, Some("scout"), None)
+            .await
+            .unwrap();
         assert_eq!(total, 1);
         assert_eq!(rows[0].caller, "scout-process");
+    }
+
+    #[tokio::test]
+    async fn filter_by_status() {
+        let pool = test_pool().await;
+        for (sid, status) in [
+            ("s1", SessionStatus::Running),
+            ("s2", SessionStatus::Stopped),
+            ("s3", SessionStatus::Failed),
+        ] {
+            upsert_session(
+                &pool,
+                &SessionUpsert {
+                    session_id: sid,
+                    created_at: "2026-03-26T00:00:00Z",
+                    caller: "worker",
+                    cwd: "/tmp",
+                    model: "opus",
+                    status,
+                    cost_usd: None,
+                    duration_ms: None,
+                    resumed: false,
+                    task_id: None,
+                    scout_item_id: None,
+                    worker_name: None,
+                    resumed_at: None,
+                    credential_id: None,
+                },
+            )
+            .await
+            .unwrap();
+        }
+
+        let (rows, total) = list_sessions(&pool, 1, 50, None, Some("running"))
+            .await
+            .unwrap();
+        assert_eq!(total, 1);
+        assert_eq!(rows[0].session_id, "s1");
+
+        let (rows, total) = list_sessions(&pool, 1, 50, None, Some("stopped"))
+            .await
+            .unwrap();
+        assert_eq!(total, 1);
+        assert_eq!(rows[0].session_id, "s2");
+
+        let (rows, total) = list_sessions(&pool, 1, 50, None, Some("failed"))
+            .await
+            .unwrap();
+        assert_eq!(total, 1);
+        assert_eq!(rows[0].session_id, "s3");
+
+        let (_, total) = list_sessions(&pool, 1, 50, None, None).await.unwrap();
+        assert_eq!(total, 3);
     }
 
     #[tokio::test]
@@ -633,6 +714,7 @@ mod tests {
                 scout_item_id: Some(42),
                 worker_name: None,
                 resumed_at: None,
+                credential_id: None,
             },
         )
         .await
@@ -653,6 +735,7 @@ mod tests {
                 scout_item_id: Some(42),
                 worker_name: None,
                 resumed_at: None,
+                credential_id: None,
             },
         )
         .await
@@ -673,6 +756,7 @@ mod tests {
                 scout_item_id: None,
                 worker_name: None,
                 resumed_at: None,
+                credential_id: None,
             },
         )
         .await

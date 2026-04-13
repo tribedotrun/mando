@@ -1,5 +1,5 @@
 import React, { useCallback } from 'react';
-import { useNavigate, useParams } from '@tanstack/react-router';
+import { useNavigate, useParams, useSearch } from '@tanstack/react-router';
 import { useTaskList } from '#renderer/hooks/queries';
 import { useUIStore } from '#renderer/app/uiStore';
 import { TaskDetailView } from '#renderer/domains/captain/components/TaskDetailView';
@@ -8,6 +8,7 @@ import { ErrorBoundary } from '#renderer/global/components/ErrorBoundary';
 export function TaskDetailPage(): React.ReactElement {
   const navigate = useNavigate();
   const { taskId } = useParams({ strict: false }) as { taskId: string };
+  const { tab } = useSearch({ strict: false }) as { tab?: string };
   const id = Number(taskId);
 
   const { data: taskData, isLoading: loading } = useTaskList();
@@ -55,6 +56,17 @@ export function TaskDetailPage(): React.ReactElement {
     [navigate],
   );
 
+  const handleTabChange = useCallback(
+    (newTab: string) => {
+      void navigate({
+        to: '/captain/tasks/$taskId',
+        params: { taskId },
+        search: { tab: newTab },
+      });
+    },
+    [navigate, taskId],
+  );
+
   if (!item) {
     return (
       <div className="flex h-full items-center justify-center text-muted-foreground">
@@ -71,6 +83,8 @@ export function TaskDetailPage(): React.ReactElement {
           onBack={handleBack}
           onOpenTerminal={handleOpenTerminal}
           onOpenTranscript={handleOpenTranscript}
+          activeTab={tab}
+          onTabChange={handleTabChange}
         />
       </ErrorBoundary>
     </div>

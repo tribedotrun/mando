@@ -76,7 +76,12 @@ impl NotificationHandler {
         // Import any pre-registered message from add_and_track so we can
         // edit the "processing..." message instead of duplicating it.
         if let Some(task_key) = &payload.task_key {
-            if let Some(msg_id) = self.pending.lock().unwrap().remove(task_key) {
+            if let Some(msg_id) = self
+                .pending
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .remove(task_key)
+            {
                 self.task_messages.insert(task_key.clone(), msg_id);
             }
         }
@@ -134,7 +139,12 @@ impl NotificationHandler {
         let key = format!("research:{run_id}");
 
         // Import pre-registered message from cmd_research.
-        if let Some(msg_id) = self.pending.lock().unwrap().remove(&key) {
+        if let Some(msg_id) = self
+            .pending
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&key)
+        {
             self.task_messages.insert(key.clone(), msg_id);
         }
 

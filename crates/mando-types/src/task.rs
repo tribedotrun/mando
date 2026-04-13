@@ -2,10 +2,6 @@
 
 use serde::{Deserialize, Serialize};
 
-fn default_rev() -> i64 {
-    1
-}
-
 pub use super::task_status::{
     ItemStatus, ReviewTrigger, ACTIONABLE_TERMINAL, ALL_STATUSES, FINALIZED, REOPENABLE, REWORKABLE,
 };
@@ -80,6 +76,8 @@ pub struct Task {
     #[serde(default)]
     pub reopen_seq: i64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reopened_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reopen_source: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub images: Option<String>,
@@ -95,7 +93,7 @@ pub struct Task {
     pub escalation_report: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
-    #[serde(default = "default_rev")]
+    #[serde(default = "crate::default_rev")]
     pub rev: i64,
     /// GitHub repo slug -- populated via JOIN on projects table, not a DB column.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -160,6 +158,7 @@ impl Task {
             no_pr: false,
             worker_seq: 0,
             reopen_seq: 0,
+            reopened_at: None,
             reopen_source: None,
             images: None,
             review_fail_count: 0,
@@ -236,6 +235,7 @@ impl Task {
             "no_pr" => self.no_pr = expect_boolish_field(key, value)?,
             "worker_seq" => self.worker_seq = expect_i64_field(key, value)?,
             "reopen_seq" => self.reopen_seq = expect_i64_field(key, value)?,
+            "reopened_at" => self.reopened_at = Some(expect_string_field(key, value)?.to_string()),
             "reopen_source" => {
                 self.reopen_source = Some(expect_string_field(key, value)?.to_string())
             }
@@ -284,6 +284,7 @@ impl Task {
             "no_pr" => self.no_pr = false,
             "worker_seq" => self.worker_seq = 0,
             "reopen_seq" => self.reopen_seq = 0,
+            "reopened_at" => self.reopened_at = None,
             "reopen_source" => self.reopen_source = None,
             "images" => self.images = None,
             "review_fail_count" => self.review_fail_count = 0,

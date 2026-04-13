@@ -393,6 +393,16 @@ impl ItemRow {
     }
 }
 
+/// List items belonging to a specific research run.
+pub async fn list_items_by_run(pool: &SqlitePool, run_id: i64) -> Result<Vec<ScoutItem>> {
+    let sql = format!(
+        "{} WHERE research_run_id = ? ORDER BY id",
+        select_items_sql()
+    );
+    let rows: Vec<ItemRow> = sqlx::query_as(&sql).bind(run_id).fetch_all(pool).await?;
+    Ok(rows.into_iter().map(|r| r.into_item()).collect())
+}
+
 /// Set the research_run_id FK on a scout item.
 pub async fn set_research_run_id(pool: &SqlitePool, id: i64, run_id: i64) -> Result<()> {
     sqlx::query("UPDATE scout_items SET research_run_id = ?, rev = rev + 1 WHERE id = ?")

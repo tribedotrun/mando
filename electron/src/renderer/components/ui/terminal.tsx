@@ -2,6 +2,7 @@ import React, { useRef, useState } from 'react';
 import Ansi from 'ansi-to-react';
 import { Check, Copy } from 'lucide-react';
 import { cn } from '#renderer/cn';
+import log from '#renderer/logger';
 
 const COPY_FEEDBACK_MS = 1500;
 
@@ -22,7 +23,7 @@ export function Terminal({ output, className }: TerminalProps): React.ReactEleme
         clearTimeout(timerRef.current);
         timerRef.current = setTimeout(() => setCopied(false), COPY_FEEDBACK_MS);
       })
-      .catch((err) => console.error('Clipboard write failed', err));
+      .catch((err) => log.warn('Clipboard write failed', err));
   };
 
   return (

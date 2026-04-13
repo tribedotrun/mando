@@ -30,21 +30,8 @@ pub struct QaResult {
     pub cost_usd: Option<f64>,
     /// Duration in milliseconds for this turn.
     pub duration_ms: Option<u64>,
-}
-
-/// JSON schema for structured Q&A responses.
-fn qa_json_schema() -> serde_json::Value {
-    serde_json::json!({
-        "type": "object",
-        "properties": {
-            "answer": { "type": "string" },
-            "suggested_followups": {
-                "type": "array",
-                "items": { "type": "string" }
-            }
-        },
-        "required": ["answer", "suggested_followups"]
-    })
+    /// Credential used for this turn (if any).
+    pub credential_id: Option<i64>,
 }
 
 /// A live Q&A session holding a persistent CC process.
@@ -73,6 +60,7 @@ impl QaSessionManager {
     }
 
     /// Ask a question — creates a new session or reuses an existing one.
+    #[allow(clippy::too_many_arguments)]
     pub async fn ask(
         &self,
         question: &str,
@@ -81,8 +69,11 @@ impl QaSessionManager {
         raw_content_note: Option<&str>,
         workflow: &ScoutWorkflow,
         session_key: Option<&str>,
+        pool: &sqlx::SqlitePool,
     ) -> Result<QaResult> {
         self.expire_stale().await;
+
+        let credential = mando_captain::runtime::tick_spawn::pick_credential(pool).await;
 
         // Try to reuse an existing session.
         if let Some(key) = session_key {
@@ -95,7 +86,7 @@ impl QaSessionManager {
                     Err(reason) => {
                         warn!(module = "scout-qa", key = %key, %reason, "live follow-up failed, falling back to resume");
                         return self
-                            .ask_via_resume(question, key, workflow)
+                            .ask_via_resume(question, key, workflow, &credential)
                             .await
                             .map_err(|e| e.context(format!("{reason}; resume fallback failed")));
                     }
@@ -103,7 +94,10 @@ impl QaSessionManager {
             }
 
             warn!(module = "scout-qa", key = %key, "live session missing, trying resume");
-            match self.ask_via_resume(question, key, workflow).await {
+            match self
+                .ask_via_resume(question, key, workflow, &credential)
+                .await
+            {
                 Ok(result) => return Ok(result),
                 Err(e) => {
                     warn!(module = "scout-qa", key = %key, error = %e, "resume failed, creating fresh session");
@@ -115,7 +109,7 @@ impl QaSessionManager {
         let prompt =
             render_first_turn_prompt(question, summary, article, raw_content_note, workflow)?;
 
-        let mut cc = mando_cc::CcSession::spawn(qa_cc_config(workflow, None)?).await?;
+        let mut cc = mando_cc::CcSession::spawn(qa_cc_config(workflow, None, &credential)?).await?;
         let session_id = cc.session_id().to_string();
 
         cc.send_message(&prompt).await?;
@@ -145,6 +139,7 @@ impl QaSessionManager {
             .clone()
             .unwrap_or_else(|| session_id.clone());
         qa_result.session_reset = session_key.is_some();
+        qa_result.credential_id = mando_captain::runtime::tick_spawn::credential_id(&credential);
 
         if keep_live {
             self.sessions.lock().await.insert(
@@ -224,12 +219,17 @@ impl QaSessionManager {
         question: &str,
         session_key: &str,
         workflow: &ScoutWorkflow,
+        credential: &Option<(i64, String)>,
     ) -> Result<QaResult> {
-        let result = mando_cc::CcOneShot::run(question, qa_cc_config(workflow, Some(session_key))?)
-            .await
-            .with_context(|| format!("resume Q&A session {session_key}"))?;
+        let result = mando_cc::CcOneShot::run(
+            question,
+            qa_cc_config(workflow, Some(session_key), credential)?,
+        )
+        .await
+        .with_context(|| format!("resume Q&A session {session_key}"))?;
 
         let mut qa_result = parse_qa_result(&result, session_key);
+        qa_result.credential_id = mando_captain::runtime::tick_spawn::credential_id(credential);
         qa_result.session_reset = false;
         Ok(qa_result)
     }
@@ -303,6 +303,7 @@ pub fn session_manager_from_workflow(workflow: &ScoutWorkflow) -> Arc<QaSessionM
 fn qa_cc_config(
     workflow: &ScoutWorkflow,
     resume_session: Option<&str>,
+    credential: &Option<(i64, String)>,
 ) -> anyhow::Result<mando_cc::CcConfig> {
     let model = crate::biz::model_lookup::required_model(workflow, "qa")?;
     let mut builder = mando_cc::CcConfig::builder()
@@ -313,6 +314,7 @@ fn qa_cc_config(
     if let Some(session_id) = resume_session {
         builder = builder.resume(session_id);
     }
+    builder = mando_captain::runtime::tick_spawn::with_credential(builder, credential);
     Ok(builder.build())
 }
 
@@ -320,73 +322,7 @@ fn qa_cc_config(
 // Internal
 // ---------------------------------------------------------------------------
 
-fn render_first_turn_prompt(
-    question: &str,
-    summary: &str,
-    article: &str,
-    raw_content_note: Option<&str>,
-    workflow: &ScoutWorkflow,
-) -> anyhow::Result<String> {
-    let raw_note = raw_content_note.unwrap_or("");
-    let user_context_rendered = workflow.user_context.render();
-
-    let mut vars: rustc_hash::FxHashMap<&str, &str> = rustc_hash::FxHashMap::default();
-    vars.insert("question", question);
-    vars.insert("summary", summary);
-    vars.insert("article", article);
-    vars.insert("raw_content_note", raw_note);
-    vars.insert("user_context", user_context_rendered.as_str());
-
-    mando_config::render_prompt("qa", &workflow.prompts, &vars).map_err(|e| anyhow::anyhow!(e))
-}
-
-fn extract_followups(val: &serde_json::Value) -> Vec<String> {
-    val["suggested_followups"]
-        .as_array()
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|v| v.as_str().map(String::from))
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
-fn parse_qa_result(result: &mando_cc::CcResult, ctx_sid: &str) -> QaResult {
-    let make = |answer: String, followups: Vec<String>| QaResult {
-        answer,
-        session_id: Some(result.session_id.clone()),
-        suggested_followups: followups,
-        session_reset: false,
-        cost_usd: result.cost_usd,
-        duration_ms: result.duration_ms,
-    };
-
-    if let Some(ref structured) = result.structured {
-        let answer = structured["answer"]
-            .as_str()
-            .map(String::from)
-            .unwrap_or_else(|| {
-                warn!(module = "scout-qa", session_id = %ctx_sid, "structured output has no 'answer', falling back to text");
-                result.text.clone()
-            });
-        return make(answer, extract_followups(structured));
-    }
-
-    warn!(module = "scout-qa", session_id = %ctx_sid, "no structured output, trying text JSON extraction");
-    let parsed = match mando_captain::biz::json_parse::parse_llm_json(&result.text) {
-        Ok(v) => v,
-        Err(e) => {
-            warn!(module = "scout-qa", error = %e, "JSON extraction failed, using raw text");
-            return make(result.text.clone(), Vec::new());
-        }
-    };
-    if let Some(answer) = parsed["answer"].as_str() {
-        return make(answer.to_string(), extract_followups(&parsed));
-    }
-
-    warn!(module = "scout-qa", session_id = %ctx_sid, "JSON extraction failed, using raw text as answer");
-    make(result.text.clone(), Vec::new())
-}
+use super::qa_parse::{parse_qa_result, qa_json_schema, render_first_turn_prompt};
 
 #[cfg(all(test, feature = "dev-mocks"))]
 mod tests {
@@ -441,6 +377,8 @@ mod tests {
 
         let workflow = ScoutWorkflow::compiled_default();
         let mgr = QaSessionManager::new(Duration::from_secs(600), Duration::from_secs(120));
+        let db = mando_db::Db::open_in_memory().await.unwrap();
+        let pool = db.pool();
 
         let first = mgr
             .ask(
@@ -450,6 +388,7 @@ mod tests {
                 None,
                 &workflow,
                 None,
+                pool,
             )
             .await
             .unwrap();
@@ -466,6 +405,7 @@ mod tests {
                 None,
                 &workflow,
                 Some(&session_id),
+                pool,
             )
             .await
             .unwrap();

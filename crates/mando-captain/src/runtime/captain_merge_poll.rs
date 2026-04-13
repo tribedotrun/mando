@@ -263,10 +263,12 @@ pub(crate) async fn poll_merging_items(
         };
 
         if is_timed_out {
-            let is_rl =
-                item.session_ids.merge.as_deref().is_some_and(|sid| {
-                    super::rate_limit_cooldown::check_and_activate_from_stream(sid)
-                });
+            let is_rl = match item.session_ids.merge.as_deref() {
+                Some(sid) => {
+                    super::credential_rate_limit::check_and_activate_from_stream(pool, sid).await
+                }
+                None => false,
+            };
             if is_rl || rate_limited {
                 tracing::info!(
                     module = "captain",

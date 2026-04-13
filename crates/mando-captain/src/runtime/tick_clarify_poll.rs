@@ -10,7 +10,7 @@ use mando_config::workflow::CaptainWorkflow;
 use mando_types::task::{ItemStatus, Task};
 
 use super::tick_clarify_apply::apply_clarifier_result;
-use super::{clarifier, notify::Notifier, rate_limit_cooldown, timeline_emit};
+use super::{clarifier, credential_rate_limit, notify::Notifier, timeline_emit};
 use crate::runtime::dashboard::truncate_utf8;
 
 pub(super) async fn poll_clarifying_items(
@@ -65,7 +65,7 @@ pub(super) async fn poll_clarifying_items(
                 // Check rate limiting — revert to New so dispatch_clarify
                 // (not dispatch_reclarify) handles the retry with the correct
                 // initial clarification prompt.
-                if rate_limit_cooldown::check_and_activate_from_stream(&session_id) {
+                if credential_rate_limit::check_and_activate_from_stream(pool, &session_id).await {
                     let _ = timeline_emit::emit_rate_limited(item, pool).await;
                     item.status = ItemStatus::New;
                     item.session_ids.clarifier = None;
@@ -260,7 +260,9 @@ pub(super) async fn poll_clarifying_items(
         };
 
         if is_timed_out {
-            if rate_limited || rate_limit_cooldown::check_and_activate_from_stream(&session_id) {
+            if rate_limited
+                || credential_rate_limit::check_and_activate_from_stream(pool, &session_id).await
+            {
                 tracing::info!(
                     module = "captain",
                     item_id = item.id,

@@ -65,10 +65,6 @@ export function announceUiRegistered(): Promise<boolean> {
   });
 }
 
-export function announceUiQuitting(): Promise<boolean> {
-  return postUiTransition('quitting');
-}
-
 export function announceUiUpdating(): Promise<boolean> {
   return postUiTransition('updating');
 }

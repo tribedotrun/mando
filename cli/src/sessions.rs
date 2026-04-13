@@ -93,10 +93,10 @@ pub(crate) async fn handle(args: SessionsArgs) -> anyhow::Result<()> {
     let entries = result["sessions"].as_array().unwrap_or(&empty);
 
     println!(
-        "{:<38}  {:<20}  {:<12}  {:>8}  STATUS",
-        "SESSION_ID", "DATE", "CALLER", "COST"
+        "{:<38}  {:<20}  {:<12}  {:>8}  {:<12}  STATUS",
+        "SESSION_ID", "DATE", "CALLER", "COST", "CREDENTIAL"
     );
-    println!("{}", "-".repeat(90));
+    println!("{}", "-".repeat(105));
 
     for entry in entries {
         let session_id = entry["session_id"].as_str().unwrap_or("?");
@@ -109,8 +109,9 @@ pub(crate) async fn handle(args: SessionsArgs) -> anyhow::Result<()> {
             .as_f64()
             .map(|c| format!("${c:.3}"))
             .unwrap_or_else(|| "-".into());
+        let credential = entry["credential_label"].as_str().unwrap_or("-");
         let status = entry["status"].as_str().unwrap_or("?");
-        println!("{session_id:<38}  {ts:<20}  {caller:<12}  {cost:>8}  {status}");
+        println!("{session_id:<38}  {ts:<20}  {caller:<12}  {cost:>8}  {credential:<12}  {status}");
     }
 
     println!("\n{} session(s)", entries.len());

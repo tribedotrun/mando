@@ -1,6 +1,5 @@
 //! Spawner lifecycle — restart, rework, reopen worker orchestration.
 
-use std::collections::HashMap;
 use std::path::Path;
 
 use anyhow::{Context, Result};
@@ -44,8 +43,22 @@ async fn clean_and_spawn_fresh(
         }
     }
     item.worker_seq += 1;
-    let result =
-        spawner::spawn_worker(item, slug, project_config, &config.captain, workflow, pool).await?;
+    // Pick credential for the reworked worker.
+    let credential = super::tick_spawn::pick_credential(pool).await;
+    let worker_cred = credential.as_ref().map(|c| spawner::WorkerCredential {
+        id: c.0,
+        token: &c.1,
+    });
+    let result = spawner::spawn_worker(
+        item,
+        slug,
+        project_config,
+        &config.captain,
+        workflow,
+        pool,
+        worker_cred.as_ref(),
+    )
+    .await?;
     Ok(LifecycleResult {
         session_name: result.session_name,
         session_id: result.session_id,
@@ -100,14 +113,36 @@ pub(crate) async fn reopen_worker(
         }
     }
 
-    // Write reopen context.
+    // Write reopen context (include image paths if any are attached).
     let reopen_seq = item.reopen_seq + 1;
+    let images_section = item
+        .images
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .map(|s| {
+            let dir = mando_config::images_dir();
+            let lines: Vec<String> = s
+                .split(',')
+                .filter_map(|f| {
+                    let name = f.trim();
+                    let base = std::path::Path::new(name).file_name()?.to_str()?;
+                    (base == name && !name.contains(".."))
+                        .then(|| format!("- {}", dir.join(base).display()))
+                })
+                .collect();
+            if lines.is_empty() {
+                String::new()
+            } else {
+                format!("\n\n## Attached Images\n{}\n", lines.join("\n"))
+            }
+        })
+        .unwrap_or_default();
     write_context_file(
         &wt_expanded,
         "captain-reopen-context.md",
         &format!(
-            "# Captain Reopen (seq={})\n\nReview feedback:\n{}\n\nAddress the feedback, then post an ack comment: `[Mando] Reopen #{} addressed: <summary>`\n\nIf you make code changes, recapture and update PR evidence.\n",
-            reopen_seq, feedback, reopen_seq
+            "# Captain Reopen (seq={})\n\nReview feedback:\n{}\n\nAddress the feedback, then post an ack comment: `[Mando] Reopen #{} addressed: <summary>`\n\nIf you make code changes, recapture and update PR evidence.\n{}",
+            reopen_seq, feedback, reopen_seq, images_section
         ),
     )
     .await?;
@@ -134,7 +169,8 @@ pub(crate) async fn reopen_worker(
     }
 
     let model = &workflow.models.worker;
-    let env = HashMap::new();
+    let (mut env, reopen_cred_id) = super::spawner::credential_env_for_session(pool, &cc_sid).await;
+    env.insert("MANDO_TASK_ID".to_string(), item.id.to_string());
 
     let reopen_seq_str = reopen_seq.to_string();
     let mut vars: FxHashMap<&str, &str> = FxHashMap::default();
@@ -187,6 +223,7 @@ pub(crate) async fn reopen_worker(
                 &session_name,
                 item_id,
                 true,
+                reopen_cred_id,
             )
             .await?;
             tracing::info!(

@@ -169,7 +169,7 @@ pub async fn nudge_item(
 
     let stream_size_before = mando_cc::get_stream_file_size(&stream_path);
     let wt_path = mando_config::expand_tilde(&wt);
-    let env = std::collections::HashMap::new();
+    let (env, cred_id) = super::spawner::credential_env_for_session(pool, &cc_sid).await;
 
     match crate::io::process_manager::resume_worker_process(
         msg,
@@ -202,6 +202,7 @@ pub async fn nudge_item(
                 &worker,
                 Some(item.id),
                 true,
+                cred_id,
             )
             .await
             {
@@ -220,6 +221,7 @@ pub async fn nudge_item(
                     "worker": worker,
                     "session_id": cc_sid,
                     "content": msg,
+                    "reason": reason,
                     "nudge_count": new_count,
                 }),
                 pool,
@@ -241,6 +243,7 @@ pub async fn nudge_item(
                 serde_json::json!({
                     "worker": worker,
                     "session_id": cc_sid,
+                    "reason": reason,
                     "nudge_count_attempted": new_count,
                     "error": e.to_string(),
                 }),
@@ -281,7 +284,6 @@ pub async fn reopen_item(
 
     let item_id = item.id.to_string();
     let _lock = crate::io::item_lock::acquire_item_lock(&item_id, "reopen")?;
-
     if let Some(new_context) =
         append_tagged_note(item.context.as_deref(), "Reopen feedback", feedback)
     {
@@ -323,6 +325,7 @@ pub async fn reopen_item(
         if allow_queue_fallback {
             item.intervention_count = new_count as i64;
             item.reopen_seq += 1;
+            item.reopened_at = Some(mando_types::now_rfc3339());
             item.status = ItemStatus::Queued;
             // Clear stale fields so the next dispatch starts fresh.
             item.pr_number = None;
@@ -334,10 +337,7 @@ pub async fn reopen_item(
             item.session_ids.worker = None;
             item.session_ids.ask = None;
             item.last_activity_at = Some(mando_types::now_rfc3339());
-            // Unarchive the workbench so the queued task stays visible.
-            if let Some(wb_id) = item.workbench_id {
-                let _ = mando_db::queries::workbenches::unarchive(pool, wb_id).await;
-            }
+            try_unarchive_workbench(item, "during queued fallback", pool).await;
             let _ = emit_reopen_event(item, reopen_source, feedback, "queued", pool).await;
             return Ok(ReopenOutcome::QueuedFallback);
         }
@@ -345,14 +345,12 @@ pub async fn reopen_item(
     }
 
     let old_worktree = item.worktree.clone();
-    // Unarchive the workbench before reopen so the task stays visible.
-    if let Some(wb_id) = item.workbench_id {
-        let _ = mando_db::queries::workbenches::unarchive(pool, wb_id).await;
-    }
+    try_unarchive_workbench(item, "before reopen", pool).await;
     match spawner_lifecycle::reopen_worker(item, config, feedback, workflow, pool).await {
         Ok(result) => {
             item.intervention_count = new_count as i64;
             item.reopen_seq += 1;
+            item.reopened_at = Some(mando_types::now_rfc3339());
             item.status = ItemStatus::InProgress;
             item.worker = Some(result.session_name);
             item.session_ids.worker = Some(result.session_id);
@@ -389,7 +387,8 @@ pub async fn reopen_item(
                 item.intervention_count = new_count as i64;
                 item.reopen_seq += 1;
                 item.status = ItemStatus::Queued;
-                item.last_activity_at = Some(mando_types::now_rfc3339());
+                item.reopened_at = Some(mando_types::now_rfc3339());
+                item.last_activity_at = item.reopened_at.clone();
                 // Emit event before clearing worker fields so the timeline
                 // records which worker/session failed.
                 let _ = emit_reopen_event(item, reopen_source, feedback, "queued", pool).await;
@@ -404,14 +403,19 @@ pub async fn reopen_item(
                 item.worker_started_at = None;
                 item.session_ids.worker = None;
                 item.session_ids.ask = None;
-                // Unarchive the workbench so the queued task stays visible.
-                if let Some(wb_id) = item.workbench_id {
-                    let _ = mando_db::queries::workbenches::unarchive(pool, wb_id).await;
-                }
+                try_unarchive_workbench(item, "during reopen fallback", pool).await;
                 Ok(ReopenOutcome::QueuedFallback)
             } else {
                 Err(e)
             }
+        }
+    }
+}
+
+async fn try_unarchive_workbench(item: &Task, context: &str, pool: &sqlx::SqlitePool) {
+    if let Some(wb_id) = item.workbench_id {
+        if let Err(e) = mando_db::queries::workbenches::unarchive(pool, wb_id).await {
+            tracing::warn!(workbench_id = wb_id, error = %e, "failed to unarchive workbench {context}");
         }
     }
 }

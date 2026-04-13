@@ -162,6 +162,18 @@ pub(crate) async fn run_git(cwd: &Path, args: &[&str]) -> Result<String> {
     Ok(stdout)
 }
 
+/// Reset an existing worktree to a new branch based on a remote ref.
+///
+/// Used by rework: the worktree directory stays, but the working tree is
+/// reset to `origin/<default_branch>` on a fresh branch. Equivalent to:
+///   git -C <wt> clean -fd && git -C <wt> checkout -B <branch> <base_ref>
+pub async fn reset_to_new_branch(wt_path: &Path, branch: &str, base_ref: &str) -> Result<()> {
+    run_git(wt_path, &["reset", "--hard"]).await?;
+    run_git(wt_path, &["clean", "-fd"]).await?;
+    run_git(wt_path, &["checkout", "-B", branch, base_ref]).await?;
+    Ok(())
+}
+
 /// Get the current branch name of a worktree.
 pub async fn current_branch(wt_path: &Path) -> Result<String> {
     run_git(wt_path, &["rev-parse", "--abbrev-ref", "HEAD"]).await

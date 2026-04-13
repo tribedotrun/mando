@@ -59,6 +59,10 @@ pub enum TimelineEventType {
     WorkerReopened,
     #[serde(rename = "human_ask_failed")]
     HumanAskFailed,
+    #[serde(rename = "evidence_updated")]
+    EvidenceUpdated,
+    #[serde(rename = "work_summary_updated")]
+    WorkSummaryUpdated,
 }
 
 /// A single event in a task's timeline.

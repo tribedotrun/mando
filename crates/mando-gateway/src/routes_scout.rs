@@ -40,7 +40,13 @@ pub(crate) fn spawn_scout_processing(state: &AppState, id: i64, url: String) {
                 emit_scout_process_failed(&bus, id, &url, &e.to_string());
                 return;
             }
-            let scout_payload = mando_scout::get_scout_item(&pool, id).await.ok();
+            let scout_payload = match mando_scout::get_scout_item(&pool, id).await {
+                Ok(v) => Some(v),
+                Err(e) => {
+                    tracing::warn!(scout_id = id, error = %e, "failed to fetch scout item for SSE event");
+                    None
+                }
+            };
             bus.send(
                 mando_types::BusEvent::Scout,
                 Some(json!({"action": "updated", "item": scout_payload, "id": id})),
@@ -182,7 +188,13 @@ pub(crate) async fn post_scout_process(
         .map_err(internal_error)?;
 
     if let Some(id) = body.id {
-        let scout_payload = mando_scout::get_scout_item(pool, id).await.ok();
+        let scout_payload = match mando_scout::get_scout_item(pool, id).await {
+            Ok(v) => Some(v),
+            Err(e) => {
+                tracing::warn!(scout_id = id, error = %e, "failed to fetch scout item for SSE event");
+                None
+            }
+        };
         state.bus.send(
             mando_types::BusEvent::Scout,
             Some(json!({"action": "updated", "item": scout_payload, "id": id})),
@@ -309,7 +321,13 @@ pub(crate) async fn patch_scout_item(
             };
             error_response(status, &msg)
         })?;
-    let scout_payload = mando_scout::get_scout_item(pool, id).await.ok();
+    let scout_payload = match mando_scout::get_scout_item(pool, id).await {
+        Ok(v) => Some(v),
+        Err(e) => {
+            tracing::warn!(scout_id = id, error = %e, "failed to fetch scout item for SSE event");
+            None
+        }
+    };
     state.bus.send(
         mando_types::BusEvent::Scout,
         Some(json!({"action": "updated", "item": scout_payload, "id": id})),

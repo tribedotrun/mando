@@ -3,7 +3,7 @@ import { useParams, useSearch } from '@tanstack/react-router';
 import { useMountEffect } from '#renderer/global/hooks/useMountEffect';
 import { useQuery } from '@tanstack/react-query';
 import { ChevronLeft, Copy, Check, Terminal as TerminalIcon } from 'lucide-react';
-import { fetchTranscript } from '#renderer/api';
+import { fetchTranscript } from '#renderer/api-sessions';
 import { TranscriptViewer, formatCallerLabel } from '#renderer/domains/sessions';
 import { copyToClipboard } from '#renderer/utils';
 import { queryKeys } from '#renderer/queryKeys';

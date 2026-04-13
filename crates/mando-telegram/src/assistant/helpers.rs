@@ -68,7 +68,10 @@ pub(crate) async fn add_and_track(
 
 pub(crate) fn register_pending(pending: &PendingMessages, scout_id: i64, message_id: i64) {
     let key = format!("scout:{scout_id}");
-    pending.lock().unwrap().insert(key, message_id);
+    pending
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(key, message_id);
 }
 
 // ── Implicit addlink ────────────────────────────────────────────────

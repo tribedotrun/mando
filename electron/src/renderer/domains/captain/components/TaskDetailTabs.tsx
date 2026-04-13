@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Check, ChevronRight, Copy, X } from 'lucide-react';
+import { Check, Copy, X } from 'lucide-react';
 import type { TaskItem, SessionSummary, TimelineEvent } from '#renderer/types';
 import { copyToClipboard, fmtDuration, relativeTime, shortenPath } from '#renderer/utils';
 import { PrSections } from '#renderer/domains/captain/components/PrSections';
@@ -14,17 +14,11 @@ import {
   DialogClose,
 } from '#renderer/components/ui/dialog';
 import {
-  Collapsible,
-  CollapsibleTrigger,
-  CollapsibleContent,
-} from '#renderer/components/ui/collapsible';
-import {
   Tooltip,
   TooltipTrigger,
   TooltipContent,
   TooltipProvider,
 } from '#renderer/components/ui/tooltip';
-import { Separator } from '#renderer/components/ui/separator';
 import { Button } from '#renderer/components/ui/button';
 import { Skeleton } from '#renderer/components/ui/skeleton';
 
@@ -110,59 +104,62 @@ export function SessionsTab({
 
   return (
     <div>
-      {reversed.map((s) => {
-        const label =
-          formatCallerLabel(s.caller).charAt(0).toUpperCase() +
-          formatCallerLabel(s.caller).slice(1);
-        const seq = seqMap.get(s.session_id);
-        const title = seq ? `${label} #${seq}` : label;
+      <div className="mb-2 text-caption text-text-4">Sessions</div>
+      <div className="space-y-0.5">
+        {reversed.map((s) => {
+          const label =
+            formatCallerLabel(s.caller).charAt(0).toUpperCase() +
+            formatCallerLabel(s.caller).slice(1);
+          const seq = seqMap.get(s.session_id);
+          const title = seq ? `${label} #${seq}` : label;
 
-        return (
-          <div
-            key={s.session_id}
-            role="button"
-            tabIndex={0}
-            onClick={() => onSessionClick(s)}
-            className="mb-1 flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-2 text-left hover:bg-muted"
-          >
-            <SessionDot status={s.status} />
-            <div className="min-w-0 flex-1">
-              <div className="text-body font-medium text-text-1">
-                {title}
-                {s.worker_name ? ` (${s.worker_name})` : ''}
+          return (
+            <div
+              key={s.session_id}
+              role="button"
+              tabIndex={0}
+              onClick={() => onSessionClick(s)}
+              className="group flex w-full cursor-pointer items-center gap-2.5 rounded-md px-2 py-2 text-left transition-colors hover:bg-muted"
+            >
+              <SessionDot status={s.status} />
+              <div className="min-w-0 flex-1">
+                <div className="text-body-sm font-medium text-text-1">
+                  {title}
+                  {s.worker_name ? ` (${s.worker_name})` : ''}
+                </div>
+                <div className="text-caption text-text-3">
+                  {s.started_at && <span>{relativeTime(s.started_at)}</span>}
+                  {s.model && <span> &middot; {s.model}</span>}
+                  {s.duration_ms != null && s.duration_ms > 0 && (
+                    <span> &middot; {fmtDuration(s.duration_ms / 1000)}</span>
+                  )}
+                </div>
               </div>
-              <div className="text-caption text-text-3">
-                {s.started_at && <span>{relativeTime(s.started_at)}</span>}
-                {s.model && <span> &middot; {s.model}</span>}
-                {s.duration_ms != null && s.duration_ms > 0 && (
-                  <span> &middot; {fmtDuration(s.duration_ms / 1000)}</span>
-                )}
-              </div>
+              {onResumeSession && s.status !== 'running' ? (
+                <Button
+                  variant="outline"
+                  size="xs"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    const displayName = title + (s.worker_name ? ` (${s.worker_name})` : '');
+                    onResumeSession(s.session_id, displayName, s.cwd);
+                  }}
+                  className="opacity-0 transition-opacity group-hover:opacity-100"
+                  title="Resume this session in a terminal"
+                >
+                  Resume
+                </Button>
+              ) : (
+                <span className="text-[11px] text-text-4">{s.status}</span>
+              )}
             </div>
-            <span className="text-[11px] text-text-4">{s.status}</span>
-            {onResumeSession && s.status !== 'running' && (
-              <Button
-                variant="outline"
-                size="xs"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  const displayName = title + (s.worker_name ? ` (${s.worker_name})` : '');
-                  onResumeSession(s.session_id, displayName, s.cwd);
-                }}
-                className="ml-1"
-                title="Resume this session in a terminal"
-              >
-                Resume
-              </Button>
-            )}
-          </div>
-        );
-      })}
+          );
+        })}
+      </div>
 
-      <Separator className="mt-2" />
-      <div className="flex items-center gap-2 pt-3 text-caption text-text-3">
+      <div className="px-2 pt-2 text-caption text-text-4">
         {sessions.length} sessions
-        {totalDuration > 0 && <span>&middot; {fmtDuration(totalDuration / 1000)}</span>}
+        {totalDuration > 0 && <span> &middot; {fmtDuration(totalDuration / 1000)}</span>}
       </div>
     </div>
   );
@@ -171,27 +168,23 @@ export function SessionsTab({
 /* -- Info tab -- */
 
 export function InfoTab({ item }: { item: TaskItem }): React.ReactElement {
-  const [contextExpanded, setContextExpanded] = useState(false);
-  const [escalationExpanded, setEscalationExpanded] = useState(false);
-
   return (
-    <div className="space-y-4">
-      {/* -- Details grid -- */}
-      <div className="grid grid-cols-[auto_1fr] items-baseline gap-x-4 gap-y-2 rounded-lg bg-muted px-4 py-3">
+    <div className="space-y-5">
+      <div className="grid grid-cols-[auto_1fr] items-baseline gap-x-6 gap-y-2.5">
         <span className="text-caption text-text-4">ID</span>
-        <span className="text-body text-muted-foreground">#{item.id}</span>
-
-        {item.branch && (
-          <>
-            <span className="text-caption text-text-4">Branch</span>
-            <CopyValue value={item.branch} />
-          </>
-        )}
+        <span className="font-mono text-caption text-text-2">#{item.id}</span>
 
         {item.worktree && (
           <>
             <span className="text-caption text-text-4">Worktree</span>
             <CopyValue value={item.worktree} display={shortenPath(item.worktree)} />
+          </>
+        )}
+
+        {item.branch && (
+          <>
+            <span className="text-caption text-text-4">Branch</span>
+            <CopyValue value={item.branch} />
           </>
         )}
 
@@ -203,84 +196,13 @@ export function InfoTab({ item }: { item: TaskItem }): React.ReactElement {
         )}
       </div>
 
-      {/* -- Content group -- */}
       {item.original_prompt && (
-        <InfoSection label="Original Request">
-          <p className="text-body leading-relaxed text-muted-foreground">{item.original_prompt}</p>
-        </InfoSection>
-      )}
-
-      {/* Escalation report, collapsed by default */}
-      {item.escalation_report && (
-        <CollapsibleSection
-          label="Escalation Report"
-          expanded={escalationExpanded}
-          onToggle={() => setEscalationExpanded((v) => !v)}
-        >
-          <pre
-            className="whitespace-pre-wrap break-words rounded-md bg-muted p-3 text-code text-foreground"
-            style={{
-              border: '1px solid color-mix(in srgb, var(--destructive) 30%, transparent)',
-            }}
-          >
-            {item.escalation_report}
-          </pre>
-        </CollapsibleSection>
-      )}
-
-      {/* Task brief, collapsed by default */}
-      {item.context && (
-        <CollapsibleSection
-          label="Task Brief"
-          expanded={contextExpanded}
-          onToggle={() => setContextExpanded((v) => !v)}
-        >
-          <PrMarkdown text={item.context} />
-        </CollapsibleSection>
+        <div>
+          <div className="mb-1.5 text-caption text-text-4">Original Request</div>
+          <p className="text-body-sm leading-relaxed text-text-2">{item.original_prompt}</p>
+        </div>
       )}
     </div>
-  );
-}
-
-function InfoSection({
-  label,
-  children,
-}: {
-  label: string;
-  children: React.ReactNode;
-}): React.ReactElement {
-  return (
-    <div>
-      <div className="mb-2 text-label text-text-4">{label}</div>
-      {children}
-    </div>
-  );
-}
-
-function CollapsibleSection({
-  label,
-  expanded,
-  onToggle,
-  children,
-}: {
-  label: string;
-  expanded: boolean;
-  onToggle: () => void;
-  children: React.ReactNode;
-}): React.ReactElement {
-  return (
-    <Collapsible open={expanded} onOpenChange={onToggle}>
-      <CollapsibleTrigger asChild>
-        <Button variant="ghost" size="xs" className="mb-2 gap-2 p-0 text-label text-text-4">
-          <ChevronRight
-            size={8}
-            className={`transition-transform duration-150 ${expanded ? 'rotate-90' : ''}`}
-          />
-          {label}
-        </Button>
-      </CollapsibleTrigger>
-      <CollapsibleContent>{children}</CollapsibleContent>
-    </Collapsible>
   );
 }
 

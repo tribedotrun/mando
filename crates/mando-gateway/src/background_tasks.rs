@@ -360,6 +360,8 @@ pub fn spawn_workbench_cleanup(state: &AppState) {
     });
 }
 
+// ── Workbench cleanup ───────────────────────────────────────────────
+
 async fn run_workbench_cleanup(pool: &SqlitePool) -> anyhow::Result<()> {
     let stale = mando_db::queries::workbenches::stale_archived(pool, 30).await?;
     if stale.is_empty() {

@@ -79,6 +79,11 @@ export function DetailOverflowMenu({
             {label}
           </DropdownMenuItem>
         ))}
+        {entries.length === 0 && !(item.context && onViewContext) && (
+          <DropdownMenuItem disabled>
+            <span className="text-text-4">No actions available</span>
+          </DropdownMenuItem>
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   );

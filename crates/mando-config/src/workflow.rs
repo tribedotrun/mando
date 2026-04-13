@@ -26,6 +26,7 @@ use crate::error::ConfigError;
 pub struct CaptainWorkflow {
     pub models: ModelsConfig,
     pub agent: AgentConfig,
+    pub auto_title: AutoTitleConfig,
     pub prompts: HashMap<String, String>,
     pub nudges: HashMap<String, String>,
     pub initial_prompts: HashMap<String, String>,
@@ -68,6 +69,40 @@ impl Default for ModelsConfig {
             clarifier: "default".into(),
             todo_parse: "default".into(),
             fallback: Some("sonnet[1m]".into()),
+        }
+    }
+}
+
+/// Configuration for auto-generating terminal workbench titles.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AutoTitleConfig {
+    pub model: String,
+    pub prompt: String,
+    /// Timeout for the `claude -p` subprocess.
+    #[serde(with = "duration_seconds")]
+    pub timeout_s: std::time::Duration,
+    /// How often the background loop checks for pending titles.
+    #[serde(with = "duration_seconds")]
+    pub poll_interval_s: std::time::Duration,
+    /// Give up if the workbench is older than this.
+    #[serde(with = "duration_seconds")]
+    pub expiry_s: std::time::Duration,
+    /// Truncate the user's first message to this many characters.
+    pub max_input_chars: usize,
+}
+
+impl Default for AutoTitleConfig {
+    fn default() -> Self {
+        Self {
+            model: "haiku".into(),
+            prompt: "Generate a concise 3-5 word title for this conversation. \
+                     Output ONLY the title, nothing else:"
+                .into(),
+            timeout_s: std::time::Duration::from_secs(30),
+            poll_interval_s: std::time::Duration::from_secs(60),
+            expiry_s: std::time::Duration::from_secs(300),
+            max_input_chars: 200,
         }
     }
 }

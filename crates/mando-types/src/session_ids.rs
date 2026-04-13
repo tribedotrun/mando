@@ -16,6 +16,8 @@ pub struct SessionIds {
     pub merge: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ask: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub advisor: Option<String>,
 }
 
 impl SessionIds {

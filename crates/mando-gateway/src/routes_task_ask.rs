@@ -1,5 +1,4 @@
 //! Task ask route handlers — multi-turn Q&A sessions with worktree access.
-
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::Json;
@@ -10,31 +9,34 @@ use crate::response::{error_response, internal_error};
 use crate::AppState;
 
 #[derive(Deserialize)]
-pub(crate) struct AskBody {
-    pub id: i64,
-    pub question: String,
-    /// Continue an existing conversation. None = start new Q&A session.
-    #[serde(default)]
-    pub ask_id: Option<String>,
-}
-
-#[derive(Deserialize)]
 pub(crate) struct AskEndBody {
     pub id: i64,
 }
 
-/// POST /api/tasks/ask — multi-turn ask with worktree access.
+/// POST /api/tasks/ask (JSON or multipart with optional images)
 ///
 /// First ask creates a new CC session in the task's worktree.
 /// Follow-up asks resume the same session via `--resume`.
 pub(crate) async fn post_task_ask(
     State(state): State<AppState>,
-    Json(body): Json<AskBody>,
+    request: axum::extract::Request,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let body = crate::image_upload::extract_ask(request).await?;
+    let result = post_task_ask_inner(&state, &body).await;
+    if result.is_err() {
+        crate::image_upload::cleanup_saved_images(&body.saved_images).await;
+    }
+    result
+}
+
+async fn post_task_ask_inner(
+    state: &AppState,
+    body: &crate::image_upload::AskWithImages,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let id = body.id;
     let workflow = state.captain_workflow.load_full();
 
-    // Load task + pool.
+    // Load task + pool (validates task exists before persisting images).
     let (item, pool) = {
         let store = state.task_store.read().await;
         let item = store
@@ -47,7 +49,7 @@ pub(crate) async fn post_task_ask(
         (item, store.pool().clone())
     };
 
-    let cwd = resolve_ask_cwd(&item, &state)?;
+    let cwd = resolve_ask_cwd(&item, state)?;
 
     let session_key = format!("task-ask:{id}");
     let mgr = state.cc_session_mgr.clone();
@@ -63,7 +65,7 @@ pub(crate) async fn post_task_ask(
     if mgr_has_session && !task_has_session {
         tracing::info!(
             task_id = id,
-            "session_ids.ask cleared by lifecycle transition — closing stale session"
+            "session_ids.ask cleared by lifecycle — closing stale session"
         );
         mgr.close(&session_key);
     } else if !mgr_has_session && task_has_session {
@@ -72,29 +74,10 @@ pub(crate) async fn post_task_ask(
             "stale session_ids.ask — manager has no session, clearing"
         );
         let store = state.task_store.write().await;
-        match store.find_by_id(id).await {
-            Ok(Some(mut task)) => {
-                task.session_ids.ask = None;
-                if let Err(e) = store.write_task(&task).await {
-                    tracing::warn!(
-                        task_id = id,
-                        error = %e,
-                        "failed to clear stale session_ids.ask"
-                    );
-                }
-            }
-            Ok(None) => {
-                tracing::warn!(
-                    task_id = id,
-                    "stale session_ids.ask clear skipped — task vanished between lookups"
-                );
-            }
-            Err(e) => {
-                tracing::warn!(
-                    task_id = id,
-                    error = %e,
-                    "stale session_ids.ask clear skipped — task store read failed"
-                );
+        if let Ok(Some(mut task)) = store.find_by_id(id).await {
+            task.session_ids.ask = None;
+            if let Err(e) = store.write_task(&task).await {
+                tracing::warn!(task_id = id, error = %e, "failed to clear stale session_ids.ask");
             }
         }
     }
@@ -126,11 +109,22 @@ pub(crate) async fn post_task_ask(
     }
 
     // Broadcast so the UI shows the question immediately.
-    broadcast_task_update(&state, id).await;
+    broadcast_task_update(state, id).await;
+
+    // Embed image paths in the question so the CC session can read them.
+    let question_for_cc = if body.saved_images.is_empty() {
+        body.question.clone()
+    } else {
+        format!(
+            "{}{}",
+            body.question,
+            crate::image_upload::format_image_paths(&body.saved_images)
+        )
+    };
 
     // ── Run the CC session ──────────────────────────────────────────────
     let cc_result = if should_resume {
-        mgr.follow_up(&session_key, &body.question, &cwd).await
+        mgr.follow_up(&session_key, &question_for_cc, &cwd).await
     } else {
         let task_id_str = id.to_string();
         let timeline_text = mando_captain::runtime::task_ask::build_timeline_text(&pool, id)
@@ -139,7 +133,7 @@ pub(crate) async fn post_task_ask(
         let prompt = mando_captain::runtime::task_ask::build_initial_prompt(
             &item,
             &task_id_str,
-            &body.question,
+            &question_for_cc,
             &workflow,
             &timeline_text,
         )
@@ -187,11 +181,23 @@ pub(crate) async fn post_task_ask(
                 &session_id,
                 &body.question,
                 &answer,
+                "ask",
             )
             .await
             .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?;
 
-            broadcast_task_update(&state, id).await;
+            // Persist images after CC session + answer both succeed so a
+            // failure in either path doesn't leave dangling DB references.
+            if !body.saved_images.is_empty() {
+                let store = state.task_store.write().await;
+                if let Err(e) =
+                    crate::image_upload::append_task_images(&store, id, &body.saved_images).await
+                {
+                    tracing::warn!(task_id = id, error = ?e, "failed to persist ask images");
+                }
+            }
+
+            broadcast_task_update(state, id).await;
 
             Ok(Json(json!({
                 "id": id,
@@ -213,7 +219,9 @@ pub(crate) async fn post_task_ask(
                 if let Ok(Some(mut task)) = store.find_by_id(id).await {
                     if task.session_ids.ask.is_some() {
                         task.session_ids.ask = None;
-                        let _ = store.write_task(&task).await;
+                        if let Err(e) = store.write_task(&task).await {
+                            tracing::warn!(task_id = id, error = %e, "failed to clear ask session id");
+                        }
                     }
                 }
             }
@@ -232,7 +240,7 @@ pub(crate) async fn post_task_ask(
                 tracing::error!(task_id = id, error = %persist_err, "failed to persist ask error");
             }
 
-            broadcast_task_update(&state, id).await;
+            broadcast_task_update(state, id).await;
 
             Err(error_response(
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -331,8 +339,6 @@ pub(crate) async fn post_task_ask_reopen(
     }
 
     let cwd = resolve_ask_cwd(&item, &state)?;
-
-    // ── Synthesize via follow-up to active Q&A session ───────────────────
     let session_key = format!("task-ask:{id}");
     let mgr = &state.cc_session_mgr;
 
@@ -467,25 +473,19 @@ fn resolve_ask_cwd(
                 .map(|p| mando_config::paths::expand_tilde(&p))
                 .filter(|p| p.is_dir())
         })
-        .ok_or_else(|| {
-            error_response(
-                StatusCode::BAD_REQUEST,
-                "no worktree or project configured — cannot run ask session",
-            )
-        })
+        .ok_or_else(|| error_response(StatusCode::BAD_REQUEST, "no worktree or project configured"))
 }
 
 /// Broadcast a task update via SSE so the frontend refreshes.
 async fn broadcast_task_update(state: &AppState, id: i64) {
-    let updated = {
-        let store = state.task_store.read().await;
-        store
-            .find_by_id(id)
-            .await
-            .ok()
-            .flatten()
-            .map(|t| serde_json::to_value(&t).unwrap())
-    };
+    let store = state.task_store.read().await;
+    let updated = store
+        .find_by_id(id)
+        .await
+        .ok()
+        .flatten()
+        .map(|t| serde_json::to_value(&t).unwrap());
+    drop(store);
     state.bus.send(
         mando_types::BusEvent::Tasks,
         Some(json!({"action": "updated", "item": updated, "id": id})),

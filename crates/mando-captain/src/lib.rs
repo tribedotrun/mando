@@ -10,7 +10,6 @@
 
 pub mod biz;
 pub mod io;
-pub(crate) mod pr_evidence;
 pub mod runtime;
 
 /// Signal that a worker process has exited. The gateway auto-tick loop listens

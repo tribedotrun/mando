@@ -160,6 +160,7 @@ pub async fn ensure_scout_article(
                     &item.item_type,
                     &content_path.display().to_string(),
                     workflow,
+                    pool,
                 )
                 .await
                 .with_context(|| format!("repair article for #{id}"))?;
@@ -170,6 +171,7 @@ pub async fn ensure_scout_article(
                         "scout-article-repair",
                         article_result.cost_usd,
                         article_result.duration_ms,
+                        article_result.credential_id,
                     )
                     .await
                 {
@@ -324,23 +326,25 @@ pub async fn act_on_scout_item(
     info!(id, %project_name, "act: calling AI");
 
     let model = crate::biz::model_lookup::required_model(workflow, "act")?;
+    let credential = mando_captain::runtime::tick_spawn::pick_credential(pool).await;
+    let cred_id = mando_captain::runtime::tick_spawn::credential_id(&credential);
+    let builder = mando_cc::CcConfig::builder()
+        .model(model)
+        .timeout(workflow.agent.act_timeout_s)
+        .caller("scout-act")
+        .json_schema(serde_json::json!({
+            "type": "object",
+            "properties": {
+                "title": { "type": "string" },
+                "description": { "type": "string" },
+                "skip": { "type": "boolean" },
+                "reason": { "type": "string" }
+            },
+            "required": ["skip"]
+        }));
     let result = mando_cc::CcOneShot::run(
         &prompt,
-        mando_cc::CcConfig::builder()
-            .model(model)
-            .timeout(workflow.agent.act_timeout_s)
-            .caller("scout-act")
-            .json_schema(serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "title": { "type": "string" },
-                    "description": { "type": "string" },
-                    "skip": { "type": "boolean" },
-                    "reason": { "type": "string" }
-                },
-                "required": ["skip"]
-            }))
-            .build(),
+        mando_captain::runtime::tick_spawn::with_credential(builder, &credential).build(),
     )
     .await
     .with_context(|| format!("AI act call failed for #{id}"))?;
@@ -352,6 +356,7 @@ pub async fn act_on_scout_item(
             "scout-act",
             result.cost_usd,
             result.duration_ms,
+            cred_id,
         )
         .await
     {

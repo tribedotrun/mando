@@ -2,8 +2,10 @@ import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { ChevronDown, MoreVertical } from 'lucide-react';
 import { fetchWorkers } from '#renderer/domains/captain/hooks/useApi';
+import { useResumeRateLimited } from '#renderer/hooks/mutations';
+import { useTaskList } from '#renderer/hooks/queries';
 import { queryKeys } from '#renderer/queryKeys';
-import { fmtRuntime, ceilMinutes, shortRepo } from '#renderer/utils';
+import { fmtRuntime, ceilMinutes, isRateLimited, shortRepo } from '#renderer/utils';
 import type { WorkerDetail } from '#renderer/types';
 import { StatusDot } from '#renderer/global/components/CardShell';
 import {
@@ -156,6 +158,7 @@ export function MetricsRow({
   onStopWorker?: (worker: WorkerDetail) => void | Promise<void>;
 } = {}): React.ReactElement {
   const [expanded, setExpanded] = useState(true);
+  const resumeMut = useResumeRateLimited();
 
   const { data: workersData } = useQuery({
     queryKey: queryKeys.workers.list(),
@@ -180,6 +183,14 @@ export function MetricsRow({
   const reviewingCount = reviewingWorkers.length;
   const mergingCount = mergingWorkers.length;
   const staleCount = staleWorkers.length;
+  const { data: taskData } = useTaskList();
+  const workerResumeId = (reviewingWorkers[0] ?? mergingWorkers[0])?.id;
+  const resumeTaskId =
+    workerResumeId ??
+    (rateLimitSecs > 0
+      ? taskData?.items.find((t) => isRateLimited(t, rateLimitSecs))?.id
+      : undefined);
+  const handleResume = resumeTaskId ? () => resumeMut.mutate({ id: resumeTaskId }) : undefined;
 
   return (
     <div data-testid="metrics-row" className="mb-1.5">
@@ -199,6 +210,8 @@ export function MetricsRow({
               staleCount={staleCount}
               rateLimitSecs={rateLimitSecs}
               expanded={false}
+              onResume={handleResume}
+              resumePending={resumeMut.isPending}
             />
           </Button>
         ) : (
@@ -210,6 +223,8 @@ export function MetricsRow({
               staleCount={0}
               rateLimitSecs={rateLimitSecs}
               expanded={false}
+              onResume={handleResume}
+              resumePending={resumeMut.isPending}
             />
           </div>
         ))}
@@ -231,6 +246,8 @@ export function MetricsRow({
               staleCount={staleCount}
               rateLimitSecs={rateLimitSecs}
               expanded={true}
+              onResume={handleResume}
+              resumePending={resumeMut.isPending}
             />
           </Button>
 
@@ -278,6 +295,8 @@ function HeaderContent({
   staleCount,
   rateLimitSecs,
   expanded,
+  onResume,
+  resumePending,
 }: {
   activeCount: number;
   reviewingCount: number;
@@ -285,6 +304,8 @@ function HeaderContent({
   staleCount: number;
   rateLimitSecs: number;
   expanded: boolean;
+  onResume?: () => void;
+  resumePending?: boolean;
 }) {
   return (
     <>
@@ -302,8 +323,21 @@ function HeaderContent({
         <span className="text-[12px] leading-4 text-stale">{staleCount} stale</span>
       )}
       {rateLimitSecs > 0 && (
-        <span className="text-[12px] leading-4 text-text-4">
+        <span className="inline-flex items-center gap-1.5 text-[12px] leading-4 text-text-4">
           paused ~{ceilMinutes(rateLimitSecs)}m
+          {onResume && (
+            <button
+              type="button"
+              disabled={resumePending}
+              className="rounded px-1 py-0.5 text-[11px] font-medium text-foreground hover:bg-accent disabled:opacity-50"
+              onClick={(e) => {
+                e.stopPropagation();
+                onResume();
+              }}
+            >
+              {resumePending ? 'Resuming...' : 'Resume'}
+            </button>
+          )}
         </span>
       )}
       <span className="flex-1" />

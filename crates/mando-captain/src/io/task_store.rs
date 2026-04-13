@@ -193,6 +193,7 @@ impl TaskStore {
                 scout_item_id: None,
                 worker_name: (!entry.worker_name.is_empty()).then_some(entry.worker_name.as_str()),
                 resumed_at: None,
+                credential_id: None,
             },
         )
         .await
@@ -203,8 +204,9 @@ impl TaskStore {
         page: usize,
         per_page: usize,
         group: Option<&str>,
+        status: Option<&str>,
     ) -> Result<(Vec<mando_db::queries::sessions::SessionRow>, usize)> {
-        sessions::list_sessions(&self.pool, page, per_page, group).await
+        sessions::list_sessions(&self.pool, page, per_page, group, status).await
     }
 
     pub async fn list_sessions_for_task(

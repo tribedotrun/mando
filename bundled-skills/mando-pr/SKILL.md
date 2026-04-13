@@ -15,11 +15,11 @@ description: Commit, push, create PR, and tag AI reviewers. Use when ready to op
 
 3. **Commit & push**: Stage changes, commit with a descriptive message, and `git push`
 
-4. **Rename branch if needed** (MUST happen before PR creation — renaming after closes the PR):
+4. **Rename branch if needed** (MUST happen before PR creation -- renaming after closes the PR):
+
+   **Skip renaming** if the branch starts with `mando/` (captain-managed branches stay as-is) or if a PR already exists (`gh pr view --json number 2>/dev/null` succeeds -- renaming would close the PR).
 
    Rename if branch name is generic (e.g., `feat/1`, `feat/wt-0211-2120`, `codex/c29a-coverage-100`) or doesn't describe the changes. Read `git log main..HEAD --oneline` to understand changes, then pick prefix from dominant commit type (`feat/`, `fix/`, `chore/`, `refactor/`) + kebab-case summary (3-5 words max). Rename local, push new, delete old remote, set upstream.
-
-   **If a PR already exists** for this branch (`gh pr view --json number 2>/dev/null` succeeds): do NOT rename. The rename procedure deletes the old remote ref, which causes GitHub to close the PR. The `x-task-log` skill handles branch renaming before PR creation to prevent this.
 
 5. **Create PR** (skip if one already exists — e.g. draft from `x-task-log`; check with `gh pr view --json number 2>/dev/null`). Use body-file to avoid escaping issues:
 

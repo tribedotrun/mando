@@ -8,10 +8,11 @@ export const queryKeys = {
   tasks: {
     all: ['tasks'] as const,
     list: () => ['tasks', 'list'] as const,
-    detail: (id: number) => ['tasks', 'detail', id] as const,
     timeline: (id: number) => ['tasks', 'timeline', id] as const,
     pr: (id: number) => ['tasks', 'pr', id] as const,
     askHistory: (id: number) => ['tasks', 'ask-history', id] as const,
+    feed: (id: number) => ['tasks', 'feed', id] as const,
+    artifacts: (id: number) => ['tasks', 'artifacts', id] as const,
   },
 
   // ── Scout ──
@@ -29,13 +30,15 @@ export const queryKeys = {
     item: (id: number) => ['scout', 'item', id] as const,
     article: (id: number) => ['scout', 'article', id] as const,
     sessions: (id: number) => ['scout', 'sessions', id] as const,
+    research: () => ['scout', 'research'] as const,
+    researchItems: (id: number) => ['scout', 'research', id, 'items'] as const,
   },
 
   // ── Sessions ──
   sessions: {
     all: ['sessions'] as const,
-    list: (page: number, category?: string) =>
-      ['sessions', 'list', page, category ?? 'all'] as const,
+    list: (page: number, category?: string, status?: string) =>
+      ['sessions', 'list', page, category ?? 'all', status ?? 'all'] as const,
     transcript: (sessionId: string) => ['sessions', 'transcript', sessionId] as const,
   },
 
@@ -63,8 +66,9 @@ export const queryKeys = {
     current: () => ['config', 'current'] as const,
   },
 
-  // ── Health ──
-  health: {
-    telegram: () => ['health', 'telegram'] as const,
+  // ── Credentials ──
+  credentials: {
+    all: ['credentials'] as const,
+    list: () => ['credentials', 'list'] as const,
   },
 } as const;

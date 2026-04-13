@@ -1,7 +1,9 @@
 import React, { useCallback, useRef, useState } from 'react';
+import { Paperclip, X } from 'lucide-react';
 import { Button } from '#renderer/components/ui/button';
 import { ScrollArea } from '#renderer/components/ui/scroll-area';
 import { Textarea } from '#renderer/components/ui/textarea';
+import { useMountEffect } from '#renderer/global/hooks/useMountEffect';
 
 const SCROLL_DELAY_MS = 50;
 
@@ -13,8 +15,9 @@ export interface QAEntry {
 interface QAChatProps {
   history: QAEntry[];
   pending: boolean;
-  onAsk: (question: string) => void;
+  onAsk: (question: string, images?: File[]) => void;
   placeholder?: string;
+  allowImages?: boolean;
   renderAnswer?: (text: string) => React.ReactNode;
   header?: React.ReactNode;
   /** Content rendered between chat history and input form (e.g. suggested follow-ups) */
@@ -48,6 +51,7 @@ export function QAChat({
   pending,
   onAsk,
   placeholder = 'Ask a question...',
+  allowImages = false,
   renderAnswer,
   header,
   footer,
@@ -67,6 +71,34 @@ export function QAChat({
   const chatEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
+  // Image state
+  const [image, setImage] = useState<File | null>(null);
+  const [preview, setPreview] = useState<string | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const previewRef = useRef(preview);
+  previewRef.current = preview;
+
+  useMountEffect(() => {
+    return () => {
+      if (previewRef.current) URL.revokeObjectURL(previewRef.current);
+    };
+  });
+
+  const setImageFile = useCallback((file: File) => {
+    if (previewRef.current) URL.revokeObjectURL(previewRef.current);
+    const url = URL.createObjectURL(file);
+    setImage(file);
+    setPreview(url);
+    previewRef.current = url;
+  }, []);
+
+  const removeImage = useCallback(() => {
+    if (previewRef.current) URL.revokeObjectURL(previewRef.current);
+    setImage(null);
+    setPreview(null);
+    previewRef.current = null;
+  }, []);
+
   const scrollToBottom = useCallback(() => {
     setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }), SCROLL_DELAY_MS);
   }, []);
@@ -79,12 +111,28 @@ export function QAChat({
       e.preventDefault();
       const q = question.trim();
       if (!q || pending) return;
-      onAsk(q);
+      const images = image ? [image] : undefined;
+      onAsk(q, images);
       setQuestion('');
+      removeImage();
       if (textareaRef.current) textareaRef.current.style.height = 'auto';
       scrollToBottom();
     },
-    [question, pending, onAsk, scrollToBottom],
+    [question, pending, onAsk, image, removeImage, scrollToBottom],
+  );
+
+  const handlePaste = useCallback(
+    (e: React.ClipboardEvent) => {
+      if (!allowImages) return;
+      for (const clipItem of e.clipboardData.items) {
+        if (!clipItem.type.startsWith('image/')) continue;
+        e.preventDefault();
+        const file = clipItem.getAsFile();
+        if (file) setImageFile(file);
+        return;
+      }
+    },
+    [allowImages, setImageFile],
   );
 
   const defaultUserStyle: React.CSSProperties = {
@@ -132,11 +180,51 @@ export function QAChat({
 
       {footer}
 
+      {allowImages && preview && image && (
+        <div className={`flex items-center gap-1.5 ${formClassName}`}>
+          <button
+            type="button"
+            onClick={removeImage}
+            className="flex items-center gap-1.5 rounded-md bg-secondary/60 px-2 py-0.5 text-caption text-muted-foreground transition-colors hover:bg-secondary"
+          >
+            <img src={preview} alt="" className="h-4 w-4 rounded-sm object-cover" />
+            <span className="max-w-[160px] truncate">{image.name}</span>
+            <X size={10} className="shrink-0 opacity-60" />
+          </button>
+        </div>
+      )}
+
       <form
         onSubmit={handleSubmit}
         className={`flex items-end gap-2 ${formClassName}`}
         style={formStyle}
       >
+        {allowImages && (
+          <>
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) setImageFile(file);
+                e.target.value = '';
+              }}
+            />
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              onClick={() => fileRef.current?.click()}
+              disabled={pending}
+              aria-label="Attach image"
+              className="shrink-0 text-muted-foreground"
+            >
+              <Paperclip size={14} />
+            </Button>
+          </>
+        )}
         <Textarea
           ref={textareaRef}
           value={question}
@@ -151,6 +239,7 @@ export function QAChat({
               handleSubmit(e);
             }
           }}
+          onPaste={handlePaste}
           placeholder={placeholder}
           className="min-h-0 flex-1 resize-none overflow-y-auto border-0 bg-muted shadow-none [scrollbar-width:none] focus-visible:ring-0 dark:bg-muted"
           rows={1}

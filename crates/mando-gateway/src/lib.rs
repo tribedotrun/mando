@@ -4,19 +4,26 @@
 //! functions, and format JSON responses.
 
 pub mod auth;
+pub mod auto_title;
 pub mod background_tasks;
 pub mod config_manager;
+pub mod credentials;
+mod credentials_oauth;
 pub mod hooks;
+mod image_upload;
+mod image_upload_ext;
 pub mod instance;
 pub mod middleware;
 pub(crate) mod response;
 mod routes_ai;
+mod routes_artifacts;
 mod routes_captain;
 mod routes_captain_adopt;
 mod routes_channels;
 mod routes_clarifier;
 mod routes_client_logs;
 mod routes_config;
+mod routes_credentials;
 mod routes_ops;
 mod routes_projects;
 mod routes_scout;
@@ -25,8 +32,10 @@ mod routes_scout_bulk;
 mod routes_scout_telegraph;
 mod routes_sessions;
 mod routes_task_actions;
+mod routes_task_advisor;
 mod routes_task_ask;
 mod routes_task_detail;
+mod routes_task_router;
 mod routes_tasks;
 mod routes_terminal;
 mod routes_ui;
@@ -86,6 +95,7 @@ pub struct AppState {
     pub ui_runtime: Arc<ui_runtime::UiRuntime>,
     /// Limits concurrent scout processing sessions (research, manual add, bulk).
     pub scout_processing_semaphore: Arc<Semaphore>,
+    pub credential_mgr: Arc<credentials::CredentialManager>,
 }
 
 /// Force all workflow models to sonnet (dev mode cost savings).

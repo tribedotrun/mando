@@ -21,13 +21,10 @@ export function Commit({
   const shortHash = hash.slice(0, 7);
 
   const copyHash = () => {
-    void navigator.clipboard
-      .writeText(hash)
-      .then(
-        () => toast.success('Copied SHA'),
-        () => toast.error('Failed to copy'),
-      )
-      .catch((err) => console.error('Clipboard write failed', err));
+    void navigator.clipboard.writeText(hash).then(
+      () => toast.success('Copied SHA'),
+      () => toast.error('Failed to copy'),
+    );
   };
 
   return (

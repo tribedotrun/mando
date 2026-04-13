@@ -135,6 +135,17 @@ export interface ScoutResponse {
   status_counts?: Record<string, number>;
 }
 
+export interface ScoutResearchRun {
+  id: number;
+  research_prompt: string;
+  status: 'running' | 'done' | 'failed';
+  error?: string;
+  session_id?: string;
+  added_count: number;
+  created_at: string;
+  completed_at?: string;
+}
+
 type SessionStatus = 'running' | 'stopped' | 'failed';
 
 export interface SessionEntry {
@@ -160,6 +171,8 @@ export interface SessionEntry {
   branch?: string;
   resume_cwd?: string;
   category?: string;
+  credential_id?: number | null;
+  credential_label?: string;
 }
 
 export interface TranscriptResponse {
@@ -243,10 +256,69 @@ export interface AskHistoryEntry {
   role: 'human' | 'assistant' | 'error';
   content: string;
   timestamp: string;
+  /** Injected on the feed endpoint: "reopen" / "rework" for human messages
+   *  whose ask produced a reopen/rework action. Absent for plain asks. */
+  intent?: 'reopen' | 'rework';
 }
 
 export interface AskHistoryResponse {
   history: AskHistoryEntry[];
+}
+
+// ── Artifacts ──
+
+export interface ArtifactMedia {
+  index: number;
+  filename: string;
+  ext: string;
+  local_path?: string;
+  remote_url?: string;
+  caption?: string;
+}
+
+export interface TaskArtifact {
+  id: number;
+  task_id: number;
+  artifact_type: 'evidence' | 'work_summary';
+  content: string;
+  media: ArtifactMedia[];
+  created_at: string;
+}
+
+export interface ArtifactsResponse {
+  artifacts: TaskArtifact[];
+}
+
+// ── Feed ──
+
+export interface FeedItem {
+  type: 'timeline' | 'artifact' | 'message';
+  timestamp: string;
+  data: TimelineEvent | TaskArtifact | AskHistoryEntry;
+}
+
+export interface FeedResponse {
+  id: string;
+  feed: FeedItem[];
+  count: number;
+}
+
+// ── Advisor ──
+
+export type AdvisorResponse = AdvisorAskResponse | AdvisorActionResponse;
+
+export interface AdvisorAskResponse {
+  id: number;
+  ask_id: string;
+  message: string;
+  answer: string;
+  session_id: string;
+}
+
+export interface AdvisorActionResponse {
+  ok: boolean;
+  intent: string;
+  feedback: string;
 }
 
 export interface ScoutArticleResponse {

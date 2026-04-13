@@ -42,6 +42,7 @@ use mando_cc::{CcConfig, CcOneShot, CcResult};
 use mando_types::now_rfc3339;
 
 /// Build a completed (Stopped) session log entry from a CcResult.
+#[allow(clippy::too_many_arguments)]
 fn make_session_entry<'a>(
     result: &'a CcResult,
     cwd: &'a Path,
@@ -49,6 +50,7 @@ fn make_session_entry<'a>(
     caller: &'a str,
     task_id: Option<i64>,
     resumed: bool,
+    credential_id: Option<i64>,
 ) -> crate::io::headless_cc::SessionLogEntry<'a> {
     crate::io::headless_cc::SessionLogEntry {
         session_id: &result.session_id,
@@ -61,6 +63,7 @@ fn make_session_entry<'a>(
         task_id,
         status: mando_types::SessionStatus::Stopped,
         worker_name: "",
+        credential_id,
     }
 }
 
@@ -217,6 +220,8 @@ impl CcSessionManager {
         task_id: Option<i64>,
         max_turns: Option<u32>,
     ) -> Result<CcResult> {
+        let credential = crate::runtime::tick_spawn::pick_credential(&self.pool).await;
+        let cred_id = crate::runtime::tick_spawn::credential_id(&credential);
         let mut builder = CcConfig::builder()
             .model(model.unwrap_or(&self.default_model))
             .cwd(cwd)
@@ -228,6 +233,7 @@ impl CcSessionManager {
         if let Some(n) = max_turns {
             builder = builder.max_turns(n);
         }
+        builder = crate::runtime::tick_spawn::with_credential(builder, &credential);
         let result = CcOneShot::run(prompt, builder.build()).await?;
 
         crate::io::headless_cc::log_cc_session(
@@ -239,6 +245,7 @@ impl CcSessionManager {
                 key,
                 task_id,
                 false,
+                cred_id,
             ),
         )
         .await?;
@@ -279,21 +286,23 @@ impl CcSessionManager {
                 .ok_or_else(|| anyhow::anyhow!("no active session for '{}'", key))?
         };
 
+        let credential = crate::runtime::tick_spawn::pick_credential(&self.pool).await;
+        let cred_id = crate::runtime::tick_spawn::credential_id(&credential);
+        let builder = CcConfig::builder()
+            .model(&self.default_model)
+            .cwd(cwd)
+            .timeout(Duration::from_secs(session.call_timeout_s))
+            .caller(key)
+            .resume(session.session_id.clone());
         let result = CcOneShot::run(
             message,
-            CcConfig::builder()
-                .model(&self.default_model)
-                .cwd(cwd)
-                .timeout(Duration::from_secs(session.call_timeout_s))
-                .caller(key)
-                .resume(session.session_id.clone())
-                .build(),
+            crate::runtime::tick_spawn::with_credential(builder, &credential).build(),
         )
         .await?;
 
         crate::io::headless_cc::log_cc_session(
             &self.pool,
-            &make_session_entry(&result, cwd, &self.default_model, key, None, true),
+            &make_session_entry(&result, cwd, &self.default_model, key, None, true, cred_id),
         )
         .await?;
 

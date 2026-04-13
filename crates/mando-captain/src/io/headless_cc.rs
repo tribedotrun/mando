@@ -17,6 +17,7 @@ pub struct SessionLogEntry<'a> {
     pub task_id: Option<i64>,
     pub status: SessionStatus,
     pub worker_name: &'a str,
+    pub credential_id: Option<i64>,
 }
 
 /// Convert empty string to None, non-empty to Some.
@@ -52,6 +53,7 @@ pub async fn log_cc_session(pool: &SqlitePool, entry: &SessionLogEntry<'_>) -> R
             scout_item_id: None,
             worker_name: non_empty(entry.worker_name),
             resumed_at: resumed_at.as_deref(),
+            credential_id: entry.credential_id,
         },
     )
     .await
@@ -59,6 +61,7 @@ pub async fn log_cc_session(pool: &SqlitePool, entry: &SessionLogEntry<'_>) -> R
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn log_running_session(
     pool: &SqlitePool,
     session_id: &str,
@@ -67,6 +70,7 @@ pub(crate) async fn log_running_session(
     worker_name: &str,
     task_id: Option<i64>,
     resumed: bool,
+    credential_id: Option<i64>,
 ) -> Result<()> {
     log_cc_session(
         pool,
@@ -81,6 +85,7 @@ pub(crate) async fn log_running_session(
             task_id,
             status: SessionStatus::Running,
             worker_name,
+            credential_id,
         },
     )
     .await
@@ -153,6 +158,7 @@ pub(crate) async fn log_cc_result(
             task_id,
             status: SessionStatus::Stopped,
             worker_name: "",
+            credential_id: None,
         },
     )
     .await
@@ -178,6 +184,7 @@ pub(crate) async fn log_cc_failure(
             task_id,
             status: SessionStatus::Failed,
             worker_name: "",
+            credential_id: None,
         },
     )
     .await

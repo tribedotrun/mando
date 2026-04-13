@@ -15,7 +15,13 @@ export function SettingsPageRoute(): React.ReactElement {
       <ErrorBoundary fallbackLabel="Settings">
         <SettingsPage
           onBack={() => void navigate({ to: '/captain' })}
-          initialSection={(section as SettingsSection) ?? 'general'}
+          section={(section as SettingsSection) ?? 'general'}
+          onSectionChange={(s) =>
+            void navigate({
+              to: '/settings/$section',
+              params: { section: s },
+            })
+          }
         />
       </ErrorBoundary>
     </div>

@@ -120,10 +120,15 @@ export function createFileLinkProvider(opts: {
             },
           } satisfies ILink;
         }),
-      ).then((links) => {
-        const validLinks = links.filter(Boolean) as ILink[];
-        callback(validLinks.length > 0 ? validLinks : undefined);
-      });
+      )
+        .then((links) => {
+          const validLinks = links.filter(Boolean) as ILink[];
+          callback(validLinks.length > 0 ? validLinks : undefined);
+        })
+        .catch((err) => {
+          log.warn('Failed to resolve terminal file links', err);
+          callback(undefined);
+        });
     },
   };
 }

@@ -190,9 +190,28 @@ async fn run_captain_tick_inner(
     );
 
     // ── Rate-limit cooldown check ──────────────────────────────────────
-    let rate_limited = super::rate_limit_cooldown::is_active();
+    // Two independent systems:
+    // - Credentials configured: blocked when all credentials are rate-limited
+    //   (pick_for_worker returns None).
+    // - No credentials: blocked by ambient (host login) cooldown.
+    let has_credentials = mando_db::queries::credentials::has_any(&pool)
+        .await
+        .unwrap_or(false);
+    let rate_limited = if has_credentials {
+        // All credentials rate-limited = no available credential to pick.
+        mando_db::queries::credentials::pick_for_worker(&pool)
+            .await
+            .unwrap_or(None)
+            .is_none()
+    } else {
+        super::ambient_rate_limit::is_active()
+    };
     if rate_limited {
-        let remaining = super::rate_limit_cooldown::remaining_secs();
+        let remaining = if has_credentials {
+            0 // per-credential cooldowns have their own DB timestamps
+        } else {
+            super::ambient_rate_limit::remaining_secs()
+        };
         tracing::warn!(
             module = "captain",
             remaining_s = remaining,
@@ -203,7 +222,7 @@ async fn run_captain_tick_inner(
     // ── §2 GATHER — context for ALL non-terminal items ────────────────
 
     let worker_contexts =
-        review_phase::gather_worker_contexts(&mut items, config, &health_state).await?;
+        review_phase::gather_worker_contexts(&mut items, config, &health_state, &pool).await?;
 
     // Persist any PRs discovered during context gathering so they survive a crash.
     super::tick_persist::flush_discovered_prs(&items, &pre_tick_snapshot, store_lock, &mut alerts)
@@ -389,7 +408,10 @@ async fn run_captain_tick_inner(
                             Some(old_snapshot) => *old_snapshot != current_snapshot,
                             None => true,
                         },
-                        Err(_) => true, // can't snapshot — treat as changed
+                        Err(e) => {
+                            tracing::debug!(task_id = item.id, error = %e, "snapshot failed, treating as changed");
+                            true
+                        }
                     }
                 })
                 .cloned()

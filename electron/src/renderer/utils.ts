@@ -5,6 +5,7 @@ import {
   type ClarifierQuestion,
   type ItemStatus,
 } from '#renderer/types';
+import type { WorkbenchItem } from '#renderer/api-terminal';
 import { toast } from 'sonner';
 import log from '#renderer/logger';
 
@@ -66,18 +67,6 @@ export function canAskAny(t: TaskItem): boolean {
   ].includes(t.status);
 }
 
-/** Whether a task can be restarted (broader than rework — includes merged/canceled). */
-export function canRestart(t: TaskItem): boolean {
-  return [
-    'awaiting-review',
-    'merged',
-    'completed-no-pr',
-    'canceled',
-    'escalated',
-    'errored',
-  ].includes(t.status);
-}
-
 /** Derive PR icon state from task status. */
 export function prState(status: string): 'open' | 'merged' | 'closed' {
   if (status === 'merged') return 'merged';
@@ -99,25 +88,35 @@ export function sortTaskItems(items: TaskItem[]): TaskItem[] {
   });
 }
 
+/** Unified sidebar child: a task OR a taskless workbench. */
+export type SidebarChild =
+  | { kind: 'task'; task: TaskItem }
+  | { kind: 'workbench'; wb: WorkbenchItem };
+
+/**
+ * Sidebar sort for a mixed list of tasks + taskless workbenches:
+ * non-finalized items first, then descending by last activity. Workbenches
+ * are always "non-finalized" for this purpose since they don't have a
+ * terminal status.
+ */
+export function sortProjectChildren(items: SidebarChild[]): SidebarChild[] {
+  const finalizedRank = (c: SidebarChild): number =>
+    c.kind === 'task' && FINALIZED_STATUSES.includes(c.task.status) ? 1 : 0;
+  const activity = (c: SidebarChild): string =>
+    c.kind === 'task'
+      ? c.task.last_activity_at || c.task.created_at || ''
+      : c.wb.lastActivityAt || c.wb.createdAt || '';
+  return [...items].sort((a, b) => {
+    const ra = finalizedRank(a);
+    const rb = finalizedRank(b);
+    if (ra !== rb) return ra - rb;
+    return activity(b).localeCompare(activity(a));
+  });
+}
+
 /** Extract a human-readable message from an unknown error. */
 export function getErrorMessage(err: unknown, fallback: string): string {
   return err instanceof Error ? err.message : fallback;
-}
-
-/** Create a store mutation helper that re-fetches on success and sets error on failure. */
-export function createMutate(
-  getState: () => { fetch: () => Promise<void> },
-  set: (partial: { error: string }) => void,
-): (fn: () => Promise<unknown>, errLabel: string) => Promise<void> {
-  return async (fn, errLabel) => {
-    try {
-      await fn();
-      await getState().fetch();
-    } catch (err) {
-      set({ error: getErrorMessage(err, errLabel) });
-      throw err;
-    }
-  };
 }
 
 /** Extract the latest clarifier question set from timeline events, if the task is in the `needs-clarification` state. */
@@ -266,30 +265,9 @@ export function indexPrev(i: number): number {
   return Math.max(i - 1, 0);
 }
 
-/** Wrap-around modulo (always non-negative). */
-export function wrapIndex(i: number, length: number): number {
-  const len = Math.max(length, 1);
-  return ((i % len) + len) % len;
-}
-
 /** Round to nearest integer. */
 export function round(v: number): number {
   return Math.round(v);
-}
-
-/** Floor to nearest integer. */
-export function floor(v: number): number {
-  return Math.floor(v);
-}
-
-/** Ceiling to nearest integer. */
-export function ceil(v: number): number {
-  return Math.ceil(v);
-}
-
-/** Format milliseconds as a short human duration (e.g. "3m" or "45s"). */
-export function fmtMs(ms: number): string {
-  return ms >= 60_000 ? `${Math.round(ms / 60_000)}m` : `${Math.round(ms / 1_000)}s`;
 }
 
 /** Compute a whole-number percentage (0-100). */
@@ -319,4 +297,16 @@ export function bulkTextareaRows(lineCount: number): number {
 /** Ceil-based minutes remaining (e.g. rate limit countdown). */
 export function ceilMinutes(secs: number): number {
   return Math.ceil(secs / 60);
+}
+
+const RATE_LIMITED_STATUSES: ReadonlySet<string> = new Set([
+  'captain-reviewing',
+  'captain-merging',
+  'clarifying',
+]);
+
+/** True when global rate-limit cooldown is active and this task is in a
+ *  status where session spawning is suppressed. */
+export function isRateLimited(item: { status: string }, rateLimitSecs: number): boolean {
+  return rateLimitSecs > 0 && RATE_LIMITED_STATUSES.has(item.status);
 }

@@ -87,25 +87,27 @@ pub async fn process_item(
         .map_err(|e| anyhow::anyhow!(e))?;
 
     let model = crate::biz::model_lookup::required_model(workflow, "process")?;
+    let credential = mando_captain::runtime::tick_spawn::pick_credential(db.pool()).await;
+    let process_cred_id = mando_captain::runtime::tick_spawn::credential_id(&credential);
+    let builder = mando_cc::CcConfig::builder()
+        .model(model)
+        .timeout(workflow.agent.process_timeout_s)
+        .caller("scout-process")
+        .json_schema(serde_json::json!({
+            "type": "object",
+            "properties": {
+                "title": { "type": "string" },
+                "source_name": { "type": "string" },
+                "date_published": { "type": ["string", "null"] },
+                "relevance_score": { "type": "integer" },
+                "quality_score": { "type": "integer" },
+                "summary": { "type": "string" }
+            },
+            "required": ["title", "source_name", "relevance_score", "quality_score", "summary"]
+        }));
     let result = mando_cc::CcOneShot::run(
         &prompt,
-        mando_cc::CcConfig::builder()
-            .model(model)
-            .timeout(workflow.agent.process_timeout_s)
-            .caller("scout-process")
-            .json_schema(serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "title": { "type": "string" },
-                    "source_name": { "type": "string" },
-                    "date_published": { "type": ["string", "null"] },
-                    "relevance_score": { "type": "integer" },
-                    "quality_score": { "type": "integer" },
-                    "summary": { "type": "string" }
-                },
-                "required": ["title", "source_name", "relevance_score", "quality_score", "summary"]
-            }))
-            .build(),
+        mando_captain::runtime::tick_spawn::with_credential(builder, &credential).build(),
     )
     .await
     .with_context(|| format!("AI scoring call failed for #{id}"))?;
@@ -118,6 +120,7 @@ pub async fn process_item(
             "scout-process",
             result.cost_usd,
             result.duration_ms,
+            process_cred_id,
         )
         .await
     {
@@ -193,6 +196,7 @@ pub async fn process_item(
             url_type.as_str(),
             &content_path_str,
             workflow,
+            db.pool(),
         )
         .await
         {
@@ -204,6 +208,7 @@ pub async fn process_item(
                         "scout-article",
                         article_result.cost_usd,
                         article_result.duration_ms,
+                        article_result.credential_id,
                     )
                     .await
                 {

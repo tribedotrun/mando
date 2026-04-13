@@ -55,6 +55,9 @@ async fn test_state_with_data_dir(data_dir: PathBuf) -> AppState {
         bus: Arc::new(bus),
         cc_session_mgr: Arc::new(cc_session_mgr),
         task_store: Arc::new(RwLock::new(task_store)),
+        credential_mgr: Arc::new(crate::credentials::CredentialManager::new(
+            db.pool().clone(),
+        )),
         db,
         qa_session_mgr: mando_scout::runtime::qa::session_manager_from_workflow(
             &mando_config::ScoutWorkflow::compiled_default(),

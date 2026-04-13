@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useMountEffect } from '#renderer/global/hooks/useMountEffect';
 import log from '#renderer/logger';
@@ -7,31 +7,25 @@ import {
   fetchTimeline,
   fetchItemSessions,
   fetchPrSummary,
-  fetchAskHistory,
 } from '#renderer/domains/captain/hooks/useApi';
 import {
   FINALIZED_STATUSES,
   type TaskItem,
   type SessionSummary,
-  type TimelineEvent,
   type MandoConfig,
 } from '#renderer/types';
-import { extractClarifierQuestions } from '#renderer/utils';
 import { buildSessionsFromTimeline } from '#renderer/domains/sessions';
 import { TaskActionBar } from '#renderer/domains/captain/components/TaskActionBar';
+import { useTaskAsk } from '#renderer/global/hooks/useTaskAsk';
 import {
-  EscalatedReportTab,
-  ClarificationTab,
-} from '#renderer/domains/captain/components/StatusCard';
-import { QATab } from '#renderer/domains/captain/components/TaskQAView';
-import {
-  TimelineTab,
   PrTab,
   SessionsTab,
   InfoTab,
   ContextModal,
 } from '#renderer/domains/captain/components/TaskDetailTabs';
+import { TaskFeedView } from '#renderer/domains/captain/components/TaskFeedView';
 import { RefreshCw } from 'lucide-react';
+import { cn } from '#renderer/cn';
 import { Button } from '#renderer/components/ui/button';
 import { Tabs, TabsList, TabsTrigger } from '#renderer/components/ui/tabs';
 import {
@@ -42,15 +36,7 @@ import {
 } from '#renderer/components/ui/tooltip';
 import { queryKeys } from '#renderer/queryKeys';
 
-type DetailTab =
-  | 'escalated'
-  | 'respond'
-  | 'timeline'
-  | 'pr'
-  | 'sessions'
-  | 'info'
-  | 'qa'
-  | 'terminal';
+type DetailTab = 'feed' | 'pr' | 'terminal' | 'more';
 const REFRESH_INDICATOR_MS = 1500;
 
 interface Props {
@@ -69,6 +55,8 @@ interface Props {
     project?: string;
     taskTitle?: string;
   }) => void;
+  activeTab?: string;
+  onTabChange?: (tab: string) => void;
 }
 
 export function TaskDetailView({
@@ -76,16 +64,14 @@ export function TaskDetailView({
   onBack,
   onOpenTerminal,
   onOpenTranscript,
+  activeTab: activeTabProp,
+  onTabChange,
 }: Props): React.ReactElement {
   const qc = useQueryClient();
-  const [activeTab, setActiveTab] = useState<DetailTab>(() => {
-    if (item.status === 'escalated') return 'escalated';
-    if (item.status === 'needs-clarification') return 'respond';
-    return 'pr';
-  });
+  const activeTab: DetailTab = (activeTabProp as DetailTab) || 'feed';
   const [prRefreshing, setPrRefreshing] = useState(false);
   const [contextModalOpen, setContextModalOpen] = useState(false);
-  const [pendingQuestion, setPendingQuestion] = useState<string | null>(null);
+  const { ask } = useTaskAsk(item.id);
 
   // Listen for header overflow menu triggering "View task brief"
   useMountEffect(() => {
@@ -157,21 +143,11 @@ export function TaskDetailView({
     },
   });
 
-  useQuery({
-    queryKey: queryKeys.tasks.askHistory(item.id),
-    queryFn: () => fetchAskHistory(item.id),
-  });
   const events = timelineData?.events ?? [];
   const sessionMap = timelineData?.sessionMap ?? {};
 
   // Timeline is the authoritative source for session data.
   const sessions = buildSessionsFromTimeline(events, sessionMap, item);
-
-  // Extract clarifier questions from latest timeline event.
-  const clarifierQuestions = useMemo(
-    () => extractClarifierQuestions(events, item.status),
-    [events, item.status],
-  );
 
   const navigateToTranscript = (sessionId: string, caller?: string, cwd?: string) => {
     onOpenTranscript?.({
@@ -183,19 +159,9 @@ export function TaskDetailView({
     });
   };
 
-  const handleTranscriptClick = (sessionId: string, _event: TimelineEvent) => {
-    const summary = sessionMap[sessionId];
-    navigateToTranscript(sessionId, summary?.caller, summary?.cwd || item.worktree);
-  };
-
   const handleSessionClick = (s: SessionSummary) => {
     navigateToTranscript(s.session_id, s.caller, s.cwd || item.worktree);
   };
-
-  const handleAskFromBar = useCallback((question: string) => {
-    setActiveTab('qa');
-    setPendingQuestion(question);
-  }, []);
 
   const openTerminalPage = useCallback(
     (resumeId?: string, name?: string, sessionCwd?: string) => {
@@ -233,55 +199,39 @@ export function TaskDetailView({
     [openTerminalPage],
   );
 
-  // Dynamic action tabs that appear at the front when status demands it.
-  const showEscalated = item.status === 'escalated';
-  const showRespond =
-    item.status === 'needs-clarification' &&
-    clarifierQuestions != null &&
-    clarifierQuestions.length > 0;
+  const tabs: { key: DetailTab; label: string }[] = [
+    { key: 'feed', label: 'Feed' },
+    { key: 'pr', label: 'PR' },
+    { key: 'terminal', label: 'Terminal' },
+    { key: 'more', label: 'More' },
+  ];
 
-  const tabs = useMemo(() => {
-    const base: { key: DetailTab; label: string; accent?: boolean }[] = [
-      { key: 'pr', label: 'PR' },
-      { key: 'timeline', label: 'Timeline' },
-      { key: 'sessions', label: 'Sessions' },
-      { key: 'info', label: 'Info' },
-      { key: 'qa', label: 'Q&A' },
-      { key: 'terminal', label: 'Terminal' },
-    ];
-    if (showRespond) base.unshift({ key: 'respond', label: 'Respond', accent: true });
-    if (showEscalated) base.unshift({ key: 'escalated', label: 'Report', accent: true });
-    return base;
-  }, [showEscalated, showRespond]);
-
-  // Auto-select action tabs when status transitions (not on mount -- useState init handles that).
-  const prevStatus = useRef(item.status);
-  if (item.status !== prevStatus.current) {
-    prevStatus.current = item.status;
-    if (showEscalated) setActiveTab('escalated');
-    else if (showRespond) setActiveTab('respond');
-  }
-
-  // If the active tab disappears (status changed), fall back to PR.
   const validKeys = tabs.map((t) => t.key);
-  const effectiveTab = validKeys.includes(activeTab) ? activeTab : 'pr';
+  const effectiveTab = validKeys.includes(activeTab) ? activeTab : 'feed';
 
   return (
     <div className="flex h-full flex-col">
       {/* Main row */}
       <div className="flex min-h-0 flex-1">
         {/* Left column, entire column scrolls together */}
-        <div className="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden">
+        <div
+          className={cn(
+            'min-h-0 min-w-0 flex-1 overflow-x-hidden',
+            effectiveTab === 'feed'
+              ? 'flex flex-col overflow-hidden'
+              : 'scrollbar-on-hover overflow-y-auto',
+          )}
+        >
           <Tabs
             value={effectiveTab}
             onValueChange={(v) => {
               if (v === 'terminal') {
                 openTerminalPage();
               } else {
-                setActiveTab(v as DetailTab);
+                onTabChange?.(v);
               }
             }}
-            className="gap-0"
+            className={cn('gap-0', effectiveTab === 'feed' && 'flex flex-1 flex-col min-h-0')}
           >
             <div className="sticky top-0 z-10 flex items-center justify-between bg-background">
               <TabsList variant="line" className="h-auto gap-0">
@@ -289,13 +239,8 @@ export function TaskDetailView({
                   <TabsTrigger
                     key={tab.key}
                     value={tab.key}
-                    className={
-                      tab.accent
-                        ? 'px-3 py-1.5 text-caption font-medium text-[var(--needs-human)]'
-                        : 'px-3 py-1.5 text-caption font-medium'
-                    }
+                    className="px-3 py-1.5 text-caption font-medium"
                   >
-                    {tab.accent && <span className="mr-1">!</span>}
                     {tab.label}
                   </TabsTrigger>
                 ))}
@@ -328,38 +273,29 @@ export function TaskDetailView({
             </div>
 
             {/* Tab content */}
-            <div className="break-words pr-2 pt-4">
-              {effectiveTab === 'escalated' && <EscalatedReportTab item={item} />}
-              {effectiveTab === 'respond' && clarifierQuestions && (
-                <ClarificationTab taskId={item.id} questions={clarifierQuestions} />
-              )}
-              {effectiveTab === 'timeline' && (
-                <TimelineTab events={events} onTranscriptClick={handleTranscriptClick} />
-              )}
+            <div className={cn('break-words', effectiveTab === 'feed' && 'flex-1 min-h-0')}>
+              {effectiveTab === 'feed' && <TaskFeedView item={item} />}
               {effectiveTab === 'pr' && <PrTab item={item} prBody={prBody} prPending={prPending} />}
-              {effectiveTab === 'sessions' && (
-                <SessionsTab
-                  sessions={sessions}
-                  onSessionClick={handleSessionClick}
-                  onResumeSession={handleResumeSession}
-                  taskId={item.id}
-                />
-              )}
-              {effectiveTab === 'info' && <InfoTab item={item} />}
-              {effectiveTab === 'qa' && (
-                <QATab
-                  item={item}
-                  pendingQuestion={pendingQuestion}
-                  onPendingConsumed={() => setPendingQuestion(null)}
-                />
+              {effectiveTab === 'more' && (
+                <div className="space-y-6">
+                  <InfoTab item={item} />
+                  <SessionsTab
+                    sessions={sessions}
+                    onSessionClick={handleSessionClick}
+                    onResumeSession={handleResumeSession}
+                    taskId={item.id}
+                  />
+                </div>
               )}
             </div>
           </Tabs>
         </div>
       </div>
 
-      {/* Action bar, pinned at bottom */}
-      <TaskActionBar item={item} onAsk={handleAskFromBar} />
+      {/* Action bar, hidden when feed tab is active (feed has its own input bar) */}
+      {effectiveTab !== 'feed' && (
+        <TaskActionBar item={item} onAsk={(q, images) => void ask(q, images)} />
+      )}
 
       {/* Context modal */}
       {contextModalOpen && item.context && (

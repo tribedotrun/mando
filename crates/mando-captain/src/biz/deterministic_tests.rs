@@ -42,6 +42,10 @@ fn base_ctx() -> WorkerContext {
         stream_stale_s: None,
         pr_head_sha: "abc123".into(),
         degraded: false,
+        has_evidence: true,
+        evidence_fresh: true,
+        has_work_summary: true,
+        work_summary_fresh: true,
     }
 }
 
@@ -263,20 +267,22 @@ fn unresolved_threads_nudge() {
 fn missing_evidence_nudge() {
     let mut ctx = base_ctx();
     ctx.process_alive = false;
-    ctx.pr_body = "## PR Summary\nJust a description".into();
+    ctx.has_evidence = false;
+    ctx.evidence_fresh = false;
     let a = classify(&ctx, &base_item(), Some(true));
     assert_eq!(a.action, ActionKind::Nudge);
     assert!(a.reason.unwrap().contains("evidence"));
 }
 
 #[test]
-fn missing_diagram_nudge() {
+fn missing_work_summary_nudge() {
     let mut ctx = base_ctx();
     ctx.process_alive = false;
-    ctx.pr_body = "No summary\n![fix](https://example.com/fix.png)".into();
+    ctx.has_work_summary = false;
+    ctx.work_summary_fresh = false;
     let a = classify(&ctx, &base_item(), Some(true));
     assert_eq!(a.action, ActionKind::Nudge);
-    assert!(a.reason.unwrap().contains("diagram"));
+    assert!(a.reason.unwrap().contains("work summary"));
 }
 
 #[test]
@@ -324,10 +330,10 @@ fn nopr_insufficient_output_nudge() {
 #[test]
 fn stale_evidence_blocks_gates_pass() {
     let mut ctx = base_ctx();
-    // Evidence exists but no SHA marker, and reopen_seq > 0
-    ctx.pr_body = "## PR Summary\n<!-- pr-summary-head: abc -->\n### After\n![fix](https://example.com/fix.png)".into();
+    // Evidence exists but is stale after reopen.
+    ctx.has_evidence = true;
+    ctx.evidence_fresh = false;
     ctx.reopen_seq = 1;
-    ctx.pr_head_sha = "abc123".into();
     let a = classify(&ctx, &base_item(), Some(true));
     assert_eq!(a.action, ActionKind::Nudge);
     assert!(
@@ -339,10 +345,12 @@ fn stale_evidence_blocks_gates_pass() {
 #[test]
 fn fresh_evidence_after_reopen_passes_gates() {
     let mut ctx = base_ctx();
-    ctx.pr_body = "## PR Summary\n<!-- pr-summary-head: abc -->\n### After\n![fix](https://example.com/fix.png)\n<!-- evidence-head: abc -->"
-        .into();
+    // DB-backed gates: evidence and summary exist and are fresh.
+    ctx.has_evidence = true;
+    ctx.evidence_fresh = true;
+    ctx.has_work_summary = true;
+    ctx.work_summary_fresh = true;
     ctx.reopen_seq = 1;
-    ctx.pr_head_sha = "abc123".into();
     let a = classify(&ctx, &base_item(), Some(true));
     assert_eq!(a.action, ActionKind::CaptainReview);
     assert_eq!(a.reason.as_deref(), Some("gates_pass"));

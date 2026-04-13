@@ -5,6 +5,7 @@
  * Daemon owns runtime; Electron handles bootstrap, update, and login-item UX.
  */
 import { app, BrowserWindow, Tray, Menu, globalShortcut, dialog, shell } from 'electron';
+import { execFileSync, execSync } from 'child_process';
 import path from 'path';
 import fs from 'fs';
 import type http from 'http';
@@ -34,7 +35,7 @@ import { registerTerminalBridgeHandlers } from '#main/terminal-bridge';
 import { setupAutoUpdate, applyPendingUpdateIfAny, cleanupAutoUpdate } from '#main/updater';
 import { getAppInfo } from '#main/app-info';
 import { startRendererServer } from '#main/renderer-server';
-import { announceUiQuitting, announceUiRegistered } from '#main/ui-lifecycle';
+import { announceUiRegistered } from '#main/ui-lifecycle';
 
 // Isolate Chromium user-data per data-dir so multiple dev/sandbox instances
 // don't fight over ~/Library/Application Support/Electron/.
@@ -50,6 +51,7 @@ let trayAvailable = false;
 let rendererServer: http.Server | null = null;
 let rendererPort = 0;
 let isQuitting = false;
+let quitAnnounced = false;
 let rendererUrl: string | null = null;
 
 // ---------------------------------------------------------------------------
@@ -152,7 +154,8 @@ function createTray(): void {
   tray.setToolTip(updateTrayTooltip());
 
   const title = getAppTitle();
-  const contextMenu = Menu.buildFromTemplate([
+  const mode = getAppMode();
+  const items: Electron.MenuItemConstructorOptions[] = [
     {
       label: `Show ${title}`,
       click: () => {
@@ -162,14 +165,35 @@ function createTray(): void {
     },
     { type: 'separator' },
     {
-      label: `Quit ${title}`,
+      label: 'Quit UI',
       click: () => {
         isQuitting = true;
         setIsQuitting(true);
         app.quit();
       },
     },
-  ]);
+  ];
+
+  if (mode !== 'production') {
+    items.push({
+      label: 'Quit All (daemon + UI)',
+      click: () => {
+        isQuitting = true;
+        setIsQuitting(true);
+        try {
+          const dataDir = getDataDir();
+          const pidFile = path.join(dataDir, 'daemon.pid');
+          const pid = parseInt(fs.readFileSync(pidFile, 'utf-8').trim(), 10);
+          if (!isNaN(pid)) process.kill(pid, 'SIGKILL');
+        } catch {
+          // Daemon already dead or pid file missing.
+        }
+        app.quit();
+      },
+    });
+  }
+
+  const contextMenu = Menu.buildFromTemplate(items);
 
   tray.setContextMenu(contextMenu);
   trayAvailable = true;
@@ -371,20 +395,46 @@ app.on('window-all-closed', () => {
   }
 });
 
-// In non-production mode, block external quit signals (e.g. Cmd+Q cascade from
-// another Electron instance sharing the same bundle ID). Our tray menu sets
-// isQuitting=true before calling app.quit(), so it still works. SIGTERM from
-// `mando-dev stop` bypasses before-quit entirely.
-app.on('before-quit', (e) => {
-  if (!isQuitting && getAppMode() !== 'production') {
-    e.preventDefault();
-    return;
-  }
+// SIGTERM from `mando-dev stop` bypasses before-quit entirely.
+app.on('before-quit', () => {
   isQuitting = true;
   setIsQuitting(true);
+
+  // Notify daemon synchronously so it sets desired_state=Suppressed and
+  // doesn't respawn us. Discovery mirrors readPort()/readToken() but sync.
+  if (!quitAnnounced) {
+    quitAnnounced = true;
+    try {
+      const dataDir = getDataDir();
+      const mode = getAppMode();
+      const portFile = path.join(dataDir, mode === 'dev' ? 'daemon-dev.port' : 'daemon.port');
+      const port = process.env.MANDO_GATEWAY_PORT || fs.readFileSync(portFile, 'utf-8').trim();
+      const token =
+        process.env.MANDO_AUTH_TOKEN ||
+        fs.readFileSync(path.join(dataDir, 'auth-token'), 'utf-8').trim();
+      execFileSync(
+        'curl',
+        [
+          '-sf',
+          '-X',
+          'POST',
+          '-H',
+          `Authorization: Bearer ${token}`,
+          `http://127.0.0.1:${port}/api/ui/quitting`,
+        ],
+        { timeout: 2000, stdio: 'ignore' },
+      );
+    } catch {
+      // Best-effort; daemon will stop respawning after 5 consecutive failures.
+    }
+  }
+
   globalShortcut.unregisterAll();
-  void announceUiQuitting();
   cleanupDaemon();
   cleanupAutoUpdate();
   rendererServer?.close();
+
+  // Electron 41 patches process.kill/app.exit/process.exit so they don't
+  // terminate inside before-quit. External kill via shell is the only way.
+  execSync(`kill -9 ${process.pid}`, { stdio: 'ignore' });
 });

@@ -284,7 +284,12 @@ impl Notifier {
     /// - Each tier notifies once per 7-day window.
     /// - `Rejected` always fires immediately.
     /// - `Allowed` clears all tiers (recovery).
-    pub async fn check_rate_limit(&self, result: &mando_cc::CcResult) {
+    pub async fn check_rate_limit(
+        &self,
+        result: &mando_cc::CcResult,
+        pool: &sqlx::SqlitePool,
+        credential_id: Option<i64>,
+    ) {
         let rl = match &result.rate_limit {
             Some(rl) => rl,
             None => return,
@@ -299,10 +304,18 @@ impl Notifier {
                         tracing::error!("rate limit tracker mutex poisoned: {e}");
                     }
                 }
-                super::rate_limit_cooldown::clear();
+                if let Some(cid) = credential_id {
+                    super::credential_rate_limit::clear(pool, cid).await;
+                } else {
+                    super::ambient_rate_limit::clear();
+                }
             }
             mando_cc::RateLimitStatus::Rejected => {
-                super::rate_limit_cooldown::activate(rl.resets_at);
+                if let Some(cid) = credential_id {
+                    super::credential_rate_limit::activate(pool, cid, rl.resets_at).await;
+                } else {
+                    super::ambient_rate_limit::activate(rl.resets_at);
+                }
                 let msg = format!(
                     "Rate limited — request rejected (resets at {})",
                     rl.resets_at
@@ -634,14 +647,19 @@ mod tests {
         }
     }
 
+    async fn test_pool() -> sqlx::SqlitePool {
+        mando_db::Db::open_in_memory().await.unwrap().pool().clone()
+    }
+
     #[tokio::test]
     async fn check_rate_limit_first_warning_emits() {
+        let pool = test_pool().await;
         let bus = Arc::new(EventBus::new());
         let mut rx = bus.subscribe();
         let n = Notifier::new(bus);
 
         let result = make_cc_result(mando_cc::RateLimitStatus::AllowedWarning, 0.89);
-        n.check_rate_limit(&result).await;
+        n.check_rate_limit(&result, &pool, None).await;
 
         let (event, data) = rx.recv().await.unwrap();
         assert_eq!(event, BusEvent::Notification);
@@ -651,18 +669,19 @@ mod tests {
 
     #[tokio::test]
     async fn check_rate_limit_same_tier_suppressed() {
+        let pool = test_pool().await;
         let bus = Arc::new(EventBus::new());
         let mut rx = bus.subscribe();
         let n = Notifier::new(bus);
 
         let r1 = make_cc_result(mando_cc::RateLimitStatus::AllowedWarning, 0.87);
-        n.check_rate_limit(&r1).await;
+        n.check_rate_limit(&r1, &pool, None).await;
         // Consume first notification.
         rx.recv().await.unwrap();
 
         // Second at same tier → suppressed.
         let r2 = make_cc_result(mando_cc::RateLimitStatus::AllowedWarning, 0.89);
-        n.check_rate_limit(&r2).await;
+        n.check_rate_limit(&r2, &pool, None).await;
 
         let timeout = tokio::time::timeout(std::time::Duration::from_millis(50), rx.recv()).await;
         assert!(timeout.is_err(), "same tier should be suppressed");
@@ -670,19 +689,20 @@ mod tests {
 
     #[tokio::test]
     async fn check_rate_limit_rejected_always_fires() {
+        let pool = test_pool().await;
         let bus = Arc::new(EventBus::new());
         let mut rx = bus.subscribe();
         let n = Notifier::new(bus);
 
         let r1 = make_cc_result(mando_cc::RateLimitStatus::Rejected, 1.0);
-        n.check_rate_limit(&r1).await;
+        n.check_rate_limit(&r1, &pool, None).await;
         let (_, data) = rx.recv().await.unwrap();
         let p: NotificationPayload = serde_json::from_value(data.unwrap()).unwrap();
         assert!(p.message.contains("rejected"));
 
         // Second rejected also fires.
         let r2 = make_cc_result(mando_cc::RateLimitStatus::Rejected, 1.0);
-        n.check_rate_limit(&r2).await;
+        n.check_rate_limit(&r2, &pool, None).await;
         let (_, data2) = rx.recv().await.unwrap();
         let p2: NotificationPayload = serde_json::from_value(data2.unwrap()).unwrap();
         assert!(p2.message.contains("rejected"));
@@ -690,22 +710,23 @@ mod tests {
 
     #[tokio::test]
     async fn check_rate_limit_allowed_clears_tiers() {
+        let pool = test_pool().await;
         let bus = Arc::new(EventBus::new());
         let mut rx = bus.subscribe();
         let n = Notifier::new(bus);
 
         // Fire tier 85.
         let r1 = make_cc_result(mando_cc::RateLimitStatus::AllowedWarning, 0.87);
-        n.check_rate_limit(&r1).await;
+        n.check_rate_limit(&r1, &pool, None).await;
         rx.recv().await.unwrap();
 
         // Recovery.
         let r2 = make_cc_result(mando_cc::RateLimitStatus::Allowed, 0.50);
-        n.check_rate_limit(&r2).await;
+        n.check_rate_limit(&r2, &pool, None).await;
 
         // Same tier fires again after recovery.
         let r3 = make_cc_result(mando_cc::RateLimitStatus::AllowedWarning, 0.87);
-        n.check_rate_limit(&r3).await;
+        n.check_rate_limit(&r3, &pool, None).await;
         let (_, data) = rx.recv().await.unwrap();
         let p: NotificationPayload = serde_json::from_value(data.unwrap()).unwrap();
         assert!(p.message.contains("87% utilization"));
@@ -713,12 +734,13 @@ mod tests {
 
     #[tokio::test]
     async fn check_rate_limit_missing_utilization_always_fires() {
+        let pool = test_pool().await;
         let bus = Arc::new(EventBus::new());
         let mut rx = bus.subscribe();
         let n = Notifier::new(bus);
 
         let r1 = make_cc_result_opt(mando_cc::RateLimitStatus::AllowedWarning, None);
-        n.check_rate_limit(&r1).await;
+        n.check_rate_limit(&r1, &pool, None).await;
 
         let (_, data) = rx.recv().await.unwrap();
         let p: NotificationPayload = serde_json::from_value(data.unwrap()).unwrap();
@@ -726,7 +748,7 @@ mod tests {
 
         // Second call with no utilization also fires (no tier tracking).
         let r2 = make_cc_result_opt(mando_cc::RateLimitStatus::AllowedWarning, None);
-        n.check_rate_limit(&r2).await;
+        n.check_rate_limit(&r2, &pool, None).await;
 
         let (_, data2) = rx.recv().await.unwrap();
         let p2: NotificationPayload = serde_json::from_value(data2.unwrap()).unwrap();

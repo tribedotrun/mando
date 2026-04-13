@@ -12,13 +12,15 @@ import type { WorkerDetail } from '#renderer/types';
 
 interface Props {
   active?: boolean;
+  inlineRef?: React.RefObject<InlineTaskCreateHandle | null>;
 }
 
-export function CaptainView({ active = true }: Props): React.ReactElement {
+export function CaptainView({ active = true, inlineRef: externalRef }: Props): React.ReactElement {
   const [nudgeWorker, setNudgeWorker] = useState<WorkerDetail | null>(null);
   const nudgeMut = useTaskNudge();
   const handoffMut = useTaskHandoff();
-  const inlineRef = useRef<InlineTaskCreateHandle>(null);
+  const ownRef = useRef<InlineTaskCreateHandle>(null);
+  const inlineRef = externalRef ?? ownRef;
 
   const handleKey = useCallback(
     (key: string, e: KeyboardEvent) => {
@@ -73,9 +75,10 @@ export function CaptainView({ active = true }: Props): React.ReactElement {
           buttonLabel="Nudge"
           pendingLabel="Nudging..."
           isPending={nudgeMut.isPending}
-          onSubmit={(msg) => {
+          allowImages
+          onSubmit={(msg, images) => {
             nudgeMut.mutate(
-              { id: nudgeWorker.id, message: msg },
+              { id: nudgeWorker.id, message: msg, images },
               { onSuccess: () => setNudgeWorker(null) },
             );
           }}

@@ -5,5 +5,6 @@ pub mod dashboard;
 pub mod firecrawl;
 pub mod process;
 pub mod qa;
+mod qa_parse;
 pub mod research;
 pub mod youtube;

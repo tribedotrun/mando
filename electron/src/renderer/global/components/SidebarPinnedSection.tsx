@@ -1,14 +1,20 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { PinOff, Terminal } from 'lucide-react';
 import { compactRelativeTime } from '#renderer/utils';
 import { StatusIcon } from '#renderer/global/components/StatusIndicator';
-import type { TaskItem } from '#renderer/types';
+import {
+  WorkbenchContextMenu,
+  WorkbenchRenameInput,
+} from '#renderer/global/components/WorkbenchContextMenu';
+import { FINALIZED_STATUSES, type TaskItem } from '#renderer/types';
 
 interface PinnedWorkbench {
   id: number;
   worktree: string;
   title: string;
   createdAt: string;
+  pinnedAt?: string | null;
+  archivedAt?: string | null;
 }
 
 interface PinnedEntry {
@@ -24,6 +30,11 @@ interface SidebarPinnedSectionProps {
   onOpenTask?: (taskId: number) => void;
   onOpenTerminalSession?: (worktree: { project: string; cwd: string }) => void;
   onUnpin: (id: number) => void;
+  onPin?: (id: number) => void;
+  onArchiveWorkbench?: (id: number) => void;
+  onRenameWorkbench?: (id: number, title: string) => void;
+  onOpenWorkbenchInFinder?: (worktree: string) => void;
+  onCopyWorkbenchPath?: (worktree: string) => void;
 }
 
 export function SidebarPinnedSection({
@@ -33,17 +44,53 @@ export function SidebarPinnedSection({
   onOpenTask,
   onOpenTerminalSession,
   onUnpin,
+  onPin,
+  onArchiveWorkbench,
+  onRenameWorkbench,
+  onOpenWorkbenchInFinder,
+  onCopyWorkbenchPath,
 }: SidebarPinnedSectionProps): React.ReactElement | null {
+  const [renamingWbId, setRenamingWbId] = useState<number | null>(null);
   if (items.length === 0) return null;
 
   return (
     <div className="flex flex-col gap-0.5">
       {items.map(({ wb, task, project }) => {
-        const label = task ? task.title : wb.title;
+        const label = task ? task.title || task.original_prompt || 'Untitled task' : wb.title;
         const ts = task ? task.last_activity_at || task.created_at : wb.createdAt;
         const isActive =
           activeTerminalCwd === wb.worktree || (task != null && activeTaskId === task.id);
-        return (
+        const canContextMenu =
+          onRenameWorkbench &&
+          onArchiveWorkbench &&
+          onPin &&
+          onOpenWorkbenchInFinder &&
+          onCopyWorkbenchPath;
+        // Task-backed rows display task.title, but Rename mutates wb.title -- hide
+        // Rename so the user never triggers a no-op. Archive mirrors the
+        // FINALIZED_STATUSES gate used for task rows in SidebarProjectItem so a
+        // running task can't be hidden mid-flight.
+        const canRename = task == null;
+        const canArchive = task == null || FINALIZED_STATUSES.includes(task.status);
+        if (renamingWbId === wb.id) {
+          return (
+            <div key={wb.id} className="rounded-md px-1.5 py-1">
+              <WorkbenchRenameInput
+                initialValue={wb.title}
+                onCommit={(newTitle) => {
+                  setRenamingWbId(null);
+                  const trimmed = newTitle.trim();
+                  if (trimmed && trimmed !== wb.title) {
+                    onRenameWorkbench?.(wb.id, trimmed);
+                  }
+                }}
+                onCancel={() => setRenamingWbId(null)}
+                className="h-7 w-full rounded border-ring bg-secondary px-1.5 text-[13px] font-normal"
+              />
+            </div>
+          );
+        }
+        const rowButton = (
           <button
             key={wb.id}
             onClick={() => {
@@ -84,6 +131,28 @@ export function SidebarPinnedSection({
               <span className="shrink-0 text-[11px] text-text-3">{compactRelativeTime(ts)}</span>
             )}
           </button>
+        );
+        if (!canContextMenu) return rowButton;
+        return (
+          <WorkbenchContextMenu
+            key={wb.id}
+            workbench={{
+              id: wb.id,
+              title: wb.title,
+              worktree: wb.worktree,
+              pinnedAt: wb.pinnedAt ?? null,
+              archivedAt: wb.archivedAt ?? null,
+            }}
+            onStartRename={(id) => setRenamingWbId(id)}
+            onTogglePin={(id, pinned) => (pinned ? onPin!(id) : onUnpin(id))}
+            onToggleArchive={(id) => onArchiveWorkbench!(id)}
+            onOpenInFinder={(path) => onOpenWorkbenchInFinder!(path)}
+            onCopyWorktree={(path) => onCopyWorkbenchPath!(path)}
+            canRename={canRename}
+            canArchive={canArchive}
+          >
+            {rowButton}
+          </WorkbenchContextMenu>
         );
       })}
     </div>

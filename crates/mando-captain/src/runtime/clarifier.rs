@@ -36,6 +36,8 @@ pub(crate) async fn run_clarification(
         .collect();
     let schema = build_clarifier_schema(&valid_names);
 
+    let credential = super::tick_spawn::pick_credential(pool).await;
+    let cred_id = super::tick_spawn::credential_id(&credential);
     let mut builder = CcConfig::builder()
         .model(&workflow.models.clarifier)
         .timeout(workflow.agent.clarifier_timeout_s)
@@ -44,6 +46,7 @@ pub(crate) async fn run_clarification(
         .cwd(cwd.clone())
         .allowed_tools(vec!["Read".into(), "Glob".into(), "Grep".into()])
         .json_schema(schema.clone());
+    builder = super::tick_spawn::with_credential(builder, &credential);
     if let Some(sid) = pre_session_id {
         builder = builder.session_id(sid);
     }
@@ -68,6 +71,7 @@ pub(crate) async fn run_clarification(
             task_id: Some(item.id),
             status: mando_types::SessionStatus::Stopped,
             worker_name: "",
+            credential_id: cred_id,
         },
     )
     .await
@@ -315,6 +319,7 @@ pub async fn answer_and_reclarify(
     let task_id = item.id.to_string();
     let timeout = workflow.agent.clarifier_timeout_s;
 
+    let credential = super::tick_spawn::pick_credential(pool).await;
     let mut builder = CcConfig::builder()
         .model(&workflow.models.clarifier)
         .timeout(timeout)
@@ -344,6 +349,8 @@ pub async fn answer_and_reclarify(
             "required": ["status", "context"]
         }));
 
+    let cred_id = super::tick_spawn::credential_id(&credential);
+    builder = super::tick_spawn::with_credential(builder, &credential);
     if let Some(ref sid) = item.session_ids.clarifier {
         builder = builder.resume(sid.clone());
     }
@@ -364,6 +371,7 @@ pub async fn answer_and_reclarify(
             task_id: Some(item.id),
             status: mando_types::SessionStatus::Stopped,
             worker_name: "",
+            credential_id: cred_id,
         },
     )
     .await

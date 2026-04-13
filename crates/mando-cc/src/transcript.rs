@@ -157,7 +157,10 @@ pub fn parse_messages(
 pub fn tool_usage(stream_path: &Path) -> Vec<ToolUsageSummary> {
     let content = match std::fs::read_to_string(stream_path) {
         Ok(c) => c,
-        Err(_) => return Vec::new(),
+        Err(e) => {
+            tracing::debug!(path = %stream_path.display(), error = %e, "cannot read stream file for tool usage");
+            return Vec::new();
+        }
     };
 
     let mut tools: HashMap<String, (u32, u32)> = HashMap::new();

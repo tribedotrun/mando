@@ -204,6 +204,18 @@ body {
   background: var(--text-4);
 }
 
+/* Scrollbar visible only on hover / active scroll */
+.scrollbar-on-hover::-webkit-scrollbar-thumb {
+  background: transparent;
+}
+.scrollbar-on-hover:hover::-webkit-scrollbar-thumb,
+.scrollbar-on-hover:active::-webkit-scrollbar-thumb {
+  background: var(--border);
+}
+.scrollbar-on-hover:hover::-webkit-scrollbar-thumb:hover {
+  background: var(--text-4);
+}
+
 /* ── Focus ring ── */
 input:not([type='checkbox']):not([type='radio']):focus-visible,
 textarea:focus-visible,

@@ -25,7 +25,7 @@ const SELECT_COLS: &str = "\
     t.worker, t.resource, t.context, t.original_prompt, \
     t.created_at, t.workbench_id, w.worktree, t.pr_number, t.worker_started_at, \
     t.intervention_count, t.captain_review_trigger, t.session_ids, t.last_activity_at, \
-    t.plan, t.no_pr, t.worker_seq, t.reopen_seq, t.reopen_source, t.images, \
+    t.plan, t.no_pr, t.worker_seq, t.reopen_seq, t.reopened_at, t.reopen_source, t.images, \
     t.review_fail_count, t.clarifier_fail_count, t.spawn_fail_count, t.merge_fail_count, \
     t.escalation_report, t.source, t.rev, p.github_repo";
 
@@ -98,6 +98,7 @@ const WRITE_COLS: &[&str] = &[
     "no_pr",
     "worker_seq",
     "reopen_seq",
+    "reopened_at",
     "reopen_source",
     "images",
     "review_fail_count",
@@ -166,6 +167,7 @@ pub(crate) fn bind_task_write_fields<'q>(
         .bind(task.no_pr as i64)
         .bind(task.worker_seq)
         .bind(task.reopen_seq)
+        .bind(&task.reopened_at)
         .bind(&task.reopen_source)
         .bind(&task.images)
         .bind(task.review_fail_count)
@@ -251,6 +253,18 @@ pub async fn active_worker_count(pool: &SqlitePool) -> Result<usize> {
     .fetch_one(pool)
     .await?;
     Ok(count as usize)
+}
+
+/// Check whether a workbench has any active (non-finalized) tasks.
+pub async fn has_active_for_workbench(pool: &SqlitePool, workbench_id: i64) -> Result<bool> {
+    let count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM tasks WHERE workbench_id = ? \
+         AND status NOT IN ('merged','completed-no-pr','canceled')",
+    )
+    .bind(workbench_id)
+    .fetch_one(pool)
+    .await?;
+    Ok(count > 0)
 }
 
 /// Replace all non-archived tasks atomically.

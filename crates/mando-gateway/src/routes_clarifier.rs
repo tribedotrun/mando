@@ -3,7 +3,6 @@
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::Json;
-use serde::Deserialize;
 use serde_json::{json, Value};
 
 use mando_captain::runtime::clarifier::ClarifierStatus;
@@ -11,29 +10,41 @@ use mando_captain::runtime::clarifier::ClarifierStatus;
 use crate::response::{error_response, internal_error};
 use crate::AppState;
 
-#[derive(Deserialize)]
-pub(crate) struct QuestionAnswer {
-    question: String,
-    answer: String,
-}
-
-#[derive(Deserialize)]
-pub(crate) struct ClarifyBody {
-    /// Structured per-question answers (from Electron UI).
-    #[serde(default)]
-    pub answers: Option<Vec<QuestionAnswer>>,
-    /// Flat text answer (from Telegram / CLI).
-    #[serde(default)]
-    pub answer: Option<String>,
-}
-
-/// POST /api/tasks/{id}/clarify — provide human answer and re-clarify inline.
+/// POST /api/tasks/{id}/clarify (JSON or multipart with optional images)
 pub(crate) async fn post_task_clarify(
     State(state): State<AppState>,
     Path(id): Path<i64>,
-    Json(body): Json<ClarifyBody>,
+    request: axum::extract::Request,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    let answer = if let Some(answers) = body.answers {
+    let body = crate::image_upload_ext::extract_clarify(request).await?;
+    let result = post_task_clarify_inner(&state, id, &body).await;
+    // Clean up images only for early validation errors (before the answer
+    // text + image paths are persisted to context). Post-persistence errors
+    // (e.g. answer_and_reclarify failure) intentionally keep images on disk
+    // because the answer text already references them.
+    if let Err(ref e) = result {
+        if is_early_clarify_error(e) {
+            crate::image_upload::cleanup_saved_images(&body.saved_images).await;
+        }
+    }
+    result
+}
+
+/// Returns true for validation/status errors that occur before the answer
+/// text (with embedded image paths) is persisted to the task context.
+fn is_early_clarify_error(err: &(StatusCode, Json<Value>)) -> bool {
+    matches!(
+        err.0,
+        StatusCode::BAD_REQUEST | StatusCode::NOT_FOUND | StatusCode::CONFLICT
+    )
+}
+
+async fn post_task_clarify_inner(
+    state: &AppState,
+    id: i64,
+    body: &crate::image_upload::ClarifyWithImages,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let mut answer = if let Some(ref answers) = body.answers {
         if answers.is_empty() {
             return Err(error_response(
                 StatusCode::BAD_REQUEST,
@@ -46,7 +57,7 @@ pub(crate) async fn post_task_clarify(
             .map(|(i, a)| format!("Q{}: {}\nA{}: {}", i + 1, a.question, i + 1, a.answer))
             .collect::<Vec<_>>()
             .join("\n\n")
-    } else if let Some(text) = body.answer {
+    } else if let Some(ref text) = body.answer {
         let trimmed = text.trim().to_string();
         if trimmed.is_empty() {
             return Err(error_response(
@@ -61,6 +72,15 @@ pub(crate) async fn post_task_clarify(
             "either 'answer' or 'answers' is required",
         ));
     };
+
+    // Embed image paths in the answer so the clarifier CC session can read them.
+    if !body.saved_images.is_empty() {
+        answer = format!(
+            "{}{}",
+            answer,
+            crate::image_upload::format_image_paths(&body.saved_images)
+        );
+    }
 
     // Load the task and validate status.
     let (item, pool) = {
@@ -80,13 +100,19 @@ pub(crate) async fn post_task_clarify(
             ));
         }
 
-        // Append human answer to context.
+        // Append human answer (with embedded image paths) to context.
+        // After this point, images must stay on disk.
         let new_context = mando_captain::runtime::task_notes::append_tagged_note(
             item.context.as_deref(),
             "Human answer",
             &answer,
         )
-        .expect("validated answer should always produce a note");
+        .ok_or_else(|| {
+            error_response(
+                StatusCode::BAD_REQUEST,
+                "answer must contain non-empty text to produce a note",
+            )
+        })?;
         store
             .update(id, |t| {
                 t.context = Some(new_context.clone());
@@ -99,6 +125,18 @@ pub(crate) async fn post_task_clarify(
         let pool = store.pool().clone();
         (updated, pool)
     };
+
+    // Persist images after context is saved. The answer text already
+    // contains the image paths, so images must stay on disk regardless
+    // of whether answer_and_reclarify succeeds or fails.
+    if !body.saved_images.is_empty() {
+        let store = state.task_store.read().await;
+        if let Err(e) =
+            crate::image_upload::append_task_images(&store, id, &body.saved_images).await
+        {
+            tracing::warn!(task_id = id, error = ?e, "failed to persist clarify images");
+        }
+    }
 
     // Emit HumanAnswered timeline event.
     let _ = mando_captain::runtime::timeline_emit::emit_for_task(
