@@ -47,6 +47,34 @@ pub(crate) async fn reconcile_running_sessions(
         if let Some(pid) = crate::io::pid_registry::get_pid(sid) {
             if pid.as_u32() > 0 {
                 if mando_cc::is_process_alive(pid) {
+                    // L0: Live rate-limit detection — kill the process so it
+                    // gets reopened on the next tick with a healthy credential.
+                    let stream_path = mando_config::stream_path_for_session(sid);
+                    if let Some(_resets_at) = mando_cc::has_rate_limit_rejection(&stream_path) {
+                        if super::credential_rate_limit::check_and_activate_from_stream(pool, sid)
+                            .await
+                        {
+                            tracing::warn!(
+                                module = "captain",
+                                session_id = %sid,
+                                ?pid,
+                                "live session hit rate limit — killing process so tick reopens with new credential"
+                            );
+                            if let Err(e) = mando_cc::kill_process(pid).await {
+                                tracing::warn!(
+                                    module = "captain",
+                                    session_id = %sid,
+                                    error = %e,
+                                    "failed to kill rate-limited process"
+                                );
+                            }
+                            jobs.push(TermJob {
+                                session_id: sid.clone(),
+                                status: SessionStatus::Failed,
+                            });
+                            continue;
+                        }
+                    }
                     continue; // genuinely running
                 }
                 jobs.push(TermJob {
@@ -63,7 +91,7 @@ pub(crate) async fn reconcile_running_sessions(
             let status = if mando_cc::is_clean_result(&result) {
                 SessionStatus::Stopped
             } else {
-                if super::rate_limit_cooldown::check_and_activate_from_stream(sid) {
+                if super::credential_rate_limit::check_and_activate_from_stream(pool, sid).await {
                     tracing::info!(
                         module = "captain",
                         session_id = %sid,

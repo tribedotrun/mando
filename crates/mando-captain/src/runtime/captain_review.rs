@@ -21,7 +21,6 @@ use mando_types::timeline::TimelineEventType;
 
 use super::notify::Notifier;
 use super::review_phase;
-use crate::io::evidence;
 
 #[cfg(test)]
 pub(crate) use super::captain_review_check::validate_verdict;
@@ -146,7 +145,7 @@ pub(crate) async fn spawn_review(
     // CaptainReviewing first and the context build then errored, callers like
     // action_contract::trigger_review bubble the error up with no rollback,
     // leaving the task stuck in CaptainReviewing with no review session.
-    let (ctx, worker_contexts_text) = review_phase::build_single_context(item, config).await?;
+    let (_ctx, worker_contexts_text) = review_phase::build_single_context(item, config).await?;
 
     // All fallible operations succeeded, now commit state changes.
     // Use db_status if provided (callers that called reset_review_retry before
@@ -159,9 +158,6 @@ pub(crate) async fn spawn_review(
     item.status = ItemStatus::CaptainReviewing;
     item.captain_review_trigger = Some(parsed_trigger);
     item.last_activity_at = Some(mando_types::now_rfc3339());
-    let pr_body_for_evidence = ctx.pr_body.clone();
-    let worker_name_owned = item.worker.as_deref().unwrap_or("unknown").to_string();
-
     let task_id = item.id.to_string();
     let task_id_num = item.id;
     let session_id = mando_uuid::Uuid::v4().to_string();
@@ -210,6 +206,11 @@ pub(crate) async fn spawn_review(
         }
     }
 
+    // Pick a credential for this review session so it goes through
+    // multi-credential load balancing when credentials are configured.
+    let credential = super::tick_spawn::pick_credential(pool).await;
+    let cred_id = credential.as_ref().map(|c| c.0);
+
     // Log "running" session entry eagerly so (a) cancel can find it
     // immediately and (b) timeline never references a missing session.
     if let Err(e) = crate::io::headless_cc::log_running_session(
@@ -220,6 +221,7 @@ pub(crate) async fn spawn_review(
         "",
         Some(item.id),
         false,
+        cred_id,
     )
     .await
     {
@@ -232,6 +234,49 @@ pub(crate) async fn spawn_review(
     let trigger_str = trigger.to_string();
     let item_title = item.title.clone();
     let item_id = item.id.to_string();
+
+    // Build problem statement from task metadata.
+    let problem_statement = {
+        let mut parts = vec![item.title.clone()];
+        if let Some(ref ctx) = item.context {
+            parts.push(ctx.clone());
+        }
+        if let Some(ref prompt) = item.original_prompt {
+            parts.push(prompt.clone());
+        }
+        parts.join("\n\n")
+    };
+
+    // Build evidence file listing from DB artifacts.
+    let db_evidence_listing = {
+        let artifacts = mando_db::queries::artifacts::list_for_task(pool, item.id)
+            .await
+            .unwrap_or_default();
+        let data_dir = mando_types::data_dir();
+        let mut listing = String::new();
+        for artifact in &artifacts {
+            if artifact.artifact_type == mando_types::ArtifactType::Evidence {
+                for media in &artifact.media {
+                    if let Some(ref local) = media.local_path {
+                        let caption = media.caption.as_deref().unwrap_or("(no caption)");
+                        listing.push_str(&format!(
+                            "- {} ({})\n",
+                            data_dir.join(local).display(),
+                            caption
+                        ));
+                    }
+                }
+            }
+        }
+        // Latest work summary content.
+        let latest_summary = artifacts
+            .iter()
+            .rfind(|a| a.artifact_type == mando_types::ArtifactType::WorkSummary)
+            .map(|a| a.content.clone())
+            .unwrap_or_default();
+        (listing, latest_summary)
+    };
+    let (evidence_file_listing, work_summary_content) = db_evidence_listing;
     let intervention_count_str = item.intervention_count.to_string();
     let trigger_flags: Vec<(String, String)> = TRIGGERS
         .iter()
@@ -246,8 +291,6 @@ pub(crate) async fn spawn_review(
         })
         .collect();
     let timeout = workflow.agent.captain_review_timeout_s;
-    let evidence_dl_timeout = workflow.agent.evidence_download_timeout_s;
-    let evidence_ff_timeout = workflow.agent.evidence_ffmpeg_timeout_s;
     let prompts = workflow.prompts.clone();
     let captain_model = workflow.models.captain.clone();
     let pool = pool.clone();
@@ -261,26 +304,10 @@ pub(crate) async fn spawn_review(
     // file which persists across restarts, so no in-memory state is lost.
     tokio::spawn(async move {
         let result = AssertUnwindSafe(async move {
-        // Download evidence images from PR body.
-        let work_dir = mando_config::state_dir().join("captain-evidence");
-        let worker_dir = work_dir.join(&worker_name_owned);
-        let evidence_download = evidence::download_evidence(
-            &pr_body_for_evidence,
-            &worker_dir,
-            evidence_dl_timeout,
-            evidence_ff_timeout,
-        )
-        .await;
-        let evidence_paths = evidence_download.paths;
-        let evidence_listing = if evidence_paths.is_empty() {
-            String::new()
-        } else {
-            let mut listing = format!("\n**{}**:\n", worker_name_owned);
-            for path in &evidence_paths {
-                listing.push_str(&format!("- {}\n", path.display()));
-            }
-            listing
-        };
+        // Evidence is now managed by the CLI (mando todo evidence) and
+        // served from the DB. The evidence_file_listing and work_summary_content
+        // were pre-computed from DB before the spawn.
+        let evidence_listing = evidence_file_listing.clone();
 
         // Load knowledge base.
         let knowledge_path = mando_config::state_dir().join("knowledge.md");
@@ -305,6 +332,9 @@ pub(crate) async fn spawn_review(
         vars.insert("worker_contexts", worker_contexts_text.clone());
         vars.insert("knowledge_base", knowledge_base.clone());
         vars.insert("evidence_images", evidence_listing.clone());
+        vars.insert("problem_statement", problem_statement.clone());
+        vars.insert("evidence_files", evidence_file_listing.clone());
+        vars.insert("work_summary", work_summary_content.clone());
         vars.insert("intervention_count", intervention_count_str.clone());
         for (key, flag) in &trigger_flags {
             vars.insert(key.as_str(), flag.clone());
@@ -323,17 +353,17 @@ pub(crate) async fn spawn_review(
             }
         };
 
-        let config = mando_cc::CcConfig::builder()
+        let builder = mando_cc::CcConfig::builder()
             .model(&captain_model)
             .timeout(timeout)
             .caller("captain-review-async")
             .task_id(&task_id)
             .cwd(cwd.clone())
             .session_id(session_id.clone())
-            .allowed_tools(vec!["Read".into()])
+            .allowed_tools(vec!["Read".into(), "Bash".into()])
             .disallowed_tools(vec!["Agent".into()])
-            .json_schema(verdict_json_schema(&trigger_str))
-            .build();
+            .json_schema(verdict_json_schema(&trigger_str));
+        let config = super::tick_spawn::with_credential(builder, &credential).build();
 
         let sid_for_hook = session_id.clone();
         match mando_cc::CcOneShot::run_with_pid_hook(&prompt, config, |pid| {
@@ -348,7 +378,12 @@ pub(crate) async fn spawn_review(
                 if let Err(e) = crate::io::pid_registry::unregister(&session_id) {
                     warn!(module = "captain", %session_id, %e, "pid_registry unregister failed");
                 }
-                review_notifier.check_rate_limit(&result).await;
+                let cred_id = mando_db::queries::sessions::get_credential_id(&pool, &session_id)
+                    .await
+                    .unwrap_or(None);
+                review_notifier
+                    .check_rate_limit(&result, &pool, cred_id)
+                    .await;
                 if let Err(e) = crate::io::headless_cc::log_cc_result(
                     &pool,
                     &result,

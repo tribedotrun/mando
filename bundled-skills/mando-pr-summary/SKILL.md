@@ -134,24 +134,17 @@ Scan the existing PR body for the `### E2E verification` subsection. If it is em
 
 ### Step 9 — Compose and update PR description
 
-Get the HEAD SHA for the freshness marker:
-
-```bash
-SHORT_SHA=$(git rev-parse --short HEAD)
-```
-
-Combine into a single markdown body. **Preserve all existing PR content that is NOT part of `## PR Summary` / `### Reviewer Checklist` sections** — this includes `## Problem`, `## Testing & Verification`, and third-party integration blocks (e.g., "Open in Devin", review badges, deploy previews).
+Combine into a single markdown body. **Preserve all existing PR content that is NOT part of `## PR Summary` / `### Reviewer Checklist` sections** -- this includes `## Problem`, `## Testing & Verification`, and third-party integration blocks (e.g., "Open in Devin", review badges, deploy previews).
 
 For `## Evidence`, follow the Step 7 hosting decision exactly:
 - replace it only when you have fresh hosted evidence for the current code state
 - preserve existing substantive hosted evidence when no bucket is configured
 - if local visuals are pending manual GitHub upload, write the Step 7 **Action required** note instead of deleting the section
-- always include `<!-- evidence-head: <SHORT_SHA> -->` after evidence content when the section has substantive evidence (images, code blocks, media URLs). Omit the marker when the section is empty or only contains the pending-upload note
 
 Format:
 
 ```markdown
-<existing PR description — Problem, Testing & Verification, etc.>
+<existing PR description -- Problem, Testing & Verification, etc.>
 
 ---
 
@@ -161,15 +154,11 @@ Format:
 <ASCII diagram>
 \```
 
-<!-- pr-summary-head: <SHORT_SHA> -->
-
-**What changed**: <1-2 sentence high-level delta — what was the old behavior vs new>
+**What changed**: <1-2 sentence high-level delta -- what was the old behavior vs new>
 
 ## Evidence
 
-<GCS-hosted visuals, preserved GitHub attachment visuals, runtime output, or the pending-upload note — or omit if none>
-
-<!-- evidence-head: <SHORT_SHA> -->
+<GCS-hosted visuals, preserved GitHub attachment visuals, runtime output, or the pending-upload note -- or omit if none>
 
 ### Reviewer Checklist
 
@@ -185,8 +174,20 @@ PRBODY
 )"
 ```
 
-### Step 10 — Save to plan folder
+### Step 10 — Save work summary to DB and plan folder
 
-Resolve the plan folder (same priority as Step 7). Write the same summary to `.ai/plans/<resolved>/pr-summary.md`. Create folder if needed. Overwrite if exists (always regenerated from current diff).
+**Save to DB** (required): Write the ASCII diagram + "What changed" sentence to a temp file, then call the CLI to persist it as a work summary artifact:
+
+```bash
+cat > /tmp/work-summary.md << 'SUMMARY'
+<ASCII diagram>
+
+**What changed**: <1-2 sentence delta>
+SUMMARY
+mando todo summary --file /tmp/work-summary.md
+rm /tmp/work-summary.md
+```
+
+**Save to plan folder** (secondary): Resolve the plan folder (same priority as Step 7). Write the same summary to `.ai/plans/<resolved>/pr-summary.md`. Create folder if needed. Overwrite if exists (always regenerated from current diff).
 
 **Important**: Never write into a plan folder that doesn't belong to the current PR. If no matching folder exists, create `.ai/plans/pr-$PR_NUM/`.

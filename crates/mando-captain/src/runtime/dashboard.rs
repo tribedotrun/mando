@@ -237,6 +237,47 @@ pub async fn handoff_item(store: &TaskStore, id: i64, pool: &sqlx::SqlitePool) -
     update_task(store, id, &serde_json::json!({"status": "handed-off"})).await
 }
 
+/// Validate that a task is blocked by a rate-limit cooldown (ambient or
+/// per-credential), then clear all active cooldowns so the next captain tick
+/// can resume it.
+pub async fn validate_rate_limited_task(store: &TaskStore, id: i64) -> Result<()> {
+    let task = store
+        .find_by_id(id)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("task not found: {}", id))?;
+    anyhow::ensure!(
+        matches!(
+            task.status,
+            ItemStatus::CaptainReviewing | ItemStatus::CaptainMerging | ItemStatus::Clarifying
+        ),
+        "resume requires captain-reviewing/captain-merging/clarifying, got {:?}",
+        task.status
+    );
+
+    let pool = store.pool();
+    let ambient_active = super::ambient_rate_limit::is_active();
+    let credential_blocking =
+        mando_db::queries::credentials::earliest_cooldown_remaining_secs(pool).await > 0;
+    anyhow::ensure!(
+        ambient_active || credential_blocking,
+        "rate-limit cooldown is not active"
+    );
+    if ambient_active {
+        super::ambient_rate_limit::clear();
+    }
+    if credential_blocking {
+        if let Err(e) = mando_db::queries::credentials::clear_all_cooldowns(pool).await {
+            tracing::warn!(
+                module = "captain",
+                task_id = id,
+                error = %e,
+                "failed to clear credential cooldowns"
+            );
+        }
+    }
+    Ok(())
+}
+
 pub async fn retry_item(store: &TaskStore, id: i64) -> Result<()> {
     let mut task = store
         .find_by_id(id)

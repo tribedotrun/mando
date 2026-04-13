@@ -7,6 +7,7 @@ import {
   acceptItem,
   cancelItem,
   retryItem,
+  resumeRateLimited,
   handoffItem,
   reopenItem,
   reworkItem,
@@ -14,11 +15,11 @@ import {
   mergePr,
   triggerTick,
   askTask,
-  endAskSession,
   nudgeWorker,
   deleteItems,
   answerClarification,
   answerClarificationText,
+  sendAdvisorMessage,
   type AddTaskInput,
 } from '#renderer/api';
 import type { TaskListResponse, TaskItem } from '#renderer/types';
@@ -33,6 +34,7 @@ export {
   useTerminalDelete,
   useWorkbenchArchive,
   useWorkbenchPin,
+  useWorkbenchRename,
   useConfigSave,
   useProjectAdd,
   useProjectEdit,
@@ -154,6 +156,24 @@ export function useTaskRetry() {
 }
 
 // ---------------------------------------------------------------------------
+// 4b. useResumeRateLimited
+// ---------------------------------------------------------------------------
+
+export function useResumeRateLimited() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (vars: { id: number }) => resumeRateLimited(vars.id),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: queryKeys.workers.list() });
+      toast.success('Rate-limit cooldown cleared');
+    },
+    onError: () => {
+      toast.error('Resume failed');
+    },
+  });
+}
+
+// ---------------------------------------------------------------------------
 // 5. useTaskHandoff
 // ---------------------------------------------------------------------------
 
@@ -183,8 +203,8 @@ export function useTaskHandoff() {
 export function useTaskReopen() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (vars: { id: number; feedback: string }) =>
-      reopenItem(vars.id, vars.feedback),
+    mutationFn: async (vars: { id: number; feedback: string; images?: File[] }) =>
+      reopenItem(vars.id, vars.feedback, vars.images),
     onMutate: async (vars) => {
       await qc.cancelQueries({ queryKey: queryKeys.tasks.list() });
       const prev = qc.getQueryData<TaskListResponse>(queryKeys.tasks.list());
@@ -239,8 +259,8 @@ export function useTaskAskReopen() {
 export function useTaskRework() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (vars: { id: number; feedback: string }) =>
-      reworkItem(vars.id, vars.feedback),
+    mutationFn: async (vars: { id: number; feedback: string; images?: File[] }) =>
+      reworkItem(vars.id, vars.feedback, vars.images),
     onMutate: async (vars) => {
       await qc.cancelQueries({ queryKey: queryKeys.tasks.list() });
       const prev = qc.getQueryData<TaskListResponse>(queryKeys.tasks.list());
@@ -297,8 +317,8 @@ export function useTaskMerge() {
 export function useTaskAsk() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (vars: { id: number; question: string; askId?: string }) =>
-      askTask(vars.id, vars.question, vars.askId),
+    mutationFn: async (vars: { id: number; question: string; askId?: string; images?: File[] }) =>
+      askTask(vars.id, vars.question, vars.askId, vars.images),
     onError: () => {
       toast.error('Ask failed');
     },
@@ -309,17 +329,19 @@ export function useTaskAsk() {
 }
 
 // ---------------------------------------------------------------------------
-// 12. useTaskEndAskSession
+// 12. useTaskAdvisor
 // ---------------------------------------------------------------------------
 
-export function useTaskEndAskSession() {
+export function useTaskAdvisor() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (vars: { id: number }) => endAskSession(vars.id),
+    mutationFn: async (vars: { id: number; message: string; intent?: string }) =>
+      sendAdvisorMessage(vars.id, vars.message, vars.intent),
     onError: () => {
-      toast.error('Failed to end ask session');
+      toast.error('Advisor message failed');
     },
     onSettled: (_data, _err, vars) => {
+      void qc.invalidateQueries({ queryKey: queryKeys.tasks.feed(vars.id) });
       void qc.invalidateQueries({ queryKey: queryKeys.tasks.askHistory(vars.id) });
     },
   });
@@ -331,7 +353,8 @@ export function useTaskEndAskSession() {
 
 export function useTaskNudge() {
   return useMutation({
-    mutationFn: async (vars: { id: number; message: string }) => nudgeWorker(vars.id, vars.message),
+    mutationFn: async (vars: { id: number; message: string; images?: File[] }) =>
+      nudgeWorker(vars.id, vars.message, vars.images),
     onSuccess: (_data, vars) => {
       toast.success(`Nudged task #${vars.id}`);
     },
@@ -381,13 +404,18 @@ export function useTaskClarify() {
   return useMutation({
     mutationFn: async (
       vars:
-        | { id: number; mode: 'structured'; answers: { question: string; answer: string }[] }
-        | { id: number; mode: 'text'; answer: string },
+        | {
+            id: number;
+            mode: 'structured';
+            answers: { question: string; answer: string }[];
+            images?: File[];
+          }
+        | { id: number; mode: 'text'; answer: string; images?: File[] },
     ) => {
       if (vars.mode === 'structured') {
-        return answerClarification(vars.id, vars.answers);
+        return answerClarification(vars.id, vars.answers, vars.images);
       }
-      return answerClarificationText(vars.id, vars.answer);
+      return answerClarificationText(vars.id, vars.answer, vars.images);
     },
     onError: () => {
       toast.error('Answer failed');
@@ -407,7 +435,8 @@ export function useTaskBulkCreate() {
       try {
         const parsed = await parseTodos(vars.text, vars.project);
         titles = parsed.items;
-      } catch {
+      } catch (err) {
+        log.warn('[useTaskBulkCreate] parseTodos failed, using raw text:', err);
         titles = [vars.text];
       }
       const results: { title: string; ok: boolean; error?: string }[] = [];

@@ -3,4 +3,4 @@
  * Components import from here instead of '#renderer/api' directly
  * (enforced by the arch/no-api-in-components ESLint rule).
  */
-export { fetchSessions, fetchTranscript } from '#renderer/api';
+export { fetchSessions, fetchTranscript } from '#renderer/api-sessions';

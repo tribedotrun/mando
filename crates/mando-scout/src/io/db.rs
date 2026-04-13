@@ -117,6 +117,7 @@ impl ScoutDb {
         caller: &str,
         cost_usd: Option<f64>,
         duration_ms: Option<u64>,
+        credential_id: Option<i64>,
     ) -> Result<()> {
         let now = mando_types::now_rfc3339();
         sq::upsert_session(
@@ -135,6 +136,7 @@ impl ScoutDb {
                 scout_item_id: item_id,
                 worker_name: None,
                 resumed_at: None,
+                credential_id,
             },
         )
         .await
@@ -411,10 +413,10 @@ mod tests {
             .add_item("https://del-sess.com", "other", None)
             .await
             .unwrap();
-        db.record_session(Some(item.id), "ses-1", "test", Some(0.5), Some(1000))
+        db.record_session(Some(item.id), "ses-1", "test", Some(0.5), Some(1000), None)
             .await
             .unwrap();
-        db.record_session(Some(item.id), "ses-2", "test", None, None)
+        db.record_session(Some(item.id), "ses-2", "test", None, None, None)
             .await
             .unwrap();
 

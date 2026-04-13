@@ -2,6 +2,7 @@ import React, { useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Check, Copy } from 'lucide-react';
 import { cn } from '#renderer/cn';
+import log from '#renderer/logger';
 
 type Highlighter = {
   codeToHtml: (code: string, opts: { lang: string; theme: string }) => string;
@@ -46,7 +47,8 @@ async function highlight(code: string, lang: string): Promise<string | null> {
   const hl = await getHighlighter();
   try {
     return hl.codeToHtml(code, { lang, theme: 'github-dark-default' });
-  } catch {
+  } catch (err) {
+    log.warn('[highlight] codeToHtml failed for lang:', lang, err);
     return null;
   }
 }
@@ -99,7 +101,7 @@ export function CodeBlock({
         clearTimeout(timerRef.current);
         timerRef.current = setTimeout(() => setCopied(false), COPY_FEEDBACK_MS);
       })
-      .catch((err) => console.error('Clipboard write failed', err));
+      .catch((err) => log.warn('Clipboard write failed', err));
   };
 
   return (

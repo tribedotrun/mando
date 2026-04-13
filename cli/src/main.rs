@@ -10,6 +10,7 @@ mod project;
 mod scout;
 mod sessions;
 mod todo;
+mod todo_artifacts;
 mod worktree;
 
 use clap::{Args, Parser, Subcommand};

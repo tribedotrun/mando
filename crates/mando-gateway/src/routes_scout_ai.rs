@@ -111,7 +111,8 @@ async fn run_research_job(state: AppState, run_id: i64, topic: &str, process: bo
     });
 
     // Run the CC session.
-    let research_result = mando_scout::runtime::research::run_research(topic, &workflow).await;
+    let research_result =
+        mando_scout::runtime::research::run_research(topic, &workflow, &pool).await;
     heartbeat_cancel.cancel();
     let _ = hb_handle.await;
 
@@ -126,6 +127,7 @@ async fn run_research_job(state: AppState, run_id: i64, topic: &str, process: bo
                     "scout-research",
                     output.cost_usd,
                     output.duration_ms,
+                    output.credential_id,
                 )
                 .await
             {
@@ -158,8 +160,15 @@ async fn run_research_job(state: AppState, run_id: i64, topic: &str, process: bo
                                     tracing::warn!(scout_id = id, error = %e, "failed to set research_run_id");
                                 }
                                 added_count += 1;
-                                let scout_payload =
-                                    mando_scout::get_scout_item(&pool, id).await.ok();
+                                let scout_payload = match mando_scout::get_scout_item(&pool, id)
+                                    .await
+                                {
+                                    Ok(v) => Some(v),
+                                    Err(e) => {
+                                        tracing::warn!(scout_id = id, error = %e, "failed to fetch scout item for SSE event");
+                                        None
+                                    }
+                                };
                                 bus.send(
                                     mando_types::BusEvent::Scout,
                                     Some(json!({"action": "created", "item": scout_payload, "id": id})),
@@ -167,33 +176,54 @@ async fn run_research_job(state: AppState, run_id: i64, topic: &str, process: bo
                                 if process {
                                     spawn_scout_processing(&state, id, link.url.clone());
                                 }
-                            } else {
-                                // Existing item: retry if it was stuck at
-                                // error. Don't touch research_run_id.
-                                let current_status = mando_scout::get_scout_item(&pool, id)
+                            } else if process {
+                                // Existing item: retry if stuck at error or
+                                // pending (e.g. prior research run was
+                                // interrupted before processing kicked off).
+                                let current_status = match mando_scout::get_scout_item(&pool, id)
                                     .await
-                                    .ok()
-                                    .and_then(|v| v["status"].as_str().map(str::to_string));
-                                if current_status.as_deref() == Some("error") && process {
-                                    match mando_db::queries::scout::reset_error_state(&pool, id)
-                                        .await
-                                    {
-                                        Err(e) => {
-                                            tracing::warn!(scout_id = id, error = %e, "failed to reset error state")
-                                        }
-                                        Ok(()) => {
-                                            spawn_scout_processing(&state, id, link.url.clone());
-                                            // Emit `updated` so the renderer
-                                            // reflects the status flip from
-                                            // error → pending.
-                                            let scout_payload =
-                                                mando_scout::get_scout_item(&pool, id).await.ok();
-                                            bus.send(
-                                                mando_types::BusEvent::Scout,
-                                                Some(json!({"action": "updated", "item": scout_payload, "id": id})),
-                                            );
+                                {
+                                    Ok(v) => v["status"].as_str().map(str::to_string),
+                                    Err(e) => {
+                                        tracing::warn!(scout_id = id, error = %e, "failed to fetch scout item status");
+                                        None
+                                    }
+                                };
+                                match current_status.as_deref() {
+                                    Some("error") => {
+                                        match mando_db::queries::scout::reset_error_state(&pool, id)
+                                            .await
+                                        {
+                                            Err(e) => {
+                                                tracing::warn!(scout_id = id, error = %e, "failed to reset error state")
+                                            }
+                                            Ok(()) => {
+                                                spawn_scout_processing(
+                                                    &state,
+                                                    id,
+                                                    link.url.clone(),
+                                                );
+                                                let scout_payload =
+                                                    match mando_scout::get_scout_item(&pool, id)
+                                                        .await
+                                                    {
+                                                        Ok(v) => Some(v),
+                                                        Err(e) => {
+                                                            tracing::warn!(scout_id = id, error = %e, "failed to fetch scout item for SSE event");
+                                                            None
+                                                        }
+                                                    };
+                                                bus.send(
+                                                    mando_types::BusEvent::Scout,
+                                                    Some(json!({"action": "updated", "item": scout_payload, "id": id})),
+                                                );
+                                            }
                                         }
                                     }
+                                    Some("pending") => {
+                                        spawn_scout_processing(&state, id, link.url.clone());
+                                    }
+                                    _ => {}
                                 }
                             }
                         }
@@ -254,6 +284,29 @@ async fn run_research_job(state: AppState, run_id: i64, topic: &str, process: bo
     }
 }
 
+/// GET /api/scout/research - list recent research runs.
+pub(crate) async fn get_scout_research_runs(
+    State(state): State<AppState>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let pool = state.db.pool();
+    let runs = mando_db::queries::scout_research::list_runs(pool, 50)
+        .await
+        .map_err(internal_error)?;
+    Ok(Json(serde_json::to_value(&runs).map_err(internal_error)?))
+}
+
+/// GET /api/scout/research/{id}/items - items discovered by a research run.
+pub(crate) async fn get_scout_research_run_items(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let pool = state.db.pool();
+    let items = mando_db::queries::scout::list_items_by_run(pool, id)
+        .await
+        .map_err(internal_error)?;
+    Ok(Json(serde_json::to_value(&items).map_err(internal_error)?))
+}
+
 /// GET /api/scout/research/{id} - poll research run status.
 pub(crate) async fn get_scout_research_run(
     State(state): State<AppState>,
@@ -267,25 +320,28 @@ pub(crate) async fn get_scout_research_run(
     Ok(Json(serde_json::to_value(&run).map_err(internal_error)?))
 }
 
-#[derive(Deserialize)]
-pub(crate) struct ScoutAskBody {
-    pub id: i64,
-    pub question: String,
-    /// Pass back from previous response to resume the same CC session.
-    pub session_id: Option<String>,
-}
-
-/// POST /api/scout/ask
+/// POST /api/scout/ask (JSON or multipart with optional images)
 pub(crate) async fn post_scout_ask(
     State(state): State<AppState>,
-    Json(body): Json<ScoutAskBody>,
+    request: axum::extract::Request,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let body = crate::image_upload_ext::extract_scout_ask(request).await?;
+    let result = post_scout_ask_inner(&state, &body).await;
+    // Scout images are ephemeral (no task.images column). Clean up after
+    // the CC session has read them, regardless of success or failure.
+    crate::image_upload::cleanup_saved_images(&body.saved_images).await;
+    result
+}
+
+async fn post_scout_ask_inner(
+    state: &AppState,
+    body: &crate::image_upload::ScoutAskWithImages,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let workflow = state.scout_workflow.load_full();
     let qa_mgr = state.qa_session_mgr.clone();
     let pool = state.db.pool();
     let id = body.id;
-    let question = body.question;
-    let session_key = body.session_id;
+    let session_key = body.session_id.clone();
 
     let item = mando_scout::get_scout_item(pool, id)
         .await
@@ -313,6 +369,17 @@ pub(crate) async fn post_scout_ask(
         None
     };
 
+    // Embed image paths in the question so the CC session can read them.
+    let question = if body.saved_images.is_empty() {
+        body.question.clone()
+    } else {
+        format!(
+            "{}{}",
+            body.question,
+            crate::image_upload::format_image_paths(&body.saved_images)
+        )
+    };
+
     let qa_result = qa_mgr
         .ask(
             &question,
@@ -321,6 +388,7 @@ pub(crate) async fn post_scout_ask(
             raw_note.as_deref(),
             &workflow,
             session_key.as_deref(),
+            pool,
         )
         .await
         .map_err(internal_error)?;
@@ -335,6 +403,7 @@ pub(crate) async fn post_scout_ask(
                 "scout-qa",
                 qa_result.cost_usd,
                 qa_result.duration_ms,
+                qa_result.credential_id,
             )
             .await
         {

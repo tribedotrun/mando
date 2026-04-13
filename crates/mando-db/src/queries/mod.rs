@@ -1,4 +1,6 @@
+pub mod artifacts;
 pub mod ask_history;
+pub mod credentials;
 pub mod projects;
 pub mod rebase;
 pub mod scout;

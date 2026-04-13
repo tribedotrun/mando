@@ -41,14 +41,25 @@ export default defineConfig({
         if (warning.code === 'MODULE_LEVEL_DIRECTIVE' && warning.message.includes('"use client"')) {
           return;
         }
+        if (warning.code === 'SOURCEMAP_ERROR' && warning.id?.includes('/node_modules/')) {
+          return;
+        }
         warn(warning);
       },
       output: {
-        manualChunks: {
-          'vendor-react': ['react', 'react-dom'],
-          'vendor-query': ['@tanstack/react-query'],
-          'vendor-markdown': ['react-markdown'],
-          'vendor-radix': ['radix-ui'],
+        manualChunks(id) {
+          if (id.includes('/node_modules/react-dom/') || id.includes('/node_modules/react/')) {
+            return 'vendor-react';
+          }
+          if (id.includes('/node_modules/@tanstack/react-query/')) {
+            return 'vendor-query';
+          }
+          if (id.includes('/node_modules/react-markdown/')) {
+            return 'vendor-markdown';
+          }
+          if (id.includes('/node_modules/radix-ui/') || id.includes('/node_modules/@radix-ui/')) {
+            return 'vendor-radix';
+          }
         },
       },
     },

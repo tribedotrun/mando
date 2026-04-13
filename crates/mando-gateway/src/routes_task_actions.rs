@@ -16,13 +16,6 @@ pub(crate) struct IdBody {
     pub id: i64,
 }
 
-#[derive(Deserialize)]
-pub(crate) struct FeedbackBody {
-    pub id: i64,
-    #[serde(default)]
-    pub feedback: String,
-}
-
 /// Shared wrapper for simple task actions that take a task store and an id,
 /// return `anyhow::Result<()>`, and emit a `Tasks` bus event on success.
 async fn simple_task_action<Fut>(
@@ -80,23 +73,45 @@ pub(crate) async fn post_task_cancel(
     .await
 }
 
-/// POST /api/tasks/reopen
+/// POST /api/tasks/reopen (JSON or multipart with optional images)
 pub(crate) async fn post_task_reopen(
     State(state): State<AppState>,
-    Json(body): Json<FeedbackBody>,
+    request: axum::extract::Request,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let body = crate::image_upload::extract_feedback(request).await?;
+    let result = post_task_reopen_inner(&state, &body).await;
+    if result.is_err() {
+        crate::image_upload::cleanup_saved_images(&body.saved_images).await;
+    }
+    result
+}
+
+async fn post_task_reopen_inner(
+    state: &AppState,
+    body: &crate::image_upload::FeedbackWithImages,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let id = body.id;
     let config = state.config.load_full();
     let workflow = state.captain_workflow.load_full();
-    let notifier = crate::captain_notifier(&state, &config);
+    let notifier = crate::captain_notifier(state, &config);
     let store = state.task_store.write().await;
     let mut item = store
         .find_by_id(id)
         .await
         .map_err(internal_error)?
         .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "item not found"))?;
+
+    // Append uploaded images to the task before reopening.
+    if !body.saved_images.is_empty() {
+        let joined = body.saved_images.join(",");
+        item.images = Some(match item.images.take() {
+            Some(existing) if !existing.is_empty() => format!("{existing},{joined}"),
+            _ => joined,
+        });
+    }
+
     // Close any active ask session — the worker will modify the codebase.
-    crate::routes_task_ask::close_ask_session(&state, id).await;
+    crate::routes_task_ask::close_ask_session(state, id).await;
 
     let old_session_id = item.session_ids.worker.clone();
     let outcome = mando_captain::runtime::action_contract::reopen_item(
@@ -203,15 +218,27 @@ pub(crate) async fn post_task_reopen(
     Ok(Json(json!({"ok": true})))
 }
 
-/// POST /api/tasks/rework
+/// POST /api/tasks/rework (JSON or multipart with optional images)
 pub(crate) async fn post_task_rework(
     State(state): State<AppState>,
-    Json(body): Json<FeedbackBody>,
+    request: axum::extract::Request,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let body = crate::image_upload::extract_feedback(request).await?;
+    let result = post_task_rework_inner(&state, &body).await;
+    if result.is_err() {
+        crate::image_upload::cleanup_saved_images(&body.saved_images).await;
+    }
+    result
+}
+
+async fn post_task_rework_inner(
+    state: &AppState,
+    body: &crate::image_upload::FeedbackWithImages,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let id = body.id;
 
     // Close any active ask session — the worktree will be destroyed.
-    crate::routes_task_ask::close_ask_session(&state, id).await;
+    crate::routes_task_ask::close_ask_session(state, id).await;
 
     // Capture old PR info before rework clears it. We close the PR on GitHub
     // only AFTER rework_item succeeds, so a validation failure (e.g. task is
@@ -241,6 +268,16 @@ pub(crate) async fn post_task_rework(
     mando_captain::runtime::dashboard::rework_item(&store, id, &body.feedback)
         .await
         .map_err(internal_error)?;
+
+    // Best-effort image persistence -- rework is already committed so
+    // a failure here should not return an error to the client.
+    if !body.saved_images.is_empty() {
+        if let Err(e) =
+            crate::image_upload::append_task_images(&store, id, &body.saved_images).await
+        {
+            tracing::warn!(task_id = id, error = ?e, "failed to persist rework images");
+        }
+    }
 
     let summary = if body.feedback.is_empty() {
         "Rework requested".to_string()
@@ -318,6 +355,57 @@ pub(crate) async fn post_task_retry(
         mando_types::BusEvent::Tasks,
         Some(json!({"action": "updated", "item": updated, "id": id})),
     );
+    Ok(Json(json!({"ok": true})))
+}
+
+/// POST /api/tasks/resume-rate-limited — clear global rate-limit cooldown and
+/// trigger a captain tick so that the identified task (and any others blocked
+/// by the cooldown) are picked up immediately.
+pub(crate) async fn post_task_resume_rate_limited(
+    State(state): State<AppState>,
+    Json(body): Json<IdBody>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let id = body.id;
+    {
+        let store = state.task_store.read().await;
+        mando_captain::runtime::dashboard::validate_rate_limited_task(&store, id)
+            .await
+            .map_err(internal_error)?;
+        if let Some(item) = store.find_by_id(id).await.map_err(internal_error)? {
+            let _ = mando_captain::runtime::timeline_emit::emit_for_task(
+                &item,
+                mando_types::timeline::TimelineEventType::RateLimited,
+                "Rate-limit cooldown cleared manually — resuming",
+                json!({"action": "resume-rate-limited", "cleared_by": "human"}),
+                store.pool(),
+            )
+            .await;
+        }
+        let updated = store
+            .find_by_id(id)
+            .await
+            .ok()
+            .flatten()
+            .map(|t| serde_json::to_value(&t).unwrap());
+        state.bus.send(
+            mando_types::BusEvent::Tasks,
+            Some(json!({"action": "updated", "item": updated, "id": id})),
+        );
+    }
+    // Trigger a captain tick so the task resumes immediately.
+    let config = state.config.load_full();
+    let workflow = state.captain_workflow.load_full();
+    mando_captain::runtime::dashboard::trigger_captain_tick(
+        &config,
+        &workflow,
+        false,
+        Some(&state.bus),
+        false,
+        &state.task_store,
+        &state.cancellation_token,
+    )
+    .await
+    .map_err(internal_error)?;
     Ok(Json(json!({"ok": true})))
 }
 

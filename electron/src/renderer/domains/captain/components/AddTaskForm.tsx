@@ -1,13 +1,17 @@
 import React, { useRef, useState } from 'react';
-import { Paperclip } from 'lucide-react';
+import { ArrowUp, Paperclip } from 'lucide-react';
 import { useDraft } from '#renderer/global/hooks/useDraft';
 import { useMountEffect } from '#renderer/global/hooks/useMountEffect';
 import { useProjects } from '#renderer/domains/settings';
 import { useTaskCreate, useTaskBulkCreate } from '#renderer/hooks/mutations';
 import { bulkTextareaRows, shortRepo } from '#renderer/utils';
 import { Button } from '#renderer/components/ui/button';
-import { Kbd } from '#renderer/components/ui/kbd';
-
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '#renderer/components/ui/tooltip';
 import { Combobox } from '#renderer/components/ui/combobox';
 
 const AUTOFOCUS_DELAY_MS = 50;
@@ -295,10 +299,51 @@ function AddTaskFormInner({
           </div>
 
           <div className="flex items-center gap-3">
-            <Button data-testid="submit-task-btn" onClick={handleSubmit} disabled={!canSubmit}>
-              Create
-              <Kbd className="bg-primary-foreground/20 text-primary-foreground">⌘↵</Kbd>
-            </Button>
+            <TooltipProvider delayDuration={300}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    data-testid="submit-task-btn"
+                    onClick={handleSubmit}
+                    disabled={!canSubmit}
+                    variant="default"
+                    size="icon-xs"
+                    aria-label="Create task"
+                    className="shrink-0 rounded-full transition-colors"
+                  >
+                    {createPhase === 'active' ? (
+                      <svg
+                        className="animate-spin"
+                        width="14"
+                        height="14"
+                        viewBox="0 0 14 14"
+                        fill="none"
+                      >
+                        <circle
+                          cx="7"
+                          cy="7"
+                          r="5.5"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          opacity="0.3"
+                        />
+                        <path
+                          d="M12.5 7a5.5 5.5 0 0 0-5.5-5.5"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                        />
+                      </svg>
+                    ) : (
+                      <ArrowUp size={14} strokeWidth={2} />
+                    )}
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="top" className="text-xs">
+                  Create ⌘↵
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
           </div>
         </div>
       </div>

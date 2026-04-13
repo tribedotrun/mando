@@ -2,19 +2,17 @@ import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import { queryKeys } from '#renderer/queryKeys';
 import {
   fetchTasks,
-  fetchTimeline,
-  fetchItemSessions,
-  fetchPrSummary,
   fetchAskHistory,
+  fetchFeed,
+  fetchArtifacts,
   fetchWorkers,
-  fetchSessions,
   apiGet,
 } from '#renderer/api';
+import { fetchSessions } from '#renderer/api-sessions';
 import {
   fetchScoutItems,
-  fetchScoutItem,
-  fetchScoutArticle,
-  fetchScoutItemSessions,
+  fetchResearchRuns,
+  fetchResearchRunItems,
   type ScoutQueryParams,
 } from '#renderer/api-scout';
 
@@ -27,14 +25,12 @@ import {
 } from '#renderer/api-terminal';
 import type {
   TaskListResponse,
-  TimelineResponse,
-  ItemSessionsResponse,
-  PrSummaryResponse,
   AskHistoryResponse,
+  FeedResponse,
+  ArtifactsResponse,
   ScoutResponse,
   ScoutItem,
-  ScoutArticleResponse,
-  ScoutItemSession,
+  ScoutResearchRun,
   WorkersResponse,
   SessionsResponse,
   MandoConfig,
@@ -64,47 +60,26 @@ export function useTaskListWithArchived(enabled: boolean) {
   });
 }
 
-export function useTaskTimeline(id: number) {
-  return useQuery<[TimelineResponse, ItemSessionsResponse]>({
-    queryKey: queryKeys.tasks.timeline(id),
-    queryFn: () => Promise.all([fetchTimeline(id), fetchItemSessions(id)]),
-    enabled: id > 0,
-  });
-}
-
-export function useTaskPrSummary(id: number, prNumber: number | undefined, isFinalized: boolean) {
-  return useQuery<PrSummaryResponse>({
-    queryKey: queryKeys.tasks.pr(id),
-    queryFn: async () => {
-      const result = await fetchPrSummary(id);
-      if (isFinalized) {
-        try {
-          localStorage.setItem(`pr-cache:${id}`, JSON.stringify(result));
-        } catch {
-          // localStorage full or unavailable -- ignore
-        }
-      }
-      return result;
-    },
-    enabled: !!prNumber,
-    staleTime: isFinalized ? Infinity : 30_000,
-    initialData: () => {
-      if (!isFinalized) return undefined;
-      try {
-        const cached = localStorage.getItem(`pr-cache:${id}`);
-        if (cached) return JSON.parse(cached) as PrSummaryResponse;
-      } catch {
-        // corrupt cache -- ignore
-      }
-      return undefined;
-    },
-  });
-}
-
 export function useTaskAskHistory(id: number) {
   return useQuery<AskHistoryResponse>({
     queryKey: queryKeys.tasks.askHistory(id),
     queryFn: () => fetchAskHistory(id),
+    enabled: id > 0,
+  });
+}
+
+export function useTaskFeed(id: number) {
+  return useQuery<FeedResponse>({
+    queryKey: queryKeys.tasks.feed(id),
+    queryFn: () => fetchFeed(id),
+    enabled: id > 0,
+  });
+}
+
+export function useTaskArtifacts(id: number) {
+  return useQuery<ArtifactsResponse>({
+    queryKey: queryKeys.tasks.artifacts(id),
+    queryFn: () => fetchArtifacts(id),
     enabled: id > 0,
   });
 }
@@ -126,27 +101,18 @@ export function useScoutList(params?: ScoutQueryParams) {
   });
 }
 
-export function useScoutItem(id: number) {
-  return useQuery<ScoutItem>({
-    queryKey: queryKeys.scout.item(id),
-    queryFn: () => fetchScoutItem(id),
-    enabled: id > 0,
+export function useResearchRuns() {
+  return useQuery<ScoutResearchRun[]>({
+    queryKey: queryKeys.scout.research(),
+    queryFn: fetchResearchRuns,
   });
 }
 
-export function useScoutArticle(id: number) {
-  return useQuery<ScoutArticleResponse>({
-    queryKey: queryKeys.scout.article(id),
-    queryFn: () => fetchScoutArticle(id),
-    enabled: id > 0,
-  });
-}
-
-export function useScoutItemSessions(id: number, enabled?: boolean) {
-  return useQuery<ScoutItemSession[]>({
-    queryKey: queryKeys.scout.sessions(id),
-    queryFn: () => fetchScoutItemSessions(id),
-    enabled: enabled !== false && id > 0,
+export function useResearchRunItems(runId: number) {
+  return useQuery<ScoutItem[]>({
+    queryKey: queryKeys.scout.researchItems(runId),
+    queryFn: () => fetchResearchRunItems(runId),
+    enabled: runId > 0,
   });
 }
 
@@ -154,11 +120,13 @@ export function useScoutItemSessions(id: number, enabled?: boolean) {
 // Sessions
 // ---------------------------------------------------------------------------
 
-export function useSessionsList(page: number, category?: string) {
+export function useSessionsList(page: number, category?: string, status?: string) {
   return useQuery<SessionsResponse>({
-    queryKey: queryKeys.sessions.list(page, category),
-    queryFn: () => fetchSessions(page, 50, category),
-    placeholderData: keepPreviousData,
+    queryKey: queryKeys.sessions.list(page, category, status),
+    queryFn: () => fetchSessions(page, 50, category, status),
+    // Only retain stale data while paginating (page > 1); clear immediately on
+    // filter changes (page resets to 1) so stale mismatched rows are not shown.
+    placeholderData: page > 1 ? keepPreviousData : undefined,
   });
 }
 
@@ -213,11 +181,3 @@ export function useConfig() {
 // ---------------------------------------------------------------------------
 // Health
 // ---------------------------------------------------------------------------
-
-export function useTelegramHealth() {
-  return useQuery({
-    queryKey: queryKeys.health.telegram(),
-    queryFn: () => apiGet<{ ok: boolean }>('/api/health/telegram'),
-    refetchInterval: 10_000,
-  });
-}

@@ -17,6 +17,7 @@ pub struct ResearchOutput {
     pub session_id: String,
     pub cost_usd: Option<f64>,
     pub duration_ms: Option<u64>,
+    pub credential_id: Option<i64>,
 }
 
 /// A single discovered link.
@@ -31,7 +32,11 @@ pub struct ResearchLink {
 }
 
 /// Run research for a topic, returning discovered links and session metadata.
-pub async fn run_research(topic: &str, workflow: &ScoutWorkflow) -> Result<ResearchOutput> {
+pub async fn run_research(
+    topic: &str,
+    workflow: &ScoutWorkflow,
+    pool: &sqlx::SqlitePool,
+) -> Result<ResearchOutput> {
     let interests_high = crate::biz::formatting::bullet_list(&workflow.interests.high);
 
     let user_context_rendered = workflow.user_context.render();
@@ -45,32 +50,34 @@ pub async fn run_research(topic: &str, workflow: &ScoutWorkflow) -> Result<Resea
         .map_err(|e| anyhow::anyhow!(e))?;
 
     let model = crate::biz::model_lookup::required_model(workflow, "research")?;
+    let credential = mando_captain::runtime::tick_spawn::pick_credential(pool).await;
+    let cred_id = mando_captain::runtime::tick_spawn::credential_id(&credential);
+    let builder = mando_cc::CcConfig::builder()
+        .model(model)
+        .timeout(workflow.agent.research_timeout_s)
+        .caller("scout-research")
+        .json_schema(serde_json::json!({
+            "type": "object",
+            "properties": {
+                "links": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "url": { "type": "string" },
+                            "title": { "type": "string" },
+                            "type": { "type": "string" },
+                            "reason": { "type": "string" }
+                        },
+                        "required": ["url", "title", "type", "reason"]
+                    }
+                }
+            },
+            "required": ["links"]
+        }));
     let result = mando_cc::CcOneShot::run(
         &prompt,
-        mando_cc::CcConfig::builder()
-            .model(model)
-            .timeout(workflow.agent.research_timeout_s)
-            .caller("scout-research")
-            .json_schema(serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "links": {
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "url": { "type": "string" },
-                                "title": { "type": "string" },
-                                "type": { "type": "string" },
-                                "reason": { "type": "string" }
-                            },
-                            "required": ["url", "title", "type", "reason"]
-                        }
-                    }
-                },
-                "required": ["links"]
-            }))
-            .build(),
+        mando_captain::runtime::tick_spawn::with_credential(builder, &credential).build(),
     )
     .await?;
 
@@ -87,5 +94,6 @@ pub async fn run_research(topic: &str, workflow: &ScoutWorkflow) -> Result<Resea
         session_id: result.session_id,
         cost_usd: result.cost_usd,
         duration_ms: result.duration_ms,
+        credential_id: cred_id,
     })
 }

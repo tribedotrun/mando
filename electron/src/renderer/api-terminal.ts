@@ -12,6 +12,7 @@ export interface WorkbenchItem {
   worktree: string;
   title: string;
   createdAt: string;
+  lastActivityAt: string;
   pinnedAt?: string | null;
   archivedAt?: string | null;
   deletedAt?: string | null;
@@ -28,6 +29,10 @@ export function archiveWorkbench(id: number): Promise<WorkbenchItem> {
 
 export function pinWorkbench(id: number, pinned: boolean): Promise<WorkbenchItem> {
   return apiPatch<WorkbenchItem>(`/api/workbenches/${id}`, { pinned });
+}
+
+export function renameWorkbench(id: number, title: string): Promise<WorkbenchItem> {
+  return apiPatch<WorkbenchItem>(`/api/workbenches/${id}`, { title });
 }
 
 // ---------------------------------------------------------------------------

@@ -43,6 +43,9 @@ const captainRoute = createRoute({
 const taskDetailRoute = createRoute({
   getParentRoute: () => appLayout,
   path: '/captain/tasks/$taskId',
+  validateSearch: z.object({
+    tab: z.string().optional().catch(undefined),
+  }),
   component: TaskDetailPage,
 });
 
@@ -50,6 +53,9 @@ const taskDetailRoute = createRoute({
 const scoutRoute = createRoute({
   getParentRoute: () => appLayout,
   path: '/scout',
+  validateSearch: z.object({
+    item: z.coerce.number().int().positive().optional().catch(undefined),
+  }),
   component: ScoutPage,
 });
 

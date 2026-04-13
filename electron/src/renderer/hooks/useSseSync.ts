@@ -100,8 +100,9 @@ function patchTaskList(qc: QueryClient, payload: SseEntityPayload<TaskItem>): vo
   const id = payload.item?.id ?? (payload.id as number | undefined);
   if (id != null) {
     void qc.invalidateQueries({ queryKey: queryKeys.tasks.timeline(id) });
-    void qc.invalidateQueries({ queryKey: queryKeys.tasks.pr(id) });
     void qc.invalidateQueries({ queryKey: queryKeys.tasks.askHistory(id) });
+    void qc.invalidateQueries({ queryKey: queryKeys.tasks.feed(id) });
+    void qc.invalidateQueries({ queryKey: queryKeys.tasks.artifacts(id) });
   }
 }
 
@@ -143,7 +144,6 @@ function handleStatusEvent(qc: QueryClient, data: SseStatusPayload | null): void
   if (data?.affected_task_ids) {
     for (const id of data.affected_task_ids) {
       void qc.invalidateQueries({ queryKey: queryKeys.tasks.timeline(id) });
-      void qc.invalidateQueries({ queryKey: queryKeys.tasks.pr(id) });
     }
   }
 }
@@ -343,6 +343,9 @@ export function useSseSync(options?: UseSseSyncOptions): SSEConnectionStatus {
                   } else if (action === 'failed') {
                     const err = (rd.error as string) ?? 'Unknown error';
                     toast.error(`Research failed: ${err}`, { id: toastId });
+                    void qc.invalidateQueries({ queryKey: queryKeys.scout.research() });
+                  } else if (action === 'started') {
+                    void qc.invalidateQueries({ queryKey: queryKeys.scout.research() });
                   } else if (action === 'progress') {
                     const elapsed = rd.elapsed_s as number;
                     const mins = Math.round(elapsed / 60);
@@ -352,8 +355,21 @@ export function useSseSync(options?: UseSseSyncOptions): SSEConnectionStatus {
                 break;
               }
 
+              case 'artifacts': {
+                const ad = event.data as { task_id?: number } | undefined;
+                if (ad?.task_id) {
+                  void qc.invalidateQueries({ queryKey: queryKeys.tasks.feed(ad.task_id) });
+                  void qc.invalidateQueries({ queryKey: queryKeys.tasks.artifacts(ad.task_id) });
+                }
+                break;
+              }
+
               case 'config':
                 void qc.invalidateQueries({ queryKey: queryKeys.config.all });
+                break;
+
+              case 'credentials':
+                void qc.invalidateQueries({ queryKey: queryKeys.credentials.all });
                 break;
 
               case 'resync':

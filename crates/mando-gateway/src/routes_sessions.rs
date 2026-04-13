@@ -14,6 +14,7 @@ pub(crate) struct SessionsQuery {
     pub page: Option<u32>,
     pub per_page: Option<u32>,
     pub category: Option<String>,
+    pub status: Option<String>,
 }
 
 /// GET /api/sessions?page=1&per_page=50&category=worker
@@ -28,7 +29,12 @@ pub(crate) async fn get_sessions(
     let per_page = params.per_page.unwrap_or(50).max(1) as usize;
 
     let (entries, total) = store
-        .list_sessions(page, per_page, params.category.as_deref())
+        .list_sessions(
+            page,
+            per_page,
+            params.category.as_deref(),
+            params.status.as_deref(),
+        )
         .await
         .map_err(|e| {
             error_response(
@@ -66,6 +72,12 @@ pub(crate) async fn get_sessions(
         .await
         .unwrap_or_default();
 
+    // Build credential_id → label map for enrichment.
+    let cred_ids: Vec<i64> = entries.iter().filter_map(|e| e.credential_id).collect();
+    let cred_labels = mando_db::queries::credentials::labels_by_ids(store.pool(), &cred_ids)
+        .await
+        .unwrap_or_default();
+
     let page_entries: Vec<Value> = entries
         .iter()
         .map(|e| {
@@ -87,6 +99,12 @@ pub(crate) async fn get_sessions(
                 if let Some(sid) = e.scout_item_id {
                     if let Some(title) = scout_titles.get(&sid) {
                         map.insert("scout_item_title".into(), Value::String(title.clone()));
+                    }
+                }
+                // Enrich with credential label.
+                if let Some(cid) = e.credential_id {
+                    if let Some(label) = cred_labels.get(&cid) {
+                        map.insert("credential_label".into(), Value::String(label.clone()));
                     }
                 }
             }

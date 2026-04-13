@@ -65,7 +65,7 @@ const rendererRoot = resolve(root, 'src/renderer');
 const rendererOut = resolve(outDir, 'renderer/main_window');
 const rendererConfig = resolve(root, 'vite.renderer.config.mts');
 execSync(
-  `npx vite build "${rendererRoot}" -c "${rendererConfig}" --outDir "${rendererOut}" --emptyOutDir --minify false`,
+  `npx vite build "${rendererRoot}" -c "${rendererConfig}" --outDir "${rendererOut}" --emptyOutDir --minify false --logLevel warn`,
   {
     cwd: root,
     stdio: 'inherit',

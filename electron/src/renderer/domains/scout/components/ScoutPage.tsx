@@ -1,5 +1,5 @@
 import React, { useCallback, useRef, useState } from 'react';
-import { Search } from 'lucide-react';
+import { History, Search } from 'lucide-react';
 import { useScoutList, type ScoutQueryParams } from '#renderer/hooks/queries';
 import { useQueryClient } from '@tanstack/react-query';
 import { queryKeys } from '#renderer/queryKeys';
@@ -10,6 +10,7 @@ import { AddUrlForm } from '#renderer/domains/scout/components/AddUrlForm';
 import { ScoutStatusTabs } from '#renderer/domains/scout/components/ScoutStatusTabs';
 import { ScoutReader } from '#renderer/domains/scout/components/ScoutReader';
 import { ScoutQA } from '#renderer/domains/scout/components/ScoutQA';
+import { ScoutResearch } from '#renderer/domains/scout/components/ScoutResearch';
 import {
   bulkUpdateScout,
   bulkDeleteScout,
@@ -25,7 +26,19 @@ const TYPES = ['all', 'github', 'youtube', 'arxiv', 'other'] as const;
 const SEARCH_DEBOUNCE_MS = 300;
 const DEFAULT_PER_PAGE = 25;
 
-export function ScoutPage({ active = true }: { active?: boolean } = {}): React.ReactElement {
+interface ScoutPageProps {
+  active?: boolean;
+  activeItemId?: number | null;
+  onOpenItem?: (id: number) => void;
+  onBackToList?: () => void;
+}
+
+export function ScoutPage({
+  active = true,
+  activeItemId = null,
+  onOpenItem,
+  onBackToList,
+}: ScoutPageProps): React.ReactElement {
   const [query, setQueryState] = useState<ScoutQueryParams>({
     status: 'all',
     per_page: DEFAULT_PER_PAGE,
@@ -46,10 +59,22 @@ export function ScoutPage({ active = true }: { active?: boolean } = {}): React.R
     void queryClient.invalidateQueries({ queryKey: queryKeys.scout.all });
   }, [queryClient]);
   const { selectedIds, toggleSelect, clearSelection } = useSelection();
-  const [activeItemId, setActiveItemId] = useState<number | null>(null);
-  const [view, setView] = useState<'' | 'read'>('');
+  const [view, setView] = useState<'' | 'research'>('');
   const [qaOpen, setQaOpen] = useState(false);
   const [qaEverOpened, setQaEverOpened] = useState(false);
+
+  // Sync ephemeral UI state with URL-driven activeItemId. URL state is the
+  // source of truth; local state must yield. React permits same-component
+  // setState during render for this "store previous props" pattern.
+  const prevActiveItemIdRef = useRef(activeItemId);
+  if (prevActiveItemIdRef.current !== null && activeItemId === null) {
+    if (qaOpen) setQaOpen(false);
+    if (qaEverOpened) setQaEverOpened(false);
+  }
+  if (activeItemId !== null && view !== '') {
+    setView('');
+  }
+  prevActiveItemIdRef.current = activeItemId;
   const [searchInput, setSearchInput] = useState('');
   const [focusedIndex, setFocusedIndex] = useState(-1);
   const [researchModalOpen, setResearchModalOpen] = useState(false);
@@ -81,11 +106,16 @@ export function ScoutPage({ active = true }: { active?: boolean } = {}): React.R
       // The research modal owns the keyboard while it is open — Enter and
       // Escape must submit/cancel the modal, not trigger list actions behind it.
       if (researchModalOpen) return;
-      // Escape from reader goes back to list
+      // Escape from a non-list view returns to the list. Reader path goes
+      // through backToList() (URL nav); research view is local useState.
       if (!inListView) {
         if (key === 'Escape') {
           e.preventDefault();
-          backToList();
+          if (view === 'research') {
+            setView('');
+          } else {
+            backToList();
+          }
         }
         return;
       }
@@ -118,7 +148,7 @@ export function ScoutPage({ active = true }: { active?: boolean } = {}): React.R
           break;
       }
     },
-    [inListView, items, clampedFocusedIndex, researchModalOpen],
+    [inListView, items, clampedFocusedIndex, researchModalOpen, view],
   );
 
   useViewKeyHandler(handleKey, active);
@@ -179,17 +209,14 @@ export function ScoutPage({ active = true }: { active?: boolean } = {}): React.R
   };
 
   const openReader = (id: number) => {
-    setActiveItemId(id);
-    setView('read');
+    onOpenItem?.(id);
   };
   const backToList = () => {
-    setActiveItemId(null);
-    setView('');
-    setQaOpen(false);
-    setQaEverOpened(false);
+    onBackToList?.();
   };
 
-  if (view === 'read' && activeItemId) {
+  // URL-driven activeItemId takes priority over local view state.
+  if (activeItemId) {
     return (
       <div className="-mx-5 -mb-4 flex" style={{ height: 'calc(100% + 1rem)' }}>
         <div className="min-w-0 flex-1 overflow-y-auto px-5 py-4">
@@ -213,6 +240,10 @@ export function ScoutPage({ active = true }: { active?: boolean } = {}): React.R
     );
   }
 
+  if (view === 'research') {
+    return <ScoutResearch onBack={() => setView('')} />;
+  }
+
   return (
     <div className="flex flex-col gap-4">
       {/* Row 1: Title + count */}
@@ -229,6 +260,15 @@ export function ScoutPage({ active = true }: { active?: boolean } = {}): React.R
             disabled={researchPending}
           >
             {researchPending ? 'Researching...' : 'Research'}
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            onClick={() => setView('research')}
+            title="Research history"
+            aria-label="Open research history"
+          >
+            <History size={16} />
           </Button>
           <AddUrlForm />
         </div>

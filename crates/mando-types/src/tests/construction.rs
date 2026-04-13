@@ -89,6 +89,10 @@ fn construct_worker_context() {
         stream_stale_s: None,
         pr_head_sha: "abc123".into(),
         degraded: false,
+        has_evidence: false,
+        evidence_fresh: false,
+        has_work_summary: false,
+        work_summary_fresh: false,
     };
     assert_eq!(ctx.session_name, "worker-1-1");
     assert!(ctx.process_alive);

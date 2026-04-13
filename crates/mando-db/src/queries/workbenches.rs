@@ -10,6 +10,7 @@ struct Row {
     worktree: String,
     title: String,
     created_at: String,
+    last_activity_at: String,
     pinned_at: Option<String>,
     archived_at: Option<String>,
     deleted_at: Option<String>,
@@ -25,6 +26,7 @@ impl Row {
             worktree: self.worktree,
             title: self.title,
             created_at: self.created_at,
+            last_activity_at: self.last_activity_at,
             pinned_at: self.pinned_at,
             archived_at: self.archived_at,
             deleted_at: self.deleted_at,
@@ -35,7 +37,8 @@ impl Row {
 
 const SELECT: &str = "\
     w.id, w.project_id, p.name AS project, w.worktree, w.title, \
-    w.created_at, w.pinned_at, w.archived_at, w.deleted_at, w.rev";
+    w.created_at, COALESCE(w.last_activity_at, w.created_at) AS last_activity_at, \
+    w.pinned_at, w.archived_at, w.deleted_at, w.rev";
 
 fn select_sql() -> &'static str {
     static SQL: std::sync::OnceLock<String> = std::sync::OnceLock::new();
@@ -46,15 +49,33 @@ fn select_sql() -> &'static str {
 
 pub async fn insert(pool: &SqlitePool, wb: &Workbench) -> Result<i64> {
     let result = sqlx::query(
-        "INSERT INTO workbenches (project_id, worktree, title, created_at) VALUES (?, ?, ?, ?)",
+        "INSERT INTO workbenches (project_id, worktree, title, created_at, last_activity_at) \
+         VALUES (?, ?, ?, ?, ?)",
     )
     .bind(wb.project_id)
     .bind(&wb.worktree)
     .bind(&wb.title)
     .bind(&wb.created_at)
+    .bind(&wb.last_activity_at)
     .execute(pool)
     .await?;
     Ok(result.last_insert_rowid())
+}
+
+/// Bump `last_activity_at` to now and increment `rev`. Returns `true` if a row
+/// was updated. Skips archived/deleted rows so stale hook callbacks can't
+/// resurrect them in the sidebar.
+pub async fn touch_activity(pool: &SqlitePool, id: i64) -> Result<bool> {
+    let now = mando_types::now_rfc3339();
+    let result = sqlx::query(
+        "UPDATE workbenches SET last_activity_at = ?, rev = rev + 1 \
+         WHERE id = ? AND archived_at IS NULL AND deleted_at IS NULL",
+    )
+    .bind(&now)
+    .bind(id)
+    .execute(pool)
+    .await?;
+    Ok(result.rows_affected() > 0)
 }
 
 pub async fn find_by_id(pool: &SqlitePool, id: i64) -> Result<Option<Workbench>> {
@@ -194,6 +215,58 @@ pub async fn archive_terminal(pool: &SqlitePool, grace_secs: u64) -> Result<usiz
         );
     }
     Ok(archived)
+}
+
+// ── Pending auto-title ──────────────────────────────────────────────
+
+/// Row returned by the pending-title query. Carries the CC session ID
+/// needed for auto-titling without leaking it into the public Workbench type.
+#[derive(Debug, sqlx::FromRow)]
+pub struct PendingTitleRow {
+    pub id: i64,
+    pub worktree: String,
+    pub title: String,
+    pub created_at: String,
+    pub pending_title_session: String,
+}
+
+/// Mark a workbench as needing auto-title generation for the given CC session.
+pub async fn set_pending_title_session(
+    pool: &SqlitePool,
+    id: i64,
+    session_id: &str,
+) -> Result<bool> {
+    let result =
+        sqlx::query("UPDATE workbenches SET pending_title_session = ?, rev = rev + 1 WHERE id = ?")
+            .bind(session_id)
+            .bind(id)
+            .execute(pool)
+            .await?;
+    Ok(result.rows_affected() > 0)
+}
+
+/// Clear the pending auto-title flag after success or permanent failure.
+pub async fn clear_pending_title_session(pool: &SqlitePool, id: i64) -> Result<bool> {
+    let result = sqlx::query(
+        "UPDATE workbenches SET pending_title_session = NULL, rev = rev + 1 WHERE id = ?",
+    )
+    .bind(id)
+    .execute(pool)
+    .await?;
+    Ok(result.rows_affected() > 0)
+}
+
+/// List workbenches that have a pending auto-title request.
+pub async fn list_pending_title(pool: &SqlitePool) -> Result<Vec<PendingTitleRow>> {
+    let rows: Vec<PendingTitleRow> = sqlx::query_as(
+        "SELECT id, worktree, title, created_at, pending_title_session \
+         FROM workbenches \
+         WHERE pending_title_session IS NOT NULL \
+           AND archived_at IS NULL AND deleted_at IS NULL",
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok(rows)
 }
 
 pub async fn stale_archived(pool: &SqlitePool, older_than_days: i64) -> Result<Vec<Workbench>> {

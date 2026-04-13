@@ -23,6 +23,10 @@ pub enum BusEvent {
     Config,
     #[serde(rename = "research")]
     Research,
+    #[serde(rename = "credentials")]
+    Credentials,
+    #[serde(rename = "artifacts")]
+    Artifacts,
 }
 
 /// Consumer-agnostic notification payload.

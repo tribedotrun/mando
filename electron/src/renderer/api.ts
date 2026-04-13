@@ -2,8 +2,6 @@ import type {
   TaskListResponse,
   TaskItem,
   WorkersResponse,
-  SessionsResponse,
-  TranscriptResponse,
   TimelineResponse,
   TickResult,
   PrSummaryResponse,
@@ -11,6 +9,9 @@ import type {
   AskHistoryResponse,
   SSEConnectionStatus,
   ItemSessionsResponse,
+  ArtifactsResponse,
+  FeedResponse,
+  AdvisorResponse,
 } from '#renderer/types';
 import log from '#renderer/logger';
 import { getErrorMessage } from '#renderer/utils';
@@ -225,16 +226,45 @@ export const deleteItems = (ids: number[], opts?: { close_pr?: boolean }) =>
     ...opts,
   });
 export const acceptItem = (id: number) => apiPost<void>('/api/tasks/accept', { id });
-export const reopenItem = (id: number, feedback: string) =>
-  apiPost<void>('/api/tasks/reopen', { id, feedback });
-export const reworkItem = (id: number, feedback: string) =>
-  apiPost<void>('/api/tasks/rework', { id, feedback });
+export async function reopenItem(id: number, feedback: string, images?: File[]): Promise<void> {
+  if (images?.length) {
+    const form = new FormData();
+    form.append('id', String(id));
+    form.append('feedback', feedback);
+    for (const img of images) form.append('images', img, img.name);
+    const res = await fetch(buildUrl('/api/tasks/reopen'), { method: 'POST', body: form });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: res.statusText }));
+      throw new Error(err.error || `HTTP ${res.status}`);
+    }
+    return;
+  }
+  return apiPost<void>('/api/tasks/reopen', { id, feedback });
+}
+
+export async function reworkItem(id: number, feedback: string, images?: File[]): Promise<void> {
+  if (images?.length) {
+    const form = new FormData();
+    form.append('id', String(id));
+    form.append('feedback', feedback);
+    for (const img of images) form.append('images', img, img.name);
+    const res = await fetch(buildUrl('/api/tasks/rework'), { method: 'POST', body: form });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: res.statusText }));
+      throw new Error(err.error || `HTTP ${res.status}`);
+    }
+    return;
+  }
+  return apiPost<void>('/api/tasks/rework', { id, feedback });
+}
 export const fetchTimeline = (id: number) => apiGet<TimelineResponse>(`/api/tasks/${id}/timeline`);
 export const fetchItemSessions = (id: number) =>
   apiGet<ItemSessionsResponse>(`/api/tasks/${id}/sessions`);
 
-// Retry / Clarify
+// Retry / Resume / Clarify
 export const retryItem = (id: number) => apiPost<{ ok: boolean }>('/api/tasks/retry', { id });
+export const resumeRateLimited = (id: number) =>
+  apiPost<{ ok: boolean }>('/api/tasks/resume-rate-limited', { id });
 
 export interface ClarifyResponse {
   ok: boolean;
@@ -250,21 +280,70 @@ export interface ClarifyResponse {
   error?: string;
 }
 
-export const answerClarification = (id: number, answers: { question: string; answer: string }[]) =>
-  apiPost<ClarifyResponse>(`/api/tasks/${id}/clarify`, { answers });
+export async function answerClarification(
+  id: number,
+  answers: { question: string; answer: string }[],
+  images?: File[],
+): Promise<ClarifyResponse> {
+  if (images?.length) {
+    const form = new FormData();
+    form.append('answers_json', JSON.stringify(answers));
+    for (const img of images) form.append('images', img, img.name);
+    const res = await fetch(buildUrl(`/api/tasks/${id}/clarify`), { method: 'POST', body: form });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: res.statusText }));
+      throw new Error(err.error || `HTTP ${res.status}`);
+    }
+    return res.json() as Promise<ClarifyResponse>;
+  }
+  return apiPost<ClarifyResponse>(`/api/tasks/${id}/clarify`, { answers });
+}
 
 /** Flat-text answer for Telegram-style input */
-export const answerClarificationText = (id: number, answer: string) =>
-  apiPost<ClarifyResponse>(`/api/tasks/${id}/clarify`, { answer });
+export async function answerClarificationText(
+  id: number,
+  answer: string,
+  images?: File[],
+): Promise<ClarifyResponse> {
+  if (images?.length) {
+    const form = new FormData();
+    form.append('answer', answer);
+    for (const img of images) form.append('images', img, img.name);
+    const res = await fetch(buildUrl(`/api/tasks/${id}/clarify`), { method: 'POST', body: form });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: res.statusText }));
+      throw new Error(err.error || `HTTP ${res.status}`);
+    }
+    return res.json() as Promise<ClarifyResponse>;
+  }
+  return apiPost<ClarifyResponse>(`/api/tasks/${id}/clarify`, { answer });
+}
 
 // Captain
 export const triggerTick = (dryRun = false) =>
   apiPost<TickResult>('/api/captain/tick', { dry_run: dryRun });
-export const nudgeWorker = (itemId: number, message: string) =>
-  apiPost<{ worker?: string; pid?: number }>('/api/captain/nudge', {
+export async function nudgeWorker(
+  itemId: number,
+  message: string,
+  images?: File[],
+): Promise<{ worker?: string; pid?: number }> {
+  if (images?.length) {
+    const form = new FormData();
+    form.append('item_id', String(itemId));
+    form.append('message', message);
+    for (const img of images) form.append('images', img, img.name);
+    const res = await fetch(buildUrl('/api/captain/nudge'), { method: 'POST', body: form });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: res.statusText }));
+      throw new Error(err.error || `HTTP ${res.status}`);
+    }
+    return res.json() as Promise<{ worker?: string; pid?: number }>;
+  }
+  return apiPost<{ worker?: string; pid?: number }>('/api/captain/nudge', {
     item_id: String(itemId),
     message,
   });
+}
 export const handoffItem = (id: number) => apiPost<{ ok: boolean }>('/api/tasks/handoff', { id });
 export const cancelItem = (id: number) => apiPost<{ ok: boolean }>('/api/tasks/cancel', { id });
 
@@ -272,8 +351,27 @@ export const cancelItem = (id: number) => apiPost<{ ok: boolean }>('/api/tasks/c
 export const fetchWorkers = () => apiGet<WorkersResponse>('/api/workers');
 
 // Task Ask (multi-turn: first ask creates session, follow-ups resume)
-export const askTask = (id: number, question: string, askId?: string) =>
-  apiPost<AskResponse>('/api/tasks/ask', { id, question, ask_id: askId });
+export async function askTask(
+  id: number,
+  question: string,
+  askId?: string,
+  images?: File[],
+): Promise<AskResponse> {
+  if (images?.length) {
+    const form = new FormData();
+    form.append('id', String(id));
+    form.append('question', question);
+    if (askId) form.append('ask_id', askId);
+    for (const img of images) form.append('images', img, img.name);
+    const res = await fetch(buildUrl('/api/tasks/ask'), { method: 'POST', body: form });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: res.statusText }));
+      throw new Error(err.error || `HTTP ${res.status}`);
+    }
+    return res.json() as Promise<AskResponse>;
+  }
+  return apiPost<AskResponse>('/api/tasks/ask', { id, question, ask_id: askId });
+}
 
 // End ask session
 export const endAskSession = (id: number) =>
@@ -287,6 +385,17 @@ export const askReopen = (id: number) =>
 export const fetchAskHistory = (id: number) =>
   apiGet<AskHistoryResponse>(`/api/tasks/${id}/history`);
 
+// Task Artifacts
+export const fetchArtifacts = (id: number) =>
+  apiGet<ArtifactsResponse>(`/api/tasks/${id}/artifacts`);
+
+// Task Feed (unified timeline + artifacts + messages)
+export const fetchFeed = (id: number) => apiGet<FeedResponse>(`/api/tasks/${id}/feed`);
+
+// Task Advisor
+export const sendAdvisorMessage = (id: number, message: string, intent: string = 'ask') =>
+  apiPost<AdvisorResponse>(`/api/tasks/${id}/advisor`, { message, intent });
+
 // Merge PR
 export const mergePr = (prNumber: number, project: string) =>
   apiPost<{ ok: boolean; message: string }>('/api/tasks/merge', { pr_number: prNumber, project });
@@ -295,15 +404,6 @@ export const mergePr = (prNumber: number, project: string) =>
 export const fetchPrSummary = (id: number) =>
   apiGet<PrSummaryResponse>(`/api/tasks/${id}/pr-summary`);
 
-// Sessions
-export async function fetchSessions(page = 1, perPage = 50, category?: string) {
-  const params = new URLSearchParams({ page: String(page), per_page: String(perPage) });
-  if (category) params.set('category', category);
-  return apiGet<SessionsResponse>(`/api/sessions?${params}`);
-}
-export const fetchTranscript = (sessionId: string) =>
-  apiGet<TranscriptResponse>(`/api/sessions/${sessionId}/transcript`);
-
 // SSE
 export function connectSSE(
   onEvent: (event: { event: string; ts: number; data?: unknown }) => void,
@@ -311,7 +411,6 @@ export function connectSSE(
 ): EventSource {
   const source = new EventSource(buildUrl('/api/events'));
 
-  // Deduplicate status changes — EventSource reconnect loops can flood setState
   let lastStatus: SSEConnectionStatus | null = null;
   const emitStatus = (status: SSEConnectionStatus) => {
     if (status === lastStatus) return;
@@ -337,8 +436,6 @@ export function connectSSE(
     } catch (e) {
       consecutiveParseFailures++;
       log.warn('[SSE] failed to parse event data:', e);
-      // First parse failure: emit degraded event so the DevInfoBar / indicator
-      // reacts immediately. Keep the counter-based escalation for the toast.
       if (!degradedEmittedForStream && typeof window !== 'undefined') {
         degradedEmittedForStream = true;
         window.dispatchEvent(new CustomEvent(OBS_DEGRADED_EVENT));
@@ -361,18 +458,8 @@ export function connectSSE(
     emitStatus('disconnected');
   };
 
-  // Named SSE events from the gateway: "snapshot_error" fires when the server
-  // cannot build the initial snapshot (DB failure), and "resync" fires when
-  // the broadcast stream lagged and the client needs to reload from REST to
-  // catch up. EventSource does not route named events to onmessage, so
-  // without explicit addEventListener calls these were silently dropped and
-  // the UI would show stale data with no feedback.
-  //
-  // We deliberately use the name "snapshot_error" instead of "error" because
-  // EventSource dispatches a plain Event (not a MessageEvent) to any listener
-  // registered for "error" on native connection failures (network drops,
-  // server restarts). That would make a named "error" event indistinguishable
-  // from a reconnection attempt, producing spurious "snapshot failed" toasts.
+  // Named SSE events: "snapshot_error" (server DB failure), "resync" (stream lag).
+  // Uses "snapshot_error" not "error" to avoid confusion with native EventSource errors.
   source.addEventListener('snapshot_error' as unknown as 'message', (msg: MessageEvent) => {
     try {
       const data = typeof msg.data === 'string' ? JSON.parse(msg.data) : null;

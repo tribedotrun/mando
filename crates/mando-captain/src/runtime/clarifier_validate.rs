@@ -84,6 +84,9 @@ pub(crate) async fn retry_with_correction(
         .resume(session_id)
         .allowed_tools(vec!["Read".into(), "Glob".into(), "Grep".into()])
         .json_schema(schema.clone());
+    let credential = super::tick_spawn::pick_credential(pool).await;
+    let cred_id = super::tick_spawn::credential_id(&credential);
+    builder = super::tick_spawn::with_credential(builder, &credential);
     if let Some(tid) = task_id {
         builder = builder.task_id(tid.to_string());
     }
@@ -102,6 +105,7 @@ pub(crate) async fn retry_with_correction(
             task_id,
             status: mando_types::SessionStatus::Stopped,
             worker_name: "",
+            credential_id: cred_id,
         },
     )
     .await

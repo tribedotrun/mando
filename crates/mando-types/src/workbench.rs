@@ -1,9 +1,5 @@
 use serde::{Deserialize, Serialize};
 
-fn default_rev() -> i64 {
-    1
-}
-
 /// Human-readable timestamp title for workbenches (e.g., "Apr 8 18:02").
 pub fn workbench_title_now() -> String {
     let now = time::OffsetDateTime::now_utc();
@@ -41,25 +37,30 @@ pub struct Workbench {
     pub worktree: String,
     pub title: String,
     pub created_at: String,
+    /// Updated on meaningful user interaction (terminal session start,
+    /// CC `UserPromptSubmit` hook). Drives sidebar sort ordering.
+    pub last_activity_at: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pinned_at: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub archived_at: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub deleted_at: Option<String>,
-    #[serde(default = "default_rev")]
+    #[serde(default = "crate::default_rev")]
     pub rev: i64,
 }
 
 impl Workbench {
     pub fn new(project_id: i64, project: String, worktree: String, title: String) -> Self {
+        let now = crate::now_rfc3339();
         Self {
             id: 0,
             project_id,
             project,
             worktree,
             title,
-            created_at: crate::now_rfc3339(),
+            created_at: now.clone(),
+            last_activity_at: now,
             pinned_at: None,
             archived_at: None,
             deleted_at: None,

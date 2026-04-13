@@ -6,7 +6,7 @@ import type {
   ActResponse,
   ScoutItemSession,
 } from '#renderer/types';
-import { apiGet, apiPost, apiPatch } from '#renderer/api';
+import { apiGet, apiPost, apiPatch, buildUrl } from '#renderer/api';
 
 export interface ScoutQueryParams {
   status?: string;
@@ -36,8 +36,27 @@ export const updateScoutStatus = (id: number, status: string) =>
 export const bulkUpdateScout = (ids: number[], updates: { status: string }) =>
   apiPost<void>('/api/scout/bulk', { ids, updates });
 export const bulkDeleteScout = (ids: number[]) => apiPost<void>('/api/scout/bulk-delete', { ids });
-export const askScout = (id: number, question: string, sessionId?: string) =>
-  apiPost<AskResponse>('/api/scout/ask', { id, question, session_id: sessionId });
+export async function askScout(
+  id: number,
+  question: string,
+  sessionId?: string,
+  images?: File[],
+): Promise<AskResponse> {
+  if (images?.length) {
+    const form = new FormData();
+    form.append('id', String(id));
+    form.append('question', question);
+    if (sessionId) form.append('session_id', sessionId);
+    for (const img of images) form.append('images', img, img.name);
+    const res = await fetch(buildUrl('/api/scout/ask'), { method: 'POST', body: form });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: res.statusText }));
+      throw new Error(err.error || `HTTP ${res.status}`);
+    }
+    return res.json() as Promise<AskResponse>;
+  }
+  return apiPost<AskResponse>('/api/scout/ask', { id, question, session_id: sessionId });
+}
 export const actOnScoutItem = (id: number, project: string, prompt?: string) =>
   apiPost<ActResponse>(`/api/scout/items/${id}/act`, { project, prompt });
 export const researchScout = (topic: string, process = true) =>
@@ -49,3 +68,7 @@ export const publishScoutTelegraph = (id: number) =>
   apiPost<{ ok: boolean; url: string }>(`/api/scout/items/${id}/telegraph`);
 export const fetchScoutItemSessions = (id: number) =>
   apiGet<ScoutItemSession[]>(`/api/scout/items/${id}/sessions`);
+export const fetchResearchRuns = () =>
+  apiGet<import('#renderer/types').ScoutResearchRun[]>('/api/scout/research');
+export const fetchResearchRunItems = (runId: number) =>
+  apiGet<import('#renderer/types').ScoutItem[]>(`/api/scout/research/${runId}/items`);

@@ -253,6 +253,15 @@ export class TerminalRuntime {
       window.mandoAPI.resolveLocalPath(input, cwd);
     const openPath = (filePath: string) => window.mandoAPI.openLocalPath(filePath);
 
+    // Handle OSC 8 hyperlinks (e.g. PR links in the CC status line).
+    // xterm's built-in OscLinkProvider parses the escape sequences; this
+    // handler routes clicks through the same IPC path as plain-text URLs.
+    term.options.linkHandler = {
+      activate: (_event, url) => {
+        void openUrl(url).catch((err) => log.warn('OSC 8 link open failed', err));
+      },
+    };
+
     this.disposables.push(
       term.registerLinkProvider(createUrlLinkProvider({ terminal: term, openUrl })),
     );

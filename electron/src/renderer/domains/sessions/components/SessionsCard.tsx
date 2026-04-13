@@ -1,7 +1,6 @@
 import React, { useState, useCallback, useRef } from 'react';
-import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import { Filter } from 'lucide-react';
-import { fetchSessions } from '#renderer/domains/sessions/hooks/useApi';
+import { useSessionsList } from '#renderer/hooks/queries';
 import { useViewKeyHandler } from '#renderer/global/hooks/useKeyboardShortcuts';
 import { useScrollIntoViewRef } from '#renderer/global/hooks/useScrollIntoViewRef';
 import type { SessionEntry } from '#renderer/types';
@@ -25,7 +24,6 @@ import { Button } from '#renderer/components/ui/button';
 import { Skeleton } from '#renderer/components/ui/skeleton';
 import { Table, TableBody, TableRow, TableCell } from '#renderer/components/ui/table';
 
-const PER_PAGE = 50;
 const CATEGORY_ORDER = [
   'workers',
   'clarifier',
@@ -55,22 +53,16 @@ export function SessionsCard({
     data: sessionsData,
     isLoading: loading,
     error: sessionsError,
-  } = useQuery({
-    queryKey: ['sessions', page, filterCategory],
-    queryFn: () => fetchSessions(page, PER_PAGE, filterCategory || undefined),
-    placeholderData: keepPreviousData,
-  });
+  } = useSessionsList(page, filterCategory || undefined, filterStatus);
   // Track whether we've ever loaded data -- suppress loading text on category switches
   const hasLoadedRef = useRef(false);
   if (sessionsData) hasLoadedRef.current = true;
 
-  const allSessions: SessionEntry[] = sessionsData?.sessions ?? [];
-  const sessions =
-    filterStatus === 'all' ? allSessions : allSessions.filter((s) => s.status === filterStatus);
+  const sessions: SessionEntry[] = sessionsData?.sessions ?? [];
   const totalPages = sessionsData?.total_pages ?? 1;
   const categories: Record<string, number> = sessionsData?.categories ?? {};
   const error = sessionsError ? getErrorMessage(sessionsError, 'Failed to fetch sessions') : null;
-  const sessionSeqMap = React.useMemo(() => buildSessionSequence(allSessions), [allSessions]);
+  const sessionSeqMap = React.useMemo(() => buildSessionSequence(sessions), [sessions]);
 
   const [showFilterMenu, setShowFilterMenu] = useState(false);
   const isFiltered = filterStatus !== 'all';
@@ -185,16 +177,13 @@ export function SessionsCard({
             value={filterStatus}
             onChange={(v) => {
               setFilterStatus(v);
+              setPage(1);
               setShowFilterMenu(false);
             }}
             open={showFilterMenu}
             onOpenChange={setShowFilterMenu}
           >
-            <Button
-              variant={isFiltered ? 'secondary' : 'ghost'}
-              size="icon-xs"
-              aria-label="Filter by status"
-            >
+            <Button variant="ghost" size="icon-xs" aria-label="Filter by status">
               <Filter size={14} />
               {isFiltered && <span className="text-[11px]">{filterStatus}</span>}
             </Button>
@@ -294,6 +283,13 @@ function SessionsList({
                     <span className="truncate text-[11px] text-muted-foreground">{subtitle}</span>
                   )}
                 </span>
+              </TableCell>
+
+              {/* Credential */}
+              <TableCell className="text-right">
+                {s.credential_label && (
+                  <span className="text-[11px] text-muted-foreground">{s.credential_label}</span>
+                )}
               </TableCell>
 
               {/* Time */}

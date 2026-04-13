@@ -1,12 +1,17 @@
 import React, { useRef, useState, useImperativeHandle, forwardRef } from 'react';
-import { Paperclip } from 'lucide-react';
+import { ArrowUp, Paperclip } from 'lucide-react';
 import { useDraft } from '#renderer/global/hooks/useDraft';
 import { useMountEffect } from '#renderer/global/hooks/useMountEffect';
 import { useProjects } from '#renderer/domains/settings';
 import { useTaskCreate } from '#renderer/hooks/mutations';
 import { shortRepo } from '#renderer/utils';
 import { Button } from '#renderer/components/ui/button';
-import { Kbd } from '#renderer/components/ui/kbd';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '#renderer/components/ui/tooltip';
 import { Combobox } from '#renderer/components/ui/combobox';
 
 const LAST_PROJECT_KEY = 'mando:lastProject';
@@ -196,12 +201,51 @@ export const InlineTaskCreate = forwardRef<InlineTaskCreateHandle>(
               <span className="text-caption text-text-3">Choose a project</span>
             )}
 
-            <Button data-testid="inline-task-submit" onClick={handleSubmit} disabled={!canSubmit}>
-              {createMut.isPending ? 'Creating...' : 'Create'}
-              <Kbd className="bg-primary-foreground/20 text-primary-foreground">
-                &#x2318;&#x21B5;
-              </Kbd>
-            </Button>
+            <TooltipProvider delayDuration={300}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    data-testid="inline-task-submit"
+                    onClick={handleSubmit}
+                    disabled={!canSubmit}
+                    variant="default"
+                    size="icon-xs"
+                    aria-label="Create task"
+                    className="shrink-0 rounded-full transition-colors"
+                  >
+                    {createMut.isPending ? (
+                      <svg
+                        className="animate-spin"
+                        width="14"
+                        height="14"
+                        viewBox="0 0 14 14"
+                        fill="none"
+                      >
+                        <circle
+                          cx="7"
+                          cy="7"
+                          r="5.5"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          opacity="0.3"
+                        />
+                        <path
+                          d="M12.5 7a5.5 5.5 0 0 0-5.5-5.5"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                        />
+                      </svg>
+                    ) : (
+                      <ArrowUp size={14} strokeWidth={2} />
+                    )}
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="top" className="text-xs">
+                  Create ⌘↵
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
           </div>
         </div>
       </div>

@@ -45,7 +45,9 @@ pub async fn apply_verdict(
     match verdict.action.as_str() {
         "ship" => {
             let is_no_pr = item.no_pr;
+            let old_intervention_count = item.intervention_count;
             item.status = spawn_logic::ship_status(is_no_pr);
+            item.intervention_count = 0;
             let (event_type, msg_suffix) = if is_no_pr {
                 (TimelineEventType::CompletedNoPr, "completed (no PR)")
             } else {
@@ -78,6 +80,7 @@ pub async fn apply_verdict(
                 }
                 Err(e) => {
                     item.status = prev_status;
+                    item.intervention_count = old_intervention_count;
                     transition_applied = false;
                     tracing::error!(module = "captain", item_id = item.id, error = %e, "persist failed for ship verdict");
                 }

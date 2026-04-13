@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo } from 'react';
 import { ChevronLeft } from 'lucide-react';
 import { useConfig } from '#renderer/hooks/queries';
 import { ErrorBoundary } from '#renderer/global/components/ErrorBoundary';
@@ -9,6 +9,7 @@ import { SettingsTelegram } from '#renderer/domains/settings/components/Settings
 import { SettingsScout } from '#renderer/domains/settings/components/SettingsScout';
 import { SettingsExperimental } from '#renderer/domains/settings/components/SettingsExperimental';
 import { SettingsAbout } from '#renderer/domains/settings/components/SettingsAbout';
+import { SettingsAccounts } from '#renderer/domains/settings/components/SettingsAccounts';
 import { Button } from '#renderer/components/ui/button';
 import { Skeleton } from '#renderer/components/ui/skeleton';
 
@@ -16,6 +17,7 @@ export type SettingsSection =
   | 'general'
   | 'projects'
   | 'captain'
+  | 'credentials'
   | 'telegram'
   | 'scout'
   | 'experimental'
@@ -30,6 +32,7 @@ const BASE_NAV_ITEMS: NavItem[] = [
   { id: 'general', label: 'General' },
   { id: 'projects', label: 'Projects' },
   { id: 'captain', label: 'Captain' },
+  { id: 'credentials', label: 'Credentials' },
   { id: 'telegram', label: 'Telegram' },
   { id: 'experimental', label: 'Experimental' },
   { id: 'about', label: 'About' },
@@ -43,6 +46,8 @@ function SettingsPanel({ section }: { section: SettingsSection }) {
       return <SettingsProjects />;
     case 'captain':
       return <SettingsCaptain />;
+    case 'credentials':
+      return <SettingsAccounts />;
     case 'telegram':
       return <SettingsTelegram />;
     case 'scout':
@@ -56,14 +61,15 @@ function SettingsPanel({ section }: { section: SettingsSection }) {
 
 interface SettingsPageProps {
   onBack: () => void;
-  initialSection?: SettingsSection;
+  section?: SettingsSection;
+  onSectionChange?: (section: SettingsSection) => void;
 }
 
 export function SettingsPage({
   onBack,
-  initialSection = 'general',
+  section: sectionProp = 'general',
+  onSectionChange,
 }: SettingsPageProps): React.ReactElement {
-  const [section, setSection] = useState<SettingsSection>(initialSection);
   const { data: config, isLoading, error } = useConfig();
   const scoutEnabled = !!config?.features?.scout;
   const navItems = useMemo(() => {
@@ -78,6 +84,10 @@ export function SettingsPage({
     }
     return items;
   }, [scoutEnabled]);
+
+  const section: SettingsSection = navItems.some((item) => item.id === sectionProp)
+    ? sectionProp
+    : 'general';
 
   if (isLoading) {
     return (
@@ -117,7 +127,7 @@ export function SettingsPage({
                 data-testid={`settings-nav-${item.id}`}
                 variant="ghost"
                 size="sm"
-                onClick={() => setSection(item.id)}
+                onClick={() => onSectionChange?.(item.id)}
                 className={`w-full justify-start text-[13px] ${
                   active
                     ? 'bg-muted font-medium text-foreground'

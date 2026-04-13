@@ -72,7 +72,7 @@ export const TaskRow = React.memo(function TaskRow({
         >
           <Checkbox
             checked={selected}
-            aria-label={`Select "${item.title}"`}
+            aria-label={`Select "${item.title || item.original_prompt || 'Untitled task'}"`}
             onCheckedChange={() => callbacks.onToggleSelect(item.id)}
             onClick={(e) => e.stopPropagation()}
           />
@@ -97,7 +97,7 @@ export const TaskRow = React.memo(function TaskRow({
               {' \u00b7 '}
             </span>
           )}
-          {item.title}
+          {item.title || item.original_prompt || 'Untitled task'}
         </span>
         {item.pr_number && (item.github_repo || item.project) && (
           <a

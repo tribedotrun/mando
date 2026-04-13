@@ -111,6 +111,24 @@ pub(super) async fn apply_clarifier_result(
                     );
                 }
 
+                // Propagate the clarified title to the parent workbench.
+                if let Some(wb_id) = item.workbench_id {
+                    if let Err(e) =
+                        mando_db::queries::workbenches::update_title(pool, wb_id, &item.title).await
+                    {
+                        tracing::warn!(
+                            module = "captain",
+                            workbench_id = wb_id,
+                            error = %e,
+                            "failed to propagate title to workbench"
+                        );
+                    } else {
+                        notifier
+                            .clone_bus()
+                            .send(mando_types::BusEvent::Workbenches, None);
+                    }
+                }
+
                 let _ = super::timeline_emit::emit_for_task(
                     item,
                     mando_types::timeline::TimelineEventType::ClarifyResolved,

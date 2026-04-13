@@ -121,6 +121,8 @@ pub(crate) async fn spawn_merge(
     let captain_model = workflow.models.captain.clone();
     let timeout = workflow.agent.captain_merge_timeout_s;
     let pool = pool.clone();
+    let credential = super::tick_spawn::pick_credential(&pool).await;
+    let cred_id = credential.as_ref().map(|c| c.0);
     let merge_notifier = notifier.fork();
 
     let session_id_for_panic = session_id.clone();
@@ -129,7 +131,7 @@ pub(crate) async fn spawn_merge(
     // external CC process is managed via the pid registry on shutdown.
     tokio::spawn(async move {
         let result = AssertUnwindSafe(async move {
-            let config = mando_cc::CcConfig::builder()
+            let builder = mando_cc::CcConfig::builder()
                 .model(&captain_model)
                 .timeout(timeout)
                 .caller("captain-merge-async")
@@ -144,8 +146,8 @@ pub(crate) async fn spawn_merge(
                     "Grep".into(),
                     "Glob".into(),
                 ])
-                .json_schema(merge_json_schema())
-                .build();
+                .json_schema(merge_json_schema());
+            let config = super::tick_spawn::with_credential(builder, &credential).build();
 
             // Log "running" session entry so cancel can find it immediately.
             if let Err(e) = crate::io::headless_cc::log_running_session(
@@ -156,6 +158,7 @@ pub(crate) async fn spawn_merge(
                 "",
                 Some(task_id_num),
                 false,
+                cred_id,
             )
             .await
             {
@@ -185,7 +188,12 @@ pub(crate) async fn spawn_merge(
                 if let Err(e) = crate::io::pid_registry::unregister(&session_id) {
                     warn!(module = "captain", %session_id, %e, "pid_registry unregister failed");
                 }
-                merge_notifier.check_rate_limit(&result).await;
+                let cred_id = mando_db::queries::sessions::get_credential_id(&pool, &session_id)
+                    .await
+                    .unwrap_or(None);
+                merge_notifier
+                    .check_rate_limit(&result, &pool, cred_id)
+                    .await;
                 if let Err(e) = crate::io::headless_cc::log_cc_result(
                     &pool,
                     &result,

@@ -16,9 +16,9 @@ use crate::routes_ai;
 use crate::routes_captain;
 use crate::routes_captain_adopt;
 use crate::routes_channels;
-use crate::routes_clarifier;
 use crate::routes_client_logs;
 use crate::routes_config;
+use crate::routes_credentials;
 use crate::routes_ops;
 use crate::routes_projects;
 use crate::routes_scout;
@@ -26,10 +26,6 @@ use crate::routes_scout_ai;
 use crate::routes_scout_bulk;
 use crate::routes_scout_telegraph;
 use crate::routes_sessions;
-use crate::routes_task_actions;
-use crate::routes_task_ask;
-use crate::routes_task_detail;
-use crate::routes_tasks;
 use crate::routes_terminal;
 use crate::routes_ui;
 use crate::routes_workbenches;
@@ -84,6 +80,7 @@ fn protected_routes() -> Router<AppState> {
         .merge(worktree_routes())
         .merge(routes_workbenches::routes())
         .merge(project_routes())
+        .merge(routes_credentials::credential_routes())
         .merge(ai_routes())
         .merge(routes_terminal::routes())
         .merge(ui_routes())
@@ -99,68 +96,9 @@ fn protected_routes() -> Router<AppState> {
 }
 
 fn task_routes() -> Router<AppState> {
-    Router::new()
-        .route("/api/tasks", get(routes_tasks::get_tasks))
-        .route("/api/tasks", delete(routes_tasks::delete_task_items))
-        .route(
-            "/api/tasks/{id}/history",
-            get(routes_task_detail::get_task_history),
-        )
-        .route(
-            "/api/tasks/{id}/timeline",
-            get(routes_task_detail::get_task_timeline),
-        )
-        .route(
-            "/api/tasks/{id}/pr-summary",
-            get(routes_task_detail::get_task_pr_summary),
-        )
-        .route(
-            "/api/tasks/{id}/sessions",
-            get(routes_task_detail::get_task_sessions),
-        )
-        .route("/api/tasks/{id}", patch(routes_tasks::patch_task_item))
-        .route("/api/tasks/add", post(routes_tasks::post_task_add))
-        .route("/api/tasks/bulk", post(routes_tasks::post_task_bulk))
-        .route("/api/tasks/delete", post(routes_tasks::post_task_delete))
-        .route("/api/tasks/merge", post(routes_tasks::post_task_merge))
-        .route(
-            "/api/tasks/accept",
-            post(routes_task_actions::post_task_accept),
-        )
-        .route(
-            "/api/tasks/cancel",
-            post(routes_task_actions::post_task_cancel),
-        )
-        .route(
-            "/api/tasks/reopen",
-            post(routes_task_actions::post_task_reopen),
-        )
-        .route(
-            "/api/tasks/rework",
-            post(routes_task_actions::post_task_rework),
-        )
-        .route(
-            "/api/tasks/handoff",
-            post(routes_task_actions::post_task_handoff),
-        )
-        .route("/api/tasks/ask", post(routes_task_ask::post_task_ask))
-        .route(
-            "/api/tasks/ask/end",
-            post(routes_task_ask::post_task_ask_end),
-        )
-        .route(
-            "/api/tasks/ask/reopen",
-            post(routes_task_ask::post_task_ask_reopen),
-        )
-        .route(
-            "/api/tasks/retry",
-            post(routes_task_actions::post_task_retry),
-        )
-        .route(
-            "/api/tasks/{id}/clarify",
-            post(routes_clarifier::post_task_clarify),
-        )
+    crate::routes_task_router::task_routes()
 }
+
 fn captain_routes() -> Router<AppState> {
     Router::new()
         .route("/api/captain/tick", post(routes_captain::post_captain_tick))
@@ -216,11 +154,16 @@ fn scout_routes() -> Router<AppState> {
         .route("/api/scout/process", post(routes_scout::post_scout_process))
         .route(
             "/api/scout/research",
-            post(routes_scout_ai::post_scout_research),
+            get(routes_scout_ai::get_scout_research_runs)
+                .post(routes_scout_ai::post_scout_research),
         )
         .route(
             "/api/scout/research/{id}",
             get(routes_scout_ai::get_scout_research_run),
+        )
+        .route(
+            "/api/scout/research/{id}/items",
+            get(routes_scout_ai::get_scout_research_run_items),
         )
         .route("/api/scout/ask", post(routes_scout_ai::post_scout_ask))
         .route(
@@ -440,6 +383,9 @@ where
         bus: bus_arc.clone(),
         cc_session_mgr: Arc::new(cc_session_mgr),
         task_store: task_store_arc,
+        credential_mgr: Arc::new(crate::credentials::CredentialManager::new(
+            db.pool().clone(),
+        )),
         db,
         qa_session_mgr,
         terminal_host: Arc::new(mando_terminal::TerminalHost::new(mando_config::data_dir())),
@@ -458,6 +404,7 @@ where
         .start_monitor(&state.task_tracker, state.cancellation_token.clone());
 
     crate::background_tasks::spawn_auto_tick(&state, tick_rx);
+    crate::startup::resume_pending_scout_items(&state).await;
 
     if let Err(err) = state.telegram_runtime.configure(&config).await {
         tracing::warn!(

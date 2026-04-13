@@ -15,7 +15,7 @@ static REWORK_LOCK_SKIPS: Mutex<Option<HashMap<String, u32>>> = Mutex::new(None)
 const REWORK_LOCK_ALERT_THRESHOLD: u32 = 5;
 
 fn with_skip_map<R>(f: impl FnOnce(&mut HashMap<String, u32>) -> R) -> R {
-    let mut guard = REWORK_LOCK_SKIPS.lock().expect("rework skip map poisoned");
+    let mut guard = REWORK_LOCK_SKIPS.lock().unwrap_or_else(|e| e.into_inner());
     f(guard.get_or_insert_with(HashMap::new))
 }
 
@@ -61,8 +61,8 @@ pub(super) fn transition_rework_to_queued(items: &mut [Task], alerts: &mut Vec<S
         };
         item.status = ItemStatus::Queued;
         item.worker = None;
-        item.worktree = None;
-        // workbench_id is permanent — once assigned, never cleared.
+        // worktree and workbench_id are permanent — rework reuses the same
+        // worktree directory and workbench, only creating a new branch.
         item.branch = None;
         item.pr_number = None;
         item.worker_started_at = None;

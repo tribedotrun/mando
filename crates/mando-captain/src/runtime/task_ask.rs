@@ -96,6 +96,11 @@ pub async fn persist_question(
 }
 
 /// Persist the assistant answer and emit a HumanAsk timeline event.
+///
+/// When `intent` is "reopen" or "rework", the assistant answer is NOT
+/// persisted to ask_history (to avoid showing an Advisor bubble with
+/// the worker-facing synthesized message), and the timeline summary
+/// uses a "Reopen request:" / "Rework request:" prefix.
 pub async fn persist_answer(
     pool: &sqlx::SqlitePool,
     task_id: i64,
@@ -103,28 +108,37 @@ pub async fn persist_answer(
     session_id: &str,
     question: &str,
     answer: &str,
+    intent: &str,
 ) -> Result<()> {
-    mando_db::queries::ask_history::append(
-        pool,
-        task_id,
-        &mando_types::AskHistoryEntry {
-            ask_id: ask_id.into(),
-            session_id: session_id.into(),
-            role: "assistant".into(),
-            content: answer.into(),
-            timestamp: mando_types::now_rfc3339(),
-        },
-    )
-    .await
-    .map_err(|e| anyhow::anyhow!("persist ask answer for task {task_id}: {e}"))?;
+    if intent == "ask" {
+        mando_db::queries::ask_history::append(
+            pool,
+            task_id,
+            &mando_types::AskHistoryEntry {
+                ask_id: ask_id.into(),
+                session_id: session_id.into(),
+                role: "assistant".into(),
+                content: answer.into(),
+                timestamp: mando_types::now_rfc3339(),
+            },
+        )
+        .await
+        .map_err(|e| anyhow::anyhow!("persist ask answer for task {task_id}: {e}"))?;
+    }
+
+    let prefix = match intent {
+        "reopen" => "Reopen request",
+        "rework" => "Rework request",
+        _ => "Asked",
+    };
 
     super::timeline_emit::emit(
         pool,
         task_id,
         mando_types::timeline::TimelineEventType::HumanAsk,
         "human",
-        &format!("Asked: {}", truncate_utf8(question, 80)),
-        serde_json::json!({"question": question}),
+        &format!("{prefix}: {}", truncate_utf8(question, 80)),
+        serde_json::json!({"question": question, "intent": intent, "ask_id": ask_id}),
     )
     .await
 }

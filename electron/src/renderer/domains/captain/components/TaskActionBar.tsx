@@ -1,9 +1,10 @@
 import React, { useState, useCallback, useRef } from 'react';
-import { ArrowUp, ChevronDown, RotateCcw } from 'lucide-react';
+import { ArrowUp, ChevronDown, Paperclip, RotateCcw, X } from 'lucide-react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { fetchAskHistory } from '#renderer/domains/captain/hooks/useApi';
 import { useTaskAskReopen, useTaskReopen, useTaskRework } from '#renderer/hooks/mutations';
 import { useDraft } from '#renderer/global/hooks/useDraft';
+import { useMountEffect } from '#renderer/global/hooks/useMountEffect';
 import { FINALIZED_STATUSES, type TaskItem } from '#renderer/types';
 import { canReopen, canRework, canAskAny } from '#renderer/utils';
 import { invalidateTaskDetail } from '#renderer/queryClient';
@@ -36,7 +37,7 @@ const ACTION_CONFIG: Record<
 
 interface Props {
   item: TaskItem;
-  onAsk?: (question: string) => void;
+  onAsk?: (question: string, images?: File[]) => void;
 }
 
 export function TaskActionBar({ item, onAsk }: Props): React.ReactElement | null {
@@ -45,36 +46,78 @@ export function TaskActionBar({ item, onAsk }: Props): React.ReactElement | null
   const [selectedAction, setSelectedAction] = useState<Action>(defaultAction);
   const [text, setText, clearTextDraft] = useDraft(`mando:draft:action:${item.id}`);
   const [pendingAction, setPendingAction] = useState<Action | null>(null);
+  const [image, setImage] = useState<File | null>(null);
+  const [preview, setPreview] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
   const queryClient = useQueryClient();
   const askReopenMut = useTaskAskReopen();
   const reopenMut = useTaskReopen();
   const reworkMut = useTaskRework();
-  // Sync selected action when task status changes -- only when there are valid actions.
+
+  // Sync selected action when task status changes.
   if (available.length > 0 && !available.includes(selectedAction)) {
     setSelectedAction(defaultAction);
   }
 
+  // Clean up preview URL on unmount.
+  const previewRef = useRef(preview);
+  previewRef.current = preview;
+  useMountEffect(() => {
+    return () => {
+      if (previewRef.current) URL.revokeObjectURL(previewRef.current);
+    };
+  });
+
+  // Reset image when the active task changes (render-time sync).
+  const prevItemId = useRef(item.id);
+  if (prevItemId.current !== item.id) {
+    prevItemId.current = item.id;
+    if (previewRef.current) URL.revokeObjectURL(previewRef.current);
+    setImage(null);
+    setPreview(null);
+    previewRef.current = null;
+  }
+
+  const setImageFile = useCallback((file: File) => {
+    if (previewRef.current) URL.revokeObjectURL(previewRef.current);
+    setImage(file);
+    const url = URL.createObjectURL(file);
+    setPreview(url);
+    previewRef.current = url;
+  }, []);
+
+  const removeImage = useCallback(() => {
+    if (previewRef.current) URL.revokeObjectURL(previewRef.current);
+    setImage(null);
+    setPreview(null);
+    previewRef.current = null;
+  }, []);
+
+  const resetInput = useCallback(() => {
+    clearTextDraft();
+    removeImage();
+    if (textareaRef.current) textareaRef.current.style.height = 'auto';
+  }, [clearTextDraft, removeImage]);
+
   const handleSubmit = useCallback(async () => {
     const trimmed = text.trim();
     if (!trimmed || askReopenMut.isPending || reopenMut.isPending || reworkMut.isPending) return;
+    const images = image ? [image] : undefined;
     setPendingAction(selectedAction);
     try {
       if (selectedAction === 'ask') {
-        onAsk?.(trimmed);
-        clearTextDraft();
-        if (textareaRef.current) textareaRef.current.style.height = 'auto';
+        onAsk?.(trimmed, images);
+        resetInput();
         setPendingAction(null);
         return;
       }
       if (selectedAction === 'reopen')
-        await reopenMut.mutateAsync({ id: item.id, feedback: trimmed });
+        await reopenMut.mutateAsync({ id: item.id, feedback: trimmed, images });
       else if (selectedAction === 'rework')
-        await reworkMut.mutateAsync({ id: item.id, feedback: trimmed });
+        await reworkMut.mutateAsync({ id: item.id, feedback: trimmed, images });
       void invalidateTaskDetail(queryClient, item.id);
-      // toast handled by mutation hooks
-      clearTextDraft();
-      if (textareaRef.current) textareaRef.current.style.height = 'auto';
+      resetInput();
     } catch {
       // toast handled by mutation hooks
     } finally {
@@ -82,11 +125,12 @@ export function TaskActionBar({ item, onAsk }: Props): React.ReactElement | null
     }
   }, [
     text,
+    image,
     selectedAction,
     item.id,
     queryClient,
     onAsk,
-    clearTextDraft,
+    resetInput,
     askReopenMut,
     reopenMut,
     reworkMut,
@@ -102,7 +146,20 @@ export function TaskActionBar({ item, onAsk }: Props): React.ReactElement | null
     [text, handleSubmit],
   );
 
-  // Determine visibility -- hidden states still reserve no space via height collapse.
+  const handlePaste = useCallback(
+    (e: React.ClipboardEvent) => {
+      for (const clipItem of e.clipboardData.items) {
+        if (!clipItem.type.startsWith('image/')) continue;
+        e.preventDefault();
+        const file = clipItem.getAsFile();
+        if (file) setImageFile(file);
+        return;
+      }
+    },
+    [setImageFile],
+  );
+
+  // Determine visibility.
   const isFinalized = FINALIZED_STATUSES.includes(item.status);
   const hidden =
     isFinalized ||
@@ -135,10 +192,24 @@ export function TaskActionBar({ item, onAsk }: Props): React.ReactElement | null
 
   return (
     <div
-      className={`shrink-0 border-t-0 transition-[max-height,opacity] duration-150 ease-in-out ${hidden ? 'max-h-0 overflow-hidden opacity-0' : 'max-h-[260px] overflow-visible opacity-100'}`}
+      className={`shrink-0 border-t-0 transition-[max-height,opacity] duration-150 ease-in-out ${hidden ? 'max-h-0 overflow-hidden opacity-0' : 'max-h-[320px] overflow-visible opacity-100'}`}
     >
       <div className="px-4 pt-3 pb-3">
         <div className="rounded-lg bg-muted px-3 py-2">
+          {/* Image chip */}
+          {preview && image && (
+            <div className="mb-1 flex items-center">
+              <button
+                onClick={removeImage}
+                className="flex items-center gap-1.5 rounded-md bg-secondary/60 px-2 py-0.5 text-caption text-muted-foreground transition-colors hover:bg-secondary"
+              >
+                <img src={preview} alt="" className="h-4 w-4 rounded-sm object-cover" />
+                <span className="max-w-[160px] truncate">{image.name}</span>
+                <X size={10} className="shrink-0 opacity-60" />
+              </button>
+            </div>
+          )}
+
           {/* Text input */}
           <Textarea
             ref={textareaRef}
@@ -152,10 +223,11 @@ export function TaskActionBar({ item, onAsk }: Props): React.ReactElement | null
               e.target.style.height = e.target.scrollHeight + 'px';
             }}
             onKeyDown={handleKeyDown}
+            onPaste={handlePaste}
             disabled={isLoading}
           />
 
-          {/* Toolbar row: action selector, reopen button, send */}
+          {/* Toolbar row: action selector, paperclip, reopen button, send */}
           <div className="mt-1.5 flex items-center gap-2">
             {hasMultipleActions && (
               <DropdownMenu>
@@ -183,6 +255,29 @@ export function TaskActionBar({ item, onAsk }: Props): React.ReactElement | null
                 </DropdownMenuContent>
               </DropdownMenu>
             )}
+
+            {/* Attach image */}
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) setImageFile(file);
+                e.target.value = '';
+              }}
+            />
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              onClick={() => fileRef.current?.click()}
+              disabled={isLoading}
+              aria-label="Attach image"
+              className="shrink-0 text-muted-foreground"
+            >
+              <Paperclip size={14} />
+            </Button>
 
             {showAskReopen &&
               (askReopenMut.isPending ? (
@@ -269,7 +364,6 @@ function getAvailableActions(item: TaskItem): Action[] {
 
 function getDefaultAction(item: TaskItem): Action {
   const available = getAvailableActions(item);
-  // Ask is preferred default; fall back to first available action.
   if (available.includes('ask')) return 'ask';
   return available[0] ?? 'ask';
 }

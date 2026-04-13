@@ -3,6 +3,8 @@
 //! All functions are async.
 
 pub mod action_contract;
+pub mod ambient_rate_limit;
+pub mod artifacts;
 pub mod captain_merge;
 mod captain_merge_poll;
 mod captain_merge_spawn;
@@ -13,6 +15,7 @@ mod captain_review_helpers;
 mod captain_review_verdict;
 pub mod clarifier;
 mod clarifier_validate;
+pub mod credential_rate_limit;
 pub mod dashboard;
 pub mod dashboard_timeline;
 pub mod dashboard_triage;
@@ -25,17 +28,18 @@ mod mergeability_rebase;
 mod mergeability_review;
 pub mod notify;
 mod nudge_health;
-pub mod rate_limit_cooldown;
 mod rebase_spawn;
 pub mod reconciler;
 mod reconciler_orphans;
 pub mod review_phase;
+mod review_phase_artifacts;
 mod review_snapshot;
 mod session_reconcile;
 pub mod spawn_phase;
 pub mod spawn_phase_review;
 pub mod spawner;
 pub mod spawner_lifecycle;
+pub(crate) mod spawner_pr;
 pub mod task_ask;
 pub mod task_notes;
 pub mod tick;

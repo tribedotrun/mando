@@ -82,8 +82,12 @@ pub async fn emit_for_task(
 }
 
 /// Emit a rate-limited timeline event with computed retry-at time.
+///
+/// Resolves the remaining cooldown from the task's active session: if the
+/// session used a specific credential, the per-credential cooldown is used;
+/// otherwise falls back to the ambient (host-login) cooldown.
 pub async fn emit_rate_limited(item: &mando_types::Task, pool: &SqlitePool) -> Result<()> {
-    let remaining = super::rate_limit_cooldown::remaining_secs();
+    let remaining = task_rate_limit_remaining_secs(item, pool).await;
     let retry_at = time::OffsetDateTime::now_utc() + time::Duration::seconds(remaining as i64);
     let retry_at_str = retry_at
         .format(&time::format_description::well_known::Rfc3339)
@@ -96,4 +100,20 @@ pub async fn emit_rate_limited(item: &mando_types::Task, pool: &SqlitePool) -> R
         pool,
     )
     .await
+}
+
+/// Remaining rate-limit seconds scoped to a task's active session.
+async fn task_rate_limit_remaining_secs(item: &mando_types::Task, pool: &SqlitePool) -> u64 {
+    let cred_id = match item.session_ids.worker.as_deref() {
+        Some(sid) => mando_db::queries::sessions::get_credential_id(pool, sid)
+            .await
+            .unwrap_or(None),
+        None => None,
+    };
+    match cred_id {
+        Some(cid) => mando_db::queries::credentials::cooldown_remaining_secs(pool, cid)
+            .await
+            .max(0) as u64,
+        None => super::ambient_rate_limit::remaining_secs(),
+    }
 }

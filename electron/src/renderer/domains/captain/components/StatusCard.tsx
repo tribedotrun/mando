@@ -1,11 +1,14 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef } from 'react';
+import { Paperclip, X } from 'lucide-react';
 import type { TaskItem, ClarifierQuestion, SessionSummary } from '#renderer/types';
 import { answerClarification } from '#renderer/domains/captain/hooks/useApi';
 import { useDraftRecord } from '#renderer/global/hooks/useDraft';
+import { useMountEffect } from '#renderer/global/hooks/useMountEffect';
 import { toast } from 'sonner';
 import log from '#renderer/logger';
 import { clarifyResultToToast, fmtDuration, getErrorMessage } from '#renderer/utils';
 import { CardShell, StatusDot } from '#renderer/global/components/CardShell';
+import { PrMarkdown } from '#renderer/domains/captain/components/PrMarkdown';
 import { Button } from '#renderer/components/ui/button';
 import { Textarea } from '#renderer/components/ui/textarea';
 
@@ -32,6 +35,34 @@ function NeedsClarificationCard({
   const [completed, setCompleted] = useState<string | null>(null);
   const filledCount = unanswered.filter((_, i) => answers[i]?.trim()).length;
 
+  // Image state
+  const [image, setImage] = useState<File | null>(null);
+  const [preview, setPreview] = useState<string | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const previewRef = useRef(preview);
+  previewRef.current = preview;
+
+  useMountEffect(() => {
+    return () => {
+      if (previewRef.current) URL.revokeObjectURL(previewRef.current);
+    };
+  });
+
+  const setImageFile = useCallback((file: File) => {
+    if (previewRef.current) URL.revokeObjectURL(previewRef.current);
+    const url = URL.createObjectURL(file);
+    setImage(file);
+    setPreview(url);
+    previewRef.current = url;
+  }, []);
+
+  const removeImage = useCallback(() => {
+    if (previewRef.current) URL.revokeObjectURL(previewRef.current);
+    setImage(null);
+    setPreview(null);
+    previewRef.current = null;
+  }, []);
+
   const handleSubmit = useCallback(async () => {
     const payload = unanswered
       .map((q, i) => ({ question: q.question, answer: answers[i]?.trim() || '' }))
@@ -40,12 +71,14 @@ function NeedsClarificationCard({
 
     setPending(true);
     try {
-      const result = await answerClarification(taskId, payload);
+      const images = image ? [image] : undefined;
+      const result = await answerClarification(taskId, payload, images);
       // SSE handles cache update
       const { variant, msg } = clarifyResultToToast(result.status);
       const fn = variant === 'success' ? toast.success : toast.info;
       fn(msg);
       clearAnswersDraft();
+      removeImage();
       if (result.status !== 'clarifying') setCompleted(msg);
     } catch (err) {
       log.warn(`[StatusCard] clarification submit failed for task ${taskId}:`, err);
@@ -53,7 +86,7 @@ function NeedsClarificationCard({
     } finally {
       setPending(false);
     }
-  }, [answers, unanswered, taskId, clearAnswersDraft]);
+  }, [answers, unanswered, taskId, clearAnswersDraft, image, removeImage]);
 
   if (completed) {
     return (
@@ -100,10 +133,45 @@ function NeedsClarificationCard({
         ))}
       </div>
 
+      {preview && image && (
+        <div className="mt-2 flex items-center gap-2 rounded-lg bg-muted px-3 py-2">
+          <img src={preview} alt={image.name} className="h-10 w-10 rounded-md object-cover" />
+          <span className="min-w-0 flex-1 truncate text-[13px] text-muted-foreground">
+            {image.name}
+          </span>
+          <Button variant="ghost" size="icon-xs" onClick={removeImage}>
+            <X size={12} />
+          </Button>
+        </div>
+      )}
+
       <div className="mt-3 flex items-center justify-between rounded-lg bg-muted px-3 py-2">
-        <span className="text-caption text-text-3">
-          {filledCount} of {unanswered.length} answered
-        </span>
+        <div className="flex items-center gap-2">
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) setImageFile(file);
+              e.target.value = '';
+            }}
+          />
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            onClick={() => fileRef.current?.click()}
+            disabled={pending}
+            aria-label="Attach image"
+            className="text-muted-foreground"
+          >
+            <Paperclip size={14} />
+          </Button>
+          <span className="text-caption text-text-3">
+            {filledCount} of {unanswered.length} answered
+          </span>
+        </div>
         <Button
           onClick={() => void handleSubmit()}
           disabled={filledCount === 0 || pending}
@@ -190,9 +258,7 @@ export function EscalatedReportTab({ item }: { item: TaskItem }): React.ReactEle
   return (
     <div className="space-y-3">
       {item.escalation_report ? (
-        <div className="whitespace-pre-wrap text-body leading-relaxed text-foreground">
-          {item.escalation_report}
-        </div>
+        <PrMarkdown text={item.escalation_report} />
       ) : (
         <div className="text-body text-muted-foreground">No escalation report available.</div>
       )}

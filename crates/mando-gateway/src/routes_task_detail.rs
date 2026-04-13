@@ -1,5 +1,7 @@
 //! GET /api/tasks/{id}/* detail route handlers.
 
+use std::collections::HashMap;
+
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::Json;
@@ -18,6 +20,177 @@ fn resolve_pr(pr_number: i64, github_repo: Option<&str>) -> Option<(String, u32)
 fn resolve_task_id(id: &str) -> Result<i64, (StatusCode, Json<Value>)> {
     id.parse::<i64>()
         .map_err(|_| error_response(StatusCode::BAD_REQUEST, &format!("invalid task id: {id}")))
+}
+
+/// GET /api/tasks/{id}/artifacts
+pub(crate) async fn get_task_artifacts(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let task_id = resolve_task_id(&id)?;
+    let pool = state.db.pool();
+
+    let artifacts = mando_db::queries::artifacts::list_for_task(pool, task_id)
+        .await
+        .map_err(internal_error)?;
+
+    Ok(Json(json!({ "artifacts": artifacts })))
+}
+
+/// GET /api/tasks/{id}/feed
+///
+/// Unified feed: merges timeline events, artifacts, and ask history into
+/// a single chronologically-ordered stream.
+pub(crate) async fn get_task_feed(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let task_id = resolve_task_id(&id)?;
+    let store = state.task_store.read().await;
+    let item = store.find_by_id(task_id).await.map_err(internal_error)?;
+    if item.is_none() {
+        return Err(error_response(
+            StatusCode::NOT_FOUND,
+            &format!("task {task_id} not found"),
+        ));
+    }
+    let pool = store.pool().clone();
+    drop(store);
+
+    // Load all three data sources in parallel.
+    let (timeline_result, artifacts_result, history_result) = tokio::join!(
+        mando_captain::runtime::dashboard_timeline::get_item_timeline(
+            &id,
+            None,
+            item.as_ref(),
+            &pool,
+        ),
+        mando_db::queries::artifacts::list_for_task(&pool, task_id),
+        mando_db::queries::ask_history::load(&pool, task_id),
+    );
+
+    let timeline_events = timeline_result
+        .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?;
+    let artifacts = artifacts_result.map_err(internal_error)?;
+    let history = history_result.map_err(internal_error)?;
+
+    // Build unified feed items with a type discriminator.
+    let mut feed: Vec<Value> = Vec::new();
+
+    // Build lookups for labeling human messages as reopen/rework:
+    //   intent_by_ask      -- exact join via ask_id (post-fix events)
+    //   intent_by_content  -- fallback join via message text. Populated from
+    //                         HumanAsk intent metadata when present, plus
+    //                         HumanReopen / ReworkRequested event content so
+    //                         legacy rows (no ask_id, no intent on HumanAsk)
+    //                         still match.
+    let mut intent_by_ask: HashMap<String, String> = HashMap::new();
+    let mut intent_by_content: HashMap<String, String> = HashMap::new();
+    if let Some(events) = timeline_events.as_array() {
+        for event in events {
+            let event_type = event
+                .get("event_type")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let data = event.get("data");
+            match event_type {
+                "human_ask" => {
+                    let intent = data
+                        .and_then(|d| d.get("intent"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+                    if intent.is_empty() || intent == "ask" {
+                        continue;
+                    }
+                    if let Some(ask_id) =
+                        data.and_then(|d| d.get("ask_id")).and_then(|v| v.as_str())
+                    {
+                        intent_by_ask.insert(ask_id.to_string(), intent.to_string());
+                    }
+                    if let Some(q) = data
+                        .and_then(|d| d.get("question"))
+                        .and_then(|v| v.as_str())
+                    {
+                        intent_by_content
+                            .entry(q.to_string())
+                            .or_insert_with(|| intent.to_string());
+                    }
+                }
+                "human_reopen" | "rework_requested" => {
+                    let inferred = if event_type == "rework_requested" {
+                        "rework"
+                    } else {
+                        "reopen"
+                    };
+                    if let Some(c) = data.and_then(|d| d.get("content")).and_then(|v| v.as_str()) {
+                        intent_by_content
+                            .entry(c.to_string())
+                            .or_insert_with(|| inferred.to_string());
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    // Timeline events.
+    if let Some(events) = timeline_events.as_array() {
+        for event in events {
+            let ts = event
+                .get("timestamp")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            feed.push(json!({
+                "type": "timeline",
+                "timestamp": ts,
+                "data": event,
+            }));
+        }
+    }
+
+    // Artifacts.
+    for artifact in &artifacts {
+        feed.push(json!({
+            "type": "artifact",
+            "timestamp": artifact.created_at,
+            "data": artifact,
+        }));
+    }
+
+    // Ask history / advisor messages. Inject intent on human entries whose
+    // ask_id (or, for legacy rows, question content) matches a reopen/rework
+    // HumanAsk timeline event.
+    for entry in &history {
+        let mut data = serde_json::to_value(entry).unwrap_or_else(|_| json!({}));
+        if entry.role == "human" {
+            let intent = intent_by_ask
+                .get(&entry.ask_id)
+                .or_else(|| intent_by_content.get(&entry.content));
+            if let Some(intent) = intent {
+                if let Some(obj) = data.as_object_mut() {
+                    obj.insert("intent".into(), Value::String(intent.clone()));
+                }
+            }
+        }
+        feed.push(json!({
+            "type": "message",
+            "timestamp": entry.timestamp,
+            "data": data,
+        }));
+    }
+
+    // Sort by timestamp.
+    feed.sort_by(|a, b| {
+        let ts_a = a.get("timestamp").and_then(|v| v.as_str()).unwrap_or("");
+        let ts_b = b.get("timestamp").and_then(|v| v.as_str()).unwrap_or("");
+        ts_a.cmp(ts_b)
+    });
+
+    Ok(Json(json!({
+        "id": id,
+        "feed": feed,
+        "count": feed.len(),
+    })))
 }
 
 /// GET /api/tasks/{id}/history
@@ -145,6 +318,9 @@ pub(crate) async fn get_task_pr_summary(
     } else {
         (None, None)
     };
+
+    // Work summary artifacts are now created by the CLI (mando todo summary).
+    // This endpoint only fetches the PR body for display.
 
     Ok(Json(json!({
         "id": id,

@@ -20,7 +20,7 @@ mod stream;
 pub mod transcript;
 
 pub use binary::resolve_claude_binary;
-pub use config::{CcConfig, Effort, PermissionMode, TaskBudget, ThinkingConfig};
+pub use config::{CcConfig, CcConfigBuilder, Effort, PermissionMode, TaskBudget, ThinkingConfig};
 pub use error::CcError;
 pub use message::{
     AssistantMessage, CcMessage, ContentBlock, InitMessage, RateLimitEvent, RateLimitStatus,
@@ -30,9 +30,9 @@ pub use oneshot::CcOneShot;
 pub use process::{get_cpu_time, is_process_alive, kill_process, spawn_detached};
 pub use session::CcSession;
 pub use stream::{
-    get_last_assistant_text, get_last_stream_event_type, get_stream_cost, get_stream_file_size,
-    get_stream_result, has_rate_limit_rejection, is_clean_result, stream_has_broken_session,
-    stream_stale_seconds, write_error_result, StreamCostInfo,
+    get_last_assistant_text, get_stream_cost, get_stream_file_size, get_stream_result,
+    has_rate_limit_rejection, is_clean_result, stream_has_broken_session, stream_stale_seconds,
+    write_error_result, StreamCostInfo,
 };
 
 /// Result from a CC invocation with optional structured output.

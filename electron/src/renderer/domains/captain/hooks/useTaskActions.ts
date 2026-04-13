@@ -46,7 +46,6 @@ export function useTaskActions() {
   };
   const [reopenItem2, setReopenItem] = useState<TaskItem | null>(null);
   const [reworkItem2, setReworkItem] = useState<TaskItem | null>(null);
-  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const { selectedIds, toggleSelect, toggleSelectAll, clearSelection } = useSelection();
 
@@ -127,7 +126,6 @@ export function useTaskActions() {
       });
       await deleteMut.mutateAsync({ ids, opts });
       clearSelection();
-      setDeleteModalOpen(false);
     } catch (err) {
       setDeleteError(getErrorMessage(err, 'Delete failed'));
     }
@@ -190,8 +188,6 @@ export function useTaskActions() {
     handleAccept,
     acceptPendingId,
     handleHandoff,
-    deleteModalOpen,
-    setDeleteModalOpen,
     deleting: deleteMut.isPending,
     deleteError,
     handleBulkDelete,

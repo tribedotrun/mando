@@ -1,7 +1,8 @@
 import React, { useRef, useState } from 'react';
 import { cn } from '#renderer/cn';
 import { useRouterState } from '@tanstack/react-router';
-import { useTaskList, useWorkbenchList } from '#renderer/hooks/queries';
+import { useTaskList, useWorkbenchList, useWorkers } from '#renderer/hooks/queries';
+import { useResumeRateLimited } from '#renderer/hooks/mutations';
 import { ChevronDown, Copy, PanelLeft, ArrowLeft, ArrowRight, SquarePen } from 'lucide-react';
 import { FinderIcon, CursorIcon, PrIcon, MergeIcon } from '#renderer/global/components/icons';
 import { DetailOverflowMenu } from '#renderer/domains/captain/components/TaskDetailParts';
@@ -18,6 +19,7 @@ import { Tooltip, TooltipTrigger, TooltipContent } from '#renderer/components/ui
 import {
   copyToClipboard,
   getErrorMessage,
+  isRateLimited,
   prLabel,
   prHref,
   prState,
@@ -51,7 +53,7 @@ function useWorkbenchCtx(): WorkbenchCtx | null {
   const { data: workbenches = [] } = useWorkbenchList();
 
   return React.useMemo<WorkbenchCtx | null>(() => {
-    if (task?.worktree || task?.workbench_id) {
+    if (task) {
       const wb = task.workbench_id
         ? workbenches.find((w) => w.id === task.workbench_id)
         : undefined;
@@ -139,6 +141,12 @@ export function AppHeader({
     [ctx?.task, timelineData],
   );
 
+  // Rate-limit resume for task detail header
+  const { data: workersData } = useWorkers();
+  const rateLimitSecs = workersData?.rate_limit_remaining_secs ?? 0;
+  const resumeMut = useResumeRateLimited();
+  const taskIsRateLimited = ctx?.task ? isRateLimited(ctx.task, rateLimitSecs) : false;
+
   // Derive page title for collapsed toolbar (non-task routes)
   const pageTitle = React.useMemo(() => {
     if (pathname.startsWith('/captain')) return 'Tasks';
@@ -191,7 +199,7 @@ export function AppHeader({
         <div className={cn('flex items-center gap-3', sidebarCollapsed && 'pl-[70px]')}>
           {navIcons}
           <span className="min-w-0 truncate text-body font-medium text-foreground">
-            {ctx.task!.title}
+            {ctx.task!.title || ctx.task!.original_prompt || 'Untitled task'}
           </span>
           <span className="flex-1" />
           <div
@@ -210,17 +218,25 @@ export function AppHeader({
                 <MergeIcon />
               </Button>
             )}
-            {ctx.worktreePath && <OpenMenu worktreePath={ctx.worktreePath} />}
-            {(ctx.task!.branch || ctx.task!.worktree || ctx.task!.plan || ctx.task!.context) && (
-              <DetailOverflowMenu
-                item={ctx.task!}
-                onViewContext={
-                  isTerminal
-                    ? undefined
-                    : () => document.dispatchEvent(new CustomEvent('mando:view-task-brief'))
-                }
-              />
+            {taskIsRateLimited && (
+              <Button
+                variant="outline"
+                size="xs"
+                disabled={resumeMut.isPending}
+                onClick={() => resumeMut.mutate({ id: ctx.task!.id })}
+              >
+                {resumeMut.isPending ? 'Resuming...' : 'Resume'}
+              </Button>
             )}
+            <OpenMenu worktreePath={ctx.worktreePath} />
+            <DetailOverflowMenu
+              item={ctx.task!}
+              onViewContext={
+                isTerminal
+                  ? undefined
+                  : () => document.dispatchEvent(new CustomEvent('mando:view-task-brief'))
+              }
+            />
           </div>
         </div>
       ) : (
@@ -367,8 +383,9 @@ function openPath(fn: () => Promise<void>, label: string) {
   fn().catch((err) => toast.error(getErrorMessage(err, `Failed to open in ${label}`)));
 }
 
-function OpenMenu({ worktreePath }: { worktreePath: string }): React.ReactElement {
+function OpenMenu({ worktreePath }: { worktreePath: string | null }): React.ReactElement {
   const [open, setOpen] = useState(false);
+  const disabled = !worktreePath;
 
   useMountEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -386,9 +403,17 @@ function OpenMenu({ worktreePath }: { worktreePath: string }): React.ReactElemen
   return (
     <div className="relative" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
       {/* Split button: default action (Cursor) + dropdown chevron */}
-      <div className="flex items-center rounded-md border border-border">
+      <div
+        className={cn(
+          'flex items-center rounded-md border border-border',
+          disabled && 'opacity-40 pointer-events-none',
+        )}
+      >
         <button
-          onClick={() => openPath(() => window.mandoAPI.openInCursor(worktreePath), 'Cursor')}
+          onClick={() =>
+            worktreePath && openPath(() => window.mandoAPI.openInCursor(worktreePath), 'Cursor')
+          }
+          disabled={disabled}
           className="flex items-center rounded-l-md px-2 py-1 transition-colors hover:bg-accent"
           aria-label="Open in Cursor"
         >
@@ -396,7 +421,8 @@ function OpenMenu({ worktreePath }: { worktreePath: string }): React.ReactElemen
         </button>
         <div className="h-4 w-px bg-border" />
         <button
-          onClick={() => setOpen((v) => !v)}
+          onClick={() => !disabled && setOpen((v) => !v)}
+          disabled={disabled}
           className="flex items-center rounded-r-md px-1.5 py-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
           aria-label="More open options"
           aria-haspopup="true"
@@ -412,7 +438,7 @@ function OpenMenu({ worktreePath }: { worktreePath: string }): React.ReactElemen
             <button
               className="flex w-full items-center gap-2.5 px-3 py-2 text-[13px] text-popover-foreground transition-colors hover:bg-accent"
               onClick={() => {
-                openPath(() => window.mandoAPI.openInFinder(worktreePath), 'Finder');
+                openPath(() => window.mandoAPI.openInFinder(worktreePath!), 'Finder');
                 setOpen(false);
               }}
             >
@@ -422,7 +448,7 @@ function OpenMenu({ worktreePath }: { worktreePath: string }): React.ReactElemen
             <button
               className="flex w-full items-center gap-2.5 px-3 py-2 text-[13px] text-popover-foreground transition-colors hover:bg-accent"
               onClick={() => {
-                openPath(() => window.mandoAPI.openInCursor(worktreePath), 'Cursor');
+                openPath(() => window.mandoAPI.openInCursor(worktreePath!), 'Cursor');
                 setOpen(false);
               }}
             >
@@ -433,7 +459,7 @@ function OpenMenu({ worktreePath }: { worktreePath: string }): React.ReactElemen
             <button
               className="flex w-full items-center gap-2.5 px-3 py-2 text-[13px] text-popover-foreground transition-colors hover:bg-accent"
               onClick={() => {
-                void copyToClipboard(worktreePath, 'Path copied');
+                void copyToClipboard(worktreePath!, 'Path copied');
                 setOpen(false);
               }}
             >

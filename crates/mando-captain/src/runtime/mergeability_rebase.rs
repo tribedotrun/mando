@@ -249,6 +249,7 @@ mod tests {
             worker_name,
             Some(99),
             false,
+            None,
         )
         .await
         .unwrap();
@@ -359,6 +360,7 @@ mod tests {
             worker_name,
             Some(88),
             false,
+            None,
         )
         .await
         .unwrap();

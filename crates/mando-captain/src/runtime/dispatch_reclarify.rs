@@ -115,6 +115,7 @@ pub(crate) async fn reclarify_items(
                 task_id: Some(item.id),
                 status: mando_types::SessionStatus::Running,
                 worker_name: "",
+                credential_id: None,
             },
         )
         .await

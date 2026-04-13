@@ -16,6 +16,43 @@ pub struct ItemSpawnResult {
     pub started_at: String,
     /// Worktree-relative path to the plan/brief file, if one was found.
     pub plan: Option<String>,
+    pub credential_id: Option<i64>,
+    pub pr_number: Option<i64>,
+}
+
+/// Pick the best credential via a single DB query: not expired, not
+/// rate-limited, fewest active running sessions.
+/// Returns `(id, access_token)` or `None` if no credentials are configured.
+pub async fn pick_credential(pool: &sqlx::SqlitePool) -> Option<(i64, String)> {
+    match mando_db::queries::credentials::pick_for_worker(pool).await {
+        Ok(pick) => pick,
+        Err(e) => {
+            tracing::warn!(
+                module = "credentials",
+                error = %e,
+                "failed to pick credential"
+            );
+            None
+        }
+    }
+}
+
+/// Inject credential env var into a CcConfig builder if credential is Some.
+/// Returns the builder (consumed and returned).
+pub fn with_credential(
+    builder: mando_cc::CcConfigBuilder,
+    credential: &Option<(i64, String)>,
+) -> mando_cc::CcConfigBuilder {
+    if let Some((_id, token)) = credential {
+        builder.env("CLAUDE_CODE_OAUTH_TOKEN", token)
+    } else {
+        builder
+    }
+}
+
+/// Extract credential_id from an Option<(id, token)>.
+pub fn credential_id(credential: &Option<(i64, String)>) -> Option<i64> {
+    credential.as_ref().map(|c| c.0)
 }
 
 pub async fn spawn_worker_for_item(
@@ -28,11 +65,9 @@ pub async fn spawn_worker_for_item(
         mando_config::resolve_project_config(Some(item.project.as_str()), config)
             .ok_or_else(|| anyhow::anyhow!("no project config for '{}'", item.project))?;
 
-    // GitHub is required for PR-based tasks. Reject upfront instead of
-    // discovering the problem mid-work in the nudge loop.
     if !item.no_pr && project_config.github_repo.is_none() {
         anyhow::bail!(
-            "project '{}' has no githubRepo configured — cannot process PR-based tasks",
+            "project '{}' has no githubRepo configured -- cannot process PR-based tasks",
             slug
         );
     }
@@ -54,14 +89,33 @@ pub async fn spawn_worker_for_item(
         }
     }
 
-    let result =
-        super::spawner::spawn_worker(item, slug, project_config, &config.captain, workflow, pool)
-            .await?;
+    // Pick credential for multi-account load balancing.
+    let credential = pick_credential(pool).await;
+    let cred_id = credential.as_ref().map(|c| c.0);
+    let worker_cred = credential
+        .as_ref()
+        .map(|c| super::spawner::WorkerCredential {
+            id: c.0,
+            token: &c.1,
+        });
+
+    let result = super::spawner::spawn_worker(
+        item,
+        slug,
+        project_config,
+        &config.captain,
+        workflow,
+        pool,
+        worker_cred.as_ref(),
+    )
+    .await?;
     let now = mando_types::now_rfc3339();
 
-    // Create a workbench row for this worktree.
+    // Create a workbench row for this worktree. Use the original prompt as the
+    // initial title so the sidebar shows something meaningful before clarification.
+    let wb_title = item.original_prompt.as_deref().unwrap_or(&item.title);
     let workbench_id =
-        create_workbench_for_spawn(pool, item.project_id, slug, &result.worktree, item.id).await?;
+        create_workbench_for_spawn(pool, item.project_id, slug, &result.worktree, wb_title).await?;
 
     Ok(ItemSpawnResult {
         session_name: result.session_name,
@@ -71,6 +125,8 @@ pub async fn spawn_worker_for_item(
         workbench_id,
         started_at: now,
         plan: result.plan,
+        credential_id: cred_id,
+        pr_number: result.pr_number,
     })
 }
 
@@ -81,14 +137,18 @@ async fn create_workbench_for_spawn(
     project_id: i64,
     project_slug: &str,
     worktree: &str,
-    _task_id: i64,
+    task_prompt: &str,
 ) -> Result<Option<i64>> {
     // Check if a workbench already exists for this worktree.
     if let Some(existing) = mando_db::queries::workbenches::find_by_worktree(pool, worktree).await?
     {
         return Ok(Some(existing.id));
     }
-    let title = mando_types::workbench::workbench_title_now();
+    let title = if task_prompt.is_empty() {
+        mando_types::workbench::workbench_title_now()
+    } else {
+        task_prompt.to_string()
+    };
     let wb = mando_types::Workbench::new(
         project_id,
         project_slug.to_string(),

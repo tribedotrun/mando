@@ -1,7 +1,5 @@
 //! /api/tasks/* route handlers.
 
-use std::path::PathBuf;
-
 use axum::extract::multipart::Field;
 use axum::extract::{Multipart, Path, Query, State};
 use axum::http::StatusCode;
@@ -93,7 +91,7 @@ pub(crate) async fn post_task_add(
     let mut source: Option<String> = None;
     let mut saved_images: Vec<String> = Vec::new();
 
-    let images_dir = images_dir();
+    let images_dir = mando_config::images_dir();
 
     while let Some(field) = multipart
         .next_field()
@@ -396,8 +394,4 @@ pub(crate) async fn patch_task_item(
             Err(error_response(task_update_error_status(&e), &msg))
         }
     }
-}
-
-fn images_dir() -> PathBuf {
-    mando_config::data_dir().join("images")
 }

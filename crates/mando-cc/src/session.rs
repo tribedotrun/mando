@@ -169,7 +169,10 @@ impl CcSession {
             // Parse message.
             let val: serde_json::Value = match serde_json::from_str(trimmed) {
                 Ok(v) => v,
-                Err(_) => continue, // Skip non-JSON debug lines.
+                Err(e) => {
+                    tracing::debug!(error = %e, "skipping non-JSON line in CC stream");
+                    continue;
+                }
             };
 
             let msg = CcMessage::parse(val);

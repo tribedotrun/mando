@@ -1,5 +1,6 @@
 //! mando-types — shared domain types for the Mando project.
 
+pub mod artifact;
 pub mod ask_history;
 pub mod captain;
 pub mod events;
@@ -17,6 +18,7 @@ pub mod workbench;
 pub mod workbench_layout;
 
 // Re-exports for convenience.
+pub use artifact::{ArtifactMedia, ArtifactType, TaskArtifact};
 pub use ask_history::AskHistoryEntry;
 pub use captain::{Action, ActionKind, TickMode, TickResult, WorkerContext};
 pub use events::{BusEvent, NotificationKind, NotificationPayload};
@@ -33,6 +35,11 @@ pub use task::{
 pub use timeline::{TimelineEvent, TimelineEventType};
 pub use workbench::Workbench;
 pub use workbench_layout::WorkbenchLayout;
+
+/// Default rev value for serde: `#[serde(default = "crate::default_rev")]`.
+pub(crate) fn default_rev() -> i64 {
+    1
+}
 
 /// Parse a string item/task ID to i64 with a caller-supplied label used in
 /// the error message. Shared by CLI commands and the Telegram bot so both

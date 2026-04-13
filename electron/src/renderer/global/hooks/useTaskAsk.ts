@@ -8,7 +8,7 @@ import type { AskHistoryEntry } from '#renderer/types';
 export interface UseTaskAskResult {
   messages: AskHistoryEntry[];
   pending: boolean;
-  ask: (question: string) => Promise<void>;
+  ask: (question: string, images?: File[]) => Promise<void>;
   /** Current conversation ID. Undefined until first ask. */
   askId: string | undefined;
 }
@@ -33,22 +33,17 @@ export function useTaskAsk(itemId: number): UseTaskAskResult {
   const messages = serverHistory?.history ?? [];
 
   const ask = useCallback(
-    async (question: string) => {
-      // Generate ask_id client-side for new conversations so the ref is
-      // always set before the API call. On error the server persists the
-      // question + error under this same ID, keeping the conversation
-      // grouped even when the CC session fails.
+    async (question: string, images?: File[]) => {
       if (!askIdRef.current) {
         askIdRef.current = crypto.randomUUID();
       }
       setPending(true);
       try {
-        const data = await askTask(itemId, question, askIdRef.current);
+        const data = await askTask(itemId, question, askIdRef.current, images);
         askIdRef.current = data.ask_id;
         void queryClient.invalidateQueries({ queryKey: queryKeys.tasks.askHistory(itemId) });
       } catch (err) {
         log.warn('[useTaskAsk] ask failed:', err);
-        // Error is persisted server-side; invalidate to show it.
         void queryClient.invalidateQueries({ queryKey: queryKeys.tasks.askHistory(itemId) });
       } finally {
         setPending(false);

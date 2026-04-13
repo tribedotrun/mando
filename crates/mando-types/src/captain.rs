@@ -56,9 +56,23 @@ pub struct WorkerContext {
     #[serde(default)]
     pub pr_head_sha: String,
     /// True when some context data could not be fetched (API errors, timeouts).
-    /// Captain LLM should be conservative when degraded — prefer skip over action.
+    /// Captain LLM should be conservative when degraded -- prefer skip over action.
     #[serde(default)]
     pub degraded: bool,
+
+    // ── DB-backed artifact gates (populated from task_artifacts table) ──
+    /// True when at least one evidence artifact exists in DB.
+    #[serde(default)]
+    pub has_evidence: bool,
+    /// True when evidence is fresh (reopen_seq == 0, or latest evidence created_at > reopened_at).
+    #[serde(default)]
+    pub evidence_fresh: bool,
+    /// True when at least one work_summary artifact exists in DB.
+    #[serde(default)]
+    pub has_work_summary: bool,
+    /// True when work summary is fresh (same logic as evidence).
+    #[serde(default)]
+    pub work_summary_fresh: bool,
 }
 
 /// The kind of action the captain can take on a worker.

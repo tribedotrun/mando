@@ -26,12 +26,12 @@ export function ScoutQA({ itemId, onClose }: Props): React.ReactElement {
   });
 
   const handleAsk = useCallback(
-    async (q: string) => {
+    async (q: string, images?: File[]) => {
       setHistory((prev) => [...prev, { role: 'user', text: q }]);
       setPending(true);
       setSuggestions([]);
       try {
-        const data = await askScout(itemId, q, sessionIdRef.current);
+        const data = await askScout(itemId, q, sessionIdRef.current, images);
         sessionIdRef.current = data.session_id;
         setHistory((prev) => [...prev, { role: 'assistant', text: data.answer }]);
         if (data.suggested_followups?.length) {
@@ -94,7 +94,8 @@ export function ScoutQA({ itemId, onClose }: Props): React.ReactElement {
       history={history}
       pending={pending}
       scrollRef={scrollRef}
-      onAsk={(q) => void handleAsk(q)}
+      onAsk={(q, images) => void handleAsk(q, images)}
+      allowImages
       placeholder="Ask about this article..."
       renderAnswer={(text) => <Markdown>{text}</Markdown>}
       historyClassName="px-4 py-3"

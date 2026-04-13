@@ -5,7 +5,7 @@ use mando_config::workflow::CaptainWorkflow;
 use mando_types::task::ItemStatus;
 use mando_types::Task;
 
-use super::{captain_review, notify::Notifier, rate_limit_cooldown, timeline_emit};
+use super::{captain_review, credential_rate_limit, notify::Notifier, timeline_emit};
 
 pub(super) async fn poll_reviewing_items(
     items: &mut [Task],
@@ -67,20 +67,17 @@ pub(super) async fn poll_reviewing_items(
         if let Some(error_msg) = captain_review::check_review_failed(item) {
             // Check if this failure was caused by rate limiting — if so,
             // activate cooldown and don't count against the retry budget.
-            let is_rl = item
-                .session_ids
-                .review
-                .as_deref()
-                .is_some_and(rate_limit_cooldown::check_and_activate_from_stream);
-            if is_rl {
-                tracing::info!(
-                    module = "captain",
-                    item_id = item.id,
-                    "review failed due to rate limit — not counting against retry budget"
-                );
-                let _ = timeline_emit::emit_rate_limited(item, pool).await;
-                item.session_ids.review = None;
-                continue;
+            if let Some(sid) = item.session_ids.review.as_deref() {
+                if credential_rate_limit::check_and_activate_from_stream(pool, sid).await {
+                    tracing::info!(
+                        module = "captain",
+                        item_id = item.id,
+                        "review failed due to rate limit — not counting against retry budget"
+                    );
+                    let _ = timeline_emit::emit_rate_limited(item, pool).await;
+                    item.session_ids.review = None;
+                    continue;
+                }
             }
 
             captain_review::handle_review_error(item, &error_msg, workflow, notifier, pool).await;
@@ -132,11 +129,10 @@ pub(super) async fn poll_reviewing_items(
 
         if is_timed_out {
             // Check if the review session was killed by rate limiting.
-            let is_rl = item
-                .session_ids
-                .review
-                .as_deref()
-                .is_some_and(rate_limit_cooldown::check_and_activate_from_stream);
+            let is_rl = match item.session_ids.review.as_deref() {
+                Some(sid) => credential_rate_limit::check_and_activate_from_stream(pool, sid).await,
+                None => false,
+            };
             if is_rl || rate_limited {
                 tracing::info!(
                     module = "captain",

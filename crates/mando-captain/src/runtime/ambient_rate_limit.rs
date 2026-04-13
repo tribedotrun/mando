@@ -1,9 +1,9 @@
-//! Global rate-limit cooldown — prevents session spawning during API rate limits.
+//! Ambient (host login) rate-limit cooldown.
 //!
-//! When any CC session reports a `Rejected` rate limit, the cooldown activates
-//! and blocks all new CC session spawning (workers, reviews, merges, clarifiers)
-//! until the cooldown expires. Failures during cooldown are not counted against
-//! retry budgets (review_fail_count, merge_fail_count, etc.).
+//! Governs sessions that use the host's Claude Code login (no credential).
+//! When credentials are configured, workers use per-credential cooldowns
+//! instead (see `credential_rate_limit` module and DB column
+//! `credentials.rate_limit_cooldown_until`).
 
 use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, Instant};

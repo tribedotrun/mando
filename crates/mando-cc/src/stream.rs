@@ -229,20 +229,6 @@ pub fn stream_has_broken_session(stream_path: &Path) -> bool {
     !content.lines().any(is_init_event)
 }
 
-/// Get the last stream event type from the current session.
-pub fn get_last_stream_event_type(stream_path: &Path) -> Option<String> {
-    let (content, last_init_idx) = current_session_lines(stream_path)?;
-    let lines: Vec<&str> = content.lines().collect();
-    for line in lines[last_init_idx..].iter().rev() {
-        if let Ok(val) = serde_json::from_str::<serde_json::Value>(line) {
-            if let Some(t) = val.get("type").and_then(|t| t.as_str()) {
-                return Some(t.to_string());
-            }
-        }
-    }
-    None
-}
-
 /// Cost, duration, and turn count extracted from a stream result event.
 pub struct StreamCostInfo {
     pub cost_usd: Option<f64>,

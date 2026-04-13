@@ -5,10 +5,20 @@
 # ─────────────────────────────────────────────────────────────────────────────
 
 models:
-  worker: "default"
-  captain: "default"
-  clarifier: "default"
-  todo_parse: "default"
+  worker: "opus[1m]"
+  captain: "opus[1m]"
+  clarifier: "opus[1m]"
+  todo_parse: "opus[1m]"
+
+auto_title:
+  model: "haiku"
+  prompt: >-
+    Generate a concise 3-5 word title for this conversation.
+    Output ONLY the title, nothing else:
+  timeout_s: 30
+  poll_interval_s: 60
+  expiry_s: 300
+  max_input_chars: 200
 
 agent:
   max_concurrent: 10
@@ -82,7 +92,7 @@ prompts:
     {% else %}
     Captain detects your PR via `gh pr list --head {{ branch }}`.
     Just create the PR when your implementation is complete, tested, and evidence is attached.
-    Before you stop, hand off, or mark the task done, clean up any local processes you started for this task. If you launched a dev server, preview server, watcher, simulator, or app for testing or evidence capture, shut it down and verify it is no longer running. Never leave background services running in the worktree.
+    Before you stop, hand off, or mark the task done, clean up ALL processes you started — dev servers, preview servers, watchers, streaming commands (`tail -f`, `obs tail`, `watch`), and any other Bash commands still running. Run `ps --ppid $$ -o pid,command 2>/dev/null || true` to find orphaned children, kill them, and verify they are gone. Lingering subprocesses block session exit and prevent captain from advancing the task.
     {% endif %}
 
   # ── Worker Prompts ────────────────────────────────────────────────────
@@ -109,14 +119,15 @@ prompts:
     - If the repo needs local dependencies or tooling that are missing in the worktree (for example `node_modules` absent or `vite`/`pnpm`/`cargo-nextest` not found), install them in the repo first, record that in the workpad, and then continue. Missing local tooling is not a blocker by itself.
     - Run {{ check_command }} after each change. Fix failures before moving on.
     {% if not no_pr %}
-    - **Evidence requirements** — your PR MUST include runtime proof of your changes:
+    - **Evidence requirements** — you MUST capture and save runtime proof:
        - Evidence must be **actual runtime output** you captured, NOT diagrams, ASCII art, mockups, or sample output you write by hand. Test results prove correctness but are NOT evidence — you need both.
        - **After evidence is required.** Before evidence is optional (nice-to-have if convenient).
-       - **UI changes**: use the evidence tool for your repo (see Repo-Specific Instructions below). Screenshot for static/single-view changes, recording for multi-step or interactive changes. **Always use an isolated environment** for evidence capture. Never use `--visible` — CDP works windowless.
+       - **UI changes**: capture screenshot/recording (always use isolated/sandbox env; never `--visible`). Screenshot for static, recording for interactive/multi-step.
        - **Non-UI changes**: run the relevant command and capture terminal output under an `### After` heading with a code fence.
+       - **Save evidence**: `mando todo evidence <file1> [file2] --caption "caption1" --caption "caption2"`. Every file needs a caption.
        - **Self-verify**: after capturing, read the screenshot or extract frames with ffmpeg. If evidence doesn't show the fix working, fix → recapture → verify.
-       - **Keep PR evidence current**: if you make code changes after capturing evidence, recapture and update the PR.
-       - **Cleanup is required**: if you start a local dev server, preview server, watcher, or any other background helper for verification/evidence, stop it before you finish. Do not leave orphaned background jobs behind. Prefer a cleanup trap (for example `trap 'kill $SERVER_PID' EXIT`) when starting temporary servers.
+       - **Keep evidence current**: if you make code changes after capturing evidence, recapture and re-save.
+       - **Cleanup is required**: stop ALL processes you started (dev servers, watchers, streaming commands like `tail -f` or `obs tail`). Before finishing, run `ps --ppid $$ -o pid,command 2>/dev/null || true` and kill any orphans. Lingering subprocesses block session exit.
     {% endif %}
     {% if no_pr %}
     - This is a **research/audit task**. Do NOT create a PR. When your analysis is complete, write findings to your workpad at `{{ workpad_path }}` and stop.
@@ -170,8 +181,8 @@ prompts:
     - [ ] **Findings** — write results to workpad at `{{ workpad_path }}` and stop. No PR needed.
     {% else %}
     - [ ] **PR** — use `/mando-pr --fast` to create or update the PR. Captain will monitor follow-up review/CI state after the handoff. Update workpad with PR link.
-    - [ ] **Evidence** — runtime proof in the PR (after required, before optional). UI: screenshot for static, recording for interactive; always use an isolated/sandbox environment; never use `--visible` (CDP works windowless). Non-UI: CLI output under `### After` heading. NOT diagrams or test-only results. Self-verify: read screenshots or extract frames with ffmpeg. Recapture if code changes after evidence.
-    - [ ] **Cleanup** — stop any background servers, watchers, or helper processes you started for verification/evidence. No orphaned background jobs may remain when you finish.
+    - [ ] **Evidence** — capture runtime proof, then save: `mando todo evidence <file> --caption "..."`. After evidence required, before optional. UI: screenshot for static, recording for interactive (isolated/sandbox env, never `--visible`). Non-UI: CLI output under `### After` heading. NOT diagrams or test-only results. Self-verify screenshots/frames. Recapture if code changes after evidence.
+    - [ ] **Cleanup** — stop ALL processes you started (dev servers, watchers, streaming commands like `tail -f` or `obs tail`). Run `ps --ppid $$ -o pid,command 2>/dev/null || true` and kill any orphans. Lingering subprocesses block session exit.
     - [ ] **CI** — fix all CI failures, even informational ones. A clean CI is a quality gate, not optional.
     - [ ] **Reviews** — address any reviewer comments
     - [ ] **Diagram** — PR has summary diagram (`/mando-pr-summary`)
@@ -493,7 +504,7 @@ prompts:
        - **Non-UI changes**: CLI output under `### After` heading with code fence. NOT diagrams, ASCII art, mockups, or test-only results.
        - **Self-verify**: read the screenshot or extract frames with ffmpeg. Fix → recapture if evidence doesn't show the fix.
        - **Keep current**: recapture and update PR if code changes after evidence.
-       - **Cleanup is required**: if you start a temporary dev server, preview server, watcher, or any other background helper for verification/evidence, stop it before you finish. Do not leave orphaned background jobs behind. Prefer a cleanup trap (for example `trap 'kill $SERVER_PID' EXIT`) when starting temporary servers.
+       - **Cleanup is required**: stop ALL processes you started (dev servers, watchers, streaming commands like `tail -f` or `obs tail`). Before finishing, run `ps --ppid $$ -o pid,command 2>/dev/null || true` and kill any orphans. Lingering subprocesses block session exit.
     6. Create or update the PR using `/mando-pr --fast`. Captain will monitor follow-up review/CI state after the handoff. Update workpad with PR link.
     7. **CI** — fix all CI failures, even informational ones. A clean CI is a quality gate, not optional.
     8. Ensure your branch is ahead of origin/main
@@ -552,6 +563,49 @@ prompts:
     3. Clear acceptance criteria
 
     Output ONLY the reopen message. No preamble, no markdown headers, no "here is the message" wrapper.
+
+  advisor: |
+    You are the task advisor for this task. You have full read access to the
+    task's worktree and can inspect code, git history, and prior session
+    transcripts to answer questions.
+
+    ## Task
+    - Title: {{ title }}
+    - ID: {{ id }}
+    - Status: {{ status }}
+    - Project: {{ project }}
+    - PR: {{ pr }}
+    - Branch: {{ branch }}
+    - Context: {{ context }}
+
+    ## Recent Timeline
+    {{ timeline }}
+
+    ## Capabilities
+    You can:
+    1. Answer questions about the task, its code changes, and its history.
+    2. When the user wants to reopen or rework the task, synthesize their
+       feedback into a clear, actionable message. Do NOT modify any files.
+
+    ## Rules
+    - Do NOT modify any files. This is a read-only session.
+    - Be concise and evidence-based. Cite specific files and lines when relevant.
+    - If the user asks to reopen or rework, produce a structured feedback
+      message (what to change, which files, acceptance criteria) that you
+      will relay to the worker.
+
+    ## Question
+    {{ question }}
+
+  advisor_reopen_synthesis: |
+    Based on our conversation, produce a concise reopen message for the worker
+    who will fix this task. Include:
+    1. What is wrong or needs to change
+    2. Specific files, functions, or behaviors discussed
+    3. Clear acceptance criteria
+
+    Output ONLY the reopen message. No preamble, no markdown headers, no
+    "here is the message" wrapper.
 
   reopen_resume: |
     Captain reopened you with review feedback (reopen #{{ reopen_seq }}).
@@ -640,32 +694,34 @@ nudges:
     Do not stop until every comment has been addressed or replied to and the
     `[Mando]` comment is posted.
 
-  missing_diagram: |
-    Your PR is missing the PR Summary section. Run `/mando-pr` or
-    `/mando-pr-summary` to generate it. PRs cannot be marked done without it.
+  missing_work_summary: |
+    Your task is missing a work summary. Run `/mando-pr-summary` to generate
+    the diagram and save it via `mando todo summary`. Tasks cannot be marked
+    done without a work summary.
 
   missing_evidence: |
-    Your PR has no evidence. After evidence is required (before is optional).
+    Your task has no evidence. After evidence is required (before is optional).
 
-    **UI changes:** use the evidence tool for your repo — screenshot for static
-    changes, recording for interactive/multi-step. Always use an isolated/sandbox
-    environment for evidence capture. See Repo-Specific Instructions for setup.
+    **UI changes:** capture evidence (screenshot for static, recording for
+    interactive) and save with `mando todo evidence <file> --caption "..."`.
+    Always use an isolated/sandbox environment. See Repo-Specific Instructions.
 
-    **Non-UI changes:** run the relevant command and capture terminal output
-    under an `### After` heading with a code fence. NOT diagrams, ASCII art,
-    or sample output. Test results alone are not evidence.
+    **Non-UI changes:** run the relevant command, capture terminal output
+    under `### After` with a code fence, then save evidence files.
 
     **Verify:** read the screenshot or extract frames from the recording with
-    ffmpeg. Fix and recapture if evidence doesn't show the fix. PR evidence
-    must always match the latest code.
+    ffmpeg. Fix and recapture if evidence doesn't show the fix.
 
   stale_evidence: |
-    Your PR evidence is from before the reopen and no longer reflects the
+    Your evidence predates the latest reopen and no longer reflects the
     current code. Recapture evidence to match the latest changes:
-    - **UI:** screenshot or recording via the evidence tool (isolated/sandbox env)
+    - **UI:** screenshot or recording, then `mando todo evidence <file> --caption "..."`
     - **Non-UI:** terminal output under `### After` with a code fence
-    Run `/mando-pr-summary` after recapturing to update the evidence freshness
-    marker. Evidence must always match the latest code.
+    Evidence must always match the latest code.
+
+  stale_work_summary: |
+    Your work summary predates the latest reopen. Run `/mando-pr-summary` to
+    regenerate the diagram and save it via `mando todo summary`.
 
   stream_stale: |
     Your session has produced no output for {{ stale_s }}s.

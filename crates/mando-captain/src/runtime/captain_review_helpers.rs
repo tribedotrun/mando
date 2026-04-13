@@ -53,7 +53,7 @@ pub(super) async fn inline_resume_worker(
 
     let wt_path = mando_config::expand_tilde(wt);
     let stream_size_before = mando_cc::get_stream_file_size(&stream_path);
-    let env = std::collections::HashMap::new();
+    let (env, cred_id) = super::spawner::credential_env_for_session(pool, sid).await;
     match crate::io::process_manager::resume_worker_process(
         feedback,
         &wt_path,
@@ -105,6 +105,7 @@ pub(super) async fn inline_resume_worker(
                 w,
                 Some(item.id),
                 true,
+                cred_id,
             )
             .await
             {

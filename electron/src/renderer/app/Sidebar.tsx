@@ -5,18 +5,21 @@ import {
   Settings,
   SquarePen,
   FolderPlus,
-  ChevronUp,
   PanelLeft,
   ArrowLeft,
   ArrowRight,
 } from 'lucide-react';
 import log from '#renderer/logger';
-import { pct, sortTaskItems } from '#renderer/utils';
+import { sortProjectChildren, copyToClipboard, getErrorMessage } from '#renderer/utils';
 import { useTaskList, useWorkbenchList, useConfig } from '#renderer/hooks/queries';
-import { useWorkbenchPin } from '#renderer/hooks/mutations';
-import { SetupChecklist } from '#renderer/domains/onboarding';
-import { SidebarProjectItem } from '#renderer/global/components/SidebarProjectItem';
+import { useWorkbenchPin, useWorkbenchRename } from '#renderer/hooks/mutations';
+import { toast } from 'sonner';
+import {
+  SidebarProjectItem,
+  type SidebarChild,
+} from '#renderer/global/components/SidebarProjectItem';
 import { SidebarPinnedSection } from '#renderer/global/components/SidebarPinnedSection';
+import { SetupTrigger, type SetupProgress } from '#renderer/app/SetupTrigger';
 import { useMountEffect } from '#renderer/global/hooks/useMountEffect';
 import { Button } from '#renderer/components/ui/button';
 import { ScrollArea } from '#renderer/components/ui/scroll-area';
@@ -26,11 +29,7 @@ import type { TaskItem } from '#renderer/types';
 
 export type Tab = 'captain' | 'scout' | 'sessions';
 
-export interface SetupProgress {
-  completed: number;
-  total: number;
-  currentStep: string;
-}
+export type { SetupProgress };
 
 interface Props {
   activeTab: Tab;
@@ -132,6 +131,23 @@ export function Sidebar({
   const items = taskData?.items ?? [];
   const { data: workbenches = [] } = useWorkbenchList();
   const pinMut = useWorkbenchPin();
+  const renameMut = useWorkbenchRename();
+
+  const openInFinder = React.useCallback((path: string) => {
+    window.mandoAPI
+      .openInFinder(path)
+      .catch((err: unknown) => toast.error(getErrorMessage(err, 'Failed to open in Finder')));
+  }, []);
+  const copyWorktreePath = React.useCallback((path: string) => {
+    void copyToClipboard(path, 'Path copied');
+  }, []);
+  const renameWorkbench = React.useCallback(
+    (id: number, title: string) => {
+      if (renameMut.isPending) return;
+      renameMut.mutate({ id, title });
+    },
+    [renameMut],
+  );
 
   const { data: _config } = useConfig();
   const scoutEnabled = !!_config?.features?.scout;
@@ -175,36 +191,32 @@ export function Sidebar({
 
   const pinnedWbIds = React.useMemo(() => new Set(pinnedItems.map((p) => p.wb.id)), [pinnedItems]);
 
-  const projectWorktrees = React.useMemo(() => {
-    // Only show workbenches that don't have a task attached (terminal-only),
-    // aren't archived, and aren't pinned (pinned shown in their own section).
+  const { projectCounts, projectChildren } = React.useMemo(() => {
+    const counts: Record<string, number> = {};
+    const children: Record<string, SidebarChild[]> = {};
     const taskWbIds = new Set(items.filter((t) => t.workbench_id).map((t) => t.workbench_id));
-    const map: Record<string, { id: number; cwd: string; name: string }[]> = {};
+
+    for (const item of items) {
+      if (!item.project) continue;
+      // Exclude tasks whose workbench is pinned (shown in pinned section).
+      if (item.workbench_id && pinnedWbIds.has(item.workbench_id)) continue;
+      const pName = pathToName[item.project] ?? item.project;
+      counts[pName] = (counts[pName] || 0) + 1;
+      (children[pName] ??= []).push({ kind: 'task', task: item });
+    }
+
+    // Taskless, non-archived, non-pinned workbenches interleave with tasks.
     for (const wb of workbenches) {
       if (taskWbIds.has(wb.id) || wb.archivedAt || pinnedWbIds.has(wb.id)) continue;
-      const projName = pathToName[wb.project] ?? wb.project;
-      (map[projName] ??= []).push({ id: wb.id, cwd: wb.worktree, name: wb.title });
+      const pName = pathToName[wb.project] ?? wb.project;
+      (children[pName] ??= []).push({ kind: 'workbench', wb });
     }
-    return map;
-  }, [workbenches, pathToName, items, pinnedWbIds]);
 
-  const { projectCounts, projectTasks } = React.useMemo(() => {
-    const counts: Record<string, number> = {};
-    const tasks: Record<string, typeof items> = {};
-    for (const item of items) {
-      if (item.project) {
-        // Exclude tasks whose workbench is pinned (shown in pinned section).
-        if (item.workbench_id && pinnedWbIds.has(item.workbench_id)) continue;
-        const pName = pathToName[item.project] ?? item.project;
-        counts[pName] = (counts[pName] || 0) + 1;
-        (tasks[pName] ??= []).push(item);
-      }
+    for (const [key, arr] of Object.entries(children)) {
+      children[key] = sortProjectChildren(arr);
     }
-    for (const [key, arr] of Object.entries(tasks)) {
-      tasks[key] = sortTaskItems(arr);
-    }
-    return { projectCounts: counts, projectTasks: tasks };
-  }, [items, pathToName, pinnedWbIds]);
+    return { projectCounts: counts, projectChildren: children };
+  }, [items, workbenches, pathToName, pinnedWbIds]);
 
   const projects = React.useMemo(() => {
     const names = new Set(Object.keys(projectCounts));
@@ -337,6 +349,11 @@ export function Sidebar({
               onOpenTask={onOpenTask}
               onOpenTerminalSession={onOpenTerminalSession}
               onUnpin={(id) => !pinMut.isPending && pinMut.mutate({ id, pinned: false })}
+              onPin={(id) => !pinMut.isPending && pinMut.mutate({ id, pinned: true })}
+              onArchiveWorkbench={onArchiveWorkbench}
+              onRenameWorkbench={renameWorkbench}
+              onOpenWorkbenchInFinder={openInFinder}
+              onCopyWorkbenchPath={copyWorktreePath}
             />
           </div>
         )}
@@ -378,8 +395,7 @@ export function Sidebar({
                     onRename={onRenameProject}
                     onRemove={onRemoveProject}
                     onNewTerminal={onNewTerminal}
-                    tasks={projectTasks[pName] ?? []}
-                    worktrees={projectWorktrees[pName] ?? []}
+                    items={projectChildren[pName] ?? []}
                     activeWorktreeCwd={activeTerminalCwd}
                     onOpenWorktree={onOpenTerminalSession}
                     onOpenTask={onOpenTask}
@@ -387,6 +403,12 @@ export function Sidebar({
                     onPinWorkbench={(id) =>
                       !pinMut.isPending && pinMut.mutate({ id, pinned: true })
                     }
+                    onUnpinWorkbench={(id) =>
+                      !pinMut.isPending && pinMut.mutate({ id, pinned: false })
+                    }
+                    onRenameWorkbench={renameWorkbench}
+                    onOpenWorkbenchInFinder={openInFinder}
+                    onCopyWorkbenchPath={copyWorktreePath}
                   />
                 );
               })}
@@ -417,77 +439,5 @@ export function Sidebar({
         />
       )}
     </aside>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Setup trigger bar + floating popover
-// ---------------------------------------------------------------------------
-
-function SetupTrigger({
-  progress,
-  active,
-  onToggle,
-  onDismiss,
-}: {
-  progress: SetupProgress;
-  active: boolean;
-  onToggle: () => void;
-  onDismiss: () => void;
-}): React.ReactElement {
-  const progressPct = pct(progress.completed, progress.total);
-
-  return (
-    <div className="relative mt-2">
-      {/* Popover card */}
-      {active && (
-        <div
-          data-testid="setup-popover"
-          className="absolute bottom-[calc(100%+6px)] left-0 z-[200] w-[300px] max-h-[420px] overflow-y-auto rounded-lg bg-muted shadow-[0_-4px_20px_rgba(0,0,0,0.5)]"
-        >
-          <SetupChecklist onDismiss={onDismiss} onMinimize={onToggle} />
-        </div>
-      )}
-
-      {/* Trigger bar */}
-      <Button
-        variant="ghost"
-        data-testid="setup-trigger"
-        onClick={onToggle}
-        aria-label={`${active ? 'Hide' : 'Show'} setup checklist, ${progressPct}% complete`}
-        aria-expanded={active}
-        className={`flex h-auto w-full items-center gap-2 rounded-md px-2.5 py-2 transition-colors ${active ? 'bg-muted' : 'bg-transparent'}`}
-      >
-        {/* Mini progress ring */}
-        <svg width="16" height="16" viewBox="0 0 20 20" className="shrink-0">
-          <circle cx="10" cy="10" r="8" fill="none" stroke="var(--secondary)" strokeWidth="2" />
-          <circle
-            cx="10"
-            cy="10"
-            r="8"
-            fill="none"
-            stroke="var(--foreground)"
-            strokeWidth="2"
-            strokeDasharray={`${(progressPct / 100) * 50.3} 50.3`}
-            strokeLinecap="round"
-            transform="rotate(-90 10 10)"
-          />
-        </svg>
-        <div className="flex flex-1 flex-col items-start">
-          <span className="text-[12px] font-medium text-foreground">
-            Get started <span className="font-normal text-text-3">{progressPct}%</span>
-          </span>
-          <span className="text-caption max-w-[120px] truncate text-text-3">
-            {progress.currentStep}
-          </span>
-        </div>
-        <ChevronUp
-          size={12}
-          color="var(--text-3)"
-          strokeWidth={2.5}
-          className={`shrink-0 transition-transform duration-150 ${active ? 'rotate-180' : ''}`}
-        />
-      </Button>
-    </div>
   );
 }

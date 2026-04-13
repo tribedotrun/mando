@@ -12,8 +12,8 @@ export {
   fetchItemSessions,
   fetchPrSummary,
   fetchTimeline,
-  fetchTranscript,
   fetchWorkers,
   reopenItem,
   reworkItem,
 } from '#renderer/api';
+export { fetchTranscript } from '#renderer/api-sessions';

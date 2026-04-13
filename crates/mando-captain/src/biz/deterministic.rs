@@ -15,7 +15,7 @@ use super::deterministic_helpers::{
     action, classify_unresolved_threads, has_substantive_output, is_image_dimension_blocked,
     render_nudge,
 };
-use super::worker_context::{evidence_is_fresh, has_no_evidence, has_summary_diagram};
+use super::worker_context::has_summary_diagram;
 
 /// Deterministic classification. Every input shape produces exactly one
 /// `Action`; there is no fallthrough. Returns `Err` only when a required
@@ -150,8 +150,8 @@ fn quality_gates_pass(
         && ctx.unreplied_threads == 0
         && ctx.unaddressed_issue_comments == 0
         && has_summary_diagram(ctx)
-        && !has_no_evidence(&ctx.pr_body)
-        && evidence_is_fresh(ctx)
+        && ctx.has_evidence
+        && ctx.evidence_fresh
     {
         return true;
     }
@@ -181,12 +181,12 @@ fn diagnose_failing_gates(
             failures.push("branch not ahead of main".into());
         }
         if ctx.pr.is_some() && !has_summary_diagram(ctx) {
-            failures.push("missing PR summary diagram".into());
+            failures.push("missing work summary".into());
         }
-        if ctx.pr.is_some() && has_no_evidence(&ctx.pr_body) {
-            failures.push("missing evidence in PR".into());
+        if ctx.pr.is_some() && !ctx.has_evidence {
+            failures.push("missing evidence".into());
         }
-        if ctx.pr.is_some() && !has_no_evidence(&ctx.pr_body) && !evidence_is_fresh(ctx) {
+        if ctx.pr.is_some() && ctx.has_evidence && !ctx.evidence_fresh {
             failures.push("stale evidence -- recapture after reopen".into());
         }
         if ctx.unresolved_threads > 0 {
@@ -244,24 +244,24 @@ fn missing_gate_nudge(
     {
         return Ok(Some(classify_unresolved_threads(ctx, nudges)?));
     }
-    // Diagram.
-    if !ctx.degraded && ctx.pr.is_some() && !has_summary_diagram(ctx) {
-        let msg = render_nudge(nudges, "missing_diagram", &vars)?;
+    // Work summary (missing entirely -- stale handled below).
+    if !ctx.degraded && ctx.pr.is_some() && !ctx.has_work_summary {
+        let msg = render_nudge(nudges, "missing_work_summary", &vars)?;
         return Ok(Some(action(
             ctx,
             ActionKind::Nudge,
             &msg,
-            "PR missing summary diagram",
+            "missing work summary",
         )));
     }
     // Evidence.
-    if !ctx.degraded && ctx.pr.is_some() && has_no_evidence(&ctx.pr_body) {
+    if !ctx.degraded && ctx.pr.is_some() && !ctx.has_evidence {
         let msg = render_nudge(nudges, "missing_evidence", &vars)?;
         return Ok(Some(action(
             ctx,
             ActionKind::Nudge,
             &msg,
-            "PR missing evidence",
+            "missing evidence",
         )));
     }
     // Reopen ack (before stale evidence -- worker must address feedback first).
@@ -296,17 +296,23 @@ fn missing_gate_nudge(
         )));
     }
     // Stale evidence (exists but not fresh after reopen).
-    if !ctx.degraded
-        && ctx.pr.is_some()
-        && !has_no_evidence(&ctx.pr_body)
-        && !evidence_is_fresh(ctx)
-    {
+    if !ctx.degraded && ctx.pr.is_some() && ctx.has_evidence && !ctx.evidence_fresh {
         let msg = render_nudge(nudges, "stale_evidence", &vars)?;
         return Ok(Some(action(
             ctx,
             ActionKind::Nudge,
             &msg,
-            "PR evidence stale after reopen",
+            "evidence stale after reopen",
+        )));
+    }
+    // Stale work summary.
+    if !ctx.degraded && ctx.pr.is_some() && ctx.has_work_summary && !ctx.work_summary_fresh {
+        let msg = render_nudge(nudges, "stale_work_summary", &vars)?;
+        return Ok(Some(action(
+            ctx,
+            ActionKind::Nudge,
+            &msg,
+            "work summary stale after reopen",
         )));
     }
     // Image dimension blocked.

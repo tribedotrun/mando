@@ -23,8 +23,10 @@ const REQUIRED_CAPTAIN_PROMPTS: &[&str] = &[
 /// Required nudge keys for captain workflow.
 const REQUIRED_CAPTAIN_NUDGES: &[&str] = &[
     "unresolved_threads",
-    "missing_diagram",
+    "missing_work_summary",
     "missing_evidence",
+    "stale_evidence",
+    "stale_work_summary",
     "stream_stale",
     "image_dimension_blocked",
     "reopen_ack",

@@ -14,6 +14,7 @@ import {
   deleteTerminal,
   archiveWorkbench,
   pinWorkbench,
+  renameWorkbench,
   type CreateTerminalParams,
   type TerminalSessionInfo,
   type WorkbenchItem,
@@ -243,6 +244,34 @@ export function useWorkbenchPin() {
     onError: (_err, vars, context) => {
       if (context?.prev) qc.setQueryData(queryKeys.workbenches.list(), context.prev);
       toast.error(vars.pinned ? 'Failed to pin workbench' : 'Failed to unpin workbench');
+    },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// useWorkbenchRename
+// ---------------------------------------------------------------------------
+
+export function useWorkbenchRename() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (vars: { id: number; title: string }) => renameWorkbench(vars.id, vars.title),
+    onMutate: async (vars) => {
+      await qc.cancelQueries({ queryKey: queryKeys.workbenches.list() });
+      const prev = qc.getQueryData<WorkbenchItem[]>(queryKeys.workbenches.list());
+      qc.setQueryData<WorkbenchItem[]>(queryKeys.workbenches.list(), (old) =>
+        old?.map((wb) => (wb.id === vars.id ? { ...wb, title: vars.title, rev: wb.rev + 1 } : wb)),
+      );
+      return { prev };
+    },
+    onSuccess: (data) => {
+      qc.setQueryData<WorkbenchItem[]>(queryKeys.workbenches.list(), (old) =>
+        old?.map((wb) => (wb.id === data.id ? data : wb)),
+      );
+    },
+    onError: (_err, _vars, context) => {
+      if (context?.prev) qc.setQueryData(queryKeys.workbenches.list(), context.prev);
+      toast.error('Failed to rename workbench');
     },
   });
 }

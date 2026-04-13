@@ -2,6 +2,9 @@
 
 use sqlx::SqlitePool;
 
+use crate::routes_scout::spawn_scout_processing;
+use crate::AppState;
+
 /// Clean up stale state on startup: dead PIDs, stuck scout items, and
 /// orphan research runs from interrupted daemon runs.
 pub async fn startup_reconciliation(pool: &SqlitePool) {
@@ -28,6 +31,29 @@ pub async fn startup_reconciliation(pool: &SqlitePool) {
         ),
         Err(e) => {
             tracing::warn!(module = "startup", error = %e, "failed to reset stale running research runs")
+        }
+    }
+}
+
+/// Re-queue any scout items left in `pending` from a prior daemon run.
+/// Must be called after `AppState` is constructed so we can spawn tasks.
+pub async fn resume_pending_scout_items(state: &AppState) {
+    let pool = state.db.pool();
+    match mando_db::queries::scout::list_processable(pool).await {
+        Ok(items) if items.is_empty() => {}
+        Ok(items) => {
+            let count = items.len();
+            for item in items {
+                spawn_scout_processing(state, item.id, item.url);
+            }
+            tracing::info!(
+                module = "startup",
+                count,
+                "resumed pending scout items for processing"
+            );
+        }
+        Err(e) => {
+            tracing::warn!(module = "startup", error = %e, "failed to query pending scout items")
         }
     }
 }

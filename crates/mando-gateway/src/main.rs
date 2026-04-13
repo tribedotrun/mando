@@ -192,6 +192,9 @@ async fn main() {
         bus: bus.clone(),
         cc_session_mgr: Arc::new(cc_session_mgr),
         task_store: task_store_arc,
+        credential_mgr: Arc::new(mando_gateway::credentials::CredentialManager::new(
+            db.pool().clone(),
+        )),
         db,
         qa_session_mgr,
         terminal_host: Arc::new(mando_terminal::TerminalHost::new(mando_config::data_dir())),
@@ -216,9 +219,13 @@ async fn main() {
 
     // Spawn captain auto-tick loop (always runs; respects auto_schedule dynamically).
     mando_gateway::background_tasks::spawn_auto_tick(&state, state.config_manager.subscribe_tick());
+    mando_gateway::startup::resume_pending_scout_items(&state).await;
 
     // Spawn workbench cleanup (5 min after startup, removes worktrees archived > 30 days).
     mando_gateway::background_tasks::spawn_workbench_cleanup(&state);
+
+    // Auto-title terminal workbenches from CC session content (60s loop).
+    mando_gateway::auto_title::spawn(&state);
 
     // Auto-resume terminal sessions that were alive when the daemon last exited.
     mando_gateway::background_tasks::spawn_terminal_auto_resume(&state);

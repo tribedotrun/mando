@@ -210,6 +210,7 @@ const TASK_API_FIELDS: &[&str] = &[
     "project_id",
     "reopen_seq",
     "reopen_source",
+    "reopened_at",
     "resource",
     "rev",
     "review_fail_count",
@@ -225,7 +226,8 @@ const TASK_API_FIELDS: &[&str] = &[
     "worktree",
 ];
 
-const SESSION_IDS_API_FIELDS: &[&str] = &["ask", "clarifier", "merge", "review", "worker"];
+const SESSION_IDS_API_FIELDS: &[&str] =
+    &["advisor", "ask", "clarifier", "merge", "review", "worker"];
 
 const ITEM_STATUS_API_VALUES: &[&str] = &[
     "awaiting-review",
@@ -268,12 +270,14 @@ fn type_contract_task_fields() {
         clarifier: Some("s".into()),
         merge: Some("s".into()),
         ask: Some("s".into()),
+        advisor: Some("s".into()),
     };
     item.last_activity_at = Some("t".into());
     item.plan = Some("p".into());
     item.no_pr = true;
     item.worker_seq = 1;
     item.reopen_seq = 1;
+    item.reopened_at = Some("t".into());
     item.reopen_source = Some("r".into());
     item.images = Some("i".into());
     item.escalation_report = Some("e".into());
@@ -304,6 +308,7 @@ fn type_contract_session_ids_fields() {
         clarifier: Some("s".into()),
         merge: Some("s".into()),
         ask: Some("s".into()),
+        advisor: Some("s".into()),
     };
     let json: serde_json::Value = serde_json::to_value(&ids).unwrap();
     let mut keys: Vec<&str> = json
