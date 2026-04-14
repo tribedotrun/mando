@@ -1,9 +1,12 @@
 import React, { useCallback, useMemo, useRef, useState } from 'react';
-import { buildUrl } from '#renderer/global/hooks/useApi';
 import { useTaskFeed } from '#renderer/hooks/queries';
 import { useTaskAdvisor } from '#renderer/hooks/mutations';
 import { PrMarkdown } from '#renderer/domains/captain/components/PrMarkdown';
 import { MessageBlock } from '#renderer/domains/captain/components/MessageBlock';
+import {
+  EvidenceBlock,
+  WorkSummaryBlock,
+} from '#renderer/domains/captain/components/ArtifactBlocks';
 import type {
   TaskItem,
   FeedItem,
@@ -12,17 +15,7 @@ import type {
   AskHistoryEntry,
   ClarifierQuestion,
 } from '#renderer/types';
-import {
-  MessageSquare,
-  FileText,
-  Image,
-  ChevronDown,
-  ChevronRight,
-  ArrowUp,
-  AlertTriangle,
-  Clock,
-  Loader2,
-} from 'lucide-react';
+import { MessageSquare, ArrowUp, AlertTriangle, Clock, Loader2 } from 'lucide-react';
 import { cn } from '#renderer/cn';
 import { canReopen, canRework, clamp } from '#renderer/utils';
 import { StatusIcon } from '#renderer/global/components/StatusIndicator';
@@ -72,7 +65,7 @@ function TimelineBlock({ event }: { event: TimelineEvent }) {
       : null;
 
   return (
-    <div className="flex items-start gap-3 px-4 py-2">
+    <div className="flex items-start gap-3 px-3 py-2">
       <div className="mt-0.5 flex-shrink-0">
         <StatusIcon status={iconStatus} />
       </div>
@@ -90,98 +83,6 @@ function TimelineBlock({ event }: { event: TimelineEvent }) {
   );
 }
 
-function EvidenceBlock({ artifact }: { artifact: TaskArtifact }) {
-  const [expanded, setExpanded] = useState(false);
-  const time = new Date(artifact.created_at).toLocaleTimeString([], {
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-  const mediaCount = artifact.media?.length ?? 0;
-
-  return (
-    <div className="mx-4 my-2 rounded-lg border border-border bg-surface-1 p-4">
-      <button
-        onClick={() => setExpanded(!expanded)}
-        className="flex w-full items-center gap-3 text-left"
-      >
-        <Image size={16} className="flex-shrink-0 text-accent" />
-        <div className="min-w-0 flex-1">
-          <div className="flex items-baseline gap-2">
-            <span className="text-body-sm font-medium text-text-1">Evidence</span>
-            <span className="text-caption text-text-3">{mediaCount} file(s)</span>
-            <span className="text-caption text-text-3">{time}</span>
-          </div>
-        </div>
-        {expanded ? (
-          <ChevronDown size={14} className="text-text-3" />
-        ) : (
-          <ChevronRight size={14} className="text-text-3" />
-        )}
-      </button>
-      {expanded && (
-        <div className="mt-3 space-y-3">
-          {artifact.media?.map((m) => {
-            const isImage = ['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(m.ext);
-            const mediaUrl = buildUrl(`/api/artifacts/${artifact.id}/media/${m.index}`);
-            return (
-              <div key={m.index} className="space-y-1">
-                {isImage && m.local_path && (
-                  <img
-                    src={mediaUrl}
-                    alt={m.caption ?? m.filename}
-                    className="max-h-64 rounded border border-border object-contain"
-                  />
-                )}
-                <div className="flex items-center gap-2 text-caption text-text-3">
-                  <FileText size={12} />
-                  <span>{m.caption ?? m.filename}</span>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function WorkSummaryBlock({ artifact }: { artifact: TaskArtifact }) {
-  const [expanded, setExpanded] = useState(true);
-  const time = new Date(artifact.created_at).toLocaleTimeString([], {
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-
-  return (
-    <div className="mx-4 my-2 rounded-lg border border-border bg-surface-1 p-4">
-      <button
-        onClick={() => setExpanded(!expanded)}
-        className="flex w-full items-center gap-3 text-left"
-      >
-        <FileText size={16} className="flex-shrink-0 text-accent" />
-        <div className="min-w-0 flex-1">
-          <div className="flex items-baseline gap-2">
-            <span className="text-body-sm font-medium text-text-1">Work Summary</span>
-            <span className="text-caption text-text-3">{time}</span>
-          </div>
-        </div>
-        {expanded ? (
-          <ChevronDown size={14} className="text-text-3" />
-        ) : (
-          <ChevronRight size={14} className="text-text-3" />
-        )}
-      </button>
-      {expanded && (
-        <div className="mt-3">
-          <pre className="max-h-80 overflow-auto whitespace-pre-wrap rounded bg-surface-2 p-3 font-mono text-caption text-text-2">
-            {artifact.content}
-          </pre>
-        </div>
-      )}
-    </div>
-  );
-}
-
 function EscalationBlock({ event, report }: { event: TimelineEvent; report?: string | null }) {
   const time = new Date(event.timestamp).toLocaleTimeString([], {
     hour: '2-digit',
@@ -190,7 +91,7 @@ function EscalationBlock({ event, report }: { event: TimelineEvent; report?: str
 
   return (
     <div
-      className="mx-4 my-2 rounded-lg px-4 py-3"
+      className="mx-3 my-2 rounded-lg px-4 py-3"
       style={{
         background: 'color-mix(in srgb, var(--destructive) 6%, transparent)',
         border: '1px solid color-mix(in srgb, var(--destructive) 20%, transparent)',
@@ -229,7 +130,7 @@ function ClarificationBlock({
 
   if (isActive && questions.length > 0) {
     return (
-      <div className="mx-4 my-2">
+      <div className="mx-3 my-2">
         <ClarificationTab taskId={taskId} questions={questions} />
       </div>
     );
@@ -237,7 +138,7 @@ function ClarificationBlock({
 
   return (
     <div
-      className="mx-4 my-2 rounded-lg px-4 py-3"
+      className="mx-3 my-2 rounded-lg px-4 py-3"
       style={{
         background: 'color-mix(in srgb, var(--needs-human) 6%, transparent)',
         border: '1px solid color-mix(in srgb, var(--needs-human) 20%, transparent)',
@@ -266,10 +167,12 @@ function FeedBlock({
   item,
   task,
   isLatestClarify,
+  isLatestArtifact,
 }: {
   item: FeedItem;
   task: TaskItem;
   isLatestClarify: (timestamp: string) => boolean;
+  isLatestArtifact: (type: string, id: number) => boolean;
 }) {
   switch (item.type) {
     case 'timeline': {
@@ -282,8 +185,8 @@ function FeedBlock({
         return <ClarificationBlock event={event} taskId={task.id} isActive={active} />;
       }
       // Suppress events that have a richer renderer elsewhere in the feed:
-      //   work_summary_updated / evidence_updated → artifact cards
-      //   human_ask → the "You" MessageBlock already shows the question
+      //   work_summary_updated / evidence_updated -> artifact cards
+      //   human_ask -> the "You" MessageBlock already shows the question
       if (
         event.event_type === 'work_summary_updated' ||
         event.event_type === 'evidence_updated' ||
@@ -295,9 +198,11 @@ function FeedBlock({
     }
     case 'artifact': {
       const artifact = item.data as TaskArtifact;
-      if (artifact.artifact_type === 'evidence') return <EvidenceBlock artifact={artifact} />;
+      const latest = isLatestArtifact(artifact.artifact_type, artifact.id);
+      if (artifact.artifact_type === 'evidence')
+        return <EvidenceBlock artifact={artifact} initialExpanded={latest} />;
       if (artifact.artifact_type === 'work_summary')
-        return <WorkSummaryBlock artifact={artifact} />;
+        return <WorkSummaryBlock artifact={artifact} initialExpanded={latest} />;
       return null;
     }
     case 'message':
@@ -351,7 +256,7 @@ function AdvisorInputBar({
   const showRework = canRework(item);
 
   return (
-    <div className="bg-background px-3 pb-3 pt-1">
+    <div className="bg-background px-2 pb-1.5">
       <div
         className={cn(
           'rounded-xl border bg-surface-1 transition-colors',
@@ -439,14 +344,31 @@ export function TaskFeedView({ item }: TaskFeedViewProps): React.ReactElement {
   }, [feedItems]);
   const isLatestClarify = useCallback((ts: string) => ts === latestClarifyTs, [latestClarifyTs]);
 
-  // Auto-scroll: callback ref on the sentinel div scrolls into view when
-  // feedItems.length increases. Safe for concurrent mode (no render side-effects).
-  const prevCountRef = useRef(feedItems.length);
+  // Find the latest artifact ID for each artifact type so only those expand by default.
+  const latestArtifactIds = useMemo(() => {
+    const latest = new Map<string, number>();
+    for (const fi of feedItems) {
+      if (fi.type === 'artifact') {
+        const a = fi.data as TaskArtifact;
+        latest.set(a.artifact_type, a.id);
+      }
+    }
+    return latest;
+  }, [feedItems]);
+  const isLatestArtifact = useCallback(
+    (type: string, id: number) => latestArtifactIds.get(type) === id,
+    [latestArtifactIds],
+  );
+
+  // Auto-scroll: callback ref on the sentinel div scrolls into view on initial
+  // load (instant) and when feedItems.length increases (smooth).
+  const prevCountRef = useRef(0);
   const feedEndCallbackRef = useCallback(
     (node: HTMLDivElement | null) => {
       feedEndRef.current = node;
-      if (node && feedItems.length > prevCountRef.current) {
-        node.scrollIntoView({ behavior: 'smooth' });
+      if (node && feedItems.length > 0 && feedItems.length !== prevCountRef.current) {
+        const isInitial = prevCountRef.current === 0;
+        node.scrollIntoView({ behavior: isInitial ? 'instant' : 'smooth' });
       }
       prevCountRef.current = feedItems.length;
     },
@@ -472,13 +394,14 @@ export function TaskFeedView({ item }: TaskFeedViewProps): React.ReactElement {
             </div>
           </div>
         ) : (
-          <div className="py-2">
+          <div className="pt-2">
             {feedItems.map((entry, i) => (
               <FeedBlock
                 key={`${entry.type}-${entry.timestamp}-${i}`}
                 item={entry}
                 task={item}
                 isLatestClarify={isLatestClarify}
+                isLatestArtifact={isLatestArtifact}
               />
             ))}
             <div ref={feedEndCallbackRef} />

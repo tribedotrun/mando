@@ -1,19 +1,13 @@
 import React, { useCallback, useRef, useState } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { useMountEffect } from '#renderer/global/hooks/useMountEffect';
 import log from '#renderer/logger';
-import { toast } from 'sonner';
 import {
   fetchTimeline,
   fetchItemSessions,
   fetchPrSummary,
 } from '#renderer/domains/captain/hooks/useApi';
-import {
-  FINALIZED_STATUSES,
-  type TaskItem,
-  type SessionSummary,
-  type MandoConfig,
-} from '#renderer/types';
+import { FINALIZED_STATUSES, type TaskItem, type SessionSummary } from '#renderer/types';
 import { buildSessionsFromTimeline } from '#renderer/domains/sessions';
 import { TaskActionBar } from '#renderer/domains/captain/components/TaskActionBar';
 import { useTaskAsk } from '#renderer/global/hooks/useTaskAsk';
@@ -42,12 +36,6 @@ const REFRESH_INDICATOR_MS = 1500;
 interface Props {
   item: TaskItem;
   onBack: () => void;
-  onOpenTerminal?: (opts: {
-    project: string;
-    cwd: string;
-    resumeSessionId?: string;
-    name?: string;
-  }) => void;
   onOpenTranscript?: (opts: {
     sessionId: string;
     caller?: string;
@@ -57,17 +45,19 @@ interface Props {
   }) => void;
   activeTab?: string;
   onTabChange?: (tab: string) => void;
+  onResumeInTerminal?: (sessionId: string, name?: string) => void;
+  terminalSlot?: React.ReactNode;
 }
 
 export function TaskDetailView({
   item,
   onBack,
-  onOpenTerminal,
   onOpenTranscript,
   activeTab: activeTabProp,
   onTabChange,
+  onResumeInTerminal,
+  terminalSlot,
 }: Props): React.ReactElement {
-  const qc = useQueryClient();
   const activeTab: DetailTab = (activeTabProp as DetailTab) || 'feed';
   const [prRefreshing, setPrRefreshing] = useState(false);
   const [contextModalOpen, setContextModalOpen] = useState(false);
@@ -163,40 +153,11 @@ export function TaskDetailView({
     navigateToTranscript(s.session_id, s.caller, s.cwd || item.worktree);
   };
 
-  const openTerminalPage = useCallback(
-    (resumeId?: string, name?: string, sessionCwd?: string) => {
-      if (!onOpenTerminal || !item.project) return;
-
-      const cfg = qc.getQueryData<MandoConfig>(queryKeys.config.current());
-      const projectPath = cfg?.captain?.projects
-        ? Object.values(cfg.captain.projects).find((p) => p.name === item.project)?.path
-        : undefined;
-
-      // Resume uses the session's stored cwd -- Claude Code resumes by session
-      // ID, so the directory just needs to exist on disk.
-      // New sessions use the worktree for correct git context.
-      const cwd = resumeId
-        ? sessionCwd || projectPath || item.worktree
-        : (item.worktree ?? projectPath);
-
-      if (!cwd) {
-        toast.error(`No working directory for task "${item.title}"`);
-        return;
-      }
-      onOpenTerminal({
-        project: item.project,
-        cwd,
-        resumeSessionId: resumeId,
-        name,
-      });
-    },
-    [onOpenTerminal, item.project, item.worktree, item.title, qc],
-  );
-
   const handleResumeSession = useCallback(
-    (sessionId: string, name?: string, sessionCwd?: string) =>
-      openTerminalPage(sessionId, name, sessionCwd),
-    [openTerminalPage],
+    (sessionId: string, name?: string) => {
+      onResumeInTerminal?.(sessionId, name);
+    },
+    [onResumeInTerminal],
   );
 
   const tabs: { key: DetailTab; label: string }[] = [
@@ -217,21 +178,19 @@ export function TaskDetailView({
         <div
           className={cn(
             'min-h-0 min-w-0 flex-1 overflow-x-hidden',
-            effectiveTab === 'feed'
+            effectiveTab === 'feed' || effectiveTab === 'terminal'
               ? 'flex flex-col overflow-hidden'
               : 'scrollbar-on-hover overflow-y-auto',
           )}
         >
           <Tabs
             value={effectiveTab}
-            onValueChange={(v) => {
-              if (v === 'terminal') {
-                openTerminalPage();
-              } else {
-                onTabChange?.(v);
-              }
-            }}
-            className={cn('gap-0', effectiveTab === 'feed' && 'flex flex-1 flex-col min-h-0')}
+            onValueChange={(v) => onTabChange?.(v)}
+            className={cn(
+              'gap-0',
+              (effectiveTab === 'feed' || effectiveTab === 'terminal') &&
+                'flex flex-1 flex-col min-h-0',
+            )}
           >
             <div className="sticky top-0 z-10 flex items-center justify-between bg-background">
               <TabsList variant="line" className="h-auto gap-0">
@@ -273,27 +232,42 @@ export function TaskDetailView({
             </div>
 
             {/* Tab content */}
-            <div className={cn('break-words', effectiveTab === 'feed' && 'flex-1 min-h-0')}>
-              {effectiveTab === 'feed' && <TaskFeedView item={item} />}
-              {effectiveTab === 'pr' && <PrTab item={item} prBody={prBody} prPending={prPending} />}
-              {effectiveTab === 'more' && (
-                <div className="space-y-6">
-                  <InfoTab item={item} />
-                  <SessionsTab
-                    sessions={sessions}
-                    onSessionClick={handleSessionClick}
-                    onResumeSession={handleResumeSession}
-                    taskId={item.id}
-                  />
-                </div>
-              )}
-            </div>
+            {effectiveTab !== 'terminal' && (
+              <div
+                className={cn(
+                  'break-words',
+                  effectiveTab === 'feed' ? 'flex-1 min-h-0' : 'px-3 pt-3',
+                )}
+              >
+                {effectiveTab === 'feed' && <TaskFeedView key={item.id} item={item} />}
+                {effectiveTab === 'pr' && (
+                  <PrTab item={item} prBody={prBody} prPending={prPending} />
+                )}
+                {effectiveTab === 'more' && (
+                  <div className="space-y-6">
+                    <InfoTab item={item} />
+                    <SessionsTab
+                      sessions={sessions}
+                      onSessionClick={handleSessionClick}
+                      onResumeSession={handleResumeSession}
+                      taskId={item.id}
+                    />
+                  </div>
+                )}
+              </div>
+            )}
+            {/* Terminal stays mounted (display:none) to keep xterm alive */}
+            {terminalSlot && (
+              <div className={cn(effectiveTab === 'terminal' ? 'flex-1 min-h-0' : 'hidden')}>
+                {terminalSlot}
+              </div>
+            )}
           </Tabs>
         </div>
       </div>
 
-      {/* Action bar, hidden when feed tab is active (feed has its own input bar) */}
-      {effectiveTab !== 'feed' && (
+      {/* Action bar: only on PR and More tabs (feed has its own input, terminal doesn't need one) */}
+      {effectiveTab !== 'feed' && effectiveTab !== 'terminal' && (
         <TaskActionBar item={item} onAsk={(q, images) => void ask(q, images)} />
       )}
 

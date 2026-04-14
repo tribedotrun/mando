@@ -76,6 +76,7 @@ async fn test_state_with_data_dir(data_dir: PathBuf) -> AppState {
             std::env::temp_dir().join("mando-ui-state-test.json"),
         )),
         scout_processing_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
+        auto_title_notify: Arc::new(tokio::sync::Notify::new()),
     }
 }
 

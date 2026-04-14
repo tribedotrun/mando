@@ -10,10 +10,9 @@ import { Tooltip, TooltipTrigger, TooltipContent } from '#renderer/components/ui
 
 interface Props {
   item: TaskItem;
-  onBack: () => void;
 }
 
-export function TaskAsk({ item, onBack }: Props): React.ReactElement {
+export function TaskAsk({ item }: Props): React.ReactElement {
   const [history, setHistory] = useState<QAEntry[]>([]);
   const [pending, setPending] = useState(false);
   const scrollRef = useRef<(() => void) | null>(null);
@@ -61,9 +60,6 @@ export function TaskAsk({ item, onBack }: Props): React.ReactElement {
 
   const header = (
     <div className="mb-3 flex items-center gap-2">
-      <Button variant="ghost" size="xs" onClick={onBack}>
-        &larr; Back
-      </Button>
       <span className="font-mono text-xs text-muted-foreground">#{item.id}</span>
       <span className="max-w-xs truncate font-mono text-xs text-text-3">{item.title}</span>
       <span className="ml-1 font-mono text-[0.6rem] text-text-4">[{item.status}]</span>

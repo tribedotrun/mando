@@ -155,21 +155,21 @@ export function SetupChecklist({ onDismiss, onMinimize }: SetupChecklistProps): 
   if (isLoading || !config) return <div />;
 
   return (
-    <div className="p-3">
-      <h2 className="mb-2.5 text-[13px] font-semibold text-foreground">Get started with Mando</h2>
+    <div className="p-4">
+      <h2 className="mb-3 text-[13px] font-semibold text-foreground">Get started with Mando</h2>
 
       {/* Progress bar */}
-      <div className="mb-3 flex gap-px">
+      <div className="mb-4 flex gap-1">
         {steps.map((_, i) => (
           <div
             key={i}
-            className={`h-[3px] flex-1 rounded transition-colors duration-300 ${steps[i].completed ? 'bg-success' : 'bg-secondary'}`}
+            className={`h-[3px] flex-1 rounded-full transition-colors duration-300 ${steps[i].completed ? 'bg-success' : 'bg-muted-foreground/20'}`}
           />
         ))}
       </div>
 
       {/* Steps */}
-      <div className="flex flex-col">
+      <div className="flex flex-col gap-0.5">
         {steps.map((step) => (
           <StepRow
             key={step.id}
@@ -183,20 +183,20 @@ export function SetupChecklist({ onDismiss, onMinimize }: SetupChecklistProps): 
       </div>
 
       {/* Footer */}
-      <div className="mt-3 flex items-center justify-between">
+      <div className="mt-4 flex items-center justify-between">
         <span className="text-[11px] text-muted-foreground">
           {completedCount} of {steps.length} complete
         </span>
         {allComplete ? (
           <Button
-            size="sm"
+            size="xs"
             onClick={onDismiss}
             className="bg-success font-semibold text-background hover:bg-success/90"
           >
             Done
           </Button>
         ) : (
-          <Button variant="ghost" size="sm" onClick={onMinimize ?? onDismiss}>
+          <Button variant="ghost" size="xs" onClick={onMinimize ?? onDismiss}>
             Later
           </Button>
         )}

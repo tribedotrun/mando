@@ -21,29 +21,10 @@ description: Commit, push, create PR, and tag AI reviewers. Use when ready to op
 
    Rename if branch name is generic (e.g., `feat/1`, `feat/wt-0211-2120`, `codex/c29a-coverage-100`) or doesn't describe the changes. Read `git log main..HEAD --oneline` to understand changes, then pick prefix from dominant commit type (`feat/`, `fix/`, `chore/`, `refactor/`) + kebab-case summary (3-5 words max). Rename local, push new, delete old remote, set upstream.
 
-5. **Create PR** (skip if one already exists — e.g. draft from `x-task-log`; check with `gh pr view --json number 2>/dev/null`). Use body-file to avoid escaping issues:
+5. **Create PR** (skip if one already exists — e.g. draft from captain spawner; check with `gh pr view --json number 2>/dev/null`). Create with an empty body — `/mando-pr-summary` (step 7) fills in the full structure:
 
    ```bash
-   cat > /tmp/pr-body.md << 'EOF'
-   ## Problem
-   <What's broken, missing, or suboptimal — the motivation for this PR>
-
-   > **Original request**: <Copy the original human prompt verbatim from the brief's "Original Request" section. If no such section exists, omit this quote block.>
-
-   ## Testing & Verification
-
-   ### Unit tests
-   <New/modified unit tests and results>
-
-   ### E2E regression
-   <mando-dev test / mando-dev check results — confirms nothing broke>
-
-   ### E2E verification
-   <Bespoke steps exercising the exact new behavior against a running system (no mocks). Include commands run + observed output (text only — no screenshots or images here; visuals belong in the Evidence section managed by mando-pr-summary). If not yet performed, leave empty — mando-pr-summary will flag it.>
-   EOF
-
-   gh pr create --title "..." --body-file /tmp/pr-body.md
-   rm /tmp/pr-body.md
+   gh pr create --title "<short descriptive title>" --body ""
    ```
 
 6. **Convert draft to ready** (ALWAYS check and convert):
@@ -53,11 +34,6 @@ description: Commit, push, create PR, and tag AI reviewers. Use when ready to op
    ```
 
 7. **Update PR summary**: Run `/mando-pr-summary`
-
-   `/mando-pr-summary` is responsible for the hosting decision:
-   - bucket present → keep the GCS flow
-   - bucket missing → preserve existing GitHub attachment evidence or leave the pending GitHub-web-upload note for any local-only visuals
-   - never use raw branch/blob URLs as screenshot evidence
 
 8. **Trigger external AI reviews** (idempotent — skip if already triggered):
 

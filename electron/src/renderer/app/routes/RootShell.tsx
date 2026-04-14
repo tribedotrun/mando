@@ -81,7 +81,7 @@ export function RootShell(): React.ReactElement {
   const navigateTab = useCallback(
     (tab: Tab) => {
       const tabRoutes: Record<Tab, string> = {
-        captain: '/captain',
+        captain: '/',
         scout: '/scout',
         sessions: '/sessions',
       };
@@ -123,7 +123,7 @@ export function RootShell(): React.ReactElement {
     }
   });
 
-  // Desktop notification click → navigate to task detail
+  // Desktop notification click -> navigate to workbench
   useMountEffect(() => {
     if (!window.mandoAPI) return;
     window.mandoAPI.onNotificationClick((data) => {
@@ -132,15 +132,21 @@ export function RootShell(): React.ReactElement {
         if (!Number.isNaN(id)) {
           const taskData = rqClient.getQueryData<TaskListResponse>(queryKeys.tasks.list());
           const task = taskData?.items.find((t) => t.id === id);
-          if (task) {
-            void navigate({ to: '/captain/tasks/$taskId', params: { taskId: String(id) } });
+          if (task?.workbench_id) {
+            void navigate({
+              to: '/wb/$workbenchId',
+              params: { workbenchId: String(task.workbench_id) },
+            });
+            return;
+          } else if (task) {
+            void navigate({ to: '/' });
             return;
           }
         }
       }
       const kind = data.kind as { type: string } | undefined;
       if (kind?.type === 'RateLimited') {
-        void navigate({ to: '/captain' });
+        void navigate({ to: '/' });
       }
     });
     return () => window.mandoAPI.removeNotificationClickListeners();
@@ -151,7 +157,7 @@ export function RootShell(): React.ReactElement {
     (action: string) => {
       useUIStore.getState().closePalette();
       const navMap: Record<string, string> = {
-        'nav-captain': '/captain',
+        'nav-captain': '/',
         'nav-scout': '/scout',
         'recent-scout': '/scout',
         'nav-sessions': '/sessions',

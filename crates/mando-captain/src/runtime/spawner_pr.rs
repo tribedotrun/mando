@@ -64,25 +64,7 @@ pub(crate) async fn create_draft_pr(
     let context = item.context.as_deref().unwrap_or("");
     let original_prompt = item.original_prompt.as_deref().unwrap_or("");
     let problem = format!("{}\n\n{}\n\n{}", item.title, context, original_prompt);
-    let body = format!(
-        "## Problem\n\n{problem}\n\n\
-         ## Solution\n\n<!-- work-summary: pending -->\n\n\
-         ## Evidence\n\n<!-- evidence: pending -->\n\n\
-         ## Reviewer Checklist\n\n\
-         - [ ] DB migration\n\
-         - [ ] Env vars\n\
-         - [ ] New dependencies\n\
-         - [ ] Backend deploy\n\
-         - [ ] Breaking changes\n\
-         - [ ] External API calls\n\
-         - [ ] No backward-compat / legacy code\n\
-         - [ ] Wiring completeness\n\
-         - [ ] Electron UI surfacing\n\n\
-         ## Testing & Verification\n\n\
-         ### Unit tests\n<!-- filled by worker -->\n\n\
-         ### E2E regression\n<!-- filled by worker -->\n\n\
-         ### E2E verification\n<!-- filled by worker -->\n"
-    );
+    let body = format!("## Problem\n\n{problem}\n");
 
     let gh_output = tokio::process::Command::new("gh")
         .args([

@@ -76,7 +76,7 @@ export function SessionsTab({
 }: {
   sessions: SessionSummary[];
   onSessionClick: (s: SessionSummary) => void;
-  onResumeSession?: (sessionId: string, name?: string, sessionCwd?: string) => void;
+  onResumeSession?: (sessionId: string, name?: string) => void;
   taskId: number;
 }): React.ReactElement {
   if (sessions.length === 0) {
@@ -142,7 +142,7 @@ export function SessionsTab({
                   onClick={(e) => {
                     e.stopPropagation();
                     const displayName = title + (s.worker_name ? ` (${s.worker_name})` : '');
-                    onResumeSession(s.session_id, displayName, s.cwd);
+                    onResumeSession(s.session_id, displayName);
                   }}
                   className="opacity-0 transition-opacity group-hover:opacity-100"
                   title="Resume this session in a terminal"

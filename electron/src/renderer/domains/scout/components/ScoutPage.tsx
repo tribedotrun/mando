@@ -223,7 +223,6 @@ export function ScoutPage({
           <ScoutReader
             key={activeItemId}
             itemId={activeItemId}
-            onBack={backToList}
             onAsk={() => {
               setQaOpen((v) => !v);
               setQaEverOpened(true);
@@ -241,7 +240,7 @@ export function ScoutPage({
   }
 
   if (view === 'research') {
-    return <ScoutResearch onBack={() => setView('')} />;
+    return <ScoutResearch />;
   }
 
   return (

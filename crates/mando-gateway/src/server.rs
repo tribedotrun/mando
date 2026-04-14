@@ -397,6 +397,7 @@ where
         telegram_runtime,
         ui_runtime,
         scout_processing_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
+        auto_title_notify: Arc::new(tokio::sync::Notify::new()),
     };
 
     state

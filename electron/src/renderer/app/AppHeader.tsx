@@ -23,7 +23,6 @@ import {
   prLabel,
   prHref,
   prState,
-  sortTaskItems,
 } from '#renderer/utils';
 import { toast } from 'sonner';
 import { Kbd } from '#renderer/components/ui/kbd';
@@ -38,51 +37,26 @@ interface WorkbenchCtx {
 /** Resolve the current workbench context from route state. */
 function useWorkbenchCtx(): WorkbenchCtx | null {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
-  const search = useRouterState({
-    select: (s) => s.location.search as Record<string, string | undefined>,
-  });
 
-  const taskIdMatch = pathname.match(/^\/captain\/tasks\/(\d+)/);
-  const taskId = taskIdMatch ? Number(taskIdMatch[1]) : null;
-  const { data: taskData } = useTaskList();
-  const task = taskId ? (taskData?.items.find((t) => t.id === taskId) ?? null) : null;
-
-  const isTerminal = pathname === '/terminal';
-  const terminalCwd = isTerminal ? (search.cwd ?? null) : null;
-  const terminalProject = isTerminal ? (search.project ?? null) : null;
+  const wbMatch = pathname.match(/^\/wb\/(\d+)/);
+  const wbId = wbMatch ? Number(wbMatch[1]) : null;
   const { data: workbenches = [] } = useWorkbenchList();
+  const workbench = wbId ? (workbenches.find((w) => w.id === wbId) ?? null) : null;
+
+  const { data: taskData } = useTaskList();
+  const task = wbId ? (taskData?.items.find((t) => t.workbench_id === wbId) ?? null) : null;
 
   return React.useMemo<WorkbenchCtx | null>(() => {
-    if (task) {
-      const wb = task.workbench_id
-        ? workbenches.find((w) => w.id === task.workbench_id)
-        : undefined;
-      const wtPath = task.worktree ?? wb?.worktree ?? null;
-      return {
-        worktreeName: wtPath?.split('/').pop() ?? null,
-        worktreePath: wtPath,
-        projectName: task.project ?? null,
-        task,
-      };
-    }
+    if (!workbench) return null;
 
-    if (isTerminal && terminalCwd) {
-      const matchedWb = workbenches.find((wb) => wb.worktree === terminalCwd);
-      const candidates =
-        taskData?.items.filter(
-          (t) => t.worktree === terminalCwd || (matchedWb && t.workbench_id === matchedWb.id),
-        ) ?? [];
-      const matchedTask = sortTaskItems(candidates)[0] ?? null;
-      return {
-        worktreeName: matchedWb?.title ?? terminalCwd.split('/').pop() ?? null,
-        worktreePath: terminalCwd,
-        projectName: matchedTask?.project ?? matchedWb?.project ?? terminalProject,
-        task: matchedTask,
-      };
-    }
-
-    return null;
-  }, [task, isTerminal, terminalCwd, terminalProject, workbenches, taskData?.items]);
+    const wtPath = workbench.worktree;
+    return {
+      worktreeName: workbench.title ?? wtPath?.split('/').pop() ?? null,
+      worktreePath: wtPath,
+      projectName: workbench.project ?? null,
+      task,
+    };
+  }, [workbench, task]);
 }
 
 interface AppHeaderProps {
@@ -102,7 +76,10 @@ export function AppHeader({
 }: AppHeaderProps): React.ReactElement {
   const ctx = useWorkbenchCtx();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
-  const isTerminal = pathname === '/terminal';
+  const search = useRouterState({
+    select: (s) => s.location.search as Record<string, string | undefined>,
+  });
+  const isTerminalTab = pathname.startsWith('/wb/') && search.tab === 'terminal';
 
   // Cmd+Shift+C copies the worktree path (ref avoids stale closure)
   const worktreePathRef = useRef(ctx?.worktreePath);
@@ -147,13 +124,12 @@ export function AppHeader({
   const resumeMut = useResumeRateLimited();
   const taskIsRateLimited = ctx?.task ? isRateLimited(ctx.task, rateLimitSecs) : false;
 
-  // Derive page title for collapsed toolbar (non-task routes)
+  // Derive page title for collapsed toolbar (non-workbench routes)
   const pageTitle = React.useMemo(() => {
-    if (pathname.startsWith('/captain')) return 'Tasks';
+    if (pathname === '/' || pathname === '') return 'Tasks';
     if (pathname.startsWith('/scout')) return 'Scout';
     if (pathname.startsWith('/sessions')) return 'Sessions';
     if (pathname.startsWith('/settings')) return 'Settings';
-    if (pathname === '/terminal') return 'Terminal';
     return '';
   }, [pathname]);
 
@@ -232,7 +208,7 @@ export function AppHeader({
             <DetailOverflowMenu
               item={ctx.task!}
               onViewContext={
-                isTerminal
+                isTerminalTab
                   ? undefined
                   : () => document.dispatchEvent(new CustomEvent('mando:view-task-brief'))
               }

@@ -8,10 +8,9 @@ import { z } from 'zod';
 import { RootShell } from '#renderer/app/routes/RootShell';
 import { AppLayout } from '#renderer/app/routes/AppLayout';
 import { CaptainPage } from '#renderer/app/routes/CaptainPage';
-import { TaskDetailPage } from '#renderer/app/routes/TaskDetailPage';
+import { WorkbenchPage } from '#renderer/app/routes/WorkbenchPage';
 import { ScoutPage } from '#renderer/app/routes/ScoutPage';
 import { SessionsPage } from '#renderer/app/routes/SessionsPage';
-import { TerminalPageRoute } from '#renderer/app/routes/TerminalPageRoute';
 import { SettingsPageRoute } from '#renderer/app/routes/SettingsPageRoute';
 import { TranscriptPage } from '#renderer/app/routes/TranscriptPage';
 import log from '#renderer/logger';
@@ -29,24 +28,32 @@ const appLayout = createRoute({
   component: AppLayout,
 });
 
-// -- Captain (task list) --
-const captainRoute = createRoute({
+// -- Home (task list / dashboard) --
+const homeRoute = createRoute({
   getParentRoute: () => appLayout,
-  path: '/captain',
+  path: '/',
   validateSearch: z.object({
     project: z.string().optional().catch(undefined),
   }),
   component: CaptainPage,
 });
 
-// -- Task detail --
-const taskDetailRoute = createRoute({
+// -- Workbench detail --
+const workbenchRoute = createRoute({
   getParentRoute: () => appLayout,
-  path: '/captain/tasks/$taskId',
+  path: '/wb/$workbenchId',
   validateSearch: z.object({
     tab: z.string().optional().catch(undefined),
+    resume: z.string().optional().catch(undefined),
+    name: z.string().optional().catch(undefined),
+    project: z.string().optional().catch(undefined),
   }),
-  component: TaskDetailPage,
+  beforeLoad: ({ params }) => {
+    if (params.workbenchId !== 'new' && Number.isNaN(Number(params.workbenchId))) {
+      log.warn('[wb-route] invalid workbenchId', params.workbenchId);
+    }
+  },
+  component: WorkbenchPage,
 });
 
 // -- Scout --
@@ -79,25 +86,6 @@ const transcriptRoute = createRoute({
   component: TranscriptPage,
 });
 
-// -- Terminal --
-const terminalRoute = createRoute({
-  getParentRoute: () => appLayout,
-  path: '/terminal',
-  validateSearch: z.object({
-    project: z.string().catch(''),
-    cwd: z.string().optional().catch(undefined),
-    resume: z.string().optional().catch(undefined),
-    name: z.string().optional().catch(undefined),
-  }),
-  beforeLoad: ({ search, navigate }) => {
-    if (!(search as { project: string }).project) {
-      log.warn('[terminal-route] beforeLoad: empty project, redirecting', search);
-      throw navigate({ to: '/captain', replace: true });
-    }
-  },
-  component: TerminalPageRoute,
-});
-
 // -- Settings (own layout, no sidebar) --
 const settingsRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -105,29 +93,12 @@ const settingsRoute = createRoute({
   component: SettingsPageRoute,
 });
 
-// -- Catch-all redirect to captain --
-const indexRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: '/',
-  beforeLoad: ({ navigate }) => {
-    throw navigate({ to: '/captain' });
-  },
-});
-
 // ---------------------------------------------------------------------------
 // Route tree assembly
 // ---------------------------------------------------------------------------
 
 const routeTree = rootRoute.addChildren([
-  indexRoute,
-  appLayout.addChildren([
-    captainRoute,
-    taskDetailRoute,
-    scoutRoute,
-    sessionsRoute,
-    transcriptRoute,
-    terminalRoute,
-  ]),
+  appLayout.addChildren([homeRoute, workbenchRoute, scoutRoute, sessionsRoute, transcriptRoute]),
   settingsRoute,
 ]);
 
@@ -135,7 +106,7 @@ const routeTree = rootRoute.addChildren([
 // Router instance
 // ---------------------------------------------------------------------------
 
-const memoryHistory = createMemoryHistory({ initialEntries: ['/captain'] });
+const memoryHistory = createMemoryHistory({ initialEntries: ['/'] });
 
 export const router = createRouter({
   routeTree,

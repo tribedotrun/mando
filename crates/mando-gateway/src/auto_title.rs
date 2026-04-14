@@ -14,16 +14,20 @@ use tracing::{info, warn};
 use crate::AppState;
 
 /// Periodically process workbenches with `pending_title_session` set.
+/// Also wakes immediately when `auto_title_notify` is signalled (e.g. on
+/// the first user prompt in a terminal workbench).
 pub fn spawn(state: &AppState) {
     let pool = state.db.pool().clone();
     let bus = state.bus.clone();
     let workflow = state.captain_workflow.clone();
     let cancel = state.cancellation_token.clone();
+    let notify = state.auto_title_notify.clone();
 
     state.task_tracker.spawn(async move {
         let initial_interval = workflow.load().auto_title.poll_interval_s;
         tokio::select! {
             _ = tokio::time::sleep(initial_interval) => {}
+            _ = notify.notified() => {}
             _ = cancel.cancelled() => { return; }
         }
 
@@ -32,6 +36,7 @@ pub fn spawn(state: &AppState) {
             process_pending(&pool, &bus, &cfg).await;
             tokio::select! {
                 _ = tokio::time::sleep(cfg.poll_interval_s) => {}
+                _ = notify.notified() => {}
                 _ = cancel.cancelled() => {
                     info!(module = "auto-title", "auto-title loop cancelled");
                     return;

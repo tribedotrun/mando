@@ -11,7 +11,8 @@ import { Button } from '#renderer/components/ui/button';
 import { useQueryClient } from '@tanstack/react-query';
 import { useConfigSave, useWorkbenchArchive } from '#renderer/hooks/mutations';
 import { queryKeys } from '#renderer/queryKeys';
-import type { MandoConfig } from '#renderer/types';
+import type { MandoConfig, TaskListResponse } from '#renderer/types';
+import { createWorktree, type WorkbenchItem } from '#renderer/api-terminal';
 import { apiPost, apiPatch, apiDel } from '#renderer/api';
 import { toast } from 'sonner';
 import { getErrorMessage } from '#renderer/utils';
@@ -22,6 +23,7 @@ import {
 } from '#renderer/components/ui/resizable';
 import { AppHeader } from '#renderer/app/AppHeader';
 import { router } from '#renderer/app/router';
+import log from '#renderer/logger';
 
 export function AppLayout(): React.ReactElement {
   const navigate = useNavigate();
@@ -34,14 +36,13 @@ export function AppLayout(): React.ReactElement {
   const saveMut = useConfigSave();
   const qc = useQueryClient();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [preparingProject, setPreparingProject] = useState<string | null>(null);
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
     id: 'sidebar-layout',
     storage: localStorage,
   });
 
   // Toggle sidebar and explicitly sync collapsed state.
-  // onResize may not fire for programmatic collapse()/expand(), so we set
-  // state directly based on the toggle direction.
   const handleToggleSidebar = useCallback(() => {
     const panel = sidebarRef.current;
     if (!panel) return;
@@ -73,18 +74,30 @@ export function AppLayout(): React.ReactElement {
   const projectFilter = useRouterState({
     select: (s) => (s.location.search as { project?: string }).project ?? null,
   });
-  const activeTerminalCwd = useRouterState({
-    select: (s) =>
-      s.location.pathname === '/terminal'
-        ? ((s.location.search as { cwd?: string }).cwd ?? null)
-        : null,
+  const activeWorkbenchId = useRouterState({
+    select: (s) => {
+      const m = s.location.pathname.match(/^\/wb\/(\w+)/);
+      return m ? m[1] : null;
+    },
   });
   const activeTaskId = useRouterState({
     select: (s) => {
-      const m = s.location.pathname.match(/^\/captain\/tasks\/(\d+)/);
-      return m ? Number(m[1]) : null;
+      const wbMatch = s.location.pathname.match(/^\/wb\/(\d+)/);
+      if (!wbMatch) return null;
+      const wbId = Number(wbMatch[1]);
+      const taskData = qc.getQueryData<TaskListResponse>(queryKeys.tasks.list());
+      const task = taskData?.items.find((t) => t.workbench_id === wbId);
+      return task?.id ?? null;
     },
   });
+
+  // Resolve active workbench's worktree path for sidebar highlighting
+  const allWorkbenches = qc.getQueryData<WorkbenchItem[]>(queryKeys.workbenches.list()) ?? [];
+  const numericWbId = activeWorkbenchId ? Number(activeWorkbenchId) : null;
+  const activeWorktreeCwd =
+    numericWbId && !Number.isNaN(numericWbId)
+      ? (allWorkbenches.find((w) => w.id === numericWbId)?.worktree ?? null)
+      : null;
 
   // Derive activeTab from current route
   const activeTab: Tab = matchRoute({ to: '/scout', fuzzy: true })
@@ -113,6 +126,74 @@ export function AppLayout(): React.ReactElement {
     };
     saveMut.mutate(updated);
   }, [qc, saveMut]);
+
+  // Navigate to a workbench by its ID
+  const navigateToWorkbench = useCallback(
+    (wbId: number, tab?: string) => {
+      void navigate({
+        to: '/wb/$workbenchId',
+        params: { workbenchId: String(wbId) },
+        search: tab ? { tab } : {},
+      });
+    },
+    [navigate],
+  );
+
+  // Resolve workbench ID from a task ID
+  const openTaskWorkbench = useCallback(
+    (taskId: number) => {
+      const taskData = qc.getQueryData<TaskListResponse>(queryKeys.tasks.list());
+      const task = taskData?.items.find((t) => t.id === taskId);
+      if (task?.workbench_id) {
+        navigateToWorkbench(task.workbench_id);
+      } else {
+        void navigate({ to: '/' });
+      }
+    },
+    [qc, navigateToWorkbench, navigate],
+  );
+
+  // Resolve workbench ID from a worktree path
+  const openWorktreeWorkbench = useCallback(
+    (cwd: string) => {
+      const workbenches = qc.getQueryData<WorkbenchItem[]>(queryKeys.workbenches.list()) ?? [];
+      const wb = workbenches.find((w) => w.worktree === cwd);
+      if (wb) {
+        navigateToWorkbench(wb.id, 'terminal');
+      }
+    },
+    [qc, navigateToWorkbench],
+  );
+
+  // Create a new workbench (pen icon)
+  const handleNewTerminal = useCallback(
+    async (project: string) => {
+      if (preparingProject) return;
+      setPreparingProject(project);
+      try {
+        const now = new Date();
+        const suffix = [
+          String(now.getMonth() + 1).padStart(2, '0'),
+          String(now.getDate()).padStart(2, '0'),
+          '-',
+          String(now.getHours()).padStart(2, '0'),
+          String(now.getMinutes()).padStart(2, '0'),
+          String(now.getSeconds()).padStart(2, '0'),
+        ].join('');
+        const result = await createWorktree(project, suffix);
+        void qc.invalidateQueries({ queryKey: queryKeys.workbenches.all });
+        if (result.workbenchId) {
+          navigateToWorkbench(result.workbenchId, 'terminal');
+        }
+      } catch (err) {
+        log.error('createWorktree failed', err);
+        toast.error(getErrorMessage(err, 'Failed to create workspace'));
+      } finally {
+        setPreparingProject(null);
+      }
+    },
+    [preparingProject, qc, navigateToWorkbench],
+  );
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -160,7 +241,7 @@ export function AppLayout(): React.ReactElement {
             activeTab={activeTab}
             onTabChange={(tab) => {
               const routes: Record<Tab, string> = {
-                captain: '/captain',
+                captain: '/',
                 scout: '/scout',
                 sessions: '/sessions',
               };
@@ -178,7 +259,7 @@ export function AppLayout(): React.ReactElement {
                 await apiPatch(`/api/projects/${encodeURIComponent(oldName)}`, { rename: newName });
                 void qc.invalidateQueries({ queryKey: queryKeys.config.all });
                 if (projectFilter === oldName) {
-                  void navigate({ to: '/captain', search: { project: newName } });
+                  void navigate({ to: '/', search: { project: newName } });
                 }
                 toast.success(`Renamed to "${newName}"`);
               } catch (err) {
@@ -191,9 +272,8 @@ export function AppLayout(): React.ReactElement {
                   `/api/projects/${encodeURIComponent(name)}`,
                 );
                 void qc.invalidateQueries({ queryKey: queryKeys.config.all });
-                // SSE handles task list cache update after project deletion
                 if (projectFilter === name) {
-                  void navigate({ to: '/captain', search: {} });
+                  void navigate({ to: '/', search: {} });
                 }
                 const taskMsg =
                   res.deleted_tasks > 0
@@ -209,24 +289,17 @@ export function AppLayout(): React.ReactElement {
             projectFilter={projectFilter}
             onProjectFilter={(project) => {
               void navigate({
-                to: '/captain',
+                to: '/',
                 search: project ? { project } : {},
               });
             }}
             setupProgress={setupProgress}
             setupActive={setupActive}
-            onNewTerminal={(project) => void navigate({ to: '/terminal', search: { project } })}
-            onOpenTask={(id) =>
-              void navigate({ to: '/captain/tasks/$taskId', params: { taskId: String(id) } })
-            }
-            activeTerminalCwd={activeTerminalCwd}
+            onNewTerminal={(project) => void handleNewTerminal(project)}
+            onOpenTask={(id) => openTaskWorkbench(id)}
+            activeTerminalCwd={activeWorktreeCwd}
             activeTaskId={activeTaskId}
-            onOpenTerminalSession={(session) =>
-              void navigate({
-                to: '/terminal',
-                search: { project: session.project, cwd: session.cwd },
-              })
-            }
+            onOpenTerminalSession={(session) => openWorktreeWorkbench(session.cwd)}
             onArchiveWorkbench={(id) => {
               archiveWorkbench.mutate({ id });
             }}

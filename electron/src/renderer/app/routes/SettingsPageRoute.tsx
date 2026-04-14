@@ -14,7 +14,6 @@ export function SettingsPageRoute(): React.ReactElement {
     <div className="flex-1 overflow-hidden">
       <ErrorBoundary fallbackLabel="Settings">
         <SettingsPage
-          onBack={() => void navigate({ to: '/captain' })}
           section={(section as SettingsSection) ?? 'general'}
           onSectionChange={(s) =>
             void navigate({

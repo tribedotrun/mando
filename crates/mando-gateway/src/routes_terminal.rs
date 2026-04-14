@@ -443,5 +443,9 @@ pub(crate) async fn post_terminal_activity(
             }
         }
     }
+    // Wake the auto-title loop so it picks up the first user message
+    // without waiting for the next poll cycle.
+    state.auto_title_notify.notify_one();
+
     Ok(Json(json!({"ok": true, "touched": touched})))
 }

@@ -26,7 +26,7 @@ fn base_ctx() -> WorkerContext {
         unresolved_threads: 0,
         unreplied_threads: 0,
         unaddressed_issue_comments: 0,
-        pr_body: "## PR Summary\n<!-- pr-summary-head: abc -->\n### After\n![fix](https://example.com/fix.png)".into(),
+        pr_body: "## Solution\n```\n┌─ diagram ─┐\n```\n**What changed**: fixed the thing".into(),
         changed_files: vec![],
         branch_ahead: true,
         process_alive: false,

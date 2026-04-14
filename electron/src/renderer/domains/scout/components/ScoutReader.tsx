@@ -27,13 +27,12 @@ import { Combobox } from '#renderer/components/ui/combobox';
 
 interface Props {
   itemId: number;
-  onBack: () => void;
   onAsk: () => void;
   qaOpen?: boolean;
 }
 
 // Parent should render with key={itemId} so this component remounts on item change
-export function ScoutReader({ itemId, onBack, onAsk, qaOpen }: Props): React.ReactElement {
+export function ScoutReader({ itemId, onAsk, qaOpen }: Props): React.ReactElement {
   const [summaryOpen, setSummaryOpen] = useState(true);
   const [actOpen, setActOpen] = useState(false);
   const [actProject, setActProject] = useState('');
@@ -126,9 +125,6 @@ export function ScoutReader({ itemId, onBack, onAsk, qaOpen }: Props): React.Rea
   if (error || !item) {
     return (
       <div data-testid="scout-reader">
-        <Button variant="ghost" size="sm" onClick={onBack} className="mb-3">
-          &larr; Back
-        </Button>
         <div className="text-xs text-destructive">{error ?? `Item #${itemId} not found`}</div>
       </div>
     );
@@ -143,9 +139,6 @@ export function ScoutReader({ itemId, onBack, onAsk, qaOpen }: Props): React.Rea
           background: 'color-mix(in srgb, var(--background) 90%, transparent)',
         }}
       >
-        <Button variant="ghost" size="sm" onClick={onBack}>
-          &larr; Back
-        </Button>
         <span className="max-w-[300px] truncate text-xs text-muted-foreground">{displayTitle}</span>
         <div className="ml-auto flex items-center gap-1">
           <Button variant={qaOpen ? 'secondary' : 'ghost'} size="sm" onClick={onAsk}>

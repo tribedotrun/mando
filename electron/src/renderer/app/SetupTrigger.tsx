@@ -25,7 +25,7 @@ export function SetupTrigger({ progress, active, onToggle, onDismiss }: Props): 
       {active && (
         <div
           data-testid="setup-popover"
-          className="absolute bottom-[calc(100%+6px)] left-0 z-[200] w-[300px] max-h-[420px] overflow-y-auto rounded-lg bg-muted shadow-[0_-4px_20px_rgba(0,0,0,0.5)]"
+          className="absolute right-0 bottom-[calc(100%+6px)] left-0 z-[200] max-h-[420px] overflow-y-auto rounded-lg bg-muted shadow-[0_-4px_20px_rgba(0,0,0,0.5)]"
         >
           <SetupChecklist onDismiss={onDismiss} onMinimize={onToggle} />
         </div>
