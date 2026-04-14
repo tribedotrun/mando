@@ -199,7 +199,7 @@ async fn run_captain_tick_inner(
         .unwrap_or(false);
     let rate_limited = if has_credentials {
         // All credentials rate-limited = no available credential to pick.
-        mando_db::queries::credentials::pick_for_worker(&pool)
+        mando_db::queries::credentials::pick_for_worker(&pool, None)
             .await
             .unwrap_or(None)
             .is_none()

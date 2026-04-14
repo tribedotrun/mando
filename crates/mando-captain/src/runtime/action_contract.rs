@@ -362,12 +362,19 @@ pub async fn reopen_item(
             // the new worktree path so the task points at the right row.
             let worktree_changed = old_worktree.as_deref() != Some(&result.worktree);
             if worktree_changed {
+                let old_wb_id = item.workbench_id;
                 item.workbench_id =
                     mando_db::queries::workbenches::find_by_worktree(pool, &result.worktree)
                         .await
                         .ok()
                         .flatten()
                         .map(|wb| wb.id);
+                // Archive the previous workbench so it doesn't linger as an orphan.
+                if let Some(old) = old_wb_id.filter(|o| Some(*o) != item.workbench_id) {
+                    if let Err(e) = mando_db::queries::workbenches::archive(pool, old).await {
+                        tracing::warn!(workbench_id = old, error = %e, "failed to archive previous workbench during reopen");
+                    }
+                }
             }
             // Reset timeout clock so the worker gets a fresh window after reopen.
             item.worker_started_at = Some(mando_types::now_rfc3339());

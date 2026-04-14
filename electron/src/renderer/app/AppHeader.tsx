@@ -172,7 +172,7 @@ export function AppHeader({
       style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
     >
       {hasTask ? (
-        <div className={cn('flex items-center gap-3', sidebarCollapsed && 'pl-[70px]')}>
+        <div className={cn('flex min-w-0 items-center gap-3', sidebarCollapsed && 'pl-[70px]')}>
           {navIcons}
           <span className="min-w-0 truncate text-body font-medium text-foreground">
             {ctx.task!.title || ctx.task!.original_prompt || 'Untitled task'}
@@ -230,19 +230,25 @@ export function AppHeader({
       {/* Row 2: status + project + worktree */}
       <div
         className={cn(
-          'flex items-center gap-2 text-caption text-text-3',
+          'flex min-w-0 items-center gap-2 text-caption text-text-3',
           (hasTask || (sidebarCollapsed && !hasTask)) && 'mt-2',
           sidebarCollapsed && 'pl-6',
         )}
       >
-        {hasTask && <HeaderStatusBadge item={ctx.task!} sessions={sessions} />}
-        {ctx.projectName && <span>{ctx.projectName}</span>}
-        {ctx.projectName && ctx.worktreeName && <span>&middot;</span>}
-        {ctx.worktreeName && <span>{ctx.worktreeName}</span>}
+        {hasTask && (
+          <span className="shrink-0">
+            <HeaderStatusBadge item={ctx.task!} sessions={sessions} />
+          </span>
+        )}
+        {ctx.projectName && <span className="shrink-0">{ctx.projectName}</span>}
+        {ctx.projectName && ctx.worktreeName && <span className="shrink-0">&middot;</span>}
+        {ctx.worktreeName && <span className="min-w-0 truncate">{ctx.worktreeName}</span>}
         {hasTask &&
           (ctx.worktreeName || ctx.projectName) &&
           ctx.task!.pr_number &&
-          (ctx.task!.github_repo || ctx.task!.project) && <span>&middot;</span>}
+          (ctx.task!.github_repo || ctx.task!.project) && (
+            <span className="shrink-0">&middot;</span>
+          )}
         {hasTask && ctx.task!.pr_number && (ctx.task!.github_repo || ctx.task!.project) && (
           <a
             href={prHref(ctx.task!.pr_number, (ctx.task!.github_repo ?? ctx.task!.project)!)}

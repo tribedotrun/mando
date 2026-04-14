@@ -2,10 +2,11 @@ import React, { useState } from 'react';
 import { buildUrl } from '#renderer/global/hooks/useApi';
 import { PrMarkdown } from '#renderer/domains/captain/components/PrMarkdown';
 import type { TaskArtifact } from '#renderer/types';
-import { FileText, Image, ChevronDown, ChevronRight } from 'lucide-react';
+import { FileText, Image, Video, ChevronDown, ChevronRight } from 'lucide-react';
 import { ImageLightbox } from '#renderer/domains/captain/components/ImageLightbox';
 
 const IMAGE_EXTS = ['png', 'jpg', 'jpeg', 'gif', 'webp'];
+const VIDEO_EXTS = ['mp4', 'mov', 'webm'];
 
 export function EvidenceBlock({
   artifact,
@@ -22,6 +23,9 @@ export function EvidenceBlock({
   });
   const mediaCount = artifact.media?.length ?? 0;
 
+  const hasVideo = (artifact.media ?? []).some((m) => VIDEO_EXTS.includes(m.ext));
+  const EvidenceIcon = hasVideo ? Video : Image;
+
   const imageMedia = (artifact.media ?? []).filter(
     (m) => IMAGE_EXTS.includes(m.ext) && m.local_path,
   );
@@ -37,7 +41,7 @@ export function EvidenceBlock({
         onClick={() => setExpanded(!expanded)}
         className="flex w-full items-center gap-3 text-left"
       >
-        <Image size={16} className="flex-shrink-0 text-accent" />
+        <EvidenceIcon size={16} className="flex-shrink-0 text-accent" />
         <div className="min-w-0 flex-1">
           <div className="flex items-baseline gap-2">
             <span className="text-body-sm font-medium text-text-1">Evidence</span>
@@ -57,6 +61,7 @@ export function EvidenceBlock({
         <div className="mt-3 space-y-3">
           {artifact.media?.map((m) => {
             const isImage = IMAGE_EXTS.includes(m.ext);
+            const isVideo = VIDEO_EXTS.includes(m.ext);
             const mediaUrl = buildUrl(`/api/artifacts/${artifact.id}/media/${m.index}`);
             const lbIdx = lightboxIndexOf.get(m.index);
             return (
@@ -70,6 +75,18 @@ export function EvidenceBlock({
                       if (lbIdx !== undefined) setLightbox({ images: imageUrls, index: lbIdx });
                     }}
                   />
+                )}
+                {isVideo && m.local_path && (
+                  <video
+                    src={mediaUrl}
+                    controls
+                    muted
+                    playsInline
+                    preload="metadata"
+                    className="max-h-64 w-full rounded border border-border object-contain"
+                  >
+                    <track kind="captions" />
+                  </video>
                 )}
                 {(m.caption || m.filename) && (
                   <p className="mt-1 text-caption text-text-3">{m.caption ?? m.filename}</p>

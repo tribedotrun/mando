@@ -46,6 +46,8 @@ fn base_ctx() -> WorkerContext {
         evidence_fresh: true,
         has_work_summary: true,
         work_summary_fresh: true,
+        has_screenshot: true,
+        has_recording: true,
     }
 }
 

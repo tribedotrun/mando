@@ -12,6 +12,7 @@ import type {
   ArtifactsResponse,
   FeedResponse,
   AdvisorResponse,
+  ActivityStatsResponse,
 } from '#renderer/types';
 import log from '#renderer/logger';
 import { getErrorMessage } from '#renderer/utils';
@@ -349,6 +350,9 @@ export const cancelItem = (id: number) => apiPost<{ ok: boolean }>('/api/tasks/c
 
 // Workers
 export const fetchWorkers = () => apiGet<WorkersResponse>('/api/workers');
+
+// Stats
+export const fetchActivityStats = () => apiGet<ActivityStatsResponse>('/api/stats/activity');
 
 // Task Ask (multi-turn: first ask creates session, follow-ups resume)
 export async function askTask(

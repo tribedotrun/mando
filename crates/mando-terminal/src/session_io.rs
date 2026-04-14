@@ -63,6 +63,11 @@ pub(super) fn terminal_env(req: &CreateRequest) -> HashMap<String, String> {
         .or_insert_with(|| req.cwd.to_string_lossy().into_owned());
     env.entry("MANDO_TERMINAL".into())
         .or_insert_with(|| "1".into());
+    // xterm.js supports OSC 8 hyperlinks. Tell CLI tools (Claude Code uses
+    // the `supports-hyperlinks` npm package) so they emit clickable links
+    // instead of plain text.
+    env.entry("FORCE_HYPERLINK".into())
+        .or_insert_with(|| "1".into());
     env
 }
 

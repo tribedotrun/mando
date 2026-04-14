@@ -220,7 +220,7 @@ impl CcSessionManager {
         task_id: Option<i64>,
         max_turns: Option<u32>,
     ) -> Result<CcResult> {
-        let credential = crate::runtime::tick_spawn::pick_credential(&self.pool).await;
+        let credential = crate::runtime::tick_spawn::pick_credential(&self.pool, None).await;
         let cred_id = crate::runtime::tick_spawn::credential_id(&credential);
         let mut builder = CcConfig::builder()
             .model(model.unwrap_or(&self.default_model))
@@ -286,7 +286,7 @@ impl CcSessionManager {
                 .ok_or_else(|| anyhow::anyhow!("no active session for '{}'", key))?
         };
 
-        let credential = crate::runtime::tick_spawn::pick_credential(&self.pool).await;
+        let credential = crate::runtime::tick_spawn::pick_credential(&self.pool, None).await;
         let cred_id = crate::runtime::tick_spawn::credential_id(&credential);
         let builder = CcConfig::builder()
             .model(&self.default_model)

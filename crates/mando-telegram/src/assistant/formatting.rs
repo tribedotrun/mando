@@ -22,6 +22,74 @@ fn type_icon(item_type: &str) -> &'static str {
         .unwrap_or("\u{1f4c4}")
 }
 
+/// Strip the metadata prefix that `process.rs` prepends to summaries.
+///
+/// The prefix contains lines like `# Title`, `**Source**: ...`,
+/// `**Type**: ...`, `**Published**: ...`, `**Relevance**: ...` followed by
+/// a blank line. Everything after the first blank line following that block
+/// is the actual summary content.
+fn strip_summary_metadata(summary: &str) -> &str {
+    let mut found_metadata = false;
+
+    for line in summary.lines() {
+        let trimmed = line.trim();
+        let is_metadata_field = trimmed.starts_with("**Source**:")
+            || trimmed.starts_with("**Type**:")
+            || trimmed.starts_with("**Published**:")
+            || trimmed.starts_with("**Relevance**:");
+        // Headings and blanks are skippable within a metadata block, but only
+        // the known **Field**: lines confirm that we're actually in one.
+        let is_skippable = trimmed.is_empty() || trimmed.starts_with('#') || is_metadata_field;
+
+        if is_skippable {
+            if is_metadata_field {
+                found_metadata = true;
+            }
+        } else if found_metadata {
+            // First content line after metadata -- return from here.
+            let offset = line.as_ptr() as usize - summary.as_ptr() as usize;
+            return &summary[offset..];
+        } else {
+            // Non-metadata line with no preceding metadata -- no prefix to strip.
+            return summary;
+        }
+    }
+
+    // Return empty only when confirmed metadata was found; otherwise
+    // the summary was just headings/blanks and should be kept as-is.
+    if found_metadata {
+        ""
+    } else {
+        summary
+    }
+}
+
+/// Parse an RFC 3339 date string into a short "Mon DD" display form.
+fn format_short_date(rfc3339: &str) -> Option<String> {
+    // RFC 3339 starts with YYYY-MM-DD; parse the date portion.
+    let date_part = rfc3339.get(..10)?;
+    let mut parts = date_part.splitn(3, '-');
+    let _year: u16 = parts.next()?.parse().ok()?;
+    let month: u8 = parts.next()?.parse().ok()?;
+    let day: u8 = parts.next()?.parse().ok()?;
+    let mon = match month {
+        1 => "Jan",
+        2 => "Feb",
+        3 => "Mar",
+        4 => "Apr",
+        5 => "May",
+        6 => "Jun",
+        7 => "Jul",
+        8 => "Aug",
+        9 => "Sep",
+        10 => "Oct",
+        11 => "Nov",
+        12 => "Dec",
+        _ => return None,
+    };
+    Some(format!("{mon} {day}"))
+}
+
 /// Format a scout item as a swipe card (HTML).
 pub fn format_swipe_card(item: &Value, summary: Option<&str>) -> String {
     let title = item["title"].as_str().unwrap_or("Untitled");
@@ -45,19 +113,31 @@ pub fn format_swipe_card(item: &Value, summary: Option<&str>) -> String {
         .map(|d| format!(" \u{00b7} {}", escape_html(d)))
         .unwrap_or_default();
 
+    let date_added = item["date_added"].as_str().and_then(format_short_date);
+    let added_part = date_added
+        .as_deref()
+        .map(|d| format!(" \u{00b7} Added: {}", escape_html(d)))
+        .unwrap_or_default();
+    let added_visible = date_added
+        .as_deref()
+        .map(|d| format!(" \u{00b7} Added: {d}"))
+        .unwrap_or_default();
+
     let mut text = format!(
-        "{icon} {scores}{src_part}{date_part}\n<a href=\"{}\">{}</a>",
+        "{icon} {scores}{src_part}{date_part}{added_part}\n<a href=\"{}\">{}</a>",
         escape_html(url),
         escape_html(title),
     );
 
     if let Some(s) = summary {
+        let stripped = strip_summary_metadata(s);
         let date_visible = date_published
             .map(|d| format!(" \u{00b7} {d}"))
             .unwrap_or_default();
-        let header_visible = format!("{icon} {scores}{src_visible}{date_visible}\n{title}");
+        let header_visible =
+            format!("{icon} {scores}{src_visible}{date_visible}{added_visible}\n{title}");
         let available = TELEGRAM_TEXT_MAX_LEN.saturating_sub(header_visible.len() + "\n\n".len());
-        let rendered = render_markdown_reply_html(s, available);
+        let rendered = render_markdown_reply_html(stripped, available);
         if !rendered.is_empty() {
             text.push_str(&format!("\n\n{rendered}"));
         }
@@ -379,5 +459,120 @@ mod tests {
         let card = format_swipe_card(&item, None);
         assert!(card.contains("R:85"));
         assert!(card.contains("Test"));
+    }
+
+    #[test]
+    fn format_card_strips_metadata_prefix() {
+        let item = json!({
+            "id": 1,
+            "title": "AI News",
+            "url": "https://example.com",
+            "item_type": "blog",
+            "relevance": 90,
+            "quality": 80,
+            "source_name": "TechBlog",
+        });
+        let summary = "# AI News\n\n\
+                        **Source**: TechBlog\n\
+                        **Type**: blog\n\
+                        **Published**: 2026-04-01\n\
+                        **Relevance**: 90/100 | **Quality**: 80/100\n\n\
+                        This is the actual summary content.\n\
+                        It has multiple lines.";
+        let card = format_swipe_card(&item, Some(summary));
+        // Should contain the actual summary content
+        assert!(card.contains("actual summary content"));
+        // Should NOT contain the duplicated metadata lines rendered as HTML
+        assert!(!card.contains("Source"));
+        assert!(!card.contains("Relevance"));
+        assert!(!card.contains("90/100"));
+    }
+
+    #[test]
+    fn format_card_shows_date_added() {
+        let item = json!({
+            "id": 1,
+            "title": "Test",
+            "url": "https://example.com",
+            "item_type": "other",
+            "relevance": 85,
+            "quality": 70,
+            "date_added": "2026-04-12T10:30:00Z",
+        });
+        let card = format_swipe_card(&item, None);
+        assert!(card.contains("Added: Apr 12"));
+    }
+
+    #[test]
+    fn format_card_no_date_added_when_missing() {
+        let item = json!({
+            "id": 1,
+            "title": "Test",
+            "url": "https://example.com",
+            "item_type": "other",
+            "relevance": 85,
+            "quality": 70,
+        });
+        let card = format_swipe_card(&item, None);
+        assert!(!card.contains("Added:"));
+    }
+
+    #[test]
+    fn strip_summary_metadata_removes_prefix() {
+        let summary = "# Title\n\n\
+                        **Source**: Blog\n\
+                        **Type**: blog\n\
+                        **Published**: 2026-04-01\n\
+                        **Relevance**: 90/100 | **Quality**: 80/100\n\n\
+                        Actual content here.";
+        let stripped = strip_summary_metadata(summary);
+        assert_eq!(stripped, "Actual content here.");
+    }
+
+    #[test]
+    fn strip_summary_metadata_no_prefix() {
+        let summary = "Just plain content.\nNo metadata here.";
+        let stripped = strip_summary_metadata(summary);
+        assert_eq!(stripped, summary);
+    }
+
+    #[test]
+    fn strip_summary_metadata_only_metadata() {
+        let summary = "# Title\n**Source**: Blog\n**Type**: blog";
+        let stripped = strip_summary_metadata(summary);
+        assert_eq!(stripped, "");
+    }
+
+    #[test]
+    fn strip_summary_metadata_preserves_content_headings() {
+        let summary = "## Key insights\n\nSome valuable content here.";
+        let stripped = strip_summary_metadata(summary);
+        assert_eq!(stripped, summary);
+    }
+
+    #[test]
+    fn strip_summary_metadata_heading_only_preserved() {
+        let summary = "# Just a heading";
+        let stripped = strip_summary_metadata(summary);
+        assert_eq!(stripped, summary);
+    }
+
+    #[test]
+    fn format_short_date_valid() {
+        assert_eq!(
+            format_short_date("2026-04-12T10:30:00Z"),
+            Some("Apr 12".into())
+        );
+        assert_eq!(format_short_date("2026-01-01"), Some("Jan 1".into()));
+        assert_eq!(
+            format_short_date("2025-12-25T00:00:00+05:00"),
+            Some("Dec 25".into())
+        );
+    }
+
+    #[test]
+    fn format_short_date_invalid() {
+        assert_eq!(format_short_date("not-a-date"), None);
+        assert_eq!(format_short_date(""), None);
     }
 }

@@ -87,7 +87,7 @@ pub async fn process_item(
         .map_err(|e| anyhow::anyhow!(e))?;
 
     let model = crate::biz::model_lookup::required_model(workflow, "process")?;
-    let credential = mando_captain::runtime::tick_spawn::pick_credential(db.pool()).await;
+    let credential = mando_captain::runtime::tick_spawn::pick_credential(db.pool(), None).await;
     let process_cred_id = mando_captain::runtime::tick_spawn::credential_id(&credential);
     let builder = mando_cc::CcConfig::builder()
         .model(model)

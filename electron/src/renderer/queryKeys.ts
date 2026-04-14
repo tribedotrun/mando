@@ -54,6 +54,12 @@ export const queryKeys = {
     list: () => ['workbenches', 'list'] as const,
   },
 
+  // ── Stats ──
+  stats: {
+    all: ['stats'] as const,
+    activity: () => ['stats', 'activity'] as const,
+  },
+
   // ── Workers (metrics) ──
   workers: {
     all: ['workers'] as const,

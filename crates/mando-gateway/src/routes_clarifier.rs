@@ -166,17 +166,19 @@ async fn post_task_clarify_inner(
             let store = state.task_store.read().await;
             let status_str = match result.status {
                 ClarifierStatus::Ready => {
-                    mando_captain::runtime::dashboard::force_update_task(
-                        &store,
-                        id,
-                        &json!({
-                            "status": "queued",
-                            "context": result.context,
-                            "session_ids": sids,
-                        }),
-                    )
-                    .await
-                    .map_err(internal_error)?;
+                    let mut update = json!({
+                        "status": "queued",
+                        "context": result.context,
+                        "session_ids": sids,
+                    });
+                    if let Some(ref title) = result.generated_title {
+                        if !title.is_empty() {
+                            update["title"] = json!(title);
+                        }
+                    }
+                    mando_captain::runtime::dashboard::force_update_task(&store, id, &update)
+                        .await
+                        .map_err(internal_error)?;
 
                     let _ = mando_captain::runtime::timeline_emit::emit_for_task(
                         &item,

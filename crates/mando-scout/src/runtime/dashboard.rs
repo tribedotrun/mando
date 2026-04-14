@@ -326,7 +326,7 @@ pub async fn act_on_scout_item(
     info!(id, %project_name, "act: calling AI");
 
     let model = crate::biz::model_lookup::required_model(workflow, "act")?;
-    let credential = mando_captain::runtime::tick_spawn::pick_credential(pool).await;
+    let credential = mando_captain::runtime::tick_spawn::pick_credential(pool, None).await;
     let cred_id = mando_captain::runtime::tick_spawn::credential_id(&credential);
     let builder = mando_cc::CcConfig::builder()
         .model(model)

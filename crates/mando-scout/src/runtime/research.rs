@@ -50,7 +50,7 @@ pub async fn run_research(
         .map_err(|e| anyhow::anyhow!(e))?;
 
     let model = crate::biz::model_lookup::required_model(workflow, "research")?;
-    let credential = mando_captain::runtime::tick_spawn::pick_credential(pool).await;
+    let credential = mando_captain::runtime::tick_spawn::pick_credential(pool, None).await;
     let cred_id = mando_captain::runtime::tick_spawn::credential_id(&credential);
     let builder = mando_cc::CcConfig::builder()
         .model(model)

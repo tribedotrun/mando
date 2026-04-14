@@ -31,6 +31,7 @@ mod routes_scout_ai;
 mod routes_scout_bulk;
 mod routes_scout_telegraph;
 mod routes_sessions;
+mod routes_stats;
 mod routes_task_actions;
 mod routes_task_advisor;
 mod routes_task_ask;

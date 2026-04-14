@@ -10,17 +10,34 @@ import {
   TableHeader,
   TableRow,
 } from '#renderer/components/ui/table';
-import { relativeTime } from '#renderer/utils';
+import { formatElapsed, relativeTime } from '#renderer/utils';
+import { useMountEffect } from '#renderer/global/hooks/useMountEffect';
 import type { ScoutResearchRun, ScoutItem } from '#renderer/types';
 
-function statusBadge(status: ScoutResearchRun['status']) {
+const ELAPSED_TICK_MS = 1000;
+
+function ElapsedTime({ since }: { since: string }) {
+  const [now, setNow] = useState(Date.now);
+  useMountEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), ELAPSED_TICK_MS);
+    return () => clearInterval(id);
+  });
+  const elapsed = now - new Date(since).getTime();
+  if (Number.isNaN(elapsed) || elapsed < 0) return null;
+  return <span className="text-text-3 tabular-nums">{formatElapsed(elapsed)}</span>;
+}
+
+function statusBadge(status: ScoutResearchRun['status'], createdAt?: string) {
   switch (status) {
     case 'running':
       return (
-        <Badge variant="outline" className="gap-1">
-          <Loader2 size={12} className="animate-spin" />
-          Running
-        </Badge>
+        <span className="flex items-center gap-2">
+          <Badge variant="outline" className="gap-1">
+            <Loader2 size={12} className="animate-spin" />
+            Running
+          </Badge>
+          {createdAt && <ElapsedTime since={createdAt} />}
+        </span>
       );
     case 'done':
       return <Badge variant="secondary">Done</Badge>;
@@ -96,7 +113,7 @@ function ResearchRow({ run }: { run: ScoutResearchRun }) {
             <span className="line-clamp-1 text-body text-foreground">{run.research_prompt}</span>
           </span>
         </TableCell>
-        <TableCell>{statusBadge(run.status)}</TableCell>
+        <TableCell>{statusBadge(run.status, run.created_at)}</TableCell>
         <TableCell className="tabular-nums text-text-3">{run.added_count}</TableCell>
         <TableCell className="text-text-3" title={run.created_at}>
           {relativeTime(run.created_at)}

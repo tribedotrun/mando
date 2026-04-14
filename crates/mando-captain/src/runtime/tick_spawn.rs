@@ -23,8 +23,15 @@ pub struct ItemSpawnResult {
 /// Pick the best credential via a single DB query: not expired, not
 /// rate-limited, fewest active running sessions.
 /// Returns `(id, access_token)` or `None` if no credentials are configured.
-pub async fn pick_credential(pool: &sqlx::SqlitePool) -> Option<(i64, String)> {
-    match mando_db::queries::credentials::pick_for_worker(pool).await {
+///
+/// `caller_filter` narrows which running sessions count toward load
+/// balancing. Pass `Some("worker")` for worker spawns so only other
+/// workers influence the pick. Pass `None` to count all sessions.
+pub async fn pick_credential(
+    pool: &sqlx::SqlitePool,
+    caller_filter: Option<&str>,
+) -> Option<(i64, String)> {
+    match mando_db::queries::credentials::pick_for_worker(pool, caller_filter).await {
         Ok(pick) => pick,
         Err(e) => {
             tracing::warn!(
@@ -90,7 +97,8 @@ pub async fn spawn_worker_for_item(
     }
 
     // Pick credential for multi-account load balancing.
-    let credential = pick_credential(pool).await;
+    // Workers dominate token spend, so balance on worker sessions only.
+    let credential = pick_credential(pool, Some("worker")).await;
     let cred_id = credential.as_ref().map(|c| c.0);
     let worker_cred = credential
         .as_ref()
@@ -111,11 +119,27 @@ pub async fn spawn_worker_for_item(
     .await?;
     let now = mando_types::now_rfc3339();
 
-    // Create a workbench row for this worktree. Use the original prompt as the
-    // initial title so the sidebar shows something meaningful before clarification.
-    let wb_title = item.original_prompt.as_deref().unwrap_or(&item.title);
+    // Create a workbench row for this worktree. Use the clarified title
+    // (clarification has already run by the time a task reaches spawn).
+    let wb_title = &item.title;
     let workbench_id =
         create_workbench_for_spawn(pool, item.project_id, slug, &result.worktree, wb_title).await?;
+
+    // Archive the previous workbench when a rework/redispatch creates a new
+    // one. Without this, the old workbench lingers as an orphan in the sidebar.
+    if let (Some(old), Some(new)) = (item.workbench_id, workbench_id) {
+        if old != new {
+            if let Err(e) = mando_db::queries::workbenches::archive(pool, old).await {
+                tracing::warn!(
+                    module = "captain",
+                    old_wb = old,
+                    new_wb = new,
+                    error = %e,
+                    "failed to archive previous workbench"
+                );
+            }
+        }
+    }
 
     Ok(ItemSpawnResult {
         session_name: result.session_name,

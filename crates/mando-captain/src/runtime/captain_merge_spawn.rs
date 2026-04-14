@@ -121,7 +121,7 @@ pub(crate) async fn spawn_merge(
     let captain_model = workflow.models.captain.clone();
     let timeout = workflow.agent.captain_merge_timeout_s;
     let pool = pool.clone();
-    let credential = super::tick_spawn::pick_credential(&pool).await;
+    let credential = super::tick_spawn::pick_credential(&pool, None).await;
     let cred_id = credential.as_ref().map(|c| c.0);
     let merge_notifier = notifier.fork();
 

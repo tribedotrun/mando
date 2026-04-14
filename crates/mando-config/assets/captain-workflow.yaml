@@ -122,8 +122,8 @@ prompts:
     - **Evidence requirements** — you MUST capture and save runtime proof:
        - Evidence must be **actual runtime output** you captured, NOT diagrams, ASCII art, mockups, or sample output you write by hand. Test results prove correctness but are NOT evidence — you need both.
        - **After evidence is required.** Before evidence is optional (nice-to-have if convenient).
-       - **UI changes**: capture screenshot/recording (always use isolated/sandbox env; never `--visible`). Screenshot for static, recording for interactive/multi-step.
-       - **Non-UI changes**: run the relevant command and capture terminal output under an `### After` heading with a code fence.
+       - **UI changes**: capture BOTH a screenshot AND a screen recording (always use isolated/sandbox env; never `--visible`). Both are mandatory — captain will reject if either is missing.
+       - **Non-UI changes**: run the relevant command, capture terminal output, save it to a file (e.g. `evidence.txt`), and submit as evidence.
        - **Save evidence**: `mando todo evidence <file1> [file2] --caption "caption1" --caption "caption2"`. Every file needs a caption.
        - **Self-verify**: after capturing, read the screenshot or extract frames with ffmpeg. If evidence doesn't show the fix working, fix → recapture → verify.
        - **Keep evidence current**: if you make code changes after capturing evidence, recapture and re-save.
@@ -181,7 +181,7 @@ prompts:
     - [ ] **Findings** — write results to workpad at `{{ workpad_path }}` and stop. No PR needed.
     {% else %}
     - [ ] **PR** — use `/mando-pr --fast` to create or update the PR. Captain will monitor follow-up review/CI state after the handoff. Update workpad with PR link.
-    - [ ] **Evidence** — capture runtime proof, then save: `mando todo evidence <file> --caption "..."`. After evidence required, before optional. UI: screenshot for static, recording for interactive (isolated/sandbox env, never `--visible`). Non-UI: CLI output under `### After` heading. NOT diagrams or test-only results. Self-verify screenshots/frames. Recapture if code changes after evidence.
+    - [ ] **Evidence** — capture runtime proof, then save: `mando todo evidence <file> --caption "..."`. After evidence required, before optional. UI: BOTH screenshot AND recording (isolated/sandbox env, never `--visible`). Non-UI: terminal output saved to file. NOT diagrams or test-only results. Self-verify screenshots/frames. Recapture if code changes after evidence.
     - [ ] **Cleanup** — stop ALL processes you started (dev servers, watchers, streaming commands like `tail -f` or `obs tail`). Run `ps --ppid $$ -o pid,command 2>/dev/null || true` and kill any orphans. Lingering subprocesses block session exit.
     - [ ] **CI** — fix all CI failures, even informational ones. A clean CI is a quality gate, not optional.
     - [ ] **Reviews** — address any reviewer comments
@@ -318,6 +318,8 @@ prompts:
 
     Update the context and decide if the item is ready or still needs clarification.
 
+    Always include a `title` field: concise (<=80 char) imperative form.
+
   todo_parse: |
     Parse this text into individual task titles for a todo list.
     {% if project %}
@@ -388,7 +390,7 @@ prompts:
     You are the last line of defense. You MUST solve the problem -- escalation is
     not available. Choose the action that moves the task forward:
 
-    - **ship** — Work is complete, evidence is valid, PR is ready for human review.
+    - **ship** — Work is complete, evidence type matches the change (UI: screenshot + recording; non-UI: terminal), PR is ready for human review.
     - **nudge** — Work needs improvement or is blocked. Provide specific actionable feedback (exact error messages, file paths, line numbers). The worker will be resumed with your instructions.
     - **respawn** — Session is broken beyond recovery or worker is stuck in a loop. Start fresh with a new worktree.
     - **reset_budget** — The intervention budget was exhausted but you identified a clear, solvable issue. Resets the intervention counter to zero and nudges with your instructions.
@@ -398,7 +400,18 @@ prompts:
 
     {% if is_gates_pass %}
     **Trigger: gates_pass** — All quality gates passed. Verify evidence quality before shipping.
-    - After evidence is required. Before is optional.
+
+    **Evidence type enforcement (mandatory):**
+    Examine the PR diff to determine whether the change touches UI (renderer/frontend files):
+    - **UI changes** require BOTH a screenshot AND a screen recording. Check:
+      - `has_screenshot`: {{ has_screenshot | default("false") }}
+      - `has_recording`: {{ has_recording | default("false") }}
+      - If either is missing, **nudge** the worker with specific instructions on what's missing.
+    - **Non-UI changes** require terminal e2e verification output saved as evidence files.
+    - If the change touches both UI and non-UI, apply the UI rule (both screenshot + recording).
+    - Do NOT ship if evidence type doesn't match the change type. Always nudge for the gap.
+
+    **Evidence quality:**
     - GOOD: terminal output, screenshots, recordings showing runtime behavior.
     - BAD: AI-drawn diagrams, test-only results, empty evidence sections.
     - After a reopen (`reopen_seq > 0`), verify evidence was recaptured to reflect
@@ -500,8 +513,8 @@ prompts:
     {% if not no_pr %}
     5. **Evidence requirements** — your PR MUST include runtime proof:
        - After evidence is **required**. Before evidence is **optional**.
-       - **UI changes**: use the evidence tool for your repo (see Repo-Specific Instructions) — screenshot for static, recording for interactive/multi-step. **Always use an isolated/sandbox environment** for evidence capture. Never use `--visible` — CDP works windowless.
-       - **Non-UI changes**: CLI output under `### After` heading with code fence. NOT diagrams, ASCII art, mockups, or test-only results.
+       - **UI changes**: capture BOTH a screenshot AND a screen recording using the evidence tool for your repo (see Repo-Specific Instructions). **Always use an isolated/sandbox environment**. Never use `--visible` — CDP works windowless. Captain will reject if either is missing.
+       - **Non-UI changes**: run the relevant command, capture terminal output, save to a file, and submit as evidence. NOT diagrams, ASCII art, mockups, or test-only results.
        - **Self-verify**: read the screenshot or extract frames with ffmpeg. Fix → recapture if evidence doesn't show the fix.
        - **Keep current**: recapture and update PR if code changes after evidence.
        - **Cleanup is required**: stop ALL processes you started (dev servers, watchers, streaming commands like `tail -f` or `obs tail`). Before finishing, run `ps --ppid $$ -o pid,command 2>/dev/null || true` and kill any orphans. Lingering subprocesses block session exit.
@@ -702,21 +715,35 @@ nudges:
   missing_evidence: |
     Your task has no evidence. After evidence is required (before is optional).
 
-    **UI changes:** capture evidence (screenshot for static, recording for
-    interactive) and save with `mando todo evidence <file> --caption "..."`.
+    **UI changes:** capture BOTH a screenshot AND a screen recording, then
+    save with `mando todo evidence <file1> <file2> --caption "..." --caption "..."`.
     Always use an isolated/sandbox environment. See Repo-Specific Instructions.
 
-    **Non-UI changes:** run the relevant command, capture terminal output
-    under `### After` with a code fence, then save evidence files.
+    **Non-UI changes:** run the relevant command, capture terminal output,
+    save to a file, then submit: `mando todo evidence output.txt --caption "..."`.
 
     **Verify:** read the screenshot or extract frames from the recording with
     ffmpeg. Fix and recapture if evidence doesn't show the fix.
 
+  missing_screenshot: |
+    Your evidence has a recording but is missing a screenshot. UI changes
+    require BOTH a screenshot AND a recording.
+
+    Capture a screenshot and re-save evidence:
+    `mando todo evidence <screenshot.png> <recording.gif> --caption "..." --caption "..."`
+
+  missing_recording: |
+    Your evidence has a screenshot but is missing a screen recording. UI changes
+    require BOTH a screenshot AND a recording.
+
+    Capture a recording and re-save evidence:
+    `mando todo evidence <screenshot.png> <recording.gif> --caption "..." --caption "..."`
+
   stale_evidence: |
     Your evidence predates the latest reopen and no longer reflects the
     current code. Recapture evidence to match the latest changes:
-    - **UI:** screenshot or recording, then `mando todo evidence <file> --caption "..."`
-    - **Non-UI:** terminal output under `### After` with a code fence
+    - **UI:** BOTH screenshot AND recording, then `mando todo evidence <file1> <file2> --caption "..." --caption "..."`
+    - **Non-UI:** terminal output saved to file
     Evidence must always match the latest code.
 
   stale_work_summary: |
