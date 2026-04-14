@@ -1,6 +1,6 @@
 import React, { useCallback, useRef, useState } from 'react';
 import Markdown from 'react-markdown';
-import { FileText } from 'lucide-react';
+import { ChevronRight, FileText } from 'lucide-react';
 import type { ScoutItem } from '#renderer/types';
 import { fetchScoutItem, updateScoutStatus } from '#renderer/domains/scout/hooks/useApi';
 import { useScrollIntoViewRef } from '#renderer/global/hooks/useScrollIntoViewRef';
@@ -9,7 +9,6 @@ import { toast } from 'sonner';
 import { getErrorMessage } from '#renderer/utils';
 import log from '#renderer/logger';
 import { Badge } from '#renderer/components/ui/badge';
-import { Button } from '#renderer/components/ui/button';
 import { Table, TableBody, TableRow, TableCell } from '#renderer/components/ui/table';
 import { Collapsible, CollapsibleContent } from '#renderer/components/ui/collapsible';
 import { Skeleton } from '#renderer/components/ui/skeleton';
@@ -148,38 +147,63 @@ export function ScoutTable({
                   data-focused={isFocused || undefined}
                   data-state={sel ? 'selected' : undefined}
                   className={`cursor-pointer ${isFocused ? 'outline outline-2 outline-ring -outline-offset-2' : ''}`}
-                  onClick={() => hasSummary && void toggleExpand(item.id, hasSummary)}
+                  onClick={() => onSelect(item.id)}
                 >
                   <TableCell>
-                    <Checkbox
-                      checked={sel}
-                      onCheckedChange={() => onToggleSelect(item.id)}
-                      onClick={(e) => e.stopPropagation()}
-                      aria-label={`Select ${item.title || domain || 'Untitled'}`}
-                      className="size-3.5"
-                    />
+                    <div className="flex items-center gap-1.5">
+                      <Checkbox
+                        checked={sel}
+                        onCheckedChange={() => onToggleSelect(item.id)}
+                        onClick={(e) => e.stopPropagation()}
+                        aria-label={`Select ${item.title || domain || 'Untitled'}`}
+                        className="size-3.5"
+                      />
+                      {hasSummary && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void toggleExpand(item.id, hasSummary);
+                          }}
+                          aria-expanded={isExpanded}
+                          aria-controls={`scout-summary-${item.id}`}
+                          aria-label={isExpanded ? 'Collapse summary' : 'Expand summary'}
+                          className="rounded p-0.5 text-muted-foreground hover:text-foreground"
+                        >
+                          <ChevronRight
+                            size={11}
+                            className={`shrink-0 transition-transform duration-150 ${isExpanded ? 'rotate-90' : ''}`}
+                          />
+                        </button>
+                      )}
+                    </div>
                   </TableCell>
 
-                  <TableCell>
-                    <Button
-                      variant="ghost"
+                  <TableCell title={item.url}>
+                    <span
+                      role="link"
+                      tabIndex={0}
                       onClick={(e) => {
                         e.stopPropagation();
                         onSelect(item.id);
                       }}
-                      className="h-auto min-w-0 flex-1 flex-col items-start p-0 text-left hover:bg-transparent hover:underline"
-                      title={item.url}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          onSelect(item.id);
+                        }
+                      }}
+                      className="block cursor-pointer truncate text-[13px] text-foreground"
                     >
-                      <span className="block truncate text-[13px] text-foreground">
-                        {item.title ||
-                          (item.status === 'pending' ? 'Pending...' : domain || 'Untitled')}
+                      {item.title ||
+                        (item.status === 'pending' ? 'Pending...' : domain || 'Untitled')}
+                    </span>
+                    {domain && (
+                      <span className="block truncate text-[11px] text-muted-foreground">
+                        {domain}
                       </span>
-                      {domain && (
-                        <span className="block truncate text-[11px] text-muted-foreground">
-                          {domain}
-                        </span>
-                      )}
-                    </Button>
+                    )}
                   </TableCell>
 
                   <TableCell className="text-center">
@@ -229,22 +253,14 @@ export function ScoutTable({
                       </Badge>
                     )}
                   </TableCell>
-
-                  <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
-                    {['processed', 'saved', 'archived'].includes(item.status) && (
-                      <Button variant="ghost" size="xs" onClick={() => onSelect(item.id)}>
-                        Read
-                      </Button>
-                    )}
-                  </TableCell>
                 </TableRow>
 
                 {/* Expanded summary */}
                 {isExpanded && (
                   <TableRow className="hover:bg-transparent">
-                    <TableCell colSpan={5} className="p-0">
+                    <TableCell colSpan={4} className="p-0">
                       <Collapsible open={isExpanded}>
-                        <CollapsibleContent>
+                        <CollapsibleContent id={`scout-summary-${item.id}`}>
                           {summaryLoading[item.id] ? (
                             <div className="space-y-2 px-10 py-3">
                               <Skeleton className="h-4 w-3/4" />

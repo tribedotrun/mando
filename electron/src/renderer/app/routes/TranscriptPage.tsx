@@ -2,9 +2,10 @@ import React, { useRef, useState } from 'react';
 import { useParams, useSearch } from '@tanstack/react-router';
 import { useMountEffect } from '#renderer/global/hooks/useMountEffect';
 import { useQuery } from '@tanstack/react-query';
-import { ChevronLeft, Copy, Check, Terminal as TerminalIcon } from 'lucide-react';
+import { Copy, Check, Terminal as TerminalIcon } from 'lucide-react';
 import { fetchTranscript } from '#renderer/api-sessions';
 import { TranscriptViewer, formatCallerLabel } from '#renderer/domains/sessions';
+import { useWorkbenchList } from '#renderer/hooks/queries';
 import { copyToClipboard } from '#renderer/utils';
 import { queryKeys } from '#renderer/queryKeys';
 import { Button } from '#renderer/components/ui/button';
@@ -43,11 +44,15 @@ export function TranscriptPage(): React.ReactElement {
     });
   };
 
+  const { data: workbenches = [] } = useWorkbenchList();
+  const workbench = search.cwd ? workbenches.find((w) => w.worktree === search.cwd) : null;
+
   const handleResumeInTerminal = () => {
-    if (search.project && search.cwd) {
+    if (workbench) {
       void router.navigate({
-        to: '/terminal',
-        search: { project: search.project, cwd: search.cwd, resume: sessionId },
+        to: '/wb/$workbenchId',
+        params: { workbenchId: String(workbench.id) },
+        search: { tab: 'terminal', resume: sessionId },
       });
     }
   };
@@ -59,16 +64,6 @@ export function TranscriptPage(): React.ReactElement {
     <div className="absolute inset-0 flex flex-col overflow-hidden bg-background">
       {/* Header */}
       <div className="flex items-center gap-3 px-8 py-4">
-        <Button
-          variant="ghost"
-          size="icon-xs"
-          onClick={() => {
-            if (router.history.length > 1) router.history.back();
-            else void router.navigate({ to: '/sessions' });
-          }}
-        >
-          <ChevronLeft size={16} />
-        </Button>
         <div className="min-w-0 flex-1">
           <div className="text-subheading text-foreground">{title}</div>
           {search.taskTitle && (
@@ -80,7 +75,7 @@ export function TranscriptPage(): React.ReactElement {
             {copyState === 'copied' ? <Check size={13} /> : <Copy size={13} />}
             <span className="font-mono text-[11px]">-r</span>
           </Button>
-          {search.project && search.cwd && (
+          {workbench && (
             <Button
               variant="outline"
               size="sm"

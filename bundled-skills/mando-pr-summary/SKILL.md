@@ -64,20 +64,20 @@ Enhance with PR-specific details:
 
 ### Step 4 — Generate the reviewer checklist
 
+Start with the universal checklist. Then check if the repo's `CLAUDE.md` has a `## PR Checklist` section -- if so, append those items.
+
 ```markdown
-### Reviewer Checklist
+## Reviewer Checklist
 
 - [ ] **DB migration**: <describe columns/tables, or "none">
 - [ ] **Env vars**: <list new vars, or "none">
 - [ ] **New dependencies**: <list packages, or "none">
-- [ ] **Mobile**: <"JS-only, no new dev build needed" or "needs new dev build because X">
 - [ ] **Backend deploy**: <which services need deploy, or "no backend changes">
 - [ ] **Breaking changes**: <describe, or "none">
 - [ ] **External API calls**: <service + rate limit/cache info, or "none added">
-- [ ] **No backward-compat / legacy code**: <confirm no shims, deprecated re-exports, legacy fallbacks, or flag violations>
-- [ ] **Wiring**: <for each new function, route, component, config field, CLI/TG command — confirm it is called/registered/rendered/read from a user-facing entry point; list any gaps>
-- [ ] **Electron UI surfacing**: <for each user-visible feature added to daemon/API/captain/CLI/TG — confirm it is reflected in the Electron app (view, indicator, setting, notification, or SSE event); list any gaps>
-- [ ] **Wiki updated**: <if routes changed → `docs/wiki/api-reference.md` updated; if architecture/captain/integrations changed → `docs/wiki/architecture.md` updated; or "no wiki-relevant changes">
+- [ ] **No backward-compat / legacy code**: <confirm no shims, deprecated re-exports, or legacy fallbacks>
+- [ ] **Wiring**: <for each new function, route, component, config field, or command -- confirm it is called/registered/rendered/read from a user-facing entry point; list any gaps>
+<if CLAUDE.md has ## PR Checklist, append each item here>
 ```
 
 ### Step 5 — Fix diagram alignment
@@ -99,29 +99,20 @@ Use the script's output as the final diagram.
 
 ### Step 7 — Evidence (screenshots/recordings)
 
-Resolve the plan folder (same as x-task-log):
-1. `git branch --show-current | grep -oE 'ABR-[0-9]+'` → `.ai/plans/ABR-{id}/`
-2. Fallback: `.ai/plans/pr-$PR_NUM/`
+Check for local evidence files saved via `mando todo evidence` (stored as task artifacts) or in the plan folder (`before-*.{png,mp4}`, `evidence-*.{png,mp4}`).
 
-Then inspect both:
-- the current PR body (to see whether `## Evidence` already contains hosted evidence or runtime output)
-- the resolved plan folder for `before-*.{png,mp4}` or `evidence-*.{png,mp4}`
-
-Apply this hosting decision:
-- **Bucket present**: keep the current GCS flow and generate a fresh hosted Evidence section from the local files.
-- **Bucket missing**:
-  - preserve existing GitHub attachment-backed evidence and substantive runtime output
-  - if new local visual files exist but no hosted attachment URL exists yet, leave this note in `## Evidence` and list the pending filenames instead of silently dropping the visuals:
-
-```markdown
-> **Action required**
-> Local PR evidence is ready, but this checkout has no `MANDO_DEV_GCS_BUCKET`.
-> Upload the pending file(s) to the PR description with GitHub’s web editor, then rerun `/mando-pr-summary`.
-> Pending files: `<file1>`, `<file2>`
-```
-
-  - never substitute raw branch/blob URLs
-- **No local visuals and no existing substantive evidence**: omit `## Evidence`.
+- **No evidence files**: omit `## Evidence`.
+- **Evidence files exist**: upload and embed URLs in `## Evidence`.
+  1. If `MANDO_DEV_GCS_BUCKET` is set: upload to GCS (`gcloud storage cp <file> gs://$MANDO_DEV_GCS_BUCKET/pr-$PR_NUM/<filename>`), reference via `https://storage.googleapis.com/$MANDO_DEV_GCS_BUCKET/pr-$PR_NUM/<filename>`.
+  2. Otherwise: upload to GitHub as release assets. Create a prerelease tagged `pr-$PR_NUM-evidence`, upload files, and embed the download URLs:
+     ```bash
+     gh release create "pr-$PR_NUM-evidence" <file1> <file2> \
+       --prerelease --title "PR #$PR_NUM evidence" --notes ""
+     # Get URL for each file:
+     gh api repos/{owner}/{repo}/releases/tags/pr-$PR_NUM-evidence \
+       --jq '.assets[] | select(.name=="<filename>") | .browser_download_url'
+     ```
+     If the release already exists, upload additional assets with `gh release upload`.
 
 ### Step 8 — Flag missing e2e verification
 
@@ -134,21 +125,20 @@ Scan the existing PR body for the `### E2E verification` subsection. If it is em
 
 ### Step 9 — Compose and update PR description
 
-Combine into a single markdown body. **Preserve all existing PR content that is NOT part of `## PR Summary` / `### Reviewer Checklist` sections** -- this includes `## Problem`, `## Testing & Verification`, and third-party integration blocks (e.g., "Open in Devin", review badges, deploy previews).
+Always produce the full canonical PR structure below. This skill owns the entire PR body -- generate every section fresh from the diff, brief, and evidence.
 
 For `## Evidence`, follow the Step 7 hosting decision exactly:
-- replace it only when you have fresh hosted evidence for the current code state
-- preserve existing substantive hosted evidence when no bucket is configured
-- if local visuals are pending manual GitHub upload, write the Step 7 **Action required** note instead of deleting the section
+- evidence uploaded (GCS or GitHub release) → embed the URLs
+- no evidence files → omit the section
 
-Format:
+Canonical structure:
 
 ```markdown
-<existing PR description -- Problem, Testing & Verification, etc.>
+## Problem
 
----
+<what's broken, missing, or suboptimal -- the motivation for this PR. Include the original request verbatim if available from the brief.>
 
-## PR Summary
+## Solution
 
 \```
 <ASCII diagram>
@@ -158,12 +148,23 @@ Format:
 
 ## Evidence
 
-<GCS-hosted visuals, preserved GitHub attachment visuals, runtime output, or the pending-upload note -- or omit if none>
+<per Step 7 hosting decision -- or omit if none>
 
-### Reviewer Checklist
+## Reviewer Checklist
 
-<checklist items>
+<enriched checklist from Step 4>
+
+## Testing & Verification
+
+<Carry forward substantive content from the existing PR body for this
+section. Only generate fresh if empty or placeholder.>
+
+### Unit tests
+### E2E regression
+### E2E verification
 ```
+
+Preserve third-party integration blocks (e.g., "Open in Devin", review badges, deploy previews) by appending them after the canonical sections.
 
 Update with HEREDOC to avoid escaping:
 

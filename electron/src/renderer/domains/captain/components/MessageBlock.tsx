@@ -22,7 +22,7 @@ export function MessageBlock({ entry }: { entry: AskHistoryEntry }): React.React
       : 'bg-surface-1 text-text-1';
   const label = isHuman ? 'You' : isError ? 'Error' : 'Advisor';
   return (
-    <div className={cn('px-4 py-2', isHuman ? 'flex justify-end' : '')}>
+    <div className={cn('px-3 py-2', isHuman ? 'flex justify-end' : '')}>
       <div className={cn('max-w-[85%] rounded-lg px-4 py-3', bubbleClass)}>
         <div className="mb-1 flex items-center gap-2">
           {intentLabel ? (

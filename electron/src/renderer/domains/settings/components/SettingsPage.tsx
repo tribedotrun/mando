@@ -1,5 +1,4 @@
 import React, { useMemo } from 'react';
-import { ChevronLeft } from 'lucide-react';
 import { useConfig } from '#renderer/hooks/queries';
 import { ErrorBoundary } from '#renderer/global/components/ErrorBoundary';
 import { SettingsGeneral } from '#renderer/domains/settings/components/SettingsGeneral';
@@ -60,13 +59,11 @@ function SettingsPanel({ section }: { section: SettingsSection }) {
 }
 
 interface SettingsPageProps {
-  onBack: () => void;
   section?: SettingsSection;
   onSectionChange?: (section: SettingsSection) => void;
 }
 
 export function SettingsPage({
-  onBack,
   section: sectionProp = 'general',
   onSectionChange,
 }: SettingsPageProps): React.ReactElement {
@@ -107,16 +104,7 @@ export function SettingsPage({
         style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
       />
       <aside className="flex w-[200px] shrink-0 flex-col bg-card pb-4 pl-3 pr-3 pt-[38px]">
-        <Button
-          data-testid="settings-back"
-          variant="ghost"
-          size="sm"
-          onClick={onBack}
-          className="mb-4 justify-start gap-2 px-0 text-sm font-medium text-foreground"
-        >
-          <ChevronLeft size={14} />
-          Settings
-        </Button>
+        <div className="mb-4 px-0 text-sm font-medium text-foreground">Settings</div>
 
         <nav className="flex flex-1 flex-col gap-0.5 overflow-y-auto">
           {navItems.map((item) => {

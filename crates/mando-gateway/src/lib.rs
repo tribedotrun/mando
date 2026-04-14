@@ -53,7 +53,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use arc_swap::ArcSwap;
-use tokio::sync::{Mutex, RwLock, Semaphore};
+use tokio::sync::{Mutex, Notify, RwLock, Semaphore};
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 
@@ -96,6 +96,10 @@ pub struct AppState {
     /// Limits concurrent scout processing sessions (research, manual add, bulk).
     pub scout_processing_semaphore: Arc<Semaphore>,
     pub credential_mgr: Arc<credentials::CredentialManager>,
+    /// Wakes the auto-title loop when a user submits their first prompt
+    /// in a terminal workbench, so it doesn't have to wait for the next
+    /// poll cycle.
+    pub auto_title_notify: Arc<Notify>,
 }
 
 /// Force all workflow models to sonnet (dev mode cost savings).

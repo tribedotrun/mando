@@ -1,8 +1,7 @@
 import React, { useState } from 'react';
-import { ArrowLeft, ChevronRight, ExternalLink, Loader2 } from 'lucide-react';
+import { ChevronRight, ExternalLink, Loader2 } from 'lucide-react';
 import { useResearchRuns, useResearchRunItems } from '#renderer/hooks/queries';
 import { Badge } from '#renderer/components/ui/badge';
-import { Button } from '#renderer/components/ui/button';
 import {
   Table,
   TableBody,
@@ -117,15 +116,12 @@ function ResearchRow({ run }: { run: ScoutResearchRun }) {
   );
 }
 
-export function ScoutResearch({ onBack }: { onBack: () => void }) {
+export function ScoutResearch() {
   const { data: runs, isLoading } = useResearchRuns();
 
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-center gap-3">
-        <Button variant="ghost" size="icon-sm" onClick={onBack}>
-          <ArrowLeft size={16} />
-        </Button>
         <h2 className="text-heading text-foreground">Research History</h2>
         {runs && (
           <span className="text-caption text-text-3">

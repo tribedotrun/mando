@@ -44,6 +44,7 @@ export interface CreateWorktreeResult {
   path: string;
   branch: string;
   project: string;
+  workbenchId?: number;
 }
 
 export function createWorktree(project: string, name?: string): Promise<CreateWorktreeResult> {

@@ -6,6 +6,7 @@ import { Button } from '#renderer/components/ui/button';
 interface Props {
   images: string[];
   index: number;
+  captions?: string[];
   onClose: () => void;
   onNavigate: (index: number) => void;
 }
@@ -24,7 +25,13 @@ function formatZoomPercent(zoom: number): string {
 
 const CONTROL_BG = 'color-mix(in srgb, var(--foreground) 10%, transparent)';
 
-export function ImageLightbox({ images, index, onClose, onNavigate }: Props): React.ReactElement {
+export function ImageLightbox({
+  images,
+  index,
+  captions,
+  onClose,
+  onNavigate,
+}: Props): React.ReactElement {
   const safeIndex =
     images.length === 0 ? 0 : index < 0 ? 0 : index >= images.length ? images.length - 1 : index;
   const [zoom, setZoom] = useState(1);
@@ -214,7 +221,7 @@ export function ImageLightbox({ images, index, onClose, onNavigate }: Props): Re
         <img
           ref={imgRef}
           src={images[safeIndex]}
-          alt=""
+          alt={captions?.[safeIndex] ?? ''}
           draggable={false}
           className="select-none"
           style={{
@@ -231,6 +238,16 @@ export function ImageLightbox({ images, index, onClose, onNavigate }: Props): Re
           onPointerUp={handlePointerUp}
           onError={() => setImgError(true)}
         />
+      )}
+
+      {/* Caption */}
+      {captions?.[safeIndex] && zoom <= 1 && (
+        <div
+          className="fixed bottom-4 left-1/2 z-[201] -translate-x-1/2 rounded-full px-4 py-1.5 text-[13px] text-foreground"
+          style={{ background: CONTROL_BG }}
+        >
+          {captions[safeIndex]}
+        </div>
       )}
     </div>
   );
