@@ -50,30 +50,29 @@ pub(crate) async fn reconcile_running_sessions(
                     // L0: Live rate-limit detection — kill the process so it
                     // gets reopened on the next tick with a healthy credential.
                     let stream_path = mando_config::stream_path_for_session(sid);
-                    if let Some(_resets_at) = mando_cc::has_rate_limit_rejection(&stream_path) {
-                        if super::credential_rate_limit::check_and_activate_from_stream(pool, sid)
+                    if mando_cc::has_rate_limit_rejection(&stream_path).is_some()
+                        && super::credential_rate_limit::check_and_activate_from_stream(pool, sid)
                             .await
-                        {
+                    {
+                        tracing::warn!(
+                            module = "captain",
+                            session_id = %sid,
+                            ?pid,
+                            "live session hit rate limit — killing process so tick reopens with new credential"
+                        );
+                        if let Err(e) = mando_cc::kill_process(pid).await {
                             tracing::warn!(
                                 module = "captain",
                                 session_id = %sid,
-                                ?pid,
-                                "live session hit rate limit — killing process so tick reopens with new credential"
+                                error = %e,
+                                "failed to kill rate-limited process"
                             );
-                            if let Err(e) = mando_cc::kill_process(pid).await {
-                                tracing::warn!(
-                                    module = "captain",
-                                    session_id = %sid,
-                                    error = %e,
-                                    "failed to kill rate-limited process"
-                                );
-                            }
-                            jobs.push(TermJob {
-                                session_id: sid.clone(),
-                                status: SessionStatus::Failed,
-                            });
-                            continue;
                         }
+                        jobs.push(TermJob {
+                            session_id: sid.clone(),
+                            status: SessionStatus::Failed,
+                        });
+                        continue;
                     }
                     continue; // genuinely running
                 }
@@ -120,6 +119,28 @@ pub(crate) async fn reconcile_running_sessions(
 
     if jobs.is_empty() {
         return;
+    }
+
+    // Log rate-limit status for every terminated session (covers workers
+    // which don't go through the Notifier's check_rate_limit path).
+    for job in &jobs {
+        let stream_path = mando_config::stream_path_for_session(&job.session_id);
+        if let Some(rl) = mando_cc::last_rate_limit_status(&stream_path) {
+            let cred_id = mando_db::queries::sessions::get_credential_id(pool, &job.session_id)
+                .await
+                .unwrap_or(None);
+            tracing::info!(
+                module = "captain",
+                session_id = %job.session_id,
+                credential_id = ?cred_id,
+                rl_status = %rl.status,
+                rl_type = rl.rate_limit_type.as_deref().unwrap_or("unknown"),
+                resets_at = ?rl.resets_at,
+                utilization = ?rl.utilization,
+                overage = rl.overage_status.as_deref().unwrap_or("none"),
+                "session rate-limit status at exit"
+            );
+        }
     }
 
     // Phase 2: Terminate all in parallel.

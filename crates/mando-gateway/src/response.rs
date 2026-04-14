@@ -9,6 +9,8 @@ use axum::http::StatusCode;
 use axum::Json;
 use serde_json::{json, Value};
 
+use crate::AppState;
+
 /// Build a JSON error response. Use this for user-facing messages (BAD_REQUEST,
 /// NOT_FOUND, etc.) where the message is already safe to return as-is.
 pub(crate) fn error_response(status: StatusCode, msg: &str) -> (StatusCode, Json<Value>) {
@@ -72,4 +74,49 @@ pub(crate) fn not_found_or_internal(e: impl std::fmt::Display) -> (StatusCode, J
         tracing::error!(error = %raw, "internal error returned to client");
         error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal server error")
     }
+}
+
+/// Broadcast a task update via SSE so the frontend refreshes.
+pub(crate) async fn broadcast_task_update(state: &AppState, id: i64) {
+    let updated = {
+        let store = state.task_store.read().await;
+        match store.find_by_id(id).await {
+            Ok(Some(task)) => Some(serde_json::to_value(&task).unwrap()),
+            Ok(None) => {
+                tracing::warn!(task_id = id, "broadcast skipped -- task not found");
+                return;
+            }
+            Err(e) => {
+                tracing::warn!(task_id = id, error = %e, "broadcast skipped -- DB read failed");
+                return;
+            }
+        }
+    };
+    state.bus.send(
+        mando_types::BusEvent::Tasks,
+        Some(json!({"action": "updated", "item": updated, "id": id})),
+    );
+}
+
+/// Resolve a task's working directory for CC sessions (advisor, ask).
+pub(crate) fn resolve_task_cwd(
+    item: &mando_types::Task,
+    state: &AppState,
+) -> Result<std::path::PathBuf, (StatusCode, Json<Value>)> {
+    item.worktree
+        .as_deref()
+        .map(mando_config::expand_tilde)
+        .filter(|p| p.is_dir())
+        .or_else(|| {
+            let cfg = state.config.load_full();
+            mando_config::paths::first_project_path(&cfg)
+                .map(|p| mando_config::paths::expand_tilde(&p))
+                .filter(|p| p.is_dir())
+        })
+        .ok_or_else(|| {
+            error_response(
+                StatusCode::BAD_REQUEST,
+                "no worktree or project configured -- cannot run session",
+            )
+        })
 }

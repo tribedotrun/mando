@@ -158,6 +158,7 @@ pub struct AgentConfig {
     pub max_merge_retries: u32,
     pub max_clarifier_retries: u32,
     pub max_rebase_retries: u32,
+    pub max_advisor_retries: u32,
     #[serde(with = "duration_seconds")]
     pub rebase_base_delay_s: std::time::Duration,
     #[serde(with = "duration_seconds")]
@@ -211,6 +212,7 @@ impl Default for AgentConfig {
             max_merge_retries: 3,
             max_clarifier_retries: 3,
             max_rebase_retries: 5,
+            max_advisor_retries: 3,
             rebase_base_delay_s: Duration::from_secs(30),
             worker_timeout_s: Duration::from_secs(21600),
             clarifier_timeout_s: Duration::from_secs(1800),

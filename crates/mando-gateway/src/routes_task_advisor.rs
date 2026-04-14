@@ -10,8 +10,10 @@ use axum::Json;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use crate::response::{error_response, internal_error};
+use crate::response::{broadcast_task_update, error_response, internal_error, resolve_task_cwd};
 use crate::AppState;
+
+const PENDING_SESSION: &str = "pending";
 
 #[derive(Deserialize)]
 pub(crate) struct AdvisorBody {
@@ -60,14 +62,12 @@ pub(crate) async fn post_task_advisor(
         (item, store.pool().clone())
     };
 
-    let cwd = resolve_advisor_cwd(&item, &state)?;
-
+    let cwd = resolve_task_cwd(&item, &state)?;
     let session_key = format!("advisor:{task_id}");
     let mgr = state.cc_session_mgr.clone();
 
     let mgr_has_session = mgr.has_session(&session_key);
     let task_has_session = item.session_ids.advisor.is_some();
-
     let should_resume = mgr_has_session && task_has_session;
 
     // Clean up stale state.
@@ -79,20 +79,13 @@ pub(crate) async fn post_task_advisor(
         mgr.close(&session_key);
     } else if !mgr_has_session && task_has_session {
         tracing::warn!(task_id, "stale session_ids.advisor -- clearing");
-        let store = state.task_store.write().await;
-        if let Ok(Some(mut task)) = store.find_by_id(task_id).await {
-            task.session_ids.advisor = None;
-            if let Err(e) = store.write_task(&task).await {
-                tracing::warn!(task_id, error = %e, "failed to clear stale session_ids.advisor");
-            }
-        }
+        clear_advisor_session(&state, task_id).await;
     }
 
     // Generate ask_id for conversation tracking.
     let ask_id = mando_uuid::Uuid::v4().to_string();
 
     // Persist user message immediately.
-    const PENDING_SESSION: &str = "pending";
     if let Err(e) = mando_captain::runtime::task_ask::persist_question(
         &pool,
         task_id,
@@ -107,134 +100,188 @@ pub(crate) async fn post_task_advisor(
             &e.to_string(),
         ));
     }
-
     broadcast_task_update(&state, task_id).await;
 
-    // Run the CC session.
-    let cc_result = if should_resume {
-        mgr.follow_up(&session_key, &body.message, &cwd).await
-    } else {
-        let task_id_str = task_id.to_string();
-        let timeline_text = mando_captain::runtime::task_ask::build_timeline_text(&pool, task_id)
-            .await
-            .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?;
-
-        let prompt = build_advisor_prompt(
-            &item,
-            &task_id_str,
-            &body.message,
-            &workflow,
-            &timeline_text,
-        )
-        .map_err(internal_error)?;
-
-        mgr.start_with_item(
-            &session_key,
-            &prompt,
-            &cwd,
-            Some(&workflow.models.captain),
-            workflow.agent.task_ask_idle_ttl_s,
-            workflow.agent.task_ask_timeout_s,
-            Some(task_id),
-            None,
-        )
-        .await
-    };
+    // Run the CC session with retries. Each failure is surfaced in the feed.
+    let result = run_advisor_cc(
+        &state,
+        &mgr,
+        &session_key,
+        should_resume,
+        &body.message,
+        &item,
+        &workflow,
+        &pool,
+        task_id,
+        &ask_id,
+        &cwd,
+    )
+    .await?;
 
     drop(mgr);
 
-    match cc_result {
-        Ok(result) => {
-            let answer = result.text.clone();
-            let session_id = result.session_id.clone();
+    let answer = result.text.clone();
+    let session_id = result.session_id.clone();
 
-            // Persist session_ids.advisor on the task.
-            if !should_resume {
-                let store = state.task_store.write().await;
-                if let Ok(Some(mut task)) = store.find_by_id(task_id).await {
-                    task.session_ids.advisor = Some(session_id.clone());
-                    if let Err(e) = store.write_task(&task).await {
-                        tracing::warn!(task_id, error = %e, "failed to persist session_ids.advisor");
-                    }
+    // Always persist session_ids.advisor -- retries may have fallen back to a
+    // fresh session even when the original intent was to resume.
+    {
+        let store = state.task_store.write().await;
+        match store.find_by_id(task_id).await {
+            Ok(Some(mut task)) => {
+                task.session_ids.advisor = Some(session_id.clone());
+                if let Err(e) = store.write_task(&task).await {
+                    tracing::warn!(task_id, error = %e, "failed to persist session_ids.advisor");
                 }
             }
-
-            // Persist answer + timeline event.
-            mando_captain::runtime::task_ask::persist_answer(
-                &pool,
-                task_id,
-                &ask_id,
-                &session_id,
-                &body.message,
-                &answer,
-                &body.intent,
-            )
-            .await
-            .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?;
-
-            broadcast_task_update(&state, task_id).await;
-
-            // Handle reopen/rework intent.
-            if body.intent == "reopen" || body.intent == "rework" {
-                return handle_advisor_action(
-                    &state,
-                    task_id,
-                    &session_key,
-                    &body.intent,
-                    &cwd,
-                    &workflow,
-                    &answer,
-                )
-                .await;
+            Ok(None) => tracing::warn!(task_id, "task vanished before persisting advisor session"),
+            Err(e) => {
+                tracing::warn!(task_id, error = %e, "failed to read task for advisor session persist")
             }
-
-            Ok(Json(json!({
-                "id": task_id,
-                "ask_id": ask_id,
-                "message": body.message,
-                "answer": answer,
-                "session_id": session_id,
-            })))
         }
-        Err(e) => {
-            let error_msg = e.to_string();
-            tracing::error!(task_id, error = %error_msg, "advisor CC session failed");
+    }
 
-            // Close broken session.
-            state.cc_session_mgr.close(&session_key);
-            {
-                let store = state.task_store.write().await;
-                if let Ok(Some(mut task)) = store.find_by_id(task_id).await {
-                    if task.session_ids.advisor.is_some() {
-                        task.session_ids.advisor = None;
-                        if let Err(e) = store.write_task(&task).await {
-                            tracing::warn!(task_id, error = %e, "failed to clear session_ids.advisor on error");
-                        }
-                    }
-                }
-            }
+    // Persist answer + timeline event.
+    mando_captain::runtime::task_ask::persist_answer(
+        &pool,
+        task_id,
+        &ask_id,
+        &session_id,
+        &body.message,
+        &answer,
+        &body.intent,
+    )
+    .await
+    .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?;
 
-            if let Err(persist_err) = mando_captain::runtime::task_ask::persist_error(
+    broadcast_task_update(&state, task_id).await;
+
+    // Handle reopen/rework intent.
+    if body.intent == "reopen" || body.intent == "rework" {
+        let action_result = handle_advisor_action(
+            &state,
+            task_id,
+            &session_key,
+            &body.intent,
+            &cwd,
+            &workflow,
+            &answer,
+        )
+        .await;
+
+        if let Err(ref err_resp) = action_result {
+            let error_msg = err_resp.1 .0["error"].as_str().unwrap_or("action failed");
+            if let Err(e) = mando_captain::runtime::task_ask::persist_error(
                 &pool,
                 task_id,
                 &ask_id,
                 PENDING_SESSION,
                 &body.message,
-                &error_msg,
+                error_msg,
             )
             .await
             {
-                tracing::error!(task_id, error = %persist_err, "failed to persist advisor error");
+                tracing::error!(task_id, error = %e, "failed to persist advisor action error");
             }
-
             broadcast_task_update(&state, task_id).await;
+        }
 
-            Err(error_response(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                &error_msg,
-            ))
+        return action_result;
+    }
+
+    Ok(Json(json!({
+        "id": task_id,
+        "ask_id": ask_id,
+        "message": body.message,
+        "answer": answer,
+        "session_id": session_id,
+    })))
+}
+
+/// Run the advisor CC session with up to max_retries attempts.
+/// Each failure is persisted to ask_history so it surfaces in the feed.
+#[allow(clippy::too_many_arguments)]
+async fn run_advisor_cc(
+    state: &AppState,
+    mgr: &mando_captain::io::cc_session::CcSessionManager,
+    session_key: &str,
+    should_resume: bool,
+    message: &str,
+    item: &mando_types::Task,
+    workflow: &mando_config::CaptainWorkflow,
+    pool: &sqlx::SqlitePool,
+    task_id: i64,
+    ask_id: &str,
+    cwd: &std::path::Path,
+) -> Result<mando_cc::CcResult, (StatusCode, Json<Value>)> {
+    // Pre-build prompt so retries can start a fresh session.
+    let task_id_str = task_id.to_string();
+    let timeline_text = mando_captain::runtime::task_ask::build_timeline_text(pool, task_id)
+        .await
+        .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?;
+    let prompt = build_advisor_prompt(item, &task_id_str, message, workflow, &timeline_text)
+        .map_err(internal_error)?;
+
+    let max_retries = workflow.agent.max_advisor_retries;
+    let mut should_resume_attempt = should_resume;
+
+    for attempt in 1..=max_retries {
+        let result = if should_resume_attempt {
+            mgr.follow_up(session_key, message, cwd).await
+        } else {
+            mgr.start_with_item(
+                session_key,
+                &prompt,
+                cwd,
+                Some(&workflow.models.captain),
+                workflow.agent.task_ask_idle_ttl_s,
+                workflow.agent.task_ask_timeout_s,
+                Some(task_id),
+                None,
+            )
+            .await
+        };
+
+        match result {
+            Ok(r) => return Ok(r),
+            Err(e) => {
+                let error_msg = e.to_string();
+                tracing::error!(
+                    task_id, attempt, max_retries = max_retries,
+                    error = %error_msg, "advisor CC session failed"
+                );
+
+                mgr.close(session_key);
+                clear_advisor_session(state, task_id).await;
+
+                let display_msg = if attempt < max_retries {
+                    format!("Attempt {attempt}/{max_retries} failed: {error_msg} \u{2014} retrying\u{2026}")
+                } else {
+                    format!("Failed after {max_retries} attempts: {error_msg}")
+                };
+                if let Err(e) = mando_captain::runtime::task_ask::persist_error(
+                    pool,
+                    task_id,
+                    ask_id,
+                    PENDING_SESSION,
+                    message,
+                    &display_msg,
+                )
+                .await
+                {
+                    tracing::error!(task_id, error = %e, "failed to persist advisor retry error");
+                }
+                broadcast_task_update(state, task_id).await;
+
+                should_resume_attempt = false;
+            }
         }
     }
+
+    Err(error_response(
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "advisor session failed after all retries",
+    ))
 }
 
 /// Handle reopen/rework via advisor synthesis.
@@ -268,14 +315,13 @@ async fn handle_advisor_action(
     let mgr = &state.cc_session_mgr;
 
     // Synthesize feedback via follow-up.
-    let synthesis_prompt_key = "advisor_reopen_synthesis";
     let synthesis_prompt = workflow
         .prompts
-        .get(synthesis_prompt_key)
+        .get("advisor_reopen_synthesis")
         .ok_or_else(|| {
             error_response(
                 StatusCode::INTERNAL_SERVER_ERROR,
-                &format!("{synthesis_prompt_key} prompt missing from captain-workflow.yaml"),
+                "advisor_reopen_synthesis prompt missing from captain-workflow.yaml",
             )
         })?
         .clone();
@@ -314,7 +360,6 @@ async fn handle_advisor_action(
         mando_captain::runtime::dashboard::rework_item(&store, task_id, &synthesized_feedback)
             .await
             .map_err(internal_error)?;
-        // Reload after rework.
         item = store
             .find_by_id(task_id)
             .await
@@ -353,23 +398,17 @@ async fn handle_advisor_action(
     } else {
         mando_types::timeline::TimelineEventType::HumanReopen
     };
-    let summary = format!(
-        "{} from advisor: {}",
-        if intent == "rework" {
-            "Rework"
-        } else {
-            "Reopened"
-        },
-        &synthesized_feedback,
-    );
+    let label = if intent == "rework" {
+        "Rework"
+    } else {
+        "Reopened"
+    };
+    let summary = format!("{label} from advisor: {synthesized_feedback}");
     if let Err(e) = mando_captain::runtime::timeline_emit::emit_for_task(
         &item,
         event_type,
         &summary,
-        json!({
-            "content": &synthesized_feedback,
-            "source": "advisor",
-        }),
+        json!({"content": &synthesized_feedback, "source": "advisor"}),
         store.pool(),
     )
     .await
@@ -407,37 +446,12 @@ fn build_advisor_prompt(
     vars.insert("project", &item.project);
     let pr = item.pr_number.map(|n| n.to_string()).unwrap_or_default();
     vars.insert("pr", &pr);
-    let branch = item.branch.as_deref().unwrap_or("");
-    vars.insert("branch", branch);
-    let context = item.context.as_deref().unwrap_or("");
-    vars.insert("context", context);
+    vars.insert("branch", item.branch.as_deref().unwrap_or(""));
+    vars.insert("context", item.context.as_deref().unwrap_or(""));
     vars.insert("timeline", timeline_text);
     vars.insert("question", question);
 
     mando_config::render_prompt("advisor", &workflow.prompts, &vars).map_err(|e| anyhow::anyhow!(e))
-}
-
-/// Resolve the working directory for an advisor session.
-fn resolve_advisor_cwd(
-    item: &mando_types::Task,
-    state: &AppState,
-) -> Result<std::path::PathBuf, (StatusCode, Json<Value>)> {
-    item.worktree
-        .as_deref()
-        .map(mando_config::expand_tilde)
-        .filter(|p| p.is_dir())
-        .or_else(|| {
-            let cfg = state.config.load_full();
-            mando_config::paths::first_project_path(&cfg)
-                .map(|p| mando_config::paths::expand_tilde(&p))
-                .filter(|p| p.is_dir())
-        })
-        .ok_or_else(|| {
-            error_response(
-                StatusCode::BAD_REQUEST,
-                "no worktree or project configured -- cannot run advisor session",
-            )
-        })
 }
 
 /// Check if the given intent is allowed from the task's current status.
@@ -463,24 +477,19 @@ fn action_eligible(intent: &str, status: &mando_types::ItemStatus) -> bool {
     }
 }
 
-/// Broadcast a task update via SSE.
-async fn broadcast_task_update(state: &AppState, id: i64) {
-    let updated = {
-        let store = state.task_store.read().await;
-        match store.find_by_id(id).await {
-            Ok(Some(task)) => Some(serde_json::to_value(&task).unwrap()),
-            Ok(None) => {
-                tracing::warn!(task_id = id, "broadcast skipped -- task not found");
-                return;
-            }
-            Err(e) => {
-                tracing::warn!(task_id = id, error = %e, "broadcast skipped -- DB read failed");
-                return;
+/// Clear session_ids.advisor on a task.
+async fn clear_advisor_session(state: &AppState, task_id: i64) {
+    let store = state.task_store.write().await;
+    match store.find_by_id(task_id).await {
+        Ok(Some(mut task)) if task.session_ids.advisor.is_some() => {
+            task.session_ids.advisor = None;
+            if let Err(e) = store.write_task(&task).await {
+                tracing::warn!(task_id, error = %e, "failed to clear session_ids.advisor");
             }
         }
-    };
-    state.bus.send(
-        mando_types::BusEvent::Tasks,
-        Some(json!({"action": "updated", "item": updated, "id": id})),
-    );
+        Ok(_) => {}
+        Err(e) => {
+            tracing::warn!(task_id, error = %e, "failed to read task for advisor session clear")
+        }
+    }
 }
