@@ -323,6 +323,7 @@ export function useTaskAsk() {
       toast.error('Ask failed');
     },
     onSettled: (_data, _err, vars) => {
+      void qc.invalidateQueries({ queryKey: queryKeys.tasks.feed(vars.id) });
       void qc.invalidateQueries({ queryKey: queryKeys.tasks.askHistory(vars.id) });
     },
   });

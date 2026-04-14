@@ -312,7 +312,13 @@ impl Notifier {
             }
             mando_cc::RateLimitStatus::Rejected => {
                 if let Some(cid) = credential_id {
-                    super::credential_rate_limit::activate(pool, cid, rl.resets_at).await;
+                    super::credential_rate_limit::activate(
+                        pool,
+                        cid,
+                        rl.resets_at,
+                        rl.rate_limit_type.as_deref(),
+                    )
+                    .await;
                 } else {
                     super::ambient_rate_limit::activate(rl.resets_at);
                 }

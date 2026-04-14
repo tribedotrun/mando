@@ -179,9 +179,17 @@ pub fn is_clean_result(result: &serde_json::Value) -> bool {
     false
 }
 
+/// A rate-limit rejection detected in a CC stream.
+pub struct RateLimitRejection {
+    /// Unix timestamp (seconds) when the rate-limit window boundary resets.
+    pub resets_at: u64,
+    /// Which window triggered the rejection (e.g. `"five_hour"`, `"seven_day"`).
+    pub rate_limit_type: Option<String>,
+}
+
 /// Check if the current session in a stream file contains a rate_limit_event
-/// with `rejected` status. Returns `resets_at` (unix timestamp) if present.
-pub fn has_rate_limit_rejection(stream_path: &Path) -> Option<u64> {
+/// with `rejected` status. Returns rejection details if present.
+pub fn has_rate_limit_rejection(stream_path: &Path) -> Option<RateLimitRejection> {
     let (content, last_init_idx) = current_session_lines(stream_path)?;
     let lines: Vec<&str> = content.lines().collect();
     // Scan backwards — the most recent rate_limit_event is authoritative.
@@ -201,9 +209,62 @@ pub fn has_rate_limit_rejection(stream_path: &Path) -> Option<u64> {
         };
         // Most recent rate_limit_event found — check and return.
         if info.get("status").and_then(|s| s.as_str()) == Some("rejected") {
-            return Some(info.get("resetsAt").and_then(|v| v.as_u64()).unwrap_or(0));
+            return Some(RateLimitRejection {
+                resets_at: info.get("resetsAt").and_then(|v| v.as_u64()).unwrap_or(0),
+                rate_limit_type: info
+                    .get("rateLimitType")
+                    .and_then(|v| v.as_str())
+                    .map(String::from),
+            });
         }
         return None;
+    }
+    None
+}
+
+/// The most recent rate-limit status from a CC stream (any status).
+pub struct StreamRateLimitInfo {
+    pub status: String,
+    pub resets_at: Option<u64>,
+    pub rate_limit_type: Option<String>,
+    pub utilization: Option<f64>,
+    pub overage_status: Option<String>,
+}
+
+/// Read the most recent `rate_limit_event` from a stream file, regardless of
+/// status. Returns `None` if the stream has no rate-limit events.
+pub fn last_rate_limit_status(stream_path: &Path) -> Option<StreamRateLimitInfo> {
+    let (content, last_init_idx) = current_session_lines(stream_path)?;
+    let lines: Vec<&str> = content.lines().collect();
+    for line in lines[last_init_idx..].iter().rev() {
+        let val: serde_json::Value = match serde_json::from_str(line) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        if val.get("type").and_then(|t| t.as_str()) != Some("rate_limit_event") {
+            continue;
+        }
+        let info = match val.get("rate_limit_info") {
+            Some(i) => i,
+            None => continue,
+        };
+        return Some(StreamRateLimitInfo {
+            status: info
+                .get("status")
+                .and_then(|s| s.as_str())
+                .unwrap_or("unknown")
+                .to_string(),
+            resets_at: info.get("resetsAt").and_then(|v| v.as_u64()),
+            rate_limit_type: info
+                .get("rateLimitType")
+                .and_then(|v| v.as_str())
+                .map(String::from),
+            utilization: info.get("utilization").and_then(|v| v.as_f64()),
+            overage_status: info
+                .get("overageStatus")
+                .and_then(|v| v.as_str())
+                .map(String::from),
+        });
     }
     None
 }

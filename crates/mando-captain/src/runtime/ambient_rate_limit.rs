@@ -113,8 +113,12 @@ pub fn clear() {
 pub fn check_and_activate_from_stream(session_id: &str) -> bool {
     let stream_path = mando_config::stream_path_for_session(session_id);
     match mando_cc::has_rate_limit_rejection(&stream_path) {
-        Some(resets_at) => {
-            let resets = if resets_at > 0 { Some(resets_at) } else { None };
+        Some(rej) => {
+            let resets = if rej.resets_at > 0 {
+                Some(rej.resets_at)
+            } else {
+                None
+            };
             activate(resets);
             true
         }
