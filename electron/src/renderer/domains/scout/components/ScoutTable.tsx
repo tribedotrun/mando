@@ -215,7 +215,8 @@ export function ScoutTable({
                   </TableCell>
 
                   <TableCell className="text-center" onClick={(e) => e.stopPropagation()}>
-                    {editingId === item.id && USER_SETTABLE.includes(item.status) ? (
+                    {item.status === 'processed' ? null : editingId === item.id &&
+                      USER_SETTABLE.includes(item.status) ? (
                       <Select
                         value={item.status}
                         onValueChange={(v) => {

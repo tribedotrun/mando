@@ -49,6 +49,20 @@ export function SettingsCaptain(): React.ReactElement {
           </div>
           <div className="flex items-center justify-between">
             <div>
+              <h3 className="text-sm font-medium text-muted-foreground">
+                Auto-merge high-confidence tasks
+              </h3>
+            </div>
+            <Switch
+              data-testid="captain-auto-merge"
+              checked={!!captain.autoMerge}
+              onCheckedChange={(checked) => {
+                saveSection({ autoMerge: checked });
+              }}
+            />
+          </div>
+          <div className="flex items-center justify-between">
+            <div>
               <h3 className="text-sm font-medium text-muted-foreground">Default Terminal Agent</h3>
             </div>
             <select

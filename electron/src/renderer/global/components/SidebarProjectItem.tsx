@@ -30,7 +30,7 @@ interface SidebarProjectItemProps {
   onRemove: (name: string) => Promise<void>;
   onNewTerminal?: (project: string) => void;
   items?: SidebarChild[];
-  onOpenTask?: (taskId: number) => void;
+  onOpenTask?: (taskId: number, workbenchId?: number) => void;
   activeWorktreeCwd?: string | null;
   onOpenWorktree?: (worktree: { project: string; cwd: string }) => void;
   onArchiveWorkbench?: (id: number) => void;

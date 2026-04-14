@@ -1,5 +1,5 @@
 import React, { useCallback, useRef, useState } from 'react';
-import { History, Search } from 'lucide-react';
+import { Filter, History, Search } from 'lucide-react';
 import { useScoutList, type ScoutQueryParams } from '#renderer/hooks/queries';
 import { useQueryClient } from '@tanstack/react-query';
 import { queryKeys } from '#renderer/queryKeys';
@@ -7,7 +7,7 @@ import { useViewKeyHandler } from '#renderer/global/hooks/useKeyboardShortcuts';
 import { useSelection, BulkBar, FeedbackModal } from '#renderer/domains/captain';
 import { ScoutTable } from '#renderer/domains/scout/components/ScoutTable';
 import { AddUrlForm } from '#renderer/domains/scout/components/AddUrlForm';
-import { ScoutStatusTabs } from '#renderer/domains/scout/components/ScoutStatusTabs';
+import { ScoutFilterMenu } from '#renderer/domains/scout/components/ScoutFilterMenu';
 import { ScoutReader } from '#renderer/domains/scout/components/ScoutReader';
 import { ScoutQA } from '#renderer/domains/scout/components/ScoutQA';
 import { ScoutResearch } from '#renderer/domains/scout/components/ScoutResearch';
@@ -22,7 +22,6 @@ import { Button } from '#renderer/components/ui/button';
 import { Input } from '#renderer/components/ui/input';
 
 const USER_SETTABLE = ['pending', 'processed', 'saved', 'archived'];
-const TYPES = ['all', 'github', 'youtube', 'arxiv', 'other'] as const;
 const SEARCH_DEBOUNCE_MS = 300;
 const DEFAULT_PER_PAGE = 25;
 
@@ -46,11 +45,8 @@ export function ScoutPage({
   const queryClient = useQueryClient();
   const { data } = useScoutList(query);
   const items = data?.items ?? [];
-  const total = data?.total ?? 0;
   const page = data?.page ?? 0;
   const pages = data?.pages ?? 0;
-  const statusCounts = data?.status_counts ?? {};
-
   const setQuery = useCallback((params: Partial<ScoutQueryParams>) => {
     setQueryState((prev) => ({ ...prev, ...params, page: params.page ?? 0 }));
   }, []);
@@ -77,6 +73,7 @@ export function ScoutPage({
   prevActiveItemIdRef.current = activeItemId;
   const [searchInput, setSearchInput] = useState('');
   const [focusedIndex, setFocusedIndex] = useState(-1);
+  const [filterOpen, setFilterOpen] = useState(false);
   const [researchModalOpen, setResearchModalOpen] = useState(false);
   const [researchPending, setResearchPending] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -245,13 +242,25 @@ export function ScoutPage({
 
   return (
     <div className="flex flex-col gap-4">
-      {/* Row 1: Title + count */}
+      {/* Row 1: Title + actions */}
       <div className="flex items-baseline justify-between">
-        <div className="flex items-baseline gap-3">
-          <h2 className="text-heading text-foreground">Scout</h2>
-          <span className="text-caption text-text-3">{total} items</span>
-        </div>
+        <h2 className="text-heading text-foreground">Scout</h2>
         <div className="flex items-center gap-2">
+          <ScoutFilterMenu
+            typeValue={typeFilter}
+            stateValue={statusFilter}
+            onTypeChange={handleTypeChange}
+            onStateChange={handleStatusChange}
+            open={filterOpen}
+            onOpenChange={setFilterOpen}
+          >
+            <Button variant="ghost" size="icon-sm" className="relative" aria-label="Filter">
+              <Filter size={16} />
+              {(typeFilter !== 'all' || statusFilter !== 'all') && (
+                <span className="absolute right-1 top-1 size-1.5 rounded-full bg-foreground" />
+              )}
+            </Button>
+          </ScoutFilterMenu>
           <Button
             variant="outline"
             size="sm"
@@ -289,29 +298,6 @@ export function ScoutPage({
           className="h-9 pl-8 text-[13px]"
         />
       </div>
-
-      {/* Row 3: Type filter */}
-      <div className="flex items-center gap-1">
-        {TYPES.map((t) => {
-          const isActive = typeFilter === t;
-          return (
-            <Button
-              key={t}
-              variant={isActive ? 'default' : 'secondary'}
-              size="xs"
-              onClick={() => handleTypeChange(t)}
-            >
-              {t}
-            </Button>
-          );
-        })}
-      </div>
-
-      <ScoutStatusTabs
-        activeStatus={statusFilter}
-        onStatusChange={handleStatusChange}
-        statusCounts={statusCounts}
-      />
 
       <ScoutTable
         items={items}

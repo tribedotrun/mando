@@ -6,7 +6,7 @@ import { useResumeRateLimited } from '#renderer/hooks/mutations';
 import { useTaskList } from '#renderer/hooks/queries';
 import { queryKeys } from '#renderer/queryKeys';
 import { fmtRuntime, ceilMinutes, isRateLimited, shortRepo } from '#renderer/utils';
-import type { WorkerDetail } from '#renderer/types';
+import { WORKING_STATUSES, type WorkerDetail } from '#renderer/types';
 import { StatusDot } from '#renderer/global/components/CardShell';
 import {
   DropdownMenu,
@@ -22,6 +22,16 @@ function getWorkerPhase(worker: WorkerDetail, stale: boolean): WorkerPhase {
   if (worker.status === 'captain-reviewing') return 'reviewing';
   if (worker.status === 'captain-merging') return 'merging';
   return stale ? 'stale' : 'active';
+}
+
+function deduplicatedActiveCount(
+  working: number,
+  reviewing: number,
+  merging: number,
+  stale: number,
+): number {
+  const raw = working - reviewing - merging - stale;
+  return raw > 0 ? raw : 0;
 }
 
 const PHASE_COLORS: Record<
@@ -179,11 +189,18 @@ export function MetricsRow({
   const reviewingWorkers = grouped.reviewing;
   const mergingWorkers = grouped.merging;
   const staleWorkers = grouped.stale;
-  const activeCount = activeWorkers.length;
   const reviewingCount = reviewingWorkers.length;
   const mergingCount = mergingWorkers.length;
   const staleCount = staleWorkers.length;
   const { data: taskData } = useTaskList();
+  const workingSet = new Set(WORKING_STATUSES);
+  const workingCount = taskData?.items.filter((t) => workingSet.has(t.status)).length ?? 0;
+  const activeCount = deduplicatedActiveCount(
+    workingCount,
+    reviewingCount,
+    mergingCount,
+    staleCount,
+  );
   const workerResumeId = (reviewingWorkers[0] ?? mergingWorkers[0])?.id;
   const resumeTaskId =
     workerResumeId ??
@@ -217,7 +234,7 @@ export function MetricsRow({
         ) : (
           <div className="flex items-center gap-3 rounded-md px-4 py-1.5 text-text-3">
             <HeaderContent
-              activeCount={0}
+              activeCount={activeCount}
               reviewingCount={0}
               mergingCount={0}
               staleCount={0}

@@ -5,6 +5,8 @@
 pub mod action_contract;
 pub mod ambient_rate_limit;
 pub mod artifacts;
+pub(crate) mod auto_merge_triage;
+mod auto_merge_triage_spawn;
 pub mod captain_merge;
 mod captain_merge_poll;
 mod captain_merge_spawn;

@@ -2,63 +2,78 @@ import React, { useState } from 'react';
 import { useScoutAdd } from '#renderer/hooks/mutations';
 import { Button } from '#renderer/components/ui/button';
 import { Input } from '#renderer/components/ui/input';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from '#renderer/components/ui/dialog';
 
 export function AddUrlForm(): React.ReactElement {
   const [isOpen, setIsOpen] = useState(false);
   const [url, setUrl] = useState('');
-  const [title, setTitle] = useState('');
   const addMutation = useScoutAdd();
+
+  const close = () => {
+    setIsOpen(false);
+    setUrl('');
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!url.trim()) return;
+    if (addMutation.isPending) return;
+    const trimmedUrl = url.trim();
+    if (!trimmedUrl) return;
     try {
-      await addMutation.mutateAsync({ url: url.trim(), title: title.trim() || undefined });
-      setUrl('');
-      setTitle('');
-      setIsOpen(false);
+      await addMutation.mutateAsync({ url: trimmedUrl });
+      close();
     } catch {
       // Error surfaced via mutation toast
     }
   };
 
-  if (!isOpen) {
-    return (
+  return (
+    <>
       <Button data-testid="add-url-btn" size="sm" onClick={() => setIsOpen(true)}>
         + Add URL
       </Button>
-    );
-  }
-
-  return (
-    <form onSubmit={(e) => void handleSubmit(e)} className="flex items-center gap-2">
-      <Input
-        data-testid="url-input"
-        type="text"
-        placeholder="https://..."
-        value={url}
-        onChange={(e) => setUrl(e.target.value)}
-        className="h-8 text-sm"
-      />
-      <Input
-        type="text"
-        placeholder="Title (optional)"
-        value={title}
-        onChange={(e) => setTitle(e.target.value)}
-        className="h-8 text-sm"
-      />
-      <Button
-        data-testid="submit-url-btn"
-        type="submit"
-        size="sm"
-        disabled={!url.trim()}
-        className="bg-success text-background hover:bg-success/90"
-      >
-        Add
-      </Button>
-      <Button variant="ghost" size="sm" type="button" onClick={() => setIsOpen(false)}>
-        Cancel
-      </Button>
-    </form>
+      <Dialog open={isOpen} onOpenChange={(open) => !open && !addMutation.isPending && close()}>
+        <DialogContent showCloseButton={false}>
+          <form onSubmit={(e) => void handleSubmit(e)}>
+            <DialogHeader>
+              <DialogTitle>Add URL</DialogTitle>
+            </DialogHeader>
+            <div className="py-4">
+              <Input
+                data-testid="url-input"
+                type="text"
+                placeholder="https://..."
+                value={url}
+                onChange={(e) => setUrl(e.target.value)}
+                autoFocus
+              />
+            </div>
+            <DialogFooter>
+              <Button
+                variant="outline"
+                type="button"
+                onClick={close}
+                disabled={addMutation.isPending}
+              >
+                Cancel
+              </Button>
+              <Button
+                data-testid="submit-url-btn"
+                type="submit"
+                disabled={!url.trim() || addMutation.isPending}
+              >
+                {addMutation.isPending ? 'Adding...' : 'Add'}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }

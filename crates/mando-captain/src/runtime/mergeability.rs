@@ -25,6 +25,9 @@ pub(crate) async fn check_done_mergeability(
     _health_state: &HealthState,
     pool: &sqlx::SqlitePool,
 ) -> Result<()> {
+    // Poll running auto-merge triage sessions before mergeability checks.
+    super::auto_merge_triage::poll_triage(items, config, workflow, notifier, pool).await;
+
     // Discover PRs for pending-review and handed-off items — parallel discovery.
     {
         let discover_jobs: Vec<(usize, String, String)> = items
@@ -115,7 +118,11 @@ pub(crate) async fn check_done_mergeability(
                 apply_closed(&mut items[idx], pr, config, notifier, pool).await;
             }
             Ok(MergeStatus::Mergeable) => {
-                tracing::debug!(module = "captain", pr = %pr, "PR is mergeable, awaiting human");
+                if config.captain.auto_merge {
+                    try_spawn_triage(&mut items[idx], config, workflow, notifier, pool).await;
+                } else {
+                    tracing::debug!(module = "captain", pr = %pr, "PR is mergeable, awaiting human");
+                }
             }
             Ok(MergeStatus::Conflicted) => {
                 handle_conflict(items, idx, pr, config, workflow, notifier, alerts, pool).await;
@@ -296,4 +303,60 @@ async fn apply_closed(
         pool,
     )
     .await;
+}
+
+/// Try to spawn an auto-merge triage session for an item.
+/// Skips if: no_pr, no PR number, triage already running, or already triaged this cycle.
+async fn try_spawn_triage(
+    item: &mut Task,
+    config: &Config,
+    workflow: &CaptainWorkflow,
+    notifier: &Notifier,
+    pool: &sqlx::SqlitePool,
+) {
+    // Skip no-PR tasks.
+    if item.no_pr {
+        return;
+    }
+    // Skip if no PR number.
+    if item.pr_number.is_none() {
+        return;
+    }
+    // Skip if triage session already running.
+    if item.session_ids.triage.is_some() {
+        return;
+    }
+    // Skip if already triaged for this reopen_seq.
+    match mando_db::queries::timeline::has_auto_merge_triage(pool, item.id, item.reopen_seq).await {
+        Ok(true) => {
+            tracing::debug!(
+                module = "captain",
+                item_id = item.id,
+                reopen_seq = item.reopen_seq,
+                "auto-merge triage already ran for this cycle, skipping"
+            );
+            return;
+        }
+        Ok(false) => {}
+        Err(e) => {
+            tracing::warn!(
+                module = "captain",
+                item_id = item.id,
+                error = %e,
+                "failed to check triage history, skipping spawn"
+            );
+            return;
+        }
+    }
+
+    if let Err(e) =
+        super::auto_merge_triage::spawn_triage(item, config, workflow, notifier, pool).await
+    {
+        tracing::warn!(
+            module = "captain",
+            item_id = item.id,
+            error = %e,
+            "failed to spawn auto-merge triage"
+        );
+    }
 }

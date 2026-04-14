@@ -10,8 +10,6 @@ export {
   bulkUpdateScout,
   fetchScoutArticle,
   fetchScoutItem,
-  fetchScoutItemSessions,
-  publishScoutTelegraph,
   researchScout,
   updateScoutStatus,
 } from '#renderer/api';

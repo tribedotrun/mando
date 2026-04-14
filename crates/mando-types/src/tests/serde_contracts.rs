@@ -226,8 +226,15 @@ const TASK_API_FIELDS: &[&str] = &[
     "worktree",
 ];
 
-const SESSION_IDS_API_FIELDS: &[&str] =
-    &["advisor", "ask", "clarifier", "merge", "review", "worker"];
+const SESSION_IDS_API_FIELDS: &[&str] = &[
+    "advisor",
+    "ask",
+    "clarifier",
+    "merge",
+    "review",
+    "triage",
+    "worker",
+];
 
 const ITEM_STATUS_API_VALUES: &[&str] = &[
     "awaiting-review",
@@ -271,6 +278,7 @@ fn type_contract_task_fields() {
         merge: Some("s".into()),
         ask: Some("s".into()),
         advisor: Some("s".into()),
+        triage: Some("s".into()),
     };
     item.last_activity_at = Some("t".into());
     item.plan = Some("p".into());
@@ -309,6 +317,7 @@ fn type_contract_session_ids_fields() {
         merge: Some("s".into()),
         ask: Some("s".into()),
         advisor: Some("s".into()),
+        triage: Some("s".into()),
     };
     let json: serde_json::Value = serde_json::to_value(&ids).unwrap();
     let mut keys: Vec<&str> = json

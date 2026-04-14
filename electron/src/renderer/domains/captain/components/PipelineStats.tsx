@@ -3,6 +3,7 @@ import { useTaskList, useActivityStats } from '#renderer/hooks/queries';
 import {
   ACTION_NEEDED_STATUSES,
   FINALIZED_STATUSES,
+  WORKING_STATUSES,
   type TaskItem,
   type ItemStatus,
 } from '#renderer/types';
@@ -17,6 +18,7 @@ interface StatCounts {
 function computeCounts(items: TaskItem[]): StatCounts {
   const actionSet = new Set<ItemStatus>(ACTION_NEEDED_STATUSES);
   const finalSet = new Set<ItemStatus>(FINALIZED_STATUSES);
+  const workingSet = new Set<ItemStatus>(WORKING_STATUSES);
 
   let queued = 0;
   let working = 0;
@@ -26,25 +28,14 @@ function computeCounts(items: TaskItem[]): StatCounts {
   for (const t of items) {
     if (finalSet.has(t.status)) continue;
 
-    switch (t.status) {
-      case 'new':
-      case 'queued':
-        queued++;
-        break;
-      case 'in-progress':
-      case 'clarifying':
-      case 'rework':
-      case 'handed-off':
-      case 'captain-reviewing':
-      case 'captain-merging':
-        working++;
-        break;
-      case 'errored':
-        errored++;
-        break;
-      default:
-        if (actionSet.has(t.status)) actionNeeded++;
-        break;
+    if (workingSet.has(t.status)) {
+      working++;
+    } else if (t.status === 'new' || t.status === 'queued') {
+      queued++;
+    } else if (t.status === 'errored') {
+      errored++;
+    } else if (actionSet.has(t.status)) {
+      actionNeeded++;
     }
   }
 

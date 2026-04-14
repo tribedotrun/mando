@@ -1,12 +1,11 @@
 import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import Markdown from 'react-markdown';
+import { MessageCircleQuestion, Zap } from 'lucide-react';
 import {
   fetchScoutItem,
   fetchScoutArticle,
   actOnScoutItem,
-  publishScoutTelegraph,
-  fetchScoutItemSessions,
 } from '#renderer/domains/scout/hooks/useApi';
 import type { ScoutItem } from '#renderer/types';
 import { getErrorMessage } from '#renderer/utils';
@@ -39,9 +38,6 @@ export function ScoutReader({ itemId, onAsk, qaOpen }: Props): React.ReactElemen
   const [actPrompt, setActPrompt] = useState('');
   const [acting, setActing] = useState(false);
   const [actResult, setActResult] = useState<string | null>(null);
-  const [publishing, setPublishing] = useState(false);
-  const [publishedUrl, setPublishedUrl] = useState<string | null>(null);
-  const [sessionsOpen, setSessionsOpen] = useState(false);
 
   const projects = useProjects();
 
@@ -64,14 +60,7 @@ export function ScoutReader({ itemId, onAsk, qaOpen }: Props): React.ReactElemen
   const displayTitle =
     item?.title || (item?.status === 'pending' ? 'Pending processing\u2026' : 'Untitled');
   const article = articleQuery.data?.article ?? null;
-  const telegraphUrl =
-    publishedUrl ?? articleQuery.data?.telegraphUrl ?? item?.telegraphUrl ?? null;
   const articleLoading = articleQuery.isLoading;
-  const sessionsQuery = useQuery({
-    queryKey: ['scout', 'sessions', itemId],
-    queryFn: () => fetchScoutItemSessions(itemId),
-    enabled: sessionsOpen,
-  });
 
   const handleAct = async () => {
     if (!effectiveActProject) return;
@@ -89,24 +78,6 @@ export function ScoutReader({ itemId, onAsk, qaOpen }: Props): React.ReactElemen
       setActResult(`Error: ${getErrorMessage(e, 'unknown')}`);
     } finally {
       setActing(false);
-    }
-  };
-
-  const handlePublish = async () => {
-    if (telegraphUrl) {
-      window.open(telegraphUrl, '_blank', 'noopener,noreferrer');
-      return;
-    }
-    setPublishing(true);
-    try {
-      const res = await publishScoutTelegraph(itemId);
-      setPublishedUrl(res.url);
-      window.open(res.url, '_blank', 'noopener,noreferrer');
-    } catch (e) {
-      log.warn('[ScoutReader] publishScoutTelegraph failed', { itemId, err: e });
-      setActResult(`Publish error: ${getErrorMessage(e, 'unknown')}`);
-    } finally {
-      setPublishing(false);
     }
   };
 
@@ -132,52 +103,69 @@ export function ScoutReader({ itemId, onAsk, qaOpen }: Props): React.ReactElemen
 
   return (
     <div data-testid="scout-reader" className={qaOpen ? '' : 'mx-auto max-w-[720px]'}>
-      {/* Nav bar */}
+      {/* Header */}
       <div
-        className="sticky top-0 z-10 mb-4 flex items-center gap-2 py-2 backdrop-blur-sm"
+        className="sticky top-0 z-10 mb-5 pb-3 backdrop-blur-sm"
         style={{
           background: 'color-mix(in srgb, var(--background) 90%, transparent)',
         }}
       >
-        <span className="max-w-[300px] truncate text-xs text-muted-foreground">{displayTitle}</span>
-        <div className="ml-auto flex items-center gap-1">
-          <Button variant={qaOpen ? 'secondary' : 'ghost'} size="sm" onClick={onAsk}>
-            Ask
-          </Button>
-          {(item.status === 'processed' ||
-            item.status === 'saved' ||
-            item.status === 'archived') && (
+        <div className="flex items-start gap-3">
+          <div className="min-w-0 flex-1">
+            <h1 className="mb-1.5 text-lg font-semibold leading-snug">
+              {item.url ? (
+                <a
+                  href={item.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-foreground hover:text-foreground/80 hover:underline"
+                >
+                  <span className="line-clamp-2">{displayTitle}</span>
+                </a>
+              ) : (
+                <span className="line-clamp-2">{displayTitle}</span>
+              )}
+            </h1>
+            <div className="flex items-center gap-3 font-mono text-xs text-muted-foreground">
+              <Badge variant="outline" className="text-[10px]">
+                {item.item_type ?? 'blog'}
+              </Badge>
+              {item.relevance != null && item.quality != null && (
+                <span>
+                  R:{item.relevance} Q:{item.quality}
+                </span>
+              )}
+              {item.source_name && <span>{item.source_name}</span>}
+              {item.date_published && <span>{item.date_published}</span>}
+            </div>
+          </div>
+          <div className="flex shrink-0 items-center gap-1 pt-1">
             <Button
-              variant={actOpen ? 'secondary' : 'ghost'}
-              size="sm"
-              onClick={() => {
-                setActOpen(!actOpen);
-                setActResult(null);
-              }}
+              variant={qaOpen ? 'secondary' : 'ghost'}
+              size="icon-sm"
+              onClick={onAsk}
+              title="Ask about this item"
+              aria-label="Ask about this item"
             >
-              Act
+              <MessageCircleQuestion size={16} />
             </Button>
-          )}
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => void handlePublish()}
-            disabled={publishing}
-          >
-            {publishing ? 'Publishing...' : telegraphUrl ? 'Open article' : 'Publish'}
-          </Button>
-          <Button
-            variant={sessionsOpen ? 'secondary' : 'ghost'}
-            size="sm"
-            onClick={() => setSessionsOpen((value) => !value)}
-          >
-            Sessions
-          </Button>
-          <Button variant="ghost" size="sm" asChild>
-            <a href={item.url} target="_blank" rel="noopener noreferrer">
-              Source
-            </a>
-          </Button>
+            {(item.status === 'processed' ||
+              item.status === 'saved' ||
+              item.status === 'archived') && (
+              <Button
+                variant={actOpen ? 'secondary' : 'ghost'}
+                size="icon-sm"
+                onClick={() => {
+                  setActOpen(!actOpen);
+                  setActResult(null);
+                }}
+                title="Create task from this item"
+                aria-label="Create task from this item"
+              >
+                <Zap size={16} />
+              </Button>
+            )}
+          </div>
         </div>
       </div>
 
@@ -194,62 +182,6 @@ export function ScoutReader({ itemId, onAsk, qaOpen }: Props): React.ReactElemen
           onAct={() => void handleAct()}
         />
       )}
-
-      {sessionsOpen && (
-        <Card className="mb-5 py-3">
-          <CardContent className="space-y-2 px-4">
-            <div className="text-label text-muted-foreground">Scout sessions</div>
-            {sessionsQuery.isLoading ? (
-              <div className="space-y-2">
-                <Skeleton className="h-10 w-full" />
-                <Skeleton className="h-10 w-full" />
-              </div>
-            ) : sessionsQuery.error ? (
-              <div className="text-xs text-destructive">
-                {getErrorMessage(sessionsQuery.error, 'Failed to load sessions')}
-              </div>
-            ) : (sessionsQuery.data?.length ?? 0) === 0 ? (
-              <div className="text-xs text-muted-foreground">No linked sessions.</div>
-            ) : (
-              <div className="space-y-2">
-                {sessionsQuery.data?.map((session) => (
-                  <div
-                    key={session.session_id}
-                    className="flex items-center justify-between gap-3 rounded-md bg-muted px-3 py-2"
-                  >
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate text-xs font-medium text-muted-foreground">
-                        {session.session_id}
-                      </div>
-                      <div className="text-[11px] text-muted-foreground">
-                        {session.caller} · {session.status}
-                      </div>
-                    </div>
-                    <div className="text-[11px] text-muted-foreground">{session.created_at}</div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Title block */}
-      <div className="mb-5">
-        <h1 className="mb-2 text-lg font-semibold leading-snug text-foreground">{displayTitle}</h1>
-        <div className="flex items-center gap-3 font-mono text-xs text-muted-foreground">
-          <Badge variant="outline" className="text-[10px]">
-            {item.item_type ?? 'blog'}
-          </Badge>
-          {item.relevance != null && (
-            <span>
-              R:{item.relevance} Q:{item.quality}
-            </span>
-          )}
-          {item.source_name && <span>{item.source_name}</span>}
-          {item.date_published && <span>{item.date_published}</span>}
-        </div>
-      </div>
 
       {/* Summary */}
       {item.summary && (

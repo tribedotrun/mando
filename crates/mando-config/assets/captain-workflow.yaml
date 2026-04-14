@@ -682,6 +682,76 @@ prompts:
     When the PR is merged, return:
     `{"action": "merged", "feedback": "summary of what was done"}`
 
+  auto_merge_triage: |
+    You are the Captain evaluating whether PR {{ pr_url }} can be merged
+    without human review.
+
+    ## Task
+
+    **Title:** {{ title }}
+    **Branch:** {{ branch }}
+    **PR:** #{{ pr_number }} ({{ pr_url }})
+
+    {% if context %}
+    ### Context
+    {{ context }}
+    {% endif %}
+
+    {% if original_prompt %}
+    ### Original Request
+    {{ original_prompt }}
+    {% endif %}
+
+    {% if pr_body %}
+    ### PR Description
+    {{ pr_body }}
+    {% endif %}
+
+    {% if changed_files %}
+    ### Changed Files
+    {{ changed_files }}
+    {% endif %}
+
+    {% if evidence_files %}
+    ### Evidence Files
+    {{ evidence_files }}
+    {% endif %}
+
+    {% if work_summary %}
+    ### Work Summary
+    {{ work_summary }}
+    {% endif %}
+
+    ## Evaluation Criteria
+
+    Assess whether this task can be safely merged without human review.
+    Consider:
+
+    1. **Scope of changes** -- are changes small and focused, or large and
+       sprawling? Smaller, focused changes are safer to auto-merge.
+    2. **Risk level** -- do changes touch critical paths (auth, payments,
+       data migration, config)? High-risk areas need human review.
+    3. **Test coverage** -- is there evidence of testing (test files changed,
+       terminal output showing passing tests)?
+    4. **Evidence quality** -- does the evidence show the feature working?
+       Is it actual runtime output or just test results?
+    5. **PR description quality** -- does the PR clearly explain what changed
+       and why? Does it match the original task intent?
+    6. **Code quality signals** -- are there any red flags in the changed
+       files list (e.g., unrelated files, config changes, dependency updates)?
+
+    ## Confidence Levels
+
+    - **high** -- Safe to merge. Small, focused changes with good evidence and
+      test coverage. Low-risk area. PR description matches task intent.
+    - **mid** -- Uncertain. Changes look reasonable but have some risk factors
+      (moderate scope, touches important paths, evidence is incomplete).
+    - **low** -- Needs human review. Large scope, high-risk area, poor evidence,
+      or PR doesn't match task intent.
+
+    Read the PR diff and any evidence files to make your assessment.
+    Be conservative -- when in doubt, choose a lower confidence level.
+
 # ── Nudge Templates ──────────────────────────────────────────────────────────
 # Deterministic nudge messages sent by tick.py when captain detects specific states.
 # These use Jinja2 syntax like prompts above.

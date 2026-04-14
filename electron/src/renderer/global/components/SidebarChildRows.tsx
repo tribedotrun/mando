@@ -16,7 +16,7 @@ export function TaskRow({
   onPinWorkbench,
 }: {
   task: import('#renderer/types').TaskItem;
-  onOpenTask?: (taskId: number) => void;
+  onOpenTask?: (taskId: number, workbenchId?: number) => void;
   onArchiveWorkbench?: (id: number) => void;
   onPinWorkbench?: (id: number) => void;
 }): React.ReactElement {
@@ -25,7 +25,7 @@ export function TaskRow({
   const canPin = task.workbench_id != null && onPinWorkbench;
   return (
     <button
-      onClick={() => onOpenTask?.(task.id)}
+      onClick={() => onOpenTask?.(task.id, task.workbench_id ?? undefined)}
       className="group flex w-full items-center gap-2 rounded px-2 py-1 text-left text-[12px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
       style={{ background: 'none', border: 'none', cursor: 'pointer' }}
     >

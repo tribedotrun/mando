@@ -18,8 +18,11 @@ export interface WorkbenchItem {
   deletedAt?: string | null;
 }
 
-export async function fetchWorkbenches(): Promise<WorkbenchItem[]> {
-  const res = await apiGet<{ workbenches: WorkbenchItem[] }>('/api/workbenches');
+export type WorkbenchStatusFilter = 'active' | 'archived' | 'all';
+
+export async function fetchWorkbenches(status?: WorkbenchStatusFilter): Promise<WorkbenchItem[]> {
+  const query = status && status !== 'active' ? `?status=${status}` : '';
+  const res = await apiGet<{ workbenches: WorkbenchItem[] }>(`/api/workbenches${query}`);
   return res.workbenches;
 }
 

@@ -29,6 +29,8 @@ pub enum TimelineEventType {
     CaptainReviewVerdict,
     #[serde(rename = "captain_merge_started")]
     CaptainMergeStarted,
+    #[serde(rename = "auto_merge_triage")]
+    AutoMergeTriage,
     #[serde(rename = "awaiting_review")]
     AwaitingReview,
     #[serde(rename = "human_reopen")]

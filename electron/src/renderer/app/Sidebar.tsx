@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import {
+  Check,
   FileText,
+  Filter,
   List,
   Settings,
   SquarePen,
@@ -22,10 +24,20 @@ import { SidebarPinnedSection } from '#renderer/global/components/SidebarPinnedS
 import { SetupTrigger, type SetupProgress } from '#renderer/app/SetupTrigger';
 import { useMountEffect } from '#renderer/global/hooks/useMountEffect';
 import { Button } from '#renderer/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+} from '#renderer/components/ui/dropdown-menu';
 import { ScrollArea } from '#renderer/components/ui/scroll-area';
 import { Tooltip, TooltipTrigger, TooltipContent } from '#renderer/components/ui/tooltip';
 import { Kbd } from '#renderer/components/ui/kbd';
+import type { WorkbenchStatusFilter } from '#renderer/api-terminal';
 import type { TaskItem } from '#renderer/types';
+
+const WORKBENCH_FILTER_OPTIONS: WorkbenchStatusFilter[] = ['active', 'archived', 'all'];
 
 export type Tab = 'captain' | 'scout' | 'sessions';
 
@@ -48,7 +60,7 @@ interface Props {
   activeTerminalCwd?: string | null;
   activeTaskId?: number | null;
   onNewTerminal?: (project: string) => void;
-  onOpenTask?: (taskId: number) => void;
+  onOpenTask?: (taskId: number, workbenchId?: number) => void;
   onOpenTerminalSession?: (worktree: { project: string; cwd: string }) => void;
   onArchiveWorkbench?: (id: number) => void;
   onToggleSidebar?: () => void;
@@ -127,9 +139,15 @@ export function Sidebar({
   onGoBack,
   onGoForward,
 }: Props): React.ReactElement | null {
+  const [workbenchFilter, setWorkbenchFilter] = useState<WorkbenchStatusFilter>('active');
+  const [filterMenuOpen, setFilterMenuOpen] = useState(false);
+
   const { data: taskData } = useTaskList();
   const items = taskData?.items ?? [];
-  const { data: workbenches = [] } = useWorkbenchList();
+  // Active list always used for pinned section (stable regardless of filter).
+  // Filtered list used only for project children.
+  const { data: activeWorkbenches = [] } = useWorkbenchList();
+  const { data: filteredWorkbenches = [] } = useWorkbenchList(workbenchFilter);
   const pinMut = useWorkbenchPin();
   const renameMut = useWorkbenchRename();
 
@@ -177,9 +195,9 @@ export function Sidebar({
     return map;
   }, [items]);
 
-  // Pinned workbenches: sorted by pinnedAt DESC (most recent first).
+  // Pinned workbenches: always from active list so the section stays stable.
   const pinnedItems = React.useMemo(() => {
-    return workbenches
+    return activeWorkbenches
       .filter((wb) => wb.pinnedAt && !wb.archivedAt)
       .sort((a, b) => (b.pinnedAt! > a.pinnedAt! ? 1 : b.pinnedAt! < a.pinnedAt! ? -1 : 0))
       .map((wb) => ({
@@ -187,7 +205,7 @@ export function Sidebar({
         task: wbTaskMap.get(wb.id),
         project: pathToName[wb.project] ?? wb.project,
       }));
-  }, [workbenches, wbTaskMap, pathToName]);
+  }, [activeWorkbenches, wbTaskMap, pathToName]);
 
   const pinnedWbIds = React.useMemo(() => new Set(pinnedItems.map((p) => p.wb.id)), [pinnedItems]);
 
@@ -205,9 +223,12 @@ export function Sidebar({
       (children[pName] ??= []).push({ kind: 'task', task: item });
     }
 
-    // Taskless, non-archived, non-pinned workbenches interleave with tasks.
-    for (const wb of workbenches) {
-      if (taskWbIds.has(wb.id) || wb.archivedAt || pinnedWbIds.has(wb.id)) continue;
+    // Taskless, non-pinned workbenches interleave with tasks.
+    // Filter by archivedAt based on the current workbench filter.
+    for (const wb of filteredWorkbenches) {
+      if (taskWbIds.has(wb.id) || pinnedWbIds.has(wb.id)) continue;
+      if (workbenchFilter === 'active' && wb.archivedAt) continue;
+      if (workbenchFilter === 'archived' && !wb.archivedAt) continue;
       const pName = pathToName[wb.project] ?? wb.project;
       (children[pName] ??= []).push({ kind: 'workbench', wb });
     }
@@ -216,7 +237,7 @@ export function Sidebar({
       children[key] = sortProjectChildren(arr);
     }
     return { projectCounts: counts, projectChildren: children };
-  }, [items, workbenches, pathToName, pinnedWbIds]);
+  }, [items, filteredWorkbenches, pathToName, pinnedWbIds, workbenchFilter]);
 
   const projects = React.useMemo(() => {
     const names = new Set(Object.keys(projectCounts));
@@ -373,12 +394,40 @@ export function Sidebar({
             >
               Projects
             </Button>
+            <DropdownMenu open={filterMenuOpen} onOpenChange={setFilterMenuOpen}>
+              <DropdownMenuTrigger asChild>
+                <button
+                  data-testid="workbench-filter-btn"
+                  className={`ml-auto flex h-5 w-5 items-center justify-center rounded transition-colors hover:text-muted-foreground ${
+                    workbenchFilter !== 'active' ? 'text-foreground' : 'text-text-3'
+                  }`}
+                >
+                  <Filter size={12} />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuLabel>Status</DropdownMenuLabel>
+                {WORKBENCH_FILTER_OPTIONS.map((opt) => {
+                  const active = workbenchFilter === opt;
+                  return (
+                    <DropdownMenuItem
+                      key={opt}
+                      onSelect={() => setWorkbenchFilter(opt)}
+                      className={active ? 'text-foreground' : ''}
+                    >
+                      <span className="flex-1 capitalize">{opt}</span>
+                      {active && <Check size={14} />}
+                    </DropdownMenuItem>
+                  );
+                })}
+              </DropdownMenuContent>
+            </DropdownMenu>
             <Button
               variant="ghost"
               size="icon-xs"
               data-testid="add-project-sidebar-btn"
               onClick={onAddProject}
-              className="ml-auto text-text-3 hover:text-muted-foreground"
+              className="text-text-3 hover:text-muted-foreground"
             >
               <FolderPlus size={14} />
             </Button>
