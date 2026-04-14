@@ -49,10 +49,16 @@ export function WorkbenchPage(): React.ReactElement {
     }
   });
 
-  // Resolve workbench and task from cache
-  const { data: workbenches = [], isLoading: workbenchesLoading } = useWorkbenchList();
+  // Use active list (Tier 1, zero refetch) as primary source.
+  // Only fetch 'all' when the workbench isn't in the active cache (archived).
+  const { data: activeWbs = [], isLoading: activeLoading } = useWorkbenchList();
+  const activeMatch = wbId ? (activeWbs.find((w) => w.id === wbId) ?? null) : null;
+  const { data: allWbs = [], isLoading: allLoading } = useWorkbenchList(
+    wbId && !activeMatch ? 'all' : undefined,
+  );
+  const workbenchesLoading = activeLoading || (!activeMatch && allLoading);
   const { data: taskData, isLoading: tasksLoading } = useTaskList();
-  const workbench = wbId ? (workbenches.find((w) => w.id === wbId) ?? null) : null;
+  const workbench = activeMatch ?? (wbId ? (allWbs.find((w) => w.id === wbId) ?? null) : null);
   const task = taskData?.items.find((t) => t.workbench_id === wbId) ?? null;
 
   const handleBack = useCallback(() => {

@@ -24,6 +24,7 @@ import {
   fetchWorkbenches,
   type TerminalSessionInfo,
   type WorkbenchItem,
+  type WorkbenchStatusFilter,
 } from '#renderer/api-terminal';
 import type {
   TaskListResponse,
@@ -145,10 +146,10 @@ export function useTerminalList() {
   });
 }
 
-export function useWorkbenchList() {
+export function useWorkbenchList(status?: WorkbenchStatusFilter) {
   return useQuery<WorkbenchItem[]>({
-    queryKey: queryKeys.workbenches.list(),
-    queryFn: () => fetchWorkbenches(),
+    queryKey: queryKeys.workbenches.list(status),
+    queryFn: () => fetchWorkbenches(status),
   });
 }
 

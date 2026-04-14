@@ -18,8 +18,6 @@ import log from '#renderer/logger';
 import { router } from '#renderer/app/router';
 import type { Tab } from '#renderer/app/Sidebar';
 
-const MERGE_DISMISS_DELAY_MS = 1_200;
-
 export function RootShell(): React.ReactElement {
   const navigate = useNavigate();
   const rqClient = useQueryClient();
@@ -138,10 +136,10 @@ export function RootShell(): React.ReactElement {
               params: { workbenchId: String(task.workbench_id) },
             });
             return;
-          } else if (task) {
-            void navigate({ to: '/' });
-            return;
           }
+          log.warn('notification click: no workbench for task', { taskId: id, inCache: !!task });
+          void navigate({ to: '/' });
+          return;
         }
       }
       const kind = data.kind as { type: string } | undefined;
@@ -185,13 +183,10 @@ export function RootShell(): React.ReactElement {
         <MergeModal
           item={mergeItem}
           onConfirm={(itemId, pr, project) => {
-            void actions.handleMerge(itemId, pr, project).then(() => {
-              setTimeout(() => useUIStore.getState().setMergeItem(null), MERGE_DISMISS_DELAY_MS);
-            });
+            useUIStore.getState().setMergeItem(null);
+            void actions.handleMerge(itemId, pr, project);
           }}
           onCancel={() => useUIStore.getState().setMergeItem(null)}
-          pending={actions.mergePending}
-          result={actions.mergeResult}
         />
       )}
       <CommandPalette

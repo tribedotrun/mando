@@ -225,9 +225,9 @@ export function useWorkbenchPin() {
   return useMutation({
     mutationFn: async (vars: { id: number; pinned: boolean }) => pinWorkbench(vars.id, vars.pinned),
     onMutate: async (vars) => {
-      await qc.cancelQueries({ queryKey: queryKeys.workbenches.list() });
+      await qc.cancelQueries({ queryKey: queryKeys.workbenches.all });
       const prev = qc.getQueryData<WorkbenchItem[]>(queryKeys.workbenches.list());
-      qc.setQueryData<WorkbenchItem[]>(queryKeys.workbenches.list(), (old) =>
+      qc.setQueriesData<WorkbenchItem[]>({ queryKey: queryKeys.workbenches.all }, (old) =>
         old?.map((wb) =>
           wb.id === vars.id
             ? { ...wb, pinnedAt: vars.pinned ? new Date().toISOString() : null, rev: wb.rev + 1 }
@@ -237,13 +237,16 @@ export function useWorkbenchPin() {
       return { prev };
     },
     onSuccess: (data) => {
-      qc.setQueryData<WorkbenchItem[]>(queryKeys.workbenches.list(), (old) =>
+      qc.setQueriesData<WorkbenchItem[]>({ queryKey: queryKeys.workbenches.all }, (old) =>
         old?.map((wb) => (wb.id === data.id ? data : wb)),
       );
     },
     onError: (_err, vars, context) => {
       if (context?.prev) qc.setQueryData(queryKeys.workbenches.list(), context.prev);
       toast.error(vars.pinned ? 'Failed to pin workbench' : 'Failed to unpin workbench');
+    },
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: queryKeys.workbenches.all });
     },
   });
 }
@@ -257,21 +260,24 @@ export function useWorkbenchRename() {
   return useMutation({
     mutationFn: async (vars: { id: number; title: string }) => renameWorkbench(vars.id, vars.title),
     onMutate: async (vars) => {
-      await qc.cancelQueries({ queryKey: queryKeys.workbenches.list() });
+      await qc.cancelQueries({ queryKey: queryKeys.workbenches.all });
       const prev = qc.getQueryData<WorkbenchItem[]>(queryKeys.workbenches.list());
-      qc.setQueryData<WorkbenchItem[]>(queryKeys.workbenches.list(), (old) =>
+      qc.setQueriesData<WorkbenchItem[]>({ queryKey: queryKeys.workbenches.all }, (old) =>
         old?.map((wb) => (wb.id === vars.id ? { ...wb, title: vars.title, rev: wb.rev + 1 } : wb)),
       );
       return { prev };
     },
     onSuccess: (data) => {
-      qc.setQueryData<WorkbenchItem[]>(queryKeys.workbenches.list(), (old) =>
+      qc.setQueriesData<WorkbenchItem[]>({ queryKey: queryKeys.workbenches.all }, (old) =>
         old?.map((wb) => (wb.id === data.id ? data : wb)),
       );
     },
     onError: (_err, _vars, context) => {
       if (context?.prev) qc.setQueryData(queryKeys.workbenches.list(), context.prev);
       toast.error('Failed to rename workbench');
+    },
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: queryKeys.workbenches.all });
     },
   });
 }
@@ -285,21 +291,31 @@ export function useWorkbenchArchive() {
   return useMutation({
     mutationFn: async (vars: { id: number }) => archiveWorkbench(vars.id),
     onMutate: async (vars) => {
-      await qc.cancelQueries({ queryKey: queryKeys.workbenches.list() });
+      await qc.cancelQueries({ queryKey: queryKeys.workbenches.all });
       const prev = qc.getQueryData<WorkbenchItem[]>(queryKeys.workbenches.list());
+      const now = new Date().toISOString();
+      // Remove from active list
       qc.setQueryData<WorkbenchItem[]>(queryKeys.workbenches.list(), (old) =>
         old?.filter((wb) => wb.id !== vars.id),
       );
+      // Mark as archived in 'all' and 'archived' variants (keeps WorkbenchPage working)
+      const markArchived = (old: WorkbenchItem[] | undefined) =>
+        old?.map((wb) =>
+          wb.id === vars.id ? { ...wb, archivedAt: now, pinnedAt: null, rev: wb.rev + 1 } : wb,
+        );
+      qc.setQueryData<WorkbenchItem[]>(queryKeys.workbenches.list('all'), markArchived);
+      qc.setQueryData<WorkbenchItem[]>(queryKeys.workbenches.list('archived'), markArchived);
       return { prev };
     },
     onSuccess: () => {
-      // Archiving a workbench changes task visibility -- invalidate the task list
-      // so the archived workbench's tasks disappear from the UI immediately.
       void qc.invalidateQueries({ queryKey: queryKeys.tasks.all });
     },
     onError: (_err, _vars, context) => {
       if (context?.prev) qc.setQueryData(queryKeys.workbenches.list(), context.prev);
       toast.error('Failed to archive workbench');
+    },
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: queryKeys.workbenches.all });
     },
   });
 }

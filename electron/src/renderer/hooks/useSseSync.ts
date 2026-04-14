@@ -296,6 +296,13 @@ export function useSseSync(options?: UseSseSyncOptions): SSEConnectionStatus {
                   'item' in (event.data as Record<string, unknown>)
                 ) {
                   patchWorkbenchList(qc, event.data as SseEntityPayload<WorkbenchItem>);
+                  // Invalidate only filtered variants (archived, all) so they
+                  // refetch, but preserve the active list's Tier 1 patch-only
+                  // behavior (zero HTTP refetches in normal operation).
+                  void qc.invalidateQueries({
+                    queryKey: queryKeys.workbenches.all,
+                    predicate: (query) => query.queryKey.length > 2,
+                  });
                 } else {
                   void qc.invalidateQueries({ queryKey: queryKeys.workbenches.all });
                 }

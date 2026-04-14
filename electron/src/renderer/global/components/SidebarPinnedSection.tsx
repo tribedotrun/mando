@@ -27,7 +27,7 @@ interface SidebarPinnedSectionProps {
   items: PinnedEntry[];
   activeTerminalCwd?: string | null;
   activeTaskId?: number | null;
-  onOpenTask?: (taskId: number) => void;
+  onOpenTask?: (taskId: number, workbenchId?: number) => void;
   onOpenTerminalSession?: (worktree: { project: string; cwd: string }) => void;
   onUnpin: (id: number) => void;
   onPin?: (id: number) => void;
@@ -95,7 +95,7 @@ export function SidebarPinnedSection({
             key={wb.id}
             onClick={() => {
               if (task) {
-                onOpenTask?.(task.id);
+                onOpenTask?.(task.id, task.workbench_id ?? wb.id);
               } else {
                 onOpenTerminalSession?.({ project, cwd: wb.worktree });
               }

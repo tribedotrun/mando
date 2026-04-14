@@ -19,8 +19,6 @@ import {
 import type { TaskItem, TaskListResponse } from '#renderer/types';
 import { copyToClipboard, getErrorMessage } from '#renderer/utils';
 
-const MERGE_SUCCESS_DISMISS_MS = 1200;
-
 export function useTaskActions() {
   const queryClient = useQueryClient();
 
@@ -35,32 +33,17 @@ export function useTaskActions() {
   const nudgeMut = useTaskNudge();
   const clarifyMut = useTaskClarify();
 
-  const [mergeItem, setMergeItemRaw] = useState<TaskItem | null>(null);
-  const [mergeResult, setMergeResult] = useState<{ ok: boolean; message: string } | null>(null);
-
-  // Clear stale mergeResult when opening a new merge modal so a previous
-  // failure doesn't permanently disable the Merge button on retry.
-  const setMergeItem = (item: TaskItem | null) => {
-    setMergeItemRaw(item);
-    if (item) setMergeResult(null);
-  };
   const [reopenItem2, setReopenItem] = useState<TaskItem | null>(null);
   const [reworkItem2, setReworkItem] = useState<TaskItem | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const { selectedIds, toggleSelect, toggleSelectAll, clearSelection } = useSelection();
 
   const handleMerge = async (itemId: number, prNumber: number, project: string) => {
-    setMergeResult(null);
     try {
       await mergeMut.mutateAsync({ id: itemId, prNumber, project });
-      setMergeResult({ ok: true, message: 'Captain will check CI and merge' });
       void invalidateTaskDetail(queryClient, itemId);
-      setTimeout(() => {
-        setMergeItem(null);
-        setMergeResult(null);
-      }, MERGE_SUCCESS_DISMISS_MS);
-    } catch (err) {
-      setMergeResult({ ok: false, message: getErrorMessage(err, 'Merge failed') });
+    } catch {
+      // toast handled by mutation hook
     }
   };
 
@@ -172,10 +155,6 @@ export function useTaskActions() {
     toggleSelect,
     toggleSelectAll,
     clearSelection,
-    mergeItem,
-    setMergeItem,
-    mergePending: mergeMut.isPending,
-    mergeResult,
     handleMerge,
     reopenItem: reopenItem2,
     setReopenItem,

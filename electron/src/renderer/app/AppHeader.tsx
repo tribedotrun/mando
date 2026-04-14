@@ -40,8 +40,12 @@ function useWorkbenchCtx(): WorkbenchCtx | null {
 
   const wbMatch = pathname.match(/^\/wb\/(\d+)/);
   const wbId = wbMatch ? Number(wbMatch[1]) : null;
-  const { data: workbenches = [] } = useWorkbenchList();
-  const workbench = wbId ? (workbenches.find((w) => w.id === wbId) ?? null) : null;
+  // Use active list (Tier 1, zero refetch) as primary source.
+  // Only fetch 'all' when the workbench isn't in the active cache (archived).
+  const { data: activeWbs = [] } = useWorkbenchList();
+  const activeMatch = wbId ? (activeWbs.find((w) => w.id === wbId) ?? null) : null;
+  const { data: allWbs = [] } = useWorkbenchList(wbId && !activeMatch ? 'all' : undefined);
+  const workbench = activeMatch ?? (wbId ? (allWbs.find((w) => w.id === wbId) ?? null) : null);
 
   const { data: taskData } = useTaskList();
   const task = wbId ? (taskData?.items.find((t) => t.workbench_id === wbId) ?? null) : null;

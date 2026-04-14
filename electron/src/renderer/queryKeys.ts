@@ -51,7 +51,10 @@ export const queryKeys = {
   // ── Workbenches ──
   workbenches: {
     all: ['workbenches'] as const,
-    list: () => ['workbenches', 'list'] as const,
+    list: (status?: string) =>
+      !status || status === 'active'
+        ? (['workbenches', 'list'] as const)
+        : (['workbenches', 'list', status] as const),
   },
 
   // ── Stats ──

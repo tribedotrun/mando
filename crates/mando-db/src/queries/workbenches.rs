@@ -120,6 +120,15 @@ pub async fn load_all(pool: &SqlitePool) -> Result<Vec<Workbench>> {
     Ok(rows.into_iter().map(|r| r.into_workbench()).collect())
 }
 
+pub async fn load_archived_only(pool: &SqlitePool) -> Result<Vec<Workbench>> {
+    let sql = format!(
+        "{} WHERE w.archived_at IS NOT NULL AND w.deleted_at IS NULL",
+        select_sql()
+    );
+    let rows: Vec<Row> = sqlx::query_as(&sql).fetch_all(pool).await?;
+    Ok(rows.into_iter().map(|r| r.into_workbench()).collect())
+}
+
 pub async fn archive(pool: &SqlitePool, id: i64) -> Result<bool> {
     let now = mando_types::now_rfc3339();
     let result = sqlx::query(

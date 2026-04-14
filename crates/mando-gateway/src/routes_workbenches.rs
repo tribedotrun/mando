@@ -1,6 +1,6 @@
 //! /api/workbenches/* route handlers.
 
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::routing::{get, patch};
 use axum::{Json, Router};
@@ -57,13 +57,24 @@ pub fn write_layout(wb_id: i64, layout: &mando_types::WorkbenchLayout) -> anyhow
 
 // ── GET /api/workbenches ───────────────────────────────────────────────
 
+#[derive(Deserialize)]
+pub(crate) struct WorkbenchListQuery {
+    #[serde(default)]
+    pub status: Option<String>,
+}
+
 pub(crate) async fn get_workbenches(
     State(state): State<AppState>,
+    Query(query): Query<WorkbenchListQuery>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let pool = state.db.pool();
-    let items = mando_db::queries::workbenches::load_active(pool)
-        .await
-        .map_err(internal_error)?;
+    let status = query.status.as_deref().unwrap_or("active");
+    let items = match status {
+        "archived" => mando_db::queries::workbenches::load_archived_only(pool).await,
+        "all" => mando_db::queries::workbenches::load_all(pool).await,
+        _ => mando_db::queries::workbenches::load_active(pool).await,
+    }
+    .map_err(internal_error)?;
     Ok(Json(json!({ "workbenches": items })))
 }
 

@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-/// Session IDs for the five types of CC sessions a task can have.
+/// Session IDs for CC sessions a task can have.
 /// Stored as a JSON TEXT column in SQLite.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SessionIds {
@@ -18,6 +18,8 @@ pub struct SessionIds {
     pub ask: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub advisor: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub triage: Option<String>,
 }
 
 impl SessionIds {

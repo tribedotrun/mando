@@ -34,6 +34,16 @@ export const IN_PROGRESS_STATUSES: ItemStatus[] = [
   'captain-merging',
 ];
 
+/** Statuses where the task is actively in the work pipeline — used for pipeline "Working" count */
+export const WORKING_STATUSES: ItemStatus[] = [
+  'in-progress',
+  'clarifying',
+  'rework',
+  'handed-off',
+  'captain-reviewing',
+  'captain-merging',
+];
+
 export interface TaskItem {
   id: number;
   rev: number;
@@ -51,6 +61,8 @@ export interface TaskItem {
     clarifier?: string;
     merge?: string;
     ask?: string;
+    advisor?: string;
+    triage?: string;
   };
   intervention_count: number;
   captain_review_trigger?: string;
@@ -416,6 +428,7 @@ export interface TelegramConfig {
 
 export interface CaptainConfig {
   autoSchedule?: boolean;
+  autoMerge?: boolean;
   tickIntervalS?: number;
   tz?: string;
   defaultTerminalAgent?: 'claude' | 'codex';

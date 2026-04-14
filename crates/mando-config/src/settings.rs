@@ -133,6 +133,7 @@ impl Default for DashboardConfig {
 #[serde(rename_all = "camelCase", default)]
 pub struct CaptainConfig {
     pub auto_schedule: bool,
+    pub auto_merge: bool,
     pub tick_interval_s: u64,
     pub tz: String,
     pub default_terminal_agent: String,
@@ -154,6 +155,7 @@ impl Default for CaptainConfig {
     fn default() -> Self {
         Self {
             auto_schedule: false,
+            auto_merge: false,
             tick_interval_s: 30,
             tz: iana_time_zone::get_timezone().unwrap_or_else(|_| "UTC".into()),
             default_terminal_agent: "claude".into(),

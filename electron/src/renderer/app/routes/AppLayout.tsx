@@ -91,13 +91,21 @@ export function AppLayout(): React.ReactElement {
     },
   });
 
-  // Resolve active workbench's worktree path for sidebar highlighting
-  const allWorkbenches = qc.getQueryData<WorkbenchItem[]>(queryKeys.workbenches.list()) ?? [];
+  // Resolve active workbench's worktree path for sidebar highlighting.
+  // Computed inline (no useMemo) so it reacts to cache population after
+  // SSE snapshot or query settlement -- getQueriesData is a cheap scan.
   const numericWbId = activeWorkbenchId ? Number(activeWorkbenchId) : null;
-  const activeWorktreeCwd =
-    numericWbId && !Number.isNaN(numericWbId)
-      ? (allWorkbenches.find((w) => w.id === numericWbId)?.worktree ?? null)
-      : null;
+  let activeWorktreeCwd: string | null = null;
+  if (numericWbId && !Number.isNaN(numericWbId)) {
+    const entries = qc.getQueriesData<WorkbenchItem[]>({ queryKey: queryKeys.workbenches.all });
+    for (const [, list] of entries) {
+      const wb = list?.find((w) => w.id === numericWbId);
+      if (wb) {
+        activeWorktreeCwd = wb.worktree;
+        break;
+      }
+    }
+  }
 
   // Derive activeTab from current route
   const activeTab: Tab = matchRoute({ to: '/scout', fuzzy: true })
@@ -139,27 +147,34 @@ export function AppLayout(): React.ReactElement {
     [navigate],
   );
 
-  // Resolve workbench ID from a task ID
+  // Navigate to workbench — prefer the directly-passed workbenchId (avoids cache miss)
   const openTaskWorkbench = useCallback(
-    (taskId: number) => {
+    (taskId: number, workbenchId?: number) => {
+      if (workbenchId) {
+        navigateToWorkbench(workbenchId);
+        return;
+      }
       const taskData = qc.getQueryData<TaskListResponse>(queryKeys.tasks.list());
       const task = taskData?.items.find((t) => t.id === taskId);
       if (task?.workbench_id) {
         navigateToWorkbench(task.workbench_id);
       } else {
-        void navigate({ to: '/' });
+        log.warn('openTaskWorkbench: no workbench resolved', { taskId, inCache: !!task });
       }
     },
-    [qc, navigateToWorkbench, navigate],
+    [qc, navigateToWorkbench],
   );
 
-  // Resolve workbench ID from a worktree path
+  // Resolve workbench ID from a worktree path, searching all cached filter variants
   const openWorktreeWorkbench = useCallback(
     (cwd: string) => {
-      const workbenches = qc.getQueryData<WorkbenchItem[]>(queryKeys.workbenches.list()) ?? [];
-      const wb = workbenches.find((w) => w.worktree === cwd);
-      if (wb) {
-        navigateToWorkbench(wb.id, 'terminal');
+      const entries = qc.getQueriesData<WorkbenchItem[]>({ queryKey: queryKeys.workbenches.all });
+      for (const [, list] of entries) {
+        const wb = list?.find((w) => w.worktree === cwd);
+        if (wb) {
+          navigateToWorkbench(wb.id, 'terminal');
+          return;
+        }
       }
     },
     [qc, navigateToWorkbench],
@@ -296,7 +311,7 @@ export function AppLayout(): React.ReactElement {
             setupProgress={setupProgress}
             setupActive={setupActive}
             onNewTerminal={(project) => void handleNewTerminal(project)}
-            onOpenTask={(id) => openTaskWorkbench(id)}
+            onOpenTask={(id, wbId) => openTaskWorkbench(id, wbId)}
             activeTerminalCwd={activeWorktreeCwd}
             activeTaskId={activeTaskId}
             onOpenTerminalSession={(session) => openWorktreeWorkbench(session.cwd)}

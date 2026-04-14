@@ -64,6 +64,30 @@ pub async fn append(pool: &SqlitePool, task_id: i64, event: &TimelineEvent) -> R
     Ok(())
 }
 
+/// Append an event with a caller-provided dedupe key.
+pub async fn append_with_dedupe_key(
+    pool: &SqlitePool,
+    task_id: i64,
+    event: &TimelineEvent,
+    dedupe_key: &str,
+) -> Result<()> {
+    let event_type_str = event_type_to_string(event.event_type)?;
+    let data_str = serde_json::to_string(&event.data)?;
+    sqlx::query(&format!(
+        "INSERT INTO timeline_events ({INSERT_COLS}) VALUES (?, ?, ?, ?, ?, ?, ?)"
+    ))
+    .bind(task_id)
+    .bind(&event_type_str)
+    .bind(&event.timestamp)
+    .bind(&event.actor)
+    .bind(&event.summary)
+    .bind(&data_str)
+    .bind(dedupe_key)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
 /// Load all timeline events for a task, ordered chronologically.
 pub async fn load(pool: &SqlitePool, task_id: i64) -> Result<Vec<TimelineEvent>> {
     let rows: Vec<TimelineRow> =
@@ -142,6 +166,29 @@ pub async fn latest_clarifier_questions(
             },
         );
     Ok(questions)
+}
+
+/// Check if an auto_merge_triage event exists for a task at a given reopen_seq.
+///
+/// Uses a dedupe_key prefix match against the UNIQUE index for an efficient
+/// O(1) lookup, following the same pattern as `has_backfill_marker`.
+pub async fn has_auto_merge_triage(
+    pool: &SqlitePool,
+    task_id: i64,
+    reopen_seq: i64,
+) -> Result<bool> {
+    let dedupe_glob = format!("{task_id}-auto_merge_triage-seq{reopen_seq}-*");
+    let exists: bool =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM timeline_events WHERE dedupe_key GLOB ?)")
+            .bind(&dedupe_glob)
+            .fetch_one(pool)
+            .await?;
+    Ok(exists)
+}
+
+/// Build the dedupe key for an auto_merge_triage timeline event.
+pub fn auto_merge_triage_dedupe_key(task_id: i64, reopen_seq: i64, timestamp: &str) -> String {
+    format!("{task_id}-auto_merge_triage-seq{reopen_seq}-{timestamp}")
 }
 
 /// Bulk insert events (for backfill).

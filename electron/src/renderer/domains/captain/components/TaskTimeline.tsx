@@ -16,6 +16,7 @@ const EVENT_ICON_MAP: Record<string, string> = {
   captain_review_started: 'captain-reviewing',
   captain_review_verdict: 'captain-reviewing',
   captain_merge_started: 'captain-merging',
+  auto_merge_triage: 'captain-reviewing',
   awaiting_review: 'awaiting-review',
   escalated: 'escalated',
   errored: 'errored',
