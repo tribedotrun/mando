@@ -133,6 +133,8 @@ mod tests {
             evidence_fresh: false,
             has_work_summary: false,
             work_summary_fresh: false,
+            has_screenshot: false,
+            has_recording: false,
         }
     }
 

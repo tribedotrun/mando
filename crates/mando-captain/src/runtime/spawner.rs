@@ -228,8 +228,8 @@ pub(crate) async fn credential_env_for_session(
     let mut env = std::collections::HashMap::new();
     // Prefer a freshly-picked healthy credential (pick_for_worker filters out
     // rate-limited ones). This ensures we rotate away from a rate-limited
-    // credential on resume.
-    let fresh = super::tick_spawn::pick_credential(pool).await;
+    // credential on resume. Balance on worker sessions only.
+    let fresh = super::tick_spawn::pick_credential(pool, Some("worker")).await;
     if let Some((cid, token)) = fresh {
         env.insert("CLAUDE_CODE_OAUTH_TOKEN".into(), token);
         return (env, Some(cid));

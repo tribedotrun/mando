@@ -15,8 +15,8 @@ models:
   act: "default"
 
 agent:
-  process_timeout_s: 120
-  article_timeout_s: 300
+  process_timeout_s: 240
+  article_timeout_s: 600
   research_timeout_s: 1800
   qa_timeout_s: 120
   qa_ttl_s: 600
@@ -52,7 +52,17 @@ prompts:
     Source: {{ url }}
     Content file: {{ content_path }}
 
-    Read the content file above using the Read tool. The file may be very large (10k+ lines). If a single Read fails or is truncated, read it in chunks using offset and limit parameters (e.g. offset=1 limit=2000, then offset=2001 limit=2000, etc.) until you have consumed the entire file. Do NOT skip any portion of the source material.
+    ## Reading Strategy
+
+    The content file may be very large (10k+ lines). NEVER attempt to read the entire file into your context.
+
+    1. Run `wc -l` on the content file above (via Bash) to get the total line count.
+    2. Read lines 1-100 to understand the format and structure.
+    3. If the file is SHORT (under 2000 lines): read the rest directly (offset=101) and proceed to scoring.
+    4. If the file is LONG (2000+ lines): divide the FULL file (from line 1) into ~2000-line chunks and spawn one Agent per chunk using the Agent tool. Each agent starts with ZERO context, so include the full file path in every agent prompt. Give each agent a prompt like:
+       "Read [full file path] lines [start]-[end] using the Read tool (offset=[start], limit=2000). Summarize this section in under 200 words: main topics, key data points or numbers, notable claims or arguments, and quality signals (sourcing, depth, information density)."
+       Launch all chunk agents in parallel (multiple Agent calls in one message). Every line of the file must be covered with no gaps between chunks.
+    5. After all agents complete, synthesize their summaries together with your initial reading to produce the final JSON output below.
 
     ## Output
 
@@ -90,7 +100,17 @@ prompts:
 
     RAW CONTENT FILE: {{ content_path }}
 
-    Read the content file above using the Read tool. The file may be very large (10k+ lines). If a single Read fails or is truncated, read it in chunks using offset and limit parameters (e.g. offset=1 limit=2000, then offset=2001 limit=2000, etc.) until you have consumed the entire file. Do NOT skip any portion of the source material.
+    ## Reading Strategy
+
+    The content file may be very large (10k+ lines). NEVER attempt to read the entire file into your context.
+
+    1. Run `wc -l` on the content file above (via Bash) to get the total line count.
+    2. Read lines 1-100 to understand the format and structure.
+    3. If the file is SHORT (under 2000 lines): read the rest directly (offset=101) and proceed to article writing.
+    4. If the file is LONG (2000+ lines): divide the FULL file (from line 1) into ~2000-line chunks and spawn one Agent per chunk using the Agent tool. Each agent starts with ZERO context, so include the full file path in every agent prompt. Give each agent a prompt like:
+       "Read [full file path] lines [start]-[end] using the Read tool (offset=[start], limit=2000). Extract from this section: (a) detailed summary (max 300 words), (b) the single best verbatim quote, (c) all distinct topics, arguments, and named concepts, (d) key attributions (who said what). This is a {{ url_type }} transcript."
+       Launch all chunk agents in parallel (multiple Agent calls in one message). Every line of the file must be covered with no gaps between chunks.
+    5. After all agents complete, weave their findings into the article. Ensure every distinct topic from every chunk is represented — dropping an entire topic is the #1 failure mode.
 
   qa: |
     You are a reading copilot. The user is reading an article and will ask questions.

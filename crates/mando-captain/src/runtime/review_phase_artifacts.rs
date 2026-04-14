@@ -1,11 +1,18 @@
 //! Artifact gate computation for the review phase.
 
+pub(crate) const SCREENSHOT_EXTS: &[&str] = &["png", "jpg", "jpeg", "webp"];
+pub(crate) const RECORDING_EXTS: &[&str] = &["gif", "mp4", "mov", "webm"];
+
 /// Artifact gate results computed from DB.
 pub(crate) struct ArtifactGates {
     pub has_evidence: bool,
     pub evidence_fresh: bool,
     pub has_work_summary: bool,
     pub work_summary_fresh: bool,
+    /// At least one screenshot (png/jpg/jpeg/webp) in evidence artifacts.
+    pub has_screenshot: bool,
+    /// At least one recording (gif/mp4/mov/webm) in evidence artifacts.
+    pub has_recording: bool,
 }
 
 /// Query task_artifacts to compute artifact gates for a single task.
@@ -49,10 +56,34 @@ pub(crate) async fn compute_artifact_gates(
             .any(|a| a.created_at.as_str() > threshold)
     };
 
+    // Typed evidence gates use only fresh artifacts (same threshold as evidence_fresh).
+    let fresh_evidence: Vec<_> = if reopen_seq == 0 || reopened_at.is_none() {
+        evidence_artifacts.clone()
+    } else {
+        let threshold = reopened_at.unwrap_or("");
+        evidence_artifacts
+            .iter()
+            .filter(|a| a.created_at.as_str() > threshold)
+            .cloned()
+            .collect()
+    };
+    let has_screenshot = fresh_evidence.iter().any(|a| {
+        a.media
+            .iter()
+            .any(|m| SCREENSHOT_EXTS.contains(&m.ext.to_lowercase().as_str()))
+    });
+    let has_recording = fresh_evidence.iter().any(|a| {
+        a.media
+            .iter()
+            .any(|m| RECORDING_EXTS.contains(&m.ext.to_lowercase().as_str()))
+    });
+
     ArtifactGates {
         has_evidence,
         evidence_fresh,
         has_work_summary,
         work_summary_fresh,
+        has_screenshot,
+        has_recording,
     }
 }

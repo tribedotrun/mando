@@ -26,6 +26,7 @@ use crate::routes_scout_ai;
 use crate::routes_scout_bulk;
 use crate::routes_scout_telegraph;
 use crate::routes_sessions;
+use crate::routes_stats;
 use crate::routes_terminal;
 use crate::routes_ui;
 use crate::routes_workbenches;
@@ -84,6 +85,7 @@ fn protected_routes() -> Router<AppState> {
         .merge(ai_routes())
         .merge(routes_terminal::routes())
         .merge(ui_routes())
+        .route("/api/stats/activity", get(routes_stats::get_activity_stats))
         .route("/api/health/system", get(routes_captain::get_health_system))
         .route("/api/health/ui", get(routes_ui::get_ui_health))
         .route("/api/health/telegram", get(routes_ui::get_telegram_health))

@@ -164,9 +164,18 @@ pub async fn set_rate_limit_cooldown(
     Ok(result.rows_affected() > 0)
 }
 
-/// Pick the best credential for a new worker: not expired, not rate-limited,
-/// fewest active (running) sessions. Returns (id, access_token).
-pub async fn pick_for_worker(pool: &SqlitePool) -> Result<Option<(i64, String)>> {
+/// Pick the best credential: not expired, not rate-limited, fewest active
+/// (running) sessions. Returns (id, access_token).
+///
+/// `caller_filter` narrows which running sessions count toward the
+/// active-session tally. Pass `Some("worker")` when spawning a worker so
+/// only other worker sessions influence the pick (workers dominate token
+/// spend). Pass `None` to count all running sessions (default for
+/// lightweight callers).
+pub async fn pick_for_worker(
+    pool: &SqlitePool,
+    caller_filter: Option<&str>,
+) -> Result<Option<(i64, String)>> {
     let now_ms = time::OffsetDateTime::now_utc().unix_timestamp() * 1000;
     let now_secs = now_ms / 1000;
 
@@ -177,6 +186,7 @@ pub async fn pick_for_worker(pool: &SqlitePool) -> Result<Option<(i64, String)>>
              SELECT credential_id, COUNT(*) AS active
              FROM cc_sessions
              WHERE status = 'running' AND credential_id IS NOT NULL
+               AND (?3 IS NULL OR caller = ?3)
              GROUP BY credential_id
          ) s ON s.credential_id = c.id
          WHERE (c.expires_at IS NULL OR c.expires_at > ?1)
@@ -186,6 +196,7 @@ pub async fn pick_for_worker(pool: &SqlitePool) -> Result<Option<(i64, String)>>
     )
     .bind(now_ms)
     .bind(now_secs)
+    .bind(caller_filter)
     .fetch_optional(pool)
     .await?;
     Ok(row)

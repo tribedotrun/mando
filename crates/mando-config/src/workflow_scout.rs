@@ -68,8 +68,8 @@ fn default_research_max_items() -> usize {
 impl Default for ScoutAgentConfig {
     fn default() -> Self {
         Self {
-            process_timeout_s: Duration::from_secs(120),
-            article_timeout_s: Duration::from_secs(300),
+            process_timeout_s: Duration::from_secs(240),
+            article_timeout_s: Duration::from_secs(600),
             research_timeout_s: Duration::from_secs(1800),
             qa_timeout_s: Duration::from_secs(120),
             qa_ttl_s: Duration::from_secs(600),

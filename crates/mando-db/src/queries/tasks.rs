@@ -255,6 +255,22 @@ pub async fn active_worker_count(pool: &SqlitePool) -> Result<usize> {
     Ok(count as usize)
 }
 
+/// Daily merge counts for the last N days (for the activity heatmap).
+pub async fn daily_merge_counts(pool: &SqlitePool, days: u32) -> Result<Vec<(String, i64)>> {
+    let rows: Vec<(String, i64)> = sqlx::query_as(
+        "SELECT DATE(t.last_activity_at) AS day, COUNT(*) \
+         FROM tasks t \
+         WHERE t.status = 'merged' \
+           AND t.last_activity_at >= datetime('now', '-' || ? || ' days') \
+         GROUP BY day \
+         ORDER BY day",
+    )
+    .bind(days)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows)
+}
+
 /// Check whether a workbench has any active (non-finalized) tasks.
 pub async fn has_active_for_workbench(pool: &SqlitePool, workbench_id: i64) -> Result<bool> {
     let count: i64 = sqlx::query_scalar(

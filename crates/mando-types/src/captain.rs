@@ -73,6 +73,12 @@ pub struct WorkerContext {
     /// True when work summary is fresh (same logic as evidence).
     #[serde(default)]
     pub work_summary_fresh: bool,
+    /// True when evidence contains at least one screenshot (png/jpg/jpeg/webp).
+    #[serde(default)]
+    pub has_screenshot: bool,
+    /// True when evidence contains at least one recording (gif/mp4/mov/webm).
+    #[serde(default)]
+    pub has_recording: bool,
 }
 
 /// The kind of action the captain can take on a worker.

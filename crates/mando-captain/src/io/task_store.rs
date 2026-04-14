@@ -166,6 +166,10 @@ impl TaskStore {
         tasks::active_worker_count(&self.pool).await
     }
 
+    pub async fn daily_merge_counts(&self, days: u32) -> Result<Vec<(String, i64)>> {
+        tasks::daily_merge_counts(&self.pool, days).await
+    }
+
     // -- Session methods --
 
     pub async fn upsert_session(&self, entry: &SessionEntry) -> Result<()> {

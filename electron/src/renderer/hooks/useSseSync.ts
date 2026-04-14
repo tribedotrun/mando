@@ -96,6 +96,11 @@ function patchTaskList(qc: QueryClient, payload: SseEntityPayload<TaskItem>): vo
     (data, items) => ({ ...(data as TaskListResponse), items, count: items.length }),
   );
 
+  // Invalidate activity stats only when a task reaches merged (or is deleted)
+  if (payload.item?.status === 'merged' || payload.action === 'deleted') {
+    void qc.invalidateQueries({ queryKey: queryKeys.stats.all });
+  }
+
   // Also invalidate detail caches for this specific task
   const id = payload.item?.id ?? (payload.id as number | undefined);
   if (id != null) {
@@ -268,6 +273,7 @@ export function useSseSync(options?: UseSseSyncOptions): SSEConnectionStatus {
                   // Legacy: empty signal, fall back to invalidation
                   void qc.invalidateQueries({ queryKey: queryKeys.tasks.list() });
                   void qc.invalidateQueries({ queryKey: queryKeys.workers.list() });
+                  void qc.invalidateQueries({ queryKey: queryKeys.stats.all });
                 }
                 break;
 
@@ -332,24 +338,18 @@ export function useSseSync(options?: UseSseSyncOptions): SSEConnectionStatus {
                 const rd = event.data as Record<string, unknown> | undefined;
                 if (rd) {
                   const action = rd.action as string | undefined;
-                  const runId = rd.run_id as number | undefined;
-                  // Key the toast by run_id so concurrent runs don't
-                  // overwrite each other's progress/completion state.
-                  const toastId = runId ? `scout-research:${runId}` : 'scout-research';
                   if (action === 'completed') {
                     const added = (rd.added_count as number) ?? 0;
-                    toast.success(`Research complete: ${added} link(s) added`, { id: toastId });
+                    toast.success(`Research complete: ${added} link(s) added`);
                     void qc.invalidateQueries({ queryKey: queryKeys.scout.all });
                   } else if (action === 'failed') {
                     const err = (rd.error as string) ?? 'Unknown error';
-                    toast.error(`Research failed: ${err}`, { id: toastId });
+                    toast.error(`Research failed: ${err}`);
                     void qc.invalidateQueries({ queryKey: queryKeys.scout.research() });
                   } else if (action === 'started') {
                     void qc.invalidateQueries({ queryKey: queryKeys.scout.research() });
                   } else if (action === 'progress') {
-                    const elapsed = rd.elapsed_s as number;
-                    const mins = Math.round(elapsed / 60);
-                    toast.loading(`Researching... (${mins}m elapsed)`, { id: toastId });
+                    void qc.invalidateQueries({ queryKey: queryKeys.scout.research() });
                   }
                 }
                 break;

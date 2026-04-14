@@ -36,7 +36,7 @@ pub(crate) async fn run_clarification(
         .collect();
     let schema = build_clarifier_schema(&valid_names);
 
-    let credential = super::tick_spawn::pick_credential(pool).await;
+    let credential = super::tick_spawn::pick_credential(pool, None).await;
     let cred_id = super::tick_spawn::credential_id(&credential);
     let mut builder = CcConfig::builder()
         .model(&workflow.models.clarifier)
@@ -319,7 +319,7 @@ pub async fn answer_and_reclarify(
     let task_id = item.id.to_string();
     let timeout = workflow.agent.clarifier_timeout_s;
 
-    let credential = super::tick_spawn::pick_credential(pool).await;
+    let credential = super::tick_spawn::pick_credential(pool, None).await;
     let mut builder = CcConfig::builder()
         .model(&workflow.models.clarifier)
         .timeout(timeout)
@@ -332,6 +332,7 @@ pub async fn answer_and_reclarify(
             "properties": {
                 "status": { "type": "string", "enum": ["understood", "ready", "clarifying", "escalate"] },
                 "context": { "type": "string" },
+                "title": { "type": "string" },
                 "questions": {
                     "type": ["array", "null"],
                     "items": {
@@ -346,7 +347,7 @@ pub async fn answer_and_reclarify(
                     }
                 }
             },
-            "required": ["status", "context"]
+            "required": ["status", "context", "title"]
         }));
 
     let cred_id = super::tick_spawn::credential_id(&credential);

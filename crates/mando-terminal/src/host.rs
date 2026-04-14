@@ -39,15 +39,20 @@ impl TerminalHost {
     }
 
     pub fn create(&self, req: CreateRequest) -> anyhow::Result<Arc<TerminalSession>> {
-        let sessions = self.sessions.lock().expect("sessions lock");
-        if sessions.len() >= Self::MAX_SESSIONS {
-            anyhow::bail!(
-                "terminal session limit reached ({}/{})",
-                sessions.len(),
-                Self::MAX_SESSIONS
-            );
+        {
+            let mut sessions = self.sessions.lock().expect("sessions lock");
+            if sessions.len() >= Self::MAX_SESSIONS {
+                // Evict exited sessions to make room before giving up.
+                Self::evict_exited(&mut sessions, &self.history);
+            }
+            if sessions.len() >= Self::MAX_SESSIONS {
+                anyhow::bail!(
+                    "terminal session limit reached ({}/{})",
+                    sessions.len(),
+                    Self::MAX_SESSIONS
+                );
+            }
         }
-        drop(sessions);
 
         let id = mando_uuid::Uuid::v4().to_string();
         info!(
@@ -62,6 +67,9 @@ impl TerminalHost {
         let session =
             TerminalSession::spawn(id.clone(), req, self.history.clone(), self.env.clone())?;
         let mut sessions = self.sessions.lock().expect("sessions lock");
+        if sessions.len() >= Self::MAX_SESSIONS {
+            Self::evict_exited(&mut sessions, &self.history);
+        }
         if sessions.len() >= Self::MAX_SESSIONS {
             let _ = session.kill();
             let _ = session.delete_history();
@@ -170,6 +178,29 @@ impl TerminalHost {
                     warn!(session = id, error = %err, "failed to kill session on shutdown");
                 }
             }
+        }
+    }
+
+    /// Remove all exited (not running, not restorable) sessions from the map
+    /// and clean up their on-disk history. Called when the session limit is
+    /// hit so dead sessions don't block new ones.
+    fn evict_exited(
+        sessions: &mut HashMap<SessionId, Arc<TerminalSession>>,
+        history: &TerminalHistoryStore,
+    ) {
+        let dead: Vec<String> = sessions
+            .iter()
+            .filter(|(_, s)| !s.is_running() && s.state() != SessionState::Restored)
+            .map(|(id, _)| id.clone())
+            .collect();
+        for id in &dead {
+            sessions.remove(id);
+            if let Err(err) = history.delete_session(id) {
+                warn!(session = id, error = %err, "failed to delete evicted session history");
+            }
+        }
+        if !dead.is_empty() {
+            info!(count = dead.len(), "evicted exited terminal sessions");
         }
     }
 }

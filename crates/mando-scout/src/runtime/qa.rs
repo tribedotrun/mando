@@ -73,7 +73,7 @@ impl QaSessionManager {
     ) -> Result<QaResult> {
         self.expire_stale().await;
 
-        let credential = mando_captain::runtime::tick_spawn::pick_credential(pool).await;
+        let credential = mando_captain::runtime::tick_spawn::pick_credential(pool, None).await;
 
         // Try to reuse an existing session.
         if let Some(key) = session_key {

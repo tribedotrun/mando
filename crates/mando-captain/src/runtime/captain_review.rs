@@ -208,7 +208,7 @@ pub(crate) async fn spawn_review(
 
     // Pick a credential for this review session so it goes through
     // multi-credential load balancing when credentials are configured.
-    let credential = super::tick_spawn::pick_credential(pool).await;
+    let credential = super::tick_spawn::pick_credential(pool, None).await;
     let cred_id = credential.as_ref().map(|c| c.0);
 
     // Log "running" session entry eagerly so (a) cancel can find it
@@ -247,16 +247,29 @@ pub(crate) async fn spawn_review(
         parts.join("\n\n")
     };
 
-    // Build evidence file listing from DB artifacts.
+    // Build evidence file listing from DB artifacts and detect evidence types.
     let db_evidence_listing = {
         let artifacts = mando_db::queries::artifacts::list_for_task(pool, item.id)
             .await
             .unwrap_or_default();
         let data_dir = mando_types::data_dir();
         let mut listing = String::new();
+        let mut has_screenshot = false;
+        let mut has_recording = false;
+        use super::review_phase_artifacts::{RECORDING_EXTS, SCREENSHOT_EXTS};
+        let freshness_threshold = item.reopened_at.as_deref().unwrap_or("");
+        let is_reopened = item.reopen_seq > 0 && item.reopened_at.is_some();
         for artifact in &artifacts {
             if artifact.artifact_type == mando_types::ArtifactType::Evidence {
+                let is_fresh = !is_reopened || artifact.created_at.as_str() > freshness_threshold;
                 for media in &artifact.media {
+                    let ext_lower = media.ext.to_lowercase();
+                    if is_fresh && SCREENSHOT_EXTS.contains(&ext_lower.as_str()) {
+                        has_screenshot = true;
+                    }
+                    if is_fresh && RECORDING_EXTS.contains(&ext_lower.as_str()) {
+                        has_recording = true;
+                    }
                     if let Some(ref local) = media.local_path {
                         let caption = media.caption.as_deref().unwrap_or("(no caption)");
                         listing.push_str(&format!(
@@ -274,9 +287,10 @@ pub(crate) async fn spawn_review(
             .rfind(|a| a.artifact_type == mando_types::ArtifactType::WorkSummary)
             .map(|a| a.content.clone())
             .unwrap_or_default();
-        (listing, latest_summary)
+        (listing, latest_summary, has_screenshot, has_recording)
     };
-    let (evidence_file_listing, work_summary_content) = db_evidence_listing;
+    let (evidence_file_listing, work_summary_content, has_screenshot, has_recording) =
+        db_evidence_listing;
     let intervention_count_str = item.intervention_count.to_string();
     let trigger_flags: Vec<(String, String)> = TRIGGERS
         .iter()
@@ -336,6 +350,14 @@ pub(crate) async fn spawn_review(
         vars.insert("evidence_files", evidence_file_listing.clone());
         vars.insert("work_summary", work_summary_content.clone());
         vars.insert("intervention_count", intervention_count_str.clone());
+        vars.insert(
+            "has_screenshot",
+            if has_screenshot { "true" } else { "false" }.into(),
+        );
+        vars.insert(
+            "has_recording",
+            if has_recording { "true" } else { "false" }.into(),
+        );
         for (key, flag) in &trigger_flags {
             vars.insert(key.as_str(), flag.clone());
         }

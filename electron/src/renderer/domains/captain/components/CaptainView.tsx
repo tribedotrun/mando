@@ -2,6 +2,7 @@ import React, { useState, useCallback, useRef } from 'react';
 import { useViewKeyHandler } from '#renderer/global/hooks/useKeyboardShortcuts';
 import { MetricsRow } from '#renderer/domains/captain/components/MetricsRow';
 import { PipelineStats } from '#renderer/domains/captain/components/PipelineStats';
+import { ActivityStrip } from '#renderer/domains/captain/components/ActivityStrip';
 import {
   InlineTaskCreate,
   type InlineTaskCreateHandle,
@@ -37,8 +38,9 @@ export function CaptainView({ active = true, inlineRef: externalRef }: Props): R
 
   return (
     <div className="flex h-full flex-col items-center pt-8">
-      {/* Pipeline stats */}
+      {/* Pipeline stats + activity heatmap */}
       <PipelineStats />
+      <ActivityStrip />
 
       {/* Worker panel */}
       <div className="mt-4 w-full max-w-[640px]">

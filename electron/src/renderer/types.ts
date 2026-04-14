@@ -81,6 +81,16 @@ export interface TaskListResponse {
   count: number;
 }
 
+export interface DailyMerge {
+  date: string;
+  count: number;
+}
+
+export interface ActivityStatsResponse {
+  merged_7d: number;
+  daily_merges: DailyMerge[];
+}
+
 export interface WorkerDetail {
   id: number;
   title: string;

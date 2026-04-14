@@ -91,8 +91,8 @@ export function ScoutPage({
   const runResearch = useCallback(async (topic: string) => {
     setResearchPending(true);
     try {
-      const { run_id } = await researchScout(topic, true);
-      toast.loading(`Researching "${topic}"...`, { id: `scout-research:${run_id}` });
+      await researchScout(topic, true);
+      toast.success('Research started');
       setResearchModalOpen(false);
     } catch (err) {
       toast.error(getErrorMessage(err, 'Research failed'));

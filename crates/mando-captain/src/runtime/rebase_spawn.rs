@@ -233,7 +233,7 @@ pub(super) async fn handle_conflict(
     let session_id = mando_uuid::Uuid::v4().to_string();
 
     // Pick credential so the rebase worker participates in load balancing.
-    let credential = super::tick_spawn::pick_credential(pool).await;
+    let credential = super::tick_spawn::pick_credential(pool, None).await;
     let cred_id = super::tick_spawn::credential_id(&credential);
     let mut env: std::collections::HashMap<String, String> = std::collections::HashMap::new();
     if let Some((_id, token)) = &credential {

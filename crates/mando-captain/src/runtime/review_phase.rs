@@ -175,6 +175,8 @@ pub(crate) async fn gather_worker_contexts(
             evidence_fresh: artifact_gate.evidence_fresh,
             has_work_summary: artifact_gate.has_work_summary,
             work_summary_fresh: artifact_gate.work_summary_fresh,
+            has_screenshot: artifact_gate.has_screenshot,
+            has_recording: artifact_gate.has_recording,
         });
     }
 
@@ -463,6 +465,8 @@ pub(crate) async fn build_single_context(
         evidence_fresh: false,
         has_work_summary: false,
         work_summary_fresh: false,
+        has_screenshot: false,
+        has_recording: false,
     };
     let formatted = worker_context::format_context(&ctx);
     Ok((ctx, formatted))

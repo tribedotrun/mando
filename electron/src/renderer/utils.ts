@@ -164,6 +164,15 @@ export function relativeTime(iso: string): string {
   return future ? `in ${days}d` : `${days}d ago`;
 }
 
+/** Format a duration in milliseconds as "Xm Ys" or "Xs". */
+export function formatElapsed(ms: number): string {
+  const totalSecs = Math.floor(ms / 1000);
+  if (totalSecs < 60) return `${totalSecs}s`;
+  const mins = Math.floor(totalSecs / 60);
+  const secs = totalSecs % 60;
+  return `${mins}m ${secs}s`;
+}
+
 /** Compact relative time without "ago" suffix (e.g. "4d", "1mo", "2h"). */
 export function compactRelativeTime(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();

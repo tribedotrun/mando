@@ -34,12 +34,12 @@ pub(crate) fn build_clarifier_schema(valid_names: &[String]) -> serde_json::Valu
                     "required": ["question", "self_answered", "category"]
                 }
             },
-            "title": { "type": ["string", "null"] },
+            "title": { "type": "string" },
             "repo": { "enum": repo_enum },
             "no_pr": { "type": ["boolean", "null"] },
             "resource": { "type": ["string", "null"] }
         },
-        "required": ["status", "context"]
+        "required": ["status", "context", "title"]
     })
 }
 
@@ -84,7 +84,7 @@ pub(crate) async fn retry_with_correction(
         .resume(session_id)
         .allowed_tools(vec!["Read".into(), "Glob".into(), "Grep".into()])
         .json_schema(schema.clone());
-    let credential = super::tick_spawn::pick_credential(pool).await;
+    let credential = super::tick_spawn::pick_credential(pool, None).await;
     let cred_id = super::tick_spawn::credential_id(&credential);
     builder = super::tick_spawn::with_credential(builder, &credential);
     if let Some(tid) = task_id {

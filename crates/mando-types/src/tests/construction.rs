@@ -92,6 +92,8 @@ fn construct_worker_context() {
         has_evidence: false,
         evidence_fresh: false,
         has_work_summary: false,
+        has_screenshot: false,
+        has_recording: false,
         work_summary_fresh: false,
     };
     assert_eq!(ctx.session_name, "worker-1-1");

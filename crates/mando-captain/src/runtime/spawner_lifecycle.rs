@@ -43,8 +43,8 @@ async fn clean_and_spawn_fresh(
         }
     }
     item.worker_seq += 1;
-    // Pick credential for the reworked worker.
-    let credential = super::tick_spawn::pick_credential(pool).await;
+    // Pick credential for the reworked worker. Balance on worker sessions only.
+    let credential = super::tick_spawn::pick_credential(pool, Some("worker")).await;
     let worker_cred = credential.as_ref().map(|c| spawner::WorkerCredential {
         id: c.0,
         token: &c.1,

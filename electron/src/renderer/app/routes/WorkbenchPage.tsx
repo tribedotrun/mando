@@ -1,4 +1,4 @@
-import React, { useCallback, useRef } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearch } from '@tanstack/react-router';
 import { useTaskList, useWorkbenchList } from '#renderer/hooks/queries';
 import { useUIStore } from '#renderer/app/uiStore';
@@ -82,8 +82,21 @@ export function WorkbenchPage(): React.ReactElement {
     [navigate],
   );
 
+  // Track whether the terminal tab has been visited so we can lazy-mount
+  // TerminalPage and avoid eagerly creating terminal sessions.
+  // Reset when TanStack Router reuses the component for a different workbench.
+  const [terminalVisited, setTerminalVisited] = useState(
+    search.tab === 'terminal' || !!search.resume,
+  );
+  const prevWbRef = useRef(workbenchId);
+  if (prevWbRef.current !== workbenchId) {
+    prevWbRef.current = workbenchId;
+    setTerminalVisited(search.tab === 'terminal' || !!search.resume);
+  }
+
   const handleTabChange = useCallback(
     (newTab: string) => {
+      if (newTab === 'terminal') setTerminalVisited(true);
       void navigate({
         to: '/wb/$workbenchId',
         params: { workbenchId },
@@ -96,6 +109,7 @@ export function WorkbenchPage(): React.ReactElement {
 
   const handleResumeInTerminal = useCallback(
     (sessionId: string, name?: string) => {
+      setTerminalVisited(true);
       void navigate({
         to: '/wb/$workbenchId',
         params: { workbenchId },
@@ -155,7 +169,7 @@ export function WorkbenchPage(): React.ReactElement {
       <div className="h-full pt-2">
         <ErrorBoundary fallbackLabel="Terminal">
           <TerminalPage
-            key={`terminal-${terminalKey}`}
+            key={`terminal-${workbench.id}-${terminalKey}`}
             project={workbench.project}
             cwd={workbench.worktree}
             resumeSessionId={search.resume}
@@ -167,17 +181,18 @@ export function WorkbenchPage(): React.ReactElement {
     );
   }
 
-  // Task workbench: render full detail view with embedded terminal
-  const terminalSlot = (
+  // Task workbench: lazy-mount terminal only after user visits the terminal tab.
+  // This prevents eagerly creating terminal sessions on every task navigation.
+  const terminalSlot = terminalVisited ? (
     <TerminalPage
-      key={`terminal-${terminalKey}`}
+      key={`terminal-${workbench.id}-${terminalKey}`}
       project={workbench.project}
       cwd={workbench.worktree}
       resumeSessionId={search.tab === 'terminal' ? (search.resume ?? null) : null}
       resumeName={search.tab === 'terminal' ? (search.name ?? null) : null}
       onResumeConsumed={handleResumeConsumed}
     />
-  );
+  ) : null;
 
   return (
     <div className="h-full px-3">

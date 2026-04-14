@@ -409,7 +409,7 @@ async fn effective_rate_limit_remaining_secs(state: &AppState) -> u64 {
     if !has_credentials {
         return mando_captain::runtime::ambient_rate_limit::remaining_secs();
     }
-    let available = mando_db::queries::credentials::pick_for_worker(pool)
+    let available = mando_db::queries::credentials::pick_for_worker(pool, None)
         .await
         .unwrap_or(None)
         .is_some();
