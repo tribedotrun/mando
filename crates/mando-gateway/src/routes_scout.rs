@@ -92,10 +92,7 @@ pub(crate) async fn get_scout_items(
     .await
     {
         Ok(val) => Ok(Json(val)),
-        Err(e) => Err(error_response(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            &e.to_string(),
-        )),
+        Err(e) => Err(internal_error(e, "failed to list scout items")),
     }
 }
 
@@ -108,7 +105,7 @@ pub(crate) async fn get_scout_item(
     mando_scout::get_scout_item(pool, id)
         .await
         .map(Json)
-        .map_err(not_found_or_internal)
+        .map_err(|e| not_found_or_internal(e, "failed to load scout item"))
 }
 
 /// GET /api/scout/items/{id}/article
@@ -121,7 +118,7 @@ pub(crate) async fn get_scout_article(
     mando_scout::ensure_scout_article(pool, id, &workflow)
         .await
         .map(Json)
-        .map_err(not_found_or_internal)
+        .map_err(|e| not_found_or_internal(e, "failed to load scout article"))
 }
 
 #[derive(Deserialize)]
@@ -162,10 +159,7 @@ pub(crate) async fn post_scout_items(
 
             Ok((StatusCode::CREATED, Json(val)))
         }
-        Err(e) => Err(error_response(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            &e.to_string(),
-        )),
+        Err(e) => Err(internal_error(e, "failed to add scout item")),
     }
 }
 
@@ -185,7 +179,7 @@ pub(crate) async fn post_scout_process(
 
     let val = mando_scout::process_scout(&config, pool, body.id, &workflow)
         .await
-        .map_err(internal_error)?;
+        .map_err(|e| internal_error(e, "failed to process scout item"))?;
 
     if let Some(id) = body.id {
         let scout_payload = match mando_scout::get_scout_item(pool, id).await {
@@ -242,7 +236,7 @@ pub(crate) async fn post_scout_act(
         } else if msg.contains("not found") {
             error_response(StatusCode::NOT_FOUND, "not found")
         } else {
-            crate::response::internal_error(e)
+            crate::response::internal_error(e, "scout action failed")
         }
     })?;
 
@@ -313,13 +307,11 @@ pub(crate) async fn patch_scout_item(
     mando_scout::update_scout_status(pool, id, &body.status)
         .await
         .map_err(|e| {
-            let msg = e.to_string();
-            let status = if msg.contains("invalid status") {
-                StatusCode::BAD_REQUEST
+            if e.to_string().contains("invalid status") {
+                error_response(StatusCode::BAD_REQUEST, &e.to_string())
             } else {
-                StatusCode::INTERNAL_SERVER_ERROR
-            };
-            error_response(status, &msg)
+                internal_error(e, "failed to update scout status")
+            }
         })?;
     let scout_payload = match mando_scout::get_scout_item(pool, id).await {
         Ok(v) => Some(v),
@@ -347,7 +339,7 @@ pub(crate) async fn delete_scout_item(
     let pool = state.db.pool();
     let val = mando_scout::delete_scout_item(pool, id)
         .await
-        .map_err(not_found_or_internal)?;
+        .map_err(|e| not_found_or_internal(e, "failed to delete scout item"))?;
     state.bus.send(
         mando_types::BusEvent::Scout,
         Some(json!({"action": "deleted", "id": id})),
@@ -363,6 +355,6 @@ pub(crate) async fn get_scout_item_sessions(
     let pool = state.db.pool();
     let sessions = mando_db::queries::sessions::list_sessions_for_scout_item(pool, id)
         .await
-        .map_err(internal_error)?;
+        .map_err(|e| internal_error(e, "failed to load scout sessions"))?;
     Ok(Json(json!(sessions)))
 }

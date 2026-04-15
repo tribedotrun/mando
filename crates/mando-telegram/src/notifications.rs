@@ -337,6 +337,12 @@ impl NotificationHandler {
                     &format!("dg:process:{scout_id}"),
                 )]))
             }
+            NotificationKind::AdvisorAnswered { item_id, .. } => {
+                Some(inline_keyboard(vec![button(
+                    "View",
+                    &format!("view:{item_id}"),
+                )]))
+            }
             _ => None,
         }
     }

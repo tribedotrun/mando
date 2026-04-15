@@ -65,7 +65,7 @@ pub(crate) async fn post_task_evidence(
     let artifact_id =
         mando_db::queries::artifacts::insert(pool, task_id, ArtifactType::Evidence, &content, &[])
             .await
-            .map_err(internal_error)?;
+            .map_err(|e| internal_error(e, "failed to create evidence artifact"))?;
 
     // Build media JSON with deterministic local_path.
     let media: Vec<ArtifactMedia> = body
@@ -85,7 +85,7 @@ pub(crate) async fn post_task_evidence(
     // Update artifact with media.
     mando_db::queries::artifacts::update_media(pool, artifact_id, &media)
         .await
-        .map_err(internal_error)?;
+        .map_err(|e| internal_error(e, "failed to update artifact media"))?;
 
     // Emit event so Electron feed updates.
     state.bus.send(
@@ -124,7 +124,7 @@ pub(crate) async fn post_task_summary(
         &[],
     )
     .await
-    .map_err(internal_error)?;
+    .map_err(|e| internal_error(e, "failed to create work summary"))?;
 
     state.bus.send(
         mando_types::BusEvent::Artifacts,
@@ -153,7 +153,7 @@ pub(crate) async fn get_artifact_media(
     let pool = state.db.pool();
     let artifact = mando_db::queries::artifacts::get(pool, artifact_id)
         .await
-        .map_err(internal_error)?
+        .map_err(|e| internal_error(e, "failed to load artifact"))?
         .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "artifact not found"))?;
 
     let media_item = artifact
@@ -215,7 +215,7 @@ pub(crate) async fn put_artifact_media(
 
     let artifact = mando_db::queries::artifacts::get(pool, artifact_id)
         .await
-        .map_err(internal_error)?
+        .map_err(|e| internal_error(e, "failed to load artifact"))?
         .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "artifact not found"))?;
 
     let mut merged: Vec<ArtifactMedia> = artifact.media.clone();
@@ -234,7 +234,7 @@ pub(crate) async fn put_artifact_media(
 
     mando_db::queries::artifacts::update_media(pool, artifact_id, &merged)
         .await
-        .map_err(internal_error)?;
+        .map_err(|e| internal_error(e, "failed to update artifact media"))?;
 
     Ok(Json(json!({ "ok": true })))
 }

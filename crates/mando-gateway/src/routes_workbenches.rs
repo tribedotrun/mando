@@ -74,7 +74,7 @@ pub(crate) async fn get_workbenches(
         "all" => mando_db::queries::workbenches::load_all(pool).await,
         _ => mando_db::queries::workbenches::load_active(pool).await,
     }
-    .map_err(internal_error)?;
+    .map_err(|e| internal_error(e, "failed to load workbenches"))?;
     Ok(Json(json!({ "workbenches": items })))
 }
 
@@ -99,34 +99,34 @@ pub(crate) async fn patch_workbench(
 
     mando_db::queries::workbenches::find_by_id(pool, id)
         .await
-        .map_err(internal_error)?
+        .map_err(|e| internal_error(e, "failed to load workbench"))?
         .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "workbench not found"))?;
 
     if let Some(ref title) = body.title {
         mando_db::queries::workbenches::update_title(pool, id, title)
             .await
-            .map_err(internal_error)?;
+            .map_err(|e| internal_error(e, "failed to update workbench title"))?;
     }
     if let Some(archived) = body.archived {
         if archived {
             mando_db::queries::workbenches::archive(pool, id)
                 .await
-                .map_err(internal_error)?;
+                .map_err(|e| internal_error(e, "failed to archive workbench"))?;
         } else {
             mando_db::queries::workbenches::unarchive(pool, id)
                 .await
-                .map_err(internal_error)?;
+                .map_err(|e| internal_error(e, "failed to unarchive workbench"))?;
         }
     }
     if let Some(pinned) = body.pinned {
         let affected = if pinned {
             mando_db::queries::workbenches::pin(pool, id)
                 .await
-                .map_err(internal_error)?
+                .map_err(|e| internal_error(e, "failed to pin workbench"))?
         } else {
             mando_db::queries::workbenches::unpin(pool, id)
                 .await
-                .map_err(internal_error)?
+                .map_err(|e| internal_error(e, "failed to unpin workbench"))?
         };
         if !affected {
             return Err(error_response(
@@ -142,7 +142,7 @@ pub(crate) async fn patch_workbench(
 
     let updated = mando_db::queries::workbenches::find_by_id(pool, id)
         .await
-        .map_err(internal_error)?
+        .map_err(|e| internal_error(e, "failed to load workbench"))?
         .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "workbench not found after update"))?;
 
     state.bus.send(
@@ -162,15 +162,17 @@ pub(crate) async fn get_workbench_layout(
     let pool = state.db.pool();
     mando_db::queries::workbenches::find_by_id(pool, id)
         .await
-        .map_err(internal_error)?
+        .map_err(|e| internal_error(e, "failed to load workbench"))?
         .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "workbench not found"))?;
 
     let layout = tokio::task::spawn_blocking(move || read_layout(id))
         .await
-        .map_err(internal_error)?
-        .map_err(not_found_or_internal)?;
+        .map_err(|e| internal_error(e, "layout read task failed"))?
+        .map_err(|e| not_found_or_internal(e, "failed to read workbench layout"))?;
 
-    Ok(Json(serde_json::to_value(layout).map_err(internal_error)?))
+    Ok(Json(serde_json::to_value(layout).map_err(|e| {
+        internal_error(e, "failed to serialize layout")
+    })?))
 }
 
 // ── PATCH /api/workbenches/:id/layout ──────────────────────────────────
@@ -183,7 +185,7 @@ pub(crate) async fn patch_workbench_layout(
     let pool = state.db.pool();
     mando_db::queries::workbenches::find_by_id(pool, id)
         .await
-        .map_err(internal_error)?
+        .map_err(|e| internal_error(e, "failed to load workbench"))?
         .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "workbench not found"))?;
 
     let layout = tokio::task::spawn_blocking(move || {
@@ -193,10 +195,12 @@ pub(crate) async fn patch_workbench_layout(
         Ok::<_, anyhow::Error>(layout)
     })
     .await
-    .map_err(internal_error)?
-    .map_err(internal_error)?;
+    .map_err(|e| internal_error(e, "layout write task failed"))?
+    .map_err(|e| internal_error(e, "failed to update workbench layout"))?;
 
-    Ok(Json(serde_json::to_value(layout).map_err(internal_error)?))
+    Ok(Json(serde_json::to_value(layout).map_err(|e| {
+        internal_error(e, "failed to serialize layout")
+    })?))
 }
 
 fn merge_layout_patch(layout: &mut mando_types::WorkbenchLayout, patch: &Value) {

@@ -116,7 +116,7 @@ pub(crate) async fn append_task_images(
             });
         })
         .await
-        .map_err(crate::response::not_found_or_internal)
+        .map_err(|e| crate::response::not_found_or_internal(e, "failed to append task images"))
         .map(|_| ())
 }
 

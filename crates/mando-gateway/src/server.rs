@@ -196,6 +196,10 @@ fn session_routes() -> Router<AppState> {
             "/api/sessions/{id}/cost",
             get(routes_sessions::get_session_cost),
         )
+        .route(
+            "/api/sessions/{id}/stream",
+            get(routes_sessions::get_session_stream),
+        )
 }
 
 fn ops_routes() -> Router<AppState> {

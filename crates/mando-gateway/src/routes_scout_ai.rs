@@ -29,7 +29,7 @@ pub(crate) async fn post_scout_research(
     // Insert research run row (status=running).
     let run_id = mando_db::queries::scout_research::insert_run(&pool, &body.topic)
         .await
-        .map_err(internal_error)?;
+        .map_err(|e| internal_error(e, "failed to create research run"))?;
 
     let process = body.process.unwrap_or(true);
     let topic = body.topic.clone();
@@ -291,8 +291,10 @@ pub(crate) async fn get_scout_research_runs(
     let pool = state.db.pool();
     let runs = mando_db::queries::scout_research::list_runs(pool, 50)
         .await
-        .map_err(internal_error)?;
-    Ok(Json(serde_json::to_value(&runs).map_err(internal_error)?))
+        .map_err(|e| internal_error(e, "failed to load research runs"))?;
+    Ok(Json(serde_json::to_value(&runs).map_err(|e| {
+        internal_error(e, "failed to serialize research runs")
+    })?))
 }
 
 /// GET /api/scout/research/{id}/items - items discovered by a research run.
@@ -303,8 +305,10 @@ pub(crate) async fn get_scout_research_run_items(
     let pool = state.db.pool();
     let items = mando_db::queries::scout::list_items_by_run(pool, id)
         .await
-        .map_err(internal_error)?;
-    Ok(Json(serde_json::to_value(&items).map_err(internal_error)?))
+        .map_err(|e| internal_error(e, "failed to load research run items"))?;
+    Ok(Json(serde_json::to_value(&items).map_err(|e| {
+        internal_error(e, "failed to serialize research items")
+    })?))
 }
 
 /// GET /api/scout/research/{id} - poll research run status.
@@ -315,9 +319,16 @@ pub(crate) async fn get_scout_research_run(
     let pool = state.db.pool();
     let run = mando_db::queries::scout_research::get_run(pool, id)
         .await
-        .map_err(internal_error)?
-        .ok_or_else(|| not_found_or_internal(anyhow::anyhow!("research run #{id} not found")))?;
-    Ok(Json(serde_json::to_value(&run).map_err(internal_error)?))
+        .map_err(|e| internal_error(e, "failed to load research run"))?
+        .ok_or_else(|| {
+            not_found_or_internal(
+                anyhow::anyhow!("research run #{id} not found"),
+                "research run not found",
+            )
+        })?;
+    Ok(Json(serde_json::to_value(&run).map_err(|e| {
+        internal_error(e, "failed to serialize research run")
+    })?))
 }
 
 /// POST /api/scout/ask (JSON or multipart with optional images)
@@ -345,10 +356,10 @@ async fn post_scout_ask_inner(
 
     let item = mando_scout::get_scout_item(pool, id)
         .await
-        .map_err(internal_error)?;
+        .map_err(|e| internal_error(e, "failed to load scout item"))?;
     let article_data = mando_scout::ensure_scout_article(pool, id, &workflow)
         .await
-        .map_err(internal_error)?;
+        .map_err(|e| internal_error(e, "failed to load scout article"))?;
 
     let summary = item["summary"]
         .as_str()
@@ -391,7 +402,7 @@ async fn post_scout_ask_inner(
             pool,
         )
         .await
-        .map_err(internal_error)?;
+        .map_err(|e| internal_error(e, "scout Q&A session failed"))?;
 
     // Record the Q&A session in cc_sessions.
     if let Some(ref sid) = qa_result.session_id {

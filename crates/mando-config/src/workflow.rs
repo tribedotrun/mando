@@ -26,6 +26,7 @@ use crate::error::ConfigError;
 pub struct CaptainWorkflow {
     pub models: ModelsConfig,
     pub agent: AgentConfig,
+    pub planning: PlanningConfig,
     pub auto_title: AutoTitleConfig,
     pub prompts: HashMap<String, String>,
     pub nudges: HashMap<String, String>,
@@ -69,6 +70,36 @@ impl Default for ModelsConfig {
             clarifier: "default".into(),
             todo_parse: "default".into(),
             fallback: Some("sonnet[1m]".into()),
+        }
+    }
+}
+
+/// Configuration for the autonomous planning pipeline.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PlanningConfig {
+    pub feedback_rounds: u32,
+    #[serde(with = "duration_seconds")]
+    pub cc_timeout_s: std::time::Duration,
+    #[serde(with = "duration_seconds")]
+    pub codex_timeout_s: std::time::Duration,
+    pub planner_max_turns: u32,
+    pub feedback_max_turns: u32,
+    pub synthesizer_max_turns: u32,
+    pub final_max_turns: u32,
+}
+
+impl Default for PlanningConfig {
+    fn default() -> Self {
+        use std::time::Duration;
+        Self {
+            feedback_rounds: 3,
+            cc_timeout_s: Duration::from_secs(300),
+            codex_timeout_s: Duration::from_secs(180),
+            planner_max_turns: 15,
+            feedback_max_turns: 10,
+            synthesizer_max_turns: 3,
+            final_max_turns: 3,
         }
     }
 }
@@ -159,6 +190,13 @@ pub struct AgentConfig {
     pub max_clarifier_retries: u32,
     pub max_rebase_retries: u32,
     pub max_advisor_retries: u32,
+    /// Maximum spawn attempts per auto-merge triage cycle (first attempt
+    /// counts as 1). On CC error, timeout, or malformed output the captain
+    /// re-spawns until this cap, then emits an exhaustion event.
+    pub auto_merge_triage_max_attempts: u32,
+    /// Backoff seconds between auto-merge triage retries. Index N is the
+    /// wait before attempt N+2 (length must equal `max_attempts - 1`).
+    pub auto_merge_triage_backoff_s: Vec<u64>,
     #[serde(with = "duration_seconds")]
     pub rebase_base_delay_s: std::time::Duration,
     #[serde(with = "duration_seconds")]
@@ -202,7 +240,7 @@ impl Default for AgentConfig {
     fn default() -> Self {
         use std::time::Duration;
         Self {
-            max_concurrent: 10,
+            max_concurrent: 3,
             resource_limits: HashMap::new(),
             max_interventions: 50,
             stale_threshold_s: Duration::from_secs(1200),
@@ -213,6 +251,8 @@ impl Default for AgentConfig {
             max_clarifier_retries: 3,
             max_rebase_retries: 5,
             max_advisor_retries: 3,
+            auto_merge_triage_max_attempts: 3,
+            auto_merge_triage_backoff_s: vec![10, 20],
             rebase_base_delay_s: Duration::from_secs(30),
             worker_timeout_s: Duration::from_secs(21600),
             clarifier_timeout_s: Duration::from_secs(1800),

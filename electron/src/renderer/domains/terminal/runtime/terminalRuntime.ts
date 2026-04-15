@@ -248,7 +248,18 @@ export class TerminalRuntime {
   }
 
   private installLinkProviders(term: XTerm): void {
-    const openUrl = (url: string) => window.mandoAPI.openExternalUrl(url);
+    // Deduplicate URL opens: when a URL is both an OSC 8 hyperlink and visible
+    // plain text, both the OscLinkProvider and UrlLinkProvider can fire on the
+    // same click. Track the last opened URL + timestamp to suppress duplicates.
+    let lastOpenedUrl = '';
+    let lastOpenedAt = 0;
+    const openUrl = (url: string) => {
+      const now = Date.now();
+      if (url === lastOpenedUrl && now - lastOpenedAt < 500) return Promise.resolve();
+      lastOpenedUrl = url;
+      lastOpenedAt = now;
+      return window.mandoAPI.openExternalUrl(url);
+    };
     const resolvePath = (input: string, cwd: string) =>
       window.mandoAPI.resolveLocalPath(input, cwd);
     const openPath = (filePath: string) => window.mandoAPI.openLocalPath(filePath);

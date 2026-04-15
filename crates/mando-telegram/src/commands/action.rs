@@ -207,6 +207,10 @@ pub(crate) fn action_buttons(
             actions.push(("\u{1f504} Reopen", "reopen"));
             actions.push(("\u{1f501} Rework", "rework"));
         }
+        ItemStatus::PlanReady => {
+            actions.push(("\u{1f680} Implement", "input"));
+            actions.push(("\u{274c} Cancel", "cancel"));
+        }
         ItemStatus::Canceled => {
             actions.push(("\u{1f504} Reopen", "reopen"));
             actions.push(("\u{1f501} Rework", "rework"));
@@ -252,6 +256,7 @@ pub(crate) fn status_short(s: ItemStatus) -> &'static str {
         ItemStatus::Errored => "[errored]",
         ItemStatus::Merged => "[merged]",
         ItemStatus::CompletedNoPr => "[done]",
+        ItemStatus::PlanReady => "[plan-ready]",
         ItemStatus::Canceled => "[canceled]",
     }
 }

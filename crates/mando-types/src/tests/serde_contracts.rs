@@ -202,9 +202,11 @@ const TASK_API_FIELDS: &[&str] = &[
     "intervention_count",
     "last_activity_at",
     "merge_fail_count",
+    "no_auto_merge",
     "no_pr",
     "original_prompt",
     "plan",
+    "planning",
     "pr_number",
     "project",
     "project_id",
@@ -250,6 +252,7 @@ const ITEM_STATUS_API_VALUES: &[&str] = &[
     "merged",
     "needs-clarification",
     "new",
+    "plan-ready",
     "queued",
     "rework",
 ];
@@ -265,7 +268,7 @@ fn type_contract_task_fields() {
     item.context = Some("c".into());
     item.original_prompt = Some("o".into());
     item.created_at = Some("t".into());
-    item.workbench_id = Some(1);
+    item.workbench_id = 1;
     item.worktree = Some("wt".into());
     item.branch = Some("b".into());
     item.pr_number = Some(1);
@@ -283,6 +286,7 @@ fn type_contract_task_fields() {
     item.last_activity_at = Some("t".into());
     item.plan = Some("p".into());
     item.no_pr = true;
+    item.planning = true;
     item.worker_seq = 1;
     item.reopen_seq = 1;
     item.reopened_at = Some("t".into());

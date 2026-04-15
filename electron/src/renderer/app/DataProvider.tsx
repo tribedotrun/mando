@@ -106,7 +106,9 @@ function DataProviderInner({ children }: { children: React.ReactNode }): React.R
     return (
       <div className="flex h-screen flex-col items-center justify-center gap-3 bg-background p-6 text-foreground">
         <span className="text-heading text-destructive">Could not connect to daemon</span>
-        <span className="text-body text-muted-foreground">{initError}</span>
+        <span className="max-w-full text-body text-muted-foreground [overflow-wrap:anywhere]">
+          {initError}
+        </span>
         <RetryButton
           className="mt-2 inline-flex items-center justify-center rounded-md bg-foreground px-4 py-2 text-sm font-medium text-background hover:bg-foreground/90"
           onRetry={() =>

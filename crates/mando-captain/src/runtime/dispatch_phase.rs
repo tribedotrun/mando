@@ -30,6 +30,18 @@ pub(crate) async fn dispatch_new_work(
     pool: &sqlx::SqlitePool,
     bus: Option<&EventBus>,
 ) -> usize {
+    // Dispatch planning-mode items first (they don't consume worker slots).
+    super::dispatch_planning::dispatch_planning_items(
+        items,
+        config,
+        workflow,
+        pool,
+        bus,
+        dry_run,
+        dry_actions,
+    )
+    .await;
+
     let mut resource_counts = dispatch_logic::count_resources(items);
     let max_clarifier_retries = workflow.agent.max_clarifier_retries as i64;
     const MAX_SPAWN_FAILS: i64 = 3;

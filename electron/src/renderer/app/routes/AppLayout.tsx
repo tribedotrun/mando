@@ -165,15 +165,23 @@ export function AppLayout(): React.ReactElement {
     [qc, navigateToWorkbench],
   );
 
-  // Resolve workbench ID from a worktree path, searching all cached filter variants
+  // Navigate to a workbench — prefer directly-passed id, fall back to cache lookup by cwd
   const openWorktreeWorkbench = useCallback(
-    (cwd: string) => {
-      const entries = qc.getQueriesData<WorkbenchItem[]>({ queryKey: queryKeys.workbenches.all });
-      for (const [, list] of entries) {
-        const wb = list?.find((w) => w.worktree === cwd);
-        if (wb) {
-          navigateToWorkbench(wb.id, 'terminal');
-          return;
+    (workbenchId?: number, cwd?: string) => {
+      if (workbenchId) {
+        navigateToWorkbench(workbenchId, 'terminal');
+        return;
+      }
+      if (cwd) {
+        const entries = qc.getQueriesData<WorkbenchItem[]>({
+          queryKey: queryKeys.workbenches.all,
+        });
+        for (const [, list] of entries) {
+          const wb = list?.find((w) => w.worktree === cwd);
+          if (wb) {
+            navigateToWorkbench(wb.id, 'terminal');
+            return;
+          }
         }
       }
     },
@@ -314,7 +322,7 @@ export function AppLayout(): React.ReactElement {
             onOpenTask={(id, wbId) => openTaskWorkbench(id, wbId)}
             activeTerminalCwd={activeWorktreeCwd}
             activeTaskId={activeTaskId}
-            onOpenTerminalSession={(session) => openWorktreeWorkbench(session.cwd)}
+            onOpenTerminalSession={(session) => openWorktreeWorkbench(session.id, session.cwd)}
             onArchiveWorkbench={(id) => {
               archiveWorkbench.mutate({ id });
             }}
@@ -335,7 +343,7 @@ export function AppLayout(): React.ReactElement {
               onGoForward={handleGoForward}
               onNewTask={handleNewTask}
             />
-            <div className="relative min-h-0 flex-1">
+            <div className="relative z-0 min-h-0 flex-1">
               <Outlet />
             </div>
           </main>

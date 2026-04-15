@@ -22,6 +22,10 @@ electron/mando-napi.node
 .ai/local/
 .ai/evidence/
 .ai/media/
+# Evidence binaries (screenshots, recordings) live under .ai/plans/<pr>/evidence/
+# locally but never go into git — they are uploaded to GCS and referenced from
+# the PR body via https URLs (see the x-dev-workflow skill).
+.ai/plans/**/evidence/
 .claude/worktrees/
 .cursor/
 .playwright-mcp/

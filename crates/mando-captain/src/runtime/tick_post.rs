@@ -60,6 +60,36 @@ pub(crate) async fn run_post_phase(
     Ok(())
 }
 
+/// Touch workbench `last_activity_at` for changed tasks and broadcast
+/// updates so the sidebar reflects captain-side events.
+pub(crate) async fn touch_affected_workbenches(
+    wb_ids: &[i64],
+    store_lock: &std::sync::Arc<tokio::sync::RwLock<crate::io::task_store::TaskStore>>,
+    bus: Option<&mando_shared::EventBus>,
+) {
+    let pool = store_lock.read().await.pool().clone();
+    for wb_id in wb_ids {
+        match mando_db::queries::workbenches::touch_activity(&pool, *wb_id).await {
+            Ok(true) => {
+                if let Some(bus) = bus {
+                    if let Ok(Some(wb)) =
+                        mando_db::queries::workbenches::find_by_id(&pool, *wb_id).await
+                    {
+                        bus.send(
+                            BusEvent::Workbenches,
+                            Some(serde_json::json!({"action": "updated", "item": wb})),
+                        );
+                    }
+                }
+            }
+            Ok(false) => {}
+            Err(e) => {
+                tracing::warn!(workbench_id = wb_id, error = %e, "tick: failed to touch workbench activity");
+            }
+        }
+    }
+}
+
 /// Merge in-memory health state into the on-disk snapshot.
 ///
 /// Only tick-owned fields (`cpu_time_s`, `cwd`) are overlaid from the

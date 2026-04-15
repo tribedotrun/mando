@@ -46,6 +46,11 @@ export function canRework(t: TaskItem): boolean {
   return ['awaiting-review', 'handed-off', 'escalated', 'errored'].includes(t.status);
 }
 
+/** Whether a task's plan can be revised (re-run planning with feedback). */
+export function canRevisePlan(t: TaskItem): boolean {
+  return t.status === 'plan-ready';
+}
+
 /** Whether a task can be asked a question in its terminal/review states (narrow). */
 export function canAskTerminal(t: TaskItem): boolean {
   return ['awaiting-review', 'escalated'].includes(t.status);
@@ -93,25 +98,14 @@ export type SidebarChild =
   | { kind: 'task'; task: TaskItem }
   | { kind: 'workbench'; wb: WorkbenchItem };
 
-/**
- * Sidebar sort for a mixed list of tasks + taskless workbenches:
- * non-finalized items first, then descending by last activity. Workbenches
- * are always "non-finalized" for this purpose since they don't have a
- * terminal status.
- */
+/** Sidebar sort for a mixed list of tasks + taskless workbenches:
+ * descending by last activity regardless of task status. */
 export function sortProjectChildren(items: SidebarChild[]): SidebarChild[] {
-  const finalizedRank = (c: SidebarChild): number =>
-    c.kind === 'task' && FINALIZED_STATUSES.includes(c.task.status) ? 1 : 0;
   const activity = (c: SidebarChild): string =>
     c.kind === 'task'
       ? c.task.last_activity_at || c.task.created_at || ''
       : c.wb.lastActivityAt || c.wb.createdAt || '';
-  return [...items].sort((a, b) => {
-    const ra = finalizedRank(a);
-    const rb = finalizedRank(b);
-    if (ra !== rb) return ra - rb;
-    return activity(b).localeCompare(activity(a));
-  });
+  return [...items].sort((a, b) => activity(b).localeCompare(activity(a)));
 }
 
 /** Extract a human-readable message from an unknown error. */

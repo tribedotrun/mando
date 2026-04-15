@@ -6,7 +6,7 @@ use axum::Json;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use crate::response::error_response;
+use crate::response::{error_response, internal_error};
 use crate::ui_runtime::UiLaunchSpec;
 use crate::AppState;
 
@@ -38,7 +38,7 @@ pub(crate) async fn post_ui_register(
             },
         )
         .await
-        .map_err(|err| error_response(StatusCode::INTERNAL_SERVER_ERROR, &err.to_string()))?;
+        .map_err(|err| internal_error(err, "failed to register UI process"))?;
 
     Ok(Json(json!({ "ok": true })))
 }
@@ -50,7 +50,7 @@ pub(crate) async fn post_ui_quitting(
         .ui_runtime
         .mark_quitting()
         .await
-        .map_err(|err| error_response(StatusCode::INTERNAL_SERVER_ERROR, &err.to_string()))?;
+        .map_err(|err| internal_error(err, "failed to mark UI quitting"))?;
     Ok(Json(json!({ "ok": true })))
 }
 
@@ -61,7 +61,7 @@ pub(crate) async fn post_ui_updating(
         .ui_runtime
         .mark_updating()
         .await
-        .map_err(|err| error_response(StatusCode::INTERNAL_SERVER_ERROR, &err.to_string()))?;
+        .map_err(|err| internal_error(err, "failed to mark UI updating"))?;
     Ok(Json(json!({ "ok": true })))
 }
 

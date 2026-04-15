@@ -9,6 +9,7 @@
 //! Both modes support `--json-schema` for structured output.
 
 mod binary;
+pub mod codex_exec;
 mod config;
 mod error;
 mod message;
@@ -130,6 +131,21 @@ pub fn update_stream_meta_status(session_id: &str, status: &str, cost_usd: Optio
     ) {
         tracing::warn!(session_id, %e, "failed to write updated stream meta");
     }
+}
+
+/// Check whether a session's meta sidecar indicates it has finished
+/// (i.e. `finished_at` is set).  Returns `true` for done/stopped/failed/timeout.
+pub fn is_session_finished(session_id: &str) -> bool {
+    let meta_path = mando_config::stream_meta_path_for_session(session_id);
+    let data = match std::fs::read_to_string(&meta_path) {
+        Ok(d) => d,
+        Err(_) => return false,
+    };
+    let val: serde_json::Value = match serde_json::from_str(&data) {
+        Ok(v) => v,
+        Err(_) => return false,
+    };
+    val.get("finished_at").and_then(|v| v.as_str()).is_some()
 }
 
 fn null_if_empty(s: &str) -> serde_json::Value {

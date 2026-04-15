@@ -50,7 +50,7 @@ pub async fn post_parse_todos(
     let pool = state.db.pool();
     let row = db_projects::resolve(pool, &body.project)
         .await
-        .map_err(internal_error)?
+        .map_err(|e| internal_error(e, "failed to resolve project"))?
         .ok_or_else(|| {
             error_response(
                 StatusCode::BAD_REQUEST,
@@ -70,7 +70,7 @@ pub async fn post_parse_todos(
     vars.insert("line_count", line_count.to_string());
     vars.insert("project", row.name);
     let prompt = mando_config::render_prompt("todo_parse", &wf.prompts, &vars)
-        .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e))?;
+        .map_err(|e| internal_error(e, "failed to render parse prompt"))?;
 
     let max_turns = wf.agent.todo_parse_max_turns;
     let mgr = &state.cc_session_mgr;
@@ -88,7 +88,7 @@ pub async fn post_parse_todos(
             Some(max_turns),
         )
         .await
-        .map_err(internal_error)?;
+        .map_err(|e| internal_error(e, "todo parse session failed"))?;
 
     mgr.close(&session_key);
 

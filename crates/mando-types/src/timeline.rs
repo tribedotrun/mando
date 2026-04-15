@@ -31,6 +31,10 @@ pub enum TimelineEventType {
     CaptainMergeStarted,
     #[serde(rename = "auto_merge_triage")]
     AutoMergeTriage,
+    #[serde(rename = "auto_merge_triage_failed")]
+    AutoMergeTriageFailed,
+    #[serde(rename = "auto_merge_triage_exhausted")]
+    AutoMergeTriageExhausted,
     #[serde(rename = "awaiting_review")]
     AwaitingReview,
     #[serde(rename = "human_reopen")]
@@ -65,6 +69,12 @@ pub enum TimelineEventType {
     EvidenceUpdated,
     #[serde(rename = "work_summary_updated")]
     WorkSummaryUpdated,
+    #[serde(rename = "planning_round")]
+    PlanningRound,
+    #[serde(rename = "plan_completed")]
+    PlanCompleted,
+    #[serde(rename = "plan_ready")]
+    PlanReady,
 }
 
 /// A single event in a task's timeline.

@@ -1,10 +1,9 @@
 import React, { useState } from 'react';
 import { Check, Copy, X } from 'lucide-react';
-import type { TaskItem, SessionSummary, TimelineEvent } from '#renderer/types';
+import type { TaskItem, SessionSummary } from '#renderer/types';
 import { copyToClipboard, fmtDuration, relativeTime, shortenPath } from '#renderer/utils';
 import { PrSections } from '#renderer/domains/captain/components/PrSections';
 import { PrMarkdown } from '#renderer/domains/captain/components/PrMarkdown';
-import { TaskTimeline } from '#renderer/domains/captain/components/TaskTimeline';
 import { formatCallerLabel, buildSessionSequence, SessionDot } from '#renderer/domains/sessions';
 import {
   Dialog,
@@ -23,19 +22,6 @@ import { Button } from '#renderer/components/ui/button';
 import { Skeleton } from '#renderer/components/ui/skeleton';
 
 const COPY_FEEDBACK_MS = 1200;
-
-/* -- Timeline tab -- */
-
-export function TimelineTab({
-  events,
-  onTranscriptClick,
-}: {
-  events: TimelineEvent[];
-  onTranscriptClick: (sessionId: string, event: TimelineEvent) => void;
-}): React.ReactElement {
-  const reversed = [...events].reverse();
-  return <TaskTimeline events={reversed} onTranscriptClick={onTranscriptClick} />;
-}
 
 /* -- PR tab -- */
 
@@ -123,7 +109,10 @@ export function SessionsTab({
             >
               <SessionDot status={s.status} />
               <div className="min-w-0 flex-1">
-                <div className="text-body-sm font-medium text-text-1">
+                <div
+                  className="truncate text-body font-medium text-text-1"
+                  title={title + (s.worker_name ? ` (${s.worker_name})` : '')}
+                >
                   {title}
                   {s.worker_name ? ` (${s.worker_name})` : ''}
                 </div>
@@ -194,12 +183,21 @@ export function InfoTab({ item }: { item: TaskItem }): React.ReactElement {
             <CopyValue value={item.plan} display={shortenPath(item.plan)} />
           </>
         )}
+
+        {item.no_auto_merge && (
+          <>
+            <span className="text-caption text-text-4">Auto-merge</span>
+            <span className="text-caption text-text-2">Disabled</span>
+          </>
+        )}
       </div>
 
       {item.original_prompt && (
         <div>
           <div className="mb-1.5 text-caption text-text-4">Original Request</div>
-          <p className="text-body-sm leading-relaxed text-text-2">{item.original_prompt}</p>
+          <p className="text-body leading-relaxed text-text-2 [overflow-wrap:anywhere]">
+            {item.original_prompt}
+          </p>
         </div>
       )}
     </div>

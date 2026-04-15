@@ -168,6 +168,12 @@ const MIGRATIONS: &[(i64, &str)] = &[
         21,
         include_str!("../migrations/021_workbench_pending_title.sql"),
     ),
+    (22, include_str!("../migrations/022_task_planning.sql")),
+    (
+        23,
+        include_str!("../migrations/023_task_workbench_not_null.sql"),
+    ),
+    (24, include_str!("../migrations/024_task_no_auto_merge.sql")),
 ];
 
 #[cfg(test)]

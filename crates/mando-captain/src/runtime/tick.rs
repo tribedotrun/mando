@@ -1,11 +1,4 @@
-//! Captain tick entry point — `run_captain_tick()`.
-//!
-//! 5-phase single-pass tick:
-//! §1 LOAD — all non-terminal items + health state + kill orphans
-//! §2 GATHER — context for ALL non-terminal items
-//! §3 CLASSIFY — one pass, all items, produces action list
-//! §4 EXECUTE — all actions
-//! §5 POST — persist, SSE, prune
+//! Captain tick entry point — 5-phase single-pass: LOAD, GATHER, CLASSIFY, EXECUTE, POST.
 
 use std::sync::Arc;
 
@@ -175,7 +168,11 @@ async fn run_captain_tick_inner(
         Vec::new()
     };
 
-    let max_workers = workflow.agent.max_concurrent;
+    let max_workers = config
+        .captain
+        .max_concurrent_workers
+        .filter(|&n| n >= 1)
+        .unwrap_or(workflow.agent.max_concurrent);
     let active_workers = items
         .iter()
         .filter(|it| it.status == ItemStatus::InProgress && it.worker.is_some())
@@ -305,8 +302,9 @@ async fn run_captain_tick_inner(
         .await;
     }
 
-    // CaptainMerging — poll for merge session results from async CC sessions.
+    // Planning + CaptainMerging — poll for completed pipelines/merge sessions.
     if !dry_run {
+        super::dispatch_planning::poll_planning_items(&mut items, &pool).await;
         super::captain_merge_poll::poll_merging_items(
             &mut items,
             config,
@@ -324,7 +322,7 @@ async fn run_captain_tick_inner(
     }
 
     // ── §4 EXECUTE — all actions ──────────────────────────────────────
-
+    let mut changed_wb_ids: rustc_hash::FxHashSet<i64> = rustc_hash::FxHashSet::default();
     if !dry_run {
         for action in &actions_to_execute {
             // During rate-limit cooldown, skip actions that spawn CC sessions.
@@ -364,7 +362,7 @@ async fn run_captain_tick_inner(
     // Dispatch: Rework → Queued, then spawn workers for Queued/New items.
     let mut active_workers = items
         .iter()
-        .filter(|it| it.status == ItemStatus::InProgress && it.worker.is_some())
+        .filter(|it| it.status == ItemStatus::InProgress && it.worker.is_some() && !it.planning)
         .count();
 
     let mut dry_dispatch_actions: Vec<String> = Vec::new();
@@ -397,25 +395,25 @@ async fn run_captain_tick_inner(
         if let Some(r) = cancelled_result(cancel, "EXECUTE phase") {
             return Ok(r);
         }
-
         // Brief write lock: only write back items the tick actually modified.
         {
             let changed_items: Vec<mando_types::Task> = items
                 .iter()
-                .filter(|item| {
-                    match task_store::task_snapshot(item) {
-                        Ok(current_snapshot) => match pre_tick_snapshot.get(&item.id) {
-                            Some(old_snapshot) => *old_snapshot != current_snapshot,
-                            None => true,
-                        },
-                        Err(e) => {
-                            tracing::debug!(task_id = item.id, error = %e, "snapshot failed, treating as changed");
-                            true
-                        }
+                .filter(|item| match task_store::task_snapshot(item) {
+                    Ok(snap) => pre_tick_snapshot.get(&item.id).is_none_or(|old| *old != snap),
+                    Err(e) => {
+                        tracing::debug!(task_id = item.id, error = %e, "snapshot failed, treating as changed");
+                        true
                     }
                 })
                 .cloned()
                 .collect();
+            changed_wb_ids.extend(
+                changed_items
+                    .iter()
+                    .map(|t| t.workbench_id)
+                    .filter(|&id| id != 0),
+            );
             if !changed_items.is_empty() {
                 let store = match tokio::time::timeout(
                     std::time::Duration::from_secs(30),
@@ -452,10 +450,12 @@ async fn run_captain_tick_inner(
             }
         }
     }
-
     // ── §5 POST — persist, SSE, prune ─────────────────────────────────
-
     let affected_task_ids: Vec<i64> = items.iter().map(|t| t.id).collect();
+    if !dry_run && !changed_wb_ids.is_empty() {
+        let ids: Vec<i64> = changed_wb_ids.into_iter().collect();
+        super::tick_post::touch_affected_workbenches(&ids, store_lock, bus).await;
+    }
     super::tick_post::run_post_phase(
         dry_run,
         &health_path,
@@ -466,9 +466,7 @@ async fn run_captain_tick_inner(
         &affected_task_ids,
     )
     .await?;
-
     super::tick_post::run_post_cleanup(dry_run, store_lock, workflow, &mut alerts).await;
-
     let status_counts = match store_lock.read().await.status_counts().await {
         Ok(c) => c,
         Err(e) => {

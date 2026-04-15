@@ -119,7 +119,8 @@ pub(crate) async fn check_done_mergeability(
             }
             Ok(MergeStatus::Mergeable) => {
                 if config.captain.auto_merge {
-                    try_spawn_triage(&mut items[idx], config, workflow, notifier, pool).await;
+                    try_spawn_triage(&mut items[idx], config, workflow, notifier, alerts, pool)
+                        .await;
                 } else {
                     tracing::debug!(module = "captain", pr = %pr, "PR is mergeable, awaiting human");
                 }
@@ -306,16 +307,32 @@ async fn apply_closed(
 }
 
 /// Try to spawn an auto-merge triage session for an item.
-/// Skips if: no_pr, no PR number, triage already running, or already triaged this cycle.
+///
+/// Gating rules (see `auto_merge_triage` module docs):
+/// - Skip if `no_pr`, no PR number, or a triage session is already running.
+/// - Spawn on first entry to AwaitingReview and after each human reopen/rework.
+/// - Within a cycle, re-spawn up to `auto_merge_triage_max_attempts` with
+///   the configured backoff between attempts.
+/// - On reaching the cap, emit an `AutoMergeTriageExhausted` event instead
+///   of spawning.
 async fn try_spawn_triage(
     item: &mut Task,
     config: &Config,
     workflow: &CaptainWorkflow,
     notifier: &Notifier,
+    alerts: &mut Vec<String>,
     pool: &sqlx::SqlitePool,
 ) {
+    use super::auto_merge_triage::{
+        decide_spawn, derive_gate_state, emit_exhaustion, last_failure_error, SpawnDecision,
+    };
+
     // Skip no-PR tasks.
     if item.no_pr {
+        return;
+    }
+    // Skip tasks with per-task auto-merge disabled.
+    if item.no_auto_merge {
         return;
     }
     // Skip if no PR number.
@@ -326,37 +343,78 @@ async fn try_spawn_triage(
     if item.session_ids.triage.is_some() {
         return;
     }
-    // Skip if already triaged for this reopen_seq.
-    match mando_db::queries::timeline::has_auto_merge_triage(pool, item.id, item.reopen_seq).await {
-        Ok(true) => {
-            tracing::debug!(
-                module = "captain",
-                item_id = item.id,
-                reopen_seq = item.reopen_seq,
-                "auto-merge triage already ran for this cycle, skipping"
-            );
-            return;
-        }
-        Ok(false) => {}
+
+    // Load focused event list and derive cycle state. If the load fails we
+    // can't tell whether the cycle is open / how many failures occurred, so
+    // we surface to alerts and skip — without an alert the captain would
+    // silently stop auto-merging until a human noticed.
+    let events = match mando_db::queries::timeline::load_triage_gate_events(pool, item.id).await {
+        Ok(v) => v,
         Err(e) => {
             tracing::warn!(
                 module = "captain",
                 item_id = item.id,
                 error = %e,
-                "failed to check triage history, skipping spawn"
+                "failed to load triage gate events; skipping spawn"
             );
+            alerts.push(format!(
+                "Auto-merge triage gate load failed for '{}' — {} (triage skipped this tick)",
+                item.title, e
+            ));
             return;
         }
-    }
+    };
+    let state = derive_gate_state(&events);
+    let now = mando_types::now_rfc3339();
+    let max_attempts = workflow.agent.auto_merge_triage_max_attempts;
+    let backoff = &workflow.agent.auto_merge_triage_backoff_s;
 
-    if let Err(e) =
-        super::auto_merge_triage::spawn_triage(item, config, workflow, notifier, pool).await
-    {
-        tracing::warn!(
-            module = "captain",
-            item_id = item.id,
-            error = %e,
-            "failed to spawn auto-merge triage"
-        );
+    match decide_spawn(&state, max_attempts, backoff, &now) {
+        SpawnDecision::Spawn { attempt } => {
+            tracing::info!(
+                module = "captain",
+                item_id = item.id,
+                attempt,
+                max_attempts,
+                "spawning auto-merge triage"
+            );
+            if let Err(e) =
+                super::auto_merge_triage::spawn_triage(item, config, workflow, notifier, pool).await
+            {
+                tracing::warn!(
+                    module = "captain",
+                    item_id = item.id,
+                    error = %e,
+                    "failed to spawn auto-merge triage"
+                );
+            }
+        }
+        SpawnDecision::EmitExhausted => {
+            let last_err = last_failure_error(&events);
+            // `state.last_failure_at` is guaranteed Some here because
+            // `decide_spawn` only returns `EmitExhausted` when
+            // `failures_in_cycle >= max_attempts`, and the same code path
+            // sets `last_failure_at` whenever a failure is appended.
+            let last_failure_at = state.last_failure_at.clone().unwrap_or_default();
+            emit_exhaustion(
+                item,
+                last_err.as_deref(),
+                &last_failure_at,
+                state.failures_in_cycle,
+                notifier,
+                pool,
+            )
+            .await;
+        }
+        SpawnDecision::Skip(reason) => {
+            tracing::debug!(
+                module = "captain",
+                item_id = item.id,
+                reason,
+                failures_in_cycle = state.failures_in_cycle,
+                cycle_open = state.cycle_open,
+                "auto-merge triage skipped"
+            );
+        }
     }
 }

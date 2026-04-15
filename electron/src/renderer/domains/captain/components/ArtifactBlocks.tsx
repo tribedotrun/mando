@@ -44,7 +44,7 @@ export function EvidenceBlock({
         <EvidenceIcon size={16} className="flex-shrink-0 text-accent" />
         <div className="min-w-0 flex-1">
           <div className="flex items-baseline gap-2">
-            <span className="text-body-sm font-medium text-text-1">Evidence</span>
+            <span className="text-body font-medium text-text-1">Evidence</span>
             <span className="text-caption text-text-3">
               {mediaCount} {mediaCount === 1 ? 'file' : 'files'}
             </span>
@@ -131,7 +131,7 @@ export function WorkSummaryBlock({
         <FileText size={16} className="flex-shrink-0 text-accent" />
         <div className="min-w-0 flex-1">
           <div className="flex items-baseline gap-2">
-            <span className="text-body-sm font-medium text-text-1">Work Summary</span>
+            <span className="text-body font-medium text-text-1">Work Summary</span>
             <span className="text-caption text-text-3">{time}</span>
           </div>
         </div>
@@ -142,7 +142,7 @@ export function WorkSummaryBlock({
         )}
       </button>
       {expanded && (
-        <div className="mt-3 text-body-sm text-text-1">
+        <div className="mt-3 text-body text-text-1">
           <PrMarkdown text={artifact.content} />
         </div>
       )}

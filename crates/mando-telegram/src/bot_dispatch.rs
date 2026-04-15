@@ -116,6 +116,15 @@ impl TelegramBot {
             .await;
         }
         if let Some((item_id, _title)) = self.pending_nudge.remove(chat_id) {
+            let mid = self
+                .send_loading(
+                    chat_id,
+                    &format!(
+                        "\u{23f3} Nudging #{}...",
+                        mando_shared::escape_html(&item_id)
+                    ),
+                )
+                .await?;
             let gw = self.gw().clone();
             match gw
                 .post(
@@ -126,8 +135,9 @@ impl TelegramBot {
             {
                 Ok(resp) => {
                     let worker = resp["worker"].as_str().unwrap_or("worker");
-                    self.send_html(
+                    self.edit_message(
                         chat_id,
+                        mid,
                         &format!(
                             "\u{1f4e3} Nudged {} for #{}",
                             mando_shared::escape_html(worker),
@@ -137,8 +147,9 @@ impl TelegramBot {
                     .await?;
                 }
                 Err(e) => {
-                    self.send_html(
+                    self.edit_message(
                         chat_id,
+                        mid,
                         &format!(
                             "\u{274c} Nudge failed for #{}: {}",
                             mando_shared::escape_html(&item_id),

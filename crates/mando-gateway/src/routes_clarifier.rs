@@ -88,7 +88,7 @@ async fn post_task_clarify_inner(
         let item = store
             .find_by_id(id)
             .await
-            .map_err(internal_error)?
+            .map_err(|e| internal_error(e, "failed to load task"))?
             .ok_or_else(|| {
                 error_response(StatusCode::NOT_FOUND, &format!("task {id} not found"))
             })?;
@@ -118,7 +118,7 @@ async fn post_task_clarify_inner(
                 t.context = Some(new_context.clone());
             })
             .await
-            .map_err(internal_error)?;
+            .map_err(|e| internal_error(e, "failed to save clarification answer"))?;
 
         let mut updated = item;
         updated.context = Some(new_context);
@@ -178,7 +178,9 @@ async fn post_task_clarify_inner(
                     }
                     mando_captain::runtime::dashboard::force_update_task(&store, id, &update)
                         .await
-                        .map_err(internal_error)?;
+                        .map_err(|e| {
+                            internal_error(e, "failed to update task after clarification")
+                        })?;
 
                     let _ = mando_captain::runtime::timeline_emit::emit_for_task(
                         &item,
@@ -201,7 +203,7 @@ async fn post_task_clarify_inner(
                         }),
                     )
                     .await
-                    .map_err(internal_error)?;
+                    .map_err(|e| internal_error(e, "failed to update task after clarification"))?;
 
                     let _ = mando_captain::runtime::timeline_emit::emit_for_task(
                         &item,
@@ -225,7 +227,7 @@ async fn post_task_clarify_inner(
                         }),
                     )
                     .await
-                    .map_err(internal_error)?;
+                    .map_err(|e| internal_error(e, "failed to update task after clarification"))?;
                     "escalate"
                 }
             };

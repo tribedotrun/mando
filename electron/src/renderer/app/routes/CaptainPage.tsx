@@ -14,7 +14,7 @@ export function CaptainPage(): React.ReactElement {
   });
 
   return (
-    <div className="absolute inset-0 overflow-auto bg-background px-4 pb-2">
+    <div className="absolute inset-0 overflow-auto bg-background px-8 pb-6">
       <ErrorBoundary fallbackLabel="Captain view">
         <CaptainView active inlineRef={inlineRef} />
       </ErrorBoundary>

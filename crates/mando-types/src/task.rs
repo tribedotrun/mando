@@ -46,8 +46,8 @@ pub struct Task {
     pub original_prompt: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub created_at: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub workbench_id: Option<i64>,
+    #[serde(default)]
+    pub workbench_id: i64,
     /// Worktree path -- not a DB column on tasks; populated via JOIN on
     /// workbenches.  Kept on the struct so existing read-sites work unchanged.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -71,6 +71,10 @@ pub struct Task {
     pub plan: Option<String>,
     #[serde(default)]
     pub no_pr: bool,
+    #[serde(default)]
+    pub no_auto_merge: bool,
+    #[serde(default)]
+    pub planning: bool,
     #[serde(default)]
     pub worker_seq: i64,
     #[serde(default)]
@@ -145,7 +149,7 @@ impl Task {
             context: None,
             original_prompt: None,
             created_at: None,
-            workbench_id: None,
+            workbench_id: 0,
             worktree: None,
             branch: None,
             pr_number: None,
@@ -156,6 +160,8 @@ impl Task {
             last_activity_at: None,
             plan: None,
             no_pr: false,
+            no_auto_merge: false,
+            planning: false,
             worker_seq: 0,
             reopen_seq: 0,
             reopened_at: None,
@@ -213,7 +219,7 @@ impl Task {
                 self.original_prompt = Some(expect_string_field(key, value)?.to_string())
             }
             "created_at" => self.created_at = Some(expect_string_field(key, value)?.to_string()),
-            "workbench_id" => self.workbench_id = Some(expect_i64_field(key, value)?),
+            "workbench_id" => self.workbench_id = expect_i64_field(key, value)?,
             "pr_number" => self.pr_number = Some(expect_i64_field(key, value)?),
             "worker_started_at" => {
                 self.worker_started_at = Some(expect_string_field(key, value)?.to_string())
@@ -233,6 +239,8 @@ impl Task {
             }
             "plan" => self.plan = Some(expect_string_field(key, value)?.to_string()),
             "no_pr" => self.no_pr = expect_boolish_field(key, value)?,
+            "no_auto_merge" => self.no_auto_merge = expect_boolish_field(key, value)?,
+            "planning" => self.planning = expect_boolish_field(key, value)?,
             "worker_seq" => self.worker_seq = expect_i64_field(key, value)?,
             "reopen_seq" => self.reopen_seq = expect_i64_field(key, value)?,
             "reopened_at" => self.reopened_at = Some(expect_string_field(key, value)?.to_string()),
@@ -282,6 +290,8 @@ impl Task {
             "last_activity_at" => self.last_activity_at = None,
             "plan" => self.plan = None,
             "no_pr" => self.no_pr = false,
+            "no_auto_merge" => self.no_auto_merge = false,
+            "planning" => self.planning = false,
             "worker_seq" => self.worker_seq = 0,
             "reopen_seq" => self.reopen_seq = 0,
             "reopened_at" => self.reopened_at = None,

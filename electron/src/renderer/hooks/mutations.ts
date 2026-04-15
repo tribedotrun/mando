@@ -20,6 +20,7 @@ import {
   answerClarification,
   answerClarificationText,
   sendAdvisorMessage,
+  startImplementation,
   type AddTaskInput,
 } from '#renderer/api';
 import type { TaskListResponse, TaskItem } from '#renderer/types';
@@ -456,6 +457,30 @@ export function useTaskBulkCreate() {
       const failed = results.filter((r) => !r.ok).length;
       if (ok > 0) toast.success(`Created ${ok} task${ok > 1 ? 's' : ''}`);
       if (failed > 0) toast.error(`${failed} task${failed > 1 ? 's' : ''} failed`);
+    },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// useStartImplementation — re-queue PlanReady task for normal worker
+// ---------------------------------------------------------------------------
+
+export function useStartImplementation() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (vars: { id: number; context: string }) =>
+      startImplementation(vars.id, vars.context),
+    onMutate: async (vars) => {
+      await qc.cancelQueries({ queryKey: queryKeys.tasks.list() });
+      const prev = qc.getQueryData<TaskListResponse>(queryKeys.tasks.list());
+      qc.setQueryData<TaskListResponse>(queryKeys.tasks.list(), (old) =>
+        updateTaskInList(old, vars.id, { status: 'queued' }),
+      );
+      return { prev };
+    },
+    onError: (_err, _vars, context) => {
+      if (context?.prev) qc.setQueryData(queryKeys.tasks.list(), context.prev);
+      toast.error('Start implementation failed');
     },
   });
 }

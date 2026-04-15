@@ -117,10 +117,7 @@ pub(crate) async fn post_captain_tick(
     .await
     {
         Ok(val) => Ok(Json(val)),
-        Err(e) => Err(error_response(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            &e.to_string(),
-        )),
+        Err(e) => Err(internal_error(e, "captain tick failed")),
     }
 }
 
@@ -144,10 +141,7 @@ pub(crate) async fn post_captain_triage(
     .await
     {
         Ok(val) => Ok(Json(val)),
-        Err(e) => Err(error_response(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            &e.to_string(),
-        )),
+        Err(e) => Err(internal_error(e, "triage failed")),
     }
 }
 
@@ -159,10 +153,7 @@ pub(crate) async fn post_captain_stop(
     let pool = state.db.pool();
     match mando_captain::runtime::dashboard::stop_all_workers(&store, pool).await {
         Ok(killed) => Ok(Json(json!({"killed": killed}))),
-        Err(e) => Err(error_response(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            &e.to_string(),
-        )),
+        Err(e) => Err(internal_error(e, "failed to stop workers")),
     }
 }
 
@@ -196,7 +187,7 @@ async fn post_captain_nudge_inner(
     let mut item = store
         .find_by_id(id)
         .await
-        .map_err(internal_error)?
+        .map_err(|e| internal_error(e, "failed to load task"))?
         .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "item not found"))?;
     let worker_name = item
         .worker
@@ -226,14 +217,12 @@ async fn post_captain_nudge_inner(
         store.pool(),
     )
     .await
-    .map_err(|e| {
-        error_response(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            &format!("nudge failed: {e}"),
-        )
-    })?;
+    .map_err(|e| internal_error(e, "nudge failed"))?;
 
-    store.write_task(&item).await.map_err(internal_error)?;
+    store
+        .write_task(&item)
+        .await
+        .map_err(|e| internal_error(e, "failed to save task"))?;
 
     // Persist images to the task after nudge succeeds.
     if !body.saved_images.is_empty() {
@@ -285,10 +274,7 @@ pub(crate) async fn post_worker_kill(
             state.bus.send(mando_types::BusEvent::Tasks, None);
             Ok(Json(json!({"ok": true, "killed": id})))
         }
-        Err(e) => Err(error_response(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            &e.to_string(),
-        )),
+        Err(e) => Err(internal_error(e, "failed to kill worker")),
     }
 }
 
@@ -298,23 +284,15 @@ pub(crate) async fn get_workers(
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let workflow = state.captain_workflow.load_full();
     let store = state.task_store.read().await;
-    let all_items = store.load_all().await.map_err(|e| {
-        tracing::error!(error = %e, "failed to load tasks for workers endpoint");
-        error_response(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            &format!("database error: {e}"),
-        )
-    })?;
+    let all_items = store
+        .load_all()
+        .await
+        .map_err(|e| internal_error(e, "failed to load tasks"))?;
     drop(store);
 
     let health_path = mando_config::worker_health_path();
-    let health = mando_captain::io::health_store::load_health_state(&health_path).map_err(|e| {
-        tracing::error!(error = %e, "failed to load health state for workers endpoint");
-        error_response(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            &format!("health state error: {e}"),
-        )
-    })?;
+    let health = mando_captain::io::health_store::load_health_state(&health_path)
+        .map_err(|e| internal_error(e, "failed to load worker health state"))?;
     let nudge_budget = workflow.agent.max_interventions;
     let stale_threshold_s = workflow.agent.stale_threshold_s.as_secs_f64();
 
@@ -429,36 +407,24 @@ pub(crate) async fn get_worker(
     let store = state.task_store.read().await;
 
     // Search by worker name, cc_session_id, or item id across indices + details.
-    let routing = store.routing().await.map_err(|e| {
-        tracing::error!(error = %e, "failed to load routing table");
-        error_response(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            &format!("database error: {e}"),
-        )
-    })?;
+    let routing = store
+        .routing()
+        .await
+        .map_err(|e| internal_error(e, "failed to load task routing"))?;
     let found = routing
         .iter()
         .find(|idx| idx.worker.as_deref() == Some(id.as_str()) || idx.id.to_string() == id);
 
     let full_item = if let Some(idx) = found {
-        store.find_by_id(idx.id).await.map_err(|e| {
-            tracing::error!(error = %e, "failed to load worker task detail");
-            error_response(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                &format!("database error: {e}"),
-            )
-        })?
+        store
+            .find_by_id(idx.id)
+            .await
+            .map_err(|e| internal_error(e, "failed to load task"))?
     } else {
         store
             .load_all()
             .await
-            .map_err(|e| {
-                tracing::error!(error = %e, "failed to load tasks for worker lookup");
-                error_response(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    &format!("database error: {e}"),
-                )
-            })?
+            .map_err(|e| internal_error(e, "failed to load tasks"))?
             .into_iter()
             .find(|t| t.session_ids.worker.as_deref() == Some(id.as_str()))
     };

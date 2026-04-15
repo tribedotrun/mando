@@ -198,7 +198,7 @@ export function TaskDetailView({
                   <TabsTrigger
                     key={tab.key}
                     value={tab.key}
-                    className="px-3 py-1.5 text-caption font-medium"
+                    className="px-3 py-1.5 text-body font-medium"
                   >
                     {tab.label}
                   </TabsTrigger>

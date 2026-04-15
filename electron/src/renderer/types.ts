@@ -15,6 +15,7 @@ export type ItemStatus =
   | 'errored'
   | 'merged'
   | 'completed-no-pr'
+  | 'plan-ready'
   | 'canceled';
 
 export const FINALIZED_STATUSES: ItemStatus[] = ['merged', 'completed-no-pr', 'canceled'];
@@ -24,6 +25,7 @@ export const ACTION_NEEDED_STATUSES: ItemStatus[] = [
   'awaiting-review',
   'escalated',
   'needs-clarification',
+  'plan-ready',
 ];
 
 /** Statuses where work is actively happening — used for the "In progress" filter tab */
@@ -69,10 +71,12 @@ export interface TaskItem {
   escalation_report?: string;
   context?: string;
   original_prompt?: string;
-  workbench_id?: number;
+  workbench_id: number;
   worktree?: string;
   plan?: string;
   no_pr?: boolean;
+  no_auto_merge?: boolean;
+  planning?: boolean;
   resource?: string;
   images?: string;
   created_at?: string;
@@ -429,6 +433,7 @@ export interface TelegramConfig {
 export interface CaptainConfig {
   autoSchedule?: boolean;
   autoMerge?: boolean;
+  maxConcurrentWorkers?: number;
   tickIntervalS?: number;
   tz?: string;
   defaultTerminalAgent?: 'claude' | 'codex';

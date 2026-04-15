@@ -10,11 +10,43 @@ import {
 } from '#renderer/components/ui/table';
 import { CodeBlock } from '#renderer/components/ui/code-block';
 import { Separator } from '#renderer/components/ui/separator';
+import { indentDepth, renderInline } from '#renderer/domains/captain/components/pr-markdown-inline';
 
 export function PrMarkdown({ text }: { text: string }): React.ReactElement {
   const [lightbox, setLightbox] = useState<{ images: string[]; index: number } | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
+  const elements = parseBlocks(text);
+
+  const handleClick = (e: React.MouseEvent) => {
+    const target = e.target as HTMLElement;
+    if (target.tagName !== 'IMG' || !target.getAttribute('data-lightbox-src')) return;
+    e.stopPropagation();
+    const el = containerRef.current;
+    if (!el) return;
+    const imgs = Array.from(el.querySelectorAll<HTMLImageElement>('img[data-lightbox-src]'));
+    const urls = imgs.map((img) => img.src);
+    const idx = imgs.indexOf(target as HTMLImageElement);
+    if (idx !== -1 && urls.length > 0) setLightbox({ images: urls, index: idx });
+  };
+
+  return (
+    <div ref={containerRef} onClick={handleClick}>
+      {elements}
+      {lightbox && (
+        <ImageLightbox
+          images={lightbox.images}
+          index={lightbox.index}
+          onClose={() => setLightbox(null)}
+          onNavigate={(i) => setLightbox((prev) => (prev ? { ...prev, index: i } : null))}
+        />
+      )}
+    </div>
+  );
+}
+
+/** Parse markdown text into block-level React elements. */
+function parseBlocks(text: string): React.ReactNode[] {
   // Pre-process: strip HTML comments and clean up
   const cleaned = text
     .replace(/<!--[\s\S]*?-->/g, '') // strip HTML comments
@@ -35,16 +67,15 @@ export function PrMarkdown({ text }: { text: string }): React.ReactElement {
       while (i < lines.length) {
         if (lines[i].trimStart().startsWith('```')) {
           foundClose = true;
-          i++; // skip closing ```
+          i++;
           break;
         }
         codeLines.push(lines[i]);
         i++;
       }
       if (!foundClose && codeLines.length === 0) {
-        // Lone ``` with no closing -- treat as regular text
         elements.push(
-          <div key={elements.length} className="py-1 text-[12px] text-foreground">
+          <div key={elements.length} className="py-1 text-body text-foreground">
             {line}
           </div>,
         );
@@ -56,6 +87,43 @@ export function PrMarkdown({ text }: { text: string }): React.ReactElement {
           code={codeLines.join('\n')}
           language={langTag || 'text'}
         />,
+      );
+      continue;
+    }
+
+    // HTML <details>/<summary> block
+    if (line.trimStart().startsWith('<details')) {
+      const detailLines: string[] = [line];
+      i++;
+      let depth = 1;
+      // Opening line may already contain </details> (e.g. single-line or after comment stripping)
+      if (line.trimStart().includes('</details>')) depth--;
+      while (i < lines.length && depth > 0) {
+        const cur = lines[i];
+        if (cur.trimStart().startsWith('<details')) depth++;
+        if (cur.trimStart().includes('</details>') && depth > 0) depth--;
+        detailLines.push(cur);
+        i++;
+      }
+      // Extract summary text
+      const joined = detailLines.join('\n');
+      const summaryMatch = joined.match(/<summary>([\s\S]*?)<\/summary>/);
+      const summaryText = summaryMatch ? summaryMatch[1].trim() : 'Details';
+      // Extract body content between </summary> and </details>
+      const afterSummary = joined
+        .replace(/<details[^>]*>/, '')
+        .replace(/<summary>[\s\S]*?<\/summary>/, '')
+        .replace(/<\/details>\s*$/, '')
+        .trim();
+      elements.push(
+        <details key={elements.length} className="my-2 rounded border border-border px-3 py-2">
+          <summary className="cursor-pointer text-[12px] font-medium text-foreground select-none">
+            {renderInline(summaryText)}
+          </summary>
+          <div className="mt-2 text-[12px]">
+            <PrMarkdown text={afterSummary} />
+          </div>
+        </details>,
       );
       continue;
     }
@@ -120,7 +188,7 @@ export function PrMarkdown({ text }: { text: string }): React.ReactElement {
     // Headings
     if (line.startsWith('#### ')) {
       elements.push(
-        <div key={elements.length} className="mt-3 mb-1 text-[12px] font-semibold text-foreground">
+        <div key={elements.length} className="mt-3 mb-1 text-caption font-semibold text-foreground">
           {renderInline(line.slice(5))}
         </div>,
       );
@@ -129,7 +197,7 @@ export function PrMarkdown({ text }: { text: string }): React.ReactElement {
     }
     if (line.startsWith('### ')) {
       elements.push(
-        <div key={elements.length} className="mt-3 mb-1 text-[13px] font-semibold text-foreground">
+        <div key={elements.length} className="mt-3 mb-1 text-body font-semibold text-foreground">
           {renderInline(line.slice(4))}
         </div>,
       );
@@ -169,7 +237,6 @@ export function PrMarkdown({ text }: { text: string }): React.ReactElement {
           CAUTION: 'var(--destructive)',
         };
         const color = admonitionColors[type] ?? 'var(--border)';
-        // Collect continuation lines
         const bodyLines: string[] = [];
         const afterTag = content.slice(admonition[0].length).trim();
         if (afterTag) bodyLines.push(afterTag);
@@ -181,7 +248,7 @@ export function PrMarkdown({ text }: { text: string }): React.ReactElement {
         elements.push(
           <div
             key={elements.length}
-            className="my-2 rounded px-3 py-2 text-[12px] [overflow-wrap:anywhere]"
+            className="my-2 rounded px-3 py-2 text-body [overflow-wrap:anywhere]"
             style={{
               background: `color-mix(in srgb, ${color} 8%, transparent)`,
               border: `1px solid color-mix(in srgb, ${color} 25%, transparent)`,
@@ -199,7 +266,6 @@ export function PrMarkdown({ text }: { text: string }): React.ReactElement {
         );
         continue;
       }
-      // Collect consecutive blockquote lines
       const bqLines = [content];
       i++;
       while (i < lines.length && lines[i].startsWith('> ')) {
@@ -209,7 +275,7 @@ export function PrMarkdown({ text }: { text: string }): React.ReactElement {
       elements.push(
         <div
           key={elements.length}
-          className="my-1 border-l-2 border-muted-foreground/30 pl-3 text-[12px] italic text-text-3"
+          className="my-1 border-l-2 border-muted-foreground/30 pl-3 text-body italic text-text-3"
         >
           {bqLines.map((bl, bi) => (
             <div key={bi}>{renderInline(bl)}</div>
@@ -223,8 +289,13 @@ export function PrMarkdown({ text }: { text: string }): React.ReactElement {
     const checkMatch = line.match(/^(\s*)[-*]\s+\[([ xX])\]\s+(.*)/);
     if (checkMatch) {
       const checked = checkMatch[2] !== ' ';
+      const depth = indentDepth(checkMatch[1]);
       elements.push(
-        <div key={elements.length} className="flex items-start gap-2 py-1 pl-1 text-[12px]">
+        <div
+          key={elements.length}
+          className="flex items-start gap-2 py-1 text-body"
+          style={{ paddingLeft: `${4 + depth * 16}px` }}
+        >
           <span
             className="mt-0.5 inline-block h-3.5 w-3.5 shrink-0 rounded-sm text-center text-label leading-[14px]"
             style={{
@@ -245,8 +316,13 @@ export function PrMarkdown({ text }: { text: string }): React.ReactElement {
     // Unordered list
     const ulMatch = line.match(/^(\s*)[-*]\s+(.*)/);
     if (ulMatch) {
+      const depth = indentDepth(ulMatch[1]);
       elements.push(
-        <div key={elements.length} className="flex gap-2 py-1 pl-2 text-[12px]">
+        <div
+          key={elements.length}
+          className="flex gap-2 py-1 text-body"
+          style={{ paddingLeft: `${8 + depth * 16}px` }}
+        >
           <span className="text-text-3">&bull;</span>
           <span className="text-foreground">{renderInline(ulMatch[2])}</span>
         </div>,
@@ -259,8 +335,13 @@ export function PrMarkdown({ text }: { text: string }): React.ReactElement {
     const olMatch = line.match(/^(\s*)\d+\.\s+(.*)/);
     if (olMatch) {
       const num = line.match(/^(\s*)(\d+)\./)?.[2] ?? '1';
+      const depth = indentDepth(olMatch[1]);
       elements.push(
-        <div key={elements.length} className="flex gap-2 py-1 pl-2 text-[12px]">
+        <div
+          key={elements.length}
+          className="flex gap-2 py-1 text-body"
+          style={{ paddingLeft: `${8 + depth * 16}px` }}
+        >
           <span className="w-4 shrink-0 text-right text-text-3">{num}.</span>
           <span className="text-foreground">{renderInline(olMatch[2])}</span>
         </div>,
@@ -278,178 +359,12 @@ export function PrMarkdown({ text }: { text: string }): React.ReactElement {
 
     // Regular paragraph
     elements.push(
-      <div
-        key={elements.length}
-        className="break-words py-1 text-[12px] leading-relaxed text-foreground"
-      >
+      <div key={elements.length} className="break-words py-1 text-body text-foreground">
         {renderInline(line)}
       </div>,
     );
     i++;
   }
 
-  const handleClick = (e: React.MouseEvent) => {
-    const target = e.target as HTMLElement;
-    if (target.tagName !== 'IMG' || !target.getAttribute('data-lightbox-src')) return;
-    const el = containerRef.current;
-    if (!el) return;
-    const imgs = Array.from(el.querySelectorAll<HTMLImageElement>('img[data-lightbox-src]'));
-    const urls = imgs.map((img) => img.src);
-    const idx = imgs.indexOf(target as HTMLImageElement);
-    if (idx !== -1 && urls.length > 0) setLightbox({ images: urls, index: idx });
-  };
-
-  return (
-    <div ref={containerRef} onClick={handleClick}>
-      {elements}
-      {lightbox && (
-        <ImageLightbox
-          images={lightbox.images}
-          index={lightbox.index}
-          onClose={() => setLightbox(null)}
-          onNavigate={(i) => setLightbox((prev) => (prev ? { ...prev, index: i } : null))}
-        />
-      )}
-    </div>
-  );
-}
-
-/** Render inline markdown: **bold**, *italic*, `code`, [links](url), ![images](url), HTML tags. */
-function renderInline(text: string): React.ReactNode {
-  // Strip remaining inline HTML comments
-  const cleaned = text.replace(/<!--.*?-->/g, '');
-  const parts: React.ReactNode[] = [];
-  // Match: images, links, bold, italic, inline code, strikethrough, HTML tags
-  const regex =
-    /!\[([^\]]*)\]\(([^)]+)\)|\[([^\]]*)\]\(([^)]+)\)|\*\*(.+?)\*\*|\*(.+?)\*|`(.+?)`|~~(.+?)~~|<(sup|sub|strong|em|b|i)>(.*?)<\/\9>|<a\s+href="([^"]*)"[^>]*>(.*?)<\/a>|<img\s+[^>]*src="([^"]*)"[^>]*\/?>/g;
-  let last = 0;
-  let key = 0;
-  let match: RegExpExecArray | null;
-
-  while ((match = regex.exec(cleaned)) !== null) {
-    if (match.index > last) {
-      parts.push(cleaned.slice(last, match.index));
-    }
-    if (match[1] !== undefined) {
-      // Image: ![alt](url) — only allow https:// to prevent resource loading exploits
-      const imgUrl = match[2] ?? '';
-      if (imgUrl.startsWith('https://')) {
-        parts.push(
-          <img
-            key={key++}
-            src={imgUrl}
-            alt={match[1]}
-            data-lightbox-src={imgUrl}
-            className="my-1 max-h-[300px] max-w-full cursor-pointer rounded transition-opacity hover:opacity-80"
-          />,
-        );
-      } else {
-        parts.push(
-          <span key={key++} className="italic text-text-3">
-            [{match[1] || 'image'}]
-          </span>,
-        );
-      }
-    } else if (match[3] !== undefined) {
-      // Link: [text](url) — only allow https:// to prevent local navigation exploits
-      const linkUrl = match[4] ?? '';
-      const isSafe = linkUrl.startsWith('https://');
-      parts.push(
-        isSafe ? (
-          <a
-            key={key++}
-            href={linkUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-muted-foreground hover:text-foreground hover:underline"
-          >
-            {match[3]}
-          </a>
-        ) : (
-          <span key={key++} className="text-muted-foreground">
-            {match[3]}
-          </span>
-        ),
-      );
-    } else if (match[5]) {
-      // Bold
-      parts.push(
-        <strong key={key++} className="font-semibold text-foreground">
-          {match[5]}
-        </strong>,
-      );
-    } else if (match[6]) {
-      // Italic
-      parts.push(<em key={key++}>{match[6]}</em>);
-    } else if (match[7]) {
-      // Inline code
-      parts.push(
-        <code
-          key={key++}
-          className="break-all rounded bg-secondary px-1 py-1 font-mono text-[11px]"
-        >
-          {match[7]}
-        </code>,
-      );
-    } else if (match[8]) {
-      // Strikethrough
-      parts.push(
-        <del key={key++} className="text-text-3">
-          {match[8]}
-        </del>,
-      );
-    } else if (match[9]) {
-      // HTML inline tags: <sup>, <sub>, <strong>, <em>, <b>, <i>
-      const tag = match[9];
-      const content = match[10];
-      const Tag = ({ sup: 'sup', sub: 'sub', strong: 'strong', em: 'em', b: 'strong', i: 'em' }[
-        tag
-      ] ?? 'span') as keyof React.JSX.IntrinsicElements;
-      parts.push(<Tag key={key++}>{content}</Tag>);
-    } else if (match[11] !== undefined) {
-      // HTML <a> tag — same https-only sanitization as markdown links
-      const aHref = match[11] ?? '';
-      const aIsSafe = aHref.startsWith('https://');
-      parts.push(
-        aIsSafe ? (
-          <a
-            key={key++}
-            href={aHref}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-muted-foreground hover:text-foreground hover:underline"
-          >
-            {match[12]}
-          </a>
-        ) : (
-          <span key={key++} className="text-muted-foreground">
-            {match[12]}
-          </span>
-        ),
-      );
-    } else if (match[13] !== undefined) {
-      // HTML <img> tag — same https-only sanitization as markdown images
-      const imgSrc = match[13] ?? '';
-      parts.push(
-        imgSrc.startsWith('https://') ? (
-          <img
-            key={key++}
-            src={imgSrc}
-            alt=""
-            data-lightbox-src={imgSrc}
-            className="my-1 max-h-[300px] max-w-full cursor-pointer rounded transition-opacity hover:opacity-80"
-          />
-        ) : (
-          <span key={key++} className="italic text-text-3">
-            [image]
-          </span>
-        ),
-      );
-    }
-    last = match.index + match[0].length;
-  }
-  if (last < cleaned.length) {
-    parts.push(cleaned.slice(last));
-  }
-  return parts.length === 1 ? parts[0] : <>{parts}</>;
+  return elements;
 }

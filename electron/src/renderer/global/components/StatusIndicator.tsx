@@ -34,6 +34,7 @@ export const STATUS_TOOLTIP: Record<string, string> = {
   errored: 'Errored',
   merged: 'Merged',
   'completed-no-pr': 'Done',
+  'plan-ready': 'Plan ready',
   canceled: 'Canceled',
 };
 
@@ -52,6 +53,7 @@ const ICON_MAP: Record<string, () => React.ReactElement> = {
   errored: () => <CircleX size={S} color="var(--destructive)" />,
   merged: () => <CircleCheck size={S} color="var(--text-3)" />,
   'completed-no-pr': () => <CircleCheck size={S} color="var(--text-3)" />,
+  'plan-ready': () => <CircleDot size={S} color="var(--review)" />,
   canceled: () => <Ban size={S} color="var(--text-4)" />,
 };
 

@@ -23,12 +23,7 @@ async fn resolve_project_db(
         name.ok_or_else(|| error_response(StatusCode::BAD_REQUEST, "project name required"))?;
     mando_db::queries::projects::resolve(pool, name)
         .await
-        .map_err(|e| {
-            error_response(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                &format!("project lookup failed: {e}"),
-            )
-        })?
+        .map_err(|e| internal_error(e, "failed to resolve project"))?
         .ok_or_else(|| error_response(StatusCode::NOT_FOUND, &format!("project not found: {name}")))
 }
 
@@ -105,11 +100,11 @@ pub(crate) async fn post_worktrees(
 
     git::fetch_origin(&project_path)
         .await
-        .map_err(internal_error)?;
+        .map_err(|e| internal_error(e, "git fetch failed"))?;
 
     let default_br = git::default_branch(&project_path)
         .await
-        .map_err(internal_error)?;
+        .map_err(|e| internal_error(e, "failed to detect default branch"))?;
 
     // Clean up stale worktree/branch if they exist.
     if wt_path.exists() {
@@ -142,7 +137,7 @@ pub(crate) async fn post_worktrees(
 
     git::create_worktree(&project_path, &branch, &wt_path, &default_br)
         .await
-        .map_err(internal_error)?;
+        .map_err(|e| internal_error(e, "failed to create worktree"))?;
 
     // Create a workbench row — use the suffix as the title (e.g. "0408-1625").
     let wb_title = suffix.clone();
@@ -169,7 +164,7 @@ pub(crate) async fn post_worktrees(
                     "failed to clean up orphan worktree after workbench insert failure"
                 );
             }
-            return Err(internal_error(e));
+            return Err(internal_error(e, "failed to create workbench"));
         }
     };
 
@@ -188,7 +183,7 @@ pub(crate) async fn get_worktrees(
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let projects = mando_db::queries::projects::list(state.db.pool())
         .await
-        .map_err(internal_error)?;
+        .map_err(|e| internal_error(e, "failed to load projects"))?;
     let mut worktrees = Vec::new();
 
     for row in &projects {
@@ -225,7 +220,7 @@ pub(crate) async fn post_worktrees_prune(
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let projects = mando_db::queries::projects::list(state.db.pool())
         .await
-        .map_err(internal_error)?;
+        .map_err(|e| internal_error(e, "failed to load projects"))?;
     let mut pruned = Vec::new();
 
     for row in &projects {
@@ -286,7 +281,7 @@ pub(crate) async fn post_worktrees_remove(
 
     git::remove_worktree(&repo_path, &wt_path)
         .await
-        .map_err(internal_error)?;
+        .map_err(|e| internal_error(e, "failed to remove worktree"))?;
 
     Ok(Json(json!({ "ok": true })))
 }
@@ -304,7 +299,7 @@ pub(crate) async fn post_worktrees_cleanup(
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let projects = mando_db::queries::projects::list(state.db.pool())
         .await
-        .map_err(internal_error)?;
+        .map_err(|e| internal_error(e, "failed to load projects"))?;
     let mut orphans = Vec::new();
     let mut removed = Vec::new();
 
@@ -391,10 +386,7 @@ pub(crate) async fn post_worktrees_cleanup(
                 error = %e,
                 "failed to read worktrees dir"
             );
-            return Err(error_response(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                &format!("read_dir {} failed: {e}", wt_dir.display()),
-            ));
+            return Err(internal_error(e, "failed to read worktrees directory"));
         }
     };
 

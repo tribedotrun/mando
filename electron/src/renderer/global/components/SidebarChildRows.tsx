@@ -26,7 +26,7 @@ export function TaskRow({
   return (
     <button
       onClick={() => onOpenTask?.(task.id, task.workbench_id ?? undefined)}
-      className="group flex w-full items-center gap-2 rounded px-2 py-1 text-left text-[12px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+      className="group flex w-full items-center gap-2 rounded px-2 py-1 text-left text-caption text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
       style={{ background: 'none', border: 'none', cursor: 'pointer' }}
     >
       <span className="relative shrink-0 translate-y-px">
@@ -97,7 +97,7 @@ export function WorkbenchRow({
   activeWorktreeCwd: string | null;
   renamingWbId: number | null;
   setRenamingWbId: (id: number | null) => void;
-  onOpenWorktree?: (worktree: { project: string; cwd: string }) => void;
+  onOpenWorktree?: (worktree: { id?: number; project: string; cwd: string }) => void;
   onArchiveWorkbench?: (id: number) => void;
   onPinWorkbench?: (id: number) => void;
   onUnpinWorkbench?: (id: number) => void;
@@ -143,8 +143,8 @@ export function WorkbenchRow({
 
   const rowButton = (
     <button
-      onClick={() => onOpenWorktree?.({ project: projectName, cwd: wb.worktree })}
-      className={`sidebar-workbench-item group flex w-full items-center gap-2 rounded px-2 py-1 text-left text-[12px] transition-colors hover:bg-muted hover:text-foreground ${isActive ? 'bg-muted font-medium text-foreground' : 'text-muted-foreground'}`}
+      onClick={() => onOpenWorktree?.({ id: wb.id, project: projectName, cwd: wb.worktree })}
+      className={`sidebar-workbench-item group flex w-full items-center gap-2 rounded px-2 py-1 text-left text-caption transition-colors hover:bg-muted hover:text-foreground ${isActive ? 'bg-muted font-medium text-foreground' : 'text-muted-foreground'}`}
       style={{
         background: isActive ? undefined : 'none',
         border: 'none',

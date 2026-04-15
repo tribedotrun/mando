@@ -113,6 +113,19 @@ pub fn try_validate_agent_config(agent: &AgentConfig, tick_interval_s: u64) -> R
     if agent.captain_review_timeout_s.is_zero() {
         errors.push("captain_review_timeout_s must be > 0".into());
     }
+    if agent.auto_merge_triage_max_attempts == 0 {
+        errors.push("auto_merge_triage_max_attempts must be > 0".into());
+    }
+    if agent.auto_merge_triage_max_attempts > 0 {
+        let expected_backoff_len = (agent.auto_merge_triage_max_attempts - 1) as usize;
+        if agent.auto_merge_triage_backoff_s.len() != expected_backoff_len {
+            errors.push(format!(
+                "auto_merge_triage_backoff_s length ({}) must equal auto_merge_triage_max_attempts - 1 ({})",
+                agent.auto_merge_triage_backoff_s.len(),
+                expected_backoff_len
+            ));
+        }
+    }
 
     // Relative checks only when individual values are positive.
     if !agent.worker_timeout_s.is_zero()

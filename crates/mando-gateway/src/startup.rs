@@ -8,8 +8,11 @@ use crate::AppState;
 /// Clean up stale state on startup: dead PIDs, stuck scout items, and
 /// orphan research runs from interrupted daemon runs.
 pub async fn startup_reconciliation(pool: &SqlitePool) {
-    if let Err(e) = mando_captain::io::pid_registry::cleanup_dead() {
-        tracing::warn!(module = "startup", error = %e, "pid_registry cleanup_dead failed");
+    if let Err(e) = mando_captain::io::pid_registry::cleanup_on_startup().await {
+        // Escalated to error: a failure here means orphan subprocesses
+        // from a prior daemon may still be running, which downstream
+        // session reconciliation cannot detect on its own.
+        tracing::error!(module = "startup", error = %e, "pid_registry cleanup_on_startup failed");
     }
     match mando_db::queries::scout::reset_stale_fetched(pool).await {
         Ok(0) => {}

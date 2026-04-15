@@ -32,17 +32,30 @@ async fn find_task(gw: &GatewayClient, id: &str) -> Option<mando_types::Task> {
 // ── Merge ────────────────────────────────────────────────────────────
 
 /// Initiate captain merge for a task's PR.
-pub(crate) async fn merge(bot: &TelegramBot, cid: &str, item_id: &str) -> Result<()> {
+///
+/// If `loading_mid` is `Some`, the result edits that message in-place.
+/// If `None`, a loading placeholder is sent first and then edited.
+pub(crate) async fn merge(
+    bot: &TelegramBot,
+    cid: &str,
+    item_id: &str,
+    loading_mid: Option<i64>,
+) -> Result<()> {
     let esc = mando_shared::escape_html(item_id);
     let gw = bot.gw();
 
+    // Validate preconditions before sending loading message.
     let item = find_task(gw, item_id)
         .await
         .ok_or_else(|| anyhow::anyhow!("item #{item_id} not found"))?;
-
     let pr_num = item
         .pr_number
         .ok_or_else(|| anyhow::anyhow!("item #{item_id} has no PR"))?;
+
+    let mid = match loading_mid {
+        Some(m) => m,
+        None => bot.send_loading(cid, "\u{23f3} Merging\u{2026}").await?,
+    };
 
     match gw
         .post(
@@ -53,12 +66,16 @@ pub(crate) async fn merge(bot: &TelegramBot, cid: &str, item_id: &str) -> Result
     {
         Ok(_) => {
             info!("merge: captain merge initiated for #{item_id}");
-            bot.send_html(cid, &format!("\u{1f680} Captain merge started for #{esc}"))
-                .await?;
+            bot.edit_message(
+                cid,
+                mid,
+                &format!("\u{1f680} Captain merge started for #{esc}"),
+            )
+            .await?;
         }
         Err(e) => {
             error!("merge: failed for #{item_id}: {e}");
-            bot.send_html(cid, &format!("\u{274c} Merge failed for #{esc}: {e}"))
+            bot.edit_message(cid, mid, &format!("\u{274c} Merge failed for #{esc}: {e}"))
                 .await?;
         }
     }
@@ -68,9 +85,21 @@ pub(crate) async fn merge(bot: &TelegramBot, cid: &str, item_id: &str) -> Result
 // ── Accept ───────────────────────────────────────────────────────────
 
 /// Accept (mark as merged) a task without triggering a PR merge.
-pub(crate) async fn accept(bot: &TelegramBot, cid: &str, item_id: &str) -> Result<()> {
+///
+/// If `loading_mid` is `Some`, the result edits that message in-place.
+/// If `None`, a loading placeholder is sent first and then edited.
+pub(crate) async fn accept(
+    bot: &TelegramBot,
+    cid: &str,
+    item_id: &str,
+    loading_mid: Option<i64>,
+) -> Result<()> {
     let esc = mando_shared::escape_html(item_id);
     let id_num = parse_item_id(item_id)?;
+    let mid = match loading_mid {
+        Some(m) => m,
+        None => bot.send_loading(cid, "\u{23f3} Accepting\u{2026}").await?,
+    };
 
     match bot
         .gw()
@@ -79,12 +108,12 @@ pub(crate) async fn accept(bot: &TelegramBot, cid: &str, item_id: &str) -> Resul
     {
         Ok(_) => {
             info!("accept: item #{item_id} accepted");
-            bot.send_html(cid, &format!("\u{2705} Accepted #{esc}"))
+            bot.edit_message(cid, mid, &format!("\u{2705} Accepted #{esc}"))
                 .await?;
         }
         Err(e) => {
             error!("accept: failed for #{item_id}: {e}");
-            bot.send_html(cid, &format!("\u{274c} Accept failed for #{esc}: {e}"))
+            bot.edit_message(cid, mid, &format!("\u{274c} Accept failed for #{esc}: {e}"))
                 .await?;
         }
     }
@@ -103,6 +132,9 @@ pub(crate) async fn reopen_with_feedback(
 ) -> Result<()> {
     let esc = mando_shared::escape_html(title);
     let id_num = parse_item_id(item_id)?;
+    let mid = bot
+        .send_loading(cid, &format!("\u{23f3} Reopening: {esc}\u{2026}"))
+        .await?;
 
     match bot
         .gw()
@@ -114,12 +146,12 @@ pub(crate) async fn reopen_with_feedback(
     {
         Ok(_) => {
             info!("reopen: item #{item_id} reopened with feedback");
-            bot.send_html(cid, &format!("\u{1f504} Reopened: {esc}"))
+            bot.edit_message(cid, mid, &format!("\u{1f504} Reopened: {esc}"))
                 .await?;
         }
         Err(e) => {
             error!("reopen: failed for #{item_id}: {e}");
-            bot.send_html(cid, &format!("\u{274c} Reopen failed for {esc}: {e}"))
+            bot.edit_message(cid, mid, &format!("\u{274c} Reopen failed for {esc}: {e}"))
                 .await?;
         }
     }
@@ -138,6 +170,9 @@ pub(crate) async fn rework_with_feedback(
 ) -> Result<()> {
     let esc = mando_shared::escape_html(title);
     let id_num = parse_item_id(item_id)?;
+    let mid = bot
+        .send_loading(cid, &format!("\u{23f3} Reworking: {esc}\u{2026}"))
+        .await?;
 
     match bot
         .gw()
@@ -149,12 +184,12 @@ pub(crate) async fn rework_with_feedback(
     {
         Ok(_) => {
             info!("rework: item #{item_id} sent to rework");
-            bot.send_html(cid, &format!("\u{1f504} Rework: {esc}"))
+            bot.edit_message(cid, mid, &format!("\u{1f504} Rework: {esc}"))
                 .await?;
         }
         Err(e) => {
             error!("rework: failed for #{item_id}: {e}");
-            bot.send_html(cid, &format!("\u{274c} Rework failed for {esc}: {e}"))
+            bot.edit_message(cid, mid, &format!("\u{274c} Rework failed for {esc}: {e}"))
                 .await?;
         }
     }
@@ -197,10 +232,14 @@ pub(crate) async fn handoff(
 // ── Todo confirm ─────────────────────────────────────────────────────
 
 /// Write confirmed todo items to the task list via multipart POST.
+///
+/// If `loading_mid` is `Some`, the final summary edits that message in-place.
+/// If `None`, the summary is sent as a new message.
 pub(crate) async fn add_todo_items(
     bot: &TelegramBot,
     cid: &str,
     items: &[crate::bot::TodoItem],
+    loading_mid: Option<i64>,
 ) -> Result<()> {
     let mut ok_titles: Vec<String> = Vec::new();
 
@@ -309,14 +348,18 @@ pub(crate) async fn add_todo_items(
             .find_map(|i| i.project.as_deref())
             .map(|p| format!(" to <b>{}</b>", mando_shared::escape_html(p)))
             .unwrap_or_default();
-        bot.send_html(
-            cid,
-            &format!(
-                "\u{2705} Added {} task(s){project_label}:\n\n{list}",
-                ok_titles.len()
-            ),
-        )
-        .await?;
+        let text = format!(
+            "\u{2705} Added {} task(s){project_label}:\n\n{list}",
+            ok_titles.len()
+        );
+        if let Some(mid) = loading_mid {
+            bot.edit_message(cid, mid, &text).await?;
+        } else {
+            bot.send_html(cid, &text).await?;
+        }
+    } else if let Some(mid) = loading_mid {
+        bot.edit_message(cid, mid, "\u{274c} All tasks failed to add.")
+            .await?;
     }
     Ok(())
 }

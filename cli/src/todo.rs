@@ -4,6 +4,7 @@ use clap::{Args, Subcommand};
 use serde_json::json;
 
 use crate::http::{parse_id, DaemonClient};
+use crate::todo_display::{fetch_task_by_id, id_from_value};
 
 #[derive(Args)]
 pub(crate) struct TodoArgs {
@@ -26,6 +27,12 @@ pub(crate) enum TodoCommand {
         /// Mark as no-PR / research-only
         #[arg(long)]
         no_pr: bool,
+        /// Disable auto-merge for this task even if global auto-merge is on
+        #[arg(long)]
+        no_auto_merge: bool,
+        /// Planning/discussion mode -- autonomous plan refinement, no implementation
+        #[arg(long)]
+        discuss: bool,
     },
     /// Bulk-add items (one per line or via --stdin)
     Bulk {
@@ -111,15 +118,27 @@ pub(crate) async fn handle(args: TodoArgs) -> anyhow::Result<()> {
             project,
             plan,
             no_pr,
-        } => handle_add(&title, project.as_deref(), plan.as_deref(), no_pr).await,
+            no_auto_merge,
+            discuss,
+        } => {
+            handle_add(
+                &title,
+                project.as_deref(),
+                plan.as_deref(),
+                no_pr,
+                no_auto_merge,
+                discuss,
+            )
+            .await
+        }
         TodoCommand::Bulk {
             items,
             stdin,
             project,
         } => handle_bulk(items.as_deref(), stdin, project.as_deref()).await,
         TodoCommand::Delete { item_id } => handle_delete(&item_id).await,
-        TodoCommand::Show { item_id } => handle_show(&item_id).await,
-        TodoCommand::List { all } => handle_list(all).await,
+        TodoCommand::Show { item_id } => crate::todo_display::handle_show(&item_id).await,
+        TodoCommand::List { all } => crate::todo_display::handle_list(all).await,
         TodoCommand::Summary { item_id, file } => {
             crate::todo_artifacts::handle_summary(item_id.as_deref(), file.as_deref()).await
         }
@@ -142,6 +161,8 @@ async fn handle_add(
     project: Option<&str>,
     plan: Option<&str>,
     no_pr: bool,
+    no_auto_merge: bool,
+    discuss: bool,
 ) -> anyhow::Result<()> {
     let client = DaemonClient::discover()?;
     let mut form = reqwest::multipart::Form::new()
@@ -155,6 +176,12 @@ async fn handle_add(
     }
     if no_pr {
         form = form.text("no_pr", "true");
+    }
+    if no_auto_merge {
+        form = form.text("no_auto_merge", "true");
+    }
+    if discuss {
+        form = form.text("planning", "true");
     }
     let result = client.post_multipart("/api/tasks/add", form).await?;
     let id = id_from_value(&result["id"]);
@@ -207,118 +234,6 @@ async fn handle_delete(item_id: &str) -> anyhow::Result<()> {
         .await?;
     println!("Deleted item #{item_id}.");
     Ok(())
-}
-
-async fn handle_show(item_id: &str) -> anyhow::Result<()> {
-    let id_num = parse_id(item_id, "item")?;
-    let client = DaemonClient::discover()?;
-    let item = fetch_task_by_id(&client, id_num).await?;
-
-    let status = item["status"].as_str().unwrap_or("?");
-    let title = item["title"].as_str().unwrap_or("?");
-    let project = item["project"].as_str().unwrap_or("?");
-    let worker = item["worker"].as_str().unwrap_or("-");
-    let worktree = item["worktree"].as_str().unwrap_or("-");
-    let pr = item["pr_number"]
-        .as_i64()
-        .map(|n| format!("#{n}"))
-        .unwrap_or_else(|| "-".into());
-    let created = item["created_at"].as_str().unwrap_or("?");
-    let last_activity = item["last_activity_at"].as_str().unwrap_or("-");
-    let worker_seq = item["worker_seq"].as_i64().unwrap_or(0);
-    let reopen_seq = item["reopen_seq"].as_i64().unwrap_or(0);
-    let intervention = item["intervention_count"].as_i64().unwrap_or(0);
-
-    println!("Task #{item_id}: {title}");
-    println!("{}", "-".repeat(60));
-    println!("  Status:        {status}");
-    println!("  Project:       {project}");
-    println!("  Worker:        {worker}");
-    println!("  Worktree:      {worktree}");
-    println!("  PR:            {pr}");
-    println!("  Created:       {created}");
-    println!("  Last activity: {last_activity}");
-    println!("  Worker seq:    {worker_seq}");
-    println!("  Reopen seq:    {reopen_seq}");
-    println!("  Interventions: {intervention}");
-
-    // Fetch sessions for this task.
-    let sessions_result = client
-        .get(&format!("/api/tasks/{item_id}/sessions"))
-        .await?;
-    let empty = vec![];
-    let sessions = sessions_result["sessions"].as_array().unwrap_or(&empty);
-    if !sessions.is_empty() {
-        println!("\n  Sessions ({}):", sessions.len());
-        for s in sessions {
-            let sid = s["session_id"].as_str().unwrap_or("?");
-            let caller = s["caller"].as_str().unwrap_or("?");
-            let cost = s["cost_usd"]
-                .as_f64()
-                .map(|c| format!("${c:.2}"))
-                .unwrap_or_else(|| "-".into());
-            let dur = s["duration_ms"]
-                .as_i64()
-                .map(|d| format!("{}s", d / 1000))
-                .unwrap_or_else(|| "-".into());
-            let status = s["status"].as_str().unwrap_or("?");
-            println!("    {sid}  {caller:<22}  {dur:>6}  {cost:>8}  {status}");
-        }
-    }
-
-    Ok(())
-}
-
-async fn handle_list(all: bool) -> anyhow::Result<()> {
-    let client = DaemonClient::discover()?;
-    let path = if all {
-        "/api/tasks?include_archived=true"
-    } else {
-        "/api/tasks"
-    };
-    let resp = client.get(path).await?;
-    // API returns {"count": N, "items": [...]} or a bare array
-    let arr = resp
-        .get("items")
-        .and_then(|v| v.as_array())
-        .or_else(|| resp.as_array());
-
-    println!(
-        "{:>4}  {:<15}  {:<20}  {:<14}  {:<8}  TITLE",
-        "ID", "STATUS", "WORKER", "PR", "PROJECT"
-    );
-    println!("{}", "-".repeat(95));
-
-    if let Some(items) = arr {
-        for item in items {
-            let status = item["status"].as_str().unwrap_or("unknown");
-            let id = id_from_value(&item["id"]);
-            let project_full = item["project"].as_str().unwrap_or("");
-            let project = project_full.rsplit('/').next().unwrap_or(project_full);
-            let worker = item["worker"].as_str().unwrap_or("");
-            let pr = item["pr_number"]
-                .as_i64()
-                .map(|n| format!("#{n}"))
-                .unwrap_or_default();
-            let title = item["title"].as_str().unwrap_or("");
-            println!("{id:>4}  {status:<15}  {worker:<20}  {pr:<14}  {project:<8}  {title}");
-        }
-    }
-    Ok(())
-}
-
-/// Fetch all tasks and return the one matching `id_num`. Errors if the item
-/// is not found. The daemon has no single-task-by-id GET endpoint, so we
-/// always list and filter client-side.
-async fn fetch_task_by_id(client: &DaemonClient, id_num: i64) -> anyhow::Result<serde_json::Value> {
-    let resp = client.get("/api/tasks?include_archived=true").await?;
-    let arr = resp
-        .get("items")
-        .and_then(|v| v.as_array())
-        .or_else(|| resp.as_array());
-    arr.and_then(|a| a.iter().find(|it| it["id"].as_i64() == Some(id_num)))
-        .cloned()
-        .ok_or_else(|| anyhow::anyhow!("item #{id_num} not found"))
 }
 
 async fn handle_ask(item_id: &str, message: Option<&str>, end: bool) -> anyhow::Result<()> {
@@ -380,6 +295,34 @@ async fn handle_input(item_id: &str, message: &str) -> anyhow::Result<()> {
     match status {
         "in-progress" => {
             anyhow::bail!("item #{item_id} has an active worker — use `captain nudge` instead");
+        }
+        "plan-ready" => {
+            // Re-queue as a normal worker with the plan injected into context.
+            let timeline: Vec<serde_json::Value> = client
+                .get(&format!("/api/tasks/{id_num}/timeline"))
+                .await?
+                .as_array()
+                .cloned()
+                .unwrap_or_default();
+            let plan_text = timeline
+                .iter()
+                .rev()
+                .find(|e| e["event_type"].as_str() == Some("plan_completed"))
+                .and_then(|e| e["data"]["plan"].as_str())
+                .unwrap_or("");
+            let existing_ctx = item["context"].as_str().unwrap_or("");
+            let new_ctx = if plan_text.is_empty() {
+                format!("{existing_ctx}\n\n[Human] {message}")
+            } else {
+                format!("{existing_ctx}\n\n## Approved Plan\n{plan_text}\n\n[Human] {message}")
+            };
+            let body = json!({
+                "planning": false,
+                "context": new_ctx,
+                "status": "queued"
+            });
+            client.patch(&format!("/api/tasks/{id_num}"), &body).await?;
+            println!("Re-queued item #{item_id} for implementation with plan.");
         }
         "merged" | "completed-no-pr" | "canceled" | "escalated" | "awaiting-review"
         | "handed-off" | "errored" => {
@@ -445,14 +388,6 @@ async fn handle_history(item_id: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Extract an ID from a JSON value that may be a number or a string.
-fn id_from_value(v: &serde_json::Value) -> String {
-    v.as_i64()
-        .map(|n| n.to_string())
-        .or_else(|| v.as_str().map(String::from))
-        .unwrap_or_else(|| "?".into())
-}
-
 #[cfg(test)]
 fn is_terminal(status: &str) -> bool {
     matches!(status, "merged" | "completed-no-pr" | "canceled")
@@ -484,11 +419,15 @@ mod tests {
                     project,
                     plan,
                     no_pr,
+                    no_auto_merge,
+                    discuss,
                 } => {
                     assert_eq!(title, "Fix bug");
                     assert!(project.is_none());
                     assert!(plan.is_none());
                     assert!(!no_pr);
+                    assert!(!no_auto_merge);
+                    assert!(!discuss);
                 }
                 _ => panic!("expected Add"),
             },

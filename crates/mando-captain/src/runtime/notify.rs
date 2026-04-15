@@ -295,21 +295,41 @@ impl Notifier {
             None => return,
         };
 
-        match &rl.status {
-            mando_cc::RateLimitStatus::Allowed => {
-                // Recovery — clear tier state so the next warning cycle starts fresh.
-                match RATE_LIMIT_TRACKER.lock() {
-                    Ok(mut tracker) => tracker.clear(),
-                    Err(e) => {
-                        tracing::error!("rate limit tracker mutex poisoned: {e}");
-                    }
-                }
-                if let Some(cid) = credential_id {
-                    super::credential_rate_limit::clear(pool, cid).await;
-                } else {
-                    super::ambient_rate_limit::clear();
+        if rl.status == mando_cc::RateLimitStatus::Allowed {
+            // Recovery — clear tier state so the next warning cycle starts fresh.
+            match RATE_LIMIT_TRACKER.lock() {
+                Ok(mut tracker) => tracker.clear(),
+                Err(e) => {
+                    tracing::error!("rate limit tracker mutex poisoned: {e}");
                 }
             }
+            if let Some(cid) = credential_id {
+                super::credential_rate_limit::clear(pool, cid).await;
+            } else {
+                super::ambient_rate_limit::clear();
+            }
+            return;
+        }
+
+        // Resolve account label only for paths that emit a notification.
+        let account_suffix = match credential_id {
+            Some(id) => match mando_db::queries::credentials::labels_by_ids(pool, &[id]).await {
+                Ok(labels) => match labels.get(&id) {
+                    Some(label) => {
+                        let escaped = mando_shared::telegram_format::escape_html(label);
+                        format!(" (account: {escaped})")
+                    }
+                    None => format!(" (credential #{id})"),
+                },
+                Err(e) => {
+                    tracing::warn!("failed to look up credential label for id {id}: {e}");
+                    format!(" (credential #{id})")
+                }
+            },
+            None => " (host account)".to_string(),
+        };
+
+        match &rl.status {
             mando_cc::RateLimitStatus::Rejected => {
                 if let Some(cid) = credential_id {
                     super::credential_rate_limit::activate(
@@ -323,7 +343,7 @@ impl Notifier {
                     super::ambient_rate_limit::activate(rl.resets_at);
                 }
                 let msg = format!(
-                    "Rate limited — request rejected (resets at {})",
+                    "Rate limited — request rejected (resets at {}){}",
                     rl.resets_at
                         .map(|t| {
                             let secs = t as i64;
@@ -334,7 +354,8 @@ impl Notifier {
                                 })
                                 .unwrap_or_else(|_| t.to_string())
                         })
-                        .unwrap_or_else(|| "unknown".into())
+                        .unwrap_or_else(|| "unknown".into()),
+                    account_suffix
                 );
                 self.emit_rate_limit(&msg, NotifyLevel::High, "rejected", rl)
                     .await;
@@ -345,7 +366,8 @@ impl Notifier {
                     None => {
                         // No utilization data — always notify (the API is
                         // telling us we're approaching the limit).
-                        let msg = "Rate limit warning — utilization unknown".to_string();
+                        let msg =
+                            format!("Rate limit warning — utilization unknown{account_suffix}");
                         self.emit_rate_limit(&msg, NotifyLevel::Normal, "allowed_warning", rl)
                             .await;
                         return;
@@ -368,7 +390,7 @@ impl Notifier {
                     return;
                 }
 
-                let msg = format!("Rate limit warning — {}% utilization", pct);
+                let msg = format!("Rate limit warning — {}% utilization{account_suffix}", pct);
                 self.emit_rate_limit(&msg, NotifyLevel::Normal, "allowed_warning", rl)
                     .await;
             }
@@ -671,6 +693,7 @@ mod tests {
         assert_eq!(event, BusEvent::Notification);
         let payload: NotificationPayload = serde_json::from_value(data.unwrap()).unwrap();
         assert!(payload.message.contains("89% utilization"));
+        assert!(payload.message.contains("(host account)"));
     }
 
     #[tokio::test]
@@ -705,6 +728,7 @@ mod tests {
         let (_, data) = rx.recv().await.unwrap();
         let p: NotificationPayload = serde_json::from_value(data.unwrap()).unwrap();
         assert!(p.message.contains("rejected"));
+        assert!(p.message.contains("(host account)"));
 
         // Second rejected also fires.
         let r2 = make_cc_result(mando_cc::RateLimitStatus::Rejected, 1.0);
@@ -751,6 +775,7 @@ mod tests {
         let (_, data) = rx.recv().await.unwrap();
         let p: NotificationPayload = serde_json::from_value(data.unwrap()).unwrap();
         assert!(p.message.contains("utilization unknown"));
+        assert!(p.message.contains("(host account)"));
 
         // Second call with no utilization also fires (no tier tracking).
         let r2 = make_cc_result_opt(mando_cc::RateLimitStatus::AllowedWarning, None);
@@ -759,5 +784,55 @@ mod tests {
         let (_, data2) = rx.recv().await.unwrap();
         let p2: NotificationPayload = serde_json::from_value(data2.unwrap()).unwrap();
         assert!(p2.message.contains("utilization unknown"));
+    }
+
+    #[tokio::test]
+    async fn check_rate_limit_includes_credential_label() {
+        let pool = test_pool().await;
+        let cred_id = mando_db::queries::credentials::insert(&pool, "team-alpha", "tok_test", None)
+            .await
+            .unwrap();
+
+        let bus = Arc::new(EventBus::new());
+        let mut rx = bus.subscribe();
+        let n = Notifier::new(bus);
+
+        // Warning with credential.
+        let r1 = make_cc_result(mando_cc::RateLimitStatus::AllowedWarning, 0.92);
+        n.check_rate_limit(&r1, &pool, Some(cred_id)).await;
+        let (_, data) = rx.recv().await.unwrap();
+        let p: NotificationPayload = serde_json::from_value(data.unwrap()).unwrap();
+        assert!(
+            p.message.contains("(account: team-alpha)"),
+            "expected credential label in message, got: {}",
+            p.message
+        );
+
+        // Rejected with credential.
+        let r2 = make_cc_result(mando_cc::RateLimitStatus::Rejected, 1.0);
+        n.check_rate_limit(&r2, &pool, Some(cred_id)).await;
+        let (_, data2) = rx.recv().await.unwrap();
+        let p2: NotificationPayload = serde_json::from_value(data2.unwrap()).unwrap();
+        assert!(
+            p2.message.contains("(account: team-alpha)"),
+            "expected credential label in rejected message, got: {}",
+            p2.message
+        );
+
+        // Unknown utilization with credential.
+        let r3 = make_cc_result_opt(mando_cc::RateLimitStatus::AllowedWarning, None);
+        n.check_rate_limit(&r3, &pool, Some(cred_id)).await;
+        let (_, data3) = rx.recv().await.unwrap();
+        let p3: NotificationPayload = serde_json::from_value(data3.unwrap()).unwrap();
+        assert!(
+            p3.message.contains("utilization unknown"),
+            "expected utilization unknown in message, got: {}",
+            p3.message
+        );
+        assert!(
+            p3.message.contains("(account: team-alpha)"),
+            "expected credential label in unknown-util message, got: {}",
+            p3.message
+        );
     }
 }

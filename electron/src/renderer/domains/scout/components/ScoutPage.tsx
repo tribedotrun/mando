@@ -216,7 +216,7 @@ export function ScoutPage({
   if (activeItemId) {
     return (
       <div className="-mx-5 -mb-4 flex" style={{ height: 'calc(100% + 1rem)' }}>
-        <div className="min-w-0 flex-1 overflow-y-auto px-5 py-4">
+        <div className="flex min-w-0 flex-1 flex-col">
           <ScoutReader
             key={activeItemId}
             itemId={activeItemId}

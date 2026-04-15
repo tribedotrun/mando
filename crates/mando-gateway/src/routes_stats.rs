@@ -25,7 +25,10 @@ pub(crate) async fn get_activity_stats(
     State(state): State<AppState>,
 ) -> Result<Json<ActivityStatsResponse>, (StatusCode, Json<Value>)> {
     let store = state.task_store.read().await;
-    let rows = store.daily_merge_counts(56).await.map_err(internal_error)?;
+    let rows = store
+        .daily_merge_counts(56)
+        .await
+        .map_err(|e| internal_error(e, "failed to load merge stats"))?;
 
     let today = time::OffsetDateTime::now_utc().date();
     let cutoff_7d = today - time::Duration::days(7);

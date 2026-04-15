@@ -12,7 +12,7 @@ pub struct ItemSpawnResult {
     pub session_id: String,
     pub branch: String,
     pub worktree: String,
-    pub workbench_id: Option<i64>,
+    pub workbench_id: i64,
     pub started_at: String,
     /// Worktree-relative path to the plan/brief file, if one was found.
     pub plan: Option<String>,
@@ -127,17 +127,15 @@ pub async fn spawn_worker_for_item(
 
     // Archive the previous workbench when a rework/redispatch creates a new
     // one. Without this, the old workbench lingers as an orphan in the sidebar.
-    if let (Some(old), Some(new)) = (item.workbench_id, workbench_id) {
-        if old != new {
-            if let Err(e) = mando_db::queries::workbenches::archive(pool, old).await {
-                tracing::warn!(
-                    module = "captain",
-                    old_wb = old,
-                    new_wb = new,
-                    error = %e,
-                    "failed to archive previous workbench"
-                );
-            }
+    if item.workbench_id != 0 && item.workbench_id != workbench_id {
+        if let Err(e) = mando_db::queries::workbenches::archive(pool, item.workbench_id).await {
+            tracing::warn!(
+                module = "captain",
+                old_wb = item.workbench_id,
+                new_wb = workbench_id,
+                error = %e,
+                "failed to archive previous workbench"
+            );
         }
     }
 
@@ -162,11 +160,11 @@ async fn create_workbench_for_spawn(
     project_slug: &str,
     worktree: &str,
     task_prompt: &str,
-) -> Result<Option<i64>> {
+) -> Result<i64> {
     // Check if a workbench already exists for this worktree.
     if let Some(existing) = mando_db::queries::workbenches::find_by_worktree(pool, worktree).await?
     {
-        return Ok(Some(existing.id));
+        return Ok(existing.id);
     }
     let title = if task_prompt.is_empty() {
         mando_types::workbench::workbench_title_now()
@@ -180,7 +178,7 @@ async fn create_workbench_for_spawn(
         title,
     );
     let id = mando_db::queries::workbenches::insert(pool, &wb).await?;
-    Ok(Some(id))
+    Ok(id)
 }
 
 pub(crate) fn default_tick_result() -> TickResult {

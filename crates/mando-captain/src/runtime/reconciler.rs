@@ -21,6 +21,16 @@ pub async fn reconcile_on_startup(config: &Config, pool: &sqlx::SqlitePool) -> R
     }
     reconcile_worker_timeouts(pool).await;
     reconcile_session_costs(pool).await;
+    // Resolve any cc_sessions still marked running from the previous daemon
+    // instance. Orphan subprocesses were already killed in
+    // `pid_registry::cleanup_on_startup`; this step settles DB state so the
+    // captain tick can salvage usable stream results immediately instead
+    // of waiting for the wall-clock clarifier/review/merge timeouts.
+    // Propagate: a DB query failure here means we would boot with stale
+    // sessions stuck in running. The gateway's `MANDO_UNSAFE_START` gate
+    // is the authoritative opt-out for operators who want to boot anyway.
+    super::startup_session_reconcile::reconcile_startup_sessions(pool).await?;
+    super::dispatch_planning::reconcile_orphaned_planning(pool).await;
 
     let log_path = ops_log::ops_log_path();
     let mut log = ops_log::load_ops_log(&log_path);

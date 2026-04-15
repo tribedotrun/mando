@@ -112,7 +112,8 @@ pub(super) async fn apply_clarifier_result(
                 }
 
                 // Propagate the clarified title to the parent workbench.
-                if let Some(wb_id) = item.workbench_id {
+                if item.workbench_id != 0 {
+                    let wb_id = item.workbench_id;
                     if let Err(e) =
                         mando_db::queries::workbenches::update_title(pool, wb_id, &item.title).await
                     {

@@ -184,8 +184,8 @@ fn construct_session_entry() {
 }
 
 #[test]
-fn item_status_has_15_values() {
-    assert_eq!(crate::task::ALL_STATUSES.len(), 15);
+fn item_status_has_16_values() {
+    assert_eq!(crate::task::ALL_STATUSES.len(), 16);
 }
 
 #[test]

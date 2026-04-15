@@ -64,7 +64,7 @@ pub(crate) async fn post_ops_start(
             "cost_usd": result.cost_usd,
             "duration_ms": result.duration_ms,
         }))),
-        Err(e) => Err(crate::response::internal_error(e)),
+        Err(e) => Err(crate::response::internal_error(e, "ops session failed")),
     }
 }
 
@@ -97,7 +97,7 @@ pub(crate) async fn post_ops_message(
             "cost_usd": result.cost_usd,
             "duration_ms": result.duration_ms,
         }))),
-        Err(e) => Err(crate::response::internal_error(e)),
+        Err(e) => Err(crate::response::internal_error(e, "ops follow-up failed")),
     }
 }
 

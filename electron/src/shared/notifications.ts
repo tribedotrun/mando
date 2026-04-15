@@ -33,6 +33,7 @@ export type NotificationKind =
       url: string;
       error: string;
     }
+  | { type: 'AdvisorAnswered'; item_id: string; title: string }
   | { type: 'Generic' };
 
 export interface NotificationPayload {
