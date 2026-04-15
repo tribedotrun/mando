@@ -11,10 +11,17 @@ pub enum SessionCaller {
     Worker,
     Clarifier,
     DeepClarifier,
+    ClarifierRetry,
     CaptainReviewAsync,
     CaptainMergeAsync,
     ExhaustionReport,
     TaskAsk,
+    Advisor,
+    AutoMergeTriage,
+    PlanningPlanner,
+    PlanningCcFeedback,
+    PlanningSynth,
+    PlanningFinal,
     ParseTodos,
     ScoutProcess,
     ScoutArticle,
@@ -31,6 +38,8 @@ pub enum CallerGroup {
     Clarifier,
     CaptainReview,
     CaptainOps,
+    Advisor,
+    Planning,
     TodoParser,
     Scout,
     Rebase,
@@ -43,10 +52,17 @@ impl SessionCaller {
             Self::Worker => "worker",
             Self::Clarifier => "clarifier",
             Self::DeepClarifier => "deep-clarifier",
+            Self::ClarifierRetry => "clarifier-retry",
             Self::CaptainReviewAsync => "captain-review-async",
             Self::CaptainMergeAsync => "captain-merge-async",
             Self::ExhaustionReport => "exhaustion-report",
             Self::TaskAsk => "task-ask",
+            Self::Advisor => "advisor",
+            Self::AutoMergeTriage => "auto-merge-triage",
+            Self::PlanningPlanner => "planning-planner",
+            Self::PlanningCcFeedback => "planning-cc-feedback",
+            Self::PlanningSynth => "planning-synth",
+            Self::PlanningFinal => "planning-final",
             Self::ParseTodos => "parse-todos",
             Self::ScoutProcess => "scout-process",
             Self::ScoutArticle => "scout-article",
@@ -63,10 +79,17 @@ impl SessionCaller {
             "worker" => Some(Self::Worker),
             "clarifier" => Some(Self::Clarifier),
             "deep-clarifier" => Some(Self::DeepClarifier),
+            "clarifier-retry" => Some(Self::ClarifierRetry),
             "captain-review-async" => Some(Self::CaptainReviewAsync),
             "captain-merge-async" => Some(Self::CaptainMergeAsync),
             "exhaustion-report" => Some(Self::ExhaustionReport),
             "task-ask" => Some(Self::TaskAsk),
+            "advisor" => Some(Self::Advisor),
+            "auto-merge-triage" => Some(Self::AutoMergeTriage),
+            "planning-planner" => Some(Self::PlanningPlanner),
+            "planning-cc-feedback" => Some(Self::PlanningCcFeedback),
+            "planning-synth" => Some(Self::PlanningSynth),
+            "planning-final" => Some(Self::PlanningFinal),
             "parse-todos" => Some(Self::ParseTodos),
             "scout-process" => Some(Self::ScoutProcess),
             "scout-article" => Some(Self::ScoutArticle),
@@ -78,6 +101,9 @@ impl SessionCaller {
             // to the same logical caller for grouping/display.
             s if s.starts_with("parse-todos-") => Some(Self::ParseTodos),
             s if s.starts_with("task-ask:") => Some(Self::TaskAsk),
+            s if s.starts_with("advisor:") => Some(Self::Advisor),
+            s if s.starts_with("planning-cc-r") => Some(Self::PlanningCcFeedback),
+            s if s.starts_with("planning-synth-r") => Some(Self::PlanningSynth),
             _ => None,
         }
     }
@@ -86,11 +112,17 @@ impl SessionCaller {
     pub fn group(&self) -> CallerGroup {
         match self {
             Self::Worker => CallerGroup::Workers,
-            Self::Clarifier | Self::DeepClarifier => CallerGroup::Clarifier,
+            Self::Clarifier | Self::DeepClarifier | Self::ClarifierRetry => CallerGroup::Clarifier,
             Self::CaptainReviewAsync => CallerGroup::CaptainReview,
-            Self::CaptainMergeAsync | Self::ExhaustionReport | Self::TaskAsk => {
-                CallerGroup::CaptainOps
-            }
+            Self::CaptainMergeAsync
+            | Self::ExhaustionReport
+            | Self::TaskAsk
+            | Self::AutoMergeTriage => CallerGroup::CaptainOps,
+            Self::Advisor => CallerGroup::Advisor,
+            Self::PlanningPlanner
+            | Self::PlanningCcFeedback
+            | Self::PlanningSynth
+            | Self::PlanningFinal => CallerGroup::Planning,
             Self::ParseTodos => CallerGroup::TodoParser,
             Self::ScoutProcess
             | Self::ScoutArticle
@@ -107,10 +139,17 @@ impl SessionCaller {
             Self::Worker,
             Self::Clarifier,
             Self::DeepClarifier,
+            Self::ClarifierRetry,
             Self::CaptainReviewAsync,
             Self::CaptainMergeAsync,
             Self::ExhaustionReport,
             Self::TaskAsk,
+            Self::Advisor,
+            Self::AutoMergeTriage,
+            Self::PlanningPlanner,
+            Self::PlanningCcFeedback,
+            Self::PlanningSynth,
+            Self::PlanningFinal,
             Self::ParseTodos,
             Self::ScoutProcess,
             Self::ScoutArticle,
@@ -127,6 +166,9 @@ impl SessionCaller {
         match self {
             Self::ParseTodos => Some("parse-todos-%"),
             Self::TaskAsk => Some("task-ask:%"),
+            Self::Advisor => Some("advisor:%"),
+            Self::PlanningCcFeedback => Some("planning-cc-r%"),
+            Self::PlanningSynth => Some("planning-synth-r%"),
             _ => None,
         }
     }
@@ -151,6 +193,8 @@ impl CallerGroup {
             Self::Clarifier => "clarifier",
             Self::CaptainReview => "captain-review",
             Self::CaptainOps => "captain-ops",
+            Self::Advisor => "advisor",
+            Self::Planning => "planning",
             Self::TodoParser => "todo-parser",
             Self::Scout => "scout",
             Self::Rebase => "rebase",
@@ -183,6 +227,36 @@ mod tests {
             });
             assert_eq!(*caller, parsed);
         }
+    }
+
+    #[test]
+    fn prefixed_callers_parse() {
+        // Advisor with embedded task ID
+        assert_eq!(
+            SessionCaller::parse("advisor:42"),
+            Some(SessionCaller::Advisor)
+        );
+        assert_eq!(
+            SessionCaller::parse("advisor:999"),
+            Some(SessionCaller::Advisor)
+        );
+        // Planning with embedded round number
+        assert_eq!(
+            SessionCaller::parse("planning-cc-r1"),
+            Some(SessionCaller::PlanningCcFeedback)
+        );
+        assert_eq!(
+            SessionCaller::parse("planning-cc-r3"),
+            Some(SessionCaller::PlanningCcFeedback)
+        );
+        assert_eq!(
+            SessionCaller::parse("planning-synth-r1"),
+            Some(SessionCaller::PlanningSynth)
+        );
+        assert_eq!(
+            SessionCaller::parse("planning-synth-r2"),
+            Some(SessionCaller::PlanningSynth)
+        );
     }
 
     #[test]

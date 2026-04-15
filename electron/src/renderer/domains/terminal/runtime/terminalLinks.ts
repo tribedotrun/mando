@@ -1,8 +1,18 @@
-import type { ILink, ILinkProvider, Terminal as XTerm } from '@xterm/xterm';
+import type { IBufferLine, ILink, ILinkProvider, Terminal as XTerm } from '@xterm/xterm';
 import log from '#renderer/logger';
 
 const URL_RE = /\bhttps?:\/\/[^\s<>"')\]}]+/g;
 const FILE_RE = /(?:^|[\s([{'"])((?:~\/|\.{1,2}\/|\/)[^\s"'`()[\]{}]+(?::\d+(?::\d+)?)?)/g;
+
+/** Returns true when the cell at `col` is part of an OSC 8 hyperlink.
+ *  Uses the internal CellData.extended.urlId property (non-zero = has link).
+ *  xterm's own OscLinkProvider uses the same internal shape. */
+function cellHasOscLink(line: IBufferLine, col: number): boolean {
+  const cell = line.getCell(col);
+  if (!cell) return false;
+  const extended = (cell as { extended?: { urlId?: number } }).extended;
+  return (extended?.urlId ?? 0) > 0;
+}
 
 interface PathTarget {
   filePath: string;
@@ -47,11 +57,15 @@ export function createUrlLinkProvider(opts: {
     text: string,
     openUrlImpl: (url: string) => Promise<void>,
   ): ILink[] | undefined {
+    const line = opts.terminal.buffer.active.getLine(bufferLineNumber);
     const links: ILink[] = [];
     for (const match of text.matchAll(URL_RE)) {
       const value = match[0];
       const index = match.index ?? -1;
       if (index < 0) continue;
+      // Skip URLs that are already OSC 8 hyperlinks -- the built-in
+      // OscLinkProvider handles those and firing both causes a double-open.
+      if (line && cellHasOscLink(line, index)) continue;
       links.push({
         text: value,
         range: createRange(bufferLineNumber, index, value),

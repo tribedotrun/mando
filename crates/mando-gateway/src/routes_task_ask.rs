@@ -5,8 +5,10 @@ use axum::Json;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use crate::response::{error_response, internal_error};
+use crate::response::{error_response, internal_error, touch_workbench_activity};
 use crate::AppState;
+
+use crate::response::broadcast_task_update;
 
 #[derive(Deserialize)]
 pub(crate) struct AskEndBody {
@@ -42,7 +44,7 @@ async fn post_task_ask_inner(
         let item = store
             .find_by_id(id)
             .await
-            .map_err(internal_error)?
+            .map_err(|e| internal_error(e, "failed to load task"))?
             .ok_or_else(|| {
                 error_response(StatusCode::NOT_FOUND, &format!("item {id} not found"))
             })?;
@@ -93,7 +95,7 @@ async fn post_task_ask_inner(
     const PENDING_SESSION: &str = "pending";
 
     // ── Persist question immediately (before CC call) ───────────────────
-    if let Err(e) = mando_captain::runtime::task_ask::persist_question(
+    mando_captain::runtime::task_ask::persist_question(
         &pool,
         id,
         &ask_id,
@@ -101,12 +103,7 @@ async fn post_task_ask_inner(
         &body.question,
     )
     .await
-    {
-        return Err(error_response(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            &e.to_string(),
-        ));
-    }
+    .map_err(|e| internal_error(e, "failed to persist ask question"))?;
 
     // Broadcast so the UI shows the question immediately.
     broadcast_task_update(state, id).await;
@@ -129,7 +126,7 @@ async fn post_task_ask_inner(
         let task_id_str = id.to_string();
         let timeline_text = mando_captain::runtime::task_ask::build_timeline_text(&pool, id)
             .await
-            .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?;
+            .map_err(|e| internal_error(e, "failed to build ask timeline"))?;
         let prompt = mando_captain::runtime::task_ask::build_initial_prompt(
             &item,
             &task_id_str,
@@ -137,7 +134,7 @@ async fn post_task_ask_inner(
             &workflow,
             &timeline_text,
         )
-        .map_err(crate::response::internal_error)?;
+        .map_err(|e| internal_error(e, "failed to build ask prompt"))?;
 
         mgr.start_with_item(
             &session_key,
@@ -184,7 +181,7 @@ async fn post_task_ask_inner(
                 "ask",
             )
             .await
-            .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?;
+            .map_err(|e| internal_error(e, "failed to persist ask answer"))?;
 
             // Persist images after CC session + answer both succeed so a
             // failure in either path doesn't leave dangling DB references.
@@ -198,6 +195,7 @@ async fn post_task_ask_inner(
             }
 
             broadcast_task_update(state, id).await;
+            touch_workbench_activity(state, item.workbench_id).await;
 
             Ok(Json(json!({
                 "id": id,
@@ -242,9 +240,11 @@ async fn post_task_ask_inner(
 
             broadcast_task_update(state, id).await;
 
+            // Raw error already logged above — use error_response directly
+            // to avoid a duplicate log from internal_error.
             Err(error_response(
                 StatusCode::INTERNAL_SERVER_ERROR,
-                &error_msg,
+                "ask session failed",
             ))
         }
     }
@@ -272,7 +272,7 @@ pub(crate) async fn post_task_ask_end(
         Ok(None) => {
             tracing::warn!(task_id = id, "ask_end clear skipped — task vanished");
         }
-        Err(e) => return Err(internal_error(e)),
+        Err(e) => return Err(internal_error(e, "failed to load task for ask end")),
     }
 
     let updated = store
@@ -281,10 +281,17 @@ pub(crate) async fn post_task_ask_end(
         .ok()
         .flatten()
         .map(|t| serde_json::to_value(&t).unwrap());
+    let wb_id = updated
+        .as_ref()
+        .and_then(|v| v.get("workbench_id"))
+        .and_then(|v| v.as_i64())
+        .unwrap_or(0);
     state.bus.send(
         mando_types::BusEvent::Tasks,
         Some(json!({"action": "updated", "item": updated, "id": id})),
     );
+    drop(store);
+    touch_workbench_activity(&state, wb_id).await;
 
     Ok(Json(json!({"ok": true, "ended": session_key})))
 }
@@ -308,7 +315,7 @@ pub(crate) async fn post_task_ask_reopen(
         let item = store
             .find_by_id(id)
             .await
-            .map_err(internal_error)?
+            .map_err(|e| internal_error(e, "failed to load task"))?
             .ok_or_else(|| {
                 error_response(StatusCode::NOT_FOUND, &format!("item {id} not found"))
             })?;
@@ -330,7 +337,7 @@ pub(crate) async fn post_task_ask_reopen(
     // ── Guard: Q&A history must be non-empty ─────────────────────────────
     let history = mando_db::queries::ask_history::load(&pool, id)
         .await
-        .map_err(internal_error)?;
+        .map_err(|e| internal_error(e, "failed to load ask history"))?;
     if history.is_empty() {
         return Err(error_response(
             StatusCode::BAD_REQUEST,
@@ -363,7 +370,7 @@ pub(crate) async fn post_task_ask_reopen(
     let result = mgr
         .follow_up(&session_key, &synthesis_prompt, &cwd)
         .await
-        .map_err(internal_error)?;
+        .map_err(|e| internal_error(e, "ask synthesis session failed"))?;
     let synthesized_feedback = result.text.clone();
 
     // ── Reopen the task with synthesized feedback ────────────────────────
@@ -375,7 +382,7 @@ pub(crate) async fn post_task_ask_reopen(
     let mut item = store
         .find_by_id(id)
         .await
-        .map_err(internal_error)?
+        .map_err(|e| internal_error(e, "failed to load task"))?
         .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "item vanished during synthesis"))?;
 
     let old_session_id = item.session_ids.worker.clone();
@@ -390,8 +397,11 @@ pub(crate) async fn post_task_ask_reopen(
         true,
     )
     .await
-    .map_err(internal_error)?;
-    store.write_task(&item).await.map_err(internal_error)?;
+    .map_err(|e| internal_error(e, "failed to reopen task"))?;
+    store
+        .write_task(&item)
+        .await
+        .map_err(|e| internal_error(e, "failed to save task"))?;
 
     // Close the ask session only after reopen succeeds.
     close_ask_session(&state, id).await;
@@ -400,6 +410,7 @@ pub(crate) async fn post_task_ask_reopen(
         mando_types::BusEvent::Tasks,
         Some(json!({"action": "updated", "item": serde_json::to_value(&item).unwrap(), "id": id})),
     );
+    touch_workbench_activity(&state, item.workbench_id).await;
 
     // ── Timeline events ──────────────────────────────────────────────────
     let summary = format!("Reopened from Q&A: {}", &synthesized_feedback);
@@ -474,22 +485,6 @@ fn resolve_ask_cwd(
                 .filter(|p| p.is_dir())
         })
         .ok_or_else(|| error_response(StatusCode::BAD_REQUEST, "no worktree or project configured"))
-}
-
-/// Broadcast a task update via SSE so the frontend refreshes.
-async fn broadcast_task_update(state: &AppState, id: i64) {
-    let store = state.task_store.read().await;
-    let updated = store
-        .find_by_id(id)
-        .await
-        .ok()
-        .flatten()
-        .map(|t| serde_json::to_value(&t).unwrap());
-    drop(store);
-    state.bus.send(
-        mando_types::BusEvent::Tasks,
-        Some(json!({"action": "updated", "item": updated, "id": id})),
-    );
 }
 
 /// Close ask session for a task (used by reopen/rework handlers).

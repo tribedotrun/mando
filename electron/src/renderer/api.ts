@@ -46,9 +46,7 @@ export function buildUrl(path: string): string {
   return `${BASE_URL}${path}`;
 }
 
-// ---------------------------------------------------------------------------
-// Error batching — queues errors and POSTs to /api/client-logs every 5s
-// ---------------------------------------------------------------------------
+// Error batching -- queues errors and POSTs to /api/client-logs every 5s
 
 /** Distinguishes HTTP errors (already logged) from network errors. */
 class HttpError extends Error {
@@ -195,6 +193,7 @@ export const fetchTasks = (includeArchived?: boolean) => {
 export interface AddTaskInput {
   title: string;
   project?: string;
+  noAutoMerge?: boolean;
   images?: File[];
 }
 
@@ -206,6 +205,7 @@ export async function addTask(input: AddTaskInput): Promise<TaskItem> {
   form.append('title', input.title);
   form.append('source', 'electron');
   if (input.project) form.append('project', input.project);
+  if (input.noAutoMerge) form.append('no_auto_merge', 'true');
   if (input.images) {
     for (const img of input.images) {
       form.append('images', img, img.name);
@@ -261,7 +261,17 @@ export async function reworkItem(id: number, feedback: string, images?: File[]):
 export const fetchTimeline = (id: number) => apiGet<TimelineResponse>(`/api/tasks/${id}/timeline`);
 export const fetchItemSessions = (id: number) =>
   apiGet<ItemSessionsResponse>(`/api/tasks/${id}/sessions`);
-
+/** Start implementation: inject plan into context and re-queue as normal worker. */
+export async function startImplementation(id: number, existingContext: string): Promise<void> {
+  const tl = await fetchTimeline(id);
+  const plan =
+    ([...tl.events].reverse().find((e) => e.event_type === 'plan_completed')?.data
+      ?.plan as string) ?? '';
+  const body = plan
+    ? `${existingContext}\n\n## Approved Plan\n${plan}\n\n[Human] Start implementation.`
+    : `${existingContext}\n\n[Human] Start implementation.`;
+  await apiPatch(`/api/tasks/${id}`, { planning: false, context: body, status: 'queued' });
+}
 // Retry / Resume / Clarify
 export const retryItem = (id: number) => apiPost<{ ok: boolean }>('/api/tasks/retry', { id });
 export const resumeRateLimited = (id: number) =>
@@ -380,7 +390,6 @@ export async function askTask(
 // End ask session
 export const endAskSession = (id: number) =>
   apiPost<{ ok: boolean; ended: string }>('/api/tasks/ask/end', { id });
-
 // Reopen from Q&A — synthesize conversation into reopen feedback
 export const askReopen = (id: number) =>
   apiPost<{ ok: boolean; feedback: string }>('/api/tasks/ask/reopen', { id });
@@ -388,11 +397,9 @@ export const askReopen = (id: number) =>
 // Task Ask History
 export const fetchAskHistory = (id: number) =>
   apiGet<AskHistoryResponse>(`/api/tasks/${id}/history`);
-
 // Task Artifacts
 export const fetchArtifacts = (id: number) =>
   apiGet<ArtifactsResponse>(`/api/tasks/${id}/artifacts`);
-
 // Task Feed (unified timeline + artifacts + messages)
 export const fetchFeed = (id: number) => apiGet<FeedResponse>(`/api/tasks/${id}/feed`);
 

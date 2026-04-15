@@ -72,7 +72,7 @@ async fn handle_todo_confirm(
                 {
                     tracing::warn!(module = "telegram", error = %e, "message send failed");
                 }
-                crate::callback_actions::add_todo_items(bot, cid, &state.items).await?;
+                crate::callback_actions::add_todo_items(bot, cid, &state.items, Some(mid)).await?;
             } else {
                 bot.api()
                     .answer_callback_query(cb_id, Some("Expired"))
@@ -184,11 +184,12 @@ async fn handle_action(
         .answer_callback_query(cb_id, Some(&format!("{label}\u{2026}")))
         .await?;
 
+    // Send loading placeholder (None = merge/accept send their own)
     use crate::callback_actions;
     if label == "Merge" {
-        callback_actions::merge(bot, cid, item_id).await?;
+        callback_actions::merge(bot, cid, item_id, None).await?;
     } else {
-        callback_actions::accept(bot, cid, item_id).await?;
+        callback_actions::accept(bot, cid, item_id, None).await?;
     }
     Ok(())
 }

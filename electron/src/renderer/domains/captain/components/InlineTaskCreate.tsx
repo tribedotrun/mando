@@ -3,9 +3,11 @@ import { ArrowUp, Paperclip } from 'lucide-react';
 import { useDraft } from '#renderer/global/hooks/useDraft';
 import { useMountEffect } from '#renderer/global/hooks/useMountEffect';
 import { useProjects } from '#renderer/domains/settings';
+import { useConfig } from '#renderer/hooks/queries';
 import { useTaskCreate } from '#renderer/hooks/mutations';
 import { shortRepo } from '#renderer/utils';
 import { Button } from '#renderer/components/ui/button';
+import { Switch } from '#renderer/components/ui/switch';
 import {
   Tooltip,
   TooltipContent,
@@ -34,11 +36,14 @@ export const InlineTaskCreate = forwardRef<InlineTaskCreateHandle>(
     });
     const [image, setImage] = useState<File | null>(null);
     const [preview, setPreview] = useState<string | null>(null);
+    const [noAutoMerge, setNoAutoMerge] = useState(false);
 
     const inputRef = useRef<HTMLTextAreaElement>(null);
     const fileRef = useRef<HTMLInputElement>(null);
     const createMut = useTaskCreate();
     const projects = useProjects();
+    const { data: config } = useConfig();
+    const globalAutoMerge = config?.captain?.autoMerge ?? false;
 
     const savedProject = project && projects.includes(project) ? project : '';
     const effectiveProject = savedProject || (projects.length === 1 ? projects[0] : '');
@@ -60,6 +65,7 @@ export const InlineTaskCreate = forwardRef<InlineTaskCreateHandle>(
     const resetForm = () => {
       clearTitleDraft();
       localStorage.removeItem(DRAFT_PROJECT_KEY);
+      setNoAutoMerge(false);
       if (preview) URL.revokeObjectURL(preview);
       setImage(null);
       setPreview(null);
@@ -98,6 +104,7 @@ export const InlineTaskCreate = forwardRef<InlineTaskCreateHandle>(
         {
           title: trimmedTitle,
           project: effectiveProject || undefined,
+          noAutoMerge: (globalAutoMerge && noAutoMerge) || undefined,
           images: image ? [image] : undefined,
         },
         { onSuccess: () => resetForm() },
@@ -194,6 +201,17 @@ export const InlineTaskCreate = forwardRef<InlineTaskCreateHandle>(
             >
               <Paperclip size={14} />
             </Button>
+
+            {globalAutoMerge && (
+              <label className="flex items-center gap-1.5 text-caption text-text-3">
+                <Switch
+                  checked={noAutoMerge}
+                  onCheckedChange={setNoAutoMerge}
+                  className="scale-75"
+                />
+                Skip auto-merge
+              </label>
+            )}
 
             <span className="flex-1" />
 

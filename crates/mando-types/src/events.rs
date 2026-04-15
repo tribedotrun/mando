@@ -89,6 +89,8 @@ pub enum NotificationKind {
         url: String,
         error: String,
     },
+    /// Advisor answered a user question on a task.
+    AdvisorAnswered { item_id: String, title: String },
     /// Generic notification (no special UI).
     Generic,
 }

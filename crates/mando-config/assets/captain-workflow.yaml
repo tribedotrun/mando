@@ -21,7 +21,7 @@ auto_title:
   max_input_chars: 200
 
 agent:
-  max_concurrent: 10
+  max_concurrent: 3
   resource_limits:
     emulator: 1
   max_interventions: 50
@@ -33,6 +33,13 @@ agent:
   max_clarifier_retries: 3
   max_rebase_retries: 5
   max_advisor_retries: 3
+  # Auto-merge triage retry policy. On CC error, timeout, or malformed output,
+  # the triage re-spawns up to `auto_merge_triage_max_attempts` times per cycle
+  # (where a cycle begins on first triage or after a human reopen). Between
+  # attempts, the captain waits the corresponding entry from
+  # `auto_merge_triage_backoff_s` (list length must be max_attempts - 1).
+  auto_merge_triage_max_attempts: 3
+  auto_merge_triage_backoff_s: [10, 20]
   rebase_base_delay_s: 30
   worker_timeout_s: 21600
   max_repeated_nudges: 3
@@ -44,6 +51,15 @@ agent:
   task_ask_idle_ttl_s: 3600
   ops_timeout_s: 120
   ops_idle_ttl_s: 3600
+
+planning:
+  feedback_rounds: 3
+  cc_timeout_s: 300
+  codex_timeout_s: 180
+  planner_max_turns: 15
+  feedback_max_turns: 10
+  synthesizer_max_turns: 3
+  final_max_turns: 3
 
 # ── Prompt Templates ─────────────────────────────────────────────────────────
 
@@ -123,9 +139,9 @@ prompts:
     - **Evidence requirements** — you MUST capture and save runtime proof:
        - Evidence must be **actual runtime output** you captured, NOT diagrams, ASCII art, mockups, or sample output you write by hand. Test results prove correctness but are NOT evidence — you need both.
        - **After evidence is required.** Before evidence is optional (nice-to-have if convenient).
-       - **UI changes**: capture BOTH a screenshot AND a screen recording (always use isolated/sandbox env; never `--visible`). Both are mandatory — captain will reject if either is missing.
+       - **UI changes**: capture BOTH a screenshot AND a screen recording (always use isolated/sandbox env; never `--visible`). Both are mandatory — captain will reject if either is missing. Save both files together in ONE final evidence call so the feed UI shows them in a single block. Do not upload intermediate screenshots one-by-one across iterations.
        - **Non-UI changes**: run the relevant command, capture terminal output, save it to a file (e.g. `evidence.txt`), and submit as evidence.
-       - **Save evidence**: `mando todo evidence <file1> [file2] --caption "caption1" --caption "caption2"`. Every file needs a caption.
+       - **Save evidence**: pass ALL evidence files in ONE call. UI changes: `mando todo evidence <screenshot.png> <recording.mp4> --caption "what the screenshot shows" --caption "what the recording demonstrates"`. Every file needs a caption.
        - **Self-verify**: after capturing, read the screenshot or extract frames with ffmpeg. If evidence doesn't show the fix working, fix → recapture → verify.
        - **Keep evidence current**: if you make code changes after capturing evidence, recapture and re-save.
        - **Cleanup is required**: stop ALL processes you started (dev servers, watchers, streaming commands like `tail -f` or `obs tail`). Before finishing, run `ps --ppid $$ -o pid,command 2>/dev/null || true` and kill any orphans. Lingering subprocesses block session exit.
@@ -182,7 +198,7 @@ prompts:
     - [ ] **Findings** — write results to workpad at `{{ workpad_path }}` and stop. No PR needed.
     {% else %}
     - [ ] **PR** — use `/mando-pr --fast` to create or update the PR. Captain will monitor follow-up review/CI state after the handoff. Update workpad with PR link.
-    - [ ] **Evidence** — capture runtime proof, then save: `mando todo evidence <file> --caption "..."`. After evidence required, before optional. UI: BOTH screenshot AND recording (isolated/sandbox env, never `--visible`). Non-UI: terminal output saved to file. NOT diagrams or test-only results. Self-verify screenshots/frames. Recapture if code changes after evidence.
+    - [ ] **Evidence** — capture runtime proof, then save in ONE final call: `mando todo evidence <screenshot.png> <recording.mp4> --caption "..." --caption "..."`. After evidence required, before optional. UI: BOTH screenshot AND recording in a SINGLE bundled call (isolated/sandbox env, never `--visible`) so the feed UI shows them together as one block. Non-UI: terminal output saved to file. NOT diagrams or test-only results. Self-verify screenshots/frames. Recapture if code changes after evidence.
     - [ ] **Cleanup** — stop ALL processes you started (dev servers, watchers, streaming commands like `tail -f` or `obs tail`). Run `ps --ppid $$ -o pid,command 2>/dev/null || true` and kill any orphans. Lingering subprocesses block session exit.
     - [ ] **CI** — fix all CI failures, even informational ones. A clean CI is a quality gate, not optional.
     - [ ] **Reviews** — address any reviewer comments
@@ -354,6 +370,12 @@ prompts:
 
     This review was triggered because: **{{ trigger }}**
 
+    {% if problem_statement %}
+    ## Task
+
+    {{ problem_statement }}
+
+    {% endif %}
     ## Worker Context
 
     {{ worker_contexts }}
@@ -366,10 +388,18 @@ prompts:
     {% if evidence_images %}
     ## Evidence Images
 
-    Evidence images have been downloaded. Read each file using the Read tool.
-    Verify: does it show the fix working? Broken layout, errors, missing elements?
+    Evidence images have been downloaded to local paths listed below.
 
     {{ evidence_images }}
+
+    **You MUST review every evidence file:**
+    1. Read each file using the Read tool (it can display images natively).
+    2. For each file, describe what it shows: visible UI state, terminal output, behavior demonstrated.
+    3. Compare what the evidence shows against the task requirements described above. Does this evidence prove the requested feature or fix is working end-to-end?
+    4. Check for red flags: error messages, broken layouts, placeholder text, wrong data, evidence of an unrelated page/feature, or evidence that contradicts the PR diff.
+    5. Record your per-file analysis in the **feedback** field of your verdict.
+
+    **Verdict rule:** Do NOT ship if evidence exists but fails to clearly demonstrate the task requirements being met. Nudge with the specific gaps.
     {% endif %}
 
     ## Available Verdicts
@@ -412,9 +442,17 @@ prompts:
     - If the change touches both UI and non-UI, apply the UI rule (both screenshot + recording).
     - Do NOT ship if evidence type doesn't match the change type. Always nudge for the gap.
 
+    **Evidence content verification (mandatory):**
+    After confirming evidence of the correct type exists, verify the content:
+    1. Read every evidence file (Read tool displays images natively).
+    2. Describe what each piece of evidence actually shows.
+    3. Compare against the task requirements: does the evidence demonstrate the requested feature/fix working end-to-end?
+    4. If evidence shows a generic success state, an unrelated page, or doesn't match the PR diff, it is insufficient. Nudge with specific gaps.
+    - Do NOT ship if evidence exists but its content does not clearly prove the task requirements are met.
+
     **Evidence quality:**
-    - GOOD: terminal output, screenshots, recordings showing runtime behavior.
-    - BAD: AI-drawn diagrams, test-only results, empty evidence sections.
+    - GOOD: terminal output, screenshots, recordings showing runtime behavior that matches the task requirements.
+    - BAD: AI-drawn diagrams, test-only results, empty evidence sections, generic "it works" screenshots unrelated to the task.
     - After a reopen (`reopen_seq > 0`), verify evidence was recaptured to reflect
       post-reopen changes. Stale pre-reopen evidence is not acceptable unless the
       reopen was purely non-behavioral (e.g., only addressed review comments with
@@ -753,6 +791,122 @@ prompts:
     Read the PR diff and any evidence files to make your assessment.
     Be conservative -- when in doubt, choose a lower confidence level.
 
+  # ── Planning Mode Prompts ──────────────────────────────────────────────────
+
+  planning_initial: |
+    You are an autonomous planning agent. Your job is to explore a codebase
+    and produce a high-level architectural plan for the following task.
+
+    ## Task
+    **Title:** {{ title }}
+    **Project:** {{ project }}
+    {% if context %}
+    **Context:** {{ context }}
+    {% endif %}
+
+    ## Instructions
+
+    1. Read the codebase around the relevant area. Use Glob, Grep, and Read
+       to understand the current architecture, key modules, and data flow.
+    2. Produce a **draft architectural plan** — high-level direction, not
+       implementation steps. Focus on:
+       - Which components need to change and why
+       - New modules or abstractions needed
+       - Data flow changes
+       - Key design decisions and trade-offs
+    3. Keep the plan concise (under 500 words). No code snippets.
+    4. Output the plan as plain text.
+
+  planning_cc_feedback: |
+    You are a senior architect reviewing a draft plan. Read the codebase to
+    verify the plan's assumptions, then provide constructive feedback.
+
+    ## Task: {{ title }}
+    ## Project: {{ project }}
+    ## Feedback Round: {{ round }}
+
+    ## Current Plan
+    {{ plan }}
+
+    ## Instructions
+
+    1. Read the relevant codebase to verify the plan's assumptions.
+    2. Identify gaps, risks, or missed alternatives.
+    3. Suggest specific improvements (what to add, remove, or change).
+    4. Keep feedback concise and actionable (under 300 words).
+    5. Do NOT rewrite the plan — just give feedback.
+
+  planning_codex_feedback: |
+    You are a senior architect reviewing a draft plan for a codebase change.
+    Provide constructive feedback focused on gaps, risks, and alternatives.
+
+    Task: {{ title }}
+    Project: {{ project }}
+    Feedback Round: {{ round }}
+
+    Current Plan:
+    {{ plan }}
+
+    Instructions:
+    - Identify architectural gaps or missed edge cases.
+    - Suggest alternatives the planner may not have considered.
+    - Flag any risks (performance, complexity, backwards compatibility).
+    - Keep feedback concise and actionable (under 300 words).
+    - Do NOT rewrite the plan — just give feedback.
+
+  planning_synthesize: |
+    You are a planning synthesizer. Incorporate feedback from two independent
+    reviewers into an improved version of the plan.
+
+    ## Task: {{ title }}
+    ## Round: {{ round }}
+
+    ## Current Plan
+    {{ plan }}
+
+    ## CC Reviewer Feedback
+    {{ cc_feedback }}
+
+    ## Codex Reviewer Feedback
+    {{ codex_feedback }}
+
+    ## Instructions
+
+    1. Carefully consider both sets of feedback.
+    2. Incorporate valid suggestions into an improved plan.
+    3. Discard feedback that contradicts the codebase or is impractical.
+    4. Keep the plan concise and high-level (under 500 words).
+    5. Output ONLY the updated plan text — no meta-commentary.
+
+  planning_final: |
+    You are producing the final output of an autonomous planning session.
+    Take the refined plan and produce two things:
+
+    1. An ASCII diagram summarizing the plan's architecture
+    2. A concise final plan text
+
+    ## Task: {{ title }}
+
+    ## Refined Plan
+    {{ plan }}
+
+    ## Diagram Rules
+
+    Use box-drawing characters (┌─┐│└─┘) for boxes. Each component gets a
+    box with a title and 1-2 lines of detail. Use ▼ for vertical flow and
+    ──→ for horizontal. Keep lines under 80 chars. Show components,
+    responsibilities, data flow between them. Do NOT show implementation
+    details or helper functions.
+
+    Layout: vertical for deep pipelines, horizontal for wide parallel
+    systems, hybrid when needed. All boxes in a container share the same
+    width with aligned right borders.
+
+    ## Output Format
+
+    Return a JSON object with exactly two fields:
+    - "diagram": the ASCII diagram as a string
+    - "plan": the final concise plan text (under 500 words, no code)
 # ── Nudge Templates ──────────────────────────────────────────────────────────
 # Deterministic nudge messages sent by tick.py when captain detects specific states.
 # These use Jinja2 syntax like prompts above.

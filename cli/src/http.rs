@@ -93,6 +93,24 @@ impl DaemonClient {
         self.request(Method::GET, path, None).await
     }
 
+    /// GET request that returns the raw response body as text (for NDJSON endpoints).
+    pub(crate) async fn get_text(&self, path: &str) -> Result<String> {
+        let start = Instant::now();
+        let url = format!("{}{path}", self.base_url);
+        let mut req = self.client.get(&url);
+        if let Some(t) = &self.token {
+            req = req.bearer_auth(t);
+        }
+        let resp = req.send().await.context("daemon request failed")?;
+        let status = resp.status();
+        debug!(method = "GET", path = path, status = %status, elapsed_ms = start.elapsed().as_millis(), "daemon request (text)");
+        if !status.is_success() {
+            let text = resp.text().await.unwrap_or_default();
+            bail!("daemon returned {status}: {text}");
+        }
+        resp.text().await.context("failed to read response body")
+    }
+
     /// GET request that returns the JSON body even when the daemon responds
     /// with 5xx. Used by health endpoints that return HTTP 503 with a
     /// structured body describing the degradation (so `mando health` can

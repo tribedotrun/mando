@@ -61,7 +61,7 @@ interface Props {
   activeTaskId?: number | null;
   onNewTerminal?: (project: string) => void;
   onOpenTask?: (taskId: number, workbenchId?: number) => void;
-  onOpenTerminalSession?: (worktree: { project: string; cwd: string }) => void;
+  onOpenTerminalSession?: (worktree: { id?: number; project: string; cwd: string }) => void;
   onArchiveWorkbench?: (id: number) => void;
   onToggleSidebar?: () => void;
   onGoBack?: () => void;

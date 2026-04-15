@@ -1,117 +1,79 @@
 //! Auto-merge triage -- spawn a short-lived CC session to evaluate whether
 //! an AwaitingReview task can be merged without human review.
 //!
-//! Spawn: when a PR is mergeable and `config.captain.auto_merge` is on.
-//! Poll:  on subsequent ticks, check if the triage session produced a result.
-//! High confidence triggers CaptainMerging; otherwise task stays in AwaitingReview.
+//! Lifecycle:
+//! - A "cycle" opens when the task first enters AwaitingReview and after
+//!   every human-initiated reopen/rework. Auto-reopens (`review`, `ci`,
+//!   `evidence`) do NOT open a new cycle.
+//! - Within a cycle, the poller re-spawns on CC error / timeout / malformed
+//!   output up to `auto_merge_triage_max_attempts` with `auto_merge_triage_backoff_s`
+//!   waits between attempts. A successful verdict closes the cycle.
+//! - On exhaustion: emit `AutoMergeTriageExhausted`, notify the human, stay
+//!   in AwaitingReview. No synthetic low-confidence verdict is ever written.
+//!
+//! Pure gate logic (state derivation + spawn decision) lives in the sibling
+//! `auto_merge_triage_gate` module so it can be unit-tested without tokio,
+//! DB, or CC dependencies.
 
-use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
 
 use mando_config::settings::Config;
 use mando_config::workflow::CaptainWorkflow;
+use mando_db::queries::timeline::AppendResult;
 use mando_types::task::{ItemStatus, Task};
-use mando_types::timeline::TimelineEventType;
+use mando_types::timeline::{TimelineEvent, TimelineEventType};
 
+use super::auto_merge_triage_gate::{extract_cc_error_text, TriageOutcome, TriageResult};
 use super::notify::Notifier;
 
+pub(crate) use super::auto_merge_triage_gate::{
+    decide_spawn, derive_gate_state, last_failure_error, triage_json_schema, SpawnDecision,
+};
 pub(crate) use super::auto_merge_triage_spawn::spawn_triage;
 
-/// Structured output from the triage agent.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct TriageResult {
-    pub confidence: String,
-    pub reason: String,
-}
-
-/// JSON Schema for the triage structured output.
-pub(super) fn triage_json_schema() -> serde_json::Value {
-    serde_json::json!({
-        "type": "object",
-        "properties": {
-            "confidence": {
-                "type": "string",
-                "enum": ["high", "mid", "low"],
-                "description": "Confidence that this task can be merged without human review"
-            },
-            "reason": {
-                "type": "string",
-                "description": "Brief explanation of the confidence assessment"
-            }
-        },
-        "required": ["confidence", "reason"]
-    })
-}
-
-/// Check if a triage session has completed. Returns the result if done.
-fn check_triage(item: &Task) -> Option<TriageResult> {
+/// Inspect the CC stream result for a triage session and classify it.
+/// Returns `None` if the session hasn't finished yet.
+fn check_triage_outcome(item: &Task) -> Option<TriageOutcome> {
     let session_id = item.session_ids.triage.as_deref()?;
     let stream_path = mando_config::stream_path_for_session(session_id);
     let result = mando_cc::get_stream_result(&stream_path)?;
 
-    // Skip error results -- handled separately by check_triage_failed().
+    // Failure path: CC errored (stream timeout, crash, spawn panic, etc.)
     if result.get("is_error").and_then(|v| v.as_bool()) == Some(true) {
-        return None;
+        let err_text = extract_cc_error_text(&result);
+        return Some(TriageOutcome::Failed(err_text));
     }
 
-    // Try structured_output first.
+    // Success path: prefer structured_output, then fall back to parsing the
+    // text `result` field.
     if let Some(so) = result.get("structured_output").filter(|v| !v.is_null()) {
         match serde_json::from_value::<TriageResult>(so.clone()) {
-            Ok(tr) => return Some(tr),
+            Ok(tr) => return Some(TriageOutcome::Verdict(tr)),
             Err(e) => {
-                warn!(module = "captain", %e, %session_id, "triage structured_output parse failed");
+                warn!(module = "captain", %e, %session_id, "triage structured_output parse failed; falling back to text");
             }
         }
     }
 
-    // Fall back to result text.
     let mut text = result
         .get("result")
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .to_string();
-
     if text.is_empty() {
         if let Some(t) = mando_cc::get_last_assistant_text(&stream_path) {
             text = t;
         } else {
-            return Some(TriageResult {
-                confidence: "low".into(),
-                reason: "Triage session completed but produced no output".into(),
-            });
+            return Some(TriageOutcome::Failed(
+                "Triage completed with no output".to_string(),
+            ));
         }
     }
-
     match serde_json::from_str::<TriageResult>(&text) {
-        Ok(tr) => Some(tr),
-        Err(e) => {
-            warn!(module = "captain", %e, "failed to parse triage result");
-            Some(TriageResult {
-                confidence: "low".into(),
-                reason: format!("Failed to parse triage result: {e}"),
-            })
-        }
-    }
-}
-
-/// Check if a triage session has failed (stream file has error result).
-fn check_triage_failed(item: &Task) -> Option<String> {
-    let session_id = item.session_ids.triage.as_deref()?;
-    let stream_path = mando_config::stream_path_for_session(session_id);
-    let result = mando_cc::get_stream_result(&stream_path)?;
-    let is_error = result
-        .get("is_error")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
-    if is_error {
-        let msg = result
-            .get("error")
-            .and_then(|v| v.as_str())
-            .unwrap_or("unknown error")
-            .to_string();
-        Some(msg)
-    } else {
-        None
+        Ok(tr) => Some(TriageOutcome::Verdict(tr)),
+        Err(e) => Some(TriageOutcome::Failed(format!(
+            "Malformed triage output: {e}"
+        ))),
     }
 }
 
@@ -153,30 +115,23 @@ pub(crate) async fn poll_triage(
             continue;
         }
 
-        // Check for CC crash/failure -- emit a low-confidence result so
-        // has_auto_merge_triage returns true and blocks re-spawning.
-        if let Some(error_msg) = check_triage_failed(item) {
-            warn!(
-                module = "captain",
-                item_id = item.id,
-                error = %error_msg,
-                "auto-merge triage session failed"
-            );
-            let failed = TriageResult {
-                confidence: "low".into(),
-                reason: format!("Triage session failed: {error_msg}"),
-            };
-            apply_triage_result(item, &failed, config, notifier, pool).await;
+        // 1. Did CC finish (with or without error)?
+        if let Some(outcome) = check_triage_outcome(item) {
+            match outcome {
+                TriageOutcome::Verdict(verdict) => {
+                    apply_triage_verdict(item, &verdict, config, notifier, pool).await;
+                }
+                TriageOutcome::Failed(err) => {
+                    apply_triage_failure(item, &err, notifier, pool).await;
+                }
+            }
             continue;
         }
 
-        // Check for completed result.
-        if let Some(result) = check_triage(item) {
-            apply_triage_result(item, &result, config, notifier, pool).await;
-            continue;
-        }
-
-        // Check timeout.
+        // 2. Triage-side idle timeout (CC stream went quiet past the budget).
+        // If the timestamp is missing or unparseable, treat as timed out: we
+        // can't trust the freshness signal, and leaving the session pending
+        // forever would orphan auto-merge for this cycle.
         let is_timed_out = match item.last_activity_at.as_deref() {
             Some(ts) => match time::OffsetDateTime::parse(
                 ts,
@@ -186,9 +141,25 @@ pub(crate) async fn poll_triage(
                     let elapsed = time::OffsetDateTime::now_utc() - entered;
                     elapsed.whole_seconds() as u64 > triage_timeout.as_secs()
                 }
-                Err(_) => false,
+                Err(e) => {
+                    warn!(
+                        module = "captain",
+                        item_id = item.id,
+                        last_activity_at = %ts,
+                        error = %e,
+                        "triage last_activity_at unparseable; treating as timed out"
+                    );
+                    true
+                }
             },
-            None => false,
+            None => {
+                warn!(
+                    module = "captain",
+                    item_id = item.id,
+                    "triage last_activity_at missing; treating as timed out"
+                );
+                true
+            }
         };
 
         if is_timed_out {
@@ -197,38 +168,44 @@ pub(crate) async fn poll_triage(
                 item_id = item.id,
                 "auto-merge triage session timed out"
             );
-            let timeout = TriageResult {
-                confidence: "low".into(),
-                reason: "Triage session timed out".into(),
-            };
-            apply_triage_result(item, &timeout, config, notifier, pool).await;
+            apply_triage_failure(
+                item,
+                &format!(
+                    "Triage session timed out after {}s with no response",
+                    triage_timeout.as_secs()
+                ),
+                notifier,
+                pool,
+            )
+            .await;
         }
     }
 }
 
-/// Apply the triage result -- emit timeline event, transition to CaptainMerging
-/// if confidence is high.
-async fn apply_triage_result(
+/// Apply a successful verdict — emit timeline event, transition to
+/// CaptainMerging if confidence is high.
+async fn apply_triage_verdict(
     item: &mut Task,
     result: &TriageResult,
     config: &Config,
     notifier: &Notifier,
     pool: &sqlx::SqlitePool,
 ) {
-    let session_id = item.session_ids.triage.clone().unwrap_or_default();
+    let Some(session_id) = item.session_ids.triage.clone() else {
+        warn!(
+            module = "captain",
+            item_id = item.id,
+            "apply_triage_verdict called with no triage session id — skipping"
+        );
+        return;
+    };
     let is_high = result.confidence == "high";
 
-    // Emit triage timeline event with a reopen_seq-keyed dedupe key so
-    // `has_auto_merge_triage` can do an O(1) indexed lookup.
-    let timestamp = mando_types::now_rfc3339();
-    let dedupe_key = mando_db::queries::timeline::auto_merge_triage_dedupe_key(
-        item.id,
-        item.reopen_seq,
-        &timestamp,
-    );
-    let event = mando_types::timeline::TimelineEvent {
+    let dedupe_key =
+        mando_db::queries::timeline::auto_merge_triage_dedupe_key(item.id, &session_id);
+    let event = TimelineEvent {
         event_type: TimelineEventType::AutoMergeTriage,
-        timestamp,
+        timestamp: mando_types::now_rfc3339(),
         actor: "captain".to_string(),
         summary: format!("Auto-merge triage: {} confidence", result.confidence),
         data: serde_json::json!({
@@ -238,23 +215,30 @@ async fn apply_triage_result(
             "reopen_seq": item.reopen_seq,
         }),
     };
-    if let Err(e) =
-        mando_db::queries::timeline::append_with_dedupe_key(pool, item.id, &event, &dedupe_key)
-            .await
+    // `AlreadyExists` happens after a daemon restart between event-write and
+    // session_id clear: the verdict is already recorded, so we proceed to
+    // clear the session and run the post-write side effects (idempotent).
+    // A real `Err` means the row didn't land — leave session_id set so the
+    // next tick re-reads the (still-successful) CC stream and retries.
+    match mando_db::queries::timeline::append_with_dedupe_key(pool, item.id, &event, &dedupe_key)
+        .await
     {
-        warn!(
-            module = "captain",
-            item_id = item.id,
-            error = %e,
-            "failed to persist auto_merge_triage timeline event"
-        );
+        Ok(AppendResult::Inserted | AppendResult::AlreadyExists) => {}
+        Err(e) => {
+            warn!(
+                module = "captain",
+                item_id = item.id,
+                error = %e,
+                "failed to persist auto_merge_triage verdict; will retry next tick"
+            );
+            return;
+        }
     }
 
-    // Clear triage session before branching so poll_triage won't re-process
-    // this session regardless of whether the merge transition succeeds.
+    // Clear the triage session so the poller won't re-process it.
     item.session_ids.triage = None;
 
-    if is_high && config.captain.auto_merge {
+    if is_high && config.captain.auto_merge && !item.no_auto_merge {
         transition_to_merging(item, result, config, notifier, pool).await;
     } else {
         info!(
@@ -267,77 +251,208 @@ async fn apply_triage_result(
     }
 }
 
-/// Transition to CaptainMerging after a high-confidence triage result.
-async fn transition_to_merging(
+/// Apply a failed attempt — emit `AutoMergeTriageFailed`, clear the session,
+/// notify normal priority. Does NOT synthesize a verdict. The next spawn tick
+/// will either re-spawn after backoff or emit exhaustion.
+///
+/// Important: if the timeline read or write fails, we deliberately leave
+/// `session_ids.triage` set so the next tick polls the same CC stream again
+/// and re-attempts persistence. Clearing on a write failure would let the
+/// retry budget be silently bypassed (the next spawn would think failure
+/// count is one lower than it actually is).
+async fn apply_triage_failure(
     item: &mut Task,
-    result: &TriageResult,
-    config: &Config,
+    err_text: &str,
     notifier: &Notifier,
     pool: &sqlx::SqlitePool,
 ) {
-    let pr_num = item.pr_number.unwrap_or(0);
-    let repo = item
-        .github_repo
-        .clone()
-        .or_else(|| mando_config::resolve_github_repo(Some(&item.project), config))
-        .unwrap_or_default();
-    let pr_url = format!("https://github.com/{repo}/pull/{pr_num}");
-
-    let prev_status = item.status;
-    item.status = ItemStatus::CaptainMerging;
-    item.session_ids.merge = None;
-    item.merge_fail_count = 0;
-    item.last_activity_at = Some(mando_types::now_rfc3339());
-
-    let event = mando_types::timeline::TimelineEvent {
-        event_type: TimelineEventType::CaptainMergeStarted,
-        timestamp: mando_types::now_rfc3339(),
-        actor: "captain".to_string(),
-        summary: "Auto-merge triage passed -- starting merge".to_string(),
-        data: serde_json::json!({
-            "pr": &pr_url,
-            "source": "auto_merge_triage",
-        }),
+    let Some(session_id) = item.session_ids.triage.clone() else {
+        // Caller (poll_triage) checked this is Some, so a None here is a bug.
+        // Bail loudly rather than write an empty session_id into the timeline.
+        warn!(
+            module = "captain",
+            item_id = item.id,
+            "apply_triage_failure called with no triage session id — skipping"
+        );
+        return;
     };
 
-    match mando_db::queries::tasks::persist_status_transition(
-        pool,
-        item,
-        prev_status.as_str(),
-        &event,
-    )
-    .await
-    {
-        Ok(true) => {
-            let title = mando_shared::telegram_format::escape_html(&item.title);
-            notifier
-                .normal(&format!(
-                    "\u{2705} Auto-merge triage passed for <b>{title}</b> -- merging"
-                ))
-                .await;
-            info!(
-                module = "captain",
-                item_id = item.id,
-                confidence = %result.confidence,
-                "auto-merge triage passed, transitioning to CaptainMerging"
-            );
-        }
-        Ok(false) => {
-            item.status = prev_status;
-            info!(
-                module = "captain",
-                item_id = item.id,
-                "auto-merge triage transition already applied"
-            );
-        }
+    // Compute the 1-indexed attempt number from the timeline state. If this
+    // load fails we cannot determine the attempt number safely (defaulting to
+    // 1 would create a duplicate dedupe key for an already-recorded attempt 1
+    // and silently drop the failure). Skip persistence; the next tick retries.
+    let attempt = match mando_db::queries::timeline::load_triage_gate_events(pool, item.id).await {
+        Ok(events) => derive_gate_state(&events).failures_in_cycle + 1,
         Err(e) => {
-            item.status = prev_status;
             warn!(
                 module = "captain",
                 item_id = item.id,
                 error = %e,
-                "failed to persist auto-merge triage transition"
+                "failed to load triage events for attempt counting; will retry next tick"
             );
+            return;
         }
+    };
+
+    let dedupe_key =
+        mando_db::queries::timeline::auto_merge_triage_failed_dedupe_key(item.id, &session_id);
+    let event = TimelineEvent {
+        event_type: TimelineEventType::AutoMergeTriageFailed,
+        timestamp: mando_types::now_rfc3339(),
+        actor: "captain".to_string(),
+        summary: format!("Auto-merge triage attempt {attempt} failed"),
+        data: serde_json::json!({
+            "error": err_text,
+            "attempt": attempt,
+            "session_id": session_id,
+            "reopen_seq": item.reopen_seq,
+        }),
+    };
+    let append = match mando_db::queries::timeline::append_with_dedupe_key(
+        pool,
+        item.id,
+        &event,
+        &dedupe_key,
+    )
+    .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            // Genuine DB error (not a UNIQUE conflict): leave the triage
+            // session id in place so the next tick retries reading the
+            // (still-erroring) CC stream and re-attempts the persist.
+            // Skipping the clear is what protects the retry budget.
+            warn!(
+                module = "captain",
+                item_id = item.id,
+                error = %e,
+                "failed to persist auto_merge_triage_failed event; will retry next tick"
+            );
+            return;
+        }
+    };
+
+    // Clear the triage session so the next tick can re-spawn after backoff.
+    // Idempotent: if `AlreadyExists`, a prior tick already wrote the failure
+    // and ran the side effects — clear the session and skip the duplicate
+    // notification so we don't spam Telegram on every restart.
+    item.session_ids.triage = None;
+
+    if append == AppendResult::AlreadyExists {
+        info!(
+            module = "captain",
+            item_id = item.id,
+            attempt,
+            "auto_merge_triage_failed already recorded; clearing session without re-notifying"
+        );
+        return;
     }
+
+    warn!(
+        module = "captain",
+        item_id = item.id,
+        attempt,
+        error = %err_text,
+        "auto-merge triage attempt failed; will retry after backoff"
+    );
+
+    let title = mando_shared::telegram_format::escape_html(&item.title);
+    let err_escaped = mando_shared::telegram_format::escape_html(err_text);
+    notifier
+        .normal(&format!(
+            "\u{26a0}\u{fe0f} Auto-merge triage attempt {attempt} failed for <b>{title}</b>: {err_escaped}"
+        ))
+        .await;
 }
+
+/// Emit an `AutoMergeTriageExhausted` event and notify the human.
+/// Called from the spawn path when attempts are at the cap.
+///
+/// `last_failure_at` is the timestamp of the most recent
+/// `AutoMergeTriageFailed` event in the current cycle. It's part of the
+/// dedupe key so two exhaustions in cycles separated by a `ReworkRequested`
+/// (which opens a fresh cycle without bumping `reopen_seq`) don't collide
+/// on the UNIQUE index.
+pub(crate) async fn emit_exhaustion(
+    item: &Task,
+    last_error: Option<&str>,
+    last_failure_at: &str,
+    attempts: u32,
+    notifier: &Notifier,
+    pool: &sqlx::SqlitePool,
+) {
+    let dedupe_key = mando_db::queries::timeline::auto_merge_triage_exhausted_dedupe_key(
+        item.id,
+        item.reopen_seq,
+        last_failure_at,
+    );
+    let event = TimelineEvent {
+        event_type: TimelineEventType::AutoMergeTriageExhausted,
+        timestamp: mando_types::now_rfc3339(),
+        actor: "captain".to_string(),
+        summary: format!("Auto-merge triage exhausted after {attempts} attempts"),
+        data: serde_json::json!({
+            "attempts": attempts,
+            "last_error": last_error.unwrap_or(""),
+            "reopen_seq": item.reopen_seq,
+        }),
+    };
+    let append = match mando_db::queries::timeline::append_with_dedupe_key(
+        pool,
+        item.id,
+        &event,
+        &dedupe_key,
+    )
+    .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            // DB write failed: don't fire the high-priority notification.
+            // The next tick's `decide_spawn` will return `EmitExhausted`
+            // again (since no exhaustion event was recorded), giving us a
+            // natural retry. Without this early return, every subsequent
+            // tick would spam the human while the DB is unhealthy.
+            warn!(
+                module = "captain",
+                item_id = item.id,
+                error = %e,
+                "failed to persist auto_merge_triage_exhausted event; will retry next tick"
+            );
+            return;
+        }
+    };
+
+    // Idempotent: if we crashed after writing the event but before the
+    // mergeability tick recorded it in derived state, the next tick re-fires
+    // `EmitExhausted`. The row already exists, so we skip the duplicate
+    // Telegram alert.
+    if append == AppendResult::AlreadyExists {
+        info!(
+            module = "captain",
+            item_id = item.id,
+            attempts,
+            "auto_merge_triage_exhausted already recorded; skipping duplicate notification"
+        );
+        return;
+    }
+
+    let title = mando_shared::telegram_format::escape_html(&item.title);
+    let err_clause = match last_error {
+        Some(e) if !e.is_empty() => format!(": {}", mando_shared::telegram_format::escape_html(e)),
+        _ => String::new(),
+    };
+    notifier
+        .high(&format!(
+            "\u{1f6d1} Auto-merge triage exhausted after {attempts} attempts for <b>{title}</b>{err_clause} — human review needed"
+        ))
+        .await;
+
+    info!(
+        module = "captain",
+        item_id = item.id,
+        attempts,
+        "auto-merge triage exhausted; human review needed"
+    );
+}
+
+pub(super) use super::auto_merge_triage_merge::transition_to_merging;

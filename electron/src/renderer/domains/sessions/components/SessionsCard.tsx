@@ -29,6 +29,8 @@ const CATEGORY_ORDER = [
   'clarifier',
   'captain-review',
   'captain-ops',
+  'advisor',
+  'planning',
   'rebase',
   'todo-parser',
   'scout',
@@ -278,7 +280,9 @@ function SessionsList({
               {/* Title + subtitle */}
               <TableCell>
                 <span className="flex min-w-0 items-baseline gap-2">
-                  <span className="shrink-0 text-[13px] text-foreground">{title}</span>
+                  <span className="min-w-0 truncate text-[13px] text-foreground" title={title}>
+                    {title}
+                  </span>
                   {subtitle && (
                     <span className="truncate text-[11px] text-muted-foreground">{subtitle}</span>
                   )}
@@ -288,7 +292,12 @@ function SessionsList({
               {/* Credential */}
               <TableCell className="text-right">
                 {s.credential_label && (
-                  <span className="text-[11px] text-muted-foreground">{s.credential_label}</span>
+                  <span
+                    className="inline-block max-w-[120px] truncate text-[11px] text-muted-foreground"
+                    title={s.credential_label}
+                  >
+                    {s.credential_label}
+                  </span>
                 )}
               </TableCell>
 

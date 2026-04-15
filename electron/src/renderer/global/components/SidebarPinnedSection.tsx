@@ -13,6 +13,7 @@ interface PinnedWorkbench {
   worktree: string;
   title: string;
   createdAt: string;
+  lastActivityAt?: string;
   pinnedAt?: string | null;
   archivedAt?: string | null;
 }
@@ -28,7 +29,7 @@ interface SidebarPinnedSectionProps {
   activeTerminalCwd?: string | null;
   activeTaskId?: number | null;
   onOpenTask?: (taskId: number, workbenchId?: number) => void;
-  onOpenTerminalSession?: (worktree: { project: string; cwd: string }) => void;
+  onOpenTerminalSession?: (worktree: { id?: number; project: string; cwd: string }) => void;
   onUnpin: (id: number) => void;
   onPin?: (id: number) => void;
   onArchiveWorkbench?: (id: number) => void;
@@ -57,7 +58,9 @@ export function SidebarPinnedSection({
     <div className="flex flex-col gap-0.5">
       {items.map(({ wb, task, project }) => {
         const label = task ? task.title || task.original_prompt || 'Untitled task' : wb.title;
-        const ts = task ? task.last_activity_at || task.created_at : wb.createdAt;
+        const ts = task
+          ? task.last_activity_at || task.created_at
+          : wb.lastActivityAt || wb.createdAt;
         const isActive =
           activeTerminalCwd === wb.worktree || (task != null && activeTaskId === task.id);
         const canContextMenu =
@@ -97,7 +100,7 @@ export function SidebarPinnedSection({
               if (task) {
                 onOpenTask?.(task.id, task.workbench_id ?? wb.id);
               } else {
-                onOpenTerminalSession?.({ project, cwd: wb.worktree });
+                onOpenTerminalSession?.({ id: wb.id, project, cwd: wb.worktree });
               }
             }}
             className={`group flex w-full items-center gap-2 rounded-md px-1.5 py-1.5 text-left text-[13px] transition-colors hover:bg-muted ${isActive ? 'bg-muted font-medium text-foreground' : 'text-muted-foreground'}`}

@@ -139,51 +139,55 @@ body {
   height: 100vh;
 }
 
-/* ── Typography utility classes ── */
-.text-display {
-  font-size: 32px;
-  font-weight: 700;
-  line-height: 40px;
-  letter-spacing: -0.02em;
-}
+/* ── Typography utility classes ──
+   Placed in @layer base so Tailwind utilities (font-medium, font-semibold,
+   etc.) can override the default font-weight set by each token. */
+@layer base {
+  .text-display {
+    font-size: 32px;
+    font-weight: 700;
+    line-height: 40px;
+    letter-spacing: -0.02em;
+  }
 
-.text-heading {
-  font-size: 22px;
-  font-weight: 600;
-  line-height: 28px;
-}
+  .text-heading {
+    font-size: 22px;
+    font-weight: 600;
+    line-height: 28px;
+  }
 
-.text-subheading {
-  font-size: 16px;
-  font-weight: 500;
-  line-height: 20px;
-}
+  .text-subheading {
+    font-size: 16px;
+    font-weight: 500;
+    line-height: 20px;
+  }
 
-.text-body {
-  font-size: 14px;
-  font-weight: 400;
-  line-height: 22px;
-}
+  .text-body {
+    font-size: 14px;
+    font-weight: 400;
+    line-height: 22px;
+  }
 
-.text-caption {
-  font-size: 12px;
-  font-weight: 400;
-  line-height: 16px;
-}
+  .text-caption {
+    font-size: 12px;
+    font-weight: 400;
+    line-height: 16px;
+  }
 
-.text-label {
-  font-size: 11px;
-  font-weight: 500;
-  line-height: 14px;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
+  .text-label {
+    font-size: 11px;
+    font-weight: 500;
+    line-height: 14px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
 
-.text-code {
-  font-family: var(--font-mono);
-  font-size: 13px;
-  font-weight: 400;
-  line-height: 18px;
+  .text-code {
+    font-family: var(--font-mono);
+    font-size: 13px;
+    font-weight: 400;
+    line-height: 18px;
+  }
 }
 
 /* ── Scrollbar ── */

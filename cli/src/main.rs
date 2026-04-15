@@ -11,6 +11,7 @@ mod scout;
 mod sessions;
 mod todo;
 mod todo_artifacts;
+mod todo_display;
 mod worktree;
 
 use clap::{Args, Parser, Subcommand};

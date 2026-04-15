@@ -338,7 +338,23 @@ async fn main() {
     // connection that would block drain indefinitely if we killed it after).
     let shutdown = async move {
         shutdown_signal().await;
+        // Cancel cooperative loops FIRST so auto-tick and request handlers
+        // stop spawning new CC sessions. If we snapshotted before cancel,
+        // the 5s grace window that signal_cc_subprocesses_for_shutdown
+        // spends waiting for exits would let brand-new sessions slip past
+        // — their PIDs would not be in our snapshot, and they would
+        // become orphans the moment the daemon exits.
         cancel.cancel();
+        // Yield once so the cancellation propagates to any task that is
+        // mid-spawn (about to register a PID). After this, the registry
+        // snapshot reflects every session that was ever registered.
+        tokio::task::yield_now().await;
+        // Signal every live CC subprocess before tearing down tokio so
+        // subprocesses get a chance to flush their final `result` event
+        // to the stream. Any stragglers beyond the grace window are
+        // cleaned up by `pid_registry::cleanup_on_startup` on the next
+        // launch.
+        mando_gateway::shutdown::signal_cc_subprocesses_for_shutdown().await;
         tg_rt.shutdown().await;
         ui_rt.shutdown().await;
     };

@@ -462,6 +462,7 @@ mod tests {
         let prompts = captain_prompts();
         let mut vars: FxHashMap<&str, &str> = FxHashMap::default();
         vars.insert("trigger", "gates_pass");
+        vars.insert("problem_statement", "Fix the login button");
         vars.insert("worker_contexts", "Worker did some work");
         vars.insert("knowledge_base", "");
         vars.insert("evidence_images", "");
@@ -479,6 +480,58 @@ mod tests {
 
         let rendered = render_prompt("captain_review", &prompts, &vars).unwrap();
         assert_no_triple_blanks(&rendered, "captain_review (gates_pass)");
+    }
+
+    #[test]
+    fn captain_review_render_evidence_scenario() {
+        let prompts = captain_prompts();
+        let mut vars: FxHashMap<&str, &str> = FxHashMap::default();
+        vars.insert("trigger", "gates_pass");
+        vars.insert("problem_statement", "Title: Fix login button alignment on mobile\n\nContext: The login button overflows the viewport on screens narrower than 375px.\n\nOriginal prompt: fix the login button on mobile, it's overflowing");
+        vars.insert(
+            "worker_contexts",
+            "Worker completed 3 commits fixing CSS flex layout for auth form.",
+        );
+        vars.insert("knowledge_base", "");
+        vars.insert(
+            "evidence_images",
+            "/tmp/evidence/screenshot-mobile.png\n/tmp/evidence/recording-mobile.mp4",
+        );
+        vars.insert("is_gates_pass", "true");
+        vars.insert("is_degraded_context", "false");
+        vars.insert("is_timeout", "false");
+        vars.insert("is_broken_session", "false");
+        vars.insert("is_repeated_nudge", "false");
+        vars.insert("is_rebase_fail", "false");
+        vars.insert("is_ci_failure", "false");
+        vars.insert("is_merge_fail", "false");
+        vars.insert("is_budget_exhausted", "false");
+        vars.insert("is_clarifier_fail", "false");
+        vars.insert("intervention_count", "0");
+        vars.insert("has_screenshot", "true");
+        vars.insert("has_recording", "true");
+
+        let rendered = render_prompt("captain_review", &prompts, &vars).unwrap();
+        assert_no_triple_blanks(&rendered, "captain_review (evidence scenario)");
+
+        // Verify new sections are present
+        assert!(rendered.contains("## Task"), "Missing ## Task section");
+        assert!(
+            rendered.contains("Fix login button alignment"),
+            "problem_statement not rendered"
+        );
+        assert!(
+            rendered.contains("You MUST review every evidence file"),
+            "Missing evidence review instructions"
+        );
+        assert!(
+            rendered.contains("Evidence content verification"),
+            "Missing content verification gate"
+        );
+        assert!(
+            rendered.contains("Compare against the task requirements"),
+            "Missing task comparison instruction"
+        );
     }
 
     #[test]

@@ -2,10 +2,12 @@
 
 use std::collections::HashMap;
 
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::Json;
 use serde_json::{json, Value};
+
+use mando_db::caller::SessionCaller;
 
 use crate::response::{error_response, internal_error};
 use crate::AppState;
@@ -32,7 +34,7 @@ pub(crate) async fn get_task_artifacts(
 
     let artifacts = mando_db::queries::artifacts::list_for_task(pool, task_id)
         .await
-        .map_err(internal_error)?;
+        .map_err(|e| internal_error(e, "failed to load task artifacts"))?;
 
     Ok(Json(json!({ "artifacts": artifacts })))
 }
@@ -47,7 +49,10 @@ pub(crate) async fn get_task_feed(
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let task_id = resolve_task_id(&id)?;
     let store = state.task_store.read().await;
-    let item = store.find_by_id(task_id).await.map_err(internal_error)?;
+    let item = store
+        .find_by_id(task_id)
+        .await
+        .map_err(|e| internal_error(e, "failed to load task"))?;
     if item.is_none() {
         return Err(error_response(
             StatusCode::NOT_FOUND,
@@ -69,10 +74,11 @@ pub(crate) async fn get_task_feed(
         mando_db::queries::ask_history::load(&pool, task_id),
     );
 
-    let timeline_events = timeline_result
-        .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?;
-    let artifacts = artifacts_result.map_err(internal_error)?;
-    let history = history_result.map_err(internal_error)?;
+    let timeline_events =
+        timeline_result.map_err(|e| internal_error(e, "failed to load task timeline"))?;
+    let artifacts =
+        artifacts_result.map_err(|e| internal_error(e, "failed to load task artifacts"))?;
+    let history = history_result.map_err(|e| internal_error(e, "failed to load ask history"))?;
 
     // Build unified feed items with a type discriminator.
     let mut feed: Vec<Value> = Vec::new();
@@ -204,7 +210,7 @@ pub(crate) async fn get_task_history(
 
     let entries = mando_db::queries::ask_history::load(pool, task_id)
         .await
-        .map_err(internal_error)?;
+        .map_err(|e| internal_error(e, "failed to load ask history"))?;
 
     Ok(Json(json!({ "history": entries })))
 }
@@ -216,32 +222,31 @@ pub(crate) async fn get_task_timeline(
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let store = state.task_store.read().await;
     let id_num: i64 = resolve_task_id(&id)?;
-    let full_item = store.find_by_id(id_num).await.map_err(internal_error)?;
+    let full_item = store
+        .find_by_id(id_num)
+        .await
+        .map_err(|e| internal_error(e, "failed to load task"))?;
     let pool = store.pool().clone();
     let item_ref = full_item.as_ref();
 
-    match mando_captain::runtime::dashboard_timeline::get_item_timeline(&id, None, item_ref, &pool)
-        .await
-    {
-        Ok(events) => {
-            let count = events.as_array().map(|a| a.len()).unwrap_or(0);
-            Ok(Json(json!({
-                "id": id,
-                "events": events,
-                "count": count,
-            })))
-        }
-        Err(e) => Err(error_response(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            &e.to_string(),
-        )),
-    }
+    let events =
+        mando_captain::runtime::dashboard_timeline::get_item_timeline(&id, None, item_ref, &pool)
+            .await
+            .map_err(|e| internal_error(e, "failed to load task timeline"))?;
+
+    let count = events.as_array().map(|a| a.len()).unwrap_or(0);
+    Ok(Json(json!({
+        "id": id,
+        "events": events,
+        "count": count,
+    })))
 }
 
-/// GET /api/tasks/{id}/sessions
+/// GET /api/tasks/{id}/sessions?caller=workers
 pub(crate) async fn get_task_sessions(
     State(state): State<AppState>,
     Path(id): Path<String>,
+    Query(params): Query<crate::routes_sessions::SessionsQuery>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let id_num: i64 = resolve_task_id(&id)?;
     let store = state.task_store.read().await;
@@ -249,10 +254,18 @@ pub(crate) async fn get_task_sessions(
     let sessions = store
         .list_sessions_for_task(id_num)
         .await
-        .map_err(internal_error)?;
+        .map_err(|e| internal_error(e, "failed to load task sessions"))?;
+
+    let caller_filter = params.caller.as_deref().or(params.category.as_deref());
 
     let matched: Vec<Value> = sessions
         .into_iter()
+        .filter(|e| match caller_filter {
+            Some(filter) => {
+                SessionCaller::parse(&e.caller).is_some_and(|c| c.group().as_str() == filter)
+            }
+            None => true,
+        })
         .map(|e| {
             json!({
                 "session_id": e.session_id,
@@ -285,7 +298,7 @@ pub(crate) async fn get_task_pr_summary(
         let item = store
             .find_by_id(id_num)
             .await
-            .map_err(internal_error)?
+            .map_err(|e| internal_error(e, "failed to load task"))?
             .ok_or_else(|| {
                 error_response(StatusCode::NOT_FOUND, &format!("item {id} not found"))
             })?;

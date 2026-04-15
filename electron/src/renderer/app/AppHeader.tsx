@@ -150,7 +150,7 @@ export function AppHeader({
     if (sidebarCollapsed) {
       return (
         <div
-          className="flex h-[38px] shrink-0 items-start pl-[70px] pt-[10px]"
+          className="relative z-10 flex h-[38px] shrink-0 items-start bg-background pl-[70px] pt-[10px]"
           style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
         >
           {navIcons}
@@ -161,7 +161,10 @@ export function AppHeader({
       );
     }
     return (
-      <div className="h-10 shrink-0" style={{ WebkitAppRegion: 'drag' } as React.CSSProperties} />
+      <div
+        className="relative z-10 h-10 shrink-0 bg-background"
+        style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
+      />
     );
   }
 
@@ -224,7 +227,10 @@ export function AppHeader({
           <div className="flex items-center pl-[70px]">
             {navIcons}
             {ctx.worktreeName && (
-              <span className="ml-3 min-w-0 truncate text-body font-medium text-foreground">
+              <span
+                className="ml-3 min-w-0 truncate text-body font-medium text-foreground"
+                title={ctx.worktreeName}
+              >
                 {ctx.worktreeName}
               </span>
             )}
@@ -244,9 +250,17 @@ export function AppHeader({
             <HeaderStatusBadge item={ctx.task!} sessions={sessions} />
           </span>
         )}
-        {ctx.projectName && <span className="shrink-0">{ctx.projectName}</span>}
+        {ctx.projectName && (
+          <span className="max-w-[200px] truncate" title={ctx.projectName}>
+            {ctx.projectName}
+          </span>
+        )}
         {ctx.projectName && ctx.worktreeName && <span className="shrink-0">&middot;</span>}
-        {ctx.worktreeName && <span className="min-w-0 truncate">{ctx.worktreeName}</span>}
+        {ctx.worktreeName && (
+          <span className="min-w-0 truncate" title={ctx.worktreeName}>
+            {ctx.worktreeName}
+          </span>
+        )}
         {hasTask &&
           (ctx.worktreeName || ctx.projectName) &&
           ctx.task!.pr_number &&

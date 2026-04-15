@@ -40,7 +40,7 @@ export function MessageBlock({ entry }: { entry: AskHistoryEntry }): React.React
             {label} · {time}
           </span>
         </div>
-        <div className="text-body-sm">
+        <div className="text-body">
           <PrMarkdown text={entry.content} />
         </div>
       </div>

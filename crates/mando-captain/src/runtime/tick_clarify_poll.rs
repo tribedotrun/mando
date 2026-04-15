@@ -223,6 +223,50 @@ pub(super) async fn poll_clarifying_items(
             continue;
         }
 
+        // No `type: "result"` entry in the stream. If the session is already
+        // finished (stopped/failed/timeout), try extracting the answer from the
+        // last assistant message instead of waiting for the full timeout.
+        if mando_cc::is_session_finished(&session_id) {
+            if let Some(assistant_text) = mando_cc::get_last_assistant_text(&stream_path) {
+                let mut parsed = clarifier::parse_clarifier_response(&assistant_text, &item.title);
+                parsed.session_id = Some(session_id.to_string());
+                apply_clarifier_result(
+                    item,
+                    parsed,
+                    &session_id,
+                    config,
+                    notifier,
+                    resource_limits,
+                    pool,
+                )
+                .await;
+                continue;
+            }
+            // Session finished but produced nothing useful — treat as error.
+            tracing::warn!(
+                module = "captain",
+                item_id = item.id,
+                %session_id,
+                "clarifier session finished without result or assistant text"
+            );
+            super::dispatch_redispatch::revert_clarifier_start(
+                item,
+                &session_id,
+                &anyhow::anyhow!("session finished without usable output"),
+                pool,
+            )
+            .await;
+            let count = item.clarifier_fail_count + 1;
+            item.clarifier_fail_count = count;
+            if count >= max_clarifier_retries {
+                super::action_contract::reset_review_retry(
+                    item,
+                    mando_types::task::ReviewTrigger::ClarifierFail,
+                );
+            }
+            continue;
+        }
+
         // No result yet — check timeout.
         let is_timed_out = match item.last_activity_at.as_deref() {
             Some(ts) => match time::OffsetDateTime::parse(

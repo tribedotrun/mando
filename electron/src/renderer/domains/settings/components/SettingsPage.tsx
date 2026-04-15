@@ -1,4 +1,5 @@
 import React, { useMemo } from 'react';
+import { ArrowLeft } from 'lucide-react';
 import { useConfig } from '#renderer/hooks/queries';
 import { ErrorBoundary } from '#renderer/global/components/ErrorBoundary';
 import { SettingsGeneral } from '#renderer/domains/settings/components/SettingsGeneral';
@@ -61,11 +62,13 @@ function SettingsPanel({ section }: { section: SettingsSection }) {
 interface SettingsPageProps {
   section?: SettingsSection;
   onSectionChange?: (section: SettingsSection) => void;
+  onBack: () => void;
 }
 
 export function SettingsPage({
   section: sectionProp = 'general',
   onSectionChange,
+  onBack,
 }: SettingsPageProps): React.ReactElement {
   const { data: config, isLoading, error } = useConfig();
   const scoutEnabled = !!config?.features?.scout;
@@ -104,6 +107,14 @@ export function SettingsPage({
         style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
       />
       <aside className="flex w-[200px] shrink-0 flex-col bg-card pb-4 pl-3 pr-3 pt-[38px]">
+        <button
+          type="button"
+          onClick={onBack}
+          className="mb-2 flex items-center gap-1.5 px-0 text-xs text-muted-foreground transition-colors hover:text-foreground"
+        >
+          <ArrowLeft size={14} />
+          Back to app
+        </button>
         <div className="mb-4 px-0 text-sm font-medium text-foreground">Settings</div>
 
         <nav className="flex flex-1 flex-col gap-0.5 overflow-y-auto">

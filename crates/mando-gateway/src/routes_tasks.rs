@@ -7,7 +7,11 @@ use axum::Json;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use crate::response::{error_response, internal_error, map_task_create_error};
+use mando_captain::io::git;
+
+use crate::response::{
+    error_response, internal_error, map_task_create_error, touch_workbench_activity,
+};
 use crate::AppState;
 
 /// Extract a text field from a multipart part, returning `Ok(None)` if empty.
@@ -39,10 +43,6 @@ fn task_update_error_status(err: &anyhow::Error) -> StatusCode {
     }
 }
 
-// ---------------------------------------------------------------
-// GET endpoints
-// ---------------------------------------------------------------
-
 /// GET /api/tasks
 pub(crate) async fn get_tasks(
     State(state): State<AppState>,
@@ -53,30 +53,24 @@ pub(crate) async fn get_tasks(
         store
             .load_all_with_archived()
             .await
-            .map_err(internal_error)?
+            .map_err(|e| internal_error(e, "failed to load tasks"))?
     } else {
-        store.load_all().await.map_err(internal_error)?
+        store
+            .load_all()
+            .await
+            .map_err(|e| internal_error(e, "failed to load tasks"))?
     };
     let count = items.len();
     let items_json: Vec<Value> = items
         .iter()
         .map(serde_json::to_value)
         .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| {
-            error_response(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                &format!("serialization failed: {e}"),
-            )
-        })?;
+        .map_err(|e| internal_error(e, "failed to serialize tasks"))?;
     Ok(Json(json!({
         "items": items_json,
         "count": count,
     })))
 }
-
-// ---------------------------------------------------------------
-// POST endpoints
-// ---------------------------------------------------------------
 
 /// POST /api/tasks/add (multipart: title, project/repo, optional context/plan/no_pr, images)
 pub(crate) async fn post_task_add(
@@ -88,6 +82,8 @@ pub(crate) async fn post_task_add(
     let mut context: Option<String> = None;
     let mut plan: Option<String> = None;
     let mut no_pr: Option<String> = None;
+    let mut no_auto_merge: Option<String> = None;
+    let mut planning: Option<String> = None;
     let mut source: Option<String> = None;
     let mut saved_images: Vec<String> = Vec::new();
 
@@ -108,26 +104,12 @@ pub(crate) async fn post_task_add(
                     repo = Some(val);
                 }
             }
-            "context" => {
-                if let Some(val) = field_text(field).await? {
-                    context = Some(val);
-                }
-            }
-            "plan" => {
-                if let Some(val) = field_text(field).await? {
-                    plan = Some(val);
-                }
-            }
-            "no_pr" => {
-                if let Some(val) = field_text(field).await? {
-                    no_pr = Some(val);
-                }
-            }
-            "source" => {
-                if let Some(val) = field_text(field).await? {
-                    source = Some(val);
-                }
-            }
+            "context" => context = field_text(field).await?.or(context),
+            "plan" => plan = field_text(field).await?.or(plan),
+            "no_pr" => no_pr = field_text(field).await?.or(no_pr),
+            "no_auto_merge" => no_auto_merge = field_text(field).await?.or(no_auto_merge),
+            "planning" => planning = field_text(field).await?.or(planning),
+            "source" => source = field_text(field).await?.or(source),
             "images" => {
                 let filename = field.file_name().unwrap_or("upload").to_string();
                 let ext = filename
@@ -207,7 +189,13 @@ pub(crate) async fn post_task_add(
         .await
         .map_err(map_task_create_error)?;
 
-        if !saved_images.is_empty() || context.is_some() || plan.is_some() || no_pr.is_some() {
+        if !saved_images.is_empty()
+            || context.is_some()
+            || plan.is_some()
+            || no_pr.is_some()
+            || no_auto_merge.is_some()
+            || planning.is_some()
+        {
             if let Some(id) = val["id"].as_i64() {
                 let mut updates = json!({});
                 if !saved_images.is_empty() {
@@ -223,6 +211,13 @@ pub(crate) async fn post_task_add(
                 if let Some(ref value) = no_pr {
                     updates["no_pr"] = json!(value == "true");
                 }
+                if let Some(ref value) = no_auto_merge {
+                    updates["no_auto_merge"] = json!(value == "true");
+                }
+                if let Some(ref value) = planning {
+                    updates["planning"] = json!(value == "true");
+                    updates["status"] = json!("queued");
+                }
                 mando_captain::runtime::dashboard::update_task(&store, id, &updates)
                     .await
                     .map_err(|e| {
@@ -237,7 +232,36 @@ pub(crate) async fn post_task_add(
         val
     };
 
-    // Reload the created task to include any field updates (context, plan, images).
+    // Create a workbench for the new task so it is clickable in the sidebar
+    // from the moment it appears.  Uses the same pattern as POST /api/worktrees.
+    // Resolve the project from the created task (it may have been inferred).
+    if let Some(task_id) = val["id"].as_i64() {
+        let project_name = {
+            let store = state.task_store.read().await;
+            store
+                .find_by_id(task_id)
+                .await
+                .ok()
+                .flatten()
+                .map(|t| t.project.clone())
+        };
+        if let Some(ref pname) = project_name {
+            if let Err(e) =
+                create_workbench_for_task(&state, &config, task_id, pname, title.trim()).await
+            {
+                // Non-fatal: the task exists, captain will create the workbench
+                // at spawn time if we fail here.
+                tracing::warn!(
+                    module = "tasks",
+                    task_id,
+                    error = %e,
+                    "failed to create workbench at task creation"
+                );
+            }
+        }
+    }
+
+    // Reload the created task to include any field updates (context, plan, images, workbench_id).
     let task_payload = if let Some(id) = val["id"].as_i64() {
         let store = state.task_store.read().await;
         store
@@ -261,7 +285,61 @@ pub(crate) async fn post_task_add(
         mando_captain::WORKER_EXIT_SIGNAL.notify_one();
     }
 
-    Ok((StatusCode::CREATED, Json(val)))
+    let response = task_payload.unwrap_or(val);
+    Ok((StatusCode::CREATED, Json(response)))
+}
+
+/// Create a worktree + workbench for a freshly inserted task and link them.
+async fn create_workbench_for_task(
+    state: &AppState,
+    _config: &mando_config::Config,
+    task_id: i64,
+    project_name: &str,
+    title: &str,
+) -> anyhow::Result<()> {
+    let pool = state.db.pool();
+
+    // Resolve project from DB.
+    let project_row = mando_db::queries::projects::resolve(pool, project_name)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("project not found: {project_name}"))?;
+    let project_path = mando_config::expand_tilde(&project_row.path);
+
+    // Build worktree path: {worktrees_dir}/{repo}-todo-{task_id}
+    let suffix = format!("todo-{task_id}");
+    let branch = format!("mando/{suffix}");
+    let wt_path = git::worktree_path(&project_path, &suffix);
+
+    // Create the git worktree.
+    git::fetch_origin(&project_path).await?;
+    let default_br = git::default_branch(&project_path).await?;
+    if wt_path.exists() {
+        let _ = git::remove_worktree(&project_path, &wt_path).await;
+    }
+    let _ = git::delete_local_branch(&project_path, &branch).await;
+    git::create_worktree(&project_path, &branch, &wt_path, &default_br).await?;
+
+    // Insert workbench row.
+    let wb = mando_types::Workbench::new(
+        project_row.id,
+        project_row.name.clone(),
+        wt_path.to_string_lossy().to_string(),
+        title.to_string(),
+    );
+    let wb_id = mando_db::queries::workbenches::insert(pool, &wb).await?;
+
+    // Link the workbench to the task.
+    let store = state.task_store.read().await;
+    mando_captain::runtime::dashboard::update_task(
+        &store,
+        task_id,
+        &json!({"workbench_id": wb_id}),
+    )
+    .await?;
+
+    state.bus.send(mando_types::BusEvent::Workbenches, None);
+
+    Ok(())
 }
 
 #[derive(Deserialize)]
@@ -327,10 +405,7 @@ pub(crate) async fn post_task_delete(
             }
             Ok(Json(resp))
         }
-        Err(e) => Err(error_response(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            &e.to_string(),
-        )),
+        Err(e) => Err(internal_error(e, "failed to delete tasks")),
     }
 }
 
@@ -356,16 +431,9 @@ pub(crate) async fn post_task_merge(
     let store = state.task_store.read().await;
     match mando_captain::runtime::dashboard::merge_pr(&store, body.pr_number, &body.project).await {
         Ok(val) => Ok(Json(val)),
-        Err(e) => Err(error_response(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            &e.to_string(),
-        )),
+        Err(e) => Err(internal_error(e, "merge failed")),
     }
 }
-
-// ---------------------------------------------------------------
-// PATCH endpoint
-// ---------------------------------------------------------------
 
 /// PATCH /api/tasks/{id}
 pub(crate) async fn patch_task_item(
@@ -383,10 +451,17 @@ pub(crate) async fn patch_task_item(
                 .ok()
                 .flatten()
                 .map(|t| serde_json::to_value(&t).unwrap());
+            let wb_id = updated
+                .as_ref()
+                .and_then(|v| v.get("workbench_id"))
+                .and_then(|v| v.as_i64())
+                .unwrap_or(0);
             state.bus.send(
                 mando_types::BusEvent::Tasks,
                 Some(json!({"action": "updated", "item": updated, "id": id_num})),
             );
+            drop(store);
+            touch_workbench_activity(&state, wb_id).await;
             Ok(Json(json!({"ok": true})))
         }
         Err(e) => {

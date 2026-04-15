@@ -25,7 +25,7 @@ const SELECT_COLS: &str = "\
     t.worker, t.resource, t.context, t.original_prompt, \
     t.created_at, t.workbench_id, w.worktree, t.pr_number, t.worker_started_at, \
     t.intervention_count, t.captain_review_trigger, t.session_ids, t.last_activity_at, \
-    t.plan, t.no_pr, t.worker_seq, t.reopen_seq, t.reopened_at, t.reopen_source, t.images, \
+    t.plan, t.no_pr, t.no_auto_merge, t.planning, t.worker_seq, t.reopen_seq, t.reopened_at, t.reopen_source, t.images, \
     t.review_fail_count, t.clarifier_fail_count, t.spawn_fail_count, t.merge_fail_count, \
     t.escalation_report, t.source, t.rev, p.github_repo";
 
@@ -48,7 +48,7 @@ pub async fn find_by_id(pool: &SqlitePool, id: i64) -> Result<Option<Task>> {
 /// Load all non-archived tasks (archive is on workbench, not task).
 pub async fn load_all(pool: &SqlitePool) -> Result<Vec<Task>> {
     let sql = format!(
-        "{} WHERE (t.workbench_id IS NULL OR w.archived_at IS NULL AND w.deleted_at IS NULL)",
+        "{} WHERE (w.archived_at IS NULL AND w.deleted_at IS NULL)",
         select_tasks_sql()
     );
     let rows: Vec<TaskRow> = sqlx::query_as(&sql).fetch_all(pool).await?;
@@ -67,7 +67,7 @@ pub async fn routing(pool: &SqlitePool) -> Result<Vec<TaskRouting>> {
         "SELECT t.id, t.title, t.status, t.project_id, p.name AS project, t.worker, t.resource
          FROM tasks t JOIN projects p ON p.id = t.project_id
          LEFT JOIN workbenches w ON w.id = t.workbench_id
-         WHERE (t.workbench_id IS NULL OR w.archived_at IS NULL AND w.deleted_at IS NULL)",
+         WHERE (w.archived_at IS NULL AND w.deleted_at IS NULL)",
     )
     .fetch_all(pool)
     .await?;
@@ -96,6 +96,8 @@ const WRITE_COLS: &[&str] = &[
     "last_activity_at",
     "plan",
     "no_pr",
+    "no_auto_merge",
+    "planning",
     "worker_seq",
     "reopen_seq",
     "reopened_at",
@@ -165,6 +167,8 @@ pub(crate) fn bind_task_write_fields<'q>(
         .bind(&task.last_activity_at)
         .bind(&task.plan)
         .bind(task.no_pr as i64)
+        .bind(task.no_auto_merge as i64)
+        .bind(task.planning as i64)
         .bind(task.worker_seq)
         .bind(task.reopen_seq)
         .bind(&task.reopened_at)
@@ -218,7 +222,7 @@ pub async fn status_counts(pool: &SqlitePool) -> Result<HashMap<String, usize>> 
     let rows: Vec<(String, i64)> = sqlx::query_as(
         "SELECT t.status, COUNT(*) FROM tasks t \
          LEFT JOIN workbenches w ON w.id = t.workbench_id \
-         WHERE (t.workbench_id IS NULL OR w.archived_at IS NULL AND w.deleted_at IS NULL) \
+         WHERE (w.archived_at IS NULL AND w.deleted_at IS NULL) \
          GROUP BY t.status",
     )
     .fetch_all(pool)
@@ -233,7 +237,7 @@ pub async fn has_active_with_source(pool: &SqlitePool, source: &str) -> Result<b
          LEFT JOIN workbenches w ON w.id = t.workbench_id \
          WHERE t.source = ? \
            AND t.status NOT IN ('merged','completed-no-pr','canceled') \
-           AND (t.workbench_id IS NULL OR w.archived_at IS NULL AND w.deleted_at IS NULL) \
+           AND (w.archived_at IS NULL AND w.deleted_at IS NULL) \
          LIMIT 1)",
     )
     .bind(source)
@@ -242,13 +246,14 @@ pub async fn has_active_with_source(pool: &SqlitePool, source: &str) -> Result<b
     Ok(exists)
 }
 
-/// Count of active workers.
+/// Count of active workers (excludes planning tasks, consistent with tick.rs).
 pub async fn active_worker_count(pool: &SqlitePool) -> Result<usize> {
     let count: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM tasks t \
          LEFT JOIN workbenches w ON w.id = t.workbench_id \
          WHERE t.status='in-progress' AND t.worker IS NOT NULL \
-           AND (t.workbench_id IS NULL OR w.archived_at IS NULL AND w.deleted_at IS NULL)",
+           AND t.planning = 0 \
+           AND (w.archived_at IS NULL AND w.deleted_at IS NULL)",
     )
     .fetch_one(pool)
     .await?;
@@ -290,7 +295,7 @@ pub async fn replace_all(pool: &SqlitePool, tasks: &[Task]) -> Result<()> {
         "DELETE FROM tasks WHERE id IN (\
          SELECT t.id FROM tasks t \
          LEFT JOIN workbenches w ON w.id = t.workbench_id \
-         WHERE t.workbench_id IS NULL OR w.archived_at IS NULL AND w.deleted_at IS NULL)",
+         WHERE w.archived_at IS NULL AND w.deleted_at IS NULL)",
     )
     .execute(&mut *tx)
     .await?;

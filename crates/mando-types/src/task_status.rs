@@ -5,7 +5,7 @@ use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 
-/// Status of a task (15 states, 3 terminal).
+/// Status of a task (16 states, 3 terminal).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ItemStatus {
     #[serde(rename = "new")]
@@ -36,12 +36,14 @@ pub enum ItemStatus {
     Merged,
     #[serde(rename = "completed-no-pr")]
     CompletedNoPr,
+    #[serde(rename = "plan-ready")]
+    PlanReady,
     #[serde(rename = "canceled")]
     Canceled,
 }
 
-/// All 15 item statuses.
-pub const ALL_STATUSES: [ItemStatus; 15] = [
+/// All 16 item statuses.
+pub const ALL_STATUSES: [ItemStatus; 16] = [
     ItemStatus::New,
     ItemStatus::Clarifying,
     ItemStatus::NeedsClarification,
@@ -56,6 +58,7 @@ pub const ALL_STATUSES: [ItemStatus; 15] = [
     ItemStatus::Errored,
     ItemStatus::Merged,
     ItemStatus::CompletedNoPr,
+    ItemStatus::PlanReady,
     ItemStatus::Canceled,
 ];
 
@@ -101,6 +104,7 @@ impl ItemStatus {
             Self::Errored => "errored",
             Self::Merged => "merged",
             Self::CompletedNoPr => "completed-no-pr",
+            Self::PlanReady => "plan-ready",
             Self::Canceled => "canceled",
         }
     }
@@ -131,6 +135,7 @@ impl FromStr for ItemStatus {
             "errored" => Ok(Self::Errored),
             "merged" => Ok(Self::Merged),
             "completed-no-pr" => Ok(Self::CompletedNoPr),
+            "plan-ready" => Ok(Self::PlanReady),
             "canceled" => Ok(Self::Canceled),
             _ => Err(format!("unknown status: {s}")),
         }

@@ -124,13 +124,13 @@ async fn handle_do(
         // Immediate actions
         "merge" => {
             let _ = bot.edit_message(cid, mid, "\u{23f3} Merging\u{2026}").await;
-            crate::callback_actions::merge(bot, cid, task_id).await?;
+            crate::callback_actions::merge(bot, cid, task_id, Some(mid)).await?;
         }
         "accept" => {
             let _ = bot
                 .edit_message(cid, mid, "\u{23f3} Accepting\u{2026}")
                 .await;
-            crate::callback_actions::accept(bot, cid, task_id).await?;
+            crate::callback_actions::accept(bot, cid, task_id, Some(mid)).await?;
         }
         "handoff" => {
             let _ = bot

@@ -158,7 +158,8 @@ pub(crate) async fn ai_parse_and_create(
     project: &str,
     photo_file_id: Option<String>,
 ) -> Result<()> {
-    bot.send_html(chat_id, "\u{1f9e0} Parsing tasks\u{2026}")
+    let mid = bot
+        .send_loading(chat_id, "\u{1f9e0} Parsing tasks\u{2026}")
         .await?;
 
     let body = json!({
@@ -178,15 +179,16 @@ pub(crate) async fn ai_parse_and_create(
                 })
                 .unwrap_or_default();
             if items.is_empty() {
-                bot.send_html(chat_id, "\u{26a0}\u{fe0f} AI returned no tasks.")
+                bot.edit_message(chat_id, mid, "\u{26a0}\u{fe0f} AI returned no tasks.")
                     .await?;
                 return Ok(());
             }
             items
         }
         Err(e) => {
-            bot.send_html(
+            bot.edit_message(
                 chat_id,
+                mid,
                 &format!(
                     "\u{26a0}\u{fe0f} Failed to parse: {}",
                     mando_shared::escape_html(&e.to_string())
@@ -207,7 +209,7 @@ pub(crate) async fn ai_parse_and_create(
         })
         .collect();
 
-    crate::callback_actions::add_todo_items(bot, chat_id, &todo_items).await
+    crate::callback_actions::add_todo_items(bot, chat_id, &todo_items, Some(mid)).await
 }
 
 fn build_project_picker(action_id: &str, names: &[String]) -> serde_json::Value {

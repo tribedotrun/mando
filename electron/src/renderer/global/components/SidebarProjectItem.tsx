@@ -32,7 +32,7 @@ interface SidebarProjectItemProps {
   items?: SidebarChild[];
   onOpenTask?: (taskId: number, workbenchId?: number) => void;
   activeWorktreeCwd?: string | null;
-  onOpenWorktree?: (worktree: { project: string; cwd: string }) => void;
+  onOpenWorktree?: (worktree: { id?: number; project: string; cwd: string }) => void;
   onArchiveWorkbench?: (id: number) => void;
   onPinWorkbench?: (id: number) => void;
   onUnpinWorkbench?: (id: number) => void;

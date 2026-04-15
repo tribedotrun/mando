@@ -6,7 +6,7 @@ use axum::Json;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use crate::response::error_response;
+use crate::response::{error_response, internal_error};
 use crate::AppState;
 
 /// GET /api/channels — show configured channels and their status.
@@ -63,13 +63,13 @@ pub(crate) async fn post_telegram_owner(
             Ok(())
         })
         .await
-        .map_err(|err| error_response(StatusCode::INTERNAL_SERVER_ERROR, &err.to_string()))?;
+        .map_err(|err| internal_error(err, "failed to update telegram config"))?;
 
     state
         .telegram_runtime
         .register_owner(body.owner)
         .await
-        .map_err(|err| error_response(StatusCode::INTERNAL_SERVER_ERROR, &err.to_string()))?;
+        .map_err(|err| internal_error(err, "failed to register telegram owner"))?;
 
     Ok(Json(json!({"ok": true})))
 }
@@ -89,7 +89,7 @@ pub(crate) async fn post_telegram_restart(
         .telegram_runtime
         .restart()
         .await
-        .map_err(|err| error_response(StatusCode::INTERNAL_SERVER_ERROR, &err.to_string()))?;
+        .map_err(|err| internal_error(err, "failed to restart telegram"))?;
 
     Ok(Json(json!({"ok": true})))
 }
@@ -147,9 +147,6 @@ pub(crate) async fn post_firecrawl_scrape(
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     match mando_scout::runtime::firecrawl::scrape(&body.url).await {
         Ok(content) => Ok(Json(json!({"ok": true, "content": content}))),
-        Err(e) => Err(error_response(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            &e.to_string(),
-        )),
+        Err(e) => Err(internal_error(e, "firecrawl scrape failed")),
     }
 }

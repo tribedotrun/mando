@@ -18,11 +18,12 @@ pub(crate) fn error_response(status: StatusCode, msg: &str) -> (StatusCode, Json
 }
 
 /// Sanitize an error for INTERNAL_SERVER_ERROR: log the raw form, return
-/// a generic client-safe message. Use via `.map_err(internal_error)?`.
-pub(crate) fn internal_error(e: impl std::fmt::Display) -> (StatusCode, Json<Value>) {
+/// an operation-specific client-safe message.
+/// Use via `.map_err(|e| internal_error(e, "failed to ..."))?`.
+pub(crate) fn internal_error(e: impl std::fmt::Display, msg: &str) -> (StatusCode, Json<Value>) {
     let raw = e.to_string();
-    tracing::error!(error = %raw, "internal error returned to client");
-    error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal server error")
+    tracing::error!(error = %raw, client_msg = msg, "internal error returned to client");
+    error_response(StatusCode::INTERNAL_SERVER_ERROR, msg)
 }
 
 /// Build an error response with a sanitized client message but log the raw
@@ -45,7 +46,7 @@ pub(crate) fn map_task_create_error(e: anyhow::Error) -> (StatusCode, Json<Value
     if msg.contains("no project configured") || msg.contains("project selection required") {
         error_response(StatusCode::UNPROCESSABLE_ENTITY, &msg)
     } else {
-        internal_error(e)
+        internal_error(e, "failed to create task")
     }
 }
 
@@ -65,14 +66,17 @@ pub(crate) fn map_task_create_error(e: anyhow::Error) -> (StatusCode, Json<Value
 /// phrase as context text (e.g. `"failed to load PR, comment not found in
 /// cache"`) are accepted because the alternative is dropping legitimate
 /// 404s for the much more common shapes above.
-pub(crate) fn not_found_or_internal(e: impl std::fmt::Display) -> (StatusCode, Json<Value>) {
+pub(crate) fn not_found_or_internal(
+    e: impl std::fmt::Display,
+    context: &str,
+) -> (StatusCode, Json<Value>) {
     let raw = e.to_string();
     if raw.to_lowercase().contains("not found") {
         tracing::debug!(error = %raw, "resource not found");
         error_response(StatusCode::NOT_FOUND, "not found")
     } else {
-        tracing::error!(error = %raw, "internal error returned to client");
-        error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal server error")
+        tracing::error!(error = %raw, client_msg = context, "internal error returned to client");
+        error_response(StatusCode::INTERNAL_SERVER_ERROR, context)
     }
 }
 
@@ -96,6 +100,38 @@ pub(crate) async fn broadcast_task_update(state: &AppState, id: i64) {
         mando_types::BusEvent::Tasks,
         Some(json!({"action": "updated", "item": updated, "id": id})),
     );
+}
+
+/// Bump a workbench's `last_activity_at` and broadcast the update via SSE.
+/// No-op if `workbench_id` is 0 (no workbench linked).
+pub(crate) async fn touch_workbench_activity(state: &AppState, workbench_id: i64) {
+    if workbench_id == 0 {
+        return;
+    }
+    let pool = state.db.pool();
+    let touched = match mando_db::queries::workbenches::touch_activity(pool, workbench_id).await {
+        Ok(t) => t,
+        Err(e) => {
+            tracing::warn!(workbench_id, error = %e, "failed to touch workbench activity");
+            return;
+        }
+    };
+    if touched {
+        match mando_db::queries::workbenches::find_by_id(pool, workbench_id).await {
+            Ok(Some(updated)) => {
+                state.bus.send(
+                    mando_types::BusEvent::Workbenches,
+                    Some(json!({"action": "updated", "item": updated})),
+                );
+            }
+            Ok(None) => {
+                tracing::warn!(workbench_id, "workbench not found after activity touch");
+            }
+            Err(e) => {
+                tracing::warn!(workbench_id, error = %e, "failed to load workbench after touch");
+            }
+        }
+    }
 }
 
 /// Resolve a task's working directory for CC sessions (advisor, ask).

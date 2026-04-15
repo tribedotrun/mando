@@ -172,7 +172,7 @@ export function WorkbenchPage(): React.ReactElement {
   // Taskless workbench: render terminal directly
   if (!task) {
     return (
-      <div className="h-full pt-2">
+      <div className="h-full px-3 pt-2">
         <ErrorBoundary fallbackLabel="Terminal">
           <TerminalPage
             key={`terminal-${workbench.id}-${terminalKey}`}
@@ -201,7 +201,7 @@ export function WorkbenchPage(): React.ReactElement {
   ) : null;
 
   return (
-    <div className="h-full px-3">
+    <div className="h-full px-3 pt-2">
       <ErrorBoundary fallbackLabel="Workbench">
         <TaskDetailView
           item={task}

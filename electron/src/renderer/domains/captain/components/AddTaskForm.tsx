@@ -3,9 +3,11 @@ import { ArrowUp, Paperclip } from 'lucide-react';
 import { useDraft } from '#renderer/global/hooks/useDraft';
 import { useMountEffect } from '#renderer/global/hooks/useMountEffect';
 import { useProjects } from '#renderer/domains/settings';
+import { useConfig } from '#renderer/hooks/queries';
 import { useTaskCreate, useTaskBulkCreate } from '#renderer/hooks/mutations';
 import { bulkTextareaRows, shortRepo } from '#renderer/utils';
 import { Button } from '#renderer/components/ui/button';
+import { Switch } from '#renderer/components/ui/switch';
 import {
   Tooltip,
   TooltipContent,
@@ -49,6 +51,7 @@ function AddTaskFormInner({
   const [image, setImage] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [noAutoMerge, setNoAutoMerge] = useState(false);
 
   const titleRef = useRef(title);
   titleRef.current = title;
@@ -59,6 +62,8 @@ function AddTaskFormInner({
   const createPhase = createMut.isPending || bulkCreateMut.isPending ? 'active' : 'idle';
 
   const projects = useProjects();
+  const { data: config } = useConfig();
+  const globalAutoMerge = config?.captain?.autoMerge ?? false;
 
   const savedProject = project && projects.includes(project) ? project : '';
   const effectiveProject = savedProject || (projects.length === 1 ? projects[0] : '');
@@ -90,6 +95,7 @@ function AddTaskFormInner({
     localStorage.removeItem(DRAFT_BULK_KEY);
     localStorage.removeItem(DRAFT_PROJECT_KEY);
     setSubmitError(null);
+    setNoAutoMerge(false);
     if (preview) URL.revokeObjectURL(preview);
     setImage(null);
     setPreview(null);
@@ -137,6 +143,7 @@ function AddTaskFormInner({
       createMut.mutate({
         title: trimmedTitle,
         project: effectiveProject || undefined,
+        noAutoMerge: (globalAutoMerge && noAutoMerge) || undefined,
         images: image ? [image] : undefined,
       });
     }
@@ -291,6 +298,17 @@ function AddTaskFormInner({
                   <Paperclip size={16} />
                 </Button>
               </>
+            )}
+
+            {!bulk && globalAutoMerge && (
+              <label className="flex items-center gap-1.5 text-[12px] text-muted-foreground">
+                <Switch
+                  checked={noAutoMerge}
+                  onCheckedChange={setNoAutoMerge}
+                  className="scale-75"
+                />
+                Skip auto-merge
+              </label>
             )}
 
             {projectRequired && !effectiveProject && (

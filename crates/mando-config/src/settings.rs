@@ -134,6 +134,7 @@ impl Default for DashboardConfig {
 pub struct CaptainConfig {
     pub auto_schedule: bool,
     pub auto_merge: bool,
+    pub max_concurrent_workers: Option<usize>,
     pub tick_interval_s: u64,
     pub tz: String,
     pub default_terminal_agent: String,
@@ -156,6 +157,7 @@ impl Default for CaptainConfig {
         Self {
             auto_schedule: false,
             auto_merge: false,
+            max_concurrent_workers: None,
             tick_interval_s: 30,
             tz: iana_time_zone::get_timezone().unwrap_or_else(|_| "UTC".into()),
             default_terminal_agent: "claude".into(),

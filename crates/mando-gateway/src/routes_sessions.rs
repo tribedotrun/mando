@@ -14,7 +14,16 @@ pub(crate) struct SessionsQuery {
     pub page: Option<u32>,
     pub per_page: Option<u32>,
     pub category: Option<String>,
+    /// Alias for category — accepted from CLI which sends `caller=`.
+    pub caller: Option<String>,
     pub status: Option<String>,
+}
+
+#[derive(Deserialize, Default)]
+pub(crate) struct StreamQuery {
+    /// Comma-separated event types to include (e.g. "user,assistant,result").
+    /// When omitted all events are returned.
+    pub types: Option<String>,
 }
 
 /// GET /api/sessions?page=1&per_page=50&category=worker
@@ -28,22 +37,16 @@ pub(crate) async fn get_sessions(
     let page = params.page.unwrap_or(1).max(1) as usize;
     let per_page = params.per_page.unwrap_or(50).max(1) as usize;
 
+    let category = params.caller.as_deref().or(params.category.as_deref());
     let (entries, total) = store
-        .list_sessions(
-            page,
-            per_page,
-            params.category.as_deref(),
-            params.status.as_deref(),
-        )
+        .list_sessions(page, per_page, category, params.status.as_deref())
         .await
-        .map_err(|e| {
-            error_response(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                &format!("session query failed: {e}"),
-            )
-        })?;
+        .map_err(|e| internal_error(e, "session query failed"))?;
 
-    let cat_counts = store.category_counts().await.map_err(internal_error)?;
+    let cat_counts = store
+        .category_counts()
+        .await
+        .map_err(|e| internal_error(e, "failed to load session categories"))?;
 
     let total_pages = if total == 0 {
         1
@@ -61,7 +64,7 @@ pub(crate) async fn get_sessions(
     let task_titles: std::collections::HashMap<String, String> = store
         .routing()
         .await
-        .map_err(internal_error)?
+        .map_err(|e| internal_error(e, "failed to load task routing"))?
         .into_iter()
         .map(|t| (t.id.to_string(), t.title.clone()))
         .collect();
@@ -112,7 +115,10 @@ pub(crate) async fn get_sessions(
         })
         .collect();
 
-    let total_cost_usd = store.total_session_cost().await.map_err(internal_error)?;
+    let total_cost_usd = store
+        .total_session_cost()
+        .await
+        .map_err(|e| internal_error(e, "failed to calculate session cost"))?;
 
     Ok(Json(json!({
         "total": total,
@@ -151,7 +157,10 @@ pub(crate) async fn get_session_transcript(
     // Read JSONL directly from CC's storage (deterministic path via CWD lookup).
     let cwd = {
         let store = state.task_store.read().await;
-        store.session_cwd(&id).await.map_err(internal_error)?
+        store
+            .session_cwd(&id)
+            .await
+            .map_err(|e| internal_error(e, "failed to load session cwd"))?
     };
     let jsonl = find_cc_transcript(&id, cwd.as_deref())
         .await
@@ -281,7 +290,8 @@ pub(crate) async fn get_session_messages(
     let stream = get_stream_or_404(&id).await?;
     let messages =
         mando_cc::transcript::parse_messages(&stream, params.limit, params.offset.unwrap_or(0));
-    let val = serde_json::to_value(&messages).map_err(internal_error)?;
+    let val = serde_json::to_value(&messages)
+        .map_err(|e| internal_error(e, "failed to serialize messages"))?;
     Ok(Json(val))
 }
 
@@ -291,7 +301,8 @@ pub(crate) async fn get_session_tools(
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let stream = get_stream_or_404(&id).await?;
     let usage = mando_cc::transcript::tool_usage(&stream);
-    let val = serde_json::to_value(&usage).map_err(internal_error)?;
+    let val = serde_json::to_value(&usage)
+        .map_err(|e| internal_error(e, "failed to serialize tool usage"))?;
     Ok(Json(val))
 }
 
@@ -301,8 +312,61 @@ pub(crate) async fn get_session_cost(
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let stream = get_stream_or_404(&id).await?;
     let cost = mando_cc::transcript::session_cost(&stream);
-    let val = serde_json::to_value(&cost).map_err(internal_error)?;
+    let val = serde_json::to_value(&cost)
+        .map_err(|e| internal_error(e, "failed to serialize session cost"))?;
     Ok(Json(val))
+}
+
+/// GET /api/sessions/{id}/stream?types=user,assistant,result
+///
+/// Returns the raw JSONL stream for a session as newline-delimited JSON.
+/// When `types` is supplied only lines whose `"type"` field matches are included.
+pub(crate) async fn get_session_stream(
+    Path(id): Path<String>,
+    Query(params): Query<StreamQuery>,
+) -> Result<axum::response::Response, (StatusCode, Json<Value>)> {
+    let stream = get_stream_or_404(&id).await?;
+    let content = tokio::fs::read_to_string(&stream)
+        .await
+        .map_err(|e| internal_error(e, "failed to read stream"))?;
+
+    let type_filter: Option<std::collections::HashSet<String>> = params.types.as_deref().map(|s| {
+        s.split(',')
+            .map(|t| t.trim().to_string())
+            .filter(|t| !t.is_empty())
+            .collect()
+    });
+
+    let mut dropped = 0usize;
+    let filtered: String = content
+        .lines()
+        .filter(|line| {
+            let Some(ref allowed) = type_filter else {
+                return true;
+            };
+            let Ok(val) = serde_json::from_str::<serde_json::Value>(line) else {
+                dropped += 1;
+                return false;
+            };
+            val["type"].as_str().is_some_and(|t| allowed.contains(t))
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    if dropped > 0 {
+        tracing::warn!(
+            module = "sessions",
+            session_id = %id,
+            dropped,
+            "stream filter skipped malformed JSONL lines"
+        );
+    }
+
+    Ok(axum::response::Response::builder()
+        .status(StatusCode::OK)
+        .header(axum::http::header::CONTENT_TYPE, "application/x-ndjson")
+        .body(axum::body::Body::from(filtered))
+        .expect("infallible: valid status and content-type header"))
 }
 
 /// Look up the CWD from stream meta sidecar (fallback when DB has no entry).

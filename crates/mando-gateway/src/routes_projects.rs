@@ -23,7 +23,7 @@ async fn resolve_project(
 ) -> Result<db::ProjectRow, (StatusCode, Json<Value>)> {
     db::resolve(state.db.pool(), identifier)
         .await
-        .map_err(internal_error)?
+        .map_err(|e| internal_error(e, "failed to resolve project"))?
         .ok_or_else(|| {
             error_response(
                 StatusCode::NOT_FOUND,
@@ -38,12 +38,12 @@ async fn reload_config_from_db(state: &AppState) -> Result<(), (StatusCode, Json
     let mut cfg = state.config.load_full().as_ref().clone();
     db::load_into_config(state.db.pool(), &mut cfg)
         .await
-        .map_err(internal_error)?;
+        .map_err(|e| internal_error(e, "failed to load project config from DB"))?;
     state
         .config_manager
         .replace(cfg)
         .await
-        .map_err(internal_error)?;
+        .map_err(|e| internal_error(e, "failed to persist config"))?;
     Ok(())
 }
 
@@ -51,7 +51,9 @@ async fn reload_config_from_db(state: &AppState) -> Result<(), (StatusCode, Json
 pub(crate) async fn get_projects(
     State(state): State<AppState>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    let rows = db::list(state.db.pool()).await.map_err(internal_error)?;
+    let rows = db::list(state.db.pool())
+        .await
+        .map_err(|e| internal_error(e, "failed to load projects"))?;
     let projects: Vec<Value> = rows
         .iter()
         .map(|row| {
@@ -147,7 +149,7 @@ pub(crate) async fn post_projects(
     let pool = state.db.pool();
     if let Some(_existing) = db::find_by_name(pool, &name)
         .await
-        .map_err(internal_error)?
+        .map_err(|e| internal_error(e, "failed to check project name"))?
     {
         return Err(error_response(
             StatusCode::CONFLICT,
@@ -156,7 +158,7 @@ pub(crate) async fn post_projects(
     }
     if let Some(_existing) = db::find_by_path(pool, &abs_path_str)
         .await
-        .map_err(internal_error)?
+        .map_err(|e| internal_error(e, "failed to check project path"))?
     {
         return Err(error_response(
             StatusCode::CONFLICT,
@@ -179,7 +181,9 @@ pub(crate) async fn post_projects(
     };
 
     let row = db::config_to_row(&pc);
-    db::upsert_full(pool, &row).await.map_err(internal_error)?;
+    db::upsert_full(pool, &row)
+        .await
+        .map_err(|e| internal_error(e, "failed to save project"))?;
     reload_config_from_db(&state).await?;
     state.bus.send(mando_types::BusEvent::Config, None);
 
@@ -218,7 +222,7 @@ pub(crate) async fn patch_project(
     if let Some(ref new_name) = body.rename {
         if let Some(existing) = db::find_by_name(pool, new_name)
             .await
-            .map_err(internal_error)?
+            .map_err(|e| internal_error(e, "failed to check project name"))?
         {
             if existing.id != row.id {
                 return Err(error_response(
@@ -258,7 +262,7 @@ pub(crate) async fn patch_project(
     let logo = row.logo.clone();
     db::update(pool, row.id, &row)
         .await
-        .map_err(internal_error)?;
+        .map_err(|e| internal_error(e, "failed to update project"))?;
     reload_config_from_db(&state).await?;
     state.bus.send(mando_types::BusEvent::Config, None);
 
@@ -283,7 +287,7 @@ pub(crate) async fn delete_project(
     let all_tasks = store
         .load_all_with_archived()
         .await
-        .map_err(internal_error)?;
+        .map_err(|e| internal_error(e, "failed to load tasks"))?;
     let task_ids: Vec<i64> = all_tasks
         .iter()
         .filter(|t| {
@@ -299,7 +303,7 @@ pub(crate) async fn delete_project(
         let opts = mando_captain::io::task_cleanup::CleanupOptions { close_pr: false };
         mando_captain::runtime::dashboard::delete_tasks(&config, &store, &task_ids, &opts)
             .await
-            .map_err(internal_error)?;
+            .map_err(|e| internal_error(e, "failed to delete project tasks"))?;
         for tid in &task_ids {
             state.bus.send(
                 mando_types::BusEvent::Tasks,
@@ -310,7 +314,7 @@ pub(crate) async fn delete_project(
 
     db::delete(state.db.pool(), row.id)
         .await
-        .map_err(internal_error)?;
+        .map_err(|e| internal_error(e, "failed to delete project"))?;
     reload_config_from_db(&state).await?;
     state.bus.send(mando_types::BusEvent::Config, None);
 

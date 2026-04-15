@@ -8,7 +8,7 @@ use axum::Json;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use crate::response::{error_response, internal_error};
+use crate::response::{error_response, internal_error, touch_workbench_activity};
 use crate::AppState;
 
 #[derive(Deserialize)]
@@ -26,7 +26,8 @@ async fn simple_task_action<Fut>(
 where
     Fut: Future<Output = anyhow::Result<()>>,
 {
-    work.await.map_err(internal_error)?;
+    work.await
+        .map_err(|e| internal_error(e, "task action failed"))?;
     let store = state.task_store.read().await;
     let updated = store
         .find_by_id(id)
@@ -34,11 +35,17 @@ where
         .ok()
         .flatten()
         .map(|t| serde_json::to_value(&t).unwrap());
+    let wb_id = updated
+        .as_ref()
+        .and_then(|v| v.get("workbench_id"))
+        .and_then(|v| v.as_i64())
+        .unwrap_or(0);
     drop(store);
     state.bus.send(
         mando_types::BusEvent::Tasks,
         Some(json!({"action": "updated", "item": updated, "id": id})),
     );
+    touch_workbench_activity(state, wb_id).await;
     Ok(Json(json!({"ok": true})))
 }
 
@@ -98,7 +105,7 @@ async fn post_task_reopen_inner(
     let mut item = store
         .find_by_id(id)
         .await
-        .map_err(internal_error)?
+        .map_err(|e| internal_error(e, "failed to load task"))?
         .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "item not found"))?;
 
     // Append uploaded images to the task before reopening.
@@ -125,13 +132,17 @@ async fn post_task_reopen_inner(
         true,
     )
     .await
-    .map_err(internal_error)?;
-    store.write_task(&item).await.map_err(internal_error)?;
+    .map_err(|e| internal_error(e, "failed to reopen task"))?;
+    store
+        .write_task(&item)
+        .await
+        .map_err(|e| internal_error(e, "failed to save task"))?;
 
     state.bus.send(
         mando_types::BusEvent::Tasks,
         Some(json!({"action": "updated", "item": serde_json::to_value(&item).unwrap(), "id": id})),
     );
+    touch_workbench_activity(state, item.workbench_id).await;
 
     let summary = match outcome {
         mando_captain::runtime::action_contract::ReopenOutcome::QueuedFallback => {
@@ -267,7 +278,7 @@ async fn post_task_rework_inner(
     let store = state.task_store.write().await;
     mando_captain::runtime::dashboard::rework_item(&store, id, &body.feedback)
         .await
-        .map_err(internal_error)?;
+        .map_err(|e| internal_error(e, "failed to rework task"))?;
 
     // Best-effort image persistence -- rework is already committed so
     // a failure here should not return an error to the client.
@@ -284,7 +295,11 @@ async fn post_task_rework_inner(
     } else {
         format!("Rework requested: {}", body.feedback)
     };
-    if let Some(item) = store.find_by_id(id).await.map_err(internal_error)? {
+    if let Some(item) = store
+        .find_by_id(id)
+        .await
+        .map_err(|e| internal_error(e, "failed to load task"))?
+    {
         let _ = mando_captain::runtime::timeline_emit::emit_for_task(
             &item,
             mando_types::timeline::TimelineEventType::ReworkRequested,
@@ -318,10 +333,16 @@ async fn post_task_rework_inner(
             .flatten()
             .map(|t| serde_json::to_value(&t).unwrap())
     };
+    let wb_id = updated
+        .as_ref()
+        .and_then(|v| v.get("workbench_id"))
+        .and_then(|v| v.as_i64())
+        .unwrap_or(0);
     state.bus.send(
         mando_types::BusEvent::Tasks,
         Some(json!({"action": "updated", "item": updated, "id": id})),
     );
+    touch_workbench_activity(state, wb_id).await;
     Ok(Json(json!({"ok": true})))
 }
 
@@ -334,8 +355,12 @@ pub(crate) async fn post_task_retry(
     let store = state.task_store.read().await;
     mando_captain::runtime::dashboard::retry_item(&store, id)
         .await
-        .map_err(internal_error)?;
-    if let Some(item) = store.find_by_id(id).await.map_err(internal_error)? {
+        .map_err(|e| internal_error(e, "failed to retry task"))?;
+    if let Some(item) = store
+        .find_by_id(id)
+        .await
+        .map_err(|e| internal_error(e, "failed to load task"))?
+    {
         let _ = mando_captain::runtime::timeline_emit::emit_for_task(
             &item,
             mando_types::timeline::TimelineEventType::StatusChanged,
@@ -351,10 +376,16 @@ pub(crate) async fn post_task_retry(
         .ok()
         .flatten()
         .map(|t| serde_json::to_value(&t).unwrap());
+    let wb_id = updated
+        .as_ref()
+        .and_then(|v| v.get("workbench_id"))
+        .and_then(|v| v.as_i64())
+        .unwrap_or(0);
     state.bus.send(
         mando_types::BusEvent::Tasks,
         Some(json!({"action": "updated", "item": updated, "id": id})),
     );
+    touch_workbench_activity(&state, wb_id).await;
     Ok(Json(json!({"ok": true})))
 }
 
@@ -370,8 +401,12 @@ pub(crate) async fn post_task_resume_rate_limited(
         let store = state.task_store.read().await;
         mando_captain::runtime::dashboard::validate_rate_limited_task(&store, id)
             .await
-            .map_err(internal_error)?;
-        if let Some(item) = store.find_by_id(id).await.map_err(internal_error)? {
+            .map_err(|e| internal_error(e, "failed to validate rate-limited task"))?;
+        if let Some(item) = store
+            .find_by_id(id)
+            .await
+            .map_err(|e| internal_error(e, "failed to load task"))?
+        {
             let _ = mando_captain::runtime::timeline_emit::emit_for_task(
                 &item,
                 mando_types::timeline::TimelineEventType::RateLimited,
@@ -387,10 +422,16 @@ pub(crate) async fn post_task_resume_rate_limited(
             .ok()
             .flatten()
             .map(|t| serde_json::to_value(&t).unwrap());
+        let wb_id = updated
+            .as_ref()
+            .and_then(|v| v.get("workbench_id"))
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0);
         state.bus.send(
             mando_types::BusEvent::Tasks,
             Some(json!({"action": "updated", "item": updated, "id": id})),
         );
+        touch_workbench_activity(&state, wb_id).await;
     }
     // Trigger a captain tick so the task resumes immediately.
     let config = state.config.load_full();
@@ -405,7 +446,7 @@ pub(crate) async fn post_task_resume_rate_limited(
         &state.cancellation_token,
     )
     .await
-    .map_err(internal_error)?;
+    .map_err(|e| internal_error(e, "failed to trigger captain tick"))?;
     Ok(Json(json!({"ok": true})))
 }
 

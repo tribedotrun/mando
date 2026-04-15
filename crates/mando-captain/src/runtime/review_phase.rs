@@ -39,7 +39,7 @@ pub(crate) async fn gather_worker_contexts(
     let mut work: Vec<GatherWork> = Vec::new();
 
     for (idx, item) in items.iter().enumerate() {
-        if item.status != mando_types::task::ItemStatus::InProgress {
+        if item.status != mando_types::task::ItemStatus::InProgress || item.planning {
             continue;
         }
         let worker_name = match &item.worker {

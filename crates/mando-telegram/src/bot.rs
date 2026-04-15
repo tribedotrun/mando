@@ -369,6 +369,14 @@ impl TelegramBot {
         &self.gw
     }
 
+    /// Send a loading placeholder and return its `message_id` for later editing.
+    pub async fn send_loading(&self, chat_id: &str, text: &str) -> Result<i64> {
+        let resp = self.send_html(chat_id, text).await?;
+        resp.get("message_id")
+            .and_then(|v| v.as_i64())
+            .ok_or_else(|| anyhow::anyhow!("response missing message_id"))
+    }
+
     pub async fn send_html(&self, chat_id: &str, text: &str) -> Result<Value> {
         self.api
             .send_message(chat_id, text, Some("HTML"), None, true)
@@ -443,7 +451,6 @@ impl TelegramBot {
     }
 
     // ── Pending todo ─────────────────────────────────────────────────
-
     pub fn set_pending_todo(&mut self, chat_id: &str) {
         self.pending_todo.insert(chat_id.to_string());
     }

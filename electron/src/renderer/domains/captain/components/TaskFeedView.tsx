@@ -1,12 +1,14 @@
 import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { useTaskFeed } from '#renderer/hooks/queries';
 import { useTaskAdvisor } from '#renderer/hooks/mutations';
+import { PlanCompletedBlock } from '#renderer/domains/captain/components/PlanCompletedBlock';
 import { PrMarkdown } from '#renderer/domains/captain/components/PrMarkdown';
 import { MessageBlock } from '#renderer/domains/captain/components/MessageBlock';
 import {
   EvidenceBlock,
   WorkSummaryBlock,
 } from '#renderer/domains/captain/components/ArtifactBlocks';
+import { useExpandedArtifactIds } from '#renderer/domains/captain/hooks/useExpandedArtifactIds';
 import type {
   TaskItem,
   FeedItem,
@@ -17,7 +19,7 @@ import type {
 } from '#renderer/types';
 import { MessageSquare, ArrowUp, AlertTriangle, Clock, Loader2 } from 'lucide-react';
 import { cn } from '#renderer/cn';
-import { canReopen, canRework, clamp } from '#renderer/utils';
+import { canReopen, canRework, canRevisePlan, clamp } from '#renderer/utils';
 import { StatusIcon } from '#renderer/global/components/StatusIndicator';
 import { ClarificationTab } from '#renderer/domains/captain/components/StatusCard';
 
@@ -29,6 +31,11 @@ const EVENT_ICON_MAP: Record<string, string> = {
   captain_review_started: 'captain-reviewing',
   captain_review_verdict: 'captain-reviewing',
   captain_merge_started: 'captain-merging',
+  auto_merge_triage: 'captain-reviewing',
+  // `errored` (red ✕) reads as "this attempt errored, system will auto-retry"
+  // — distinct from `rework` which signals a deliberate human rework request.
+  auto_merge_triage_failed: 'errored',
+  auto_merge_triage_exhausted: 'escalated',
   merged: 'merged',
   escalated: 'escalated',
   errored: 'errored',
@@ -38,7 +45,47 @@ const EVENT_ICON_MAP: Record<string, string> = {
   rework_requested: 'rework',
   evidence_updated: 'awaiting-review',
   work_summary_updated: 'awaiting-review',
+  planning_round: 'in-progress',
+  plan_completed: 'plan-ready',
+  plan_ready: 'plan-ready',
 };
+
+/** Color-code the auto_merge_triage verdict icon by confidence:
+ *  high → green check (success), mid → default review icon, low → red x. */
+function triageIconOverride(event: TimelineEvent): string | null {
+  if (event.event_type !== 'auto_merge_triage') return null;
+  const confidence = event.data?.confidence as string | undefined;
+  if (confidence === 'high') return 'merged';
+  if (confidence === 'low') return 'errored';
+  return null;
+}
+
+/** Inline preview line for triage events — shows the verdict reason or
+ *  failure error directly under the summary so the human doesn't have to
+ *  click through. Returns null for non-triage events. */
+function triagePreview(event: TimelineEvent): string | null {
+  const data = event.data as Record<string, unknown> | null | undefined;
+  if (!data) return null;
+  switch (event.event_type) {
+    case 'auto_merge_triage': {
+      const reason = data.reason;
+      return typeof reason === 'string' && reason.trim() ? reason : null;
+    }
+    case 'auto_merge_triage_failed': {
+      const error = data.error;
+      return typeof error === 'string' && error.trim() ? error : null;
+    }
+    case 'auto_merge_triage_exhausted': {
+      const lastError = data.last_error;
+      if (typeof lastError === 'string' && lastError.trim()) {
+        return `Last error: ${lastError}`;
+      }
+      return 'Human review needed';
+    }
+    default:
+      return null;
+  }
+}
 
 // ── Feed Block Components ──
 
@@ -49,7 +96,7 @@ function firstLine(s: string, max: number): string {
 }
 
 function TimelineBlock({ event }: { event: TimelineEvent }) {
-  const iconStatus = EVENT_ICON_MAP[event.event_type] ?? 'queued';
+  const iconStatus = triageIconOverride(event) ?? EVENT_ICON_MAP[event.event_type] ?? 'queued';
   const time = new Date(event.timestamp).toLocaleTimeString([], {
     hour: '2-digit',
     minute: '2-digit',
@@ -63,6 +110,7 @@ function TimelineBlock({ event }: { event: TimelineEvent }) {
           ? firstLine(event.data.content as string, 140)
           : null))
       : null;
+  const triageDetail = triagePreview(event);
 
   return (
     <div className="flex items-start gap-3 px-3 py-2">
@@ -72,11 +120,18 @@ function TimelineBlock({ event }: { event: TimelineEvent }) {
       <div className="min-w-0 flex-1">
         <div className="flex items-baseline gap-2">
           <span className="text-caption text-text-2">{time}</span>
-          <span className="text-caption font-medium text-text-2">{event.actor}</span>
+          <span className="max-w-[120px] truncate text-caption font-medium text-text-2">
+            {event.actor}
+          </span>
         </div>
-        <p className="text-body-sm text-text-1">{event.summary}</p>
+        <p className="break-words text-body text-text-1">{event.summary}</p>
         {nudgeReason ? (
-          <p className="mt-0.5 text-caption text-text-3">Reason: {nudgeReason}</p>
+          <p className="mt-0.5 text-caption text-text-3 [overflow-wrap:anywhere]">
+            Reason: {nudgeReason}
+          </p>
+        ) : null}
+        {triageDetail ? (
+          <p className="mt-0.5 text-caption text-text-3 [overflow-wrap:anywhere]">{triageDetail}</p>
         ) : null}
       </div>
     </div>
@@ -99,15 +154,15 @@ function EscalationBlock({ event, report }: { event: TimelineEvent; report?: str
     >
       <div className="mb-2 flex items-center gap-2">
         <AlertTriangle size={14} className="text-destructive" />
-        <span className="text-body-sm font-medium text-destructive">Escalated</span>
+        <span className="text-body font-medium text-destructive">Escalated</span>
         <span className="text-caption text-text-3">{time}</span>
       </div>
       {report ? (
-        <div className="text-body-sm text-text-1">
+        <div className="text-body text-text-1">
           <PrMarkdown text={report} />
         </div>
       ) : (
-        <p className="text-body-sm text-text-1">{event.summary}</p>
+        <p className="break-words text-body text-text-1">{event.summary}</p>
       )}
     </div>
   );
@@ -146,13 +201,13 @@ function ClarificationBlock({
     >
       <div className="mb-2 flex items-center gap-2">
         <MessageSquare size={14} style={{ color: 'var(--needs-human)' }} />
-        <span className="text-body-sm font-medium" style={{ color: 'var(--needs-human)' }}>
+        <span className="text-body font-medium" style={{ color: 'var(--needs-human)' }}>
           Clarification requested
         </span>
         <span className="text-caption text-text-3">{time}</span>
       </div>
       {questions.map((q, i) => (
-        <div key={i} className="mb-1 text-body-sm text-text-2">
+        <div key={i} className="mb-1 text-body text-text-2">
           <span className="text-text-3">{i + 1}.</span> {q.question}
           {q.self_answered && (
             <span className="ml-1 text-caption text-text-3">(auto-resolved)</span>
@@ -167,12 +222,12 @@ function FeedBlock({
   item,
   task,
   isLatestClarify,
-  isLatestArtifact,
+  isArtifactExpanded,
 }: {
   item: FeedItem;
   task: TaskItem;
   isLatestClarify: (timestamp: string) => boolean;
-  isLatestArtifact: (type: string, id: number) => boolean;
+  isArtifactExpanded: (id: number) => boolean;
 }) {
   switch (item.type) {
     case 'timeline': {
@@ -183,6 +238,16 @@ function FeedBlock({
       if (event.event_type === 'clarify_question') {
         const active = task.status === 'needs-clarification' && isLatestClarify(event.timestamp);
         return <ClarificationBlock event={event} taskId={task.id} isActive={active} />;
+      }
+      if (event.event_type === 'plan_completed') {
+        return (
+          <PlanCompletedBlock
+            event={event}
+            isPlanReady={task.status === 'plan-ready'}
+            taskId={task.id}
+            taskContext={task.context ?? ''}
+          />
+        );
       }
       // Suppress events that have a richer renderer elsewhere in the feed:
       //   work_summary_updated / evidence_updated -> artifact cards
@@ -198,11 +263,11 @@ function FeedBlock({
     }
     case 'artifact': {
       const artifact = item.data as TaskArtifact;
-      const latest = isLatestArtifact(artifact.artifact_type, artifact.id);
+      const expanded = isArtifactExpanded(artifact.id);
       if (artifact.artifact_type === 'evidence')
-        return <EvidenceBlock artifact={artifact} initialExpanded={latest} />;
+        return <EvidenceBlock artifact={artifact} initialExpanded={expanded} />;
       if (artifact.artifact_type === 'work_summary')
-        return <WorkSummaryBlock artifact={artifact} initialExpanded={latest} />;
+        return <WorkSummaryBlock artifact={artifact} initialExpanded={expanded} />;
       return null;
     }
     case 'message':
@@ -224,7 +289,7 @@ function AdvisorInputBar({
   isPending: boolean;
 }) {
   const [input, setInput] = useState('');
-  const [intent, setIntent] = useState<'ask' | 'reopen' | 'rework'>('ask');
+  const [intent, setIntent] = useState<'ask' | 'reopen' | 'rework' | 'revise-plan'>('ask');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const handleSubmit = useCallback(() => {
@@ -254,6 +319,7 @@ function AdvisorInputBar({
 
   const showReopen = canReopen(item);
   const showRework = canRework(item);
+  const showRevise = canRevisePlan(item);
 
   return (
     <div className="bg-background px-2 pb-1.5">
@@ -274,18 +340,22 @@ function AdvisorInputBar({
               ? 'Describe what to fix (sends as reopen)...'
               : intent === 'rework'
                 ? 'Describe what to redo (fresh worker + new branch)...'
-                : 'Ask the advisor about this task...'
+                : intent === 'revise-plan'
+                  ? 'Describe what to change in the plan (re-runs planning)...'
+                  : 'Ask the advisor about this task...'
           }
           rows={2}
-          className="min-h-[52px] max-h-[256px] w-full resize-none border-0 bg-transparent px-3.5 pt-3 pb-0 text-body-sm leading-5 text-text-1 placeholder:text-text-3 focus:outline-none"
+          className="min-h-[52px] max-h-[256px] w-full resize-none border-0 bg-transparent px-3.5 pt-3 pb-0 text-body leading-5 text-text-1 placeholder:text-text-3 focus:outline-none"
         />
         <div className="flex items-center justify-between px-1.5 pb-1.5">
           <div>
-            {showReopen || showRework ? (
+            {showReopen || showRework || showRevise ? (
               <select
                 value={intent}
-                onChange={(e) => setIntent(e.target.value as 'ask' | 'reopen' | 'rework')}
-                className="cursor-pointer appearance-none rounded-md bg-transparent py-1 pr-4 pl-2 text-body-sm text-text-3 hover:text-text-1 focus:outline-none"
+                onChange={(e) =>
+                  setIntent(e.target.value as 'ask' | 'reopen' | 'rework' | 'revise-plan')
+                }
+                className="cursor-pointer appearance-none rounded-md bg-transparent py-1 pr-4 pl-2 text-body text-text-3 hover:text-text-1 focus:outline-none"
                 style={{
                   backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%23666' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")`,
                   backgroundRepeat: 'no-repeat',
@@ -295,9 +365,10 @@ function AdvisorInputBar({
                 <option value="ask">Ask</option>
                 {showReopen && <option value="reopen">Reopen</option>}
                 {showRework && <option value="rework">Rework</option>}
+                {showRevise && <option value="revise-plan">Revise</option>}
               </select>
             ) : (
-              <span className="py-1 pl-2 text-body-sm text-text-4">Ask</span>
+              <span className="py-1 pl-2 text-body text-text-4">Ask</span>
             )}
           </div>
           <button
@@ -344,21 +415,7 @@ export function TaskFeedView({ item }: TaskFeedViewProps): React.ReactElement {
   }, [feedItems]);
   const isLatestClarify = useCallback((ts: string) => ts === latestClarifyTs, [latestClarifyTs]);
 
-  // Find the latest artifact ID for each artifact type so only those expand by default.
-  const latestArtifactIds = useMemo(() => {
-    const latest = new Map<string, number>();
-    for (const fi of feedItems) {
-      if (fi.type === 'artifact') {
-        const a = fi.data as TaskArtifact;
-        latest.set(a.artifact_type, a.id);
-      }
-    }
-    return latest;
-  }, [feedItems]);
-  const isLatestArtifact = useCallback(
-    (type: string, id: number) => latestArtifactIds.get(type) === id,
-    [latestArtifactIds],
-  );
+  const isArtifactExpanded = useExpandedArtifactIds(feedItems);
 
   // Auto-scroll: callback ref on the sentinel div scrolls into view on initial
   // load (instant) and when feedItems.length increases (smooth).
@@ -390,7 +447,7 @@ export function TaskFeedView({ item }: TaskFeedViewProps): React.ReactElement {
           <div className="flex h-full items-center justify-center">
             <div className="text-center text-text-3">
               <Clock size={32} className="mx-auto mb-2 opacity-50" />
-              <p className="text-body-sm">Waiting for activity...</p>
+              <p className="text-body">Waiting for activity...</p>
             </div>
           </div>
         ) : (
@@ -401,7 +458,7 @@ export function TaskFeedView({ item }: TaskFeedViewProps): React.ReactElement {
                 item={entry}
                 task={item}
                 isLatestClarify={isLatestClarify}
-                isLatestArtifact={isLatestArtifact}
+                isArtifactExpanded={isArtifactExpanded}
               />
             ))}
             <div ref={feedEndCallbackRef} />

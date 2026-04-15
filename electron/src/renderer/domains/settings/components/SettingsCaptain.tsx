@@ -63,6 +63,25 @@ export function SettingsCaptain(): React.ReactElement {
           </div>
           <div className="flex items-center justify-between">
             <div>
+              <h3 className="text-sm font-medium text-muted-foreground">Max Concurrent Workers</h3>
+            </div>
+            <select
+              data-testid="captain-max-concurrent-workers"
+              value={captain.maxConcurrentWorkers ?? 3}
+              onChange={(e) => {
+                saveSection({ maxConcurrentWorkers: +e.target.value });
+              }}
+              className="rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground"
+            >
+              {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => (
+                <option key={n} value={n}>
+                  {n}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="flex items-center justify-between">
+            <div>
               <h3 className="text-sm font-medium text-muted-foreground">Default Terminal Agent</h3>
             </div>
             <select

@@ -63,7 +63,7 @@ export function TranscriptPage(): React.ReactElement {
   return (
     <div className="absolute inset-0 flex flex-col overflow-hidden bg-background">
       {/* Header */}
-      <div className="flex items-center gap-3 px-8 py-4">
+      <div className="flex items-center gap-3 px-8 pt-2 pb-4">
         <div className="min-w-0 flex-1">
           <div className="text-subheading text-foreground">{title}</div>
           {search.taskTitle && (

@@ -12,11 +12,11 @@ pub(crate) struct SessionsArgs {
     /// Show only last N sessions
     #[arg(long)]
     pub last: Option<usize>,
-    /// Filter by caller (e.g. "captain", "clarifier")
+    /// Filter by caller group (e.g. "workers", "captain-review", "clarifier")
     #[arg(long)]
     pub caller: Option<String>,
-    /// Filter by task ID
-    #[arg(long, conflicts_with_all = ["last", "caller"])]
+    /// Filter by task ID (combinable with --caller; conflicts with --last)
+    #[arg(long, conflicts_with = "last")]
     pub task: Option<i64>,
     /// Output as JSON
     #[arg(long)]
@@ -25,10 +25,18 @@ pub(crate) struct SessionsArgs {
 
 #[derive(Subcommand)]
 pub(crate) enum SessionsCommand {
-    /// Show transcript for a session
+    /// Show markdown transcript for a session (human-readable)
     Transcript {
         /// Session ID
         session_id: String,
+    },
+    /// Show raw JSONL stream for a session (agent-readable)
+    Stream {
+        /// Session ID
+        session_id: String,
+        /// Include only these event types (repeatable, e.g. --type user --type assistant)
+        #[arg(long = "type", value_name = "TYPE")]
+        types: Vec<String>,
     },
     /// Show parsed messages for a session
     Messages {
@@ -54,6 +62,7 @@ pub(crate) async fn handle(args: SessionsArgs) -> anyhow::Result<()> {
     if let Some(cmd) = &args.command {
         return match cmd {
             SessionsCommand::Transcript { session_id } => handle_transcript(session_id).await,
+            SessionsCommand::Stream { session_id, types } => handle_stream(session_id, types).await,
             SessionsCommand::Messages { session_id, last } => {
                 handle_messages(session_id, *last).await
             }
@@ -64,13 +73,13 @@ pub(crate) async fn handle(args: SessionsArgs) -> anyhow::Result<()> {
 
     let client = DaemonClient::discover()?;
 
-    // Use per-task endpoint when --task is provided.
     let result = if let Some(task_id) = args.task {
-        client
-            .get(&format!("/api/tasks/{task_id}/sessions"))
-            .await?
+        let mut path = format!("/api/tasks/{task_id}/sessions");
+        if let Some(ref caller) = args.caller {
+            path = format!("{path}?caller={caller}");
+        }
+        client.get(&path).await?
     } else {
-        let mut path = "/api/sessions".to_string();
         let mut params = vec![];
         if let Some(n) = args.last {
             params.push(format!("last={n}"));
@@ -78,9 +87,11 @@ pub(crate) async fn handle(args: SessionsArgs) -> anyhow::Result<()> {
         if let Some(ref caller) = args.caller {
             params.push(format!("caller={caller}"));
         }
-        if !params.is_empty() {
-            path = format!("{path}?{}", params.join("&"));
-        }
+        let path = if params.is_empty() {
+            "/api/sessions".to_string()
+        } else {
+            format!("/api/sessions?{}", params.join("&"))
+        };
         client.get(&path).await?
     };
 
@@ -102,7 +113,9 @@ pub(crate) async fn handle(args: SessionsArgs) -> anyhow::Result<()> {
         let session_id = entry["session_id"].as_str().unwrap_or("?");
         let ts = entry["started_at"]
             .as_str()
+            .or_else(|| entry["created_at"].as_str())
             .or_else(|| entry["ts"].as_str())
+            .map(|s| &s[..s.len().min(16)])
             .unwrap_or("?");
         let caller = entry["caller"].as_str().unwrap_or("?");
         let cost = entry["cost_usd"]
@@ -115,6 +128,33 @@ pub(crate) async fn handle(args: SessionsArgs) -> anyhow::Result<()> {
     }
 
     println!("\n{} session(s)", entries.len());
+    Ok(())
+}
+
+async fn handle_stream(session_id: &str, types: &[String]) -> anyhow::Result<()> {
+    let client = DaemonClient::discover()?;
+    let path = if types.is_empty() {
+        format!("/api/sessions/{session_id}/stream")
+    } else {
+        format!(
+            "/api/sessions/{session_id}/stream?types={}",
+            types.join(",")
+        )
+    };
+    // Stream endpoint returns NDJSON — fetch raw text and print as-is.
+    let text = client.get_text(&path).await?;
+    print!("{text}");
+    Ok(())
+}
+
+async fn handle_transcript(session_id: &str) -> anyhow::Result<()> {
+    let client = DaemonClient::discover()?;
+    let result = client
+        .get(&format!("/api/sessions/{session_id}/transcript"))
+        .await?;
+    // Print only the markdown content, not the JSON wrapper.
+    let markdown = result["markdown"].as_str().unwrap_or("");
+    print!("{markdown}");
     Ok(())
 }
 
@@ -203,15 +243,6 @@ async fn handle_cost(session_id: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn handle_transcript(session_id: &str) -> anyhow::Result<()> {
-    let client = DaemonClient::discover()?;
-    let result = client
-        .get(&format!("/api/sessions/{session_id}/transcript"))
-        .await?;
-    println!("{}", serde_json::to_string_pretty(&result)?);
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -253,10 +284,10 @@ mod tests {
 
     #[test]
     fn parse_sessions_caller() {
-        let cli = TestCli::try_parse_from(["test", "sessions", "--caller", "captain"]).unwrap();
+        let cli = TestCli::try_parse_from(["test", "sessions", "--caller", "workers"]).unwrap();
         match cli.cmd {
             TestCmd::Sessions(args) => {
-                assert_eq!(args.caller.as_deref(), Some("captain"));
+                assert_eq!(args.caller.as_deref(), Some("workers"));
             }
         }
     }
@@ -282,6 +313,19 @@ mod tests {
     }
 
     #[test]
+    fn parse_sessions_task_and_caller() {
+        let cli =
+            TestCli::try_parse_from(["test", "sessions", "--task", "14", "--caller", "workers"])
+                .unwrap();
+        match cli.cmd {
+            TestCmd::Sessions(args) => {
+                assert_eq!(args.task, Some(14));
+                assert_eq!(args.caller.as_deref(), Some("workers"));
+            }
+        }
+    }
+
+    #[test]
     fn parse_sessions_transcript() {
         let cli = TestCli::try_parse_from(["test", "sessions", "transcript", "abc-123"]).unwrap();
         match cli.cmd {
@@ -290,6 +334,30 @@ mod tests {
                     assert_eq!(session_id, "abc-123");
                 }
                 _ => panic!("expected Transcript"),
+            },
+        }
+    }
+
+    #[test]
+    fn parse_sessions_stream() {
+        let cli = TestCli::try_parse_from([
+            "test",
+            "sessions",
+            "stream",
+            "abc-123",
+            "--type",
+            "user",
+            "--type",
+            "assistant",
+        ])
+        .unwrap();
+        match cli.cmd {
+            TestCmd::Sessions(args) => match args.command {
+                Some(SessionsCommand::Stream { session_id, types }) => {
+                    assert_eq!(session_id, "abc-123");
+                    assert_eq!(types, vec!["user", "assistant"]);
+                }
+                _ => panic!("expected Stream"),
             },
         }
     }

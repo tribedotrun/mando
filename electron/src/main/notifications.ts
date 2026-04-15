@@ -22,6 +22,8 @@ function titleForKind(kind: NotificationKind): string {
       return 'Scout Processed';
     case 'ScoutProcessFailed':
       return 'Scout Failed';
+    case 'AdvisorAnswered':
+      return 'Advisor Answered';
     case 'Generic':
       return 'Mando';
   }

@@ -188,7 +188,7 @@ pub(crate) async fn post_captain_adopt(
             Some("adopt"),
         )
         .await
-        .map_err(internal_error)?;
+        .map_err(|e| internal_error(e, "failed to create task for adoption"))?;
 
         let id = val["id"].as_i64().ok_or_else(|| {
             error_response(

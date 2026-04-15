@@ -79,9 +79,10 @@ function RunItems({ runId }: { runId: number }) {
                   href={item.url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 text-foreground hover:underline"
+                  className="inline-flex min-w-0 max-w-full items-center gap-1 text-foreground hover:underline"
+                  title={item.title || item.url}
                 >
-                  {item.title || item.url}
+                  <span className="truncate">{item.title || item.url}</span>
                   <ExternalLink size={11} className="shrink-0 text-text-3" />
                 </a>
               </TableCell>
@@ -182,7 +183,7 @@ export function ScoutResearch() {
             .map((r) => (
               <div
                 key={r.id}
-                className="rounded-md bg-destructive/10 px-3 py-2 text-caption text-destructive"
+                className="rounded-md bg-destructive/10 px-3 py-2 text-caption text-destructive [overflow-wrap:anywhere]"
               >
                 <span className="font-medium">
                   Failed: &ldquo;{r.research_prompt.slice(0, 60)}

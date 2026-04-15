@@ -17,7 +17,7 @@ pub(crate) async fn publish_telegraph(
     let workflow = state.scout_workflow.load_full();
     let article = mando_scout::ensure_scout_article(pool, id, &workflow)
         .await
-        .map_err(not_found_or_internal)?;
+        .map_err(|e| not_found_or_internal(e, "failed to load scout article"))?;
 
     let title = article["title"].as_str().unwrap_or("Untitled");
     let article_md = article["article"].as_str().ok_or_else(|| {
@@ -29,7 +29,7 @@ pub(crate) async fn publish_telegraph(
 
     let url = mando_scout::io::telegraph::publish_article(id, title, article_md)
         .await
-        .map_err(internal_error)?;
+        .map_err(|e| internal_error(e, "failed to publish to Telegraph"))?;
 
     Ok(Json(serde_json::json!({"ok": true, "url": url})))
 }

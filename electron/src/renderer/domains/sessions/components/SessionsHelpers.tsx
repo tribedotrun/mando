@@ -63,7 +63,20 @@ export function buildSessionsFromTimeline(
       worker_name: existing?.worker_name,
     });
   }
-  return [...seen.values()];
+  // Merge DB-sourced sessions not referenced by any timeline event (e.g.
+  // advisor, planning, auto-merge-triage sessions that have task_id set
+  // but no timeline event carries their session_id).
+  for (const [sid, s] of Object.entries(sessionMap)) {
+    if (!seen.has(sid)) {
+      seen.set(sid, s);
+    }
+  }
+  // Sort chronologically by started_at so the merged list is ordered.
+  return [...seen.values()].sort((a, b) => {
+    const ta = a.started_at ?? '';
+    const tb = b.started_at ?? '';
+    return ta < tb ? -1 : ta > tb ? 1 : 0;
+  });
 }
 
 /**
@@ -94,9 +107,17 @@ const CALLER_LABELS: Record<string, string> = {
   worker: 'worker',
   clarifier: 'clarifier',
   'deep-clarifier': 'deep clarifier',
+  'clarifier-retry': 'clarifier retry',
   'captain-review-async': 'captain review',
+  'captain-merge-async': 'captain merge',
   'exhaustion-report': 'exhaustion',
   'task-ask': 'ask',
+  advisor: 'advisor',
+  'auto-merge-triage': 'merge triage',
+  'planning-planner': 'planner',
+  'planning-cc-feedback': 'planning feedback',
+  'planning-synth': 'planning synthesis',
+  'planning-final': 'planning final',
   'scout-process': 'scout',
   'scout-article': 'article',
   'scout-qa': 'Q&A',
@@ -105,8 +126,22 @@ const CALLER_LABELS: Record<string, string> = {
   rebase: 'rebase',
 };
 
+/** Prefix-to-canonical mapping for callers with embedded IDs. */
+const CALLER_PREFIXES: [string, string][] = [
+  ['advisor:', 'advisor'],
+  ['task-ask:', 'task-ask'],
+  ['parse-todos-', 'parse-todos'],
+  ['planning-cc-r', 'planning-cc-feedback'],
+  ['planning-synth-r', 'planning-synth'],
+];
+
 export function formatCallerLabel(caller: string): string {
-  return CALLER_LABELS[caller] ?? caller;
+  const direct = CALLER_LABELS[caller];
+  if (direct) return direct;
+  for (const [prefix, canonical] of CALLER_PREFIXES) {
+    if (caller.startsWith(prefix)) return CALLER_LABELS[canonical] ?? canonical;
+  }
+  return caller;
 }
 
 /**

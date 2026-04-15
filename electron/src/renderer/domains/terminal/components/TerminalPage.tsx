@@ -78,6 +78,18 @@ export function TerminalPage({
 
     if (resumeSessionId) {
       setResumePending(true);
+      autoSelectedRef.current = true;
+
+      // If there is exactly one prior session for this workbench it was the
+      // auto-created placeholder.  Snapshot its id so we can close it after
+      // the resume succeeds, keeping only the resumed session in the tab bar.
+      // When multiple sessions exist the user opened them intentionally, so
+      // we leave them alone.
+      const cached =
+        queryClient.getQueryData<TerminalSessionInfo[]>(queryKeys.terminals.list()) ?? [];
+      const prior = cached.filter((s) => s.project === project && s.cwd === cwd);
+      const autoCreatedId = prior.length === 1 ? prior[0].id : null;
+
       void (async () => {
         try {
           const session = await createMutation.mutateAsync({
@@ -90,6 +102,12 @@ export function TerminalPage({
           setResumePending(false);
           setActiveTab(session.id);
           onResumeConsumed?.();
+
+          // Remove the single auto-created placeholder so it does not linger
+          // alongside the resumed session.
+          if (autoCreatedId && autoCreatedId !== session.id) {
+            deleteMutation.mutate({ id: autoCreatedId });
+          }
         } catch (err) {
           setResumePending(false);
           setResumeFailed(true);
@@ -142,6 +160,7 @@ export function TerminalPage({
       const session = relevantSessions.find((candidate) => candidate.id === sessionId);
       if (!session) return;
 
+      autoSelectedRef.current = true;
       setStartingShellForId(sessionId);
       try {
         const next = await createMutation.mutateAsync({
@@ -218,7 +237,12 @@ export function TerminalPage({
               }
               stroke="none"
             />
-            <span>{session.name || `${session.agent} ${session.id.slice(0, 6)}`}</span>
+            <span
+              className="max-w-[160px] truncate"
+              title={session.name || `${session.agent} ${session.id.slice(0, 6)}`}
+            >
+              {session.name || `${session.agent} ${session.id.slice(0, 6)}`}
+            </span>
             <X
               size={12}
               className="opacity-40 hover:opacity-100"

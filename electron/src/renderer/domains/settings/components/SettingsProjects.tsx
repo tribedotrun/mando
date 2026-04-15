@@ -91,16 +91,28 @@ export function SettingsProjects(): React.ReactElement {
                           }}
                         />
                       )}
-                      <h3 className="text-sm font-semibold text-foreground">{displayName}</h3>
+                      <h3
+                        className="min-w-0 truncate text-sm font-semibold text-foreground"
+                        title={displayName}
+                      >
+                        {displayName}
+                      </h3>
                     </div>
                     <p className="mt-1 truncate font-mono text-xs text-muted-foreground">
                       {project.path}
                     </p>
                     {project.scoutSummary && (
-                      <p className="mt-1 text-xs text-muted-foreground">{project.scoutSummary}</p>
+                      <p className="mt-1 break-words text-xs text-muted-foreground">
+                        {project.scoutSummary}
+                      </p>
                     )}
                     {project.githubRepo && (
-                      <p className="mt-1 text-xs text-muted-foreground">{project.githubRepo}</p>
+                      <p
+                        className="mt-1 truncate text-xs text-muted-foreground"
+                        title={project.githubRepo}
+                      >
+                        {project.githubRepo}
+                      </p>
                     )}
                     {project.aliases && project.aliases.length > 0 && (
                       <div className="mt-2 flex flex-wrap gap-1">
@@ -112,7 +124,10 @@ export function SettingsProjects(): React.ReactElement {
                       </div>
                     )}
                     {project.hooks && Object.keys(project.hooks).length > 0 && (
-                      <div className="mt-2 text-xs text-muted-foreground">
+                      <div
+                        className="mt-2 truncate text-xs text-muted-foreground"
+                        title={`Hooks: ${Object.keys(project.hooks).join(', ')}`}
+                      >
                         Hooks: {Object.keys(project.hooks).join(', ')}
                       </div>
                     )}

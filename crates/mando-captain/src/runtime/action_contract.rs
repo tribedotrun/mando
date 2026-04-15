@@ -357,9 +357,7 @@ pub async fn reopen_item(
             item.session_ids.ask = None;
             item.branch = Some(result.branch);
             item.worktree = Some(result.worktree.clone());
-            // If the worktree changed (broken-session fallback spawned a fresh
-            // one), the old workbench_id is stale. Look up the workbench for
-            // the new worktree path so the task points at the right row.
+            // If worktree changed (broken-session fallback), update workbench_id.
             let worktree_changed = old_worktree.as_deref() != Some(&result.worktree);
             if worktree_changed {
                 let old_wb_id = item.workbench_id;
@@ -368,11 +366,12 @@ pub async fn reopen_item(
                         .await
                         .ok()
                         .flatten()
-                        .map(|wb| wb.id);
+                        .map(|wb| wb.id)
+                        .unwrap_or(0);
                 // Archive the previous workbench so it doesn't linger as an orphan.
-                if let Some(old) = old_wb_id.filter(|o| Some(*o) != item.workbench_id) {
-                    if let Err(e) = mando_db::queries::workbenches::archive(pool, old).await {
-                        tracing::warn!(workbench_id = old, error = %e, "failed to archive previous workbench during reopen");
+                if old_wb_id != 0 && old_wb_id != item.workbench_id {
+                    if let Err(e) = mando_db::queries::workbenches::archive(pool, old_wb_id).await {
+                        tracing::warn!(workbench_id = old_wb_id, error = %e, "failed to archive previous workbench during reopen");
                     }
                 }
             }
@@ -420,10 +419,11 @@ pub async fn reopen_item(
 }
 
 async fn try_unarchive_workbench(item: &Task, context: &str, pool: &sqlx::SqlitePool) {
-    if let Some(wb_id) = item.workbench_id {
-        if let Err(e) = mando_db::queries::workbenches::unarchive(pool, wb_id).await {
-            tracing::warn!(workbench_id = wb_id, error = %e, "failed to unarchive workbench {context}");
-        }
+    if item.workbench_id == 0 {
+        return;
+    }
+    if let Err(e) = mando_db::queries::workbenches::unarchive(pool, item.workbench_id).await {
+        tracing::warn!(workbench_id = item.workbench_id, error = %e, "failed to unarchive workbench {context}");
     }
 }
 

@@ -57,10 +57,11 @@ pub(crate) fn check_dispatch(
 }
 
 /// Count active resources across in-progress items.
+/// Planning-mode items are excluded (they don't consume worker/resource slots).
 pub(crate) fn count_resources(items: &[Task]) -> HashMap<String, usize> {
     let mut counts = HashMap::new();
     for item in items {
-        if item.status == ItemStatus::InProgress {
+        if item.status == ItemStatus::InProgress && !item.planning {
             let resource = item.resource.as_deref().unwrap_or(DEFAULT_RESOURCE);
             *counts.entry(resource.to_string()).or_insert(0) += 1;
         }
@@ -68,14 +69,18 @@ pub(crate) fn count_resources(items: &[Task]) -> HashMap<String, usize> {
     counts
 }
 
-/// Find items eligible for dispatch, in priority order.
+/// Find items eligible for regular worker dispatch, in priority order.
 ///
-/// Items with status `ready` or `rework` are eligible.
+/// Items with status `ready` or `rework` are eligible. Planning-mode items
+/// are excluded (dispatched separately by `dispatch_planning`).
 /// Sorted by: rework first, then by creation order (position in list).
 pub(crate) fn dispatchable_items(items: &[Task]) -> Vec<usize> {
     let mut candidates: Vec<(usize, bool)> = Vec::new();
 
     for (i, item) in items.iter().enumerate() {
+        if item.planning {
+            continue;
+        }
         match item.status {
             ItemStatus::Rework => candidates.push((i, true)),
             ItemStatus::Queued => candidates.push((i, false)),
