@@ -43,8 +43,8 @@ pub(crate) async fn reconcile_running_sessions(
     for row in &running {
         let sid = &row.session_id;
 
-        // L1: PID liveness
-        if let Some(pid) = crate::io::pid_registry::get_pid(sid) {
+        // L1: PID liveness (fingerprint-verified: mismatch = PID reused, fall to L2/L3)
+        if let Some(pid) = crate::io::pid_registry::get_verified_pid(sid) {
             if pid.as_u32() > 0 {
                 if mando_cc::is_process_alive(pid) {
                     // L0: Live rate-limit detection — kill the process so it

@@ -81,6 +81,13 @@ pub async fn delete_local_branch(repo_path: &Path, branch: &str) -> Result<()> {
     Ok(())
 }
 
+/// Delete a branch from the remote. Best-effort: the remote branch may
+/// already be gone if the PR was merged or someone cleaned up manually.
+pub async fn delete_remote_branch(repo_path: &Path, branch: &str) -> Result<()> {
+    run_git(repo_path, &["push", "origin", "--delete", branch]).await?;
+    Ok(())
+}
+
 /// Prune stale git worktree metadata for worktrees whose directories no longer exist.
 pub async fn prune_worktrees(repo_path: &Path) -> Result<()> {
     run_git(repo_path, &["worktree", "prune"]).await?;

@@ -105,8 +105,8 @@ pub(crate) async fn reopen_worker(
         );
     }
 
-    // Kill existing worker.
-    let pid = pid_registry::get_pid(&cc_sid).unwrap_or(mando_types::Pid::new(0));
+    // Kill existing worker (fingerprint-verified to avoid PID reuse).
+    let pid = pid_registry::get_verified_pid(&cc_sid).unwrap_or(mando_types::Pid::new(0));
     if pid.as_u32() > 0 {
         if let Err(e) = mando_cc::kill_process(pid).await {
             tracing::warn!(module = "captain", pid = %pid, error = %e, "failed to kill existing worker for reopen");

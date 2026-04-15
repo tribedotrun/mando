@@ -377,7 +377,7 @@ pub(crate) async fn post_task_bulk(
 pub(crate) struct DeleteBody {
     pub ids: Vec<i64>,
     #[serde(default)]
-    pub close_pr: bool,
+    pub force: bool,
 }
 
 /// POST /api/tasks/delete
@@ -388,7 +388,8 @@ pub(crate) async fn post_task_delete(
     let config = state.config.load_full();
     let ids = &body.ids;
     let opts = mando_captain::io::task_cleanup::CleanupOptions {
-        close_pr: body.close_pr,
+        close_pr: true,
+        force: body.force,
     };
     let store = state.task_store.read().await;
     match mando_captain::runtime::dashboard::delete_tasks(&config, &store, ids, &opts).await {

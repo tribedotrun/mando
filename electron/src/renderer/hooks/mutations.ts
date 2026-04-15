@@ -373,7 +373,7 @@ export function useTaskNudge() {
 export function useTaskDelete() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (vars: { ids: number[]; opts?: { close_pr?: boolean } }) =>
+    mutationFn: async (vars: { ids: number[]; opts?: { close_pr?: boolean; force?: boolean } }) =>
       deleteItems(vars.ids, vars.opts),
     onMutate: async (vars) => {
       await qc.cancelQueries({ queryKey: queryKeys.tasks.list() });

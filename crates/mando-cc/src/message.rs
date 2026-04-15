@@ -66,6 +66,9 @@ pub struct AssistantMessage {
     pub model: String,
     pub session_id: Option<String>,
     pub uuid: Option<String>,
+    /// API message ID (`msg_...`) — distinct from the CC event `uuid`.
+    /// Useful for deduplicating re-emitted turns across stream reads.
+    pub message_id: Option<String>,
     pub usage: Option<serde_json::Value>,
     /// API error type (e.g. "rate_limit", "server_error") if this turn errored.
     pub error: Option<String>,
@@ -114,6 +117,14 @@ pub struct ResultMessage {
     pub duration_api_ms: Option<u64>,
     pub num_turns: Option<u32>,
     pub usage: Option<serde_json::Value>,
+    /// Per-model token/cost breakdown (added in 2026-03 CLI). Raw JSON —
+    /// callers needing typed access should parse themselves since schema
+    /// continues to evolve. Accepts `model_usage` or `modelUsage` keys.
+    pub model_usage: Option<serde_json::Value>,
+    /// Count of tool calls denied by the permission system during the session.
+    /// Reported by the CLI as either a numeric count or a list of denials —
+    /// we store whichever shape was emitted.
+    pub permission_denials: Option<serde_json::Value>,
     /// Error strings collected during execution (e.g. API errors, tool failures).
     pub errors: Vec<String>,
     pub raw: serde_json::Value,
@@ -182,6 +193,10 @@ impl CcMessage {
                     .and_then(|s| s.as_str())
                     .map(String::from);
                 let error = val.get("error").and_then(|s| s.as_str()).map(String::from);
+                let message_id = val
+                    .pointer("/message/id")
+                    .and_then(|v| v.as_str())
+                    .map(String::from);
                 CcMessage::Assistant(AssistantMessage {
                     content,
                     model,
@@ -190,6 +205,7 @@ impl CcMessage {
                         .and_then(|s| s.as_str())
                         .map(String::from),
                     uuid: val.get("uuid").and_then(|s| s.as_str()).map(String::from),
+                    message_id,
                     usage,
                     error,
                     stop_reason,
@@ -220,6 +236,20 @@ impl CcMessage {
                             .collect()
                     })
                     .unwrap_or_default();
+                // Accept either snake_case (stream-json protocol) or camelCase
+                // (observed in some SDK-emitted events) to stay forward-compat.
+                // Filter nulls per-key so a null snake_case value still falls
+                // back to a valid camelCase value instead of being dropped.
+                let model_usage = val
+                    .get("model_usage")
+                    .filter(|v| !v.is_null())
+                    .or_else(|| val.get("modelUsage").filter(|v| !v.is_null()))
+                    .cloned();
+                let permission_denials = val
+                    .get("permission_denials")
+                    .filter(|v| !v.is_null())
+                    .or_else(|| val.get("permissionDenials").filter(|v| !v.is_null()))
+                    .cloned();
                 CcMessage::Result(ResultMessage {
                     subtype,
                     is_error: val
@@ -240,6 +270,8 @@ impl CcMessage {
                         .and_then(|v| v.as_u64())
                         .map(|n| n as u32),
                     usage: val.get("usage").cloned(),
+                    model_usage,
+                    permission_denials,
                     errors,
                     raw: val,
                 })
@@ -542,6 +574,132 @@ mod tests {
                 assert_eq!(a.error.as_deref(), Some("rate_limit"));
                 assert_eq!(a.stop_reason.as_deref(), Some("max_tokens"));
             }
+            other => panic!("expected Assistant, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_result_with_model_usage_and_denials() {
+        let val = serde_json::json!({
+            "type": "result",
+            "subtype": "success",
+            "is_error": false,
+            "result": "done",
+            "session_id": "xyz",
+            "total_cost_usd": 0.12,
+            "model_usage": {
+                "claude-opus-4-6": {
+                    "input_tokens": 1500,
+                    "output_tokens": 800,
+                    "cost_usd": 0.11
+                },
+                "claude-haiku-4-5": {
+                    "input_tokens": 200,
+                    "output_tokens": 50,
+                    "cost_usd": 0.01
+                }
+            },
+            "permission_denials": [
+                {"tool_name": "Bash", "reason": "deny rule: rm -rf"}
+            ]
+        });
+        match CcMessage::parse(val) {
+            CcMessage::Result(r) => {
+                let mu = r.model_usage.expect("model_usage present");
+                assert!(mu.get("claude-opus-4-6").is_some());
+                let denials = r
+                    .permission_denials
+                    .expect("permission_denials present")
+                    .as_array()
+                    .cloned()
+                    .expect("denials is array");
+                assert_eq!(denials.len(), 1);
+            }
+            other => panic!("expected Result, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_result_null_snake_falls_back_to_camel() {
+        // Regression: a present-but-null snake_case value must not mask a
+        // valid camelCase value. Upstream sometimes emits both.
+        let val = serde_json::json!({
+            "type": "result",
+            "subtype": "success",
+            "session_id": "abc",
+            "result": "",
+            "model_usage": null,
+            "modelUsage": {"claude-opus-4-6": {"cost_usd": 0.07}},
+            "permission_denials": null,
+            "permissionDenials": 2
+        });
+        match CcMessage::parse(val) {
+            CcMessage::Result(r) => {
+                let mu = r.model_usage.expect("model_usage fell back to camel");
+                assert!(mu.get("claude-opus-4-6").is_some());
+                assert_eq!(
+                    r.permission_denials.as_ref().and_then(|v| v.as_u64()),
+                    Some(2)
+                );
+            }
+            other => panic!("expected Result, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_result_accepts_camelcase_keys() {
+        // Forward-compat: camelCase keys seen in some SDK-emitted events.
+        let val = serde_json::json!({
+            "type": "result",
+            "subtype": "success",
+            "session_id": "abc",
+            "result": "",
+            "modelUsage": {"claude-opus-4-6": {"cost_usd": 0.05}},
+            "permissionDenials": 3
+        });
+        match CcMessage::parse(val) {
+            CcMessage::Result(r) => {
+                assert!(r.model_usage.is_some());
+                assert_eq!(
+                    r.permission_denials.as_ref().and_then(|v| v.as_u64()),
+                    Some(3)
+                );
+            }
+            other => panic!("expected Result, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_assistant_captures_message_id() {
+        let val = serde_json::json!({
+            "type": "assistant",
+            "message": {
+                "id": "msg_01ABC",
+                "model": "claude-opus-4-6",
+                "content": [{"type": "text", "text": "hi"}]
+            },
+            "session_id": "s1"
+        });
+        match CcMessage::parse(val) {
+            CcMessage::Assistant(a) => {
+                assert_eq!(a.message_id.as_deref(), Some("msg_01ABC"));
+            }
+            other => panic!("expected Assistant, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_assistant_missing_message_id_ok() {
+        let val = serde_json::json!({
+            "type": "assistant",
+            "message": {
+                "model": "claude-opus-4-6",
+                "content": []
+            },
+            "session_id": "s1"
+        });
+        match CcMessage::parse(val) {
+            CcMessage::Assistant(a) => assert!(a.message_id.is_none()),
             other => panic!("expected Assistant, got {:?}", other),
         }
     }

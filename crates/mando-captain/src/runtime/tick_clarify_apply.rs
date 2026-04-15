@@ -146,6 +146,58 @@ pub(super) async fn apply_clarifier_result(
                 );
             }
         }
+        clarifier::ClarifierStatus::Answered => {
+            item.status = ItemStatus::CompletedNoPr;
+            item.no_pr = true;
+            item.context = Some(result.context);
+            if let Some(ref sid) = result.session_id {
+                item.session_ids.clarifier = Some(sid.clone());
+            }
+            if let Some(title) = result.generated_title {
+                if !title.is_empty() {
+                    item.title = title;
+                }
+            }
+
+            if let Err(e) = mando_db::queries::tasks::persist_clarify_result(pool, item).await {
+                tracing::error!(
+                    module = "captain",
+                    id = item.id,
+                    error = %e,
+                    "failed to persist clarify result"
+                );
+            }
+
+            let _ = super::timeline_emit::emit_for_task(
+                item,
+                mando_types::timeline::TimelineEventType::CompletedNoPr,
+                "Clarifier answered directly, no work needed",
+                serde_json::json!({"session_id": session_id}),
+                pool,
+            )
+            .await;
+
+            let answer_preview = item
+                .context
+                .as_deref()
+                .unwrap_or("")
+                .chars()
+                .take(500)
+                .collect::<String>();
+            notifier
+                .high(&format!(
+                    "\u{2705} Answered: <b>{}</b>\n{}",
+                    mando_shared::telegram_format::escape_html(&item.title),
+                    mando_shared::telegram_format::escape_html(&answer_preview),
+                ))
+                .await;
+
+            tracing::info!(
+                module = "captain",
+                title = %truncate_utf8(&item.title, 60),
+                "clarifier answered directly, completed without worker"
+            );
+        }
         clarifier::ClarifierStatus::Clarifying => {
             item.status = ItemStatus::NeedsClarification;
             item.last_activity_at = Some(mando_types::now_rfc3339());

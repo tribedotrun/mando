@@ -102,10 +102,6 @@ export function SidebarProjectItem({
     <div
       className="sidebar-project-item relative min-w-0 overflow-hidden"
       data-menu-open={menuOpen || undefined}
-      onContextMenu={(e) => {
-        e.preventDefault();
-        setMenuOpen(true);
-      }}
     >
       {renaming ? (
         <div className="rounded-md px-1.5 py-1">
@@ -127,6 +123,10 @@ export function SidebarProjectItem({
             variant="ghost"
             onClick={() => {
               setExpanded((v) => !v);
+            }}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              setMenuOpen(true);
             }}
             className="flex h-auto w-full items-center justify-between rounded-md px-1.5 py-1.5 text-[13px] font-normal text-muted-foreground transition-colors"
           >

@@ -174,6 +174,10 @@ const MIGRATIONS: &[(i64, &str)] = &[
         include_str!("../migrations/023_task_workbench_not_null.sql"),
     ),
     (24, include_str!("../migrations/024_task_no_auto_merge.sql")),
+    (
+        25,
+        include_str!("../migrations/025_timeline_dedupe_nullable.sql"),
+    ),
 ];
 
 #[cfg(test)]

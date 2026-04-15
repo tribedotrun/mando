@@ -285,15 +285,7 @@ async fn emit_exhaustion_writes_terminal_event_with_last_error() {
     let id = store.add(item.clone()).await.unwrap();
     item.id = id;
 
-    emit_exhaustion(
-        &item,
-        Some("Stream idle timeout"),
-        "2026-04-14T20:10:00Z",
-        3,
-        &notifier,
-        &pool,
-    )
-    .await;
+    emit_exhaustion(&item, Some("Stream idle timeout"), 3, &notifier, &pool).await;
 
     let events = mando_db::queries::timeline::load(&pool, item.id)
         .await

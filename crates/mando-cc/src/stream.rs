@@ -290,22 +290,55 @@ pub fn stream_has_broken_session(stream_path: &Path) -> bool {
     !content.lines().any(is_init_event)
 }
 
-/// Cost, duration, and turn count extracted from a stream result event.
+/// Cost, duration, turn count, and session health metrics extracted from a
+/// stream result event.
 pub struct StreamCostInfo {
     pub cost_usd: Option<f64>,
     pub duration_ms: Option<u64>,
     pub num_turns: Option<i64>,
+    /// Number of tool invocations blocked by the permission system. Coerced to
+    /// a count whether the CLI emitted a numeric field or a list of denials.
+    pub permission_denials_count: Option<u64>,
+    /// Raw per-model token/cost breakdown as emitted by the CLI. Kept as JSON
+    /// because the inner schema still evolves upstream.
+    pub model_usage: Option<serde_json::Value>,
 }
 
-/// Extract cost, duration, and turn count from the result event in a JSONL stream file.
+/// Read either `permission_denials` or `permissionDenials`, then coerce to a count.
+///
+/// Filter nulls per-key so a null snake_case value still falls back to a
+/// valid camelCase value instead of being dropped.
+fn permission_denials_count(result: &serde_json::Value) -> Option<u64> {
+    let raw = result
+        .get("permission_denials")
+        .filter(|v| !v.is_null())
+        .or_else(|| result.get("permissionDenials").filter(|v| !v.is_null()))?;
+    if let Some(n) = raw.as_u64() {
+        return Some(n);
+    }
+    if let Some(arr) = raw.as_array() {
+        return Some(arr.len() as u64);
+    }
+    None
+}
+
+/// Extract cost, duration, turns, and session-health fields from the result
+/// event in a JSONL stream file.
 ///
 /// Returns `None` if the stream file is missing or has no result event.
 pub fn get_stream_cost(stream_path: &Path) -> Option<StreamCostInfo> {
     let result = get_stream_result(stream_path)?;
+    let model_usage = result
+        .get("model_usage")
+        .filter(|v| !v.is_null())
+        .or_else(|| result.get("modelUsage").filter(|v| !v.is_null()))
+        .cloned();
     Some(StreamCostInfo {
         cost_usd: result.get("total_cost_usd").and_then(|v| v.as_f64()),
         duration_ms: result.get("duration_ms").and_then(|v| v.as_u64()),
         num_turns: result.get("num_turns").and_then(|v| v.as_i64()),
+        permission_denials_count: permission_denials_count(&result),
+        model_usage,
     })
 }
 
@@ -445,6 +478,54 @@ mod tests {
         let info = get_stream_cost(&path).unwrap();
         assert_eq!(info.cost_usd, Some(0.03));
         assert!(info.duration_ms.is_none());
+
+        std::fs::remove_file(&path).ok();
+        std::fs::remove_dir(&dir).ok();
+    }
+
+    #[test]
+    fn stream_cost_captures_denials_and_model_usage() {
+        let dir = std::env::temp_dir().join("mando-cc-test-denials");
+        std::fs::create_dir_all(&dir).ok();
+        let path = dir.join("test.jsonl");
+
+        let content = [
+            r#"{"type":"system","subtype":"init"}"#,
+            r#"{"type":"result","subtype":"success","total_cost_usd":0.2,"permission_denials":[{"tool":"Bash"}],"model_usage":{"claude-opus-4-6":{"cost_usd":0.2}}}"#,
+        ]
+        .join("\n");
+        std::fs::write(&path, &content).unwrap();
+
+        let info = get_stream_cost(&path).unwrap();
+        assert_eq!(info.permission_denials_count, Some(1));
+        assert!(info.model_usage.is_some());
+        assert!(info
+            .model_usage
+            .as_ref()
+            .unwrap()
+            .get("claude-opus-4-6")
+            .is_some());
+
+        std::fs::remove_file(&path).ok();
+        std::fs::remove_dir(&dir).ok();
+    }
+
+    #[test]
+    fn stream_cost_denials_as_count() {
+        let dir = std::env::temp_dir().join("mando-cc-test-denials-count");
+        std::fs::create_dir_all(&dir).ok();
+        let path = dir.join("test.jsonl");
+
+        // Older CLI shape: numeric count rather than list.
+        let content = [
+            r#"{"type":"system","subtype":"init"}"#,
+            r#"{"type":"result","subtype":"success","permissionDenials":5}"#,
+        ]
+        .join("\n");
+        std::fs::write(&path, &content).unwrap();
+
+        let info = get_stream_cost(&path).unwrap();
+        assert_eq!(info.permission_denials_count, Some(5));
 
         std::fs::remove_file(&path).ok();
         std::fs::remove_dir(&dir).ok();

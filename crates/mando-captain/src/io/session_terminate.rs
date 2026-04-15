@@ -28,8 +28,8 @@ pub async fn terminate_session(
         Ok(true) => {}
     }
 
-    // 2. Kill process via pid_registry.
-    if let Some(pid) = super::pid_registry::get_pid(session_id) {
+    // 2. Kill process via pid_registry (fingerprint-verified to avoid PID reuse).
+    if let Some(pid) = super::pid_registry::get_verified_pid(session_id) {
         if pid.as_u32() > 0 && mando_cc::is_process_alive(pid) {
             if let Err(e) = mando_cc::kill_process(pid).await {
                 tracing::warn!(
@@ -46,13 +46,15 @@ pub async fn terminate_session(
     // 3. Read cost/duration from stream file before updating DB.
     let stream_path = mando_config::stream_path_for_session(session_id);
     let cost_info = mando_cc::get_stream_cost(&stream_path);
-    let (cost_usd, duration_ms, num_turns) = match &cost_info {
+    let (cost_usd, duration_ms, num_turns, denials, model_usage) = match &cost_info {
         Some(info) => (
             info.cost_usd,
             info.duration_ms.map(|d| d as i64),
             info.num_turns,
+            info.permission_denials_count,
+            info.model_usage.clone(),
         ),
-        None => (None, None, None),
+        None => (None, None, None, None, None),
     };
 
     // 4. Update cc_sessions status + cost. DB failure must not block local
@@ -102,11 +104,22 @@ pub async fn terminate_session(
         }
     }
 
+    // Serialize model_usage to a compact JSON string for structured logging.
+    // Absent when the CLI didn't emit per-model breakdown.
+    let model_usage_log = model_usage
+        .as_ref()
+        .map(|v| serde_json::to_string(v).unwrap_or_default())
+        .unwrap_or_default();
     if db_ok {
         tracing::info!(
             module = "session_terminate",
             session_id,
             status = %new_status.as_str(),
+            cost_usd = ?cost_usd,
+            duration_ms = ?duration_ms,
+            num_turns = ?num_turns,
+            permission_denials = ?denials,
+            model_usage = %model_usage_log,
             "session terminated"
         );
     } else {
@@ -114,6 +127,7 @@ pub async fn terminate_session(
             module = "session_terminate",
             session_id,
             status = %new_status.as_str(),
+            permission_denials = ?denials,
             "session terminated (PID + health cleaned, DB update failed)"
         );
     }

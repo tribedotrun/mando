@@ -87,6 +87,15 @@ impl ItemStatus {
         FINALIZED.contains(&self)
     }
 
+    /// Returns true when a worker or captain session is actively running.
+    #[must_use]
+    pub fn is_active(self) -> bool {
+        matches!(
+            self,
+            Self::InProgress | Self::Clarifying | Self::CaptainReviewing | Self::CaptainMerging
+        )
+    }
+
     /// The serde string representation (kebab-case).
     pub fn as_str(self) -> &'static str {
         match self {

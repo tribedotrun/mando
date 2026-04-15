@@ -64,12 +64,7 @@ pub(crate) async fn get_task_feed(
 
     // Load all three data sources in parallel.
     let (timeline_result, artifacts_result, history_result) = tokio::join!(
-        mando_captain::runtime::dashboard_timeline::get_item_timeline(
-            &id,
-            None,
-            item.as_ref(),
-            &pool,
-        ),
+        mando_captain::runtime::dashboard_timeline::get_item_timeline(&id, None, &pool,),
         mando_db::queries::artifacts::list_for_task(&pool, task_id),
         mando_db::queries::ask_history::load(&pool, task_id),
     );
@@ -220,19 +215,13 @@ pub(crate) async fn get_task_timeline(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let _ = resolve_task_id(&id)?;
     let store = state.task_store.read().await;
-    let id_num: i64 = resolve_task_id(&id)?;
-    let full_item = store
-        .find_by_id(id_num)
-        .await
-        .map_err(|e| internal_error(e, "failed to load task"))?;
     let pool = store.pool().clone();
-    let item_ref = full_item.as_ref();
 
-    let events =
-        mando_captain::runtime::dashboard_timeline::get_item_timeline(&id, None, item_ref, &pool)
-            .await
-            .map_err(|e| internal_error(e, "failed to load task timeline"))?;
+    let events = mando_captain::runtime::dashboard_timeline::get_item_timeline(&id, None, &pool)
+        .await
+        .map_err(|e| internal_error(e, "failed to load task timeline"))?;
 
     let count = events.as_array().map(|a| a.len()).unwrap_or(0);
     Ok(Json(json!({
