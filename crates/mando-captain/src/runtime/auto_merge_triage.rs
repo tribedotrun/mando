@@ -19,7 +19,6 @@ use tracing::{info, warn};
 
 use mando_config::settings::Config;
 use mando_config::workflow::CaptainWorkflow;
-use mando_db::queries::timeline::AppendResult;
 use mando_types::task::{ItemStatus, Task};
 use mando_types::timeline::{TimelineEvent, TimelineEventType};
 
@@ -195,14 +194,12 @@ async fn apply_triage_verdict(
         warn!(
             module = "captain",
             item_id = item.id,
-            "apply_triage_verdict called with no triage session id — skipping"
+            "apply_triage_verdict called with no triage session id -- skipping"
         );
         return;
     };
     let is_high = result.confidence == "high";
 
-    let dedupe_key =
-        mando_db::queries::timeline::auto_merge_triage_dedupe_key(item.id, &session_id);
     let event = TimelineEvent {
         event_type: TimelineEventType::AutoMergeTriage,
         timestamp: mando_types::now_rfc3339(),
@@ -215,16 +212,24 @@ async fn apply_triage_verdict(
             "reopen_seq": item.reopen_seq,
         }),
     };
-    // `AlreadyExists` happens after a daemon restart between event-write and
-    // session_id clear: the verdict is already recorded, so we proceed to
-    // clear the session and run the post-write side effects (idempotent).
-    // A real `Err` means the row didn't land — leave session_id set so the
-    // next tick re-reads the (still-successful) CC stream and retries.
-    match mando_db::queries::timeline::append_with_dedupe_key(pool, item.id, &event, &dedupe_key)
-        .await
+    // Atomically write the event AND clear session_ids.triage in one tx.
+    // No crash window: either both happen or neither does. On crash-restart
+    // the triage session is still set, the CC stream is still on disk, and
+    // the next tick re-processes from scratch.
+    item.session_ids.triage = None;
+    let session_ids_json = item.session_ids.to_json();
+    match mando_db::queries::timeline::append_and_clear_triage_session(
+        pool,
+        item.id,
+        &event,
+        &session_ids_json,
+    )
+    .await
     {
-        Ok(AppendResult::Inserted | AppendResult::AlreadyExists) => {}
+        Ok(_) => {}
         Err(e) => {
+            // Restore session so next tick retries.
+            item.session_ids.triage = Some(session_id);
             warn!(
                 module = "captain",
                 item_id = item.id,
@@ -234,9 +239,6 @@ async fn apply_triage_verdict(
             return;
         }
     }
-
-    // Clear the triage session so the poller won't re-process it.
-    item.session_ids.triage = None;
 
     if is_high && config.captain.auto_merge && !item.no_auto_merge {
         transition_to_merging(item, result, config, notifier, pool).await;
@@ -267,20 +269,15 @@ async fn apply_triage_failure(
     pool: &sqlx::SqlitePool,
 ) {
     let Some(session_id) = item.session_ids.triage.clone() else {
-        // Caller (poll_triage) checked this is Some, so a None here is a bug.
-        // Bail loudly rather than write an empty session_id into the timeline.
         warn!(
             module = "captain",
             item_id = item.id,
-            "apply_triage_failure called with no triage session id — skipping"
+            "apply_triage_failure called with no triage session id -- skipping"
         );
         return;
     };
 
-    // Compute the 1-indexed attempt number from the timeline state. If this
-    // load fails we cannot determine the attempt number safely (defaulting to
-    // 1 would create a duplicate dedupe key for an already-recorded attempt 1
-    // and silently drop the failure). Skip persistence; the next tick retries.
+    // Compute the 1-indexed attempt number from the timeline state.
     let attempt = match mando_db::queries::timeline::load_triage_gate_events(pool, item.id).await {
         Ok(events) => derive_gate_state(&events).failures_in_cycle + 1,
         Err(e) => {
@@ -294,8 +291,6 @@ async fn apply_triage_failure(
         }
     };
 
-    let dedupe_key =
-        mando_db::queries::timeline::auto_merge_triage_failed_dedupe_key(item.id, &session_id);
     let event = TimelineEvent {
         event_type: TimelineEventType::AutoMergeTriageFailed,
         timestamp: mando_types::now_rfc3339(),
@@ -308,20 +303,20 @@ async fn apply_triage_failure(
             "reopen_seq": item.reopen_seq,
         }),
     };
-    let append = match mando_db::queries::timeline::append_with_dedupe_key(
+    // Atomically write the failure event AND clear session_ids.triage.
+    item.session_ids.triage = None;
+    let session_ids_json = item.session_ids.to_json();
+    match mando_db::queries::timeline::append_and_clear_triage_session(
         pool,
         item.id,
         &event,
-        &dedupe_key,
+        &session_ids_json,
     )
     .await
     {
-        Ok(r) => r,
+        Ok(_) => {}
         Err(e) => {
-            // Genuine DB error (not a UNIQUE conflict): leave the triage
-            // session id in place so the next tick retries reading the
-            // (still-erroring) CC stream and re-attempts the persist.
-            // Skipping the clear is what protects the retry budget.
+            item.session_ids.triage = Some(session_id);
             warn!(
                 module = "captain",
                 item_id = item.id,
@@ -330,22 +325,6 @@ async fn apply_triage_failure(
             );
             return;
         }
-    };
-
-    // Clear the triage session so the next tick can re-spawn after backoff.
-    // Idempotent: if `AlreadyExists`, a prior tick already wrote the failure
-    // and ran the side effects — clear the session and skip the duplicate
-    // notification so we don't spam Telegram on every restart.
-    item.session_ids.triage = None;
-
-    if append == AppendResult::AlreadyExists {
-        info!(
-            module = "captain",
-            item_id = item.id,
-            attempt,
-            "auto_merge_triage_failed already recorded; clearing session without re-notifying"
-        );
-        return;
     }
 
     warn!(
@@ -368,24 +347,15 @@ async fn apply_triage_failure(
 /// Emit an `AutoMergeTriageExhausted` event and notify the human.
 /// Called from the spawn path when attempts are at the cap.
 ///
-/// `last_failure_at` is the timestamp of the most recent
-/// `AutoMergeTriageFailed` event in the current cycle. It's part of the
-/// dedupe key so two exhaustions in cycles separated by a `ReworkRequested`
-/// (which opens a fresh cycle without bumping `reopen_seq`) don't collide
-/// on the UNIQUE index.
+/// Idempotency is handled by `derive_gate_state`: once the exhaustion event
+/// exists in the timeline, `decide_spawn` returns `Skip`, preventing re-emission.
 pub(crate) async fn emit_exhaustion(
     item: &Task,
     last_error: Option<&str>,
-    last_failure_at: &str,
     attempts: u32,
     notifier: &Notifier,
     pool: &sqlx::SqlitePool,
 ) {
-    let dedupe_key = mando_db::queries::timeline::auto_merge_triage_exhausted_dedupe_key(
-        item.id,
-        item.reopen_seq,
-        last_failure_at,
-    );
     let event = TimelineEvent {
         event_type: TimelineEventType::AutoMergeTriageExhausted,
         timestamp: mando_types::now_rfc3339(),
@@ -397,41 +367,12 @@ pub(crate) async fn emit_exhaustion(
             "reopen_seq": item.reopen_seq,
         }),
     };
-    let append = match mando_db::queries::timeline::append_with_dedupe_key(
-        pool,
-        item.id,
-        &event,
-        &dedupe_key,
-    )
-    .await
-    {
-        Ok(r) => r,
-        Err(e) => {
-            // DB write failed: don't fire the high-priority notification.
-            // The next tick's `decide_spawn` will return `EmitExhausted`
-            // again (since no exhaustion event was recorded), giving us a
-            // natural retry. Without this early return, every subsequent
-            // tick would spam the human while the DB is unhealthy.
-            warn!(
-                module = "captain",
-                item_id = item.id,
-                error = %e,
-                "failed to persist auto_merge_triage_exhausted event; will retry next tick"
-            );
-            return;
-        }
-    };
-
-    // Idempotent: if we crashed after writing the event but before the
-    // mergeability tick recorded it in derived state, the next tick re-fires
-    // `EmitExhausted`. The row already exists, so we skip the duplicate
-    // Telegram alert.
-    if append == AppendResult::AlreadyExists {
-        info!(
+    if let Err(e) = mando_db::queries::timeline::append(pool, item.id, &event).await {
+        warn!(
             module = "captain",
             item_id = item.id,
-            attempts,
-            "auto_merge_triage_exhausted already recorded; skipping duplicate notification"
+            error = %e,
+            "failed to persist auto_merge_triage_exhausted event; will retry next tick"
         );
         return;
     }

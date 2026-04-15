@@ -107,7 +107,7 @@ export function useTaskActions() {
         const item = allItems.find((b) => b.id === id);
         return item && item.status !== 'in-progress';
       });
-      await deleteMut.mutateAsync({ ids, opts });
+      await deleteMut.mutateAsync({ ids, opts: { ...opts, force: true } });
       clearSelection();
     } catch (err) {
       setDeleteError(getErrorMessage(err, 'Delete failed'));

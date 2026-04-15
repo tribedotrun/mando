@@ -232,6 +232,49 @@ pub fn get_pid(session_id: &str) -> Option<Pid> {
     }
 }
 
+/// Look up the PID for a session with fingerprint verification. Returns
+/// `Some(pid)` only if the process is alive AND its start-time fingerprint
+/// matches the one stored at registration (proving the kernel has not reused
+/// the PID for an unrelated process). Legacy entries with an empty
+/// fingerprint skip verification and are trusted if alive.
+///
+/// Use this for kill sites where signalling a wrong process is dangerous.
+/// Non-kill lookups (display, health, liveness decisions) should keep using
+/// `get_pid()`.
+pub fn get_verified_pid(session_id: &str) -> Option<Pid> {
+    let entry = match load() {
+        Ok(map) => map.get(session_id).cloned(),
+        Err(e) => {
+            tracing::error!(module = "pid_registry", session_id, error = %e, "pid_registry load failed");
+            return None;
+        }
+    }?;
+
+    if entry.pid.as_u32() == 0 || !mando_cc::is_process_alive(entry.pid) {
+        return None;
+    }
+
+    // Legacy entry (empty fingerprint) -- skip verification.
+    if entry.started_at.is_empty() {
+        return Some(entry.pid);
+    }
+
+    let current_fp = capture_start_fingerprint(entry.pid);
+    if current_fp == entry.started_at {
+        Some(entry.pid)
+    } else {
+        tracing::info!(
+            module = "pid_registry",
+            session_id,
+            pid = %entry.pid,
+            stored_fp = %entry.started_at,
+            current_fp = %current_fp,
+            "PID reuse detected (fingerprint mismatch); refusing to return PID for kill"
+        );
+        None
+    }
+}
+
 /// Startup cleanup: kill any live subprocesses from a prior daemon and
 /// empty the registry.
 ///

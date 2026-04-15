@@ -300,7 +300,10 @@ pub(crate) async fn delete_project(
     let deleted_tasks = task_ids.len();
 
     if !task_ids.is_empty() {
-        let opts = mando_captain::io::task_cleanup::CleanupOptions { close_pr: false };
+        let opts = mando_captain::io::task_cleanup::CleanupOptions {
+            close_pr: false,
+            force: true,
+        };
         mando_captain::runtime::dashboard::delete_tasks(&config, &store, &task_ids, &opts)
             .await
             .map_err(|e| internal_error(e, "failed to delete project tasks"))?;

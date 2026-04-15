@@ -164,6 +164,7 @@ pub enum ClarifierStatus {
     Ready,
     Clarifying,
     Escalate,
+    Answered,
 }
 
 /// Format structured questions into human-readable text.
@@ -445,7 +446,7 @@ pub(crate) fn parse_clarifier_response(text: &str, item_title: &str) -> Clarifie
     let status = match status_str {
         "clarifying" => ClarifierStatus::Clarifying,
         "escalate" => ClarifierStatus::Escalate,
-        "answered" => ClarifierStatus::Ready,
+        "answered" => ClarifierStatus::Answered,
         "understood" | "ready" => ClarifierStatus::Ready,
         unknown => {
             warn!(

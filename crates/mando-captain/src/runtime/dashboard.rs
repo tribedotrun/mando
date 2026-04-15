@@ -95,6 +95,17 @@ pub async fn add_task(
 
     let id = store.add(new_task).await?;
 
+    // Emit Created timeline event at creation time.
+    let _ = super::timeline_emit::emit(
+        store.pool(),
+        id,
+        mando_types::timeline::TimelineEventType::Created,
+        "captain",
+        &format!("Item created: {clean_title}"),
+        serde_json::json!({ "source": source }),
+    )
+    .await;
+
     Ok(serde_json::json!({
         "id": id,
         "title": title,
@@ -117,6 +128,23 @@ pub async fn delete_tasks(
             to_delete.push(task);
         }
     }
+
+    if !opts.force {
+        for task in &to_delete {
+            if task.status.is_active() {
+                anyhow::bail!(
+                    "task {} ({}) has an active worker (status: {}); \
+                     use `mando captain stop {}` to stop it first, \
+                     or force-delete from the Electron UI",
+                    task.id,
+                    task.title,
+                    task.status,
+                    task.id,
+                );
+            }
+        }
+    }
+
     let warnings =
         crate::io::task_cleanup::cleanup_tasks(&to_delete, config, store.pool(), opts).await;
     for id in ids {

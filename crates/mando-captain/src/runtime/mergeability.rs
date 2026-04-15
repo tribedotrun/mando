@@ -391,15 +391,9 @@ async fn try_spawn_triage(
         }
         SpawnDecision::EmitExhausted => {
             let last_err = last_failure_error(&events);
-            // `state.last_failure_at` is guaranteed Some here because
-            // `decide_spawn` only returns `EmitExhausted` when
-            // `failures_in_cycle >= max_attempts`, and the same code path
-            // sets `last_failure_at` whenever a failure is appended.
-            let last_failure_at = state.last_failure_at.clone().unwrap_or_default();
             emit_exhaustion(
                 item,
                 last_err.as_deref(),
-                &last_failure_at,
                 state.failures_in_cycle,
                 notifier,
                 pool,

@@ -108,13 +108,14 @@ pub(crate) async fn log_session_completion(
 
     let stream_path = mando_config::stream_path_for_session(session_id);
     let cost_info = mando_cc::get_stream_cost(&stream_path);
-    let (cost_usd, duration_ms, num_turns) = match &cost_info {
+    let (cost_usd, duration_ms, num_turns, denials) = match &cost_info {
         Some(info) => (
             info.cost_usd,
             info.duration_ms.map(|d| d as i64),
             info.num_turns,
+            info.permission_denials_count,
         ),
-        None => (None, None, None),
+        None => (None, None, None, None),
     };
 
     if let Err(e) = mando_db::queries::sessions::update_session_status_with_cost(
@@ -132,6 +133,30 @@ pub(crate) async fn log_session_completion(
             session_id,
             error = %e,
             "failed to update session cost"
+        );
+    }
+
+    // Surface permission denials and per-model cost in obs so escalation
+    // signals don't sit silently in the stream file. A non-zero denial count
+    // usually means the worker hit a guard rail — captain uses this plus the
+    // cost breakdown to reason about rework vs abandon decisions.
+    if denials.unwrap_or(0) > 0
+        || cost_info
+            .as_ref()
+            .and_then(|i| i.model_usage.as_ref())
+            .is_some()
+    {
+        let model_usage_log = cost_info
+            .as_ref()
+            .and_then(|i| i.model_usage.as_ref())
+            .map(|v| serde_json::to_string(v).unwrap_or_default())
+            .unwrap_or_default();
+        tracing::info!(
+            module = "headless_cc",
+            session_id,
+            permission_denials = ?denials,
+            model_usage = %model_usage_log,
+            "session completed with non-zero denials or per-model cost breakdown"
         );
     }
 

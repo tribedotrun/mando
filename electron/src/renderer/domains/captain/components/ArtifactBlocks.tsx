@@ -109,6 +109,42 @@ export function EvidenceBlock({
   );
 }
 
+/** Detect lines with Unicode box-drawing characters and wrap consecutive runs in fenced code blocks. */
+const BOX_DRAWING_RE = /[┌┐└┘│─├┤┬┴┼▼▲◄►╔╗╚╝║═╠╣╦╩╬]/;
+
+function wrapAsciiArt(text: string): string {
+  const lines = text.split('\n');
+  const result: string[] = [];
+  let i = 0;
+  while (i < lines.length) {
+    if (BOX_DRAWING_RE.test(lines[i])) {
+      const group: string[] = [lines[i]];
+      i++;
+      // Collect consecutive diagram lines, including blank lines between them.
+      while (i < lines.length) {
+        if (BOX_DRAWING_RE.test(lines[i])) {
+          group.push(lines[i]);
+          i++;
+        } else if (
+          lines[i].trim() === '' &&
+          i + 1 < lines.length &&
+          BOX_DRAWING_RE.test(lines[i + 1])
+        ) {
+          group.push(lines[i]);
+          i++;
+        } else {
+          break;
+        }
+      }
+      result.push('```', ...group, '```');
+    } else {
+      result.push(lines[i]);
+      i++;
+    }
+  }
+  return result.join('\n');
+}
+
 export function WorkSummaryBlock({
   artifact,
   initialExpanded = false,
@@ -143,7 +179,7 @@ export function WorkSummaryBlock({
       </button>
       {expanded && (
         <div className="mt-3 text-body text-text-1">
-          <PrMarkdown text={artifact.content} />
+          <PrMarkdown text={wrapAsciiArt(artifact.content)} />
         </div>
       )}
     </div>

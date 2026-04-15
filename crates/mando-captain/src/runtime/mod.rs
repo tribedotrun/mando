@@ -64,7 +64,6 @@ mod tick_post;
 mod tick_review;
 mod tick_rework;
 pub mod tick_spawn;
-pub mod timeline_backfill;
 pub mod timeline_emit;
 
 /// Revert a task to Queued, clearing all worker-related fields.

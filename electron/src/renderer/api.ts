@@ -221,7 +221,7 @@ export async function addTask(input: AddTaskInput): Promise<TaskItem> {
   }
   return res.json() as Promise<TaskItem>;
 }
-export const deleteItems = (ids: number[], opts?: { close_pr?: boolean }) =>
+export const deleteItems = (ids: number[], opts?: { close_pr?: boolean; force?: boolean }) =>
   apiPost<{ ok: boolean; deleted: number; warnings?: string[] }>('/api/tasks/delete', {
     ids,
     ...opts,

@@ -114,21 +114,14 @@ pub async fn persist_status_transition(
 ) -> Result<bool> {
     let event_type_str = super::timeline::event_type_to_string(event.event_type)?;
     let data_str = serde_json::to_string(&event.data)?;
-    let dedupe_key = format!(
-        "{}-{}-from:{}-w{}-r{}-i{}-rf{}",
-        task.id,
-        event_type_str,
-        expected_status,
-        task.worker_seq,
-        task.reopen_seq,
-        task.intervention_count,
-        task.review_fail_count,
-    );
 
     let mut tx = pool.begin().await?;
 
     // Update task with guard condition. Uses the same field set as update_task_exec
     // but with `WHERE status = expected_status` as an idempotency guard.
+    // This is the sole deduplication mechanism -- concurrent ticks are prevented
+    // by TICK_RUNNING + flock, and crash-restart replays see the post-transition
+    // status so the guard returns 0 rows.
     let set_clause = update_set_clause();
     let result = bind_task_write_fields(
         sqlx::query(&format!(
@@ -148,12 +141,13 @@ pub async fn persist_status_transition(
             task_id = task.id,
             expected_status,
             new_status = task.status.as_str(),
-            "persist_status_transition: 0 rows — already transitioned"
+            "persist_status_transition: 0 rows -- already transitioned"
         );
         return Ok(false);
     }
 
-    // Insert timeline event with dedupe key in the same transaction.
+    // Insert timeline event. dedupe_key is NULL -- no code path writes
+    // dedupe keys. The UPDATE guard above is the sole idempotency mechanism.
     sqlx::query(&format!(
         "INSERT INTO timeline_events ({}) VALUES (?, ?, ?, ?, ?, ?, ?)",
         super::timeline::INSERT_COLS
@@ -164,7 +158,7 @@ pub async fn persist_status_transition(
     .bind(&event.actor)
     .bind(&event.summary)
     .bind(&data_str)
-    .bind(&dedupe_key)
+    .bind(None::<String>)
     .execute(&mut *tx)
     .await?;
 

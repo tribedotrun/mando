@@ -181,7 +181,9 @@ PRBODY
 
 ```bash
 cat > /tmp/work-summary.md << 'SUMMARY'
+```
 <ASCII diagram>
+```
 
 **What changed**: <1-2 sentence delta>
 SUMMARY

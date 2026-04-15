@@ -1,4 +1,5 @@
-//! Task cleanup. Removes worktree, branch, health entry, close PR when deleting tasks.
+//! Task cleanup. Removes worktree, branches (local + remote), health entry,
+//! workbench, CC stream files, plans, and closes the PR when deleting tasks.
 
 use anyhow::Result;
 use mando_config::settings::Config;
@@ -8,6 +9,8 @@ use mando_types::Task;
 #[derive(Debug, Clone, Default)]
 pub struct CleanupOptions {
     pub close_pr: bool,
+    /// Skip the active-worker guard and force-delete regardless of task status.
+    pub force: bool,
 }
 
 pub(crate) async fn cleanup_task(
@@ -27,7 +30,7 @@ pub(crate) async fn cleanup_task(
 
     {
         let cc_sid = item.session_ids.worker.as_deref().unwrap_or("");
-        let pid = super::pid_registry::get_pid(cc_sid).unwrap_or(mando_types::Pid::new(0));
+        let pid = super::pid_registry::get_verified_pid(cc_sid).unwrap_or(mando_types::Pid::new(0));
         if pid.as_u32() > 0 {
             if let Err(e) = mando_cc::kill_process(pid).await {
                 let msg = format!("kill worker pid {pid}: {e}");
@@ -98,6 +101,15 @@ pub(crate) async fn cleanup_task(
             } else {
                 tracing::info!(module = "cleanup", branch = %branch, "deleted branch");
             }
+
+            // Also remove the remote branch so it doesn't linger on GitHub.
+            if let Err(e) = super::git::delete_remote_branch(rp, branch).await {
+                let msg = format!("delete_remote_branch {branch}: {e}");
+                tracing::warn!(module = "cleanup", branch = %branch, error = %e, "failed to delete remote branch");
+                warnings.push(msg);
+            } else {
+                tracing::info!(module = "cleanup", branch = %branch, "deleted remote branch");
+            }
         }
     }
 
@@ -146,6 +158,17 @@ pub(crate) async fn cleanup_task(
         }
     }
 
+    // Collect session IDs before deleting DB rows so we can clean up stream
+    // files on disk. The stream files (jsonl, meta.json, stderr) are not
+    // managed by the DB and would otherwise be orphaned.
+    let session_ids: Vec<String> =
+        mando_db::queries::sessions::list_sessions_for_task(pool, item.id)
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .map(|s| s.session_id)
+            .collect();
+
     {
         match mando_db::queries::sessions::delete_sessions_for_task(pool, item.id).await {
             Ok(n) => {
@@ -156,6 +179,30 @@ pub(crate) async fn cleanup_task(
             Err(e) => {
                 let msg = format!("delete_sessions_for_task {}: {e}", item.id);
                 tracing::warn!(module = "cleanup", task_id = %item.id, error = %e, "failed to delete sessions");
+                warnings.push(msg);
+            }
+        }
+    }
+
+    // Remove CC stream files (.jsonl, .meta.json, .stderr) for each session.
+    for sid in &session_ids {
+        for ext in &["jsonl", "meta.json", "stderr"] {
+            let path = mando_config::cc_streams_dir().join(format!("{sid}.{ext}"));
+            let _ = tokio::fs::remove_file(&path).await;
+        }
+    }
+    if !session_ids.is_empty() {
+        tracing::info!(module = "cleanup", item_id = %item.id, count = session_ids.len(), "removed CC stream files");
+    }
+
+    // Remove the plans/brief file for this task.
+    {
+        let plans_dir = mando_config::state_dir().join("plans");
+        let brief_path = plans_dir.join(format!("item-{}.md", item.id));
+        if let Err(e) = tokio::fs::remove_file(&brief_path).await {
+            if e.kind() != std::io::ErrorKind::NotFound {
+                let msg = format!("remove plan file {}: {e}", brief_path.display());
+                tracing::warn!(module = "cleanup", path = %brief_path.display(), error = %e, "failed to remove plan file");
                 warnings.push(msg);
             }
         }
@@ -191,6 +238,22 @@ pub(crate) async fn cleanup_task(
                     warnings.push(msg);
                 }
             }
+        }
+    }
+
+    // Soft-delete the workbench so it disappears from the sidebar.
+    if item.workbench_id > 0 {
+        let wb_id = item.workbench_id;
+        if let Err(e) = mando_db::queries::workbenches::mark_deleted(pool, wb_id).await {
+            let msg = format!("mark_deleted workbench {wb_id}: {e}");
+            tracing::warn!(module = "cleanup", workbench_id = wb_id, error = %e, "failed to soft-delete workbench");
+            warnings.push(msg);
+        } else {
+            tracing::info!(
+                module = "cleanup",
+                workbench_id = wb_id,
+                "soft-deleted workbench"
+            );
         }
     }
 

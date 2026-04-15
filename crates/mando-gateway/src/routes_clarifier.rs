@@ -176,6 +176,12 @@ async fn post_task_clarify_inner(
                             update["title"] = json!(title);
                         }
                     }
+                    if let Some(no_pr) = result.no_pr {
+                        update["no_pr"] = json!(no_pr);
+                    }
+                    if let Some(ref repo) = result.repo {
+                        update["repo"] = json!(repo);
+                    }
                     mando_captain::runtime::dashboard::force_update_task(&store, id, &update)
                         .await
                         .map_err(|e| {
@@ -191,6 +197,30 @@ async fn post_task_clarify_inner(
                     )
                     .await;
                     "ready"
+                }
+                ClarifierStatus::Answered => {
+                    mando_captain::runtime::dashboard::force_update_task(
+                        &store,
+                        id,
+                        &json!({
+                            "status": "completed-no-pr",
+                            "no_pr": true,
+                            "context": result.context,
+                            "session_ids": sids,
+                        }),
+                    )
+                    .await
+                    .map_err(|e| internal_error(e, "failed to update task after clarification"))?;
+
+                    let _ = mando_captain::runtime::timeline_emit::emit_for_task(
+                        &item,
+                        mando_types::timeline::TimelineEventType::CompletedNoPr,
+                        "Clarifier answered directly, no work needed",
+                        json!({"session_id": result.session_id}),
+                        &pool,
+                    )
+                    .await;
+                    "answered"
                 }
                 ClarifierStatus::Clarifying => {
                     mando_captain::runtime::dashboard::force_update_task(
