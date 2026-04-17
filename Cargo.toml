@@ -1,30 +1,41 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/mando-uuid",
-    "crates/mando-types",
-    "crates/mando-config",
-    "crates/mando-shared",
-    "crates/mando-captain",
-    "crates/mando-scout",
-    "crates/mando-readability",
-    "crates/mando-gateway",
-    "crates/mando-telegram",
+    # (all legacy crates dissolved)
     "cli",
-    "crates/mando-cc",
-    "crates/mando-db",
-    "crates/mando-terminal",
+
+    # Domain crates
+    "crates/captain",
+    "crates/scout",
+    "crates/sessions",
+    "crates/settings",
+    "crates/terminal",
+
+    # Global providers
+    "crates/global-types",
+    "crates/global-infra",
+    "crates/global-db",
+    "crates/global-bus",
+    "crates/global-claude",
+    "crates/global-net",
+
+    # Contract + transports + binary
+    "crates/api-types",
+    "crates/transport-http",
+    "crates/transport-tg",
+    "crates/mando-gateway",
+
+    # Dev-only (excluded from release)
 ]
 
 [workspace.package]
-version = "0.1.18-beta.4"
+version = "0.1.18-beta.5"
 edition = "2021"
 license = "Apache-2.0"
 repository = "https://github.com/tribedotrun/mando"
 homepage = "https://mando.build"
 
 [workspace.dependencies]
-# External (≥5k stars)
 tokio = { version = "1", features = ["full"] }
 axum = { version = "0.8", features = ["multipart"] }
 clap = { version = "4", features = ["derive"] }
@@ -55,17 +66,25 @@ sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite"] }
 rustc-hash = "2"
 
 # Internal crates
-mando-uuid = { path = "crates/mando-uuid" }
-mando-types = { path = "crates/mando-types" }
-mando-config = { path = "crates/mando-config" }
-mando-shared = { path = "crates/mando-shared" }
-mando-captain = { path = "crates/mando-captain" }
-mando-scout = { path = "crates/mando-scout" }
-mando-cc = { path = "crates/mando-cc" }
-mando-readability = { path = "crates/mando-readability" }
-mando-db = { path = "crates/mando-db" }
-mando-gateway = { path = "crates/mando-gateway" }
-mando-terminal = { path = "crates/mando-terminal" }
+mando-terminal = { path = "crates/terminal" }
+
+# Domain crates
+captain = { path = "crates/captain" }
+scout = { path = "crates/scout" }
+sessions = { path = "crates/sessions" }
+settings = { path = "crates/settings" }
+terminal = { path = "crates/terminal" }
+
+# Global crates
+global-types = { path = "crates/global-types" }
+global-infra = { path = "crates/global-infra" }
+global-db = { path = "crates/global-db" }
+global-bus = { path = "crates/global-bus" }
+global-claude = { path = "crates/global-claude" }
+global-net = { path = "crates/global-net" }
+api-types = { path = "crates/api-types" }
+transport-http = { path = "crates/transport-http" }
+transport-tg = { path = "crates/transport-tg" }
 
 [profile.dev]
 debug = 1

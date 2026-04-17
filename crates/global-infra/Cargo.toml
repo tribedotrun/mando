@@ -1,0 +1,16 @@
+[package]
+name = "global-infra"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+time.workspace = true
+tokio.workspace = true
+regex.workspace = true
+getrandom = "0.2"

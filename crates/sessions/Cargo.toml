@@ -1,0 +1,18 @@
+[package]
+name = "sessions"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+global-types = { path = "../global-types" }
+global-db = { path = "../global-db" }
+global-bus = { path = "../global-bus" }
+global-infra = { path = "../global-infra" }
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+time.workspace = true
+sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite"] }
+tokio.workspace = true

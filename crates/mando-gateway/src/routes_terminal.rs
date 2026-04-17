@@ -13,7 +13,7 @@ use std::convert::Infallible;
 
 use crate::response::error_response;
 use crate::AppState;
-use mando_terminal::types::{Agent, TerminalSize};
+use terminal::types::{Agent, TerminalSize};
 
 pub(crate) fn routes() -> Router<AppState> {
     Router::new()
@@ -64,7 +64,7 @@ pub(crate) async fn post_terminal_create(
 
     let mut terminal_env = HashMap::new();
     terminal_env.insert("MANDO_PORT".to_string(), state.listen_port.to_string());
-    let auth_token = crate::auth::ensure_auth_token();
+    let auth_token = transport_http::auth::ensure_auth_token();
     terminal_env.insert("MANDO_AUTH_TOKEN".to_string(), auth_token);
 
     let cfg = state.config.load();
@@ -85,49 +85,45 @@ pub(crate) async fn post_terminal_create(
     let project_name = body.project.clone();
     let cwd_str = cwd.to_string_lossy().to_string();
 
-    let project_id = match mando_db::queries::projects::find_by_name(state.db.pool(), &project_name)
-        .await
-    {
-        Ok(Some(row)) => row.id,
-        Ok(None) => mando_db::queries::projects::upsert(state.db.pool(), &project_name, "", None)
-            .await
-            .map_err(|e| {
-                error_response(
+    let project_id =
+        match settings::io::projects::find_by_name(state.db.pool(), &project_name).await {
+            Ok(Some(row)) => row.id,
+            Ok(None) => settings::io::projects::upsert(state.db.pool(), &project_name, "", None)
+                .await
+                .map_err(|e| {
+                    error_response(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        &format!("failed to create project: {e}"),
+                    )
+                })?,
+            Err(e) => {
+                return Err(error_response(
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    &format!("failed to create project: {e}"),
-                )
-            })?,
-        Err(e) => {
-            return Err(error_response(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                &format!("project lookup failed: {e}"),
-            ));
-        }
-    };
+                    &format!("project lookup failed: {e}"),
+                ));
+            }
+        };
 
     // Resolve the workbench this terminal session belongs to, creating it
     // if needed. Spawning a terminal is meaningful user activity, so bump
     // `last_activity_at` for pre-existing workbenches (new inserts already
     // have `last_activity_at == created_at`). Broadcast the change so the
     // sidebar can reorder and pick up the newly created workbench.
-    let existing_wb = mando_db::queries::workbenches::find_by_worktree(state.db.pool(), &cwd_str)
-        .await
-        .map_err(|e| {
-            error_response(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                &format!("workbench lookup failed: {e}"),
-            )
-        })?;
+    let existing_wb =
+        captain::io::queries::workbenches::find_by_worktree(state.db.pool(), &cwd_str)
+            .await
+            .map_err(|e| {
+                error_response(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    &format!("workbench lookup failed: {e}"),
+                )
+            })?;
     let (wb_id, touched_wb_id) = match (body.resume_session_id.is_some(), existing_wb.as_ref()) {
         (false, None) => {
-            let title = mando_types::workbench::workbench_title_now();
-            let wb = mando_types::Workbench::new(
-                project_id,
-                project_name.clone(),
-                cwd_str.clone(),
-                title,
-            );
-            let id = mando_db::queries::workbenches::insert(state.db.pool(), &wb)
+            let title = captain::workbench_title_now();
+            let wb =
+                captain::Workbench::new(project_id, project_name.clone(), cwd_str.clone(), title);
+            let id = captain::io::queries::workbenches::insert(state.db.pool(), &wb)
                 .await
                 .map_err(|e| {
                     error_response(
@@ -138,7 +134,7 @@ pub(crate) async fn post_terminal_create(
             (Some(id), Some(id))
         }
         (_, Some(wb)) => {
-            let touched = match mando_db::queries::workbenches::touch_activity(
+            let touched = match captain::io::queries::workbenches::touch_activity(
                 state.db.pool(),
                 wb.id,
             )
@@ -154,7 +150,7 @@ pub(crate) async fn post_terminal_create(
         }
         _ => (None, None),
     };
-    let req = mando_terminal::CreateRequest {
+    let req = terminal::CreateRequest {
         project: body.project,
         cwd,
         agent: body.agent,
@@ -170,7 +166,9 @@ pub(crate) async fn post_terminal_create(
         Ok(s) => s,
         Err(e) => {
             if let Some(id) = wb_id {
-                if let Err(e) = mando_db::queries::workbenches::archive(state.db.pool(), id).await {
+                if let Err(e) =
+                    captain::io::queries::workbenches::archive(state.db.pool(), id).await
+                {
                     tracing::warn!(workbench_id = id, error = %e, "failed to archive workbench after terminal creation failure");
                 }
             }
@@ -189,10 +187,10 @@ pub(crate) async fn post_terminal_create(
         } else {
             "updated"
         };
-        match mando_db::queries::workbenches::find_by_id(state.db.pool(), id).await {
+        match captain::io::queries::workbenches::find_by_id(state.db.pool(), id).await {
             Ok(Some(updated)) => {
                 state.bus.send(
-                    mando_types::BusEvent::Workbenches,
+                    global_types::BusEvent::Workbenches,
                     Some(json!({ "action": action, "item": updated })),
                 );
             }
@@ -294,7 +292,7 @@ pub(crate) async fn get_terminal_stream(
             yield Ok(Event::default().event("output").data(b64));
         }
 
-        if initial_state != mando_terminal::SessionState::Live {
+        if initial_state != terminal::SessionState::Live {
             let event = Event::default()
                 .event("exit")
                 .data(json!({"code": initial_exit_code}).to_string());
@@ -304,12 +302,12 @@ pub(crate) async fn get_terminal_stream(
 
         loop {
             match rx.recv().await {
-                Ok(mando_terminal::TerminalEvent::Output(data)) => {
+                Ok(terminal::TerminalEvent::Output(data)) => {
                     let b64 = base64::engine::general_purpose::STANDARD.encode(&data);
                     let event = Event::default().event("output").data(b64);
                     yield Ok(event);
                 }
-                Ok(mando_terminal::TerminalEvent::Exit { code }) => {
+                Ok(terminal::TerminalEvent::Exit { code }) => {
                     let event = Event::default()
                         .event("exit")
                         .data(json!({"code": code}).to_string());
@@ -375,12 +373,12 @@ pub(crate) async fn post_terminal_cc_session(
     // Persist auto-title intent to DB so the background reconciliation loop
     // picks it up. Skips task-backed workbenches (clarifier owns their titles).
     let pool = state.db.pool();
-    if let Ok(Some(wb)) = mando_db::queries::workbenches::find_by_worktree(pool, &cwd).await {
-        let has_tasks = mando_db::queries::tasks::has_active_for_workbench(pool, wb.id)
+    if let Ok(Some(wb)) = captain::io::queries::workbenches::find_by_worktree(pool, &cwd).await {
+        let has_tasks = captain::io::queries::tasks::has_active_for_workbench(pool, wb.id)
             .await
             .unwrap_or(false);
         if !has_tasks {
-            let _ = mando_db::queries::workbenches::set_pending_title_session(
+            let _ = captain::io::queries::workbenches::set_pending_title_session(
                 pool,
                 wb.id,
                 &body.cc_session_id,
@@ -405,7 +403,7 @@ pub(crate) async fn post_terminal_activity(
         .get(&id)
         .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "terminal session not found"))?;
     let cwd = session.info().cwd.to_string_lossy().to_string();
-    let Some(wb) = mando_db::queries::workbenches::find_by_worktree(state.db.pool(), &cwd)
+    let Some(wb) = captain::io::queries::workbenches::find_by_worktree(state.db.pool(), &cwd)
         .await
         .map_err(|e| {
             error_response(
@@ -416,7 +414,7 @@ pub(crate) async fn post_terminal_activity(
     else {
         return Ok(Json(json!({"ok": true, "touched": false})));
     };
-    let touched = mando_db::queries::workbenches::touch_activity(state.db.pool(), wb.id)
+    let touched = captain::io::queries::workbenches::touch_activity(state.db.pool(), wb.id)
         .await
         .map_err(|e| {
             error_response(
@@ -425,10 +423,10 @@ pub(crate) async fn post_terminal_activity(
             )
         })?;
     if touched {
-        match mando_db::queries::workbenches::find_by_id(state.db.pool(), wb.id).await {
+        match captain::io::queries::workbenches::find_by_id(state.db.pool(), wb.id).await {
             Ok(Some(updated)) => {
                 state.bus.send(
-                    mando_types::BusEvent::Workbenches,
+                    global_types::BusEvent::Workbenches,
                     Some(json!({ "action": "updated", "item": updated })),
                 );
             }

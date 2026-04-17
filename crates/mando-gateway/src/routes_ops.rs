@@ -14,8 +14,8 @@ use crate::AppState;
 /// defaulted to an empty PathBuf which blew up downstream.
 fn resolve_cwd(state: &AppState) -> Result<std::path::PathBuf, (StatusCode, Json<Value>)> {
     let cfg = state.config.load_full();
-    mando_config::paths::first_project_path(&cfg)
-        .map(|p| mando_config::paths::expand_tilde(&p))
+    settings::config::paths::first_project_path(&cfg)
+        .map(|p| global_infra::paths::expand_tilde(&p))
         .ok_or_else(|| {
             error_response(
                 StatusCode::BAD_REQUEST,

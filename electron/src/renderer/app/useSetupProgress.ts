@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { useConfig } from '#renderer/hooks/queries';
-import type { SetupProgress } from '#renderer/app/Sidebar';
+import { useConfig } from '#renderer/global/runtime/useConfig';
+import type { SetupProgress } from '#renderer/global/runtime/SidebarContext';
 
 const SETUP_TOTAL = 3;
 const AUTO_HIDE_DELAY_MS = 3_000;

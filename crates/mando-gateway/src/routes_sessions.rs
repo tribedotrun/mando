@@ -71,13 +71,13 @@ pub(crate) async fn get_sessions(
 
     // Build scout_item_id → title map for enrichment.
     let scout_ids: Vec<i64> = entries.iter().filter_map(|e| e.scout_item_id).collect();
-    let scout_titles = mando_db::queries::scout::item_titles(store.pool(), &scout_ids)
+    let scout_titles = scout::io::queries::scout::item_titles(store.pool(), &scout_ids)
         .await
         .unwrap_or_default();
 
     // Build credential_id → label map for enrichment.
     let cred_ids: Vec<i64> = entries.iter().filter_map(|e| e.credential_id).collect();
-    let cred_labels = mando_db::queries::credentials::labels_by_ids(store.pool(), &cred_ids)
+    let cred_labels = settings::io::credentials::labels_by_ids(store.pool(), &cred_ids)
         .await
         .unwrap_or_default();
 
@@ -146,7 +146,7 @@ pub(crate) async fn get_session_transcript(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    let cache_dir = mando_config::state_dir().join("transcripts");
+    let cache_dir = global_infra::paths::state_dir().join("transcripts");
 
     // Markdown cache (completed sessions only) — serve immediately.
     let md_path = cache_dir.join(format!("{id}.md"));
@@ -168,7 +168,7 @@ pub(crate) async fn get_session_transcript(
             error_response(StatusCode::NOT_FOUND, &format!("transcript {id} not found"))
         })?;
 
-    let markdown = mando_shared::transcript::jsonl_to_markdown(&jsonl);
+    let markdown = sessions::io::transcript::jsonl_to_markdown(&jsonl);
 
     // Cache as .md only if the session is complete (not still running).
     if !is_session_running(&id).await {
@@ -195,7 +195,7 @@ enum StreamMeta {
 
 /// Read and parse a stream meta sidecar for a session.
 async fn read_stream_meta(session_id: &str) -> StreamMeta {
-    let meta_path = mando_config::state_dir()
+    let meta_path = global_infra::paths::state_dir()
         .join("cc-streams")
         .join(format!("{session_id}.meta.json"));
     let content = match tokio::fs::read_to_string(&meta_path).await {
@@ -272,7 +272,7 @@ pub(crate) struct MessagesQuery {
 
 /// Resolve a session's stream file path, returning 404 if it doesn't exist.
 async fn get_stream_or_404(id: &str) -> Result<std::path::PathBuf, (StatusCode, Json<Value>)> {
-    let stream = mando_config::stream_path_for_session(id);
+    let stream = global_infra::paths::stream_path_for_session(id);
     if !tokio::fs::try_exists(&stream).await.unwrap_or(false) {
         return Err(error_response(
             StatusCode::NOT_FOUND,
@@ -288,8 +288,11 @@ pub(crate) async fn get_session_messages(
     Query(params): Query<MessagesQuery>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let stream = get_stream_or_404(&id).await?;
-    let messages =
-        mando_cc::transcript::parse_messages(&stream, params.limit, params.offset.unwrap_or(0));
+    let messages = global_claude::transcript::parse_messages(
+        &stream,
+        params.limit,
+        params.offset.unwrap_or(0),
+    );
     let val = serde_json::to_value(&messages)
         .map_err(|e| internal_error(e, "failed to serialize messages"))?;
     Ok(Json(val))
@@ -300,7 +303,7 @@ pub(crate) async fn get_session_tools(
     Path(id): Path<String>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let stream = get_stream_or_404(&id).await?;
-    let usage = mando_cc::transcript::tool_usage(&stream);
+    let usage = global_claude::transcript::tool_usage(&stream);
     let val = serde_json::to_value(&usage)
         .map_err(|e| internal_error(e, "failed to serialize tool usage"))?;
     Ok(Json(val))
@@ -311,7 +314,7 @@ pub(crate) async fn get_session_cost(
     Path(id): Path<String>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let stream = get_stream_or_404(&id).await?;
-    let cost = mando_cc::transcript::session_cost(&stream);
+    let cost = global_claude::transcript::session_cost(&stream);
     let val = serde_json::to_value(&cost)
         .map_err(|e| internal_error(e, "failed to serialize session cost"))?;
     Ok(Json(val))

@@ -42,7 +42,7 @@ where
         .unwrap_or(0);
     drop(store);
     state.bus.send(
-        mando_types::BusEvent::Tasks,
+        global_types::BusEvent::Tasks,
         Some(json!({"action": "updated", "item": updated, "id": id})),
     );
     touch_workbench_activity(state, wb_id).await;
@@ -59,7 +59,7 @@ pub(crate) async fn post_task_accept(
     simple_task_action(
         &state,
         id,
-        mando_captain::runtime::dashboard::accept_item(&store, id),
+        captain::runtime::dashboard::accept_item(&store, id),
     )
     .await
 }
@@ -75,7 +75,7 @@ pub(crate) async fn post_task_cancel(
     simple_task_action(
         &state,
         id,
-        mando_captain::runtime::dashboard::cancel_item(&store, id, pool),
+        captain::runtime::dashboard::cancel_item(&store, id, pool),
     )
     .await
 }
@@ -121,7 +121,7 @@ async fn post_task_reopen_inner(
     crate::routes_task_ask::close_ask_session(state, id).await;
 
     let old_session_id = item.session_ids.worker.clone();
-    let outcome = mando_captain::runtime::action_contract::reopen_item(
+    let outcome = captain::runtime::action_contract::reopen_item(
         &mut item,
         "human",
         &body.feedback,
@@ -139,20 +139,20 @@ async fn post_task_reopen_inner(
         .map_err(|e| internal_error(e, "failed to save task"))?;
 
     state.bus.send(
-        mando_types::BusEvent::Tasks,
+        global_types::BusEvent::Tasks,
         Some(json!({"action": "updated", "item": serde_json::to_value(&item).unwrap(), "id": id})),
     );
     touch_workbench_activity(state, item.workbench_id).await;
 
     let summary = match outcome {
-        mando_captain::runtime::action_contract::ReopenOutcome::QueuedFallback => {
+        captain::runtime::action_contract::ReopenOutcome::QueuedFallback => {
             if body.feedback.is_empty() {
                 "Reopened — queued for fresh work".to_string()
             } else {
                 format!("Reopened — queued for fresh work: {}", body.feedback)
             }
         }
-        mando_captain::runtime::action_contract::ReopenOutcome::CaptainReviewing => {
+        captain::runtime::action_contract::ReopenOutcome::CaptainReviewing => {
             if body.feedback.is_empty() {
                 "Reopen routed to captain review".to_string()
             } else {
@@ -167,9 +167,9 @@ async fn post_task_reopen_inner(
             }
         }
     };
-    let _ = mando_captain::runtime::timeline_emit::emit_for_task(
+    let _ = captain::runtime::timeline_emit::emit_for_task(
         &item,
-        mando_types::timeline::TimelineEventType::HumanReopen,
+        captain::TimelineEventType::HumanReopen,
         &summary,
         json!({
             "content": &body.feedback,
@@ -182,7 +182,7 @@ async fn post_task_reopen_inner(
 
     if matches!(
         outcome,
-        mando_captain::runtime::action_contract::ReopenOutcome::Reopened
+        captain::runtime::action_contract::ReopenOutcome::Reopened
     ) {
         // Emit SessionResumed only when the session was truly resumed (same
         // session_id). If reopen_worker fell back to clean_and_spawn_fresh the
@@ -190,16 +190,16 @@ async fn post_task_reopen_inner(
         let truly_resumed = old_session_id.is_some() && old_session_id == item.session_ids.worker;
         let (evt, summary) = if truly_resumed {
             (
-                mando_types::timeline::TimelineEventType::SessionResumed,
+                captain::TimelineEventType::SessionResumed,
                 format!("Resumed {}", item.worker.as_deref().unwrap_or("worker")),
             )
         } else {
             (
-                mando_types::timeline::TimelineEventType::WorkerSpawned,
+                captain::TimelineEventType::WorkerSpawned,
                 format!("Spawned {}", item.worker.as_deref().unwrap_or("worker")),
             )
         };
-        let _ = mando_captain::runtime::timeline_emit::emit_for_task(
+        let _ = captain::runtime::timeline_emit::emit_for_task(
             &item,
             evt,
             &summary,
@@ -214,13 +214,13 @@ async fn post_task_reopen_inner(
         let msg = if body.feedback.is_empty() {
             format!(
                 "\u{1f504} Reopened <b>{}</b>",
-                mando_shared::telegram_format::escape_html(&item.title)
+                transport_tg::telegram_format::escape_html(&item.title)
             )
         } else {
             format!(
                 "\u{1f504} Reopened <b>{}</b>: {}",
-                mando_shared::telegram_format::escape_html(&item.title),
-                mando_shared::telegram_format::escape_html(&body.feedback)
+                transport_tg::telegram_format::escape_html(&item.title),
+                transport_tg::telegram_format::escape_html(&body.feedback)
             )
         };
         notifier.normal(&msg).await;
@@ -276,7 +276,7 @@ async fn post_task_rework_inner(
     };
 
     let store = state.task_store.write().await;
-    mando_captain::runtime::dashboard::rework_item(&store, id, &body.feedback)
+    captain::runtime::dashboard::rework_item(&store, id, &body.feedback)
         .await
         .map_err(|e| internal_error(e, "failed to rework task"))?;
 
@@ -300,9 +300,9 @@ async fn post_task_rework_inner(
         .await
         .map_err(|e| internal_error(e, "failed to load task"))?
     {
-        let _ = mando_captain::runtime::timeline_emit::emit_for_task(
+        let _ = captain::runtime::timeline_emit::emit_for_task(
             &item,
-            mando_types::timeline::TimelineEventType::ReworkRequested,
+            captain::TimelineEventType::ReworkRequested,
             &summary,
             json!({"content": &body.feedback}),
             store.pool(),
@@ -314,7 +314,7 @@ async fn post_task_rework_inner(
 
     // Close the old PR on GitHub after rework succeeds.
     if let Some((pr_num, repo)) = old_pr_info {
-        if let Err(e) = mando_captain::io::github::close_pr(&repo, &pr_num).await {
+        if let Err(e) = captain::io::github::close_pr(&repo, &pr_num).await {
             tracing::warn!(
                 module = "gateway",
                 task_id = id,
@@ -339,7 +339,7 @@ async fn post_task_rework_inner(
         .and_then(|v| v.as_i64())
         .unwrap_or(0);
     state.bus.send(
-        mando_types::BusEvent::Tasks,
+        global_types::BusEvent::Tasks,
         Some(json!({"action": "updated", "item": updated, "id": id})),
     );
     touch_workbench_activity(state, wb_id).await;
@@ -353,7 +353,7 @@ pub(crate) async fn post_task_retry(
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let id = body.id;
     let store = state.task_store.read().await;
-    mando_captain::runtime::dashboard::retry_item(&store, id)
+    captain::runtime::dashboard::retry_item(&store, id)
         .await
         .map_err(|e| internal_error(e, "failed to retry task"))?;
     if let Some(item) = store
@@ -361,9 +361,9 @@ pub(crate) async fn post_task_retry(
         .await
         .map_err(|e| internal_error(e, "failed to load task"))?
     {
-        let _ = mando_captain::runtime::timeline_emit::emit_for_task(
+        let _ = captain::runtime::timeline_emit::emit_for_task(
             &item,
-            mando_types::timeline::TimelineEventType::StatusChanged,
+            captain::TimelineEventType::StatusChanged,
             "Retried — re-entering captain review",
             json!({"from": "errored", "to": "captain-reviewing"}),
             store.pool(),
@@ -382,7 +382,7 @@ pub(crate) async fn post_task_retry(
         .and_then(|v| v.as_i64())
         .unwrap_or(0);
     state.bus.send(
-        mando_types::BusEvent::Tasks,
+        global_types::BusEvent::Tasks,
         Some(json!({"action": "updated", "item": updated, "id": id})),
     );
     touch_workbench_activity(&state, wb_id).await;
@@ -399,7 +399,7 @@ pub(crate) async fn post_task_resume_rate_limited(
     let id = body.id;
     {
         let store = state.task_store.read().await;
-        mando_captain::runtime::dashboard::validate_rate_limited_task(&store, id)
+        captain::runtime::dashboard::validate_rate_limited_task(&store, id)
             .await
             .map_err(|e| internal_error(e, "failed to validate rate-limited task"))?;
         if let Some(item) = store
@@ -407,9 +407,9 @@ pub(crate) async fn post_task_resume_rate_limited(
             .await
             .map_err(|e| internal_error(e, "failed to load task"))?
         {
-            let _ = mando_captain::runtime::timeline_emit::emit_for_task(
+            let _ = captain::runtime::timeline_emit::emit_for_task(
                 &item,
-                mando_types::timeline::TimelineEventType::RateLimited,
+                captain::TimelineEventType::RateLimited,
                 "Rate-limit cooldown cleared manually — resuming",
                 json!({"action": "resume-rate-limited", "cleared_by": "human"}),
                 store.pool(),
@@ -428,7 +428,7 @@ pub(crate) async fn post_task_resume_rate_limited(
             .and_then(|v| v.as_i64())
             .unwrap_or(0);
         state.bus.send(
-            mando_types::BusEvent::Tasks,
+            global_types::BusEvent::Tasks,
             Some(json!({"action": "updated", "item": updated, "id": id})),
         );
         touch_workbench_activity(&state, wb_id).await;
@@ -436,7 +436,7 @@ pub(crate) async fn post_task_resume_rate_limited(
     // Trigger a captain tick so the task resumes immediately.
     let config = state.config.load_full();
     let workflow = state.captain_workflow.load_full();
-    mando_captain::runtime::dashboard::trigger_captain_tick(
+    captain::runtime::dashboard::trigger_captain_tick(
         &config,
         &workflow,
         false,
@@ -461,7 +461,7 @@ pub(crate) async fn post_task_handoff(
     simple_task_action(
         &state,
         id,
-        mando_captain::runtime::dashboard::handoff_item(&store, id, pool),
+        captain::runtime::dashboard::handoff_item(&store, id, pool),
     )
     .await
 }

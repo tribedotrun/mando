@@ -1,0 +1,60 @@
+# Allowed dependency edges between Mando crates.
+# Enforced by structural CI test.
+# Any edge not listed here is illegal.
+
+[edges]
+# Global crates
+global-types = ["global-infra"]
+global-infra = []
+global-db = []
+global-bus = ["global-types"]
+global-claude = ["global-types", "global-infra"]
+global-net = ["global-types"]
+
+# API contract
+api-types = ["global-types"]
+
+# Domains
+captain = [
+    "global-types", "global-db", "global-claude",
+    "global-bus", "global-infra",
+    "sessions", "settings",
+]
+scout = [
+    "global-types", "global-db", "global-net",
+    "global-claude", "global-infra",
+    "sessions", "settings",
+]
+sessions = [
+    "global-types", "global-db",
+    "global-bus", "global-infra",
+]
+settings = [
+    "global-types", "global-db",
+    "global-infra",
+]
+
+# Terminal
+terminal = ["global-types", "global-infra"]
+
+# Transports
+transport-http = ["api-types", "global-types", "global-infra"]
+transport-tg = [
+    "global-types", "global-infra",
+    "captain", "settings",
+]
+
+# Daemon binary (wires everything: domains + transports + globals)
+mando-gateway = [
+    "global-types", "global-infra", "global-claude",
+    "global-bus", "global-db",
+    "captain", "scout", "sessions", "settings",
+    "transport-http", "transport-tg", "terminal",
+]
+
+# CLI client (peer to Electron, HTTP-only)
+mando-cli = ["global-types"]
+
+# Dev mocks (standalone, zero Mando deps)
+dev-cc-mock = []
+dev-tg-mock = []

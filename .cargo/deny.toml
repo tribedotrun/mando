@@ -1,0 +1,76 @@
+# cargo-deny configuration for Mando workspace.
+# Enforces the same dependency edges as dep-graph.toml at the cargo level.
+# Run: cargo deny check bans
+
+[graph]
+targets = [
+    "aarch64-apple-darwin",
+    "x86_64-unknown-linux-gnu",
+]
+
+[bans]
+multiple-versions = "warn"
+wildcards = "allow"
+workspace-default-features = "allow"
+external-default-features = "allow"
+
+# Per-crate dependency allow-lists matching dep-graph.toml.
+# Only internal workspace crates are listed -- external crates are unrestricted.
+
+[[bans.deny]]
+crate = "mando-uuid"
+reason = "dissolved -- use uuid directly"
+
+[[bans.deny]]
+crate = "mando-types"
+reason = "dissolved -- types live in domain crates"
+
+[[bans.deny]]
+crate = "mando-cc"
+reason = "dissolved -- use global-claude"
+
+[[bans.deny]]
+crate = "mando-readability"
+reason = "dissolved -- use global-net"
+
+[[bans.deny]]
+crate = "mando-db"
+reason = "dissolved -- use global-db"
+
+[[bans.deny]]
+crate = "mando-config"
+reason = "dissolved -- use settings/config"
+
+[[bans.deny]]
+crate = "mando-shared"
+reason = "dissolved -- split into global-infra, sessions/io, transport-tg"
+
+[[bans.deny]]
+crate = "mando-telegram"
+reason = "dissolved -- use transport-tg"
+
+[[bans.deny]]
+crate = "mando-gateway"
+reason = "dissolved -- use mando-app"
+
+[licenses]
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
+    "Zlib",
+    "BSL-1.0",
+    "OpenSSL",
+    "CC0-1.0",
+    "MPL-2.0",
+]
+confidence-threshold = 0.8
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

@@ -29,7 +29,7 @@ pub(crate) async fn get_health(State(state): State<AppState>) -> Json<Value> {
 pub(crate) async fn get_health_system(State(state): State<AppState>) -> impl IntoResponse {
     let config = state.config.load_full();
     let active_paths = state.runtime_paths.clone();
-    let configured_paths = mando_config::resolve_captain_runtime_paths(&config);
+    let configured_paths = captain::config::resolve_captain_runtime_paths(&config);
     let ui_status = state.ui_runtime.status().await;
     let telegram_status = state.telegram_runtime.status().await;
     let store = state.task_store.read().await;
@@ -55,7 +55,7 @@ pub(crate) async fn get_health_system(State(state): State<AppState>) -> impl Int
     if telegram_status.enabled && !telegram_status.running {
         healthy = false;
     }
-    let data_dir = mando_config::data_dir();
+    let data_dir = global_infra::paths::data_dir();
     let uptime = state.start_time.elapsed().as_secs();
     let body = json!({
         "healthy": healthy,
@@ -67,7 +67,7 @@ pub(crate) async fn get_health_system(State(state): State<AppState>) -> impl Int
         "captain_degraded": captain_degraded,
         "projects": config.captain.projects.values().map(|pc| &pc.name).collect::<Vec<_>>(),
         "dataDir": data_dir.to_string_lossy(),
-        "configPath": mando_config::get_config_path().to_string_lossy(),
+        "configPath": settings::config::get_config_path().to_string_lossy(),
         "taskDbPath": active_paths.task_db_path.to_string_lossy(),
         "workerHealthPath": active_paths.worker_health_path.to_string_lossy(),
         "lockfilePath": active_paths.lockfile_path.to_string_lossy(),
@@ -105,7 +105,7 @@ pub(crate) async fn post_captain_tick(
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let config = state.config.load_full();
     let workflow = state.captain_workflow.load_full();
-    match mando_captain::runtime::dashboard::trigger_captain_tick(
+    match captain::runtime::dashboard::trigger_captain_tick(
         &config,
         &workflow,
         body.dry_run,
@@ -133,7 +133,7 @@ pub(crate) async fn post_captain_triage(
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let config = state.config.load_full();
     let store = state.task_store.read().await;
-    match mando_captain::runtime::dashboard_triage::triage_pending_review(
+    match captain::runtime::dashboard_triage::triage_pending_review(
         &config,
         &store,
         body.item_id.as_deref(),
@@ -151,7 +151,7 @@ pub(crate) async fn post_captain_stop(
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let store = state.task_store.read().await;
     let pool = state.db.pool();
-    match mando_captain::runtime::dashboard::stop_all_workers(&store, pool).await {
+    match captain::runtime::dashboard::stop_all_workers(&store, pool).await {
         Ok(killed) => Ok(Json(json!({"killed": killed}))),
         Err(e) => Err(internal_error(e, "failed to stop workers")),
     }
@@ -206,7 +206,7 @@ async fn post_captain_nudge_inner(
         )
     };
 
-    mando_captain::runtime::action_contract::nudge_item(
+    captain::runtime::action_contract::nudge_item(
         &mut item,
         Some(&message),
         None, // manual nudge -- no circuit breaker reason
@@ -241,11 +241,11 @@ async fn post_captain_nudge_inner(
         .flatten()
         .map(|t| serde_json::to_value(&t).unwrap());
     state.bus.send(
-        mando_types::BusEvent::Tasks,
+        global_types::BusEvent::Tasks,
         Some(json!({"action": "updated", "item": updated, "id": id})),
     );
     let cc_sid = item.session_ids.worker.as_deref().unwrap_or("");
-    let pid = mando_captain::io::pid_lookup::resolve_pid(cc_sid, &worker_name);
+    let pid = captain::io::pid_lookup::resolve_pid(cc_sid, &worker_name);
 
     Ok(Json(json!({
         "ok": true,
@@ -267,11 +267,9 @@ pub(crate) async fn post_worker_kill(
     Path(id): Path<String>,
     Json(body): Json<KillWorkerBody>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    match mando_captain::io::process_manager::kill_worker_process(mando_types::Pid::new(body.pid))
-        .await
-    {
+    match captain::io::process_manager::kill_worker_process(captain::Pid::new(body.pid)).await {
         Ok(()) => {
-            state.bus.send(mando_types::BusEvent::Tasks, None);
+            state.bus.send(global_types::BusEvent::Tasks, None);
             Ok(Json(json!({"ok": true, "killed": id})))
         }
         Err(e) => Err(internal_error(e, "failed to kill worker")),
@@ -290,8 +288,8 @@ pub(crate) async fn get_workers(
         .map_err(|e| internal_error(e, "failed to load tasks"))?;
     drop(store);
 
-    let health_path = mando_config::worker_health_path();
-    let health = mando_captain::io::health_store::load_health_state(&health_path)
+    let health_path = captain::config::worker_health_path();
+    let health = captain::io::health_store::load_health_state(&health_path)
         .map_err(|e| internal_error(e, "failed to load worker health state"))?;
     let nudge_budget = workflow.agent.max_interventions;
     let stale_threshold_s = workflow.agent.stale_threshold_s.as_secs_f64();
@@ -302,20 +300,17 @@ pub(crate) async fn get_workers(
         .filter(|task| {
             matches!(
                 task.status,
-                mando_types::task::ItemStatus::InProgress
-                    | mando_types::task::ItemStatus::CaptainReviewing
-                    | mando_types::task::ItemStatus::CaptainMerging
+                captain::ItemStatus::InProgress
+                    | captain::ItemStatus::CaptainReviewing
+                    | captain::ItemStatus::CaptainMerging
             ) && task.worker.is_some()
         })
         .map(|task| {
             let worker_name = task.worker.as_deref().unwrap_or("");
-            let nudge_count = mando_captain::io::health_store::get_health_u32(
-                &health,
-                worker_name,
-                "nudge_count",
-            );
+            let nudge_count =
+                captain::io::health_store::get_health_u32(&health, worker_name, "nudge_count");
             let cc_sid = task.session_ids.worker.as_deref().unwrap_or("");
-            let pid = mando_captain::io::pid_lookup::resolve_pid(cc_sid, worker_name);
+            let pid = captain::io::pid_lookup::resolve_pid(cc_sid, worker_name);
             let last_action = health
                 .get(worker_name)
                 .and_then(|v| v.get("last_action"))
@@ -326,16 +321,15 @@ pub(crate) async fn get_workers(
                 .session_ids
                 .worker
                 .as_deref()
-                .map(mando_config::stream_path_for_session)
-                .and_then(|p| mando_cc::stream_stale_seconds(&p));
-            let process_alive = pid.is_some_and(mando_cc::is_process_alive);
+                .map(global_infra::paths::stream_path_for_session)
+                .and_then(|p| global_claude::stream_stale_seconds(&p));
+            let process_alive = pid.is_some_and(global_claude::is_process_alive);
             // During CaptainReviewing/CaptainMerging the worker process has
             // exited naturally — captain is handling the task via a separate
             // session. A dead worker in these states is expected, not stale.
             let in_captain_phase = matches!(
                 task.status,
-                mando_types::task::ItemStatus::CaptainReviewing
-                    | mando_types::task::ItemStatus::CaptainMerging
+                captain::ItemStatus::CaptainReviewing | captain::ItemStatus::CaptainMerging
             );
             let is_stale = if in_captain_phase {
                 false
@@ -381,20 +375,20 @@ pub(crate) async fn get_workers(
 /// - the ambient cooldown when no credentials are configured.
 async fn effective_rate_limit_remaining_secs(state: &AppState) -> u64 {
     let pool = state.db.pool();
-    let has_credentials = mando_db::queries::credentials::has_any(pool)
+    let has_credentials = settings::io::credentials::has_any(pool)
         .await
         .unwrap_or(false);
     if !has_credentials {
-        return mando_captain::runtime::ambient_rate_limit::remaining_secs();
+        return captain::runtime::ambient_rate_limit::remaining_secs();
     }
-    let available = mando_db::queries::credentials::pick_for_worker(pool, None)
+    let available = settings::io::credentials::pick_for_worker(pool, None)
         .await
         .unwrap_or(None)
         .is_some();
     if available {
         return 0;
     }
-    mando_db::queries::credentials::earliest_cooldown_remaining_secs(pool)
+    settings::io::credentials::earliest_cooldown_remaining_secs(pool)
         .await
         .max(0) as u64
 }

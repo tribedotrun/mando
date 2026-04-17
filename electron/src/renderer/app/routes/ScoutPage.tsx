@@ -1,7 +1,7 @@
 import React from 'react';
 import { useNavigate, useSearch } from '@tanstack/react-router';
-import { ScoutPage as ScoutPageView } from '#renderer/domains/scout/components/ScoutPage';
-import { ErrorBoundary } from '#renderer/global/components/ErrorBoundary';
+import { ScoutPage as ScoutPageView } from '#renderer/domains/scout/ui/ScoutPage';
+import { ErrorBoundary } from '#renderer/global/ui/ErrorBoundary';
 
 export function ScoutPage(): React.ReactElement {
   const navigate = useNavigate();

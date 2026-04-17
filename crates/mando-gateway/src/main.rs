@@ -25,9 +25,16 @@ struct Args {
     #[arg(long)]
     foreground: bool,
 
-    /// Dev mode — writes daemon-dev.port instead of daemon.port
-    #[arg(long)]
+    /// Dev mode — writes daemon-dev.port instead of daemon.port.
+    /// Forces all models to sonnet. Mutually exclusive with --sandbox.
+    #[arg(long, conflicts_with = "sandbox")]
     dev: bool,
+
+    /// Sandbox mode — forces all models (captain, worker, clarifier, scout,
+    /// terminal sessions) to haiku so tests are fast and cheap.
+    /// Mutually exclusive with --dev.
+    #[arg(long)]
+    sandbox: bool,
 
     /// No Electron UI at all (no window, no CDP)
     #[arg(long)]
@@ -50,12 +57,12 @@ async fn main() {
     let start_time = Instant::now();
 
     // Load config.
-    let config = mando_config::load_config(None).unwrap_or_else(|e| {
+    let config = settings::io::config_fs::load_config(None).unwrap_or_else(|e| {
         eprintln!("fatal: failed to load config: {e}");
         std::process::exit(1);
     });
-    let runtime_paths = mando_config::resolve_captain_runtime_paths(&config);
-    mando_config::set_active_captain_runtime_paths(runtime_paths.clone());
+    let runtime_paths = captain::config::resolve_captain_runtime_paths(&config);
+    captain::config::set_active_captain_runtime_paths(runtime_paths.clone());
 
     // Inject env vars from config into process environment.
     for (k, v) in &config.env {
@@ -70,30 +77,30 @@ async fn main() {
         std::process::exit(1);
     }
 
-    let auth_token = mando_gateway::auth::ensure_auth_token();
+    let auth_token = transport_http::auth::ensure_auth_token();
 
     // Sync bundled prod skills to ~/.claude/skills/mando-*.
-    mando_config::skills::sync_bundled_skills();
+    settings::config::skills::sync_bundled_skills();
 
-    let bus = Arc::new(mando_shared::EventBus::new());
+    let bus = Arc::new(global_bus::EventBus::new());
 
     // Unified DB pool — shared across all subsystems.
     let db_path = runtime_paths.task_db_path.clone();
-    let db = mando_db::Db::open(&db_path).await.unwrap_or_else(|e| {
+    let db = global_db::Db::open(&db_path).await.unwrap_or_else(|e| {
         eprintln!("fatal: cannot open database at {}: {e}", db_path.display());
         std::process::exit(1);
     });
     let db = Arc::new(db);
 
     // Task store wraps the same pool.
-    let task_store = mando_captain::io::task_store::TaskStore::new(db.pool().clone());
+    let task_store = captain::io::task_store::TaskStore::new(db.pool().clone());
     let task_store_arc = Arc::new(RwLock::new(task_store));
 
     // Seed projects from config.json into DB (first run only), then load
     // all projects from DB back into config so the DB is the source of truth.
     let config = {
         let mut cfg = config;
-        mando_db::queries::projects::startup_sync(db.pool(), &mut cfg)
+        settings::io::projects::startup_sync(db.pool(), &mut cfg)
             .await
             .expect("fatal: failed to sync projects from DB");
         cfg
@@ -118,9 +125,7 @@ async fn main() {
         .unwrap_or(false);
     mando_gateway::startup::startup_reconciliation(db.pool()).await;
 
-    if let Err(e) =
-        mando_captain::runtime::reconciler::reconcile_on_startup(&config, db.pool()).await
-    {
+    if let Err(e) = captain::runtime::reconciler::reconcile_on_startup(&config, db.pool()).await {
         if unsafe_start {
             tracing::error!(
                 module = "startup",
@@ -138,28 +143,37 @@ async fn main() {
         }
     }
 
-    let mut captain_wf = mando_config::load_captain_workflow(
-        &mando_config::captain_workflow_path(),
+    let mut captain_wf = settings::io::config_fs::load_captain_workflow(
+        &settings::config::captain_workflow_path(),
         config.captain.tick_interval_s,
     )
     .unwrap_or_else(|e| {
         eprintln!("fatal: failed to load captain workflow: {e}");
         std::process::exit(1);
     });
-    let mut scout_wf =
-        mando_config::load_scout_workflow(&mando_config::scout_workflow_path(), &config)
-            .unwrap_or_else(|e| {
-                eprintln!("fatal: failed to load scout workflow: {e}");
-                std::process::exit(1);
-            });
+    let mut scout_wf = settings::io::config_fs::load_scout_workflow(
+        &settings::config::scout_workflow_path(),
+        &config,
+    )
+    .unwrap_or_else(|e| {
+        eprintln!("fatal: failed to load scout workflow: {e}");
+        std::process::exit(1);
+    });
     if args.dev {
         mando_gateway::apply_dev_model_overrides(&mut captain_wf, &mut scout_wf);
+    } else if args.sandbox {
+        mando_gateway::apply_sandbox_model_overrides(&mut captain_wf, &mut scout_wf);
     }
 
-    let cc_state_dir = mando_config::state_dir().join("ops_sessions").join("cc");
-    let cc_session_mgr = mando_captain::io::cc_session::CcSessionManager::new(
+    // Terminal sessions default to sonnet in dev/prod, haiku in sandbox.
+    let terminal_default_model = if args.sandbox { "haiku" } else { "sonnet" };
+
+    let cc_state_dir = global_infra::paths::state_dir()
+        .join("ops_sessions")
+        .join("cc");
+    let cc_session_mgr = captain::io::cc_session::CcSessionManager::new(
         cc_state_dir,
-        "sonnet",
+        terminal_default_model,
         db.pool().clone(),
     );
 
@@ -175,13 +189,13 @@ async fn main() {
     let task_tracker = TaskTracker::new();
     let cancellation_token = CancellationToken::new();
     let ui_runtime = Arc::new(mando_gateway::ui_runtime::UiRuntime::new(
-        mando_config::state_dir().join("ui-state.json"),
+        global_infra::paths::state_dir().join("ui-state.json"),
     ));
     let telegram_runtime = Arc::new(mando_gateway::telegram_runtime::TelegramRuntime::new(
         port, auth_token,
     ));
 
-    let qa_session_mgr = mando_scout::runtime::qa::session_manager_from_workflow(&scout_wf);
+    let qa_session_mgr = scout::runtime::qa::session_manager_from_workflow(&scout_wf);
     let state = mando_gateway::AppState {
         config: config_arc.clone(),
         config_manager,
@@ -197,10 +211,11 @@ async fn main() {
         )),
         db,
         qa_session_mgr,
-        terminal_host: Arc::new(mando_terminal::TerminalHost::new(mando_config::data_dir())),
+        terminal_host: Arc::new(terminal::TerminalHost::new(global_infra::paths::data_dir())),
         start_time,
         listen_port: port,
         dev_mode: args.dev,
+        sandbox_mode: args.sandbox,
         task_tracker,
         cancellation_token,
         telegram_runtime,
@@ -265,7 +280,7 @@ async fn main() {
                 if let Ok(v) = std::env::var("MANDO_AUTH_TOKEN") {
                     env_map.insert("MANDO_AUTH_TOKEN".to_string(), v);
                 } else if let Ok(v) =
-                    std::fs::read_to_string(mando_config::data_dir().join("auth-token"))
+                    std::fs::read_to_string(global_infra::paths::data_dir().join("auth-token"))
                 {
                     env_map.insert("MANDO_AUTH_TOKEN".to_string(), v.trim().to_string());
                 }

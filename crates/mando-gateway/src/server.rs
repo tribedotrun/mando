@@ -10,8 +10,10 @@ use tokio_util::task::TaskTracker;
 use tower_http::cors::{AllowOrigin, CorsLayer};
 use tracing::info;
 
-use crate::auth;
-use crate::middleware::request_id;
+use transport_http::auth;
+use transport_http::middleware::request_id;
+use transport_http::static_files;
+
 use crate::routes_ai;
 use crate::routes_captain;
 use crate::routes_captain_adopt;
@@ -32,7 +34,6 @@ use crate::routes_ui;
 use crate::routes_workbenches;
 use crate::routes_worktrees;
 use crate::sse;
-use crate::static_files;
 use crate::telegram_runtime;
 use crate::ui_runtime;
 use crate::AppState;
@@ -282,16 +283,16 @@ fn ui_routes() -> Router<AppState> {
 }
 
 pub async fn start_server(
-    cfg: mando_config::Config,
-    bus: mando_shared::EventBus,
+    cfg: settings::config::Config,
+    bus: global_bus::EventBus,
 ) -> anyhow::Result<()> {
     start_server_with(cfg, bus, std::future::pending::<()>(), false).await
 }
 
 /// Full `start_server` with explicit shutdown signal and unsafe-start gate.
 pub async fn start_server_with<F>(
-    config: mando_config::Config,
-    bus: mando_shared::EventBus,
+    config: settings::config::Config,
+    bus: global_bus::EventBus,
     shutdown: F,
     unsafe_start: bool,
 ) -> anyhow::Result<()>
@@ -300,21 +301,21 @@ where
 {
     let host = config.gateway.dashboard.host.clone();
     let port = config.gateway.dashboard.port;
-    let runtime_paths = mando_config::resolve_captain_runtime_paths(&config);
-    mando_config::set_active_captain_runtime_paths(runtime_paths.clone());
+    let runtime_paths = captain::config::resolve_captain_runtime_paths(&config);
+    captain::config::set_active_captain_runtime_paths(runtime_paths.clone());
 
     let bus_arc = Arc::new(bus);
 
-    let db = mando_db::Db::open(&runtime_paths.task_db_path).await?;
+    let db = global_db::Db::open(&runtime_paths.task_db_path).await?;
     let db = Arc::new(db);
 
     let config = {
         let mut cfg = config;
-        mando_db::queries::projects::startup_sync(db.pool(), &mut cfg).await?;
+        settings::io::projects::startup_sync(db.pool(), &mut cfg).await?;
         cfg
     };
 
-    let task_store = mando_captain::io::task_store::TaskStore::new(db.pool().clone());
+    let task_store = captain::io::task_store::TaskStore::new(db.pool().clone());
     let task_store_arc = Arc::new(RwLock::new(task_store));
     let config_arc = Arc::new(ArcSwap::from_pointee(config));
     let config_write_mu = Arc::new(Mutex::new(()));
@@ -326,11 +327,11 @@ where
         config_write_mu.clone(),
         tick_tx,
     );
-    let auth_token = crate::auth::ensure_auth_token();
+    let auth_token = auth::ensure_auth_token();
     let task_tracker = TaskTracker::new();
     let cancellation_token = CancellationToken::new();
     let ui_runtime = Arc::new(ui_runtime::UiRuntime::new(
-        mando_config::state_dir().join("ui-state.json"),
+        global_infra::paths::state_dir().join("ui-state.json"),
     ));
     let telegram_runtime = Arc::new(telegram_runtime::TelegramRuntime::new(port, auth_token));
 
@@ -338,9 +339,7 @@ where
 
     crate::startup::startup_reconciliation(db.pool()).await;
 
-    if let Err(e) =
-        mando_captain::runtime::reconciler::reconcile_on_startup(&config, db.pool()).await
-    {
+    if let Err(e) = captain::runtime::reconciler::reconcile_on_startup(&config, db.pool()).await {
         if unsafe_start {
             tracing::error!(
                 module = "startup",
@@ -357,18 +356,19 @@ where
         }
     }
 
-    let captain_wf = mando_config::load_captain_workflow(
-        &mando_config::captain_workflow_path(),
+    let captain_wf = settings::io::config_fs::load_captain_workflow(
+        &settings::config::captain_workflow_path(),
         config.captain.tick_interval_s,
     )?;
-    let scout_wf =
-        mando_config::load_scout_workflow(&mando_config::scout_workflow_path(), &config)?;
-    let cc_state_dir = mando_config::state_dir().join("ops_sessions").join("cc");
-    let cc_session_mgr = mando_captain::io::cc_session::CcSessionManager::new(
-        cc_state_dir,
-        "sonnet",
-        db.pool().clone(),
-    );
+    let scout_wf = settings::io::config_fs::load_scout_workflow(
+        &settings::config::scout_workflow_path(),
+        &config,
+    )?;
+    let cc_state_dir = global_infra::paths::state_dir()
+        .join("ops_sessions")
+        .join("cc");
+    let cc_session_mgr =
+        captain::io::cc_session::CcSessionManager::new(cc_state_dir, "sonnet", db.pool().clone());
     let cc_recovered = cc_session_mgr.recover();
     if cc_recovered.recovered > 0 || cc_recovered.corrupt > 0 {
         tracing::info!(
@@ -378,7 +378,7 @@ where
         );
     }
 
-    let qa_session_mgr = mando_scout::runtime::qa::session_manager_from_workflow(&scout_wf);
+    let qa_session_mgr = scout::runtime::qa::session_manager_from_workflow(&scout_wf);
     let state = AppState {
         config: config_arc,
         config_manager,
@@ -394,10 +394,11 @@ where
         )),
         db,
         qa_session_mgr,
-        terminal_host: Arc::new(mando_terminal::TerminalHost::new(mando_config::data_dir())),
+        terminal_host: Arc::new(terminal::TerminalHost::new(global_infra::paths::data_dir())),
         start_time: std::time::Instant::now(),
         listen_port: port,
         dev_mode: false,
+        sandbox_mode: false,
         task_tracker,
         cancellation_token,
         telegram_runtime,

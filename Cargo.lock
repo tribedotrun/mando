@@ -83,6 +83,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
 
 [[package]]
+name = "api-types"
+version = "0.1.18-beta.5"
+dependencies = [
+ "global-types",
+ "serde",
+ "serde_json",
+ "time",
+]
+
+[[package]]
 name = "arc-swap"
 version = "1.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -253,6 +263,34 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1e748733b7cbc798e1434b6ac524f0c1ff2ab456fe201501e6497c8417a4fc33"
 
 [[package]]
+name = "captain"
+version = "0.1.18-beta.5"
+dependencies = [
+ "anyhow",
+ "futures",
+ "global-bus",
+ "global-claude",
+ "global-db",
+ "global-infra",
+ "global-types",
+ "libc",
+ "regex",
+ "reqwest",
+ "rustc-hash",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "sessions",
+ "settings",
+ "sqlx",
+ "thiserror 2.0.18",
+ "time",
+ "tokio",
+ "tokio-util",
+ "tracing",
+]
+
+[[package]]
 name = "cc"
 version = "1.2.60"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -270,9 +308,9 @@ checksum = "9330f8b2ff13f34540b44e946ef35111825727b38d33286ef986142615121801"
 
 [[package]]
 name = "clap"
-version = "4.6.0"
+version = "4.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b193af5b67834b676abd72466a96c1024e6a6ad978a1f484bd90b85c94041351"
+checksum = "1ddb117e43bbf7dacf0a4190fef4d345b9bad68dfc649cb349e7d17d28428e51"
 dependencies = [
  "clap_builder",
  "clap_derive",
@@ -292,9 +330,9 @@ dependencies = [
 
 [[package]]
 name = "clap_derive"
-version = "4.6.0"
+version = "4.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1110bd8a634a1ab8cb04345d8d878267d57c3cf1b38d91b71af6686408bbca6a"
+checksum = "f2ce8604710f6733aa641a2b3731eaa1e8b3d9973d5e3565da11800813f997a9"
 dependencies = [
  "heck",
  "proc-macro2",
@@ -768,6 +806,85 @@ dependencies = [
  "r-efi 6.0.0",
  "wasip2",
  "wasip3",
+]
+
+[[package]]
+name = "global-bus"
+version = "0.1.18-beta.5"
+dependencies = [
+ "global-types",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "global-claude"
+version = "0.1.18-beta.5"
+dependencies = [
+ "anyhow",
+ "global-infra",
+ "global-types",
+ "libc",
+ "regex",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "global-db"
+version = "0.1.18-beta.5"
+dependencies = [
+ "anyhow",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "time",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "global-infra"
+version = "0.1.18-beta.5"
+dependencies = [
+ "anyhow",
+ "getrandom 0.2.17",
+ "regex",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "time",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "global-net"
+version = "0.1.18-beta.5"
+dependencies = [
+ "anyhow",
+ "global-types",
+ "html5ever",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "global-types"
+version = "0.1.18-beta.5"
+dependencies = [
+ "global-infra",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -1289,56 +1406,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c41e0c4fef86961ac6d6f8a82609f55f31b05e4fce149ac5710e439df7619ba4"
 
 [[package]]
-name = "mando-captain"
-version = "0.1.18-beta.4"
-dependencies = [
- "anyhow",
- "futures",
- "libc",
- "mando-cc",
- "mando-config",
- "mando-db",
- "mando-shared",
- "mando-types",
- "mando-uuid",
- "regex",
- "reqwest",
- "rustc-hash",
- "serde",
- "serde_json",
- "serde_yaml",
- "sqlx",
- "thiserror 2.0.18",
- "time",
- "tokio",
- "tokio-util",
- "tracing",
-]
-
-[[package]]
-name = "mando-cc"
-version = "0.1.18-beta.4"
-dependencies = [
- "anyhow",
- "libc",
- "mando-config",
- "mando-types",
- "mando-uuid",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
-]
-
-[[package]]
 name = "mando-cli"
-version = "0.1.18-beta.4"
+version = "0.1.18-beta.5"
 dependencies = [
  "anyhow",
  "clap",
- "mando-types",
+ "global-types",
  "reqwest",
  "serde",
  "serde_json",
@@ -1349,40 +1422,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "mando-config"
-version = "0.1.18-beta.4"
-dependencies = [
- "anyhow",
- "iana-time-zone",
- "mando-types",
- "minijinja",
- "rustc-hash",
- "serde",
- "serde_json",
- "serde_yaml",
- "thiserror 2.0.18",
- "tracing",
-]
-
-[[package]]
-name = "mando-db"
-version = "0.1.18-beta.4"
-dependencies = [
- "anyhow",
- "mando-config",
- "mando-types",
- "mando-uuid",
- "serde",
- "serde_json",
- "sqlx",
- "time",
- "tokio",
- "tracing",
-]
-
-[[package]]
 name = "mando-gateway"
-version = "0.1.18-beta.4"
+version = "0.1.18-beta.5"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -1390,28 +1431,28 @@ dependencies = [
  "axum",
  "base64",
  "bytes",
+ "captain",
  "clap",
  "futures-util",
+ "global-bus",
+ "global-claude",
+ "global-db",
+ "global-infra",
+ "global-types",
  "libc",
- "mando-captain",
- "mando-cc",
- "mando-config",
- "mando-db",
- "mando-scout",
- "mando-shared",
- "mando-telegram",
- "mando-terminal",
- "mando-types",
- "mando-uuid",
  "opentelemetry",
  "opentelemetry-otlp",
  "opentelemetry_sdk",
  "reqwest",
  "rustc-hash",
+ "scout",
  "serde",
  "serde_json",
+ "sessions",
+ "settings",
  "shell-words",
  "sqlx",
+ "terminal",
  "time",
  "tokio",
  "tokio-stream",
@@ -1422,110 +1463,9 @@ dependencies = [
  "tracing-appender",
  "tracing-opentelemetry",
  "tracing-subscriber",
+ "transport-http",
+ "transport-tg",
  "uuid",
-]
-
-[[package]]
-name = "mando-readability"
-version = "0.1.18-beta.4"
-dependencies = [
- "html5ever",
-]
-
-[[package]]
-name = "mando-scout"
-version = "0.1.18-beta.4"
-dependencies = [
- "anyhow",
- "mando-captain",
- "mando-cc",
- "mando-config",
- "mando-db",
- "mando-readability",
- "mando-shared",
- "mando-types",
- "mando-uuid",
- "reqwest",
- "rustc-hash",
- "serde",
- "serde_json",
- "sha2",
- "sqlx",
- "thiserror 2.0.18",
- "time",
- "tokio",
- "tracing",
- "urlencoding",
-]
-
-[[package]]
-name = "mando-shared"
-version = "0.1.18-beta.4"
-dependencies = [
- "anyhow",
- "mando-config",
- "mando-db",
- "mando-types",
- "regex",
- "serde",
- "serde_json",
- "sqlx",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "mando-telegram"
-version = "0.1.18-beta.4"
-dependencies = [
- "anyhow",
- "clap",
- "mando-config",
- "mando-shared",
- "mando-types",
- "mando-uuid",
- "reqwest",
- "serde",
- "serde_json",
- "time",
- "tokio",
- "tracing",
- "tracing-appender",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "mando-terminal"
-version = "0.1.18-beta.4"
-dependencies = [
- "anyhow",
- "dirs",
- "mando-types",
- "mando-uuid",
- "portable-pty",
- "serde",
- "serde_json",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "mando-types"
-version = "0.1.18-beta.4"
-dependencies = [
- "mando-uuid",
- "serde",
- "serde_json",
- "time",
- "tracing",
-]
-
-[[package]]
-name = "mando-uuid"
-version = "0.1.18-beta.4"
-dependencies = [
- "getrandom 0.2.17",
 ]
 
 [[package]]
@@ -2433,6 +2373,31 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 
 [[package]]
+name = "scout"
+version = "0.1.18-beta.5"
+dependencies = [
+ "anyhow",
+ "global-claude",
+ "global-db",
+ "global-infra",
+ "global-net",
+ "global-types",
+ "reqwest",
+ "rustc-hash",
+ "serde",
+ "serde_json",
+ "sessions",
+ "settings",
+ "sha2",
+ "sqlx",
+ "thiserror 2.0.18",
+ "time",
+ "tokio",
+ "tracing",
+ "urlencoding",
+]
+
+[[package]]
 name = "security-framework"
 version = "3.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2589,6 +2554,44 @@ checksum = "15c6d3b776267a75d31bbdfd5d36c0ca051251caafc285827052bc53bcdc8162"
 dependencies = [
  "libc",
  "serial-core",
+]
+
+[[package]]
+name = "sessions"
+version = "0.1.18-beta.5"
+dependencies = [
+ "anyhow",
+ "global-bus",
+ "global-db",
+ "global-infra",
+ "global-types",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "time",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "settings"
+version = "0.1.18-beta.5"
+dependencies = [
+ "anyhow",
+ "global-db",
+ "global-infra",
+ "global-types",
+ "iana-time-zone",
+ "minijinja",
+ "rustc-hash",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "sqlx",
+ "thiserror 2.0.18",
+ "time",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -3033,6 +3036,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "terminal"
+version = "0.1.18-beta.5"
+dependencies = [
+ "anyhow",
+ "dirs",
+ "global-infra",
+ "global-types",
+ "portable-pty",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "termios"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3150,9 +3168,9 @@ checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
 
 [[package]]
 name = "tokio"
-version = "1.52.0"
+version = "1.52.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a91135f59b1cbf38c91e73cf3386fca9bb77915c45ce2771460c9d92f0f3d776"
+checksum = "b67dee974fe86fd92cc45b7a95fdd2f99a36a6d7b0d431a231178d3d670bbcc6"
 dependencies = [
  "bytes",
  "libc",
@@ -3453,6 +3471,44 @@ dependencies = [
 ]
 
 [[package]]
+name = "transport-http"
+version = "0.1.18-beta.5"
+dependencies = [
+ "anyhow",
+ "api-types",
+ "axum",
+ "global-infra",
+ "global-types",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tower-http",
+ "tracing",
+]
+
+[[package]]
+name = "transport-tg"
+version = "0.1.18-beta.5"
+dependencies = [
+ "anyhow",
+ "captain",
+ "clap",
+ "global-infra",
+ "global-types",
+ "html5ever",
+ "regex",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "settings",
+ "time",
+ "tokio",
+ "tracing",
+ "tracing-appender",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "try-lock"
 version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3553,9 +3609,9 @@ checksum = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821"
 
 [[package]]
 name = "uuid"
-version = "1.23.0"
+version = "1.23.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5ac8b6f42ead25368cf5b098aeb3dc8a1a2c05a3eee8a9a1a68c640edbfc79d9"
+checksum = "ddd74a9687298c6858e9b88ec8935ec45d22e8fd5e6394fa1bd4e99a87789c76"
 dependencies = [
  "getrandom 0.4.2",
  "js-sys",

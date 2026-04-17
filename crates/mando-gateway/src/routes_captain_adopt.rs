@@ -13,24 +13,24 @@ use crate::response::{error_response, internal_error};
 use crate::AppState;
 
 fn resolve_adopt_project(
-    config: &mando_config::settings::Config,
+    config: &settings::config::settings::Config,
     requested: Option<&str>,
     wt_path: &Path,
 ) -> Result<String, (StatusCode, Json<Value>)> {
     if let Some(project) = requested {
-        return mando_config::resolve_project_config(Some(project), config)
+        return settings::config::resolve_project_config(Some(project), config)
             .map(|(_, pc)| pc.name.clone())
             .ok_or_else(|| error_response(StatusCode::BAD_REQUEST, "unknown project"));
     }
 
-    let central_wt_dir = mando_captain::io::git::worktrees_dir();
+    let central_wt_dir = captain::io::git::worktrees_dir();
     let wt_name = wt_path.file_name().and_then(|n| n.to_str());
     let mut matched = config
         .captain
         .projects
         .values()
         .filter_map(|pc| {
-            let project_path = mando_config::expand_tilde(&pc.path);
+            let project_path = global_infra::paths::expand_tilde(&pc.path);
             if wt_path == project_path || wt_path.starts_with(&project_path) {
                 return Some((pc.name.clone(), usize::MAX));
             }
@@ -179,7 +179,7 @@ pub(crate) async fn post_captain_adopt(
             Some(note) => format!("Adopted from worktree: {wt_display}\n\nNote: {note}"),
             None => format!("Adopted from worktree: {wt_display}"),
         };
-        let val = mando_captain::runtime::dashboard::add_task_with_context(
+        let val = captain::runtime::dashboard::add_task_with_context(
             &config,
             &store,
             &body.title,
@@ -202,7 +202,7 @@ pub(crate) async fn post_captain_adopt(
             "status": "queued",
             "plan": ".ai/briefs/adopt-handoff.md"
         });
-        mando_captain::runtime::dashboard::update_task(&store, id, &updates)
+        captain::runtime::dashboard::update_task(&store, id, &updates)
             .await
             .map_err(|e| {
                 error_response(

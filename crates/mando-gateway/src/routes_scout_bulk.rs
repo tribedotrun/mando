@@ -31,14 +31,14 @@ pub(crate) async fn post_scout_bulk_update(
     let mut updated = 0u32;
     let mut failed: Vec<Value> = Vec::new();
     for id in &body.ids {
-        if let Err(e) = mando_scout::update_scout_status(pool, *id, &body.updates.status).await {
+        if let Err(e) = scout::update_scout_status(pool, *id, &body.updates.status).await {
             failed.push(json!({"id": id, "error": e.to_string()}));
         } else {
             updated += 1;
         }
     }
     if updated > 0 {
-        state.bus.send(mando_types::BusEvent::Scout, None);
+        state.bus.send(global_types::BusEvent::Scout, None);
     }
     let status = if !failed.is_empty() && updated == 0 {
         "error"
@@ -67,14 +67,14 @@ pub(crate) async fn post_scout_bulk_delete(
     let mut deleted = 0u32;
     let mut failed: Vec<Value> = Vec::new();
     for id in &body.ids {
-        if let Err(e) = mando_scout::delete_scout_item(pool, *id).await {
+        if let Err(e) = scout::delete_scout_item(pool, *id).await {
             failed.push(json!({"id": id, "error": e.to_string()}));
         } else {
             deleted += 1;
         }
     }
     if deleted > 0 {
-        state.bus.send(mando_types::BusEvent::Scout, None);
+        state.bus.send(global_types::BusEvent::Scout, None);
     }
     let status = if !failed.is_empty() && deleted == 0 {
         "error"

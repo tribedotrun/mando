@@ -70,7 +70,7 @@ pub fn init_tracing(foreground: bool) {
     // MANDO_LOG_DIR overrides the default log directory (set by mando-dev for dev/sandbox).
     let json_dir = match std::env::var("MANDO_LOG_DIR") {
         Ok(dir) if !dir.is_empty() => std::path::PathBuf::from(dir),
-        _ => mando_config::data_dir().join("logs"),
+        _ => global_infra::paths::data_dir().join("logs"),
     };
     if let Err(e) = std::fs::create_dir_all(&json_dir) {
         eprintln!(

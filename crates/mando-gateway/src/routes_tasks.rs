@@ -7,7 +7,7 @@ use axum::Json;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use mando_captain::io::git;
+use captain::io::git;
 
 use crate::response::{
     error_response, internal_error, map_task_create_error, touch_workbench_activity,
@@ -35,7 +35,7 @@ fn parse_id(s: &str) -> Result<i64, (StatusCode, Json<Value>)> {
 }
 
 fn task_update_error_status(err: &anyhow::Error) -> StatusCode {
-    match err.downcast_ref::<mando_types::TaskUpdateError>() {
+    match err.downcast_ref::<captain::TaskUpdateError>() {
         Some(e) if e.is_not_found() => StatusCode::NOT_FOUND,
         Some(e) if e.is_client_error() => StatusCode::BAD_REQUEST,
         Some(_) => StatusCode::INTERNAL_SERVER_ERROR,
@@ -87,7 +87,7 @@ pub(crate) async fn post_task_add(
     let mut source: Option<String> = None;
     let mut saved_images: Vec<String> = Vec::new();
 
-    let images_dir = mando_config::images_dir();
+    let images_dir = global_infra::paths::images_dir();
 
     while let Some(field) = multipart
         .next_field()
@@ -117,7 +117,7 @@ pub(crate) async fn post_task_add(
                     .next()
                     .filter(|e| e.len() <= 5)
                     .unwrap_or("bin");
-                let uuid = mando_uuid::Uuid::v4();
+                let uuid = global_infra::uuid::Uuid::v4();
                 let dest_name = format!("{uuid}.{ext}");
 
                 let data = field
@@ -157,7 +157,7 @@ pub(crate) async fn post_task_add(
     // Validate project name before calling add_task so the client gets a 400
     // with the helpful message instead of a generic 500.
     if let Some(ref name) = repo {
-        if mando_config::resolve_project_config(Some(name), &config).is_none() {
+        if settings::config::resolve_project_config(Some(name), &config).is_none() {
             let mut valid: Vec<&str> = config
                 .captain
                 .projects
@@ -179,7 +179,7 @@ pub(crate) async fn post_task_add(
 
     let val = {
         let store = state.task_store.read().await;
-        let val = mando_captain::runtime::dashboard::add_task(
+        let val = captain::runtime::dashboard::add_task(
             &config,
             &store,
             title.trim(),
@@ -218,7 +218,7 @@ pub(crate) async fn post_task_add(
                     updates["planning"] = json!(value == "true");
                     updates["status"] = json!("queued");
                 }
-                mando_captain::runtime::dashboard::update_task(&store, id, &updates)
+                captain::runtime::dashboard::update_task(&store, id, &updates)
                     .await
                     .map_err(|e| {
                         crate::response::internal_error_with(
@@ -274,15 +274,15 @@ pub(crate) async fn post_task_add(
         None
     };
     state.bus.send(
-        mando_types::BusEvent::Tasks,
+        global_types::BusEvent::Tasks,
         Some(json!({"action": "created", "item": task_payload, "id": val["id"]})),
     );
 
     // Signal the auto-tick loop to run immediately so the new task is
     // dispatched without waiting for the next scheduled interval. The loop
-    // watches `mando_captain::WORKER_EXIT_SIGNAL` as its wake trigger.
+    // watches `captain::WORKER_EXIT_SIGNAL` as its wake trigger.
     if config.captain.auto_schedule {
-        mando_captain::WORKER_EXIT_SIGNAL.notify_one();
+        captain::WORKER_EXIT_SIGNAL.notify_one();
     }
 
     let response = task_payload.unwrap_or(val);
@@ -292,7 +292,7 @@ pub(crate) async fn post_task_add(
 /// Create a worktree + workbench for a freshly inserted task and link them.
 async fn create_workbench_for_task(
     state: &AppState,
-    _config: &mando_config::Config,
+    _config: &settings::config::Config,
     task_id: i64,
     project_name: &str,
     title: &str,
@@ -300,10 +300,10 @@ async fn create_workbench_for_task(
     let pool = state.db.pool();
 
     // Resolve project from DB.
-    let project_row = mando_db::queries::projects::resolve(pool, project_name)
+    let project_row = settings::io::projects::resolve(pool, project_name)
         .await?
         .ok_or_else(|| anyhow::anyhow!("project not found: {project_name}"))?;
-    let project_path = mando_config::expand_tilde(&project_row.path);
+    let project_path = global_infra::paths::expand_tilde(&project_row.path);
 
     // Build worktree path: {worktrees_dir}/{repo}-todo-{task_id}
     let suffix = format!("todo-{task_id}");
@@ -320,24 +320,20 @@ async fn create_workbench_for_task(
     git::create_worktree(&project_path, &branch, &wt_path, &default_br).await?;
 
     // Insert workbench row.
-    let wb = mando_types::Workbench::new(
+    let wb = captain::Workbench::new(
         project_row.id,
         project_row.name.clone(),
         wt_path.to_string_lossy().to_string(),
         title.to_string(),
     );
-    let wb_id = mando_db::queries::workbenches::insert(pool, &wb).await?;
+    let wb_id = captain::io::queries::workbenches::insert(pool, &wb).await?;
 
     // Link the workbench to the task.
     let store = state.task_store.read().await;
-    mando_captain::runtime::dashboard::update_task(
-        &store,
-        task_id,
-        &json!({"workbench_id": wb_id}),
-    )
-    .await?;
+    captain::runtime::dashboard::update_task(&store, task_id, &json!({"workbench_id": wb_id}))
+        .await?;
 
-    state.bus.send(mando_types::BusEvent::Workbenches, None);
+    state.bus.send(global_types::BusEvent::Workbenches, None);
 
     Ok(())
 }
@@ -356,12 +352,10 @@ pub(crate) async fn post_task_bulk(
     let ids = &body.ids;
     let store = state.task_store.read().await;
     let pool = state.db.pool();
-    match mando_captain::runtime::dashboard::bulk_update_tasks(&store, ids, body.updates, pool)
-        .await
-    {
+    match captain::runtime::dashboard::bulk_update_tasks(&store, ids, body.updates, pool).await {
         Ok(()) => {
             state.bus.send(
-                mando_types::BusEvent::Tasks,
+                global_types::BusEvent::Tasks,
                 Some(json!({"action": "bulk"})),
             );
             Ok(Json(json!({"ok": true})))
@@ -387,16 +381,16 @@ pub(crate) async fn post_task_delete(
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let config = state.config.load_full();
     let ids = &body.ids;
-    let opts = mando_captain::io::task_cleanup::CleanupOptions {
+    let opts = captain::io::task_cleanup::CleanupOptions {
         close_pr: true,
         force: body.force,
     };
     let store = state.task_store.read().await;
-    match mando_captain::runtime::dashboard::delete_tasks(&config, &store, ids, &opts).await {
+    match captain::runtime::dashboard::delete_tasks(&config, &store, ids, &opts).await {
         Ok(warnings) => {
             for id in ids {
                 state.bus.send(
-                    mando_types::BusEvent::Tasks,
+                    global_types::BusEvent::Tasks,
                     Some(json!({"action": "deleted", "id": id})),
                 );
             }
@@ -430,7 +424,7 @@ pub(crate) async fn post_task_merge(
     Json(body): Json<MergeBody>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let store = state.task_store.read().await;
-    match mando_captain::runtime::dashboard::merge_pr(&store, body.pr_number, &body.project).await {
+    match captain::runtime::dashboard::merge_pr(&store, body.pr_number, &body.project).await {
         Ok(val) => Ok(Json(val)),
         Err(e) => Err(internal_error(e, "merge failed")),
     }
@@ -444,7 +438,7 @@ pub(crate) async fn patch_task_item(
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let id_num = parse_id(&id)?;
     let store = state.task_store.read().await;
-    match mando_captain::runtime::dashboard::update_task(&store, id_num, &body).await {
+    match captain::runtime::dashboard::update_task(&store, id_num, &body).await {
         Ok(()) => {
             let updated = store
                 .find_by_id(id_num)
@@ -458,7 +452,7 @@ pub(crate) async fn patch_task_item(
                 .and_then(|v| v.as_i64())
                 .unwrap_or(0);
             state.bus.send(
-                mando_types::BusEvent::Tasks,
+                global_types::BusEvent::Tasks,
                 Some(json!({"action": "updated", "item": updated, "id": id_num})),
             );
             drop(store);

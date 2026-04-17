@@ -7,7 +7,7 @@ use axum::http::StatusCode;
 use axum::Json;
 use serde_json::{json, Value};
 
-use mando_db::caller::SessionCaller;
+use sessions::SessionCaller;
 
 use crate::response::{error_response, internal_error};
 use crate::AppState;
@@ -32,7 +32,7 @@ pub(crate) async fn get_task_artifacts(
     let task_id = resolve_task_id(&id)?;
     let pool = state.db.pool();
 
-    let artifacts = mando_db::queries::artifacts::list_for_task(pool, task_id)
+    let artifacts = captain::io::queries::artifacts::list_for_task(pool, task_id)
         .await
         .map_err(|e| internal_error(e, "failed to load task artifacts"))?;
 
@@ -64,9 +64,9 @@ pub(crate) async fn get_task_feed(
 
     // Load all three data sources in parallel.
     let (timeline_result, artifacts_result, history_result) = tokio::join!(
-        mando_captain::runtime::dashboard_timeline::get_item_timeline(&id, None, &pool,),
-        mando_db::queries::artifacts::list_for_task(&pool, task_id),
-        mando_db::queries::ask_history::load(&pool, task_id),
+        captain::runtime::dashboard_timeline::get_item_timeline(&id, None, &pool,),
+        captain::io::queries::artifacts::list_for_task(&pool, task_id),
+        captain::io::queries::ask_history::load(&pool, task_id),
     );
 
     let timeline_events =
@@ -78,58 +78,27 @@ pub(crate) async fn get_task_feed(
     // Build unified feed items with a type discriminator.
     let mut feed: Vec<Value> = Vec::new();
 
-    // Build lookups for labeling human messages as reopen/rework:
-    //   intent_by_ask      -- exact join via ask_id (post-fix events)
-    //   intent_by_content  -- fallback join via message text. Populated from
-    //                         HumanAsk intent metadata when present, plus
-    //                         HumanReopen / ReworkRequested event content so
-    //                         legacy rows (no ask_id, no intent on HumanAsk)
-    //                         still match.
+    // Build lookup for labeling human messages as reopen/rework via ask_id.
     let mut intent_by_ask: HashMap<String, String> = HashMap::new();
-    let mut intent_by_content: HashMap<String, String> = HashMap::new();
     if let Some(events) = timeline_events.as_array() {
         for event in events {
             let event_type = event
                 .get("event_type")
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
+            if event_type != "human_ask" {
+                continue;
+            }
             let data = event.get("data");
-            match event_type {
-                "human_ask" => {
-                    let intent = data
-                        .and_then(|d| d.get("intent"))
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("");
-                    if intent.is_empty() || intent == "ask" {
-                        continue;
-                    }
-                    if let Some(ask_id) =
-                        data.and_then(|d| d.get("ask_id")).and_then(|v| v.as_str())
-                    {
-                        intent_by_ask.insert(ask_id.to_string(), intent.to_string());
-                    }
-                    if let Some(q) = data
-                        .and_then(|d| d.get("question"))
-                        .and_then(|v| v.as_str())
-                    {
-                        intent_by_content
-                            .entry(q.to_string())
-                            .or_insert_with(|| intent.to_string());
-                    }
-                }
-                "human_reopen" | "rework_requested" => {
-                    let inferred = if event_type == "rework_requested" {
-                        "rework"
-                    } else {
-                        "reopen"
-                    };
-                    if let Some(c) = data.and_then(|d| d.get("content")).and_then(|v| v.as_str()) {
-                        intent_by_content
-                            .entry(c.to_string())
-                            .or_insert_with(|| inferred.to_string());
-                    }
-                }
-                _ => {}
+            let intent = data
+                .and_then(|d| d.get("intent"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            if intent.is_empty() || intent == "ask" {
+                continue;
+            }
+            if let Some(ask_id) = data.and_then(|d| d.get("ask_id")).and_then(|v| v.as_str()) {
+                intent_by_ask.insert(ask_id.to_string(), intent.to_string());
             }
         }
     }
@@ -159,15 +128,11 @@ pub(crate) async fn get_task_feed(
     }
 
     // Ask history / advisor messages. Inject intent on human entries whose
-    // ask_id (or, for legacy rows, question content) matches a reopen/rework
-    // HumanAsk timeline event.
+    // ask_id matches a reopen/rework HumanAsk timeline event.
     for entry in &history {
         let mut data = serde_json::to_value(entry).unwrap_or_else(|_| json!({}));
         if entry.role == "human" {
-            let intent = intent_by_ask
-                .get(&entry.ask_id)
-                .or_else(|| intent_by_content.get(&entry.content));
-            if let Some(intent) = intent {
+            if let Some(intent) = intent_by_ask.get(&entry.ask_id) {
                 if let Some(obj) = data.as_object_mut() {
                     obj.insert("intent".into(), Value::String(intent.clone()));
                 }
@@ -203,7 +168,7 @@ pub(crate) async fn get_task_history(
     let task_id: i64 = resolve_task_id(&id)?;
     let pool = store.pool();
 
-    let entries = mando_db::queries::ask_history::load(pool, task_id)
+    let entries = captain::io::queries::ask_history::load(pool, task_id)
         .await
         .map_err(|e| internal_error(e, "failed to load ask history"))?;
 
@@ -219,7 +184,7 @@ pub(crate) async fn get_task_timeline(
     let store = state.task_store.read().await;
     let pool = store.pool().clone();
 
-    let events = mando_captain::runtime::dashboard_timeline::get_item_timeline(&id, None, &pool)
+    let events = captain::runtime::dashboard_timeline::get_item_timeline(&id, None, &pool)
         .await
         .map_err(|e| internal_error(e, "failed to load task timeline"))?;
 
@@ -297,7 +262,7 @@ pub(crate) async fn get_task_pr_summary(
     // Fetch PR body outside the read lock.
     let (summary, summary_error) = if let Some(pr_num) = pr_number {
         if let Some((repo, num)) = resolve_pr(pr_num, github_repo.as_deref()) {
-            match mando_captain::io::github_pr::get_pr_body(&repo, num).await {
+            match captain::io::github_pr::get_pr_body(&repo, num).await {
                 Ok(body) if !body.is_empty() => (Some(body), None),
                 Ok(_) => (None, None),
                 Err(e) => {

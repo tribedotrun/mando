@@ -28,7 +28,7 @@ async fn get_credential_token(
     State(state): State<AppState>,
     axum::extract::Path(id): axum::extract::Path<i64>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    match mando_db::queries::credentials::get_token_by_id(state.db.pool(), id).await {
+    match settings::io::credentials::get_token_by_id(state.db.pool(), id).await {
         Ok(Some(token)) => (StatusCode::OK, Json(serde_json::json!({ "token": token }))),
         Ok(None) => (
             StatusCode::NOT_FOUND,
@@ -48,7 +48,7 @@ async fn remove_credential(
 ) -> (StatusCode, Json<serde_json::Value>) {
     match state.credential_mgr.remove(id).await {
         Ok(true) => {
-            state.bus.send(mando_types::BusEvent::Credentials, None);
+            state.bus.send(global_types::BusEvent::Credentials, None);
             (StatusCode::OK, Json(serde_json::json!({ "ok": true })))
         }
         Ok(false) => (
@@ -86,7 +86,7 @@ async fn add_setup_token(
 
     match state.credential_mgr.store(&label, &token, expires_at).await {
         Ok(id) => {
-            state.bus.send(mando_types::BusEvent::Credentials, None);
+            state.bus.send(global_types::BusEvent::Credentials, None);
             (
                 StatusCode::CREATED,
                 Json(serde_json::json!({ "ok": true, "id": id, "label": label })),

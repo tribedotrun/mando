@@ -1,8 +1,4 @@
 //! Task advisor route handlers -- persistent per-task advisor sessions.
-//!
-//! The advisor is a lazy-spawned CC session that serves as the user's
-//! interface to a task. It can answer questions, synthesize reopen/rework
-//! requests, and dispatch actions to captain.
 
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
@@ -86,10 +82,10 @@ pub(crate) async fn post_task_advisor(
     }
 
     // Generate ask_id for conversation tracking.
-    let ask_id = mando_uuid::Uuid::v4().to_string();
+    let ask_id = global_infra::uuid::Uuid::v4().to_string();
 
     // Persist user message immediately.
-    mando_captain::runtime::task_ask::persist_question(
+    captain::runtime::task_ask::persist_question(
         &pool,
         task_id,
         &ask_id,
@@ -140,7 +136,7 @@ pub(crate) async fn post_task_advisor(
     }
 
     // Persist answer + timeline event.
-    mando_captain::runtime::task_ask::persist_answer(
+    captain::runtime::task_ask::persist_answer(
         &pool,
         task_id,
         &ask_id,
@@ -165,14 +161,14 @@ pub(crate) async fn post_task_advisor(
         }
         let msg = format!(
             "Advisor answered on <b>{}</b>: {}",
-            mando_shared::telegram_format::escape_html(&item.title),
-            mando_shared::telegram_format::escape_html(&preview),
+            transport_tg::telegram_format::escape_html(&item.title),
+            transport_tg::telegram_format::escape_html(&preview),
         );
         notifier
             .notify_typed(
                 &msg,
-                mando_types::notify::NotifyLevel::Normal,
-                mando_types::events::NotificationKind::AdvisorAnswered {
+                global_types::notify::NotifyLevel::Normal,
+                global_types::events::NotificationKind::AdvisorAnswered {
                     item_id: task_id.to_string(),
                     title: item.title.clone(),
                 },
@@ -196,7 +192,7 @@ pub(crate) async fn post_task_advisor(
 
         if let Err(ref err_resp) = action_result {
             let error_msg = err_resp.1 .0["error"].as_str().unwrap_or("action failed");
-            if let Err(e) = mando_captain::runtime::task_ask::persist_error(
+            if let Err(e) = captain::runtime::task_ask::persist_error(
                 &pool,
                 task_id,
                 &ask_id,
@@ -228,20 +224,20 @@ pub(crate) async fn post_task_advisor(
 #[allow(clippy::too_many_arguments)]
 async fn run_advisor_cc(
     state: &AppState,
-    mgr: &mando_captain::io::cc_session::CcSessionManager,
+    mgr: &captain::io::cc_session::CcSessionManager,
     session_key: &str,
     should_resume: bool,
     message: &str,
-    item: &mando_types::Task,
-    workflow: &mando_config::CaptainWorkflow,
+    item: &captain::Task,
+    workflow: &settings::config::CaptainWorkflow,
     pool: &sqlx::SqlitePool,
     task_id: i64,
     ask_id: &str,
     cwd: &std::path::Path,
-) -> Result<mando_cc::CcResult, (StatusCode, Json<Value>)> {
+) -> Result<global_claude::CcResult, (StatusCode, Json<Value>)> {
     // Pre-build prompt so retries can start a fresh session.
     let task_id_str = task_id.to_string();
-    let timeline_text = mando_captain::runtime::task_ask::build_timeline_text(pool, task_id)
+    let timeline_text = captain::runtime::task_ask::build_timeline_text(pool, task_id)
         .await
         .map_err(|e| internal_error(e, "failed to build advisor timeline"))?;
     let prompt = build_advisor_prompt(item, &task_id_str, message, workflow, &timeline_text)
@@ -284,7 +280,7 @@ async fn run_advisor_cc(
                 } else {
                     format!("Failed after {max_retries} attempts: {error_msg}")
                 };
-                if let Err(e) = mando_captain::runtime::task_ask::persist_error(
+                if let Err(e) = captain::runtime::task_ask::persist_error(
                     pool,
                     task_id,
                     ask_id,
@@ -316,7 +312,7 @@ async fn handle_advisor_action(
     session_key: &str,
     intent: &str,
     cwd: &std::path::Path,
-    workflow: &mando_config::CaptainWorkflow,
+    workflow: &settings::config::CaptainWorkflow,
     _initial_answer: &str,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     // Check status eligibility BEFORE the expensive CC synthesis call.
@@ -381,21 +377,21 @@ async fn handle_advisor_action(
         ));
     }
 
-    if intent == "revise-plan" && item.status == mando_types::ItemStatus::PlanReady {
+    if intent == "revise-plan" && item.status == captain::ItemStatus::PlanReady {
         // Re-queue the planning pipeline with user feedback injected.
         let existing_ctx = item.context.as_deref().unwrap_or("");
         item.context = Some(format!(
             "{existing_ctx}\n\n## Revision feedback\n{synthesized_feedback}"
         ));
         item.planning = true;
-        item.status = mando_types::ItemStatus::Queued;
-        item.last_activity_at = Some(mando_types::now_rfc3339());
+        item.status = captain::ItemStatus::Queued;
+        item.last_activity_at = Some(global_types::now_rfc3339());
         store
             .write_task(&item)
             .await
             .map_err(|e| internal_error(e, "failed to save task"))?;
     } else if intent == "rework" {
-        mando_captain::runtime::dashboard::rework_item(&store, task_id, &synthesized_feedback)
+        captain::runtime::dashboard::rework_item(&store, task_id, &synthesized_feedback)
             .await
             .map_err(|e| internal_error(e, "failed to rework task"))?;
         item = store
@@ -404,7 +400,7 @@ async fn handle_advisor_action(
             .map_err(|e| internal_error(e, "failed to load task"))?
             .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "item vanished after rework"))?;
     } else {
-        let _outcome = mando_captain::runtime::action_contract::reopen_item(
+        let _outcome = captain::runtime::action_contract::reopen_item(
             &mut item,
             "human",
             &synthesized_feedback,
@@ -435,9 +431,9 @@ async fn handle_advisor_action(
 
     // Emit timeline event.
     let event_type = if intent == "rework" {
-        mando_types::timeline::TimelineEventType::ReworkRequested
+        captain::TimelineEventType::ReworkRequested
     } else {
-        mando_types::timeline::TimelineEventType::HumanReopen
+        captain::TimelineEventType::HumanReopen
     };
     let label = if intent == "rework" {
         "Rework"
@@ -445,7 +441,7 @@ async fn handle_advisor_action(
         "Reopened"
     };
     let summary = format!("{label} from advisor: {synthesized_feedback}");
-    if let Err(e) = mando_captain::runtime::timeline_emit::emit_for_task(
+    if let Err(e) = captain::runtime::timeline_emit::emit_for_task(
         &item,
         event_type,
         &summary,
@@ -458,7 +454,7 @@ async fn handle_advisor_action(
     }
 
     state.bus.send(
-        mando_types::BusEvent::Tasks,
+        global_types::BusEvent::Tasks,
         Some(json!({"action": "updated", "item": serde_json::to_value(&item).unwrap(), "id": task_id})),
     );
     touch_workbench_activity(state, item.workbench_id).await;
@@ -472,10 +468,10 @@ async fn handle_advisor_action(
 
 /// Build the initial advisor prompt from the workflow template.
 fn build_advisor_prompt(
-    item: &mando_types::Task,
+    item: &captain::Task,
     task_id: &str,
     question: &str,
-    workflow: &mando_config::CaptainWorkflow,
+    workflow: &settings::config::CaptainWorkflow,
     timeline_text: &str,
 ) -> anyhow::Result<String> {
     use rustc_hash::FxHashMap;
@@ -493,7 +489,8 @@ fn build_advisor_prompt(
     vars.insert("timeline", timeline_text);
     vars.insert("question", question);
 
-    mando_config::render_prompt("advisor", &workflow.prompts, &vars).map_err(|e| anyhow::anyhow!(e))
+    settings::config::render_prompt("advisor", &workflow.prompts, &vars)
+        .map_err(|e| anyhow::anyhow!(e))
 }
 
 /// Check if the given intent is allowed from the task's current status.

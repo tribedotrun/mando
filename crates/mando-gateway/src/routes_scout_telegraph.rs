@@ -15,7 +15,7 @@ pub(crate) async fn publish_telegraph(
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let pool = state.db.pool();
     let workflow = state.scout_workflow.load_full();
-    let article = mando_scout::ensure_scout_article(pool, id, &workflow)
+    let article = scout::ensure_scout_article(pool, id, &workflow)
         .await
         .map_err(|e| not_found_or_internal(e, "failed to load scout article"))?;
 
@@ -27,7 +27,7 @@ pub(crate) async fn publish_telegraph(
         )
     })?;
 
-    let url = mando_scout::io::telegraph::publish_article(id, title, article_md)
+    let url = scout::io::telegraph::publish_article(id, title, article_md)
         .await
         .map_err(|e| internal_error(e, "failed to publish to Telegraph"))?;
 

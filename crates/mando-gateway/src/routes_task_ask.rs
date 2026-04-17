@@ -88,14 +88,14 @@ async fn post_task_ask_inner(
     let ask_id = body
         .ask_id
         .clone()
-        .unwrap_or_else(|| mando_uuid::Uuid::v4().to_string());
+        .unwrap_or_else(|| global_infra::uuid::Uuid::v4().to_string());
 
     // The real CC session_id isn't available until start_with_item returns.
     // Use a clear sentinel so question rows are distinguishable from answer rows.
     const PENDING_SESSION: &str = "pending";
 
     // ── Persist question immediately (before CC call) ───────────────────
-    mando_captain::runtime::task_ask::persist_question(
+    captain::runtime::task_ask::persist_question(
         &pool,
         id,
         &ask_id,
@@ -124,10 +124,10 @@ async fn post_task_ask_inner(
         mgr.follow_up(&session_key, &question_for_cc, &cwd).await
     } else {
         let task_id_str = id.to_string();
-        let timeline_text = mando_captain::runtime::task_ask::build_timeline_text(&pool, id)
+        let timeline_text = captain::runtime::task_ask::build_timeline_text(&pool, id)
             .await
             .map_err(|e| internal_error(e, "failed to build ask timeline"))?;
-        let prompt = mando_captain::runtime::task_ask::build_initial_prompt(
+        let prompt = captain::runtime::task_ask::build_initial_prompt(
             &item,
             &task_id_str,
             &question_for_cc,
@@ -171,7 +171,7 @@ async fn post_task_ask_inner(
             // Persist the answer + timeline event. Propagate as 500 so the
             // caller sees the inconsistency instead of receiving an answer
             // that was never written to history.
-            mando_captain::runtime::task_ask::persist_answer(
+            captain::runtime::task_ask::persist_answer(
                 &pool,
                 id,
                 &ask_id,
@@ -225,7 +225,7 @@ async fn post_task_ask_inner(
             }
 
             // Persist the error so it shows in the Q&A tab.
-            if let Err(persist_err) = mando_captain::runtime::task_ask::persist_error(
+            if let Err(persist_err) = captain::runtime::task_ask::persist_error(
                 &pool,
                 id,
                 &ask_id,
@@ -287,7 +287,7 @@ pub(crate) async fn post_task_ask_end(
         .and_then(|v| v.as_i64())
         .unwrap_or(0);
     state.bus.send(
-        mando_types::BusEvent::Tasks,
+        global_types::BusEvent::Tasks,
         Some(json!({"action": "updated", "item": updated, "id": id})),
     );
     drop(store);
@@ -304,7 +304,7 @@ pub(crate) async fn post_task_ask_reopen(
     State(state): State<AppState>,
     Json(body): Json<AskEndBody>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    use mando_types::ItemStatus;
+    use captain::ItemStatus;
 
     let id = body.id;
     let workflow = state.captain_workflow.load_full();
@@ -335,7 +335,7 @@ pub(crate) async fn post_task_ask_reopen(
     }
 
     // ── Guard: Q&A history must be non-empty ─────────────────────────────
-    let history = mando_db::queries::ask_history::load(&pool, id)
+    let history = captain::io::queries::ask_history::load(&pool, id)
         .await
         .map_err(|e| internal_error(e, "failed to load ask history"))?;
     if history.is_empty() {
@@ -386,7 +386,7 @@ pub(crate) async fn post_task_ask_reopen(
         .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "item vanished during synthesis"))?;
 
     let old_session_id = item.session_ids.worker.clone();
-    let outcome = mando_captain::runtime::action_contract::reopen_item(
+    let outcome = captain::runtime::action_contract::reopen_item(
         &mut item,
         "human",
         &synthesized_feedback,
@@ -407,16 +407,16 @@ pub(crate) async fn post_task_ask_reopen(
     close_ask_session(&state, id).await;
 
     state.bus.send(
-        mando_types::BusEvent::Tasks,
+        global_types::BusEvent::Tasks,
         Some(json!({"action": "updated", "item": serde_json::to_value(&item).unwrap(), "id": id})),
     );
     touch_workbench_activity(&state, item.workbench_id).await;
 
     // ── Timeline events ──────────────────────────────────────────────────
     let summary = format!("Reopened from Q&A: {}", &synthesized_feedback);
-    let _ = mando_captain::runtime::timeline_emit::emit_for_task(
+    let _ = captain::runtime::timeline_emit::emit_for_task(
         &item,
-        mando_types::timeline::TimelineEventType::HumanReopen,
+        captain::TimelineEventType::HumanReopen,
         &summary,
         json!({
             "content": &synthesized_feedback,
@@ -430,21 +430,21 @@ pub(crate) async fn post_task_ask_reopen(
 
     if matches!(
         outcome,
-        mando_captain::runtime::action_contract::ReopenOutcome::Reopened
+        captain::runtime::action_contract::ReopenOutcome::Reopened
     ) {
         let truly_resumed = old_session_id.is_some() && old_session_id == item.session_ids.worker;
         let (evt, evt_summary) = if truly_resumed {
             (
-                mando_types::timeline::TimelineEventType::SessionResumed,
+                captain::TimelineEventType::SessionResumed,
                 format!("Resumed {}", item.worker.as_deref().unwrap_or("worker")),
             )
         } else {
             (
-                mando_types::timeline::TimelineEventType::WorkerSpawned,
+                captain::TimelineEventType::WorkerSpawned,
                 format!("Spawned {}", item.worker.as_deref().unwrap_or("worker")),
             )
         };
-        let _ = mando_captain::runtime::timeline_emit::emit_for_task(
+        let _ = captain::runtime::timeline_emit::emit_for_task(
             &item,
             evt,
             &evt_summary,
@@ -458,7 +458,7 @@ pub(crate) async fn post_task_ask_reopen(
 
         let msg = format!(
             "\u{1f504} Reopened <b>{}</b> from Q&A",
-            mando_shared::telegram_format::escape_html(&item.title),
+            transport_tg::telegram_format::escape_html(&item.title),
         );
         notifier.normal(&msg).await;
     }
@@ -471,17 +471,17 @@ pub(crate) async fn post_task_ask_reopen(
 
 /// Resolve the working directory for a task's ask session.
 fn resolve_ask_cwd(
-    item: &mando_types::Task,
+    item: &captain::Task,
     state: &AppState,
 ) -> Result<std::path::PathBuf, (StatusCode, Json<Value>)> {
     item.worktree
         .as_deref()
-        .map(mando_config::expand_tilde)
+        .map(global_infra::paths::expand_tilde)
         .filter(|p| p.is_dir())
         .or_else(|| {
             let cfg = state.config.load_full();
-            mando_config::paths::first_project_path(&cfg)
-                .map(|p| mando_config::paths::expand_tilde(&p))
+            settings::config::paths::first_project_path(&cfg)
+                .map(|p| global_infra::paths::expand_tilde(&p))
                 .filter(|p| p.is_dir())
         })
         .ok_or_else(|| error_response(StatusCode::BAD_REQUEST, "no worktree or project configured"))

@@ -1,0 +1,18 @@
+[package]
+name = "global-claude"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+global-types = { path = "../global-types" }
+global-infra = { path = "../global-infra" }
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+regex.workspace = true
+libc = "0.2"
+tempfile = "3"

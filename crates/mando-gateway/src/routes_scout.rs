@@ -19,7 +19,7 @@ use crate::AppState;
 ///
 /// Mirrors the inline spawn in `post_scout_items` but extracted so
 /// `post_scout_research` can reuse the same pattern.
-pub(crate) fn spawn_scout_processing(state: &AppState, id: i64, url: String) {
+pub fn spawn_scout_processing(state: &AppState, id: i64, url: String) {
     let config = state.config.load_full();
     let workflow = state.scout_workflow.load_full();
     let pool = state.db.pool().clone();
@@ -28,19 +28,19 @@ pub(crate) fn spawn_scout_processing(state: &AppState, id: i64, url: String) {
     state.task_tracker.spawn(async move {
         let _permit = semaphore.acquire().await.expect("semaphore not closed");
         let result = AssertUnwindSafe(async {
-            if let Err(e) = mando_scout::process_scout(&config, &pool, Some(id), &workflow).await {
+            if let Err(e) = scout::process_scout(&config, &pool, Some(id), &workflow).await {
                 tracing::warn!(scout_id = id, error = %e, "auto-process failed");
                 // Move to error status so the item is retryable instead of
                 // stuck at fetched forever.
                 if let Err(db_err) =
-                    mando_db::queries::scout::increment_error_count(&pool, id).await
+                    scout::io::queries::scout::increment_error_count(&pool, id).await
                 {
                     tracing::error!(scout_id = id, error = %db_err, "failed to increment error count after process failure");
                 }
                 emit_scout_process_failed(&bus, id, &url, &e.to_string());
                 return;
             }
-            let scout_payload = match mando_scout::get_scout_item(&pool, id).await {
+            let scout_payload = match scout::get_scout_item(&pool, id).await {
                 Ok(v) => Some(v),
                 Err(e) => {
                     tracing::warn!(scout_id = id, error = %e, "failed to fetch scout item for SSE event");
@@ -48,7 +48,7 @@ pub(crate) fn spawn_scout_processing(state: &AppState, id: i64, url: String) {
                 }
             };
             bus.send(
-                mando_types::BusEvent::Scout,
+                global_types::BusEvent::Scout,
                 Some(json!({"action": "updated", "item": scout_payload, "id": id})),
             );
             emit_scout_processed(&bus, &pool, id).await;
@@ -81,7 +81,7 @@ pub(crate) async fn get_scout_items(
     Query(params): Query<ScoutQuery>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let pool = state.db.pool();
-    match mando_scout::list_scout_items(
+    match scout::list_scout_items(
         pool,
         params.status.as_deref(),
         params.q.as_deref(),
@@ -102,7 +102,7 @@ pub(crate) async fn get_scout_item(
     Path(id): Path<i64>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let pool = state.db.pool();
-    mando_scout::get_scout_item(pool, id)
+    scout::get_scout_item(pool, id)
         .await
         .map(Json)
         .map_err(|e| not_found_or_internal(e, "failed to load scout item"))
@@ -115,7 +115,7 @@ pub(crate) async fn get_scout_article(
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let pool = state.db.pool();
     let workflow = state.scout_workflow.load_full();
-    mando_scout::ensure_scout_article(pool, id, &workflow)
+    scout::ensure_scout_article(pool, id, &workflow)
         .await
         .map(Json)
         .map_err(|e| not_found_or_internal(e, "failed to load scout article"))
@@ -139,15 +139,15 @@ pub(crate) async fn post_scout_items(
         ));
     }
     let pool = state.db.pool();
-    match mando_scout::add_scout_item(pool, &body.url, body.title.as_deref()).await {
+    match scout::add_scout_item(pool, &body.url, body.title.as_deref()).await {
         Ok(val) => {
             let scout_payload = if let Some(id) = val["id"].as_i64() {
-                mando_scout::get_scout_item(pool, id).await.ok()
+                scout::get_scout_item(pool, id).await.ok()
             } else {
                 None
             };
             state.bus.send(
-                mando_types::BusEvent::Scout,
+                global_types::BusEvent::Scout,
                 Some(json!({"action": "created", "item": scout_payload, "id": val["id"]})),
             );
 
@@ -177,12 +177,12 @@ pub(crate) async fn post_scout_process(
     let workflow = state.scout_workflow.load_full();
     let pool = state.db.pool();
 
-    let val = mando_scout::process_scout(&config, pool, body.id, &workflow)
+    let val = scout::process_scout(&config, pool, body.id, &workflow)
         .await
         .map_err(|e| internal_error(e, "failed to process scout item"))?;
 
     if let Some(id) = body.id {
-        let scout_payload = match mando_scout::get_scout_item(pool, id).await {
+        let scout_payload = match scout::get_scout_item(pool, id).await {
             Ok(v) => Some(v),
             Err(e) => {
                 tracing::warn!(scout_id = id, error = %e, "failed to fetch scout item for SSE event");
@@ -190,13 +190,13 @@ pub(crate) async fn post_scout_process(
             }
         };
         state.bus.send(
-            mando_types::BusEvent::Scout,
+            global_types::BusEvent::Scout,
             Some(json!({"action": "updated", "item": scout_payload, "id": id})),
         );
         emit_scout_processed(&state.bus, state.db.pool(), id).await;
     } else {
         state.bus.send(
-            mando_types::BusEvent::Scout,
+            global_types::BusEvent::Scout,
             Some(json!({"action": "updated"})),
         );
     }
@@ -220,7 +220,7 @@ pub(crate) async fn post_scout_act(
     let workflow = state.scout_workflow.load_full();
     let pool = state.db.pool();
 
-    let ai_result = mando_scout::act_on_scout_item(
+    let ai_result = scout::act_on_scout_item(
         &config,
         pool,
         id,
@@ -255,7 +255,7 @@ pub(crate) async fn post_scout_act(
 
     let config = state.config.load_full();
     let store = state.task_store.read().await;
-    let val = mando_captain::runtime::dashboard::add_task_with_context(
+    let val = captain::runtime::dashboard::add_task_with_context(
         &config,
         &store,
         task_title,
@@ -277,7 +277,7 @@ pub(crate) async fn post_scout_act(
         None
     };
     state.bus.send(
-        mando_types::BusEvent::Tasks,
+        global_types::BusEvent::Tasks,
         Some(serde_json::json!({"action": "created", "item": task_payload, "id": val["id"]})),
     );
 
@@ -304,7 +304,7 @@ pub(crate) async fn patch_scout_item(
     Json(body): Json<PatchScoutBody>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let pool = state.db.pool();
-    mando_scout::update_scout_status(pool, id, &body.status)
+    scout::update_scout_status(pool, id, &body.status)
         .await
         .map_err(|e| {
             if e.to_string().contains("invalid status") {
@@ -313,7 +313,7 @@ pub(crate) async fn patch_scout_item(
                 internal_error(e, "failed to update scout status")
             }
         })?;
-    let scout_payload = match mando_scout::get_scout_item(pool, id).await {
+    let scout_payload = match scout::get_scout_item(pool, id).await {
         Ok(v) => Some(v),
         Err(e) => {
             tracing::warn!(scout_id = id, error = %e, "failed to fetch scout item for SSE event");
@@ -321,7 +321,7 @@ pub(crate) async fn patch_scout_item(
         }
     };
     state.bus.send(
-        mando_types::BusEvent::Scout,
+        global_types::BusEvent::Scout,
         Some(json!({"action": "updated", "item": scout_payload, "id": id})),
     );
     Ok(Json(json!({"ok": true})))
@@ -337,11 +337,11 @@ pub(crate) async fn delete_scout_item(
     Path(id): Path<i64>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let pool = state.db.pool();
-    let val = mando_scout::delete_scout_item(pool, id)
+    let val = scout::delete_scout_item(pool, id)
         .await
         .map_err(|e| not_found_or_internal(e, "failed to delete scout item"))?;
     state.bus.send(
-        mando_types::BusEvent::Scout,
+        global_types::BusEvent::Scout,
         Some(json!({"action": "deleted", "id": id})),
     );
     Ok(Json(val))
@@ -353,7 +353,7 @@ pub(crate) async fn get_scout_item_sessions(
     Path(id): Path<i64>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let pool = state.db.pool();
-    let sessions = mando_db::queries::sessions::list_sessions_for_scout_item(pool, id)
+    let sessions = sessions::io::queries::list_sessions_for_scout_item(pool, id)
         .await
         .map_err(|e| internal_error(e, "failed to load scout sessions"))?;
     Ok(Json(json!(sessions)))

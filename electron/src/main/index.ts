@@ -9,15 +9,13 @@ import { execFileSync, execSync } from 'child_process';
 import path from 'path';
 import fs from 'fs';
 import type http from 'http';
-import log from '#main/logger';
-import { registerConfigHandlers } from '#main/config-handlers';
-import { registerSetupValidationHandlers } from '#main/setup-validation';
-import { getDevGitInfo } from '#main/dev-git-info';
-import { installTrustedGatewayAuth } from '#main/gateway-auth';
-import { handleTrusted, setTrustedRendererOrigins } from '#main/ipc-security';
+import log from '#main/global/providers/logger';
+import { registerConfigHandlers } from '#main/onboarding/repo/config';
+import { registerSetupValidationHandlers } from '#main/onboarding/runtime/setupValidation';
+import { getDevGitInfo } from '#main/global/runtime/devGitInfo';
+import { installTrustedGatewayAuth } from '#main/daemon/runtime/gatewayAuth';
+import { handleTrusted, setTrustedRendererOrigins } from '#main/global/runtime/ipcSecurity';
 import {
-  getDataDir,
-  getConfigPath,
   readPort,
   ensureDaemon,
   startHealthMonitor,
@@ -25,17 +23,20 @@ import {
   invalidateDiscoveryCache,
   setIsQuitting,
   updateTrayTooltip,
-  getAppMode,
-  getAppTitle,
-  isHeadless,
-} from '#main/daemon';
-import { createTrayIcon, createDockIcon } from '#main/icons';
-import { registerNotificationHandlers } from '#main/notifications';
-import { registerTerminalBridgeHandlers } from '#main/terminal-bridge';
-import { setupAutoUpdate, applyPendingUpdateIfAny, cleanupAutoUpdate } from '#main/updater';
-import { getAppInfo } from '#main/app-info';
-import { startRendererServer } from '#main/renderer-server';
-import { announceUiRegistered } from '#main/ui-lifecycle';
+} from '#main/global/runtime/lifecycle';
+import { getDataDir, getConfigPath, getAppMode, isHeadless } from '#main/global/config/lifecycle';
+import { getAppTitle } from '#main/global/service/lifecycle';
+import { createTrayIcon, createDockIcon } from '#main/global/runtime/icons';
+import { registerNotificationHandlers } from '#main/shell/runtime/notifications';
+import { registerTerminalBridgeHandlers } from '#main/shell/runtime/terminalBridge';
+import {
+  setupAutoUpdate,
+  applyPendingUpdateIfAny,
+  cleanupAutoUpdate,
+} from '#main/updater/runtime/updater';
+import { getAppInfo } from '#main/global/runtime/appInfo';
+import { startRendererServer } from '#main/daemon/runtime/rendererServer';
+import { announceUiRegistered } from '#main/global/runtime/uiLifecycle';
 
 // Isolate Chromium user-data per data-dir so multiple dev/sandbox instances
 // don't fight over ~/Library/Application Support/Electron/.
@@ -74,7 +75,7 @@ function createWindow(): void {
     height: headless ? 1200 : 800,
     minWidth: 900,
     minHeight: 600,
-    title: getAppTitle(),
+    title: getAppTitle(getAppMode()),
     titleBarStyle: 'hidden',
     vibrancy: 'sidebar',
     trafficLightPosition: { x: 16, y: 16 },
@@ -153,7 +154,7 @@ function createTray(): void {
   tray = new Tray(icon);
   tray.setToolTip(updateTrayTooltip());
 
-  const title = getAppTitle();
+  const title = getAppTitle(getAppMode());
   const mode = getAppMode();
   const items: Electron.MenuItemConstructorOptions[] = [
     {

@@ -11,7 +11,7 @@ use tracing::{info, warn};
 /// time, so it naturally routes to whichever daemon spawned the Claude
 /// process, regardless of which daemon most recently wrote the script.
 fn hook_script_path() -> PathBuf {
-    mando_types::home_dir()
+    global_types::home_dir()
         .join(".claude")
         .join("hooks")
         .join("mando-session-notify.sh")
@@ -19,7 +19,7 @@ fn hook_script_path() -> PathBuf {
 
 /// Path to Claude settings.json.
 fn claude_settings_path() -> PathBuf {
-    mando_types::home_dir()
+    global_types::home_dir()
         .join(".claude")
         .join("settings.json")
 }

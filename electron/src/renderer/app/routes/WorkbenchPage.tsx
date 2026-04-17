@@ -1,13 +1,12 @@
 import React, { useCallback, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearch } from '@tanstack/react-router';
-import { useTaskList, useWorkbenchList } from '#renderer/hooks/queries';
+import { useTaskList, useWorkbenchList, useWorktreeTerminal } from '#renderer/domains/captain';
 import { useUIStore } from '#renderer/app/uiStore';
-import { TaskDetailView } from '#renderer/domains/captain/components/TaskDetailView';
-import { TerminalPage } from '#renderer/domains/terminal/components/TerminalPage';
-import { WorkspacePreparing } from '#renderer/domains/terminal/components/WorkspacePreparing';
-import { useWorktreeTerminal } from '#renderer/domains/terminal/hooks/useWorktreeTerminal';
-import { ErrorBoundary } from '#renderer/global/components/ErrorBoundary';
-import { useMountEffect } from '#renderer/global/hooks/useMountEffect';
+import { TaskDetailView } from '#renderer/domains/captain/ui/TaskDetailView';
+import { TerminalPage } from '#renderer/domains/captain/terminal/ui/TerminalPage';
+import { WorkspacePreparing } from '#renderer/domains/captain/terminal/ui/WorkspacePreparing';
+import { ErrorBoundary } from '#renderer/global/ui/ErrorBoundary';
+import { useMountEffect } from '#renderer/global/runtime/useMountEffect';
 
 export function WorkbenchPage(): React.ReactElement {
   const navigate = useNavigate();

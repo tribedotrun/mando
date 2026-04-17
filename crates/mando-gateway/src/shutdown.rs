@@ -19,7 +19,7 @@ const SHUTDOWN_GRACE: std::time::Duration = std::time::Duration::from_secs(5);
 /// `SHUTDOWN_GRACE`) for them to exit, then emit a terminal log line so
 /// operators can tell what state the daemon exited in.
 pub async fn signal_cc_subprocesses_for_shutdown() {
-    let map = match mando_captain::io::pid_registry::snapshot() {
+    let map = match captain::io::pid_registry::snapshot() {
         Ok(m) => m,
         Err(e) => {
             warn!(module = "shutdown", error = %e, "could not snapshot pid registry for shutdown");
@@ -42,8 +42,8 @@ pub async fn signal_cc_subprocesses_for_shutdown() {
     // Parallel SIGTERM+reap with a single overall deadline so one slow
     // subprocess can't drag shutdown past the grace window.
     let kills = pids.into_iter().map(|pid| async move {
-        let _ = mando_cc::kill_process(pid).await;
-        !mando_cc::is_process_alive(pid)
+        let _ = global_claude::kill_process(pid).await;
+        !global_claude::is_process_alive(pid)
     });
     let joined = futures_util::future::join_all(kills);
     match tokio::time::timeout(SHUTDOWN_GRACE, joined).await {

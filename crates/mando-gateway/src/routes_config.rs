@@ -19,19 +19,24 @@ use crate::AppState;
 /// but workflow reload has failed, leaving the daemon running mixed state.
 fn load_workflows_for(
     state: &AppState,
-    cfg: &mando_config::Config,
+    cfg: &settings::config::Config,
 ) -> anyhow::Result<(
-    mando_config::workflow::CaptainWorkflow,
-    mando_config::workflow::ScoutWorkflow,
+    settings::config::workflow::CaptainWorkflow,
+    settings::config::workflow::ScoutWorkflow,
 )> {
-    let mut new_cwf = mando_config::load_captain_workflow(
-        &mando_config::captain_workflow_path(),
+    let mut new_cwf = settings::io::config_fs::load_captain_workflow(
+        &settings::config::captain_workflow_path(),
         cfg.captain.tick_interval_s,
     )?;
-    let mut new_dwf = mando_config::load_scout_workflow(&mando_config::scout_workflow_path(), cfg)?;
+    let mut new_dwf = settings::io::config_fs::load_scout_workflow(
+        &settings::config::scout_workflow_path(),
+        cfg,
+    )?;
 
     if state.dev_mode {
         crate::apply_dev_model_overrides(&mut new_cwf, &mut new_dwf);
+    } else if state.sandbox_mode {
+        crate::apply_sandbox_model_overrides(&mut new_cwf, &mut new_dwf);
     }
 
     Ok((new_cwf, new_dwf))
@@ -42,8 +47,8 @@ fn load_workflows_for(
 /// mutation if loading fails.
 fn publish_workflows(
     state: &AppState,
-    cwf: mando_config::workflow::CaptainWorkflow,
-    dwf: mando_config::workflow::ScoutWorkflow,
+    cwf: settings::config::workflow::CaptainWorkflow,
+    dwf: settings::config::workflow::ScoutWorkflow,
 ) {
     state.captain_workflow.store(Arc::new(cwf));
     state.scout_workflow.store(Arc::new(dwf));
@@ -53,7 +58,7 @@ fn publish_workflows(
 /// After serializing the config, inject the in-memory projects so the
 /// Electron renderer can use them. Called from both GET /api/config and
 /// the SSE snapshot builder.
-pub(crate) fn inject_projects(config: &mando_config::Config, val: &mut Value) {
+pub(crate) fn inject_projects(config: &settings::config::Config, val: &mut Value) {
     if let Some(captain) = val.get_mut("captain") {
         let projects: serde_json::Map<String, Value> = config
             .captain
@@ -82,7 +87,7 @@ pub(crate) async fn put_config(
     Json(body): Json<Value>,
 ) -> impl IntoResponse {
     // Validate by deserializing.
-    let mut new_config: mando_config::Config = match serde_json::from_value(body) {
+    let mut new_config: settings::config::Config = match serde_json::from_value(body) {
         Ok(c) => c,
         Err(e) => {
             return (
@@ -99,9 +104,10 @@ pub(crate) async fn put_config(
     // Validate workflow config before persisting anything.
     {
         let tick_s = new_config.captain.tick_interval_s;
-        if let Err(e) =
-            mando_config::try_load_captain_workflow(&mando_config::captain_workflow_path(), tick_s)
-        {
+        if let Err(e) = settings::io::config_fs::try_load_captain_workflow(
+            &settings::config::captain_workflow_path(),
+            tick_s,
+        ) {
             return (
                 StatusCode::BAD_REQUEST,
                 Json(json!({"error": e.to_string()})),
@@ -148,9 +154,7 @@ pub(crate) async fn put_config(
     {
         let old_projects = state.config.load_full().captain.projects.clone();
         let mut cfg = state.config.load_full().as_ref().clone();
-        if let Err(e) =
-            mando_db::queries::projects::load_into_config(state.db.pool(), &mut cfg).await
-        {
+        if let Err(e) = settings::io::projects::load_into_config(state.db.pool(), &mut cfg).await {
             tracing::warn!(module = "config", error = %e, "failed to reload projects after config save");
             cfg.captain.projects = old_projects;
         }
@@ -168,10 +172,10 @@ pub(crate) async fn put_config(
     }
 
     // Notify SSE clients — Config for sidebar/settings, Status for workers.
-    state.bus.send(mando_types::BusEvent::Config, None);
-    state.bus.send(mando_types::BusEvent::Status, None);
+    state.bus.send(global_types::BusEvent::Config, None);
+    state.bus.send(global_types::BusEvent::Status, None);
 
-    let configured_paths = mando_config::resolve_captain_runtime_paths(&committed_config);
+    let configured_paths = captain::config::resolve_captain_runtime_paths(&committed_config);
     Json(json!({
         "ok": true,
         "restartRequired": state.runtime_paths != configured_paths,
@@ -184,14 +188,14 @@ pub(crate) async fn put_config(
 
 /// GET /api/config/status — returns whether config exists and setup is complete.
 pub(crate) async fn get_config_status(State(state): State<AppState>) -> Json<Value> {
-    let config_path = mando_config::get_config_path();
+    let config_path = settings::config::get_config_path();
     let exists = config_path.exists();
     let config = state.config.load_full();
     let active_paths = state.runtime_paths.clone();
-    let configured_paths = mando_config::resolve_captain_runtime_paths(&config);
+    let configured_paths = captain::config::resolve_captain_runtime_paths(&config);
     let (setup_complete, error) = if exists {
         match tokio::fs::read_to_string(&config_path).await {
-            Ok(contents) => match serde_json::from_str::<mando_config::Config>(&contents) {
+            Ok(contents) => match serde_json::from_str::<settings::config::Config>(&contents) {
                 Ok(_) => (true, None),
                 Err(e) => {
                     tracing::warn!(path = %config_path.display(), error = %e, "config.json exists but is corrupt");
@@ -226,17 +230,17 @@ pub(crate) async fn post_config_setup(
     Json(body): Json<Value>,
 ) -> impl IntoResponse {
     if let Some(config_val) = body.get("config") {
-        let mut new_config: mando_config::Config = match serde_json::from_value(config_val.clone())
-        {
-            Ok(c) => c,
-            Err(e) => {
-                return (
-                    StatusCode::BAD_REQUEST,
-                    Json(json!({"error": format!("invalid config: {e}")})),
-                )
-                    .into_response();
-            }
-        };
+        let mut new_config: settings::config::Config =
+            match serde_json::from_value(config_val.clone()) {
+                Ok(c) => c,
+                Err(e) => {
+                    return (
+                        StatusCode::BAD_REQUEST,
+                        Json(json!({"error": format!("invalid config: {e}")})),
+                    )
+                        .into_response();
+                }
+            };
 
         new_config.populate_runtime_fields();
 
@@ -245,8 +249,8 @@ pub(crate) async fn post_config_setup(
         // also covers the scout workflow.
         {
             let tick_s = new_config.captain.tick_interval_s;
-            if let Err(e) = mando_config::try_load_captain_workflow(
-                &mando_config::captain_workflow_path(),
+            if let Err(e) = settings::io::config_fs::try_load_captain_workflow(
+                &settings::config::captain_workflow_path(),
                 tick_s,
             ) {
                 return (
@@ -292,7 +296,7 @@ pub(crate) async fn post_config_setup(
             let old_projects = state.config.load_full().captain.projects.clone();
             let mut cfg = state.config.load_full().as_ref().clone();
             if let Err(e) =
-                mando_db::queries::projects::load_into_config(state.db.pool(), &mut cfg).await
+                settings::io::projects::load_into_config(state.db.pool(), &mut cfg).await
             {
                 tracing::warn!(module = "config", error = %e, "failed to reload projects after setup");
                 cfg.captain.projects = old_projects;
@@ -318,10 +322,10 @@ pub(crate) async fn post_config_setup(
 pub(crate) async fn get_config_paths(State(state): State<AppState>) -> Json<Value> {
     let config = state.config.load_full();
     let active_paths = state.runtime_paths.clone();
-    let configured_paths = mando_config::resolve_captain_runtime_paths(&config);
+    let configured_paths = captain::config::resolve_captain_runtime_paths(&config);
     Json(json!({
-        "dataDir": mando_config::data_dir().to_string_lossy(),
-        "configPath": mando_config::get_config_path().to_string_lossy(),
+        "dataDir": global_infra::paths::data_dir().to_string_lossy(),
+        "configPath": settings::config::get_config_path().to_string_lossy(),
         "taskDbPath": active_paths.task_db_path.to_string_lossy(),
         "workerHealthPath": active_paths.worker_health_path.to_string_lossy(),
         "lockfilePath": active_paths.lockfile_path.to_string_lossy(),

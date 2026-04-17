@@ -48,10 +48,10 @@ pub fn spawn(state: &AppState) {
 
 async fn process_pending(
     pool: &SqlitePool,
-    bus: &mando_shared::EventBus,
-    cfg: &mando_config::workflow::AutoTitleConfig,
+    bus: &global_bus::EventBus,
+    cfg: &settings::config::workflow::AutoTitleConfig,
 ) {
-    let pending = match mando_db::queries::workbenches::list_pending_title(pool).await {
+    let pending = match captain::io::queries::workbenches::list_pending_title(pool).await {
         Ok(p) => p,
         Err(e) => {
             warn!(module = "auto-title", error = %e, "failed to list pending titles");
@@ -66,13 +66,13 @@ async fn process_pending(
         match title_one(pool, row, &projects_dir, cfg).await {
             Ok(Some(title)) => {
                 if let Err(e) =
-                    mando_db::queries::workbenches::update_title(pool, row.id, &title).await
+                    captain::io::queries::workbenches::update_title(pool, row.id, &title).await
                 {
                     warn!(module = "auto-title", workbench_id = row.id, error = %e, "update_title failed");
                     continue;
                 }
                 clear(pool, row.id).await;
-                bus.send(mando_types::BusEvent::Workbenches, None);
+                bus.send(global_types::BusEvent::Workbenches, None);
                 info!(module = "auto-title", workbench_id = row.id, title = %title, "auto-titled terminal workbench");
             }
             Ok(None) => {
@@ -101,13 +101,13 @@ async fn process_pending(
 /// - `Err` on permanent failure
 async fn title_one(
     pool: &SqlitePool,
-    row: &mando_db::queries::workbenches::PendingTitleRow,
+    row: &captain::io::queries::workbenches::PendingTitleRow,
     projects_dir: &std::path::Path,
-    cfg: &mando_config::workflow::AutoTitleConfig,
+    cfg: &settings::config::workflow::AutoTitleConfig,
 ) -> anyhow::Result<Option<String>> {
     // Guard: skip if the workbench title was already changed by something else.
     if let Ok(Some(current)) =
-        mando_db::queries::workbenches::find_by_worktree(pool, &row.worktree).await
+        captain::io::queries::workbenches::find_by_worktree(pool, &row.worktree).await
     {
         if current.title != row.title {
             // Already titled externally -- just clear the pending flag.
@@ -126,7 +126,7 @@ async fn title_one(
     };
 
     // Read the first user message.
-    let messages = mando_cc::transcript::parse_messages(&jsonl_path, Some(5), 0);
+    let messages = global_claude::transcript::parse_messages(&jsonl_path, Some(5), 0);
     let first_user = match messages.into_iter().find(|m| m.role == "user") {
         Some(m) => m,
         None => return Ok(None),
@@ -138,7 +138,7 @@ async fn title_one(
     }
 
     // Run claude -p with the configured model and timeout.
-    let claude = mando_cc::resolve_claude_binary();
+    let claude = global_claude::resolve_claude_binary();
     let full_prompt = format!("{}\n\n{prompt_text}", cfg.prompt);
     let cmd = tokio::process::Command::new(&claude)
         .args(["-p", &full_prompt, "--model", &cfg.model])
@@ -172,7 +172,7 @@ async fn title_one(
 }
 
 async fn clear(pool: &SqlitePool, id: i64) {
-    if let Err(e) = mando_db::queries::workbenches::clear_pending_title_session(pool, id).await {
+    if let Err(e) = captain::io::queries::workbenches::clear_pending_title_session(pool, id).await {
         warn!(module = "auto-title", workbench_id = id, error = %e, "clear_pending failed");
     }
 }

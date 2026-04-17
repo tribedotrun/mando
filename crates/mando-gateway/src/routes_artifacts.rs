@@ -8,7 +8,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use tokio_util::io::ReaderStream;
 
-use mando_types::artifact::{ArtifactMedia, ArtifactType};
+use captain::{ArtifactMedia, ArtifactType};
 
 #[derive(Deserialize)]
 pub(crate) struct RemoteUrlPatch {
@@ -62,10 +62,15 @@ pub(crate) async fn post_task_evidence(
 
     // Insert row first to get the artifact_id.
     let content = format!("Evidence ({} files)", body.files.len());
-    let artifact_id =
-        mando_db::queries::artifacts::insert(pool, task_id, ArtifactType::Evidence, &content, &[])
-            .await
-            .map_err(|e| internal_error(e, "failed to create evidence artifact"))?;
+    let artifact_id = captain::io::queries::artifacts::insert(
+        pool,
+        task_id,
+        ArtifactType::Evidence,
+        &content,
+        &[],
+    )
+    .await
+    .map_err(|e| internal_error(e, "failed to create evidence artifact"))?;
 
     // Build media JSON with deterministic local_path.
     let media: Vec<ArtifactMedia> = body
@@ -83,13 +88,13 @@ pub(crate) async fn post_task_evidence(
         .collect();
 
     // Update artifact with media.
-    mando_db::queries::artifacts::update_media(pool, artifact_id, &media)
+    captain::io::queries::artifacts::update_media(pool, artifact_id, &media)
         .await
         .map_err(|e| internal_error(e, "failed to update artifact media"))?;
 
     // Emit event so Electron feed updates.
     state.bus.send(
-        mando_types::BusEvent::Artifacts,
+        global_types::BusEvent::Artifacts,
         Some(json!({"action": "evidence_created", "task_id": task_id, "artifact_id": artifact_id})),
     );
 
@@ -116,7 +121,7 @@ pub(crate) async fn post_task_summary(
     let task_id = resolve_id(&id, "task")?;
     let pool = state.db.pool();
 
-    let artifact_id = mando_db::queries::artifacts::insert(
+    let artifact_id = captain::io::queries::artifacts::insert(
         pool,
         task_id,
         ArtifactType::WorkSummary,
@@ -127,7 +132,7 @@ pub(crate) async fn post_task_summary(
     .map_err(|e| internal_error(e, "failed to create work summary"))?;
 
     state.bus.send(
-        mando_types::BusEvent::Artifacts,
+        global_types::BusEvent::Artifacts,
         Some(json!({"action": "summary_created", "task_id": task_id, "artifact_id": artifact_id})),
     );
 
@@ -151,7 +156,7 @@ pub(crate) async fn get_artifact_media(
         .map_err(|_| error_response(StatusCode::BAD_REQUEST, "invalid media index"))?;
 
     let pool = state.db.pool();
-    let artifact = mando_db::queries::artifacts::get(pool, artifact_id)
+    let artifact = captain::io::queries::artifacts::get(pool, artifact_id)
         .await
         .map_err(|e| internal_error(e, "failed to load artifact"))?
         .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "artifact not found"))?;
@@ -166,7 +171,7 @@ pub(crate) async fn get_artifact_media(
         .as_ref()
         .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "no local file for this media"))?;
 
-    let data_dir = mando_types::data_dir();
+    let data_dir = global_types::data_dir();
     let file_path = data_dir.join(local_path);
 
     let file = tokio::fs::File::open(&file_path)
@@ -213,7 +218,7 @@ pub(crate) async fn put_artifact_media(
     let artifact_id = resolve_id(&id, "artifact")?;
     let pool = state.db.pool();
 
-    let artifact = mando_db::queries::artifacts::get(pool, artifact_id)
+    let artifact = captain::io::queries::artifacts::get(pool, artifact_id)
         .await
         .map_err(|e| internal_error(e, "failed to load artifact"))?
         .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "artifact not found"))?;
@@ -232,7 +237,7 @@ pub(crate) async fn put_artifact_media(
         slot.remote_url = Some(patch.remote_url.clone());
     }
 
-    mando_db::queries::artifacts::update_media(pool, artifact_id, &merged)
+    captain::io::queries::artifacts::update_media(pool, artifact_id, &merged)
         .await
         .map_err(|e| internal_error(e, "failed to update artifact media"))?;
 
