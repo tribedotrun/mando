@@ -297,12 +297,23 @@ async fn handle_captain_stop() -> anyhow::Result<()> {
 
 pub(crate) async fn handle_merge_pr(pr_num: &str, project: Option<&str>) -> anyhow::Result<()> {
     let client = DaemonClient::discover()?;
-    let pr_number = mando_types::task::parse_pr_number(pr_num)
-        .ok_or_else(|| anyhow::anyhow!("invalid PR reference: {pr_num}"))?;
+    let pr_number =
+        parse_pr_number(pr_num).ok_or_else(|| anyhow::anyhow!("invalid PR reference: {pr_num}"))?;
     let body = json!({"pr_number": pr_number, "project": project.unwrap_or("")});
     let result = client.post("/api/tasks/merge", &body).await?;
     println!("{}", serde_json::to_string_pretty(&result)?);
     Ok(())
+}
+
+fn parse_pr_number(pr: &str) -> Option<i64> {
+    if let Some(idx) = pr.rfind("/pull/") {
+        let after = &pr[idx + 6..];
+        let num_end = after
+            .find(|c: char| !c.is_ascii_digit())
+            .unwrap_or(after.len());
+        return after[..num_end].parse().ok();
+    }
+    pr.trim_start_matches('#').parse().ok()
 }
 
 #[cfg(test)]

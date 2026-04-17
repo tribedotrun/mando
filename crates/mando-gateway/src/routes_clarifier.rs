@@ -5,7 +5,7 @@ use axum::http::StatusCode;
 use axum::Json;
 use serde_json::{json, Value};
 
-use mando_captain::runtime::clarifier::ClarifierStatus;
+use captain::runtime::clarifier::ClarifierStatus;
 
 use crate::response::{error_response, internal_error};
 use crate::AppState;
@@ -93,7 +93,7 @@ async fn post_task_clarify_inner(
                 error_response(StatusCode::NOT_FOUND, &format!("task {id} not found"))
             })?;
 
-        if item.status != mando_types::task::ItemStatus::NeedsClarification {
+        if item.status != captain::ItemStatus::NeedsClarification {
             return Err(error_response(
                 StatusCode::CONFLICT,
                 &format!("task must be in needs-clarification, got {:?}", item.status),
@@ -102,7 +102,7 @@ async fn post_task_clarify_inner(
 
         // Append human answer (with embedded image paths) to context.
         // After this point, images must stay on disk.
-        let new_context = mando_captain::runtime::task_notes::append_tagged_note(
+        let new_context = captain::runtime::task_notes::append_tagged_note(
             item.context.as_deref(),
             "Human answer",
             &answer,
@@ -139,9 +139,9 @@ async fn post_task_clarify_inner(
     }
 
     // Emit HumanAnswered timeline event.
-    let _ = mando_captain::runtime::timeline_emit::emit_for_task(
+    let _ = captain::runtime::timeline_emit::emit_for_task(
         &item,
-        mando_types::timeline::TimelineEventType::HumanAnswered,
+        captain::TimelineEventType::HumanAnswered,
         &format!("Human answered: {answer}"),
         json!({"answer": &answer}),
         &pool,
@@ -151,8 +151,7 @@ async fn post_task_clarify_inner(
     // Run inline re-clarification.
     let wf = state.captain_workflow.load_full();
     let cfg = state.config.load_full();
-    match mando_captain::runtime::clarifier::answer_and_reclarify(&item, &answer, &wf, &cfg, &pool)
-        .await
+    match captain::runtime::clarifier::answer_and_reclarify(&item, &answer, &wf, &cfg, &pool).await
     {
         Ok(result) => {
             // Build session_ids JSON preserving existing fields, updating clarifier.
@@ -182,15 +181,15 @@ async fn post_task_clarify_inner(
                     if let Some(ref repo) = result.repo {
                         update["repo"] = json!(repo);
                     }
-                    mando_captain::runtime::dashboard::force_update_task(&store, id, &update)
+                    captain::runtime::dashboard::force_update_task(&store, id, &update)
                         .await
                         .map_err(|e| {
                             internal_error(e, "failed to update task after clarification")
                         })?;
 
-                    let _ = mando_captain::runtime::timeline_emit::emit_for_task(
+                    let _ = captain::runtime::timeline_emit::emit_for_task(
                         &item,
-                        mando_types::timeline::TimelineEventType::ClarifyResolved,
+                        captain::TimelineEventType::ClarifyResolved,
                         "Clarification complete, ready for work",
                         json!({"session_id": result.session_id}),
                         &pool,
@@ -199,7 +198,7 @@ async fn post_task_clarify_inner(
                     "ready"
                 }
                 ClarifierStatus::Answered => {
-                    mando_captain::runtime::dashboard::force_update_task(
+                    captain::runtime::dashboard::force_update_task(
                         &store,
                         id,
                         &json!({
@@ -212,9 +211,9 @@ async fn post_task_clarify_inner(
                     .await
                     .map_err(|e| internal_error(e, "failed to update task after clarification"))?;
 
-                    let _ = mando_captain::runtime::timeline_emit::emit_for_task(
+                    let _ = captain::runtime::timeline_emit::emit_for_task(
                         &item,
-                        mando_types::timeline::TimelineEventType::CompletedNoPr,
+                        captain::TimelineEventType::CompletedNoPr,
                         "Clarifier answered directly, no work needed",
                         json!({"session_id": result.session_id}),
                         &pool,
@@ -223,7 +222,7 @@ async fn post_task_clarify_inner(
                     "answered"
                 }
                 ClarifierStatus::Clarifying => {
-                    mando_captain::runtime::dashboard::force_update_task(
+                    captain::runtime::dashboard::force_update_task(
                         &store,
                         id,
                         &json!({
@@ -235,9 +234,9 @@ async fn post_task_clarify_inner(
                     .await
                     .map_err(|e| internal_error(e, "failed to update task after clarification"))?;
 
-                    let _ = mando_captain::runtime::timeline_emit::emit_for_task(
+                    let _ = captain::runtime::timeline_emit::emit_for_task(
                         &item,
-                        mando_types::timeline::TimelineEventType::ClarifyQuestion,
+                        captain::TimelineEventType::ClarifyQuestion,
                         "Still needs clarification",
                         json!({"session_id": result.session_id, "questions": result.questions}),
                         &pool,
@@ -246,7 +245,7 @@ async fn post_task_clarify_inner(
                     "clarifying"
                 }
                 ClarifierStatus::Escalate => {
-                    mando_captain::runtime::dashboard::force_update_task(
+                    captain::runtime::dashboard::force_update_task(
                         &store,
                         id,
                         &json!({
@@ -269,7 +268,7 @@ async fn post_task_clarify_inner(
                 .flatten()
                 .map(|t| serde_json::to_value(&t).unwrap());
             state.bus.send(
-                mando_types::BusEvent::Tasks,
+                global_types::BusEvent::Tasks,
                 Some(json!({"action": "updated", "item": updated, "id": id})),
             );
 
@@ -302,11 +301,11 @@ async fn post_task_clarify_inner(
                     .map(|t| serde_json::to_value(&t).unwrap())
             };
             state.bus.send(
-                mando_types::BusEvent::Tasks,
+                global_types::BusEvent::Tasks,
                 Some(json!({"action": "updated", "item": updated, "id": id})),
             );
             let questions: Option<serde_json::Value> =
-                match mando_db::queries::timeline::latest_clarifier_questions(&pool, id).await {
+                match captain::io::queries::timeline::latest_clarifier_questions(&pool, id).await {
                     Ok(q) => q,
                     Err(tl_err) => {
                         tracing::warn!(

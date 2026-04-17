@@ -17,7 +17,7 @@ pub enum ConfigChangeEvent {
 
 #[derive(Clone)]
 pub struct ConfigManager {
-    config: Arc<ArcSwap<mando_config::Config>>,
+    config: Arc<ArcSwap<settings::config::Config>>,
     write_mu: Arc<Mutex<()>>,
     changes_tx: broadcast::Sender<ConfigChangeEvent>,
     tick_tx: watch::Sender<Duration>,
@@ -25,7 +25,7 @@ pub struct ConfigManager {
 
 impl ConfigManager {
     pub fn new(
-        config: Arc<ArcSwap<mando_config::Config>>,
+        config: Arc<ArcSwap<settings::config::Config>>,
         write_mu: Arc<Mutex<()>>,
         tick_tx: watch::Sender<Duration>,
     ) -> Self {
@@ -38,7 +38,7 @@ impl ConfigManager {
         }
     }
 
-    pub fn load_full(&self) -> Arc<mando_config::Config> {
+    pub fn load_full(&self) -> Arc<settings::config::Config> {
         self.config.load_full()
     }
 
@@ -48,7 +48,7 @@ impl ConfigManager {
 
     pub async fn update<F>(&self, mutator: F) -> anyhow::Result<ConfigChangeEvent>
     where
-        F: FnOnce(&mut mando_config::Config) -> anyhow::Result<()>,
+        F: FnOnce(&mut settings::config::Config) -> anyhow::Result<()>,
     {
         let _guard = self.write_mu.lock().await;
         let old = (*self.config.load_full()).clone();
@@ -59,7 +59,7 @@ impl ConfigManager {
 
     pub async fn replace(
         &self,
-        mut new: mando_config::Config,
+        mut new: settings::config::Config,
     ) -> anyhow::Result<ConfigChangeEvent> {
         let _guard = self.write_mu.lock().await;
         let old = (*self.config.load_full()).clone();
@@ -72,7 +72,7 @@ impl ConfigManager {
     /// with the config commit.
     pub async fn replace_then<F>(
         &self,
-        mut new: mando_config::Config,
+        mut new: settings::config::Config,
         post_commit: F,
     ) -> anyhow::Result<ConfigChangeEvent>
     where
@@ -88,13 +88,13 @@ impl ConfigManager {
 
     async fn commit_locked(
         &self,
-        old: mando_config::Config,
-        mut new: mando_config::Config,
+        old: settings::config::Config,
+        mut new: settings::config::Config,
     ) -> anyhow::Result<ConfigChangeEvent> {
         new.populate_runtime_fields();
 
         let to_save = new.clone();
-        tokio::task::spawn_blocking(move || mando_config::save_config(&to_save, None))
+        tokio::task::spawn_blocking(move || settings::io::config_fs::save_config(&to_save, None))
             .await
             .context("config save task panicked")??;
 
@@ -128,7 +128,10 @@ fn clamped_tick_duration(raw: u64) -> Duration {
     Duration::from_secs(raw.max(10))
 }
 
-fn classify_change(old: &mando_config::Config, new: &mando_config::Config) -> ConfigChangeEvent {
+fn classify_change(
+    old: &settings::config::Config,
+    new: &settings::config::Config,
+) -> ConfigChangeEvent {
     let tg_changed = old.channels.telegram.enabled != new.channels.telegram.enabled
         || old.channels.telegram.owner != new.channels.telegram.owner
         || old.channels.telegram.token != new.channels.telegram.token
@@ -195,6 +198,6 @@ fn sync_process_env(
     }
 }
 
-pub fn initial_tick_duration(config: &mando_config::Config) -> Duration {
+pub fn initial_tick_duration(config: &settings::config::Config) -> Duration {
     clamped_tick_duration(config.captain.tick_interval_s)
 }

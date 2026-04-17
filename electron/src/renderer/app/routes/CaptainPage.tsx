@@ -1,8 +1,8 @@
 import React, { useRef } from 'react';
-import { CaptainView } from '#renderer/domains/captain/components/CaptainView';
-import type { InlineTaskCreateHandle } from '#renderer/domains/captain/components/InlineTaskCreate';
-import { ErrorBoundary } from '#renderer/global/components/ErrorBoundary';
-import { useMountEffect } from '#renderer/global/hooks/useMountEffect';
+import { CaptainView } from '#renderer/domains/captain/ui/CaptainView';
+import type { InlineTaskCreateHandle } from '#renderer/domains/captain/ui/InlineTaskCreate';
+import { ErrorBoundary } from '#renderer/global/ui/ErrorBoundary';
+import { useMountEffect } from '#renderer/global/runtime/useMountEffect';
 import { useUIStore } from '#renderer/app/uiStore';
 
 export function CaptainPage(): React.ReactElement {

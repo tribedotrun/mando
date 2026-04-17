@@ -1,14 +1,11 @@
 import React from 'react';
 import { ChevronUp } from 'lucide-react';
-import { pct } from '#renderer/utils';
-import { SetupChecklist } from '#renderer/domains/onboarding';
-import { Button } from '#renderer/components/ui/button';
+import { pct } from '#renderer/global/service/utils';
+import { SetupChecklist } from '#renderer/domains/onboarding/ui/SetupChecklist';
+import { Button } from '#renderer/global/ui/button';
+import type { SetupProgress } from '#renderer/global/runtime/SidebarContext';
 
-export interface SetupProgress {
-  completed: number;
-  total: number;
-  currentStep: string;
-}
+export type { SetupProgress };
 
 interface Props {
   progress: SetupProgress;
@@ -25,7 +22,7 @@ export function SetupTrigger({ progress, active, onToggle, onDismiss }: Props): 
       {active && (
         <div
           data-testid="setup-popover"
-          className="absolute right-0 bottom-[calc(100%+6px)] left-0 z-[200] max-h-[420px] overflow-y-auto rounded-lg bg-muted shadow-[0_-4px_20px_rgba(0,0,0,0.5)]"
+          className="absolute right-0 bottom-[calc(100%+6px)] left-0 z-[200] max-h-[420px] overflow-y-auto rounded-lg bg-muted shadow-[0_-4px_20px_color-mix(in_srgb,black_50%,transparent)]"
         >
           <SetupChecklist onDismiss={onDismiss} onMinimize={onToggle} />
         </div>

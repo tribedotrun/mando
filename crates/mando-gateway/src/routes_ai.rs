@@ -7,7 +7,7 @@ use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use mando_db::queries::projects as db_projects;
+use settings::io::projects as db_projects;
 
 use crate::response::{error_response, internal_error};
 use crate::AppState;
@@ -57,7 +57,7 @@ pub async fn post_parse_todos(
                 &format!("unknown project: {}", body.project),
             )
         })?;
-    let cwd = mando_config::expand_tilde(&row.path);
+    let cwd = global_infra::paths::expand_tilde(&row.path);
     if !cwd.is_dir() {
         return Err(error_response(
             StatusCode::BAD_REQUEST,
@@ -69,12 +69,12 @@ pub async fn post_parse_todos(
     vars.insert("text", text.to_string());
     vars.insert("line_count", line_count.to_string());
     vars.insert("project", row.name);
-    let prompt = mando_config::render_prompt("todo_parse", &wf.prompts, &vars)
+    let prompt = settings::config::render_prompt("todo_parse", &wf.prompts, &vars)
         .map_err(|e| internal_error(e, "failed to render parse prompt"))?;
 
     let max_turns = wf.agent.todo_parse_max_turns;
     let mgr = &state.cc_session_mgr;
-    let session_key = format!("parse-todos-{}", mando_uuid::Uuid::v4().short());
+    let session_key = format!("parse-todos-{}", global_infra::uuid::Uuid::v4().short());
 
     let result = mgr
         .start_with_item(

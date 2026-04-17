@@ -115,15 +115,15 @@ pub(crate) async fn post_notify(
     }
 
     // Emit a valid NotificationPayload for SSE subscribers.
-    let payload = mando_types::events::NotificationPayload {
+    let payload = global_types::events::NotificationPayload {
         message: body.message.clone(),
-        level: mando_types::notify::NotifyLevel::Normal,
-        kind: mando_types::events::NotificationKind::Generic,
+        level: global_types::notify::NotifyLevel::Normal,
+        kind: global_types::events::NotificationKind::Generic,
         task_key: None,
         reply_markup: None,
     };
     state.bus.send(
-        mando_types::BusEvent::Notification,
+        global_types::BusEvent::Notification,
         Some(serde_json::to_value(&payload).unwrap_or(json!({"message": body.message}))),
     );
 
@@ -145,7 +145,7 @@ pub(crate) struct FirecrawlScrapeBody {
 pub(crate) async fn post_firecrawl_scrape(
     Json(body): Json<FirecrawlScrapeBody>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    match mando_scout::runtime::firecrawl::scrape(&body.url).await {
+    match scout::io::firecrawl::scrape(&body.url).await {
         Ok(content) => Ok(Json(json!({"ok": true, "content": content}))),
         Err(e) => Err(internal_error(e, "firecrawl scrape failed")),
     }

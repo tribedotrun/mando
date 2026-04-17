@@ -13,7 +13,7 @@ import { ScoutPage } from '#renderer/app/routes/ScoutPage';
 import { SessionsPage } from '#renderer/app/routes/SessionsPage';
 import { SettingsPageRoute } from '#renderer/app/routes/SettingsPageRoute';
 import { TranscriptPage } from '#renderer/app/routes/TranscriptPage';
-import log from '#renderer/logger';
+import log from '#renderer/global/service/logger';
 
 // ---------------------------------------------------------------------------
 // Route tree

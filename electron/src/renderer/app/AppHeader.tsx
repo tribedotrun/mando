@@ -1,67 +1,25 @@
-import React, { useRef, useState } from 'react';
-import { cn } from '#renderer/cn';
+import React, { useRef } from 'react';
+import { cn } from '#renderer/global/service/cn';
 import { useRouterState } from '@tanstack/react-router';
-import { useTaskList, useWorkbenchList, useWorkers } from '#renderer/hooks/queries';
-import { useResumeRateLimited } from '#renderer/hooks/mutations';
-import { ChevronDown, Copy, PanelLeft, ArrowLeft, ArrowRight, SquarePen } from 'lucide-react';
-import { FinderIcon, CursorIcon, PrIcon, MergeIcon } from '#renderer/global/components/icons';
-import { DetailOverflowMenu } from '#renderer/domains/captain/components/TaskDetailParts';
-import { HeaderStatusBadge } from '#renderer/domains/captain/components/StatusCard';
+import { useWorkers, useResumeRateLimited, useTaskTimelineData } from '#renderer/domains/captain';
+import { PrIcon, MergeIcon } from '#renderer/global/ui/icons';
+import { DetailOverflowMenu } from '#renderer/domains/captain/ui/TaskDetailParts';
+import { HeaderStatusBadge } from '#renderer/domains/captain/ui/TaskStatusBadge';
 import { buildSessionsFromTimeline } from '#renderer/domains/sessions';
-import { useMountEffect } from '#renderer/global/hooks/useMountEffect';
-import type { TaskItem, SessionSummary } from '#renderer/types';
-import { queryKeys } from '#renderer/queryKeys';
-import { useQuery } from '@tanstack/react-query';
-import { fetchTimeline, fetchItemSessions } from '#renderer/domains/captain/hooks/useApi';
+import { useMountEffect } from '#renderer/global/runtime/useMountEffect';
 import { useUIStore } from '#renderer/app/uiStore';
-import { Button } from '#renderer/components/ui/button';
-import { Tooltip, TooltipTrigger, TooltipContent } from '#renderer/components/ui/tooltip';
+import { Button } from '#renderer/global/ui/button';
 import {
+  canMerge,
   copyToClipboard,
-  getErrorMessage,
   isRateLimited,
   prLabel,
   prHref,
   prState,
-} from '#renderer/utils';
-import { toast } from 'sonner';
-import { Kbd } from '#renderer/components/ui/kbd';
-
-interface WorkbenchCtx {
-  worktreeName: string | null;
-  worktreePath: string | null;
-  projectName: string | null;
-  task: TaskItem | null;
-}
-
-/** Resolve the current workbench context from route state. */
-function useWorkbenchCtx(): WorkbenchCtx | null {
-  const pathname = useRouterState({ select: (s) => s.location.pathname });
-
-  const wbMatch = pathname.match(/^\/wb\/(\d+)/);
-  const wbId = wbMatch ? Number(wbMatch[1]) : null;
-  // Use active list (Tier 1, zero refetch) as primary source.
-  // Only fetch 'all' when the workbench isn't in the active cache (archived).
-  const { data: activeWbs = [] } = useWorkbenchList();
-  const activeMatch = wbId ? (activeWbs.find((w) => w.id === wbId) ?? null) : null;
-  const { data: allWbs = [] } = useWorkbenchList(wbId && !activeMatch ? 'all' : undefined);
-  const workbench = activeMatch ?? (wbId ? (allWbs.find((w) => w.id === wbId) ?? null) : null);
-
-  const { data: taskData } = useTaskList();
-  const task = wbId ? (taskData?.items.find((t) => t.workbench_id === wbId) ?? null) : null;
-
-  return React.useMemo<WorkbenchCtx | null>(() => {
-    if (!workbench) return null;
-
-    const wtPath = workbench.worktree;
-    return {
-      worktreeName: workbench.title ?? wtPath?.split('/').pop() ?? null,
-      worktreePath: wtPath,
-      projectName: workbench.project ?? null,
-      task,
-    };
-  }, [workbench, task]);
-}
+} from '#renderer/global/service/utils';
+import { getPageTitle } from '#renderer/global/service/routeHelpers';
+import { useWorkbenchCtx } from '#renderer/app/useWorkbenchCtx';
+import { CollapsedNavIcons, OpenMenu } from '#renderer/app/AppHeaderParts';
 
 interface AppHeaderProps {
   sidebarCollapsed?: boolean;
@@ -104,16 +62,7 @@ export function AppHeader({
 
   // Fetch sessions for the status badge when viewing a task.
   const taskId = ctx?.task?.id ?? null;
-  const { data: timelineData } = useQuery({
-    queryKey: taskId != null ? queryKeys.tasks.timeline(taskId) : ['noop'],
-    queryFn: async () => {
-      const [tl, sess] = await Promise.all([fetchTimeline(taskId!), fetchItemSessions(taskId!)]);
-      const map: Record<string, SessionSummary> = {};
-      for (const s of sess.sessions) map[s.session_id] = s;
-      return { events: tl.events, sessionMap: map, sessions: sess.sessions };
-    },
-    enabled: !!taskId,
-  });
+  const { data: timelineData } = useTaskTimelineData(taskId ?? 0);
   const sessions = React.useMemo(
     () =>
       ctx?.task && timelineData
@@ -128,14 +77,7 @@ export function AppHeader({
   const resumeMut = useResumeRateLimited();
   const taskIsRateLimited = ctx?.task ? isRateLimited(ctx.task, rateLimitSecs) : false;
 
-  // Derive page title for collapsed toolbar (non-workbench routes)
-  const pageTitle = React.useMemo(() => {
-    if (pathname === '/' || pathname === '') return 'Tasks';
-    if (pathname.startsWith('/scout')) return 'Scout';
-    if (pathname.startsWith('/sessions')) return 'Sessions';
-    if (pathname.startsWith('/settings')) return 'Settings';
-    return '';
-  }, [pathname]);
+  const pageTitle = getPageTitle(pathname);
 
   const navIcons = sidebarCollapsed ? (
     <CollapsedNavIcons
@@ -189,7 +131,7 @@ export function AppHeader({
             className="flex shrink-0 items-center gap-2"
             style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
           >
-            {ctx.task!.pr_number && ctx.task!.project && ctx.task!.status === 'awaiting-review' && (
+            {canMerge(ctx.task!) && (
               <Button
                 variant="ghost"
                 size="icon-sm"
@@ -290,190 +232,6 @@ export function AppHeader({
           </>
         )}
       </div>
-    </div>
-  );
-}
-
-function CollapsedNavIcons({
-  onToggleSidebar,
-  onGoBack,
-  onGoForward,
-  onNewTask,
-}: {
-  onToggleSidebar?: () => void;
-  onGoBack?: () => void;
-  onGoForward?: () => void;
-  onNewTask?: () => void;
-}): React.ReactElement {
-  return (
-    <div
-      className="flex shrink-0 items-center gap-1"
-      style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
-    >
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <button
-            onClick={onToggleSidebar}
-            aria-label="Toggle sidebar"
-            className="flex h-6 w-6 items-center justify-center rounded text-text-3 transition-colors hover:text-muted-foreground"
-          >
-            <PanelLeft size={14} />
-          </button>
-        </TooltipTrigger>
-        <TooltipContent
-          side="bottom"
-          className="flex items-center gap-3 px-3 py-2 text-sm font-medium"
-        >
-          Toggle sidebar <Kbd>&#8984;B</Kbd>
-        </TooltipContent>
-      </Tooltip>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <button
-            onClick={onGoBack}
-            aria-label="Back"
-            className="flex h-6 w-6 items-center justify-center rounded text-text-3 transition-colors hover:text-muted-foreground"
-          >
-            <ArrowLeft size={14} />
-          </button>
-        </TooltipTrigger>
-        <TooltipContent
-          side="bottom"
-          className="flex items-center gap-3 px-3 py-2 text-sm font-medium"
-        >
-          Back <Kbd>&#8984;[</Kbd>
-        </TooltipContent>
-      </Tooltip>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <button
-            onClick={onGoForward}
-            aria-label="Forward"
-            className="flex h-6 w-6 items-center justify-center rounded text-text-3 transition-colors hover:text-muted-foreground"
-          >
-            <ArrowRight size={14} />
-          </button>
-        </TooltipTrigger>
-        <TooltipContent
-          side="bottom"
-          className="flex items-center gap-3 px-3 py-2 text-sm font-medium"
-        >
-          Forward <Kbd>&#8984;]</Kbd>
-        </TooltipContent>
-      </Tooltip>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <button
-            onClick={onNewTask}
-            aria-label="New task"
-            className="flex h-6 w-6 items-center justify-center rounded text-text-3 transition-colors hover:text-muted-foreground"
-          >
-            <SquarePen size={14} />
-          </button>
-        </TooltipTrigger>
-        <TooltipContent side="bottom" className="px-3 py-2 text-sm font-medium">
-          New task
-        </TooltipContent>
-      </Tooltip>
-    </div>
-  );
-}
-
-function openPath(fn: () => Promise<void>, label: string) {
-  fn().catch((err) => toast.error(getErrorMessage(err, `Failed to open in ${label}`)));
-}
-
-function OpenMenu({ worktreePath }: { worktreePath: string | null }): React.ReactElement {
-  const [open, setOpen] = useState(false);
-  const disabled = !worktreePath;
-
-  useMountEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        setOpen((prev) => {
-          if (prev) e.stopPropagation();
-          return false;
-        });
-      }
-    };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  });
-
-  return (
-    <div className="relative" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
-      {/* Split button: default action (Cursor) + dropdown chevron */}
-      <div
-        className={cn(
-          'flex items-center rounded-md border border-border',
-          disabled && 'opacity-40 pointer-events-none',
-        )}
-      >
-        <button
-          onClick={() =>
-            worktreePath && openPath(() => window.mandoAPI.openInCursor(worktreePath), 'Cursor')
-          }
-          disabled={disabled}
-          className="flex items-center rounded-l-md px-2 py-1 transition-colors hover:bg-accent"
-          aria-label="Open in Cursor"
-        >
-          <CursorIcon size={14} />
-        </button>
-        <div className="h-4 w-px bg-border" />
-        <button
-          onClick={() => !disabled && setOpen((v) => !v)}
-          disabled={disabled}
-          className="flex items-center rounded-r-md px-1.5 py-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-          aria-label="More open options"
-          aria-haspopup="true"
-          aria-expanded={open}
-        >
-          <ChevronDown size={12} />
-        </button>
-      </div>
-      {open && (
-        <>
-          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 top-full z-50 mt-1 min-w-[200px] rounded-md border border-border bg-popover py-1 shadow-lg">
-            <button
-              className="flex w-full items-center gap-2.5 px-3 py-2 text-[13px] text-popover-foreground transition-colors hover:bg-accent"
-              onClick={() => {
-                openPath(() => window.mandoAPI.openInFinder(worktreePath!), 'Finder');
-                setOpen(false);
-              }}
-            >
-              <FinderIcon size={16} />
-              <span className="flex-1 text-left">Finder</span>
-            </button>
-            <button
-              className="flex w-full items-center gap-2.5 px-3 py-2 text-[13px] text-popover-foreground transition-colors hover:bg-accent"
-              onClick={() => {
-                openPath(() => window.mandoAPI.openInCursor(worktreePath!), 'Cursor');
-                setOpen(false);
-              }}
-            >
-              <CursorIcon size={16} />
-              <span className="flex-1 text-left">Cursor</span>
-            </button>
-            <div className="my-1 h-px bg-border" />
-            <button
-              className="flex w-full items-center gap-2.5 px-3 py-2 text-[13px] text-popover-foreground transition-colors hover:bg-accent"
-              onClick={() => {
-                void copyToClipboard(worktreePath!, 'Path copied');
-                setOpen(false);
-              }}
-            >
-              <Copy size={15} className="shrink-0 text-muted-foreground" />
-              <span className="flex-1 text-left">Copy path</span>
-              <span className="flex items-center gap-0.5 text-text-3">
-                <Kbd>&#8984;</Kbd>
-                <Kbd>&#8679;</Kbd>
-                <Kbd>C</Kbd>
-              </span>
-            </button>
-          </div>
-        </>
-      )}
     </div>
   );
 }

@@ -18,8 +18,8 @@ impl CredentialManager {
     }
 
     /// List all stored credentials (sanitized: no tokens exposed).
-    pub async fn list(&self) -> Vec<mando_db::queries::credentials::CredentialInfo> {
-        match mando_db::queries::credentials::list_all(&self.pool).await {
+    pub async fn list(&self) -> Vec<settings::io::credentials::CredentialInfo> {
+        match settings::io::credentials::list_all(&self.pool).await {
             Ok(rows) => rows.iter().map(|r| r.to_info()).collect(),
             Err(e) => {
                 warn!(module = "credentials", error = %e, "failed to list credentials");
@@ -36,15 +36,14 @@ impl CredentialManager {
         expires_at: Option<i64>,
     ) -> anyhow::Result<i64> {
         let id =
-            mando_db::queries::credentials::insert(&self.pool, label, access_token, expires_at)
-                .await?;
+            settings::io::credentials::insert(&self.pool, label, access_token, expires_at).await?;
         info!(module = "credentials", label, id, "stored credential");
         Ok(id)
     }
 
     /// Remove a credential by ID.
     pub async fn remove(&self, id: i64) -> anyhow::Result<bool> {
-        let removed = mando_db::queries::credentials::delete(&self.pool, id).await?;
+        let removed = settings::io::credentials::delete(&self.pool, id).await?;
         if removed {
             info!(module = "credentials", id, "removed credential");
         }

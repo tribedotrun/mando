@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 use serde::Serialize;
 use tokio::sync::{Mutex, RwLock};
 
-use mando_telegram::PendingMessages;
+use transport_tg::PendingMessages;
 
 const MAX_BACKOFF_SECS: u64 = 60;
 const DEGRADED_FAILURE_COUNT: u32 = 5;
@@ -25,7 +25,7 @@ pub struct TelegramStatus {
 #[derive(Default)]
 struct TelegramRuntimeState {
     generation: u64,
-    last_config: Option<mando_config::Config>,
+    last_config: Option<settings::config::Config>,
     enabled: bool,
     running: bool,
     owner: String,
@@ -55,7 +55,7 @@ impl TelegramRuntime {
         }
     }
 
-    pub async fn configure(&self, config: &mando_config::Config) -> anyhow::Result<()> {
+    pub async fn configure(&self, config: &settings::config::Config) -> anyhow::Result<()> {
         let enabled = telegram_enabled(config);
         let owner = config.channels.telegram.owner.clone();
 
@@ -85,7 +85,7 @@ impl TelegramRuntime {
             )
         };
 
-        let gw = mando_telegram::http::GatewayClient::new(self.port, Some(self.auth_token.clone()));
+        let gw = transport_tg::http::GatewayClient::new(self.port, Some(self.auth_token.clone()));
         let cfg = Arc::new(RwLock::new(cfg_clone));
         let pending = {
             let state = self.inner.lock().await;
@@ -94,7 +94,7 @@ impl TelegramRuntime {
 
         let runtime = self.clone();
         let bot_handle = tokio::spawn(async move {
-            match mando_telegram::start_bot(cfg, Some(gw), pending).await {
+            match transport_tg::start_bot(cfg, Some(gw), pending).await {
                 Ok(()) => {
                     runtime.handle_task_exit(generation, "telegram bot exited cleanly".to_string());
                 }
@@ -192,22 +192,22 @@ impl TelegramRuntime {
         token: &str,
         owner: &str,
     ) -> anyhow::Result<()> {
-        let api_base_url = mando_telegram::resolve_api_base_url();
+        let api_base_url = transport_tg::resolve_api_base_url();
         let api = match &api_base_url {
-            Some(url) => mando_telegram::TelegramApi::with_base_url(token, url)?,
-            None => mando_telegram::TelegramApi::new(token),
+            Some(url) => transport_tg::TelegramApi::with_base_url(token, url)?,
+            None => transport_tg::TelegramApi::new(token),
         };
         let runtime = self.clone();
         let base_url = format!("http://127.0.0.1:{}", self.port);
         let gw_token = Some(self.auth_token.clone());
-        let gw = mando_telegram::http::GatewayClient::new(self.port, Some(self.auth_token.clone()));
+        let gw = transport_tg::http::GatewayClient::new(self.port, Some(self.auth_token.clone()));
         let pending = {
             let state = self.inner.lock().await;
             state.pending.clone()
         };
         let owner_chat_id = owner.to_string();
         let notif_handle = tokio::spawn(async move {
-            mando_telegram::sse::run_notification_loop(
+            transport_tg::sse::run_notification_loop(
                 base_url,
                 gw_token,
                 api,
@@ -324,6 +324,6 @@ fn abort_locked(state: &mut TelegramRuntimeState) {
     }
 }
 
-fn telegram_enabled(config: &mando_config::Config) -> bool {
+fn telegram_enabled(config: &settings::config::Config) -> bool {
     config.channels.telegram.enabled && !config.channels.telegram.token.is_empty()
 }

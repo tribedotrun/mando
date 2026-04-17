@@ -1,0 +1,32 @@
+[package]
+name = "scout"
+version.workspace = true
+edition = "2021"
+description = "GitHub integration — PRs, repo scanning, and webhook processing"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+
+[dependencies]
+global-types = { path = "../global-types" }
+global-infra = { path = "../global-infra" }
+global-net = { path = "../global-net" }
+global-claude = { path = "../global-claude" }
+global-db = { path = "../global-db" }
+sessions = { path = "../sessions" }
+settings = { path = "../settings" }
+sqlx.workspace = true
+time.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+reqwest.workspace = true
+tracing.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+rustc-hash.workspace = true
+urlencoding = "2"
+sha2 = { workspace = true }
+
+[features]
+dev-mocks = []

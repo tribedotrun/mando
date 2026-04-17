@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { TaskItem } from '#renderer/types';
+import type { TaskItem } from '#renderer/global/types';
 
 interface UIState {
   createTaskOpen: boolean;

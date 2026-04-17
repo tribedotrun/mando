@@ -1,26 +1,23 @@
 import React, { useCallback, useRef } from 'react';
 import { Outlet, useNavigate, useRouterState } from '@tanstack/react-router';
-import { useQueryClient } from '@tanstack/react-query';
-import { useMountEffect } from '#renderer/global/hooks/useMountEffect';
-import { useGlobalKeyboard } from '#renderer/global/hooks/useKeyboardShortcuts';
-import { queryKeys } from '#renderer/queryKeys';
-import type { TaskListResponse, MandoConfig } from '#renderer/types';
-import { useTaskActions } from '#renderer/domains/captain/hooks/useTaskActions';
-import { useConfig } from '#renderer/hooks/queries';
-import { useConfigSave } from '#renderer/hooks/mutations';
+import { useGlobalKeyboard } from '#renderer/global/runtime/useKeyboardShortcuts';
+import { useMainShortcuts, useNotificationClicks } from '#renderer/global/runtime/useNativeActions';
+import { useTaskWorkbenchLookup } from '#renderer/global/runtime/useTaskCacheLookup';
+import { useClaudeCodeVerification } from '#renderer/global/runtime/useClaudeCodeVerification';
+import { useTaskActions } from '#renderer/domains/captain';
 import { useUIStore } from '#renderer/app/uiStore';
-import { DevInfoBar } from '#renderer/global/components/DevInfoBar';
-import { CommandPalette } from '#renderer/global/components/CommandPalette';
-import { CreateTaskModal } from '#renderer/domains/captain/components/AddTaskForm';
-import { MergeModal } from '#renderer/domains/captain/components/MergeModal';
-import { ShortcutOverlay } from '#renderer/global/components/ShortcutOverlay';
-import log from '#renderer/logger';
+import { DevInfoBar } from '#renderer/global/ui/DevInfoBar';
+import { CommandPalette } from '#renderer/global/ui/CommandPalette';
+import { CreateTaskModal } from '#renderer/domains/captain/ui/AddTaskForm';
+import { MergeModal } from '#renderer/domains/captain/ui/MergeModal';
+import { ShortcutOverlay } from '#renderer/global/ui/ShortcutOverlay';
+import log from '#renderer/global/service/logger';
+import { TAB_ROUTES } from '#renderer/global/service/routeHelpers';
 import { router } from '#renderer/app/router';
 import type { Tab } from '#renderer/app/Sidebar';
 
 export function RootShell(): React.ReactElement {
   const navigate = useNavigate();
-  const rqClient = useQueryClient();
   const actions = useTaskActions();
   const paletteOpen = useUIStore((s) => s.paletteOpen);
   const createTaskOpen = useUIStore((s) => s.createTaskOpen);
@@ -34,56 +31,11 @@ export function RootShell(): React.ReactElement {
     select: (s) => (s.location.search as { project?: string }).project ?? null,
   });
 
-  // Eager Claude Code check -- runs once when config is available
-  useConfig(); // ensure config query is active for CC check below
-  const saveMut = useConfigSave();
-  const ccCheckDone = useRef(false);
-  useMountEffect(() => {
-    function tryCheck() {
-      if (ccCheckDone.current) return;
-      const cfg = rqClient.getQueryData<MandoConfig>(queryKeys.config.current());
-      if (!cfg) return; // config not loaded yet
-      if (cfg.features?.claudeCodeVerified || cfg.features?.setupDismissed) {
-        ccCheckDone.current = true;
-        return;
-      }
-      ccCheckDone.current = true;
-      void window.mandoAPI
-        ?.checkClaudeCode?.()
-        .then((result) => {
-          if (result.installed && result.works) {
-            const current = rqClient.getQueryData<MandoConfig>(queryKeys.config.current());
-            if (current && !current.features?.claudeCodeVerified) {
-              const updated: MandoConfig = {
-                ...current,
-                features: { ...(current.features || {}), claudeCodeVerified: true },
-              };
-              saveMut.mutate(updated);
-            }
-          }
-        })
-        .catch((err) => log.warn('eager CC check failed:', err));
-    }
+  useClaudeCodeVerification();
 
-    // Try immediately in case config is already cached
-    tryCheck();
-
-    // Subscribe to cache updates so we catch config arriving later
-    const unsub = rqClient.getQueryCache().subscribe((event) => {
-      if (event.query.queryKey[0] === 'config') tryCheck();
-    });
-    return unsub;
-  });
-
-  // Map tab names to routes
   const navigateTab = useCallback(
     (tab: Tab) => {
-      const tabRoutes: Record<Tab, string> = {
-        captain: '/',
-        scout: '/scout',
-        sessions: '/sessions',
-      };
-      void navigate({ to: tabRoutes[tab] });
+      void navigate({ to: TAB_ROUTES[tab] });
     },
     [navigate],
   );
@@ -111,43 +63,37 @@ export function RootShell(): React.ReactElement {
   });
 
   // Main process shortcuts (Cmd+N from menu)
-  useMountEffect(() => {
-    if (window.mandoAPI) {
-      const handler = (action: string) => {
-        if (action === 'add-task') openCreateTask();
-      };
-      window.mandoAPI.onShortcut(handler);
-      return () => window.mandoAPI.removeShortcutListeners();
-    }
+  useMainShortcuts((action: string) => {
+    if (action === 'add-task') openCreateTask();
   });
 
   // Desktop notification click -> navigate to workbench
-  useMountEffect(() => {
-    if (!window.mandoAPI) return;
-    window.mandoAPI.onNotificationClick((data) => {
-      if (data.item_id) {
-        const id = Number(data.item_id);
-        if (!Number.isNaN(id)) {
-          const taskData = rqClient.getQueryData<TaskListResponse>(queryKeys.tasks.list());
-          const task = taskData?.items.find((t) => t.id === id);
-          if (task?.workbench_id) {
-            void navigate({
-              to: '/wb/$workbenchId',
-              params: { workbenchId: String(task.workbench_id) },
-            });
-            return;
-          }
-          log.warn('notification click: no workbench for task', { taskId: id, inCache: !!task });
-          void navigate({ to: '/' });
+  const lookupWorkbench = useTaskWorkbenchLookup();
+  const navigateRef = useRef(navigate);
+  navigateRef.current = navigate;
+  const lookupRef = useRef(lookupWorkbench);
+  lookupRef.current = lookupWorkbench;
+  useNotificationClicks((data) => {
+    if (data.item_id) {
+      const id = Number(data.item_id);
+      if (!Number.isNaN(id)) {
+        const wbId = lookupRef.current(id);
+        if (wbId) {
+          void navigateRef.current({
+            to: '/wb/$workbenchId',
+            params: { workbenchId: String(wbId) },
+          });
           return;
         }
+        log.warn('notification click: no workbench for task', { taskId: id });
+        void navigateRef.current({ to: '/' });
+        return;
       }
-      const kind = data.kind as { type: string } | undefined;
-      if (kind?.type === 'RateLimited') {
-        void navigate({ to: '/' });
-      }
-    });
-    return () => window.mandoAPI.removeNotificationClickListeners();
+    }
+    const kind = data.kind as { type: string } | undefined;
+    if (kind?.type === 'RateLimited') {
+      void navigateRef.current({ to: '/' });
+    }
   });
 
   // Command palette actions

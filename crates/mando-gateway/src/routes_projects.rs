@@ -10,7 +10,7 @@ use axum::Json;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use mando_db::queries::projects as db;
+use settings::io::projects as db;
 
 use crate::response::{error_response, internal_error};
 use crate::AppState;
@@ -91,7 +91,7 @@ pub(crate) async fn post_projects(
     State(state): State<AppState>,
     Json(body): Json<AddProjectBody>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    let abs_path = mando_config::expand_tilde(&body.path);
+    let abs_path = global_infra::paths::expand_tilde(&body.path);
 
     // Validate path exists and is a directory.
     if !abs_path.is_dir() {
@@ -134,7 +134,7 @@ pub(crate) async fn post_projects(
     }
 
     // Auto-detect GitHub repo — reject if not found.
-    let github_repo = mando_config::detect_github_repo(&abs_path_str);
+    let github_repo = settings::config::detect_github_repo(&abs_path_str);
     if github_repo.is_none() {
         return Err(error_response(
             StatusCode::BAD_REQUEST,
@@ -170,7 +170,7 @@ pub(crate) async fn post_projects(
     let scout_summary = detect_project_summary(&abs_path).await;
     let logo = detect_project_logo(&abs_path, &name);
 
-    let pc = mando_config::settings::ProjectConfig {
+    let pc = settings::config::settings::ProjectConfig {
         name: name.clone(),
         path: abs_path_str.clone(),
         github_repo: github_repo.clone(),
@@ -185,7 +185,7 @@ pub(crate) async fn post_projects(
         .await
         .map_err(|e| internal_error(e, "failed to save project"))?;
     reload_config_from_db(&state).await?;
-    state.bus.send(mando_types::BusEvent::Config, None);
+    state.bus.send(global_types::BusEvent::Config, None);
 
     Ok(Json(json!({
         "ok": true,
@@ -264,7 +264,7 @@ pub(crate) async fn patch_project(
         .await
         .map_err(|e| internal_error(e, "failed to update project"))?;
     reload_config_from_db(&state).await?;
-    state.bus.send(mando_types::BusEvent::Config, None);
+    state.bus.send(global_types::BusEvent::Config, None);
 
     Ok(Json(json!({ "ok": true, "logo": logo })))
 }
@@ -300,16 +300,16 @@ pub(crate) async fn delete_project(
     let deleted_tasks = task_ids.len();
 
     if !task_ids.is_empty() {
-        let opts = mando_captain::io::task_cleanup::CleanupOptions {
+        let opts = captain::io::task_cleanup::CleanupOptions {
             close_pr: false,
             force: true,
         };
-        mando_captain::runtime::dashboard::delete_tasks(&config, &store, &task_ids, &opts)
+        captain::runtime::dashboard::delete_tasks(&config, &store, &task_ids, &opts)
             .await
             .map_err(|e| internal_error(e, "failed to delete project tasks"))?;
         for tid in &task_ids {
             state.bus.send(
-                mando_types::BusEvent::Tasks,
+                global_types::BusEvent::Tasks,
                 Some(json!({"action": "deleted", "id": tid})),
             );
         }
@@ -319,7 +319,7 @@ pub(crate) async fn delete_project(
         .await
         .map_err(|e| internal_error(e, "failed to delete project"))?;
     reload_config_from_db(&state).await?;
-    state.bus.send(mando_types::BusEvent::Config, None);
+    state.bus.send(global_types::BusEvent::Config, None);
 
     Ok(Json(json!({ "ok": true, "deleted_tasks": deleted_tasks })))
 }
@@ -336,7 +336,7 @@ async fn try_source(
 }
 
 fn detect_project_logo(project_path: &std::path::Path, project_name: &str) -> Option<String> {
-    mando_config::detect_project_logo(project_path, project_name)
+    settings::io::logo::detect_project_logo(project_path, project_name)
 }
 /// Auto-detect a project summary from Cargo.toml, package.json, or README.
 async fn detect_project_summary(project_path: &std::path::Path) -> String {

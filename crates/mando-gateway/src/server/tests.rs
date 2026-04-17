@@ -4,8 +4,10 @@ use base64::Engine;
 use std::path::PathBuf;
 
 fn test_data_dir() -> PathBuf {
-    let data_dir =
-        std::env::temp_dir().join(format!("mando-gw-terminal-test-{}", mando_uuid::Uuid::v4()));
+    let data_dir = std::env::temp_dir().join(format!(
+        "mando-gw-terminal-test-{}",
+        global_infra::uuid::Uuid::v4()
+    ));
     std::fs::create_dir_all(&data_dir).unwrap();
     data_dir
 }
@@ -15,23 +17,20 @@ async fn test_state() -> AppState {
 }
 
 async fn test_state_with_data_dir(data_dir: PathBuf) -> AppState {
-    let config = mando_config::Config::default();
-    let runtime_paths = mando_config::resolve_captain_runtime_paths(&config);
-    mando_config::set_active_captain_runtime_paths(runtime_paths.clone());
-    let bus = mando_shared::EventBus::new();
-    let db = mando_db::Db::open_in_memory().await.unwrap();
+    let config = settings::config::Config::default();
+    let runtime_paths = captain::config::resolve_captain_runtime_paths(&config);
+    captain::config::set_active_captain_runtime_paths(runtime_paths.clone());
+    let bus = global_bus::EventBus::new();
+    let db = global_db::Db::open_in_memory().await.unwrap();
     let db = Arc::new(db);
 
     let cc_state_dir = std::env::temp_dir().join(format!(
         "mando-gw-test-cc-sessions-{:?}",
         std::thread::current().id()
     ));
-    let cc_session_mgr = mando_captain::io::cc_session::CcSessionManager::new(
-        cc_state_dir,
-        "sonnet",
-        db.pool().clone(),
-    );
-    let task_store = mando_captain::io::task_store::TaskStore::new(db.pool().clone());
+    let cc_session_mgr =
+        captain::io::cc_session::CcSessionManager::new(cc_state_dir, "sonnet", db.pool().clone());
+    let task_store = captain::io::task_store::TaskStore::new(db.pool().clone());
     let config_write_mu = Arc::new(Mutex::new(()));
     let (tick_tx, _tick_rx) = watch::channel(crate::config_manager::initial_tick_duration(&config));
     let config_arc = Arc::new(ArcSwap::from_pointee(config));
@@ -46,10 +45,10 @@ async fn test_state_with_data_dir(data_dir: PathBuf) -> AppState {
         config_manager,
         runtime_paths,
         captain_workflow: Arc::new(ArcSwap::from_pointee(
-            mando_config::CaptainWorkflow::compiled_default(),
+            settings::config::CaptainWorkflow::compiled_default(),
         )),
         scout_workflow: Arc::new(ArcSwap::from_pointee(
-            mando_config::ScoutWorkflow::compiled_default(),
+            settings::config::ScoutWorkflow::compiled_default(),
         )),
         config_write_mu,
         bus: Arc::new(bus),
@@ -59,13 +58,14 @@ async fn test_state_with_data_dir(data_dir: PathBuf) -> AppState {
             db.pool().clone(),
         )),
         db,
-        qa_session_mgr: mando_scout::runtime::qa::session_manager_from_workflow(
-            &mando_config::ScoutWorkflow::compiled_default(),
+        qa_session_mgr: scout::runtime::qa::session_manager_from_workflow(
+            &settings::config::ScoutWorkflow::compiled_default(),
         ),
-        terminal_host: Arc::new(mando_terminal::TerminalHost::new(data_dir)),
+        terminal_host: Arc::new(terminal::TerminalHost::new(data_dir)),
         start_time: std::time::Instant::now(),
         listen_port: 0,
         dev_mode: false,
+        sandbox_mode: false,
         task_tracker: TaskTracker::new(),
         cancellation_token: CancellationToken::new(),
         telegram_runtime: Arc::new(crate::telegram_runtime::TelegramRuntime::new(
@@ -95,7 +95,7 @@ async fn spawn_app(state: AppState) -> std::net::SocketAddr {
 }
 
 fn authed_client() -> reqwest::Client {
-    let token = crate::auth::ensure_auth_token();
+    let token = transport_http::auth::ensure_auth_token();
     let mut headers = reqwest::header::HeaderMap::new();
     headers.insert(
         reqwest::header::AUTHORIZATION,

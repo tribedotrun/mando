@@ -86,7 +86,7 @@ pub fn spawn_auto_tick(state: &AppState, tick_rx: watch::Receiver<Duration>) {
                     let cfg = tick_config.load_full();
                     if cfg.captain.auto_schedule {
                         let wf = tick_workflow.load_full();
-                        match mando_captain::runtime::dashboard::trigger_captain_tick(
+                        match captain::runtime::dashboard::trigger_captain_tick(
                             &cfg,
                             &wf,
                             false,
@@ -132,18 +132,18 @@ pub fn spawn_auto_tick(state: &AppState, tick_rx: watch::Receiver<Duration>) {
                                         consecutive_failures,
                                         "auto-tick has failed repeatedly — marking degraded"
                                     );
-                                    let payload = mando_types::events::NotificationPayload {
+                                    let payload = global_types::events::NotificationPayload {
                                         message: format!(
                                             "\u{26a0}\u{fe0f} Captain auto-tick failing ({consecutive_failures} consecutive failures). Last error: {e}"
                                         ),
-                                        level: mando_types::NotifyLevel::Normal,
-                                        kind: mando_types::events::NotificationKind::Generic,
+                                        level: global_types::NotifyLevel::Normal,
+                                        kind: global_types::events::NotificationKind::Generic,
                                         task_key: Some("captain:degraded".into()),
                                         reply_markup: None,
                                     };
                                     match serde_json::to_value(&payload) {
                                         Ok(json) => tick_bus.send(
-                                            mando_types::BusEvent::Notification,
+                                            global_types::BusEvent::Notification,
                                             Some(json),
                                         ),
                                         Err(ser_err) => tracing::error!(
@@ -182,7 +182,7 @@ pub fn spawn_auto_tick(state: &AppState, tick_rx: watch::Receiver<Duration>) {
                                 "auto-tick interval updated"
                             );
                         },
-                        _ = mando_captain::WORKER_EXIT_SIGNAL.notified() => {
+                        _ = captain::WORKER_EXIT_SIGNAL.notified() => {
                             tracing::debug!(module = "captain", "worker exit detected — triggering immediate tick");
                         },
                         _ = cancel.cancelled() => {
@@ -270,8 +270,8 @@ pub fn spawn_terminal_auto_resume(state: &AppState) {
 
             let cfg = config.load();
             let args_str = match &old.agent {
-                mando_terminal::Agent::Claude => cfg.captain.claude_terminal_args.clone(),
-                mando_terminal::Agent::Codex => cfg.captain.codex_terminal_args.clone(),
+                terminal::Agent::Claude => cfg.captain.claude_terminal_args.clone(),
+                terminal::Agent::Codex => cfg.captain.codex_terminal_args.clone(),
             };
             let config_env = cfg.env.clone();
             drop(cfg);
@@ -292,10 +292,10 @@ pub fn spawn_terminal_auto_resume(state: &AppState) {
 
             let mut terminal_env = std::collections::HashMap::new();
             terminal_env.insert("MANDO_PORT".to_string(), listen_port.to_string());
-            let auth_token = crate::auth::ensure_auth_token();
+            let auth_token = transport_http::auth::ensure_auth_token();
             terminal_env.insert("MANDO_AUTH_TOKEN".to_string(), auth_token);
 
-            let req = mando_terminal::CreateRequest {
+            let req = terminal::CreateRequest {
                 project: old.project.clone(),
                 cwd: old.cwd.clone(),
                 agent: old.agent.clone(),
@@ -363,7 +363,7 @@ pub fn spawn_workbench_cleanup(state: &AppState) {
 // ── Workbench cleanup ───────────────────────────────────────────────
 
 async fn run_workbench_cleanup(pool: &SqlitePool) -> anyhow::Result<()> {
-    let stale = mando_db::queries::workbenches::stale_archived(pool, 30).await?;
+    let stale = captain::io::queries::workbenches::stale_archived(pool, 30).await?;
     if stale.is_empty() {
         return Ok(());
     }
@@ -393,7 +393,7 @@ async fn run_workbench_cleanup(pool: &SqlitePool) -> anyhow::Result<()> {
                 }
             });
             if let Some(repo) = repo_path {
-                if let Err(e) = mando_captain::io::git::remove_worktree(&repo, wt_path).await {
+                if let Err(e) = captain::io::git::remove_worktree(&repo, wt_path).await {
                     warn!(module = "cleanup", worktree = %wb.worktree, error = %e, "git worktree remove failed");
                 } else {
                     info!(module = "cleanup", worktree = %wb.worktree, "removed git worktree");
@@ -402,13 +402,13 @@ async fn run_workbench_cleanup(pool: &SqlitePool) -> anyhow::Result<()> {
                 warn!(module = "cleanup", worktree = %wb.worktree, error = %e, "failed to remove worktree directory");
             }
         }
-        let layout_path = mando_types::data_dir()
+        let layout_path = global_types::data_dir()
             .join("workbenches")
             .join(format!("{}.json", wb.id));
         if layout_path.exists() {
             let _ = tokio::fs::remove_file(&layout_path).await;
         }
-        mando_db::queries::workbenches::mark_deleted(pool, wb.id).await?;
+        captain::io::queries::workbenches::mark_deleted(pool, wb.id).await?;
         info!(module = "cleanup", id = wb.id, title = %wb.title, "workbench marked deleted");
     }
     Ok(())

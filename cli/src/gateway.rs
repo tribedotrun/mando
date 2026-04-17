@@ -129,28 +129,89 @@ async fn handle_health() -> anyhow::Result<()> {
 }
 
 async fn handle_logs(lines: usize, follow: bool) -> anyhow::Result<()> {
+    // Priority order:
+    // 1. MANDO_LOG_DIR (set by mando-dev for dev/sandbox) - JSONL files
+    // 2. {data_dir}/logs/ (real prod default: ~/.mando/logs/) - JSONL files
+    // 3. ~/Library/Logs/Mando/daemon.log (launchd fmt log) - fallback
+    let log_path = find_daemon_log();
+
+    match log_path {
+        Some(path) => {
+            let is_jsonl = path.to_string_lossy().contains(".jsonl");
+            println!("Tailing {}", path.display());
+            if is_jsonl {
+                println!("Tip: use 'mando-dev obs query --gw' for structured log access.");
+            }
+            let mut args = vec!["-n".to_string(), lines.to_string()];
+            if follow {
+                // Use -F (follow name) for rotating JSONL files so tail
+                // switches to the new file after midnight rotation.
+                args.push(if is_jsonl { "-F" } else { "-f" }.to_string());
+            }
+            args.push(path.to_string_lossy().into_owned());
+
+            let status = tokio::process::Command::new("tail")
+                .args(&args)
+                .status()
+                .await?;
+
+            if !status.success() {
+                anyhow::bail!("tail exited with {status}");
+            }
+            Ok(())
+        }
+        None => {
+            println!("No daemon log found. Checked:");
+            if let Ok(dir) = std::env::var("MANDO_LOG_DIR") {
+                println!("  {dir}/daemon.jsonl.*");
+            }
+            let data_logs = crate::http::data_dir().join("logs");
+            println!("  {}/daemon.jsonl.*", data_logs.display());
+            let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
+            println!("  {home}/Library/Logs/Mando/daemon.log");
+            println!("\nTip: use 'mando-dev obs query --gw' for structured log access.");
+            Ok(())
+        }
+    }
+}
+
+/// Find the best available daemon log file.
+fn find_daemon_log() -> Option<std::path::PathBuf> {
+    // 1. MANDO_LOG_DIR (dev/sandbox JSONL)
+    if let Ok(dir) = std::env::var("MANDO_LOG_DIR") {
+        if let Some(path) = latest_jsonl(&std::path::PathBuf::from(dir)) {
+            return Some(path);
+        }
+    }
+
+    // 2. {data_dir}/logs/ (real prod JSONL)
+    let data_logs = crate::http::data_dir().join("logs");
+    if let Some(path) = latest_jsonl(&data_logs) {
+        return Some(path);
+    }
+
+    // 3. ~/Library/Logs/Mando/daemon.log (launchd fmt log)
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
-    let log_path = std::path::PathBuf::from(home).join("Library/Logs/Mando/daemon.log");
-    if !log_path.exists() {
-        println!("No log file at {}", log_path.display());
-        return Ok(());
+    let fmt_log = std::path::PathBuf::from(home).join("Library/Logs/Mando/daemon.log");
+    if fmt_log.exists() {
+        return Some(fmt_log);
     }
 
-    let mut args = vec!["-n".to_string(), lines.to_string()];
-    if follow {
-        args.push("-f".to_string());
-    }
-    args.push(log_path.to_string_lossy().into_owned());
+    None
+}
 
-    let status = tokio::process::Command::new("tail")
-        .args(&args)
-        .status()
-        .await?;
-
-    if !status.success() {
-        anyhow::bail!("tail exited with {status}");
-    }
-    Ok(())
+/// Find the most recent daemon.jsonl* file in a directory.
+fn latest_jsonl(dir: &std::path::Path) -> Option<std::path::PathBuf> {
+    let entries = std::fs::read_dir(dir).ok()?;
+    entries
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| {
+            p.file_name()
+                .and_then(|f| f.to_str())
+                .is_some_and(|f| f.starts_with("daemon.jsonl"))
+        })
+        .max_by_key(|p| p.metadata().and_then(|m| m.modified()).ok())
 }
 
 /// Find the daemon binary (mando-gw or self binary).

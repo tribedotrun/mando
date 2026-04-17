@@ -1,8 +1,8 @@
 import React, { useCallback } from 'react';
 import { useNavigate } from '@tanstack/react-router';
-import { SessionsCard } from '#renderer/domains/sessions/components/SessionsCard';
-import { ErrorBoundary } from '#renderer/global/components/ErrorBoundary';
-import type { SessionEntry } from '#renderer/types';
+import { SessionsCard } from '#renderer/domains/sessions/ui/SessionsCard';
+import { ErrorBoundary } from '#renderer/global/ui/ErrorBoundary';
+import type { SessionEntry } from '#renderer/global/types';
 
 export function SessionsPage(): React.ReactElement {
   const navigate = useNavigate();

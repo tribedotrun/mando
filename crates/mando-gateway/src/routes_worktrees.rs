@@ -9,7 +9,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use time::OffsetDateTime;
 
-use mando_captain::io::git;
+use captain::io::git;
 
 use crate::response::{error_response, internal_error};
 use crate::AppState;
@@ -18,10 +18,10 @@ use crate::AppState;
 async fn resolve_project_db(
     pool: &sqlx::SqlitePool,
     name: Option<&str>,
-) -> Result<mando_db::queries::projects::ProjectRow, (StatusCode, Json<Value>)> {
+) -> Result<settings::io::projects::ProjectRow, (StatusCode, Json<Value>)> {
     let name =
         name.ok_or_else(|| error_response(StatusCode::BAD_REQUEST, "project name required"))?;
-    mando_db::queries::projects::resolve(pool, name)
+    settings::io::projects::resolve(pool, name)
         .await
         .map_err(|e| internal_error(e, "failed to resolve project"))?
         .ok_or_else(|| error_response(StatusCode::NOT_FOUND, &format!("project not found: {name}")))
@@ -35,7 +35,7 @@ async fn find_project_for_worktree(pool: &sqlx::SqlitePool, wt_path: &Path) -> O
         return None;
     }
     let wt_name = wt_path.file_name().and_then(|n| n.to_str())?;
-    let projects = match mando_db::queries::projects::list(pool).await {
+    let projects = match settings::io::projects::list(pool).await {
         Ok(p) => p,
         Err(e) => {
             tracing::error!(error = %e, "failed to list projects for worktree lookup");
@@ -47,7 +47,7 @@ async fn find_project_for_worktree(pool: &sqlx::SqlitePool, wt_path: &Path) -> O
         if row.path.is_empty() {
             continue;
         }
-        let project_path = mando_config::expand_tilde(&row.path);
+        let project_path = global_infra::paths::expand_tilde(&row.path);
         let prefix = format!("{}-", repo_dir_name(&project_path));
         if wt_name.starts_with(&prefix) && best.as_ref().is_none_or(|(len, _)| prefix.len() > *len)
         {
@@ -78,7 +78,7 @@ pub(crate) async fn post_worktrees(
     Json(body): Json<CreateWorktreeBody>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let project_row = resolve_project_db(state.db.pool(), body.project.as_deref()).await?;
-    let project_path = mando_config::expand_tilde(&project_row.path);
+    let project_path = global_infra::paths::expand_tilde(&project_row.path);
 
     let suffix = match &body.name {
         Some(n) => n.clone(),
@@ -141,13 +141,13 @@ pub(crate) async fn post_worktrees(
 
     // Create a workbench row — use the suffix as the title (e.g. "0408-1625").
     let wb_title = suffix.clone();
-    let wb = mando_types::Workbench::new(
+    let wb = captain::Workbench::new(
         project_row.id,
         project_row.name.clone(),
         wt_path.to_string_lossy().to_string(),
         wb_title,
     );
-    let wb_id = match mando_db::queries::workbenches::insert(state.db.pool(), &wb).await {
+    let wb_id = match captain::io::queries::workbenches::insert(state.db.pool(), &wb).await {
         Ok(id) => Some(id),
         Err(e) => {
             tracing::warn!(
@@ -181,7 +181,7 @@ pub(crate) async fn post_worktrees(
 pub(crate) async fn get_worktrees(
     State(state): State<AppState>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    let projects = mando_db::queries::projects::list(state.db.pool())
+    let projects = settings::io::projects::list(state.db.pool())
         .await
         .map_err(|e| internal_error(e, "failed to load projects"))?;
     let mut worktrees = Vec::new();
@@ -190,7 +190,7 @@ pub(crate) async fn get_worktrees(
         if row.path.is_empty() {
             continue;
         }
-        let project_path = mando_config::expand_tilde(&row.path);
+        let project_path = global_infra::paths::expand_tilde(&row.path);
         match git::list_worktrees(&project_path).await {
             Ok(paths) => {
                 for p in paths {
@@ -218,7 +218,7 @@ pub(crate) async fn get_worktrees(
 pub(crate) async fn post_worktrees_prune(
     State(state): State<AppState>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    let projects = mando_db::queries::projects::list(state.db.pool())
+    let projects = settings::io::projects::list(state.db.pool())
         .await
         .map_err(|e| internal_error(e, "failed to load projects"))?;
     let mut pruned = Vec::new();
@@ -227,7 +227,7 @@ pub(crate) async fn post_worktrees_prune(
         if row.path.is_empty() {
             continue;
         }
-        let project_path = mando_config::expand_tilde(&row.path);
+        let project_path = global_infra::paths::expand_tilde(&row.path);
         let output = tokio::process::Command::new("git")
             .args(["worktree", "prune"])
             .current_dir(&project_path)
@@ -297,7 +297,7 @@ pub(crate) async fn post_worktrees_cleanup(
     State(state): State<AppState>,
     Json(body): Json<CleanupBody>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    let projects = mando_db::queries::projects::list(state.db.pool())
+    let projects = settings::io::projects::list(state.db.pool())
         .await
         .map_err(|e| internal_error(e, "failed to load projects"))?;
     let mut orphans = Vec::new();
@@ -311,7 +311,7 @@ pub(crate) async fn post_worktrees_cleanup(
         if row.path.is_empty() {
             continue;
         }
-        let project_path = mando_config::expand_tilde(&row.path);
+        let project_path = global_infra::paths::expand_tilde(&row.path);
         let prefix = format!("{}-", repo_dir_name(&project_path));
 
         if !body.dry_run {

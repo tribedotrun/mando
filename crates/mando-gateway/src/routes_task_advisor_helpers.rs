@@ -3,8 +3,8 @@
 use crate::AppState;
 
 /// Check if the given intent is allowed from the task's current status.
-pub(crate) fn action_eligible(intent: &str, status: &mando_types::ItemStatus) -> bool {
-    use mando_types::ItemStatus;
+pub(crate) fn action_eligible(intent: &str, status: &captain::ItemStatus) -> bool {
+    use captain::ItemStatus;
     match intent {
         "rework" => matches!(
             status,

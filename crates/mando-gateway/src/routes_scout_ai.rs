@@ -27,7 +27,7 @@ pub(crate) async fn post_scout_research(
     let pool = state.db.pool().clone();
 
     // Insert research run row (status=running).
-    let run_id = mando_db::queries::scout_research::insert_run(&pool, &body.topic)
+    let run_id = scout::io::queries::scout_research::insert_run(&pool, &body.topic)
         .await
         .map_err(|e| internal_error(e, "failed to create research run"))?;
 
@@ -49,12 +49,12 @@ pub(crate) async fn post_scout_research(
             let msg = panic_to_string(&panic);
             tracing::error!(run_id, panic = %msg, "research job panicked");
             if let Err(db_err) =
-                mando_db::queries::scout_research::fail_run(&panic_pool, run_id, &msg).await
+                scout::io::queries::scout_research::fail_run(&panic_pool, run_id, &msg).await
             {
                 tracing::error!(run_id, error = %db_err, "failed to mark panicked run as failed");
             }
             panic_bus.send(
-                mando_types::BusEvent::Research,
+                global_types::BusEvent::Research,
                 Some(json!({"action": "failed", "run_id": run_id, "error": msg})),
             );
         }
@@ -82,7 +82,7 @@ async fn run_research_job(state: AppState, run_id: i64, topic: &str, process: bo
 
     // Emit research_started SSE.
     bus.send(
-        mando_types::BusEvent::Research,
+        global_types::BusEvent::Research,
         Some(json!({"action": "started", "run_id": run_id, "research_prompt": topic})),
     );
 
@@ -101,7 +101,7 @@ async fn run_research_job(state: AppState, run_id: i64, topic: &str, process: bo
                 _ = tokio::time::sleep(std::time::Duration::from_secs(wait)) => {
                     elapsed += wait;
                     hb_bus.send(
-                        mando_types::BusEvent::Research,
+                        global_types::BusEvent::Research,
                         Some(json!({"action": "progress", "run_id": run_id, "elapsed_s": elapsed})),
                     );
                 }
@@ -111,15 +111,14 @@ async fn run_research_job(state: AppState, run_id: i64, topic: &str, process: bo
     });
 
     // Run the CC session.
-    let research_result =
-        mando_scout::runtime::research::run_research(topic, &workflow, &pool).await;
+    let research_result = scout::runtime::research::run_research(topic, &workflow, &pool).await;
     heartbeat_cancel.cancel();
     let _ = hb_handle.await;
 
     match research_result {
         Ok(output) => {
             // Record the research session.
-            let scout_db = mando_scout::ScoutDb::new(pool.clone());
+            let scout_db = scout::ScoutDb::new(pool.clone());
             if let Err(e) = scout_db
                 .record_session(
                     None,
@@ -133,7 +132,7 @@ async fn run_research_job(state: AppState, run_id: i64, topic: &str, process: bo
             {
                 tracing::warn!(error = %e, "failed to record research session");
             }
-            state.bus.send(mando_types::BusEvent::Sessions, None);
+            state.bus.send(global_types::BusEvent::Sessions, None);
 
             // Process discovered links (capped by research_max_items).
             let max_items = workflow.agent.research_max_items;
@@ -142,7 +141,7 @@ async fn run_research_job(state: AppState, run_id: i64, topic: &str, process: bo
             let mut links_json: Vec<Value> = Vec::new();
 
             for link in output.result.links.iter().take(max_items) {
-                match mando_scout::add_scout_item(&pool, &link.url, Some(&link.title)).await {
+                match scout::add_scout_item(&pool, &link.url, Some(&link.title)).await {
                     Ok(val) => {
                         let id = val["id"].as_i64();
                         let was_added = val["added"].as_bool() == Some(true);
@@ -153,16 +152,15 @@ async fn run_research_job(state: AppState, run_id: i64, topic: &str, process: bo
                                 // record who discovered it. Existing items
                                 // keep their original research_run_id so
                                 // historical attribution is preserved.
-                                if let Err(e) =
-                                    mando_db::queries::scout::set_research_run_id(&pool, id, run_id)
-                                        .await
+                                if let Err(e) = scout::io::queries::scout::set_research_run_id(
+                                    &pool, id, run_id,
+                                )
+                                .await
                                 {
                                     tracing::warn!(scout_id = id, error = %e, "failed to set research_run_id");
                                 }
                                 added_count += 1;
-                                let scout_payload = match mando_scout::get_scout_item(&pool, id)
-                                    .await
-                                {
+                                let scout_payload = match scout::get_scout_item(&pool, id).await {
                                     Ok(v) => Some(v),
                                     Err(e) => {
                                         tracing::warn!(scout_id = id, error = %e, "failed to fetch scout item for SSE event");
@@ -170,7 +168,7 @@ async fn run_research_job(state: AppState, run_id: i64, topic: &str, process: bo
                                     }
                                 };
                                 bus.send(
-                                    mando_types::BusEvent::Scout,
+                                    global_types::BusEvent::Scout,
                                     Some(json!({"action": "created", "item": scout_payload, "id": id})),
                                 );
                                 if process {
@@ -180,9 +178,7 @@ async fn run_research_job(state: AppState, run_id: i64, topic: &str, process: bo
                                 // Existing item: retry if stuck at error or
                                 // pending (e.g. prior research run was
                                 // interrupted before processing kicked off).
-                                let current_status = match mando_scout::get_scout_item(&pool, id)
-                                    .await
-                                {
+                                let current_status = match scout::get_scout_item(&pool, id).await {
                                     Ok(v) => v["status"].as_str().map(str::to_string),
                                     Err(e) => {
                                         tracing::warn!(scout_id = id, error = %e, "failed to fetch scout item status");
@@ -191,8 +187,10 @@ async fn run_research_job(state: AppState, run_id: i64, topic: &str, process: bo
                                 };
                                 match current_status.as_deref() {
                                     Some("error") => {
-                                        match mando_db::queries::scout::reset_error_state(&pool, id)
-                                            .await
+                                        match scout::io::queries::scout::reset_error_state(
+                                            &pool, id,
+                                        )
+                                        .await
                                         {
                                             Err(e) => {
                                                 tracing::warn!(scout_id = id, error = %e, "failed to reset error state")
@@ -203,18 +201,19 @@ async fn run_research_job(state: AppState, run_id: i64, topic: &str, process: bo
                                                     id,
                                                     link.url.clone(),
                                                 );
-                                                let scout_payload =
-                                                    match mando_scout::get_scout_item(&pool, id)
-                                                        .await
-                                                    {
-                                                        Ok(v) => Some(v),
-                                                        Err(e) => {
-                                                            tracing::warn!(scout_id = id, error = %e, "failed to fetch scout item for SSE event");
-                                                            None
-                                                        }
-                                                    };
+                                                let scout_payload = match scout::get_scout_item(
+                                                    &pool, id,
+                                                )
+                                                .await
+                                                {
+                                                    Ok(v) => Some(v),
+                                                    Err(e) => {
+                                                        tracing::warn!(scout_id = id, error = %e, "failed to fetch scout item for SSE event");
+                                                        None
+                                                    }
+                                                };
                                                 bus.send(
-                                                    mando_types::BusEvent::Scout,
+                                                    global_types::BusEvent::Scout,
                                                     Some(json!({"action": "updated", "item": scout_payload, "id": id})),
                                                 );
                                             }
@@ -247,7 +246,7 @@ async fn run_research_job(state: AppState, run_id: i64, topic: &str, process: bo
             }
 
             // Complete the research run.
-            if let Err(e) = mando_db::queries::scout_research::complete_run(
+            if let Err(e) = scout::io::queries::scout_research::complete_run(
                 &pool,
                 run_id,
                 &output.session_id,
@@ -259,7 +258,7 @@ async fn run_research_job(state: AppState, run_id: i64, topic: &str, process: bo
             }
 
             bus.send(
-                mando_types::BusEvent::Research,
+                global_types::BusEvent::Research,
                 Some(json!({
                     "action": "completed",
                     "run_id": run_id,
@@ -272,12 +271,12 @@ async fn run_research_job(state: AppState, run_id: i64, topic: &str, process: bo
         Err(e) => {
             let error_msg = e.to_string();
             if let Err(db_err) =
-                mando_db::queries::scout_research::fail_run(&pool, run_id, &error_msg).await
+                scout::io::queries::scout_research::fail_run(&pool, run_id, &error_msg).await
             {
                 tracing::warn!(run_id, error = %db_err, "failed to mark research run as failed");
             }
             bus.send(
-                mando_types::BusEvent::Research,
+                global_types::BusEvent::Research,
                 Some(json!({"action": "failed", "run_id": run_id, "error": error_msg})),
             );
         }
@@ -289,7 +288,7 @@ pub(crate) async fn get_scout_research_runs(
     State(state): State<AppState>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let pool = state.db.pool();
-    let runs = mando_db::queries::scout_research::list_runs(pool, 50)
+    let runs = scout::io::queries::scout_research::list_runs(pool, 50)
         .await
         .map_err(|e| internal_error(e, "failed to load research runs"))?;
     Ok(Json(serde_json::to_value(&runs).map_err(|e| {
@@ -303,7 +302,7 @@ pub(crate) async fn get_scout_research_run_items(
     Path(id): Path<i64>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let pool = state.db.pool();
-    let items = mando_db::queries::scout::list_items_by_run(pool, id)
+    let items = scout::io::queries::scout::list_items_by_run(pool, id)
         .await
         .map_err(|e| internal_error(e, "failed to load research run items"))?;
     Ok(Json(serde_json::to_value(&items).map_err(|e| {
@@ -317,7 +316,7 @@ pub(crate) async fn get_scout_research_run(
     Path(id): Path<i64>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let pool = state.db.pool();
-    let run = mando_db::queries::scout_research::get_run(pool, id)
+    let run = scout::io::queries::scout_research::get_run(pool, id)
         .await
         .map_err(|e| internal_error(e, "failed to load research run"))?
         .ok_or_else(|| {
@@ -354,10 +353,10 @@ async fn post_scout_ask_inner(
     let id = body.id;
     let session_key = body.session_id.clone();
 
-    let item = mando_scout::get_scout_item(pool, id)
+    let item = scout::get_scout_item(pool, id)
         .await
         .map_err(|e| internal_error(e, "failed to load scout item"))?;
-    let article_data = mando_scout::ensure_scout_article(pool, id, &workflow)
+    let article_data = scout::ensure_scout_article(pool, id, &workflow)
         .await
         .map_err(|e| internal_error(e, "failed to load scout article"))?;
 
@@ -370,7 +369,7 @@ async fn post_scout_ask_inner(
         .unwrap_or("(no article content)")
         .to_string();
 
-    let raw_path = mando_scout::content_path(id);
+    let raw_path = scout::content_path(id);
     let raw_note = if raw_path.exists() {
         Some(format!(
             "The original source content is saved at `{}`. Read it for full detail.",
@@ -406,7 +405,7 @@ async fn post_scout_ask_inner(
 
     // Record the Q&A session in cc_sessions.
     if let Some(ref sid) = qa_result.session_id {
-        let scout_db = mando_scout::ScoutDb::new(pool.clone());
+        let scout_db = scout::ScoutDb::new(pool.clone());
         if let Err(e) = scout_db
             .record_session(
                 Some(id),
@@ -420,7 +419,7 @@ async fn post_scout_ask_inner(
         {
             tracing::warn!(error = %e, "post_scout_ask: failed to record session");
         }
-        state.bus.send(mando_types::BusEvent::Sessions, None);
+        state.bus.send(global_types::BusEvent::Sessions, None);
     }
 
     Ok(Json(json!({

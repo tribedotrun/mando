@@ -11,7 +11,7 @@ use std::fs;
 use std::path::PathBuf;
 
 fn pid_path() -> PathBuf {
-    mando_config::data_dir().join("daemon.pid")
+    global_infra::paths::data_dir().join("daemon.pid")
 }
 
 fn port_path(dev: bool) -> PathBuf {
@@ -20,7 +20,7 @@ fn port_path(dev: bool) -> PathBuf {
     } else {
         "daemon.port"
     };
-    mando_config::data_dir().join(name)
+    global_infra::paths::data_dir().join(name)
 }
 
 /// Ensure no other mando-gw is running, then write our PID.

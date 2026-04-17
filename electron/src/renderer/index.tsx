@@ -3,9 +3,9 @@ import { createRoot } from 'react-dom/client';
 import { RouterProvider } from '@tanstack/react-router';
 import { DataProvider } from '#renderer/app/DataProvider';
 import { router } from '#renderer/app/router';
-import { ErrorBoundary } from '#renderer/global/components/ErrorBoundary';
-import { Toaster } from '#renderer/components/ui/sonner';
-import { TooltipProvider } from '#renderer/components/ui/tooltip';
+import { ErrorBoundary } from '#renderer/global/ui/ErrorBoundary';
+import { Toaster } from '#renderer/global/ui/sonner';
+import { TooltipProvider } from '#renderer/global/ui/tooltip';
 import './index.css';
 
 const container = document.getElementById('root');

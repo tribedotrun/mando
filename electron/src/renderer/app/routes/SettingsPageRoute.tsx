@@ -1,10 +1,7 @@
 import React from 'react';
 import { useNavigate, useParams } from '@tanstack/react-router';
-import {
-  SettingsPage,
-  type SettingsSection,
-} from '#renderer/domains/settings/components/SettingsPage';
-import { ErrorBoundary } from '#renderer/global/components/ErrorBoundary';
+import { SettingsPage, type SettingsSection } from '#renderer/domains/settings/ui/SettingsPage';
+import { ErrorBoundary } from '#renderer/global/ui/ErrorBoundary';
 import { router } from '#renderer/app/router';
 
 export function SettingsPageRoute(): React.ReactElement {

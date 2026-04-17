@@ -1,6 +1,6 @@
 {
   "name": "mando",
-  "version": "0.1.18-beta.4",
+  "version": "0.1.18-beta.5",
   "description": "Desktop app for managing AI coding agents",
   "license": "Apache-2.0",
   "repository": {
@@ -22,6 +22,7 @@
     "test": "npx playwright test",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src/ tests/",
+    "lint:test": "node --test 'eslint/**/tests/*.test.mjs'",
     "format": "prettier --write 'src/**/*.{ts,tsx}' 'tests/**/*.ts' '*.{ts,mjs,mts}'",
     "format:check": "prettier --check 'src/**/*.{ts,tsx}' 'tests/**/*.ts' '*.{ts,mjs,mts}'"
   },

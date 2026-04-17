@@ -1,8 +1,7 @@
 //! Shared image-upload helpers for multipart endpoints.
 //!
-//! Provides dual-mode extraction (JSON or multipart) for endpoints that
-//! accept optional image attachments while remaining backward-compatible
-//! with existing JSON-only clients (CLI, Telegram).
+//! Provides dual-mode extraction: multipart for image-capable clients
+//! (Electron), JSON for text-only clients (CLI, Telegram).
 
 use axum::extract::multipart::Field;
 use axum::extract::{FromRequest, Multipart};
@@ -65,14 +64,14 @@ const MAX_IMAGE_BYTES: usize = 10 * 1024 * 1024; // 10 MB
 pub(crate) async fn save_image_field(
     field: Field<'_>,
 ) -> Result<String, (StatusCode, Json<Value>)> {
-    let images_dir = mando_config::images_dir();
+    let images_dir = global_infra::paths::images_dir();
     let filename = field.file_name().unwrap_or("upload").to_string();
     let ext = filename
         .rsplit('.')
         .next()
         .filter(|e| e.len() <= 5)
         .unwrap_or("bin");
-    let uuid = mando_uuid::Uuid::v4();
+    let uuid = global_infra::uuid::Uuid::v4();
     let dest_name = format!("{uuid}.{ext}");
 
     let data = field
@@ -100,7 +99,7 @@ pub(crate) async fn save_image_field(
 
 /// Append new image filenames to a task's existing `images` field.
 pub(crate) async fn append_task_images(
-    store: &mando_captain::io::task_store::TaskStore,
+    store: &captain::io::task_store::TaskStore,
     id: i64,
     new_images: &[String],
 ) -> Result<(), (StatusCode, Json<Value>)> {
@@ -126,7 +125,7 @@ pub(crate) async fn cleanup_saved_images(filenames: &[String]) {
     if filenames.is_empty() {
         return;
     }
-    let dir = mando_config::images_dir();
+    let dir = global_infra::paths::images_dir();
     for name in filenames {
         let path = dir.join(name);
         if let Err(e) = tokio::fs::remove_file(&path).await {
@@ -140,7 +139,7 @@ pub(crate) fn format_image_paths(filenames: &[String]) -> String {
     if filenames.is_empty() {
         return String::new();
     }
-    let dir = mando_config::images_dir();
+    let dir = global_infra::paths::images_dir();
     let lines: Vec<String> = filenames
         .iter()
         .map(|f| format!("- {}", dir.join(f).display()))

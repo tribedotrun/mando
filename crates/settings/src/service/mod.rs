@@ -1,0 +1,1 @@
+//! Settings pure business logic.

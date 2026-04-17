@@ -126,8 +126,8 @@ async fn build_snapshot(state: &AppState) -> anyhow::Result<serde_json::Value> {
     let tasks = serde_json::to_value(&all_items)?;
 
     let workers = {
-        let health_path = mando_config::worker_health_path();
-        let health = mando_captain::io::health_store::load_health_state_async(&health_path).await?;
+        let health_path = captain::config::worker_health_path();
+        let health = captain::io::health_store::load_health_state_async(&health_path).await?;
         let nudge_budget = workflow.agent.max_interventions;
 
         all_items
@@ -135,18 +135,15 @@ async fn build_snapshot(state: &AppState) -> anyhow::Result<serde_json::Value> {
             .filter(|t| {
                 matches!(
                     t.status,
-                    mando_types::task::ItemStatus::InProgress
-                        | mando_types::task::ItemStatus::CaptainReviewing
-                        | mando_types::task::ItemStatus::CaptainMerging
+                    captain::ItemStatus::InProgress
+                        | captain::ItemStatus::CaptainReviewing
+                        | captain::ItemStatus::CaptainMerging
                 ) && t.worker.is_some()
             })
             .map(|task| {
                 let worker_name = task.worker.as_deref().unwrap_or("");
-                let nudge_count = mando_captain::io::health_store::get_health_u32(
-                    &health,
-                    worker_name,
-                    "nudge_count",
-                );
+                let nudge_count =
+                    captain::io::health_store::get_health_u32(&health, worker_name, "nudge_count");
                 let last_action = health
                     .get(worker_name)
                     .and_then(|v| v.get("last_action"))
@@ -174,7 +171,7 @@ async fn build_snapshot(state: &AppState) -> anyhow::Result<serde_json::Value> {
     };
 
     // Workbenches (active, non-archived, non-deleted).
-    let workbenches = match mando_db::queries::workbenches::load_active(state.db.pool()).await {
+    let workbenches = match captain::io::queries::workbenches::load_active(state.db.pool()).await {
         Ok(wbs) => serde_json::to_value(&wbs).unwrap_or_default(),
         Err(e) => {
             tracing::warn!(error = %e, "SSE snapshot: failed to load workbenches");
@@ -227,11 +224,11 @@ async fn build_snapshot(state: &AppState) -> anyhow::Result<serde_json::Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mando_types::BusEvent;
+    use global_types::BusEvent;
 
     #[tokio::test]
     async fn sse_receives_event() {
-        let bus = mando_shared::EventBus::new();
+        let bus = global_bus::EventBus::new();
         let mut rx = bus.subscribe();
 
         bus.send(BusEvent::Tasks, Some(json!({"test": true})));

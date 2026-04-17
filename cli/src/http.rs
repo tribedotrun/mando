@@ -10,7 +10,7 @@ use tracing::debug;
 /// Re-export for use inside the CLI crate. Single source of truth lives in
 /// mando-types so the CLI and daemon cannot drift out of sync on where
 /// runtime state is read/written.
-pub(crate) use mando_types::data_dir;
+pub(crate) use global_types::data_dir;
 
 /// Discover daemon port and auth token, build a pre-configured client.
 pub(crate) struct DaemonClient {
@@ -186,8 +186,8 @@ impl DaemonClient {
     }
 }
 
-/// Thin wrapper around `mando_types::parse_i64_id` that returns an
+/// Thin wrapper around `global_types::parse_i64_id` that returns an
 /// `anyhow::Error` instead of a plain String, so call sites can use `?`.
 pub(crate) fn parse_id(id: &str, label: &str) -> Result<i64> {
-    mando_types::parse_i64_id(id, label).map_err(|e| anyhow::anyhow!(e))
+    global_types::parse_i64_id(id, label).map_err(|e| anyhow::anyhow!(e))
 }

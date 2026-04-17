@@ -1,22 +1,27 @@
 [package]
 name = "mando-gateway"
 version.workspace = true
-edition = "2021"
-description = "HTTP/SSE daemon — API server, captain tick loop, and event streaming"
+edition.workspace = true
 license.workspace = true
-repository.workspace = true
-homepage.workspace = true
+description = "Mando daemon — HTTP API, captain tick loop, event streaming, and Electron/TG transports"
 
 [[bin]]
 name = "mando-gw"
 path = "src/main.rs"
 
 [dependencies]
-mando-types.workspace = true
-mando-config.workspace = true
-mando-captain.workspace = true
-mando-scout.workspace = true
-mando-shared.workspace = true
+global-types = { path = "../global-types" }
+global-infra = { path = "../global-infra" }
+global-claude = { path = "../global-claude" }
+global-bus = { path = "../global-bus" }
+global-db = { path = "../global-db" }
+sessions = { path = "../sessions" }
+settings = { path = "../settings" }
+captain.workspace = true
+scout.workspace = true
+transport-http = { path = "../transport-http" }
+transport-tg = { path = "../transport-tg" }
+terminal.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 axum.workspace = true
@@ -37,12 +42,7 @@ reqwest.workspace = true
 arc-swap.workspace = true
 anyhow.workspace = true
 time.workspace = true
-mando-uuid.workspace = true
-mando-cc.workspace = true
-mando-db.workspace = true
 sqlx.workspace = true
-mando-telegram = { path = "../mando-telegram" }
-mando-terminal.workspace = true
 rustc-hash.workspace = true
 async-stream = "0.3"
 shell-words = "1"

@@ -1,43 +1,26 @@
-import React, { createContext, use, useMemo, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { QueryClientProvider } from '@tanstack/react-query';
-import { queryClient } from '#renderer/queryClient';
-import { OBS_DEGRADED_EVENT } from '#renderer/api';
-import log from '#renderer/logger';
-import { useDesktopNotifications } from '#renderer/global/hooks/useDesktopNotifications';
-import { useMountEffect } from '#renderer/global/hooks/useMountEffect';
+import { queryClient } from '#renderer/global/providers/queryClient';
+import { OBS_DEGRADED_EVENT } from '#renderer/global/providers/http';
+import log from '#renderer/global/service/logger';
+import { useDesktopNotifications } from '#renderer/global/runtime/useDesktopNotifications';
+import { useMountEffect } from '#renderer/global/runtime/useMountEffect';
+import { useNativeActions } from '#renderer/global/runtime/useNativeActions';
 import { toast } from 'sonner';
-import { RetryButton } from '#renderer/domains/captain/components/RetryButton';
-import { Skeleton } from '#renderer/components/ui/skeleton';
-import { useSseSync } from '#renderer/hooks/useSseSync';
-import type { SSEConnectionStatus } from '#renderer/types';
+import { RetryButton } from '#renderer/domains/captain/ui/RetryButton';
+import { Skeleton } from '#renderer/global/ui/skeleton';
+import { useSseSync } from '#renderer/global/runtime/useSseSync';
+import type { SSEConnectionStatus } from '#renderer/global/types';
+import { DataContext } from '#renderer/global/runtime/dataContext';
 
 const INIT_FALLBACK_MS = 3_000;
-
-// ---------------------------------------------------------------------------
-// Context -- exposes SSE status to consumers
-// ---------------------------------------------------------------------------
-
-interface DataContextValue {
-  sseStatus: SSEConnectionStatus;
-}
-
-const DataContext = createContext<DataContextValue>({
-  sseStatus: 'disconnected',
-});
-
-export function useDataContext(): DataContextValue {
-  return use(DataContext);
-}
-
-// ---------------------------------------------------------------------------
-// Inner component (rendered inside QueryClientProvider so hooks work)
-// ---------------------------------------------------------------------------
 
 function DataProviderInner({ children }: { children: React.ReactNode }): React.ReactElement {
   const [initialized, setInitialized] = useState(false);
   const [initError, setInitError] = useState<string | null>(null);
   const [needsOnboarding, setNeedsOnboarding] = useState(false);
   const [sseStatus, setSseStatus] = useState<SSEConnectionStatus>('disconnected');
+  const { restartDaemon } = useNativeActions();
 
   const { processEvent: processNotification } = useDesktopNotifications();
 
@@ -61,12 +44,14 @@ function DataProviderInner({ children }: { children: React.ReactNode }): React.R
       }
     },
     onBootstrap: async () => {
-      if (window.mandoAPI) {
-        const hasConfig = await window.mandoAPI.hasConfig();
+      if (typeof window !== 'undefined' && 'mandoAPI' in window) {
+        const hasConfig = await (
+          window as { mandoAPI: { hasConfig: () => Promise<boolean> } }
+        ).mandoAPI.hasConfig();
         if (!hasConfig) {
           setNeedsOnboarding(true);
           setInitialized(true);
-          return true; // needs onboarding, skip SSE
+          return true;
         }
       }
       return false;
@@ -111,9 +96,7 @@ function DataProviderInner({ children }: { children: React.ReactNode }): React.R
         </span>
         <RetryButton
           className="mt-2 inline-flex items-center justify-center rounded-md bg-foreground px-4 py-2 text-sm font-medium text-background hover:bg-foreground/90"
-          onRetry={() =>
-            void window.mandoAPI.restartDaemon().finally(() => window.location.reload())
-          }
+          onRetry={restartDaemon}
         />
       </div>
     );
@@ -143,7 +126,7 @@ function OnboardingPlaceholder(): React.ReactElement {
   const [OnboardingWizard, setOW] = useState<React.ComponentType | null>(null);
   const [loadError, setLoadError] = useState(false);
   useMountEffect(() => {
-    import('#renderer/domains/onboarding/components/OnboardingWizard')
+    import('#renderer/domains/onboarding/ui/OnboardingWizard')
       .then((mod) => {
         setOW(() => mod.OnboardingWizard);
       })

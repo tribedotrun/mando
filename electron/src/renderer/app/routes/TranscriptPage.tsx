@@ -1,46 +1,30 @@
-import React, { useRef, useState } from 'react';
+import React from 'react';
 import { useParams, useSearch } from '@tanstack/react-router';
-import { useMountEffect } from '#renderer/global/hooks/useMountEffect';
-import { useQuery } from '@tanstack/react-query';
 import { Copy, Check, Terminal as TerminalIcon } from 'lucide-react';
-import { fetchTranscript } from '#renderer/api-sessions';
-import { TranscriptViewer, formatCallerLabel } from '#renderer/domains/sessions';
-import { useWorkbenchList } from '#renderer/hooks/queries';
-import { copyToClipboard } from '#renderer/utils';
-import { queryKeys } from '#renderer/queryKeys';
-import { Button } from '#renderer/components/ui/button';
-import { ScrollArea } from '#renderer/components/ui/scroll-area';
-import { Skeleton } from '#renderer/components/ui/skeleton';
-import { ErrorBoundary } from '#renderer/global/components/ErrorBoundary';
+import { formatCallerLabel, useTranscript, buildResumeCmd } from '#renderer/domains/sessions';
+import { TranscriptViewer } from '#renderer/domains/sessions/ui/TranscriptViewer';
+import { useWorkbenchList } from '#renderer/domains/captain';
+import { copyToClipboard } from '#renderer/global/service/utils';
+import { useCopyFeedback } from '#renderer/global/runtime/useCopyFeedback';
+import { Button } from '#renderer/global/ui/button';
+import { ScrollArea } from '#renderer/global/ui/scroll-area';
+import { Skeleton } from '#renderer/global/ui/skeleton';
+import { ErrorBoundary } from '#renderer/global/ui/ErrorBoundary';
 import { router } from '#renderer/app/router';
-
-const COPY_FEEDBACK_MS = 1200;
 
 export function TranscriptPage(): React.ReactElement {
   const { sessionId } = useParams({ strict: false }) as { sessionId: string };
   const search = useSearch({ from: '/_app/sessions/$sessionId' });
 
-  const { data, isLoading, error } = useQuery({
-    queryKey: queryKeys.sessions.transcript(sessionId),
-    queryFn: () => fetchTranscript(sessionId),
-    enabled: !!sessionId,
-  });
+  const { data, isLoading, error } = useTranscript(sessionId);
 
-  const [copyState, setCopyState] = useState<'idle' | 'copied'>('idle');
-  const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  useMountEffect(() => () => clearTimeout(timerRef.current));
+  const { copied, markCopied } = useCopyFeedback();
 
-  const resumeCmd = search.cwd
-    ? `cd "${search.cwd}" && claude -r ${sessionId}`
-    : `claude -r ${sessionId}`;
+  const resumeCmd = buildResumeCmd(sessionId, search.cwd);
 
   const handleCopy = () => {
     void copyToClipboard(resumeCmd).then((ok) => {
-      if (ok) {
-        setCopyState('copied');
-        clearTimeout(timerRef.current);
-        timerRef.current = setTimeout(() => setCopyState('idle'), COPY_FEEDBACK_MS);
-      }
+      if (ok) markCopied();
     });
   };
 
@@ -57,8 +41,7 @@ export function TranscriptPage(): React.ReactElement {
     }
   };
 
-  const callerLabel = search.caller ? formatCallerLabel(search.caller) : 'session';
-  const title = callerLabel.charAt(0).toUpperCase() + callerLabel.slice(1);
+  const title = search.caller ? formatCallerLabel(search.caller) : 'Session';
 
   return (
     <div className="absolute inset-0 flex flex-col overflow-hidden bg-background">
@@ -72,7 +55,7 @@ export function TranscriptPage(): React.ReactElement {
         </div>
         <div className="flex items-center gap-2">
           <Button variant="outline" size="sm" onClick={handleCopy} className="gap-1.5">
-            {copyState === 'copied' ? <Check size={13} /> : <Copy size={13} />}
+            {copied ? <Check size={13} /> : <Copy size={13} />}
             <span className="font-mono text-[11px]">-r</span>
           </Button>
           {workbench && (
