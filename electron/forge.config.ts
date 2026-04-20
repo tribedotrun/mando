@@ -27,7 +27,7 @@ const BUNDLE_IDS: Record<string, string> = {
 const appName = APP_NAMES[appMode] || 'Mando';
 const bundleId = BUNDLE_IDS[appMode] || 'run.tribe.mando';
 
-const rustTargetDir = process.env.MANDO_RUST_TARGET_DIR || '../target/release';
+const rustTargetDir = process.env.MANDO_RUST_TARGET_DIR || '../rust/target/release';
 
 const config: ForgeConfig = {
   packagerConfig: {

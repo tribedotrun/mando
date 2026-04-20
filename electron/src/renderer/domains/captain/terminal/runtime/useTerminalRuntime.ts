@@ -2,11 +2,11 @@ import { useRef, useState } from 'react';
 import type { TerminalSessionInfo } from '#renderer/domains/captain/repo/terminal-api';
 import { useMountEffect } from '#renderer/global/runtime/useMountEffect';
 import { useViewKeyHandler } from '#renderer/global/runtime/useKeyboardShortcuts';
-import {
-  TerminalRuntime,
-  type TerminalConnectionState,
-  type TerminalSearchState,
-} from '#renderer/domains/captain/terminal/runtime/terminalRuntime';
+import { TerminalRuntime } from '#renderer/domains/captain/terminal/runtime/terminalRuntime';
+import type {
+  TerminalConnectionState,
+  TerminalSearchState,
+} from '#renderer/domains/captain/terminal/runtime/terminalConfig';
 import log from '#renderer/global/service/logger';
 
 interface UseTerminalRuntimeOptions {
@@ -25,12 +25,12 @@ interface UseTerminalRuntimeResult {
   findPrevious: () => void;
 }
 
-const EMPTY_SEARCH: TerminalSearchState = {
+const EMPTY_SEARCH: TerminalSearchState = Object.freeze({
   open: false,
   query: '',
   resultCount: 0,
   resultIndex: -1,
-};
+});
 
 export function useTerminalRuntime({
   session,

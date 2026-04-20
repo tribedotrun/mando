@@ -1,10 +1,20 @@
-import { buildUrl, apiGet, apiPatch, apiPost } from '#renderer/global/providers/http';
+import {
+  apiDeleteRouteR,
+  apiGetRouteR,
+  apiPatchRouteR,
+  apiPostRouteR,
+  openSseRoute,
+} from '#renderer/global/providers/http';
 import log from '#renderer/global/service/logger';
+import type { RouteEvent } from '#shared/daemon-contract/runtime';
+import { eventSchemas } from '#shared/daemon-contract/schemas';
 import type {
+  CreateWorktreeResponse,
   WorkbenchItem,
   WorkbenchStatusFilter,
   TerminalSessionInfo,
 } from '#renderer/global/types';
+import { type ApiError, type ResultAsync, ApiErrorThrown, parseSseMessage } from '#result';
 
 export type {
   WorkbenchItem,
@@ -16,38 +26,35 @@ export type {
 // Workbenches
 // ---------------------------------------------------------------------------
 
-export async function fetchWorkbenches(status?: WorkbenchStatusFilter): Promise<WorkbenchItem[]> {
-  const query = status && status !== 'active' ? `?status=${status}` : '';
-  const res = await apiGet<{ workbenches: WorkbenchItem[] }>(`/api/workbenches${query}`);
-  return res.workbenches;
+export function fetchWorkbenches(
+  status?: WorkbenchStatusFilter,
+): ResultAsync<WorkbenchItem[], ApiError> {
+  return apiGetRouteR('getWorkbenches', {
+    query: status && status !== 'active' ? { status } : undefined,
+  }).map((res) => res.workbenches);
 }
 
-export function archiveWorkbench(id: number): Promise<WorkbenchItem> {
-  return apiPatch<WorkbenchItem>(`/api/workbenches/${id}`, { archived: true });
+export function archiveWorkbench(id: number): ResultAsync<WorkbenchItem, ApiError> {
+  return apiPatchRouteR('patchWorkbenchesById', { archived: true }, { params: { id } });
 }
 
-export function pinWorkbench(id: number, pinned: boolean): Promise<WorkbenchItem> {
-  return apiPatch<WorkbenchItem>(`/api/workbenches/${id}`, { pinned });
+export function pinWorkbench(id: number, pinned: boolean): ResultAsync<WorkbenchItem, ApiError> {
+  return apiPatchRouteR('patchWorkbenchesById', { pinned }, { params: { id } });
 }
 
-export function renameWorkbench(id: number, title: string): Promise<WorkbenchItem> {
-  return apiPatch<WorkbenchItem>(`/api/workbenches/${id}`, { title });
+export function renameWorkbench(id: number, title: string): ResultAsync<WorkbenchItem, ApiError> {
+  return apiPatchRouteR('patchWorkbenchesById', { title }, { params: { id } });
 }
 
 // ---------------------------------------------------------------------------
 // Worktrees
 // ---------------------------------------------------------------------------
 
-export interface CreateWorktreeResult {
-  ok: boolean;
-  path: string;
-  branch: string;
-  project: string;
-  workbenchId?: number;
-}
-
-export function createWorktree(project: string, name?: string): Promise<CreateWorktreeResult> {
-  return apiPost<CreateWorktreeResult>('/api/worktrees', { project, name });
+export function createWorktree(
+  project: string,
+  name?: string,
+): ResultAsync<CreateWorktreeResponse, ApiError> {
+  return apiPostRouteR('postWorktrees', { project, name });
 }
 
 export interface CreateTerminalParams {
@@ -59,46 +66,18 @@ export interface CreateTerminalParams {
   name?: string;
 }
 
-export async function createTerminal(params: CreateTerminalParams): Promise<TerminalSessionInfo> {
-  const res = await fetch(buildUrl('/api/terminal'), {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(params),
-  });
-  if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`createTerminal failed: ${err}`);
-  }
-  return res.json();
+export function createTerminal(
+  params: CreateTerminalParams,
+): ResultAsync<TerminalSessionInfo, ApiError> {
+  return apiPostRouteR('postTerminal', params);
 }
 
-export async function listTerminals(): Promise<TerminalSessionInfo[]> {
-  const res = await fetch(buildUrl('/api/terminal'));
-  if (!res.ok) throw new Error('listTerminals failed');
-  return res.json();
+export function listTerminals(): ResultAsync<TerminalSessionInfo[], ApiError> {
+  return apiGetRouteR('getTerminal');
 }
 
-export async function getTerminal(id: string): Promise<TerminalSessionInfo> {
-  const res = await fetch(buildUrl(`/api/terminal/${id}`));
-  if (!res.ok) throw new Error('getTerminal failed');
-  return res.json();
-}
-
-export async function writeTerminal(id: string, data: string): Promise<void> {
-  const encoder = new TextEncoder();
-  const bytes = encoder.encode(data);
-  const binary = Array.from(bytes)
-    .map((b) => String.fromCharCode(b))
-    .join('');
-  const encoded = btoa(binary);
-  const res = await fetch(buildUrl(`/api/terminal/${id}/write`), {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ data: encoded }),
-  });
-  if (!res.ok) {
-    log.warn('terminal write failed', { id, status: res.status });
-  }
+export function getTerminal(id: string): ResultAsync<TerminalSessionInfo, ApiError> {
+  return apiGetRouteR('getTerminalById', { params: { id } });
 }
 
 export async function writeTerminalBytes(id: string, bytes: Uint8Array): Promise<void> {
@@ -106,29 +85,36 @@ export async function writeTerminalBytes(id: string, bytes: Uint8Array): Promise
     .map((b) => String.fromCharCode(b))
     .join('');
   const encoded = btoa(binary);
-  const res = await fetch(buildUrl(`/api/terminal/${id}/write`), {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ data: encoded }),
-  });
-  if (!res.ok) {
-    log.warn('terminal write failed', { id, status: res.status });
-  }
+  const result = await apiPostRouteR(
+    'postTerminalByIdWrite',
+    { data: encoded },
+    { params: { id } },
+  );
+  // Fire-and-forget: callers in terminalRuntime use void promise.catch(log.warn).
+  // No mutation hook depends on rejection, so log-only is intentional.
+  result.match(
+    () => undefined,
+    (error) => log.warn('terminal write failed', { id, error }),
+  );
 }
 
 export async function resizeTerminal(id: string, rows: number, cols: number): Promise<void> {
-  const res = await fetch(buildUrl(`/api/terminal/${id}/resize`), {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ rows, cols }),
-  });
-  if (!res.ok) {
-    log.warn('terminal resize failed', { id, status: res.status });
-  }
+  const result = await apiPostRouteR('postTerminalByIdResize', { rows, cols }, { params: { id } });
+  // Fire-and-forget: callers in terminalRuntime use void promise.catch(log.warn).
+  // No mutation hook depends on rejection, so log-only is intentional.
+  result.match(
+    () => undefined,
+    (error) => log.warn('terminal resize failed', { id, error }),
+  );
 }
 
 export async function deleteTerminal(id: string): Promise<void> {
-  await fetch(buildUrl(`/api/terminal/${id}`), { method: 'DELETE' });
+  const result = await apiDeleteRouteR('deleteTerminalById', { params: { id } });
+  // useTerminalDelete relies on rejection to trigger onError rollback + toast.
+  if (result.isErr()) {
+    // invariant: mutationFn boundary -- ApiErrorThrown propagates to React Query onError
+    throw new ApiErrorThrown(result.error);
+  }
 }
 
 export function connectTerminalStream(
@@ -139,26 +125,51 @@ export function connectTerminalStream(
   onError?: (err: Event) => void,
   options?: { replay?: boolean },
 ): EventSource {
-  const params = new URLSearchParams();
-  if (options?.replay === false) params.set('replay', '0');
-  const query = params.size > 0 ? `?${params.toString()}` : '';
-  const url = buildUrl(`/api/terminal/${id}/stream${query}`);
-  const es = new EventSource(url);
+  const es = openSseRoute('getTerminalByIdStream', {
+    params: { id },
+    query: options?.replay === false ? { replay: 0 } : undefined,
+  });
 
-  es.addEventListener('output', (e: MessageEvent) => {
-    const raw = atob(e.data);
-    const bytes = new Uint8Array(raw.length);
-    for (let i = 0; i < raw.length; i++) {
-      bytes[i] = raw.charCodeAt(i);
+  es.onmessage = (e) => {
+    const parsed = parseSseMessage(e.data as unknown, eventSchemas.getTerminalByIdStream);
+    if (parsed.failure) {
+      log.error('terminal stream event parse failed', parsed.failure);
+      onExit(null);
+      es.close();
+      return;
     }
-    onOutput(bytes);
-  });
+    const envelope = parsed.data as RouteEvent<'getTerminalByIdStream'>;
 
-  es.addEventListener('exit', (e: MessageEvent) => {
-    const data = JSON.parse(e.data);
-    onExit(data.code ?? null);
-    es.close();
-  });
+    switch (envelope.event) {
+      case 'output': {
+        try {
+          const raw = atob(envelope.data.dataB64);
+          const bytes = new Uint8Array(raw.length);
+          for (let i = 0; i < raw.length; i++) {
+            bytes[i] = raw.charCodeAt(i);
+          }
+          onOutput(bytes);
+        } catch (err) {
+          log.error('terminal stream output base64 decode failed', err);
+          onExit(null);
+          es.close();
+        }
+        return;
+      }
+
+      case 'exit':
+        onExit(envelope.data.code ?? null);
+        es.close();
+        return;
+
+      default: {
+        const unexpected: never = envelope;
+        log.error('unexpected terminal stream event', unexpected);
+        onExit(null);
+        es.close();
+      }
+    }
+  };
 
   es.onopen = () => {
     onOpen?.();

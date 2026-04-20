@@ -1,0 +1,87 @@
+[contract]
+name        = "daemon-api"
+kind        = "owned"
+types-crate = "rust/crates/api-types"
+transports  = ["http", "sse"]
+base-url    = "http://127.0.0.1:{port}/api"
+docs        = "rust/crates/api-types/README.md"
+
+# -----------------------------------------------------------------------------
+# Producers (owned — we emit these).
+# -----------------------------------------------------------------------------
+
+[[producer]]
+name       = "axum-router"
+path       = "rust/crates/mando-gateway/src/server.rs"
+role       = "axum Router composition + /api/* route mounting"
+transports = ["http"]
+
+[[producer]]
+name       = "transport-http-router"
+path       = "rust/crates/transport-http/src"
+role       = "Composed axum router and every routes_*.rs module under it"
+transports = ["http", "sse"]
+
+[[producer]]
+name       = "sse-emitter"
+path       = "rust/crates/transport-http/src/transport/sse.rs"
+role       = "/api/events SSE emitter — encodes api_types::SseEnvelope"
+transports = ["sse"]
+
+[[producer]]
+name       = "event-bus"
+path       = "rust/crates/global-bus/src/lib.rs"
+role       = "in-process broadcast channel driving the SSE emitter"
+transports = ["sse"]
+
+# -----------------------------------------------------------------------------
+# Consumers (every caller that reads the daemon API).
+# -----------------------------------------------------------------------------
+
+[[consumer]]
+name        = "mando-cli"
+path        = "rust/cli/src/http.rs"
+transports  = ["http"]
+role        = "CLI daemon HTTP client"
+enforcement = "scanner"
+allow-value = false
+
+[[consumer]]
+name        = "mando-cli-gateway"
+path        = "rust/cli/src/gateway.rs"
+transports  = ["http"]
+role        = "CLI gateway helper calls"
+enforcement = "scanner"
+allow-value = false
+
+[[consumer]]
+name        = "transport-tg-http"
+path        = "rust/crates/transport-tg/src/http.rs"
+transports  = ["http"]
+role        = "Telegram-bot process daemon HTTP client"
+enforcement = "scanner"
+allow-value = false
+
+[[consumer]]
+name        = "transport-tg-sse"
+path        = "rust/crates/transport-tg/src/sse.rs"
+transports  = ["sse"]
+role        = "Telegram-bot SSE notification consumer"
+enforcement = "scanner"
+allow-value = false
+
+[[consumer]]
+name        = "gateway-client"
+path        = "rust/crates/gateway-client/src"
+transports  = ["http", "sse"]
+role        = "Reusable typed daemon client — parse_sse_block + SseConsumer"
+enforcement = "scanner"
+allow-value = false
+
+[[consumer]]
+name        = "electron-renderer"
+path        = "electron/src/renderer"
+transports  = ["http", "sse"]
+role        = "Electron renderer React Query daemon consumer"
+enforcement = "ts-rs-codegen"
+allow-value = false

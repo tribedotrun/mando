@@ -1,8 +1,10 @@
 import { useCallback, useRef, useState } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQueryClient } from '@tanstack/react-query';
 import log from '#renderer/global/service/logger';
-import { askTask, fetchAskHistory } from '#renderer/domains/captain/repo/api';
+import { askTask } from '#renderer/domains/captain/repo/api';
+import { useTaskAskHistory } from '#renderer/domains/captain/repo/queries';
 import { queryKeys } from '#renderer/global/repo/queryKeys';
+import { toReactQuery } from '#result';
 import type { AskHistoryEntry } from '#renderer/global/types';
 
 export interface UseTaskAskResult {
@@ -25,10 +27,7 @@ export function useTaskAsk(itemId: number): UseTaskAskResult {
   const askIdRef = useRef<string | undefined>(undefined);
   const queryClient = useQueryClient();
 
-  const { data: serverHistory } = useQuery({
-    queryKey: queryKeys.tasks.askHistory(itemId),
-    queryFn: () => fetchAskHistory(itemId),
-  });
+  const { data: serverHistory } = useTaskAskHistory(itemId);
 
   const messages = serverHistory?.history ?? [];
 
@@ -39,7 +38,7 @@ export function useTaskAsk(itemId: number): UseTaskAskResult {
       }
       setPending(true);
       try {
-        const data = await askTask(itemId, question, askIdRef.current, images);
+        const data = await toReactQuery(askTask(itemId, question, askIdRef.current, images));
         askIdRef.current = data.ask_id;
         void queryClient.invalidateQueries({ queryKey: queryKeys.tasks.askHistory(itemId) });
       } catch (err) {

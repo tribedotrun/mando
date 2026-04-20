@@ -1,25 +1,28 @@
-import type {
-  TaskListResponse,
-  TaskItem,
-  WorkersResponse,
-  TimelineResponse,
-  TickResult,
-  PrSummaryResponse,
-  AskResponse,
-  AskHistoryResponse,
-  ItemSessionsResponse,
-  ArtifactsResponse,
-  FeedResponse,
-  AdvisorResponse,
-  ActivityStatsResponse,
-} from '#renderer/global/types';
-import { apiGet, apiPost, apiPatch, buildUrl } from '#renderer/global/providers/http';
+import type { AskResponse, ClarifyResponse, NudgeResponse, TaskItem } from '#renderer/global/types';
+import { z } from 'zod';
+import {
+  apiGetRouteR,
+  apiMultipartRouteR,
+  apiPatchRouteR,
+  apiPostRouteR,
+} from '#renderer/global/providers/http';
+import { parseError as makeParseError, type ApiError, type ResultAsync, errAsync } from '#result';
+
+const taskAddMultipartInputSchema = z
+  .object({
+    title: z.string(),
+    project: z.string().optional(),
+    noAutoMerge: z.boolean().optional(),
+    images: z.array(z.instanceof(File)).optional(),
+  })
+  .strict();
 
 // Tasks
-export const fetchTasks = (includeArchived?: boolean) => {
-  const qs = includeArchived ? '?include_archived=true' : '';
-  return apiGet<TaskListResponse>(`/api/tasks${qs}`);
-};
+export const fetchTasks = (includeArchived?: boolean) =>
+  apiGetRouteR('getTasks', {
+    query: includeArchived ? { include_archived: true } : undefined,
+  });
+
 export interface AddTaskInput {
   title: string;
   project?: string;
@@ -28,219 +31,199 @@ export interface AddTaskInput {
 }
 
 export const parseTodos = (text: string, project: string) =>
-  apiPost<{ items: string[] }>('/api/ai/parse-todos', { text, project });
+  apiPostRouteR('postAiParsetodos', { text, project });
 
-export async function addTask(input: AddTaskInput): Promise<TaskItem> {
+export function addTask(input: AddTaskInput): ResultAsync<TaskItem, ApiError> {
+  const parsedInput = taskAddMultipartInputSchema.safeParse(input);
+  if (!parsedInput.success) {
+    return errAsync(makeParseError(parsedInput.error.issues, 'route:postTasksAdd multipart'));
+  }
+
+  const data = parsedInput.data;
   const form = new FormData();
-  form.append('title', input.title);
+  form.append('title', data.title);
   form.append('source', 'electron');
-  if (input.project) form.append('project', input.project);
-  if (input.noAutoMerge) form.append('no_auto_merge', 'true');
-  if (input.images) {
-    for (const img of input.images) {
+  if (data.project) form.append('project', data.project);
+  if (data.noAutoMerge) form.append('no_auto_merge', 'true');
+  if (data.images) {
+    for (const img of data.images) {
       form.append('images', img, img.name);
     }
   }
-  const res = await fetch(buildUrl('/api/tasks/add'), {
-    method: 'POST',
-    body: form,
+  return apiMultipartRouteR('postTasksAdd', form, undefined, {
+    title: data.title,
+    project: data.project ?? null,
+    plan: false,
+    no_pr: false,
   });
-  if (!res.ok) {
-    const errBody = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error(errBody.error || `HTTP ${res.status}`);
-  }
-  return res.json() as Promise<TaskItem>;
 }
+
 export const deleteItems = (ids: number[], opts?: { close_pr?: boolean; force?: boolean }) =>
-  apiPost<{ ok: boolean; deleted: number; warnings?: string[] }>('/api/tasks/delete', {
-    ids,
-    ...opts,
-  });
-export const acceptItem = (id: number) => apiPost<void>('/api/tasks/accept', { id });
-export async function reopenItem(id: number, feedback: string, images?: File[]): Promise<void> {
+  apiPostRouteR('postTasksDelete', { ids, ...opts });
+
+export const acceptItem = (id: number) => apiPostRouteR('postTasksAccept', { id });
+
+export function reopenItem(id: number, feedback: string, images?: File[]) {
   if (images?.length) {
     const form = new FormData();
     form.append('id', String(id));
     form.append('feedback', feedback);
     for (const img of images) form.append('images', img, img.name);
-    const res = await fetch(buildUrl('/api/tasks/reopen'), { method: 'POST', body: form });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: res.statusText }));
-      throw new Error(err.error || `HTTP ${res.status}`);
-    }
-    return;
+    return apiMultipartRouteR('postTasksReopen', form, undefined, { id, feedback });
   }
-  return apiPost<void>('/api/tasks/reopen', { id, feedback });
+  return apiMultipartRouteR('postTasksReopen', { id, feedback });
 }
 
-export async function reworkItem(id: number, feedback: string, images?: File[]): Promise<void> {
+export function reworkItem(id: number, feedback: string, images?: File[]) {
   if (images?.length) {
     const form = new FormData();
     form.append('id', String(id));
     form.append('feedback', feedback);
     for (const img of images) form.append('images', img, img.name);
-    const res = await fetch(buildUrl('/api/tasks/rework'), { method: 'POST', body: form });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: res.statusText }));
-      throw new Error(err.error || `HTTP ${res.status}`);
-    }
-    return;
+    return apiMultipartRouteR('postTasksRework', form, undefined, { id, feedback });
   }
-  return apiPost<void>('/api/tasks/rework', { id, feedback });
+  return apiMultipartRouteR('postTasksRework', { id, feedback });
 }
-export const fetchTimeline = (id: number) => apiGet<TimelineResponse>(`/api/tasks/${id}/timeline`);
+
+export const fetchTimeline = (id: number) =>
+  apiGetRouteR('getTasksByIdTimeline', { params: { id } });
 export const fetchItemSessions = (id: number) =>
-  apiGet<ItemSessionsResponse>(`/api/tasks/${id}/sessions`);
+  apiGetRouteR('getTasksByIdSessions', { params: { id } });
+
 /** Start implementation: inject plan into context and re-queue as normal worker. */
-export async function startImplementation(id: number, existingContext: string): Promise<void> {
-  const tl = await fetchTimeline(id);
-  const plan =
-    ([...tl.events].reverse().find((e) => e.event_type === 'plan_completed')?.data
-      ?.plan as string) ?? '';
-  const body = plan
-    ? `${existingContext}\n\n## Approved Plan\n${plan}\n\n[Human] Start implementation.`
-    : `${existingContext}\n\n[Human] Start implementation.`;
-  await apiPatch(`/api/tasks/${id}`, { planning: false, context: body, status: 'queued' });
+export function startImplementation(
+  id: number,
+  existingContext: string,
+): ResultAsync<void, ApiError> {
+  return fetchTimeline(id).andThen((tl) => {
+    const completedPlan = [...tl.events]
+      .reverse()
+      .find((event) => event.data.event_type === 'plan_completed');
+    const plan = completedPlan?.data.event_type === 'plan_completed' ? completedPlan.data.plan : '';
+    const body = plan
+      ? `${existingContext}\n\n## Approved Plan\n${plan}\n\n[Human] Start implementation.`
+      : `${existingContext}\n\n[Human] Start implementation.`;
+    return apiPatchRouteR('patchTasksById', { context: body }, { params: { id } })
+      .andThen(() => apiPostRouteR('postTasksQueue', { id }))
+      .map(() => undefined);
+  });
 }
+
 // Retry / Resume / Clarify
-export const retryItem = (id: number) => apiPost<{ ok: boolean }>('/api/tasks/retry', { id });
+export const retryItem = (id: number) => apiPostRouteR('postTasksRetry', { id });
 export const resumeRateLimited = (id: number) =>
-  apiPost<{ ok: boolean }>('/api/tasks/resume-rate-limited', { id });
+  apiPostRouteR('postTasksResumeratelimited', { id });
 
-export interface ClarifyResponse {
-  ok: boolean;
-  status: string;
-  context?: string;
-  questions?: {
-    question: string;
-    answer?: string | null;
-    self_answered: boolean;
-    category?: 'code' | 'intent';
-  }[];
-  session_id?: string;
-  error?: string;
-}
-
-export async function answerClarification(
+export function answerClarification(
   id: number,
   answers: { question: string; answer: string }[],
   images?: File[],
-): Promise<ClarifyResponse> {
+): ResultAsync<ClarifyResponse, ApiError> {
   if (images?.length) {
     const form = new FormData();
-    form.append('answers_json', JSON.stringify(answers));
+    form.append('answers', JSON.stringify(answers));
     for (const img of images) form.append('images', img, img.name);
-    const res = await fetch(buildUrl(`/api/tasks/${id}/clarify`), { method: 'POST', body: form });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: res.statusText }));
-      throw new Error(err.error || `HTTP ${res.status}`);
-    }
-    return res.json() as Promise<ClarifyResponse>;
+    return apiMultipartRouteR('postTasksByIdClarify', form, { params: { id } }, { answers });
   }
-  return apiPost<ClarifyResponse>(`/api/tasks/${id}/clarify`, { answers });
+  return apiMultipartRouteR('postTasksByIdClarify', { answers }, { params: { id } });
 }
 
 /** Flat-text answer for Telegram-style input */
-export async function answerClarificationText(
+export function answerClarificationText(
   id: number,
   answer: string,
   images?: File[],
-): Promise<ClarifyResponse> {
+): ResultAsync<ClarifyResponse, ApiError> {
   if (images?.length) {
     const form = new FormData();
     form.append('answer', answer);
     for (const img of images) form.append('images', img, img.name);
-    const res = await fetch(buildUrl(`/api/tasks/${id}/clarify`), { method: 'POST', body: form });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: res.statusText }));
-      throw new Error(err.error || `HTTP ${res.status}`);
-    }
-    return res.json() as Promise<ClarifyResponse>;
+    return apiMultipartRouteR('postTasksByIdClarify', form, { params: { id } }, { answer });
   }
-  return apiPost<ClarifyResponse>(`/api/tasks/${id}/clarify`, { answer });
+  return apiMultipartRouteR('postTasksByIdClarify', { answer }, { params: { id } });
 }
 
 // Captain
 export const triggerTick = (dryRun = false) =>
-  apiPost<TickResult>('/api/captain/tick', { dry_run: dryRun });
-export async function nudgeWorker(
+  apiPostRouteR('postCaptainTick', { dry_run: dryRun, emit_notifications: true });
+
+export function nudgeWorker(
   itemId: number,
   message: string,
   images?: File[],
-): Promise<{ worker?: string; pid?: number }> {
+): ResultAsync<NudgeResponse, ApiError> {
   if (images?.length) {
     const form = new FormData();
     form.append('item_id', String(itemId));
     form.append('message', message);
     for (const img of images) form.append('images', img, img.name);
-    const res = await fetch(buildUrl('/api/captain/nudge'), { method: 'POST', body: form });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: res.statusText }));
-      throw new Error(err.error || `HTTP ${res.status}`);
-    }
-    return res.json() as Promise<{ worker?: string; pid?: number }>;
+    return apiMultipartRouteR('postCaptainNudge', form, undefined, {
+      item_id: String(itemId),
+      message,
+    });
   }
-  return apiPost<{ worker?: string; pid?: number }>('/api/captain/nudge', {
+  return apiMultipartRouteR('postCaptainNudge', {
     item_id: String(itemId),
     message,
   });
 }
-export const handoffItem = (id: number) => apiPost<{ ok: boolean }>('/api/tasks/handoff', { id });
-export const cancelItem = (id: number) => apiPost<{ ok: boolean }>('/api/tasks/cancel', { id });
+
+export const handoffItem = (id: number) => apiPostRouteR('postTasksHandoff', { id });
+export const cancelItem = (id: number) => apiPostRouteR('postTasksCancel', { id });
 
 // Workers
-export const fetchWorkers = () => apiGet<WorkersResponse>('/api/workers');
+export const fetchWorkers = () => apiGetRouteR('getWorkers');
 
 // Stats
-export const fetchActivityStats = () => apiGet<ActivityStatsResponse>('/api/stats/activity');
+export const fetchActivityStats = () => apiGetRouteR('getStatsActivity');
 
 // Task Ask (multi-turn: first ask creates session, follow-ups resume)
-export async function askTask(
+export function askTask(
   id: number,
   question: string,
   askId?: string,
   images?: File[],
-): Promise<AskResponse> {
+): ResultAsync<AskResponse, ApiError> {
   if (images?.length) {
     const form = new FormData();
     form.append('id', String(id));
     form.append('question', question);
     if (askId) form.append('ask_id', askId);
     for (const img of images) form.append('images', img, img.name);
-    const res = await fetch(buildUrl('/api/tasks/ask'), { method: 'POST', body: form });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: res.statusText }));
-      throw new Error(err.error || `HTTP ${res.status}`);
-    }
-    return res.json() as Promise<AskResponse>;
+    return apiMultipartRouteR('postTasksAsk', form, undefined, {
+      id,
+      question,
+      ask_id: askId,
+    });
   }
-  return apiPost<AskResponse>('/api/tasks/ask', { id, question, ask_id: askId });
+  return apiMultipartRouteR('postTasksAsk', { id, question, ask_id: askId });
 }
 
 // End ask session
-export const endAskSession = (id: number) =>
-  apiPost<{ ok: boolean; ended: string }>('/api/tasks/ask/end', { id });
+export const endAskSession = (id: number) => apiPostRouteR('postTasksAskEnd', { id });
 // Reopen from Q&A — synthesize conversation into reopen feedback
-export const askReopen = (id: number) =>
-  apiPost<{ ok: boolean; feedback: string }>('/api/tasks/ask/reopen', { id });
+export const askReopen = (id: number) => apiPostRouteR('postTasksAskReopen', { id });
 
 // Task Ask History
 export const fetchAskHistory = (id: number) =>
-  apiGet<AskHistoryResponse>(`/api/tasks/${id}/history`);
+  apiGetRouteR('getTasksByIdHistory', { params: { id } });
 // Task Artifacts
 export const fetchArtifacts = (id: number) =>
-  apiGet<ArtifactsResponse>(`/api/tasks/${id}/artifacts`);
+  apiGetRouteR('getTasksByIdArtifacts', { params: { id } });
 // Task Feed (unified timeline + artifacts + messages)
-export const fetchFeed = (id: number) => apiGet<FeedResponse>(`/api/tasks/${id}/feed`);
+export const fetchFeed = (id: number) => apiGetRouteR('getTasksByIdFeed', { params: { id } });
 
 // Task Advisor
 export const sendAdvisorMessage = (id: number, message: string, intent: string = 'ask') =>
-  apiPost<AdvisorResponse>(`/api/tasks/${id}/advisor`, { message, intent });
+  apiPostRouteR('postTasksByIdAdvisor', { message, intent }, { params: { id } });
 
 // Merge PR
 export const mergePr = (prNumber: number, project: string) =>
-  apiPost<{ ok: boolean; message: string }>('/api/tasks/merge', { pr_number: prNumber, project });
+  apiPostRouteR('postTasksMerge', { pr_number: prNumber, project });
 
 // PR Summary
 export const fetchPrSummary = (id: number) =>
-  apiGet<PrSummaryResponse>(`/api/tasks/${id}/pr-summary`);
+  apiGetRouteR('getTasksByIdPrsummary', { params: { id } });
+
+// Used by error-mapping helpers; surface as a sibling export to keep the import surface tidy.
+export { errAsync as _errAsync };

@@ -11,17 +11,19 @@
  */
 
 import type { QueryClient } from '@tanstack/react-query';
+import { fromWireConfig } from '#renderer/global/repo/configMutations';
 import { queryKeys } from '#renderer/global/repo/queryKeys';
 import type {
-  TaskItem,
-  ScoutItem,
-  SSEEvent,
+  ScoutEventData,
+  SseSnapshotData,
   SseEntityPayload,
   SseStatusPayload,
   SseSessionsPayload,
+  TaskEventData,
   TaskListResponse,
+  TaskItem,
+  WorkbenchEventData,
   WorkersResponse,
-  MandoConfig,
   WorkbenchItem,
   TerminalSessionInfo,
 } from '#renderer/global/types';
@@ -78,7 +80,7 @@ function patchListItem<T extends { id: number | string; rev: number }>(
 
 // ── Task list helpers (TaskListResponse wraps items + count) ──
 
-export function patchTaskList(qc: QueryClient, payload: SseEntityPayload<TaskItem>): void {
+export function patchTaskList(qc: QueryClient, payload: TaskEventData): void {
   patchListItem<TaskItem>(
     qc,
     queryKeys.tasks.list(),
@@ -102,7 +104,7 @@ export function patchTaskList(qc: QueryClient, payload: SseEntityPayload<TaskIte
   }
 }
 
-export function patchScoutList(qc: QueryClient, payload: SseEntityPayload<ScoutItem>): void {
+export function patchScoutList(qc: QueryClient, payload: ScoutEventData): void {
   // Scout list is paginated -- invalidate all scout list queries for simplicity since the paginated key includes page/status and we can't know which page changed.
   if (payload.action === 'created' || payload.action === 'deleted') {
     void qc.invalidateQueries({ queryKey: queryKeys.scout.all });
@@ -112,28 +114,12 @@ export function patchScoutList(qc: QueryClient, payload: SseEntityPayload<ScoutI
   void qc.invalidateQueries({ queryKey: queryKeys.scout.all });
 }
 
-export function patchWorkbenchList(
-  qc: QueryClient,
-  payload: SseEntityPayload<WorkbenchItem>,
-): void {
+export function patchWorkbenchList(qc: QueryClient, payload: WorkbenchEventData): void {
   patchListItem<WorkbenchItem>(
     qc,
     queryKeys.workbenches.list(),
     payload,
     (data) => data as WorkbenchItem[] | undefined,
-    (_data, items) => items,
-  );
-}
-
-export function patchTerminalList(
-  qc: QueryClient,
-  payload: SseEntityPayload<TerminalSessionInfo>,
-): void {
-  patchListItem<TerminalSessionInfo>(
-    qc,
-    queryKeys.terminals.list(),
-    payload,
-    (data) => data as TerminalSessionInfo[] | undefined,
     (_data, items) => items,
   );
 }
@@ -165,43 +151,46 @@ export interface SnapshotCounts {
   workers: number;
 }
 
-export function seedFromSnapshot(qc: QueryClient, snapshot: SSEEvent): SnapshotCounts {
-  const d = snapshot.data as Record<string, unknown> | undefined;
-  if (!d) return { tasks: 0, workers: 0 };
-
+export function seedFromSnapshot(
+  qc: QueryClient,
+  snapshot: SseSnapshotData | null | undefined,
+): SnapshotCounts {
+  if (!snapshot) return { tasks: 0, workers: 0 };
+  const tasksCount = Array.isArray(snapshot.tasks) ? snapshot.tasks.length : 0;
+  const workersCount = Array.isArray(snapshot.workers) ? snapshot.workers.length : 0;
   // Seed task list
-  if (d.tasks && Array.isArray(d.tasks)) {
+  if (Array.isArray(snapshot.tasks)) {
     qc.setQueryData(queryKeys.tasks.list(), {
-      items: d.tasks as TaskItem[],
-      count: (d.tasks as TaskItem[]).length,
+      items: snapshot.tasks,
+      count: snapshot.tasks.length,
     });
   }
 
   // Seed workers
-  if (d.workers && Array.isArray(d.workers)) {
-    qc.setQueryData(queryKeys.workers.list(), {
-      workers: d.workers,
-    } as WorkersResponse);
+  if (Array.isArray(snapshot.workers)) {
+    const seed: WorkersResponse = {
+      workers: snapshot.workers,
+      rate_limit_remaining_secs: null,
+    };
+    qc.setQueryData(queryKeys.workers.list(), seed);
   }
 
   // Seed workbenches
-  if (d.workbenches && Array.isArray(d.workbenches)) {
-    qc.setQueryData(queryKeys.workbenches.list(), d.workbenches as WorkbenchItem[]);
+  if (Array.isArray(snapshot.workbenches)) {
+    qc.setQueryData(queryKeys.workbenches.list(), snapshot.workbenches as WorkbenchItem[]);
   }
 
   // Seed terminals
-  if (d.terminals && Array.isArray(d.terminals)) {
-    qc.setQueryData(queryKeys.terminals.list(), d.terminals as TerminalSessionInfo[]);
+  if (Array.isArray(snapshot.terminals)) {
+    qc.setQueryData(queryKeys.terminals.list(), snapshot.terminals as TerminalSessionInfo[]);
   }
 
   // Seed config
-  if (d.config) {
-    qc.setQueryData(queryKeys.config.current(), d.config as MandoConfig);
-  }
+  qc.setQueryData(queryKeys.config.current(), fromWireConfig(snapshot.config));
 
   return {
-    tasks: Array.isArray(d.tasks) ? (d.tasks as unknown[]).length : 0,
-    workers: Array.isArray(d.workers) ? (d.workers as unknown[]).length : 0,
+    tasks: tasksCount,
+    workers: workersCount,
   };
 }
 

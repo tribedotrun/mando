@@ -35,6 +35,9 @@ description: Commit, push, create PR, and tag AI reviewers. Use when ready to op
 
 7. **Update PR summary**: Run `/mando-pr-summary`
 
+   - `/mando-pr-summary` should write the work summary to the task DB **only** when `MANDO_TASK_ID` is set for the current session (that is, the PR is coming from a real Mando task worktree).
+   - If `MANDO_TASK_ID` is unset, it must still update the PR body and plan-folder summary, but skip the task-DB write.
+
 8. **Trigger external AI reviews** (idempotent — skip if already triggered):
 
    ```bash

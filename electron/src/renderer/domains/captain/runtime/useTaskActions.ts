@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { toast } from 'sonner';
+import { copyToClipboard, toast } from '#renderer/global/runtime/useFeedback';
 import { useSelection } from '#renderer/global/runtime/useSelection';
 import { invalidateTaskDetail } from '#renderer/global/repo/sseCacheHelpers';
 import { queryKeys } from '#renderer/global/repo/queryKeys';
@@ -17,7 +17,7 @@ import {
   useTaskClarify,
 } from '#renderer/domains/captain/runtime/hooks';
 import type { TaskItem, TaskListResponse } from '#renderer/global/types';
-import { copyToClipboard, getErrorMessage } from '#renderer/global/service/utils';
+import { getErrorMessage } from '#renderer/global/service/utils';
 
 export function useTaskActions() {
   const queryClient = useQueryClient();
@@ -127,6 +127,7 @@ export function useTaskActions() {
   // Returns true on success so callers can decide whether to close a modal.
   // On failure the error is surfaced via toast and false is returned, allowing
   // the modal to stay open so the user does not lose their typed input.
+  // invariant: mutation errors are absorbed as false return; callers use the boolean to control modal lifecycle, not to handle errors
   const handleAnswer = async (id: number, answer: string): Promise<boolean> => {
     try {
       await clarifyMut.mutateAsync({ id, mode: 'text' as const, answer });
@@ -136,6 +137,7 @@ export function useTaskActions() {
     }
   };
 
+  // invariant: mutation errors are absorbed as false return; callers use the boolean to control modal lifecycle, not to handle errors
   const handleNudge = async (id: number, message: string): Promise<boolean> => {
     try {
       await nudgeMut.mutateAsync({ id, message });

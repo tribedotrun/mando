@@ -9,6 +9,7 @@
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
     "isolatedModules": true,
+    "allowImportingTsExtensions": true,
     "jsx": "react-jsx",
     "outDir": "dist",
     "rootDir": ".",
@@ -17,7 +18,7 @@
       "#main/*": ["./src/main/*"],
       "#preload/*": ["./src/preload/*"],
       "#shared/*": ["./src/shared/*"],
-      "#contracts/*": ["../contracts/*"]
+      "#result": ["./src/shared/result/index.ts"]
     }
   },
   "include": [

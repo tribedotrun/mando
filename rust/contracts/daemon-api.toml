@@ -1,0 +1,231 @@
+# Daemon route → lifecycle-transition registry.
+#
+# Paired with PR #886 (clarify/CC-errors fix) and coordinated with PR #884
+# (daemon-consumer wire-type hardening). Each `[[producer]]` entry names
+# an HTTP handler that mutates task state and declares the lifecycle
+# transitions it can drive. The `check_route_transitions.py` scanner
+# validates that:
+#
+# 1. Every declared transition string (`<from> -> <to>`) is a legal edge
+#    in `captain::service::lifecycle::infer_transition_command` (the
+#    single source of truth).
+# 2. Every handler listed here resolves to an async fn defined under
+#    `rust/crates/transport-http/src/transport/`.
+#
+# If you add a new task-mutating route, add a `[[producer]]` entry with
+# the transitions it may take. If you add a new edge to the lifecycle
+# table and a route uses it, update the route's `transitions` array here.
+# Handlers that do not mutate task state set `transitions = []`.
+#
+# #884 is expected to widen the schema with additional fields (method,
+# request/response types). Keep this file forward-compatible — unknown
+# fields in a `[[producer]]` entry are ignored by `check_route_transitions.py`.
+
+[[producer]]
+path = "POST /api/tasks/{id}/clarify"
+handler = "post_task_clarify"
+transitions = [
+  "needs-clarification -> clarifying",
+  "clarifying -> queued",
+  "clarifying -> needs-clarification",
+  "clarifying -> completed-no-pr",
+  "clarifying -> captain-reviewing",
+]
+
+[[producer]]
+path = "POST /api/tasks/rework"
+handler = "post_task_rework"
+transitions = [
+  "awaiting-review -> rework",
+  "escalated -> rework",
+  "errored -> rework",
+  "handed-off -> rework",
+]
+
+[[producer]]
+path = "POST /api/tasks/reopen"
+handler = "post_task_reopen"
+transitions = [
+  "awaiting-review -> in-progress",
+  "awaiting-review -> queued",
+  "awaiting-review -> captain-reviewing",
+  "escalated -> in-progress",
+  "escalated -> queued",
+  "escalated -> captain-reviewing",
+  "errored -> in-progress",
+  "errored -> queued",
+  "errored -> captain-reviewing",
+  "handed-off -> in-progress",
+  "handed-off -> queued",
+  "handed-off -> captain-reviewing",
+]
+
+[[producer]]
+path = "POST /api/tasks/accept"
+handler = "post_task_accept"
+transitions = [
+  "awaiting-review -> merged",
+  "handed-off -> merged",
+  "escalated -> merged",
+  "errored -> merged",
+]
+
+[[producer]]
+path = "POST /api/tasks/queue"
+handler = "post_task_queue"
+transitions = [
+  "new -> queued",
+  "plan-ready -> queued",
+  "rework -> queued",
+]
+
+[[producer]]
+path = "POST /api/tasks/cancel"
+handler = "post_task_cancel"
+transitions = [
+  "new -> canceled",
+  "clarifying -> canceled",
+  "needs-clarification -> canceled",
+  "plan-ready -> canceled",
+  "queued -> canceled",
+  "in-progress -> canceled",
+  "awaiting-review -> canceled",
+  "rework -> canceled",
+  "handed-off -> canceled",
+  "escalated -> canceled",
+  "errored -> canceled",
+  "captain-reviewing -> canceled",
+  "captain-merging -> canceled",
+]
+
+[[producer]]
+path = "POST /api/tasks/handoff"
+handler = "post_task_handoff"
+transitions = [
+  "queued -> handed-off",
+  "in-progress -> handed-off",
+  "awaiting-review -> handed-off",
+  "rework -> handed-off",
+  "needs-clarification -> handed-off",
+  "escalated -> handed-off",
+  "errored -> handed-off",
+  "plan-ready -> handed-off",
+]
+
+[[producer]]
+path = "POST /api/tasks/{id}/advisor"
+handler = "post_task_advisor"
+transitions = [
+  "plan-ready -> queued",
+  "awaiting-review -> in-progress",
+  "awaiting-review -> queued",
+  "awaiting-review -> captain-reviewing",
+  "escalated -> in-progress",
+  "escalated -> queued",
+  "escalated -> captain-reviewing",
+  "errored -> in-progress",
+  "errored -> queued",
+  "errored -> captain-reviewing",
+  "handed-off -> in-progress",
+  "handed-off -> queued",
+  "handed-off -> captain-reviewing",
+]
+
+[[producer]]
+path = "POST /api/tasks/ask/reopen"
+handler = "post_task_ask_reopen"
+transitions = [
+  "awaiting-review -> in-progress",
+  "awaiting-review -> queued",
+  "awaiting-review -> captain-reviewing",
+  "escalated -> in-progress",
+  "escalated -> queued",
+  "escalated -> captain-reviewing",
+]
+
+[[producer]]
+path = "POST /api/captain/nudge"
+handler = "post_captain_nudge"
+transitions = []
+
+[[producer]]
+path = "POST /api/captain/adopt"
+handler = "post_captain_adopt"
+transitions = [
+  "new -> queued",
+  "new -> clarifying",
+]
+
+[[producer]]
+path = "POST /api/tasks/add"
+handler = "post_task_add"
+transitions = []
+
+[[producer]]
+path = "POST /api/tasks/retry"
+handler = "post_task_retry"
+transitions = [
+  "errored -> captain-reviewing",
+]
+
+[[producer]]
+path = "POST /api/tasks/merge"
+handler = "post_task_merge"
+transitions = [
+  "awaiting-review -> captain-merging",
+  "handed-off -> captain-merging",
+]
+
+# Non-mutating task/captain handlers: registered so the completeness
+# scanner can see all mutating-plane routes. `transitions = []` asserts
+# "this route does not drive a task-lifecycle transition".
+
+[[producer]]
+path = "POST /api/tasks/resume-rate-limited"
+handler = "post_task_resume_rate_limited"
+transitions = []
+
+[[producer]]
+path = "POST /api/tasks/ask"
+handler = "post_task_ask"
+transitions = []
+
+[[producer]]
+path = "POST /api/tasks/ask/end"
+handler = "post_task_ask_end"
+transitions = []
+
+[[producer]]
+path = "POST /api/tasks/bulk"
+handler = "post_task_bulk"
+transitions = []
+
+[[producer]]
+path = "POST /api/tasks/delete"
+handler = "post_task_delete"
+transitions = []
+
+[[producer]]
+path = "DELETE /api/tasks"
+handler = "delete_task_items"
+transitions = []
+
+[[producer]]
+path = "PATCH /api/tasks/{id}"
+handler = "patch_task_item"
+transitions = []
+
+[[producer]]
+path = "POST /api/captain/tick"
+handler = "post_captain_tick"
+transitions = []
+
+[[producer]]
+path = "POST /api/captain/triage"
+handler = "post_captain_triage"
+transitions = []
+
+[[producer]]
+path = "POST /api/captain/stop"
+handler = "post_captain_stop"
+transitions = []

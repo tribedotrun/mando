@@ -1,22 +1,10 @@
-import React, { useState, useCallback, useRef } from 'react';
+import React from 'react';
 import { Filter } from 'lucide-react';
-import { useSessionsList } from '#renderer/domains/sessions/runtime/hooks';
-import { useViewKeyHandler } from '#renderer/global/runtime/useKeyboardShortcuts';
+import { useSessionsCard } from '#renderer/domains/sessions/runtime/useSessionsCard';
 import type { SessionEntry } from '#renderer/global/types';
-import {
-  clamp,
-  copyToClipboard,
-  getErrorMessage,
-  indexNext,
-  indexPrev,
-} from '#renderer/global/service/utils';
+import { clamp } from '#renderer/global/service/utils';
 import { StatusFilterMenu } from '#renderer/global/ui/StatusFilterMenu';
-import {
-  buildSessionSequence,
-  sortCategories,
-  buildResumeCmd,
-  SESSION_STATUS_OPTIONS,
-} from '#renderer/domains/sessions/service/helpers';
+import { SESSION_STATUS_OPTIONS } from '#renderer/domains/sessions/service/helpers';
 import { SessionsEmptyState } from '#renderer/domains/sessions/ui/SessionsHelpers';
 import { SessionsList } from '#renderer/domains/sessions/ui/SessionsList';
 import { Button } from '#renderer/global/ui/button';
@@ -31,93 +19,28 @@ export function SessionsCard({
   active = true,
   onOpenSession: onOpenSessionProp,
 }: SessionsCardProps = {}): React.ReactElement {
-  const [page, setPage] = useState(1);
-  const [filterCategory, setFilterCategory] = useState('');
-  const [filterStatus, setFilterStatus] = useState<string>('all');
-  const [focusedIndex, setFocusedIndex] = useState(-1);
-
   const {
-    data: sessionsData,
-    isLoading: loading,
-    error: sessionsError,
-  } = useSessionsList(page, filterCategory || undefined, filterStatus);
-  // Track whether we've ever loaded data -- suppress loading text on category switches
-  const hasLoadedRef = useRef(false);
-  if (sessionsData) hasLoadedRef.current = true;
-
-  const sessions: SessionEntry[] = sessionsData?.sessions ?? [];
-  const totalPages = sessionsData?.total_pages ?? 1;
-  const categories: Record<string, number> = sessionsData?.categories ?? {};
-  const error = sessionsError ? getErrorMessage(sessionsError, 'Failed to fetch sessions') : null;
-  const sessionSeqMap = React.useMemo(() => buildSessionSequence(sessions), [sessions]);
-
-  const [showFilterMenu, setShowFilterMenu] = useState(false);
-  const isFiltered = filterStatus !== 'all';
-
-  // Clamp focusedIndex inline -- derived from sessions.length
-  const clampedFocusedIndex =
-    sessions.length === 0
-      ? -1
-      : focusedIndex >= sessions.length
-        ? sessions.length - 1
-        : focusedIndex;
-
-  const openSession = useCallback(
-    (s: SessionEntry) => {
-      onOpenSessionProp?.(s);
-    },
-    [onOpenSessionProp],
-  );
-
-  const handleCatClick = (cat: string) => {
-    setFilterCategory(cat);
-    setPage(1);
-  };
-
-  const resumeCmd = (s: SessionEntry) => buildResumeCmd(s.session_id, s.resume_cwd || s.cwd);
-
-  const handleKey = useCallback(
-    (key: string, e: KeyboardEvent) => {
-      switch (key) {
-        case 'j':
-          e.preventDefault();
-          setFocusedIndex((i) => indexNext(i, sessions.length - 1));
-          break;
-        case 'k':
-          e.preventDefault();
-          setFocusedIndex((i) => indexPrev(i));
-          break;
-        case 'Enter': {
-          const s = sessions[clampedFocusedIndex];
-          if (s) {
-            e.preventDefault();
-            openSession(s);
-          }
-          break;
-        }
-        case 'c': {
-          const s = sessions[clampedFocusedIndex];
-          if (s) {
-            e.preventDefault();
-            void copyToClipboard(resumeCmd(s), 'Command copied');
-          }
-          break;
-        }
-        case 'Escape':
-          if (clampedFocusedIndex >= 0) {
-            e.preventDefault();
-            setFocusedIndex(-1);
-          }
-          break;
-      }
-    },
-    [sessions, clampedFocusedIndex, openSession],
-  );
-
-  useViewKeyHandler(handleKey, active);
-
-  const allTotal = Object.values(categories).reduce((a, b) => a + b, 0);
-  const sortedCats = sortCategories(categories);
+    page,
+    setPage,
+    filterCategory,
+    filterStatus,
+    setFilterStatus,
+    showFilterMenu,
+    setShowFilterMenu,
+    sessions,
+    totalPages,
+    categories,
+    loading,
+    error,
+    hasLoadedRef,
+    sessionSeqMap,
+    clampedFocusedIndex,
+    isFiltered,
+    allTotal,
+    sortedCats,
+    handleCatClick,
+    openSession,
+  } = useSessionsCard({ active, onOpenSession: onOpenSessionProp });
 
   return (
     <div data-testid="sessions-card" className="flex flex-col gap-4">

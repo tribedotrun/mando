@@ -1,10 +1,10 @@
 import React from 'react';
 import { Check, Copy } from 'lucide-react';
-import { useHighlight } from '#renderer/global/runtime/useHighlightQuery';
+import { useHighlight } from '#renderer/global/runtime/useHighlight';
 import { useCopyFeedback } from '#renderer/global/runtime/useCopyFeedback';
 import { cn } from '#renderer/global/service/cn';
 import { normalizeLang } from '#renderer/global/service/codeBlockHelpers';
-import { copyToClipboard } from '#renderer/global/service/utils';
+import { copyToClipboard } from '#renderer/global/runtime/useFeedback';
 
 interface CodeBlockProps {
   code: string;

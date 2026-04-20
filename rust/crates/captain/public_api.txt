@@ -1,0 +1,13 @@
+pub use config::{ resolve_captain_runtime_paths, set_active_captain_runtime_paths, CaptainRuntimePaths, };
+pub use io::cc_session::CcSessionManager;
+pub use io::pid_registry::{ cleanup_on_startup as cleanup_pid_on_startup, snapshot as pid_snapshot, };
+pub use io::queries::tasks::routing as task_routing;
+pub use io::task_store::TaskStore;
+pub use runtime::daemon::CaptainRuntimeDeps;
+pub use runtime::notify::Notifier;
+pub use runtime::reconciler::reconcile_on_startup;
+pub(crate) use runtime::worker_exit::{watch_worker_exit, WORKER_EXIT_SIGNAL};
+pub use runtime::CaptainRuntime;
+pub use runtime::{action_contract::ReopenOutcome, clarifier::ClarifierStatus};
+pub use service::lifecycle::apply_transition;
+pub use types::*;

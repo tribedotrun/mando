@@ -1,12 +1,11 @@
-import type {
-  ScoutResponse,
-  ScoutItem,
-  AskResponse,
-  ScoutArticleResponse,
-  ActResponse,
-  ScoutItemSession,
-} from '#renderer/global/types';
-import { apiGet, apiPost, apiPatch, buildUrl } from '#renderer/global/providers/http';
+import type { AskResponse } from '#renderer/global/types';
+import {
+  apiGetRouteR,
+  apiMultipartRouteR,
+  apiPatchRouteR,
+  apiPostRouteR,
+} from '#renderer/global/providers/http';
+import type { ApiError, ResultAsync } from '#result';
 
 export interface ScoutQueryParams {
   status?: string;
@@ -16,59 +15,54 @@ export interface ScoutQueryParams {
   per_page?: number;
 }
 
+// All scout repo functions return ResultAsync. Hooks at the queries.ts/mutations.ts
+// layer translate to throw via toReactQuery() at the React Query boundary.
+
 export const fetchScoutItems = (params?: ScoutQueryParams) => {
-  const qs = new URLSearchParams();
-  if (params?.status) qs.set('status', params.status);
-  if (params?.q) qs.set('q', params.q);
-  if (params?.type) qs.set('type', params.type);
-  if (params?.page != null) qs.set('page', String(params.page));
-  if (params?.per_page != null) qs.set('per_page', String(params.per_page));
-  const query = qs.toString();
-  return apiGet<ScoutResponse>(`/api/scout/items${query ? `?${query}` : ''}`);
+  return apiGetRouteR('getScoutItems', { query: params });
 };
-export const fetchScoutItem = (id: number) => apiGet<ScoutItem>(`/api/scout/items/${id}`);
+export const fetchScoutItem = (id: number) => apiGetRouteR('getScoutItemsById', { params: { id } });
 export const fetchScoutArticle = (id: number) =>
-  apiGet<ScoutArticleResponse>(`/api/scout/items/${id}/article`);
+  apiGetRouteR('getScoutItemsByIdArticle', { params: { id } });
 export const addScoutUrl = (scoutUrl: string, title?: string) =>
-  apiPost<ScoutItem>('/api/scout/items', { url: scoutUrl, title });
-export const updateScoutStatus = (id: number, status: string) =>
-  apiPatch<ScoutItem>(`/api/scout/items/${id}`, { status });
-export const bulkUpdateScout = (ids: number[], updates: { status: string }) =>
-  apiPost<void>('/api/scout/bulk', { ids, updates });
-export const bulkDeleteScout = (ids: number[]) => apiPost<void>('/api/scout/bulk-delete', { ids });
-export async function askScout(
+  apiPostRouteR('postScoutItems', { url: scoutUrl, title });
+export type ScoutCommand = 'mark_pending' | 'mark_processed' | 'save' | 'archive';
+
+export const updateScoutStatus = (id: number, command: ScoutCommand) =>
+  apiPatchRouteR('patchScoutItemsById', { command }, { params: { id } });
+export const bulkUpdateScout = (ids: number[], command: ScoutCommand) =>
+  apiPostRouteR('postScoutBulk', { ids, command });
+export const bulkDeleteScout = (ids: number[]) => apiPostRouteR('postScoutBulkdelete', { ids });
+export function askScout(
   id: number,
   question: string,
   sessionId?: string,
   images?: File[],
-): Promise<AskResponse> {
+): ResultAsync<AskResponse, ApiError> {
   if (images?.length) {
     const form = new FormData();
     form.append('id', String(id));
     form.append('question', question);
     if (sessionId) form.append('session_id', sessionId);
     for (const img of images) form.append('images', img, img.name);
-    const res = await fetch(buildUrl('/api/scout/ask'), { method: 'POST', body: form });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: res.statusText }));
-      throw new Error(err.error || `HTTP ${res.status}`);
-    }
-    return res.json() as Promise<AskResponse>;
+    return apiMultipartRouteR('postScoutAsk', form, undefined, {
+      id,
+      question,
+      session_id: sessionId,
+    });
   }
-  return apiPost<AskResponse>('/api/scout/ask', { id, question, session_id: sessionId });
+  return apiMultipartRouteR('postScoutAsk', {
+    id,
+    question,
+    session_id: sessionId,
+  });
 }
 export const actOnScoutItem = (id: number, project: string, prompt?: string) =>
-  apiPost<ActResponse>(`/api/scout/items/${id}/act`, { project, prompt });
+  apiPostRouteR('postScoutItemsByIdAct', { project, prompt }, { params: { id } });
 export const researchScout = (topic: string, process = true) =>
-  apiPost<{ run_id: number }>('/api/scout/research', {
-    topic,
-    process,
-  });
+  apiPostRouteR('postScoutResearch', { topic, process });
 export const publishScoutTelegraph = (id: number) =>
-  apiPost<{ ok: boolean; url: string }>(`/api/scout/items/${id}/telegraph`);
-export const fetchScoutItemSessions = (id: number) =>
-  apiGet<ScoutItemSession[]>(`/api/scout/items/${id}/sessions`);
-export const fetchResearchRuns = () =>
-  apiGet<import('#renderer/global/types').ScoutResearchRun[]>('/api/scout/research');
+  apiPostRouteR('postScoutItemsByIdTelegraph', undefined, { params: { id } });
+export const fetchResearchRuns = () => apiGetRouteR('getScoutResearch');
 export const fetchResearchRunItems = (runId: number) =>
-  apiGet<import('#renderer/global/types').ScoutItem[]>(`/api/scout/research/${runId}/items`);
+  apiGetRouteR('getScoutResearchByIdItems', { params: { id: runId } });

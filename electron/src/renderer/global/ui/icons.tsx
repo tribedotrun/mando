@@ -22,7 +22,17 @@ export function IconQueued() {
   );
 }
 
-/** Half-filled circle -- in progress / clarifying */
+/** Quarter pie slice -- clarifying (just started, ~25%) */
+export function IconClarifying() {
+  return (
+    <svg width={S} height={S} viewBox="0 0 16 16" fill="none">
+      <circle cx="8" cy="8" r="6" stroke="var(--muted-foreground)" strokeWidth="1.5" />
+      <path d="M8 2A6 6 0 0 1 14 8L8 8Z" fill="var(--muted-foreground)" />
+    </svg>
+  );
+}
+
+/** Half-filled circle -- in progress (~50%) */
 export function IconWorking() {
   return (
     <svg width={S} height={S} viewBox="0 0 16 16" fill="none">
@@ -32,12 +42,22 @@ export function IconWorking() {
   );
 }
 
-/** Three-quarter circle -- captain reviewing (almost done) */
+/** Three-quarter circle -- captain reviewing (~75%) */
 export function IconReviewing() {
   return (
     <svg width={S} height={S} viewBox="0 0 16 16" fill="none">
       <circle cx="8" cy="8" r="6" stroke="var(--muted-foreground)" strokeWidth="1.5" />
       <path d="M8 2a6 6 0 0 1 0 12A6 6 0 0 1 2 8h6V2z" fill="var(--muted-foreground)" />
+    </svg>
+  );
+}
+
+/** Near-full pie (~90%) with thin wedge cut at top-left -- captain merging */
+export function IconMerging() {
+  return (
+    <svg width={S} height={S} viewBox="0 0 16 16" fill="none">
+      <circle cx="8" cy="8" r="6" stroke="var(--muted-foreground)" strokeWidth="1.5" />
+      <path d="M8 2A6 6 0 1 1 4.47 3.15L8 8Z" fill="var(--muted-foreground)" />
     </svg>
   );
 }

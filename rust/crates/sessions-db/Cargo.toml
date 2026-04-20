@@ -1,0 +1,20 @@
+[package]
+name = "sessions-db"
+version.workspace = true
+edition = "2021"
+description = "Shared session DB layer — queries, types, and lifecycle helpers used by both sessions and captain"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+
+[dependencies]
+global-types = { path = "../global-types" }
+global-db = { path = "../global-db" }
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite"] }
+
+[dev-dependencies]
+tokio.workspace = true

@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { queryKeys } from '#renderer/global/repo/queryKeys';
+import { defineJsonKeyspace } from '#renderer/global/providers/persistence';
 import {
   fetchTasks,
   fetchAskHistory,
@@ -19,6 +20,8 @@ import {
   type WorkbenchStatusFilter,
 } from '#renderer/domains/captain/repo/terminal-api';
 import log from '#renderer/global/service/logger';
+import { prSummaryResponseSchema } from '#shared/daemon-contract/schemas';
+import { toReactQuery } from '#result';
 import type {
   TaskListResponse,
   AskHistoryResponse,
@@ -38,7 +41,7 @@ export type { TerminalSessionInfo };
 export function useTaskList() {
   return useQuery<TaskListResponse>({
     queryKey: queryKeys.tasks.list(),
-    queryFn: () => fetchTasks(),
+    queryFn: () => toReactQuery(fetchTasks()),
   });
 }
 
@@ -48,7 +51,7 @@ export function useTaskList() {
 export function useTaskListWithArchived(enabled: boolean) {
   return useQuery<TaskListResponse>({
     queryKey: [...queryKeys.tasks.list(), 'with-archived'],
-    queryFn: () => fetchTasks(true),
+    queryFn: () => toReactQuery(fetchTasks(true)),
     enabled,
   });
 }
@@ -56,7 +59,7 @@ export function useTaskListWithArchived(enabled: boolean) {
 export function useTaskAskHistory(id: number) {
   return useQuery<AskHistoryResponse>({
     queryKey: queryKeys.tasks.askHistory(id),
-    queryFn: () => fetchAskHistory(id),
+    queryFn: () => toReactQuery(fetchAskHistory(id)),
     enabled: id > 0,
   });
 }
@@ -64,7 +67,7 @@ export function useTaskAskHistory(id: number) {
 export function useTaskFeed(id: number) {
   return useQuery<FeedResponse>({
     queryKey: queryKeys.tasks.feed(id),
-    queryFn: () => fetchFeed(id),
+    queryFn: () => toReactQuery(fetchFeed(id)),
     enabled: id > 0,
   });
 }
@@ -72,7 +75,7 @@ export function useTaskFeed(id: number) {
 export function useTaskArtifacts(id: number) {
   return useQuery<ArtifactsResponse>({
     queryKey: queryKeys.tasks.artifacts(id),
-    queryFn: () => fetchArtifacts(id),
+    queryFn: () => toReactQuery(fetchArtifacts(id)),
     enabled: id > 0,
   });
 }
@@ -84,14 +87,14 @@ export function useTaskArtifacts(id: number) {
 export function useTerminalList() {
   return useQuery<TerminalSessionInfo[]>({
     queryKey: queryKeys.terminals.list(),
-    queryFn: () => listTerminals(),
+    queryFn: () => toReactQuery(listTerminals()),
   });
 }
 
 export function useWorkbenchList(status?: WorkbenchStatusFilter) {
   return useQuery<WorkbenchItem[]>({
     queryKey: queryKeys.workbenches.list(status),
-    queryFn: () => fetchWorkbenches(status),
+    queryFn: () => toReactQuery(fetchWorkbenches(status)),
   });
 }
 
@@ -102,7 +105,7 @@ export function useWorkbenchList(status?: WorkbenchStatusFilter) {
 export function useActivityStats() {
   return useQuery<ActivityStatsResponse>({
     queryKey: queryKeys.stats.activity(),
-    queryFn: () => fetchActivityStats(),
+    queryFn: () => toReactQuery(fetchActivityStats()),
     staleTime: 5 * 60 * 1000,
   });
 }
@@ -115,7 +118,10 @@ export function useTaskTimelineData(id: number) {
   return useQuery({
     queryKey: queryKeys.tasks.timeline(id),
     queryFn: async () => {
-      const [tl, sess] = await Promise.all([fetchTimeline(id), fetchItemSessions(id)]);
+      const [tl, sess] = await Promise.all([
+        toReactQuery(fetchTimeline(id)),
+        toReactQuery(fetchItemSessions(id)),
+      ]);
       const map: Record<string, SessionSummary> = {};
       for (const s of sess.sessions) map[s.session_id] = s;
       return { events: tl.events, sessionMap: map, sessions: sess.sessions };
@@ -128,13 +134,19 @@ export function useTaskTimelineData(id: number) {
 // PR Summary
 // ---------------------------------------------------------------------------
 
+const prCacheStore = defineJsonKeyspace(
+  'pr-cache:',
+  prSummaryResponseSchema,
+  'domains/captain/repo/queries#useTaskPrSummary',
+);
+
 export function useTaskPrSummary(id: number, prNumber: number | undefined, isFinalized: boolean) {
   return useQuery({
     queryKey: queryKeys.tasks.pr(id),
     queryFn: async () => {
-      const data = await fetchPrSummary(id);
+      const data = await toReactQuery(fetchPrSummary(id));
       if (isFinalized && data.summary) {
-        localStorage.setItem(`pr-cache:${id}`, JSON.stringify(data));
+        prCacheStore.for(String(id)).write(data);
       }
       return data;
     },
@@ -142,16 +154,14 @@ export function useTaskPrSummary(id: number, prNumber: number | undefined, isFin
     staleTime: isFinalized ? Infinity : 30_000,
     initialData: () => {
       if (!isFinalized) return undefined;
-      const key = `pr-cache:${id}`;
-      const cached = localStorage.getItem(key);
-      if (!cached) return undefined;
-      try {
-        return JSON.parse(cached);
-      } catch (err) {
-        log.warn(`[TaskDetail] corrupted pr-cache for item ${id}, clearing:`, err);
-        localStorage.removeItem(key);
+      const slot = prCacheStore.for(String(id));
+      const cached = slot.read();
+      if (cached === undefined) {
+        // Cache miss or schema-invalid (defineJsonSlot already cleared and logged).
         return undefined;
       }
+      log.debug(`[TaskDetail] hydrated pr-cache for item ${id}`);
+      return cached;
     },
   });
 }
@@ -163,7 +173,7 @@ export function useTaskPrSummary(id: number, prNumber: number | undefined, isFin
 export function useWorkers() {
   return useQuery<WorkersResponse>({
     queryKey: queryKeys.workers.list(),
-    queryFn: () => fetchWorkers(),
+    queryFn: () => toReactQuery(fetchWorkers()),
     refetchInterval: 15_000,
   });
 }

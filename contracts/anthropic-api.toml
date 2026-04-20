@@ -1,0 +1,70 @@
+[contract]
+name        = "anthropic-api"
+kind        = "external"
+types-crate = "rust/crates/settings"
+transports  = ["http", "stream"]
+base-url    = "https://api.anthropic.com"
+docs        = "https://docs.anthropic.com/en/api/overview"
+
+[[consumer]]
+name        = "settings-usage-probe"
+path        = "rust/crates/settings/src/io/usage_probe.rs"
+transports  = ["http"]
+role        = "Probes /v1/messages to read anthropic-ratelimit-unified-* headers"
+enforcement = "scanner"
+allow-value = true
+allow-value-reason = "Request/response bodies are Anthropic-owned schema; we touch only the rate-limit headers."
+
+[[consumer]]
+name        = "global-claude-stream"
+path        = "rust/crates/global-claude/src/stream.rs"
+transports  = ["stream"]
+role        = "Parses JSONL stream emitted by the claude CLI process"
+enforcement = "scanner"
+allow-value = true
+allow-value-reason = "Stream JSONL is Claude CLI output; field shape is upstream-owned."
+
+[[consumer]]
+name        = "global-claude-transcript"
+path        = "rust/crates/global-claude/src/transcript.rs"
+transports  = ["stream"]
+role        = "Parses claude CLI transcript events"
+enforcement = "scanner"
+allow-value = true
+allow-value-reason = "Transcript events are Claude CLI output; field shape is upstream-owned."
+
+[[consumer]]
+name        = "global-claude-protocol"
+path        = "rust/crates/global-claude/src/protocol.rs"
+transports  = ["stream"]
+role        = "Claude CLI protocol message parsing"
+enforcement = "scanner"
+allow-value = true
+allow-value-reason = "Claude CLI protocol shape is upstream-owned."
+
+[[consumer]]
+name        = "global-claude-message"
+path        = "rust/crates/global-claude/src/message.rs"
+transports  = ["stream"]
+role        = "Claude CLI message parsing"
+enforcement = "scanner"
+allow-value = true
+allow-value-reason = "Message payload shape is upstream-owned."
+
+[[consumer]]
+name        = "global-claude-json-parse"
+path        = "rust/crates/global-claude/src/json_parse.rs"
+transports  = ["stream"]
+role        = "JSON parsing helpers for claude CLI output"
+enforcement = "scanner"
+allow-value = true
+allow-value-reason = "JSON helpers for upstream-owned shape."
+
+[[consumer]]
+name        = "global-claude-stream-symptoms"
+path        = "rust/crates/global-claude/src/stream_symptoms.rs"
+transports  = ["stream"]
+role        = "Detects error symptoms in claude CLI stream"
+enforcement = "scanner"
+allow-value = true
+allow-value-reason = "Symptom detection operates on upstream-owned stream values."

@@ -1,5 +1,10 @@
 export { useTaskActions } from '#renderer/domains/captain/runtime/useTaskActions';
 export { useExpandedArtifactIds } from '#renderer/domains/captain/runtime/useExpandedArtifactIds';
+export { useAppHeader } from '#renderer/domains/captain/runtime/useAppHeader';
+export { useSidebarData } from '#renderer/domains/captain/runtime/useSidebarData';
+export { useSidebarNav } from '#renderer/domains/captain/runtime/useSidebarNav';
+export { useWorkbenchCtx } from '#renderer/domains/captain/runtime/useWorkbenchCtx';
+export { useWorkbenchPage } from '#renderer/domains/captain/runtime/useWorkbenchPage';
 
 // Query hooks re-exported for app-tier consumers
 export { useTaskList, useWorkbenchList, useWorkers } from '#renderer/domains/captain/runtime/hooks';

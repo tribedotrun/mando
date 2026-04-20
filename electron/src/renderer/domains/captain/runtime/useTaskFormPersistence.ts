@@ -1,9 +1,15 @@
 import { useCallback, useState } from 'react';
+import { defineKeyspace, defineSlot } from '#renderer/global/providers/persistence';
 
-const LAST_PROJECT_KEY = 'mando:lastProject';
+const lastProjectSlot = defineSlot(
+  'mando:lastProject',
+  'domains/captain/runtime/useTaskFormPersistence',
+);
+
+const formStore = defineKeyspace('', 'domains/captain/runtime/useTaskFormPersistence');
 
 /**
- * Encapsulates localStorage-based draft persistence for task creation forms.
+ * Encapsulates draft persistence for task creation forms.
  * Handles project selection memory and optional bulk-mode flag.
  */
 export function useTaskFormPersistence(opts: {
@@ -15,23 +21,23 @@ export function useTaskFormPersistence(opts: {
   const { draftProjectKey, draftBulkKey, hasDraft, initialProject } = opts;
 
   const [bulk, setBulkState] = useState(() =>
-    draftBulkKey ? hasDraft && localStorage.getItem(draftBulkKey) === '1' : false,
+    draftBulkKey ? hasDraft && formStore.for(draftBulkKey).read() === '1' : false,
   );
 
   const [project, setProjectState] = useState(() => {
     if (hasDraft) {
-      const saved = localStorage.getItem(draftProjectKey);
-      if (saved !== null) return saved;
+      const saved = formStore.for(draftProjectKey).read();
+      if (saved !== undefined) return saved;
     }
-    return initialProject ?? localStorage.getItem(LAST_PROJECT_KEY) ?? '';
+    return initialProject ?? lastProjectSlot.read() ?? '';
   });
 
   const setBulk = useCallback(
     (next: boolean) => {
       setBulkState(next);
       if (draftBulkKey) {
-        if (next) localStorage.setItem(draftBulkKey, '1');
-        else localStorage.removeItem(draftBulkKey);
+        if (next) formStore.for(draftBulkKey).write('1');
+        else formStore.for(draftBulkKey).clear();
       }
     },
     [draftBulkKey],
@@ -42,11 +48,11 @@ export function useTaskFormPersistence(opts: {
       const resolved = value === '__all__' ? '' : value;
       setProjectState(resolved);
       if (resolved) {
-        localStorage.setItem(LAST_PROJECT_KEY, value);
-        localStorage.setItem(draftProjectKey, value);
+        lastProjectSlot.write(value);
+        formStore.for(draftProjectKey).write(value);
       } else {
-        localStorage.removeItem(LAST_PROJECT_KEY);
-        localStorage.removeItem(draftProjectKey);
+        lastProjectSlot.clear();
+        formStore.for(draftProjectKey).clear();
       }
     },
     [draftProjectKey],
@@ -54,22 +60,22 @@ export function useTaskFormPersistence(opts: {
 
   const resetDrafts = useCallback(() => {
     setBulkState(false);
-    if (draftBulkKey) localStorage.removeItem(draftBulkKey);
-    localStorage.removeItem(draftProjectKey);
+    if (draftBulkKey) formStore.for(draftBulkKey).clear();
+    formStore.for(draftProjectKey).clear();
   }, [draftBulkKey, draftProjectKey]);
 
   const cleanupIfEmpty = useCallback(
     (titleEmpty: boolean) => {
       if (titleEmpty) {
-        if (draftBulkKey) localStorage.removeItem(draftBulkKey);
-        localStorage.removeItem(draftProjectKey);
+        if (draftBulkKey) formStore.for(draftBulkKey).clear();
+        formStore.for(draftProjectKey).clear();
       }
     },
     [draftBulkKey, draftProjectKey],
   );
 
   const persistProject = useCallback((proj: string) => {
-    if (proj) localStorage.setItem(LAST_PROJECT_KEY, proj);
+    if (proj) lastProjectSlot.write(proj);
   }, []);
 
   return { bulk, setBulk, project, setProject, resetDrafts, cleanupIfEmpty, persistProject };

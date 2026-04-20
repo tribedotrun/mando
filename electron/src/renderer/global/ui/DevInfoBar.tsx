@@ -1,43 +1,13 @@
-import React, { useRef, useState } from 'react';
-import { useMountEffect } from '#renderer/global/runtime/useMountEffect';
-import { useDevInfo } from '#renderer/global/runtime/useAppInfo';
+import React from 'react';
 import { useNativeActions } from '#renderer/global/runtime/useNativeActions';
 import { DevInspector } from '#renderer/global/ui/DevInspector';
 import { Badge } from '#renderer/global/ui/badge';
 import { Button } from '#renderer/global/ui/button';
+import { useDevInfoBar } from '#renderer/global/runtime/useDevInfoBar';
 
 export function DevInfoBar(): React.ReactElement | null {
-  const info = useDevInfo();
+  const { info, inspecting, setInspecting, hoveredName, setHoveredName } = useDevInfoBar();
   const { openConfigFile, openDataDir, toggleDevTools } = useNativeActions();
-  const [inspecting, setInspecting] = useState(false);
-  const [hoveredName, setHoveredName] = useState<string | null>(null);
-  const inspectingRef = useRef(false);
-  inspectingRef.current = inspecting;
-
-  // Shift+A: toggle inspect on, or copy when already on (dev/sandbox only)
-  const infoRef = useRef(info);
-  infoRef.current = info;
-  useMountEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (!infoRef.current) return;
-      const t = e.target as HTMLElement;
-      if (t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement || t.isContentEditable)
-        return;
-      if (e.key === 'A' && e.shiftKey && !e.metaKey && !e.ctrlKey) {
-        e.preventDefault();
-        if (inspectingRef.current) {
-          const copy = window.__devInspectorCopy;
-          if (copy) copy();
-        } else {
-          setInspecting(true);
-        }
-      } else if (e.key === 'Escape' && inspectingRef.current) {
-        setInspecting(false);
-      }
-    };
-    document.addEventListener('keydown', onKey, true);
-    return () => document.removeEventListener('keydown', onKey, true);
-  });
 
   if (!info) return null;
 

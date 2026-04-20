@@ -1,26 +1,14 @@
-import React, { useCallback, useRef, useState } from 'react';
-import { useMountEffect } from '#renderer/global/runtime/useMountEffect';
-import { useTaskTimelineData, useTaskPrSummary } from '#renderer/domains/captain/runtime/hooks';
-import { FINALIZED_STATUSES, type TaskItem, type SessionSummary } from '#renderer/global/types';
-import { buildSessionsFromTimeline } from '#renderer/domains/sessions';
-import { TaskActionBar } from '#renderer/domains/captain/ui/TaskActionBar';
+import React from 'react';
+import { useTaskDetailView } from '#renderer/domains/captain/runtime/useTaskDetailView';
 import { useTaskAsk } from '#renderer/domains/captain/runtime/useTaskAsk';
+import type { TaskItem } from '#renderer/global/types';
+import { TaskActionBar } from '#renderer/domains/captain/ui/TaskActionBar';
 import { PrTab, InfoTab, ContextModal } from '#renderer/domains/captain/ui/TaskDetailTabs';
 import { SessionsTab } from '#renderer/domains/captain/ui/SessionsTab';
 import { TaskFeedView } from '#renderer/domains/captain/ui/TaskFeedView';
-import { RefreshCw } from 'lucide-react';
+import { TaskDetailTabBar } from '#renderer/domains/captain/ui/TaskDetailViewParts';
 import { cn } from '#renderer/global/service/cn';
-import { Button } from '#renderer/global/ui/button';
-import { Tabs, TabsList, TabsTrigger } from '#renderer/global/ui/tabs';
-import {
-  Tooltip,
-  TooltipTrigger,
-  TooltipContent,
-  TooltipProvider,
-} from '#renderer/global/ui/tooltip';
-
-type DetailTab = 'feed' | 'pr' | 'terminal' | 'more';
-const REFRESH_INDICATOR_MS = 1500;
+import { Tabs } from '#renderer/global/ui/tabs';
 
 interface Props {
   item: TaskItem;
@@ -47,84 +35,20 @@ export function TaskDetailView({
   onResumeInTerminal,
   terminalSlot,
 }: Props): React.ReactElement {
-  const activeTab: DetailTab = (activeTabProp as DetailTab) || 'feed';
-  const [prRefreshing, setPrRefreshing] = useState(false);
-  const [contextModalOpen, setContextModalOpen] = useState(false);
   const { ask } = useTaskAsk(item.id);
-
-  // Listen for header overflow menu triggering "View task brief"
-  useMountEffect(() => {
-    const handler = () => setContextModalOpen(true);
-    document.addEventListener('mando:view-task-brief', handler);
-    return () => document.removeEventListener('mando:view-task-brief', handler);
-  });
-
-  const onBackRef = useRef(onBack);
-  onBackRef.current = onBack;
-
-  // Escape key handler.
-  useMountEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return;
-      if (
-        document.querySelector('[role="dialog"]') ||
-        document.querySelector('[data-command-palette]') ||
-        document.querySelector('[data-shortcut-overlay]')
-      )
-        return;
-      e.stopPropagation();
-      onBackRef.current();
-    };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  });
-
-  // Data queries.
-  const { data: timelineData } = useTaskTimelineData(item.id);
-
-  const isFinalized = FINALIZED_STATUSES.includes(item.status);
   const {
-    data: prBody,
-    isPending: prPending,
-    refetch: refetchPr,
-  } = useTaskPrSummary(item.id, item.pr_number, isFinalized);
-
-  const events = timelineData?.events ?? [];
-  const sessionMap = timelineData?.sessionMap ?? {};
-
-  // Timeline is the authoritative source for session data.
-  const sessions = buildSessionsFromTimeline(events, sessionMap, item);
-
-  const navigateToTranscript = (sessionId: string, caller?: string, cwd?: string) => {
-    onOpenTranscript?.({
-      sessionId,
-      caller: caller || 'worker',
-      cwd: cwd || item.worktree || undefined,
-      project: item.project || undefined,
-      taskTitle: item.title || undefined,
-    });
-  };
-
-  const handleSessionClick = (s: SessionSummary) => {
-    navigateToTranscript(s.session_id, s.caller, s.cwd || item.worktree);
-  };
-
-  const handleResumeSession = useCallback(
-    (sessionId: string, name?: string) => {
-      onResumeInTerminal?.(sessionId, name);
-    },
-    [onResumeInTerminal],
-  );
-
-  const tabs: { key: DetailTab; label: string }[] = [
-    { key: 'feed', label: 'Feed' },
-    { key: 'pr', label: 'PR' },
-    { key: 'terminal', label: 'Terminal' },
-    { key: 'more', label: 'More' },
-  ];
-
-  const validKeys = tabs.map((t) => t.key);
-  const effectiveTab = validKeys.includes(activeTab) ? activeTab : 'feed';
+    tabs,
+    effectiveTab,
+    prRefreshing,
+    contextModalOpen,
+    setContextModalOpen,
+    prBody,
+    prPending,
+    sessions,
+    handleSessionClick,
+    handleResumeSession,
+    handlePrRefresh,
+  } = useTaskDetailView({ item, onBack, onOpenTranscript, onResumeInTerminal, activeTabProp });
 
   return (
     <div className="flex h-full flex-col">
@@ -148,44 +72,13 @@ export function TaskDetailView({
                 'flex flex-1 flex-col min-h-0',
             )}
           >
-            <div className="sticky top-0 z-10 flex items-center justify-between bg-background">
-              <TabsList variant="line" className="h-auto gap-0">
-                {tabs.map((tab) => (
-                  <TabsTrigger
-                    key={tab.key}
-                    value={tab.key}
-                    className="px-3 py-1.5 text-body font-medium"
-                  >
-                    {tab.label}
-                  </TabsTrigger>
-                ))}
-              </TabsList>
-              {effectiveTab === 'pr' && item.pr_number && (
-                <TooltipProvider delayDuration={300}>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        size="icon-xs"
-                        disabled={prRefreshing}
-                        onClick={() => {
-                          setPrRefreshing(true);
-                          void refetchPr();
-                          setTimeout(() => setPrRefreshing(false), REFRESH_INDICATOR_MS);
-                        }}
-                        className="mr-2 text-text-3 hover:text-text-1"
-                      >
-                        <RefreshCw size={14} className={prRefreshing ? 'animate-spin' : ''} />
-                        <span className="sr-only">Refresh PR</span>
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom" className="text-xs">
-                      Refresh PR
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-              )}
-            </div>
+            <TaskDetailTabBar
+              tabs={tabs}
+              effectiveTab={effectiveTab}
+              prNumber={item.pr_number}
+              prRefreshing={prRefreshing}
+              onPrRefresh={handlePrRefresh}
+            />
 
             {/* Tab content */}
             {effectiveTab !== 'terminal' && (

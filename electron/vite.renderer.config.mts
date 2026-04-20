@@ -28,6 +28,7 @@ export default defineConfig({
       '#preload': fileURLToPath(new URL('src/preload', import.meta.url)),
       '#shared': fileURLToPath(new URL('src/shared', import.meta.url)),
       '#contracts': fileURLToPath(new URL('../contracts', import.meta.url)),
+      '#result': fileURLToPath(new URL('src/shared/result/index.ts', import.meta.url)),
     },
   },
   base: './',

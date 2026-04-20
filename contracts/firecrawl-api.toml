@@ -1,0 +1,25 @@
+[contract]
+name        = "firecrawl-api"
+kind        = "external"
+types-crate = "rust/crates/scout"
+transports  = ["http"]
+base-url    = "https://api.firecrawl.dev"
+docs        = "https://docs.firecrawl.dev"
+
+[[consumer]]
+name        = "scout-firecrawl"
+path        = "rust/crates/scout/src/io/firecrawl.rs"
+transports  = ["http"]
+role        = "Firecrawl scrape client"
+enforcement = "scanner"
+allow-value = true
+allow-value-reason = "Firecrawl response schema is upstream-owned; scrape returns opaque markdown plus metadata."
+
+[[consumer]]
+name        = "scout-content-fetch-firecrawl"
+path        = "rust/crates/scout/src/io/content_fetch.rs"
+transports  = ["http"]
+role        = "Firecrawl fallback path inside content_fetch"
+enforcement = "scanner"
+allow-value = true
+allow-value-reason = "Firecrawl is called as a fallback inside content_fetch; response shape is upstream-owned."

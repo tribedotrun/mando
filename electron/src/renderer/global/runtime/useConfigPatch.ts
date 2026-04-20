@@ -2,17 +2,14 @@ import { useCallback, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useConfigSave } from '#renderer/global/repo/configMutations';
 import { queryKeys } from '#renderer/global/repo/queryKeys';
+import { toast } from '#renderer/global/runtime/useFeedback';
+import { getErrorMessage } from '#renderer/global/service/utils';
 import type { MandoConfig } from '#renderer/global/types';
 
 type ConfigTransform = (current: MandoConfig) => MandoConfig;
 
 const DEFAULT_DEBOUNCE_MS = 1500;
 
-/**
- * Provides instant and debounced config patching.
- * Both read the latest config from the React Query cache at execution time
- * (not at call time) so debounced saves always use fresh data.
- */
 export function useConfigPatch(debounceMs = DEFAULT_DEBOUNCE_MS) {
   const qc = useQueryClient();
   const saveMut = useConfigSave();
@@ -20,13 +17,15 @@ export function useConfigPatch(debounceMs = DEFAULT_DEBOUNCE_MS) {
   const timerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   const getConfig = useCallback(
-    () => qc.getQueryData<MandoConfig>(queryKeys.config.current()) ?? ({} as MandoConfig),
+    (): MandoConfig | null => qc.getQueryData<MandoConfig>(queryKeys.config.current()) ?? null,
     [qc],
   );
 
   const save = useCallback(
     (transform: ConfigTransform, options?: Parameters<typeof saveMut.mutate>[1]) => {
-      saveMut.mutate(transform(getConfig()), options);
+      const current = getConfig();
+      if (!current) return;
+      saveMut.mutate(transform(current), options);
     },
     [saveMut, getConfig],
   );
@@ -38,7 +37,14 @@ export function useConfigPatch(debounceMs = DEFAULT_DEBOUNCE_MS) {
       timerRef.current = setTimeout(() => {
         timerRef.current = undefined;
         if (pendingRef.current) {
-          saveMut.mutate(pendingRef.current(getConfig()));
+          const current = getConfig();
+          if (current) {
+            saveMut.mutate(pendingRef.current(current), {
+              onError: (err) => {
+                toast.error(getErrorMessage(err, 'Failed to save settings'));
+              },
+            });
+          }
           pendingRef.current = null;
         }
       }, debounceMs);

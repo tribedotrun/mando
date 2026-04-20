@@ -3,7 +3,7 @@ import Ansi from 'ansi-to-react';
 import { Check, Copy } from 'lucide-react';
 import { useCopyFeedback } from '#renderer/global/runtime/useCopyFeedback';
 import { cn } from '#renderer/global/service/cn';
-import { copyToClipboard } from '#renderer/global/service/utils';
+import { copyToClipboard } from '#renderer/global/runtime/useFeedback';
 
 interface TerminalProps {
   output: string;

@@ -1,0 +1,13 @@
+[package]
+name = "api-types"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+global-types = { path = "../global-types" }
+inventory.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+time.workspace = true
+ts-rs = "=12.0.1"

@@ -1,0 +1,17 @@
+[package]
+name = "transport-ui"
+version.workspace = true
+edition = "2021"
+description = "Electron UI runtime supervision for the Mando daemon"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true
+anyhow.workspace = true
+libc = "0.2"

@@ -6,16 +6,17 @@
  * back to the renderer.
  */
 import { Notification, BrowserWindow } from 'electron';
-import { onTrusted } from '#main/global/runtime/ipcSecurity';
+import { onChannel, sendChannel } from '#main/global/runtime/ipcSecurity';
 import { titleForKind, stripHtml } from '#main/shell/service/notifications';
-import type { NotificationPayload } from '#shared/notifications';
 
 /**
  * Register IPC handlers for desktop notifications.
- * Call once during app startup.
+ * Call once during app startup. Payload is parsed against the IPC contract schema
+ * before reaching the handler, so a malformed renderer message is dropped at the
+ * boundary rather than triggering arbitrary native notification behaviour.
  */
 export function registerNotificationHandlers(getMainWindow: () => BrowserWindow | null): void {
-  onTrusted('show-notification', (_event, payload: NotificationPayload) => {
+  onChannel('show-notification', (_event, payload) => {
     if (!Notification.isSupported()) return;
 
     const title = titleForKind(payload.kind);
@@ -39,7 +40,7 @@ export function registerNotificationHandlers(getMainWindow: () => BrowserWindow 
             : 'scout_id' in payload.kind
               ? String(payload.kind.scout_id)
               : undefined;
-        win.webContents.send('notification-click', {
+        sendChannel(win.webContents, 'notification-click', {
           kind: payload.kind,
           item_id: itemId,
         });

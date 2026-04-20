@@ -14,6 +14,7 @@ import type {
   ScoutArticleResponse,
   ScoutResearchRun,
 } from '#renderer/global/types';
+import { toReactQuery } from '#result';
 
 export type { ScoutQueryParams };
 
@@ -25,7 +26,7 @@ export function useScoutList(params?: ScoutQueryParams) {
       q: params?.q,
       type: params?.type,
     }),
-    queryFn: () => fetchScoutItems(params),
+    queryFn: () => toReactQuery(fetchScoutItems(params)),
     placeholderData: keepPreviousData,
   });
 }
@@ -33,7 +34,7 @@ export function useScoutList(params?: ScoutQueryParams) {
 export function useScoutItem(itemId: number, options?: { enabled?: boolean }) {
   return useQuery<ScoutItem>({
     queryKey: queryKeys.scout.item(itemId),
-    queryFn: () => fetchScoutItem(itemId),
+    queryFn: () => toReactQuery(fetchScoutItem(itemId)),
     enabled: options?.enabled,
   });
 }
@@ -41,21 +42,21 @@ export function useScoutItem(itemId: number, options?: { enabled?: boolean }) {
 export function useScoutArticle(itemId: number) {
   return useQuery<ScoutArticleResponse>({
     queryKey: queryKeys.scout.article(itemId),
-    queryFn: () => fetchScoutArticle(itemId),
+    queryFn: () => toReactQuery(fetchScoutArticle(itemId)),
   });
 }
 
 export function useResearchRuns() {
   return useQuery<ScoutResearchRun[]>({
     queryKey: queryKeys.scout.research(),
-    queryFn: fetchResearchRuns,
+    queryFn: () => toReactQuery(fetchResearchRuns()),
   });
 }
 
 export function useResearchRunItems(runId: number) {
   return useQuery<ScoutItem[]>({
     queryKey: queryKeys.scout.researchItems(runId),
-    queryFn: () => fetchResearchRunItems(runId),
+    queryFn: () => toReactQuery(fetchResearchRunItems(runId)),
     enabled: runId > 0,
   });
 }

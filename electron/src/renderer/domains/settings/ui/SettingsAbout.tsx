@@ -1,5 +1,5 @@
 import React from 'react';
-import { useAppVersion } from '#renderer/domains/settings/runtime/useAppVersion';
+import { useAppVersion } from '#renderer/domains/settings/runtime/hooks';
 
 export function SettingsAbout(): React.ReactElement {
   const { data } = useAppVersion();

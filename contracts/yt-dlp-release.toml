@@ -1,0 +1,17 @@
+[contract]
+name        = "yt-dlp-release"
+kind        = "external"
+types-crate = "rust/crates/scout"
+transports  = ["http"]
+base-url    = "https://github.com/yt-dlp/yt-dlp/releases"
+docs        = "https://github.com/yt-dlp/yt-dlp"
+
+# This contract covers one-shot binary downloads — no JSON body parsing.
+[[consumer]]
+name        = "scout-yt-dlp-downloader"
+path        = "rust/crates/scout/src/io/yt_dlp.rs"
+transports  = ["http"]
+role        = "Downloads the yt-dlp_macos binary from GitHub releases on first use"
+enforcement = "scanner"
+allow-value = true
+allow-value-reason = "Binary file download — there is no JSON schema at this boundary, but the scanner contract requires value-flag uniformity."

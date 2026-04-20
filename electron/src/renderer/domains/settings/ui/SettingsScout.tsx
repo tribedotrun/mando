@@ -12,7 +12,7 @@ import {
 } from '#renderer/global/service/configPatches';
 import type { ScoutConfig } from '#renderer/global/types';
 
-const EMPTY_SCOUT: ScoutConfig = {};
+const EMPTY_SCOUT: ScoutConfig = Object.freeze({});
 
 function TagInput({
   label,

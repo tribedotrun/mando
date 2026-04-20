@@ -6,7 +6,7 @@ The best way to contribute is by opening an issue — bug reports, feature reque
 
 ### Prerequisites
 
-- **Rust** -- version pinned in `rust-toolchain.toml`
+- **Rust** -- version pinned in `rust/rust-toolchain.toml`
 - **Node.js** -- version pinned in `.node-version`
 - **cargo-nextest** -- `cargo install cargo-nextest --locked`
 - **macOS** -- Mando is a macOS application
@@ -22,9 +22,9 @@ cd electron && npm install && cd ..
 ### Build and run
 
 ```bash
-cargo build --workspace                  # Build all Rust crates
+cargo build --manifest-path rust/Cargo.toml --workspace                  # Build all Rust crates
 cd electron && npm run build && cd ..    # Build Electron app
-cargo nextest run --workspace --lib      # Run unit tests
+cargo nextest run --manifest-path rust/Cargo.toml --workspace --lib      # Run unit tests
 ```
 
 ## License

@@ -2,12 +2,10 @@ import React from 'react';
 import { Loader2 } from 'lucide-react';
 import { useResearchRuns } from '#renderer/domains/scout/runtime/hooks';
 import { Table, TableBody, TableHead, TableHeader, TableRow } from '#renderer/global/ui/table';
-import { failedRunsWithErrors } from '#renderer/domains/scout/service/researchHelpers';
 import { ResearchRow } from '#renderer/domains/scout/ui/ScoutResearchRow';
 
 export function ScoutResearch() {
   const { data: runs, isLoading } = useResearchRuns();
-  const failedRuns = failedRunsWithErrors(runs ?? []);
 
   return (
     <div className="flex flex-col gap-4">
@@ -30,14 +28,14 @@ export function ScoutResearch() {
           No research runs yet. Use the Research button to start one.
         </div>
       ) : (
-        <Table>
+        <Table className="table-fixed">
           <TableHeader>
             <TableRow className="hover:bg-transparent">
               <TableHead>Prompt</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead>Added</TableHead>
-              <TableHead>Started</TableHead>
-              <TableHead>Completed</TableHead>
+              <TableHead className="w-32">Status</TableHead>
+              <TableHead className="w-20">Added</TableHead>
+              <TableHead className="w-28">Started</TableHead>
+              <TableHead className="w-28">Completed</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -46,24 +44,6 @@ export function ScoutResearch() {
             ))}
           </TableBody>
         </Table>
-      )}
-
-      {failedRuns.length > 0 && (
-        <div className="flex flex-col gap-2">
-          {failedRuns.map((r) => (
-            <div
-              key={r.id}
-              className="rounded-md bg-destructive/10 px-3 py-2 text-caption text-destructive [overflow-wrap:anywhere]"
-            >
-              <span className="font-medium">
-                Failed: &ldquo;{r.research_prompt.slice(0, 60)}
-                {r.research_prompt.length > 60 ? '...' : ''}&rdquo;
-              </span>
-              {' \u2014 '}
-              {r.error}
-            </div>
-          ))}
-        </div>
       )}
     </div>
   );

@@ -6,57 +6,70 @@ import path from 'path';
 import { spawn } from 'child_process';
 import { shell, type IpcMainInvokeEvent } from 'electron';
 import log from '#main/global/providers/logger';
-import { handleTrusted } from '#main/global/runtime/ipcSecurity';
+import { handleChannel, sendChannel } from '#main/global/runtime/ipcSecurity';
 import { installCliAndPlists } from '#main/global/runtime/launchd';
-import { daemonFetch, ensureDaemon } from '#main/global/runtime/lifecycle';
+import { daemonRouteFetch, daemonRouteJsonR, ensureDaemon } from '#main/global/runtime/lifecycle';
+import {
+  parseConfigJsonText,
+  requireConfigJsonText,
+  requireValidConfigJsonText,
+} from '#shared/daemon-contract/json';
 import { getDataDir, getConfigPath, getAppMode } from '#main/global/config/lifecycle';
 
+function parseConfigJson(configJson: string, where: string) {
+  return requireConfigJsonText(configJson, where);
+}
+
 export function registerConfigHandlers(): void {
-  handleTrusted('has-config', async () => {
-    try {
-      const resp = await daemonFetch('/api/config/status');
-      if (resp.ok) {
-        const data = (await resp.json()) as { setupComplete: boolean };
-        return data.setupComplete;
-      }
-    } catch (e: unknown) {
-      log.debug('[has-config] daemon check failed:', e);
-    }
+  handleChannel('has-config', async () => {
+    const result = await daemonRouteJsonR('getConfigStatus');
+    if (result.isOk()) return result.value.setupComplete;
+    log.debug('[has-config] daemon check failed:', result.error);
     const configPath = getConfigPath();
     if (!fs.existsSync(configPath)) return false;
     try {
       const raw = fs.readFileSync(configPath, 'utf-8');
-      return typeof JSON.parse(raw) === 'object';
+      return parseConfigJsonText(raw, 'ipc:has-config local config').isOk();
     } catch (e: unknown) {
       log.warn('[has-config] local config parse failed:', e);
       return false;
     }
   });
 
-  handleTrusted('read-config', async () => {
+  handleChannel('read-config', async () => {
     try {
-      const resp = await daemonFetch('/api/config');
-      if (resp.ok) return await resp.text();
+      const resp = await daemonRouteFetch('getConfig');
+      if (resp.ok) {
+        return requireValidConfigJsonText(await resp.text(), 'ipc:read-config daemon');
+      }
     } catch (err: unknown) {
       log.debug('read-config: daemon not ready, falling back to local file:', err);
     }
     try {
-      return fs.readFileSync(getConfigPath(), 'utf-8');
+      return requireValidConfigJsonText(
+        fs.readFileSync(getConfigPath(), 'utf-8'),
+        'ipc:read-config local',
+      );
     } catch (err: unknown) {
       log.error('read-config: both daemon and local file read failed:', err);
       throw new Error('Failed to load config from daemon and local file', { cause: err });
     }
   });
 
-  // save-config IPC removed — renderer calls PUT /api/config directly
+  // save-config IPC removed; renderer now writes config through the typed daemon contract
 
   // Save partial onboarding progress to a separate file. Using config.json
   // would make hasConfig return true and skip the remainder of onboarding.
-  handleTrusted('save-config-local', (_: unknown, configJson: string) => {
+  handleChannel('save-config-local', (_event, configJson: string) => {
     try {
+      const config = parseConfigJson(configJson, 'ipc:save-config-local');
       const dir = path.dirname(getConfigPath());
       fs.mkdirSync(dir, { recursive: true });
-      fs.writeFileSync(path.join(dir, 'config.partial.json'), configJson, 'utf-8');
+      fs.writeFileSync(
+        path.join(dir, 'config.partial.json'),
+        JSON.stringify(config, null, 2),
+        'utf-8',
+      );
       return true;
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
@@ -65,10 +78,12 @@ export function registerConfigHandlers(): void {
     }
   });
 
-  handleTrusted('setup-complete', async (event: IpcMainInvokeEvent, configJson: string) => {
-    const send = (step: string) => event.sender.send('setup-progress', step);
+  handleChannel('setup-complete', async (event: IpcMainInvokeEvent, configJson: string) => {
+    const send = (step: string) => sendChannel(event.sender, 'setup-progress', step);
     const dataDir = getDataDir();
     let lastError: string | undefined;
+    const config = parseConfigJson(configJson, 'ipc:setup-complete');
+    const serializedConfig = JSON.stringify(config, null, 2);
 
     send('Saving configuration\u2026');
     for (const sub of ['state', 'logs', 'images']) {
@@ -76,7 +91,7 @@ export function registerConfigHandlers(): void {
     }
     const configPath = getConfigPath();
     fs.mkdirSync(path.dirname(configPath), { recursive: true });
-    fs.writeFileSync(configPath, configJson, 'utf-8');
+    fs.writeFileSync(configPath, serializedConfig, 'utf-8');
     const partial = path.join(path.dirname(configPath), 'config.partial.json');
     if (fs.existsSync(partial)) fs.unlinkSync(partial);
 
@@ -87,10 +102,16 @@ export function registerConfigHandlers(): void {
     let daemonNotified = false;
     for (let attempt = 0; attempt < 5; attempt++) {
       try {
-        await daemonFetch('/api/config/setup', {
+        const resp = await daemonRouteFetch('postConfigSetup', undefined, {
           method: 'POST',
-          body: JSON.stringify({ config: JSON.parse(configJson) }),
+          body: { config },
         });
+        if (!resp.ok) {
+          const detail = await resp.text().catch(() => '');
+          throw new Error(
+            `postConfigSetup failed: HTTP ${resp.status}${detail ? ` ${detail.slice(0, 120)}` : ''}`,
+          );
+        }
         daemonNotified = true;
         break;
       } catch (err: unknown) {
@@ -126,20 +147,26 @@ export function registerConfigHandlers(): void {
     };
   });
 
-  // add-project IPC removed — renderer calls POST /api/projects directly
+  // add-project IPC removed; renderer now creates projects through the typed daemon contract
   // launchd:reinstall IPC removed — was never called from renderer
 
-  handleTrusted('open-logs-folder', () => shell.openPath(path.join(getDataDir(), 'logs')));
-  handleTrusted('open-data-dir', () => shell.openPath(getDataDir()));
-  handleTrusted('open-config-file', () => shell.openPath(getConfigPath()));
-  handleTrusted('open-in-finder', async (_e, dir: string) => {
+  handleChannel('open-logs-folder', async () => {
+    await shell.openPath(path.join(getDataDir(), 'logs'));
+  });
+  handleChannel('open-data-dir', async () => {
+    await shell.openPath(getDataDir());
+  });
+  handleChannel('open-config-file', async () => {
+    await shell.openPath(getConfigPath());
+  });
+  handleChannel('open-in-finder', async (_event, dir) => {
     const err = await shell.openPath(dir);
     if (err) {
       log.warn(`open-in-finder failed for "${dir}": ${err}`);
       throw new Error(err);
     }
   });
-  handleTrusted('open-in-cursor', (_e, dir: string) => {
+  handleChannel('open-in-cursor', (_event, dir) => {
     try {
       spawn('cursor', [dir], { detached: true, stdio: 'ignore' }).unref();
     } catch (err) {

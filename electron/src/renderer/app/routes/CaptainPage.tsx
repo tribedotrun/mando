@@ -3,7 +3,7 @@ import { CaptainView } from '#renderer/domains/captain/ui/CaptainView';
 import type { InlineTaskCreateHandle } from '#renderer/domains/captain/ui/InlineTaskCreate';
 import { ErrorBoundary } from '#renderer/global/ui/ErrorBoundary';
 import { useMountEffect } from '#renderer/global/runtime/useMountEffect';
-import { useUIStore } from '#renderer/app/uiStore';
+import { useUIStore } from '#renderer/global/runtime/useUIStore';
 
 export function CaptainPage(): React.ReactElement {
   const inlineRef = useRef<InlineTaskCreateHandle>(null);

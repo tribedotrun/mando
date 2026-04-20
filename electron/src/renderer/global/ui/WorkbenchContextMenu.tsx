@@ -1,4 +1,4 @@
-import React, { useCallback, useRef, useState } from 'react';
+import React from 'react';
 import { Archive, Copy, FolderOpen, Pencil, Pin, PinOff } from 'lucide-react';
 import {
   ContextMenu,
@@ -7,8 +7,9 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from '#renderer/global/ui/context-menu';
-import { Input } from '#renderer/global/ui/input';
 import { useSidebar } from '#renderer/global/runtime/SidebarContext';
+
+export { WorkbenchRenameInput } from '#renderer/global/ui/WorkbenchRenameInput';
 
 export interface WorkbenchMenuTarget {
   id: number;
@@ -64,15 +65,7 @@ function WorkbenchContextMenuFrame({
 
   return (
     <ContextMenu>
-      <ContextMenuTrigger
-        asChild
-        onContextMenu={(event) => {
-          event.preventDefault();
-          event.stopPropagation();
-        }}
-      >
-        {children}
-      </ContextMenuTrigger>
+      <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
       <ContextMenuContent className="min-w-[200px]">
         <ContextMenuItem
           onSelect={() =>
@@ -109,54 +102,6 @@ export function ArchivableWorkbenchContextMenu(
     <WorkbenchContextMenuFrame
       {...props}
       extraActions={<ArchiveWorkbenchMenuItem workbenchId={props.workbench.id} />}
-    />
-  );
-}
-
-interface RenameInputProps {
-  initialValue: string;
-  onCommit: (value: string) => void;
-  onCancel: () => void;
-  className?: string;
-}
-
-export function WorkbenchRenameInput({
-  initialValue,
-  onCommit,
-  onCancel,
-  className,
-}: RenameInputProps): React.ReactElement {
-  const [value, setValue] = useState(initialValue);
-  const submittedRef = useRef(false);
-  const inputRefCb = useCallback((element: HTMLInputElement | null) => {
-    if (element) {
-      element.focus();
-      element.select();
-    }
-  }, []);
-  const commit = () => {
-    if (submittedRef.current) return;
-    submittedRef.current = true;
-    onCommit(value);
-  };
-  const cancel = () => {
-    if (submittedRef.current) return;
-    submittedRef.current = true;
-    onCancel();
-  };
-  return (
-    <Input
-      ref={inputRefCb}
-      value={value}
-      onChange={(event) => setValue(event.target.value)}
-      onKeyDown={(event) => {
-        if (event.key === 'Enter') commit();
-        if (event.key === 'Escape') cancel();
-      }}
-      onBlur={commit}
-      className={
-        className ?? 'h-6 w-full rounded border-ring bg-secondary px-2 text-[12px] font-normal'
-      }
     />
   );
 }

@@ -4,8 +4,10 @@ import { Tooltip, TooltipTrigger, TooltipContent } from '#renderer/global/ui/too
 import { STATUS_TOOLTIP } from '#renderer/global/service/statusDisplay';
 import {
   IconQueued,
+  IconClarifying,
   IconWorking,
   IconReviewing,
+  IconMerging,
   IconRework,
   IconHandedOff,
 } from '#renderer/global/ui/icons';
@@ -14,13 +16,13 @@ export { ACTION_LABELS, STATUS_TOOLTIP } from '#renderer/global/service/statusDi
 
 const S = 16;
 
-const ICON_MAP: Record<string, () => React.ReactElement> = {
+const ICON_MAP: Readonly<Record<string, () => React.ReactElement>> = Object.freeze({
   new: IconQueued,
   queued: IconQueued,
-  clarifying: IconWorking,
+  clarifying: IconClarifying,
   'in-progress': IconWorking,
   'captain-reviewing': IconReviewing,
-  'captain-merging': IconReviewing,
+  'captain-merging': IconMerging,
   'awaiting-review': () => <CircleDot size={S} color="var(--review)" />,
   escalated: () => <CircleAlert size={S} color="var(--destructive)" />,
   'needs-clarification': () => <CircleHelp size={S} color="var(--needs-human)" />,
@@ -31,7 +33,7 @@ const ICON_MAP: Record<string, () => React.ReactElement> = {
   'completed-no-pr': () => <CircleCheck size={S} color="var(--text-3)" />,
   'plan-ready': () => <CircleDot size={S} color="var(--review)" />,
   canceled: () => <Ban size={S} color="var(--text-4)" />,
-};
+});
 
 export function StatusIcon({ status }: { status: string }): React.ReactElement {
   const Icon = ICON_MAP[status] ?? IconQueued;

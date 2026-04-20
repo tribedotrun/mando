@@ -1,10 +1,4 @@
-export interface ClaudeCheckResult {
-  installed: boolean;
-  version: string | null;
-  works: boolean;
-  checkFailed?: boolean;
-  error?: string;
-}
+export type { ClaudeCheckResult } from '#renderer/domains/onboarding/types';
 
 interface SetupResult {
   ok: boolean;

@@ -1,0 +1,119 @@
+[workspace]
+resolver = "2"
+members = [
+    # (all legacy crates dissolved)
+    "cli",
+
+    # Domain crates
+    "crates/captain",
+    "crates/scout",
+    "crates/sessions",
+    "crates/sessions-db",
+    "crates/settings",
+    "crates/terminal",
+
+    # Global providers
+    "crates/global-types",
+    "crates/global-infra",
+    "crates/global-db",
+    "crates/global-bus",
+    "crates/global-claude",
+    "crates/global-net",
+
+    # Contract + transports + binary
+    "crates/api-types",
+    "crates/api-types-codegen",
+    "crates/gateway-client",
+    "crates/transport-http",
+    "crates/transport-http-macros",
+    "crates/transport-tg",
+    "crates/transport-ui",
+    "crates/mando-gateway",
+
+    # Dev-only (excluded from release)
+]
+
+[workspace.package]
+version = "0.1.18-beta.6"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/tribedotrun/mando"
+homepage = "https://mando.build"
+
+[workspace.dependencies]
+tokio = { version = "1", features = ["full"] }
+axum = { version = "0.8", features = ["multipart"] }
+clap = { version = "4", features = ["derive"] }
+reqwest = { version = "0.12", features = ["json", "multipart"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+minijinja = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+tracing-appender = "0.2"
+opentelemetry = "0.31"
+opentelemetry_sdk = { version = "0.31", features = ["rt-tokio"] }
+opentelemetry-otlp = { version = "0.31", features = ["grpc-tonic"] }
+tracing-opentelemetry = "0.32"
+tower-http = { version = "0.6", features = ["cors"] }
+tokio-stream = { version = "0.1", features = ["sync"] }
+tokio-util = { version = "0.7", features = ["rt"] }
+futures-util = "0.3"
+html5ever = "0.29"
+regex = "1"
+arc-swap = "1"
+anyhow = "1"
+sha2 = "0.10"
+thiserror = "2"
+time = { version = "0.3", features = ["formatting", "parsing", "macros", "local-offset"] }
+sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite"] }
+rustc-hash = "2"
+inventory = "0.3.24"
+
+# Internal crates
+mando-terminal = { path = "crates/terminal" }
+
+# Domain crates
+captain = { path = "crates/captain" }
+scout = { path = "crates/scout" }
+sessions = { path = "crates/sessions" }
+settings = { path = "crates/settings" }
+terminal = { path = "crates/terminal" }
+
+# Global crates
+global-types = { path = "crates/global-types" }
+global-infra = { path = "crates/global-infra" }
+global-db = { path = "crates/global-db" }
+global-bus = { path = "crates/global-bus" }
+global-claude = { path = "crates/global-claude" }
+global-net = { path = "crates/global-net" }
+api-types = { path = "crates/api-types" }
+gateway-client = { path = "crates/gateway-client" }
+transport-http = { path = "crates/transport-http" }
+transport-http-macros = { path = "crates/transport-http-macros" }
+transport-tg = { path = "crates/transport-tg" }
+transport-ui = { path = "crates/transport-ui" }
+
+[profile.dev]
+debug = 1
+split-debuginfo = "unpacked"
+
+[profile.dev.package."*"]
+debug = 0
+
+# PR #883 invariants:
+# - #1 no silent crashes — panic sources are named and logged via
+#   unrecoverable!() instead of ad-hoc unwrap/expect/panic/todo/unimplemented.
+# - #2 no silent error absorption — `let _ = Result<...>` is rejected.
+# The denies are passed on the command line in `mando-dev check` so
+# `cargo clippy --workspace` (no --all-targets) only applies them to
+# library builds; #[cfg(test)] modules and integration tests are not
+# linted, matching the plan's carve-out for test code.
+
+# ts-rs 12.0.1's `Serde<EnumAttr>` does not recognize `#[serde(deny_unknown_fields)]`
+# and emits a cosmetic "failed to parse serde attribute" warning on every
+# compile for each TS-derived enum that carries the attribute (two enums
+# today: `FeedItem`, `TimelineEventPayload`). Tracked as #890 — replace
+# `ts-rs` with a first-party TS-binding derive under our wire contract.
+# Until #890 lands, those 4 warnings are accepted noise on the stock crate.

@@ -4,8 +4,8 @@ import type { FeedItem, TaskArtifact } from '#renderer/global/types';
 // Evidence media classification — kept in sync with captain's typed evidence
 // gates (review_phase_artifacts.rs). `gif` counts as a recording (animated
 // screencast), even though the renderer uses an <img> tag for it.
-const SCREENSHOT_EXTS = ['png', 'jpg', 'jpeg', 'webp'];
-const RECORDING_EXTS = ['gif', 'mp4', 'mov', 'webm'];
+const SCREENSHOT_EXTS = Object.freeze(['png', 'jpg', 'jpeg', 'webp']);
+const RECORDING_EXTS = Object.freeze(['gif', 'mp4', 'mov', 'webm']);
 
 /**
  * Decide which feed artifacts should expand by default.

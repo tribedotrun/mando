@@ -1,5 +1,9 @@
 import { useRef } from 'react';
 import { useMountEffect } from '#renderer/global/runtime/useMountEffect';
+import {
+  dispatchToActiveView,
+  registerViewHandler,
+} from '#renderer/global/providers/viewKeyRegistry';
 
 /** Returns true when the active element is a text input that should suppress shortcuts. */
 function isInputFocused(): boolean {
@@ -11,25 +15,8 @@ function isInputFocused(): boolean {
   return false;
 }
 
-// ── View handler registry ──
-// Multiple views stay mounted (hidden via display:none to avoid flicker).
-// Each registers a handler + active ref; dispatch calls the active one.
 type ViewKeyHandler = (key: string, e: KeyboardEvent) => void;
-interface ViewEntry {
-  handler: ViewKeyHandler;
-  activeRef: React.RefObject<boolean>;
-}
 const G_SEQUENCE_TIMEOUT_MS = 500;
-const viewHandlers = new Set<ViewEntry>();
-
-function dispatchToActiveView(key: string, e: KeyboardEvent): void {
-  for (const entry of viewHandlers) {
-    if (entry.activeRef.current) {
-      entry.handler(key, e);
-      return;
-    }
-  }
-}
 
 /**
  * Hook for views to register their keyboard handler.
@@ -43,16 +30,12 @@ export function useViewKeyHandler(handler: ViewKeyHandler, active = true): void 
   const activeRef = useRef(active);
   activeRef.current = active;
 
-  useMountEffect(() => {
-    const entry: ViewEntry = {
+  useMountEffect(() =>
+    registerViewHandler({
       handler: (key, e) => handlerRef.current(key, e),
       activeRef,
-    };
-    viewHandlers.add(entry);
-    return () => {
-      viewHandlers.delete(entry);
-    };
-  });
+    }),
+  );
 }
 
 // ── Global keyboard hook (used in App) ──

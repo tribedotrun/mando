@@ -4,7 +4,7 @@ import { Copy, Check, Terminal as TerminalIcon } from 'lucide-react';
 import { formatCallerLabel, useTranscript, buildResumeCmd } from '#renderer/domains/sessions';
 import { TranscriptViewer } from '#renderer/domains/sessions/ui/TranscriptViewer';
 import { useWorkbenchList } from '#renderer/domains/captain';
-import { copyToClipboard } from '#renderer/global/service/utils';
+import { copyToClipboard } from '#renderer/global/runtime/useFeedback';
 import { useCopyFeedback } from '#renderer/global/runtime/useCopyFeedback';
 import { Button } from '#renderer/global/ui/button';
 import { ScrollArea } from '#renderer/global/ui/scroll-area';

@@ -1,5 +1,4 @@
 import React, { useState } from 'react';
-import { ChevronDown } from 'lucide-react';
 import {
   useResumeRateLimited,
   useTaskList,
@@ -11,10 +10,10 @@ import {
   deduplicatedActiveCount,
   findResumeTarget,
 } from '#renderer/domains/captain/service/metricsHelpers';
-import { ceilMinutes } from '#renderer/global/service/utils';
 import type { WorkerDetail } from '#renderer/global/types';
 import { Button } from '#renderer/global/ui/button';
 import { WorkerRow } from '#renderer/domains/captain/ui/WorkerRow';
+import { MetricsHeaderContent } from '#renderer/domains/captain/ui/MetricsRowParts';
 
 export function MetricsRow({
   onNudge,
@@ -49,6 +48,16 @@ export function MetricsRow({
   const resumeTaskId = findResumeTarget(grouped, taskData?.items ?? [], rateLimitSecs);
   const handleResume = resumeTaskId ? () => resumeMut.mutate({ id: resumeTaskId }) : undefined;
 
+  const headerProps = {
+    activeCount,
+    reviewingCount,
+    mergingCount,
+    staleCount,
+    rateLimitSecs,
+    onResume: handleResume,
+    resumePending: resumeMut.isPending,
+  };
+
   return (
     <div data-testid="metrics-row" className="mb-1.5">
       {(!expanded || workers.length === 0) &&
@@ -59,28 +68,16 @@ export function MetricsRow({
             aria-label="Expand workers panel"
             className="flex h-auto w-auto items-center gap-3 rounded-md px-4 py-1.5 text-text-3"
           >
-            <HeaderContent
-              activeCount={activeCount}
-              reviewingCount={reviewingCount}
-              mergingCount={mergingCount}
-              staleCount={staleCount}
-              rateLimitSecs={rateLimitSecs}
-              expanded={false}
-              onResume={handleResume}
-              resumePending={resumeMut.isPending}
-            />
+            <MetricsHeaderContent {...headerProps} expanded={false} />
           </Button>
         ) : (
           <div className="flex items-center gap-3 rounded-md px-4 py-1.5 text-text-3">
-            <HeaderContent
-              activeCount={activeCount}
+            <MetricsHeaderContent
+              {...headerProps}
               reviewingCount={0}
               mergingCount={0}
               staleCount={0}
-              rateLimitSecs={rateLimitSecs}
               expanded={false}
-              onResume={handleResume}
-              resumePending={resumeMut.isPending}
             />
           </div>
         ))}
@@ -93,16 +90,7 @@ export function MetricsRow({
             aria-label="Collapse workers panel"
             className="flex h-auto w-full items-center gap-3 rounded-none border-none bg-transparent px-4 py-2 text-text-3"
           >
-            <HeaderContent
-              activeCount={activeCount}
-              reviewingCount={reviewingCount}
-              mergingCount={mergingCount}
-              staleCount={staleCount}
-              rateLimitSecs={rateLimitSecs}
-              expanded={true}
-              onResume={handleResume}
-              resumePending={resumeMut.isPending}
-            />
+            <MetricsHeaderContent {...headerProps} expanded={true} />
           </Button>
 
           <div className="mx-4 border-t border-border/40" />
@@ -130,68 +118,5 @@ export function MetricsRow({
         </div>
       )}
     </div>
-  );
-}
-
-function HeaderContent({
-  activeCount,
-  reviewingCount,
-  mergingCount,
-  staleCount,
-  rateLimitSecs,
-  expanded,
-  onResume,
-  resumePending,
-}: {
-  activeCount: number;
-  reviewingCount: number;
-  mergingCount: number;
-  staleCount: number;
-  rateLimitSecs: number;
-  expanded: boolean;
-  onResume?: () => void;
-  resumePending?: boolean;
-}) {
-  return (
-    <>
-      <span className="text-label text-text-3">Workers</span>
-      <span className={`text-[12px] leading-4 ${activeCount > 0 ? 'text-success' : 'text-text-4'}`}>
-        {activeCount} active
-      </span>
-      {reviewingCount > 0 && (
-        <span className="text-[12px] leading-4 text-review">{reviewingCount} reviewing</span>
-      )}
-      {mergingCount > 0 && (
-        <span className="text-[12px] leading-4 text-success">{mergingCount} merging</span>
-      )}
-      {staleCount > 0 && (
-        <span className="text-[12px] leading-4 text-stale">{staleCount} stale</span>
-      )}
-      {rateLimitSecs > 0 && (
-        <span className="inline-flex items-center gap-1.5 text-[12px] leading-4 text-text-4">
-          paused ~{ceilMinutes(rateLimitSecs)}m
-          {onResume && (
-            <button
-              type="button"
-              disabled={resumePending}
-              className="rounded px-1 py-0.5 text-[11px] font-medium text-foreground hover:bg-accent disabled:opacity-50"
-              onClick={(e) => {
-                e.stopPropagation();
-                onResume();
-              }}
-            >
-              {resumePending ? 'Resuming...' : 'Resume'}
-            </button>
-          )}
-        </span>
-      )}
-      <span className="flex-1" />
-      {(activeCount > 0 || reviewingCount > 0 || mergingCount > 0 || staleCount > 0) && (
-        <ChevronDown
-          size={10}
-          className={`transition-transform duration-150 ease-out ${expanded ? 'rotate-180' : ''}`}
-        />
-      )}
-    </>
   );
 }

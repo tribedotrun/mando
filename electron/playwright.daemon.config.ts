@@ -2,7 +2,7 @@
  * Playwright config for Electron integration tests.
  *
  * Run: npx playwright test --config=playwright.daemon.config.ts
- * Prereq: cargo build --bin mando-gw --bin mando-cc-mock && npm run build:test
+ * Prereq: cargo build --manifest-path rust/Cargo.toml --bin mando-gw --bin mando-cc-mock && npm run build:test
  */
 import { defineConfig } from '@playwright/test';
 

@@ -45,12 +45,13 @@ export function createUrlLinkProvider(opts: {
   terminal: XTerm;
   openUrl: (url: string) => Promise<void>;
 }): ILinkProvider {
-  return {
+  const provider: ILinkProvider = {
     provideLinks(bufferLineNumber, callback) {
       const text = lineText(opts.terminal, bufferLineNumber);
       callback(text ? findUrlLinks(bufferLineNumber, text, opts.openUrl) : undefined);
     },
-  } as ILinkProvider;
+  };
+  return provider;
 
   function findUrlLinks(
     bufferLineNumber: number,
@@ -87,6 +88,7 @@ export function createFileLinkProvider(opts: {
 }): ILinkProvider {
   const cache = new Map<string, string | null>();
 
+  // invariant: path resolution errors are caught and return null; null is the valid "unresolvable" signal to the ILinkProvider caller
   const resolveCached = async (rawPath: string): Promise<string | null> => {
     const key = `${opts.cwd}::${rawPath}`;
     if (cache.has(key)) return cache.get(key) ?? null;

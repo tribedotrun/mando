@@ -20,7 +20,7 @@ export function useScoutQASession(itemId: number) {
           sessionId: sessionIdRef.current,
           images,
         });
-        sessionIdRef.current = data.session_id;
+        sessionIdRef.current = data.session_id ?? undefined;
         setHistory((prev) => [...prev, { role: 'assistant', text: data.answer }]);
         if (data.suggested_followups?.length) {
           setSuggestions(data.suggested_followups);

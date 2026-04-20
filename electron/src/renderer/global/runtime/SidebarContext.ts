@@ -57,6 +57,9 @@ export const SidebarContext = createContext<SidebarContextValue | null>(null);
 
 export function useSidebar(): SidebarContextValue {
   const ctx = use(SidebarContext);
-  if (!ctx) throw new Error('useSidebar must be used within a SidebarProvider');
+  if (!ctx) {
+    // invariant: SidebarContext must be wrapped by SidebarProvider; missing means a tree mistake
+    throw new Error('useSidebar must be used within a SidebarProvider');
+  }
   return ctx;
 }

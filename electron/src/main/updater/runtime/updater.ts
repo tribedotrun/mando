@@ -1,310 +1,121 @@
 /**
- * DIY auto-updater — bypasses Squirrel.Mac entirely.
- *
- * Downloads the update ZIP ourselves, extracts it, and swaps the .app bundle
- * via rename (mv). No ShipIt, no admin prompt.
- *
- * Channels:
- *   stable — default, receives only full releases
- *   beta   — opt-in via Settings, receives prereleases too
- *
- * Update flow:
- *   1. Periodic check → fetch feed from CF Worker
- *   2. If newer version → download ZIP to staging dir
- *   3. Extract → staging/Mando.app
- *   4. Send 'update-ready' IPC to renderer
- *   5a. User clicks "Update" → swap .app bundle, relaunch
- *   5b. User ignores → next app launch detects staged update, swaps, relaunches
+ * DIY auto-updater -- download, stage, and apply a signed app bundle without
+ * Squirrel.Mac. This owner coordinates the explicit updater state machine while
+ * feed, channel, and filesystem concerns live in dedicated service modules.
  */
 import { app, BrowserWindow } from 'electron';
-import {
-  readFileSync,
-  writeFileSync,
-  mkdirSync,
-  existsSync,
-  renameSync,
-  rmSync,
-  readdirSync,
-  createWriteStream,
-} from 'fs';
-import path from 'path';
-import https from 'https';
-import { execSync } from 'child_process';
-import { handleTrusted } from '#main/global/runtime/ipcSecurity';
+import { handleChannel, sendChannel } from '#main/global/runtime/ipcSecurity';
 import { readAppPackageVersion } from '#main/global/runtime/appPackage';
 import { updateDaemonBinary } from '#main/global/runtime/launchd';
 import { announceUiUpdating } from '#main/global/runtime/uiLifecycle';
 import log from '#main/global/providers/logger';
 import { getDataDir } from '#main/global/config/lifecycle';
-import type {
-  UpdateChannel,
-  FeedResponse,
-  PendingUpdate,
-  FeedResult,
-} from '#main/updater/types/updater';
+import { UPDATE_CHECK_INTERVAL_MS, INITIAL_CHECK_DELAY_MS } from '#main/updater/config/updater';
+import { createUpdaterRuntimeState } from '#main/updater/runtime/updaterState';
+import { readChannel, writeChannel } from '#main/updater/service/channelConfig';
+import { fetchFeed, downloadFile } from '#main/updater/service/feedClient';
 import {
-  UPDATE_CHECK_INTERVAL_MS,
-  INITIAL_CHECK_DELAY_MS,
-  UPDATE_SERVER,
-  MAX_REDIRECTS,
-  getStagingDir,
-  getPendingPath,
-  getChannelConfigPath,
-  getAppBundlePath,
-} from '#main/updater/config/updater';
-import { errCode } from '#main/updater/service/updater';
+  applyStagedUpdate,
+  ensureStagingDir,
+  cleanupStagedUpdateArtifacts,
+  downloadPath,
+  extractAndStage,
+  readPendingUpdate,
+  removePendingUpdateMarker,
+  stagingAppExists,
+  writePendingUpdate,
+} from '#main/updater/service/stagedUpdate';
 
-let pendingUpdate: PendingUpdate | null = null;
-let downloading = false;
-let checkTimer: ReturnType<typeof setTimeout> | null = null;
-let checkInterval: ReturnType<typeof setInterval> | null = null;
+const runtime = createUpdaterRuntimeState();
 
-function readChannel(): UpdateChannel {
+type UpdateBroadcastChannel =
+  | 'update-ready'
+  | 'update-checking'
+  | 'update-no-update'
+  | 'update-check-error'
+  | 'update-check-done';
+
+function broadcastToWindows(
+  channel: 'update-ready',
+  payload: { version: string; notes: string },
+): void;
+function broadcastToWindows(channel: 'update-check-done', payload: { found: boolean }): void;
+function broadcastToWindows(
+  channel: Exclude<UpdateBroadcastChannel, 'update-ready' | 'update-check-done'>,
+): void;
+function broadcastToWindows(channel: UpdateBroadcastChannel, payload?: unknown): void {
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (channel === 'update-ready') {
+      sendChannel(window.webContents, channel, payload as { version: string; notes: string });
+      continue;
+    }
+    if (channel === 'update-check-done') {
+      sendChannel(window.webContents, channel, payload as { found: boolean });
+      continue;
+    }
+    sendChannel(window.webContents, channel);
+  }
+}
+
+async function stageUpdate(feed: { url: string; name: string; notes: string }) {
+  ensureStagingDir();
+  const zipPath = downloadPath();
+  log.info(`auto-update: downloading from ${feed.url.substring(0, 80)}...`);
+  await downloadFile(feed.url, zipPath);
+  log.info('auto-update: download complete, extracting...');
+
+  const appPath = extractAndStage(zipPath);
+  log.info(`auto-update: extracted to ${appPath}`);
+
+  const pendingUpdate = { version: feed.name, notes: feed.notes, appPath };
+  writePendingUpdate(pendingUpdate);
+  return pendingUpdate;
+}
+
+async function checkAndDownload() {
+  if (runtime.isDownloading() || runtime.getPending()) return;
+
+  runtime.setDownloading(true);
+  broadcastToWindows('update-checking');
+
+  const result: Awaited<ReturnType<typeof fetchFeed>> = await fetchFeed();
+  if (result.kind !== 'update') {
+    runtime.setDownloading(false);
+    broadcastToWindows(result.kind === 'up-to-date' ? 'update-no-update' : 'update-check-error');
+    return;
+  }
+
+  log.info(`auto-update: update available: ${result.feed.name}`);
+
   try {
-    const raw = readFileSync(getChannelConfigPath(), 'utf-8');
-    const parsed = JSON.parse(raw) as { channel?: string };
-    if (parsed.channel === 'beta') return parsed.channel;
+    const pendingUpdate = await stageUpdate(result.feed);
+    runtime.setPending(pendingUpdate);
+    broadcastToWindows('update-ready', {
+      version: pendingUpdate.version,
+      notes: pendingUpdate.notes,
+    });
+    broadcastToWindows('update-check-done', { found: true });
+    log.info(`auto-update: v${pendingUpdate.version} ready to install`);
   } catch (err) {
-    const code = errCode(err);
-    if (code !== 'ENOENT') {
-      log.warn('auto-update: failed to read channel config, defaulting to stable', err);
-    }
-  }
-  return 'stable';
-}
-
-function writeChannel(channel: UpdateChannel): void {
-  const configPath = getChannelConfigPath();
-  mkdirSync(path.dirname(configPath), { recursive: true });
-  writeFileSync(configPath, JSON.stringify({ channel }), 'utf-8');
-}
-
-function buildFeedUrl(): string {
-  const arch = process.arch;
-  const version = app.getVersion();
-  const channel = readChannel();
-  const channelParam = channel !== 'stable' ? `?channel=${channel}` : '';
-  return `${UPDATE_SERVER}/update/darwin/${arch}/${version}${channelParam}`;
-}
-
-function fetchFeed(): Promise<FeedResult> {
-  return new Promise((resolve) => {
-    const url = buildFeedUrl();
-    log.info(`auto-update: checking ${url}`);
-    const req = https.get(url, (res) => {
-      if (res.statusCode === 204) {
-        log.info('auto-update: up to date');
-        resolve({ kind: 'up-to-date' });
-        return;
-      }
-      let body = '';
-      res.on('data', (chunk: Buffer) => {
-        if (body.length < 500 || res.statusCode === 200) body += chunk.toString();
-      });
-      res.on('end', () => {
-        if (res.statusCode !== 200) {
-          const snippet = body.slice(0, 500).replace(/\s+/g, ' ').trim();
-          log.warn(
-            `auto-update: feed returned ${res.statusCode}${snippet ? ` body="${snippet}"` : ''}`,
-          );
-          resolve({ kind: 'error' });
-          return;
-        }
-        try {
-          resolve({ kind: 'update', feed: JSON.parse(body) as FeedResponse });
-        } catch (err) {
-          log.error(
-            `auto-update: invalid feed JSON: ${err instanceof Error ? err.message : String(err)}`,
-          );
-          resolve({ kind: 'error' });
-        }
-      });
-      res.on('error', (err) => {
-        log.warn(`auto-update: feed body read failed: ${err.message}`);
-        resolve({ kind: 'error' });
-      });
-    });
-    req.on('error', (err) => {
-      log.error('auto-update: feed fetch error', err.message);
-      resolve({ kind: 'error' });
-    });
-  });
-}
-
-function downloadFile(url: string, dest: string, redirectsLeft = MAX_REDIRECTS): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (!url.startsWith('https://')) {
-      reject(new Error(`Refusing non-HTTPS download URL: ${url.substring(0, 80)}`));
-      return;
-    }
-
-    const file = createWriteStream(dest);
-
-    const request = https.get(url, (res) => {
-      if (res.statusCode === 301 || res.statusCode === 302) {
-        const location = res.headers.location;
-        if (!location) {
-          reject(new Error('Redirect with no location'));
-          return;
-        }
-        if (redirectsLeft <= 0) {
-          reject(new Error('Too many redirects'));
-          return;
-        }
-        file.close();
-        downloadFile(location, dest, redirectsLeft - 1).then(resolve, reject);
-        return;
-      }
-      if (res.statusCode !== 200) {
-        file.close();
-        reject(new Error(`Download failed: HTTP ${res.statusCode}`));
-        return;
-      }
-      res.pipe(file);
-      file.on('finish', () => {
-        file.close();
-        resolve();
-      });
-    });
-    request.on('error', (err) => {
-      file.close();
-      reject(err);
-    });
-  });
-}
-
-function extractAndStage(zipPath: string): string {
-  const stagingDir = getStagingDir();
-  const extractDir = path.join(stagingDir, 'extract');
-
-  if (existsSync(extractDir)) rmSync(extractDir, { recursive: true }); // clean previous
-  mkdirSync(extractDir, { recursive: true });
-
-  // ditto -xk preserves code signatures and resource forks
-  execSync(`ditto -xk "${zipPath}" "${extractDir}"`, { timeout: 120_000 });
-
-  // Find the .app bundle in the extracted contents
-  const entries = readdirSync(extractDir);
-  const appEntry = entries.find((e) => e.endsWith('.app'));
-  if (appEntry) return path.join(extractDir, appEntry);
-
-  // Might be nested in a directory (e.g., Mando-darwin-arm64/Mando.app)
-  for (const entry of entries) {
-    const nested = path.join(extractDir, entry);
-    const sub = readdirSync(nested);
-    const nestedApp = sub.find((e) => e.endsWith('.app'));
-    if (nestedApp) return path.join(nested, nestedApp);
-  }
-
-  throw new Error('No .app bundle found in ZIP');
-}
-
-function verifyCodeSignature(appPath: string): void {
-  execSync(`codesign --verify --deep --strict "${appPath}"`, { timeout: 30_000 });
-}
-
-function applyUpdate(newAppPath: string): void {
-  const currentApp = getAppBundlePath();
-  const stagingDir = getStagingDir();
-  const oldAppPath = path.join(stagingDir, 'Mando-old.app');
-
-  // Verify the new app has a valid code signature before swapping
-  verifyCodeSignature(newAppPath);
-
-  log.info(`auto-update: swapping ${currentApp} → ${newAppPath}`);
-
-  // Clean up any previous old app
-  if (existsSync(oldAppPath)) rmSync(oldAppPath, { recursive: true });
-
-  try {
-    renameSync(currentApp, oldAppPath);
-    try {
-      renameSync(newAppPath, currentApp);
-    } catch (innerErr) {
-      // Rollback: restore the original app before propagating
-      log.error('auto-update: second rename failed, rolling back');
-      renameSync(oldAppPath, currentApp);
-      throw innerErr;
-    }
-  } catch (err: unknown) {
-    const code = errCode(err);
-    if (code !== 'EPERM' && code !== 'EACCES') throw err;
-
-    // App is root-owned (ShipIt damage from a previous Squirrel update).
-    // One-time admin prompt to remove the old bundle, then place the new one.
-    // Can't chown inside a signed bundle (Gatekeeper blocks it), so we rm + mv.
-    if (!currentApp.endsWith('.app') || !currentApp.startsWith('/Applications/')) {
-      throw new Error(`auto-update: refusing admin rm on unexpected path: ${currentApp}`, {
-        cause: err,
-      });
-    }
-    log.warn('auto-update: permission denied, removing old app with admin privileges');
-    execSync(
-      `osascript -e 'do shell script "rm -rf \\"${currentApp}\\"" with administrator privileges'`,
-      { timeout: 60_000 },
-    );
-    renameSync(newAppPath, currentApp);
-  }
-
-  log.info('auto-update: swap complete');
-}
-
-function cleanupAfterUpdate(): void {
-  if (downloading) return; // don't clean up while a download is in progress
-  const stagingDir = getStagingDir();
-  if (existsSync(getPendingPath())) rmSync(getPendingPath());
-  const oldAppPath = path.join(stagingDir, 'Mando-old.app');
-  if (existsSync(oldAppPath)) {
-    rmSync(oldAppPath, { recursive: true });
-    log.info('auto-update: cleaned up old app');
-  }
-  const extractDir = path.join(stagingDir, 'extract');
-  if (existsSync(extractDir)) rmSync(extractDir, { recursive: true });
-  const zipPath = path.join(stagingDir, 'update.zip');
-  if (existsSync(zipPath)) rmSync(zipPath);
-}
-
-function writePending(update: PendingUpdate): void {
-  const pendingPath = getPendingPath();
-  mkdirSync(path.dirname(pendingPath), { recursive: true });
-  // Atomic write: write to temp file, then rename
-  const tmpPath = pendingPath + '.tmp';
-  writeFileSync(tmpPath, JSON.stringify(update), 'utf-8');
-  renameSync(tmpPath, pendingPath);
-}
-
-function readPending(): PendingUpdate | null {
-  const pendingPath = getPendingPath();
-  try {
-    const raw = readFileSync(pendingPath, 'utf-8');
-    return JSON.parse(raw) as PendingUpdate;
-  } catch (err) {
-    const code = errCode(err);
-    if (code !== 'ENOENT') {
-      log.warn('auto-update: failed to read pending update marker', err);
-    }
-    return null;
+    log.error('auto-update: download/extract failed', err);
+    cleanupStagedUpdateArtifacts();
+    broadcastToWindows('update-check-error');
+  } finally {
+    runtime.setDownloading(false);
   }
 }
 
-/** Called early in app startup — before window creation. */
-export async function applyPendingUpdateIfAny(): Promise<boolean> {
-  const staged = readPending();
-  if (!staged || !existsSync(staged.appPath)) {
-    cleanupAfterUpdate();
+export async function applyPendingUpdateIfAny() {
+  const staged = readPendingUpdate();
+  if (!staged || !stagingAppExists(staged.appPath)) {
+    cleanupStagedUpdateArtifacts();
     return false;
   }
 
   log.info(`auto-update: applying staged update to ${staged.version}`);
-
-  // Delete the marker FIRST to prevent relaunch loops
-  rmSync(getPendingPath());
-
+  removePendingUpdateMarker();
   await announceUiUpdating();
 
-  // Update daemon binary from the STAGED app bundle (not the current one) so
-  // the new daemon is running before the app swap. Best-effort: the version-mismatch
-  // handler in ensureDaemon() catches stragglers on relaunch.
   try {
     updateDaemonBinary(getDataDir(), staged.appPath);
   } catch (err) {
@@ -312,127 +123,77 @@ export async function applyPendingUpdateIfAny(): Promise<boolean> {
   }
 
   try {
-    applyUpdate(staged.appPath);
+    applyStagedUpdate(staged.appPath);
     app.relaunch();
     app.exit(0);
-    return true; // unreachable, but signals to caller
+    return true;
   } catch (err) {
     log.error('auto-update: failed to apply staged update', err);
-    cleanupAfterUpdate();
+    cleanupStagedUpdateArtifacts();
     return false;
   }
 }
 
-function broadcastToWindows(channel: string, payload?: unknown): void {
-  for (const win of BrowserWindow.getAllWindows()) {
-    win.webContents.send(channel, payload);
-  }
-}
-
-async function checkAndDownload(): Promise<void> {
-  if (downloading) return;
-  if (pendingUpdate) return; // already have one ready
-
-  downloading = true;
-  broadcastToWindows('update-checking');
-
-  const result = await fetchFeed();
-  if (result.kind !== 'update') {
-    downloading = false;
-    broadcastToWindows(result.kind === 'up-to-date' ? 'update-no-update' : 'update-check-error');
-    return;
-  }
-
-  const { feed } = result;
-  log.info(`auto-update: update available: ${feed.name}`);
-
-  const stagingDir = getStagingDir();
-  mkdirSync(stagingDir, { recursive: true });
-  const zipPath = path.join(stagingDir, 'update.zip');
-
-  try {
-    log.info(`auto-update: downloading from ${feed.url.substring(0, 80)}...`);
-    await downloadFile(feed.url, zipPath);
-    log.info('auto-update: download complete, extracting...');
-
-    const appPath = extractAndStage(zipPath);
-    log.info(`auto-update: extracted to ${appPath}`);
-
-    pendingUpdate = { version: feed.name, notes: feed.notes, appPath };
-    writePending(pendingUpdate);
-
-    broadcastToWindows('update-ready', { version: feed.name, notes: feed.notes });
-    broadcastToWindows('update-check-done', { found: true });
-    log.info(`auto-update: v${feed.name} ready to install`);
-  } catch (err) {
-    log.error('auto-update: download/extract failed', err);
-    if (existsSync(zipPath)) rmSync(zipPath);
-    const extractDir = path.join(stagingDir, 'extract');
-    if (existsSync(extractDir)) rmSync(extractDir, { recursive: true });
-    broadcastToWindows('update-check-error');
-  } finally {
-    downloading = false;
-  }
-}
-
 export function setupAutoUpdate(): void {
-  handleTrusted('updates:install', async () => {
+  handleChannel('updates:install', async () => {
     if (!app.isPackaged) {
       log.info('auto-update: install requested in dev mode — ignoring');
       return;
     }
+
+    const pendingUpdate = runtime.getPending();
     if (!pendingUpdate) {
       log.warn('auto-update: install requested but no update pending');
       return;
     }
+
     log.info(`auto-update: user requested install of v${pendingUpdate.version}`);
     try {
       await announceUiUpdating();
-
-      // Update daemon binary from staged app BEFORE app swap.
       try {
         updateDaemonBinary(getDataDir(), pendingUpdate.appPath);
       } catch (err) {
         log.warn('auto-update: pre-swap daemon binary update failed (will retry on relaunch)', err);
       }
-      applyUpdate(pendingUpdate.appPath);
-      rmSync(getPendingPath(), { force: true });
+      applyStagedUpdate(pendingUpdate.appPath);
+      removePendingUpdateMarker();
+      runtime.setPending(null);
       app.relaunch();
       app.exit(0);
     } catch (err) {
       log.error('auto-update: install failed', err);
-      cleanupAfterUpdate();
-      pendingUpdate = null;
+      cleanupStagedUpdateArtifacts();
+      runtime.setPending(null);
       throw err;
     }
   });
 
-  handleTrusted('updates:check', () => {
+  handleChannel('updates:check', async () => {
     if (!app.isPackaged) {
       log.info('auto-update: manual check requested in dev mode');
       broadcastToWindows('update-no-update');
       return;
     }
     log.info('auto-update: manual check triggered');
-    return checkAndDownload();
+    await checkAndDownload();
   });
 
-  handleTrusted('updates:app-version', () => readAppPackageVersion() ?? app.getVersion());
-  handleTrusted('updates:pending', () =>
-    pendingUpdate ? { version: pendingUpdate.version, notes: pendingUpdate.notes } : null,
-  );
-  handleTrusted('updates:get-channel', () => readChannel());
+  handleChannel('updates:app-version', () => readAppPackageVersion() ?? app.getVersion());
+  handleChannel('updates:pending', () => {
+    const pendingUpdate = runtime.getPending();
+    return pendingUpdate ? { version: pendingUpdate.version, notes: pendingUpdate.notes } : null;
+  });
+  handleChannel('updates:get-channel', () => readChannel());
 
-  handleTrusted('updates:set-channel', (_: unknown, channel: string) => {
-    if (channel !== 'stable' && channel !== 'beta') return;
+  handleChannel('updates:set-channel', async (_event, channel) => {
     writeChannel(channel);
     log.info(`auto-update: channel changed to ${channel}`);
     if (!app.isPackaged) return;
-    if (pendingUpdate && !downloading) {
-      cleanupAfterUpdate();
-      pendingUpdate = null;
+    if (runtime.getPending() && !runtime.isDownloading()) {
+      cleanupStagedUpdateArtifacts();
+      runtime.setPending(null);
     }
-    return checkAndDownload();
+    await checkAndDownload();
   });
 
   if (!app.isPackaged) {
@@ -440,20 +201,20 @@ export function setupAutoUpdate(): void {
     return;
   }
 
-  // Schedule periodic checks
-  checkTimer = setTimeout(
-    () => void checkAndDownload().catch((err) => log.error('Update check failed', err)),
-    INITIAL_CHECK_DELAY_MS,
+  runtime.setCheckTimer(
+    setTimeout(
+      () => void checkAndDownload().catch((err) => log.error('Update check failed', err)),
+      INITIAL_CHECK_DELAY_MS,
+    ),
   );
-  checkInterval = setInterval(
-    () => void checkAndDownload().catch((err) => log.error('Update check failed', err)),
-    UPDATE_CHECK_INTERVAL_MS,
+  runtime.setCheckInterval(
+    setInterval(
+      () => void checkAndDownload().catch((err) => log.error('Update check failed', err)),
+      UPDATE_CHECK_INTERVAL_MS,
+    ),
   );
 }
 
 export function cleanupAutoUpdate(): void {
-  if (checkTimer) clearTimeout(checkTimer);
-  if (checkInterval) clearInterval(checkInterval);
-  checkTimer = null;
-  checkInterval = null;
+  runtime.clearTimers();
 }

@@ -1,17 +1,28 @@
 import log from '#main/global/providers/logger';
-import { daemonFetch } from '#main/global/runtime/lifecycle';
+import { daemonRouteFetch, daemonRouteSignal } from '#main/global/runtime/lifecycle';
 import { uiLaunchEnv } from '#main/global/service/uiLifecycle';
+import type { RouteBody } from '#shared/daemon-contract/runtime';
 
 const UI_ENDPOINT_TIMEOUT_MS = 1500;
 
 type UiTransition = 'register' | 'quitting' | 'updating' | 'launch' | 'restart';
+const UI_ROUTE_KEYS = {
+  register: 'postUiRegister',
+  quitting: 'postUiQuitting',
+  updating: 'postUiUpdating',
+  launch: 'postUiLaunch',
+  restart: 'postUiRestart',
+} as const;
 
-async function postUiTransition(transition: UiTransition, body?: unknown): Promise<boolean> {
+async function postUiTransition<T extends UiTransition>(
+  transition: T,
+  body?: RouteBody<(typeof UI_ROUTE_KEYS)[T]>,
+): Promise<boolean> {
   try {
-    const resp = await daemonFetch(`/api/ui/${transition}`, {
+    const resp = await daemonRouteFetch(UI_ROUTE_KEYS[transition], undefined, {
       method: 'POST',
       keepalive: true,
-      body: body ? JSON.stringify(body) : undefined,
+      body,
       signal: AbortSignal.timeout(UI_ENDPOINT_TIMEOUT_MS),
     });
     if (resp.ok) return true;
@@ -46,5 +57,9 @@ export function announceUiRegistered(): Promise<boolean> {
 }
 
 export function announceUiUpdating(): Promise<boolean> {
-  return postUiTransition('updating');
+  return postUiTransition('updating', {});
+}
+
+export function announceUiQuittingSync(): void {
+  daemonRouteSignal('postUiQuitting', undefined, { body: {} });
 }

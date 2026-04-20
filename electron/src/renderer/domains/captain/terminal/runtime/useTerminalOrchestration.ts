@@ -7,8 +7,8 @@ import {
   useTerminalCreate,
   useTerminalDelete,
 } from '#renderer/domains/captain/runtime/hooks';
-import { useConfig } from '#renderer/global/runtime/useConfig';
-import { toast } from 'sonner';
+import { useConfig } from '#renderer/global/repo/queries';
+import { toast } from '#renderer/global/runtime/useFeedback';
 import log from '#renderer/global/service/logger';
 
 interface OrchestrationInput {

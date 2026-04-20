@@ -26,17 +26,21 @@ export function MergeModal({ item, onConfirm, onCancel }: Props): React.ReactEle
         <DialogHeader className="min-w-0">
           <DialogTitle
             className="truncate"
-            title={`Merge ${shortRepo(item.project)} PR ${item.pr_number ? prLabel(item.pr_number) : ''}`}
+            title={`Merge ${shortRepo(item.project ?? undefined)} PR ${item.pr_number ? prLabel(item.pr_number) : ''}`}
           >
-            Merge {shortRepo(item.project)} PR {item.pr_number ? prLabel(item.pr_number) : ''}
+            Merge {shortRepo(item.project ?? undefined)} PR{' '}
+            {item.pr_number ? prLabel(item.pr_number) : ''}
           </DialogTitle>
-          <DialogDescription className="truncate" title={item.title}>
+          <DialogDescription className="truncate" title={item.title ?? undefined}>
             {item.title}
           </DialogDescription>
         </DialogHeader>
 
         {item.branch && (
-          <p className="min-w-0 truncate text-code text-muted-foreground" title={item.branch}>
+          <p
+            className="min-w-0 truncate text-code text-muted-foreground"
+            title={item.branch ?? undefined}
+          >
             {item.branch}
           </p>
         )}

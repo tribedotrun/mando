@@ -5,20 +5,22 @@ import { Button } from '#renderer/global/ui/button';
 import { TelegramScreen } from '#renderer/domains/onboarding/ui/OnboardingSteps';
 import { ClaudeCheckScreen } from '#renderer/domains/onboarding/ui/ClaudeCheckScreen';
 import { formatSetupError } from '#renderer/domains/onboarding/service/types';
+import { useDataContext } from '#renderer/global/runtime/dataContext';
 import { toast } from 'sonner';
 import log from '#renderer/global/service/logger';
 import { getErrorMessage } from '#renderer/global/service/utils';
 
 type Step = 'welcome' | 'claude-check' | 'telegram' | 'finishing';
 
-const BULLETS = [
+const BULLETS = Object.freeze([
   'Your backlog runs itself \u2014 tasks get picked up, reviewed, and delivered as pull requests with visual evidence.',
   'Run tasks across multiple projects at once. Each gets its own isolated workspace.',
   'Stay current \u2014 relevant articles, repos, and podcasts become actionable tasks tailored to your stack.',
-];
+]);
 
 export function OnboardingWizard(): React.ReactElement {
   const { progressMsg, saveProgress, completeSetup, checkClaudeCode } = useSetupIpc();
+  const { resetDataPlane } = useDataContext();
   const [step, setStep] = useState<Step>('welcome');
   const [error, setError] = useState<string | null>(null);
   const [tgToken, setTgToken] = useState('');
@@ -42,14 +44,14 @@ export function OnboardingWizard(): React.ReactElement {
           setStep('telegram');
           return;
         }
-        window.location.reload();
+        resetDataPlane();
       } catch (err) {
         log.error('[Onboarding] setup-complete failed:', err);
         setError(getErrorMessage(err, 'Failed to save configuration'));
         setStep('telegram');
       }
     },
-    [tgToken, completeSetup],
+    [tgToken, completeSetup, resetDataPlane],
   );
 
   if (step === 'welcome') {
@@ -89,10 +91,7 @@ export function OnboardingWizard(): React.ReactElement {
 function WelcomeScreen({ onStart }: { onStart: () => void }): React.ReactElement {
   return (
     <div data-testid="onboarding-wizard" className="relative flex h-full bg-background">
-      <div
-        className="absolute inset-x-0 top-0 z-10 h-8"
-        style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
-      />
+      <div className="absolute inset-x-0 top-0 z-10 h-8" style={{ WebkitAppRegion: 'drag' }} />
       <div className="flex w-[460px] shrink-0 flex-col justify-center p-12">
         <div className="mb-6">
           <h1 className="text-display text-foreground">Mando</h1>

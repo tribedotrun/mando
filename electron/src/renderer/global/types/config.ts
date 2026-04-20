@@ -1,8 +1,11 @@
-// Config types matching Rust Config struct (camelCase serde)
+export interface ClassifyRule {
+  category: string;
+  patterns: string[];
+}
 
 export interface ProjectConfig {
-  name: string;
-  path: string;
+  name?: string;
+  path?: string;
   githubRepo?: string | null;
   logo?: string | null;
   aliases?: string[];
@@ -10,6 +13,7 @@ export interface ProjectConfig {
   workerPreamble?: string;
   scoutSummary?: string;
   checkCommand?: string;
+  classifyRules?: ClassifyRule[];
 }
 
 export interface FeaturesConfig {
@@ -49,7 +53,7 @@ export interface MandoConfig {
   ui?: UiConfig;
   features?: FeaturesConfig;
   channels?: { telegram?: TelegramConfig };
-  gateway?: { host?: string; port?: number; dashboard?: { host?: string; port?: number } };
+  gateway?: { dashboard?: { host?: string; port?: number } };
   captain?: CaptainConfig;
   scout?: ScoutConfig;
   env?: Record<string, string>;

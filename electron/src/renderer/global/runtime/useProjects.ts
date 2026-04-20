@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { useConfig } from '#renderer/global/runtime/useConfig';
+import { useConfig } from '#renderer/global/repo/queries';
 
 /**
  * Returns the sorted list of configured project names. Reads from

@@ -2,6 +2,7 @@ import React, { useCallback, useRef, useState } from 'react';
 import { FileText } from 'lucide-react';
 import type { ScoutItem } from '#renderer/global/types';
 import { useScoutStatusUpdate } from '#renderer/domains/scout/runtime/hooks';
+import { scoutCommandForStatus } from '#renderer/domains/scout/runtime/useScoutPage';
 import { useScrollIntoViewRef } from '#renderer/global/runtime/useScrollIntoViewRef';
 import { EmptyState } from '#renderer/global/ui/EmptyState';
 import { Table, TableBody } from '#renderer/global/ui/table';
@@ -39,7 +40,12 @@ export function ScoutTable({
   }, []);
 
   const handleStatusChange = (id: number, status: string) => {
-    statusMut.mutate({ id, status }, { onSettled: () => setEditingId(null) });
+    statusMut.mutate(
+      { id, command: scoutCommandForStatus(status) },
+      {
+        onSettled: () => setEditingId(null),
+      },
+    );
   };
 
   if (items.length === 0) {

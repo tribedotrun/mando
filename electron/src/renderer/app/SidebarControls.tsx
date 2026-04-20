@@ -47,7 +47,7 @@ export function SidebarUpdateButton(): React.ReactElement | null {
       disabled={installing}
       onClick={installUpdate}
       className="absolute right-3 top-3 z-20"
-      style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+      style={{ WebkitAppRegion: 'no-drag' }}
     >
       {installing ? 'Installing…' : 'Update'}
     </Button>

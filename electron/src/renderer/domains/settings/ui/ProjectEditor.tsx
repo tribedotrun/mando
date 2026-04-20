@@ -1,13 +1,11 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { Card, CardContent } from '#renderer/global/ui/card';
-import { Input } from '#renderer/global/ui/input';
-import { Textarea } from '#renderer/global/ui/textarea';
-import { Label } from '#renderer/global/ui/label';
 import { Button } from '#renderer/global/ui/button';
 import { ProjectHooksFields } from '#renderer/domains/settings/ui/ProjectHooksFields';
 import { ProjectLogoField } from '#renderer/domains/settings/ui/ProjectLogoField';
+import { ProjectEditorFields } from '#renderer/domains/settings/ui/ProjectEditorFields';
 import type { ProjectConfig } from '#renderer/global/types';
-import { useProjectLogo } from '#renderer/domains/settings/runtime/useProjectLogo';
+import { useProjectEditor } from '#renderer/domains/settings/runtime/useProjectEditor';
 
 export interface ProjectEditorProps {
   pathKey: string;
@@ -28,51 +26,30 @@ export function ProjectEditor({
 }: ProjectEditorProps): React.ReactElement {
   const {
     logoFile,
-    detecting: detectingLogo,
-    error: detectError,
+    detectingLogo,
+    detectError,
     detectLogo,
-  } = useProjectLogo(project.name, project.logo || null);
-  const [name, setName] = useState(project.name || '');
-  const [githubRepo, setGithubRepo] = useState(project.githubRepo || '');
-  const [aliases, setAliases] = useState((project.aliases || []).join(', '));
-  const [preamble, setPreamble] = useState(project.workerPreamble || '');
-  const [checkCommand, setCheckCommand] = useState(project.checkCommand || '');
-  const [scoutSummary, setScoutSummary] = useState(project.scoutSummary || '');
-  const [preSpawn, setPreSpawn] = useState(project.hooks?.pre_spawn || '');
-  const [workerTeardown, setWorkerTeardown] = useState(project.hooks?.worker_teardown || '');
-  const [postMerge, setPostMerge] = useState(project.hooks?.post_merge || '');
-
-  const nameLower = name.trim().toLowerCase();
-  const nameConflict =
-    nameLower.length > 0 &&
-    Object.entries(existingProjects).some(
-      ([key, value]) => key !== pathKey && value.name?.toLowerCase() === nameLower,
-    );
-
-  const handleSubmit = () => {
-    if (!name.trim() || nameConflict) return;
-
-    const hooks: Record<string, string> = {};
-    if (preSpawn.trim()) hooks.pre_spawn = preSpawn.trim();
-    if (workerTeardown.trim()) hooks.worker_teardown = workerTeardown.trim();
-    if (postMerge.trim()) hooks.post_merge = postMerge.trim();
-
-    const updated: ProjectConfig = {
-      name: name.trim(),
-      path: project.path,
-      githubRepo: githubRepo.trim() || undefined,
-      logo: logoFile ?? undefined,
-      aliases: aliases
-        .split(',')
-        .map((alias) => alias.trim())
-        .filter(Boolean),
-      workerPreamble: preamble.trim() || undefined,
-      checkCommand: checkCommand.trim() || undefined,
-      scoutSummary: scoutSummary.trim() || undefined,
-      hooks: Object.keys(hooks).length > 0 ? hooks : undefined,
-    };
-    onSave(pathKey, updated);
-  };
+    name,
+    setName,
+    githubRepo,
+    setGithubRepo,
+    aliases,
+    setAliases,
+    preamble,
+    setPreamble,
+    checkCommand,
+    setCheckCommand,
+    scoutSummary,
+    setScoutSummary,
+    preSpawn,
+    setPreSpawn,
+    workerTeardown,
+    setWorkerTeardown,
+    postMerge,
+    setPostMerge,
+    nameConflict,
+    handleSubmit,
+  } = useProjectEditor({ pathKey, project, existingProjects, onSave });
 
   return (
     <Card className="py-4">
@@ -86,88 +63,22 @@ export function ProjectEditor({
           onDetect={() => void detectLogo()}
         />
 
-        <div>
-          <Label className="mb-1.5 text-xs text-muted-foreground">Local Path (read-only)</Label>
-          <Input
-            data-testid="project-path-input"
-            value={project.path || ''}
-            disabled
-            className="opacity-60"
-          />
-        </div>
-
-        <div>
-          <Label className="mb-1.5 text-xs text-muted-foreground">Name</Label>
-          <Input
-            data-testid="project-name-input"
-            value={name}
-            onChange={(event) => setName(event.target.value)}
-            placeholder="mando"
-            aria-invalid={nameConflict || undefined}
-          />
-          {nameConflict && (
-            <p className="mt-1 text-xs text-destructive">
-              A project with this name already exists.
-            </p>
-          )}
-        </div>
-
-        <div>
-          <Label className="mb-1.5 text-xs text-muted-foreground">
-            GitHub Repo (auto-detected, optional)
-          </Label>
-          <Input
-            data-testid="project-github-repo-input"
-            value={githubRepo}
-            onChange={(event) => setGithubRepo(event.target.value)}
-            placeholder="owner/repo"
-          />
-        </div>
-
-        <div>
-          <Label className="mb-1.5 text-xs text-muted-foreground">Aliases (comma-separated)</Label>
-          <Input
-            value={aliases}
-            onChange={(event) => setAliases(event.target.value)}
-            placeholder="mdo, mnd"
-          />
-        </div>
-
-        <div>
-          <Label className="mb-1.5 text-xs text-muted-foreground">Worker Preamble</Label>
-          <Textarea
-            data-testid="project-preamble-input"
-            className="h-20 resize-none"
-            value={preamble}
-            onChange={(event) => setPreamble(event.target.value)}
-            placeholder="Instructions prepended to worker prompts..."
-          />
-        </div>
-
-        <div>
-          <Label className="mb-1.5 text-xs text-muted-foreground">Scout Summary</Label>
-          <Input
-            value={scoutSummary}
-            onChange={(event) => setScoutSummary(event.target.value)}
-            placeholder="Auto-generated from project metadata"
-          />
-          <p className="mt-1 text-xs text-muted-foreground">
-            Describes this project to Scout for context-aware analysis.
-          </p>
-        </div>
-
-        <div>
-          <Label className="mb-1.5 text-xs text-muted-foreground">Check Command</Label>
-          <Input
-            data-testid="project-check-command-input"
-            value={checkCommand}
-            onChange={(event) => setCheckCommand(event.target.value)}
-            placeholder="mando-dev check"
-          />
-          <p className="mt-1 text-xs text-muted-foreground">
-            Custom quality-gate command run by captain before marking work complete.
-          </p>
-        </div>
+        <ProjectEditorFields
+          path={project.path || ''}
+          name={name}
+          nameConflict={nameConflict}
+          githubRepo={githubRepo}
+          aliases={aliases}
+          preamble={preamble}
+          scoutSummary={scoutSummary}
+          checkCommand={checkCommand}
+          onName={setName}
+          onGithubRepo={setGithubRepo}
+          onAliases={setAliases}
+          onPreamble={setPreamble}
+          onScoutSummary={setScoutSummary}
+          onCheckCommand={setCheckCommand}
+        />
 
         <ProjectHooksFields
           preSpawn={preSpawn}

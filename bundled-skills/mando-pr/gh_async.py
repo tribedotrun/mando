@@ -15,11 +15,50 @@ MAX_GH_RETRIES = 5
 BASE_BACKOFF_SECONDS = 2
 
 
-def _is_rate_limit_error(error: str) -> bool:
+class GhError(RuntimeError):
+    """Raised when the `gh` CLI exits non-zero.
+
+    Carries the structured HTTP status (when gh reports one in stderr) so
+    callers can branch on e.g. 404 without substring-matching formatted
+    messages.
+    """
+
+    def __init__(self, stderr: str, http_status: int | None = None) -> None:
+        super().__init__(stderr)
+        self.stderr = stderr
+        self.http_status = http_status
+
+    def is_not_found(self) -> bool:
+        return self.http_status == 404
+
+
+def _parse_http_status(stderr: str) -> int | None:
+    """Extract the HTTP status gh reports on API failures, e.g. `HTTP 404:`."""
+    marker = "HTTP "
+    idx = stderr.find(marker)
+    if idx == -1:
+        return None
+    digits: list[str] = []
+    for ch in stderr[idx + len(marker):]:
+        if ch.isdigit():
+            digits.append(ch)
+            if len(digits) == 3:
+                break
+        else:
+            break
+    if len(digits) != 3:
+        return None
+    try:
+        return int("".join(digits))
+    except ValueError:
+        return None
+
+
+def _is_rate_limit_error(error: str, http_status: int | None) -> bool:
     """Detect both primary (429) and secondary (403) rate limits."""
-    if "HTTP 429" in error:
+    if http_status == 429:
         return True
-    if "HTTP 403" in error and "rate limit" in error.lower():
+    if http_status == 403 and "rate limit" in error.lower():
         return True
     return False
 
@@ -39,10 +78,14 @@ async def run_gh(*args: str) -> str:
         if proc.returncode == 0:
             return stdout.decode()
         error = stderr.decode().strip() or "gh command failed"
-        if not _is_rate_limit_error(error):
-            raise RuntimeError(error)
+        http_status = _parse_http_status(error)
+        if not _is_rate_limit_error(error, http_status):
+            raise GhError(error, http_status=http_status)
         if attempt >= MAX_GH_RETRIES:
-            raise RuntimeError(f"Rate limited after {MAX_GH_RETRIES} retries: {error}")
+            raise GhError(
+                f"Rate limited after {MAX_GH_RETRIES} retries: {error}",
+                http_status=http_status,
+            )
         jitter = random.uniform(0, delay)
         await asyncio.sleep(min(delay + jitter, max_delay))
         delay = min(delay * 2, max_delay)
@@ -111,8 +154,8 @@ async def fetch_all(owner: str, repo: str, pr: int) -> dict[str, Any]:
                 "--paginate",
                 f"repos/{owner}/{repo}/{endpoint}?per_page=100",
             )
-        except RuntimeError as exc:
-            if "404" in str(exc):
+        except GhError as exc:
+            if exc.is_not_found():
                 return []
             raise
         return parse_paginated(raw.strip())
@@ -120,8 +163,8 @@ async def fetch_all(owner: str, repo: str, pr: int) -> dict[str, Any]:
     async def single(endpoint: str) -> list:
         try:
             raw = await run_gh("api", f"repos/{owner}/{repo}/{endpoint}")
-        except RuntimeError as exc:
-            if "404" in str(exc):
+        except GhError as exc:
+            if exc.is_not_found():
                 return []
             raise
         if not raw.strip():
@@ -167,8 +210,8 @@ async def get_check_runs(owner: str, repo: str, sha: str) -> list[dict]:
             "api",
             f"repos/{owner}/{repo}/commits/{sha}/check-runs?per_page=100",
         )
-    except RuntimeError as exc:
-        if "404" in str(exc):
+    except GhError as exc:
+        if exc.is_not_found():
             return []
         raise
     if not raw.strip():
