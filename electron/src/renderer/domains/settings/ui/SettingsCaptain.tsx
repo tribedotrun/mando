@@ -9,7 +9,7 @@ import {
 import type { CaptainConfig } from '#renderer/global/types';
 import { Switch } from '#renderer/global/ui/switch';
 
-const EMPTY_CAPTAIN: CaptainConfig = {};
+const EMPTY_CAPTAIN: CaptainConfig = Object.freeze({});
 
 export function SettingsCaptain(): React.ReactElement {
   const { data: config } = useConfig();

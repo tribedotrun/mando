@@ -1,4 +1,4 @@
-const LANG_ALIASES: Record<string, string> = {
+const LANG_ALIASES: Record<string, string> = Object.freeze({
   ts: 'typescript',
   js: 'javascript',
   py: 'python',
@@ -7,7 +7,7 @@ const LANG_ALIASES: Record<string, string> = {
   yml: 'yaml',
   md: 'markdown',
   rs: 'rust',
-};
+});
 
 export function normalizeLang(lang: string): string {
   return LANG_ALIASES[lang] ?? lang;

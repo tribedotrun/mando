@@ -1,6 +1,4 @@
-import React, { useMemo } from 'react';
-import { ArrowLeft } from 'lucide-react';
-import { useConfig } from '#renderer/global/runtime/useConfig';
+import React from 'react';
 import { ErrorBoundary } from '#renderer/global/ui/ErrorBoundary';
 import { SettingsGeneral } from '#renderer/domains/settings/ui/SettingsGeneral';
 import { SettingsProjects } from '#renderer/domains/settings/ui/SettingsProjects';
@@ -10,33 +8,11 @@ import { SettingsScout } from '#renderer/domains/settings/ui/SettingsScout';
 import { SettingsExperimental } from '#renderer/domains/settings/ui/SettingsExperimental';
 import { SettingsAbout } from '#renderer/domains/settings/ui/SettingsAbout';
 import { SettingsAccounts } from '#renderer/domains/settings/ui/SettingsAccounts';
-import { Button } from '#renderer/global/ui/button';
 import { Skeleton } from '#renderer/global/ui/skeleton';
-
-export type SettingsSection =
-  | 'general'
-  | 'projects'
-  | 'captain'
-  | 'credentials'
-  | 'telegram'
-  | 'scout'
-  | 'experimental'
-  | 'about';
-
-interface NavItem {
-  id: SettingsSection;
-  label: string;
-}
-
-const BASE_NAV_ITEMS: NavItem[] = [
-  { id: 'general', label: 'General' },
-  { id: 'projects', label: 'Projects' },
-  { id: 'captain', label: 'Captain' },
-  { id: 'credentials', label: 'Credentials' },
-  { id: 'telegram', label: 'Telegram' },
-  { id: 'experimental', label: 'Experimental' },
-  { id: 'about', label: 'About' },
-];
+import { SettingsSidebar } from '#renderer/domains/settings/ui/SettingsPageParts';
+import { useSettingsPage } from '#renderer/domains/settings/runtime/useSettingsPage';
+export type { SettingsSection } from '#renderer/domains/settings/types';
+import type { SettingsSection } from '#renderer/domains/settings/types';
 
 function SettingsPanel({ section }: { section: SettingsSection }) {
   switch (section) {
@@ -70,24 +46,7 @@ export function SettingsPage({
   onSectionChange,
   onBack,
 }: SettingsPageProps): React.ReactElement {
-  const { data: config, isLoading, error } = useConfig();
-  const scoutEnabled = !!config?.features?.scout;
-  const navItems = useMemo(() => {
-    let items = BASE_NAV_ITEMS;
-    if (scoutEnabled) {
-      const idx = items.findIndex((i) => i.id === 'experimental');
-      items = [
-        ...items.slice(0, idx),
-        { id: 'scout' as SettingsSection, label: 'Scout' },
-        ...items.slice(idx),
-      ];
-    }
-    return items;
-  }, [scoutEnabled]);
-
-  const section: SettingsSection = navItems.some((item) => item.id === sectionProp)
-    ? sectionProp
-    : 'general';
+  const { navItems, section, isLoading, error } = useSettingsPage(sectionProp);
 
   if (isLoading) {
     return (
@@ -102,52 +61,14 @@ export function SettingsPage({
 
   return (
     <div data-testid="settings-page" className="relative flex h-full">
-      <div
-        className="absolute inset-x-0 top-0 z-10 h-[38px]"
-        style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
+      <div className="absolute inset-x-0 top-0 z-10 h-[38px]" style={{ WebkitAppRegion: 'drag' }} />
+      <SettingsSidebar
+        navItems={navItems}
+        section={section}
+        error={error}
+        onBack={onBack}
+        onSectionChange={onSectionChange}
       />
-      <aside className="flex w-[200px] shrink-0 flex-col bg-card pb-4 pl-3 pr-3 pt-[38px]">
-        <button
-          type="button"
-          onClick={onBack}
-          className="mb-2 flex items-center gap-1.5 px-0 text-xs text-muted-foreground transition-colors hover:text-foreground"
-        >
-          <ArrowLeft size={14} />
-          Back to app
-        </button>
-        <div className="mb-4 px-0 text-sm font-medium text-foreground">Settings</div>
-
-        <nav className="flex flex-1 flex-col gap-0.5 overflow-y-auto">
-          {navItems.map((item) => {
-            const active = section === item.id;
-            return (
-              <Button
-                key={item.id}
-                data-testid={`settings-nav-${item.id}`}
-                variant="ghost"
-                size="sm"
-                onClick={() => onSectionChange?.(item.id)}
-                className={`w-full justify-start text-[13px] ${
-                  active
-                    ? 'bg-muted font-medium text-foreground'
-                    : 'font-normal text-muted-foreground'
-                }`}
-              >
-                {item.label}
-              </Button>
-            );
-          })}
-        </nav>
-
-        {error && (
-          <div className="pt-3">
-            <p className="text-xs text-destructive">
-              {error instanceof Error ? error.message : 'Failed to load config'}
-            </p>
-          </div>
-        )}
-      </aside>
-
       <main className="flex-1 overflow-y-auto px-8 pb-6 pt-[38px]">
         <div className="max-w-[720px]">
           <ErrorBoundary key={section} fallbackLabel={section}>

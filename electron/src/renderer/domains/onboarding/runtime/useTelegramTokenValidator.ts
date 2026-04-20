@@ -1,5 +1,6 @@
 import { useCallback, useState } from 'react';
 
+import { validateTelegramToken } from '#renderer/global/providers/native/onboarding';
 import log from '#renderer/global/service/logger';
 import { getErrorMessage } from '#renderer/global/service/utils';
 
@@ -21,6 +22,7 @@ export function useTelegramTokenValidator(): {
   const [validating, setValidating] = useState(false);
   const [result, setResult] = useState<TGValidationResult>(null);
 
+  // invariant: validation result is encoded as boolean and stored in local state; errors are absorbed into state.result.error, never propagated
   const validate = useCallback(async (token: string): Promise<boolean> => {
     const trimmed = token.trim();
     if (!trimmed) {
@@ -30,7 +32,7 @@ export function useTelegramTokenValidator(): {
     setValidating(true);
     setResult(null);
     try {
-      const res = await window.mandoAPI.validateTelegramToken(trimmed);
+      const res = await validateTelegramToken(trimmed);
       if (res.valid) {
         setResult({ botUsername: res.botUsername });
         return true;

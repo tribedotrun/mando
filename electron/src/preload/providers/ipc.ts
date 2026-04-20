@@ -1,93 +1,71 @@
-import { ipcRenderer } from 'electron';
-import type { MandoAPI } from '#preload/types/api';
+// Preload-side IPC bridge. Every invoke goes through `invoke()` from
+// shared/ipc-contract/runtime which parses the result against the channel's
+// Zod schema before handing it back. Every subscription uses `subscribe()`
+// which parses each pushed payload before calling the renderer's callback.
+//
+// Subscription contract (#831): every `on*` method returns a caller-owned
+// unsubscribe function. The caller is responsible for invoking it on
+// cleanup; the bridge exposes no channel-wide `remove*Listeners` APIs.
+// This eliminates the previous pattern where one feature could tear down
+// another feature's listener by calling the wrong cleanup.
 
-/** IPC wrapper functions that implement the MandoAPI contract. */
+import type { MandoAPI } from '#preload/types/api';
+import { invoke, subscribe, send } from '#shared/ipc-contract';
+
 export const ipcApi: MandoAPI = {
   // App mode
-  appMode: () => ipcRenderer.invoke('get-app-mode'),
-  devGitInfo: () => ipcRenderer.invoke('get-dev-git-info'),
+  appMode: () => invoke('get-app-mode'),
+  devGitInfo: () => invoke('get-dev-git-info'),
   // System checks
-  checkClaudeCode: () => ipcRenderer.invoke('check-claude-code'),
-  validateTelegramToken: (token: string) => ipcRenderer.invoke('validate-telegram-token', token),
+  checkClaudeCode: () => invoke('check-claude-code'),
+  validateTelegramToken: (token) => invoke('validate-telegram-token', token),
   // Config & setup
-  gatewayUrl: () => ipcRenderer.invoke('get-gateway-url'),
-  appInfo: () => ipcRenderer.invoke('get-app-info'),
-  hasConfig: () => ipcRenderer.invoke('has-config'),
-  readConfig: () => ipcRenderer.invoke('read-config'),
-  // saveConfig and addProject removed -- renderer calls daemon HTTP directly
-  saveConfigLocal: (config: string) => ipcRenderer.invoke('save-config-local', config),
-  setupComplete: (config: string) => ipcRenderer.invoke('setup-complete', config),
-  onSetupProgress: (callback: (step: string) => void) => {
-    ipcRenderer.on('setup-progress', (_event, step: string) => callback(step));
-  },
+  gatewayUrl: () => invoke('get-gateway-url'),
+  appInfo: () => invoke('get-app-info'),
+  hasConfig: () => invoke('has-config'),
+  readConfig: () => invoke('read-config'),
+  saveConfigLocal: (config) => invoke('save-config-local', config),
+  setupComplete: (config) => invoke('setup-complete', config),
+  onSetupProgress: (callback) => subscribe('setup-progress', callback),
   // Daemon control
-  restartDaemon: () => ipcRenderer.invoke('restart-daemon'),
+  restartDaemon: () => invoke('restart-daemon'),
   // Shortcuts
-  onShortcut: (callback: (action: string) => void) => {
-    ipcRenderer.on('shortcut', (_event, action: string) => callback(action));
-  },
-  removeShortcutListeners: () => {
-    ipcRenderer.removeAllListeners('shortcut');
-  },
+  onShortcut: (callback) => subscribe('shortcut', callback),
   // Desktop notifications
-  showNotification: (payload: unknown) => {
-    ipcRenderer.send('show-notification', payload);
+  showNotification: (payload) => {
+    send('show-notification', payload);
   },
-  onNotificationClick: (callback: (data: { kind: unknown; item_id?: string }) => void) => {
-    ipcRenderer.on('notification-click', (_event, data) => callback(data));
-  },
-  removeNotificationClickListeners: () => {
-    ipcRenderer.removeAllListeners('notification-click');
-  },
+  onNotificationClick: (callback) => subscribe('notification-click', callback),
   // Auto-update
   updates: {
-    onUpdateReady: (callback: (info: { version: string; notes: string }) => void) => {
-      ipcRenderer.on('update-ready', (_event, info) => callback(info));
-    },
-    onUpdateChecking: (callback: () => void) => {
-      ipcRenderer.on('update-checking', () => callback());
-    },
-    onUpdateNoUpdate: (callback: () => void) => {
-      ipcRenderer.on('update-no-update', () => callback());
-    },
-    onUpdateCheckError: (callback: () => void) => {
-      ipcRenderer.on('update-check-error', () => callback());
-    },
-    onUpdateCheckDone: (callback: (info: { found: boolean }) => void) => {
-      ipcRenderer.on('update-check-done', (_event, info) => callback(info));
-    },
-    installUpdate: () => ipcRenderer.invoke('updates:install'),
-    checkForUpdates: () => ipcRenderer.invoke('updates:check'),
-    getPending: () =>
-      ipcRenderer.invoke('updates:pending') as Promise<{ version: string; notes: string } | null>,
-    appVersion: () => ipcRenderer.invoke('updates:app-version'),
-    getChannel: () => ipcRenderer.invoke('updates:get-channel'),
-    setChannel: (channel: string) => ipcRenderer.invoke('updates:set-channel', channel),
-    removeUpdateListeners: () => {
-      ipcRenderer.removeAllListeners('update-ready');
-    },
-    removeCheckListeners: () => {
-      ipcRenderer.removeAllListeners('update-checking');
-      ipcRenderer.removeAllListeners('update-no-update');
-      ipcRenderer.removeAllListeners('update-check-error');
-      ipcRenderer.removeAllListeners('update-check-done');
-    },
+    onUpdateReady: (callback) => subscribe('update-ready', callback),
+    onUpdateChecking: (callback) => subscribe('update-checking', callback),
+    onUpdateNoUpdate: (callback) => subscribe('update-no-update', callback),
+    onUpdateCheckError: (callback) => subscribe('update-check-error', callback),
+    onUpdateCheckDone: (callback) => subscribe('update-check-done', callback),
+    installUpdate: () => invoke('updates:install'),
+    checkForUpdates: () => invoke('updates:check'),
+    getPending: () => invoke('updates:pending'),
+    appVersion: () => invoke('updates:app-version'),
+    getChannel: () => invoke('updates:get-channel'),
+    setChannel: (channel) => invoke('updates:set-channel', channel),
   },
-  // Login item
-  selectDirectory: () => ipcRenderer.invoke('select-directory'),
-  setLoginItem: (enabled: boolean) => ipcRenderer.invoke('set-login-item', enabled),
-  // DevTools
-  toggleDevTools: () => ipcRenderer.invoke('toggle-devtools'),
-  // Logs
-  openLogsFolder: () => void ipcRenderer.invoke('open-logs-folder'),
-  // Terminal desktop bridge
-  openExternalUrl: (url: string) => ipcRenderer.invoke('terminal:open-external-url', url),
-  resolveLocalPath: (input: string, cwd: string) =>
-    ipcRenderer.invoke('terminal:resolve-local-path', input, cwd),
-  openLocalPath: (path: string) => ipcRenderer.invoke('terminal:open-local-path', path),
-  // Open paths
-  openDataDir: () => void ipcRenderer.invoke('open-data-dir'),
-  openConfigFile: () => void ipcRenderer.invoke('open-config-file'),
-  openInFinder: (dir: string) => ipcRenderer.invoke('open-in-finder', dir) as Promise<void>,
-  openInCursor: (dir: string) => ipcRenderer.invoke('open-in-cursor', dir) as Promise<void>,
+  // Native shell
+  selectDirectory: () => invoke('select-directory'),
+  setLoginItem: (enabled) => invoke('set-login-item', enabled),
+  toggleDevTools: () => invoke('toggle-devtools'),
+  openLogsFolder: () => {
+    void invoke('open-logs-folder');
+  },
+  openExternalUrl: (url) => invoke('terminal:open-external-url', url),
+  resolveLocalPath: (input, cwd) => invoke('terminal:resolve-local-path', [input, cwd]),
+  openLocalPath: (path) => invoke('terminal:open-local-path', path),
+  openDataDir: () => {
+    void invoke('open-data-dir');
+  },
+  openConfigFile: () => {
+    void invoke('open-config-file');
+  },
+  openInFinder: (dir) => invoke('open-in-finder', dir),
+  openInCursor: (dir) => invoke('open-in-cursor', dir),
 };

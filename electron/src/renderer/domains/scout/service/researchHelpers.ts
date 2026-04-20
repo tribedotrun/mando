@@ -70,11 +70,6 @@ export function scoutItemDomain(item: Pick<ScoutItem, 'source_name' | 'url'>): s
   }
 }
 
-/** Filter runs that failed with an error message. */
-export function failedRunsWithErrors(runs: ScoutResearchRun[]): ScoutResearchRun[] {
-  return runs.filter((r) => r.status === 'failed' && r.error);
-}
-
 export function statusBadgeConfig(status: ScoutResearchRun['status']): StatusBadgeConfig {
   switch (status) {
     case 'running':
@@ -83,5 +78,7 @@ export function statusBadgeConfig(status: ScoutResearchRun['status']): StatusBad
       return { variant: 'secondary', label: 'Done', spinning: false, showElapsed: false };
     case 'failed':
       return { variant: 'destructive', label: 'Failed', spinning: false, showElapsed: false };
+    default:
+      return { variant: 'outline', label: status, spinning: false, showElapsed: false };
   }
 }

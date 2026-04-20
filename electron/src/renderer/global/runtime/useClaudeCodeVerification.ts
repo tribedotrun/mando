@@ -21,14 +21,14 @@ export function useClaudeCodeVerification() {
   const doneRef = useRef(false);
 
   useMountEffect(() => {
-    function getConfig() {
-      return qc.getQueryData<MandoConfig>(queryKeys.config.current()) ?? ({} as MandoConfig);
+    function getConfig(): MandoConfig | null {
+      return qc.getQueryData<MandoConfig>(queryKeys.config.current()) ?? null;
     }
 
     function tryCheck() {
       if (doneRef.current) return;
       const cfg = getConfig();
-      if (!cfg || Object.keys(cfg).length === 0) return;
+      if (!cfg) return;
       if (cfg.features?.claudeCodeVerified || cfg.features?.setupDismissed) {
         doneRef.current = true;
         return;
@@ -43,7 +43,9 @@ export function useClaudeCodeVerification() {
                 ...current,
                 features: { ...(current.features || {}), claudeCodeVerified: true },
               };
-              saveMut.mutate(updated);
+              saveMut.mutate(updated, {
+                onError: (err) => log.warn('eager CC verification save failed:', err),
+              });
             }
           }
         })

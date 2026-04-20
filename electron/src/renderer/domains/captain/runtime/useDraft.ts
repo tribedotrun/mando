@@ -1,13 +1,59 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { z } from 'zod';
+import {
+  defineJsonKeyspace,
+  defineKeyspace,
+  type PersistedJsonSlot,
+  type PersistedSlot,
+} from '#renderer/global/providers/persistence';
 import log from '#renderer/global/service/logger';
 
 const DEBOUNCE_MS = 400;
 
+const draftStore = defineKeyspace('', 'domains/captain/runtime/useDraft');
+const draftRecordSchema = z
+  .record(z.string().regex(/^\d+$/), z.string())
+  .transform((value): Record<number, string> => value as Record<number, string>);
+const draftRecordStore = defineJsonKeyspace(
+  'json:',
+  draftRecordSchema,
+  'domains/captain/runtime/useDraft',
+);
+
+function slotFor(key: string): PersistedSlot {
+  return draftStore.for(key);
+}
+
+function recordSlotFor(key: string): PersistedJsonSlot<Record<number, string>> {
+  return draftRecordStore.for(key);
+}
+
+function readDraft(key: string): string {
+  return slotFor(key).read() ?? '';
+}
+
+function writeDraft(key: string, value: string): void {
+  if (value) slotFor(key).write(value);
+  else slotFor(key).clear();
+}
+
+function readDraftRecord(key: string): Record<number, string> {
+  return recordSlotFor(key).read() ?? {};
+}
+
+function writeDraftRecord(key: string, value: Record<number, string>): void {
+  if (Object.values(value).some((entry) => entry.trim())) {
+    recordSlotFor(key).write(value);
+    return;
+  }
+  recordSlotFor(key).clear();
+}
+
 /**
- * Persist a text draft to localStorage with debounced writes.
+ * Persist a text draft to browser storage with debounced writes.
  * Returns [value, setValue, clearDraft].
  *
- * - Loads from localStorage on mount.
+ * - Loads on mount.
  * - Debounces writes (400ms) on every setValue call.
  * - clearDraft() removes the key and resets value to ''.
  * - Flushes pending writes on unmount.
@@ -15,7 +61,7 @@ const DEBOUNCE_MS = 400;
 export function useDraft(key: string): [string, (v: string) => void, () => void] {
   const [value, setValueState] = useState(() => {
     try {
-      return localStorage.getItem(key) ?? '';
+      return readDraft(key);
     } catch (err) {
       log.warn(`[useDraft] initial load failed for key="${key}":`, err);
       return '';
@@ -34,23 +80,12 @@ export function useDraft(key: string): [string, (v: string) => void, () => void]
       clearTimeout(timerRef.current);
       timerRef.current = null;
       const prevKey = keyRef.current;
-      try {
-        if (latestRef.current) localStorage.setItem(prevKey, latestRef.current);
-        else localStorage.removeItem(prevKey);
-      } catch (err) {
-        log.warn(`[useDraft] flush on key change failed for key="${prevKey}":`, err);
-      }
+      writeDraft(prevKey, latestRef.current);
     }
     keyRef.current = key;
-    try {
-      const stored = localStorage.getItem(key) ?? '';
-      setValueState(stored);
-      latestRef.current = stored;
-    } catch (err) {
-      log.warn(`[useDraft] load failed for key="${key}":`, err);
-      setValueState('');
-      latestRef.current = '';
-    }
+    const stored = readDraft(key);
+    setValueState(stored);
+    latestRef.current = stored;
   }, [key]);
 
   const scheduleSave = useCallback((v: string) => {
@@ -58,12 +93,7 @@ export function useDraft(key: string): [string, (v: string) => void, () => void]
     if (timerRef.current) clearTimeout(timerRef.current);
     timerRef.current = setTimeout(() => {
       timerRef.current = null;
-      try {
-        if (latestRef.current) localStorage.setItem(keyRef.current, latestRef.current);
-        else localStorage.removeItem(keyRef.current);
-      } catch (err) {
-        log.warn(`[useDraft] save failed for key="${keyRef.current}":`, err);
-      }
+      writeDraft(keyRef.current, latestRef.current);
     }, DEBOUNCE_MS);
   }, []);
 
@@ -82,11 +112,7 @@ export function useDraft(key: string): [string, (v: string) => void, () => void]
     }
     setValueState('');
     latestRef.current = '';
-    try {
-      localStorage.removeItem(keyRef.current);
-    } catch (err) {
-      log.warn(`[useDraft] clear failed for key="${keyRef.current}":`, err);
-    }
+    slotFor(keyRef.current).clear();
   }, []);
 
   // Flush pending write on unmount.
@@ -95,12 +121,7 @@ export function useDraft(key: string): [string, (v: string) => void, () => void]
       if (timerRef.current) {
         clearTimeout(timerRef.current);
         timerRef.current = null;
-        try {
-          if (latestRef.current) localStorage.setItem(keyRef.current, latestRef.current);
-          else localStorage.removeItem(keyRef.current);
-        } catch (err) {
-          log.warn(`[useDraft] unmount flush failed for key="${keyRef.current}":`, err);
-        }
+        writeDraft(keyRef.current, latestRef.current);
       }
     };
   }, []);
@@ -115,33 +136,68 @@ export function useDraft(key: string): [string, (v: string) => void, () => void]
 export function useDraftRecord(
   key: string,
 ): [Record<number, string>, (v: Record<number, string>) => void, () => void] {
-  const [raw, setRaw, clearRaw] = useDraft(key);
+  const [value, setValueState] = useState(() => {
+    try {
+      return readDraftRecord(key);
+    } catch (err) {
+      log.warn(`[useDraftRecord] initial load failed for key="${key}":`, err);
+      return {};
+    }
+  });
 
-  // Parse during render but never call side effects (clearRaw) here —
-  // invalid data returns {} and will be overwritten on next valid write.
-  const parsed: Record<number, string> = raw
-    ? (() => {
-        try {
-          const val = JSON.parse(raw);
-          if (typeof val !== 'object' || val === null || Array.isArray(val)) {
-            log.warn(`[useDraftRecord] invalid shape for key="${key}"`);
-            return {};
-          }
-          return val as Record<number, string>;
-        } catch (err) {
-          log.warn(`[useDraftRecord] parse failed for key="${key}":`, err);
-          return {};
-        }
-      })()
-    : {};
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const latestRef = useRef(value);
+  const keyRef = useRef(key);
+
+  useEffect(() => {
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+      const prevKey = keyRef.current;
+      writeDraftRecord(prevKey, latestRef.current);
+    }
+    keyRef.current = key;
+    const stored = readDraftRecord(key);
+    setValueState(stored);
+    latestRef.current = stored;
+  }, [key]);
+
+  const scheduleSave = useCallback((next: Record<number, string>) => {
+    latestRef.current = next;
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => {
+      timerRef.current = null;
+      writeDraftRecord(keyRef.current, latestRef.current);
+    }, DEBOUNCE_MS);
+  }, []);
 
   const setValue = useCallback(
     (v: Record<number, string>) => {
-      const hasContent = Object.values(v).some((s) => s.trim());
-      setRaw(hasContent ? JSON.stringify(v) : '');
+      setValueState(v);
+      scheduleSave(v);
     },
-    [setRaw],
+    [scheduleSave],
   );
 
-  return [parsed, setValue, clearRaw];
+  const clearDraft = useCallback(() => {
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+    setValueState({});
+    latestRef.current = {};
+    recordSlotFor(keyRef.current).clear();
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+        timerRef.current = null;
+        writeDraftRecord(keyRef.current, latestRef.current);
+      }
+    };
+  }, []);
+
+  return [value, setValue, clearDraft];
 }

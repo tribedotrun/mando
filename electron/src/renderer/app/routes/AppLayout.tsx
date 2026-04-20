@@ -4,9 +4,10 @@ import { usePanelRef } from 'react-resizable-panels';
 import { useDataContext } from '#renderer/global/runtime/dataContext';
 import { useMountEffect } from '#renderer/global/runtime/useMountEffect';
 import { useNativeActions } from '#renderer/global/runtime/useNativeActions';
+import log from '#renderer/global/service/logger';
 import { usePanelLayout } from '#renderer/global/runtime/usePanelLayout';
 import { Sidebar } from '#renderer/app/Sidebar';
-import { SidebarProvider } from '#renderer/app/SidebarProvider';
+import { SidebarProvider } from '#renderer/domains/captain/ui/SidebarProvider';
 import { RetryButton } from '#renderer/domains/captain/ui/RetryButton';
 import { Button } from '#renderer/global/ui/button';
 import {
@@ -16,11 +17,11 @@ import {
 } from '#renderer/global/ui/resizable';
 import { AppHeader } from '#renderer/app/AppHeader';
 import { router } from '#renderer/app/router';
-import { useUIStore } from '#renderer/app/uiStore';
+import { useUIStore } from '#renderer/global/runtime/useUIStore';
 
 export function AppLayout(): React.ReactElement {
   const sidebarRef = usePanelRef();
-  const { sseStatus } = useDataContext();
+  const { sseStatus, resetDataPlane } = useDataContext();
   const { restartDaemon, openLogsFolder } = useNativeActions();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const { defaultLayout, onLayoutChanged } = usePanelLayout('sidebar-layout');
@@ -41,16 +42,27 @@ export function AppLayout(): React.ReactElement {
   const handleGoBack = useCallback(() => router.history.back(), []);
   const handleGoForward = useCallback(() => router.history.forward(), []);
   const handleNewTask = useCallback(() => useUIStore.getState().openCreateTask(), []);
+  const handleRestartDaemon = useCallback(() => {
+    void restartDaemon()
+      .then(() => {
+        resetDataPlane();
+      })
+      .catch((err) => {
+        log.warn('[AppLayout] restartDaemon failed', err);
+      });
+  }, [restartDaemon, resetDataPlane]);
 
-  // Sync initial collapsed state (panel may restore collapsed from localStorage)
+  // Sync initial collapsed state (panel may restore collapsed from persistence)
   useMountEffect(() => {
     if (sidebarRef.current?.isCollapsed()) setSidebarCollapsed(true);
   });
 
-  // Listen for sidebar toggle events (keyboard shortcut + context action)
+  // Register the local toggle handler with the UI store. Sources outside
+  // AppLayout (keyboard shortcut, sidebar context action) call
+  // useUIStore.getState().toggleSidebar() to invoke this.
   useMountEffect(() => {
-    window.addEventListener('mando:toggle-sidebar', handleToggleSidebar);
-    return () => window.removeEventListener('mando:toggle-sidebar', handleToggleSidebar);
+    useUIStore.getState().registerSidebarToggle(handleToggleSidebar);
+    return () => useUIStore.getState().unregisterSidebarToggle();
   });
 
   return (
@@ -64,7 +76,7 @@ export function AppLayout(): React.ReactElement {
           <span className="flex-1" />
           <RetryButton
             className="inline-flex items-center justify-center rounded-md bg-secondary px-3 py-1 text-[13px] font-medium text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-            onRetry={restartDaemon}
+            onRetry={handleRestartDaemon}
           />
           <Button
             variant="link"

@@ -30,6 +30,15 @@ const outDir = resolve(root, buildDir);
 const isDev = process.argv.includes('--dev');
 const viteUrl = process.env.VITE_DEV_SERVER_URL;
 
+// Alias map: keep in sync with tsconfig.json `paths` and vite.renderer.config.mts.
+const alias = {
+  '#renderer': resolve(root, 'src/renderer'),
+  '#main': resolve(root, 'src/main'),
+  '#preload': resolve(root, 'src/preload'),
+  '#shared': resolve(root, 'src/shared'),
+  '#result': resolve(root, 'src/shared/result/index.ts'),
+};
+
 console.log('Building main process...');
 await build({
   entryPoints: [resolve(root, 'src/main/index.ts')],
@@ -39,6 +48,7 @@ await build({
   format: 'cjs',
   external: ['electron'],
   outfile: resolve(outDir, 'main/index.js'),
+  alias,
   define: {
     MAIN_WINDOW_VITE_DEV_SERVER_URL: isDev && viteUrl ? JSON.stringify(viteUrl) : 'undefined',
     MAIN_WINDOW_VITE_NAME: '"main_window"',
@@ -56,6 +66,7 @@ await build({
   format: 'cjs',
   external: ['electron'],
   outfile: resolve(outDir, 'preload/index.js'),
+  alias,
   sourcemap: true,
 });
 console.log(`  -> ${buildDir}/preload/index.js`);

@@ -1,11 +1,12 @@
 import { useCallback, useRef, useState } from 'react';
 import { createWorktree } from '#renderer/domains/captain/repo/terminal-api';
-import { apiPost } from '#renderer/global/providers/http';
-import { toast } from 'sonner';
+import { apiPostRouteR } from '#renderer/global/providers/http';
+import { toast } from '#renderer/global/runtime/useFeedback';
 import { getErrorMessage } from '#renderer/global/service/utils';
 import log from '#renderer/global/service/logger';
 import { useQueryClient } from '@tanstack/react-query';
 import { queryKeys } from '#renderer/global/repo/queryKeys';
+import { toReactQuery } from '#result';
 
 export interface TerminalPageState {
   project: string;
@@ -37,14 +38,16 @@ export function useWorktreeTerminal() {
           String(now.getMinutes()).padStart(2, '0'),
           String(now.getSeconds()).padStart(2, '0'),
         ].join('');
-        const result = await createWorktree(project, suffix);
+        const result = await toReactQuery(createWorktree(project, suffix));
         if (wtGenRef.current !== gen) {
-          apiPost('/api/worktrees/remove', { path: result.path }).catch((e) => console.error(e));
+          void toReactQuery(apiPostRouteR('postWorktreesRemove', { path: result.path })).catch(
+            (e) => log.error('worktreesRemove cleanup failed', e),
+          );
           return;
         }
         setTerminalPage({ project, cwd: result.path });
         void qc.invalidateQueries({ queryKey: queryKeys.workbenches.all });
-        onReady?.(result.path, { workbenchId: result.workbenchId });
+        onReady?.(result.path, { workbenchId: result.workbenchId ?? undefined });
       } catch (err) {
         if (wtGenRef.current !== gen) return;
         log.error('createWorktree failed', err);

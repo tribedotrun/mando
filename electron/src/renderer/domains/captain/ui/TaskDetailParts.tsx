@@ -2,7 +2,7 @@ import React from 'react';
 import { AlignLeft, Copy } from 'lucide-react';
 import type { TaskItem } from '#renderer/global/types';
 import { MoreIcon } from '#renderer/domains/captain/ui/TaskIcons';
-import { copyToClipboard } from '#renderer/global/service/utils';
+import { copyToClipboard } from '#renderer/global/runtime/useFeedback';
 import { planCopyLabel } from '#renderer/domains/captain/service/projectHelpers';
 import {
   DropdownMenu,

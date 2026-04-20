@@ -26,7 +26,12 @@ export function getDefaultAction(item: TaskItem): ActionBarAction {
   return available[0] ?? 'ask';
 }
 
-const HIDDEN_STATUSES = ['needs-clarification', 'captain-reviewing', 'new', 'queued'] as const;
+const HIDDEN_STATUSES = Object.freeze([
+  'needs-clarification',
+  'captain-reviewing',
+  'new',
+  'queued',
+] as const);
 
 /** Whether to show the "ask-reopen" shortcut button. */
 export function shouldShowAskReopen(

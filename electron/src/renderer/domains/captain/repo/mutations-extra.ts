@@ -1,8 +1,9 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { toast } from 'sonner';
+import { toast } from '#renderer/global/runtime/useFeedback';
 import { endAskSession } from '#renderer/domains/captain/repo/api';
-import { apiPost } from '#renderer/global/providers/http';
+import { apiPostRouteR } from '#renderer/global/providers/http';
 import { queryKeys } from '#renderer/global/repo/queryKeys';
+import { toReactQuery } from '#result';
 
 // ---------------------------------------------------------------------------
 // useEndAskSession
@@ -11,7 +12,7 @@ import { queryKeys } from '#renderer/global/repo/queryKeys';
 export function useEndAskSession() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (vars: { id: number }) => endAskSession(vars.id),
+    mutationFn: (vars: { id: number }) => toReactQuery(endAskSession(vars.id)),
     onSettled: () => {
       void qc.invalidateQueries({ queryKey: queryKeys.tasks.all });
     },
@@ -25,7 +26,10 @@ export function useEndAskSession() {
 export function useAddProject() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (vars: { path: string }) => apiPost('/api/projects', { path: vars.path }),
+    mutationFn: (vars: { path: string }) =>
+      toReactQuery(
+        apiPostRouteR('postProjects', { name: undefined, path: vars.path, aliases: [] }),
+      ),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: queryKeys.config.all });
     },

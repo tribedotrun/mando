@@ -17,10 +17,7 @@ export function SetupLayout({
 } & Omit<React.HTMLAttributes<HTMLDivElement>, 'title'>): React.ReactElement {
   return (
     <div className="relative flex h-full bg-background" {...rest}>
-      <div
-        className="absolute inset-x-0 top-0 z-10 h-8"
-        style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
-      />
+      <div className="absolute inset-x-0 top-0 z-10 h-8" style={{ WebkitAppRegion: 'drag' }} />
       <div className="flex w-[300px] shrink-0 flex-col justify-center bg-card px-10 pb-20">
         {step != null && total != null && (
           <div className="mb-6">

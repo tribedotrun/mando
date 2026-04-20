@@ -7,15 +7,15 @@ interface ShortcutEntry {
   label: string;
 }
 
-const GENERAL: ShortcutEntry[] = [
+const GENERAL: readonly ShortcutEntry[] = Object.freeze([
   { keys: ['\u2318', 'K'], label: 'Command palette' },
   { keys: ['\u2318', ','], label: 'Settings' },
   { keys: ['\u2318', 'N'], label: 'New task' },
   { keys: ['?'], label: 'Shortcut reference' },
   { keys: ['Esc'], label: 'Close / deselect' },
-];
+]);
 
-const NAVIGATION: ShortcutEntry[] = [
+const NAVIGATION: readonly ShortcutEntry[] = Object.freeze([
   { keys: ['G', 'C'], label: 'Go to Captain' },
   { keys: ['G', 'D'], label: 'Go to Scout' },
   { keys: ['G', 'S'], label: 'Go to Sessions' },
@@ -26,15 +26,15 @@ const NAVIGATION: ShortcutEntry[] = [
   { keys: ['K'], label: 'Previous item' },
   { keys: ['Enter'], label: 'Expand / open' },
   { keys: ['X'], label: 'Deselect row' },
-];
+]);
 
-const ACTIONS: ShortcutEntry[] = [
+const ACTIONS: readonly ShortcutEntry[] = Object.freeze([
   { keys: ['C'], label: 'Create task' },
   { keys: ['M'], label: 'Merge PR' },
   { keys: ['S'], label: 'Change status' },
   { keys: ['R'], label: 'Restart / rework' },
   { keys: ['\u2318', 'Enter'], label: 'Submit form' },
-];
+]);
 
 interface Props {
   open: boolean;
@@ -86,7 +86,7 @@ function ShortcutColumn({
   entries,
 }: {
   title: string;
-  entries: ShortcutEntry[];
+  entries: readonly ShortcutEntry[];
 }): React.ReactElement {
   return (
     <div>

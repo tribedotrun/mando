@@ -1,6 +1,6 @@
 {
   "name": "mando",
-  "version": "0.1.18-beta.5",
+  "version": "0.1.18-beta.6",
   "description": "Desktop app for managing AI coding agents",
   "license": "Apache-2.0",
   "repository": {
@@ -23,6 +23,9 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint src/ tests/",
     "lint:test": "node --test 'eslint/**/tests/*.test.mjs'",
+    "arch:check": "node eslint/architecture/checks/app-shell-shape.mjs && node eslint/architecture/checks/cross-domain-leak.mjs && node eslint/architecture/checks/daemon-contract-schema-coverage.mjs && node eslint/architecture/checks/global-thinness.mjs && node eslint/architecture/checks/no-cross-tier-relative.mjs && node eslint/architecture/checks/ownership-pressure.mjs",
+    "test:unit": "node --experimental-strip-types --test 'src/**/__tests__/*.test.ts'",
+    "gen:schemas": "node scripts/gen-schemas.mjs",
     "format": "prettier --write 'src/**/*.{ts,tsx}' 'tests/**/*.ts' '*.{ts,mjs,mts}'",
     "format:check": "prettier --check 'src/**/*.{ts,tsx}' 'tests/**/*.ts' '*.{ts,mjs,mts}'"
   },
@@ -51,7 +54,9 @@
   },
   "imports": {
     "#renderer/*": "./src/renderer/*",
-    "#main/*": "./src/main/*"
+    "#main/*": "./src/main/*",
+    "#result": "./src/shared/result/index.ts",
+    "#shared/*": "./src/shared/*"
   },
   "engines": {
     "node": ">=24"
@@ -85,10 +90,5 @@
   },
   "optionalDependencies": {
     "appdmg": "^0.6.6"
-  },
-  "overrides": {
-    "tar": "^7.5.12",
-    "tmp": "^0.2.5",
-    "@tootallnate/once": "^3.0.1"
   }
 }

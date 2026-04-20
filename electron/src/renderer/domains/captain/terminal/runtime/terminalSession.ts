@@ -17,7 +17,3 @@ export function getTerminalSessionState(session: TerminalSessionInfo): TerminalS
 export function isRestoredTerminalSession(session: TerminalSessionInfo): boolean {
   return getTerminalSessionState(session) === 'restored';
 }
-
-export function isLiveTerminalSession(session: TerminalSessionInfo): boolean {
-  return getTerminalSessionState(session) === 'live';
-}

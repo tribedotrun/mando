@@ -1,17 +1,20 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { toast } from 'sonner';
+import { toast } from '#renderer/global/runtime/useFeedback';
 import {
   addScoutUrl,
   bulkUpdateScout,
   bulkDeleteScout,
+  type ScoutCommand,
   updateScoutStatus,
   actOnScoutItem,
   researchScout,
   askScout,
+  publishScoutTelegraph,
 } from '#renderer/domains/scout/repo/api';
-import type { ScoutResponse } from '#renderer/global/types';
+import type { ScoutItem, ScoutResponse } from '#renderer/global/types';
 import { queryKeys } from '#renderer/global/repo/queryKeys';
 import { getErrorMessage } from '#renderer/global/service/utils';
+import { toReactQuery } from '#result';
 
 // ---------------------------------------------------------------------------
 // useScoutAdd
@@ -19,7 +22,8 @@ import { getErrorMessage } from '#renderer/global/service/utils';
 
 export function useScoutAdd() {
   return useMutation({
-    mutationFn: async (vars: { url: string; title?: string }) => addScoutUrl(vars.url, vars.title),
+    mutationFn: (vars: { url: string; title?: string }) =>
+      toReactQuery(addScoutUrl(vars.url, vars.title)),
     onError: () => {
       toast.error('Failed to add scout item');
     },
@@ -33,8 +37,8 @@ export function useScoutAdd() {
 
 export function useScoutBulkUpdate() {
   return useMutation({
-    mutationFn: async (vars: { ids: number[]; updates: { status: string } }) =>
-      bulkUpdateScout(vars.ids, vars.updates),
+    mutationFn: (vars: { ids: number[]; command: ScoutCommand }) =>
+      toReactQuery(bulkUpdateScout(vars.ids, vars.command)),
     onError: () => {
       toast.error('Bulk update failed');
     },
@@ -49,7 +53,7 @@ export function useScoutBulkUpdate() {
 export function useScoutBulkDelete() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (vars: { ids: number[] }) => bulkDeleteScout(vars.ids),
+    mutationFn: (vars: { ids: number[] }) => toReactQuery(bulkDeleteScout(vars.ids)),
     onMutate: async (vars) => {
       // Cancel all scout list queries regardless of params
       await qc.cancelQueries({ queryKey: queryKeys.scout.all });
@@ -82,8 +86,8 @@ export function useScoutBulkDelete() {
 export function useScoutStatusUpdate() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (vars: { id: number; status: string }) =>
-      updateScoutStatus(vars.id, vars.status),
+    mutationFn: (vars: { id: number; command: ScoutCommand }) =>
+      toReactQuery(updateScoutStatus(vars.id, vars.command)),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: queryKeys.scout.all });
     },
@@ -99,8 +103,8 @@ export function useScoutStatusUpdate() {
 
 export function useScoutAct() {
   return useMutation({
-    mutationFn: async (vars: { id: number; project: string; prompt?: string }) =>
-      actOnScoutItem(vars.id, vars.project, vars.prompt),
+    mutationFn: (vars: { id: number; project: string; prompt?: string }) =>
+      toReactQuery(actOnScoutItem(vars.id, vars.project, vars.prompt)),
   });
 }
 
@@ -110,8 +114,8 @@ export function useScoutAct() {
 
 export function useScoutResearch() {
   return useMutation({
-    mutationFn: async (vars: { topic: string; process?: boolean }) =>
-      researchScout(vars.topic, vars.process ?? true),
+    mutationFn: (vars: { topic: string; process?: boolean }) =>
+      toReactQuery(researchScout(vars.topic, vars.process ?? true)),
     onSuccess: () => {
       toast.success('Research started');
     },
@@ -127,11 +131,36 @@ export function useScoutResearch() {
 
 export function useScoutAsk() {
   return useMutation({
-    mutationFn: async (vars: {
-      id: number;
-      question: string;
-      sessionId?: string;
-      images?: File[];
-    }) => askScout(vars.id, vars.question, vars.sessionId, vars.images),
+    mutationFn: (vars: { id: number; question: string; sessionId?: string; images?: File[] }) =>
+      toReactQuery(askScout(vars.id, vars.question, vars.sessionId, vars.images)),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// useScoutPublishTelegraph
+// ---------------------------------------------------------------------------
+
+export function useScoutPublishTelegraph() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { id: number }) => toReactQuery(publishScoutTelegraph(vars.id)),
+    onSuccess: ({ url }, vars) => {
+      qc.setQueryData<ScoutItem>(queryKeys.scout.item(vars.id), (old) =>
+        old ? { ...old, telegraphUrl: url } : old,
+      );
+      qc.setQueriesData<ScoutResponse>({ queryKey: queryKeys.scout.all }, (old) => {
+        if (!old?.items) return old;
+        return {
+          ...old,
+          items: old.items.map((item) =>
+            item.id === vars.id ? { ...item, telegraphUrl: url } : item,
+          ),
+        };
+      });
+      toast.success('Published to Telegraph');
+    },
+    onError: (err) => {
+      toast.error(getErrorMessage(err, 'Telegraph publish failed'));
+    },
   });
 }

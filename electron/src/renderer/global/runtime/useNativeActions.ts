@@ -1,7 +1,30 @@
 import { useCallback, useState } from 'react';
-import { toast } from 'sonner';
+import type { NotificationKind } from '#shared/notifications';
+import { toast } from '#renderer/global/runtime/useFeedback';
 import { getErrorMessage } from '#renderer/global/service/utils';
 import { useMountEffect } from '#renderer/global/runtime/useMountEffect';
+import {
+  openInFinder as openInFinderNative,
+  openInCursor as openInCursorNative,
+  selectDirectory as selectDirectoryNative,
+  openLogsFolder as openLogsFolderNative,
+  openConfigFile as openConfigFileNative,
+  openDataDir as openDataDirNative,
+  toggleDevTools as toggleDevToolsNative,
+} from '#renderer/global/providers/native/shell';
+import {
+  restartDaemon as restartDaemonNative,
+  setLoginItem as setLoginItemNative,
+  subscribeShortcut,
+} from '#renderer/global/providers/native/app';
+import { checkClaudeCode as checkClaudeCodeNative } from '#renderer/global/providers/native/onboarding';
+import { subscribeNotificationClick } from '#renderer/global/providers/native/notifications';
+import {
+  subscribeUpdateReady,
+  getPendingUpdate,
+  installUpdate as installNativeUpdate,
+} from '#renderer/global/providers/native/updates';
+import log from '#renderer/global/service/logger';
 
 function openPath(fn: () => Promise<void>, label: string) {
   fn().catch((err) => toast.error(getErrorMessage(err, `Failed to open in ${label}`)));
@@ -9,43 +32,44 @@ function openPath(fn: () => Promise<void>, label: string) {
 
 export function useNativeActions() {
   const openInFinder = useCallback((path: string) => {
-    openPath(() => window.mandoAPI.openInFinder(path), 'Finder');
+    openPath(() => openInFinderNative(path), 'Finder');
   }, []);
 
   const openInCursor = useCallback((path: string) => {
-    openPath(() => window.mandoAPI.openInCursor(path), 'Cursor');
+    openPath(() => openInCursorNative(path), 'Cursor');
   }, []);
 
+  // invariant: IPC passthrough; null means user dismissed the dialog (not an error); no failure path to propagate
   const selectDirectory = useCallback(async (): Promise<string | null> => {
-    return window.mandoAPI.selectDirectory();
+    return selectDirectoryNative();
   }, []);
 
   const openLogsFolder = useCallback(() => {
-    void window.mandoAPI.openLogsFolder();
+    openLogsFolderNative();
   }, []);
 
   const openConfigFile = useCallback(() => {
-    void window.mandoAPI.openConfigFile();
+    openConfigFileNative();
   }, []);
 
   const openDataDir = useCallback(() => {
-    void window.mandoAPI.openDataDir();
+    openDataDirNative();
   }, []);
 
   const toggleDevTools = useCallback(() => {
-    void window.mandoAPI.toggleDevTools();
+    void toggleDevToolsNative();
   }, []);
 
   const restartDaemon = useCallback(() => {
-    void window.mandoAPI.restartDaemon().finally(() => window.location.reload());
+    return restartDaemonNative();
   }, []);
 
   const setLoginItem = useCallback(async (enabled: boolean) => {
-    await window.mandoAPI.setLoginItem(enabled);
+    await setLoginItemNative(enabled);
   }, []);
 
   const checkClaudeCode = useCallback(async () => {
-    return window.mandoAPI?.checkClaudeCode?.();
+    return checkClaudeCodeNative();
   }, []);
 
   return {
@@ -65,18 +89,16 @@ export function useNativeActions() {
 /** Subscribe to IPC shortcut actions from the main process. */
 export function useMainShortcuts(onAction: (action: string) => void) {
   useMountEffect(() => {
-    if (!window.mandoAPI) return;
-    window.mandoAPI.onShortcut(onAction);
-    return () => window.mandoAPI.removeShortcutListeners();
+    return subscribeShortcut(onAction);
   });
 }
 
 /** Subscribe to notification clicks from the main process. */
-export function useNotificationClicks(onData: (data: { item_id?: string; kind: unknown }) => void) {
+export function useNotificationClicks(
+  onData: (data: { item_id?: string; kind: NotificationKind }) => void,
+) {
   useMountEffect(() => {
-    if (!window.mandoAPI) return;
-    window.mandoAPI.onNotificationClick(onData);
-    return () => window.mandoAPI.removeNotificationClickListeners();
+    return subscribeNotificationClick(onData);
   });
 }
 
@@ -86,22 +108,25 @@ export function useUpdateBanner() {
   const [installing, setInstalling] = useState(false);
 
   useMountEffect(() => {
-    if (!window.mandoAPI?.updates) return;
-    window.mandoAPI.updates.onUpdateReady(() => setUpdateReady(true));
-    window.mandoAPI.updates
-      .getPending()
+    const unsubscribe = subscribeUpdateReady(() => setUpdateReady(true));
+    getPendingUpdate()
       .then((p) => {
         if (p) setUpdateReady(true);
       })
-      .catch(() => void 0);
-    return () => window.mandoAPI.updates.removeUpdateListeners();
+      .catch((err: unknown) => {
+        log.warn('[useUpdateBanner] getPending check failed:', err);
+      });
+    return unsubscribe;
   });
 
   const installUpdate = useCallback(() => {
     setInstalling(true);
-    window.mandoAPI.updates
-      .installUpdate()
-      .catch(() => setUpdateReady(false))
+    installNativeUpdate()
+      .catch((err: unknown) => {
+        log.error('[useUpdateBanner] installUpdate failed:', err);
+        toast.error(getErrorMessage(err, 'Update installation failed. Please try again.'));
+        setUpdateReady(false);
+      })
       .finally(() => setInstalling(false));
   }, []);
 

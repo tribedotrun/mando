@@ -1,0 +1,71 @@
+[package]
+name = "mando-gateway"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Mando daemon — HTTP API, captain tick loop, event streaming, and Electron/TG transports"
+
+[[bin]]
+name = "mando-gw"
+path = "src/main.rs"
+
+[dependencies]
+api-types = { path = "../api-types" }
+global-types = { path = "../global-types" }
+global-infra = { path = "../global-infra" }
+global-claude = { path = "../global-claude" }
+global-bus = { path = "../global-bus" }
+global-db = { path = "../global-db" }
+sessions = { path = "../sessions" }
+settings = { path = "../settings" }
+captain.workspace = true
+scout.workspace = true
+transport-http = { path = "../transport-http" }
+transport-tg = { path = "../transport-tg" }
+transport-ui = { path = "../transport-ui" }
+terminal.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+axum.workspace = true
+tokio.workspace = true
+tower-http.workspace = true
+tokio-stream.workspace = true
+tokio-util.workspace = true
+futures-util.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+tracing-appender.workspace = true
+opentelemetry = { workspace = true, optional = true }
+opentelemetry_sdk = { workspace = true, optional = true }
+opentelemetry-otlp = { workspace = true, optional = true }
+tracing-opentelemetry = { workspace = true, optional = true }
+clap.workspace = true
+reqwest.workspace = true
+arc-swap.workspace = true
+anyhow.workspace = true
+time.workspace = true
+sqlx.workspace = true
+rustc-hash.workspace = true
+inventory.workspace = true
+async-stream = "0.3"
+shell-words = "1"
+base64 = "0.22"
+bytes = "1"
+toml = "0.8"
+libc = "0.2"
+
+[features]
+default = ["otlp"]
+otlp = ["opentelemetry", "opentelemetry_sdk", "opentelemetry-otlp", "tracing-opentelemetry"]
+# PR #855 live-substage drift-catch. Enables DRIFT_SEED env var that mutates a
+# handler's JSON response before sending to verify typed clients reject the
+# drift. Never ship in release builds -- the `drift_test` module contains a
+# compile_error! guard against that.
+drift-test = []
+
+[dev-dependencies]
+reqwest = { workspace = true, features = ["json", "multipart"] }
+tokio.workspace = true
+serde_json.workspace = true
+uuid = { version = "1", features = ["v4"] }
+libc = "0.2"

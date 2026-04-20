@@ -4,7 +4,7 @@ import { useConfigSave } from '#renderer/global/repo/configMutations';
 import { queryKeys } from '#renderer/global/repo/queryKeys';
 import type { MandoConfig } from '#renderer/global/types';
 import log from '#renderer/global/service/logger';
-import { toast } from 'sonner';
+import { toast } from '#renderer/global/runtime/useFeedback';
 
 /**
  * Encapsulates the login-item toggle saga:
@@ -18,14 +18,18 @@ export function useLoginItemToggle(setLoginItem: (enabled: boolean) => Promise<v
   const saveMut = useConfigSave();
 
   const getConfig = useCallback(
-    () => qc.getQueryData<MandoConfig>(queryKeys.config.current()) ?? ({} as MandoConfig),
+    (): MandoConfig | null => qc.getQueryData<MandoConfig>(queryKeys.config.current()) ?? null,
     [qc],
   );
 
   const toggle = useCallback(
     (currentValue: boolean) => {
-      setSaving(true);
       const current = getConfig();
+      if (!current) {
+        toast.error('Config not loaded yet');
+        return;
+      }
+      setSaving(true);
       const next = !currentValue;
       const updated: MandoConfig = { ...current, ui: { ...(current.ui || {}), openAtLogin: next } };
       saveMut.mutate(updated, {

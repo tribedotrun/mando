@@ -19,8 +19,8 @@ function PlanSummaryBlock({
   action,
 }: PlanSummaryBlockProps): React.ReactElement {
   const [planOpen, setPlanOpen] = useState(false);
-  const diagram = (event.data?.diagram as string) || '';
-  const plan = (event.data?.plan as string) || '';
+  const diagram = event.data.event_type === 'plan_completed' ? event.data.diagram : '';
+  const plan = event.data.event_type === 'plan_completed' ? event.data.plan : '';
   const time = formatEventTime(event.timestamp);
 
   return (

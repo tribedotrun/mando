@@ -80,7 +80,7 @@ export function findNearbyText(el: HTMLElement): string | null {
   return null;
 }
 
-const SKIP_PROPS = new Set([
+const SKIP_PROPS = Object.freeze([
   'children',
   'className',
   'style',
@@ -99,11 +99,13 @@ const SKIP_PROPS = new Set([
   'onOpenSettings',
   'onAddProject',
   'data-testid',
-]);
+] as const);
 
 /** Write `val` into `ctx[key]` if it is a primitive string/number worth surfacing. */
 export function collectPrimitive(ctx: Record<string, string>, key: string, val: unknown): void {
-  if (SKIP_PROPS.has(key) || key in ctx || key.startsWith('on')) return;
+  if ((SKIP_PROPS as readonly string[]).includes(key) || key in ctx || key.startsWith('on')) {
+    return;
+  }
   if (typeof val === 'string' && val.length > 0 && val.length < 200) {
     ctx[key] = val;
   } else if (typeof val === 'number') {

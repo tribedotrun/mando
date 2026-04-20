@@ -1,0 +1,74 @@
+# Allowed dependency edges between Mando crates.
+# Enforced by structural CI test.
+# Any edge not listed here is illegal.
+
+[edges]
+# Global crates
+global-types = ["global-infra"]
+global-infra = []
+global-db = ["global-types"]
+global-bus = ["api-types", "global-types"]
+global-claude = ["api-types", "global-types", "global-infra"]
+global-net = ["global-types", "global-infra"]
+
+# API contract
+api-types = ["global-types"]
+
+# Gateway client (typed consumer for the daemon API — shared SSE helper)
+gateway-client = ["api-types", "global-net"]
+
+# Domains
+captain = [
+    "api-types", "global-types", "global-db", "global-claude",
+    "global-bus", "global-infra",
+    "sessions-db", "settings",
+]
+scout = [
+    "api-types", "global-types", "global-db", "global-net",
+    "global-claude", "global-infra", "global-bus",
+    "sessions", "settings",
+]
+sessions = [
+    "global-types", "global-db",
+    "global-bus", "global-infra", "global-claude",
+    "sessions-db",
+]
+sessions-db = [
+    "global-types", "global-db",
+]
+settings = [
+    "api-types", "global-types", "global-db",
+    "global-infra", "global-net",
+]
+
+# Terminal
+terminal = ["global-types", "global-infra", "settings"]
+
+# Transports
+transport-http = [
+    "api-types", "captain", "global-bus", "global-claude", "global-db",
+    "global-types", "global-infra", "scout", "sessions", "settings",
+    "terminal", "transport-tg", "transport-ui"
+]
+transport-tg = [
+    "api-types", "gateway-client",
+    "global-types", "global-infra", "global-net",
+    "captain", "sessions", "settings",
+]
+transport-ui = []
+
+# Daemon binary (wires everything: domains + transports + globals)
+mando-gateway = [
+    "api-types",
+    "global-types", "global-infra", "global-claude",
+    "global-bus", "global-db",
+    "captain", "scout", "sessions", "settings",
+    "transport-http", "transport-tg", "transport-ui", "terminal",
+]
+
+# CLI client (peer to Electron, HTTP-only)
+mando-cli = ["api-types", "global-types", "global-infra"]
+
+# Dev mocks (standalone, zero Mando deps)
+dev-cc-mock = []
+dev-tg-mock = []

@@ -1,0 +1,41 @@
+[package]
+name = "captain"
+version.workspace = true
+edition = "2021"
+description = "Autonomous agent orchestrator — task lifecycle, reviews, and interventions"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+
+[features]
+# PR #886: `testing` gates `Task::set_status_for_tests`. Production
+# callers cannot enable it; downstream test code turns it on via
+# `[dev-dependencies] captain = { ..., features = ["testing"] }` (see
+# `transport-tg`). Keeps the type-level "status is read-only publicly"
+# guarantee while allowing fixtures.
+testing = []
+
+[dependencies]
+api-types = { path = "../api-types" }
+global-types = { path = "../global-types" }
+global-infra = { path = "../global-infra" }
+global-claude = { path = "../global-claude" }
+global-bus = { path = "../global-bus" }
+global-db = { path = "../global-db" }
+sessions-db = { path = "../sessions-db" }
+settings = { path = "../settings" }
+time.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml.workspace = true
+tokio.workspace = true
+reqwest.workspace = true
+tracing.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+regex = { workspace = true }
+sqlx.workspace = true
+rustc-hash.workspace = true
+tokio-util.workspace = true
+futures = "0.3"
+libc = "0.2"

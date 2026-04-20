@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Copy, Check } from 'lucide-react';
-import { copyToClipboard } from '#renderer/global/service/utils';
+import { copyToClipboard } from '#renderer/global/runtime/useFeedback';
 import { useCopyFeedback } from '#renderer/global/runtime/useCopyFeedback';
 import { Button } from '#renderer/global/ui/button';
 import { Tooltip, TooltipTrigger, TooltipContent } from '#renderer/global/ui/tooltip';

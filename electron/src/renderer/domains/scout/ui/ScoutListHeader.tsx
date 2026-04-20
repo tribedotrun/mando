@@ -1,14 +1,12 @@
-import React, { useCallback, useState } from 'react';
+import React from 'react';
 import { Filter, History, Search } from 'lucide-react';
-import { useScoutResearch, type ScoutQueryParams } from '#renderer/domains/scout/runtime/hooks';
-import { useDebouncedCallback } from '#renderer/domains/scout/runtime/useDebouncedCallback';
+import { useScoutListHeader } from '#renderer/domains/scout/runtime/useScoutListHeader';
+import type { ScoutQueryParams } from '#renderer/domains/scout/runtime/hooks';
 import { ScoutFilterMenu } from '#renderer/domains/scout/ui/ScoutFilterMenu';
 import { AddUrlForm } from '#renderer/domains/scout/ui/AddUrlForm';
 import { FeedbackModal } from '#renderer/global/ui/FeedbackModal';
 import { Button } from '#renderer/global/ui/button';
 import { Input } from '#renderer/global/ui/input';
-
-const SEARCH_DEBOUNCE_MS = 300;
 
 interface Props {
   query: ScoutQueryParams;
@@ -25,55 +23,21 @@ export function ScoutListHeader({
   onResearchHistoryClick,
   onResearchModalOpenChange,
 }: Props): React.ReactElement {
-  const [searchInput, setSearchInput] = useState('');
-  const [filterOpen, setFilterOpen] = useState(false);
-  const [researchModalOpen, setResearchModalOpen] = useState(false);
-  const researchMut = useScoutResearch();
+  const {
+    searchInput,
+    filterOpen,
+    setFilterOpen,
+    researchModalOpen,
+    researchPending,
+    setResearchOpen,
+    runResearch,
+    handleSearchChange,
+    handleStatusChange,
+    handleTypeChange,
+  } = useScoutListHeader({ onQueryChange, onResearchModalOpenChange });
 
   const statusFilter = query.status ?? 'all';
   const typeFilter = query.type ?? 'all';
-
-  const setResearchOpen = useCallback(
-    (open: boolean) => {
-      setResearchModalOpen(open);
-      onResearchModalOpenChange(open);
-    },
-    [onResearchModalOpenChange],
-  );
-
-  const runResearch = useCallback(
-    (topic: string) => {
-      researchMut.mutate({ topic }, { onSuccess: () => setResearchOpen(false) });
-    },
-    [researchMut, setResearchOpen],
-  );
-
-  const debouncedQueryChange = useDebouncedCallback(
-    (value: string) => onQueryChange({ q: value || undefined, page: 0 }),
-    SEARCH_DEBOUNCE_MS,
-  );
-
-  const handleSearchChange = useCallback(
-    (value: string) => {
-      setSearchInput(value);
-      debouncedQueryChange(value);
-    },
-    [debouncedQueryChange],
-  );
-
-  const handleStatusChange = useCallback(
-    (status: string) => {
-      onQueryChange({ status: status === 'all' ? 'all' : status, page: 0 });
-    },
-    [onQueryChange],
-  );
-
-  const handleTypeChange = useCallback(
-    (type: string) => {
-      onQueryChange({ type: type === 'all' ? undefined : type, page: 0 });
-    },
-    [onQueryChange],
-  );
 
   return (
     <>
@@ -100,9 +64,9 @@ export function ScoutListHeader({
             variant="outline"
             size="sm"
             onClick={() => setResearchOpen(true)}
-            disabled={researchMut.isPending}
+            disabled={researchPending}
           >
-            {researchMut.isPending ? 'Researching...' : 'Research'}
+            {researchPending ? 'Researching...' : 'Research'}
           </Button>
           <Button
             variant="ghost"
@@ -141,7 +105,7 @@ export function ScoutListHeader({
           placeholder="What should Scout research? (e.g. Rust async runtime fairness)"
           buttonLabel="Research"
           pendingLabel="Researching..."
-          isPending={researchMut.isPending}
+          isPending={researchPending}
           onSubmit={runResearch}
           onCancel={() => setResearchOpen(false)}
         />

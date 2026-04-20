@@ -1,143 +1,21 @@
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { queryClient } from '#renderer/global/providers/queryClient';
-import { OBS_DEGRADED_EVENT } from '#renderer/global/providers/http';
-import log from '#renderer/global/service/logger';
-import { useDesktopNotifications } from '#renderer/global/runtime/useDesktopNotifications';
-import { useMountEffect } from '#renderer/global/runtime/useMountEffect';
-import { useNativeActions } from '#renderer/global/runtime/useNativeActions';
-import { toast } from 'sonner';
-import { RetryButton } from '#renderer/domains/captain/ui/RetryButton';
-import { Skeleton } from '#renderer/global/ui/skeleton';
-import { useSseSync } from '#renderer/global/runtime/useSseSync';
-import type { SSEConnectionStatus } from '#renderer/global/types';
-import { DataContext } from '#renderer/global/runtime/dataContext';
-
-const INIT_FALLBACK_MS = 3_000;
-
-function DataProviderInner({ children }: { children: React.ReactNode }): React.ReactElement {
-  const [initialized, setInitialized] = useState(false);
-  const [initError, setInitError] = useState<string | null>(null);
-  const [needsOnboarding, setNeedsOnboarding] = useState(false);
-  const [sseStatus, setSseStatus] = useState<SSEConnectionStatus>('disconnected');
-  const { restartDaemon } = useNativeActions();
-
-  const { processEvent: processNotification } = useDesktopNotifications();
-
-  // OBS degraded listener
-  useMountEffect(() => {
-    const onObsDegraded = () => {
-      toast.error('Observability pipeline degraded -- logs not being sent');
-    };
-    window.addEventListener(OBS_DEGRADED_EVENT, onObsDegraded);
-    return () => {
-      window.removeEventListener(OBS_DEGRADED_EVENT, onObsDegraded);
-    };
-  });
-
-  // SSE sync -- handles snapshot seeding, tier 1/2 patching, reconnect recovery
-  useSseSync({
-    onStatusChange: (status) => {
-      setSseStatus(status);
-      if (status === 'connected' && !initialized) {
-        setInitialized(true);
-      }
-    },
-    onBootstrap: async () => {
-      if (typeof window !== 'undefined' && 'mandoAPI' in window) {
-        const hasConfig = await (
-          window as { mandoAPI: { hasConfig: () => Promise<boolean> } }
-        ).mandoAPI.hasConfig();
-        if (!hasConfig) {
-          setNeedsOnboarding(true);
-          setInitialized(true);
-          return true;
-        }
-      }
-      return false;
-    },
-    processDesktopNotification: processNotification,
-    onError: (msg) => {
-      setInitError(msg);
-      setInitialized(true);
-    },
-  });
-
-  // Mark initialized once the hook has had a chance to run (snapshot seeds on first connect)
-  useMountEffect(() => {
-    // If SSE connects quickly the onStatusChange callback sets initialized.
-    // As a fallback, mark initialized after a short delay so the UI doesn't
-    // stay on the skeleton forever if the first status event hasn't fired yet.
-    const t = setTimeout(() => {
-      setInitialized((prev) => prev || true);
-    }, INIT_FALLBACK_MS);
-    return () => clearTimeout(t);
-  });
-
-  const contextValue = useMemo(() => ({ sseStatus }), [sseStatus]);
-
-  if (!initialized) {
-    return (
-      <div className="flex h-screen items-center justify-center bg-background">
-        <div className="flex flex-col items-center gap-3">
-          <Skeleton className="h-5 w-32" />
-          <Skeleton className="h-4 w-20" />
-        </div>
-      </div>
-    );
-  }
-
-  if (initError) {
-    return (
-      <div className="flex h-screen flex-col items-center justify-center gap-3 bg-background p-6 text-foreground">
-        <span className="text-heading text-destructive">Could not connect to daemon</span>
-        <span className="max-w-full text-body text-muted-foreground [overflow-wrap:anywhere]">
-          {initError}
-        </span>
-        <RetryButton
-          className="mt-2 inline-flex items-center justify-center rounded-md bg-foreground px-4 py-2 text-sm font-medium text-background hover:bg-foreground/90"
-          onRetry={restartDaemon}
-        />
-      </div>
-    );
-  }
-
-  return (
-    <DataContext value={contextValue}>
-      {needsOnboarding ? <OnboardingPlaceholder /> : children}
-    </DataContext>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Provider (outermost shell)
-// ---------------------------------------------------------------------------
+import { DataProviderInner } from '#renderer/app/DataProviderInner';
 
 export function DataProvider({ children }: { children: React.ReactNode }): React.ReactElement {
+  const [dataPlaneEpoch, setDataPlaneEpoch] = useState(0);
+
+  const resetDataPlane = useCallback(() => {
+    queryClient.clear();
+    setDataPlaneEpoch((prev) => prev + 1);
+  }, []);
+
   return (
     <QueryClientProvider client={queryClient}>
-      <DataProviderInner>{children}</DataProviderInner>
+      <DataProviderInner key={dataPlaneEpoch} resetDataPlane={resetDataPlane}>
+        {children}
+      </DataProviderInner>
     </QueryClientProvider>
   );
-}
-
-/** Thin wrapper so the onboarding import stays lazy in App.tsx */
-function OnboardingPlaceholder(): React.ReactElement {
-  const [OnboardingWizard, setOW] = useState<React.ComponentType | null>(null);
-  const [loadError, setLoadError] = useState(false);
-  useMountEffect(() => {
-    import('#renderer/domains/onboarding/ui/OnboardingWizard')
-      .then((mod) => {
-        setOW(() => mod.OnboardingWizard);
-      })
-      .catch((err) => {
-        log.error('[onboarding] chunk load failed:', err);
-        setLoadError(true);
-      });
-  });
-  if (loadError) {
-    return <div className="p-6 text-destructive">Failed to load onboarding. Restart the app.</div>;
-  }
-  if (!OnboardingWizard) return <div />;
-  return <OnboardingWizard />;
 }

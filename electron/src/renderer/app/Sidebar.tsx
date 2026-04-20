@@ -1,44 +1,33 @@
 import React, { useState } from 'react';
 import {
-  Check,
   FileText,
-  Filter,
   List,
   Settings,
   SquarePen,
-  FolderPlus,
   PanelLeft,
   ArrowLeft,
   ArrowRight,
 } from 'lucide-react';
 import { SidebarNavButton, SidebarUpdateButton } from '#renderer/app/SidebarControls';
-import { useSidebarData } from '#renderer/app/useSidebarData';
-import { SidebarProjectItem } from '#renderer/global/ui/SidebarProjectItem';
+import { useSidebarData } from '#renderer/domains/captain';
 import { SidebarPinnedSection } from '#renderer/global/ui/SidebarPinnedSection';
-import { SetupTrigger } from '#renderer/app/SetupTrigger';
+import { SidebarProjectsSection } from '#renderer/app/SidebarProjectsSection';
+import { SetupTrigger } from '#renderer/domains/onboarding/ui/SetupTrigger';
 import { Button } from '#renderer/global/ui/button';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuTrigger,
-} from '#renderer/global/ui/dropdown-menu';
 import { ScrollArea } from '#renderer/global/ui/scroll-area';
-import { WORKBENCH_FILTER_OPTIONS, type WorkbenchStatusFilter } from '#renderer/global/types';
+import { type WorkbenchStatusFilter } from '#renderer/global/types';
 import { useSidebar, type Tab } from '#renderer/global/runtime/SidebarContext';
 
 export type { Tab, SetupProgress } from '#renderer/global/runtime/SidebarContext';
 
-const NAV_ITEMS: { id: Tab; label: string; Icon: React.FC }[] = [
+const NAV_ITEMS: readonly { id: Tab; label: string; Icon: React.FC }[] = Object.freeze([
   { id: 'sessions', label: 'Sessions', Icon: () => <List size={16} /> },
   { id: 'scout', label: 'Scout', Icon: () => <FileText size={16} /> },
-];
+]);
 
 export function Sidebar(): React.ReactElement | null {
   const { state, actions } = useSidebar();
   const [workbenchFilter, setWorkbenchFilter] = useState<WorkbenchStatusFilter>('active');
-  const [filterMenuOpen, setFilterMenuOpen] = useState(false);
 
   const { pinnedItems, projectCounts, projectChildren, projects, projectLogos, scoutEnabled } =
     useSidebarData(workbenchFilter);
@@ -49,12 +38,9 @@ export function Sidebar(): React.ReactElement | null {
     <aside className="relative flex h-full flex-col overflow-hidden bg-card px-1.5">
       <div
         className="flex h-[38px] shrink-0 items-start pl-[70px] pt-[10px]"
-        style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
+        style={{ WebkitAppRegion: 'drag' }}
       >
-        <div
-          className="flex items-center gap-1"
-          style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
-        >
+        <div className="flex items-center gap-1" style={{ WebkitAppRegion: 'no-drag' }}>
           <SidebarNavButton
             onClick={actions.toggleSidebar}
             icon={PanelLeft}
@@ -114,70 +100,20 @@ export function Sidebar(): React.ReactElement | null {
           </div>
         )}
         <div className={pinnedItems.length > 0 ? 'pt-3' : 'pt-6'}>
-          <div className="text-label mb-2 flex w-full items-center pl-1.5">
-            <Button
-              variant="ghost"
-              size="xs"
-              data-testid="home-tab"
-              onClick={() => {
-                actions.changeTab('captain');
-                actions.filterByProject(null);
-              }}
-              className={`h-auto flex-1 justify-start p-0 text-left transition-colors ${homeActive ? 'text-muted-foreground' : 'text-text-3'}`}
-            >
-              Projects
-            </Button>
-            <DropdownMenu open={filterMenuOpen} onOpenChange={setFilterMenuOpen}>
-              <DropdownMenuTrigger asChild>
-                <button
-                  data-testid="workbench-filter-btn"
-                  className={`ml-auto flex h-5 w-5 items-center justify-center rounded transition-colors hover:text-muted-foreground ${
-                    workbenchFilter !== 'active' ? 'text-foreground' : 'text-text-3'
-                  }`}
-                >
-                  <Filter size={12} />
-                </button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuLabel>Status</DropdownMenuLabel>
-                {WORKBENCH_FILTER_OPTIONS.map((opt) => {
-                  const active = workbenchFilter === opt;
-                  return (
-                    <DropdownMenuItem
-                      key={opt}
-                      onSelect={() => setWorkbenchFilter(opt)}
-                      className={active ? 'text-foreground' : ''}
-                    >
-                      <span className="flex-1 capitalize">{opt}</span>
-                      {active && <Check size={14} />}
-                    </DropdownMenuItem>
-                  );
-                })}
-              </DropdownMenuContent>
-            </DropdownMenu>
-            <Button
-              variant="ghost"
-              size="icon-xs"
-              data-testid="add-project-sidebar-btn"
-              onClick={actions.addProject}
-              className="text-text-3 hover:text-muted-foreground"
-            >
-              <FolderPlus size={14} />
-            </Button>
-          </div>
-          {projects.length > 0 && (
-            <div className="flex flex-col gap-1">
-              {projects.map((pName) => (
-                <SidebarProjectItem
-                  key={pName}
-                  name={pName}
-                  logo={projectLogos[pName]}
-                  count={projectCounts[pName] ?? 0}
-                  items={projectChildren[pName] ?? []}
-                />
-              ))}
-            </div>
-          )}
+          <SidebarProjectsSection
+            homeActive={homeActive}
+            onGoHome={() => {
+              actions.changeTab('captain');
+              actions.filterByProject(null);
+            }}
+            onAddProject={actions.addProject}
+            projects={projects}
+            projectLogos={projectLogos}
+            projectCounts={projectCounts}
+            projectChildren={projectChildren}
+            workbenchFilter={workbenchFilter}
+            onFilterChange={setWorkbenchFilter}
+          />
         </div>
       </ScrollArea>
 

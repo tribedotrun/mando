@@ -29,7 +29,6 @@ export const queryKeys = {
       ] as const,
     item: (id: number) => ['scout', 'item', id] as const,
     article: (id: number) => ['scout', 'article', id] as const,
-    sessions: (id: number) => ['scout', 'sessions', id] as const,
     research: () => ['scout', 'research'] as const,
     researchItems: (id: number) => ['scout', 'research', id, 'items'] as const,
   },
@@ -63,6 +62,11 @@ export const queryKeys = {
     activity: () => ['stats', 'activity'] as const,
   },
 
+  health: {
+    all: ['health'] as const,
+    telegram: () => ['health', 'telegram'] as const,
+  },
+
   // ── Workers (metrics) ──
   workers: {
     all: ['workers'] as const,
@@ -79,5 +83,26 @@ export const queryKeys = {
   credentials: {
     all: ['credentials'] as const,
     list: () => ['credentials', 'list'] as const,
+  },
+
+  // ── Highlighter ──
+  highlighter: {
+    all: ['shiki-highlight'] as const,
+    code: (lang: string, code: string) => ['shiki-highlight', lang, code] as const,
+  },
+
+  // ── Settings (renderer-local read-through caches) ──
+  settings: {
+    all: ['settings'] as const,
+    generalSystemInfo: () => ['settings', 'general', 'systemInfo'] as const,
+    aboutAppVersion: () => ['settings', 'about', 'appVersion'] as const,
+    telegramHealth: (apiToken: string) => ['settings', 'telegram', 'health', apiToken] as const,
+  },
+
+  // ── Onboarding (renderer-local read-through caches) ──
+  onboarding: {
+    all: ['onboarding'] as const,
+    claudeCheck: () => ['onboarding', 'claude-check'] as const,
+    appInfo: () => ['onboarding', 'app-info'] as const,
   },
 } as const;

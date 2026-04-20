@@ -11,25 +11,14 @@ import {
   patchTaskList,
   patchScoutList,
   patchWorkbenchList,
-  patchTerminalList,
   handleStatusEvent,
   handleSessionsEvent,
   seedFromSnapshot,
 } from '#renderer/global/repo/sseCacheHelpers';
 import { useMountEffect } from '#renderer/global/runtime/useMountEffect';
-import type {
-  TaskItem,
-  ScoutItem,
-  SSEConnectionStatus,
-  SSEEvent,
-  SseEntityPayload,
-  SseStatusPayload,
-  SseSessionsPayload,
-  WorkbenchItem,
-  TerminalSessionInfo,
-} from '#renderer/global/types';
+import type { SSEConnectionStatus, SSEEvent } from '#renderer/global/types';
 import { parseNotification } from '#renderer/global/service/notificationHelpers';
-import { toast } from 'sonner';
+import { toast } from '#renderer/global/runtime/useFeedback';
 import log from '#renderer/global/service/logger';
 
 export interface UseSseSyncOptions {
@@ -79,18 +68,27 @@ export function useSseSync(options?: UseSseSyncOptions): SSEConnectionStatus {
           (event: SSEEvent) => {
             switch (event.event) {
               case 'snapshot': {
-                const counts = seedFromSnapshot(qc, event);
+                const counts = seedFromSnapshot(qc, event.data.data);
                 log.debug('[sse] snapshot seeded caches', counts);
                 break;
               }
 
-              case 'tasks':
+              case 'snapshot_error': {
+                const message = event.data.data.message;
+                log.error('[sse] snapshot_error:', message);
+                optionsRef.current?.onError?.(message);
+                void qc.invalidateQueries();
+                break;
+              }
+
+              case 'tasks': {
+                const payload = event.data.data;
                 if (
-                  event.data &&
-                  typeof event.data === 'object' &&
-                  'item' in (event.data as Record<string, unknown>)
+                  payload?.action === 'created' ||
+                  payload?.action === 'updated' ||
+                  payload?.action === 'deleted'
                 ) {
-                  patchTaskList(qc, event.data as SseEntityPayload<TaskItem>);
+                  patchTaskList(qc, payload);
                 } else {
                   // Legacy: empty signal, fall back to invalidation
                   void qc.invalidateQueries({ queryKey: queryKeys.tasks.list() });
@@ -98,26 +96,30 @@ export function useSseSync(options?: UseSseSyncOptions): SSEConnectionStatus {
                   void qc.invalidateQueries({ queryKey: queryKeys.stats.all });
                 }
                 break;
+              }
 
-              case 'scout':
+              case 'scout': {
+                const payload = event.data.data;
                 if (
-                  event.data &&
-                  typeof event.data === 'object' &&
-                  'item' in (event.data as Record<string, unknown>)
+                  payload?.action === 'created' ||
+                  payload?.action === 'updated' ||
+                  payload?.action === 'deleted'
                 ) {
-                  patchScoutList(qc, event.data as SseEntityPayload<ScoutItem>);
+                  patchScoutList(qc, payload);
                 } else {
                   void qc.invalidateQueries({ queryKey: queryKeys.scout.all });
                 }
                 break;
+              }
 
-              case 'workbenches':
+              case 'workbenches': {
+                const payload = event.data.data;
                 if (
-                  event.data &&
-                  typeof event.data === 'object' &&
-                  'item' in (event.data as Record<string, unknown>)
+                  payload?.action === 'created' ||
+                  payload?.action === 'updated' ||
+                  payload?.action === 'deleted'
                 ) {
-                  patchWorkbenchList(qc, event.data as SseEntityPayload<WorkbenchItem>);
+                  patchWorkbenchList(qc, payload);
                   // Invalidate only filtered variants (archived, all) so they refetch, but preserve the active list's Tier 1 patch-only behavior (zero HTTP refetches in normal operation).
                   void qc.invalidateQueries({
                     queryKey: queryKeys.workbenches.all,
@@ -127,25 +129,16 @@ export function useSseSync(options?: UseSseSyncOptions): SSEConnectionStatus {
                   void qc.invalidateQueries({ queryKey: queryKeys.workbenches.all });
                 }
                 break;
-
-              case 'terminals':
-                if (
-                  event.data &&
-                  typeof event.data === 'object' &&
-                  'item' in (event.data as Record<string, unknown>)
-                ) {
-                  patchTerminalList(qc, event.data as SseEntityPayload<TerminalSessionInfo>);
-                } else {
-                  void qc.invalidateQueries({ queryKey: queryKeys.terminals.all });
-                }
-                break;
+              }
 
               case 'status':
-                handleStatusEvent(qc, (event.data as SseStatusPayload) ?? null);
+                // Outer SSE parse already narrowed to StatusPayload; data.data is typed.
+                handleStatusEvent(qc, event.data.data ?? null);
                 break;
 
               case 'sessions':
-                handleSessionsEvent(qc, (event.data as SseSessionsPayload) ?? null);
+                // Outer SSE parse already narrowed to SessionsPayload; data.data is typed.
+                handleSessionsEvent(qc, event.data.data ?? null);
                 break;
 
               case 'notification': {
@@ -155,27 +148,27 @@ export function useSseSync(options?: UseSseSyncOptions): SSEConnectionStatus {
                     const fn = payload.kind.status === 'rejected' ? toast.error : toast.info;
                     fn(payload.message);
                   }
-                } else if (event.data) {
+                } else if (event.data.data) {
                   log.warn('[sse] unexpected notification shape:', event.data);
                 }
                 break;
               }
 
               case 'research': {
-                const rd = event.data as Record<string, unknown> | undefined;
+                // Outer SSE parse already narrowed to ResearchPayload; data.data is typed.
+                const rd = event.data.data;
                 if (rd) {
-                  const action = rd.action as string | undefined;
-                  if (action === 'completed') {
-                    const added = (rd.added_count as number) ?? 0;
+                  if (rd.action === 'completed') {
+                    const added = rd.added_count ?? 0;
                     toast.success(`Research complete: ${added} link(s) added`);
                     void qc.invalidateQueries({ queryKey: queryKeys.scout.all });
-                  } else if (action === 'failed') {
-                    const err = (rd.error as string) ?? 'Unknown error';
+                  } else if (rd.action === 'failed') {
+                    const err = rd.error ?? 'Unknown error';
                     toast.error(`Research failed: ${err}`);
                     void qc.invalidateQueries({ queryKey: queryKeys.scout.research() });
-                  } else if (action === 'started') {
+                  } else if (rd.action === 'started') {
                     void qc.invalidateQueries({ queryKey: queryKeys.scout.research() });
-                  } else if (action === 'progress') {
+                  } else if (rd.action === 'progress') {
                     void qc.invalidateQueries({ queryKey: queryKeys.scout.research() });
                   }
                 }
@@ -183,7 +176,8 @@ export function useSseSync(options?: UseSseSyncOptions): SSEConnectionStatus {
               }
 
               case 'artifacts': {
-                const ad = event.data as { task_id?: number } | undefined;
+                // Outer SSE parse already narrowed to ArtifactsPayload; data.data is typed.
+                const ad = event.data.data;
                 if (ad?.task_id) {
                   void qc.invalidateQueries({ queryKey: queryKeys.tasks.feed(ad.task_id) });
                   void qc.invalidateQueries({ queryKey: queryKeys.tasks.artifacts(ad.task_id) });
@@ -204,8 +198,12 @@ export function useSseSync(options?: UseSseSyncOptions): SSEConnectionStatus {
                 void qc.invalidateQueries();
                 break;
 
-              default:
+              default: {
+                const unexpected: never = event;
+                log.error('[sse] unexpected daemon event', unexpected);
+                void qc.invalidateQueries();
                 break;
+              }
             }
 
             // Desktop notifications for all events

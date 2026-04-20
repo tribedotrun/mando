@@ -175,9 +175,11 @@ PRBODY
 )"
 ```
 
-### Step 10 — Save work summary to DB and plan folder
+### Step 10 — Save work summary to the right place
 
-**Save to DB** (required): Write the ASCII diagram + "What changed" sentence to a temp file, then call the CLI to persist it as a work summary artifact:
+**Save to DB only for real Mando-task PRs**: Write the ASCII diagram + "What changed" sentence to a temp file, then persist it as a work summary artifact **only when the current session is attached to a Mando task**.
+
+Use `MANDO_TASK_ID` as the gate. If it is set, write to the task DB:
 
 ```bash
 cat > /tmp/work-summary.md << 'SUMMARY'
@@ -187,10 +189,18 @@ cat > /tmp/work-summary.md << 'SUMMARY'
 
 **What changed**: <1-2 sentence delta>
 SUMMARY
-mando todo summary --file /tmp/work-summary.md
+
+if [ -n "${MANDO_TASK_ID:-}" ]; then
+  mando todo summary --file /tmp/work-summary.md
+else
+  echo "Skipping task DB summary: not a Mando-task PR (MANDO_TASK_ID is unset)"
+fi
+
 rm /tmp/work-summary.md
 ```
 
-**Save to plan folder** (secondary): Resolve the plan folder (same priority as Step 7). Write the same summary to `.ai/plans/<resolved>/pr-summary.md`. Create folder if needed. Overwrite if exists (always regenerated from current diff).
+If `MANDO_TASK_ID` is unset, do **not** try to infer a task from PR number, branch name, or plan folder. Skip the DB write cleanly and continue.
+
+**Save to plan folder** (always): Resolve the plan folder (same priority as Step 7). Write the same summary to `.ai/plans/<resolved>/pr-summary.md`. Create folder if needed. Overwrite if exists (always regenerated from current diff).
 
 **Important**: Never write into a plan folder that doesn't belong to the current PR. If no matching folder exists, create `.ai/plans/pr-$PR_NUM/`.

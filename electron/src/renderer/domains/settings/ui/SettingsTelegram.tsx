@@ -1,13 +1,14 @@
 import React, { useState } from 'react';
 import {
+  useConfig,
+  useConfigPatch,
   useTelegramHealth,
   type TelegramHealth,
-} from '#renderer/domains/settings/runtime/useTelegramHealth';
+} from '#renderer/domains/settings/runtime/hooks';
 import { Card, CardContent } from '#renderer/global/ui/card';
 import { Input } from '#renderer/global/ui/input';
 import { Label } from '#renderer/global/ui/label';
 import { Skeleton } from '#renderer/global/ui/skeleton';
-import { useConfig, useConfigPatch } from '#renderer/domains/settings/runtime/hooks';
 import { telegramPatch, envPatch } from '#renderer/global/service/configPatches';
 import type { TelegramConfig } from '#renderer/global/types';
 import { toast } from 'sonner';
@@ -59,7 +60,7 @@ function RuntimeStatus({ health }: { health: TelegramHealth | undefined }): Reac
   );
 }
 
-const EMPTY_TELEGRAM: TelegramConfig = {};
+const EMPTY_TELEGRAM: TelegramConfig = Object.freeze({});
 
 export function SettingsTelegram(): React.ReactElement {
   const { data: config } = useConfig();

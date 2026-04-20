@@ -18,6 +18,7 @@ export {
   useScoutAct,
   useScoutResearch,
   useScoutAsk,
+  useScoutPublishTelegraph,
 } from '#renderer/domains/scout/repo/mutations';
 export { useScoutQASession } from '#renderer/domains/scout/runtime/useScoutQASession';
 

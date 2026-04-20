@@ -1,0 +1,9 @@
+# Repo-level Codex defaults for Mando.
+# Keep personal auth, model/provider choice, trust, and notifications in
+# ~/.codex/config.toml. This file is only for repo-specific behavior.
+
+project_doc_fallback_filenames = [
+  "AGENTS.md",
+  "CLAUDE.md",
+  "CLAUDE.local.md",
+]

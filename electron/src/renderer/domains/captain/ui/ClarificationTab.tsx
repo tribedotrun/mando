@@ -1,20 +1,11 @@
-import React, { useCallback, useRef, useState } from 'react';
-import { Paperclip, X } from 'lucide-react';
-import { toast } from 'sonner';
+import React, { useState } from 'react';
+import { X } from 'lucide-react';
 import type { ClarifierQuestion } from '#renderer/global/types';
-import { useTaskClarify } from '#renderer/domains/captain/runtime/hooks';
-import { useDraftRecord } from '#renderer/domains/captain/runtime/useDraft';
-import { useImageAttachment } from '#renderer/global/runtime/useImageAttachment';
-import {
-  buildClarifyPayload,
-  clarifyFingerprint,
-  filledAnswerCount,
-  getUnansweredQuestions,
-} from '#renderer/domains/captain/service/clarifyHelpers';
-import { clarifyResultToToast } from '#renderer/global/service/utils';
+import { useClarificationTab } from '#renderer/domains/captain/runtime/useClarificationTab';
 import { CardShell, StatusDot } from '#renderer/global/ui/CardShell';
 import { Button } from '#renderer/global/ui/button';
 import { Textarea } from '#renderer/global/ui/textarea';
+import { TaskAttachmentButton } from '#renderer/domains/captain/ui/TaskComposerControls';
 
 export function ClarificationTab({
   taskId,
@@ -23,40 +14,19 @@ export function ClarificationTab({
   taskId: number;
   questions: ClarifierQuestion[];
 }): React.ReactElement {
-  const unanswered = getUnansweredQuestions(questions);
-  const qFingerprint = clarifyFingerprint(unanswered);
-  const [answers, setAnswers, clearAnswersDraft] = useDraftRecord(
-    `mando:draft:clarify:${taskId}:${qFingerprint}`,
-  );
+  const {
+    unanswered,
+    answers,
+    setAnswers,
+    filledCount,
+    clarifyMut,
+    image,
+    preview,
+    setImageFile,
+    removeImage,
+    handleSubmit,
+  } = useClarificationTab(taskId, questions);
   const [completed, setCompleted] = useState<string | null>(null);
-  const filledCount = filledAnswerCount(unanswered, answers);
-  const clarifyMut = useTaskClarify();
-
-  const { image, preview, setImageFile, removeImage } = useImageAttachment();
-  const fileRef = useRef<HTMLInputElement>(null);
-
-  const handleSubmit = useCallback(async () => {
-    const payload = buildClarifyPayload(unanswered, answers);
-    if (payload.length === 0) return;
-
-    try {
-      const images = image ? [image] : undefined;
-      const result = await clarifyMut.mutateAsync({
-        id: taskId,
-        mode: 'structured' as const,
-        answers: payload,
-        images,
-      });
-      const { variant, msg } = clarifyResultToToast(result.status);
-      const fn = variant === 'success' ? toast.success : toast.info;
-      fn(msg);
-      clearAnswersDraft();
-      removeImage();
-      if (result.status !== 'clarifying') setCompleted(msg);
-    } catch {
-      // toast handled by mutation hook
-    }
-  }, [answers, unanswered, taskId, clearAnswersDraft, image, removeImage, clarifyMut]);
 
   if (completed) {
     return (
@@ -95,7 +65,9 @@ export function ClarificationTab({
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && e.metaKey && filledCount > 0) {
                   e.preventDefault();
-                  void handleSubmit();
+                  void handleSubmit().then((msg) => {
+                    if (msg) setCompleted(msg);
+                  });
                 }
               }}
             />
@@ -117,33 +89,22 @@ export function ClarificationTab({
 
       <div className="mt-3 flex items-center justify-between rounded-lg bg-muted px-3 py-2">
         <div className="flex items-center gap-2">
-          <input
-            ref={fileRef}
-            type="file"
-            accept="image/*"
-            className="hidden"
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (file) setImageFile(file);
-              e.target.value = '';
-            }}
-          />
-          <Button
-            variant="ghost"
+          <TaskAttachmentButton
+            onImageSelect={setImageFile}
             size="icon-xs"
-            onClick={() => fileRef.current?.click()}
             disabled={clarifyMut.isPending}
-            aria-label="Attach image"
             className="text-muted-foreground"
-          >
-            <Paperclip size={14} />
-          </Button>
+          />
           <span className="text-caption text-text-3">
             {filledCount} of {unanswered.length} answered
           </span>
         </div>
         <Button
-          onClick={() => void handleSubmit()}
+          onClick={() =>
+            void handleSubmit().then((msg) => {
+              if (msg) setCompleted(msg);
+            })
+          }
           disabled={filledCount === 0 || clarifyMut.isPending}
           size="sm"
         >

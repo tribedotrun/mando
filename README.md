@@ -46,18 +46,18 @@ Rust crates:
     ├── mando-scout      ← scout queue + AI triage
     ├── mando-readability← HTML article extraction
     └── mando-uuid       ← v4 UUID
-CLI (cli/)              ← `mando` binary (HTTP client)
+CLI (rust/cli/)         ← `mando` binary (HTTP client)
 Electron (electron/)    ← Mando.app (HTTP/SSE client)
 ```
 
 ## Building from source
 
-Requires Rust (see `rust-toolchain.toml`), Node.js (see `.node-version`), and **`cargo-nextest`** (`cargo install cargo-nextest --locked`).
+Requires Rust (see `rust/rust-toolchain.toml`), Node.js (see `.node-version`), and **`cargo-nextest`** (`cargo install cargo-nextest --locked`).
 
 ```bash
-cargo build --workspace          # Build all Rust crates
+cargo build --manifest-path rust/Cargo.toml --workspace          # Build all Rust crates
 cd electron && npm ci && npm run build   # Build Electron app
-cargo nextest run --workspace --lib      # Run unit tests
+cargo nextest run --manifest-path rust/Cargo.toml --workspace --lib      # Run unit tests
 ```
 
 ## License

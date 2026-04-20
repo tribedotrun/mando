@@ -25,7 +25,7 @@ export function cleanLabel(label: string): string {
 }
 
 export function looksLikeTerminalOutput(text: string): boolean {
-  // eslint-disable-next-line no-control-regex
+  // eslint-disable-next-line no-control-regex -- reason: matching ANSI escape (ESC [) requires the literal control char
   return /\x1b\[/.test(text) || /^\$\s/.test(text);
 }
 
@@ -45,7 +45,7 @@ export function toolLangToShiki(name: string, lang?: string): string {
 // Built-in CC tool names -- fallback when format-based check is ambiguous.
 // Source: github.com/anthropics/claude-code -> src/tools/ (getAllBaseTools).
 // Update when CC adds new tools; stale list degrades gracefully (format check covers most cases).
-const CC_TOOLS = new Set([
+const CC_TOOLS = Object.freeze([
   'Agent',
   'AskUserQuestion',
   'Bash',
@@ -85,10 +85,10 @@ const CC_TOOLS = new Set([
   'WebFetch',
   'WebSearch',
   'Write',
-]);
+] as const);
 
 function isKnownTool(name: string): boolean {
-  return CC_TOOLS.has(name) || name.startsWith('mcp__');
+  return (CC_TOOLS as readonly string[]).includes(name) || name.startsWith('mcp__');
 }
 
 // -- Parser --

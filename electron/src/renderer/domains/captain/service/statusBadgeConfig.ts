@@ -4,7 +4,7 @@ export interface StatusBadge {
   pulse?: boolean;
 }
 
-const CONFIG: Record<string, StatusBadge> = {
+const CONFIG: Record<string, StatusBadge> = Object.freeze({
   'in-progress': { label: 'Streaming', color: 'var(--success)', pulse: true },
   clarifying: { label: 'Streaming', color: 'var(--success)', pulse: true },
   new: { label: 'Queued', color: 'var(--text-4)' },
@@ -19,9 +19,9 @@ const CONFIG: Record<string, StatusBadge> = {
   'handed-off': { label: 'Handed off', color: 'var(--text-3)' },
   merged: { label: 'Merged', color: 'var(--text-4)' },
   canceled: { label: 'Canceled', color: 'var(--text-4)' },
-};
+});
 
-const FALLBACK: StatusBadge = { label: 'Completed', color: 'var(--text-4)' };
+const FALLBACK: StatusBadge = Object.freeze({ label: 'Completed', color: 'var(--text-4)' });
 
 /** Returns the badge config for a task status. */
 export function getStatusBadge(status: string): StatusBadge {

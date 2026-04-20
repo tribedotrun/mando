@@ -5,9 +5,9 @@
  */
 export { buildUrl } from '#renderer/global/providers/http';
 
-import { buildUrl as _buildUrl } from '#renderer/global/providers/http';
+import { buildUrl as _buildUrl, staticRoutePath } from '#renderer/global/providers/http';
 
 /** Builds a full URL for a project logo image. */
 export function projectLogoUrl(logoFile: string): string {
-  return _buildUrl(`/api/images/${logoFile}`);
+  return _buildUrl(staticRoutePath('getImagesByFilename', { params: { filename: logoFile } }));
 }

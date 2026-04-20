@@ -1,168 +1,292 @@
-import type { SSEConnectionStatus } from '#renderer/global/types';
+import type { SSEConnectionStatus, SSEEvent } from '#renderer/global/types';
 // eslint-disable-next-line no-restricted-imports -- logger is cross-cutting infrastructure
 import log from '#renderer/global/service/logger';
+import {
+  assertMultipartRouteBody,
+  assertRouteBody,
+  resolveRoutePath,
+  type JsonRouteOptions,
+  type MultipartRouteOptions,
+  type RouteBody,
+  type RouteEvent,
+  type RouteKey,
+  type RouteRes,
+  type SseRouteOptions,
+} from '#shared/daemon-contract/runtime';
+import type {
+  DeleteJsonRouteWithBodyKey,
+  DeleteJsonRouteWithResKey,
+  GetJsonRouteWithResKey,
+  GetSseRouteWithEventKey,
+  PatchJsonRouteWithResKey,
+  PostJsonRouteWithResKey,
+  PostMultipartRouteWithResKey,
+  PutJsonRouteWithResKey,
+} from '#shared/daemon-contract/routes';
+import { resSchemas, eventSchemas, errorResponseSchema } from '#shared/daemon-contract/schemas';
+import type { ZodType } from 'zod';
+import {
+  type ApiError,
+  type ResultAsync,
+  fromPromise as resultFromPromise,
+  httpError as makeHttpError,
+  networkError as makeNetworkError,
+  parseError as makeParseError,
+  SchemaParseError,
+  timeoutError as makeTimeoutError,
+  parseSseMessage,
+} from '#result';
+import { buildUrl, initBaseUrl, staticRoutePath } from '#renderer/global/providers/httpBase';
+import {
+  __testClearErrorBatch,
+  __testGetErrorBatch,
+  queueError,
+} from '#renderer/global/providers/httpObsQueue';
+import { reportObsDegraded } from '#renderer/global/providers/obsHealth';
 
-function getErrorMessage(err: unknown, fallback: string): string {
-  return err instanceof Error ? err.message : fallback;
-}
+export { buildUrl, initBaseUrl, staticRoutePath, __testGetErrorBatch, __testClearErrorBatch };
 
-let BASE_URL = 'http://127.0.0.1:18893';
-export async function initBaseUrl(): Promise<void> {
-  if (window.mandoAPI) {
-    const url = await window.mandoAPI.gatewayUrl();
-    if (url) BASE_URL = url;
-  }
-}
-
-export function buildUrl(path: string): string {
-  return `${BASE_URL}${path}`;
-}
-
-// Error batching -- queues errors and POSTs to /api/client-logs every 5s
-
-/** Distinguishes HTTP errors (already logged) from network errors. */
 class HttpError extends Error {
-  constructor(
-    message: string,
-    public status: number,
-  ) {
+  status: number;
+
+  constructor(message: string, status: number) {
     super(message);
+    this.status = status;
   }
 }
 
-interface ClientLogEntry {
-  level: string;
-  message: string;
-  context?: unknown;
-  timestamp: string;
-}
-
-let errorBatch: ClientLogEntry[] = [];
-let batchTimer: ReturnType<typeof setTimeout> | null = null;
-let flushFailures = 0;
-let degradationReported = false;
-
-const MAX_ERROR_BATCH = 200;
-const MAX_FLUSH_RETRIES = 5;
-const BASE_RETRY_MS = 5_000;
-const MAX_RETRY_MS = 60_000;
-const FLUSH_DELAY_MS = 5_000;
-
-/** Fired once when the client-logs flush exceeds MAX_FLUSH_RETRIES consecutive failures. */
-export const OBS_DEGRADED_EVENT = 'mando:obs-degraded';
-
-function queueError(level: string, message: string, context?: unknown): void {
-  if (errorBatch.length >= MAX_ERROR_BATCH) return;
-  errorBatch.push({
-    level,
-    message,
-    context,
-    timestamp: new Date().toISOString(),
-  });
-
-  if (!batchTimer) {
-    batchTimer = setTimeout(() => void flushErrors(), FLUSH_DELAY_MS);
-  }
-}
-
-async function flushErrors(): Promise<void> {
-  batchTimer = null;
-  if (errorBatch.length === 0) return;
-
-  const entries = [...errorBatch];
-  errorBatch = [];
-
-  try {
-    await fetch(`${BASE_URL}/api/client-logs`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ entries }),
-    });
-    flushFailures = 0;
-  } catch (err) {
-    flushFailures++;
-    const reason = getErrorMessage(err, 'unknown');
-    if (flushFailures >= MAX_FLUSH_RETRIES) {
-      log.error(
-        `[obs] dropping ${entries.length} entries after ${MAX_FLUSH_RETRIES} flush failures (last error: ${reason})`,
-      );
-      if (!degradationReported && typeof window !== 'undefined') {
-        degradationReported = true;
-        window.dispatchEvent(new CustomEvent(OBS_DEGRADED_EVENT));
-      }
-      flushFailures = 0;
-      return;
-    }
-    log.warn(
-      `[obs] flush failed (attempt ${flushFailures}/${MAX_FLUSH_RETRIES}, ${reason}), will retry`,
-    );
-    errorBatch.push(...entries.slice(0, MAX_ERROR_BATCH - errorBatch.length));
-    if (!batchTimer && errorBatch.length > 0) {
-      const delay = Math.min(BASE_RETRY_MS * 2 ** flushFailures, MAX_RETRY_MS);
-      batchTimer = setTimeout(() => void flushErrors(), delay);
-    }
-  }
-}
-
-// ---------------------------------------------------------------------------
-// HTTP helpers with timing + error logging
-// ---------------------------------------------------------------------------
-
-async function apiRequest<T>(method: string, apiPath: string, body?: unknown): Promise<T> {
+async function apiRequestInternal<T>(
+  method: string,
+  routeKey: RouteKey,
+  apiPath: string,
+  body: unknown,
+): Promise<T> {
+  assertRouteBody(routeKey, body);
   const start = performance.now();
-  const hasBody = method !== 'GET' && method !== 'DELETE';
+  const hasBody = method !== 'GET' && body != null;
   const headers = hasBody ? { 'Content-Type': 'application/json' } : undefined;
+  const schema = (resSchemas as Partial<Record<RouteKey, ZodType<unknown> | undefined>>)[routeKey];
 
   try {
-    const res = await fetch(buildUrl(apiPath), {
+    const response = await fetch(buildUrl(apiPath), {
       method,
       headers,
       body: hasBody && body != null ? JSON.stringify(body) : undefined,
     });
     const ms = (performance.now() - start).toFixed(0);
-    if (!res.ok) {
-      const errBody = await res.json().catch(() => ({ error: res.statusText }));
-      const msg = errBody.error || `HTTP ${res.status}`;
-      queueError('error', `${method} ${apiPath} ${res.status} (${ms}ms)`, { error: msg });
-      throw new HttpError(msg, res.status);
+    if (!response.ok) {
+      const rawErr: unknown = await response.json().catch(() => null);
+      const parsed = errorResponseSchema.safeParse(rawErr);
+      const message = parsed.success
+        ? parsed.data.error
+        : response.statusText || `HTTP ${response.status}`;
+      queueError('error', `${method} ${apiPath} ${response.status} (${ms}ms)`, { error: message });
+      throw new HttpError(message, response.status);
     }
-    if (res.status !== 200) log.debug(`${method} ${apiPath} ${res.status} (${ms}ms)`);
-    return res.json() as Promise<T>;
-  } catch (err) {
-    if (err instanceof Error && !(err instanceof HttpError)) {
+    if (response.status !== 200) log.debug(`${method} ${apiPath} ${response.status} (${ms}ms)`);
+    const raw: unknown = await response.json();
+    if (!schema) {
+      log.warn(`[http] no schema registered for route "${routeKey}" -- skipping validation`);
+      return raw as T;
+    }
+    const parsed = schema.safeParse(raw);
+    if (parsed.success) return parsed.data as T;
+    queueError('error', `${method} ${apiPath} response failed schema parse`, {
+      route: routeKey,
+      issues: parsed.error.issues,
+    });
+    throw new SchemaParseError(parsed.error.issues, `route:${routeKey} body`);
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      !(error instanceof HttpError) &&
+      !(error instanceof SchemaParseError)
+    ) {
       const ms = (performance.now() - start).toFixed(0);
-      queueError('error', `${method} ${apiPath} failed (${ms}ms)`, { error: err.message });
+      queueError('error', `${method} ${apiPath} failed (${ms}ms)`, { error: error.message });
     }
-    throw err;
+    throw error;
   }
 }
 
-export function apiGet<T>(apiPath: string): Promise<T> {
-  return apiRequest<T>('GET', apiPath);
+function apiGetRoute<K extends GetJsonRouteWithResKey>(
+  key: K,
+  options?: JsonRouteOptions<K>,
+): Promise<RouteRes<K>> {
+  return apiRequestInternal<RouteRes<K>>('GET', key, resolveRoutePath(key, options), undefined);
 }
 
-export function apiPost<T>(apiPath: string, body?: unknown): Promise<T> {
-  return apiRequest<T>('POST', apiPath, body);
+function apiPostRoute<K extends PostJsonRouteWithResKey>(
+  key: K,
+  body?: RouteBody<K>,
+  options?: JsonRouteOptions<K>,
+): Promise<RouteRes<K>> {
+  return apiRequestInternal<RouteRes<K>>('POST', key, resolveRoutePath(key, options), body);
 }
 
-export function apiPatch<T>(apiPath: string, body: unknown): Promise<T> {
-  return apiRequest<T>('PATCH', apiPath, body);
+function apiPatchRoute<K extends PatchJsonRouteWithResKey>(
+  key: K,
+  body: RouteBody<K>,
+  options?: JsonRouteOptions<K>,
+): Promise<RouteRes<K>> {
+  return apiRequestInternal<RouteRes<K>>('PATCH', key, resolveRoutePath(key, options), body);
 }
 
-export function apiPut<T>(apiPath: string, body: unknown): Promise<T> {
-  return apiRequest<T>('PUT', apiPath, body);
+function apiPutRoute<K extends PutJsonRouteWithResKey>(
+  key: K,
+  body: RouteBody<K>,
+  options?: JsonRouteOptions<K>,
+): Promise<RouteRes<K>> {
+  return apiRequestInternal<RouteRes<K>>('PUT', key, resolveRoutePath(key, options), body);
 }
 
-export function apiDel<T>(apiPath: string): Promise<T> {
-  return apiRequest<T>('DELETE', apiPath);
+type DeleteRouteOptions<K extends DeleteJsonRouteWithResKey> = JsonRouteOptions<K> &
+  (K extends DeleteJsonRouteWithBodyKey ? { body: RouteBody<K> } : { body?: never });
+
+function apiDeleteRoute<K extends DeleteJsonRouteWithResKey>(
+  key: K,
+  options?: DeleteRouteOptions<K>,
+): Promise<RouteRes<K>> {
+  const deleteOptions = (options ?? {}) as JsonRouteOptions<K> & { body?: RouteBody<K> };
+  const { body, ...routeOptions } = deleteOptions;
+  return apiRequestInternal<RouteRes<K>>('DELETE', key, resolveRoutePath(key, routeOptions), body);
 }
 
-// SSE
+async function apiMultipartRoute<K extends PostMultipartRouteWithResKey>(
+  key: K,
+  body: FormData | RouteBody<K>,
+  options?: MultipartRouteOptions<K>,
+  shadowBody?: RouteBody<K>,
+): Promise<RouteRes<K>> {
+  const isForm = body instanceof FormData;
+  const apiPath = resolveRoutePath(key, options);
+  const schema = (resSchemas as Record<string, ZodType<unknown> | undefined>)[key as string];
+  try {
+    assertMultipartRouteBody(key, body, shadowBody);
+  } catch (error) {
+    if (isForm && error instanceof SchemaParseError) {
+      queueError('error', `POST multipart ${apiPath} missing shadow body`, {
+        route: key as string,
+      });
+    }
+    throw error;
+  }
+  const response = await fetch(buildUrl(apiPath), {
+    method: 'POST',
+    headers: isForm ? undefined : { 'Content-Type': 'application/json' },
+    body: isForm ? body : JSON.stringify(body),
+  });
+  if (!response.ok) {
+    const rawErr: unknown = await response.json().catch(() => null);
+    const parsed = errorResponseSchema.safeParse(rawErr);
+    const message = parsed.success
+      ? parsed.data.error
+      : response.statusText || `HTTP ${response.status}`;
+    throw new HttpError(message, response.status);
+  }
+  const raw: unknown = await response.json();
+  if (!schema) {
+    log.warn(`[http] no schema registered for route "${key as string}" -- skipping validation`);
+    return raw as RouteRes<K>;
+  }
+  const parsed = schema.safeParse(raw);
+  if (parsed.success) return parsed.data as RouteRes<K>;
+  queueError('error', `POST multipart ${apiPath} response failed schema parse`, {
+    route: key as string,
+    issues: parsed.error.issues,
+  });
+  throw new SchemaParseError(parsed.error.issues, `route:${key as string} body`);
+}
+
+export function openSseRoute<K extends GetSseRouteWithEventKey>(
+  key: K,
+  options?: SseRouteOptions<K>,
+): EventSource {
+  return new EventSource(buildUrl(resolveRoutePath(key, options)));
+}
+
+function asResult<K extends string>(
+  fn: () => Promise<unknown>,
+  key: K,
+): ResultAsync<unknown, ApiError> {
+  return resultFromPromise(fn(), (cause): ApiError => {
+    if (cause instanceof Error && cause.name === 'AbortError') {
+      return makeTimeoutError(0, `route:${String(key)}`);
+    }
+    if (cause instanceof SchemaParseError) {
+      return makeParseError(cause.issues, cause.where ?? `route:${String(key)}`);
+    }
+    if (cause instanceof HttpError) {
+      return makeHttpError(cause.status, null, cause.message);
+    }
+    if (cause instanceof Error) {
+      return makeNetworkError(cause, `route:${String(key)}`);
+    }
+    return makeNetworkError(String(cause), `route:${String(key)}`);
+  });
+}
+
+export function apiGetRouteR<K extends GetJsonRouteWithResKey>(
+  key: K,
+  options?: JsonRouteOptions<K>,
+): ResultAsync<RouteRes<K>, ApiError> {
+  return asResult(() => apiGetRoute(key, options), key) as ResultAsync<RouteRes<K>, ApiError>;
+}
+
+export function apiPostRouteR<K extends PostJsonRouteWithResKey>(
+  key: K,
+  body?: RouteBody<K>,
+  options?: JsonRouteOptions<K>,
+): ResultAsync<RouteRes<K>, ApiError> {
+  return asResult(() => apiPostRoute(key, body, options), key) as ResultAsync<
+    RouteRes<K>,
+    ApiError
+  >;
+}
+
+export function apiPatchRouteR<K extends PatchJsonRouteWithResKey>(
+  key: K,
+  body: RouteBody<K>,
+  options?: JsonRouteOptions<K>,
+): ResultAsync<RouteRes<K>, ApiError> {
+  return asResult(() => apiPatchRoute(key, body, options), key) as ResultAsync<
+    RouteRes<K>,
+    ApiError
+  >;
+}
+
+export function apiPutRouteR<K extends PutJsonRouteWithResKey>(
+  key: K,
+  body: RouteBody<K>,
+  options?: JsonRouteOptions<K>,
+): ResultAsync<RouteRes<K>, ApiError> {
+  return asResult(() => apiPutRoute(key, body, options), key) as ResultAsync<RouteRes<K>, ApiError>;
+}
+
+export function apiDeleteRouteR<K extends DeleteJsonRouteWithResKey>(
+  key: K,
+  options?: DeleteRouteOptions<K>,
+): ResultAsync<RouteRes<K>, ApiError> {
+  return asResult(() => apiDeleteRoute(key, options), key) as ResultAsync<RouteRes<K>, ApiError>;
+}
+
+export function apiMultipartRouteR<K extends PostMultipartRouteWithResKey>(
+  key: K,
+  body: FormData | RouteBody<K>,
+  options?: MultipartRouteOptions<K>,
+  shadowBody?: RouteBody<K>,
+): ResultAsync<RouteRes<K>, ApiError> {
+  return asResult(() => apiMultipartRoute(key, body, options, shadowBody), key) as ResultAsync<
+    RouteRes<K>,
+    ApiError
+  >;
+}
+
 export function connectSSE(
-  onEvent: (event: { event: string; ts: number; data?: unknown }) => void,
+  onEvent: (event: SSEEvent) => void,
   onStatusChange?: (status: SSEConnectionStatus) => void,
 ): EventSource {
-  const source = new EventSource(buildUrl('/api/events'));
+  const source = openSseRoute('getEvents');
 
   let lastStatus: SSEConnectionStatus | null = null;
   const emitStatus = (status: SSEConnectionStatus) => {
@@ -179,63 +303,47 @@ export function connectSSE(
 
   let consecutiveParseFailures = 0;
   let degradedEmittedForStream = false;
-  const PARSE_FAILURE_THRESHOLD = 5;
+  const sseSchema = (eventSchemas as Record<string, ZodType<unknown> | undefined>).getEvents;
 
-  source.onmessage = (msg) => {
-    try {
-      const data = JSON.parse(msg.data);
-      consecutiveParseFailures = 0;
-      onEvent(data);
-    } catch (e) {
+  source.onmessage = (message) => {
+    const result = parseSseMessage(message.data as unknown, sseSchema);
+    if (result.failure) {
       consecutiveParseFailures++;
-      log.warn('[SSE] failed to parse event data:', e);
-      if (!degradedEmittedForStream && typeof window !== 'undefined') {
+      queueError('error', 'SSE parse_failed', result.failure);
+      if (!degradedEmittedForStream) {
         degradedEmittedForStream = true;
-        window.dispatchEvent(new CustomEvent(OBS_DEGRADED_EVENT));
+        reportObsDegraded();
       }
-      if (consecutiveParseFailures === PARSE_FAILURE_THRESHOLD) {
-        log.error(
-          `[SSE] ${PARSE_FAILURE_THRESHOLD} consecutive parse failures, data stream may be corrupt`,
-        );
-        queueError(
-          'error',
-          `SSE stream degraded: ${PARSE_FAILURE_THRESHOLD} consecutive parse failures`,
-        );
+      if (consecutiveParseFailures === 5) {
+        log.error('[SSE] 5 consecutive parse failures, data stream may be corrupt');
         emitStatus('disconnected');
       }
+      return;
     }
+
+    consecutiveParseFailures = 0;
+    const data = result.data as RouteEvent<'getEvents'>;
+
+    if (data.event === 'snapshot_error') {
+      const payload = data.data.data;
+      const reason =
+        payload && typeof payload === 'object' && 'message' in payload
+          ? String((payload as { message: unknown }).message)
+          : 'server failed to build snapshot';
+      log.error('[SSE] snapshot_error event from server:', reason);
+      queueError('error', `SSE snapshot failed: ${reason}`);
+      emitStatus('disconnected');
+    } else if (data.event === 'resync') {
+      log.warn('[SSE] broadcast lagged, client must reload snapshot');
+    }
+
+    onEvent(data);
   };
 
   source.onerror = () => {
     log.warn('[SSE] connection error — will auto-reconnect');
     emitStatus('disconnected');
   };
-
-  // Named SSE events: "snapshot_error" (server DB failure), "resync" (stream lag).
-  // Uses "snapshot_error" not "error" to avoid confusion with native EventSource errors.
-  source.addEventListener('snapshot_error' as unknown as 'message', (msg: MessageEvent) => {
-    try {
-      const data = typeof msg.data === 'string' ? JSON.parse(msg.data) : null;
-      const reason =
-        data && typeof data === 'object' && 'error' in data
-          ? String((data as { error: unknown }).error)
-          : 'server failed to build snapshot';
-      log.error('[SSE] snapshot_error event from server:', reason);
-      queueError('error', `SSE snapshot failed: ${reason}`);
-      emitStatus('disconnected');
-    } catch (e) {
-      log.error('[SSE] snapshot_error event (unparseable):', e);
-      queueError('error', 'SSE snapshot failed (unparseable error payload)');
-      emitStatus('disconnected');
-    }
-  });
-
-  source.addEventListener('resync' as unknown as 'message', () => {
-    log.warn('[SSE] broadcast lagged, client must reload snapshot');
-    // Forward as a normal event so the DataProvider / store layer can
-    // trigger a re-fetch of the initial data set.
-    onEvent({ event: 'resync', ts: Date.now() });
-  });
 
   return source;
 }

@@ -50,8 +50,8 @@ export function WorkerRow({
       >
         {fmtRuntime(
           phase === 'reviewing' || phase === 'merging'
-            ? worker.last_activity_at
-            : worker.started_at,
+            ? (worker.last_activity_at ?? undefined)
+            : (worker.started_at ?? undefined),
         )}
       </span>
 

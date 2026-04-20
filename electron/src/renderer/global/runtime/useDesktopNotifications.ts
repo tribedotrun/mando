@@ -1,5 +1,5 @@
 /**
- * Desktop notification hook — processes SSE notification events and
+ * Desktop notification hook -- processes SSE notification events and
  * shows macOS native notifications via IPC to the main process.
  *
  * Filtering rules:
@@ -7,24 +7,30 @@
  * - Normal: only when window is not focused
  * - Low: never show (internal machinery)
  *
- * User can disable all desktop notifications via localStorage preference.
+ * User can disable all desktop notifications via the typed persistence
+ * preference key.
  */
 import { useCallback, useRef, useState } from 'react';
 import type { NotifyLevel, SSEEvent } from '#renderer/global/types';
+import { defineSlot } from '#renderer/global/providers/persistence';
+import { showNativeNotification } from '#renderer/global/providers/native/notifications';
 import { parseNotification } from '#renderer/global/service/notificationHelpers';
 
-const STORAGE_KEY = 'mando:desktop-notifications-enabled';
+const enabledSlot = defineSlot(
+  'mando:desktop-notifications-enabled',
+  'global/runtime/useDesktopNotifications',
+);
+
 const DEDUP_WINDOW_MS = 5000;
 
 /** Check if the user has enabled desktop notifications (default: true). */
 export function getNotificationsEnabled(): boolean {
-  const stored = localStorage.getItem(STORAGE_KEY);
-  return stored !== 'false';
+  return enabledSlot.read() !== 'false';
 }
 
 /** Set the desktop notifications preference. */
 export function setNotificationsEnabled(enabled: boolean): void {
-  localStorage.setItem(STORAGE_KEY, String(enabled));
+  enabledSlot.write(String(enabled));
 }
 
 /** Hook that owns the notification preference state. */
@@ -39,7 +45,7 @@ export function useNotificationsPref() {
 }
 
 /** Notification levels that always show regardless of focus. */
-const ALWAYS_SHOW_LEVELS: NotifyLevel[] = ['Critical', 'High'];
+const ALWAYS_SHOW_LEVELS: readonly NotifyLevel[] = Object.freeze(['Critical', 'High'] as const);
 
 function shouldShow(level: NotifyLevel, windowFocused: boolean): boolean {
   if (level === 'Low') return false;
@@ -61,7 +67,6 @@ export function useDesktopNotifications(): {
 
   const processEvent = useCallback((event: SSEEvent) => {
     if (!getNotificationsEnabled()) return;
-    if (!window.mandoAPI?.showNotification) return;
 
     const payload = parseNotification(event);
     if (!payload) return;
@@ -79,7 +84,7 @@ export function useDesktopNotifications(): {
       }, DEDUP_WINDOW_MS);
     }
 
-    window.mandoAPI.showNotification(payload);
+    showNativeNotification(payload);
   }, []);
 
   return { processEvent };

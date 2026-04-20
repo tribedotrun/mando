@@ -9,7 +9,10 @@ const MODE_COLORS: Partial<Record<AppMode, [number, number, number]>> = {
 
 export function modeColor(mode: AppMode): [number, number, number] {
   const color = MODE_COLORS[mode];
-  if (!color) throw new Error(`No tint color defined for mode: ${mode}`);
+  if (!color) {
+    // invariant: every AppMode variant must have a MODE_COLORS entry; missing means a code change
+    throw new Error(`No tint color defined for mode: ${mode}`);
+  }
   return color;
 }
 

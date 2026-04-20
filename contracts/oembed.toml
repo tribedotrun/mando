@@ -1,0 +1,16 @@
+[contract]
+name        = "oembed"
+kind        = "external"
+types-crate = "rust/crates/scout"
+transports  = ["http"]
+base-url    = "https://publish.twitter.com/oembed"
+docs        = "https://oembed.com/"
+
+[[consumer]]
+name        = "scout-content-fetch-oembed"
+path        = "rust/crates/scout/src/io/content_fetch.rs"
+transports  = ["http"]
+role        = "Twitter oEmbed fetch for X.com links"
+enforcement = "scanner"
+allow-value = true
+allow-value-reason = "oEmbed response is upstream-owned schema; we read a small subset of fields (html, author_name)."

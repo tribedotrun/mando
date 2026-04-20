@@ -1,21 +1,16 @@
-import {
-  FINALIZED_STATUSES,
-  type TaskItem,
-  type TimelineEvent,
-  type ClarifierQuestion,
-  type ItemStatus,
-  type WorkbenchItem,
-} from '#renderer/global/types';
-import { toast } from 'sonner';
-import log from '#renderer/global/service/logger';
+import { type TaskItem } from '#renderer/global/types';
+
+export type { SidebarChild } from '#renderer/global/service/projectChildren';
+export {
+  sortProjectChildren,
+  assembleProjectChildren,
+} from '#renderer/global/service/projectChildren';
 
 /** Extract the last path segment from a GitHub `owner/repo` string. */
 export function shortRepo(project?: string): string {
   if (!project) return '\u2014';
   return project.split('/').pop() ?? project;
 }
-
-/* ── PR display helpers ── */
 
 /** Format a numeric PR number as a short `#N` label. */
 export function prLabel(prNumber: number): string {
@@ -27,56 +22,50 @@ export function prHref(prNumber: number, githubRepo: string): string {
   return `https://github.com/${githubRepo}/pull/${prNumber}`;
 }
 
-/* ── Task status predicates ── */
-
 /** Whether a task can be merged (has PR + project, awaiting review). */
-export function canMerge(t: TaskItem): boolean {
-  return !!t.pr_number && !!t.project && t.status === 'awaiting-review';
+export function canMerge(task: TaskItem): boolean {
+  return !!task.pr_number && !!task.project && task.status === 'awaiting-review';
 }
 
 /** Whether a task can be reopened (terminal or review states). */
-export function canReopen(t: TaskItem): boolean {
+export function canReopen(task: TaskItem): boolean {
   return ['awaiting-review', 'escalated', 'errored', 'handed-off', 'completed-no-pr'].includes(
-    t.status,
+    task.status,
   );
 }
 
 /** Whether a task can be reworked (fresh worktree + new worker). */
-export function canRework(t: TaskItem): boolean {
-  return ['awaiting-review', 'handed-off', 'escalated', 'errored'].includes(t.status);
+export function canRework(task: TaskItem): boolean {
+  return ['awaiting-review', 'handed-off', 'escalated', 'errored'].includes(task.status);
 }
 
 /** Whether a task can be handed off to a human. */
-export function canHandoff(t: TaskItem): boolean {
-  return ['awaiting-review', 'escalated'].includes(t.status);
+export function canHandoff(task: TaskItem): boolean {
+  return ['awaiting-review', 'escalated'].includes(task.status);
 }
 
 /** Whether a task can be retried after error. */
-export function canRetry(t: TaskItem): boolean {
-  return t.status === 'errored';
+export function canRetry(task: TaskItem): boolean {
+  return task.status === 'errored';
 }
 
 /** Whether a task needs clarification answers. */
-export function canAnswer(t: TaskItem): boolean {
-  return t.status === 'needs-clarification';
+export function canAnswer(task: TaskItem): boolean {
+  return task.status === 'needs-clarification';
 }
 
 /** Whether a task's plan can be revised (re-run planning with feedback). */
-export function canRevisePlan(t: TaskItem): boolean {
-  return t.status === 'plan-ready';
+export function canRevisePlan(task: TaskItem): boolean {
+  return task.status === 'plan-ready';
 }
 
 /** Whether a task can be asked a question in its terminal/review states (narrow). */
-export function canAskTerminal(t: TaskItem): boolean {
-  return ['awaiting-review', 'escalated'].includes(t.status);
+export function canAskTerminal(task: TaskItem): boolean {
+  return ['awaiting-review', 'escalated'].includes(task.status);
 }
 
-/**
- * Whether a task can be asked a question in any active or review state (broad).
- * Superset of canAskTerminal — also covers in-progress, captain reviews, merging,
- * and clarifying states so the action bar surface lets the human query mid-flight.
- */
-export function canAskAny(t: TaskItem): boolean {
+/** Whether a task can be asked a question in any active or review state (broad). */
+export function canAskAny(task: TaskItem): boolean {
   return [
     'awaiting-review',
     'escalated',
@@ -84,7 +73,7 @@ export function canAskAny(t: TaskItem): boolean {
     'captain-reviewing',
     'captain-merging',
     'clarifying',
-  ].includes(t.status);
+  ].includes(task.status);
 }
 
 /** Derive PR icon state from task status. */
@@ -94,145 +83,23 @@ export function prState(status: string): 'open' | 'merged' | 'closed' {
   return 'open';
 }
 
-/* ── Task sort ── */
-
-/** Canonical sort: non-finalized first, then descending by last activity. */
-export function sortTaskItems(items: TaskItem[]): TaskItem[] {
-  return [...items].sort((a, b) => {
-    const aFinal = FINALIZED_STATUSES.includes(a.status) ? 1 : 0;
-    const bFinal = FINALIZED_STATUSES.includes(b.status) ? 1 : 0;
-    if (aFinal !== bFinal) return aFinal - bFinal;
-    const ta = a.last_activity_at || a.created_at || '';
-    const tb = b.last_activity_at || b.created_at || '';
-    return tb.localeCompare(ta);
-  });
-}
-
-/** Sidebar child: a workbench with optional task metadata. */
-export interface SidebarChild {
-  wb: WorkbenchItem;
-  task?: TaskItem;
-}
-
-/** Sort sidebar children descending by last activity (task activity preferred when present). */
-export function sortProjectChildren(items: SidebarChild[]): SidebarChild[] {
-  const activity = (c: SidebarChild): string =>
-    c.task?.last_activity_at || c.task?.created_at || c.wb.lastActivityAt || c.wb.createdAt || '';
-  return [...items].sort((a, b) => activity(b).localeCompare(activity(a)));
-}
-
-/** Build per-project sidebar child lists using a workbench-first model.
- *  Every visible row is a workbench; tasks ride along as optional metadata.
- *  Orphan tasks are only synthesized when the task has no real workbench --
- *  tasks whose workbench exists but was excluded by the current filter stay
- *  hidden so the filter doesn't leak across states.
- *
- *  `projectCounts` is filter-independent: it counts ALL non-pinned tasks per
- *  project. The delete-project confirmation dialog uses this count to gate a
- *  destructive action that deletes every task server-side, so it must reflect
- *  the true task total regardless of what's currently visible. */
-export function assembleProjectChildren(opts: {
-  tasks: TaskItem[];
-  filteredWorkbenches: WorkbenchItem[];
-  allWorkbenchIds: Set<number>;
-  wbTaskMap: Map<number, TaskItem>;
-  pinnedWbIds: Set<number>;
-  pathToName: Record<string, string>;
-  workbenchFilter: 'active' | 'archived' | 'all';
-}): {
-  projectCounts: Record<string, number>;
-  projectChildren: Record<string, SidebarChild[]>;
-} {
-  const {
-    tasks,
-    filteredWorkbenches,
-    allWorkbenchIds,
-    wbTaskMap,
-    pinnedWbIds,
-    pathToName,
-    workbenchFilter,
-  } = opts;
-  const counts: Record<string, number> = {};
-  const children: Record<string, SidebarChild[]> = {};
-  const seenTaskIds = new Set<number>();
-
-  // Filter-independent task counts -- used by the delete-project dialog which
-  // gates a server-side wipe of all tasks regardless of filter.
-  for (const task of tasks) {
-    if (!task.project) continue;
-    if (task.workbench_id && pinnedWbIds.has(task.workbench_id)) continue;
-    const pName = pathToName[task.project] ?? task.project;
-    counts[pName] = (counts[pName] || 0) + 1;
-  }
-
-  for (const wb of filteredWorkbenches) {
-    if (pinnedWbIds.has(wb.id)) continue;
-    if (workbenchFilter === 'active' && wb.archivedAt) continue;
-    if (workbenchFilter === 'archived' && !wb.archivedAt) continue;
-    const task = wbTaskMap.get(wb.id);
-    if (task) seenTaskIds.add(task.id);
-    const pName = pathToName[wb.project] ?? wb.project;
-    counts[pName] ??= 0;
-    (children[pName] ??= []).push({ wb, task });
-  }
-
-  // Only synthesize rows for truly orphan tasks (no workbench at all). Tasks
-  // whose workbench exists but falls outside the current filter stay hidden.
-  for (const task of tasks) {
-    if (!task.project || seenTaskIds.has(task.id)) continue;
-    if (task.workbench_id && allWorkbenchIds.has(task.workbench_id)) continue;
-    if (task.workbench_id && pinnedWbIds.has(task.workbench_id)) continue;
-    if (workbenchFilter === 'archived') continue;
-    const pName = pathToName[task.project] ?? task.project;
-    const syntheticWb: WorkbenchItem = {
-      id: task.workbench_id ?? 0,
-      rev: 0,
-      project: task.project,
-      worktree: task.worktree ?? '',
-      title: task.title || task.original_prompt || 'Untitled task',
-      createdAt: task.created_at ?? new Date().toISOString(),
-      lastActivityAt: task.last_activity_at ?? task.created_at ?? new Date().toISOString(),
-    };
-    (children[pName] ??= []).push({ wb: syntheticWb, task });
-  }
-
-  for (const [key, arr] of Object.entries(children)) {
-    children[key] = sortProjectChildren(arr);
-  }
-  return { projectCounts: counts, projectChildren: children };
-}
-
 /** Extract a human-readable message from an unknown error. */
 export function getErrorMessage(err: unknown, fallback: string): string {
   return err instanceof Error ? err.message : fallback;
 }
 
-/** Extract the latest clarifier question set from timeline events, if the task is in the `needs-clarification` state. */
-export function extractClarifierQuestions(
-  events: TimelineEvent[],
-  status: ItemStatus,
-): ClarifierQuestion[] | null {
-  if (status !== 'needs-clarification') return null;
-  for (let i = events.length - 1; i >= 0; i--) {
-    const e = events[i];
-    if (e.event_type !== 'clarify_question') continue;
-    const q = e.data?.questions;
-    if (Array.isArray(q)) return q as ClarifierQuestion[];
-  }
-  return null;
-}
-
 /** Convert an ISO timestamp string to local time (e.g. "02:45:12 PM"). */
 export function localizeTimestamp(ts: string): string {
-  const d = new Date(ts);
-  if (Number.isNaN(d.getTime())) return ts;
-  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  const date = new Date(ts);
+  if (Number.isNaN(date.getTime())) return ts;
+  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 
 /** Replace all ISO timestamp patterns in arbitrary text with localized times. */
 export function localizeMeta(text: string): string {
-  return text.replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?/g, (m) =>
-    localizeTimestamp(m),
+  return text.replace(
+    /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?/g,
+    (match) => localizeTimestamp(match),
   );
 }
 
@@ -280,37 +147,21 @@ export function compactRelativeTime(iso: string): string {
   return `${years}y`;
 }
 
-/** Short timestamp: "Mar 27, 02:45 PM". Returns em-dash for empty/invalid. */
-export function shortTs(iso: string): string {
-  if (!iso) return '\u2014';
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return '\u2014';
-  return d.toLocaleString(undefined, {
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-}
-
 /** Shorten absolute macOS paths by replacing the home directory with `~`. */
 export function shortenPath(path: string): string {
-  const m = path.match(/^\/Users\/[^/]+/);
-  return m ? '~' + path.slice(m[0].length) : path;
+  const match = path.match(/^\/Users\/[^/]+/);
+  return match ? '~' + path.slice(match[0].length) : path;
 }
 
 /** Human-readable duration from seconds (e.g. "3m 12s"). */
 export function fmtDuration(sec: number): string {
   if (sec < 60) return `${Math.round(sec)}s`;
-  const m = Math.floor(sec / 60);
-  const s = Math.round(sec % 60);
-  return s > 0 ? `${m}m ${s}s` : `${m}m`;
+  const minutes = Math.floor(sec / 60);
+  const seconds = Math.round(sec % 60);
+  return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
 }
 
-/**
- * Map a clarification API result status to a toast variant + message.
- * Used by both the detail view clarifier card and useTaskActions.handleAnswer.
- */
+/** Map a clarification API result status to a toast variant + message. */
 export function clarifyResultToToast(status: string | undefined): {
   variant: 'success' | 'info';
   msg: string;
@@ -327,44 +178,24 @@ export function clarifyResultToToast(status: string | undefined): {
   }
 }
 
-/**
- * Write text to the clipboard and show a toast on success or failure.
- * Returns true on success so callers can decide whether to run follow-up logic.
- */
-export async function copyToClipboard(text: string, label?: string): Promise<boolean> {
-  try {
-    await navigator.clipboard.writeText(text);
-    if (label) {
-      toast.success(label);
-    }
-    return true;
-  } catch (err) {
-    log.warn('clipboard write failed:', err);
-    toast.error(getErrorMessage(err, 'Copy failed, clipboard access denied'));
-    return false;
-  }
-}
-
-/* ── Numeric helpers (extracted to keep Math.* out of component files) ── */
-
 /** Clamp a value between lo and hi (inclusive). */
-export function clamp(v: number, lo: number, hi: number): number {
-  return Math.min(Math.max(v, lo), hi);
+export function clamp(value: number, lo: number, hi: number): number {
+  return Math.min(Math.max(value, lo), hi);
 }
 
 /** Increment index, clamped to [0, maxIndex]. */
-export function indexNext(i: number, maxIndex: number): number {
-  return Math.min(i + 1, maxIndex);
+export function indexNext(index: number, maxIndex: number): number {
+  return Math.min(index + 1, maxIndex);
 }
 
 /** Decrement index, clamped to [0, maxIndex]. */
-export function indexPrev(i: number): number {
-  return Math.max(i - 1, 0);
+export function indexPrev(index: number): number {
+  return Math.max(index - 1, 0);
 }
 
 /** Round to nearest integer. */
-export function round(v: number): number {
-  return Math.round(v);
+export function round(value: number): number {
+  return Math.round(value);
 }
 
 /** Compute a whole-number percentage (0-100). */
@@ -381,9 +212,9 @@ export function fmtRuntime(startedAt?: string): string {
   const diffMs = Date.now() - start;
   if (diffMs < 0) return '-';
   const totalMin = Math.floor(diffMs / 60_000);
-  const h = Math.floor(totalMin / 60);
-  const m = totalMin % 60;
-  return h > 0 ? `${h}h ${m}m` : `${m}m`;
+  const hours = Math.floor(totalMin / 60);
+  const minutes = totalMin % 60;
+  return hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
 }
 
 /** Compute textarea row count for bulk mode. */
@@ -396,14 +227,13 @@ export function ceilMinutes(secs: number): number {
   return Math.ceil(secs / 60);
 }
 
-const RATE_LIMITED_STATUSES: ReadonlySet<string> = new Set([
+const RATE_LIMITED_STATUSES = Object.freeze([
   'captain-reviewing',
   'captain-merging',
   'clarifying',
-]);
+] as const);
 
-/** True when global rate-limit cooldown is active and this task is in a
- *  status where session spawning is suppressed. */
+/** True when global rate-limit cooldown is active and this task is in a blocked status. */
 export function isRateLimited(item: { status: string }, rateLimitSecs: number): boolean {
-  return rateLimitSecs > 0 && RATE_LIMITED_STATUSES.has(item.status);
+  return rateLimitSecs > 0 && (RATE_LIMITED_STATUSES as readonly string[]).includes(item.status);
 }

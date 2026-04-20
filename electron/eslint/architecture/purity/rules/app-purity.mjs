@@ -6,19 +6,20 @@ const DOMAIN_RE = new RegExp(`/domains/(${RENDERER_DOMAINS.join('|')})/(types|co
 const BANNED_IMPORT_PATTERNS = [
   { pattern: /\/providers\/http/, messageId: 'noHttpProvider' },
   { pattern: /^@tanstack\/react-query$/, messageId: 'noReactQuery' },
+  { pattern: /^zustand(?:\/.*)?$/, messageId: 'noZustand' },
 ];
 
 // Infrastructure specifiers that app/ legitimately needs (providers, query client setup).
 const ALLOWED_SPECIFIERS = new Set([
   'QueryClientProvider', // Root React provider for app shell
   'useQueryClient', // Cache orchestration in the app-tier orchestration layer
-  'OBS_DEGRADED_EVENT', // Event constant used in DataProvider bootstrap
 ]);
 
 // Infrastructure provider paths that app/ legitimately needs.
 const ALLOWED_PROVIDER_PATHS = new Set([
   '#renderer/global/providers/queryClient', // queryClient singleton for QueryClientProvider
 ]);
+const ALLOWED_APP_PROVIDERS = new Set(['DataProvider']);
 
 /** @type {import('eslint').Rule.RuleModule} */
 export default {
@@ -29,11 +30,30 @@ export default {
       impure: 'App files must not import domain internals directly. Use the domain barrel or import UI by path. See s-arch skill.',
       noHttpProvider: 'App files must not import HTTP providers directly. Use repo mutation hooks. See s-arch skill.',
       noReactQuery: 'App files must not import from @tanstack/react-query directly. Use hooks from runtime/. See s-arch skill.',
+      noZustand: 'App files must not define shared stores. Move shell state to global/runtime or the owning domain runtime. See s-arch skill.',
       noIpc: 'App files must not access window.mandoAPI directly. Use runtime hooks. See s-arch skill.',
+      noExportedHooks: 'App files must not export reusable hooks. Move runtime hooks to global/runtime or the owning domain runtime. See s-arch skill.',
+      noCustomProvider: 'App files must not define custom provider components outside approved root wiring. Move the provider to the owning domain or runtime layer. See s-arch skill.',
     },
   },
   create(context) {
     if (!isAppFile(context.filename || context.getFilename())) return {};
+
+    function reportExportedHook(node, name) {
+      if (typeof name === 'string' && /^use[A-Z0-9_]/.test(name)) {
+        context.report({ node, messageId: 'noExportedHooks' });
+      }
+    }
+
+    function reportCustomProvider(node, name) {
+      if (
+        typeof name === 'string' &&
+        /Provider$/.test(name) &&
+        !ALLOWED_APP_PROVIDERS.has(name)
+      ) {
+        context.report({ node, messageId: 'noCustomProvider' });
+      }
+    }
 
     return {
       ImportDeclaration(node) {
@@ -66,6 +86,36 @@ export default {
           node.property.name === 'mandoAPI'
         ) {
           context.report({ node, messageId: 'noIpc' });
+        }
+      },
+      ExportNamedDeclaration(node) {
+        const decl = node.declaration;
+        if (decl?.type === 'FunctionDeclaration') {
+          reportExportedHook(decl, decl.id?.name);
+          reportCustomProvider(decl, decl.id?.name);
+          return;
+        }
+        if (decl?.type === 'VariableDeclaration') {
+          for (const item of decl.declarations) {
+            if (item.id.type === 'Identifier') {
+              reportExportedHook(item, item.id.name);
+              reportCustomProvider(item, item.id.name);
+            }
+          }
+          return;
+        }
+        for (const specifier of node.specifiers ?? []) {
+          if (specifier.type === 'ExportSpecifier') {
+            reportExportedHook(specifier, specifier.exported.name);
+            reportCustomProvider(specifier, specifier.exported.name);
+          }
+        }
+      },
+      ExportDefaultDeclaration(node) {
+        const decl = node.declaration;
+        if (decl?.type === 'FunctionDeclaration') {
+          reportExportedHook(decl, decl.id?.name);
+          reportCustomProvider(decl, decl.id?.name);
         }
       },
     };

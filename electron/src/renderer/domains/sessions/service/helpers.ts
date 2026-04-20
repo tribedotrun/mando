@@ -1,7 +1,7 @@
 import type { SessionEntry, SessionSummary, TaskItem, TimelineEvent } from '#renderer/global/types';
 
 /** Maps timeline event types to a caller label used when the session_id has no row in the session map. */
-const CALLER_MAP: Record<string, string> = {
+const CALLER_MAP: Record<string, string> = Object.freeze({
   worker_spawned: 'worker',
   worker_completed: 'worker',
   worker_nudged: 'worker',
@@ -13,7 +13,7 @@ const CALLER_MAP: Record<string, string> = {
   clarify_question: 'clarifier',
   human_ask: 'task-ask',
   rebase_triggered: 'rebase',
-};
+});
 
 /**
  * Build SessionSummary entries from timeline events as the authoritative source.
@@ -28,13 +28,16 @@ export function buildSessionsFromTimeline(
 ): SessionSummary[] {
   const seen = new Map<string, SessionSummary>();
   for (const ev of events) {
-    const sid = ev.data?.session_id as string | undefined;
+    // Narrow on the payload's event_type tag — only variants that actually
+    // carry a session_id contribute to the merged list.
+    const payload = ev.data;
+    const sid = 'session_id' in payload ? payload.session_id : undefined;
     if (!sid || seen.has(sid)) continue;
     const existing = sessionMap[sid];
     seen.set(sid, {
       session_id: sid,
       status: existing?.status ?? 'stopped',
-      caller: existing?.caller ?? CALLER_MAP[ev.event_type] ?? 'worker',
+      caller: existing?.caller ?? CALLER_MAP[payload.event_type] ?? 'worker',
       started_at: existing?.started_at ?? ev.timestamp,
       duration_ms: existing?.duration_ms,
       cost_usd: existing?.cost_usd,
@@ -84,7 +87,7 @@ export function buildSessionSequence(sessions: SessionEntry[]): Map<string, numb
   return result;
 }
 
-const CALLER_LABELS: Record<string, string> = {
+const CALLER_LABELS: Record<string, string> = Object.freeze({
   worker: 'worker',
   clarifier: 'clarifier',
   'deep-clarifier': 'deep clarifier',
@@ -105,16 +108,16 @@ const CALLER_LABELS: Record<string, string> = {
   'scout-research': 'research',
   'scout-act': 'act',
   rebase: 'rebase',
-};
+});
 
 /** Prefix-to-canonical mapping for callers with embedded IDs. */
-const CALLER_PREFIXES: [string, string][] = [
+const CALLER_PREFIXES: readonly (readonly [string, string])[] = Object.freeze([
   ['advisor:', 'advisor'],
   ['task-ask:', 'task-ask'],
   ['parse-todos-', 'parse-todos'],
   ['planning-cc-r', 'planning-cc-feedback'],
   ['planning-synth-r', 'planning-synth'],
-];
+] as const);
 
 /** Extract skill name from prompt body that starts with "Base directory for this skill: .../name" */
 export function detectSkill(content: string): string | null {
@@ -174,15 +177,32 @@ export function buildSequenceFromSummaries(
       cwd: s.cwd || '',
       model: s.model || '',
       caller: s.caller,
-      resumed: s.resumed ? 1 : 0,
+      resumed: s.resumed,
+      cost_usd: s.cost_usd,
+      duration_ms: s.duration_ms,
+      turn_count: null,
+      scout_item_id: null,
       task_id: String(taskId),
-      worker_name: s.worker_name || '',
+      worker_name: s.worker_name,
+      resumed_at: null,
       status: s.status,
+      task_title: null,
+      scout_item_title: null,
+      github_repo: null,
+      pr_number: null,
+      worktree: null,
+      branch: null,
+      resume_cwd: null,
+      category: null,
+      credential_id: null,
+      credential_label: null,
+      error: null,
+      api_error_status: null,
     })),
   );
 }
 
-const CATEGORY_ORDER = [
+const CATEGORY_ORDER = Object.freeze([
   'worker',
   'captain-review-async',
   'captain-merge-async',
@@ -195,7 +215,7 @@ const CATEGORY_ORDER = [
   'triage',
   'nudge',
   'adopt',
-];
+]);
 
 /** Sorts category keys: known categories in canonical order, unknowns appended. */
 export function sortCategories(categories: Record<string, number>): string[] {

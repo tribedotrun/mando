@@ -1,0 +1,53 @@
+[contract]
+name        = "github-api"
+kind        = "external"
+# No mirror crate — we parse `gh` CLI JSON output directly.
+types-crate = "rust/crates/captain"
+transports  = ["cli"]
+base-url    = "https://api.github.com"
+docs        = "https://docs.github.com/en/rest"
+
+[[consumer]]
+name        = "captain-github-pr"
+path        = "rust/crates/captain/src/io/github_pr.rs"
+transports  = ["cli"]
+role        = "gh CLI PR + review thread queries (GraphQL + REST)"
+enforcement = "scanner"
+allow-value = true
+allow-value-reason = "GitHub REST/GraphQL responses are upstream schema; we parse with local Deserialize structs but keep Value for free-form review comment bodies."
+
+[[consumer]]
+name        = "captain-github"
+path        = "rust/crates/captain/src/io/github.rs"
+transports  = ["cli"]
+role        = "gh CLI mergeability + status checks"
+enforcement = "scanner"
+allow-value = true
+allow-value-reason = "gh CLI JSON output is upstream schema; typed structs cover hot paths but Value is permitted at the boundary."
+
+[[consumer]]
+name        = "captain-gh-run"
+path        = "rust/crates/captain/src/io/gh_run.rs"
+transports  = ["cli"]
+role        = "gh command runner + pagination helpers"
+enforcement = "scanner"
+allow-value = true
+allow-value-reason = "Process-level JSON plumbing; upstream schema is gh CLI output."
+
+[[consumer]]
+name        = "captain-mergeability"
+path        = "rust/crates/captain/src/runtime/mergeability.rs"
+transports  = ["cli"]
+role        = "captain mergeability state machine parsing gh output"
+enforcement = "scanner"
+allow-value = true
+allow-value-reason = "Value parsing of gh output until all fields are migrated to typed structs."
+
+[[consumer]]
+name        = "captain-mergeability-rebase"
+path        = "rust/crates/captain/src/runtime/mergeability_rebase.rs"
+transports  = ["cli"]
+role        = "captain rebase sub-flow parsing gh output"
+enforcement = "scanner"
+allow-value = true
+allow-value-reason = "Value parsing of gh output until all fields are migrated to typed structs."

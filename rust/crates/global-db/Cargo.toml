@@ -1,0 +1,15 @@
+[package]
+name = "global-db"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite"] }
+anyhow.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+time.workspace = true
+global-types.workspace = true

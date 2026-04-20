@@ -1,5 +1,6 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { toast } from 'sonner';
+import { toast } from '#renderer/global/runtime/useFeedback';
+import log from '#renderer/global/service/logger';
 import {
   createTerminal,
   deleteTerminal,
@@ -11,6 +12,7 @@ import {
   type WorkbenchItem,
 } from '#renderer/domains/captain/repo/terminal-api';
 import { queryKeys } from '#renderer/global/repo/queryKeys';
+import { toReactQuery } from '#result';
 
 // ---------------------------------------------------------------------------
 // useTerminalCreate
@@ -19,13 +21,14 @@ import { queryKeys } from '#renderer/global/repo/queryKeys';
 export function useTerminalCreate() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (params: CreateTerminalParams) => createTerminal(params),
+    mutationFn: (params: CreateTerminalParams) => toReactQuery(createTerminal(params)),
     onSuccess: (newSession) => {
       qc.setQueryData<TerminalSessionInfo[]>(queryKeys.terminals.list(), (old) =>
         old ? [...old, newSession] : [newSession],
       );
     },
-    onError: () => {
+    onError: (err) => {
+      log.error('useTerminalCreate', err);
       toast.error('Failed to create terminal');
     },
   });
@@ -38,7 +41,7 @@ export function useTerminalCreate() {
 export function useTerminalDelete() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (vars: { id: string }) => deleteTerminal(vars.id),
+    mutationFn: (vars: { id: string }) => deleteTerminal(vars.id),
     onMutate: async (vars) => {
       await qc.cancelQueries({ queryKey: queryKeys.terminals.list() });
       const prev = qc.getQueryData<TerminalSessionInfo[]>(queryKeys.terminals.list());
@@ -47,8 +50,9 @@ export function useTerminalDelete() {
       );
       return { prev };
     },
-    onError: (_err, _vars, context) => {
+    onError: (err, _vars, context) => {
       if (context?.prev) qc.setQueryData(queryKeys.terminals.list(), context.prev);
+      log.error('useTerminalDelete', err);
       toast.error('Failed to delete terminal');
     },
   });
@@ -61,7 +65,8 @@ export function useTerminalDelete() {
 export function useWorkbenchPin() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (vars: { id: number; pinned: boolean }) => pinWorkbench(vars.id, vars.pinned),
+    mutationFn: (vars: { id: number; pinned: boolean }) =>
+      toReactQuery(pinWorkbench(vars.id, vars.pinned)),
     onMutate: async (vars) => {
       await qc.cancelQueries({ queryKey: queryKeys.workbenches.all });
       const prev = qc.getQueryData<WorkbenchItem[]>(queryKeys.workbenches.list());
@@ -79,8 +84,9 @@ export function useWorkbenchPin() {
         old?.map((wb) => (wb.id === data.id ? data : wb)),
       );
     },
-    onError: (_err, vars, context) => {
+    onError: (err, vars, context) => {
       if (context?.prev) qc.setQueryData(queryKeys.workbenches.list(), context.prev);
+      log.error('useWorkbenchPin', err);
       toast.error(vars.pinned ? 'Failed to pin workbench' : 'Failed to unpin workbench');
     },
     onSettled: () => {
@@ -96,7 +102,8 @@ export function useWorkbenchPin() {
 export function useWorkbenchRename() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (vars: { id: number; title: string }) => renameWorkbench(vars.id, vars.title),
+    mutationFn: (vars: { id: number; title: string }) =>
+      toReactQuery(renameWorkbench(vars.id, vars.title)),
     onMutate: async (vars) => {
       await qc.cancelQueries({ queryKey: queryKeys.workbenches.all });
       const prev = qc.getQueryData<WorkbenchItem[]>(queryKeys.workbenches.list());
@@ -110,8 +117,9 @@ export function useWorkbenchRename() {
         old?.map((wb) => (wb.id === data.id ? data : wb)),
       );
     },
-    onError: (_err, _vars, context) => {
+    onError: (err, _vars, context) => {
       if (context?.prev) qc.setQueryData(queryKeys.workbenches.list(), context.prev);
+      log.error('useWorkbenchRename', err);
       toast.error('Failed to rename workbench');
     },
     onSettled: () => {
@@ -127,7 +135,7 @@ export function useWorkbenchRename() {
 export function useWorkbenchArchive() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (vars: { id: number }) => archiveWorkbench(vars.id),
+    mutationFn: (vars: { id: number }) => toReactQuery(archiveWorkbench(vars.id)),
     onMutate: async (vars) => {
       await qc.cancelQueries({ queryKey: queryKeys.workbenches.all });
       const prev = qc.getQueryData<WorkbenchItem[]>(queryKeys.workbenches.list());
@@ -148,8 +156,9 @@ export function useWorkbenchArchive() {
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: queryKeys.tasks.all });
     },
-    onError: (_err, _vars, context) => {
+    onError: (err, _vars, context) => {
       if (context?.prev) qc.setQueryData(queryKeys.workbenches.list(), context.prev);
+      log.error('useWorkbenchArchive', err);
       toast.error('Failed to archive workbench');
     },
     onSettled: () => {

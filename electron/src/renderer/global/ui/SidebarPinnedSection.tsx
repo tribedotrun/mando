@@ -8,24 +8,8 @@ import {
   WorkbenchContextMenu,
   WorkbenchRenameInput,
 } from '#renderer/global/ui/WorkbenchContextMenu';
-import { FINALIZED_STATUSES, type TaskItem } from '#renderer/global/types';
+import { FINALIZED_STATUSES, type PinnedEntry } from '#renderer/global/types';
 import { useSidebar } from '#renderer/global/runtime/SidebarContext';
-
-interface PinnedWorkbench {
-  id: number;
-  worktree: string;
-  title: string;
-  createdAt: string;
-  lastActivityAt?: string;
-  pinnedAt?: string | null;
-  archivedAt?: string | null;
-}
-
-export interface PinnedEntry {
-  wb: PinnedWorkbench;
-  task?: TaskItem;
-  project: string;
-}
 
 interface SidebarPinnedSectionProps {
   items: PinnedEntry[];

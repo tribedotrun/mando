@@ -1,27 +1,79 @@
-// Types matching the Rust mando-types crate and REST API contract
-import type { MandoConfig } from '#renderer/global/types/config';
+import type {
+  ItemStatus,
+  SessionsEventData,
+  SseEnvelope,
+  StatusEventData,
+  TaskItem,
+} from '#shared/daemon-contract';
 
-export type ItemStatus =
-  | 'new'
-  | 'clarifying'
-  | 'needs-clarification'
-  | 'queued'
-  | 'in-progress'
-  | 'captain-reviewing'
-  | 'captain-merging'
-  | 'awaiting-review'
-  | 'rework'
-  | 'handed-off'
-  | 'escalated'
-  | 'errored'
-  | 'merged'
-  | 'completed-no-pr'
-  | 'plan-ready'
-  | 'canceled';
+export type {
+  ActResponse,
+  ActivityStatsResponse,
+  AdvisorActionResponse,
+  AdvisorAskResponse,
+  AdvisorResponse,
+  ArtifactMedia,
+  ArtifactsResponse,
+  AskHistoryEntry,
+  AskHistoryResponse,
+  AskResponse,
+  ClarifyResponse,
+  ClarifierQuestion,
+  ClarifierQuestionPayload,
+  CreateWorktreeResponse,
+  CredentialInfo,
+  DailyMerge,
+  FeedItem,
+  FeedResponse,
+  ItemSessionsResponse,
+  ItemStatus,
+  MergeResponse,
+  NudgeResponse,
+  PrSummaryResponse,
+  ReviewTrigger,
+  ScoutArticleResponse,
+  ScoutEventData,
+  ScoutItem,
+  ScoutItemSession,
+  ScoutResearchRun,
+  SessionsEventData,
+  ScoutResponse,
+  SessionEntry,
+  SessionIds,
+  SessionSummary,
+  SessionsResponse,
+  StatusEventData,
+  TaskEventData,
+  TaskArtifact,
+  TaskCreateResponse,
+  SseSnapshotData,
+  TaskItem,
+  TaskListResponse,
+  TelegramHealth,
+  TerminalSessionInfo,
+  TickResult,
+  TimelineEvent,
+  TimelineResponse,
+  TranscriptResponse,
+  ResearchEventData,
+  ArtifactEventData,
+  WorkbenchEventData,
+  WorkbenchItem,
+  WorkerDetail,
+  WorkersResponse,
+} from '#shared/daemon-contract';
+export type {
+  CaptainConfig,
+  FeaturesConfig,
+  MandoConfig,
+  ProjectConfig,
+  ScoutConfig,
+  TelegramConfig,
+  UiConfig,
+} from '#renderer/global/types/config';
 
 export const FINALIZED_STATUSES: ItemStatus[] = ['merged', 'completed-no-pr', 'canceled'];
 
-/** Statuses that require human action — used for the "Action needed" filter tab */
 export const ACTION_NEEDED_STATUSES: ItemStatus[] = [
   'awaiting-review',
   'escalated',
@@ -29,7 +81,6 @@ export const ACTION_NEEDED_STATUSES: ItemStatus[] = [
   'plan-ready',
 ];
 
-/** Statuses where work is actively happening — used for the "In progress" filter tab */
 export const IN_PROGRESS_STATUSES: ItemStatus[] = [
   'clarifying',
   'in-progress',
@@ -37,7 +88,6 @@ export const IN_PROGRESS_STATUSES: ItemStatus[] = [
   'captain-merging',
 ];
 
-/** Statuses where the task is actively in the work pipeline — used for pipeline "Working" count */
 export const WORKING_STATUSES: ItemStatus[] = [
   'in-progress',
   'clarifying',
@@ -47,7 +97,6 @@ export const WORKING_STATUSES: ItemStatus[] = [
   'captain-merging',
 ];
 
-/** Exhaustive list of all task statuses. */
 export const ALL_STATUSES: ItemStatus[] = [
   'new',
   'clarifying',
@@ -67,427 +116,43 @@ export const ALL_STATUSES: ItemStatus[] = [
   'canceled',
 ];
 
-export interface TaskItem {
-  id: number;
-  rev: number;
-  title: string;
-  status: ItemStatus;
-  project?: string;
-  github_repo?: string;
-  branch?: string;
-  pr_number?: number;
-  project_id?: number;
-  worker?: string;
-  session_ids?: {
-    worker?: string;
-    review?: string;
-    clarifier?: string;
-    merge?: string;
-    ask?: string;
-    advisor?: string;
-    triage?: string;
-  };
-  intervention_count: number;
-  captain_review_trigger?: string;
-  escalation_report?: string;
-  context?: string;
-  original_prompt?: string;
-  workbench_id: number;
-  worktree?: string;
-  plan?: string;
-  no_pr?: boolean;
-  no_auto_merge?: boolean;
-  planning?: boolean;
-  resource?: string;
-  images?: string;
-  created_at?: string;
-  last_activity_at?: string;
-  worker_started_at?: string;
-  worker_seq: number;
-  reopen_seq: number;
-  reopen_source?: string;
-  review_fail_count: number;
-  clarifier_fail_count: number;
-  spawn_fail_count: number;
-  merge_fail_count: number;
-  source?: string;
-}
-
-export interface TaskListResponse {
-  items: TaskItem[];
-  count: number;
-}
-
-export interface DailyMerge {
-  date: string;
-  count: number;
-}
-
-export interface ActivityStatsResponse {
-  merged_7d: number;
-  daily_merges: DailyMerge[];
-}
-
-export interface WorkerDetail {
-  id: number;
-  title: string;
-  status?: ItemStatus;
-  project: string;
-  github_repo?: string;
-  branch?: string;
-  cc_session_id?: string | null;
-  worker?: string;
-  worktree?: string;
-  pr_number?: number | null;
-  started_at?: string;
-  last_activity_at?: string;
-  intervention_count?: number;
-  nudge_count?: number;
-  nudge_budget?: number;
-  last_action?: string;
-  pid?: number;
-  is_stale?: boolean;
-}
-
-export interface WorkersResponse {
-  workers: WorkerDetail[];
-  rate_limit_remaining_secs?: number;
-}
-
-export interface ScoutItem {
-  id: number;
-  rev: number;
-  url: string;
-  title?: string;
-  status: string;
-  item_type?: string;
-  summary?: string;
-  has_summary?: boolean;
-  relevance?: number;
-  quality?: number;
-  date_added?: string;
-  source_name?: string;
-  date_published?: string;
-  telegraphUrl?: string;
-}
-
-export interface ScoutResponse {
-  items: ScoutItem[];
-  count: number;
-  total: number;
-  page: number;
-  pages: number;
-  per_page: number;
-  filter: string | null;
-  status_counts?: Record<string, number>;
-}
-
-export interface ScoutResearchRun {
-  id: number;
-  research_prompt: string;
-  status: 'running' | 'done' | 'failed';
-  error?: string;
-  session_id?: string;
-  added_count: number;
-  created_at: string;
-  completed_at?: string;
-}
-
-type SessionStatus = 'running' | 'stopped' | 'failed';
-
-export interface SessionEntry {
-  session_id: string;
-  created_at: string;
-  cwd: string;
-  model: string;
-  caller: string;
-  resumed: boolean | number;
-  cost_usd?: number;
-  duration_ms?: number;
-  turn_count?: number;
-  scout_item_id?: number | null;
-  task_id: string | null;
-  worker_name: string | null;
-  resumed_at?: string | null;
-  status: SessionStatus;
-  task_title?: string;
-  scout_item_title?: string;
-  github_repo?: string;
-  pr_number?: number;
-  worktree?: string;
-  branch?: string;
-  resume_cwd?: string;
-  category?: string;
-  credential_id?: number | null;
-  credential_label?: string;
-}
-
-export interface TranscriptResponse {
-  session_id: string;
-  markdown: string;
-}
-
-export interface SessionsResponse {
-  total: number;
-  page: number;
-  per_page: number;
-  total_pages: number;
-  categories: Record<string, number>;
-  total_cost_usd?: number;
-  sessions: SessionEntry[];
-}
-
-export interface SessionSummary {
-  session_id: string;
-  status: SessionStatus;
-  caller: string;
-  started_at: string;
-  duration_ms?: number;
-  cost_usd?: number;
-  model?: string;
-  resumed: boolean;
-  cwd?: string;
-  worker_name?: string;
-}
-
-export interface ItemSessionsResponse {
-  sessions: SessionSummary[];
-  count: number;
-}
-
-export interface ClarifierQuestion {
-  question: string;
-  answer?: string | null;
-  self_answered: boolean;
-  category?: 'code' | 'intent';
-}
-
-export interface TimelineEvent {
-  event_type: string;
-  timestamp: string;
-  actor: string;
-  summary: string;
-  data: Record<string, unknown>;
-}
-
-export interface TimelineResponse {
-  id: string;
-  events: TimelineEvent[];
-  count: number;
-}
-
-export interface TickResult {
-  mode: string;
-  tick_id?: string;
-  actions?: unknown[];
-  tasks?: Record<string, number>;
-  alerts?: string[];
-  rate_limited?: boolean;
-}
-
-export interface PrSummaryResponse {
-  pr_number: number;
-  summary: string | null;
-}
-
-export interface AskResponse {
-  answer: string;
-  ask_id: string;
-  session_id?: string;
-  suggested_followups?: string[];
-}
-
-export interface AskHistoryEntry {
-  ask_id: string;
-  session_id: string;
-  role: 'human' | 'assistant' | 'error';
-  content: string;
-  timestamp: string;
-  /** Injected on the feed endpoint: "reopen" / "rework" for human messages
-   *  whose ask produced a reopen/rework action. Absent for plain asks. */
-  intent?: 'reopen' | 'rework';
-}
-
-export interface AskHistoryResponse {
-  history: AskHistoryEntry[];
-}
-
-// ── Artifacts ──
-
-export interface ArtifactMedia {
-  index: number;
-  filename: string;
-  ext: string;
-  local_path?: string;
-  remote_url?: string;
-  caption?: string;
-}
-
-export interface TaskArtifact {
-  id: number;
-  task_id: number;
-  artifact_type: 'evidence' | 'work_summary';
-  content: string;
-  media: ArtifactMedia[];
-  created_at: string;
-}
-
-export interface ArtifactsResponse {
-  artifacts: TaskArtifact[];
-}
-
-// ── Feed ──
-
-export interface FeedItem {
-  type: 'timeline' | 'artifact' | 'message';
-  timestamp: string;
-  data: TimelineEvent | TaskArtifact | AskHistoryEntry;
-}
-
-export interface FeedResponse {
-  id: string;
-  feed: FeedItem[];
-  count: number;
-}
-
-// ── Advisor ──
-
-export type AdvisorResponse = AdvisorAskResponse | AdvisorActionResponse;
-
-export interface AdvisorAskResponse {
-  id: number;
-  ask_id: string;
-  message: string;
-  answer: string;
-  session_id: string;
-}
-
-export interface AdvisorActionResponse {
-  ok: boolean;
-  intent: string;
-  feedback: string;
-}
-
-export interface ScoutArticleResponse {
-  article: string;
-  title?: string;
-  telegraphUrl?: string;
-}
-
-export interface ActResponse {
-  ok?: boolean;
-  task_id?: string;
-  title?: string;
-  skipped?: boolean;
-  reason?: string;
-}
-
 export type SSEConnectionStatus = 'connected' | 'connecting' | 'disconnected';
 
-export interface SSEEvent {
-  event: string;
-  ts: number;
-  data?: unknown;
-}
-
-// ── SSE payload types for item-level sync ──
+export type SSEEvent = SseEnvelope;
 
 export type SseAction = 'created' | 'updated' | 'deleted';
 
-/** Tier 1: entity list events carry the changed item */
 export interface SseEntityPayload<T> {
-  action: SseAction;
-  item?: T;
-  id?: number | string;
+  action?: string | null;
+  item?: T | null;
+  id?: number | string | null;
 }
 
-/** Tier 2: aggregate events carry affected entity IDs */
-export interface SseStatusPayload {
-  action: 'tick' | 'config';
-  affected_task_ids?: number[];
-}
-
-export interface SseSessionsPayload {
-  affected_task_ids?: number[];
-}
-
-/** Snapshot sent on SSE connect -- seeds all caches */
-export interface SseSnapshot {
-  event: 'snapshot';
-  ts: number;
-  data: {
-    tasks: TaskItem[];
-    workers: WorkerDetail[];
-    scout_items: ScoutItem[];
-    terminals: TerminalSessionInfo[];
-    workbenches: WorkbenchItem[];
-    config: MandoConfig;
-    daemon: { version: string; uptime: number };
-  };
-}
-
-// ── Config types (matching Rust Config struct, camelCase serde) ──
-export type {
-  ProjectConfig,
-  FeaturesConfig,
-  TelegramConfig,
-  CaptainConfig,
-  ScoutConfig,
-  UiConfig,
-  MandoConfig,
-} from '#renderer/global/types/config';
-
-// ── Workbench / Terminal types (promoted from captain domain for global use) ──
-
-export interface WorkbenchItem {
-  id: number;
-  rev: number;
-  project: string;
-  worktree: string;
-  title: string;
-  createdAt: string;
-  lastActivityAt: string;
-  pinnedAt?: string | null;
-  archivedAt?: string | null;
-  deletedAt?: string | null;
-}
+export type SseStatusPayload = StatusEventData;
+export type SseSessionsPayload = SessionsEventData;
 
 export type WorkbenchStatusFilter = 'active' | 'archived' | 'all';
 
-/** All valid workbench status filter options. */
+export interface PinnedWorkbench {
+  id: number;
+  worktree: string;
+  title: string;
+  createdAt: string;
+  lastActivityAt?: string;
+  pinnedAt?: string | null;
+  archivedAt?: string | null;
+}
+
+export interface PinnedEntry {
+  wb: PinnedWorkbench;
+  task?: TaskItem;
+  project: string;
+}
+
 export const WORKBENCH_FILTER_OPTIONS: WorkbenchStatusFilter[] = ['active', 'archived', 'all'];
 
-export interface TerminalSessionInfo {
-  id: string;
-  rev: number;
-  project: string;
-  cwd: string;
-  agent: 'claude' | 'codex';
-  running: boolean;
-  exit_code: number | null;
-  state?: 'live' | 'restored' | 'exited';
-  restored?: boolean;
-  createdAt?: string;
-  endedAt?: string | null;
-  terminalId?: string | null;
-  name?: string | null;
-  ccSessionId?: string | null;
-}
+export type { NotificationKind, NotificationPayload, NotifyLevel } from '#shared/notifications';
 
-// ── Desktop notification types (re-exported from shared module) ──
-export type { NotifyLevel, NotificationPayload } from '#shared/notifications';
-
-export interface ScoutItemSession {
-  session_id: string;
-  caller: string;
-  status: string;
-  created_at: string;
-  model?: string;
-  duration_ms?: number | null;
-  cost_usd?: number | null;
-}
-
-// Window augmentation for preload API + dev inspector
 declare global {
   interface Window {
     mandoAPI: import('#preload/index').MandoAPI;

@@ -1,6 +1,6 @@
 import { Terminal as XTerm, type IDisposable } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
-import { SearchAddon, type ISearchOptions } from '@xterm/addon-search';
+import { SearchAddon } from '@xterm/addon-search';
 import { WebglAddon } from '@xterm/addon-webgl';
 import { ClipboardAddon } from '@xterm/addon-clipboard';
 import { Unicode11Addon } from '@xterm/addon-unicode11';
@@ -10,81 +10,31 @@ import {
   writeTerminalBytes,
   type TerminalSessionInfo,
 } from '#renderer/domains/captain/repo/terminal-api';
-import {
-  createFileLinkProvider,
-  createUrlLinkProvider,
-} from '#renderer/domains/captain/terminal/service/terminalLinks';
 import { isRestoredTerminalSession } from '#renderer/domains/captain/terminal/runtime/terminalSession';
+import { installTerminalLinkProviders } from '#renderer/domains/captain/terminal/runtime/terminalLinkBridge';
+import {
+  DEFAULT_ROWS,
+  DEFAULT_COLS,
+  SCROLLBACK_LINES,
+  RESIZE_DEBOUNCE_MS,
+  RECONNECT_BASE_MS,
+  RECONNECT_MAX_MS,
+  RECONNECT_MAX_ATTEMPTS,
+  TERMINAL_THEME,
+  SEARCH_OPTIONS,
+  type TerminalConnectionState,
+  type TerminalSearchState,
+  emptySearchState,
+  writeWithCallback,
+  binaryBytes,
+  isShiftEnter,
+} from '#renderer/domains/captain/terminal/runtime/terminalConfig';
 import log from '#renderer/global/service/logger';
-
-const DEFAULT_ROWS = 32;
-const DEFAULT_COLS = 120;
-const SCROLLBACK_LINES = 10_000;
-const RESIZE_DEBOUNCE_MS = 100;
-const RECONNECT_BASE_MS = 1000;
-const RECONNECT_MAX_MS = 10_000;
-const RECONNECT_MAX_ATTEMPTS = 10;
-
-const TERMINAL_THEME = {
-  background: '#0a0a0a',
-  foreground: '#e5e5e5',
-  cursor: '#e5e5e5',
-  selectionBackground: '#3a3a3a',
-  black: '#0a0a0a',
-  red: '#ff5555',
-  green: '#50fa7b',
-  yellow: '#f1fa8c',
-  blue: '#6272a4',
-  magenta: '#ff79c6',
-  cyan: '#8be9fd',
-  white: '#e0e0e0',
-};
-
-const SEARCH_OPTIONS: ISearchOptions = {
-  incremental: true,
-  decorations: {
-    matchBackground: '#2a3348',
-    matchBorder: '#5d84ff',
-    matchOverviewRuler: '#5d84ff',
-    activeMatchBackground: '#4b5d89',
-    activeMatchBorder: '#91a8ff',
-    activeMatchColorOverviewRuler: '#91a8ff',
-  },
-};
-
-export type TerminalConnectionState = 'connecting' | 'connected' | 'disconnected';
-
-export interface TerminalSearchState {
-  open: boolean;
-  query: string;
-  resultCount: number;
-  resultIndex: number;
-}
 
 interface TerminalRuntimeCallbacks {
   onConnectionStateChange: (state: TerminalConnectionState) => void;
   onSearchStateChange: (state: TerminalSearchState) => void;
   onExit?: (code: number | null) => void;
-}
-
-function emptySearchState(): TerminalSearchState {
-  return { open: false, query: '', resultCount: 0, resultIndex: -1 };
-}
-
-function writeWithCallback(term: XTerm, data: string | Uint8Array): Promise<void> {
-  return new Promise((resolve) => term.write(data, resolve));
-}
-
-function binaryBytes(data: string): Uint8Array {
-  const bytes = new Uint8Array(data.length);
-  for (let i = 0; i < data.length; i++) bytes[i] = data.charCodeAt(i);
-  return bytes;
-}
-
-function isShiftEnter(event: KeyboardEvent): boolean {
-  return (
-    event.key === 'Enter' && event.shiftKey && !event.ctrlKey && !event.altKey && !event.metaKey
-  );
 }
 
 export class TerminalRuntime {
@@ -154,7 +104,7 @@ export class TerminalRuntime {
 
     term.open(container);
     this.installWebglAddon(term);
-    this.installLinkProviders(term);
+    this.disposables.push(...installTerminalLinkProviders(term, this.session.cwd));
     fitAddon.fit();
     await this.syncTerminalSize();
     this.bindTerminalInput();
@@ -245,47 +195,6 @@ export class TerminalRuntime {
     } catch (err) {
       log.warn('WebGL addon failed, using DOM renderer', err);
     }
-  }
-
-  private installLinkProviders(term: XTerm): void {
-    // Deduplicate URL opens: when a URL is both an OSC 8 hyperlink and visible
-    // plain text, both the OscLinkProvider and UrlLinkProvider can fire on the
-    // same click. Track the last opened URL + timestamp to suppress duplicates.
-    let lastOpenedUrl = '';
-    let lastOpenedAt = 0;
-    const openUrl = (url: string) => {
-      const now = Date.now();
-      if (url === lastOpenedUrl && now - lastOpenedAt < 500) return Promise.resolve();
-      lastOpenedUrl = url;
-      lastOpenedAt = now;
-      return window.mandoAPI.openExternalUrl(url);
-    };
-    const resolvePath = (input: string, cwd: string) =>
-      window.mandoAPI.resolveLocalPath(input, cwd);
-    const openPath = (filePath: string) => window.mandoAPI.openLocalPath(filePath);
-
-    // Handle OSC 8 hyperlinks (e.g. PR links in the CC status line).
-    // xterm's built-in OscLinkProvider parses the escape sequences; this
-    // handler routes clicks through the same IPC path as plain-text URLs.
-    term.options.linkHandler = {
-      activate: (_event, url) => {
-        void openUrl(url).catch((err) => log.warn('OSC 8 link open failed', err));
-      },
-    };
-
-    this.disposables.push(
-      term.registerLinkProvider(createUrlLinkProvider({ terminal: term, openUrl })),
-    );
-    this.disposables.push(
-      term.registerLinkProvider(
-        createFileLinkProvider({
-          terminal: term,
-          cwd: this.session.cwd,
-          resolvePath,
-          openPath,
-        }),
-      ),
-    );
   }
 
   private bindTerminalInput(): void {

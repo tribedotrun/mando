@@ -4,13 +4,9 @@ import { useGlobalKeyboard } from '#renderer/global/runtime/useKeyboardShortcuts
 import { useMainShortcuts, useNotificationClicks } from '#renderer/global/runtime/useNativeActions';
 import { useTaskWorkbenchLookup } from '#renderer/global/runtime/useTaskCacheLookup';
 import { useClaudeCodeVerification } from '#renderer/global/runtime/useClaudeCodeVerification';
-import { useTaskActions } from '#renderer/domains/captain';
-import { useUIStore } from '#renderer/app/uiStore';
+import { useUIStore } from '#renderer/global/runtime/useUIStore';
 import { DevInfoBar } from '#renderer/global/ui/DevInfoBar';
-import { CommandPalette } from '#renderer/global/ui/CommandPalette';
-import { CreateTaskModal } from '#renderer/domains/captain/ui/AddTaskForm';
-import { MergeModal } from '#renderer/domains/captain/ui/MergeModal';
-import { ShortcutOverlay } from '#renderer/global/ui/ShortcutOverlay';
+import { RootShellOverlays } from '#renderer/app/routes/RootShellOverlays';
 import log from '#renderer/global/service/logger';
 import { TAB_ROUTES } from '#renderer/global/service/routeHelpers';
 import { router } from '#renderer/app/router';
@@ -18,17 +14,12 @@ import type { Tab } from '#renderer/app/Sidebar';
 
 export function RootShell(): React.ReactElement {
   const navigate = useNavigate();
-  const actions = useTaskActions();
   const paletteOpen = useUIStore((s) => s.paletteOpen);
   const createTaskOpen = useUIStore((s) => s.createTaskOpen);
   const shortcutsOpen = useUIStore((s) => s.shortcutsOpen);
-  const mergeItem = useUIStore((s) => s.mergeItem);
 
   const showSettings = useRouterState({
     select: (s) => s.location.pathname.startsWith('/settings'),
-  });
-  const currentProject = useRouterState({
-    select: (s) => (s.location.search as { project?: string }).project ?? null,
   });
 
   useClaudeCodeVerification();
@@ -59,7 +50,7 @@ export function RootShell(): React.ReactElement {
     onToggleShortcuts: useUIStore.getState().toggleShortcuts,
     onGoBack: () => router.history.back(),
     onGoForward: () => router.history.forward(),
-    onToggleSidebar: () => window.dispatchEvent(new CustomEvent('mando:toggle-sidebar')),
+    onToggleSidebar: () => useUIStore.getState().toggleSidebar(),
   });
 
   // Main process shortcuts (Cmd+N from menu)
@@ -90,8 +81,7 @@ export function RootShell(): React.ReactElement {
         return;
       }
     }
-    const kind = data.kind as { type: string } | undefined;
-    if (kind?.type === 'RateLimited') {
+    if (data.kind.type === 'RateLimited') {
       void navigateRef.current({ to: '/' });
     }
   });
@@ -125,30 +115,7 @@ export function RootShell(): React.ReactElement {
       <DevInfoBar />
 
       {/* Global overlays */}
-      {mergeItem && (
-        <MergeModal
-          item={mergeItem}
-          onConfirm={(itemId, pr, project) => {
-            useUIStore.getState().setMergeItem(null);
-            void actions.handleMerge(itemId, pr, project);
-          }}
-          onCancel={() => useUIStore.getState().setMergeItem(null)}
-        />
-      )}
-      <CommandPalette
-        open={paletteOpen}
-        onClose={() => useUIStore.getState().closePalette()}
-        onAction={handlePaletteAction}
-      />
-      <CreateTaskModal
-        open={createTaskOpen}
-        onClose={() => useUIStore.getState().closeCreateTask()}
-        initialProject={currentProject}
-      />
-      <ShortcutOverlay
-        open={shortcutsOpen}
-        onClose={() => useUIStore.getState().closeShortcuts()}
-      />
+      <RootShellOverlays onPaletteAction={handlePaletteAction} />
     </div>
   );
 }

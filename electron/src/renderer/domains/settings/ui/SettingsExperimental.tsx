@@ -6,7 +6,7 @@ import { featuresPatch } from '#renderer/global/service/configPatches';
 import type { FeaturesConfig } from '#renderer/global/types';
 import { Switch } from '#renderer/global/ui/switch';
 
-const EMPTY_FEATURES: FeaturesConfig = {};
+const EMPTY_FEATURES: FeaturesConfig = Object.freeze({});
 
 interface FlagDef {
   key: keyof FeaturesConfig;
@@ -14,13 +14,13 @@ interface FlagDef {
   description: string;
 }
 
-const FLAGS: FlagDef[] = [
+const FLAGS: readonly FlagDef[] = Object.freeze([
   {
     key: 'scout',
     label: 'Scout',
     description: 'Research tech blogs and turn them into actionable tasks for your project.',
   },
-];
+]);
 
 export function SettingsExperimental(): React.ReactElement {
   const { data: config } = useConfig();

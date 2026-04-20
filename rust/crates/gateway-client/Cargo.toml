@@ -1,0 +1,21 @@
+[package]
+name = "gateway-client"
+version.workspace = true
+edition = "2021"
+description = "Reusable typed daemon client: SSE consumer and envelope parser"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+
+[dependencies]
+api-types = { path = "../api-types" }
+global-net = { path = "../global-net" }
+anyhow.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]

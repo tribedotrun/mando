@@ -2,21 +2,11 @@ import React, { useCallback, useState } from 'react';
 import type { Row } from '@tanstack/react-table';
 import { useWorkbenchArchive } from '#renderer/domains/captain/runtime/hooks';
 import { FINALIZED_STATUSES, type TaskItem } from '#renderer/global/types';
-import {
-  prLabel,
-  prHref,
-  prState,
-  canAnswer,
-  canMerge,
-  canReopen,
-  canAskTerminal,
-} from '#renderer/global/service/utils';
-import { ArchiveBtn, MergeBtn, MoreIcon } from '#renderer/domains/captain/ui/TaskIcons';
+import { prLabel, prHref, prState } from '#renderer/global/service/utils';
 import { PrIcon } from '#renderer/global/ui/icons';
 import { StatusIcon, ACTION_LABELS } from '#renderer/global/ui/StatusIndicator';
-import { ActionBtn, TaskOverflowMenu } from '#renderer/domains/captain/ui/TaskActions';
 import { Checkbox } from '#renderer/global/ui/checkbox';
-import { Button } from '#renderer/global/ui/button';
+import { TaskRowActions } from '#renderer/domains/captain/ui/TaskRowParts';
 
 export interface TaskRowCallbacks {
   onToggleSelect: (id: number) => void;
@@ -121,48 +111,14 @@ export const TaskRow = React.memo(function TaskRow({
       </span>
 
       {/* Actions, inline flex item, hidden until hover via CSS */}
-      <div
-        data-actions
-        data-menu-open={menuOpen || undefined}
-        className="action-zone flex shrink-0 items-center gap-1.5"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {canMerge(item) && <MergeBtn onClick={() => callbacks.onMerge(item)} />}
-        {item.status === 'awaiting-review' && !item.pr_number && (
-          <ActionBtn
-            label="Accept"
-            onClick={() => callbacks.onAccept(item.id)}
-            testId="accept-btn"
-            pending={callbacks.acceptPendingId === item.id}
-          />
-        )}
-        {canAnswer(item) && (
-          <ActionBtn label="Answer" onClick={() => callbacks.onAnswer(item)} testId="answer-btn" />
-        )}
-        {canReopen(item) && (
-          <ActionBtn label="Reopen" onClick={() => callbacks.onReopen(item)} testId="reopen-btn" />
-        )}
-        {isFinalized && item.workbench_id && (
-          <ArchiveBtn onClick={handleArchive} pending={archiveWb.isPending} />
-        )}
-        {canAskTerminal(item) && <ActionBtn label="Ask" onClick={() => callbacks.onAsk(item)} />}
-        {!isFinalized && (
-          <TaskOverflowMenu
-            item={item}
-            open={menuOpen}
-            onOpenChange={setMenuOpen}
-            onRework={() => callbacks.onRework(item)}
-            onHandoff={() => callbacks.onHandoff(item.id)}
-            onCancel={() => callbacks.onCancel(item.id)}
-            onRetry={() => callbacks.onRetry(item.id)}
-            onAnswer={() => callbacks.onAnswer(item)}
-          >
-            <Button variant="outline" size="icon-xs" aria-label="More actions">
-              <MoreIcon />
-            </Button>
-          </TaskOverflowMenu>
-        )}
-      </div>
+      <TaskRowActions
+        item={item}
+        menuOpen={menuOpen}
+        onMenuOpenChange={setMenuOpen}
+        archivePending={archiveWb.isPending}
+        onArchive={handleArchive}
+        callbacks={callbacks}
+      />
     </div>
   );
 });

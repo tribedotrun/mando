@@ -1,0 +1,40 @@
+[package]
+name = "transport-http"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+api-types = { path = "../api-types" }
+captain = { path = "../captain" }
+global-bus = { path = "../global-bus" }
+global-claude = { path = "../global-claude" }
+global-db = { path = "../global-db" }
+global-types = { path = "../global-types" }
+global-infra = { path = "../global-infra" }
+scout = { path = "../scout" }
+sessions = { path = "../sessions" }
+settings = { path = "../settings" }
+terminal = { path = "../terminal" }
+transport-http-macros = { path = "../transport-http-macros" }
+transport-tg = { path = "../transport-tg" }
+transport-ui = { path = "../transport-ui" }
+serde.workspace = true
+serde_json.workspace = true
+axum.workspace = true
+tokio.workspace = true
+tower-http.workspace = true
+tracing.workspace = true
+anyhow.workspace = true
+tokio-util.workspace = true
+futures-util.workspace = true
+tokio-stream.workspace = true
+reqwest.workspace = true
+rustc-hash.workspace = true
+sqlx.workspace = true
+time.workspace = true
+inventory.workspace = true
+base64 = "0.22"
+shell-words = "1"
+async-stream = "0.3"
+toml = "0.8"

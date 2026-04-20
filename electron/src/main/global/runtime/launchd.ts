@@ -25,21 +25,29 @@ import {
 export type { DaemonStatus } from '#main/global/runtime/portCheck';
 export { getDaemonStatus } from '#main/global/runtime/portCheck';
 
-/** Resolve cargo target dir — respects env overrides, then walks up to workspace root. */
+/** Resolve cargo target dir — respects env overrides, then walks upward to find rust/target. */
 function cargoTargetDir(): string {
   const override = process.env.MANDO_RUST_TARGET_DIR || process.env.CARGO_TARGET_DIR;
-  if (override) return override;
-  // Walk up from the electron dir to find the workspace Cargo.toml → target/debug.
-  // In worktrees the target dir lives at the primary repo root, not the worktree.
-  let dir = path.resolve(__dirname, '../../..');
-  for (let i = 0; i < 5; i++) {
-    if (fs.existsSync(path.join(dir, 'target', 'debug', 'mando-gw'))) {
-      return path.join(dir, 'target', 'debug');
-    }
-    dir = path.dirname(dir);
+  if (override) {
+    return path.isAbsolute(override) ? override : path.resolve(process.cwd(), override);
   }
-  // Fallback: assume target is relative to the repo root (standard layout).
-  return path.resolve(__dirname, '../../../target/debug');
+
+  let dir = path.resolve(__dirname);
+  for (let i = 0; i < 8; i++) {
+    for (const candidate of [
+      path.join(dir, 'rust', 'target', 'debug', 'mando-gw'),
+      path.join(dir, 'target', 'debug', 'mando-gw'),
+    ]) {
+      if (fs.existsSync(candidate)) {
+        return path.dirname(candidate);
+      }
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+
+  return path.resolve(__dirname, '../../../../rust/target/debug');
 }
 
 function cliSourcePath(): string {

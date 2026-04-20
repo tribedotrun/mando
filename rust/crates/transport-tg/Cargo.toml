@@ -1,0 +1,35 @@
+[package]
+name = "transport-tg"
+version.workspace = true
+edition = "2021"
+description = "Telegram bot for task notifications and remote commands"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+
+[dependencies]
+api-types = { path = "../api-types" }
+global-types = { path = "../global-types" }
+global-infra = { path = "../global-infra" }
+global-net = { path = "../global-net" }
+captain.workspace = true
+settings = { path = "../settings" }
+clap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+reqwest.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+tracing-appender.workspace = true
+anyhow.workspace = true
+time.workspace = true
+regex.workspace = true
+html5ever.workspace = true
+gateway-client = { path = "../gateway-client" }
+
+[dev-dependencies]
+axum.workspace = true
+# Enables `Task::set_status_for_tests` for the telegram_format unit
+# tests only; production transport-tg builds do not see this shim.
+captain = { workspace = true, features = ["testing"] }

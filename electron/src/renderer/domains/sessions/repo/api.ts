@@ -1,12 +1,15 @@
-import type { SessionsResponse, TranscriptResponse } from '#renderer/global/types';
-import { apiGet } from '#renderer/global/providers/http';
+import { apiGetRouteR } from '#renderer/global/providers/http';
 
-export async function fetchSessions(page = 1, perPage = 50, category?: string, status?: string) {
-  const params = new URLSearchParams({ page: String(page), per_page: String(perPage) });
-  if (category) params.set('category', category);
-  if (status && status !== 'all') params.set('status', status);
-  return apiGet<SessionsResponse>(`/api/sessions?${params}`);
+export function fetchSessions(page = 1, perPage = 50, category?: string, status?: string) {
+  return apiGetRouteR('getSessions', {
+    query: {
+      page,
+      per_page: perPage,
+      category,
+      status: status && status !== 'all' ? status : undefined,
+    },
+  });
 }
 
 export const fetchTranscript = (sessionId: string) =>
-  apiGet<TranscriptResponse>(`/api/sessions/${sessionId}/transcript`);
+  apiGetRouteR('getSessionsByIdTranscript', { params: { id: sessionId } });

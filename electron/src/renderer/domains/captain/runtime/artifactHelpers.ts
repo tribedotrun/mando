@@ -1,4 +1,5 @@
 import { buildUrl } from '#renderer/global/runtime/useApi';
+import { staticRoutePath } from '#renderer/global/providers/http';
 import type { TaskArtifact } from '#renderer/global/types';
 
 export const IMAGE_EXTS = ['png', 'jpg', 'jpeg', 'gif', 'webp'];
@@ -18,7 +19,13 @@ export function deriveArtifactMedia(artifact: TaskArtifact): ArtifactMediaDerive
   const imageMedia = media.filter((m) => IMAGE_EXTS.includes(m.ext) && m.local_path);
   return {
     hasVideo,
-    imageUrls: imageMedia.map((m) => buildUrl(`/api/artifacts/${artifact.id}/media/${m.index}`)),
+    imageUrls: imageMedia.map((m) =>
+      buildUrl(
+        staticRoutePath('getArtifactsByIdMediaByIndex', {
+          params: { id: artifact.id, index: m.index },
+        }),
+      ),
+    ),
     imageCaptions: imageMedia.map((m) => m.caption ?? m.filename),
     lightboxIndexOf: new Map(imageMedia.map((m, i) => [m.index, i])),
   };
@@ -26,5 +33,9 @@ export function deriveArtifactMedia(artifact: TaskArtifact): ArtifactMediaDerive
 
 /** Build a media URL for a specific artifact media item. */
 export function artifactMediaUrl(artifactId: number, mediaIndex: number): string {
-  return buildUrl(`/api/artifacts/${artifactId}/media/${mediaIndex}`);
+  return buildUrl(
+    staticRoutePath('getArtifactsByIdMediaByIndex', {
+      params: { id: artifactId, index: mediaIndex },
+    }),
+  );
 }

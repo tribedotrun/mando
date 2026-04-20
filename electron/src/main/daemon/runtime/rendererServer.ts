@@ -18,6 +18,7 @@ const MIME_TYPES: Record<string, string> = {
   '.woff2': 'font/woff2',
 };
 
+// invariant: Node http.Server startup; rejects on bind failure which is a fatal startup error, not a recoverable per-request failure
 export function startRendererServer(
   rendererDir: string,
 ): Promise<{ port: number; server: http.Server }> {
