@@ -22,7 +22,6 @@ use super::error::ConfigError;
 // ── Types ────────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(default)]
 pub struct CaptainWorkflow {
     pub models: ModelsConfig,
     pub agent: AgentConfig,
@@ -31,6 +30,30 @@ pub struct CaptainWorkflow {
     pub prompts: HashMap<String, String>,
     pub nudges: HashMap<String, String>,
     pub initial_prompts: HashMap<String, String>,
+    pub sandbox: SandboxOverrides,
+    /// Stream-symptom classifier rules. Order matters (first match wins).
+    /// See `captain-workflow.yaml::stream_symptoms` for wire format.
+    pub stream_symptoms: Vec<global_claude::StreamSymptomRule>,
+}
+
+/// Timing overrides applied on top of `AgentConfig` + `Config.captain.tick_interval_s`
+/// when the daemon runs with `--sandbox`. Any `None` field keeps the prod value.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SandboxOverrides {
+    pub tick_interval_s: Option<u64>,
+    pub stale_threshold_s: Option<u64>,
+    pub captain_review_timeout_s: Option<u64>,
+    pub captain_merge_timeout_s: Option<u64>,
+    pub clarifier_timeout_s: Option<u64>,
+    pub worker_timeout_s: Option<u64>,
+    pub task_ask_timeout_s: Option<u64>,
+    pub ops_timeout_s: Option<u64>,
+    pub no_pr_min_active_s: Option<u64>,
+    // Low-intervention sandbox fails fast into `escalated` when haiku +
+    // the captain review prompt get stuck in a nudge loop. That keeps the
+    // rework/escalation e2e specs bounded — they can drive straight from
+    // escalated → rework without waiting 20+ minutes of haiku critique.
+    pub max_interventions: Option<u32>,
 }
 
 impl CaptainWorkflow {
@@ -49,11 +72,11 @@ impl CaptainWorkflow {
 }
 
 pub use super::workflow_scout::{
-    InterestsConfig, ScoutAgentConfig, ScoutRepo, ScoutWorkflow, UserContextConfig,
+    InterestsConfig, ScoutAgentConfig, ScoutRepo, ScoutWorkflow, ScoutWorkflowOverride,
+    UserContextConfig,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
 pub struct ModelsConfig {
     pub worker: String,
     pub captain: String,
@@ -74,7 +97,6 @@ impl Default for ModelsConfig {
 
 /// Configuration for the autonomous planning pipeline.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
 pub struct PlanningConfig {
     pub feedback_rounds: u32,
     #[serde(with = "duration_seconds")]
@@ -104,7 +126,6 @@ impl Default for PlanningConfig {
 
 /// Configuration for auto-generating terminal workbench titles.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
 pub struct AutoTitleConfig {
     pub model: String,
     pub prompt: String,
@@ -171,7 +192,6 @@ mod duration_seconds {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
 pub struct AgentConfig {
     pub max_concurrent: usize,
     pub resource_limits: HashMap<String, usize>,
@@ -233,6 +253,12 @@ pub struct AgentConfig {
     /// Idle TTL for ops CC sessions.
     #[serde(with = "duration_seconds")]
     pub ops_idle_ttl_s: std::time::Duration,
+    /// Minimum worker runtime before a no-PR task's quality gates can pass.
+    /// Prevents a worker from shipping research / audit tasks the moment it
+    /// produces any substantive output. Sandbox overrides to 0 so e2e tests
+    /// don't have to wait out the minimum.
+    #[serde(with = "duration_seconds")]
+    pub no_pr_min_active_s: std::time::Duration,
 }
 
 impl Default for AgentConfig {
@@ -266,6 +292,7 @@ impl Default for AgentConfig {
             task_ask_idle_ttl_s: Duration::from_secs(3600),
             ops_timeout_s: Duration::from_secs(120),
             ops_idle_ttl_s: Duration::from_secs(3600),
+            no_pr_min_active_s: Duration::from_secs(180),
         }
     }
 }
@@ -284,10 +311,12 @@ fn parse_captain_workflow(yaml: &str, path: &Path) -> Result<CaptainWorkflow, Co
 }
 
 fn parse_scout_workflow(yaml: &str, path: &Path) -> Result<ScoutWorkflow, ConfigError> {
-    serde_yaml::from_str(yaml).map_err(|e| ConfigError::YamlParse {
-        path: path.to_path_buf(),
-        source: e,
-    })
+    let override_file: ScoutWorkflowOverride =
+        serde_yaml::from_str(yaml).map_err(|e| ConfigError::YamlParse {
+            path: path.to_path_buf(),
+            source: e,
+        })?;
+    Ok(override_file.into_workflow())
 }
 
 // Filesystem-backed load_captain_workflow and try_load_captain_workflow live in
@@ -393,6 +422,48 @@ mod tests {
     }
 
     #[test]
+    fn scout_override_can_omit_injected_fields() {
+        let mut config = crate::config::Config::default();
+        config.scout.interests.high = vec!["Config interest".into()];
+        config.scout.user_context.role = "Config role".into();
+
+        let wf = parse_scout_workflow_or_default(
+            Some(
+                r#"
+models:
+  process: "default"
+  article: "default"
+  research: "default"
+  qa: "default"
+  act: "default"
+agent:
+  process_timeout_s: 240
+  article_timeout_s: 600
+  research_timeout_s: 1800
+  qa_timeout_s: 120
+  qa_ttl_s: 600
+  act_timeout_s: 60
+  research_max_items: 10
+  cc_max_retries: 2
+prompts:
+  process: "process"
+  synthesize: "synthesize"
+  qa: "qa"
+  research: "research"
+  act: "act"
+"#,
+            ),
+            Path::new("scout-workflow.yaml"),
+            &config,
+        )
+        .unwrap();
+
+        assert_eq!(wf.interests.high, vec!["Config interest"]);
+        assert_eq!(wf.user_context.role, "Config role");
+        assert!(wf.repos.is_empty());
+    }
+
+    #[test]
     fn render_worker_initial_prompt() {
         let wf = CaptainWorkflow::compiled_default();
         let mut vars: FxHashMap<&str, &str> = FxHashMap::default();
@@ -447,7 +518,7 @@ mod tests {
     }
 
     #[test]
-    fn render_captain_merge_prompt_for_blocking_ci() {
+    fn render_captain_merge_prompt_skips_ci_wait() {
         let wf = CaptainWorkflow::compiled_default();
         let mut vars: FxHashMap<&str, &str> = FxHashMap::default();
         vars.insert("pr_url", "https://github.com/tribedotrun/mando/pull/334");
@@ -457,16 +528,13 @@ mod tests {
 
         let rendered = render_prompt("captain_merge", &wf.prompts, &vars).unwrap();
 
-        assert!(rendered.contains("gh pr checks 334 --repo tribedotrun/mando --required"));
-        assert!(rendered.contains("--required --watch --fail-fast"));
-        assert!(rendered.contains("15 minutes"));
+        assert!(rendered.contains("CI is informational only"));
         assert!(rendered.contains("gh pr merge 334 --repo tribedotrun/mando --squash"));
         assert!(rendered.contains("gh pr merge 334 --repo tribedotrun/mando --squash --admin"));
-        assert!(rendered.contains("Do not use `/ci`"));
 
-        assert!(!rendered.contains("Read `.github/workflows/` to understand how CI is triggered"));
-        assert!(!rendered.contains("Take the appropriate action to trigger CI"));
-        assert!(!rendered.contains("every 30 seconds"));
+        assert!(!rendered.contains("--required --watch --fail-fast"));
+        assert!(!rendered.contains("15 minutes"));
+        assert!(!rendered.contains("Do not use `/ci`"));
     }
 
     #[test]

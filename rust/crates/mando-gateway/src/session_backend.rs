@@ -1,6 +1,98 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+fn wrap_session_result(
+    result: global_claude::CcResult<serde_json::Value>,
+) -> sessions::SessionAiResult {
+    sessions::SessionAiResult {
+        text: result.text,
+        structured: result
+            .structured
+            .map(sessions::SessionStructuredOutput::from),
+        session_id: result.session_id,
+        cost_usd: result.cost_usd,
+        duration_ms: result.duration_ms,
+        duration_api_ms: result.duration_api_ms,
+        num_turns: result.num_turns,
+        errors: result.errors,
+        envelope: result.envelope,
+        stream_path: result.stream_path,
+        rate_limit: result.rate_limit,
+        pid: result.pid,
+        credential_id: result.credential_id,
+    }
+}
+
+fn session_status(status: &str) -> anyhow::Result<api_types::SessionStatus> {
+    match status {
+        "running" => Ok(api_types::SessionStatus::Running),
+        "stopped" => Ok(api_types::SessionStatus::Stopped),
+        "failed" => Ok(api_types::SessionStatus::Failed),
+        other => Err(anyhow::anyhow!("unknown session status: {other}")),
+    }
+}
+
+fn session_category(group: sessions::CallerGroup) -> api_types::SessionCategory {
+    match group {
+        sessions::CallerGroup::Workers => api_types::SessionCategory::Workers,
+        sessions::CallerGroup::Clarifier => api_types::SessionCategory::Clarifier,
+        sessions::CallerGroup::CaptainReview => api_types::SessionCategory::CaptainReview,
+        sessions::CallerGroup::CaptainOps => api_types::SessionCategory::CaptainOps,
+        sessions::CallerGroup::Advisor => api_types::SessionCategory::Advisor,
+        sessions::CallerGroup::Planning => api_types::SessionCategory::Planning,
+        sessions::CallerGroup::TodoParser => api_types::SessionCategory::TodoParser,
+        sessions::CallerGroup::Scout => api_types::SessionCategory::Scout,
+        sessions::CallerGroup::Rebase => api_types::SessionCategory::Rebase,
+    }
+}
+
+fn session_entry_from_row(
+    entry: sessions::queries::SessionRow,
+    task_titles: &std::collections::HashMap<i64, String>,
+    scout_titles: &std::collections::HashMap<i64, String>,
+    cred_labels: &std::collections::HashMap<i64, String>,
+) -> anyhow::Result<api_types::SessionEntry> {
+    let category = entry.group().map(session_category);
+    let task_title = entry
+        .task_id
+        .and_then(|task_id| task_titles.get(&task_id).cloned());
+    let scout_item_title = entry
+        .scout_item_id
+        .and_then(|scout_id| scout_titles.get(&scout_id).cloned());
+    let credential_label = entry
+        .credential_id
+        .and_then(|credential_id| cred_labels.get(&credential_id).cloned());
+
+    Ok(api_types::SessionEntry {
+        session_id: entry.session_id,
+        created_at: entry.created_at,
+        cwd: entry.cwd,
+        model: entry.model,
+        caller: entry.caller,
+        resumed: entry.resumed != 0,
+        cost_usd: entry.cost_usd,
+        duration_ms: entry.duration_ms,
+        turn_count: Some(entry.turn_count),
+        scout_item_id: entry.scout_item_id,
+        task_id: entry.task_id.map(|id| id.to_string()),
+        worker_name: entry.worker_name,
+        resumed_at: entry.resumed_at,
+        status: session_status(&entry.status)?,
+        task_title,
+        scout_item_title,
+        github_repo: None,
+        pr_number: None,
+        worktree: None,
+        branch: None,
+        resume_cwd: None,
+        category,
+        credential_id: entry.credential_id,
+        credential_label,
+        error: entry.error,
+        api_error_status: entry.api_error_status,
+    })
+}
+
 pub fn build_sessions_runtime(
     state_dir: PathBuf,
     default_model: &str,
@@ -63,6 +155,7 @@ pub fn build_sessions_runtime(
                                 request.max_turns,
                             )
                             .await
+                            .map(wrap_session_result)
                     })
                 })
             },
@@ -81,6 +174,7 @@ pub fn build_sessions_runtime(
                                 request.call_timeout,
                             )
                             .await
+                            .map(wrap_session_result)
                     })
                 })
             },
@@ -91,6 +185,7 @@ pub fn build_sessions_runtime(
                         manager
                             .follow_up(&request.key, &request.message, &request.cwd)
                             .await
+                            .map(wrap_session_result)
                     })
                 })
             },
@@ -139,37 +234,14 @@ pub fn build_sessions_runtime(
                         let sessions = entries
                             .into_iter()
                             .map(|entry| {
-                                let mut value =
-                                    serde_json::to_value(&entry).unwrap_or(serde_json::Value::Null);
-                                if let serde_json::Value::Object(ref mut map) = value {
-                                    if let Some(task_id) = entry.task_id {
-                                        if let Some(title) = task_titles.get(&task_id) {
-                                            map.insert(
-                                                "task_title".into(),
-                                                serde_json::Value::String(title.clone()),
-                                            );
-                                        }
-                                    }
-                                    if let Some(scout_id) = entry.scout_item_id {
-                                        if let Some(title) = scout_titles.get(&scout_id) {
-                                            map.insert(
-                                                "scout_item_title".into(),
-                                                serde_json::Value::String(title.clone()),
-                                            );
-                                        }
-                                    }
-                                    if let Some(credential_id) = entry.credential_id {
-                                        if let Some(label) = cred_labels.get(&credential_id) {
-                                            map.insert(
-                                                "credential_label".into(),
-                                                serde_json::Value::String(label.clone()),
-                                            );
-                                        }
-                                    }
-                                }
-                                value
+                                session_entry_from_row(
+                                    entry,
+                                    &task_titles,
+                                    &scout_titles,
+                                    &cred_labels,
+                                )
                             })
-                            .collect();
+                            .collect::<anyhow::Result<Vec<_>>>()?;
 
                         let total_pages = if total == 0 {
                             1
@@ -199,13 +271,12 @@ pub fn build_sessions_runtime(
                     )
                 })
             },
-            transcript_markdown: {
+            session_jsonl_path: {
                 let pool = query_pool.clone();
                 Arc::new(move |session_id: String| {
                     let pool = pool.clone();
                     Box::pin(async move {
-                        sessions::transcript_access::load_transcript_markdown(&pool, &session_id)
-                            .await
+                        sessions::transcript_access::load_jsonl_path(&pool, &session_id).await
                     })
                 })
             },
@@ -229,6 +300,15 @@ pub fn build_sessions_runtime(
                     sessions::transcript_access::load_session_stream(&session_id, types).await
                 })
             }),
+            events_snapshot: {
+                let pool = query_pool.clone();
+                Arc::new(move |session_id: String| {
+                    let pool = pool.clone();
+                    Box::pin(async move {
+                        sessions::transcript_access::load_events_snapshot(&pool, &session_id).await
+                    })
+                })
+            },
         },
     ))
 }

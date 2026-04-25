@@ -7,10 +7,10 @@ use std::path::{Path, PathBuf};
 
 use crate::{Task, TimelineEventPayload};
 use anyhow::{Context, Result};
-use global_claude::{codex_exec, CcConfig, CcOneShot};
+use global_claude::{codex_exec, CcConfig};
 use rustc_hash::FxHashMap;
-use settings::config::settings::Config;
-use settings::config::workflow::CaptainWorkflow;
+use settings::CaptainWorkflow;
+use settings::Config;
 
 pub struct PlanningResult {
     pub diagram: String,
@@ -30,16 +30,18 @@ pub(crate) async fn run_planning_pipeline(
     pool: &sqlx::SqlitePool,
 ) -> Result<PlanningResult> {
     let cwd = resolve_planning_cwd(item, config)?;
-    let credential = super::tick_spawn::pick_credential(pool, None).await;
     let pcfg = &workflow.planning;
 
     // Step 1: Planner -- reads task context + codebase, produces draft plan.
+    // Each sub-step picks its own credential via `cc_failover` so a single
+    // exhausted credential mid-pipeline fails over to a healthy one
+    // instead of aborting the whole plan.
     tracing::info!(
         module = "planning",
         task_id = item.id,
         "starting planner step"
     );
-    let mut current_plan = run_planner_step(item, workflow, &cwd, &credential, pool).await?;
+    let mut current_plan = run_planner_step(item, workflow, &cwd, pool).await?;
 
     // Step 2: Feedback rounds.
     let rounds = pcfg.feedback_rounds as usize;
@@ -50,16 +52,8 @@ pub(crate) async fn run_planning_pipeline(
             round,
             "starting feedback round"
         );
-        let (cc_feedback, codex_feedback) = run_feedback_round(
-            round,
-            &current_plan,
-            item,
-            workflow,
-            &cwd,
-            &credential,
-            pool,
-        )
-        .await?;
+        let (cc_feedback, codex_feedback) =
+            run_feedback_round(round, &current_plan, item, workflow, &cwd, pool).await?;
 
         // Emit progress timeline event.
         global_infra::best_effort!(
@@ -85,21 +79,19 @@ pub(crate) async fn run_planning_pipeline(
             item,
             workflow,
             &cwd,
-            &credential,
             pool,
         )
         .await?;
     }
 
     // Step 3: Final synthesis -- produce diagram + concise plan.
-    let result =
-        run_final_synthesis(&current_plan, item, workflow, &cwd, &credential, pool).await?;
+    let result = run_final_synthesis(&current_plan, item, workflow, &cwd, pool).await?;
 
     Ok(result)
 }
 
 pub(crate) fn resolve_planning_cwd(item: &Task, config: &Config) -> Result<PathBuf> {
-    match settings::config::resolve_project_config(Some(&item.project), config) {
+    match settings::resolve_project_config(Some(&item.project), config) {
         Some((_key, proj)) => Ok(global_infra::paths::expand_tilde(&proj.path)),
         None => Err(anyhow::anyhow!(
             "cannot resolve project {:?} for planning pipeline",
@@ -108,13 +100,10 @@ pub(crate) fn resolve_planning_cwd(item: &Task, config: &Config) -> Result<PathB
     }
 }
 
-type Credential = Option<(i64, String)>;
-
 async fn run_planner_step(
     item: &Task,
     workflow: &CaptainWorkflow,
     cwd: &Path,
-    credential: &Credential,
     pool: &sqlx::SqlitePool,
 ) -> Result<String> {
     let mut vars = FxHashMap::default();
@@ -123,21 +112,35 @@ async fn run_planner_step(
     vars.insert("context", context);
     vars.insert("project", item.project.as_str());
 
-    let prompt = settings::config::render_prompt("planning_initial", &workflow.prompts, &vars)
+    let prompt = settings::render_prompt("planning_initial", &workflow.prompts, &vars)
         .map_err(|e| anyhow::anyhow!("failed to render planning_initial prompt: {e}"))?;
 
-    let builder = CcConfig::builder()
-        .model(&workflow.models.captain)
-        .timeout(workflow.planning.cc_timeout_s)
-        .caller("planning-planner")
-        .task_id(item.id.to_string())
-        .cwd(cwd)
-        .allowed_tools(vec!["Read".into(), "Glob".into(), "Grep".into()])
-        .max_turns(workflow.planning.planner_max_turns);
-
-    let builder = global_claude::with_credential(builder, credential);
-    let result =
-        CcOneShot::run_with_retry(&prompt, builder.build(), workflow.agent.cc_max_retries).await?;
+    let task_id = item.id.to_string();
+    let task_id_ref = task_id.as_str();
+    let model = workflow.models.captain.as_str();
+    let timeout = workflow.planning.cc_timeout_s;
+    let max_turns = workflow.planning.planner_max_turns;
+    let result = settings::cc_failover::run_with_credential_failover(
+        pool,
+        "planning-planner",
+        &prompt,
+        |ctx| {
+            let mut builder = CcConfig::builder()
+                .model(model)
+                .timeout(timeout)
+                .caller("planning-planner")
+                .task_id(task_id_ref)
+                .cwd(cwd.to_path_buf())
+                .allowed_tools(vec!["Read".into(), "Glob".into(), "Grep".into()])
+                .max_turns(max_turns);
+            builder = global_claude::with_credential(builder, &ctx.credential);
+            if let Some(rid) = &ctx.resume_session_id {
+                builder = builder.resume(rid);
+            }
+            builder.build()
+        },
+    )
+    .await?;
 
     log_planning_session(&result, cwd, "planning-planner", item.id, pool).await;
     Ok(result.text)
@@ -150,10 +153,9 @@ async fn run_feedback_round(
     item: &Task,
     workflow: &CaptainWorkflow,
     cwd: &Path,
-    credential: &Credential,
     pool: &sqlx::SqlitePool,
 ) -> Result<(String, String)> {
-    let cc_future = run_cc_feedback(round, current_plan, item, workflow, cwd, credential, pool);
+    let cc_future = run_cc_feedback(round, current_plan, item, workflow, cwd, pool);
     let codex_future = run_codex_feedback(round, current_plan, item, workflow, cwd);
 
     let (cc_result, codex_result) = tokio::join!(cc_future, codex_future);
@@ -179,7 +181,6 @@ async fn run_cc_feedback(
     item: &Task,
     workflow: &CaptainWorkflow,
     cwd: &Path,
-    credential: &Credential,
     pool: &sqlx::SqlitePool,
 ) -> Result<String> {
     let round_str = round.to_string();
@@ -189,22 +190,33 @@ async fn run_cc_feedback(
     vars.insert("round", round_str.as_str());
     vars.insert("project", item.project.as_str());
 
-    let prompt = settings::config::render_prompt("planning_cc_feedback", &workflow.prompts, &vars)
+    let prompt = settings::render_prompt("planning_cc_feedback", &workflow.prompts, &vars)
         .map_err(|e| anyhow::anyhow!("failed to render planning_cc_feedback prompt: {e}"))?;
 
     let caller = format!("planning-cc-r{round}");
-    let builder = CcConfig::builder()
-        .model(&workflow.models.captain)
-        .timeout(workflow.planning.cc_timeout_s)
-        .caller(&caller)
-        .task_id(item.id.to_string())
-        .cwd(cwd)
-        .allowed_tools(vec!["Read".into(), "Glob".into(), "Grep".into()])
-        .max_turns(workflow.planning.feedback_max_turns);
-
-    let builder = global_claude::with_credential(builder, credential);
+    let task_id = item.id.to_string();
+    let task_id_ref = task_id.as_str();
+    let caller_ref = caller.as_str();
+    let model = workflow.models.captain.as_str();
+    let timeout = workflow.planning.cc_timeout_s;
+    let max_turns = workflow.planning.feedback_max_turns;
     let result =
-        CcOneShot::run_with_retry(&prompt, builder.build(), workflow.agent.cc_max_retries).await?;
+        settings::cc_failover::run_with_credential_failover(pool, caller_ref, &prompt, |ctx| {
+            let mut builder = CcConfig::builder()
+                .model(model)
+                .timeout(timeout)
+                .caller(caller_ref)
+                .task_id(task_id_ref)
+                .cwd(cwd.to_path_buf())
+                .allowed_tools(vec!["Read".into(), "Glob".into(), "Grep".into()])
+                .max_turns(max_turns);
+            builder = global_claude::with_credential(builder, &ctx.credential);
+            if let Some(rid) = &ctx.resume_session_id {
+                builder = builder.resume(rid);
+            }
+            builder.build()
+        })
+        .await?;
 
     log_planning_session(&result, cwd, &caller, item.id, pool).await;
     Ok(result.text)
@@ -224,9 +236,8 @@ async fn run_codex_feedback(
     vars.insert("round", round_str.as_str());
     vars.insert("project", item.project.as_str());
 
-    let prompt =
-        settings::config::render_prompt("planning_codex_feedback", &workflow.prompts, &vars)
-            .map_err(|e| anyhow::anyhow!("failed to render planning_codex_feedback prompt: {e}"))?;
+    let prompt = settings::render_prompt("planning_codex_feedback", &workflow.prompts, &vars)
+        .map_err(|e| anyhow::anyhow!("failed to render planning_codex_feedback prompt: {e}"))?;
 
     let result = codex_exec(&prompt, cwd, workflow.planning.codex_timeout_s).await?;
     Ok(result.text)
@@ -241,7 +252,6 @@ async fn run_synthesizer(
     item: &Task,
     workflow: &CaptainWorkflow,
     cwd: &Path,
-    credential: &Credential,
     pool: &sqlx::SqlitePool,
 ) -> Result<String> {
     let round_str = round.to_string();
@@ -252,23 +262,33 @@ async fn run_synthesizer(
     vars.insert("codex_feedback", codex_feedback);
     vars.insert("round", round_str.as_str());
 
-    let prompt =
-        settings::config::render_prompt("planning_synthesize", &workflow.prompts, &vars)
-            .map_err(|e| anyhow::anyhow!("failed to render planning_synthesize prompt: {e}"))?;
+    let prompt = settings::render_prompt("planning_synthesize", &workflow.prompts, &vars)
+        .map_err(|e| anyhow::anyhow!("failed to render planning_synthesize prompt: {e}"))?;
 
     let caller = format!("planning-synth-r{round}");
-    let builder = CcConfig::builder()
-        .model(&workflow.models.captain)
-        .timeout(workflow.planning.cc_timeout_s)
-        .caller(&caller)
-        .task_id(item.id.to_string())
-        .cwd(cwd)
-        .allowed_tools(vec!["Read".into(), "Glob".into(), "Grep".into()])
-        .max_turns(workflow.planning.synthesizer_max_turns);
-
-    let builder = global_claude::with_credential(builder, credential);
+    let task_id = item.id.to_string();
+    let task_id_ref = task_id.as_str();
+    let caller_ref = caller.as_str();
+    let model = workflow.models.captain.as_str();
+    let timeout = workflow.planning.cc_timeout_s;
+    let max_turns = workflow.planning.synthesizer_max_turns;
     let result =
-        CcOneShot::run_with_retry(&prompt, builder.build(), workflow.agent.cc_max_retries).await?;
+        settings::cc_failover::run_with_credential_failover(pool, caller_ref, &prompt, |ctx| {
+            let mut builder = CcConfig::builder()
+                .model(model)
+                .timeout(timeout)
+                .caller(caller_ref)
+                .task_id(task_id_ref)
+                .cwd(cwd.to_path_buf())
+                .allowed_tools(vec!["Read".into(), "Glob".into(), "Grep".into()])
+                .max_turns(max_turns);
+            builder = global_claude::with_credential(builder, &ctx.credential);
+            if let Some(rid) = &ctx.resume_session_id {
+                builder = builder.resume(rid);
+            }
+            builder.build()
+        })
+        .await?;
 
     log_planning_session(&result, cwd, &caller, item.id, pool).await;
     Ok(result.text)
@@ -279,14 +299,13 @@ async fn run_final_synthesis(
     item: &Task,
     workflow: &CaptainWorkflow,
     cwd: &Path,
-    credential: &Credential,
     pool: &sqlx::SqlitePool,
 ) -> Result<PlanningResult> {
     let mut vars = FxHashMap::default();
     vars.insert("title", item.title.as_str());
     vars.insert("plan", current_plan);
 
-    let prompt = settings::config::render_prompt("planning_final", &workflow.prompts, &vars)
+    let prompt = settings::render_prompt("planning_final", &workflow.prompts, &vars)
         .map_err(|e| anyhow::anyhow!("failed to render planning_final prompt: {e}"))?;
 
     let schema = serde_json::json!({
@@ -305,19 +324,33 @@ async fn run_final_synthesis(
         "additionalProperties": false
     });
 
-    let builder = CcConfig::builder()
-        .model(&workflow.models.captain)
-        .timeout(workflow.planning.cc_timeout_s)
-        .caller("planning-final")
-        .task_id(item.id.to_string())
-        .cwd(cwd)
-        .allowed_tools(vec!["Read".into(), "Glob".into(), "Grep".into()])
-        .json_schema(schema)
-        .max_turns(workflow.planning.final_max_turns);
-
-    let builder = global_claude::with_credential(builder, credential);
-    let result =
-        CcOneShot::run_with_retry(&prompt, builder.build(), workflow.agent.cc_max_retries).await?;
+    let task_id = item.id.to_string();
+    let task_id_ref = task_id.as_str();
+    let model = workflow.models.captain.as_str();
+    let timeout = workflow.planning.cc_timeout_s;
+    let max_turns = workflow.planning.final_max_turns;
+    let result = settings::cc_failover::run_with_credential_failover(
+        pool,
+        "planning-final",
+        &prompt,
+        |ctx| {
+            let mut builder = CcConfig::builder()
+                .model(model)
+                .timeout(timeout)
+                .caller("planning-final")
+                .task_id(task_id_ref)
+                .cwd(cwd.to_path_buf())
+                .allowed_tools(vec!["Read".into(), "Glob".into(), "Grep".into()])
+                .json_schema(schema.clone())
+                .max_turns(max_turns);
+            builder = global_claude::with_credential(builder, &ctx.credential);
+            if let Some(rid) = &ctx.resume_session_id {
+                builder = builder.resume(rid);
+            }
+            builder.build()
+        },
+    )
+    .await?;
 
     log_planning_session(&result, cwd, "planning-final", item.id, pool).await;
 

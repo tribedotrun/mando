@@ -12,6 +12,7 @@ const RESULT_HELPERS_ALLOWLIST = /shared\/result\//;
 // IPC handlers, lifecycle, codegen). Each will migrate as the plan progresses.
 const THROW_ALLOWED_FILES = [
   /\/renderer\/global\/providers\/http\.ts$/,
+  /\/renderer\/global\/providers\/httpRoutes\.ts$/,
   /\/main\/global\/runtime\/lifecycle\.ts$/,
   /\/main\/global\/runtime\/ipcSecurity\.ts$/,
   /\/main\/global\/runtime\/launchd\.ts$/,

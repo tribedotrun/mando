@@ -3,6 +3,21 @@
 //! Ensures all required prompt/nudge keys exist at gateway startup.
 
 use super::workflow::{AgentConfig, CaptainWorkflow, ScoutWorkflow};
+use global_claude::CcStreamSymptom;
+
+/// Every `CcStreamSymptom` variant the compiled binary routes on. A user
+/// workflow override must declare a rule for each variant — missing a variant
+/// would silently disable broken-session detection for that failure mode.
+/// Keep this list in sync with the enum.
+const REQUIRED_STREAM_SYMPTOMS: &[CcStreamSymptom] = &[
+    CcStreamSymptom::ImageDimensionLimit,
+    CcStreamSymptom::StreamIdleTimeout,
+    CcStreamSymptom::RateLimitAborted,
+    CcStreamSymptom::IsError,
+    CcStreamSymptom::ContextLengthExceeded,
+    CcStreamSymptom::NoConversationFound,
+    CcStreamSymptom::SessionInterrupted,
+];
 
 /// Required prompt keys for captain workflow.
 const REQUIRED_CAPTAIN_PROMPTS: &[&str] = &[
@@ -72,11 +87,30 @@ pub fn validate_captain_workflow(wf: &CaptainWorkflow) {
         &wf.initial_prompts,
         &mut errors,
     );
+    validate_stream_symptoms(&wf.stream_symptoms, &mut errors);
     if !errors.is_empty() {
         global_infra::unrecoverable!(format!(
             "captain workflow missing required template keys: {}",
             errors.join(", ")
         ));
+    }
+}
+
+/// Reject a workflow whose `stream_symptoms` omits any variant the binary
+/// routes on. A missing rule would silently disable broken-session detection
+/// for that failure mode — the exact regression a user override could
+/// introduce by copying an older captain-workflow.yaml.
+fn validate_stream_symptoms(rules: &[global_claude::StreamSymptomRule], errors: &mut Vec<String>) {
+    if rules.is_empty() {
+        errors.push(
+            "stream_symptoms: missing or empty — broken-session detection would be disabled".into(),
+        );
+        return;
+    }
+    for required in REQUIRED_STREAM_SYMPTOMS {
+        if !rules.iter().any(|r| r.name == *required) {
+            errors.push(format!("stream_symptoms: missing rule for {:?}", required));
+        }
     }
 }
 
@@ -232,5 +266,42 @@ mod tests {
         let msg = err.downcast_ref::<String>().unwrap();
         assert!(msg.contains("max_concurrent"));
         assert!(msg.contains("max_interventions"));
+    }
+
+    #[test]
+    fn validate_stream_symptoms_rejects_empty_list() {
+        let mut errors = Vec::new();
+        validate_stream_symptoms(&[], &mut errors);
+        assert_eq!(errors.len(), 1);
+        assert!(errors[0].contains("missing or empty"), "got: {:?}", errors);
+    }
+
+    #[test]
+    fn validate_stream_symptoms_accepts_compiled_default() {
+        let wf = CaptainWorkflow::compiled_default();
+        let mut errors = Vec::new();
+        validate_stream_symptoms(&wf.stream_symptoms, &mut errors);
+        assert!(errors.is_empty(), "compiled default failed: {:?}", errors);
+    }
+
+    #[test]
+    fn validate_stream_symptoms_reports_each_missing_variant() {
+        // Strip a couple of variants and confirm both are named in the
+        // error list — users who copy-paste an older yaml need to know
+        // exactly which rules to restore.
+        let wf = CaptainWorkflow::compiled_default();
+        let kept: Vec<_> = wf
+            .stream_symptoms
+            .into_iter()
+            .filter(|r| {
+                r.name != CcStreamSymptom::SessionInterrupted
+                    && r.name != CcStreamSymptom::NoConversationFound
+            })
+            .collect();
+        let mut errors = Vec::new();
+        validate_stream_symptoms(&kept, &mut errors);
+        let joined = errors.join(" | ");
+        assert!(joined.contains("SessionInterrupted"), "got: {joined}");
+        assert!(joined.contains("NoConversationFound"), "got: {joined}");
     }
 }

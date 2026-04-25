@@ -3,9 +3,10 @@ import { FileText } from 'lucide-react';
 import type { ScoutItem } from '#renderer/global/types';
 import { useScoutStatusUpdate } from '#renderer/domains/scout/runtime/hooks';
 import { scoutCommandForStatus } from '#renderer/domains/scout/runtime/useScoutPage';
+import type { ScoutUserSettableStatus } from '#renderer/domains/scout/service/researchHelpers';
 import { useScrollIntoViewRef } from '#renderer/global/runtime/useScrollIntoViewRef';
-import { EmptyState } from '#renderer/global/ui/EmptyState';
-import { Table, TableBody } from '#renderer/global/ui/table';
+import { EmptyState } from '#renderer/domains/scout/ui/EmptyState';
+import { Table, TableBody } from '#renderer/global/ui/primitives/table';
 import { ScoutTableRow } from '#renderer/domains/scout/ui/ScoutTableRow';
 
 export interface ScoutTableCallbacks {
@@ -39,7 +40,7 @@ export function ScoutTable({
     setExpandedId((prev) => (prev === id ? null : id));
   }, []);
 
-  const handleStatusChange = (id: number, status: string) => {
+  const handleStatusChange = (id: number, status: ScoutUserSettableStatus) => {
     statusMut.mutate(
       { id, command: scoutCommandForStatus(status) },
       {

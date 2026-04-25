@@ -5,7 +5,7 @@ use axum::http::StatusCode;
 
 use crate::image_upload::{
     cleanup_saved_images, field_id, field_text, into_multipart, is_multipart, save_image_field,
-    ClarifyQA, ClarifyWithImages, NudgeWithImages, ScoutAskWithImages,
+    unexpected_multipart_field, ClarifyQA, ClarifyWithImages, NudgeWithImages, ScoutAskWithImages,
 };
 use crate::response::{error_response, ApiError};
 
@@ -33,7 +33,6 @@ async fn extract_scout_ask_json(
     struct Body {
         id: i64,
         question: String,
-        #[serde(default)]
         session_id: Option<String>,
     }
     let b: Body = serde_json::from_slice(&body)
@@ -97,7 +96,8 @@ async fn extract_scout_ask_fields(
         .await
         .map_err(|e| error_response(StatusCode::BAD_REQUEST, &format!("multipart error: {e}")))?
     {
-        match field.name().unwrap_or("") {
+        let field_name = field.name().map(str::to_owned);
+        match field_name.as_deref().unwrap_or("") {
             "id" => *id = Some(field_id(field).await?),
             "question" => *question = field_text(field).await?,
             "session_id" => {
@@ -107,7 +107,7 @@ async fn extract_scout_ask_fields(
                 }
             }
             "images" => saved.push(save_image_field(field).await?),
-            _ => {}
+            _ => return Err(unexpected_multipart_field(field_name.as_deref())),
         }
     }
     Ok(())
@@ -186,11 +186,12 @@ async fn extract_nudge_fields(
         .await
         .map_err(|e| error_response(StatusCode::BAD_REQUEST, &format!("multipart error: {e}")))?
     {
-        match field.name().unwrap_or("") {
+        let field_name = field.name().map(str::to_owned);
+        match field_name.as_deref().unwrap_or("") {
             "item_id" => *item_id = field_text(field).await?,
             "message" => *message = field_text(field).await?,
             "images" => saved.push(save_image_field(field).await?),
-            _ => {}
+            _ => return Err(unexpected_multipart_field(field_name.as_deref())),
         }
     }
     Ok(())
@@ -218,9 +219,7 @@ async fn extract_clarify_json(
 
     #[derive(serde::Deserialize)]
     struct Body {
-        #[serde(default)]
         answers: Option<Vec<ClarifyQA>>,
-        #[serde(default)]
         answer: Option<String>,
     }
     let b: Body = serde_json::from_slice(&body)
@@ -264,7 +263,8 @@ async fn extract_clarify_fields(
         .await
         .map_err(|e| error_response(StatusCode::BAD_REQUEST, &format!("multipart error: {e}")))?
     {
-        match field.name().unwrap_or("") {
+        let field_name = field.name().map(str::to_owned);
+        match field_name.as_deref().unwrap_or("") {
             "answers" => {
                 let text = field_text(field).await?;
                 let parsed: Vec<ClarifyQA> = serde_json::from_str(&text)
@@ -278,7 +278,7 @@ async fn extract_clarify_fields(
                 }
             }
             "images" => saved.push(save_image_field(field).await?),
-            _ => {}
+            _ => return Err(unexpected_multipart_field(field_name.as_deref())),
         }
     }
     Ok(())

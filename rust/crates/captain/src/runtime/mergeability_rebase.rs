@@ -7,55 +7,12 @@ use crate::service::merge_logic;
 
 pub(super) use super::rebase_spawn::handle_conflict;
 
-pub(super) enum MergeStatus {
-    Merged,
-    Closed,
-    Mergeable,
-    Conflicted,
-    Unknown,
-}
+pub(super) use global_github::MergeableStatus as MergeStatus;
 
-/// Check PR mergeable status via `gh pr view`.
+/// Check PR mergeable status via the GitHub provider boundary.
 #[tracing::instrument(skip_all)]
 pub(super) async fn check_pr_mergeable(pr: &str, repo: &str) -> Result<MergeStatus> {
-    let pr_num = pr.trim_start_matches('#');
-    let mut cmd = tokio::process::Command::new("gh");
-    cmd.args([
-        "pr",
-        "view",
-        pr_num,
-        "--json",
-        "state,mergeable,mergeStateStatus",
-    ]);
-    if !repo.is_empty() {
-        cmd.args(["--repo", repo]);
-    }
-
-    let output = cmd.output().await?;
-    if !output.status.success() {
-        anyhow::bail!(
-            "gh pr view failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
-
-    let json: serde_json::Value = serde_json::from_slice(&output.stdout)?;
-    let state = json["state"].as_str().ok_or_else(|| {
-        anyhow::anyhow!("gh pr view response missing `state` field for PR {pr} in {repo}")
-    })?;
-    let mergeable = json["mergeable"].as_str().ok_or_else(|| {
-        anyhow::anyhow!("gh pr view response missing `mergeable` field for PR {pr} in {repo}")
-    })?;
-
-    match state {
-        "MERGED" => Ok(MergeStatus::Merged),
-        "CLOSED" => Ok(MergeStatus::Closed),
-        _ => match mergeable {
-            "MERGEABLE" => Ok(MergeStatus::Mergeable),
-            "CONFLICTING" => Ok(MergeStatus::Conflicted),
-            _ => Ok(MergeStatus::Unknown),
-        },
-    }
+    global_github::check_pr_mergeable(pr, repo).await
 }
 
 /// Reap dead rebase workers and detect success via SHA comparison.
@@ -78,7 +35,7 @@ pub(super) async fn reap_dead_rebase_workers(items: &mut [Task], pool: &sqlx::Sq
         let wt = item.worktree.as_deref().unwrap_or("");
         let succeeded = if !wt.is_empty() {
             let wt_path = global_infra::paths::expand_tilde(wt);
-            match crate::io::git::head_sha(&wt_path).await {
+            match global_git::head_sha_short(&wt_path).await {
                 Ok(current_sha) => {
                     merge_logic::did_rebase_succeed(item.rebase_head_sha.as_deref(), &current_sha)
                 }

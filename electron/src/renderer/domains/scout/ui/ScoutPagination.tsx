@@ -1,5 +1,5 @@
 import React from 'react';
-import { Button } from '#renderer/global/ui/button';
+import { Button } from '#renderer/global/ui/primitives/button';
 
 interface Props {
   page: number;

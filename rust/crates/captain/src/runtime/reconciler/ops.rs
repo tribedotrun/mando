@@ -1,5 +1,5 @@
 use anyhow::Result;
-use settings::config::settings::Config;
+use settings::Config;
 
 use crate::io::ops_log::{self, OpsLog};
 use crate::io::task_store::TaskStore;
@@ -37,53 +37,31 @@ pub(super) async fn reconcile_merge(
 
     tracing::info!(module = "reconciler", pr = %pr, item_id = %item_id, "resuming merge");
 
-    {
-        let output = tokio::process::Command::new("gh")
-            .args(["pr", "view", pr, "--json", "state", "--repo", repo])
-            .output()
-            .await;
-
-        match output {
-            Ok(output) => match serde_json::from_slice::<serde_json::Value>(&output.stdout) {
-                Ok(json) => match json["state"].as_str() {
-                    Some("MERGED") => {
-                        ops_log::mark_step(log, op_id, "squash_merge");
-                        ops_log::mark_step(log, op_id, "check_merged");
-                    }
-                    Some("OPEN") | Some("CLOSED") => {
-                        ops_log::mark_step(log, op_id, "check_merged");
-                    }
-                    other => {
-                        tracing::warn!(
-                            module = "reconciler",
-                            pr = %pr,
-                            state = ?other,
-                            "unexpected PR state from GitHub — will retry"
-                        );
-                        return Ok(());
-                    }
-                },
-                Err(e) => {
-                    let stderr = String::from_utf8_lossy(&output.stderr);
-                    tracing::warn!(
-                        module = "reconciler",
-                        pr = %pr,
-                        error = %e,
-                        stderr = %stderr,
-                        "gh pr view returned non-JSON — will retry"
-                    );
-                    return Ok(());
-                }
-            },
-            Err(e) => {
-                tracing::warn!(
-                    module = "reconciler",
-                    pr = %pr,
-                    error = %e,
-                    "gh pr view failed — will retry check_merged on next reconciliation"
-                );
-                return Ok(());
-            }
+    match global_github::pr_state(repo, pr).await {
+        Ok(global_github::PrState::Merged) => {
+            ops_log::mark_step(log, op_id, "squash_merge");
+            ops_log::mark_step(log, op_id, "check_merged");
+        }
+        Ok(global_github::PrState::Open | global_github::PrState::Closed) => {
+            ops_log::mark_step(log, op_id, "check_merged");
+        }
+        Ok(global_github::PrState::Unknown(state)) => {
+            tracing::warn!(
+                module = "reconciler",
+                pr = %pr,
+                state = %state,
+                "unexpected PR state from GitHub — will retry"
+            );
+            return Ok(());
+        }
+        Err(e) => {
+            tracing::warn!(
+                module = "reconciler",
+                pr = %pr,
+                error = %e,
+                "gh pr view failed — will retry check_merged on next reconciliation"
+            );
+            return Ok(());
         }
     }
 
@@ -193,9 +171,7 @@ pub(super) async fn reconcile_merge(
     }
 
     if !ops_log::is_step_done(log, op_id, "post_merge_hook") {
-        if let Some((_, project_config)) =
-            settings::config::resolve_project_config(Some(repo), config)
-        {
+        if let Some((_, project_config)) = settings::resolve_project_config(Some(repo), config) {
             let repo_path = global_infra::paths::expand_tilde(&project_config.path);
             let mut hook_env = std::collections::HashMap::new();
             let store = TaskStore::new(pool.clone());

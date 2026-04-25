@@ -40,10 +40,12 @@ pub enum ItemStatus {
     PlanReady,
     #[serde(rename = "canceled")]
     Canceled,
+    #[serde(rename = "stopped")]
+    Stopped,
 }
 
-/// All 16 item statuses.
-pub const ALL_STATUSES: [ItemStatus; 16] = [
+/// All 17 item statuses.
+pub const ALL_STATUSES: [ItemStatus; 17] = [
     ItemStatus::New,
     ItemStatus::Clarifying,
     ItemStatus::NeedsClarification,
@@ -60,6 +62,7 @@ pub const ALL_STATUSES: [ItemStatus; 16] = [
     ItemStatus::CompletedNoPr,
     ItemStatus::PlanReady,
     ItemStatus::Canceled,
+    ItemStatus::Stopped,
 ];
 
 /// Terminal statuses — no further work expected.
@@ -72,14 +75,15 @@ pub const FINALIZED: [ItemStatus; 3] = [
 /// Statuses from which an item can be reworked (same worktree, new branch + new worker)
 /// or reopened (resume existing session). Currently identical; separate names
 /// kept for semantic clarity in call sites.
-pub const ACTIONABLE_TERMINAL: [ItemStatus; 4] = [
+pub const ACTIONABLE_TERMINAL: [ItemStatus; 5] = [
     ItemStatus::AwaitingReview,
     ItemStatus::HandedOff,
     ItemStatus::Escalated,
     ItemStatus::Errored,
+    ItemStatus::Stopped,
 ];
-pub const REWORKABLE: [ItemStatus; 4] = ACTIONABLE_TERMINAL;
-pub const REOPENABLE: [ItemStatus; 4] = ACTIONABLE_TERMINAL;
+pub const REWORKABLE: [ItemStatus; 5] = ACTIONABLE_TERMINAL;
+pub const REOPENABLE: [ItemStatus; 5] = ACTIONABLE_TERMINAL;
 
 impl ItemStatus {
     #[must_use]
@@ -115,6 +119,7 @@ impl ItemStatus {
             Self::CompletedNoPr => "completed-no-pr",
             Self::PlanReady => "plan-ready",
             Self::Canceled => "canceled",
+            Self::Stopped => "stopped",
         }
     }
 }
@@ -122,6 +127,30 @@ impl ItemStatus {
 impl fmt::Display for ItemStatus {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.as_str())
+    }
+}
+
+impl From<ItemStatus> for api_types::ItemStatus {
+    fn from(status: ItemStatus) -> Self {
+        match status {
+            ItemStatus::New => Self::New,
+            ItemStatus::Clarifying => Self::Clarifying,
+            ItemStatus::NeedsClarification => Self::NeedsClarification,
+            ItemStatus::Queued => Self::Queued,
+            ItemStatus::InProgress => Self::InProgress,
+            ItemStatus::CaptainReviewing => Self::CaptainReviewing,
+            ItemStatus::CaptainMerging => Self::CaptainMerging,
+            ItemStatus::AwaitingReview => Self::AwaitingReview,
+            ItemStatus::Rework => Self::Rework,
+            ItemStatus::HandedOff => Self::HandedOff,
+            ItemStatus::Escalated => Self::Escalated,
+            ItemStatus::Errored => Self::Errored,
+            ItemStatus::Merged => Self::Merged,
+            ItemStatus::CompletedNoPr => Self::CompletedNoPr,
+            ItemStatus::PlanReady => Self::PlanReady,
+            ItemStatus::Canceled => Self::Canceled,
+            ItemStatus::Stopped => Self::Stopped,
+        }
     }
 }
 
@@ -146,6 +175,7 @@ impl FromStr for ItemStatus {
             "completed-no-pr" => Ok(Self::CompletedNoPr),
             "plan-ready" => Ok(Self::PlanReady),
             "canceled" => Ok(Self::Canceled),
+            "stopped" => Ok(Self::Stopped),
             _ => Err(format!("unknown status: {s}")),
         }
     }
@@ -169,6 +199,23 @@ pub enum ReviewTrigger {
     MergeFail,
     RepeatedNudge,
 }
+
+/// All 13 review triggers, in enum declaration order.
+pub const ALL_REVIEW_TRIGGERS: [ReviewTrigger; 13] = [
+    ReviewTrigger::GatesPass,
+    ReviewTrigger::Timeout,
+    ReviewTrigger::BrokenSession,
+    ReviewTrigger::BudgetExhausted,
+    ReviewTrigger::ClarifierFail,
+    ReviewTrigger::SpawnFail,
+    ReviewTrigger::RebaseFail,
+    ReviewTrigger::CiFailure,
+    ReviewTrigger::DegradedContext,
+    ReviewTrigger::Retry,
+    ReviewTrigger::CaptainDecision,
+    ReviewTrigger::MergeFail,
+    ReviewTrigger::RepeatedNudge,
+];
 
 impl ReviewTrigger {
     pub fn as_str(self) -> &'static str {

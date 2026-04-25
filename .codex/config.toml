@@ -7,3 +7,6 @@ project_doc_fallback_filenames = [
   "CLAUDE.md",
   "CLAUDE.local.md",
 ]
+
+[sandbox_workspace_write]
+network_access = true

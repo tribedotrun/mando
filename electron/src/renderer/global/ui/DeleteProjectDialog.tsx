@@ -1,7 +1,12 @@
 import React, { useState } from 'react';
-import { Dialog, DialogContent, DialogTitle, DialogDescription } from '#renderer/global/ui/dialog';
-import { Button } from '#renderer/global/ui/button';
-import { Checkbox } from '#renderer/global/ui/checkbox';
+import {
+  Dialog,
+  DialogContent,
+  DialogTitle,
+  DialogDescription,
+} from '#renderer/global/ui/primitives/dialog';
+import { Button } from '#renderer/global/ui/primitives/button';
+import { Checkbox } from '#renderer/global/ui/primitives/checkbox';
 import { toast } from 'sonner';
 import { useSidebar } from '#renderer/global/runtime/SidebarContext';
 
@@ -17,6 +22,19 @@ export function DeleteProjectDialog({ open, onOpenChange, name, count }: DeleteP
   const [confirmed, setConfirmed] = useState(false);
   const [pending, setPending] = useState(false);
   const dialogTitle = count > 0 ? 'Delete project and tasks?' : 'Remove project?';
+
+  const removeProject = async (): Promise<void> => {
+    setPending(true);
+    try {
+      await actions.removeProject(name);
+      onOpenChange(false);
+      setConfirmed(false);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to delete project');
+    } finally {
+      setPending(false);
+    }
+  };
 
   return (
     <Dialog
@@ -72,21 +90,7 @@ export function DeleteProjectDialog({ open, onOpenChange, name, count }: DeleteP
           <Button
             variant="destructive"
             size="sm"
-            onClick={() => {
-              setPending(true);
-              void actions
-                .removeProject(name)
-                .then(() => {
-                  onOpenChange(false);
-                  setConfirmed(false);
-                })
-                .catch((err) =>
-                  toast.error(err instanceof Error ? err.message : 'Failed to delete project'),
-                )
-                .finally(() => {
-                  setPending(false);
-                });
-            }}
+            onClick={() => void removeProject()}
             disabled={(count > 0 && !confirmed) || pending}
           >
             {pending

@@ -22,7 +22,7 @@ struct Args {
     foreground: bool,
 
     /// Dev mode — writes daemon-dev.port instead of daemon.port.
-    /// Forces all models to sonnet. Mutually exclusive with --sandbox.
+    /// Forces all models to haiku. Mutually exclusive with --sandbox.
     #[arg(long, conflicts_with = "sandbox")]
     dev: bool,
 
@@ -57,11 +57,20 @@ async fn main() {
     // and backtrace before Rust's default hook prints to stderr.
     global_infra::install_panic_hook();
 
+    // Install the Prometheus metrics recorder before any `metrics::counter!`
+    // macro fires (middleware or otherwise). Must happen once, before the
+    // HTTP router is built — the `/metrics` handler reads the resulting
+    // handle from a OnceLock.
+    if let Err(e) = transport_http::install_metrics_recorder() {
+        eprintln!("fatal: failed to install metrics recorder: {e:#}");
+        std::process::exit(1);
+    }
+
     let start_time = Instant::now();
 
     // Load config.
     let config = settings::config_fs::load_config(None).unwrap_or_else(|e| {
-        eprintln!("fatal: failed to load config: {e}");
+        eprintln!("fatal: failed to load config: {e:#}");
         std::process::exit(1);
     });
     // Inject env vars from config into process environment.
@@ -78,7 +87,7 @@ async fn main() {
     }
 
     // Sync bundled prod skills to ~/.claude/skills/mando-*.
-    settings::config::skills::sync_bundled_skills();
+    settings::sync_bundled_skills();
 
     // Refuse to start if reconciliation fails — booting with an unreconciled
     // WAL can silently duplicate or lose external work. Set MANDO_UNSAFE_START=1
@@ -100,7 +109,7 @@ async fn main() {
     )
     .await
     .unwrap_or_else(|e| {
-        eprintln!("fatal: bootstrap failed: {e}");
+        eprintln!("fatal: bootstrap failed: {e:#}");
         std::process::exit(1);
     });
     let mando_gateway::GatewayBootstrap { state, .. } = bootstrap;
@@ -118,7 +127,7 @@ async fn main() {
         .drain_pending_lifecycle_effects()
         .await
         .unwrap_or_else(|e| {
-            eprintln!("fatal: failed to drain lifecycle effects: {e}");
+            eprintln!("fatal: failed to drain lifecycle effects: {e:#}");
             std::process::exit(1);
         });
 

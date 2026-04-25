@@ -1,10 +1,8 @@
 import React, { useCallback } from 'react';
 import { useRouterState } from '@tanstack/react-router';
-import { useTaskActions } from '#renderer/domains/captain';
+import { CreateTaskModal, MergeModal, useTaskActions } from '#renderer/domains/captain/shell';
 import { useUIStore } from '#renderer/global/runtime/useUIStore';
 import { CommandPalette } from '#renderer/global/ui/CommandPalette';
-import { CreateTaskModal } from '#renderer/domains/captain/ui/AddTaskForm';
-import { MergeModal } from '#renderer/domains/captain/ui/MergeModal';
 import { ShortcutOverlay } from '#renderer/global/ui/ShortcutOverlay';
 
 interface Props {
@@ -25,7 +23,7 @@ export function RootShellOverlays({ onPaletteAction }: Props): React.ReactElemen
   const handleMergeConfirm = useCallback(
     (itemId: number, pr: number, project: string) => {
       useUIStore.getState().setMergeItem(null);
-      void actions.handleMerge(itemId, pr, project);
+      void actions.merge.handleMerge(itemId, pr, project);
     },
     [actions],
   );

@@ -9,12 +9,12 @@ import {
   ArrowRight,
 } from 'lucide-react';
 import { SidebarNavButton, SidebarUpdateButton } from '#renderer/app/SidebarControls';
-import { useSidebarData } from '#renderer/domains/captain';
+import { useSidebarData } from '#renderer/domains/captain/shell';
+import { SetupProgressButton } from '#renderer/domains/onboarding/shell';
 import { SidebarPinnedSection } from '#renderer/global/ui/SidebarPinnedSection';
 import { SidebarProjectsSection } from '#renderer/app/SidebarProjectsSection';
-import { SetupTrigger } from '#renderer/domains/onboarding/ui/SetupTrigger';
-import { Button } from '#renderer/global/ui/button';
-import { ScrollArea } from '#renderer/global/ui/scroll-area';
+import { Button } from '#renderer/global/ui/primitives/button';
+import { ScrollArea } from '#renderer/global/ui/primitives/scroll-area';
 import { type WorkbenchStatusFilter } from '#renderer/global/types';
 import { useSidebar, type Tab } from '#renderer/global/runtime/SidebarContext';
 
@@ -129,7 +129,7 @@ export function Sidebar(): React.ReactElement | null {
       </Button>
 
       {state.setupProgress && (
-        <SetupTrigger
+        <SetupProgressButton
           progress={state.setupProgress}
           active={state.setupActive}
           onToggle={actions.toggleSetup}

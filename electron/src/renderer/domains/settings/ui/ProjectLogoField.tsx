@@ -1,5 +1,5 @@
-import { Button } from '#renderer/global/ui/button';
-import { Label } from '#renderer/global/ui/label';
+import { Button } from '#renderer/global/ui/primitives/button';
+import { Label } from '#renderer/global/ui/primitives/label';
 import { projectLogoUrl } from '#renderer/domains/settings/runtime/useApi';
 
 interface ProjectLogoFieldProps {

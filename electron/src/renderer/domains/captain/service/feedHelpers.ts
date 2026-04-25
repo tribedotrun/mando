@@ -1,6 +1,6 @@
-import type { FeedItem, TimelineEvent } from '#renderer/global/types';
+import type { FeedItem, ItemStatus, TimelineEvent } from '#renderer/global/types';
 
-export const EVENT_ICON_MAP: Record<string, string> = {
+export const EVENT_ICON_MAP: Record<string, ItemStatus> = {
   created: 'queued',
   worker_spawned: 'in-progress',
   planning_spawned: 'in-progress',
@@ -49,7 +49,7 @@ export const EVENT_ICON_MAP: Record<string, string> = {
  *  high -> green check (merge-ready), low -> red x (forced ship), mid /
  *  absent -> default icon. Works for the captain verdict on awaiting_review
  *  (auto_merge_triage* variants carry no confidence on the current wire). */
-export function confidenceIconOverride(event: TimelineEvent): string | null {
+export function confidenceIconOverride(event: TimelineEvent): ItemStatus | null {
   if (event.data.event_type !== 'awaiting_review') return null;
   const confidence = event.data.confidence.trim();
   if (confidence === 'high') return 'merged';

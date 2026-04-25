@@ -9,6 +9,7 @@ use serde_json::json;
 use tracing::{info, warn};
 
 use crate::bot::TelegramBot;
+use crate::gateway_paths as paths;
 
 use super::action::status_short;
 
@@ -23,16 +24,30 @@ pub async fn handle_input_text(bot: &mut TelegramBot, chat_id: &str, text: &str)
 
     let tasks_resp = bot
         .gw()
-        .get_typed::<api_types::TaskListResponse>("/api/tasks")
+        .get_typed::<api_types::TaskListResponse>(paths::TASKS)
         .await?;
 
-    let item: Option<captain::Task> = tasks_resp.items.into_iter().find_map(|item| {
-        if item.title == item_title {
-            serde_json::from_value(serde_json::to_value(item).ok()?).ok()
-        } else {
-            None
+    // Fail-fast on serde drift: propagate the error instead of dropping
+    // the matching task into the "not found" bucket. A schema mismatch
+    // is an infrastructure error and must surface, not be papered over
+    // with "Task no longer exists".
+    let mut item: Option<captain::Task> = None;
+    for candidate in tasks_resp.items {
+        if candidate.title != item_title {
+            continue;
         }
-    });
+        let task_id = candidate.id;
+        let value = serde_json::to_value(&candidate).map_err(|e| {
+            anyhow::anyhow!("failed to serialize TaskItem {task_id} during sessions lookup: {e}")
+        })?;
+        let task: captain::Task = serde_json::from_value(value).map_err(|e| {
+            anyhow::anyhow!(
+                "failed to convert TaskItem {task_id} to Task during sessions lookup (api-types schema drift): {e}"
+            )
+        })?;
+        item = Some(task);
+        break;
+    }
 
     let item = match item {
         Some(it) => it,
@@ -73,7 +88,7 @@ pub async fn handle_input_text(bot: &mut TelegramBot, chat_id: &str, text: &str)
         match bot
             .gw()
             .post_typed::<_, api_types::ClarifyResponse>(
-                &format!("/api/tasks/{item_id}/clarify"),
+                &paths::task_clarify(item_id),
                 &json!({"answer": text}),
             )
             .await
@@ -179,7 +194,7 @@ async fn append_context_fallback(
 ) {
     let existing = bot
         .gw()
-        .get_typed::<api_types::TaskListResponse>("/api/tasks")
+        .get_typed::<api_types::TaskListResponse>(paths::TASKS)
         .await
         .ok()
         .and_then(|r| {
@@ -202,7 +217,7 @@ async fn append_context_fallback(
     match bot
         .gw()
         .patch_typed::<_, api_types::BoolOkResponse>(
-            &format!("/api/tasks/{item_id}"),
+            &paths::task_item(item_id),
             &json!({"context": appended}),
         )
         .await
@@ -268,7 +283,7 @@ pub(crate) async fn ask_turn(bot: &mut TelegramBot, chat_id: &str, text: &str) -
     let response = match bot
         .gw()
         .post_typed::<_, api_types::AskResponse>(
-            "/api/tasks/ask",
+            paths::TASKS_ASK,
             &json!({"id": task_id, "question": text}),
         )
         .await
@@ -298,7 +313,7 @@ pub(crate) async fn ask_turn(bot: &mut TelegramBot, chat_id: &str, text: &str) -
 /// format them for display in Telegram. Filters out self-answered entries
 /// to mirror the Electron renderer's behavior.
 pub(crate) async fn fetch_clarifier_questions(bot: &TelegramBot, item_id: &str) -> Option<String> {
-    let path = format!("/api/tasks/{item_id}/timeline");
+    let path = paths::task_timeline(item_id);
     let timeline = bot
         .gw()
         .get_typed::<api_types::TimelineResponse>(&path)

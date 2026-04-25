@@ -7,8 +7,7 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 
 /// Scout workflow configuration loaded from `scout-workflow.yaml`.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScoutWorkflow {
     pub models: HashMap<String, String>,
     pub agent: ScoutAgentConfig,
@@ -16,6 +15,45 @@ pub struct ScoutWorkflow {
     pub repos: Vec<ScoutRepo>,
     pub user_context: UserContextConfig,
     pub prompts: HashMap<String, String>,
+}
+
+impl Default for ScoutWorkflow {
+    // Delegate to the compiled YAML so `models` and `prompts` stay in sync
+    // with `scout-workflow.yaml` — a derived empty-HashMap default would
+    // silently no-op in `apply_model_overrides` (which iterates
+    // `models.values_mut()`) and leave scout runs unconfigured.
+    fn default() -> Self {
+        Self::compiled_default()
+    }
+}
+
+/// Deserialize-only shape for `~/.mando/scout-workflow.yaml` overrides.
+///
+/// `interests`, `user_context`, and `repos` are injected from `config.json`
+/// after the file is parsed. Keeping them optional here lets prompt/model
+/// overrides omit injected data while `ScoutWorkflow` stays fully populated at
+/// runtime.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ScoutWorkflowOverride {
+    pub models: HashMap<String, String>,
+    pub agent: ScoutAgentConfig,
+    pub interests: Option<InterestsConfig>,
+    pub repos: Option<Vec<ScoutRepo>>,
+    pub user_context: Option<UserContextConfig>,
+    pub prompts: HashMap<String, String>,
+}
+
+impl ScoutWorkflowOverride {
+    pub fn into_workflow(self) -> ScoutWorkflow {
+        ScoutWorkflow {
+            models: self.models,
+            agent: self.agent,
+            interests: self.interests.unwrap_or_default(),
+            repos: self.repos.unwrap_or_default(),
+            user_context: self.user_context.unwrap_or_default(),
+            prompts: self.prompts,
+        }
+    }
 }
 
 /// Serde adapter that reads/writes a `Duration` as a floating-point seconds value.
@@ -42,7 +80,6 @@ mod duration_seconds {
 
 /// Timeout configuration for scout CC sessions.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
 pub struct ScoutAgentConfig {
     #[serde(with = "duration_seconds")]
     pub process_timeout_s: Duration,
@@ -102,7 +139,7 @@ impl ScoutWorkflow {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
+#[serde(rename_all = "camelCase")]
 pub struct InterestsConfig {
     pub high: Vec<String>,
     pub low: Vec<String>,
@@ -110,7 +147,7 @@ pub struct InterestsConfig {
 
 /// User context for scout prompts — adapts explanations to the reader's background.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
+#[serde(rename_all = "camelCase")]
 pub struct UserContextConfig {
     /// Reader's role/background.
     pub role: String,
@@ -149,7 +186,6 @@ impl UserContextConfig {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(default)]
 pub struct ScoutRepo {
     pub name: String,
     pub path: String,

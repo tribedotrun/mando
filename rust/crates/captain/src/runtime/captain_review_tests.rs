@@ -6,6 +6,9 @@ mod schema;
 #[path = "captain_review_render_tests.rs"]
 mod render;
 
+#[path = "captain_review_validate_tests.rs"]
+mod validate;
+
 #[test]
 fn test_check_review_parses_structured_output() {
     use std::io::Write;
@@ -125,22 +128,6 @@ fn test_check_review_escalates_when_all_paths_empty() {
 }
 
 #[test]
-fn test_validate_verdict_rejects_invalid_action() {
-    let item = Task {
-        captain_review_trigger: Some(crate::ReviewTrigger::GatesPass),
-        ..Task::new("test")
-    };
-    let verdict = CaptainVerdict {
-        action: "approve".into(),
-        feedback: "looks good".into(),
-        ..Default::default()
-    };
-    let result = validate_verdict(verdict, &item);
-    assert_eq!(result.action, "escalate");
-    assert!(result.feedback.contains("approve"));
-}
-
-#[test]
 fn test_reset_review_retry_starts_fresh_cycle() {
     let mut item = Task::new("test");
     item.status = crate::ItemStatus::Errored;
@@ -165,7 +152,7 @@ async fn test_spawn_review_preserves_existing_review_fail_count() {
     let pool = db.pool().clone();
     let notifier =
         crate::runtime::notify::Notifier::new(std::sync::Arc::new(global_bus::EventBus::new()));
-    let workflow = settings::config::workflow::CaptainWorkflow::compiled_default();
+    let workflow = settings::CaptainWorkflow::compiled_default();
 
     let worktree =
         std::env::temp_dir().join(format!("mando-captain-review-test-{}", std::process::id()));
@@ -201,7 +188,7 @@ async fn test_spawn_review_preserves_existing_review_fail_count() {
         &mut item,
         "retry",
         None, // already CaptainReviewing in DB
-        &settings::config::Config::default(),
+        &settings::Config::default(),
         &workflow,
         &notifier,
         &pool,
@@ -219,7 +206,7 @@ async fn test_review_failure_budget_moves_item_to_errored_on_fifth_attempt() {
     let pool = db.pool().clone();
     let notifier =
         crate::runtime::notify::Notifier::new(std::sync::Arc::new(global_bus::EventBus::new()));
-    let workflow = settings::config::workflow::CaptainWorkflow::compiled_default();
+    let workflow = settings::CaptainWorkflow::compiled_default();
 
     let mut item = Task::new("test");
     item.status = crate::ItemStatus::CaptainReviewing;
@@ -258,8 +245,8 @@ async fn test_nudge_verdict_resets_worker_started_at() {
         feedback: "keep going".into(),
         ..Default::default()
     };
-    let config = settings::config::settings::Config::default();
-    let workflow = settings::config::workflow::CaptainWorkflow::compiled_default();
+    let config = settings::Config::default();
+    let workflow = settings::CaptainWorkflow::compiled_default();
     apply_verdict(&mut item, &verdict, &config, &workflow, &notifier, &pool)
         .await
         .unwrap();
@@ -301,8 +288,8 @@ async fn test_apply_verdict_nudge_preserves_review_context_on_failed_resume() {
         feedback: "try again".into(),
         ..Default::default()
     };
-    let config = settings::config::settings::Config::default();
-    let workflow = settings::config::workflow::CaptainWorkflow::compiled_default();
+    let config = settings::Config::default();
+    let workflow = settings::CaptainWorkflow::compiled_default();
     apply_verdict(&mut item, &verdict, &config, &workflow, &notifier, &pool)
         .await
         .unwrap();
@@ -331,8 +318,8 @@ async fn test_reset_budget_verdict_resets_intervention_count() {
         feedback: "try a different approach".into(),
         ..Default::default()
     };
-    let config = settings::config::settings::Config::default();
-    let workflow = settings::config::workflow::CaptainWorkflow::compiled_default();
+    let config = settings::Config::default();
+    let workflow = settings::CaptainWorkflow::compiled_default();
     apply_verdict(&mut item, &verdict, &config, &workflow, &notifier, &pool)
         .await
         .unwrap();
@@ -342,6 +329,54 @@ async fn test_reset_budget_verdict_resets_intervention_count() {
     // worker_started_at must be reset to ~now.
     let started = item.worker_started_at.as_deref().unwrap();
     assert_ne!(started, "2020-01-01T00:00:00Z", "timestamp was not reset");
+}
+
+#[tokio::test]
+async fn test_respawn_verdict_preserves_worktree() {
+    // Respawn must reuse the existing worktree. Captain invariant #4 in
+    // CLAUDE.md: "Rework = same worktree with new branch + worker". The
+    // spawner's 3-way match in spawner.rs picks the Rework arm iff
+    // item.worktree is still Some(..) and item.branch is None; clearing
+    // worktree here forces the fallthrough arm which allocates a new slot
+    // from worker-counter.txt and creates a brand-new dir on disk.
+    let db = global_db::Db::open_in_memory().await.unwrap();
+    let pool = db.pool().clone();
+    let notifier =
+        crate::runtime::notify::Notifier::new(std::sync::Arc::new(global_bus::EventBus::new()));
+
+    let mut item = Task::new("test");
+    item.status = crate::ItemStatus::CaptainReviewing;
+    item.worker = Some("worker-1-1".into());
+    item.worktree = Some("/tmp/mando-todo-1".into());
+    item.branch = Some("mando/todo-1".into());
+    item.pr_number = Some(100);
+    item.session_ids.worker = Some("worker-sid".into());
+    item.worker_started_at = Some("2020-01-01T00:00:00Z".to_string());
+
+    let verdict = CaptainVerdict {
+        action: "respawn".into(),
+        feedback: "session is broken, retry".into(),
+        ..Default::default()
+    };
+    let config = settings::Config::default();
+    let workflow = settings::CaptainWorkflow::compiled_default();
+    apply_verdict(&mut item, &verdict, &config, &workflow, &notifier, &pool)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        item.worktree.as_deref(),
+        Some("/tmp/mando-todo-1"),
+        "respawn must preserve item.worktree so the next spawn hits the \
+         spawner's Rework arm (same worktree, new branch from origin/main)",
+    );
+    assert!(item.worker.is_none(), "worker cleared");
+    assert!(item.branch.is_none(), "branch cleared");
+    assert!(
+        item.session_ids.worker.is_none(),
+        "worker session id cleared"
+    );
+    assert_eq!(item.pr_number, None, "pr_number cleared");
 }
 
 #[tokio::test]
@@ -362,8 +397,8 @@ async fn test_reset_budget_preserves_review_fields_on_failed_resume() {
         feedback: "unblock this".into(),
         ..Default::default()
     };
-    let config = settings::config::settings::Config::default();
-    let workflow = settings::config::workflow::CaptainWorkflow::compiled_default();
+    let config = settings::Config::default();
+    let workflow = settings::CaptainWorkflow::compiled_default();
     apply_verdict(&mut item, &verdict, &config, &workflow, &notifier, &pool)
         .await
         .unwrap();

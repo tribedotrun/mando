@@ -3,8 +3,8 @@ import { useScrollIntoViewRef } from '#renderer/global/runtime/useScrollIntoView
 import type { SessionEntry } from '#renderer/global/types';
 import { relativeTime } from '#renderer/global/service/utils';
 import { sessionTitle, sessionSubtitle } from '#renderer/domains/sessions/service/helpers';
-import { SessionDot } from '#renderer/domains/sessions/ui/SessionsHelpers';
-import { Table, TableBody, TableRow, TableCell } from '#renderer/global/ui/table';
+import { SessionDot } from '#renderer/global/ui/SessionDot';
+import { Table, TableBody, TableRow, TableCell } from '#renderer/global/ui/primitives/table';
 
 export function SessionsList({
   sessions,
@@ -41,13 +41,18 @@ export function SessionsList({
               </TableCell>
 
               {/* Title + subtitle */}
-              <TableCell>
+              <TableCell className="w-full max-w-0">
                 <span className="flex min-w-0 items-baseline gap-2">
-                  <span className="min-w-0 truncate text-[13px] text-foreground" title={title}>
+                  <span className="shrink-0 text-[13px] text-foreground" title={title}>
                     {title}
                   </span>
                   {subtitle && (
-                    <span className="truncate text-[11px] text-muted-foreground">{subtitle}</span>
+                    <span
+                      className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground"
+                      title={subtitle}
+                    >
+                      {subtitle}
+                    </span>
                   )}
                 </span>
               </TableCell>

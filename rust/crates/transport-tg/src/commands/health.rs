@@ -4,6 +4,7 @@ use crate::telegram_format::escape_html;
 use anyhow::Result;
 
 use crate::bot::TelegramBot;
+use crate::gateway_paths as paths;
 
 pub async fn handle(bot: &TelegramBot, chat_id: &str, _args: &str) -> Result<()> {
     // System health
@@ -12,7 +13,7 @@ pub async fn handle(bot: &TelegramBot, chat_id: &str, _args: &str) -> Result<()>
     // degradation info instead of failing with a raw status line.
     let health_text = match bot
         .gw()
-        .get_with_body_on_5xx_typed::<api_types::SystemHealthResponse>("/api/health/system")
+        .get_with_body_on_5xx_typed::<api_types::SystemHealthResponse>(paths::HEALTH_SYSTEM)
         .await
     {
         Ok(h) => {
@@ -50,7 +51,7 @@ pub async fn handle(bot: &TelegramBot, chat_id: &str, _args: &str) -> Result<()>
     // Workers
     let workers_text = match bot
         .gw()
-        .get_typed::<api_types::WorkersResponse>("/api/workers")
+        .get_typed::<api_types::WorkersResponse>(paths::WORKERS)
         .await
     {
         Ok(resp) => {

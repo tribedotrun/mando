@@ -1,7 +1,7 @@
 import React, { useCallback, useMemo, useRef } from 'react';
 import { useTaskFeed, useTaskAdvisor } from '#renderer/domains/captain/runtime/hooks';
 import { useExpandedArtifactIds } from '#renderer/domains/captain/runtime/useExpandedArtifactIds';
-import { FeedBlock } from '#renderer/domains/captain/ui/FeedBlocks';
+import { FeedBlocks } from '#renderer/domains/captain/ui/FeedBlocks';
 import { AdvisorInputBar } from '#renderer/domains/captain/ui/AdvisorInputBar';
 import { latestClarifyTimestamp } from '#renderer/domains/captain/service/feedHelpers';
 import type { TaskItem } from '#renderer/global/types';
@@ -56,7 +56,7 @@ export function TaskFeedView({ item }: TaskFeedViewProps): React.ReactElement {
         ) : (
           <div className="pt-2">
             {feedItems.map((entry, i) => (
-              <FeedBlock
+              <FeedBlocks
                 key={`${entry.type}-${entry.timestamp}-${i}`}
                 item={entry}
                 task={item}

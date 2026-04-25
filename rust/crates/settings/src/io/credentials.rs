@@ -389,24 +389,27 @@ pub async fn pick_for_worker(
 
 /// Seconds remaining until a specific credential leaves cooldown.
 /// Returns 0 if the credential isn't cooling down (or doesn't exist).
-pub async fn cooldown_remaining_secs(pool: &SqlitePool, id: i64) -> i64 {
+/// Propagates DB errors — a transient failure coerced to 0 used to
+/// look identical to "no cooldown" and led captain to reuse a
+/// rate-limited key.
+pub async fn cooldown_remaining_secs(pool: &SqlitePool, id: i64) -> anyhow::Result<i64> {
     let now_secs = time::OffsetDateTime::now_utc().unix_timestamp();
     let row: Option<(Option<i64>,)> =
         sqlx::query_as("SELECT rate_limit_cooldown_until FROM credentials WHERE id = ?")
             .bind(id)
             .fetch_optional(pool)
             .await
-            .ok()
-            .flatten();
-    match row {
+            .map_err(|e| anyhow::anyhow!("cooldown query failed for credential {id}: {e}"))?;
+    Ok(match row {
         Some((Some(until),)) if until > now_secs => until - now_secs,
         _ => 0,
-    }
+    })
 }
 
 /// Seconds until the earliest credential leaves cooldown. Returns 0 when no
-/// credentials are cooling down.
-pub async fn earliest_cooldown_remaining_secs(pool: &SqlitePool) -> i64 {
+/// credentials are cooling down. Propagates DB errors for the same reason
+/// as `cooldown_remaining_secs`.
+pub async fn earliest_cooldown_remaining_secs(pool: &SqlitePool) -> anyhow::Result<i64> {
     let now_secs = time::OffsetDateTime::now_utc().unix_timestamp();
     let row: Option<(Option<i64>,)> = sqlx::query_as(
         "SELECT MIN(rate_limit_cooldown_until) FROM credentials
@@ -415,12 +418,11 @@ pub async fn earliest_cooldown_remaining_secs(pool: &SqlitePool) -> i64 {
     .bind(now_secs)
     .fetch_optional(pool)
     .await
-    .ok()
-    .flatten();
-    match row {
+    .map_err(|e| anyhow::anyhow!("earliest-cooldown query failed: {e}"))?;
+    Ok(match row {
         Some((Some(until),)) => until - now_secs,
         _ => 0,
-    }
+    })
 }
 
 /// Clear all active credential cooldowns. Used by the manual resume API so the

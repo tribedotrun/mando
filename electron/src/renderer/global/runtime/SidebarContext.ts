@@ -23,6 +23,7 @@ export interface SidebarActions {
 
   // Workbench operations
   archiveWorkbench: (id: number) => void;
+  unarchiveWorkbench: (id: number) => void;
   pinWorkbench: (id: number) => void;
   unpinWorkbench: (id: number) => void;
   renameWorkbench: (id: number, title: string) => void;

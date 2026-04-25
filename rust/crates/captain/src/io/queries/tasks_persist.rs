@@ -15,10 +15,9 @@ use super::tasks::{bind_task_write_fields, update_set_clause};
 mod api;
 
 pub use api::{
-    enqueue_task_effects, persist_clarify_result, persist_clarify_start, persist_reclarify_start,
-    persist_resume_clarifier, persist_spawn, persist_status_transition,
-    persist_status_transition_with_command, persist_status_transition_with_command_and_effects,
-    revert_orphaned_planning, set_pr_number,
+    enqueue_task_effects, persist_clarify_result, persist_clarify_start, persist_resume_clarifier,
+    persist_spawn, persist_status_transition, persist_status_transition_with_command,
+    persist_status_transition_with_command_and_effects, revert_orphaned_planning,
 };
 
 async fn load_status_and_rev(

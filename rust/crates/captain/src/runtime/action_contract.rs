@@ -3,8 +3,8 @@
 use crate::{ItemStatus, ReviewTrigger, Task};
 use anyhow::{Context, Result};
 use rustc_hash::FxHashMap;
-use settings::config::settings::Config;
-use settings::config::workflow::CaptainWorkflow;
+use settings::CaptainWorkflow;
+use settings::Config;
 
 use crate::service::{lifecycle, spawn_logic};
 
@@ -130,9 +130,8 @@ pub async fn nudge_item(
             Some(m) if !m.is_empty() => m,
             _ => {
                 let empty_vars: FxHashMap<&str, &str> = FxHashMap::default();
-                msg_owned =
-                    settings::config::render_nudge("nudge_default", &workflow.nudges, &empty_vars)
-                        .map_err(|e| anyhow::anyhow!(e))?;
+                msg_owned = settings::render_nudge("nudge_default", &workflow.nudges, &empty_vars)
+                    .map_err(|e| anyhow::anyhow!(e))?;
                 &msg_owned
             }
         },
@@ -160,6 +159,37 @@ pub async fn nudge_item(
         .await?;
         alerts.push(format!(
             "Broken session for {} — captain review triggered",
+            worker
+        ));
+        return Ok(());
+    }
+    let symptoms = global_claude::StreamSymptomMatcher::new(workflow.stream_symptoms.clone());
+    if let Some(m) = global_claude::stream_broken_session_symptom(&stream_path, &symptoms) {
+        // Structured log mirrors the spawner_lifecycle / captain_review_helpers
+        // broken-session paths so obs queries keyed on `symptom=` / `origin=`
+        // see every broken-session decision, not just the reopen/resume ones.
+        tracing::warn!(
+            module = "captain",
+            worker = %worker,
+            cc_sid = %cc_sid,
+            symptom = %m.reason,
+            origin = %m.origin.tag(),
+            "nudge detected broken-session symptom — captain review triggered"
+        );
+        item.intervention_count = new_count as i64;
+        reopen::trigger_review(
+            item,
+            ReviewTrigger::BrokenSession,
+            config,
+            workflow,
+            notifier,
+            pool,
+        )
+        .await?;
+        alerts.push(format!(
+            "Broken session symptom ({}, origin={}) for {} — captain review triggered",
+            m.reason,
+            m.origin.tag(),
             worker
         ));
         return Ok(());

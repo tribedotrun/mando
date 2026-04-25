@@ -1,5 +1,7 @@
 //! Command handlers — one module per Telegram command.
 
+use crate::gateway_paths as paths;
+
 pub mod action;
 mod action_sessions;
 pub mod detail;
@@ -17,26 +19,34 @@ pub mod triage;
 pub(crate) async fn load_tasks(
     gw: &crate::http::GatewayClient,
 ) -> anyhow::Result<Vec<captain::Task>> {
-    load_tasks_with_path(gw, "/api/tasks").await
+    load_tasks_with_path(gw, paths::TASKS).await
 }
 
 /// Load tasks from a specific API path (supports query params).
+///
+/// Fail-fast: a wire-type conversion failure on any task is treated as
+/// an infrastructure error and propagated. Previously `filter_map +
+/// .ok()` silently omitted the offending task from the list, so users
+/// saw a shorter task list with no indication anything was wrong.
 pub(crate) async fn load_tasks_with_path(
     gw: &crate::http::GatewayClient,
     path: &str,
 ) -> anyhow::Result<Vec<captain::Task>> {
     let resp = gw.get_typed::<api_types::TaskListResponse>(path).await?;
-    let items = resp
-        .items
+    resp.items
         .into_iter()
-        .filter_map(|item| {
-            serde_json::from_value(serde_json::to_value(item).ok()?).map_err(|e| {
-                tracing::error!(module = "commands", error = %e, "failed to convert TaskItem to Task");
-                e
-            }).ok()
+        .map(|item| {
+            let task_id = item.id;
+            let value = serde_json::to_value(&item).map_err(|e| {
+                anyhow::anyhow!("failed to serialize TaskItem {task_id} for TG command: {e}")
+            })?;
+            serde_json::from_value::<captain::Task>(value).map_err(|e| {
+                anyhow::anyhow!(
+                    "failed to convert TaskItem {task_id} to Task (api-types schema drift): {e}"
+                )
+            })
         })
-        .collect();
-    Ok(items)
+        .collect()
 }
 
 /// Load tasks with user-visible error handling. Returns `None` (and sends an

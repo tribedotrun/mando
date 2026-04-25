@@ -6,6 +6,7 @@ import {
 } from '#renderer/global/providers/native/app';
 import { getUpdateAppVersion, getUpdateChannel } from '#renderer/global/providers/native/updates';
 import { queryKeys } from '#renderer/global/repo/queryKeys';
+import { daemonSyncMeta } from '#renderer/global/repo/syncPolicy';
 import { toReactQuery } from '#result';
 
 export interface TelegramHealth {
@@ -26,6 +27,7 @@ export type UpdateSystemInfo = {
 export function useTelegramHealth() {
   return useQuery<TelegramHealth>({
     queryKey: queryKeys.health.telegram(),
+    meta: daemonSyncMeta('polling', 'Telegram process health changes independently'),
     queryFn: () => toReactQuery(apiGetRouteR('getHealthTelegram')),
     refetchInterval: 10_000,
   });

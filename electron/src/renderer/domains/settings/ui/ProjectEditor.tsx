@@ -1,6 +1,6 @@
 import React from 'react';
-import { Card, CardContent } from '#renderer/global/ui/card';
-import { Button } from '#renderer/global/ui/button';
+import { Card, CardContent } from '#renderer/global/ui/primitives/card';
+import { Button } from '#renderer/global/ui/primitives/button';
 import { ProjectHooksFields } from '#renderer/domains/settings/ui/ProjectHooksFields';
 import { ProjectLogoField } from '#renderer/domains/settings/ui/ProjectLogoField';
 import { ProjectEditorFields } from '#renderer/domains/settings/ui/ProjectEditorFields';
@@ -24,32 +24,7 @@ export function ProjectEditor({
   onCancel,
   saving,
 }: ProjectEditorProps): React.ReactElement {
-  const {
-    logoFile,
-    detectingLogo,
-    detectError,
-    detectLogo,
-    name,
-    setName,
-    githubRepo,
-    setGithubRepo,
-    aliases,
-    setAliases,
-    preamble,
-    setPreamble,
-    checkCommand,
-    setCheckCommand,
-    scoutSummary,
-    setScoutSummary,
-    preSpawn,
-    setPreSpawn,
-    workerTeardown,
-    setWorkerTeardown,
-    postMerge,
-    setPostMerge,
-    nameConflict,
-    handleSubmit,
-  } = useProjectEditor({ pathKey, project, existingProjects, onSave });
+  const editor = useProjectEditor({ pathKey, project, existingProjects, onSave });
 
   return (
     <Card className="py-4">
@@ -57,43 +32,43 @@ export function ProjectEditor({
         <h4 className="text-sm font-medium text-foreground">Edit {project.name || pathKey}</h4>
 
         <ProjectLogoField
-          logoFile={logoFile}
-          detectingLogo={detectingLogo}
-          detectError={detectError}
-          onDetect={() => void detectLogo()}
+          logoFile={editor.logo.file}
+          detectingLogo={editor.logo.detecting}
+          detectError={editor.logo.error}
+          onDetect={() => void editor.logo.detect()}
         />
 
         <ProjectEditorFields
           path={project.path || ''}
-          name={name}
-          nameConflict={nameConflict}
-          githubRepo={githubRepo}
-          aliases={aliases}
-          preamble={preamble}
-          scoutSummary={scoutSummary}
-          checkCommand={checkCommand}
-          onName={setName}
-          onGithubRepo={setGithubRepo}
-          onAliases={setAliases}
-          onPreamble={setPreamble}
-          onScoutSummary={setScoutSummary}
-          onCheckCommand={setCheckCommand}
+          name={editor.fields.name}
+          nameConflict={editor.validation.nameConflict}
+          githubRepo={editor.fields.githubRepo}
+          aliases={editor.fields.aliases}
+          preamble={editor.fields.preamble}
+          scoutSummary={editor.fields.scoutSummary}
+          checkCommand={editor.fields.checkCommand}
+          onName={editor.fields.setName}
+          onGithubRepo={editor.fields.setGithubRepo}
+          onAliases={editor.fields.setAliases}
+          onPreamble={editor.fields.setPreamble}
+          onScoutSummary={editor.fields.setScoutSummary}
+          onCheckCommand={editor.fields.setCheckCommand}
         />
 
         <ProjectHooksFields
-          preSpawn={preSpawn}
-          setPreSpawn={setPreSpawn}
-          workerTeardown={workerTeardown}
-          setWorkerTeardown={setWorkerTeardown}
-          postMerge={postMerge}
-          setPostMerge={setPostMerge}
+          preSpawn={editor.hooks.preSpawn}
+          setPreSpawn={editor.hooks.setPreSpawn}
+          workerTeardown={editor.hooks.workerTeardown}
+          setWorkerTeardown={editor.hooks.setWorkerTeardown}
+          postMerge={editor.hooks.postMerge}
+          setPostMerge={editor.hooks.setPostMerge}
         />
 
         <div className="flex items-center gap-3 pt-2">
           <Button
             data-testid="project-save-btn"
-            onClick={handleSubmit}
-            disabled={!name.trim() || nameConflict || saving}
+            onClick={editor.actions.handleSubmit}
+            disabled={!editor.fields.name.trim() || editor.validation.nameConflict || saving}
           >
             {saving ? 'Saving...' : 'Save'}
           </Button>

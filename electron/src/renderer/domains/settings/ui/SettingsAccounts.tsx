@@ -1,8 +1,8 @@
 import React from 'react';
 import { KeyRound, Trash2 } from 'lucide-react';
-import { Card, CardContent } from '#renderer/global/ui/card';
-import { Button } from '#renderer/global/ui/button';
-import { Skeleton } from '#renderer/global/ui/skeleton';
+import { Card, CardContent } from '#renderer/global/ui/primitives/card';
+import { Button } from '#renderer/global/ui/primitives/button';
+import { Skeleton } from '#renderer/global/ui/primitives/skeleton';
 import { useSettingsAccounts } from '#renderer/domains/settings/runtime/useSettingsAccounts';
 import {
   AddCredentialForm,
@@ -11,23 +11,10 @@ import {
   StatusBadge,
   TokenDisplay,
 } from '#renderer/domains/settings/ui/SettingsAccountsParts';
-import { CredentialUsage } from '#renderer/domains/settings/ui/SettingsAccountsUsage';
+import { CredentialUsage } from '#renderer/domains/settings/ui/CredentialUsage';
 
 export function SettingsAccounts(): React.ReactElement {
-  const {
-    setupToken,
-    setSetupToken,
-    setupLabel,
-    setSetupLabel,
-    showTokenInput,
-    setShowTokenInput,
-    credentials,
-    isLoading,
-    addTokenMut,
-    removeMut,
-    handleCancel,
-    handleAdd,
-  } = useSettingsAccounts();
+  const accounts = useSettingsAccounts();
 
   return (
     <div data-testid="settings-credentials" className="space-y-8">
@@ -41,12 +28,12 @@ export function SettingsAccounts(): React.ReactElement {
 
       <Card className="py-4">
         <CardContent>
-          {isLoading ? (
+          {accounts.credentials.isLoading ? (
             <div className="space-y-3">
               <Skeleton className="h-12 w-full" />
               <Skeleton className="h-12 w-full" />
             </div>
-          ) : credentials.length === 0 ? (
+          ) : accounts.credentials.items.length === 0 ? (
             <div className="flex flex-col items-center gap-3 py-8 text-center">
               <KeyRound size={32} className="text-muted-foreground/40" />
               <div>
@@ -58,7 +45,7 @@ export function SettingsAccounts(): React.ReactElement {
             </div>
           ) : (
             <div className="space-y-3">
-              {credentials.map((cred) => (
+              {accounts.credentials.items.map((cred) => (
                 <div
                   key={cred.id}
                   className="rounded-lg border border-border bg-background px-4 py-3"
@@ -78,8 +65,8 @@ export function SettingsAccounts(): React.ReactElement {
                       variant="ghost"
                       size="icon"
                       className="ml-2 shrink-0 text-muted-foreground hover:text-destructive"
-                      disabled={removeMut.isPending}
-                      onClick={() => removeMut.mutate(cred.id)}
+                      disabled={accounts.mutations.removeMut.isPending}
+                      onClick={() => accounts.mutations.removeMut.mutate(cred.id)}
                     >
                       <Trash2 size={14} />
                     </Button>
@@ -95,18 +82,10 @@ export function SettingsAccounts(): React.ReactElement {
       <Card className="py-4">
         <CardContent>
           <h3 className="mb-4 text-sm font-medium text-muted-foreground">Add Credential</h3>
-          {!showTokenInput ? (
-            <ShowAddButton onClick={() => setShowTokenInput(true)} />
+          {!accounts.visibility.showTokenInput ? (
+            <ShowAddButton onClick={() => accounts.visibility.setShowTokenInput(true)} />
           ) : (
-            <AddCredentialForm
-              setupToken={setupToken}
-              setupLabel={setupLabel}
-              isPending={addTokenMut.isPending}
-              onTokenChange={setSetupToken}
-              onLabelChange={setSetupLabel}
-              onAdd={handleAdd}
-              onCancel={handleCancel}
-            />
+            <AddCredentialForm onClose={() => accounts.visibility.setShowTokenInput(false)} />
           )}
         </CardContent>
       </Card>

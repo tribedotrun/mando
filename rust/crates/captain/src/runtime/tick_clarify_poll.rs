@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use api_types::TimelineEventPayload;
 
 use crate::{ItemStatus, Task};
-use settings::config::workflow::CaptainWorkflow;
+use settings::CaptainWorkflow;
 
 use super::tick_clarify_apply::apply_clarifier_result;
 use super::{clarifier, credential_rate_limit, notify::Notifier, timeline_emit};
@@ -62,6 +62,32 @@ pub(super) async fn poll_clarifying_items(
         let Some(session_id) = item.session_ids.clarifier.clone() else {
             continue;
         };
+
+        // Per-session idempotency guard. Once a clarifier session's
+        // structured output has been committed into its task via
+        // `apply_clarifier_result`, the `cc_sessions.result_applied_at`
+        // column is set inside the same transaction. Skip here so a prior
+        // round's already-consumed stream cannot be re-applied during the
+        // HTTP inline reclarifier window after the user answers a
+        // follow-up question (the task re-enters Clarifying with the same
+        // session id still in place).
+        match sessions_db::session_by_id(pool, &session_id).await {
+            Ok(Some(row)) if row.result_applied_at.is_some() => {
+                continue;
+            }
+            Err(e) => {
+                tracing::warn!(
+                    module = "captain",
+                    item_id = item.id,
+                    %session_id,
+                    error = %e,
+                    "tick_clarify_poll: failed to load cc_sessions row for applied check"
+                );
+                continue;
+            }
+            _ => {}
+        }
+
         let stream_path = global_infra::paths::stream_path_for_session(&session_id);
 
         // Check for error result first (like check_review_failed).
@@ -82,8 +108,7 @@ pub(super) async fn poll_clarifying_items(
                 );
 
                 // Check rate limiting — revert to New so dispatch_clarify
-                // (not dispatch_reclarify) handles the retry with the correct
-                // initial clarification prompt.
+                // handles the retry with the correct initial clarification prompt.
                 if credential_rate_limit::check_and_activate_from_stream(pool, &session_id).await {
                     global_infra::best_effort!(
                         timeline_emit::emit_rate_limited(item, pool).await,

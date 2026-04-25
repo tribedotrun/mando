@@ -5,6 +5,7 @@ use serde_json::json;
 
 use crate::bot::TelegramBot;
 use crate::commands::action;
+use crate::gateway_paths as paths;
 
 /// Handle all `act:*` callbacks.
 pub(crate) async fn handle_action_callback(
@@ -35,7 +36,7 @@ pub(crate) async fn handle_action_callback(
                 if let Err(e) = bot
                     .gw()
                     .post_typed::<_, api_types::AskEndResponse>(
-                        "/api/tasks/ask/end",
+                        paths::TASKS_ASK_END,
                         &json!({"id": task_id}),
                     )
                     .await
@@ -164,6 +165,12 @@ async fn handle_do(
                 .edit_message(cid, mid, "\u{23f3} Handing off\u{2026}")
                 .await;
             crate::callback_actions::handoff(bot, cid, task_id, "").await?;
+        }
+        "stop" => {
+            let _ignored = bot
+                .edit_message(cid, mid, "\u{23f3} Stopping\u{2026}")
+                .await;
+            crate::callback_actions::stop(bot, cid, task_id).await?;
         }
         "cancel" => {
             let _ignored = bot

@@ -16,13 +16,33 @@ const POLL_INTERVAL_MS = 2000;
  */
 export function useClaudeCodeVerification() {
   const qc = useQueryClient();
-  const { checkClaudeCode } = useNativeActions();
+  const { checkClaudeCode } = useNativeActions().system;
   const saveMut = useConfigSave();
   const doneRef = useRef(false);
 
   useMountEffect(() => {
     function getConfig(): MandoConfig | null {
       return qc.getQueryData<MandoConfig>(queryKeys.config.current()) ?? null;
+    }
+
+    async function checkClaudeCodeStatus(): Promise<void> {
+      try {
+        const result = await checkClaudeCode();
+        if (result?.installed && result.works) {
+          const current = getConfig();
+          if (current && !current.features?.claudeCodeVerified) {
+            const updated: MandoConfig = {
+              ...current,
+              features: { ...(current.features || {}), claudeCodeVerified: true },
+            };
+            saveMut.mutate(updated, {
+              onError: (err) => log.warn('eager CC verification save failed:', err),
+            });
+          }
+        }
+      } catch (err) {
+        log.warn('eager CC check failed:', err);
+      }
     }
 
     function tryCheck() {
@@ -34,22 +54,7 @@ export function useClaudeCodeVerification() {
         return;
       }
       doneRef.current = true;
-      void checkClaudeCode()
-        .then((result) => {
-          if (result?.installed && result.works) {
-            const current = getConfig();
-            if (current && !current.features?.claudeCodeVerified) {
-              const updated: MandoConfig = {
-                ...current,
-                features: { ...(current.features || {}), claudeCodeVerified: true },
-              };
-              saveMut.mutate(updated, {
-                onError: (err) => log.warn('eager CC verification save failed:', err),
-              });
-            }
-          }
-        })
-        .catch((err) => log.warn('eager CC check failed:', err));
+      void checkClaudeCodeStatus();
     }
 
     tryCheck();

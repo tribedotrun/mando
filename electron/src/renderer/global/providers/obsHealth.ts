@@ -13,24 +13,37 @@ import log from '#renderer/global/service/logger';
 
 type Listener = () => void;
 
-const listeners = new Set<Listener>();
+function createObsHealthBus() {
+  const listeners = new Set<Listener>();
+
+  return {
+    report(): void {
+      for (const fn of listeners) {
+        try {
+          fn();
+        } catch (err) {
+          // DOM dispatchEvent (which this replaces) runs every registered
+          // listener regardless of sibling failures; preserve that semantic
+          // so one throwing subscriber does not cancel the rest.
+          log.warn('[obsHealth] subscriber threw during reportObsDegraded:', err);
+        }
+      }
+    },
+    subscribe(fn: Listener): () => void {
+      listeners.add(fn);
+      return () => {
+        listeners.delete(fn);
+      };
+    },
+  };
+}
+
+const obsHealthBus = createObsHealthBus();
 
 export function reportObsDegraded(): void {
-  for (const fn of listeners) {
-    try {
-      fn();
-    } catch (err) {
-      // DOM dispatchEvent (which this replaces) runs every registered
-      // listener regardless of sibling failures; preserve that semantic
-      // so one throwing subscriber does not cancel the rest.
-      log.warn('[obsHealth] subscriber threw during reportObsDegraded:', err);
-    }
-  }
+  obsHealthBus.report();
 }
 
 export function subscribeObsDegraded(fn: Listener): () => void {
-  listeners.add(fn);
-  return () => {
-    listeners.delete(fn);
-  };
+  return obsHealthBus.subscribe(fn);
 }

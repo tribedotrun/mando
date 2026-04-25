@@ -4,6 +4,7 @@
 //! If project can't be inferred, user picks via inline keyboard first.
 
 use crate::bot::{TelegramBot, TodoItem};
+use crate::gateway_paths as paths;
 use anyhow::Result;
 use serde_json::json;
 
@@ -67,8 +68,7 @@ pub async fn execute_todo_with_photo(
 
     // --- Single line: AI-parse the title before creating ---
     if lines.len() == 1 {
-        let (matched_slug, cleaned) =
-            settings::config::match_project_by_prefix(lines[0], &projects);
+        let (matched_slug, cleaned) = settings::match_project_by_prefix(lines[0], &projects);
         let project = matched_slug.or(single_project);
         let title = cleaned.to_string();
 
@@ -124,7 +124,7 @@ pub async fn execute_todo_with_photo(
     // --- Multi-line: detect project, then AI parse ---
 
     // Check first line for project prefix.
-    let (detected_project, _) = settings::config::match_project_by_prefix(lines[0], &projects);
+    let (detected_project, _) = settings::match_project_by_prefix(lines[0], &projects);
     let project = detected_project.or(single_project);
 
     if project.is_none() && projects.len() > 1 {
@@ -192,7 +192,7 @@ pub(crate) async fn ai_parse_and_create(
     });
     let result = bot
         .gw()
-        .post_typed::<_, api_types::ParseTodosResponse>("/api/ai/parse-todos", &body)
+        .post_typed::<_, api_types::ParseTodosResponse>(paths::AI_PARSE_TODOS, &body)
         .await;
 
     let parsed_items: Vec<String> = match result {

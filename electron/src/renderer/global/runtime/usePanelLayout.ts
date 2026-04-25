@@ -1,7 +1,12 @@
 import { useDefaultLayout } from 'react-resizable-panels';
-import { createPrefixedStorage } from '#renderer/global/providers/persistence';
+import { z } from 'zod';
+import { createJsonStorage } from '#renderer/global/providers/persistence';
 
-const panelStorage = createPrefixedStorage('', 'global/runtime/usePanelLayout');
+const panelLayoutSchema = z.union([
+  z.record(z.string(), z.number()),
+  z.record(z.string(), z.object({ layout: z.array(z.number()) }).passthrough()),
+]);
+const panelStorage = createJsonStorage('', panelLayoutSchema, 'global/runtime/usePanelLayout');
 
 /**
  * Wraps useDefaultLayout with the typed persistence boundary so UI

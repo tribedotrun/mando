@@ -19,7 +19,7 @@ fn with_skip_map<R>(f: impl FnOnce(&mut HashMap<String, u32>) -> R) -> R {
     f(guard.get_or_insert_with(HashMap::new))
 }
 
-/// Transition all Rework items to Queued, clearing worker fields.
+/// Transition all Rework items to Queued, clearing worker + interaction fields.
 pub(super) fn transition_rework_to_queued(items: &mut [Task], alerts: &mut Vec<String>) {
     for item in items.iter_mut() {
         if item.status != ItemStatus::Rework {
@@ -75,7 +75,7 @@ pub(super) fn transition_rework_to_queued(items: &mut [Task], alerts: &mut Vec<S
         item.pr_number = None;
         item.worker_started_at = None;
         item.session_ids.worker = None;
-        item.session_ids.ask = None;
+        super::clear_task_interaction_sessions(item);
         with_skip_map(|m| {
             m.remove(&item_id);
         });
@@ -84,5 +84,31 @@ pub(super) fn transition_rework_to_queued(items: &mut [Task], alerts: &mut Vec<S
             title = %truncate_utf8(&item.title, 60),
             "dispatch: rework to queued"
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn transition_rework_to_queued_clears_advisor_session() {
+        let mut item = Task::new("rework");
+        item.set_status_for_tests(ItemStatus::Rework);
+        item.worker = Some("worker".into());
+        item.branch = Some("feat/rework".into());
+        item.pr_number = Some(42);
+        item.session_ids.worker = Some("worker-sid".into());
+        item.session_ids.ask = Some("ask-sid".into());
+        item.session_ids.advisor = Some("advisor-sid".into());
+
+        let mut alerts = Vec::new();
+        transition_rework_to_queued(std::slice::from_mut(&mut item), &mut alerts);
+
+        assert_eq!(item.status(), ItemStatus::Queued);
+        assert!(item.session_ids.worker.is_none());
+        assert!(item.session_ids.ask.is_none());
+        assert!(item.session_ids.advisor.is_none());
+        assert!(alerts.is_empty());
     }
 }

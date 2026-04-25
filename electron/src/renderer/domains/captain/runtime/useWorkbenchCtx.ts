@@ -1,7 +1,8 @@
 import React from 'react';
 import { useRouterState } from '@tanstack/react-router';
 import type { TaskItem } from '#renderer/global/types';
-import { useTaskList, useWorkbenchList } from '#renderer/domains/captain/runtime/hooks';
+import { useWorkbenchList } from '#renderer/domains/captain/runtime/hooks';
+import { useTaskForWorkbench } from '#renderer/domains/captain/runtime/useTaskForWorkbench';
 
 export interface WorkbenchCtx {
   worktreeName: string | null;
@@ -25,8 +26,7 @@ export function useWorkbenchCtx(): WorkbenchCtx | null {
   );
   const workbench = activeMatch ?? (wbId ? (allWbs.find((w) => w.id === wbId) ?? null) : null);
 
-  const { data: taskData } = useTaskList();
-  const task = wbId ? (taskData?.items.find((t) => t.workbench_id === wbId) ?? null) : null;
+  const { task } = useTaskForWorkbench(wbId, workbench);
 
   return React.useMemo<WorkbenchCtx | null>(() => {
     if (!workbench) return null;

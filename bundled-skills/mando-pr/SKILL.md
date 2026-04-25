@@ -13,32 +13,34 @@ description: Commit, push, create PR, and tag AI reviewers. Use when ready to op
 
 2. **Verify wiring and UI surfacing**: Review `git diff origin/main..HEAD` and confirm: (a) every new public function, route handler, component, config field, and CLI/TG command is called, registered, rendered, or read from a user-facing entry point; (b) every user-visible feature added to the daemon, API, captain, CLI, or Telegram has a corresponding Electron UI update (view, indicator, setting, notification, or SSE event). Fix any gaps before proceeding.
 
-3. **Commit & push**: Stage changes, commit with a descriptive message, and `git push`
+3. **Run quality gate**: Run `mando-dev build && mando-dev check`. This runs fmt, clippy, nextest (unit tests via `cargo nextest --workspace --lib`), Electron format/lint/typecheck, ESLint rule unit tests, and all scanners (contract, wire, renderer, file-length, generated-doc-sync). Fix every failure before proceeding — do not push a PR that does not pass the local gate.
 
-4. **Rename branch if needed** (MUST happen before PR creation -- renaming after closes the PR):
+4. **Commit & push**: Stage changes, commit with a descriptive message, and `git push`
+
+5. **Rename branch if needed** (MUST happen before PR creation -- renaming after closes the PR):
 
    **Skip renaming** if the branch starts with `mando/` (captain-managed branches stay as-is) or if a PR already exists (`gh pr view --json number 2>/dev/null` succeeds -- renaming would close the PR).
 
    Rename if branch name is generic (e.g., `feat/1`, `feat/wt-0211-2120`, `codex/c29a-coverage-100`) or doesn't describe the changes. Read `git log main..HEAD --oneline` to understand changes, then pick prefix from dominant commit type (`feat/`, `fix/`, `chore/`, `refactor/`) + kebab-case summary (3-5 words max). Rename local, push new, delete old remote, set upstream.
 
-5. **Create PR** (skip if one already exists — e.g. draft from captain spawner; check with `gh pr view --json number 2>/dev/null`). Create with an empty body — `/mando-pr-summary` (step 7) fills in the full structure:
+6. **Create PR** (skip if one already exists — e.g. draft from captain spawner; check with `gh pr view --json number 2>/dev/null`). Create with an empty body — `/mando-pr-summary` (step 8) fills in the full structure:
 
    ```bash
    gh pr create --title "<short descriptive title>" --body ""
    ```
 
-6. **Convert draft to ready** (ALWAYS check and convert):
+7. **Convert draft to ready** (ALWAYS check and convert):
 
    ```bash
    gh pr view --json isDraft,number --jq 'select(.isDraft) | .number' | xargs -I {} gh pr ready {}
    ```
 
-7. **Update PR summary**: Run `/mando-pr-summary`
+8. **Update PR summary**: Run `/mando-pr-summary`
 
    - `/mando-pr-summary` should write the work summary to the task DB **only** when `MANDO_TASK_ID` is set for the current session (that is, the PR is coming from a real Mando task worktree).
    - If `MANDO_TASK_ID` is unset, it must still update the PR body and plan-folder summary, but skip the task-DB write.
 
-8. **Trigger external AI reviews** (idempotent — skip if already triggered):
+9. **Trigger external AI reviews** (idempotent — skip if already triggered):
 
    ```bash
    # Only post trigger comments if they don't already exist
@@ -49,7 +51,7 @@ description: Commit, push, create PR, and tag AI reviewers. Use when ready to op
    echo "$EXISTING" | grep -qF "cursor review" || gh pr comment -b "cursor review"
    ```
 
-9. **Address comments and reviews**:
+10. **Address comments and reviews**:
 
    **If `--fast`**: single pass, no loop, no internal review agents.
 
@@ -61,7 +63,7 @@ description: Commit, push, create PR, and tag AI reviewers. Use when ready to op
 
    - `UNADDRESSED COMMENTS` → fix ALL issues, reply to EACH comment, commit & push with `git add . && git commit -m "..." && git push`
    - `[FAIL]` CI checks → inspect, fix code, commit & push with `git add . && git commit -m "..." && git push`
-   - `[WAIT]` or `ALL CLEAR` → proceed to step 10
+   - `[WAIT]` or `ALL CLEAR` → proceed to step 11
 
    **If not `--fast`**: internal review + monitoring loop.
 
@@ -101,7 +103,7 @@ description: Commit, push, create PR, and tag AI reviewers. Use when ready to op
       - `UNADDRESSED COMMENTS` → fix ALL issues, reply to EACH comment (see below), commit & push, re-trigger CI (see below), re-check
       - `[WAIT]` required CI pending → sleep 10s, re-check
       - `[INFO]` non-blocking checks (review bots) → ignore, do NOT wait
-      - `ALL CLEAR` → proceed to step 10
+      - `ALL CLEAR` → proceed to step 11
 
    d. **Consolidate** remaining issues into a table with Reviewer, Issue, and Location columns. Fix all in ONE commit with `git add . && git commit -m "..." && git push`.
 
@@ -115,7 +117,7 @@ description: Commit, push, create PR, and tag AI reviewers. Use when ready to op
 
    The status script detects unaddressed threads — a comment is "addressed" when the PR author has replied in the thread.
 
-10. **Verify clean git state** (MUST be last step):
+11. **Verify clean git state** (MUST be last step):
 
     ```bash
     git status --short

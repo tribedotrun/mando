@@ -14,7 +14,7 @@
 //! authority.
 
 use crate::{ItemStatus, Task, TimelineEventPayload};
-use settings::config::settings::Config;
+use settings::Config;
 
 use super::notify::Notifier;
 use crate::service::lifecycle;
@@ -87,9 +87,9 @@ pub(crate) async fn try_auto_merge_from_verdict(
     let repo = item
         .github_repo
         .clone()
-        .or_else(|| settings::config::resolve_github_repo(Some(&item.project), config))
+        .or_else(|| settings::resolve_github_repo(Some(&item.project), config))
         .unwrap_or_default();
-    match current_pr_head_sha(&repo, pr_num).await {
+    match global_github::current_pr_head_sha(&repo, pr_num).await {
         Ok(current) => {
             if reviewed_sha.is_empty() || reviewed_sha == super::captain_review_payload::UNKNOWN_SHA
             {
@@ -209,37 +209,4 @@ pub(crate) async fn try_auto_merge_from_verdict(
             );
         }
     }
-}
-
-/// Fetch the current head SHA of a PR via `gh pr view --json headRefOid`.
-/// Returns the OID string on success.
-async fn current_pr_head_sha(repo: &str, pr_num: i64) -> anyhow::Result<String> {
-    let output = tokio::process::Command::new("gh")
-        .args([
-            "pr",
-            "view",
-            &pr_num.to_string(),
-            "--repo",
-            repo,
-            "--json",
-            "headRefOid",
-        ])
-        .output()
-        .await
-        .map_err(|e| anyhow::anyhow!("gh pr view spawn failed: {e}"))?;
-    if !output.status.success() {
-        return Err(anyhow::anyhow!(
-            "gh pr view failed: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        ));
-    }
-    let json: serde_json::Value = serde_json::from_slice(&output.stdout)?;
-    let sha = json
-        .get("headRefOid")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| anyhow::anyhow!("gh pr view response missing headRefOid"))?;
-    if sha.is_empty() || !sha.chars().all(|c| c.is_ascii_hexdigit()) {
-        return Err(anyhow::anyhow!("gh pr view returned invalid headRefOid"));
-    }
-    Ok(sha.to_string())
 }

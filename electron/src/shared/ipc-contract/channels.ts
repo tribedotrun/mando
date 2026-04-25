@@ -1,5 +1,5 @@
 // Central IPC channel registry. Single source of truth for the renderer<->main boundary.
-// MandoAPI in preload/types/api.ts is derived from `inferIpcApi<typeof channels>`.
+// MandoAPI in preload/providers/ipc.ts is derived from `inferIpcApi<typeof channels>`.
 
 import { z } from 'zod';
 

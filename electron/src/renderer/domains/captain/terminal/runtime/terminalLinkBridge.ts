@@ -1,9 +1,9 @@
 import type { IDisposable, Terminal as XTerm } from '@xterm/xterm';
-import { openExternalUrl } from '#renderer/global/providers/native/shell';
 import {
-  resolveLocalPath,
+  openExternalUrl,
   openLocalPath,
-} from '#renderer/domains/captain/terminal/providers/terminalNative';
+  resolveLocalPath,
+} from '#renderer/global/providers/native/shell';
 import {
   createFileLinkProvider,
   createUrlLinkProvider,
@@ -25,7 +25,13 @@ export function installTerminalLinkProviders(term: XTerm, cwd: string): IDisposa
 
   term.options.linkHandler = {
     activate: (_event, url) => {
-      void openUrl(url).catch((err) => log.warn('OSC 8 link open failed', err));
+      void (async () => {
+        try {
+          await openUrl(url);
+        } catch (err) {
+          log.warn('OSC 8 link open failed', err);
+        }
+      })();
     },
   };
 

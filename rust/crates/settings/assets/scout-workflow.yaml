@@ -8,11 +8,11 @@
 # ─────────────────────────────────────────────────────────────────────────────
 
 models:
-  process: "default"
-  article: "default"
-  research: "default"
-  qa: "default"
-  act: "default"
+  process: "sonnet"
+  article: "sonnet"
+  research: "sonnet"
+  qa: "sonnet"
+  act: "sonnet"
 
 agent:
   process_timeout_s: 240
@@ -22,10 +22,16 @@ agent:
   qa_ttl_s: 600
   act_timeout_s: 60
   research_max_items: 10
+  cc_max_retries: 2
 
 # interests, user_context, and repos are injected from config.json at load time.
-interests: {}
-user_context: {}
+interests:
+  high: []
+  low: []
+user_context:
+  role: ""
+  knownDomains: []
+  explainDomains: []
 repos: []
 
 # ── Prompt Templates ─────────────────────────────────────────────────────────
@@ -66,10 +72,10 @@ prompts:
 
     ## Output
 
+    The item's title and publication date are extracted deterministically from the source (yt-dlp metadata for YouTube, snowflake math for tweets, HTML meta tags for blogs). You do NOT need to return them. Focus on scoring and summarizing.
+
     Respond with ONLY a JSON object (no markdown fences, no commentary) with these keys:
-    - "title": short descriptive title (max 80 chars)
     - "source_name": concise origin/creator name — YouTube: channel name (e.g. "3Blue1Brown"), blogs: author or site (e.g. "Paul Graham"), GitHub: org/user (e.g. "vercel"), arxiv: first author (e.g. "Vaswani et al.")
-    - "date_published": publication date as "YYYY-MM-DD" string, or null if unknown. Check meta tags, bylines, timestamps, content body. YouTube: upload date. Tweets: tweet date. GitHub repos: null.
     - "relevance_score": integer 0-100 — how relevant to the interest profile above
     - "quality_score": integer 0-100 — information density, sourcing, depth, regardless of topic
     - "summary": concise markdown string (MAX 100 words). Focus on non-obvious insights — details, data points, or nuances that a general AI summary would miss. Must cover: (1) What this is about (1-2 sentences), (2) Key insights — specific details, numbers, quotes, or arguments that make this worth reading (3-5 bullets).

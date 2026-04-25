@@ -5,12 +5,16 @@ import type {
   TelegramConfig,
   FeaturesConfig,
 } from '#renderer/global/types';
+import {
+  DEFAULT_CLAUDE_TERMINAL_ARGS,
+  DEFAULT_CODEX_TERMINAL_ARGS,
+} from '#renderer/global/config/wireConfig';
 
 export type ConfigTransform = (current: MandoConfig) => MandoConfig;
 
 /** Default CLI arguments for worker agents. */
-export const CLAUDE_ARGS_DEFAULT = '--dangerously-skip-permissions';
-export const CODEX_ARGS_DEFAULT = '--full-auto';
+export const CLAUDE_ARGS_DEFAULT = DEFAULT_CLAUDE_TERMINAL_ARGS;
+export const CODEX_ARGS_DEFAULT = DEFAULT_CODEX_TERMINAL_ARGS;
 
 /** Patches the scout sub-tree. */
 export function scoutPatch(patch: Partial<ScoutConfig>): ConfigTransform {

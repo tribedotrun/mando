@@ -5,8 +5,8 @@ use tracing::warn;
 
 use crate::{ItemStatus, Task};
 use global_types::SessionStatus;
-use settings::config::settings::Config;
-use settings::config::workflow::CaptainWorkflow;
+use settings::CaptainWorkflow;
+use settings::Config;
 
 use sqlx::SqlitePool;
 
@@ -197,8 +197,8 @@ pub async fn apply_verdict(
             // Snapshot fields that will be cleared, so we can rollback on error.
             let saved_worker_sid = item.session_ids.worker.clone();
             let saved_ask_sid = item.session_ids.ask.clone();
+            let saved_advisor_sid = item.session_ids.advisor.clone();
             let saved_worker = item.worker.clone();
-            let saved_worktree = item.worktree.clone();
             let saved_branch = item.branch.clone();
             let saved_pr = item.pr_number;
             let saved_worker_started = item.worker_started_at.clone();
@@ -206,10 +206,12 @@ pub async fn apply_verdict(
 
             let _ = lifecycle::apply_transition(item, ItemStatus::Queued)?;
             item.session_ids.worker = None;
-            item.session_ids.ask = None;
+            super::clear_task_interaction_sessions(item);
             item.worker = None;
-            item.worktree = None;
-            // workbench_id is permanent — once assigned, never cleared.
+            // worktree and workbench_id are permanent — respawn reuses the
+            // existing worktree directory and workbench, only creating a new
+            // branch. Matches the Rework lifecycle path in tick_rework.rs and
+            // captain invariant #4 in CLAUDE.md.
             item.branch = None;
             item.pr_number = None;
             item.worker_started_at = None;
@@ -251,8 +253,8 @@ pub async fn apply_verdict(
                     lifecycle::restore_status(item, prev_status);
                     item.session_ids.worker = saved_worker_sid;
                     item.session_ids.ask = saved_ask_sid;
+                    item.session_ids.advisor = saved_advisor_sid;
                     item.worker = saved_worker;
-                    item.worktree = saved_worktree;
                     item.branch = saved_branch;
                     item.pr_number = saved_pr;
                     item.worker_started_at = saved_worker_started;
@@ -263,8 +265,7 @@ pub async fn apply_verdict(
             }
         }
         "escalate" => {
-            let _ = lifecycle::apply_transition(item, ItemStatus::Escalated)?;
-            item.escalation_report = verdict.report.clone();
+            let _ = lifecycle::apply_escalation(item, verdict.report.clone())?;
             let event = crate::TimelineEvent {
                 timestamp: global_types::now_rfc3339(),
                 actor: "captain".to_string(),
@@ -427,7 +428,10 @@ pub async fn apply_verdict(
         }
         other => {
             warn!(module = "captain", action = %other, "unknown verdict action, escalating");
-            let _ = lifecycle::apply_transition(item, ItemStatus::Escalated)?;
+            let _ = lifecycle::apply_escalation(
+                item,
+                Some(format!("Unknown captain verdict action: {other}")),
+            )?;
             let event = crate::TimelineEvent {
                 timestamp: global_types::now_rfc3339(),
                 actor: "captain".to_string(),
@@ -460,6 +464,7 @@ pub async fn apply_verdict(
                 }
                 Err(e) => {
                     lifecycle::restore_status(item, prev_status);
+                    item.escalation_report = None;
                     transition_applied = false;
                     tracing::error!(module = "captain", item_id = item.id, error = %e, "persist failed for unknown verdict");
                 }

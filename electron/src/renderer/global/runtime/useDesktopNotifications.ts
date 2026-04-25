@@ -11,13 +11,15 @@
  * preference key.
  */
 import { useCallback, useRef, useState } from 'react';
+import { z } from 'zod';
 import type { NotifyLevel, SSEEvent } from '#renderer/global/types';
-import { defineSlot } from '#renderer/global/providers/persistence';
+import { defineJsonSlot } from '#renderer/global/providers/persistence';
 import { showNativeNotification } from '#renderer/global/providers/native/notifications';
 import { parseNotification } from '#renderer/global/service/notificationHelpers';
 
-const enabledSlot = defineSlot(
+const enabledSlot = defineJsonSlot(
   'mando:desktop-notifications-enabled',
+  z.boolean(),
   'global/runtime/useDesktopNotifications',
 );
 
@@ -25,12 +27,12 @@ const DEDUP_WINDOW_MS = 5000;
 
 /** Check if the user has enabled desktop notifications (default: true). */
 export function getNotificationsEnabled(): boolean {
-  return enabledSlot.read() !== 'false';
+  return enabledSlot.read() ?? true;
 }
 
 /** Set the desktop notifications preference. */
 export function setNotificationsEnabled(enabled: boolean): void {
-  enabledSlot.write(String(enabled));
+  enabledSlot.write(enabled);
 }
 
 /** Hook that owns the notification preference state. */

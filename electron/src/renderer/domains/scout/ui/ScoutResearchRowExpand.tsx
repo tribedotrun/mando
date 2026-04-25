@@ -2,8 +2,8 @@ import React from 'react';
 import { ExternalLink, Loader2, RefreshCw } from 'lucide-react';
 import type { ScoutItem, ScoutResearchRun } from '#renderer/global/types';
 import { useResearchRunItems, useScoutResearch } from '#renderer/domains/scout/runtime/hooks';
-import { Badge } from '#renderer/global/ui/badge';
-import { Button } from '#renderer/global/ui/button';
+import { Badge } from '#renderer/global/ui/primitives/badge';
+import { Button } from '#renderer/global/ui/primitives/button';
 import {
   Table,
   TableBody,
@@ -11,7 +11,7 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from '#renderer/global/ui/table';
+} from '#renderer/global/ui/primitives/table';
 
 export function ScoutResearchRowExpand({ run }: { run: ScoutResearchRun }): React.ReactElement {
   const research = useScoutResearch();

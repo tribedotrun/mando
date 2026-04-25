@@ -9,6 +9,7 @@ import {
   fromSseMessage,
   parseJsonText,
   parseJsonTextWith,
+  parseTextWith,
   parseWith,
   toReactQuery,
 } from '../helpers.ts';
@@ -50,6 +51,23 @@ describe('parseJsonText', () => {
 
   it('returns Err on malformed JSON text', () => {
     const r = parseJsonText('{broken', 'json:test');
+    r.match(
+      () => assert.fail('expected err'),
+      (e) => assert.equal(e.code, 'parse'),
+    );
+  });
+});
+
+describe('parseTextWith', () => {
+  it('returns Ok when raw text matches the schema', () => {
+    const portSchema = z.string().trim().regex(/^\d+$/).transform(Number);
+    const r = parseTextWith(' 18791\n', portSchema, 'text:test');
+    assert.equal(r.unwrap(), 18791);
+  });
+
+  it('returns Err when raw text fails the schema', () => {
+    const portSchema = z.string().trim().regex(/^\d+$/).transform(Number);
+    const r = parseTextWith('abc', portSchema, 'text:test');
     r.match(
       () => assert.fail('expected err'),
       (e) => assert.equal(e.code, 'parse'),

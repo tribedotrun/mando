@@ -19,6 +19,8 @@ members = [
     "crates/global-bus",
     "crates/global-claude",
     "crates/global-net",
+    "crates/global-git",
+    "crates/global-github",
 
     # Contract + transports + binary
     "crates/api-types",
@@ -34,7 +36,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.18-beta.6"
+version = "0.1.18-beta.7"
 edition = "2021"
 license = "Apache-2.0"
 repository = "https://github.com/tribedotrun/mando"
@@ -70,6 +72,8 @@ time = { version = "0.3", features = ["formatting", "parsing", "macros", "local-
 sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite"] }
 rustc-hash = "2"
 inventory = "0.3.24"
+metrics = "0.24"
+metrics-exporter-prometheus = { version = "0.17", default-features = false }
 
 # Internal crates
 mando-terminal = { path = "crates/terminal" }
@@ -88,6 +92,8 @@ global-db = { path = "crates/global-db" }
 global-bus = { path = "crates/global-bus" }
 global-claude = { path = "crates/global-claude" }
 global-net = { path = "crates/global-net" }
+global-git = { path = "crates/global-git" }
+global-github = { path = "crates/global-github" }
 api-types = { path = "crates/api-types" }
 gateway-client = { path = "crates/gateway-client" }
 transport-http = { path = "crates/transport-http" }

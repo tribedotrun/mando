@@ -15,8 +15,8 @@ fn inferred_status_event(current: &Task, next: &Task, command: &str) -> Timeline
             next.status.as_str()
         ),
         data: TimelineEventPayload::StatusChangedByCommand {
-            from: current.status.as_str().to_string(),
-            to: next.status.as_str().to_string(),
+            from: current.status.into(),
+            to: next.status.into(),
             command: command.to_string(),
         },
     }

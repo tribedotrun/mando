@@ -4,8 +4,10 @@ pub fn with_credential(
     builder: CcConfigBuilder,
     credential: &Option<(i64, String)>,
 ) -> CcConfigBuilder {
-    if let Some((_id, token)) = credential {
-        builder.env("CLAUDE_CODE_OAUTH_TOKEN", token)
+    if let Some((id, token)) = credential {
+        builder
+            .env("CLAUDE_CODE_OAUTH_TOKEN", token)
+            .credential_id(*id)
     } else {
         builder
     }

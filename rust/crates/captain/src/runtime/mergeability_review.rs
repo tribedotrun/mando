@@ -2,8 +2,8 @@
 
 use crate::{ItemStatus, Task, TimelineEventPayload};
 use rustc_hash::FxHashMap;
-use settings::config::settings::Config;
-use settings::config::workflow::CaptainWorkflow;
+use settings::CaptainWorkflow;
+use settings::Config;
 
 use crate::runtime::notify::Notifier;
 
@@ -43,7 +43,7 @@ pub(crate) async fn check_done_review_threads(
 
         // Build a stub with the resolved github_repo slug so fetch_pr_data
         // can resolve short PR refs like "#334" to the correct repo.
-        let github_repo = settings::config::resolve_github_repo(Some(&items[idx].project), config);
+        let github_repo = settings::resolve_github_repo(Some(&items[idx].project), config);
         let stub = Task {
             pr_number: items[idx].pr_number,
             github_repo,
@@ -281,11 +281,7 @@ pub(crate) fn classify_review_state(
     let issues_text = parts.join("\n");
     let mut vars: FxHashMap<&str, &str> = FxHashMap::default();
     vars.insert("issues", issues_text.as_str());
-    let message = match settings::config::render_prompt(
-        "review_reopen_message",
-        &workflow.prompts,
-        &vars,
-    ) {
+    let message = match settings::render_prompt("review_reopen_message", &workflow.prompts, &vars) {
         Ok(m) => m,
         Err(e) => {
             tracing::error!(module = "captain", error = %e, "failed to render review_reopen_message");

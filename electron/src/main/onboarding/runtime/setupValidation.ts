@@ -10,7 +10,9 @@ import { promisify } from 'util';
 import { z } from 'zod';
 import { handleChannel } from '#main/global/runtime/ipcSecurity';
 import { currentPath } from '#main/global/service/launchd';
+import { parseNonEmptyText } from '#main/global/service/boundaryText';
 import log from '#main/global/providers/logger';
+import { parseJsonTextWith } from '#result';
 
 // Telegram getMe response shape per https://core.telegram.org/bots/api#getme.
 // Only the fields we actually consume are required; the rest is ignored.
@@ -53,7 +55,7 @@ export function registerSetupValidationHandlers(): void {
 
     let version: string | null = null;
     const ver = await run('claude', ['--version'], 10_000);
-    if (ver) version = ver.stdout.trim();
+    if (ver) version = parseNonEmptyText(ver.stdout, 'command:claude-version');
 
     // Version check is sufficient — Mando provides its own API key to CC
     // workers via config, so CC doesn't need to be independently authenticated.
@@ -67,13 +69,12 @@ export function registerSetupValidationHandlers(): void {
         log.warn(`[setup-validation] Telegram getMe returned ${resp.status}`);
         return { valid: false, error: `Telegram API returned ${resp.status}` };
       }
-      const rawJson: unknown = await resp.json();
-      const parsed = telegramGetMeSchema.safeParse(rawJson);
-      if (!parsed.success) {
+      const parsed = parseJsonTextWith(await resp.text(), telegramGetMeSchema, 'telegram:getMe');
+      if (parsed.isErr()) {
         log.warn('[setup-validation] Telegram getMe response failed schema parse');
         return { valid: false, error: 'Telegram API response was malformed' };
       }
-      const data = parsed.data;
+      const data = parsed.value;
       if (data.ok && data.result) {
         return { valid: true, botName: data.result.first_name, botUsername: data.result.username };
       }

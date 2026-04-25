@@ -15,6 +15,11 @@ ruleTester.run('architecture/no-native-bridge-outside-providers', rule, {
   invalid: [
     {
       code: `window.mandoAPI.openInFinder('/tmp');`,
+      filename: 'src/renderer/domains/onboarding/providers/ipcBridge.ts',
+      errors: [{ messageId: 'noDirectBridge' }],
+    },
+    {
+      code: `window.mandoAPI.openInFinder('/tmp');`,
       filename: 'src/renderer/global/runtime/useNativeActions.ts',
       errors: [{ messageId: 'noDirectBridge' }],
     },

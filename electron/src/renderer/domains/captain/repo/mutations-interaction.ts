@@ -1,5 +1,4 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { toast } from '#renderer/global/runtime/useFeedback';
 import log from '#renderer/global/service/logger';
 import {
   mergePr,
@@ -19,12 +18,20 @@ import {
   updateTaskInList,
 } from '#renderer/domains/captain/repo/taskListHelpers';
 
+async function triggerPostMergeTick(): Promise<void> {
+  try {
+    await toReactQuery(triggerTick());
+  } catch (e) {
+    log.warn('post-merge tick failed', e);
+  }
+}
+
 export function useTaskMerge() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (vars: { id: number; prNumber: number; project: string }) => {
       const result = await toReactQuery(mergePr(vars.prNumber, vars.project));
-      void toReactQuery(triggerTick()).catch((e) => log.warn('post-merge tick failed', e));
+      void triggerPostMergeTick();
       return result;
     },
     onMutate: async (vars) => {
@@ -38,10 +45,6 @@ export function useTaskMerge() {
     onError: (err, _vars, context) => {
       if (context?.prev) qc.setQueryData(queryKeys.tasks.list(), context.prev);
       log.error('useTaskMerge', err);
-      toast.error('Merge failed');
-    },
-    onSuccess: () => {
-      toast.success('Captain will check CI and merge');
     },
   });
 }
@@ -53,7 +56,6 @@ export function useTaskAsk() {
       toReactQuery(askTask(vars.id, vars.question, vars.askId, vars.images)),
     onError: (err) => {
       log.error('useTaskAsk', err);
-      toast.error('Ask failed');
     },
     onSettled: (_data, err, vars) => {
       if (err) log.warn('useTaskAsk settled with error', err);
@@ -70,7 +72,6 @@ export function useTaskAdvisor() {
       toReactQuery(sendAdvisorMessage(vars.id, vars.message, vars.intent)),
     onError: (err) => {
       log.error('useTaskAdvisor', err);
-      toast.error('Advisor message failed');
     },
     onSettled: (_data, err, vars) => {
       if (err) log.warn('useTaskAdvisor settled with error', err);
@@ -84,12 +85,8 @@ export function useTaskNudge() {
   return useMutation({
     mutationFn: (vars: { id: number; message: string; images?: File[] }) =>
       toReactQuery(nudgeWorker(vars.id, vars.message, vars.images)),
-    onSuccess: (_data, vars) => {
-      toast.success(`Nudged task #${vars.id}`);
-    },
     onError: (err) => {
       log.error('useTaskNudge', err);
-      toast.error('Nudge failed');
     },
   });
 }
@@ -111,12 +108,6 @@ export function useTaskDelete() {
     onError: (err, _vars, context) => {
       if (context?.prev) qc.setQueryData(queryKeys.tasks.list(), context.prev);
       log.error('useTaskDelete', err);
-      toast.error('Delete failed');
-    },
-    onSuccess: (result) => {
-      if (result.warnings?.length) {
-        for (const w of result.warnings) toast.error(w);
-      }
     },
   });
 }
@@ -140,7 +131,6 @@ export function useTaskClarify() {
     },
     onError: (err) => {
       log.error('useTaskClarify', err);
-      toast.error('Answer failed');
     },
   });
 }

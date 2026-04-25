@@ -4,8 +4,8 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::{ItemStatus, Task, TimelineEventPayload};
-use settings::config::settings::Config;
-use settings::config::workflow::CaptainWorkflow;
+use settings::CaptainWorkflow;
+use settings::Config;
 
 use crate::runtime::dashboard::truncate_utf8;
 use crate::runtime::notify::Notifier;
@@ -102,6 +102,7 @@ pub(crate) async fn redispatch_newly_queued(
                             item.worker_started_at = Some(spawn_result.started_at);
                             item.session_ids.worker = Some(spawn_result.session_id);
                             item.plan = spawn_result.plan;
+                            item.pr_number = spawn_result.pr_number;
                             item.spawn_fail_count = 0;
                             *active_workers += 1;
                             let resource = item
@@ -197,8 +198,20 @@ pub(crate) async fn redispatch_newly_queued(
 }
 
 /// Clean up after a failed clarifier run: mark session failed, emit
-/// timeline event, revert status to New, persist the revert. If the
-/// revert persist fails, escalate to captain review.
+/// timeline event, revert status to New, persist the revert.
+///
+/// On `Ok(false)` (rev conflict) the revert is dropped silently — the
+/// task was concurrently advanced by the HTTP inline reclarifier, which
+/// is the authoritative writer for follow-up clarifier work since the
+/// `dispatch_reclarify` safety net was removed. The old fallback
+/// escalated to captain review on any concurrent-write conflict, which
+/// created the PR #966 ghost-failure class: a correctly delivered Q2
+/// from the inline path got flipped to captain-reviewing because this
+/// tick was still holding a stale in-memory snapshot.
+///
+/// On `Err(_)` (the query itself failed) we still log but no longer
+/// escalate — there is no active writer that needs to be "rescued", and
+/// the next tick will re-evaluate the task from fresh DB state.
 #[tracing::instrument(skip_all)]
 pub(crate) async fn revert_clarifier_start(
     item: &mut Task,
@@ -228,6 +241,15 @@ pub(crate) async fn revert_clarifier_start(
         .await,
         "dispatch_redispatch: super::timeline_emit::emit_for_task( item, &format!('Clarifi"
     );
+    // Snapshot the in-memory status BEFORE the optimistic transition so
+    // we can restore it if the persist fails or loses a rev race. Without
+    // restore, the in-memory task would be left at `New` while the DB
+    // reflects whatever the concurrent winner wrote (typically
+    // `needs-clarification` after the HTTP inline apply). Tick write-back
+    // via `update_task_exec` would then call
+    // `infer_transition_command(NeedsClarification, New)` which has no
+    // legal edge and fails the whole tick merge — codex P1 on PR #966.
+    let previous_status = item.status;
     if let Err(e) = lifecycle::apply_transition(item, ItemStatus::New) {
         tracing::error!(
             module = "captain",
@@ -243,8 +265,8 @@ pub(crate) async fn revert_clarifier_start(
         actor: "captain".into(),
         summary: "Retrying clarifier after failure".into(),
         data: TimelineEventPayload::StatusChangedClarifierFail {
-            from: "clarifying".to_string(),
-            to: "new".to_string(),
+            from: api_types::ItemStatus::Clarifying,
+            to: api_types::ItemStatus::New,
             session_id: session_id.to_string(),
             error: err_msg.clone(),
         },
@@ -260,19 +282,111 @@ pub(crate) async fn revert_clarifier_start(
     {
         Ok(true) => {}
         Ok(false) => {
-            tracing::error!(
+            tracing::info!(
                 module = "captain",
                 id = item.id,
-                "failed to persist clarify revert — task changed concurrently"
+                "clarify revert skipped — task was concurrently advanced (e.g. HTTP inline reclarifier committed a fresh result)"
             );
-            super::action_contract::reset_review_retry(item, crate::ReviewTrigger::ClarifierFail);
+            // Restore in-memory status so the subsequent tick write-back
+            // doesn't fabricate an illegal `NeedsClarification -> New`
+            // transition via update_task_exec.
+            lifecycle::restore_status(item, previous_status);
         }
         Err(pe) => {
             tracing::error!(
                 module = "captain", id = item.id, error = %pe,
-                "failed to persist clarify revert — escalating to captain review"
+                "failed to persist clarify revert"
             );
-            super::action_contract::reset_review_retry(item, crate::ReviewTrigger::ClarifierFail);
+            lifecycle::restore_status(item, previous_status);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    async fn pool_with_project() -> sqlx::SqlitePool {
+        let db = global_db::Db::open_in_memory().await.unwrap();
+        settings::projects::upsert(db.pool(), "test", "", None)
+            .await
+            .unwrap();
+        db.pool().clone()
+    }
+
+    fn clarifying_task(title: &str, session_id: &str) -> Task {
+        let mut task = Task::new(title);
+        task.project_id = 1;
+        task.project = "test".into();
+        task.status = ItemStatus::Clarifying;
+        task.session_ids.clarifier = Some(session_id.into());
+        task.last_activity_at = Some(global_types::now_rfc3339());
+        task
+    }
+
+    /// PR #966 invariant: when `persist_status_transition_with_command`
+    /// returns `Ok(false)` (the task was concurrently advanced past
+    /// `Clarifying` — e.g. the HTTP inline reclarifier committed a fresh
+    /// result between our stream read and our revert), `revert_clarifier_start`
+    /// must NOT escalate to captain review. It logs and drops.
+    ///
+    /// Before PR #966, the `Ok(false)` arm called `reset_review_retry`
+    /// which forced the in-memory task into `CaptainReviewing`. At
+    /// tick-end persist, that flipped a correctly delivered Q2 into a
+    /// ghost captain-review retry (the task-#88 symptom).
+    #[tokio::test]
+    async fn rev_conflict_does_not_escalate() {
+        let pool = pool_with_project().await;
+
+        // Create task as NeedsClarification in the DB — so the
+        // `expected_status == "clarifying"` guard in
+        // persist_status_transition_with_command will see a mismatch and
+        // return Ok(false).
+        let mut db_task = clarifying_task("rev-conflict", "sid-conflict");
+        db_task.status = ItemStatus::NeedsClarification;
+        let id = crate::io::queries::tasks::insert_task(&pool, &db_task)
+            .await
+            .unwrap();
+
+        // In-memory task simulates the captain tick snapshot: task was
+        // Clarifying when loaded, but the DB has moved on.
+        let mut memory_task = crate::io::queries::tasks::find_by_id(&pool, id)
+            .await
+            .unwrap()
+            .unwrap();
+        memory_task.status = ItemStatus::Clarifying;
+
+        revert_clarifier_start(
+            &mut memory_task,
+            "sid-conflict",
+            &anyhow::anyhow!("simulated CC error"),
+            &pool,
+        )
+        .await;
+
+        // The rev-conflict fallback must:
+        //  (a) NOT flip to CaptainReviewing (the pre-PR-#966 behavior
+        //      that caused the task-#88 ghost captain-review);
+        //  (b) restore the pre-transition in-memory status (Clarifying)
+        //      so the tick's write-back doesn't try to infer an illegal
+        //      `NeedsClarification -> New` transition — codex P1 fix on
+        //      the same PR.
+        assert_eq!(
+            memory_task.status,
+            ItemStatus::Clarifying,
+            "in-memory status should be restored to pre-transition value on rev conflict"
+        );
+        assert!(
+            memory_task.captain_review_trigger.is_none(),
+            "rev-conflict fallback must not set captain_review_trigger"
+        );
+
+        // DB is untouched by the revert (the concurrent winner's
+        // state remains).
+        let db_after = crate::io::queries::tasks::find_by_id(&pool, id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(db_after.status, ItemStatus::NeedsClarification);
     }
 }

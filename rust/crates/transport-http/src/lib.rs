@@ -1,5 +1,12 @@
 //! transport-http -- HTTP transport surface for the Mando daemon.
 
+// Axum's handler trait-resolution bundles every route's Service impl into
+// a deeply nested generic soup. With enough typed handlers (~100+) and
+// nested `Result<Json<...>, ApiError>` return types, rustc trips E0275
+// `overflow evaluating h2::proto::streams::store::Key: Send` at the
+// default recursion_limit=128. Bump to give the trait resolver room.
+#![recursion_limit = "256"]
+
 mod api_router;
 mod auth;
 mod config;
@@ -14,8 +21,9 @@ mod types;
 
 pub use api_router::{contract_inventory_link_anchor, ApiRouter};
 pub use auth::ensure_auth_token;
+pub use middleware::metrics::install_metrics_recorder;
 pub use runtime::captain_support::captain_notifier;
-pub use settings::config::resolve_github_repo;
+pub use settings::resolve_github_repo;
 pub use transport::router::build_router;
 pub use transport::*;
 pub use transport_http_macros::instrument_api;

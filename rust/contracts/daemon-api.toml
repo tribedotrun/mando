@@ -40,6 +40,7 @@ transitions = [
   "escalated -> rework",
   "errored -> rework",
   "handed-off -> rework",
+  "stopped -> rework",
 ]
 
 [[producer]]
@@ -58,6 +59,9 @@ transitions = [
   "handed-off -> in-progress",
   "handed-off -> queued",
   "handed-off -> captain-reviewing",
+  "stopped -> in-progress",
+  "stopped -> queued",
+  "stopped -> captain-reviewing",
 ]
 
 [[producer]]
@@ -110,6 +114,13 @@ transitions = [
   "escalated -> handed-off",
   "errored -> handed-off",
   "plan-ready -> handed-off",
+]
+
+[[producer]]
+path = "POST /api/tasks/stop"
+handler = "post_task_stop"
+transitions = [
+  "in-progress -> stopped",
 ]
 
 [[producer]]

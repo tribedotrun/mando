@@ -2,6 +2,7 @@ pub(crate) mod dashboard_payloads;
 pub mod error;
 pub mod scout;
 
+pub use dashboard_payloads::ScoutActDraft;
 pub use error::{find_scout_error, ScoutError};
 pub use scout::{ResearchRunStatus, ScoutItem, ScoutResearchRun, ScoutStatus};
 

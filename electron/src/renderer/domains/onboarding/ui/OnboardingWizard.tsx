@@ -1,8 +1,8 @@
 import React, { useState, useCallback } from 'react';
 import { useSetupIpc } from '#renderer/domains/onboarding/runtime/useSetupIpc';
 import heroImg from '#renderer/assets/hero.png';
-import { Button } from '#renderer/global/ui/button';
-import { TelegramScreen } from '#renderer/domains/onboarding/ui/OnboardingSteps';
+import { Button } from '#renderer/global/ui/primitives/button';
+import { TelegramScreen } from '#renderer/domains/onboarding/ui/TelegramScreen';
 import { ClaudeCheckScreen } from '#renderer/domains/onboarding/ui/ClaudeCheckScreen';
 import { formatSetupError } from '#renderer/domains/onboarding/service/types';
 import { useDataContext } from '#renderer/global/runtime/dataContext';
@@ -26,10 +26,14 @@ export function OnboardingWizard(): React.ReactElement {
   const [tgToken, setTgToken] = useState('');
 
   const handleSaveProgress = useCallback(() => {
-    void saveProgress(tgToken).catch((e) => {
-      log.error('Failed to save onboarding progress:', e);
-      toast.error(getErrorMessage(e, 'Failed to save onboarding progress'));
-    });
+    void (async () => {
+      try {
+        await saveProgress(tgToken);
+      } catch (e) {
+        log.error('Failed to save onboarding progress:', e);
+        toast.error(getErrorMessage(e, 'Failed to save onboarding progress'));
+      }
+    })();
   }, [tgToken, saveProgress]);
 
   const finishSetup = useCallback(

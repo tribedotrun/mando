@@ -1,14 +1,20 @@
 import React from 'react';
 import { useParams, useSearch } from '@tanstack/react-router';
-import { Copy, Check, Terminal as TerminalIcon } from 'lucide-react';
-import { formatCallerLabel, useTranscript, buildResumeCmd } from '#renderer/domains/sessions';
-import { TranscriptViewer } from '#renderer/domains/sessions/ui/TranscriptViewer';
+import { Copy, Check, FileText, Terminal as TerminalIcon } from 'lucide-react';
+import {
+  formatCallerLabel,
+  useSessionJsonlPath,
+  buildResumeCmd,
+  isTranscriptUnavailable,
+  useTranscriptEventsStream,
+} from '#renderer/domains/sessions';
+import { TranscriptMessageList } from '#renderer/domains/sessions/ui/transcriptEvents/TranscriptMessageList';
 import { useWorkbenchList } from '#renderer/domains/captain';
+import { useNativeActions } from '#renderer/global/runtime/useFeedbackNativeActions';
 import { copyToClipboard } from '#renderer/global/runtime/useFeedback';
 import { useCopyFeedback } from '#renderer/global/runtime/useCopyFeedback';
-import { Button } from '#renderer/global/ui/button';
-import { ScrollArea } from '#renderer/global/ui/scroll-area';
-import { Skeleton } from '#renderer/global/ui/skeleton';
+import { Button } from '#renderer/global/ui/primitives/button';
+import { Skeleton } from '#renderer/global/ui/primitives/skeleton';
 import { ErrorBoundary } from '#renderer/global/ui/ErrorBoundary';
 import { router } from '#renderer/app/router';
 
@@ -16,16 +22,17 @@ export function TranscriptPage(): React.ReactElement {
   const { sessionId } = useParams({ strict: false }) as { sessionId: string };
   const search = useSearch({ from: '/_app/sessions/$sessionId' });
 
-  const { data, isLoading, error } = useTranscript(sessionId);
+  const { data, isLoading, error } = useTranscriptEventsStream(sessionId);
 
   const { copied, markCopied } = useCopyFeedback();
 
   const resumeCmd = buildResumeCmd(sessionId, search.cwd);
 
   const handleCopy = () => {
-    void copyToClipboard(resumeCmd).then((ok) => {
+    void (async () => {
+      const ok = await copyToClipboard(resumeCmd);
       if (ok) markCopied();
-    });
+    })();
   };
 
   const { data: workbenches = [] } = useWorkbenchList();
@@ -39,6 +46,15 @@ export function TranscriptPage(): React.ReactElement {
         search: { tab: 'terminal', resume: sessionId },
       });
     }
+  };
+
+  const { data: jsonl } = useSessionJsonlPath(sessionId);
+  const jsonlPath = jsonl?.path ?? null;
+  const { files } = useNativeActions();
+
+  const handleOpenJsonl = () => {
+    if (!jsonlPath) return;
+    files.openLocalPath(jsonlPath);
   };
 
   const title = search.caller ? formatCallerLabel(search.caller) : 'Session';
@@ -58,6 +74,17 @@ export function TranscriptPage(): React.ReactElement {
             {copied ? <Check size={13} /> : <Copy size={13} />}
             <span className="font-mono text-[11px]">-r</span>
           </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleOpenJsonl}
+            disabled={!jsonlPath}
+            title={jsonlPath ? jsonlPath : 'JSONL file not available for this session'}
+            className="gap-1.5"
+          >
+            <FileText size={13} />
+            Open JSONL
+          </Button>
           {workbench && (
             <Button
               variant="outline"
@@ -73,18 +100,23 @@ export function TranscriptPage(): React.ReactElement {
       </div>
 
       {/* Transcript */}
-      <ScrollArea className="min-h-0 flex-1 px-8 pb-6">
-        <ErrorBoundary fallbackLabel="Transcript">
-          {isLoading ? (
-            <div className="space-y-3 py-4">
-              <Skeleton className="h-5 w-48" />
-              <Skeleton className="h-4 w-full" />
-              <Skeleton className="h-4 w-3/4" />
-              <Skeleton className="h-20 w-full" />
+      <ErrorBoundary fallbackLabel="Transcript">
+        {isLoading ? (
+          <div className="space-y-3 px-8 py-4">
+            <Skeleton className="h-5 w-48" />
+            <Skeleton className="h-4 w-full" />
+            <Skeleton className="h-4 w-3/4" />
+            <Skeleton className="h-20 w-full" />
+          </div>
+        ) : error ? (
+          isTranscriptUnavailable(error) ? (
+            <div className="mx-8 rounded-md border border-dashed px-3 py-3 text-body text-muted-foreground">
+              No transcript was recorded for this session. This usually means the session failed or
+              was killed before emitting any output.
             </div>
-          ) : error ? (
+          ) : (
             <div
-              className="rounded-md px-3 py-2 text-body"
+              className="mx-8 rounded-md px-3 py-2 text-body"
               style={{
                 background: 'color-mix(in srgb, var(--destructive) 10%, transparent)',
                 color: 'var(--destructive)',
@@ -92,15 +124,15 @@ export function TranscriptPage(): React.ReactElement {
             >
               Failed to load transcript
             </div>
-          ) : data?.markdown ? (
-            <TranscriptViewer markdown={data.markdown} />
-          ) : (
-            <div className="py-8 text-center text-body text-muted-foreground">
-              No transcript available
-            </div>
-          )}
-        </ErrorBoundary>
-      </ScrollArea>
+          )
+        ) : data?.events && data.events.length > 0 ? (
+          <TranscriptMessageList events={data.events} isRunning={data.isRunning} />
+        ) : (
+          <div className="py-8 text-center text-body text-muted-foreground">
+            No transcript available
+          </div>
+        )}
+      </ErrorBoundary>
     </div>
   );
 }

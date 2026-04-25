@@ -18,11 +18,9 @@ pub struct TerminalHistoryMeta {
     pub exit_code: Option<u32>,
     pub size: TerminalSize,
     pub state: SessionState,
-    #[serde(default)]
     pub name: Option<String>,
     /// Claude Code session ID captured from `~/.claude/sessions/{pid}.json`.
     /// Used for `--resume <id>` on auto-resume after daemon restart.
-    #[serde(default)]
     pub cc_session_id: Option<String>,
 }
 

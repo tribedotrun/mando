@@ -1,15 +1,19 @@
 import React, { useState } from 'react';
 import { cn } from '#renderer/global/service/cn';
 import { ChevronDown, Copy } from 'lucide-react';
-import { FinderIcon, CursorIcon } from '#renderer/global/ui/icons';
+import { FinderIcon, CursorIcon } from '#renderer/global/ui/primitives/icons';
 import { useMountEffect } from '#renderer/global/runtime/useMountEffect';
 import { useNativeActions } from '#renderer/global/runtime/useNativeActions';
-import { Kbd } from '#renderer/global/ui/kbd';
+import { Kbd } from '#renderer/global/ui/primitives/kbd';
 import { copyToClipboard } from '#renderer/global/runtime/useFeedback';
 
-export function OpenMenu({ worktreePath }: { worktreePath: string | null }): React.ReactElement {
+export function AppHeaderOpenMenu({
+  worktreePath,
+}: {
+  worktreePath: string | null;
+}): React.ReactElement {
   const [open, setOpen] = useState(false);
-  const { openInFinder, openInCursor } = useNativeActions();
+  const { openInFinder, openInCursor } = useNativeActions().files;
   const disabled = !worktreePath;
 
   useMountEffect(() => {

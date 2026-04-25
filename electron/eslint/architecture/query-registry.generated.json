@@ -1,0 +1,32 @@
+{
+  "generatedBy": "devtools/scripts/generate_renderer_query_registry.py",
+  "hooks": [
+    "useActivityStats",
+    "useAppVersion",
+    "useClaudeCodeCheck",
+    "useConfig",
+    "useCredentialsList",
+    "useDevInfoQuery",
+    "useHighlight",
+    "useResearchRunItems",
+    "useResearchRuns",
+    "useScoutArticle",
+    "useScoutItem",
+    "useScoutList",
+    "useSessionJsonlPath",
+    "useSessionsList",
+    "useTaskArtifacts",
+    "useTaskAskHistory",
+    "useTaskFeed",
+    "useTaskList",
+    "useTaskListWithArchived",
+    "useTaskPrSummary",
+    "useTaskTimelineData",
+    "useTelegramHealth",
+    "useTerminalList",
+    "useTranscriptEventsCache",
+    "useUpdateSystemInfo",
+    "useWorkbenchList",
+    "useWorkers"
+  ]
+}

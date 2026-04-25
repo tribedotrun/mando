@@ -72,7 +72,6 @@ impl FromStr for SessionStatus {
 
 /// A single CC session log entry.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
 pub struct SessionEntry {
     pub session_id: String,
     pub ts: String,

@@ -1,8 +1,14 @@
 import React from 'react';
 import { Loader2 } from 'lucide-react';
 import { useResearchRuns } from '#renderer/domains/scout/runtime/hooks';
-import { Table, TableBody, TableHead, TableHeader, TableRow } from '#renderer/global/ui/table';
-import { ResearchRow } from '#renderer/domains/scout/ui/ScoutResearchRow';
+import {
+  Table,
+  TableBody,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '#renderer/global/ui/primitives/table';
+import { ScoutResearchRow } from '#renderer/domains/scout/ui/ScoutResearchRow';
 
 export function ScoutResearch() {
   const { data: runs, isLoading } = useResearchRuns();
@@ -40,7 +46,7 @@ export function ScoutResearch() {
           </TableHeader>
           <TableBody>
             {runs.map((run) => (
-              <ResearchRow key={run.id} run={run} />
+              <ScoutResearchRow key={run.id} run={run} />
             ))}
           </TableBody>
         </Table>

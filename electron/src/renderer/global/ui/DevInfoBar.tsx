@@ -1,18 +1,23 @@
 import React from 'react';
 import { useNativeActions } from '#renderer/global/runtime/useNativeActions';
 import { DevInspector } from '#renderer/global/ui/DevInspector';
-import { Badge } from '#renderer/global/ui/badge';
-import { Button } from '#renderer/global/ui/button';
+import { Badge } from '#renderer/global/ui/primitives/badge';
+import { Button } from '#renderer/global/ui/primitives/button';
 import { useDevInfoBar } from '#renderer/global/runtime/useDevInfoBar';
 
 export function DevInfoBar(): React.ReactElement | null {
   const { info, inspecting, setInspecting, hoveredName, setHoveredName } = useDevInfoBar();
-  const { openConfigFile, openDataDir, toggleDevTools } = useNativeActions();
+  const nativeActions = useNativeActions();
+  const { openConfigFile, openDataDir } = nativeActions.files;
+  const { toggleDevTools } = nativeActions.app;
 
   if (!info) return null;
 
   const prodLocalColor = 'var(--needs-human)';
   const previewColor = '#a855f7';
+  // SANDBOX bar gets its own amber accent so evidence captures from e2e runs
+  // are visually unambiguous — distinct from PROD-LOCAL orange and PREVIEW purple.
+  const sandboxColor = '#f59e0b';
   const modeColor =
     info.mode === 'DEV'
       ? 'var(--muted-foreground)'
@@ -20,7 +25,9 @@ export function DevInfoBar(): React.ReactElement | null {
         ? previewColor
         : info.mode === 'PROD-LOCAL'
           ? prodLocalColor
-          : 'var(--muted-foreground)';
+          : info.mode === 'SANDBOX'
+            ? sandboxColor
+            : 'var(--muted-foreground)';
   const tintColor =
     info.mode === 'DEV'
       ? 'var(--muted-foreground)'
@@ -28,7 +35,9 @@ export function DevInfoBar(): React.ReactElement | null {
         ? previewColor
         : info.mode === 'PROD-LOCAL'
           ? prodLocalColor
-          : 'var(--text-3)';
+          : info.mode === 'SANDBOX'
+            ? sandboxColor
+            : 'var(--text-3)';
   const bg = `color-mix(in srgb, ${tintColor} 5%, transparent)`;
 
   const btnStyle = {

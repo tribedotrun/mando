@@ -56,7 +56,7 @@ pub struct GatewayBootstrap {
 }
 
 pub async fn bootstrap_gateway(
-    config: settings::config::Config,
+    config: settings::Config,
     bus: Arc<global_bus::EventBus>,
     options: BootstrapOptions,
 ) -> anyhow::Result<GatewayBootstrap> {
@@ -101,7 +101,7 @@ pub async fn bootstrap_gateway(
         }
     }
 
-    let terminal_default_model = if options.sandbox_mode {
+    let terminal_default_model = if options.sandbox_mode || options.dev_mode {
         "haiku"
     } else {
         "sonnet"

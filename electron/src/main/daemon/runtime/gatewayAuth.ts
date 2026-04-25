@@ -26,23 +26,29 @@ async function attachGatewayAuth(
       return;
     }
 
-    const gatewayPort =
-      process.env.MANDO_GATEWAY_PORT ||
-      (await readPort().catch((err: unknown) => {
+    let gatewayPort = process.env.MANDO_GATEWAY_PORT;
+    if (!gatewayPort) {
+      try {
+        gatewayPort = await readPort();
+      } catch (err: unknown) {
         log.debug('[gateway-auth] readPort failed, skipping auth injection:', err);
-        return '';
-      }));
+        gatewayPort = '';
+      }
+    }
     if (!gatewayPort || requestUrl.port !== gatewayPort) {
       callback(passthrough(details));
       return;
     }
 
-    const token =
-      process.env.MANDO_AUTH_TOKEN ||
-      (await readToken().catch((err: unknown) => {
+    let token = process.env.MANDO_AUTH_TOKEN;
+    if (!token) {
+      try {
+        token = await readToken();
+      } catch (err: unknown) {
         log.debug('[gateway-auth] readToken failed, skipping auth injection:', err);
-        return null;
-      }));
+        token = undefined;
+      }
+    }
     if (!token) {
       callback(passthrough(details));
       return;

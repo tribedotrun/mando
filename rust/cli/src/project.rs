@@ -3,6 +3,7 @@
 use anyhow::Result;
 use clap::{Args, Subcommand};
 
+use crate::gateway_paths as paths;
 use crate::http::DaemonClient;
 
 #[derive(Args)]
@@ -88,7 +89,7 @@ async fn handle_add(name: &str, path: &str, aliases: &[String]) -> Result<()> {
     let client = DaemonClient::discover()?;
     let result: api_types::ProjectUpsertResponse = client
         .post_json(
-            "/api/projects",
+            paths::PROJECTS,
             &api_types::AddProjectRequest {
                 name: Some(name.to_string()),
                 path: path.to_string(),
@@ -120,7 +121,7 @@ async fn handle_edit(
     let encoded = urlencoding::encode(name);
     client
         .patch_json::<api_types::BoolOkResponse, _>(
-            &format!("/api/projects/{encoded}"),
+            &paths::project(&encoded),
             &api_types::EditProjectRequest {
                 rename: rename.map(str::to_string),
                 github_repo: github_repo.map(str::to_string),
@@ -140,7 +141,7 @@ async fn handle_edit(
 
 async fn handle_list() -> Result<()> {
     let client = DaemonClient::discover()?;
-    let result: api_types::ProjectsListResponse = client.get_json("/api/projects").await?;
+    let result: api_types::ProjectsListResponse = client.get_json(paths::PROJECTS).await?;
 
     if result.projects.is_empty() {
         println!("No projects configured.");
@@ -169,7 +170,7 @@ async fn handle_remove(name: &str) -> Result<()> {
     let client = DaemonClient::discover()?;
     let encoded = urlencoding::encode(name);
     client
-        .delete_json::<api_types::BoolOkResponse>(&format!("/api/projects/{encoded}"))
+        .delete_json::<api_types::BoolOkResponse>(&paths::project(&encoded))
         .await?;
     println!("Removed project: {name}");
     Ok(())

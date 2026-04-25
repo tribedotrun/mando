@@ -1,6 +1,5 @@
 import { useRef, useState } from 'react';
-import { useDraft } from '#renderer/domains/captain/runtime/useDraft';
-import { useImageAttachment } from '#renderer/global/runtime/useImageAttachment';
+import { useTextImageDraft } from '#renderer/global/runtime/useTextImageDraft';
 import { useTaskFormPersistence } from '#renderer/domains/captain/runtime/useTaskFormPersistence';
 import { useProjects } from '#renderer/global/runtime/useProjects';
 import { useConfig } from '#renderer/global/repo/queries';
@@ -9,7 +8,15 @@ import { resolveEffectiveProject } from '#renderer/domains/captain/service/proje
 import { extractImageFromClipboard } from '#renderer/global/service/clipboardImage';
 
 export function useInlineTaskCreate() {
-  const [title, setTitle, clearTitleDraft] = useDraft('mando:draft:inlineTask');
+  const {
+    text: title,
+    setText: setTitle,
+    image,
+    preview,
+    setImageFile,
+    removeImage,
+    clearDraft,
+  } = useTextImageDraft('inlineTask', { legacyTextSuffix: 'inlineTask' });
   const hasDraft = title !== '';
   const {
     project,
@@ -20,8 +27,8 @@ export function useInlineTaskCreate() {
     draftProjectKey: 'mando:draft:inlineTask:project',
     hasDraft,
   });
-  const { image, preview, setImageFile, removeImage } = useImageAttachment();
   const [noAutoMerge, setNoAutoMerge] = useState(false);
+  const [planning, setPlanning] = useState(false);
 
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const createMut = useTaskCreate();
@@ -33,10 +40,10 @@ export function useInlineTaskCreate() {
   const trimmedTitle = title.trim();
 
   const resetForm = () => {
-    clearTitleDraft();
+    clearDraft();
     resetDrafts();
     setNoAutoMerge(false);
-    removeImage();
+    setPlanning(false);
   };
 
   const canSubmit =
@@ -50,6 +57,7 @@ export function useInlineTaskCreate() {
         title: trimmedTitle,
         project: effectiveProject || undefined,
         noAutoMerge: (globalAutoMerge && noAutoMerge) || undefined,
+        planning: planning || undefined,
         images: image ? [image] : undefined,
       },
       { onSuccess: () => resetForm() },
@@ -69,24 +77,12 @@ export function useInlineTaskCreate() {
   };
 
   return {
-    title,
-    setTitle,
-    image,
-    preview,
-    setImageFile,
-    removeImage,
-    noAutoMerge,
-    setNoAutoMerge,
-    inputRef,
-    createMut,
-    projects,
-    globalAutoMerge,
-    effectiveProject,
-    projectRequired,
-    canSubmit,
-    handleSubmit,
-    handleKeyDown,
-    handlePaste,
-    handleProjectChange,
+    draft: { title, setTitle, inputRef },
+    image: { image, preview, setImageFile, removeImage },
+    autoMerge: { globalAutoMerge, noAutoMerge, setNoAutoMerge },
+    planMode: { planning, setPlanning },
+    project: { projects, effectiveProject, projectRequired, handleProjectChange },
+    submit: { pending: createMut.isPending, canSubmit, handleSubmit },
+    events: { handleKeyDown, handlePaste },
   };
 }

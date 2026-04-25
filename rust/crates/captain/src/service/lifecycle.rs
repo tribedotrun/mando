@@ -16,6 +16,7 @@ pub enum TaskLifecycleCommand {
     Cancel,
     Rework,
     Handoff,
+    Stop,
     StartMerge,
     RetryReview,
 }
@@ -28,6 +29,7 @@ impl TaskLifecycleCommand {
             Self::Cancel => "cancel",
             Self::Rework => "rework",
             Self::Handoff => "handoff",
+            Self::Stop => "stop",
             Self::StartMerge => "start_merge",
             Self::RetryReview => "retry_review",
         }
@@ -81,6 +83,7 @@ pub fn infer_transition_command(
             }
         }
         (ItemStatus::InProgress, ItemStatus::HandedOff) => "handoff",
+        (ItemStatus::InProgress, ItemStatus::Stopped) => "stop",
         (ItemStatus::InProgress, ItemStatus::CaptainReviewing) => {
             if planning {
                 "planning_review"
@@ -152,6 +155,12 @@ pub fn infer_transition_command(
         (ItemStatus::CaptainReviewing, ItemStatus::Errored) => "captain_review_failed",
         (ItemStatus::CaptainReviewing, ItemStatus::Canceled) => "cancel",
 
+        (ItemStatus::Stopped, ItemStatus::InProgress) => "resume_worker",
+        (ItemStatus::Stopped, ItemStatus::Queued) => "reopen_queued",
+        (ItemStatus::Stopped, ItemStatus::CaptainReviewing) => "captain_review",
+        (ItemStatus::Stopped, ItemStatus::Rework) => "rework",
+        (ItemStatus::Stopped, ItemStatus::Canceled) => "cancel",
+
         (ItemStatus::CaptainMerging, ItemStatus::Merged) => "merge_complete",
         (ItemStatus::CaptainMerging, ItemStatus::CaptainMerging) => "merge_spawn",
         (ItemStatus::CaptainMerging, ItemStatus::CaptainReviewing) => "merge_failed_review",
@@ -203,6 +212,33 @@ pub fn apply_transition(task: &mut crate::Task, to: ItemStatus) -> Result<TaskTr
     Ok(decision)
 }
 
+/// `Clarifying → NeedsClarification` via the failure path — drops
+/// `session_ids.clarifier` so the next re-answer spawns a fresh CC
+/// session instead of resuming the one that just failed. Use this
+/// instead of plain `apply_transition` when a fatal clarifier error
+/// causes the rollback; the happy follow-up path (new question asked)
+/// still uses `apply_transition` and preserves the session.
+pub fn apply_clarifier_failure(task: &mut crate::Task) -> Result<TaskTransitionDecision> {
+    let decision = decide_transition(task.status, task.planning, ItemStatus::NeedsClarification)?;
+    task.status = decision.to;
+    task.session_ids.clarifier = None;
+    Ok(decision)
+}
+
+/// `* → Escalated` — requires the caller to supply the escalation
+/// report so Escalated is never reached with an empty audit trail.
+/// Pass `Some(reason)` for diagnostic callers (unknown verdict,
+/// unexpected state) even when no structured report is available.
+pub fn apply_escalation(
+    task: &mut crate::Task,
+    report: Option<String>,
+) -> Result<TaskTransitionDecision> {
+    let decision = decide_transition(task.status, task.planning, ItemStatus::Escalated)?;
+    task.status = decision.to;
+    task.escalation_report = report;
+    Ok(decision)
+}
+
 pub fn restore_status(task: &mut crate::Task, status: ItemStatus) {
     task.status = status;
 }
@@ -251,6 +287,10 @@ pub fn apply_manual_transition(
             | ItemStatus::Errored
             | ItemStatus::Rework
             | ItemStatus::PlanReady => ItemStatus::HandedOff,
+            _ => return Err(invalid()),
+        },
+        TaskLifecycleCommand::Stop => match current {
+            ItemStatus::InProgress => ItemStatus::Stopped,
             _ => return Err(invalid()),
         },
         TaskLifecycleCommand::StartMerge => match current {
@@ -359,6 +399,26 @@ mod tests {
     }
 
     #[test]
+    fn apply_clarifier_failure_drops_clarifier_session() {
+        let mut task = crate::Task::new("t");
+        task.set_status_for_tests(ItemStatus::Clarifying);
+        task.session_ids.clarifier = Some("poisoned".into());
+        let decision = apply_clarifier_failure(&mut task).unwrap();
+        assert_eq!(decision.to, ItemStatus::NeedsClarification);
+        assert_eq!(task.status(), ItemStatus::NeedsClarification);
+        assert_eq!(task.session_ids.clarifier, None);
+    }
+
+    #[test]
+    fn apply_escalation_records_report() {
+        let mut task = crate::Task::new("t");
+        task.set_status_for_tests(ItemStatus::CaptainReviewing);
+        let decision = apply_escalation(&mut task, Some("boom".into())).unwrap();
+        assert_eq!(decision.to, ItemStatus::Escalated);
+        assert_eq!(task.escalation_report.as_deref(), Some("boom"));
+    }
+
+    #[test]
     fn infer_transition_command_allows_merge_spawn_self_transition() {
         assert_eq!(
             infer_transition_command(
@@ -368,6 +428,63 @@ mod tests {
             )
             .unwrap(),
             "merge_spawn"
+        );
+    }
+
+    // Stop edges: InProgress can reach Stopped, and Stopped can resume
+    // (InProgress) or fall back to the queue. These pair with reopen's
+    // apply_transition calls in action_contract::reopen so a Stopped task
+    // reopens on the same worktree the same way Errored/HandedOff do.
+    #[test]
+    fn infer_transition_command_allows_stop_from_in_progress() {
+        assert_eq!(
+            infer_transition_command(ItemStatus::InProgress, ItemStatus::Stopped, false).unwrap(),
+            "stop"
+        );
+    }
+
+    #[test]
+    fn infer_transition_command_allows_resume_from_stopped() {
+        assert_eq!(
+            infer_transition_command(ItemStatus::Stopped, ItemStatus::InProgress, false).unwrap(),
+            "resume_worker"
+        );
+        assert_eq!(
+            infer_transition_command(ItemStatus::Stopped, ItemStatus::Queued, false).unwrap(),
+            "reopen_queued"
+        );
+    }
+
+    #[test]
+    fn apply_manual_stop_requires_in_progress() {
+        assert_eq!(
+            apply_manual_transition(ItemStatus::InProgress, TaskLifecycleCommand::Stop).unwrap(),
+            ItemStatus::Stopped
+        );
+        for bad in [
+            ItemStatus::Queued,
+            ItemStatus::AwaitingReview,
+            ItemStatus::HandedOff,
+            ItemStatus::Merged,
+            ItemStatus::Canceled,
+            ItemStatus::Stopped,
+        ] {
+            assert!(
+                apply_manual_transition(bad, TaskLifecycleCommand::Stop).is_err(),
+                "stop from {bad:?} must be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn stopped_is_not_finalized_and_is_reopenable() {
+        assert!(
+            !ItemStatus::Stopped.is_finalized(),
+            "Stopped must stay reopenable; finalized statuses are terminal"
+        );
+        assert!(
+            crate::types::REOPENABLE.contains(&ItemStatus::Stopped),
+            "Stopped belongs in the REOPENABLE set so reopen_item accepts it"
         );
     }
 }

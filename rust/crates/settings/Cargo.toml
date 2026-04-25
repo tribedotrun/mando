@@ -9,7 +9,9 @@ api-types = { path = "../api-types" }
 global-types = { path = "../global-types" }
 global-db = { path = "../global-db" }
 global-infra = { path = "../global-infra" }
+global-git = { path = "../global-git" }
 global-net = { path = "../global-net" }
+global-claude = { path = "../global-claude" }
 serde.workspace = true
 serde_json.workspace = true
 serde_yaml.workspace = true

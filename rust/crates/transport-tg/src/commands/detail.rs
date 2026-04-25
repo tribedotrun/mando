@@ -1,7 +1,8 @@
 //! Task detail card — rich inline view triggered by tapping a task in `/tasks`.
 
 use crate::bot::TelegramBot;
-use crate::telegram_format::{escape_html, status_icon};
+use crate::gateway_paths as paths;
+use crate::telegram_format::{escape_html, paused_badge, status_icon};
 use anyhow::Result;
 use tracing::warn;
 
@@ -10,7 +11,7 @@ const MAX_INLINE_PHOTOS: usize = 3;
 
 /// Render a task detail card by editing the given message in place.
 pub async fn handle_view(bot: &TelegramBot, chat_id: &str, mid: i64, task_id: &str) -> Result<()> {
-    let tasks = super::load_tasks_with_path(bot.gw(), "/api/tasks?include_archived=true").await?;
+    let tasks = super::load_tasks_with_path(bot.gw(), paths::TASKS_WITH_ARCHIVED).await?;
     let task = tasks.iter().find(|t| t.id.to_string() == task_id);
 
     let Some(task) = task else {
@@ -23,9 +24,9 @@ pub async fn handle_view(bot: &TelegramBot, chat_id: &str, mid: i64, task_id: &s
         return Ok(());
     };
 
-    let pr_path = format!("/api/tasks/{task_id}/pr-summary");
-    let tl_path = format!("/api/tasks/{task_id}/timeline");
-    let sess_path = format!("/api/tasks/{task_id}/sessions");
+    let pr_path = paths::task_pr_summary(task_id);
+    let tl_path = paths::task_timeline(task_id);
+    let sess_path = paths::task_sessions(task_id);
     let (pr_res, timeline_res, sessions_res) = tokio::join!(
         bot.gw().get_typed::<api_types::PrSummaryResponse>(&pr_path),
         bot.gw().get_typed::<api_types::TimelineResponse>(&tl_path),
@@ -36,7 +37,19 @@ pub async fn handle_view(bot: &TelegramBot, chat_id: &str, mid: i64, task_id: &s
     let mut lines = Vec::new();
 
     // -- Header --
-    let icon = status_icon(task.status().as_str());
+    // Paused tasks (every credential in the pool cooling down) take
+    // precedence over their lifecycle status — the lifecycle value is
+    // already stale, what matters to the reader is when captain can
+    // dispatch again.
+    let now_secs = time::OffsetDateTime::now_utc().unix_timestamp();
+    let paused = paused_badge(task.paused_until, now_secs);
+    let (icon, status_display): (&str, String) = match &paused {
+        Some((paused_icon, label)) => (paused_icon, label.clone()),
+        None => (
+            status_icon(task.status().as_str()),
+            task.status().as_str().to_string(),
+        ),
+    };
     lines.push(format!(
         "{icon} <b>#{} {}</b>",
         task.id,
@@ -44,7 +57,7 @@ pub async fn handle_view(bot: &TelegramBot, chat_id: &str, mid: i64, task_id: &s
     ));
 
     // -- Meta line: status | project | worker --
-    let mut meta = vec![format!("<b>{}</b>", escape_html(task.status().as_str()))];
+    let mut meta = vec![format!("<b>{}</b>", escape_html(&status_display))];
     if !task.project.is_empty() {
         meta.push(escape_html(&task.project));
     }

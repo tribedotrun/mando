@@ -1,7 +1,7 @@
 import React, { useRef, useState } from 'react';
 import { ImageLightbox } from '#renderer/global/ui/ImageLightbox';
-import { CodeBlock } from '#renderer/global/ui/code-block';
-import { Separator } from '#renderer/global/ui/separator';
+import { CodeBlock } from '#renderer/global/ui/primitives/code-block';
+import { Separator } from '#renderer/global/ui/primitives/separator';
 import { InlineMarkdown } from '#renderer/global/ui/InlineMarkdown';
 import {
   MarkdownTable,

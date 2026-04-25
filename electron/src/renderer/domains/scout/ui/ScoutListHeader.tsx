@@ -4,9 +4,9 @@ import { useScoutListHeader } from '#renderer/domains/scout/runtime/useScoutList
 import type { ScoutQueryParams } from '#renderer/domains/scout/runtime/hooks';
 import { ScoutFilterMenu } from '#renderer/domains/scout/ui/ScoutFilterMenu';
 import { AddUrlForm } from '#renderer/domains/scout/ui/AddUrlForm';
-import { FeedbackModal } from '#renderer/global/ui/FeedbackModal';
-import { Button } from '#renderer/global/ui/button';
-import { Input } from '#renderer/global/ui/input';
+import { PromptModal } from '#renderer/global/ui/PromptModal';
+import { Button } from '#renderer/global/ui/primitives/button';
+import { Input } from '#renderer/global/ui/primitives/input';
 
 interface Props {
   query: ScoutQueryParams;
@@ -23,18 +23,7 @@ export function ScoutListHeader({
   onResearchHistoryClick,
   onResearchModalOpenChange,
 }: Props): React.ReactElement {
-  const {
-    searchInput,
-    filterOpen,
-    setFilterOpen,
-    researchModalOpen,
-    researchPending,
-    setResearchOpen,
-    runResearch,
-    handleSearchChange,
-    handleStatusChange,
-    handleTypeChange,
-  } = useScoutListHeader({ onQueryChange, onResearchModalOpenChange });
+  const header = useScoutListHeader({ onQueryChange, onResearchModalOpenChange });
 
   const statusFilter = query.status ?? 'all';
   const typeFilter = query.type ?? 'all';
@@ -48,10 +37,10 @@ export function ScoutListHeader({
           <ScoutFilterMenu
             typeValue={typeFilter}
             stateValue={statusFilter}
-            onTypeChange={handleTypeChange}
-            onStateChange={handleStatusChange}
-            open={filterOpen}
-            onOpenChange={setFilterOpen}
+            onTypeChange={header.filter.handleTypeChange}
+            onStateChange={header.filter.handleStatusChange}
+            open={header.filter.open}
+            onOpenChange={header.filter.setOpen}
           >
             <Button variant="ghost" size="icon-sm" className="relative" aria-label="Filter">
               <Filter size={16} />
@@ -63,10 +52,10 @@ export function ScoutListHeader({
           <Button
             variant="outline"
             size="sm"
-            onClick={() => setResearchOpen(true)}
-            disabled={researchPending}
+            onClick={() => header.research.setOpen(true)}
+            disabled={header.research.pending}
           >
-            {researchPending ? 'Researching...' : 'Research'}
+            {header.research.pending ? 'Researching...' : 'Research'}
           </Button>
           <Button
             variant="ghost"
@@ -91,23 +80,24 @@ export function ScoutListHeader({
         <Input
           ref={searchRef}
           type="text"
-          value={searchInput}
-          onChange={(e) => handleSearchChange(e.target.value)}
+          value={header.search.input}
+          onChange={(e) => header.search.handleChange(e.target.value)}
           placeholder="Search..."
           className="h-9 pl-8 text-[13px]"
         />
       </div>
 
-      {researchModalOpen && (
-        <FeedbackModal
+      {header.research.open && (
+        <PromptModal
           testId="scout-research-modal"
           title="Scout research"
           placeholder="What should Scout research? (e.g. Rust async runtime fairness)"
           buttonLabel="Research"
           pendingLabel="Researching..."
-          isPending={researchPending}
-          onSubmit={runResearch}
-          onCancel={() => setResearchOpen(false)}
+          isPending={header.research.pending}
+          draftKey="scoutResearch"
+          onSubmit={header.research.run}
+          onCancel={() => header.research.setOpen(false)}
         />
       )}
     </>

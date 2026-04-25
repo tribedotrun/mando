@@ -29,8 +29,8 @@ pub use rebase_state::{RebaseState, RebaseStatus};
 pub use session_ids::SessionIds;
 pub use task::{
     parse_pr_number, pr_label, pr_url, ItemStatus, ReviewTrigger, Task, TaskRouting,
-    TaskUpdateError, UpdateTaskInput, ACTIONABLE_TERMINAL, ALL_STATUSES, FINALIZED, REOPENABLE,
-    REWORKABLE,
+    TaskUpdateError, UpdateTaskInput, ACTIONABLE_TERMINAL, ALL_REVIEW_TRIGGERS, ALL_STATUSES,
+    FINALIZED, REOPENABLE, REWORKABLE,
 };
 pub use task_action::{find_task_action_error, TaskActionError};
 pub use task_create::{find_task_create_error, TaskCreateError};

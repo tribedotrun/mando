@@ -75,10 +75,19 @@ pub(crate) fn count_resources(items: &[Task]) -> HashMap<String, usize> {
 /// are excluded (dispatched separately by `dispatch_planning`).
 /// Sorted by: rework first, then by creation order (position in list).
 pub(crate) fn dispatchable_items(items: &[Task]) -> Vec<usize> {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64;
     let mut candidates: Vec<(usize, bool)> = Vec::new();
 
     for (i, item) in items.iter().enumerate() {
         if item.planning {
+            continue;
+        }
+        // Skip paused tasks (credential pool exhausted on a prior tick) —
+        // they rejoin the candidate set once `paused_until` has passed.
+        if item.paused_until.is_some_and(|until| until > now) {
             continue;
         }
         match item.status {
@@ -94,27 +103,21 @@ pub(crate) fn dispatchable_items(items: &[Task]) -> Vec<usize> {
 }
 
 /// Find new items that need clarification.
+///
+/// Skips tasks whose `paused_until` is still in the future — those tasks
+/// parked themselves after `AllCredentialsExhausted` on a prior tick and
+/// must wait for the soonest credential cooldown to pass before captain
+/// re-dispatches. Past or unset `paused_until` is treated as eligible.
 pub(crate) fn new_items(items: &[Task]) -> Vec<usize> {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64;
     items
         .iter()
         .enumerate()
         .filter(|(_, it)| it.status == ItemStatus::New)
-        .map(|(i, _)| i)
-        .collect()
-}
-
-/// Find items that need (re-)clarification — both `Clarifying` (retry)
-/// and `NeedsClarification` (human answered, awaiting re-run).
-pub(crate) fn clarifying_items(items: &[Task]) -> Vec<usize> {
-    items
-        .iter()
-        .enumerate()
-        .filter(|(_, it)| {
-            matches!(
-                it.status,
-                ItemStatus::Clarifying | ItemStatus::NeedsClarification
-            )
-        })
+        .filter(|(_, it)| it.paused_until.is_none_or(|until| until <= now))
         .map(|(i, _)| i)
         .collect()
 }
@@ -212,20 +215,5 @@ mod tests {
 
         let result = new_items(&[a, b, c]);
         assert_eq!(result, vec![0, 2]);
-    }
-
-    #[test]
-    fn clarifying_items_includes_both_statuses() {
-        let mut a = Task::new("A");
-        a.status = ItemStatus::Clarifying;
-        let mut b = Task::new("B");
-        b.status = ItemStatus::NeedsClarification;
-        let mut c = Task::new("C");
-        c.status = ItemStatus::Queued;
-        let mut d = Task::new("D");
-        d.status = ItemStatus::NeedsClarification;
-
-        let result = clarifying_items(&[a, b, c, d]);
-        assert_eq!(result, vec![0, 1, 3]);
     }
 }

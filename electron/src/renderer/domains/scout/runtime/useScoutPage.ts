@@ -9,11 +9,15 @@ import {
 import { useViewKeyHandler } from '#renderer/global/runtime/useKeyboardShortcuts';
 import { useSelection } from '#renderer/global/runtime/useSelection';
 import { indexNext, indexPrev } from '#renderer/global/service/utils';
-import { SCOUT_DEFAULT_PER_PAGE } from '#renderer/domains/scout/service/researchHelpers';
-import type { ScoutCommand } from '#renderer/domains/scout/repo/api';
-import type { ScoutItem } from '#renderer/global/types';
+import {
+  SCOUT_DEFAULT_PER_PAGE,
+  type ScoutUserSettableStatus,
+} from '#renderer/domains/scout/service/researchHelpers';
+import type { ScoutItem, ScoutItemLifecycleCommand } from '#renderer/global/types';
 
-export const scoutCommandForStatus = (status: string): ScoutCommand => {
+export const scoutCommandForStatus = (
+  status: ScoutUserSettableStatus,
+): ScoutItemLifecycleCommand => {
   switch (status) {
     case 'pending':
       return 'mark_pending';
@@ -37,26 +41,38 @@ interface ScoutPageOptions {
 }
 
 export interface ScoutPageState {
-  query: ScoutQueryParams;
-  items: ScoutItem[];
-  page: number;
-  pages: number;
-  setQuery: (params: Partial<ScoutQueryParams>) => void;
-  selectedIds: Set<number>;
-  toggleSelect: (id: number) => void;
-  clearSelection: () => void;
-  view: '' | 'research';
-  setView: (v: '' | 'research') => void;
-  qaOpen: boolean;
-  setQaOpen: Dispatch<SetStateAction<boolean>>;
-  qaEverOpened: boolean;
-  setQaEverOpened: Dispatch<SetStateAction<boolean>>;
-  clampedFocusedIndex: number;
-  searchRef: React.RefObject<HTMLInputElement | null>;
-  researchModalOpenRef: React.MutableRefObject<boolean>;
-  handleBulkStatus: (status: string) => void;
-  handleBulkDelete: () => void;
-  inListView: boolean;
+  query: {
+    params: ScoutQueryParams;
+    set: (params: Partial<ScoutQueryParams>) => void;
+    page: number;
+    pages: number;
+  };
+  list: {
+    items: ScoutItem[];
+    view: '' | 'research';
+    setView: (v: '' | 'research') => void;
+    inListView: boolean;
+  };
+  selection: {
+    selectedIds: Set<number>;
+    toggleSelect: (id: number) => void;
+    clearSelection: () => void;
+  };
+  qa: {
+    open: boolean;
+    setOpen: Dispatch<SetStateAction<boolean>>;
+    everOpened: boolean;
+    setEverOpened: Dispatch<SetStateAction<boolean>>;
+  };
+  focus: {
+    clampedIndex: number;
+    searchRef: React.RefObject<HTMLInputElement | null>;
+    researchModalOpenRef: React.MutableRefObject<boolean>;
+  };
+  actions: {
+    handleBulkStatus: (status: ScoutUserSettableStatus) => void;
+    handleBulkDelete: () => void;
+  };
 }
 
 export function useScoutPage({
@@ -163,7 +179,7 @@ export function useScoutPage({
 
   useViewKeyHandler(handleKey, active);
 
-  const handleBulkStatus = (status: string) => {
+  const handleBulkStatus = (status: ScoutUserSettableStatus) => {
     const ids = [...selectedIds];
     if (!ids.length) return;
     bulkUpdateMut.mutate(
@@ -192,25 +208,16 @@ export function useScoutPage({
   };
 
   return {
-    query,
-    items,
-    page,
-    pages,
-    setQuery,
-    selectedIds,
-    toggleSelect,
-    clearSelection,
-    view,
-    setView,
-    qaOpen,
-    setQaOpen,
-    qaEverOpened,
-    setQaEverOpened,
-    clampedFocusedIndex,
-    searchRef,
-    researchModalOpenRef,
-    handleBulkStatus,
-    handleBulkDelete,
-    inListView,
+    query: { params: query, set: setQuery, page, pages },
+    list: { items, view, setView, inListView },
+    selection: { selectedIds, toggleSelect, clearSelection },
+    qa: {
+      open: qaOpen,
+      setOpen: setQaOpen,
+      everOpened: qaEverOpened,
+      setEverOpened: setQaEverOpened,
+    },
+    focus: { clampedIndex: clampedFocusedIndex, searchRef, researchModalOpenRef },
+    actions: { handleBulkStatus, handleBulkDelete },
   };
 }

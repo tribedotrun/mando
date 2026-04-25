@@ -55,9 +55,19 @@ impl CcOneShot {
         F: Fn(global_types::Pid),
     {
         let caller = config.caller.clone();
-        retry_loop(&caller, max_retries, || {
+        retry_loop(&caller, max_retries, |attempt| {
             let per_attempt_hook = |pid| on_spawn(pid);
-            Self::run_with_pid_hook(prompt, config.clone(), per_attempt_hook)
+            // The first attempt keeps the caller's pre-allocated
+            // `session_id` so callers that pre-register the id (captain
+            // review, captain merge) and then poll that exact stream /
+            // pid still see matching output. Only retries clear it, so
+            // CC mints a fresh UUID and cannot bail with "Session ID is
+            // already in use" on the consumed id from the first attempt.
+            let mut per_attempt = config.clone();
+            if attempt > 0 {
+                per_attempt.session_id = None;
+            }
+            Self::run_with_pid_hook(prompt, per_attempt, per_attempt_hook)
         })
         .await
     }
@@ -76,12 +86,12 @@ pub(crate) async fn retry_loop<F, Fut>(
     mut mk_attempt: F,
 ) -> Result<CcResult<serde_json::Value>, CcError>
 where
-    F: FnMut() -> Fut,
+    F: FnMut(u32) -> Fut,
     Fut: std::future::Future<Output = Result<CcResult<serde_json::Value>, CcError>>,
 {
     let mut attempt: u32 = 0;
     loop {
-        match mk_attempt().await {
+        match mk_attempt(attempt).await {
             Ok(result) => return Ok(result),
             Err(err) => {
                 if err.classify() != ErrorClass::Transient || attempt >= max_retries {
@@ -124,16 +134,53 @@ mod tests {
             errors: Vec::new(),
             envelope: CcEnvelope(serde_json::Value::Null),
             stream_path: std::path::PathBuf::new(),
+            credential_id: None,
             rate_limit: None,
             pid: global_types::Pid(0),
         }
     }
 
     #[tokio::test]
+    async fn retry_loop_threads_attempt_counter_starting_at_zero() {
+        // Callers (`run_with_retry_pid_hook`) rely on `attempt == 0` to
+        // decide whether to preserve the caller's pre-allocated
+        // session_id. This test pins that contract: first invocation of
+        // `mk_attempt` sees 0; the retry sees 1.
+        let seen = Arc::new(std::sync::Mutex::new(Vec::<u32>::new()));
+        let seen_clone = seen.clone();
+        let attempts_counter = Arc::new(AtomicU32::new(0));
+        let attempts_clone = attempts_counter.clone();
+        let _ = retry_loop("test", 1, |attempt| {
+            seen_clone.lock().unwrap().push(attempt);
+            let attempts = attempts_clone.clone();
+            async move {
+                let n = attempts.fetch_add(1, Ordering::SeqCst);
+                if n == 0 {
+                    Err(CcError::ApiError {
+                        api_error_status: Some(529),
+                        message: "overloaded".into(),
+                        session_id: "s-a".into(),
+                        credential_id: None,
+                    })
+                } else {
+                    Ok(dummy_result("s-a"))
+                }
+            }
+        })
+        .await;
+        let observed = seen.lock().unwrap().clone();
+        assert_eq!(
+            observed,
+            vec![0, 1],
+            "mk_attempt must see attempt=0 on first call, attempt=1 on retry"
+        );
+    }
+
+    #[tokio::test]
     async fn retry_loop_retries_transient_then_succeeds() {
         let attempts = Arc::new(AtomicU32::new(0));
         let attempts_clone = attempts.clone();
-        let result = retry_loop("test", 2, || {
+        let result = retry_loop("test", 2, |_attempt| {
             let attempts = attempts_clone.clone();
             async move {
                 let n = attempts.fetch_add(1, Ordering::SeqCst);
@@ -142,6 +189,7 @@ mod tests {
                         api_error_status: Some(529),
                         message: "overloaded".into(),
                         session_id: "s-t".into(),
+                        credential_id: None,
                     })
                 } else {
                     Ok(dummy_result("s-t"))
@@ -157,7 +205,7 @@ mod tests {
     async fn retry_loop_surfaces_fatal_immediately() {
         let attempts = Arc::new(AtomicU32::new(0));
         let attempts_clone = attempts.clone();
-        let result = retry_loop("test", 5, || {
+        let result = retry_loop("test", 5, |_attempt| {
             let attempts = attempts_clone.clone();
             async move {
                 attempts.fetch_add(1, Ordering::SeqCst);
@@ -165,6 +213,7 @@ mod tests {
                     api_error_status: Some(400),
                     message: "bad request".into(),
                     session_id: "s-f".into(),
+                    credential_id: None,
                 })
             }
         })
@@ -181,7 +230,7 @@ mod tests {
     async fn retry_loop_gives_up_after_max_retries() {
         let attempts = Arc::new(AtomicU32::new(0));
         let attempts_clone = attempts.clone();
-        let result = retry_loop("test", 1, || {
+        let result = retry_loop("test", 1, |_attempt| {
             let attempts = attempts_clone.clone();
             async move {
                 attempts.fetch_add(1, Ordering::SeqCst);
@@ -189,6 +238,7 @@ mod tests {
                     api_error_status: Some(503),
                     message: "unavailable".into(),
                     session_id: "s-m".into(),
+                    credential_id: None,
                 })
             }
         })

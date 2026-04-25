@@ -177,6 +177,9 @@ pub fn get_last_assistant_text(stream_path: &Path) -> Option<String> {
 
 /// Check if a stream result indicates clean completion.
 pub fn is_clean_result(result: &serde_json::Value) -> bool {
+    if result.get("is_error").and_then(|e| e.as_bool()) == Some(true) {
+        return false;
+    }
     if let Some(subtype) = result.get("subtype").and_then(|s| s.as_str()) {
         return subtype == "success";
     }
@@ -418,6 +421,14 @@ mod tests {
         assert!(!is_clean_result(
             &serde_json::json!({"subtype": "error_max_turns"})
         ));
+    }
+
+    #[test]
+    fn clean_result_is_error_wins_over_success_subtype() {
+        assert!(!is_clean_result(&serde_json::json!({
+            "subtype": "success",
+            "is_error": true
+        })));
     }
 
     #[test]

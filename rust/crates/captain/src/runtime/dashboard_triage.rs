@@ -2,7 +2,7 @@
 
 use anyhow::Result;
 use api_types::{TriageItemResponse, TriageResponse};
-use settings::config::settings::Config;
+use settings::Config;
 
 use crate::io::task_store::TaskStore;
 
@@ -42,7 +42,7 @@ pub async fn triage_pending_review(
         let project_config = if it.project.is_empty() {
             None
         } else {
-            settings::config::resolve_project_config(Some(&it.project), config).map(|(_, pc)| pc)
+            settings::resolve_project_config(Some(&it.project), config).map(|(_, pc)| pc)
         };
         let github_repo = project_config
             .and_then(|pc| pc.github_repo.clone())
@@ -57,7 +57,7 @@ pub async fn triage_pending_review(
         }
 
         let pr_num_str = pr_num.to_string();
-        match crate::io::github::fetch_pr_status(&github_repo, &pr_num_str).await {
+        match global_github::fetch_pr_status(&github_repo, &pr_num_str).await {
             Ok(pr_status) => {
                 let ti = crate::service::triage::build_triage_item(
                     &it.id.to_string(),

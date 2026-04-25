@@ -1,0 +1,2 @@
+{"type":"system","subtype":"init"}
+{"type":"result","subtype":"error_during_execution","is_error":true,"result":"API Error: 529 injected_by_cc_mock"}

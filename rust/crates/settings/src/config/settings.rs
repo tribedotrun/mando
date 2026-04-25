@@ -1,5 +1,6 @@
 //! Config structs matching config.json schema (serde, camelCase).
 
+use api_types::TerminalAgent;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -9,7 +10,7 @@ use std::collections::HashMap;
 
 /// Root configuration for Mando.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
+#[serde(rename_all = "camelCase")]
 pub struct Config {
     pub workspace: String,
     pub ui: UiConfig,
@@ -44,11 +45,12 @@ impl Config {
         if let Some(val) = self.env.get("TELEGRAM_MANDO_BOT_TOKEN") {
             self.channels.telegram.token = val.clone();
         }
+        self.captain.populate_runtime_paths();
     }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
+#[serde(rename_all = "camelCase")]
 pub struct UiConfig {
     pub open_at_login: bool,
 }
@@ -59,7 +61,7 @@ pub struct UiConfig {
 
 /// Feature flags.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
+#[serde(rename_all = "camelCase")]
 pub struct FeaturesConfig {
     pub scout: bool,
     pub setup_dismissed: bool,
@@ -73,7 +75,7 @@ pub struct FeaturesConfig {
 /// Per-user scout configuration — interests, user context, and repo summaries.
 /// Stored in config.json so it's per-user and gitignored.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
+#[serde(rename_all = "camelCase")]
 pub struct ScoutConfig {
     pub interests: super::workflow_scout::InterestsConfig,
     pub user_context: super::workflow_scout::UserContextConfig,
@@ -84,13 +86,13 @@ pub struct ScoutConfig {
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
+#[serde(rename_all = "camelCase")]
 pub struct ChannelsConfig {
     pub telegram: TelegramConfig,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
+#[serde(rename_all = "camelCase")]
 pub struct TelegramConfig {
     pub enabled: bool,
     /// Runtime-only: populated from env.TELEGRAM_*_BOT_TOKEN, not serialized.
@@ -104,13 +106,13 @@ pub struct TelegramConfig {
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
+#[serde(rename_all = "camelCase")]
 pub struct GatewayConfig {
     pub dashboard: DashboardConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
+#[serde(rename_all = "camelCase")]
 pub struct DashboardConfig {
     pub host: String,
     pub port: u16,
@@ -130,14 +132,14 @@ impl Default for DashboardConfig {
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
+#[serde(rename_all = "camelCase")]
 pub struct CaptainConfig {
     pub auto_schedule: bool,
     pub auto_merge: bool,
     pub max_concurrent_workers: Option<usize>,
     pub tick_interval_s: u64,
     pub tz: String,
-    pub default_terminal_agent: String,
+    pub default_terminal_agent: TerminalAgent,
     /// Extra CLI arguments appended when spawning Claude Code terminals.
     pub claude_terminal_args: String,
     /// Extra CLI arguments appended when spawning Codex terminals.
@@ -152,6 +154,27 @@ pub struct CaptainConfig {
     pub worker_health_path: String,
 }
 
+fn default_task_db_path() -> String {
+    global_infra::paths::data_dir()
+        .join("mando.db")
+        .to_string_lossy()
+        .into_owned()
+}
+
+fn default_lockfile_path() -> String {
+    global_infra::paths::data_dir()
+        .join("captain.lock")
+        .to_string_lossy()
+        .into_owned()
+}
+
+fn default_worker_health_path() -> String {
+    global_infra::paths::state_dir()
+        .join("worker-health.json")
+        .to_string_lossy()
+        .into_owned()
+}
+
 impl Default for CaptainConfig {
     fn default() -> Self {
         Self {
@@ -160,28 +183,27 @@ impl Default for CaptainConfig {
             max_concurrent_workers: None,
             tick_interval_s: 30,
             tz: iana_time_zone::get_timezone().unwrap_or_else(|_| "UTC".into()),
-            default_terminal_agent: "claude".into(),
+            default_terminal_agent: TerminalAgent::Claude,
             claude_terminal_args: "--dangerously-skip-permissions".into(),
             codex_terminal_args: "--full-auto".into(),
             projects: HashMap::new(),
-            task_db_path: global_infra::paths::data_dir()
-                .join("mando.db")
-                .to_string_lossy()
-                .into_owned(),
-            lockfile_path: global_infra::paths::data_dir()
-                .join("captain.lock")
-                .to_string_lossy()
-                .into_owned(),
-            worker_health_path: global_infra::paths::state_dir()
-                .join("worker-health.json")
-                .to_string_lossy()
-                .into_owned(),
+            task_db_path: default_task_db_path(),
+            lockfile_path: default_lockfile_path(),
+            worker_health_path: default_worker_health_path(),
         }
     }
 }
 
+impl CaptainConfig {
+    fn populate_runtime_paths(&mut self) {
+        self.task_db_path = default_task_db_path();
+        self.lockfile_path = default_lockfile_path();
+        self.worker_health_path = default_worker_health_path();
+    }
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
+#[serde(rename_all = "camelCase")]
 pub struct ProjectConfig {
     pub name: String,
     pub path: String,

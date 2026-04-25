@@ -1,14 +1,16 @@
 import React from 'react';
 import { useTaskDetailView } from '#renderer/domains/captain/runtime/useTaskDetailView';
 import { useTaskAsk } from '#renderer/domains/captain/runtime/useTaskAsk';
+import { canStop } from '#renderer/global/service/utils';
 import type { TaskItem } from '#renderer/global/types';
-import { TaskActionBar } from '#renderer/domains/captain/ui/TaskActionBar';
-import { PrTab, InfoTab, ContextModal } from '#renderer/domains/captain/ui/TaskDetailTabs';
+import { TaskComposer } from '#renderer/domains/captain/ui/TaskComposer';
+import { PrTab, InfoTab } from '#renderer/domains/captain/ui/TaskDetailTabs';
+import { ContextModal } from '#renderer/domains/captain/ui/ContextModal';
 import { SessionsTab } from '#renderer/domains/captain/ui/SessionsTab';
 import { TaskFeedView } from '#renderer/domains/captain/ui/TaskFeedView';
-import { TaskDetailTabBar } from '#renderer/domains/captain/ui/TaskDetailViewParts';
+import { TaskDetailTabBar } from '#renderer/domains/captain/ui/TaskDetailTabBar';
 import { cn } from '#renderer/global/service/cn';
-import { Tabs } from '#renderer/global/ui/tabs';
+import { Tabs } from '#renderer/global/ui/primitives/tabs';
 
 interface Props {
   item: TaskItem;
@@ -36,19 +38,14 @@ export function TaskDetailView({
   terminalSlot,
 }: Props): React.ReactElement {
   const { ask } = useTaskAsk(item.id);
-  const {
-    tabs,
-    effectiveTab,
-    prRefreshing,
-    contextModalOpen,
-    setContextModalOpen,
-    prBody,
-    prPending,
-    sessions,
-    handleSessionClick,
-    handleResumeSession,
-    handlePrRefresh,
-  } = useTaskDetailView({ item, onBack, onOpenTranscript, onResumeInTerminal, activeTabProp });
+  const detail = useTaskDetailView({
+    item,
+    onBack,
+    onOpenTranscript,
+    onResumeInTerminal,
+    activeTabProp,
+  });
+  const effectiveTab = detail.tabs.effectiveTab;
 
   return (
     <div className="flex h-full flex-col">
@@ -73,11 +70,14 @@ export function TaskDetailView({
             )}
           >
             <TaskDetailTabBar
-              tabs={tabs}
+              tabs={detail.tabs.items}
               effectiveTab={effectiveTab}
               prNumber={item.pr_number}
-              prRefreshing={prRefreshing}
-              onPrRefresh={handlePrRefresh}
+              prRefreshing={detail.pr.refreshing}
+              onPrRefresh={detail.pr.handleRefresh}
+              canStop={canStop(item)}
+              stopPending={detail.stop.pending}
+              onStop={() => void detail.stop.handle()}
             />
 
             {/* Tab content */}
@@ -90,15 +90,15 @@ export function TaskDetailView({
               >
                 {effectiveTab === 'feed' && <TaskFeedView key={item.id} item={item} />}
                 {effectiveTab === 'pr' && (
-                  <PrTab item={item} prBody={prBody} prPending={prPending} />
+                  <PrTab item={item} prBody={detail.pr.body} prPending={detail.pr.pending} />
                 )}
                 {effectiveTab === 'more' && (
                   <div className="space-y-6">
                     <InfoTab item={item} />
                     <SessionsTab
-                      sessions={sessions}
-                      onSessionClick={handleSessionClick}
-                      onResumeSession={handleResumeSession}
+                      sessions={detail.sessions.items}
+                      onSessionClick={detail.sessions.handleSessionClick}
+                      onResumeSession={detail.sessions.handleResumeSession}
                       taskId={item.id}
                     />
                   </div>
@@ -117,12 +117,12 @@ export function TaskDetailView({
 
       {/* Action bar: only on PR and More tabs (feed has its own input, terminal doesn't need one) */}
       {effectiveTab !== 'feed' && effectiveTab !== 'terminal' && (
-        <TaskActionBar item={item} onAsk={(q, images) => void ask(q, images)} />
+        <TaskComposer item={item} onAsk={(q, images) => void ask(q, images)} />
       )}
 
       {/* Context modal */}
-      {contextModalOpen && item.context && (
-        <ContextModal context={item.context} onClose={() => setContextModalOpen(false)} />
+      {detail.context.open && item.context && (
+        <ContextModal context={item.context} onClose={() => detail.context.setOpen(false)} />
       )}
     </div>
   );

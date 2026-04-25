@@ -137,12 +137,16 @@ async fn touch_workbench_activity(
             if let Some(updated) =
                 crate::io::queries::workbenches::find_by_id(pool, workbench_id).await?
             {
-                let item: Option<api_types::WorkbenchItem> =
-                    serde_json::from_value(serde_json::to_value(&updated).unwrap_or_default()).ok();
+                // Propagate serde failures — lifecycle-outbox is the
+                // transactional retry path; a failed event gets marked
+                // failed on the row and retried rather than silently
+                // emitted with `item: None`.
+                let item =
+                    crate::runtime::daemon::workbench_runtime::to_wire_workbench_item(&updated)?;
                 bus.send(global_bus::BusPayload::Workbenches(Some(
                     api_types::WorkbenchEventData {
                         action: Some("updated".into()),
-                        item,
+                        item: Some(item),
                     },
                 )));
             }

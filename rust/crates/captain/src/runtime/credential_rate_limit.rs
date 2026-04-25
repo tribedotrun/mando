@@ -1,104 +1,22 @@
-//! Per-credential rate-limit cooldown.
+//! Per-credential rate-limit cooldown — captain-side orchestration.
 //!
-//! When a session using a specific credential hits a rate limit, that
-//! credential is marked with `rate_limit_cooldown_until` in the DB.
-//! `pick_for_worker` already filters these out, so healthy credentials
-//! keep being selected while rate-limited ones cool down.
+//! The primitive cooldown math and the single-credential activate/clear
+//! writes live in `settings::cc_failover` so scout and captain share one
+//! implementation. This module only wires in the captain-specific pieces:
 //!
-//! Cooldown duration depends on the rate-limit window type:
-//! - `five_hour`: use `resets_at` directly (at most ~5h, accurate proxy).
-//! - `seven_day` / other long windows: `resets_at` is the window boundary
-//!   which can be days away, but the API often recovers much sooner as old
-//!   usage ages out of the sliding window. Use a fixed 1-hour cooldown and
-//!   let the next tick re-probe.
+//! - `check_and_activate_from_stream`: scans a worker session's stream
+//!   file for a `rate_limit_event rejected` envelope and routes to either
+//!   the per-credential cooldown (if the session had a `credential_id`) or
+//!   the ambient fallback (for setups without any credential rows).
 
 use sqlx::SqlitePool;
 
-/// Maximum cooldown for long-window rate limits (seven_day, etc.) where
-/// `resets_at` is a window boundary, not actual recovery time.
-const LONG_WINDOW_MAX_COOLDOWN_SECS: u64 = 3600; // 1 hour
-
-/// Compute cooldown deadline (unix seconds) from rate-limit parameters.
-///
-/// Extracted for testability — `activate` calls this then writes to DB.
-fn compute_cooldown_until(now: u64, resets_at: Option<u64>, rate_limit_type: Option<&str>) -> u64 {
-    match resets_at {
-        Some(ts) if ts > now => {
-            let is_long_window = !matches!(rate_limit_type, Some("five_hour"));
-            if is_long_window {
-                // seven_day / unknown: cap cooldown — API recovers before window boundary.
-                now + (ts - now + 30).min(LONG_WINDOW_MAX_COOLDOWN_SECS)
-            } else {
-                // five_hour: resets_at is at most ~5h out, use it directly.
-                ts + 30
-            }
-        }
-        _ => now + 600, // 10-minute default
-    }
-}
-
-/// Mark a credential as rate-limited.
-///
-/// `rate_limit_type` is the CC `rateLimitType` string (e.g. `"five_hour"`,
-/// `"seven_day"`). For five-hour limits `resets_at` is a tight upper bound;
-/// for seven-day limits it can be days away so we cap the cooldown.
-#[tracing::instrument(skip_all)]
-pub async fn activate(
-    pool: &SqlitePool,
-    credential_id: i64,
-    resets_at: Option<u64>,
-    rate_limit_type: Option<&str>,
-) {
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-
-    let until = compute_cooldown_until(now, resets_at, rate_limit_type);
-
-    match settings::credentials::set_rate_limit_cooldown(pool, credential_id, until as i64).await {
-        Ok(_) => {
-            tracing::warn!(
-                module = "captain",
-                credential_id,
-                until_epoch = until,
-                cooldown_secs = until - now,
-                rate_limit_type = rate_limit_type.unwrap_or("unknown"),
-                "credential rate-limited"
-            );
-        }
-        Err(e) => {
-            tracing::error!(
-                module = "captain",
-                credential_id,
-                error = %e,
-                "failed to set credential rate limit cooldown"
-            );
-        }
-    }
-}
-
-/// Clear rate-limit cooldown for a credential (recovery).
-#[tracing::instrument(skip_all)]
-pub async fn clear(pool: &SqlitePool, credential_id: i64) {
-    match settings::credentials::set_rate_limit_cooldown(pool, credential_id, 0).await {
-        Ok(_) => {
-            tracing::info!(
-                module = "captain",
-                credential_id,
-                "credential rate limit cleared (recovery)"
-            );
-        }
-        Err(e) => {
-            tracing::error!(
-                module = "captain",
-                credential_id,
-                error = %e,
-                "failed to clear credential rate limit cooldown"
-            );
-        }
-    }
-}
+// Re-exports so legacy callsites (notify, credential_usage_poll,
+// tick_spawn) don't need to reach into settings. The activate/clear
+// behavior is identical; the log `module` field changes to
+// `"cc-failover"` so those events cluster together across the scout/
+// captain boundary.
+pub use settings::cc_failover::{rate_limit_activate as activate, rate_limit_clear as clear};
 
 /// Check a session's stream for rate limit rejection and activate the
 /// appropriate cooldown (per-credential or ambient).
@@ -127,53 +45,5 @@ pub async fn check_and_activate_from_stream(pool: &SqlitePool, session_id: &str)
             true
         }
         None => false,
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    const NOW: u64 = 1_700_000_000;
-
-    #[test]
-    fn five_hour_uses_resets_at_directly() {
-        let resets_at = NOW + 3 * 3600; // 3h from now
-        let until = compute_cooldown_until(NOW, Some(resets_at), Some("five_hour"));
-        assert_eq!(until, resets_at + 30);
-    }
-
-    #[test]
-    fn seven_day_caps_at_one_hour() {
-        let resets_at = NOW + 33 * 3600; // 33h from now (typical seven_day)
-        let until = compute_cooldown_until(NOW, Some(resets_at), Some("seven_day"));
-        assert_eq!(until, NOW + LONG_WINDOW_MAX_COOLDOWN_SECS);
-    }
-
-    #[test]
-    fn seven_day_short_resets_at_not_capped() {
-        // If seven_day resetsAt is only 20 min away, use it (under the 1h cap).
-        let resets_at = NOW + 1200; // 20 min
-        let until = compute_cooldown_until(NOW, Some(resets_at), Some("seven_day"));
-        assert_eq!(until, NOW + 1200 + 30);
-    }
-
-    #[test]
-    fn unknown_type_caps_like_seven_day() {
-        let resets_at = NOW + 10 * 3600;
-        let until = compute_cooldown_until(NOW, Some(resets_at), None);
-        assert_eq!(until, NOW + LONG_WINDOW_MAX_COOLDOWN_SECS);
-    }
-
-    #[test]
-    fn past_resets_at_uses_default() {
-        let until = compute_cooldown_until(NOW, Some(NOW - 100), Some("five_hour"));
-        assert_eq!(until, NOW + 600);
-    }
-
-    #[test]
-    fn no_resets_at_uses_default() {
-        let until = compute_cooldown_until(NOW, None, Some("five_hour"));
-        assert_eq!(until, NOW + 600);
     }
 }

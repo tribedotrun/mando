@@ -13,6 +13,58 @@ pub enum SessionStatus {
     Failed,
 }
 
+impl SessionStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Running => "running",
+            Self::Stopped => "stopped",
+            Self::Failed => "failed",
+        }
+    }
+}
+
+impl std::fmt::Display for SessionStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str((*self).as_str())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "kebab-case")]
+pub enum SessionCategory {
+    Workers,
+    Clarifier,
+    CaptainReview,
+    CaptainOps,
+    Advisor,
+    Planning,
+    TodoParser,
+    Scout,
+    Rebase,
+}
+
+impl SessionCategory {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Workers => "workers",
+            Self::Clarifier => "clarifier",
+            Self::CaptainReview => "captain-review",
+            Self::CaptainOps => "captain-ops",
+            Self::Advisor => "advisor",
+            Self::Planning => "planning",
+            Self::TodoParser => "todo-parser",
+            Self::Scout => "scout",
+            Self::Rebase => "rebase",
+        }
+    }
+}
+
+impl std::fmt::Display for SessionCategory {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str((*self).as_str())
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(deny_unknown_fields)]
 pub struct SessionEntry {
@@ -37,7 +89,7 @@ pub struct SessionEntry {
     pub worktree: Option<String>,
     pub branch: Option<String>,
     pub resume_cwd: Option<String>,
-    pub category: Option<String>,
+    pub category: Option<SessionCategory>,
     pub credential_id: Option<i64>,
     pub credential_label: Option<String>,
     pub error: Option<String>,
@@ -119,9 +171,9 @@ pub struct SessionCostSummary {
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(deny_unknown_fields)]
-pub struct TranscriptResponse {
+pub struct SessionJsonlPathResponse {
     pub session_id: String,
-    pub markdown: String,
+    pub path: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]

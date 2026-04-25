@@ -23,41 +23,94 @@ Manage everything from the native macOS desktop app, the `mando` CLI, or Telegra
 ## Architecture
 
 ```
-mando-gw daemon (launchd / --foreground)
-    ├── axum HTTP API
-    ├── SSE /api/events (live updates)
-    ├── captain auto-tick (worker orchestration)
-    ├── Telegram runtime
-    └── cron service
-        ▲ HTTP/SSE ▲
-    ┌──────────┴──────────┐
-    │   Electron app      │  thin client (no Rust in-process)
-    │   CLI (mando)       │  pure HTTP client
-    │   Telegram runtime  │  owned by daemon
-    └─────────────────────┘
+mando-gw daemon (Rust, launchd / --foreground)
+    ├── axum API on 127.0.0.1:{port}
+    │   ├── JSON / multipart / static routes
+    │   ├── NDJSON terminal streams
+    │   └── SSE /api/events live updates
+    ├── typed API registry
+    │   └── api_route! → api-types → generated Electron contracts
+    ├── captain runtime
+    │   └── auto-tick, workers, review, merge, reopen/rework
+    ├── scout runtime
+    │   └── content fetch, article extraction, research, triage
+    ├── sessions + terminal runtimes
+    ├── embedded Telegram transport
+    │   └── Bot API polling + local daemon HTTP/SSE
+    └── Electron UI supervisor
 
-Rust crates:
-    ├── mando-gateway    ← daemon binary + axum server
-    ├── mando-captain    ← tick engine, workers, clarifier
-    ├── mando-telegram   ← Telegram runtime library
-    ├── mando-config     ← Config struct (serde)
-    ├── mando-types      ← TaskItem, ItemStatus, etc.
-    ├── mando-shared     ← cron, event bus, helpers
-    ├── mando-scout      ← scout queue + AI triage
-    ├── mando-readability← HTML article extraction
-    └── mando-uuid       ← v4 UUID
-CLI (rust/cli/)         ← `mando` binary (HTTP client)
-Electron (electron/)    ← Mando.app (HTTP/SSE client)
+Clients:
+    Electron app (electron/)  ← React/TypeScript HTTP + SSE client
+    CLI (rust/cli/)           ← `mando` HTTP client
+    Telegram                  ← embedded daemon transport, external Bot API
 ```
+
+The daemon API is the shared boundary. Rust handlers register routes through
+`api_route!`, request/response/event types live in `api-types`, and
+`api-types-codegen` generates the TypeScript route map and Zod schemas consumed
+by Electron. The Electron renderer keeps daemon-backed state in React Query and
+patches that cache from `/api/events`.
+
+Rust workspace layout:
+
+- **Domain crates:** `captain`, `scout`, `sessions`, `sessions-db`, `settings`,
+  `terminal`.
+- **Global providers:** `global-types`, `global-infra`, `global-db`,
+  `global-bus`, `global-claude`, `global-net`.
+- **Contracts, transports, and binary:** `api-types`, `api-types-codegen`,
+  `gateway-client`, `transport-http`, `transport-http-macros`, `transport-tg`,
+  `transport-ui`, `mando-gateway`.
+- **Apps:** `rust/cli` builds the `mando` CLI; `electron/` builds `Mando.app`.
 
 ## Building from source
 
-Requires Rust (see `rust/rust-toolchain.toml`), Node.js (see `.node-version`), and **`cargo-nextest`** (`cargo install cargo-nextest --locked`).
+Requires Rust (see `rust/rust-toolchain.toml`), Node.js 24 (see
+`.node-version`), and npm. The public source build uses direct Cargo and npm
+commands. Run each block from the repository root.
+
+Build the Rust workspace:
 
 ```bash
-cargo build --manifest-path rust/Cargo.toml --workspace          # Build all Rust crates
-cd electron && npm ci && npm run build   # Build Electron app
-cargo nextest run --manifest-path rust/Cargo.toml --workspace --lib      # Run unit tests
+cd rust
+cargo build --workspace
+```
+
+Build the Electron app:
+
+```bash
+cd electron
+npm ci
+npm run build:test
+npm run typecheck
+```
+
+Optional Rust tests use `cargo-nextest`:
+
+```bash
+cargo install cargo-nextest --locked
+cd rust
+cargo nextest run --workspace --lib
+```
+
+Run the app from source after the Rust build:
+
+```bash
+cd electron
+npm run start
+```
+
+Package the macOS app with Electron Forge. The packaged app embeds the release
+Rust daemon and CLI binaries; macOS signing and notarization require the local
+Apple credentials referenced by the Electron Forge configuration.
+
+```bash
+cd rust
+cargo build --release --bin mando-gw --no-default-features -p mando-gateway
+cargo build --release --bin mando
+
+cd ../electron
+npm ci
+npm run package
 ```
 
 ## License

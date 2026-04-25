@@ -59,7 +59,6 @@ impl FromStr for ScoutStatus {
 
 /// A scout item.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
 pub struct ScoutItem {
     pub id: i64,
     pub url: String,
@@ -150,7 +149,6 @@ impl FromStr for ResearchRunStatus {
 
 /// A scout research run record.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
 pub struct ScoutResearchRun {
     pub id: i64,
     pub research_prompt: String,

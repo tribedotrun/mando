@@ -103,55 +103,6 @@ pub async fn persist_clarify_start(pool: &SqlitePool, task: &Task) -> Result<()>
     Ok(())
 }
 
-pub async fn persist_reclarify_start(pool: &SqlitePool, task: &Task) -> Result<()> {
-    let mut tx = pool.begin().await?;
-    let result = sqlx::query(
-        "UPDATE tasks
-         SET session_ids = ?, last_activity_at = ?, rev = rev + 1
-         WHERE id = ? AND status = 'clarifying' AND rev = ?",
-    )
-    .bind(task.session_ids.to_json())
-    .bind(&task.last_activity_at)
-    .bind(task.id)
-    .bind(task.rev)
-    .execute(&mut *tx)
-    .await?;
-    anyhow::ensure!(
-        result.rows_affected() > 0,
-        "persist_reclarify_start: 0 rows affected for task {} — status changed concurrently",
-        task.id
-    );
-    let metadata = json!({
-        "task_id": task.id,
-        "clarifier_session_id": task.session_ids.clarifier,
-    });
-    let aggregate_id = task.id.to_string();
-    let noop = super::noop_effect();
-    record_transition(
-        &mut tx,
-        &LifecycleTransitionRecord {
-            aggregate_type: "task",
-            aggregate_id: &aggregate_id,
-            command: "restart_clarifier",
-            from_state: Some("clarifying"),
-            to_state: "clarifying",
-            actor: "captain",
-            cause: None,
-            metadata: &metadata,
-            rev_before: task.rev,
-            rev_after: task.rev + 1,
-            idempotency_key: None,
-        },
-        &[LifecycleEffect {
-            effect_kind: "lifecycle.transition.recorded",
-            payload: &noop,
-        }],
-    )
-    .await?;
-    tx.commit().await?;
-    Ok(())
-}
-
 /// Commit the `needs-clarification → clarifying` transition before the clarify
 /// route runs its inline re-clarification turn. Without this, the row stays at
 /// `needs-clarification` while `answer_and_reclarify` tries to write a result,
@@ -214,25 +165,59 @@ pub async fn persist_clarify_result(pool: &SqlitePool, task: &Task) -> Result<()
         "clarifier_session_id": task.session_ids.clarifier,
     });
     let noop = super::noop_effect();
-    let applied = super::persist_task_transition(
-        pool,
+
+    // Open an outer tx so the task transition AND the clarifier session's
+    // `result_applied_at` marker land together. If the marker doesn't land
+    // atomically with the task transition, a subsequent NC→Clarifying
+    // re-entry (user answers a follow-up) would let `tick_clarify_poll`
+    // re-apply this same already-consumed stream.
+    let mut tx = pool.begin().await?;
+    let transition_id = super::persist_task_transition_in_tx(
+        &mut tx,
         task,
         expected_status,
         "apply_clarifier_result",
         "captain",
         None,
-        metadata,
-        vec![LifecycleEffect {
+        &metadata,
+        &[LifecycleEffect {
             effect_kind: "lifecycle.transition.recorded",
             payload: &noop,
         }],
     )
     .await?;
     anyhow::ensure!(
-        applied,
+        transition_id.is_some(),
         "persist_clarify_result: transition rejected for task {}",
         task.id
     );
+
+    // Every successful clarifier turn lands a session id via
+    // `apply_clarifier_result` before this function is called, so a
+    // missing id here indicates an upstream bug (the in-memory task
+    // state is out of sync with the CC run that produced this result).
+    // Debug-assert so tests catch the regression; in release we still
+    // commit the transition but log because the fallback is: the
+    // `result_applied_at` marker is NOT written, which re-opens the
+    // PR #887 hazard where `tick_clarify_poll` could re-apply a stale
+    // stream on the next `NeedsClarification -> Clarifying` entry.
+    debug_assert!(
+        task.session_ids.clarifier.is_some(),
+        "persist_clarify_result called without a clarifier session id on task {}",
+        task.id
+    );
+    if let Some(ref sid) = task.session_ids.clarifier {
+        sessions_db::mark_session_result_applied_in_tx(&mut tx, sid).await?;
+    } else {
+        tracing::warn!(
+            module = "captain-io-queries-tasks_persist-api",
+            task_id = task.id,
+            "persist_clarify_result: no clarifier session id to mark applied — \
+             a subsequent NC→Clarifying re-entry could let tick_clarify_poll \
+             re-apply a stale stream. Investigate the call site."
+        );
+    }
+    tx.commit().await?;
     Ok(())
 }
 
@@ -337,15 +322,6 @@ pub async fn enqueue_task_effects(
     .await?;
     tx.commit().await?;
     Ok(Some(transition_id))
-}
-
-pub async fn set_pr_number(pool: &SqlitePool, task_id: i64, pr_number: i64) -> Result<()> {
-    sqlx::query("UPDATE tasks SET pr_number = ?1 WHERE id = ?2")
-        .bind(pr_number)
-        .bind(task_id)
-        .execute(pool)
-        .await?;
-    Ok(())
 }
 
 pub async fn revert_orphaned_planning(pool: &SqlitePool) -> Result<u64> {
@@ -465,50 +441,6 @@ mod tests {
             Some("captain-merging")
         );
         assert_eq!(transition.get::<String, _>("to_state"), "captain-merging");
-        assert_eq!(transition.get::<i64, _>("rev_before"), persisted.rev);
-        assert_eq!(transition.get::<i64, _>("rev_after"), persisted.rev + 1);
-    }
-
-    #[tokio::test]
-    async fn persist_reclarify_start_records_lifecycle_transition() {
-        let pool = test_pool().await;
-        let mut task = test_task("clarify me");
-        task.status = ItemStatus::Clarifying;
-        task.last_activity_at = Some(global_types::now_rfc3339());
-        let id = tasks::insert_task(&pool, &task).await.unwrap();
-
-        let mut persisted = tasks::find_by_id(&pool, id).await.unwrap().unwrap();
-        persisted.session_ids.clarifier = Some("clarifier-session-2".into());
-        persisted.last_activity_at = Some(global_types::now_rfc3339());
-
-        persist_reclarify_start(&pool, &persisted).await.unwrap();
-
-        let after = tasks::find_by_id(&pool, id).await.unwrap().unwrap();
-        assert_eq!(after.status, ItemStatus::Clarifying);
-        assert_eq!(after.rev, persisted.rev + 1);
-        assert_eq!(
-            after.session_ids.clarifier.as_deref(),
-            Some("clarifier-session-2")
-        );
-
-        let transition = sqlx::query(
-            "SELECT command, from_state, to_state, rev_before, rev_after
-             FROM lifecycle_transitions
-             WHERE aggregate_type = 'task' AND aggregate_id = ?
-             ORDER BY id DESC
-             LIMIT 1",
-        )
-        .bind(id.to_string())
-        .fetch_one(&pool)
-        .await
-        .unwrap();
-
-        assert_eq!(transition.get::<String, _>("command"), "restart_clarifier");
-        assert_eq!(
-            transition.get::<Option<String>, _>("from_state").as_deref(),
-            Some("clarifying")
-        );
-        assert_eq!(transition.get::<String, _>("to_state"), "clarifying");
         assert_eq!(transition.get::<i64, _>("rev_before"), persisted.rev);
         assert_eq!(transition.get::<i64, _>("rev_after"), persisted.rev + 1);
     }

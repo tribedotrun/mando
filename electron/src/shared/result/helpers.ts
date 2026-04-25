@@ -32,6 +32,18 @@ export function parseWith<T>(schema: ZodType<T>, raw: unknown, where: string): R
   return err(parseError(out.error.issues, where, raw));
 }
 
+// Parse a raw text string directly against a schema. Useful for primitive file
+// contents or command output that never becomes JSON but still crosses a trust boundary.
+export function parseTextWith<T>(
+  rawText: string,
+  schema: ZodType<T>,
+  where: string,
+): Result<T, ParseApiError> {
+  const out = schema.safeParse(rawText);
+  if (out.success) return ok<T, ParseApiError>(out.data);
+  return err<T, ParseApiError>(makeParseApiError(out.error.issues, where, rawText));
+}
+
 // Parse a raw JSON string into unknown. JSON.parse failure becomes a typed parse error.
 export function parseJsonText(rawText: string, where: string): Result<unknown, ParseApiError> {
   try {

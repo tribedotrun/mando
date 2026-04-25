@@ -239,7 +239,7 @@ mod tests {
     use api_types::{NotificationEventPayload, NotificationKind, NotificationPayload, NotifyLevel};
 
     fn notification_block(message: &str) -> String {
-        let env = SseEnvelope::Notification(NotificationEventPayload {
+        let env = SseEnvelope::Notification(Box::new(NotificationEventPayload {
             ts: 1.0,
             data: Some(NotificationPayload {
                 message: message.to_string(),
@@ -248,7 +248,7 @@ mod tests {
                 task_key: None,
                 reply_markup: None,
             }),
-        });
+        }));
         format!("data: {}", serde_json::to_string(&env).unwrap())
     }
 

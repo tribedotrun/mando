@@ -1,19 +1,39 @@
-// Ban toast imports/calls from `sonner` outside:
-// - `**/ui/**` (the UI tier may fire toasts directly),
-// - `src/renderer/global/runtime/useFeedback.ts` (single canonical adapter).
+// Ban toast imports outside:
+// - `**/ui/**`,
+// - the single feedback adapter,
+// - runtime feedback hooks (`**/runtime/useFeedback*.ts[x]`,
+//   `**/runtime/useError*.ts[x]`).
 //
-// Per R9, toasts fire from exactly one funnel; repo/runtime/service tiers
-// return errors or results and the UI decides how to surface them. Prevents
-// duplicate toasts and inconsistent error UX across tiers.
+// Repo/service/providers tiers return data or errors; UI and dedicated runtime
+// feedback hooks decide how to surface them. Prevents duplicate toasts and
+// keeps the feedback funnel explicit.
 //
 // Codifies invariant R9 in .claude/skills/s-arch/invariants.md.
 
 const ADAPTER_SUFFIX = '/renderer/global/runtime/useFeedback.ts';
+const FEEDBACK_HOOK_RE = /\/runtime\/use(?:Error|Feedback)[^/]*\.tsx?$/;
+const TOAST_SOURCES = new Set(['sonner', '#renderer/global/runtime/useFeedback']);
+
+function normalizeFilename(filename) {
+  return (filename || '').replaceAll('\\', '/');
+}
 
 function isAllowed(filename) {
-  if (filename.includes('/ui/')) return true;
-  if (filename.endsWith(ADAPTER_SUFFIX)) return true;
-  return false;
+  const normalized = normalizeFilename(filename);
+  if (normalized.includes('/ui/')) return true;
+  if (normalized.endsWith(ADAPTER_SUFFIX)) return true;
+  return FEEDBACK_HOOK_RE.test(normalized);
+}
+
+function isToastSpecifier(spec) {
+  if (spec.type === 'ImportNamespaceSpecifier') return true;
+  if (spec.type === 'ImportDefaultSpecifier') return true;
+  return (
+    spec.type === 'ImportSpecifier' &&
+    spec.imported &&
+    spec.imported.type === 'Identifier' &&
+    spec.imported.name === 'toast'
+  );
 }
 
 /** @type {import('eslint').Rule.RuleModule} */
@@ -21,12 +41,11 @@ export default {
   meta: {
     type: 'problem',
     docs: {
-      description:
-        "Ban toast imports from 'sonner' outside ui/ and the single feedback adapter.",
+      description: 'Ban toast imports outside ui/ and dedicated runtime feedback hooks.',
     },
     messages: {
       noToastOutsideUi:
-        "Banned: `toast` import from 'sonner' outside `ui/` and `global/runtime/useFeedback.ts`. Repo/runtime/service tiers must return the result; the UI or the feedback adapter decides how to display. See .claude/skills/s-arch/invariants.md#r9.",
+        'Banned: toast imports belong in `ui/`, `global/runtime/useFeedback.ts`, or runtime hooks named `useFeedback*` / `useError*`. Repo/runtime/service/providers tiers must return the result and let those feedback hooks decide how to surface it. See .claude/skills/s-arch/invariants.md#r9.',
     },
   },
   create(context) {
@@ -35,21 +54,9 @@ export default {
 
     return {
       ImportDeclaration(node) {
-        if (node.source.value !== 'sonner') return;
+        if (!TOAST_SOURCES.has(node.source.value)) return;
         for (const spec of node.specifiers) {
-          if (spec.type === 'ImportNamespaceSpecifier') {
-            context.report({ node: spec, messageId: 'noToastOutsideUi' });
-            continue;
-          }
-          const importedName =
-            spec.type === 'ImportSpecifier' &&
-            spec.imported &&
-            spec.imported.type === 'Identifier'
-              ? spec.imported.name
-              : spec.type === 'ImportDefaultSpecifier'
-                ? 'default'
-                : null;
-          if (importedName === 'toast' || importedName === 'default') {
+          if (isToastSpecifier(spec)) {
             context.report({ node: spec, messageId: 'noToastOutsideUi' });
           }
         }

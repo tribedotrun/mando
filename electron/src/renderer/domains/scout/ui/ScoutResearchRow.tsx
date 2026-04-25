@@ -4,8 +4,8 @@ import type { ScoutResearchRun } from '#renderer/global/types';
 import { useNow } from '#renderer/domains/scout/runtime/useNow';
 import { formatElapsed, relativeTime } from '#renderer/global/service/utils';
 import { statusBadgeConfig } from '#renderer/domains/scout/service/researchHelpers';
-import { Badge } from '#renderer/global/ui/badge';
-import { TableCell, TableRow } from '#renderer/global/ui/table';
+import { Badge } from '#renderer/global/ui/primitives/badge';
+import { TableCell, TableRow } from '#renderer/global/ui/primitives/table';
 import { ScoutResearchRowExpand } from '#renderer/domains/scout/ui/ScoutResearchRowExpand';
 
 function ElapsedTime({ since }: { since: string }): React.ReactElement | null {
@@ -38,7 +38,7 @@ function StatusBadge({
   return <Badge variant={cfg.variant}>{cfg.label}</Badge>;
 }
 
-export function ResearchRow({ run }: { run: ScoutResearchRun }): React.ReactElement {
+export function ScoutResearchRow({ run }: { run: ScoutResearchRun }): React.ReactElement {
   const [open, setOpen] = useState(false);
 
   return (

@@ -11,7 +11,7 @@
  */
 
 import type { QueryClient } from '@tanstack/react-query';
-import { fromWireConfig } from '#renderer/global/repo/configMutations';
+import { fromWireConfig } from '#renderer/global/config/wireConfig';
 import { queryKeys } from '#renderer/global/repo/queryKeys';
 import type {
   ScoutEventData,
@@ -192,17 +192,4 @@ export function seedFromSnapshot(
     tasks: tasksCount,
     workers: workersCount,
   };
-}
-
-// ── Task detail invalidation ──
-
-export function invalidateTaskDetail(client: QueryClient, id?: number): void {
-  if (id != null) {
-    void client.invalidateQueries({ queryKey: queryKeys.tasks.timeline(id) });
-    void client.invalidateQueries({ queryKey: queryKeys.tasks.pr(id) });
-    void client.invalidateQueries({ queryKey: queryKeys.tasks.askHistory(id) });
-  } else {
-    // Invalidate all task sub-queries (timeline, pr, ask-history for every task)
-    void client.invalidateQueries({ queryKey: queryKeys.tasks.all });
-  }
 }

@@ -1,7 +1,16 @@
 import React from 'react';
-import { Ban, CircleAlert, CircleCheck, CircleDot, CircleHelp, CircleX } from 'lucide-react';
-import { Tooltip, TooltipTrigger, TooltipContent } from '#renderer/global/ui/tooltip';
+import {
+  Ban,
+  CircleAlert,
+  CircleCheck,
+  CircleDot,
+  CircleHelp,
+  CircleStop,
+  CircleX,
+} from 'lucide-react';
+import { Tooltip, TooltipTrigger, TooltipContent } from '#renderer/global/ui/primitives/tooltip';
 import { STATUS_TOOLTIP } from '#renderer/global/service/statusDisplay';
+import type { ItemStatus } from '#renderer/global/types';
 import {
   IconQueued,
   IconClarifying,
@@ -10,13 +19,13 @@ import {
   IconMerging,
   IconRework,
   IconHandedOff,
-} from '#renderer/global/ui/icons';
+} from '#renderer/global/ui/primitives/icons';
 
 export { ACTION_LABELS, STATUS_TOOLTIP } from '#renderer/global/service/statusDisplay';
 
 const S = 16;
 
-const ICON_MAP: Readonly<Record<string, () => React.ReactElement>> = Object.freeze({
+const ICON_MAP: Readonly<Record<ItemStatus, () => React.ReactElement>> = Object.freeze({
   new: IconQueued,
   queued: IconQueued,
   clarifying: IconClarifying,
@@ -33,9 +42,10 @@ const ICON_MAP: Readonly<Record<string, () => React.ReactElement>> = Object.free
   'completed-no-pr': () => <CircleCheck size={S} color="var(--text-3)" />,
   'plan-ready': () => <CircleDot size={S} color="var(--review)" />,
   canceled: () => <Ban size={S} color="var(--text-4)" />,
+  stopped: () => <CircleStop size={S} color="var(--text-3)" />,
 });
 
-export function StatusIcon({ status }: { status: string }): React.ReactElement {
+export function StatusIndicator({ status }: { status: ItemStatus }): React.ReactElement {
   const Icon = ICON_MAP[status] ?? IconQueued;
   const tip = STATUS_TOOLTIP[status] ?? status;
   return (

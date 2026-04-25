@@ -1,6 +1,7 @@
 //! `/tasks [all]` — task overview grouped by repo → workflow state, with merge/accept buttons.
 
 use crate::bot::TelegramBot;
+use crate::gateway_paths as paths;
 use crate::telegram_format::{escape_html, split_message, status_icon};
 use anyhow::Result;
 use captain::ItemStatus;
@@ -26,6 +27,7 @@ const STATUS_ORDER: &[ItemStatus] = &[
     ItemStatus::Merged,
     ItemStatus::CompletedNoPr,
     ItemStatus::PlanReady,
+    ItemStatus::Stopped,
     ItemStatus::Canceled,
 ];
 
@@ -47,6 +49,7 @@ fn status_label(s: &ItemStatus) -> &'static str {
         ItemStatus::CompletedNoPr => "completed_no_pr",
         ItemStatus::PlanReady => "plan_ready",
         ItemStatus::Canceled => "canceled",
+        ItemStatus::Stopped => "stopped",
     }
 }
 
@@ -55,9 +58,9 @@ pub async fn handle(bot: &TelegramBot, chat_id: &str, args: &str) -> Result<()> 
     let show_all = args.trim().eq_ignore_ascii_case("all");
     // When show_all, fetch including archived items from the gateway.
     let api_path = if show_all {
-        "/api/tasks?include_archived=true"
+        paths::TASKS_WITH_ARCHIVED
     } else {
-        "/api/tasks"
+        paths::TASKS
     };
     let items = match super::load_tasks_with_path(bot.gw(), api_path).await {
         Ok(items) => items,
@@ -164,6 +167,7 @@ pub async fn handle(bot: &TelegramBot, chat_id: &str, args: &str) -> Result<()> 
                 status_items.len()
             ));
 
+            let now_secs = time::OffsetDateTime::now_utc().unix_timestamp();
             for item in &status_items {
                 // Under a status header, show compact: #id Title (worker | PR #N)
                 let id_str = format!("#{} ", item.id);
@@ -184,7 +188,16 @@ pub async fn handle(bot: &TelegramBot, chat_id: &str, args: &str) -> Result<()> 
                         format!(" | {link}")
                     })
                     .unwrap_or_default();
-                lines.push(format!("  \u{2022} {id_str}{title}{worker}{pr_part}"));
+                // When a task is paused (every credential cooling down)
+                // suffix the reset time so the reader knows why it's
+                // sitting in its lifecycle state without moving.
+                let paused_suffix =
+                    crate::telegram_format::paused_badge(item.paused_until, now_secs)
+                        .map(|(_, label)| format!(" | {}", escape_html(&label)))
+                        .unwrap_or_default();
+                lines.push(format!(
+                    "  \u{2022} {id_str}{title}{worker}{pr_part}{paused_suffix}"
+                ));
 
                 let id = item.id;
                 let title_short = super::truncate(&item.title, 30);

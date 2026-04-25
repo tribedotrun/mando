@@ -2,6 +2,7 @@
 
 use clap::{Args, Subcommand};
 
+use crate::gateway_paths as paths;
 use crate::http::DaemonClient;
 
 fn session_status_label(status: api_types::SessionStatus) -> &'static str {
@@ -91,10 +92,10 @@ pub(crate) async fn handle(args: SessionsArgs) -> anyhow::Result<()> {
     let client = DaemonClient::discover()?;
 
     let entries: Vec<SessionRow> = if let Some(task_id) = args.task {
-        let mut path = format!("/api/tasks/{task_id}/sessions");
-        if let Some(ref caller) = args.caller {
-            path = format!("{path}?caller={caller}");
-        }
+        let path = match args.caller.as_ref() {
+            Some(caller) => paths::task_sessions_caller(task_id, caller),
+            None => paths::task_sessions(task_id),
+        };
         let result: api_types::ItemSessionsResponse = client.get_json(&path).await?;
         if args.json {
             println!("{}", serde_json::to_string_pretty(&result)?);
@@ -121,9 +122,9 @@ pub(crate) async fn handle(args: SessionsArgs) -> anyhow::Result<()> {
             params.push(format!("caller={caller}"));
         }
         let path = if params.is_empty() {
-            "/api/sessions".to_string()
+            paths::SESSIONS.to_string()
         } else {
-            format!("/api/sessions?{}", params.join("&"))
+            paths::sessions_query(params.join("&"))
         };
         let result: api_types::SessionsListResponse = client.get_json(&path).await?;
         if args.json {
@@ -175,12 +176,9 @@ pub(crate) async fn handle(args: SessionsArgs) -> anyhow::Result<()> {
 async fn handle_stream(session_id: &str, types: &[String]) -> anyhow::Result<()> {
     let client = DaemonClient::discover()?;
     let path = if types.is_empty() {
-        format!("/api/sessions/{session_id}/stream")
+        paths::session_stream(session_id)
     } else {
-        format!(
-            "/api/sessions/{session_id}/stream?types={}",
-            types.join(",")
-        )
+        paths::session_stream_types(session_id, types.join(","))
     };
     let text = client.get_text(&path).await?;
     print!("{text}");
@@ -189,18 +187,18 @@ async fn handle_stream(session_id: &str, types: &[String]) -> anyhow::Result<()>
 
 async fn handle_transcript(session_id: &str) -> anyhow::Result<()> {
     let client = DaemonClient::discover()?;
-    let result: api_types::TranscriptResponse = client
-        .get_json(&format!("/api/sessions/{session_id}/transcript"))
-        .await?;
-    print!("{}", result.markdown);
+    let result: api_types::TranscriptEventsResponse =
+        client.get_json(&paths::session_events(session_id)).await?;
+    let markdown = crate::transcript_render::events_to_markdown(&result.events);
+    print!("{markdown}");
     Ok(())
 }
 
 async fn handle_messages(session_id: &str, last: Option<usize>) -> anyhow::Result<()> {
     let client = DaemonClient::discover()?;
-    let mut path = format!("/api/sessions/{session_id}/messages");
+    let mut path = paths::session_messages(session_id);
     if let Some(n) = last {
-        path = format!("{path}?limit={n}");
+        path = paths::session_messages_limit(session_id, n);
     }
     let result: api_types::SessionMessagesResponse = client.get_json(&path).await?;
 
@@ -232,9 +230,8 @@ async fn handle_messages(session_id: &str, last: Option<usize>) -> anyhow::Resul
 
 async fn handle_tools(session_id: &str) -> anyhow::Result<()> {
     let client = DaemonClient::discover()?;
-    let result: api_types::SessionToolUsageResponse = client
-        .get_json(&format!("/api/sessions/{session_id}/tools"))
-        .await?;
+    let result: api_types::SessionToolUsageResponse =
+        client.get_json(&paths::session_tools(session_id)).await?;
 
     println!("{:<20}  {:>6}  {:>6}", "TOOL", "CALLS", "ERRORS");
     println!("{}", "-".repeat(40));
@@ -248,9 +245,8 @@ async fn handle_tools(session_id: &str) -> anyhow::Result<()> {
 
 async fn handle_cost(session_id: &str) -> anyhow::Result<()> {
     let client = DaemonClient::discover()?;
-    let result: api_types::SessionCostResponse = client
-        .get_json(&format!("/api/sessions/{session_id}/cost"))
-        .await?;
+    let result: api_types::SessionCostResponse =
+        client.get_json(&paths::session_cost(session_id)).await?;
     let cost = result
         .cost
         .total_cost_usd

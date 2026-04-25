@@ -18,12 +18,34 @@ const MIME_TYPES: Record<string, string> = {
   '.woff2': 'font/woff2',
 };
 
+export const RENDERER_CONTENT_SECURITY_POLICY = [
+  "default-src 'self'",
+  "script-src 'self'",
+  "style-src 'self' 'unsafe-inline'",
+  'connect-src http://127.0.0.1:*',
+  "img-src 'self' http://127.0.0.1:* data: blob:",
+  "font-src 'self'",
+  "object-src 'none'",
+  "base-uri 'self'",
+  "frame-ancestors 'none'",
+].join('; ');
+
+const SECURITY_HEADERS: Record<string, string> = {
+  'Content-Security-Policy': RENDERER_CONTENT_SECURITY_POLICY,
+  'X-Content-Type-Options': 'nosniff',
+};
+
 // invariant: Node http.Server startup; rejects on bind failure which is a fatal startup error, not a recoverable per-request failure
 export function startRendererServer(
   rendererDir: string,
 ): Promise<{ port: number; server: http.Server }> {
   return new Promise((resolve, reject) => {
     const server = http.createServer((req, res) => {
+      // SECURITY: packaged renderer CSP headers must be set before any status/body write.
+      for (const [name, value] of Object.entries(SECURITY_HEADERS)) {
+        res.setHeader(name, value);
+      }
+
       const urlPath = req.url === '/' ? '/index.html' : req.url || '/index.html';
       const cleanPath = urlPath.split('?')[0];
       const filePath = path.join(rendererDir, cleanPath);

@@ -1,7 +1,6 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use serde_json::Value;
 use time::OffsetDateTime;
 
 use super::CaptainRuntime;
@@ -23,19 +22,8 @@ fn read_layout(workbench_id: i64) -> anyhow::Result<crate::WorkbenchLayout> {
     }
 }
 
-fn write_layout(workbench_id: i64, layout: &crate::WorkbenchLayout) -> anyhow::Result<()> {
-    let path = layout_path(workbench_id);
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let json = serde_json::to_string_pretty(layout)?;
-    let tmp_path = path.with_extension("json.tmp");
-    std::fs::write(&tmp_path, json)?;
-    std::fs::rename(&tmp_path, &path)?;
-    Ok(())
-}
-
-fn merge_layout_patch(layout: &mut crate::WorkbenchLayout, patch: &Value) {
+#[cfg(test)]
+fn merge_layout_patch(layout: &mut crate::WorkbenchLayout, patch: &serde_json::Value) {
     if let Some(active_panel) = patch.get("activePanel").and_then(|value| value.as_str()) {
         layout.active_panel = Some(active_panel.to_string());
     }
@@ -68,27 +56,16 @@ enum PruneMetadataOutcome {
 }
 
 async fn prune_worktree_metadata(project_path: &Path) -> PruneMetadataOutcome {
-    let output = match tokio::process::Command::new("git")
-        .args(["worktree", "prune"])
-        .current_dir(project_path)
-        .output()
-        .await
-    {
-        Ok(output) => output,
-        Err(err) => return PruneMetadataOutcome::Failed(err.to_string()),
-    };
-
-    if output.status.success() {
-        PruneMetadataOutcome::Success
-    } else {
-        PruneMetadataOutcome::Failed(String::from_utf8_lossy(&output.stderr).trim().to_string())
+    match global_git::prune_worktrees(project_path).await {
+        Ok(()) => PruneMetadataOutcome::Success,
+        Err(err) => PruneMetadataOutcome::Failed(err.to_string()),
     }
 }
 
 impl CaptainRuntime {
     #[tracing::instrument(skip_all)]
     pub async fn current_worktree_branch(&self, wt_path: &Path) -> anyhow::Result<String> {
-        crate::io::git::current_branch(wt_path).await
+        global_git::current_branch(wt_path).await
     }
 
     #[tracing::instrument(skip_all)]
@@ -143,14 +120,31 @@ impl CaptainRuntime {
             return Ok(crate::WorkbenchPatchOutcome::NotFound);
         };
 
-        let item: Option<api_types::WorkbenchItem> =
-            serde_json::from_value(serde_json::to_value(&updated).unwrap_or_default()).ok();
-        self.bus.send(global_bus::BusPayload::Workbenches(Some(
-            api_types::WorkbenchEventData {
-                action: Some("updated".into()),
-                item,
-            },
-        )));
+        // Fail-fast on schema drift — the DB mutation already committed,
+        // but we refuse to emit an `item: None` bus event. The HTTP
+        // response still returns Ok(Updated) because the persistence
+        // succeeded; the SSE path is the observability channel that
+        // needs to be fixed by correcting api-types. The error is logged
+        // and skipped here rather than propagated so we don't fail the
+        // caller's mutation retroactively.
+        match crate::runtime::daemon::workbench_runtime::to_wire_workbench_item(&updated) {
+            Ok(item) => {
+                self.bus.send(global_bus::BusPayload::Workbenches(Some(
+                    api_types::WorkbenchEventData {
+                        action: Some("updated".into()),
+                        item: Some(item),
+                    },
+                )));
+            }
+            Err(e) => {
+                tracing::error!(
+                    module = "captain-runtime-daemon_workbench_api_runtime",
+                    workbench_id = updated.id,
+                    error = %e,
+                    "skipping workbench bus broadcast after patch — api-types schema drift"
+                );
+            }
+        }
 
         Ok(crate::WorkbenchPatchOutcome::Updated(updated))
     }
@@ -165,27 +159,6 @@ impl CaptainRuntime {
         };
 
         let layout = tokio::task::spawn_blocking(move || read_layout(id)).await??;
-        Ok(Some(layout))
-    }
-
-    #[tracing::instrument(skip_all)]
-    pub async fn patch_workbench_layout(
-        &self,
-        id: i64,
-        patch: Value,
-    ) -> anyhow::Result<Option<crate::WorkbenchLayout>> {
-        let Some(_) = crate::io::queries::workbenches::find_by_id(&self.pool, id).await? else {
-            return Ok(None);
-        };
-
-        let layout = tokio::task::spawn_blocking(move || {
-            let mut layout = read_layout(id)?;
-            merge_layout_patch(&mut layout, &patch);
-            write_layout(id, &layout)?;
-            Ok::<_, anyhow::Error>(layout)
-        })
-        .await??;
-
         Ok(Some(layout))
     }
 
@@ -218,13 +191,13 @@ impl CaptainRuntime {
         };
 
         let branch = format!("worktree-{suffix}");
-        let worktree_path = crate::io::git::worktree_path(&project_path, &suffix);
+        let worktree_path = global_git::worktree_path(&project_path, &suffix);
 
-        crate::io::git::fetch_origin(&project_path).await?;
-        let default_branch = crate::io::git::default_branch(&project_path).await?;
+        global_git::fetch_origin(&project_path).await?;
+        let default_branch = global_git::default_branch(&project_path).await?;
 
         if worktree_path.exists() {
-            if let Err(err) = crate::io::git::remove_worktree(&project_path, &worktree_path).await {
+            if let Err(err) = global_git::remove_worktree(&project_path, &worktree_path).await {
                 tracing::warn!(
                     module = "worktrees",
                     path = %worktree_path.display(),
@@ -239,7 +212,7 @@ impl CaptainRuntime {
                 }
             }
         }
-        if let Err(err) = crate::io::git::delete_local_branch(&project_path, &branch).await {
+        if let Err(err) = global_git::delete_local_branch(&project_path, &branch).await {
             tracing::debug!(
                 module = "worktrees",
                 branch = %branch,
@@ -248,8 +221,9 @@ impl CaptainRuntime {
             );
         }
 
-        crate::io::git::create_worktree(&project_path, &branch, &worktree_path, &default_branch)
+        global_git::create_worktree(&project_path, &branch, &worktree_path, &default_branch)
             .await?;
+        crate::io::worktree_bootstrap::copy_local_files(&project_path, &worktree_path).await;
 
         let workbench = crate::Workbench::new(
             project_row.id,
@@ -269,7 +243,7 @@ impl CaptainRuntime {
                     "workbench insert failed after worktree creation; cleaning up orphan worktree"
                 );
                 if let Err(remove_err) =
-                    crate::io::git::remove_worktree(&project_path, &worktree_path).await
+                    global_git::remove_worktree(&project_path, &worktree_path).await
                 {
                     tracing::warn!(
                         module = "worktrees",
@@ -302,7 +276,7 @@ impl CaptainRuntime {
                 continue;
             }
             let project_path = global_infra::paths::expand_tilde(&row.path);
-            match crate::io::git::list_worktrees(&project_path).await {
+            match global_git::list_worktrees(&project_path).await {
                 Ok(paths) => {
                     worktrees.extend(paths.into_iter().map(|path| crate::WorktreeEntry {
                         project: row.name.clone(),
@@ -390,7 +364,7 @@ impl CaptainRuntime {
             return Ok(crate::RemoveWorktreeOutcome::NotFound);
         };
 
-        crate::io::git::remove_worktree(&repo_path, worktree_path).await?;
+        global_git::remove_worktree(&repo_path, worktree_path).await?;
         Ok(crate::RemoveWorktreeOutcome::Removed)
     }
 
@@ -429,7 +403,7 @@ impl CaptainRuntime {
                 }
             }
 
-            match crate::io::git::list_worktrees(&project_path).await {
+            match global_git::list_worktrees(&project_path).await {
                 Ok(paths) => {
                     all_tracked.extend(paths);
                 }

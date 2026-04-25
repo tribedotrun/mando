@@ -1,7 +1,7 @@
 import React from 'react';
-import { Input } from '#renderer/global/ui/input';
-import { Textarea } from '#renderer/global/ui/textarea';
-import { Label } from '#renderer/global/ui/label';
+import { Input } from '#renderer/global/ui/primitives/input';
+import { Textarea } from '#renderer/global/ui/primitives/textarea';
+import { Label } from '#renderer/global/ui/primitives/label';
 
 interface Props {
   path: string;

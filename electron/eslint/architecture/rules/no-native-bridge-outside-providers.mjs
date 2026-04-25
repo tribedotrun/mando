@@ -7,7 +7,7 @@ function isRendererFile(filename) {
 }
 
 function isAllowedFile(filename) {
-  return normalize(filename).includes('/providers/');
+  return normalize(filename).includes('src/renderer/global/providers/native/');
 }
 
 function isWindowMandoApi(node) {
@@ -27,11 +27,11 @@ export default {
     type: 'problem',
     docs: {
       description:
-        'Renderer code may access the native bridge only through provider-layer wrappers.',
+        'Renderer code may access the native bridge only through global native-provider wrappers.',
     },
     messages: {
       noDirectBridge:
-        'Direct `window.mandoAPI` access is allowed only in provider boundary modules. Move this call behind a dedicated provider wrapper. See .claude/skills/s-arch/invariants.md#r7.',
+        'Direct `window.mandoAPI` access is allowed only in `renderer/global/providers/native/**`. Move this call behind the global native-provider surface. See .claude/skills/s-arch/invariants.md#r7.',
     },
   },
   create(context) {

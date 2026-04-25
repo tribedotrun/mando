@@ -52,7 +52,6 @@ shell-words = "1"
 base64 = "0.22"
 bytes = "1"
 toml = "0.8"
-libc = "0.2"
 
 [features]
 default = ["otlp"]
@@ -68,4 +67,3 @@ reqwest = { workspace = true, features = ["json", "multipart"] }
 tokio.workspace = true
 serde_json.workspace = true
 uuid = { version = "1", features = ["v4"] }
-libc = "0.2"

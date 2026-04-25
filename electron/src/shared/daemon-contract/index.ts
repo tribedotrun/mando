@@ -62,25 +62,49 @@ export type AskResponse = {
   session_id: string | null;
   suggested_followups: Array<string> | null;
 };
+export type AssistantContentBlock =
+  | { kind: 'text'; data: AssistantTextBlock }
+  | { kind: 'thinking'; data: AssistantThinkingBlock }
+  | { kind: 'tool_use'; data: AssistantToolUseBlock };
+export type AssistantEvent = {
+  meta: EventMeta;
+  model: string | null;
+  blocks: Array<AssistantContentBlock>;
+  usage: TranscriptUsageInfo | null;
+  stopReason: string | null;
+};
+export type AssistantTextBlock = { text: string };
+export type AssistantThinkingBlock = { text: string };
+export type AssistantToolUseBlock = { id: string; name: ToolName; input: ToolInput };
+export type BashInput = {
+  command: string;
+  description: string | null;
+  timeout: number | null;
+  runInBackground: boolean | null;
+};
 export type BoolOkResponse = { ok: boolean };
 export type BoolTouchedResponse = { ok: boolean; touched: boolean };
 export type BulkFailure = { id: number; error: string };
+export type BulkResultStatus = 'ok' | 'partial' | 'error';
 export type CaptainConfig = {
   autoSchedule: boolean;
   autoMerge: boolean;
   maxConcurrentWorkers: number | null;
   tickIntervalS: number;
   tz: string;
-  defaultTerminalAgent: string;
+  defaultTerminalAgent: TerminalAgent;
   claudeTerminalArgs: string;
   codexTerminalArgs: string;
   projects: { [key in string]: ProjectConfig };
 };
+export type CcPermissionMode = 'default' | 'acceptEdits' | 'bypassPermissions' | 'plan' | 'dontAsk';
+export type CcTodoItem = { content: string; activeForm: string | null; status: CcTodoItemStatus };
+export type CcTodoItemStatus = 'pending' | 'in_progress' | 'completed';
 export type ChannelStatus = {
   name: string;
   enabled: boolean;
   running: boolean;
-  mode: string;
+  mode: TelegramMode;
   token: string;
   owner: string;
   lastError: string | null;
@@ -100,10 +124,11 @@ export type ClarifierQuestionPayload = {
   category: string | null;
 };
 export type ClarifyAnswer = { question: string; answer: string };
+export type ClarifyOutcome = 'ready' | 'clarifying' | 'escalate' | 'answered';
 export type ClarifyRequest = { answers?: Array<ClarifyAnswer>; answer?: string };
 export type ClarifyResponse = {
   ok: boolean;
-  status: string;
+  status: ClarifyOutcome;
   context: string | null;
   questions: Array<ClarifierQuestion> | null;
   session_id: string | null;
@@ -217,6 +242,13 @@ export type CredentialsPayload = { ts: number; data: CredentialsEventData | null
 export type DailyMerge = { date: string; count: number };
 export type DashboardConfig = { host: string; port: number };
 export type DeleteTasksResponse = { ok: boolean; deleted: number; warnings: Array<string> | null };
+export type DrainStop = 'idle' | 'max-ticks' | 'wall-clock' | 'until-status' | 'cancelled';
+export type EditInput = {
+  filePath: string;
+  oldString: string;
+  newString: string;
+  replaceAll: boolean | null;
+};
 export type EditProjectRequest = {
   rename?: string;
   github_repo?: string;
@@ -231,6 +263,15 @@ export type EditProjectRequest = {
 export type EmptyRequest = Record<symbol, never>;
 export type EmptyResponse = Record<symbol, never>;
 export type ErrorResponse = { error: string };
+export type EventIndex = { lineNumber: number };
+export type EventMeta = {
+  index: EventIndex;
+  uuid: string | null;
+  parentUuid: string | null;
+  sessionId: string | null;
+  timestamp: string | null;
+  isSidechain: boolean | null;
+};
 export type EvidenceCreatedResponse = {
   artifact_id: number;
   task_id: number;
@@ -252,7 +293,20 @@ export type FeedResponse = { id: string; feed: Array<FeedItem>; count: number };
 export type FirecrawlScrapeRequest = { url: string };
 export type FirecrawlScrapeResponse = { ok: boolean; content: string };
 export type GatewayConfig = { dashboard: DashboardConfig };
+export type GlobInput = { pattern: string; path: string | null };
+export type GrepInput = {
+  pattern: string;
+  path: string | null;
+  glob: string | null;
+  fileType: string | null;
+  outputMode: GrepOutputMode | null;
+  headLimit: number | null;
+  caseInsensitive: boolean | null;
+  multiline: boolean | null;
+};
+export type GrepOutputMode = 'content' | 'files_with_matches' | 'count';
 export type HealthResponse = { healthy: boolean; version: string; pid: number; uptime: number };
+export type HookPhase = 'started' | 'response';
 export type ImageFilenameParams = { filename: string };
 export type InlineKeyboardButton = {
   text: string;
@@ -277,7 +331,8 @@ export type ItemStatus =
   | 'merged'
   | 'completed-no-pr'
   | 'plan-ready'
-  | 'canceled';
+  | 'canceled'
+  | 'stopped';
 export type MandoConfig = {
   workspace: string;
   ui: UiConfig;
@@ -288,20 +343,37 @@ export type MandoConfig = {
   scout: ScoutConfig;
   env: { [key in string]: string };
 };
+export type McpServerStatus = { name: string; status: string };
+export type McpToolName = { server: string; tool: string };
 export type MergeRequest = { pr_number: number; project: string };
-export type MergeResponse = { status: string; item_id: number; pr: number };
+export type MergeResponse = { status: ItemStatus; item_id: number; pr: number };
 export type MessagesQuery = { limit: number | null; offset: number | null };
+export type ModelUsageBreakdown = {
+  model: string;
+  usage: TranscriptUsageInfo;
+  costUsd: number | null;
+  contextWindow: number | null;
+};
+export type NotebookCellType = 'code' | 'markdown';
+export type NotebookEditInput = {
+  notebookPath: string;
+  newSource: string;
+  cellId: string | null;
+  cellType: NotebookCellType | null;
+  editMode: NotebookEditMode | null;
+};
+export type NotebookEditMode = 'replace' | 'insert' | 'delete';
 export type NotificationEventPayload = { ts: number; data: NotificationPayload | null };
 export type NotificationKind =
   | { type: 'Escalated'; item_id: string; summary: string | null }
   | { type: 'NeedsClarification'; item_id: string; questions: string | null }
   | {
       type: 'RateLimited';
-      status: string;
+      status: CredentialRateLimitStatus;
       utilization: number | null;
       resets_at: number | null;
       rate_limit_type: string | null;
-      overage_status: string | null;
+      overage_status: CredentialRateLimitStatus | null;
       overage_resets_at: number | null;
       overage_disabled_reason: string | null;
     }
@@ -332,11 +404,18 @@ export type NudgeResponse = {
   ok: boolean;
   worker: string | null;
   pid: number | null;
-  status: string | null;
+  status: ItemStatus | null;
   alerts: Array<string> | null;
 };
+export type OpaqueInput = { raw: string };
+export type OtherToolName = { name: string };
 export type ParseTodosRequest = { text: string; project: string };
 export type ParseTodosResponse = { items: Array<string> };
+export type PermissionDenial = {
+  toolName: string | null;
+  toolUseId: string | null;
+  reason: string | null;
+};
 export type PrSummaryResponse = {
   pr_number: number | null;
   summary: string | null;
@@ -390,6 +469,12 @@ export type ProjectUpsertResponse = {
   logo: string | null;
 };
 export type ProjectsListResponse = { projects: Array<ProjectSummary> };
+export type ReadInput = {
+  filePath: string;
+  offset: number | null;
+  limit: number | null;
+  pages: string | null;
+};
 export type RemoveWorktreeRequest = { path: string };
 export type ResearchError = { url: string; error: string };
 export type ResearchEventData = {
@@ -412,6 +497,25 @@ export type ResearchLink = {
 };
 export type ResearchPayload = { ts: number; data: ResearchEventData | null };
 export type ResearchStartResponse = { run_id: number };
+export type ResultEvent = { meta: EventMeta; outcome: ResultOutcome; summary: ResultSummary };
+export type ResultOutcome =
+  | 'success'
+  | 'error_during_execution'
+  | 'error_max_turns'
+  | 'error_max_budget_usd'
+  | 'error_max_structured_output_retries';
+export type ResultSummary = {
+  durationMs: number | null;
+  durationApiMs: number | null;
+  numTurns: number | null;
+  totalCostUsd: number | null;
+  stopReason: string | null;
+  permissionDenials: Array<PermissionDenial>;
+  errors: Array<string>;
+  usage: TranscriptUsageInfo | null;
+  modelUsage: Array<ModelUsageBreakdown>;
+  isError: boolean;
+};
 export type ResyncPayload = { ts: number; data: SseResyncData };
 export type ReviewTrigger =
   | 'gates_pass'
@@ -419,6 +523,7 @@ export type ReviewTrigger =
   | 'broken_session'
   | 'budget_exhausted'
   | 'clarifier_fail'
+  | 'spawn_fail'
   | 'rebase_fail'
   | 'ci_failure'
   | 'degraded_context'
@@ -433,7 +538,7 @@ export type ScoutAddResponse = {
   id: number;
   url: string;
   type: string;
-  status: string;
+  status: ScoutItemStatus;
 };
 export type ScoutArticleResponse = {
   id: number;
@@ -447,12 +552,12 @@ export type ScoutBulkDeleteRequest = { ids: Array<number> };
 export type ScoutBulkDeleteResponse = {
   deleted: number;
   failed: Array<BulkFailure>;
-  status: string;
+  status: BulkResultStatus;
 };
 export type ScoutBulkUpdateResponse = {
   updated: number;
   failed: Array<BulkFailure>;
-  status: string;
+  status: BulkResultStatus;
 };
 export type ScoutConfig = { interests: InterestsConfig; userContext: UserContextConfig };
 export type ScoutDeleteResponse = { removed: boolean; id: number };
@@ -462,7 +567,7 @@ export type ScoutItem = {
   rev: number;
   url: string;
   title: string | null;
-  status: string;
+  status: ScoutItemStatus;
   item_type: string | null;
   summary: string | null;
   has_summary: boolean | null;
@@ -482,17 +587,26 @@ export type ScoutItemLifecycleCommand = 'mark_pending' | 'mark_processed' | 'sav
 export type ScoutItemSession = {
   session_id: string;
   caller: string;
-  status: string;
+  status: SessionStatus;
   created_at: string;
   model: string | null;
   duration_ms: number | null;
   cost_usd: number | null;
 };
+export type ScoutItemStatus = 'pending' | 'fetched' | 'processed' | 'saved' | 'archived' | 'error';
+export type ScoutItemStatusFilter =
+  | 'all'
+  | 'pending'
+  | 'fetched'
+  | 'processed'
+  | 'saved'
+  | 'archived'
+  | 'error';
 export type ScoutLifecycleCommandRequest = { command: ScoutItemLifecycleCommand };
 export type ScoutPayload = { ts: number; data: ScoutEventData | null };
 export type ScoutProcessRequest = { id?: number };
 export type ScoutQuery = {
-  status: string | null;
+  status: ScoutItemStatusFilter | null;
   q: string | null;
   type: string | null;
   page: number | null;
@@ -503,7 +617,7 @@ export type ScoutResearchRequest = { topic: string; process?: boolean };
 export type ScoutResearchRun = {
   id: number;
   research_prompt: string;
-  status: string;
+  status: ScoutResearchRunStatus;
   error: string | null;
   session_id: string | null;
   added_count: number;
@@ -511,6 +625,7 @@ export type ScoutResearchRun = {
   completed_at: string | null;
   rev: number;
 };
+export type ScoutResearchRunStatus = 'running' | 'done' | 'failed';
 export type ScoutResponse = {
   items: Array<ScoutItem>;
   count: number;
@@ -521,6 +636,16 @@ export type ScoutResponse = {
   filter: string | null;
   status_counts: { [key in string]: number } | null;
 };
+export type SessionCategory =
+  | 'workers'
+  | 'clarifier'
+  | 'captain-review'
+  | 'captain-ops'
+  | 'advisor'
+  | 'planning'
+  | 'todo-parser'
+  | 'scout'
+  | 'rebase';
 export type SessionCostResponse = { cost: SessionCostSummary };
 export type SessionCostSummary = {
   total_input_tokens: number;
@@ -552,7 +677,7 @@ export type SessionEntry = {
   worktree: string | null;
   branch: string | null;
   resume_cwd: string | null;
-  category: string | null;
+  category: SessionCategory | null;
   credential_id: number | null;
   credential_label: string | null;
   error: string | null;
@@ -567,6 +692,7 @@ export type SessionIds = {
   ask: string | null;
   advisor: string | null;
 };
+export type SessionJsonlPathResponse = { session_id: string; path: string | null };
 export type SessionMessagesQuery = { limit: number | null; offset: number | null };
 export type SessionMessagesResponse = { messages: Array<TranscriptMessage> };
 export type SessionStatus = 'running' | 'stopped' | 'failed';
@@ -599,12 +725,12 @@ export type SessionsPayload = { ts: number; data: SessionsEventData | null };
 export type SessionsQuery = {
   page: number | null;
   per_page: number | null;
-  category: string | null;
+  category: SessionCategory | null;
   /**
    * Alias for category -- accepted from CLI which sends `caller=`.
    */
-  caller: string | null;
-  status: string | null;
+  caller: SessionCategory | null;
+  status: SessionStatus | null;
 };
 export type SessionsResponse = {
   total: number;
@@ -617,6 +743,7 @@ export type SessionsResponse = {
 };
 export type SetupTokenRequest = { label: string; token: string };
 export type SetupTokenResponse = { ok: boolean; id: number | null; label: string | null };
+export type SkillInput = { skill: string; args: string | null };
 export type SnapshotErrorPayload = { ts: number; data: SseSnapshotErrorData };
 export type SnapshotPayload = { ts: number; data: SseSnapshotData };
 export type SseDaemonInfo = { version: string; uptime: number };
@@ -647,7 +774,15 @@ export type SseSnapshotErrorData = { message: string; retry: boolean };
 export type StatusEventData = { action: string | null; affected_task_ids: Array<number> | null };
 export type StatusPayload = { ts: number; data: StatusEventData | null };
 export type StopWorkersResponse = { killed: number };
+export type StructuredOutputInput = { raw: string };
 export type SummaryCreatedResponse = { artifact_id: number; task_id: number };
+export type SystemApiRetryEvent = {
+  meta: EventMeta;
+  message: string | null;
+  retryInMs: number | null;
+  attempt: number | null;
+};
+export type SystemCompactBoundaryEvent = { meta: EventMeta; reason: string | null };
 export type SystemHealthResponse = {
   healthy: boolean;
   version: string;
@@ -669,6 +804,33 @@ export type SystemHealthResponse = {
   telegram: TelegramHealth;
   ui: UiHealthResponse;
 };
+export type SystemHookEvent = {
+  meta: EventMeta;
+  phase: HookPhase;
+  hookId: string | null;
+  hookName: string | null;
+  hookEvent: string | null;
+  output: string | null;
+  stdout: string | null;
+  stderr: string | null;
+};
+export type SystemInitEvent = {
+  meta: EventMeta;
+  cwd: string | null;
+  model: string | null;
+  permissionMode: CcPermissionMode | null;
+  tools: Array<string>;
+  slashCommands: Array<string>;
+  mcpServers: Array<McpServerStatus>;
+  outputStyle: string | null;
+};
+export type SystemLocalCommandOutputEvent = {
+  meta: EventMeta;
+  command: string | null;
+  output: string;
+};
+export type SystemRateLimitEvent = { meta: EventMeta; info: string };
+export type SystemStatusEvent = { meta: EventMeta; status: string | null; message: string | null };
 export type TaskAddRequest = {
   title: string;
   project: string | null;
@@ -704,6 +866,7 @@ export type TaskEvidenceResponse = {
 export type TaskFeedbackRequest = { id: number; feedback: string };
 export type TaskIdParams = { id: number };
 export type TaskIdRequest = { id: number };
+export type TaskInput = { description: string; prompt: string; subagentType: string | null };
 export type TaskItem = {
   id: number;
   rev: number;
@@ -741,6 +904,14 @@ export type TaskItem = {
   spawn_fail_count: number;
   merge_fail_count: number;
   source: string | null;
+  /**
+   * Unix seconds after which captain may dispatch this task again.
+   * Set when every healthy credential is in rate-limit cooldown and
+   * the failover layer surfaces `AllCredentialsExhausted`. Captain
+   * tick excludes tasks where `paused_until > unixepoch()`; UI shows
+   * "Paused until HH:MM". `None` means not paused.
+   */
+  paused_until: number | null;
 };
 export type TaskListQuery = { include_archived: boolean | null };
 export type TaskListResponse = { items: Array<TaskItem>; count: number };
@@ -756,8 +927,9 @@ export type TelegramHealth = {
   lastError: string | null;
   degraded: boolean;
   restartCount: number;
-  mode: string;
+  mode: TelegramMode;
 };
+export type TelegramMode = 'embedded';
 export type TelegramOwnerRequest = { owner: string };
 export type TelegramReplyMarkup =
   | { kind: 'inlineKeyboard'; rows: Array<Array<InlineKeyboardButton>> }
@@ -814,8 +986,44 @@ export type TickAction = {
   message: string | null;
   reason: string | null;
 };
+export type TickDrainResult = {
+  iterations: number;
+  stopped_reason: DrainStop;
+  /**
+   * Wall-clock duration of the drain, in milliseconds.
+   */
+  elapsed_ms: number;
+  /**
+   * Final tick's `TickResult`. Always present — even a 0-iteration drain
+   * (no-op request) surfaces the last tick it ran, and the guarded empty
+   * result when nothing ran.
+   */
+  last: TickResult;
+};
 export type TickMode = 'live' | 'dry-run' | 'skipped';
-export type TickRequest = { dry_run?: boolean; emit_notifications?: boolean };
+export type TickRequest = {
+  dry_run?: boolean;
+  emit_notifications?: boolean;
+  /**
+   * Drain ticks until a pass reports no state changes (iterations converge),
+   * or until a cap trips.
+   */
+  until_idle?: boolean;
+  /**
+   * Hard upper bound on ticks in this call. Clamped to a server-side
+   * ceiling so a misbehaving caller can't peg the daemon.
+   */
+  max_ticks?: number;
+  /**
+   * Drain until the task identified by `task_id` reaches any of these
+   * statuses. Requires `task_id`; a value without `task_id` is a 400.
+   */
+  until_status?: Array<ItemStatus>;
+  /**
+   * Target task for `until_status`.
+   */
+  task_id?: number;
+};
 export type TickResult = {
   mode: TickMode;
   tick_id: string | null;
@@ -919,8 +1127,8 @@ export type TimelineEventPayload =
       content: string;
       worker: string;
       session_id: string;
-      from: string;
-      to: string;
+      from: ItemStatus;
+      to: ItemStatus;
       source: string;
     }
   | { event_type: 'human_ask'; question: string; intent: string; ask_id: string }
@@ -932,7 +1140,7 @@ export type TimelineEventPayload =
       attempt: number;
       max_retries: number;
     }
-  | { event_type: 'rework_requested'; content: string; to: string }
+  | { event_type: 'rework_requested'; content: string; to: ItemStatus }
   | { event_type: 'merged'; pr: string; source: string; accepted_by: string }
   | { event_type: 'accepted_no_pr'; accepted_by: string }
   | {
@@ -952,7 +1160,8 @@ export type TimelineEventPayload =
     }
   | { event_type: 'canceled'; pr: string }
   | { event_type: 'canceled_by_human'; canceled_by: string }
-  | { event_type: 'handed_off'; to: string; handed_off_by: string }
+  | { event_type: 'handed_off'; to: ItemStatus; handed_off_by: string }
+  | { event_type: 'stopped'; stopped_by: string }
   | {
       event_type: 'completed_no_pr';
       action: string;
@@ -962,14 +1171,14 @@ export type TimelineEventPayload =
       reviewed_head_sha: string;
     }
   | { event_type: 'clarifier_completed_no_pr'; session_id: string }
-  | { event_type: 'status_changed'; from: string; to: string }
-  | { event_type: 'status_changed_by_command'; from: string; to: string; command: string }
-  | { event_type: 'status_changed_queued'; to: string; reason: string }
-  | { event_type: 'status_changed_retry_merge'; from: string; to: string; pr: number }
+  | { event_type: 'status_changed'; from: ItemStatus; to: ItemStatus }
+  | { event_type: 'status_changed_by_command'; from: ItemStatus; to: ItemStatus; command: string }
+  | { event_type: 'status_changed_queued'; to: ItemStatus; reason: string }
+  | { event_type: 'status_changed_retry_merge'; from: ItemStatus; to: ItemStatus; pr: number }
   | {
       event_type: 'status_changed_clarifier_fail';
-      from: string;
-      to: string;
+      from: ItemStatus;
+      to: ItemStatus;
       session_id: string;
       error: string;
     }
@@ -996,30 +1205,80 @@ export type TimelineEventPayload =
   | { event_type: 'plan_completed'; diagram: string; plan: string }
   | { event_type: 'plan_ready' };
 export type TimelineResponse = { id: string; events: Array<TimelineEvent>; count: number };
+export type TodoWriteInput = { todos: Array<CcTodoItem> };
 export type TokenResponse = { token: string };
-export type TranscriptAssistantEntry = {
-  uuid: string;
-  parentUuid: string | null;
-  sessionId: string;
-  text: string;
-  timestamp: string | null;
-  usage: TranscriptUsageInfo | null;
+export type ToolInput =
+  | { kind: 'bash'; data: BashInput }
+  | { kind: 'read'; data: ReadInput }
+  | { kind: 'edit'; data: EditInput }
+  | { kind: 'write'; data: WriteInput }
+  | { kind: 'grep'; data: GrepInput }
+  | { kind: 'glob'; data: GlobInput }
+  | { kind: 'todo_write'; data: TodoWriteInput }
+  | { kind: 'web_fetch'; data: WebFetchInput }
+  | { kind: 'web_search'; data: WebSearchInput }
+  | { kind: 'task'; data: TaskInput }
+  | { kind: 'notebook_edit'; data: NotebookEditInput }
+  | { kind: 'skill'; data: SkillInput }
+  | { kind: 'structured_output'; data: StructuredOutputInput }
+  | { kind: 'opaque'; data: OpaqueInput };
+export type ToolName =
+  | { kind: 'bash' }
+  | { kind: 'read' }
+  | { kind: 'edit' }
+  | { kind: 'write' }
+  | { kind: 'grep' }
+  | { kind: 'glob' }
+  | { kind: 'todo_write' }
+  | { kind: 'web_fetch' }
+  | { kind: 'web_search' }
+  | { kind: 'task' }
+  | { kind: 'notebook_edit' }
+  | { kind: 'skill' }
+  | { kind: 'structured_output' }
+  | { kind: 'mcp'; data: McpToolName }
+  | { kind: 'other'; data: OtherToolName };
+export type ToolProgressEvent = {
+  meta: EventMeta;
+  toolUseId: string;
+  toolName: ToolName;
+  elapsedSeconds: number | null;
 };
-export type TranscriptInit = {
-  uuid: string;
+export type ToolResultBlocks = { blocks: Array<ToolResultChildBlock> };
+export type ToolResultChildBlock =
+  | { kind: 'text'; data: ToolResultText }
+  | { kind: 'image'; data: UserImageBlock }
+  | { kind: 'unknown'; data: ToolResultUnknownBlock };
+export type ToolResultContent =
+  | { kind: 'text'; data: ToolResultText }
+  | { kind: 'blocks'; data: ToolResultBlocks };
+export type ToolResultText = { text: string };
+export type ToolResultUnknownBlock = { raw: string };
+export type TranscriptConnectionClosed = { reason: string };
+export type TranscriptEvent =
+  | { kind: 'system_init'; data: SystemInitEvent }
+  | { kind: 'system_compact_boundary'; data: SystemCompactBoundaryEvent }
+  | { kind: 'system_status'; data: SystemStatusEvent }
+  | { kind: 'system_api_retry'; data: SystemApiRetryEvent }
+  | { kind: 'system_local_command_output'; data: SystemLocalCommandOutputEvent }
+  | { kind: 'system_hook'; data: SystemHookEvent }
+  | { kind: 'system_rate_limit'; data: SystemRateLimitEvent }
+  | { kind: 'user'; data: UserEvent }
+  | { kind: 'assistant'; data: AssistantEvent }
+  | { kind: 'tool_progress'; data: ToolProgressEvent }
+  | { kind: 'result'; data: ResultEvent }
+  | { kind: 'unknown'; data: UnknownEvent };
+export type TranscriptEventEnvelope =
+  | { event: 'snapshot'; data: TranscriptSnapshotBatch }
+  | { event: 'snapshot_complete'; data: TranscriptSnapshotComplete }
+  | { event: 'event'; data: TranscriptEvent }
+  | { event: 'connection_closed'; data: TranscriptConnectionClosed }
+  | { event: 'error'; data: TranscriptStreamError };
+export type TranscriptEventsResponse = {
   sessionId: string;
-  cwd: string | null;
-  model: string | null;
-  timestamp: string | null;
+  events: Array<TranscriptEvent>;
+  isRunning: boolean;
 };
-export type TranscriptLine =
-  | ({ type: 'init' } & TranscriptInit)
-  | ({ type: 'user' } & TranscriptUserEntry)
-  | ({ type: 'assistant' } & TranscriptAssistantEntry)
-  | ({ type: 'tool_use' } & TranscriptToolUse)
-  | ({ type: 'tool_result' } & TranscriptToolResult)
-  | ({ type: 'result' } & TranscriptResult)
-  | ({ type: 'system' } & TranscriptSystem);
 export type TranscriptMessage = {
   role: string;
   uuid: string;
@@ -1028,50 +1287,15 @@ export type TranscriptMessage = {
   tool_calls: Array<TranscriptToolCall>;
   usage: TranscriptUsageInfo | null;
 };
-export type TranscriptResponse = { session_id: string; markdown: string };
-export type TranscriptResult = {
-  sessionId: string;
-  durationMs: number | null;
-  costUsd: number | null;
-  isError: boolean;
-  error: string | null;
-  timestamp: string | null;
-};
-export type TranscriptSystem = {
-  uuid: string;
-  sessionId: string;
-  text: string;
-  timestamp: string | null;
-};
+export type TranscriptSnapshotBatch = { events: Array<TranscriptEvent> };
+export type TranscriptSnapshotComplete = { isRunning: boolean };
+export type TranscriptStreamError = { message: string; retry: boolean };
 export type TranscriptToolCall = { id: string; name: string; input_summary: string };
-export type TranscriptToolResult = {
-  uuid: string;
-  parentUuid: string | null;
-  toolUseId: string;
-  isError: boolean;
-  text: string;
-  timestamp: string | null;
-};
-export type TranscriptToolUse = {
-  uuid: string;
-  parentUuid: string | null;
-  toolUseId: string;
-  name: string;
-  inputSummary: string;
-  timestamp: string | null;
-};
 export type TranscriptUsageInfo = {
   input_tokens: number;
   output_tokens: number;
   cache_read_tokens: number;
   cache_creation_tokens: number;
-};
-export type TranscriptUserEntry = {
-  uuid: string;
-  parentUuid: string | null;
-  sessionId: string;
-  text: string;
-  timestamp: string | null;
 };
 export type TriageItemResponse = {
   task_id: string;
@@ -1106,10 +1330,34 @@ export type UiRegisterRequest = {
   cwd: string | null;
   env: { [key in string]: string };
 };
+export type UnknownEvent = {
+  meta: EventMeta;
+  rawType: string | null;
+  rawSubtype: string | null;
+  raw: string;
+};
+export type UserContentBlock =
+  | { kind: 'text'; data: UserTextBlock }
+  | { kind: 'image'; data: UserImageBlock }
+  | { kind: 'tool_result'; data: UserToolResultBlock };
 export type UserContextConfig = {
   role: string;
   knownDomains: Array<string>;
   explainDomains: Array<string>;
+};
+export type UserEvent = { meta: EventMeta; blocks: Array<UserContentBlock> };
+export type UserImageBlock = { mediaType: string | null; dataLen: number | null };
+export type UserTextBlock = { text: string };
+export type UserToolResultBlock = {
+  toolUseId: string;
+  content: ToolResultContent;
+  isError: boolean | null;
+};
+export type WebFetchInput = { url: string; prompt: string };
+export type WebSearchInput = {
+  query: string;
+  allowedDomains: Array<string> | null;
+  blockedDomains: Array<string> | null;
 };
 export type WorkSummaryRequest = { content: string };
 export type WorkbenchEventData = { action: string | null; item: WorkbenchItem | null };
@@ -1127,8 +1375,9 @@ export type WorkbenchItem = {
   archivedAt: string | null;
   deletedAt: string | null;
 };
-export type WorkbenchListQuery = { status: string | null };
+export type WorkbenchListQuery = { status: WorkbenchStatusFilter | null };
 export type WorkbenchPatchRequest = { title?: string; archived?: boolean; pinned?: boolean };
+export type WorkbenchStatusFilter = 'active' | 'archived' | 'all';
 export type WorkbenchesPayload = { ts: number; data: WorkbenchEventData | null };
 export type WorkbenchesResponse = { workbenches: Array<WorkbenchItem> };
 export type WorkerDetail = {
@@ -1167,3 +1416,4 @@ export type WorktreeListItem = { project: string; path: string };
 export type WorktreeListResponse = { worktrees: Array<WorktreeListItem> };
 export type WorktreePruneError = { project: string; error: string };
 export type WorktreePruneResponse = { ok: boolean; pruned: Array<string> };
+export type WriteInput = { filePath: string; content: string };

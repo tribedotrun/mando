@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from 'react';
-import { Button } from '#renderer/global/ui/button';
+import { Button } from '#renderer/global/ui/primitives/button';
 import { useConfig } from '#renderer/domains/onboarding/runtime/hooks';
 import { useStepStates } from '#renderer/domains/onboarding/runtime/useStepStates';
 import {

@@ -1,14 +1,14 @@
 import React, { useState } from 'react';
 import { useScoutAdd } from '#renderer/domains/scout/runtime/hooks';
-import { Button } from '#renderer/global/ui/button';
-import { Input } from '#renderer/global/ui/input';
+import { Button } from '#renderer/global/ui/primitives/button';
+import { Input } from '#renderer/global/ui/primitives/input';
 import {
   Dialog,
   DialogContentPlain,
   DialogHeader,
   DialogTitle,
   DialogFooter,
-} from '#renderer/global/ui/dialog';
+} from '#renderer/global/ui/primitives/dialog';
 
 export function AddUrlForm(): React.ReactElement {
   const [isOpen, setIsOpen] = useState(false);

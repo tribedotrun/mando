@@ -3,10 +3,10 @@ import type { Row } from '@tanstack/react-table';
 import { useWorkbenchArchive } from '#renderer/domains/captain/runtime/hooks';
 import { FINALIZED_STATUSES, type TaskItem } from '#renderer/global/types';
 import { prLabel, prHref, prState } from '#renderer/global/service/utils';
-import { PrIcon } from '#renderer/global/ui/icons';
-import { StatusIcon, ACTION_LABELS } from '#renderer/global/ui/StatusIndicator';
-import { Checkbox } from '#renderer/global/ui/checkbox';
-import { TaskRowActions } from '#renderer/domains/captain/ui/TaskRowParts';
+import { PrIcon } from '#renderer/global/ui/primitives/icons';
+import { StatusIndicator, ACTION_LABELS } from '#renderer/global/ui/StatusIndicator';
+import { Checkbox } from '#renderer/global/ui/primitives/checkbox';
+import { TaskRowActions } from '#renderer/domains/captain/ui/TaskRowActions';
 
 export interface TaskRowCallbacks {
   onToggleSelect: (id: number) => void;
@@ -17,6 +17,7 @@ export interface TaskRowCallbacks {
   onAccept: (id: number) => void;
   acceptPendingId?: number | null;
   onHandoff: (id: number) => void;
+  onStop: (id: number) => void;
   onCancel: (id: number) => void;
   onRetry: (id: number) => void;
   onAnswer: (item: TaskItem) => void;
@@ -40,6 +41,7 @@ export const TaskRow = React.memo(function TaskRow({
   const selected = row.getIsSelected();
   const archiveWb = useWorkbenchArchive();
   const isFinalized = FINALIZED_STATUSES.includes(item.status);
+  const actionLabel = ACTION_LABELS[item.status];
   const [menuOpen, setMenuOpen] = useState(false);
 
   const handleArchive = useCallback(() => {
@@ -50,6 +52,8 @@ export const TaskRow = React.memo(function TaskRow({
     <div
       ref={scrollRef}
       data-testid="task-row"
+      data-task-id={item.id}
+      data-status={item.status}
       data-focused={focused || undefined}
       className={`group relative flex cursor-pointer items-center gap-2.5 rounded px-3 py-2 ${selected ? 'bg-accent' : 'bg-card'} ${isFinalized ? 'opacity-55' : ''} ${focused ? 'outline-2 outline-ring -outline-offset-2' : ''} ${menuOpen ? 'z-20' : ''}`}
       onClick={(e) => {
@@ -62,7 +66,7 @@ export const TaskRow = React.memo(function TaskRow({
         <span
           className={`absolute inset-0 flex items-center justify-center transition-opacity ${selected ? 'opacity-0' : 'group-hover:opacity-0'}`}
         >
-          <StatusIcon status={item.status} />
+          <StatusIndicator status={item.status} />
         </span>
         <span
           className={`absolute inset-0 z-[1] flex items-center justify-center transition-opacity group-hover:opacity-100 ${selected ? 'opacity-100' : 'opacity-0'}`}
@@ -79,12 +83,9 @@ export const TaskRow = React.memo(function TaskRow({
       {/* Col: title + badges, title truncates, badges never compress */}
       <span className="flex min-w-0 flex-1 items-center gap-1.5 text-[14px] leading-[18px]">
         <span className={`min-w-0 truncate ${isFinalized ? 'text-text-3' : 'text-foreground'}`}>
-          {ACTION_LABELS[item.status] && (
-            <span
-              className="mr-1.5 text-[12px] font-medium"
-              style={{ color: ACTION_LABELS[item.status].color }}
-            >
-              {ACTION_LABELS[item.status].label}
+          {actionLabel && (
+            <span className="mr-1.5 text-[12px] font-medium" style={{ color: actionLabel.color }}>
+              {actionLabel.label}
               {' \u00b7 '}
             </span>
           )}

@@ -89,4 +89,11 @@ impl CaptainRuntime {
         crate::runtime::dashboard::handoff_item(&store, id, &self.pool).await?;
         self.drain_pending_lifecycle_effects().await
     }
+
+    #[tracing::instrument(skip_all)]
+    pub async fn stop_item(&self, id: i64) -> anyhow::Result<()> {
+        let store = self.task_store.read().await;
+        crate::runtime::dashboard::stop_item(&store, id, &self.pool).await?;
+        self.drain_pending_lifecycle_effects().await
+    }
 }

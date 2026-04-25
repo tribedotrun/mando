@@ -103,11 +103,21 @@ async fn post_task_clarify_inner(
             )
         })?;
     item.context = Some(new_context);
-    state
-        .captain
-        .write_task(&item)
-        .await
-        .map_err(|e| internal_error(e, "failed to save clarification answer"))?;
+
+    // Commit the needs-clarification -> clarifying transition before the
+    // inline reclarifier runs. `persist_resume_clarifier` owns the
+    // transition: it calls `apply_transition` on the in-memory item,
+    // clears the stale clarifier session id, then writes the row with a
+    // conditional UPDATE guarded on the needs-clarification predecessor.
+    // Doing the transition + write here as well would trip the lifecycle
+    // guard on the runtime-level re-apply (Clarifying -> Clarifying is
+    // illegal).
+    if let Err(e) = state.captain.persist_resume_clarifier(&mut item).await {
+        return Err(internal_error(
+            e,
+            "failed to advance task to clarifying for inline re-clarification",
+        ));
+    }
 
     if !body.saved_images.is_empty() {
         if let Err(e) = state
@@ -129,16 +139,6 @@ async fn post_task_clarify_inner(
             },
         )
         .await;
-
-    // Commit the needs-clarification -> clarifying transition *before* running
-    // the inline reclarifier; the subsequent apply_clarifier_result path
-    // expects the task to already be in `clarifying` when it reads the row.
-    if let Err(e) = state.captain.persist_resume_clarifier(&mut item).await {
-        return Err(internal_error(
-            e,
-            "failed to advance task to clarifying for inline re-clarification",
-        ));
-    }
 
     let wf = state.settings.load_captain_workflow();
     match state
@@ -166,16 +166,16 @@ async fn post_task_clarify_inner(
                 .await
                 .map_err(|e| internal_error(e, "failed to apply clarification result"))?;
 
-            let status_str = match item.status() {
-                captain::ItemStatus::Queued => "ready",
-                captain::ItemStatus::NeedsClarification => "clarifying",
-                captain::ItemStatus::CaptainReviewing => "escalate",
-                captain::ItemStatus::CompletedNoPr => "answered",
+            let status = match item.status() {
+                captain::ItemStatus::Queued => api_types::ClarifyOutcome::Ready,
+                captain::ItemStatus::NeedsClarification => api_types::ClarifyOutcome::Clarifying,
+                captain::ItemStatus::CaptainReviewing => api_types::ClarifyOutcome::Escalate,
+                captain::ItemStatus::CompletedNoPr => api_types::ClarifyOutcome::Answered,
                 _ => match response_outcome {
-                    ClarifierStatus::Ready => "ready",
-                    ClarifierStatus::Clarifying => "clarifying",
-                    ClarifierStatus::Escalate => "escalate",
-                    ClarifierStatus::Answered => "answered",
+                    ClarifierStatus::Ready => api_types::ClarifyOutcome::Ready,
+                    ClarifierStatus::Clarifying => api_types::ClarifyOutcome::Clarifying,
+                    ClarifierStatus::Escalate => api_types::ClarifyOutcome::Escalate,
+                    ClarifierStatus::Answered => api_types::ClarifyOutcome::Answered,
                 },
             };
 
@@ -183,7 +183,7 @@ async fn post_task_clarify_inner(
 
             Ok(Json(api_types::ClarifyResponse {
                 ok: true,
-                status: status_str.to_string(),
+                status,
                 context: item.context.clone().or(response_context),
                 questions,
                 session_id: response_session_id,

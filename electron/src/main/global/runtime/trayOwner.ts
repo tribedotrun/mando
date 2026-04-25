@@ -13,6 +13,7 @@ import fs from 'fs';
 import path from 'path';
 import log from '#main/global/providers/logger';
 import { getAppMode, getDataDir } from '#main/global/config/lifecycle';
+import { mustParsePositiveIntegerText } from '#main/global/service/boundaryText';
 import { getAppTitle } from '#main/global/service/lifecycle';
 import { createTrayIcon } from '#main/global/runtime/icons';
 import { updateTrayTooltip } from '#main/global/runtime/lifecycle';
@@ -68,7 +69,7 @@ function quitAllIncludingDaemon(): void {
   const pidFile = path.join(getDataDir(), 'daemon.pid');
   let pid: number | undefined;
   try {
-    pid = parseInt(fs.readFileSync(pidFile, 'utf-8').trim(), 10);
+    pid = mustParsePositiveIntegerText(fs.readFileSync(pidFile, 'utf-8'), `file:${pidFile}`);
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
     if (code !== 'ENOENT') {

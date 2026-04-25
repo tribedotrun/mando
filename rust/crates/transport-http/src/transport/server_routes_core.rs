@@ -5,7 +5,7 @@ use crate::transport::server_routes_features::{
 };
 use crate::transport::{
     routes_captain, routes_captain_adopt, routes_client_logs, routes_config, routes_credentials,
-    routes_sessions, routes_stats, routes_terminal, routes_workbenches, sse,
+    routes_sessions, routes_stats, routes_terminal, routes_workbenches, sse, sse_session_events,
 };
 use crate::{ApiRouter, AppState};
 
@@ -94,7 +94,7 @@ fn captain_routes() -> ApiRouter<AppState> {
         auth = Protected,
         handler = routes_captain::post_captain_tick,
         body = api_types::TickRequest,
-        res = api_types::TickResult
+        res = api_types::TickDrainResult
     );
     let router = crate::api_route!(
         router,
@@ -155,12 +155,30 @@ fn session_routes() -> ApiRouter<AppState> {
     );
     let router = crate::api_route!(
         router,
-        GET "/api/sessions/{id}/transcript",
+        GET "/api/sessions/{id}/events",
         transport = Json,
         auth = Protected,
-        handler = routes_sessions::get_session_transcript,
+        handler = routes_sessions::get_session_events,
         params = api_types::SessionIdParams,
-        res = api_types::TranscriptResponse
+        res = api_types::TranscriptEventsResponse
+    );
+    let router = crate::api_route!(
+        router,
+        GET "/api/sessions/{id}/events/stream",
+        transport = Sse,
+        auth = Protected,
+        handler = sse_session_events::get_session_events_stream,
+        event = api_types::TranscriptEventEnvelope,
+        params = api_types::SessionIdParams
+    );
+    let router = crate::api_route!(
+        router,
+        GET "/api/sessions/{id}/jsonl-path",
+        transport = Json,
+        auth = Protected,
+        handler = routes_sessions::get_session_jsonl_path,
+        params = api_types::SessionIdParams,
+        res = api_types::SessionJsonlPathResponse
     );
     let router = crate::api_route!(
         router,

@@ -123,12 +123,68 @@ fn terminal_info_from_session(
     .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))
 }
 
+/// Resolve the effective cwd for a terminal-create request, honoring the
+/// session's stored cwd when resuming. Claude Code scopes its
+/// per-conversation file on disk by the cwd at launch (the project-dir
+/// hash), so resuming from a different cwd fails with
+/// `No conversation found with session ID`. When `resume_session_id` is
+/// set and the stored cwd is non-empty, the stored cwd wins. Callers may
+/// pass an empty `resume_session_id` or a `None`/empty stored-cwd lookup
+/// (no row yet, legacy session) in which case the caller's cwd is used.
+fn resolve_resume_cwd(
+    caller_cwd: std::path::PathBuf,
+    resume_session_id: Option<&str>,
+    stored_cwd: Option<String>,
+) -> std::path::PathBuf {
+    let Some(sid) = resume_session_id else {
+        return caller_cwd;
+    };
+    let Some(stored) = stored_cwd else {
+        return caller_cwd;
+    };
+    if stored.is_empty() {
+        return caller_cwd;
+    }
+    let stored_path = global_infra::paths::expand_tilde(&stored);
+    if stored_path == caller_cwd {
+        return caller_cwd;
+    }
+    tracing::warn!(
+        module = "routes_terminal",
+        resume_session_id = sid,
+        caller_cwd = %caller_cwd.display(),
+        stored_cwd = %stored_path.display(),
+        "resume cwd mismatch — overriding to session's stored cwd so CC can locate the conversation"
+    );
+    stored_path
+}
+
 #[crate::instrument_api(method = "POST", path = "/api/terminal")]
 pub(crate) async fn post_terminal_create(
     State(state): State<AppState>,
     Json(body): Json<api_types::TerminalCreateRequest>,
 ) -> Result<Json<api_types::TerminalSessionInfo>, ApiError> {
-    let cwd: std::path::PathBuf = body.cwd.into();
+    let caller_cwd: std::path::PathBuf = body.cwd.clone().into();
+    let stored_cwd_lookup = match body.resume_session_id.as_deref() {
+        Some(sid) => match state.sessions.session_cwd(sid).await {
+            Ok(stored) => stored,
+            Err(e) => {
+                tracing::warn!(
+                    module = "routes_terminal",
+                    resume_session_id = sid,
+                    error = %e,
+                    "failed to look up stored cwd for resume; falling back to caller-supplied cwd"
+                );
+                None
+            }
+        },
+        None => None,
+    };
+    let cwd = resolve_resume_cwd(
+        caller_cwd,
+        body.resume_session_id.as_deref(),
+        stored_cwd_lookup,
+    );
     if !cwd.is_dir() {
         return Err(error_response(
             StatusCode::BAD_REQUEST,
@@ -175,14 +231,45 @@ pub(crate) async fn post_terminal_create(
 #[crate::instrument_api(method = "GET", path = "/api/terminal")]
 pub(crate) async fn get_terminal_list(
     State(state): State<AppState>,
-) -> Json<Vec<api_types::TerminalSessionInfo>> {
+) -> Result<Json<Vec<api_types::TerminalSessionInfo>>, ApiError> {
+    // Schema drift surfaces at ERROR per offending session so operators
+    // can diagnose, but the list endpoint still returns 200 with the
+    // healthy rows. A 500 here would hide the remaining terminals and
+    // prevent the UI panel from rendering at all — worse UX than the
+    // earlier silent `filter_map` because it costs information.
     let sessions = state
         .terminal
         .list()
         .into_iter()
-        .filter_map(|session| serde_json::from_value(serde_json::to_value(session).ok()?).ok())
+        .filter_map(|session| {
+            let session_id = session.id.clone();
+            let value = match serde_json::to_value(&session) {
+                Ok(v) => v,
+                Err(e) => {
+                    tracing::error!(
+                        module = "transport-http",
+                        session_id = %session_id,
+                        error = %e,
+                        "skipping terminal session — serialize failed"
+                    );
+                    return None;
+                }
+            };
+            match serde_json::from_value::<api_types::TerminalSessionInfo>(value) {
+                Ok(info) => Some(info),
+                Err(e) => {
+                    tracing::error!(
+                        module = "transport-http",
+                        session_id = %session_id,
+                        error = %e,
+                        "skipping terminal session — api-types schema drift"
+                    );
+                    None
+                }
+            }
+        })
         .collect();
-    Json(sessions)
+    Ok(Json(sessions))
 }
 
 #[crate::instrument_api(method = "POST", path = "/api/terminal/{id}/write")]
@@ -408,4 +495,59 @@ pub(crate) async fn post_terminal_activity(
             )
         })?;
     Ok(Json(api_types::BoolTouchedResponse { ok: true, touched }))
+}
+
+#[cfg(test)]
+mod resolve_resume_cwd_tests {
+    use super::resolve_resume_cwd;
+    use std::path::PathBuf;
+
+    #[test]
+    fn no_resume_session_returns_caller_cwd() {
+        let caller = PathBuf::from("/workspace/A");
+        let out = resolve_resume_cwd(caller.clone(), None, Some("/workspace/B".into()));
+        assert_eq!(out, caller);
+    }
+
+    #[test]
+    fn no_stored_cwd_returns_caller_cwd() {
+        let caller = PathBuf::from("/workspace/A");
+        let out = resolve_resume_cwd(caller.clone(), Some("sid-1"), None);
+        assert_eq!(out, caller);
+    }
+
+    #[test]
+    fn empty_stored_cwd_returns_caller_cwd() {
+        let caller = PathBuf::from("/workspace/A");
+        let out = resolve_resume_cwd(caller.clone(), Some("sid-1"), Some(String::new()));
+        assert_eq!(out, caller);
+    }
+
+    #[test]
+    fn matching_stored_cwd_returns_caller_cwd() {
+        let caller = PathBuf::from("/workspace/A");
+        let out = resolve_resume_cwd(caller.clone(), Some("sid-1"), Some("/workspace/A".into()));
+        assert_eq!(out, caller);
+    }
+
+    #[test]
+    fn mismatched_stored_cwd_overrides() {
+        // The plan's central assertion: when cc_sessions has cwd=/A but the
+        // caller passes cwd=/B with a resume_session_id, the effective cwd
+        // must be /A so CC can locate the conversation.
+        let caller = PathBuf::from("/workspace/B");
+        let out = resolve_resume_cwd(caller, Some("sid-1"), Some("/workspace/A".into()));
+        assert_eq!(out, PathBuf::from("/workspace/A"));
+    }
+
+    #[test]
+    fn tilde_in_stored_cwd_expands() {
+        // `global_infra::paths::expand_tilde` turns `~/project` into the
+        // absolute home-relative path. The override path must match what
+        // CC originally saw at launch.
+        let home = std::env::var("HOME").expect("HOME must be set");
+        let caller = PathBuf::from("/workspace/somewhere-else");
+        let out = resolve_resume_cwd(caller, Some("sid-1"), Some("~/project".into()));
+        assert_eq!(out, PathBuf::from(format!("{home}/project")));
+    }
 }

@@ -1,7 +1,8 @@
 pub use api_router::{contract_inventory_link_anchor, ApiRouter};
 pub use auth::ensure_auth_token;
+pub use middleware::metrics::install_metrics_recorder;
 pub use runtime::captain_support::captain_notifier;
-pub use settings::config::resolve_github_repo;
+pub use settings::resolve_github_repo;
 pub use transport::router::build_router;
 pub use transport::*;
 pub use transport_http_macros::instrument_api;

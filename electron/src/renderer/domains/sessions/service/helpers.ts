@@ -1,4 +1,13 @@
-import type { SessionEntry, SessionSummary, TaskItem, TimelineEvent } from '#renderer/global/types';
+import type {
+  SessionCategory,
+  SessionEntry,
+  SessionStatus,
+  SessionSummary,
+  TaskItem,
+  TimelineEvent,
+} from '#renderer/global/types';
+import { sessionCategorySchema, sessionStatusSchema } from '#shared/daemon-contract/schemas';
+import { ApiErrorThrown } from '#result';
 
 /** Maps timeline event types to a caller label used when the session_id has no row in the session map. */
 const CALLER_MAP: Record<string, string> = Object.freeze({
@@ -202,29 +211,29 @@ export function buildSequenceFromSummaries(
   );
 }
 
-const CATEGORY_ORDER = Object.freeze([
-  'worker',
-  'captain-review-async',
-  'captain-merge-async',
-  'clarifier',
-  'deep-clarifier',
-  'clarifier-retry',
-  'ask',
-  'advisor',
-  'terminal',
-  'triage',
-  'nudge',
-  'adopt',
-]);
+const CATEGORY_ORDER: readonly SessionCategory[] = sessionCategorySchema.options;
 
-/** Sorts category keys: known categories in canonical order, unknowns appended. */
-export function sortCategories(categories: Record<string, number>): string[] {
-  const sorted = CATEGORY_ORDER.filter((c) => c in categories);
-  for (const c of Object.keys(categories)) {
-    if (!sorted.includes(c)) sorted.push(c);
-  }
-  return sorted;
+/** Sorts category keys in canonical contract order and ignores unknown keys. */
+export function sortCategories(categories: Record<string, number>): SessionCategory[] {
+  return CATEGORY_ORDER.filter((category) => category in categories);
 }
 
 /** Session status filter options for the sessions list. */
-export const SESSION_STATUS_OPTIONS = ['all', 'running', 'stopped', 'failed'] as const;
+export type SessionStatusFilter = 'all' | SessionStatus;
+
+export const SESSION_STATUS_OPTIONS: readonly SessionStatusFilter[] = [
+  'all',
+  ...sessionStatusSchema.options,
+];
+
+/**
+ * True when a thrown transcript-fetch error is a 404 from the daemon — the
+ * session finished (or never started) without emitting a transcript file.
+ * Drives the inline "no transcript recorded" stub in TranscriptPage so
+ * failed clarifier/worker sessions don't show the generic error strip.
+ */
+export function isTranscriptUnavailable(error: unknown): boolean {
+  if (!(error instanceof ApiErrorThrown)) return false;
+  const api = error.apiError;
+  return api.code === 'http' && api.status === 404;
+}

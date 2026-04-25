@@ -89,7 +89,7 @@ async fn tick_live_retries_clarifier_on_failure() {
     let mut config = Config::default();
     config.captain.projects.insert(
         project_path.to_string_lossy().to_string(),
-        settings::config::settings::ProjectConfig {
+        settings::ProjectConfig {
             name: "acme/widgets".into(),
             aliases: vec![],
             path: project_path.to_string_lossy().to_string(),

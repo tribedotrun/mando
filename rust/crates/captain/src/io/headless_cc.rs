@@ -118,7 +118,7 @@ pub(crate) async fn log_session_completion(
 
     let stream_path = global_infra::paths::stream_path_for_session(session_id);
     let cost_info = global_claude::get_stream_cost(&stream_path);
-    let (cost_usd, duration_ms, num_turns, denials) = match &cost_info {
+    let (mut cost_usd, duration_ms, num_turns, denials) = match &cost_info {
         Some(info) => (
             info.cost_usd,
             info.duration_ms.map(|d| d as i64),
@@ -127,6 +127,23 @@ pub(crate) async fn log_session_completion(
         ),
         None => (None, None, None, None),
     };
+    // Same fallback as session_terminate: when CC never wrote `type:result`
+    // (abnormal exit), estimate cost from per-model usage so the DB row
+    // reflects real token spend instead of NULL.
+    if cost_usd.unwrap_or(0.0) <= 0.0 {
+        let estimate = global_claude::session_cost_or_estimate(&stream_path).total_cost_usd;
+        if let Some(est) = estimate {
+            if est > 0.0 {
+                tracing::info!(
+                    module = "headless_cc",
+                    session_id,
+                    estimated_cost_usd = est,
+                    "no authoritative cost in stream; recorded per-model usage estimate"
+                );
+                cost_usd = Some(est);
+            }
+        }
+    }
 
     if let Err(e) = sessions_db::update_session_status_with_cost(
         pool,

@@ -4,6 +4,7 @@ pub mod content_fetch;
 pub mod db;
 pub mod file_store;
 pub mod firecrawl;
+pub mod metadata_probe;
 pub mod queries;
 pub mod telegraph;
 pub mod youtube;

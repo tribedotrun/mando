@@ -1,9 +1,10 @@
 import React, { useImperativeHandle } from 'react';
 import { useInlineTaskCreate } from '#renderer/domains/captain/runtime/useInlineTaskCreate';
-import { Button } from '#renderer/global/ui/button';
+import { Button } from '#renderer/global/ui/primitives/button';
+import { TaskAttachmentButton } from '#renderer/domains/captain/ui/TaskAttachmentButton';
 import {
-  TaskAttachmentButton,
   TaskAutoMergeToggle,
+  TaskPlanModeToggle,
   TaskProjectSelect,
   TaskSubmitButton,
 } from '#renderer/domains/captain/ui/TaskComposerControls';
@@ -17,61 +18,46 @@ interface InlineTaskCreateProps {
 }
 
 export function InlineTaskCreate({ ref }: InlineTaskCreateProps): React.ReactElement {
-  const {
-    title,
-    setTitle,
-    image,
-    preview,
-    setImageFile,
-    removeImage,
-    noAutoMerge,
-    setNoAutoMerge,
-    inputRef,
-    createMut,
-    projects,
-    globalAutoMerge,
-    effectiveProject,
-    projectRequired,
-    canSubmit,
-    handleSubmit,
-    handleKeyDown,
-    handlePaste,
-    handleProjectChange,
-  } = useInlineTaskCreate();
+  const form = useInlineTaskCreate();
 
   useImperativeHandle(ref, () => ({
-    focus: () => inputRef.current?.focus(),
+    focus: () => form.draft.inputRef.current?.focus(),
   }));
 
   return (
     <div className="mx-auto w-full max-w-[640px]">
       <div className="rounded-xl bg-muted">
         <textarea
-          ref={inputRef}
+          ref={form.draft.inputRef}
           data-testid="inline-task-input"
-          value={title}
-          onChange={(event) => setTitle(event.target.value)}
-          onKeyDown={handleKeyDown}
-          onPaste={handlePaste}
+          value={form.draft.title}
+          onChange={(event) => form.draft.setTitle(event.target.value)}
+          onKeyDown={form.events.handleKeyDown}
+          onPaste={form.events.handlePaste}
           placeholder="What needs to be done?"
           rows={3}
           className="w-full resize-none rounded-xl bg-transparent px-4 pb-2 pt-4 text-sm text-foreground placeholder:text-text-3 focus:outline-none"
           style={{ caretColor: 'var(--foreground)' }}
         />
 
-        {preview && image && (
+        {form.image.preview && form.image.image && (
           <div className="flex items-center gap-3 px-4 pb-3">
             <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-secondary">
               <img
-                src={preview}
-                alt={image.name}
+                src={form.image.preview}
+                alt={form.image.image.name}
                 className="max-h-10 max-w-10 rounded-md object-contain"
               />
             </div>
             <span className="min-w-0 truncate text-caption text-muted-foreground">
-              {image.name}
+              {form.image.image.name}
             </span>
-            <Button variant="ghost" size="xs" onClick={removeImage} className="text-text-3">
+            <Button
+              variant="ghost"
+              size="xs"
+              onClick={form.image.removeImage}
+              className="text-text-3"
+            >
               Remove
             </Button>
           </div>
@@ -79,35 +65,40 @@ export function InlineTaskCreate({ ref }: InlineTaskCreateProps): React.ReactEle
 
         <div className="flex items-center gap-2 px-3 pb-3">
           <TaskProjectSelect
-            projects={projects}
-            value={effectiveProject}
-            onValueChange={handleProjectChange}
+            projects={form.project.projects}
+            value={form.project.effectiveProject}
+            onValueChange={form.project.handleProjectChange}
             testId="inline-task-project"
           />
           <TaskAttachmentButton
-            onImageSelect={setImageFile}
+            onImageSelect={form.image.setImageFile}
             size="icon-sm"
             className="text-text-3"
           />
-          {globalAutoMerge && (
+          {form.autoMerge.globalAutoMerge && (
             <TaskAutoMergeToggle
-              checked={noAutoMerge}
-              onCheckedChange={setNoAutoMerge}
+              checked={form.autoMerge.noAutoMerge}
+              onCheckedChange={form.autoMerge.setNoAutoMerge}
               className="flex items-center gap-1.5 text-caption text-text-3"
             />
           )}
+          <TaskPlanModeToggle
+            checked={form.planMode.planning}
+            onCheckedChange={form.planMode.setPlanning}
+            className="flex items-center gap-1.5 text-caption text-text-3"
+          />
 
           <span className="flex-1" />
 
-          {projectRequired && !effectiveProject && (
+          {form.project.projectRequired && !form.project.effectiveProject && (
             <span className="text-caption text-text-3">Choose a project</span>
           )}
 
           <TaskSubmitButton
             testId="inline-task-submit"
-            disabled={!canSubmit}
-            pending={createMut.isPending}
-            onSubmit={handleSubmit}
+            disabled={!form.submit.canSubmit}
+            pending={form.submit.pending}
+            onSubmit={form.submit.handleSubmit}
           />
         </div>
       </div>

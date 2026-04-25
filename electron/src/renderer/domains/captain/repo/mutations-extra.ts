@@ -1,5 +1,4 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { toast } from '#renderer/global/runtime/useFeedback';
 import { endAskSession } from '#renderer/domains/captain/repo/api';
 import { apiPostRouteR } from '#renderer/global/providers/http';
 import { queryKeys } from '#renderer/global/repo/queryKeys';
@@ -32,9 +31,6 @@ export function useAddProject() {
       ),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: queryKeys.config.all });
-    },
-    onError: () => {
-      toast.error('Failed to add project');
     },
   });
 }

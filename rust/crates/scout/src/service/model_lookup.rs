@@ -4,7 +4,7 @@
 //! to an empty string (which would produce a malformed CC call and confuse the
 //! model router).
 
-use settings::config::ScoutWorkflow;
+use settings::ScoutWorkflow;
 
 /// Fetch a required model by key. Returns a descriptive error if missing or
 /// empty so callers can propagate with `?` instead of defaulting.

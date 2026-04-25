@@ -9,20 +9,33 @@ export interface ViewEntry {
   activeRef: React.RefObject<boolean>;
 }
 
-const viewHandlers = new Set<ViewEntry>();
+function createViewKeyRegistry() {
+  const viewHandlers = new Set<ViewEntry>();
 
-export function registerViewHandler(entry: ViewEntry): () => void {
-  viewHandlers.add(entry);
-  return () => {
-    viewHandlers.delete(entry);
+  return {
+    register(entry: ViewEntry): () => void {
+      viewHandlers.add(entry);
+      return () => {
+        viewHandlers.delete(entry);
+      };
+    },
+    dispatch(key: string, e: KeyboardEvent): void {
+      for (const entry of viewHandlers) {
+        if (entry.activeRef.current) {
+          entry.handler(key, e);
+          return;
+        }
+      }
+    },
   };
 }
 
+const viewKeyRegistry = createViewKeyRegistry();
+
+export function registerViewHandler(entry: ViewEntry): () => void {
+  return viewKeyRegistry.register(entry);
+}
+
 export function dispatchToActiveView(key: string, e: KeyboardEvent): void {
-  for (const entry of viewHandlers) {
-    if (entry.activeRef.current) {
-      entry.handler(key, e);
-      return;
-    }
-  }
+  viewKeyRegistry.dispatch(key, e);
 }

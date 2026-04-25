@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Button } from '#renderer/global/ui/button';
+import { Button } from '#renderer/global/ui/primitives/button';
 
 interface Props {
   onRetry: () => Promise<unknown> | void;

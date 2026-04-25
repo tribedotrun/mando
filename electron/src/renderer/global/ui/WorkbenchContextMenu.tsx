@@ -1,12 +1,12 @@
 import React from 'react';
-import { Archive, Copy, FolderOpen, Pencil, Pin, PinOff } from 'lucide-react';
+import { Archive, ArchiveRestore, Copy, FolderOpen, Pencil, Pin, PinOff } from 'lucide-react';
 import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
   ContextMenuSeparator,
   ContextMenuTrigger,
-} from '#renderer/global/ui/context-menu';
+} from '#renderer/global/ui/primitives/context-menu';
 import { useSidebar } from '#renderer/global/runtime/SidebarContext';
 
 export { WorkbenchRenameInput } from '#renderer/global/ui/WorkbenchRenameInput';
@@ -50,6 +50,16 @@ function ArchiveWorkbenchMenuItem({ workbenchId }: { workbenchId: number }): Rea
     <ContextMenuItem onSelect={() => actions.archiveWorkbench(workbenchId)}>
       <Archive size={14} />
       Archive
+    </ContextMenuItem>
+  );
+}
+
+function UnarchiveWorkbenchMenuItem({ workbenchId }: { workbenchId: number }): React.ReactElement {
+  const { actions } = useSidebar();
+  return (
+    <ContextMenuItem onSelect={() => actions.unarchiveWorkbench(workbenchId)}>
+      <ArchiveRestore size={14} />
+      Unarchive
     </ContextMenuItem>
   );
 }
@@ -102,6 +112,17 @@ export function ArchivableWorkbenchContextMenu(
     <WorkbenchContextMenuFrame
       {...props}
       extraActions={<ArchiveWorkbenchMenuItem workbenchId={props.workbench.id} />}
+    />
+  );
+}
+
+export function UnarchivableWorkbenchContextMenu(
+  props: WorkbenchContextMenuProps,
+): React.ReactElement {
+  return (
+    <WorkbenchContextMenuFrame
+      {...props}
+      extraActions={<UnarchiveWorkbenchMenuItem workbenchId={props.workbench.id} />}
     />
   );
 }

@@ -1,6 +1,11 @@
 import fs from 'fs';
 import path from 'path';
 import { getAppMode, getDataDir } from '#main/global/config/lifecycle';
+import {
+  hasNonEmptyText,
+  mustParsePortText,
+  mustParseTrimmedText,
+} from '#main/global/service/boundaryText';
 
 interface DiscoveryCache {
   port: string | null;
@@ -25,28 +30,28 @@ function tokenFilePath(): string {
 export async function readPort() {
   if (discovery.port) return discovery.port;
   const content = await fs.promises.readFile(portFilePath(), 'utf-8');
-  discovery.port = content.trim();
+  discovery.port = mustParsePortText(content, `file:${portFilePath()}`);
   return discovery.port;
 }
 
 export function readPortSync(): string {
   if (discovery.port) return discovery.port;
   const content = fs.readFileSync(portFilePath(), 'utf-8');
-  discovery.port = content.trim();
+  discovery.port = mustParsePortText(content, `file:${portFilePath()}`);
   return discovery.port;
 }
 
 export async function readToken() {
   if (discovery.token) return discovery.token;
   const content = await fs.promises.readFile(tokenFilePath(), 'utf-8');
-  discovery.token = content.trim();
+  discovery.token = mustParseTrimmedText(content, `file:${tokenFilePath()}`);
   return discovery.token;
 }
 
 export function readTokenSync(): string {
   if (discovery.token) return discovery.token;
   const content = fs.readFileSync(tokenFilePath(), 'utf-8');
-  discovery.token = content.trim();
+  discovery.token = mustParseTrimmedText(content, `file:${tokenFilePath()}`);
   return discovery.token;
 }
 
@@ -56,12 +61,13 @@ export function invalidateDiscoveryCache(): void {
 }
 
 export async function hasExternalGatewayToken(dataDir: string) {
-  const envToken = process.env.MANDO_AUTH_TOKEN?.trim();
-  if (envToken) return true;
+  const envToken = process.env.MANDO_AUTH_TOKEN;
+  if (envToken && hasNonEmptyText(envToken, 'env:MANDO_AUTH_TOKEN')) return true;
 
   try {
-    const content = await fs.promises.readFile(path.join(dataDir, 'auth-token'), 'utf-8');
-    return content.trim().length > 0;
+    const tokenPath = path.join(dataDir, 'auth-token');
+    const content = await fs.promises.readFile(tokenPath, 'utf-8');
+    return hasNonEmptyText(content, `file:${tokenPath}`);
   } catch {
     return false;
   }

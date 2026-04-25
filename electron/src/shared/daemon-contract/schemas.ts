@@ -102,11 +102,47 @@ export const askResponseSchema = z
     suggested_followups: z.array(z.string()).nullable(),
   })
   .strict();
+export const assistantContentBlockSchema = z.union([
+  z.object({ kind: z.literal('text'), data: z.lazy(() => assistantTextBlockSchema) }).strict(),
+  z
+    .object({ kind: z.literal('thinking'), data: z.lazy(() => assistantThinkingBlockSchema) })
+    .strict(),
+  z
+    .object({ kind: z.literal('tool_use'), data: z.lazy(() => assistantToolUseBlockSchema) })
+    .strict(),
+]);
+export const assistantEventSchema = z
+  .object({
+    meta: z.lazy(() => eventMetaSchema),
+    model: z.string().nullable(),
+    blocks: z.array(z.lazy(() => assistantContentBlockSchema)),
+    usage: z.lazy(() => transcriptUsageInfoSchema).nullable(),
+    stopReason: z.string().nullable(),
+  })
+  .strict();
+export const assistantTextBlockSchema = z.object({ text: z.string() }).strict();
+export const assistantThinkingBlockSchema = z.object({ text: z.string() }).strict();
+export const assistantToolUseBlockSchema = z
+  .object({
+    id: z.string(),
+    name: z.lazy(() => toolNameSchema),
+    input: z.lazy(() => toolInputSchema),
+  })
+  .strict();
+export const bashInputSchema = z
+  .object({
+    command: z.string(),
+    description: z.string().nullable(),
+    timeout: z.number().nullable(),
+    runInBackground: z.boolean().nullable(),
+  })
+  .strict();
 export const boolOkResponseSchema = z.object({ ok: z.boolean() }).strict();
 export const boolTouchedResponseSchema = z
   .object({ ok: z.boolean(), touched: z.boolean() })
   .strict();
 export const bulkFailureSchema = z.object({ id: z.number(), error: z.string() }).strict();
+export const bulkResultStatusSchema = z.enum(['ok', 'partial', 'error']);
 export const captainConfigSchema = z
   .object({
     autoSchedule: z.boolean(),
@@ -114,7 +150,7 @@ export const captainConfigSchema = z
     maxConcurrentWorkers: z.number().nullable(),
     tickIntervalS: z.number(),
     tz: z.string(),
-    defaultTerminalAgent: z.string(),
+    defaultTerminalAgent: z.lazy(() => terminalAgentSchema),
     claudeTerminalArgs: z.string(),
     codexTerminalArgs: z.string(),
     projects: z.record(
@@ -123,12 +159,27 @@ export const captainConfigSchema = z
     ),
   })
   .strict();
+export const ccPermissionModeSchema = z.enum([
+  'default',
+  'acceptEdits',
+  'bypassPermissions',
+  'plan',
+  'dontAsk',
+]);
+export const ccTodoItemSchema = z
+  .object({
+    content: z.string(),
+    activeForm: z.string().nullable(),
+    status: z.lazy(() => ccTodoItemStatusSchema),
+  })
+  .strict();
+export const ccTodoItemStatusSchema = z.enum(['pending', 'in_progress', 'completed']);
 export const channelStatusSchema = z
   .object({
     name: z.string(),
     enabled: z.boolean(),
     running: z.boolean(),
-    mode: z.string(),
+    mode: z.lazy(() => telegramModeSchema),
     token: z.string(),
     owner: z.string(),
     lastError: z.string().nullable(),
@@ -157,6 +208,7 @@ export const clarifierQuestionPayloadSchema = z
   })
   .strict();
 export const clarifyAnswerSchema = z.object({ question: z.string(), answer: z.string() }).strict();
+export const clarifyOutcomeSchema = z.enum(['ready', 'clarifying', 'escalate', 'answered']);
 export const clarifyRequestSchema = z
   .object({
     answers: z.array(z.lazy(() => clarifyAnswerSchema)).optional(),
@@ -166,7 +218,7 @@ export const clarifyRequestSchema = z
 export const clarifyResponseSchema = z
   .object({
     ok: z.boolean(),
-    status: z.string(),
+    status: z.lazy(() => clarifyOutcomeSchema),
     context: z.string().nullable(),
     questions: z.array(z.lazy(() => clarifierQuestionSchema)).nullable(),
     session_id: z.string().nullable(),
@@ -332,6 +384,21 @@ export const dashboardConfigSchema = z.object({ host: z.string(), port: z.number
 export const deleteTasksResponseSchema = z
   .object({ ok: z.boolean(), deleted: z.number(), warnings: z.array(z.string()).nullable() })
   .strict();
+export const drainStopSchema = z.enum([
+  'idle',
+  'max-ticks',
+  'wall-clock',
+  'until-status',
+  'cancelled',
+]);
+export const editInputSchema = z
+  .object({
+    filePath: z.string(),
+    oldString: z.string(),
+    newString: z.string(),
+    replaceAll: z.boolean().nullable(),
+  })
+  .strict();
 export const editProjectRequestSchema = z
   .object({
     rename: z.string().optional(),
@@ -348,6 +415,17 @@ export const editProjectRequestSchema = z
 export const emptyRequestSchema = z.record(z.symbol(), z.never());
 export const emptyResponseSchema = z.record(z.symbol(), z.never());
 export const errorResponseSchema = z.object({ error: z.string() }).strict();
+export const eventIndexSchema = z.object({ lineNumber: z.number() }).strict();
+export const eventMetaSchema = z
+  .object({
+    index: z.lazy(() => eventIndexSchema),
+    uuid: z.string().nullable(),
+    parentUuid: z.string().nullable(),
+    sessionId: z.string().nullable(),
+    timestamp: z.string().nullable(),
+    isSidechain: z.boolean().nullable(),
+  })
+  .strict();
 export const evidenceCreatedResponseSchema = z
   .object({
     artifact_id: z.number(),
@@ -400,9 +478,26 @@ export const firecrawlScrapeResponseSchema = z
 export const gatewayConfigSchema = z
   .object({ dashboard: z.lazy(() => dashboardConfigSchema) })
   .strict();
+export const globInputSchema = z
+  .object({ pattern: z.string(), path: z.string().nullable() })
+  .strict();
+export const grepInputSchema = z
+  .object({
+    pattern: z.string(),
+    path: z.string().nullable(),
+    glob: z.string().nullable(),
+    fileType: z.string().nullable(),
+    outputMode: z.lazy(() => grepOutputModeSchema).nullable(),
+    headLimit: z.number().nullable(),
+    caseInsensitive: z.boolean().nullable(),
+    multiline: z.boolean().nullable(),
+  })
+  .strict();
+export const grepOutputModeSchema = z.enum(['content', 'files_with_matches', 'count']);
 export const healthResponseSchema = z
   .object({ healthy: z.boolean(), version: z.string(), pid: z.number(), uptime: z.number() })
   .strict();
+export const hookPhaseSchema = z.enum(['started', 'response']);
 export const imageFilenameParamsSchema = z.object({ filename: z.string() }).strict();
 export const inlineKeyboardButtonSchema = z
   .object({ text: z.string(), callbackData: z.string().nullable(), url: z.string().nullable() })
@@ -430,6 +525,7 @@ export const itemStatusSchema = z.enum([
   'completed-no-pr',
   'plan-ready',
   'canceled',
+  'stopped',
 ]);
 export const mandoConfigSchema = z
   .object({
@@ -443,13 +539,34 @@ export const mandoConfigSchema = z
     env: z.record(z.string(), z.string()),
   })
   .strict();
+export const mcpServerStatusSchema = z.object({ name: z.string(), status: z.string() }).strict();
+export const mcpToolNameSchema = z.object({ server: z.string(), tool: z.string() }).strict();
 export const mergeRequestSchema = z.object({ pr_number: z.number(), project: z.string() }).strict();
 export const mergeResponseSchema = z
-  .object({ status: z.string(), item_id: z.number(), pr: z.number() })
+  .object({ status: z.lazy(() => itemStatusSchema), item_id: z.number(), pr: z.number() })
   .strict();
 export const messagesQuerySchema = z
   .object({ limit: z.number().nullable(), offset: z.number().nullable() })
   .strict();
+export const modelUsageBreakdownSchema = z
+  .object({
+    model: z.string(),
+    usage: z.lazy(() => transcriptUsageInfoSchema),
+    costUsd: z.number().nullable(),
+    contextWindow: z.number().nullable(),
+  })
+  .strict();
+export const notebookCellTypeSchema = z.enum(['code', 'markdown']);
+export const notebookEditInputSchema = z
+  .object({
+    notebookPath: z.string(),
+    newSource: z.string(),
+    cellId: z.string().nullable(),
+    cellType: z.lazy(() => notebookCellTypeSchema).nullable(),
+    editMode: z.lazy(() => notebookEditModeSchema).nullable(),
+  })
+  .strict();
+export const notebookEditModeSchema = z.enum(['replace', 'insert', 'delete']);
 export const notificationEventPayloadSchema = z
   .object({ ts: z.number(), data: z.lazy(() => notificationPayloadSchema).nullable() })
   .strict();
@@ -467,11 +584,11 @@ export const notificationKindSchema = z.union([
   z
     .object({
       type: z.literal('RateLimited'),
-      status: z.string(),
+      status: z.lazy(() => credentialRateLimitStatusSchema),
       utilization: z.number().nullable(),
       resets_at: z.number().nullable(),
       rate_limit_type: z.string().nullable(),
-      overage_status: z.string().nullable(),
+      overage_status: z.lazy(() => credentialRateLimitStatusSchema).nullable(),
       overage_resets_at: z.number().nullable(),
       overage_disabled_reason: z.string().nullable(),
     })
@@ -518,12 +635,21 @@ export const nudgeResponseSchema = z
     ok: z.boolean(),
     worker: z.string().nullable(),
     pid: z.number().nullable(),
-    status: z.string().nullable(),
+    status: z.lazy(() => itemStatusSchema).nullable(),
     alerts: z.array(z.string()).nullable(),
   })
   .strict();
+export const opaqueInputSchema = z.object({ raw: z.string() }).strict();
+export const otherToolNameSchema = z.object({ name: z.string() }).strict();
 export const parseTodosRequestSchema = z.object({ text: z.string(), project: z.string() }).strict();
 export const parseTodosResponseSchema = z.object({ items: z.array(z.string()) }).strict();
+export const permissionDenialSchema = z
+  .object({
+    toolName: z.string().nullable(),
+    toolUseId: z.string().nullable(),
+    reason: z.string().nullable(),
+  })
+  .strict();
 export const prSummaryResponseSchema = z
   .object({
     pr_number: z.number().nullable(),
@@ -595,6 +721,14 @@ export const projectUpsertResponseSchema = z
 export const projectsListResponseSchema = z
   .object({ projects: z.array(z.lazy(() => projectSummarySchema)) })
   .strict();
+export const readInputSchema = z
+  .object({
+    filePath: z.string(),
+    offset: z.number().nullable(),
+    limit: z.number().nullable(),
+    pages: z.string().nullable(),
+  })
+  .strict();
 export const removeWorktreeRequestSchema = z.object({ path: z.string() }).strict();
 export const researchErrorSchema = z.object({ url: z.string(), error: z.string() }).strict();
 export const researchEventDataSchema = z
@@ -623,6 +757,34 @@ export const researchPayloadSchema = z
   .object({ ts: z.number(), data: z.lazy(() => researchEventDataSchema).nullable() })
   .strict();
 export const researchStartResponseSchema = z.object({ run_id: z.number() }).strict();
+export const resultEventSchema = z
+  .object({
+    meta: z.lazy(() => eventMetaSchema),
+    outcome: z.lazy(() => resultOutcomeSchema),
+    summary: z.lazy(() => resultSummarySchema),
+  })
+  .strict();
+export const resultOutcomeSchema = z.enum([
+  'success',
+  'error_during_execution',
+  'error_max_turns',
+  'error_max_budget_usd',
+  'error_max_structured_output_retries',
+]);
+export const resultSummarySchema = z
+  .object({
+    durationMs: z.number().nullable(),
+    durationApiMs: z.number().nullable(),
+    numTurns: z.number().nullable(),
+    totalCostUsd: z.number().nullable(),
+    stopReason: z.string().nullable(),
+    permissionDenials: z.array(z.lazy(() => permissionDenialSchema)),
+    errors: z.array(z.string()),
+    usage: z.lazy(() => transcriptUsageInfoSchema).nullable(),
+    modelUsage: z.array(z.lazy(() => modelUsageBreakdownSchema)),
+    isError: z.boolean(),
+  })
+  .strict();
 export const resyncPayloadSchema = z
   .object({ ts: z.number(), data: z.lazy(() => sseResyncDataSchema) })
   .strict();
@@ -632,6 +794,7 @@ export const reviewTriggerSchema = z.enum([
   'broken_session',
   'budget_exhausted',
   'clarifier_fail',
+  'spawn_fail',
   'rebase_fail',
   'ci_failure',
   'degraded_context',
@@ -652,7 +815,7 @@ export const scoutAddResponseSchema = z
     id: z.number(),
     url: z.string(),
     type: z.string(),
-    status: z.string(),
+    status: z.lazy(() => scoutItemStatusSchema),
   })
   .strict();
 export const scoutArticleResponseSchema = z
@@ -674,14 +837,14 @@ export const scoutBulkDeleteResponseSchema = z
   .object({
     deleted: z.number(),
     failed: z.array(z.lazy(() => bulkFailureSchema)),
-    status: z.string(),
+    status: z.lazy(() => bulkResultStatusSchema),
   })
   .strict();
 export const scoutBulkUpdateResponseSchema = z
   .object({
     updated: z.number(),
     failed: z.array(z.lazy(() => bulkFailureSchema)),
-    status: z.string(),
+    status: z.lazy(() => bulkResultStatusSchema),
   })
   .strict();
 export const scoutConfigSchema = z
@@ -706,7 +869,7 @@ export const scoutItemSchema = z
     rev: z.number(),
     url: z.string(),
     title: z.string().nullable(),
-    status: z.string(),
+    status: z.lazy(() => scoutItemStatusSchema),
     item_type: z.string().nullable(),
     summary: z.string().nullable(),
     has_summary: z.boolean().nullable(),
@@ -733,13 +896,30 @@ export const scoutItemSessionSchema = z
   .object({
     session_id: z.string(),
     caller: z.string(),
-    status: z.string(),
+    status: z.lazy(() => sessionStatusSchema),
     created_at: z.string(),
     model: z.string().nullable(),
     duration_ms: z.number().nullable(),
     cost_usd: z.number().nullable(),
   })
   .strict();
+export const scoutItemStatusSchema = z.enum([
+  'pending',
+  'fetched',
+  'processed',
+  'saved',
+  'archived',
+  'error',
+]);
+export const scoutItemStatusFilterSchema = z.enum([
+  'all',
+  'pending',
+  'fetched',
+  'processed',
+  'saved',
+  'archived',
+  'error',
+]);
 export const scoutLifecycleCommandRequestSchema = z
   .object({ command: z.lazy(() => scoutItemLifecycleCommandSchema) })
   .strict();
@@ -749,7 +929,7 @@ export const scoutPayloadSchema = z
 export const scoutProcessRequestSchema = z.object({ id: z.number().optional() }).strict();
 export const scoutQuerySchema = z
   .object({
-    status: z.string().nullable(),
+    status: z.lazy(() => scoutItemStatusFilterSchema).nullable(),
     q: z.string().nullable(),
     type: z.string().nullable(),
     page: z.number().nullable(),
@@ -764,7 +944,7 @@ export const scoutResearchRunSchema = z
   .object({
     id: z.number(),
     research_prompt: z.string(),
-    status: z.string(),
+    status: z.lazy(() => scoutResearchRunStatusSchema),
     error: z.string().nullable(),
     session_id: z.string().nullable(),
     added_count: z.number(),
@@ -773,6 +953,7 @@ export const scoutResearchRunSchema = z
     rev: z.number(),
   })
   .strict();
+export const scoutResearchRunStatusSchema = z.enum(['running', 'done', 'failed']);
 export const scoutResponseSchema = z
   .object({
     items: z.array(z.lazy(() => scoutItemSchema)),
@@ -785,6 +966,17 @@ export const scoutResponseSchema = z
     status_counts: z.record(z.string(), z.number()).nullable(),
   })
   .strict();
+export const sessionCategorySchema = z.enum([
+  'workers',
+  'clarifier',
+  'captain-review',
+  'captain-ops',
+  'advisor',
+  'planning',
+  'todo-parser',
+  'scout',
+  'rebase',
+]);
 export const sessionCostResponseSchema = z
   .object({ cost: z.lazy(() => sessionCostSummarySchema) })
   .strict();
@@ -821,7 +1013,7 @@ export const sessionEntrySchema = z
     worktree: z.string().nullable(),
     branch: z.string().nullable(),
     resume_cwd: z.string().nullable(),
-    category: z.string().nullable(),
+    category: z.lazy(() => sessionCategorySchema).nullable(),
     credential_id: z.number().nullable(),
     credential_label: z.string().nullable(),
     error: z.string().nullable(),
@@ -838,6 +1030,9 @@ export const sessionIdsSchema = z
     ask: z.string().nullable(),
     advisor: z.string().nullable(),
   })
+  .strict();
+export const sessionJsonlPathResponseSchema = z
+  .object({ session_id: z.string(), path: z.string().nullable() })
   .strict();
 export const sessionMessagesQuerySchema = z
   .object({ limit: z.number().nullable(), offset: z.number().nullable() })
@@ -888,9 +1083,9 @@ export const sessionsQuerySchema = z
   .object({
     page: z.number().nullable(),
     per_page: z.number().nullable(),
-    category: z.string().nullable(),
-    caller: z.string().nullable(),
-    status: z.string().nullable(),
+    category: z.lazy(() => sessionCategorySchema).nullable(),
+    caller: z.lazy(() => sessionCategorySchema).nullable(),
+    status: z.lazy(() => sessionStatusSchema).nullable(),
   })
   .strict();
 export const sessionsResponseSchema = z
@@ -907,6 +1102,9 @@ export const sessionsResponseSchema = z
 export const setupTokenRequestSchema = z.object({ label: z.string(), token: z.string() }).strict();
 export const setupTokenResponseSchema = z
   .object({ ok: z.boolean(), id: z.number().nullable(), label: z.string().nullable() })
+  .strict();
+export const skillInputSchema = z
+  .object({ skill: z.string(), args: z.string().nullable() })
   .strict();
 export const snapshotErrorPayloadSchema = z
   .object({ ts: z.number(), data: z.lazy(() => sseSnapshotErrorDataSchema) })
@@ -964,8 +1162,20 @@ export const statusPayloadSchema = z
   .object({ ts: z.number(), data: z.lazy(() => statusEventDataSchema).nullable() })
   .strict();
 export const stopWorkersResponseSchema = z.object({ killed: z.number() }).strict();
+export const structuredOutputInputSchema = z.object({ raw: z.string() }).strict();
 export const summaryCreatedResponseSchema = z
   .object({ artifact_id: z.number(), task_id: z.number() })
+  .strict();
+export const systemApiRetryEventSchema = z
+  .object({
+    meta: z.lazy(() => eventMetaSchema),
+    message: z.string().nullable(),
+    retryInMs: z.number().nullable(),
+    attempt: z.number().nullable(),
+  })
+  .strict();
+export const systemCompactBoundaryEventSchema = z
+  .object({ meta: z.lazy(() => eventMetaSchema), reason: z.string().nullable() })
   .strict();
 export const systemHealthResponseSchema = z
   .object({
@@ -988,6 +1198,47 @@ export const systemHealthResponseSchema = z
     restartRequired: z.boolean(),
     telegram: z.lazy(() => telegramHealthSchema),
     ui: z.lazy(() => uiHealthResponseSchema),
+  })
+  .strict();
+export const systemHookEventSchema = z
+  .object({
+    meta: z.lazy(() => eventMetaSchema),
+    phase: z.lazy(() => hookPhaseSchema),
+    hookId: z.string().nullable(),
+    hookName: z.string().nullable(),
+    hookEvent: z.string().nullable(),
+    output: z.string().nullable(),
+    stdout: z.string().nullable(),
+    stderr: z.string().nullable(),
+  })
+  .strict();
+export const systemInitEventSchema = z
+  .object({
+    meta: z.lazy(() => eventMetaSchema),
+    cwd: z.string().nullable(),
+    model: z.string().nullable(),
+    permissionMode: z.lazy(() => ccPermissionModeSchema).nullable(),
+    tools: z.array(z.string()),
+    slashCommands: z.array(z.string()),
+    mcpServers: z.array(z.lazy(() => mcpServerStatusSchema)),
+    outputStyle: z.string().nullable(),
+  })
+  .strict();
+export const systemLocalCommandOutputEventSchema = z
+  .object({
+    meta: z.lazy(() => eventMetaSchema),
+    command: z.string().nullable(),
+    output: z.string(),
+  })
+  .strict();
+export const systemRateLimitEventSchema = z
+  .object({ meta: z.lazy(() => eventMetaSchema), info: z.string() })
+  .strict();
+export const systemStatusEventSchema = z
+  .object({
+    meta: z.lazy(() => eventMetaSchema),
+    status: z.string().nullable(),
+    message: z.string().nullable(),
   })
   .strict();
 export const taskAddRequestSchema = z
@@ -1049,6 +1300,9 @@ export const taskFeedbackRequestSchema = z
   .strict();
 export const taskIdParamsSchema = z.object({ id: z.number() }).strict();
 export const taskIdRequestSchema = z.object({ id: z.number() }).strict();
+export const taskInputSchema = z
+  .object({ description: z.string(), prompt: z.string(), subagentType: z.string().nullable() })
+  .strict();
 export const taskItemSchema = z
   .object({
     id: z.number(),
@@ -1087,6 +1341,7 @@ export const taskItemSchema = z
     spawn_fail_count: z.number(),
     merge_fail_count: z.number(),
     source: z.string().nullable(),
+    paused_until: z.number().nullable(),
   })
   .strict();
 export const taskListQuerySchema = z.object({ include_archived: z.boolean().nullable() }).strict();
@@ -1112,9 +1367,10 @@ export const telegramHealthSchema = z
     lastError: z.string().nullable(),
     degraded: z.boolean(),
     restartCount: z.number(),
-    mode: z.string(),
+    mode: z.lazy(() => telegramModeSchema),
   })
   .strict();
+export const telegramModeSchema = z.literal('embedded');
 export const telegramOwnerRequestSchema = z.object({ owner: z.string() }).strict();
 export const telegramReplyMarkupSchema = z.union([
   z
@@ -1190,9 +1446,24 @@ export const tickActionSchema = z
     reason: z.string().nullable(),
   })
   .strict();
+export const tickDrainResultSchema = z
+  .object({
+    iterations: z.number(),
+    stopped_reason: z.lazy(() => drainStopSchema),
+    elapsed_ms: z.number(),
+    last: z.lazy(() => tickResultSchema),
+  })
+  .strict();
 export const tickModeSchema = z.enum(['live', 'dry-run', 'skipped']);
 export const tickRequestSchema = z
-  .object({ dry_run: z.boolean().optional(), emit_notifications: z.boolean().optional() })
+  .object({
+    dry_run: z.boolean().optional(),
+    emit_notifications: z.boolean().optional(),
+    until_idle: z.boolean().optional(),
+    max_ticks: z.number().optional(),
+    until_status: z.array(z.lazy(() => itemStatusSchema)).optional(),
+    task_id: z.number().optional(),
+  })
   .strict();
 export const tickResultSchema = z
   .object({
@@ -1359,8 +1630,8 @@ export const timelineEventPayloadSchema = z.union([
       content: z.string(),
       worker: z.string(),
       session_id: z.string(),
-      from: z.string(),
-      to: z.string(),
+      from: z.lazy(() => itemStatusSchema),
+      to: z.lazy(() => itemStatusSchema),
       source: z.string(),
     })
     .strict(),
@@ -1383,7 +1654,11 @@ export const timelineEventPayloadSchema = z.union([
     })
     .strict(),
   z
-    .object({ event_type: z.literal('rework_requested'), content: z.string(), to: z.string() })
+    .object({
+      event_type: z.literal('rework_requested'),
+      content: z.string(),
+      to: z.lazy(() => itemStatusSchema),
+    })
     .strict(),
   z
     .object({
@@ -1418,8 +1693,13 @@ export const timelineEventPayloadSchema = z.union([
   z.object({ event_type: z.literal('canceled'), pr: z.string() }).strict(),
   z.object({ event_type: z.literal('canceled_by_human'), canceled_by: z.string() }).strict(),
   z
-    .object({ event_type: z.literal('handed_off'), to: z.string(), handed_off_by: z.string() })
+    .object({
+      event_type: z.literal('handed_off'),
+      to: z.lazy(() => itemStatusSchema),
+      handed_off_by: z.string(),
+    })
     .strict(),
+  z.object({ event_type: z.literal('stopped'), stopped_by: z.string() }).strict(),
   z
     .object({
       event_type: z.literal('completed_no_pr'),
@@ -1431,31 +1711,41 @@ export const timelineEventPayloadSchema = z.union([
     })
     .strict(),
   z.object({ event_type: z.literal('clarifier_completed_no_pr'), session_id: z.string() }).strict(),
-  z.object({ event_type: z.literal('status_changed'), from: z.string(), to: z.string() }).strict(),
+  z
+    .object({
+      event_type: z.literal('status_changed'),
+      from: z.lazy(() => itemStatusSchema),
+      to: z.lazy(() => itemStatusSchema),
+    })
+    .strict(),
   z
     .object({
       event_type: z.literal('status_changed_by_command'),
-      from: z.string(),
-      to: z.string(),
+      from: z.lazy(() => itemStatusSchema),
+      to: z.lazy(() => itemStatusSchema),
       command: z.string(),
     })
     .strict(),
   z
-    .object({ event_type: z.literal('status_changed_queued'), to: z.string(), reason: z.string() })
+    .object({
+      event_type: z.literal('status_changed_queued'),
+      to: z.lazy(() => itemStatusSchema),
+      reason: z.string(),
+    })
     .strict(),
   z
     .object({
       event_type: z.literal('status_changed_retry_merge'),
-      from: z.string(),
-      to: z.string(),
+      from: z.lazy(() => itemStatusSchema),
+      to: z.lazy(() => itemStatusSchema),
       pr: z.number(),
     })
     .strict(),
   z
     .object({
       event_type: z.literal('status_changed_clarifier_fail'),
-      from: z.string(),
-      to: z.string(),
+      from: z.lazy(() => itemStatusSchema),
+      to: z.lazy(() => itemStatusSchema),
       session_id: z.string(),
       error: z.string(),
     })
@@ -1506,56 +1796,136 @@ export const timelineEventPayloadSchema = z.union([
 export const timelineResponseSchema = z
   .object({ id: z.string(), events: z.array(z.lazy(() => timelineEventSchema)), count: z.number() })
   .strict();
+export const todoWriteInputSchema = z
+  .object({ todos: z.array(z.lazy(() => ccTodoItemSchema)) })
+  .strict();
 export const tokenResponseSchema = z.object({ token: z.string() }).strict();
-export const transcriptAssistantEntrySchema = z
-  .object({
-    uuid: z.string(),
-    parentUuid: z.string().nullable(),
-    sessionId: z.string(),
-    text: z.string(),
-    timestamp: z.string().nullable(),
-    usage: z.lazy(() => transcriptUsageInfoSchema).nullable(),
-  })
-  .strict();
-export const transcriptInitSchema = z
-  .object({
-    uuid: z.string(),
-    sessionId: z.string(),
-    cwd: z.string().nullable(),
-    model: z.string().nullable(),
-    timestamp: z.string().nullable(),
-  })
-  .strict();
-export const transcriptLineSchema = z.union([
+export const toolInputSchema = z.union([
+  z.object({ kind: z.literal('bash'), data: z.lazy(() => bashInputSchema) }).strict(),
+  z.object({ kind: z.literal('read'), data: z.lazy(() => readInputSchema) }).strict(),
+  z.object({ kind: z.literal('edit'), data: z.lazy(() => editInputSchema) }).strict(),
+  z.object({ kind: z.literal('write'), data: z.lazy(() => writeInputSchema) }).strict(),
+  z.object({ kind: z.literal('grep'), data: z.lazy(() => grepInputSchema) }).strict(),
+  z.object({ kind: z.literal('glob'), data: z.lazy(() => globInputSchema) }).strict(),
+  z.object({ kind: z.literal('todo_write'), data: z.lazy(() => todoWriteInputSchema) }).strict(),
+  z.object({ kind: z.literal('web_fetch'), data: z.lazy(() => webFetchInputSchema) }).strict(),
+  z.object({ kind: z.literal('web_search'), data: z.lazy(() => webSearchInputSchema) }).strict(),
+  z.object({ kind: z.literal('task'), data: z.lazy(() => taskInputSchema) }).strict(),
   z
-    .object({ type: z.literal('init') })
-    .strict()
-    .and(z.lazy(() => transcriptInitSchema)),
+    .object({ kind: z.literal('notebook_edit'), data: z.lazy(() => notebookEditInputSchema) })
+    .strict(),
+  z.object({ kind: z.literal('skill'), data: z.lazy(() => skillInputSchema) }).strict(),
   z
-    .object({ type: z.literal('user') })
-    .strict()
-    .and(z.lazy(() => transcriptUserEntrySchema)),
-  z
-    .object({ type: z.literal('assistant') })
-    .strict()
-    .and(z.lazy(() => transcriptAssistantEntrySchema)),
-  z
-    .object({ type: z.literal('tool_use') })
-    .strict()
-    .and(z.lazy(() => transcriptToolUseSchema)),
-  z
-    .object({ type: z.literal('tool_result') })
-    .strict()
-    .and(z.lazy(() => transcriptToolResultSchema)),
-  z
-    .object({ type: z.literal('result') })
-    .strict()
-    .and(z.lazy(() => transcriptResultSchema)),
-  z
-    .object({ type: z.literal('system') })
-    .strict()
-    .and(z.lazy(() => transcriptSystemSchema)),
+    .object({
+      kind: z.literal('structured_output'),
+      data: z.lazy(() => structuredOutputInputSchema),
+    })
+    .strict(),
+  z.object({ kind: z.literal('opaque'), data: z.lazy(() => opaqueInputSchema) }).strict(),
 ]);
+export const toolNameSchema = z.union([
+  z.object({ kind: z.literal('bash') }).strict(),
+  z.object({ kind: z.literal('read') }).strict(),
+  z.object({ kind: z.literal('edit') }).strict(),
+  z.object({ kind: z.literal('write') }).strict(),
+  z.object({ kind: z.literal('grep') }).strict(),
+  z.object({ kind: z.literal('glob') }).strict(),
+  z.object({ kind: z.literal('todo_write') }).strict(),
+  z.object({ kind: z.literal('web_fetch') }).strict(),
+  z.object({ kind: z.literal('web_search') }).strict(),
+  z.object({ kind: z.literal('task') }).strict(),
+  z.object({ kind: z.literal('notebook_edit') }).strict(),
+  z.object({ kind: z.literal('skill') }).strict(),
+  z.object({ kind: z.literal('structured_output') }).strict(),
+  z.object({ kind: z.literal('mcp'), data: z.lazy(() => mcpToolNameSchema) }).strict(),
+  z.object({ kind: z.literal('other'), data: z.lazy(() => otherToolNameSchema) }).strict(),
+]);
+export const toolProgressEventSchema = z
+  .object({
+    meta: z.lazy(() => eventMetaSchema),
+    toolUseId: z.string(),
+    toolName: z.lazy(() => toolNameSchema),
+    elapsedSeconds: z.number().nullable(),
+  })
+  .strict();
+export const toolResultBlocksSchema = z
+  .object({ blocks: z.array(z.lazy(() => toolResultChildBlockSchema)) })
+  .strict();
+export const toolResultChildBlockSchema = z.union([
+  z.object({ kind: z.literal('text'), data: z.lazy(() => toolResultTextSchema) }).strict(),
+  z.object({ kind: z.literal('image'), data: z.lazy(() => userImageBlockSchema) }).strict(),
+  z
+    .object({ kind: z.literal('unknown'), data: z.lazy(() => toolResultUnknownBlockSchema) })
+    .strict(),
+]);
+export const toolResultContentSchema = z.union([
+  z.object({ kind: z.literal('text'), data: z.lazy(() => toolResultTextSchema) }).strict(),
+  z.object({ kind: z.literal('blocks'), data: z.lazy(() => toolResultBlocksSchema) }).strict(),
+]);
+export const toolResultTextSchema = z.object({ text: z.string() }).strict();
+export const toolResultUnknownBlockSchema = z.object({ raw: z.string() }).strict();
+export const transcriptConnectionClosedSchema = z.object({ reason: z.string() }).strict();
+export const transcriptEventSchema = z.union([
+  z.object({ kind: z.literal('system_init'), data: z.lazy(() => systemInitEventSchema) }).strict(),
+  z
+    .object({
+      kind: z.literal('system_compact_boundary'),
+      data: z.lazy(() => systemCompactBoundaryEventSchema),
+    })
+    .strict(),
+  z
+    .object({ kind: z.literal('system_status'), data: z.lazy(() => systemStatusEventSchema) })
+    .strict(),
+  z
+    .object({ kind: z.literal('system_api_retry'), data: z.lazy(() => systemApiRetryEventSchema) })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('system_local_command_output'),
+      data: z.lazy(() => systemLocalCommandOutputEventSchema),
+    })
+    .strict(),
+  z.object({ kind: z.literal('system_hook'), data: z.lazy(() => systemHookEventSchema) }).strict(),
+  z
+    .object({
+      kind: z.literal('system_rate_limit'),
+      data: z.lazy(() => systemRateLimitEventSchema),
+    })
+    .strict(),
+  z.object({ kind: z.literal('user'), data: z.lazy(() => userEventSchema) }).strict(),
+  z.object({ kind: z.literal('assistant'), data: z.lazy(() => assistantEventSchema) }).strict(),
+  z
+    .object({ kind: z.literal('tool_progress'), data: z.lazy(() => toolProgressEventSchema) })
+    .strict(),
+  z.object({ kind: z.literal('result'), data: z.lazy(() => resultEventSchema) }).strict(),
+  z.object({ kind: z.literal('unknown'), data: z.lazy(() => unknownEventSchema) }).strict(),
+]);
+export const transcriptEventEnvelopeSchema = z.union([
+  z
+    .object({ event: z.literal('snapshot'), data: z.lazy(() => transcriptSnapshotBatchSchema) })
+    .strict(),
+  z
+    .object({
+      event: z.literal('snapshot_complete'),
+      data: z.lazy(() => transcriptSnapshotCompleteSchema),
+    })
+    .strict(),
+  z.object({ event: z.literal('event'), data: z.lazy(() => transcriptEventSchema) }).strict(),
+  z
+    .object({
+      event: z.literal('connection_closed'),
+      data: z.lazy(() => transcriptConnectionClosedSchema),
+    })
+    .strict(),
+  z.object({ event: z.literal('error'), data: z.lazy(() => transcriptStreamErrorSchema) }).strict(),
+]);
+export const transcriptEventsResponseSchema = z
+  .object({
+    sessionId: z.string(),
+    events: z.array(z.lazy(() => transcriptEventSchema)),
+    isRunning: z.boolean(),
+  })
+  .strict();
 export const transcriptMessageSchema = z
   .object({
     role: z.string(),
@@ -1566,49 +1936,15 @@ export const transcriptMessageSchema = z
     usage: z.lazy(() => transcriptUsageInfoSchema).nullable(),
   })
   .strict();
-export const transcriptResponseSchema = z
-  .object({ session_id: z.string(), markdown: z.string() })
+export const transcriptSnapshotBatchSchema = z
+  .object({ events: z.array(z.lazy(() => transcriptEventSchema)) })
   .strict();
-export const transcriptResultSchema = z
-  .object({
-    sessionId: z.string(),
-    durationMs: z.number().nullable(),
-    costUsd: z.number().nullable(),
-    isError: z.boolean(),
-    error: z.string().nullable(),
-    timestamp: z.string().nullable(),
-  })
-  .strict();
-export const transcriptSystemSchema = z
-  .object({
-    uuid: z.string(),
-    sessionId: z.string(),
-    text: z.string(),
-    timestamp: z.string().nullable(),
-  })
+export const transcriptSnapshotCompleteSchema = z.object({ isRunning: z.boolean() }).strict();
+export const transcriptStreamErrorSchema = z
+  .object({ message: z.string(), retry: z.boolean() })
   .strict();
 export const transcriptToolCallSchema = z
   .object({ id: z.string(), name: z.string(), input_summary: z.string() })
-  .strict();
-export const transcriptToolResultSchema = z
-  .object({
-    uuid: z.string(),
-    parentUuid: z.string().nullable(),
-    toolUseId: z.string(),
-    isError: z.boolean(),
-    text: z.string(),
-    timestamp: z.string().nullable(),
-  })
-  .strict();
-export const transcriptToolUseSchema = z
-  .object({
-    uuid: z.string(),
-    parentUuid: z.string().nullable(),
-    toolUseId: z.string(),
-    name: z.string(),
-    inputSummary: z.string(),
-    timestamp: z.string().nullable(),
-  })
   .strict();
 export const transcriptUsageInfoSchema = z
   .object({
@@ -1616,15 +1952,6 @@ export const transcriptUsageInfoSchema = z
     output_tokens: z.number(),
     cache_read_tokens: z.number(),
     cache_creation_tokens: z.number(),
-  })
-  .strict();
-export const transcriptUserEntrySchema = z
-  .object({
-    uuid: z.string(),
-    parentUuid: z.string().nullable(),
-    sessionId: z.string(),
-    text: z.string(),
-    timestamp: z.string().nullable(),
   })
   .strict();
 export const triageItemResponseSchema = z
@@ -1668,11 +1995,51 @@ export const uiRegisterRequestSchema = z
     env: z.record(z.string(), z.string()),
   })
   .strict();
+export const unknownEventSchema = z
+  .object({
+    meta: z.lazy(() => eventMetaSchema),
+    rawType: z.string().nullable(),
+    rawSubtype: z.string().nullable(),
+    raw: z.string(),
+  })
+  .strict();
+export const userContentBlockSchema = z.union([
+  z.object({ kind: z.literal('text'), data: z.lazy(() => userTextBlockSchema) }).strict(),
+  z.object({ kind: z.literal('image'), data: z.lazy(() => userImageBlockSchema) }).strict(),
+  z
+    .object({ kind: z.literal('tool_result'), data: z.lazy(() => userToolResultBlockSchema) })
+    .strict(),
+]);
 export const userContextConfigSchema = z
   .object({
     role: z.string(),
     knownDomains: z.array(z.string()),
     explainDomains: z.array(z.string()),
+  })
+  .strict();
+export const userEventSchema = z
+  .object({
+    meta: z.lazy(() => eventMetaSchema),
+    blocks: z.array(z.lazy(() => userContentBlockSchema)),
+  })
+  .strict();
+export const userImageBlockSchema = z
+  .object({ mediaType: z.string().nullable(), dataLen: z.number().nullable() })
+  .strict();
+export const userTextBlockSchema = z.object({ text: z.string() }).strict();
+export const userToolResultBlockSchema = z
+  .object({
+    toolUseId: z.string(),
+    content: z.lazy(() => toolResultContentSchema),
+    isError: z.boolean().nullable(),
+  })
+  .strict();
+export const webFetchInputSchema = z.object({ url: z.string(), prompt: z.string() }).strict();
+export const webSearchInputSchema = z
+  .object({
+    query: z.string(),
+    allowedDomains: z.array(z.string()).nullable(),
+    blockedDomains: z.array(z.string()).nullable(),
   })
   .strict();
 export const workSummaryRequestSchema = z.object({ content: z.string() }).strict();
@@ -1695,7 +2062,9 @@ export const workbenchItemSchema = z
     deletedAt: z.string().nullable(),
   })
   .strict();
-export const workbenchListQuerySchema = z.object({ status: z.string().nullable() }).strict();
+export const workbenchListQuerySchema = z
+  .object({ status: z.lazy(() => workbenchStatusFilterSchema).nullable() })
+  .strict();
 export const workbenchPatchRequestSchema = z
   .object({
     title: z.string().optional(),
@@ -1703,6 +2072,7 @@ export const workbenchPatchRequestSchema = z
     pinned: z.boolean().optional(),
   })
   .strict();
+export const workbenchStatusFilterSchema = z.enum(['active', 'archived', 'all']);
 export const workbenchesPayloadSchema = z
   .object({ ts: z.number(), data: z.lazy(() => workbenchEventDataSchema).nullable() })
   .strict();
@@ -1757,6 +2127,7 @@ export const worktreePruneErrorSchema = z
 export const worktreePruneResponseSchema = z
   .object({ ok: z.boolean(), pruned: z.array(z.string()) })
   .strict();
+export const writeInputSchema = z.object({ filePath: z.string(), content: z.string() }).strict();
 
 export const resSchemas = {
   deleteCredentialsById: credentialMutationResponseSchema,
@@ -1783,9 +2154,10 @@ export const resSchemas = {
   getScoutResearchByIdItems: z.array(scoutItemSchema),
   getSessions: sessionsListResponseSchema,
   getSessionsByIdCost: sessionCostResponseSchema,
+  getSessionsByIdEvents: transcriptEventsResponseSchema,
+  getSessionsByIdJsonlpath: sessionJsonlPathResponseSchema,
   getSessionsByIdMessages: sessionMessagesResponseSchema,
   getSessionsByIdTools: sessionToolUsageResponseSchema,
-  getSessionsByIdTranscript: transcriptResponseSchema,
   getStatsActivity: activityStatsResponseSchema,
   getTasks: taskListResponseSchema,
   getTasksByIdArtifacts: artifactsResponseSchema,
@@ -1807,7 +2179,7 @@ export const resSchemas = {
   postCaptainAdopt: taskCreateResponseSchema,
   postCaptainNudge: nudgeResponseSchema,
   postCaptainStop: stopWorkersResponseSchema,
-  postCaptainTick: tickResultSchema,
+  postCaptainTick: tickDrainResultSchema,
   postCaptainTriage: triageResponseSchema,
   postChannelsTelegramOwner: boolOkResponseSchema,
   postClientlogs: clientLogBatchResponseSchema,
@@ -1844,6 +2216,7 @@ export const resSchemas = {
   postTasksResumeratelimited: boolOkResponseSchema,
   postTasksRetry: boolOkResponseSchema,
   postTasksRework: boolOkResponseSchema,
+  postTasksStop: boolOkResponseSchema,
   postTerminal: terminalSessionInfoSchema,
   postTerminalByIdActivity: boolTouchedResponseSchema,
   postTerminalByIdCcsession: boolOkResponseSchema,
@@ -1863,6 +2236,7 @@ export const resSchemas = {
 } as const;
 export const eventSchemas = {
   getEvents: sseEnvelopeSchema,
+  getSessionsByIdEventsStream: transcriptEventEnvelopeSchema,
   getTerminalByIdStream: terminalStreamEnvelopeSchema,
 } as const;
 export const bodySchemas = {
@@ -1912,6 +2286,7 @@ export const bodySchemas = {
   postTasksResumeratelimited: taskIdRequestSchema,
   postTasksRetry: taskIdRequestSchema,
   postTasksRework: taskFeedbackRequestSchema,
+  postTasksStop: taskIdRequestSchema,
   postTerminal: terminalCreateRequestSchema,
   postTerminalByIdActivity: emptyRequestSchema,
   postTerminalByIdCcsession: terminalCcSessionRequestSchema,
@@ -1953,10 +2328,12 @@ export const paramsSchemas = {
   getScoutResearchById: scoutResearchIdParamsSchema,
   getScoutResearchByIdItems: scoutResearchIdParamsSchema,
   getSessionsByIdCost: sessionIdParamsSchema,
+  getSessionsByIdEvents: sessionIdParamsSchema,
+  getSessionsByIdEventsStream: sessionIdParamsSchema,
+  getSessionsByIdJsonlpath: sessionIdParamsSchema,
   getSessionsByIdMessages: sessionIdParamsSchema,
   getSessionsByIdStream: sessionIdParamsSchema,
   getSessionsByIdTools: sessionIdParamsSchema,
-  getSessionsByIdTranscript: sessionIdParamsSchema,
   getTasksByIdArtifacts: taskIdParamsSchema,
   getTasksByIdFeed: taskIdParamsSchema,
   getTasksByIdHistory: taskIdParamsSchema,

@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { queryKeys } from '#renderer/global/repo/queryKeys';
-import { checkClaudeCode as ipcCheckClaudeCode } from '#renderer/domains/onboarding/providers/ipcBridge';
+import { checkClaudeCode as checkClaudeCodeNative } from '#renderer/global/providers/native/onboarding';
 import log from '#renderer/global/service/logger';
 import { getErrorMessage } from '#renderer/global/service/utils';
 import type { ClaudeCheckResult } from '#renderer/domains/onboarding/types';
@@ -10,7 +10,7 @@ export function useClaudeCodeCheck() {
     queryKey: queryKeys.onboarding.claudeCheck(),
     queryFn: async () => {
       try {
-        return await ipcCheckClaudeCode();
+        return await checkClaudeCodeNative();
       } catch (err) {
         log.error('checkClaudeCode failed:', err);
         return {

@@ -4,14 +4,14 @@ use serde::{Deserialize, Serialize};
 
 use super::session_ids::SessionIds;
 pub use super::task_status::{
-    ItemStatus, ReviewTrigger, ACTIONABLE_TERMINAL, ALL_STATUSES, FINALIZED, REOPENABLE, REWORKABLE,
+    ItemStatus, ReviewTrigger, ACTIONABLE_TERMINAL, ALL_REVIEW_TRIGGERS, ALL_STATUSES, FINALIZED,
+    REOPENABLE, REWORKABLE,
 };
 pub use super::task_update::{TaskUpdateError, UpdateTaskInput};
 
 /// Routing fields — lightweight struct for captain tick hot path.
 /// Populated from tasks WHERE the owning workbench is not archived.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
 pub struct TaskRouting {
     pub id: i64,
     pub title: String,
@@ -40,7 +40,6 @@ impl Default for TaskRouting {
 
 /// A task — the fundamental unit of work in Mando.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
 pub struct Task {
     pub id: i64,
     pub title: String,
@@ -106,6 +105,13 @@ pub struct Task {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
     pub rev: i64,
+    /// Unix seconds until which captain should NOT dispatch the next
+    /// stage (clarifier, worker, review, merge) for this task. Set when
+    /// every credential in the pool is in rate-limit cooldown and cleared
+    /// automatically the first tick after the clock passes it. `None`
+    /// means not paused.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub paused_until: Option<i64>,
     /// GitHub repo slug -- populated via JOIN on projects table, not a DB column.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub github_repo: Option<String>,
@@ -208,6 +214,7 @@ impl Task {
             escalation_report: None,
             source: None,
             rev: 1,
+            paused_until: None,
             github_repo: None,
             rebase_worker: None,
             rebase_retries: 0,

@@ -6,8 +6,6 @@ import { ClipboardAddon } from '@xterm/addon-clipboard';
 import { Unicode11Addon } from '@xterm/addon-unicode11';
 import {
   connectTerminalStream,
-  resizeTerminal,
-  writeTerminalBytes,
   type TerminalSessionInfo,
 } from '#renderer/domains/captain/repo/terminal-api';
 import { isRestoredTerminalSession } from '#renderer/domains/captain/terminal/runtime/terminalSession';
@@ -25,11 +23,15 @@ import {
   type TerminalConnectionState,
   type TerminalSearchState,
   emptySearchState,
-  writeWithCallback,
   binaryBytes,
   isShiftEnter,
 } from '#renderer/domains/captain/terminal/runtime/terminalConfig';
 import log from '#renderer/global/service/logger';
+import {
+  resizeTerminalLogged,
+  writeTerminalBytesLogged,
+  writeTerminalOutputLogged,
+} from '#renderer/domains/captain/terminal/runtime/terminalIo';
 
 interface TerminalRuntimeCallbacks {
   onConnectionStateChange: (state: TerminalConnectionState) => void;
@@ -207,8 +209,10 @@ export class TerminalRuntime {
       // a bare \r on the keypress event. Only send the sequence on keydown.
       if (event.type === 'keydown') {
         const encoder = new TextEncoder();
-        void writeTerminalBytes(this.session.id, encoder.encode('\x1b\r')).catch((err) =>
-          log.warn('Terminal soft-enter write failed', err),
+        void writeTerminalBytesLogged(
+          this.session.id,
+          encoder.encode('\x1b\r'),
+          'Terminal soft-enter write failed',
         );
       }
       return false;
@@ -217,16 +221,20 @@ export class TerminalRuntime {
     this.disposables.push(
       this.term.onData((data) => {
         const encoder = new TextEncoder();
-        void writeTerminalBytes(this.session.id, encoder.encode(data)).catch((err) =>
-          log.warn('Terminal write failed', err),
+        void writeTerminalBytesLogged(
+          this.session.id,
+          encoder.encode(data),
+          'Terminal write failed',
         );
       }),
     );
 
     this.disposables.push(
       this.term.onBinary((data) => {
-        void writeTerminalBytes(this.session.id, binaryBytes(data)).catch((err) =>
-          log.warn('Terminal binary write failed', err),
+        void writeTerminalBytesLogged(
+          this.session.id,
+          binaryBytes(data),
+          'Terminal binary write failed',
         );
       }),
     );
@@ -254,9 +262,7 @@ export class TerminalRuntime {
       (data) => {
         const term = this.term;
         if (!term || this.disposed) return;
-        void writeWithCallback(term, data).catch((err) =>
-          log.warn('Terminal output write failed', err),
-        );
+        void writeTerminalOutputLogged(term, data, 'Terminal output write failed');
       },
       (code) => {
         this.exited = true;
@@ -312,9 +318,7 @@ export class TerminalRuntime {
   private async syncTerminalSize(): Promise<void> {
     if (!this.term) return;
     const { rows, cols } = this.term;
-    await resizeTerminal(this.session.id, rows, cols).catch((err) =>
-      log.warn('Terminal resize failed', err),
-    );
+    await resizeTerminalLogged(this.session.id, rows, cols);
   }
 
   private setSearchState(next: TerminalSearchState): void {

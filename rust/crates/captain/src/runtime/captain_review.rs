@@ -15,8 +15,8 @@ use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
 
 use crate::{ItemStatus, Task, TimelineEventPayload};
-use settings::config::settings::Config;
-use settings::config::workflow::CaptainWorkflow;
+use settings::CaptainWorkflow;
+use settings::Config;
 
 use super::notify::Notifier;
 use super::review_phase;
@@ -43,14 +43,14 @@ pub use super::captain_review_verdict::apply_verdict;
 pub struct CaptainVerdict {
     pub action: String,
     pub feedback: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub report: Option<String>,
     /// Set when action = ship. One of "high", "mid", "low".
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub confidence: Option<String>,
     /// Set when action = ship. Structured justification (problem facets
     /// mapped to evidence artifacts) per the Confidence Grading rubric.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub confidence_reason: Option<String>,
 }
 
@@ -72,11 +72,16 @@ const TRIGGERS: &[&str] = &[
 
 /// Allowed actions for a given trigger, matching `is_verdict_allowed`.
 fn allowed_actions_for_trigger(trigger: &str) -> &'static [&'static str] {
+    // Mirror of `captain_review_check::is_verdict_allowed`. `escalate` is
+    // available on every tier. Broken-session reviews are intentionally
+    // narrower than the default path: once the session is known dead in
+    // place, the captain may ship, respawn, or escalate, but never resume
+    // the same session via nudge/reset_budget.
     match trigger {
         "clarifier_fail" => &["retry_clarifier", "escalate"],
         "spawn_fail" => &["respawn", "escalate"],
-        "budget_exhausted" => &["ship", "nudge", "respawn", "reset_budget", "escalate"],
-        _ => &["ship", "nudge", "respawn", "reset_budget"],
+        "broken_session" => &["ship", "respawn", "escalate"],
+        _ => &["ship", "nudge", "respawn", "reset_budget", "escalate"],
     }
 }
 
@@ -270,6 +275,7 @@ pub(crate) async fn spawn_review(
     let trigger_str = trigger.to_string();
     let item_title = item.title.clone();
     let item_id = item.id.to_string();
+    let item_no_pr = item.no_pr;
 
     // Build problem statement from task metadata.
     let problem_statement = {
@@ -395,11 +401,19 @@ pub(crate) async fn spawn_review(
             "has_recording",
             if has_recording { "true" } else { "false" }.into(),
         );
+        // no_pr tasks have no diff, no PR, no merge step — the worker
+        // transcript and any DB-backed evidence is the entire deliverable.
+        // The prompt uses this flag to relax the screenshot + recording gate
+        // that only applies to PR review.
+        vars.insert(
+            "is_no_pr",
+            if item_no_pr { "true" } else { "" }.into(),
+        );
         for (key, flag) in &trigger_flags {
             vars.insert(key.as_str(), flag.clone());
         }
 
-        let prompt = match settings::config::render_prompt("captain_review", &prompts, &vars) {
+        let prompt = match settings::render_prompt("captain_review", &prompts, &vars) {
             Ok(p) => p,
             Err(e) => {
                 warn!(module = "captain", %session_id, %e, "failed to render captain review prompt");

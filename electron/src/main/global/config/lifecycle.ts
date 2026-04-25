@@ -36,3 +36,5 @@ export function getDataDir(): string {
 export function getConfigPath(): string {
   return process.env.MANDO_CONFIG || path.join(getDataDir(), 'config.json');
 }
+
+export const INITIAL_RECONNECT_DELAY_MS = 1000;

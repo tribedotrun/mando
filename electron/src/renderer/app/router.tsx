@@ -5,7 +5,7 @@ import {
   createMemoryHistory,
 } from '@tanstack/react-router';
 import { z } from 'zod';
-import { RootShell } from '#renderer/app/routes/RootShell';
+import { RootFrame } from '#renderer/app/routes/RootFrame';
 import { AppLayout } from '#renderer/app/routes/AppLayout';
 import { CaptainPage } from '#renderer/app/routes/CaptainPage';
 import { WorkbenchPage } from '#renderer/app/routes/WorkbenchPage';
@@ -19,7 +19,7 @@ import log from '#renderer/global/service/logger';
 // Route tree
 // ---------------------------------------------------------------------------
 
-const rootRoute = createRootRoute({ component: RootShell });
+const rootRoute = createRootRoute({ component: RootFrame });
 
 // Pathless layout: sidebar + content. Wraps all routes except settings.
 const appLayout = createRoute({

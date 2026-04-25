@@ -4,6 +4,7 @@ use std::fmt;
 use std::path::PathBuf;
 use std::time::Instant;
 
+use crate::gateway_paths as paths;
 use anyhow::{bail, Context, Result};
 use reqwest::{Client, Method};
 use serde::{de::DeserializeOwned, Serialize};
@@ -325,7 +326,7 @@ impl DaemonClient {
         T: DeserializeOwned,
     {
         let start = Instant::now();
-        let url = format!("{}/api/health", self.base_url);
+        let url = format!("{}{}", self.base_url, paths::HEALTH);
         let resp = self
             .client
             .get(&url)
@@ -333,7 +334,7 @@ impl DaemonClient {
             .await
             .map_err(|e| wrap_send_error(e, "daemon not reachable"))?;
         let status = resp.status();
-        debug!(method = "GET", path = "/api/health", status = %status, elapsed_ms = start.elapsed().as_millis(), "daemon health check");
+        debug!(method = "GET", path = paths::HEALTH, status = %status, elapsed_ms = start.elapsed().as_millis(), "daemon health check");
         resp.json().await.context("invalid JSON response")
     }
 }

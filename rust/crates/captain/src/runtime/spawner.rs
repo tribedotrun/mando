@@ -5,11 +5,10 @@ use std::path::PathBuf;
 
 use crate::Task;
 use anyhow::{Context, Result};
-use rustc_hash::FxHashMap;
-use settings::config::settings::{CaptainConfig, ProjectConfig};
-use settings::config::workflow::CaptainWorkflow;
+use settings::CaptainWorkflow;
+use settings::{CaptainConfig, ProjectConfig};
 
-use crate::io::{git, hooks, pid_registry};
+use crate::io::{hooks, pid_registry};
 
 /// Credential to inject into the worker's environment.
 pub(crate) struct WorkerCredential<'a> {
@@ -36,29 +35,25 @@ pub(crate) async fn spawn_worker(
     let session_id = global_infra::uuid::Uuid::v4().to_string();
 
     // Fetch origin so we branch off the latest remote HEAD.
-    git::fetch_origin(&repo_path).await?;
+    global_git::fetch_origin(&repo_path).await?;
 
-    // Resolve worktree + branch:
-    //   - Reopen: worktree + branch both present → reuse as-is
-    //   - Rework: worktree present, branch cleared → same worktree, new branch from origin/main
-    //   - First spawn: no worktree → create fresh
-    let existing_wt = item
+    // Resolve worktree + branch via a pure plan (see `plan_worktree`).
+    let stored_wt = item
         .worktree
         .as_deref()
-        .map(global_infra::paths::expand_tilde)
-        .filter(|p| p.exists());
-    let default_branch = git::default_branch(&repo_path).await?;
-    let (branch, wt_path) = match (existing_wt, item.branch.as_deref()) {
-        (Some(wt), Some(existing_branch)) => {
+        .map(global_infra::paths::expand_tilde);
+    let default_branch = global_git::default_branch(&repo_path).await?;
+    let (branch, wt_path) = match plan_worktree(stored_wt.as_ref(), item.branch.as_deref()) {
+        WorktreePlan::Reuse { wt, branch } => {
             tracing::info!(
                 module = "spawner",
                 worktree = %wt.display(),
-                branch = existing_branch,
+                branch = %branch,
                 "reusing existing worktree for reopened item"
             );
-            (existing_branch.to_string(), wt)
+            (branch, wt)
         }
-        (Some(wt), None) => {
+        WorktreePlan::Rework { wt } => {
             // Rework: same worktree, fresh branch from origin/main.
             let slug = new_slug(item, next_worker_slot(&global_infra::paths::state_dir())?);
             let branch = format!("mando/{}", slug);
@@ -68,10 +63,44 @@ pub(crate) async fn spawn_worker(
                 branch = %branch,
                 "rework: resetting existing worktree to new branch"
             );
-            git::reset_to_new_branch(&wt, &branch, &default_branch).await?;
+            global_git::reset_to_new_branch(&wt, &branch, &default_branch).await?;
             (branch, wt)
         }
-        _ => reserve_fresh_worktree(item, &repo_path, &default_branch).await?,
+        WorktreePlan::Recreate { wt, stored_branch } => {
+            // Worktree binding set, directory missing on disk. Captain
+            // invariant #4 keeps the assigned worktree permanent, so we
+            // recreate it at the stored path with a fresh branch instead
+            // of silently reserving a new slot. Allocating a fresh slot
+            // here would mint a second workbench row, archive the first,
+            // and desync the sidebar.
+            tracing::warn!(
+                module = "spawner",
+                task_id = item.id,
+                worktree = %wt.display(),
+                stored_branch = ?stored_branch,
+                "task worktree dir missing on disk — recreating at stored path to preserve invariant #4 (worktree permanent)"
+            );
+            let branch = recreate_worktree_at(item, &repo_path, &default_branch, &wt).await?;
+            (branch, wt)
+        }
+        WorktreePlan::Fresh {
+            stored_branch: None,
+        } => reserve_fresh_worktree(item, &repo_path, &default_branch).await?,
+        WorktreePlan::Fresh {
+            stored_branch: Some(b),
+        } => {
+            // Fail-fast: branch set without a worktree binding is an
+            // impossible state. `tick_branch_sync` only populates
+            // `item.branch` when a worktree exists; getting here means
+            // some upstream path cleared worktree without clearing
+            // branch. Refuse to spawn — captain's spawn_fail_count +
+            // escalation path will surface the state corruption.
+            anyhow::bail!(
+                "task {} has branch '{}' set but no worktree binding — refusing to spawn (impossible state; check tick_branch_sync and verdict/reopen paths)",
+                item.id,
+                b
+            );
+        }
     };
 
     // Copy plan briefs into worktree if they exist (blocking fs → spawn_blocking).
@@ -94,7 +123,7 @@ pub(crate) async fn spawn_worker(
         let workflow_clone = workflow.clone();
         tokio::task::spawn_blocking(move || {
             let slot = branch_slot(&branch_clone).unwrap_or(0);
-            prepare_initial_worker_prompt(
+            super::spawner_prompt::prepare_initial_worker_prompt(
                 &item_clone,
                 slot,
                 &branch_clone,
@@ -109,7 +138,7 @@ pub(crate) async fn spawn_worker(
     // Create draft PR for PR-eligible tasks (scaffold commit + push + gh pr create).
     let mut draft_pr_number: Option<i64> = None;
     if !item.no_pr {
-        match super::spawner_pr::create_draft_pr(item, &branch, &wt_path, pool).await {
+        match super::spawner_pr::create_draft_pr(item, &branch, &wt_path).await {
             Ok(pr_num) => {
                 draft_pr_number = Some(pr_num);
                 tracing::info!(
@@ -268,6 +297,108 @@ fn new_slug(item: &Task, slot: u64) -> String {
     format!("todo-{}-{}", item.id, slot)
 }
 
+/// Decision for how `spawn_worker` should resolve a task's worktree + branch.
+///
+/// Captain invariant #4 (see CLAUDE.md): once a task has a worktree
+/// assigned, that path is permanent for the task's lifetime. The plan
+/// below never silently drops a stored worktree binding — a missing
+/// directory on disk yields [`WorktreePlan::Recreate`], not
+/// [`WorktreePlan::Fresh`].
+#[derive(Debug)]
+pub(crate) enum WorktreePlan {
+    /// Reopen — worktree exists on disk, branch is known. Reuse as-is.
+    Reuse { wt: PathBuf, branch: String },
+    /// Rework — worktree exists on disk, branch is cleared. Same
+    /// worktree, fresh branch from origin/main.
+    Rework { wt: PathBuf },
+    /// Worktree binding is set but the directory was removed out from
+    /// under the task. Recreate `git worktree` at the stored path with a
+    /// fresh branch; do NOT allocate a new slot.
+    Recreate {
+        wt: PathBuf,
+        stored_branch: Option<String>,
+    },
+    /// No worktree assigned yet. Reserve a fresh slot. A stored branch
+    /// without a stored worktree is an impossible-state warning passed
+    /// through so the caller can log it.
+    Fresh { stored_branch: Option<String> },
+}
+
+/// Pure decision: which worktree plan should `spawn_worker` execute?
+///
+/// Separated so the branch selection is unit-testable without a real git
+/// repo. All IO (next_worker_slot, git commands, logging) happens in the
+/// caller based on the returned variant.
+pub(crate) fn plan_worktree(stored_wt: Option<&PathBuf>, branch: Option<&str>) -> WorktreePlan {
+    match (stored_wt, branch) {
+        (Some(wt), Some(b)) if wt.exists() => WorktreePlan::Reuse {
+            wt: wt.clone(),
+            branch: b.to_string(),
+        },
+        (Some(wt), None) if wt.exists() => WorktreePlan::Rework { wt: wt.clone() },
+        (Some(wt), stored) => WorktreePlan::Recreate {
+            wt: wt.clone(),
+            stored_branch: stored.map(str::to_string),
+        },
+        (None, stored) => WorktreePlan::Fresh {
+            stored_branch: stored.map(str::to_string),
+        },
+    }
+}
+
+/// Recreate a missing worktree at its stored path with a fresh slot-derived
+/// branch. Retries on `WorktreeAlreadyExists` (leftover metadata, counter
+/// reuse, concurrent slot allocation) by rotating the branch slug; the path
+/// itself stays pinned to `wt` so captain invariant #4 is preserved.
+async fn recreate_worktree_at(
+    item: &Task,
+    repo_path: &std::path::Path,
+    default_branch: &str,
+    wt: &std::path::Path,
+) -> Result<String> {
+    const MAX_ATTEMPTS: usize = 20;
+
+    for attempt in 0..MAX_ATTEMPTS {
+        let slug = new_slug(item, next_worker_slot(&global_infra::paths::state_dir())?);
+        let branch = format!("mando/{}", slug);
+
+        if let Err(e) = global_git::prune_worktrees(repo_path).await {
+            tracing::warn!(module = "spawner", error = %e, "failed to prune stale git worktree metadata before recreate");
+        }
+        if let Err(e) = global_git::delete_local_branch(repo_path, &branch).await {
+            tracing::debug!(module = "spawner", branch = %branch, error = %e, "stale branch cleanup before recreate (expected if branch doesn't exist)");
+        }
+
+        match global_git::create_worktree(repo_path, &branch, wt, default_branch).await {
+            Ok(()) => {
+                crate::io::worktree_bootstrap::copy_local_files(repo_path, wt).await;
+                return Ok(branch);
+            }
+            Err(e)
+                if crate::find_git_error(&e).is_some_and(|g| {
+                    matches!(g, crate::GitError::WorktreeAlreadyExists { .. })
+                }) && attempt + 1 < MAX_ATTEMPTS =>
+            {
+                tracing::warn!(
+                    module = "spawner",
+                    branch = %branch,
+                    worktree = %wt.display(),
+                    attempt = attempt + 1,
+                    "branch/worktree already exists during recreate — rotating slug and retrying"
+                );
+            }
+            Err(e) => return Err(e),
+        }
+    }
+
+    anyhow::bail!(
+        "failed to recreate worktree at {} after {} attempts for task {}",
+        wt.display(),
+        MAX_ATTEMPTS,
+        item.id
+    );
+}
+
 async fn reserve_fresh_worktree(
     item: &Task,
     repo_path: &std::path::Path,
@@ -280,12 +411,12 @@ async fn reserve_fresh_worktree(
         let slot = tokio::task::spawn_blocking(move || next_worker_slot(&slot_state_dir)).await??;
         let slug = new_slug(item, slot);
         let branch = format!("mando/{}", slug);
-        let wt = git::worktree_path(repo_path, &slug);
+        let wt = global_git::worktree_path(repo_path, &slug);
 
-        if let Err(e) = git::prune_worktrees(repo_path).await {
+        if let Err(e) = global_git::prune_worktrees(repo_path).await {
             tracing::warn!(module = "spawner", error = %e, "failed to prune stale git worktrees");
         }
-        if let Err(e) = git::delete_local_branch(repo_path, &branch).await {
+        if let Err(e) = global_git::delete_local_branch(repo_path, &branch).await {
             tracing::warn!(
                 module = "spawner",
                 branch = %branch,
@@ -294,8 +425,11 @@ async fn reserve_fresh_worktree(
             );
         }
 
-        match git::create_worktree(repo_path, &branch, &wt, default_branch).await {
-            Ok(()) => return Ok((branch, wt)),
+        match global_git::create_worktree(repo_path, &branch, &wt, default_branch).await {
+            Ok(()) => {
+                crate::io::worktree_bootstrap::copy_local_files(repo_path, &wt).await;
+                return Ok((branch, wt));
+            }
             Err(e)
                 if crate::find_git_error(&e).is_some_and(|g| {
                     matches!(g, crate::GitError::WorktreeAlreadyExists { .. })
@@ -361,133 +495,6 @@ fn copy_plan_briefs(item: &Task, wt_path: &std::path::Path) -> Result<Option<Str
     Ok(None)
 }
 
-fn prepare_initial_worker_prompt(
-    item: &Task,
-    slot: u64,
-    branch: &str,
-    wt_path: &std::path::Path,
-    project_config: &ProjectConfig,
-    workflow: &CaptainWorkflow,
-) -> Result<String> {
-    let plan = resolve_worker_plan_path(item, wt_path)?;
-    let is_adopted = is_adopted_handoff(item, plan.as_deref(), wt_path);
-    let prompt_name = if is_adopted {
-        "worker_continue"
-    } else if plan.is_some() {
-        "worker_briefed"
-    } else {
-        "worker_initial"
-    };
-    let initial_prompt_name = if is_adopted { "adopted" } else { "worker" };
-
-    let context = item.context.as_deref().unwrap_or("");
-    let original_prompt = item.original_prompt.as_deref().unwrap_or("");
-    let task_id_str = item.id.to_string();
-    let no_pr = if item.no_pr { "true" } else { "" };
-    let workpad_path = ensure_workpad_path(item)?;
-
-    let check_command = check_command_or_fallback(project_config);
-
-    let mut brief_vars: FxHashMap<&str, String> = FxHashMap::default();
-    brief_vars.insert("title", item.title.clone());
-    brief_vars.insert("context", context.to_string());
-    brief_vars.insert("branch", branch.to_string());
-    brief_vars.insert("id", task_id_str.clone());
-    brief_vars.insert("original_prompt", original_prompt.to_string());
-    brief_vars.insert("worker_preamble", project_config.worker_preamble.clone());
-    brief_vars.insert("check_command", check_command.clone());
-    brief_vars.insert("no_pr", no_pr.to_string());
-    brief_vars.insert("workpad_path", workpad_path.clone());
-    if let Some(ref plan_path) = plan {
-        brief_vars.insert("plan", plan_path.clone());
-    }
-
-    let rendered_brief =
-        settings::config::render_prompt(prompt_name, &workflow.prompts, &brief_vars)
-            .map_err(anyhow::Error::msg)?;
-
-    let brief_filename = worker_brief_filename(item, slot);
-    let briefs_dir = wt_path.join(".ai").join("briefs");
-    std::fs::create_dir_all(&briefs_dir)?;
-    let brief_path = briefs_dir.join(&brief_filename);
-    std::fs::write(&brief_path, rendered_brief)?;
-
-    let mut vars: FxHashMap<&str, String> = FxHashMap::default();
-    vars.insert("brief_filename", brief_filename.clone());
-    vars.insert("brief_path", brief_path.display().to_string());
-    vars.insert("id", task_id_str);
-    vars.insert("no_pr", no_pr.to_string());
-    vars.insert("workpad_path", workpad_path);
-
-    settings::config::render_initial_prompt(initial_prompt_name, &workflow.initial_prompts, &vars)
-        .map_err(anyhow::Error::msg)
-}
-
-fn ensure_workpad_path(item: &Task) -> Result<String> {
-    let workpad_path = global_infra::paths::data_dir()
-        .join("plans")
-        .join(item.id.to_string())
-        .join("workpad.md");
-    if let Some(parent) = workpad_path.parent() {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("failed to create workpad directory {}", parent.display()))?;
-    }
-    if !workpad_path.exists() {
-        std::fs::write(&workpad_path, "")
-            .with_context(|| format!("failed to initialize workpad {}", workpad_path.display()))?;
-    }
-    Ok(workpad_path.display().to_string())
-}
-
-fn worker_brief_filename(item: &Task, slot: u64) -> String {
-    format!("todo-{}-{slot}.md", item.id)
-}
-
-fn resolve_worker_plan_path(item: &Task, wt_path: &std::path::Path) -> Result<Option<String>> {
-    let Some(plan_path) = item.plan.as_deref() else {
-        return Ok(None);
-    };
-
-    let plan = global_infra::paths::expand_tilde(plan_path);
-    if plan.is_absolute() {
-        let file_name = plan
-            .file_name()
-            .ok_or_else(|| anyhow::anyhow!("plan path has no filename: {}", plan.display()))?;
-        let briefs_dir = wt_path.join(".ai").join("briefs");
-        std::fs::create_dir_all(&briefs_dir)?;
-        let copied_path = briefs_dir.join(file_name);
-        if plan != copied_path {
-            std::fs::copy(&plan, &copied_path)?;
-        }
-        return Ok(Some(copied_path.display().to_string()));
-    }
-
-    let relative = plan_path.trim().to_string();
-    if relative.is_empty() {
-        return Ok(None);
-    }
-
-    Ok(Some(wt_path.join(relative).display().to_string()))
-}
-
-fn is_adopted_handoff(item: &Task, plan: Option<&str>, wt_path: &std::path::Path) -> bool {
-    plan.is_some_and(|path| path.ends_with("adopt-handoff.md"))
-        && item.worktree.is_some()
-        && item.branch.is_some()
-        && wt_path.exists()
-}
-
-const CHECK_COMMAND_FALLBACK: &str =
-    "the project's quality gate (formatting, linting, tests — check CLAUDE.md for the exact command)";
-
-fn check_command_or_fallback(project_config: &ProjectConfig) -> String {
-    if project_config.check_command.is_empty() {
-        CHECK_COMMAND_FALLBACK.to_string()
-    } else {
-        format!("`{}`", project_config.check_command)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -499,180 +506,93 @@ mod tests {
         path
     }
 
+    // ── plan_worktree: branch-selection decision (captain invariant #4) ──
+
     #[test]
-    fn generic_items_render_worker_initial_brief() {
+    fn plan_reuse_when_wt_exists_and_branch_present() {
         let wt = temp_worktree();
-        let mut item = Task::new("Fix auth redirect");
-        item.context = Some("Auth redirect loop in login callback".into());
-        let workflow = CaptainWorkflow::compiled_default();
-        let project = ProjectConfig::default();
-
-        let initial =
-            prepare_initial_worker_prompt(&item, 1, "mando/fix-auth-1", &wt, &project, &workflow)
-                .unwrap();
-
-        assert!(initial.contains(&wt.join(".ai/briefs/todo-0-1.md").display().to_string()));
-        assert!(initial.contains("Before updating the workpad, read"));
-        assert!(initial.contains(
-            &global_infra::paths::data_dir()
-                .join("plans/0/workpad.md")
-                .display()
-                .to_string()
-        ));
-        let brief = std::fs::read_to_string(wt.join(".ai/briefs/todo-0-1.md")).unwrap();
-        assert!(brief.contains("Captain Brief"));
-        assert!(brief.contains("Auth redirect loop in login callback"));
-        assert!(brief.contains(
-            &global_infra::paths::data_dir()
-                .join("plans/0/workpad.md")
-                .display()
-                .to_string()
-        ));
+        let plan = plan_worktree(Some(&wt), Some("mando/todo-7-3"));
+        match plan {
+            WorktreePlan::Reuse { wt: got, branch } => {
+                assert_eq!(got, wt);
+                assert_eq!(branch, "mando/todo-7-3");
+            }
+            other => panic!("expected Reuse, got {other:?}"),
+        }
     }
 
     #[test]
-    fn planned_items_render_worker_briefed_flow() {
+    fn plan_rework_when_wt_exists_and_branch_cleared() {
         let wt = temp_worktree();
-        let plan_source = wt.join("source-brief.md");
-        std::fs::write(&plan_source, "# Brief").unwrap();
-
-        let mut item = Task::new("Implement planned change");
-        item.plan = Some(plan_source.display().to_string());
-
-        let workflow = CaptainWorkflow::compiled_default();
-        let project = ProjectConfig::default();
-
-        prepare_initial_worker_prompt(&item, 2, "mando/todo-0", &wt, &project, &workflow).unwrap();
-
-        let brief = std::fs::read_to_string(wt.join(".ai/briefs/todo-0-2.md")).unwrap();
-        assert!(brief.contains("Human-Curated Plan"));
-        assert!(brief.contains(&wt.join(".ai/briefs/source-brief.md").display().to_string()));
-        assert!(wt.join(".ai/briefs/source-brief.md").exists());
+        let plan = plan_worktree(Some(&wt), None);
+        match plan {
+            WorktreePlan::Rework { wt: got } => assert_eq!(got, wt),
+            other => panic!("expected Rework, got {other:?}"),
+        }
     }
 
     #[test]
-    fn tilde_plan_paths_are_copied_into_worktree_briefs() {
-        let wt = temp_worktree();
-        let home = std::path::PathBuf::from(std::env::var("HOME").unwrap());
-        let plan_source = home.join(format!(
-            ".mando/plans/tilde-test-{}/brief.md",
-            global_infra::uuid::Uuid::v4()
-        ));
-        std::fs::create_dir_all(plan_source.parent().unwrap()).unwrap();
-        std::fs::write(&plan_source, "# Brief from tilde path").unwrap();
-
-        let mut item = Task::new("Implement planned change");
-        item.plan = Some(format!(
-            "~/.mando/plans/{}/brief.md",
-            plan_source
-                .parent()
-                .and_then(|path| path.file_name())
-                .unwrap()
-                .to_string_lossy()
-        ));
-
-        let workflow = CaptainWorkflow::compiled_default();
-        let project = ProjectConfig::default();
-
-        prepare_initial_worker_prompt(&item, 4, "mando/todo-0", &wt, &project, &workflow).unwrap();
-
-        let brief = std::fs::read_to_string(wt.join(".ai/briefs/todo-0-4.md")).unwrap();
-        assert!(brief.contains(&wt.join(".ai/briefs/brief.md").display().to_string()));
-        assert!(wt.join(".ai/briefs/brief.md").exists());
-
-        let _ = std::fs::remove_file(&plan_source);
-        let _ = std::fs::remove_dir(plan_source.parent().unwrap());
+    fn plan_recreate_when_wt_missing_on_disk_with_branch() {
+        // Captain invariant #4 — the stored worktree binding is permanent.
+        // A missing directory must route to Recreate (recreate at the stored
+        // path), never to Fresh (allocate a new slot). A fresh slot would
+        // mint a second workbench row and archive the first.
+        let wt: PathBuf =
+            std::env::temp_dir().join(format!("mando-missing-{}", global_infra::uuid::Uuid::v4()));
+        assert!(!wt.exists(), "sanity: missing path must not exist");
+        let plan = plan_worktree(Some(&wt), Some("mando/todo-7-3"));
+        match plan {
+            WorktreePlan::Recreate {
+                wt: got,
+                stored_branch,
+            } => {
+                assert_eq!(got, wt, "recreate must target the ORIGINAL stored path");
+                assert_eq!(stored_branch.as_deref(), Some("mando/todo-7-3"));
+            }
+            other => panic!("expected Recreate, got {other:?}"),
+        }
     }
 
     #[test]
-    fn adopted_items_render_worker_continue_flow() {
-        let wt = temp_worktree();
-        let adopt_brief = wt.join(".ai/briefs/adopt-handoff.md");
-        std::fs::create_dir_all(adopt_brief.parent().unwrap()).unwrap();
-        std::fs::write(&adopt_brief, "# Adopt handoff").unwrap();
-
-        let mut item = Task::new("Finish in-flight work");
-        item.plan = Some(".ai/briefs/adopt-handoff.md".into());
-        item.worktree = Some(wt.display().to_string());
-        item.branch = Some("feature/adopt".into());
-
-        let workflow = CaptainWorkflow::compiled_default();
-        let project = ProjectConfig::default();
-
-        let initial =
-            prepare_initial_worker_prompt(&item, 3, "feature/adopt", &wt, &project, &workflow)
-                .unwrap();
-
-        assert!(initial.contains("handed off"));
-        assert!(initial.contains("Before updating the workpad, read"));
-        assert!(initial.contains(
-            &global_infra::paths::data_dir()
-                .join("plans/0/workpad.md")
-                .display()
-                .to_string()
-        ));
-        let brief = std::fs::read_to_string(wt.join(".ai/briefs/todo-0-3.md")).unwrap();
-        assert!(brief.contains("Mid-Implementation Handoff"));
+    fn plan_recreate_when_wt_missing_on_disk_and_branch_cleared() {
+        // Same invariant applies after a respawn verdict — branch is None
+        // but the worktree binding must still survive a missing dir.
+        let wt: PathBuf =
+            std::env::temp_dir().join(format!("mando-missing-{}", global_infra::uuid::Uuid::v4()));
+        assert!(!wt.exists());
+        let plan = plan_worktree(Some(&wt), None);
+        match plan {
+            WorktreePlan::Recreate {
+                wt: got,
+                stored_branch,
+            } => {
+                assert_eq!(got, wt);
+                assert!(stored_branch.is_none());
+            }
+            other => panic!("expected Recreate, got {other:?}"),
+        }
     }
 
-    // ── is_adopted_handoff boundary conditions ──────────────────────
+    #[test]
+    fn plan_fresh_when_no_worktree_binding() {
+        let plan = plan_worktree(None, None);
+        match plan {
+            WorktreePlan::Fresh { stored_branch } => assert!(stored_branch.is_none()),
+            other => panic!("expected Fresh, got {other:?}"),
+        }
+    }
 
     #[test]
-    fn adopt_requires_all_four_conditions() {
-        let wt = temp_worktree();
-
-        // All conditions met → adopted
-        let mut item = Task::new("test");
-        item.worktree = Some(wt.display().to_string());
-        item.branch = Some("b".into());
-        assert!(is_adopted_handoff(
-            &item,
-            Some(".ai/briefs/adopt-handoff.md"),
-            &wt
-        ));
-
-        // Missing worktree → not adopted
-        let mut item2 = Task::new("test");
-        item2.branch = Some("b".into());
-        assert!(!is_adopted_handoff(
-            &item2,
-            Some(".ai/briefs/adopt-handoff.md"),
-            &wt
-        ));
-
-        // Missing branch → not adopted
-        let mut item3 = Task::new("test");
-        item3.worktree = Some(wt.display().to_string());
-        assert!(!is_adopted_handoff(
-            &item3,
-            Some(".ai/briefs/adopt-handoff.md"),
-            &wt
-        ));
-
-        // Wrong plan filename → not adopted
-        let mut item4 = Task::new("test");
-        item4.worktree = Some(wt.display().to_string());
-        item4.branch = Some("b".into());
-        assert!(!is_adopted_handoff(
-            &item4,
-            Some(".ai/briefs/regular-brief.md"),
-            &wt
-        ));
-
-        // No plan → not adopted
-        let mut item5 = Task::new("test");
-        item5.worktree = Some(wt.display().to_string());
-        item5.branch = Some("b".into());
-        assert!(!is_adopted_handoff(&item5, None, &wt));
-
-        // Nonexistent worktree path → not adopted
-        let mut item6 = Task::new("test");
-        item6.worktree = Some("/nonexistent/path".into());
-        item6.branch = Some("b".into());
-        assert!(!is_adopted_handoff(
-            &item6,
-            Some(".ai/briefs/adopt-handoff.md"),
-            &std::path::PathBuf::from("/nonexistent/path")
-        ));
+    fn plan_fresh_surfaces_impossible_state_branch_without_worktree() {
+        // Impossible state — a branch without a worktree binding. Surface
+        // the stored branch so the caller can WARN instead of silently
+        // discarding it.
+        let plan = plan_worktree(None, Some("mando/orphan"));
+        match plan {
+            WorktreePlan::Fresh { stored_branch } => {
+                assert_eq!(stored_branch.as_deref(), Some("mando/orphan"));
+            }
+            other => panic!("expected Fresh with stored_branch, got {other:?}"),
+        }
     }
 }

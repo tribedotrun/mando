@@ -12,7 +12,7 @@ use crate::{http::GatewayClient, resolve_api_base_url, sse, PendingMessages, Tel
 #[derive(Default)]
 struct TelegramRuntimeState {
     generation: u64,
-    last_config: Option<settings::config::Config>,
+    last_config: Option<settings::Config>,
     enabled: bool,
     running: bool,
     owner: String,
@@ -43,7 +43,7 @@ impl TelegramRuntime {
     }
 
     #[tracing::instrument(skip_all)]
-    pub async fn configure(&self, config: &settings::config::Config) -> Result<()> {
+    pub async fn configure(&self, config: &settings::Config) -> Result<()> {
         let enabled = telegram_enabled(config);
         let owner = config.channels.telegram.owner.clone();
 
@@ -173,7 +173,7 @@ impl TelegramRuntime {
             last_error: state.last_error.clone(),
             degraded: state.degraded,
             restart_count: state.restart_count,
-            mode: "embedded",
+            mode: api_types::TelegramMode::Embedded,
         }
     }
 

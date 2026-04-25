@@ -1,4 +1,9 @@
-import { FINALIZED_STATUSES, type AskHistoryEntry, type TaskItem } from '#renderer/global/types';
+import {
+  FINALIZED_STATUSES,
+  type AskHistoryEntry,
+  type ItemStatus,
+  type TaskItem,
+} from '#renderer/global/types';
 import { canAskAny, canReopen, canRework } from '#renderer/global/service/utils';
 
 export type ActionBarAction = 'ask' | 'reopen' | 'rework';
@@ -26,12 +31,12 @@ export function getDefaultAction(item: TaskItem): ActionBarAction {
   return available[0] ?? 'ask';
 }
 
-const HIDDEN_STATUSES = Object.freeze([
+const HIDDEN_STATUSES: readonly ItemStatus[] = Object.freeze([
   'needs-clarification',
   'captain-reviewing',
   'new',
   'queued',
-] as const);
+]);
 
 /** Whether to show the "ask-reopen" shortcut button. */
 export function shouldShowAskReopen(
@@ -49,7 +54,7 @@ export function shouldShowAskReopen(
 export function isActionBarHidden(item: TaskItem): boolean {
   return (
     FINALIZED_STATUSES.includes(item.status) ||
-    (HIDDEN_STATUSES as readonly string[]).includes(item.status) ||
+    HIDDEN_STATUSES.includes(item.status) ||
     getAvailableActions(item).length === 0
   );
 }

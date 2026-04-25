@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from 'react';
-import type { QAEntry } from '#renderer/global/ui/QAChat';
+import type { QAEntry } from '#renderer/domains/scout/service/qaTypes';
 import { useScoutAsk } from '#renderer/domains/scout/repo/mutations';
 import { getErrorMessage } from '#renderer/global/service/utils';
 

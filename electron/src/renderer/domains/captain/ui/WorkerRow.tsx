@@ -3,14 +3,14 @@ import { MoreVertical } from 'lucide-react';
 import { getWorkerPhase, PHASE_COLORS } from '#renderer/domains/captain/service/metricsHelpers';
 import { fmtRuntime, shortRepo } from '#renderer/global/service/utils';
 import type { WorkerDetail } from '#renderer/global/types';
-import { StatusDot } from '#renderer/global/ui/CardShell';
+import { StatusDot } from '#renderer/domains/captain/ui/CardFrame';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from '#renderer/global/ui/dropdown-menu';
-import { Button } from '#renderer/global/ui/button';
+} from '#renderer/global/ui/primitives/dropdown-menu';
+import { Button } from '#renderer/global/ui/primitives/button';
 
 export function WorkerRow({
   worker,

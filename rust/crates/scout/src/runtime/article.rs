@@ -2,7 +2,7 @@
 
 use anyhow::Result;
 use rustc_hash::FxHashMap;
-use settings::config::ScoutWorkflow;
+use settings::ScoutWorkflow;
 
 const LOCAL_ARTICLE_MAX_CHARS: usize = 280;
 
@@ -35,25 +35,30 @@ pub async fn generate_article(
     vars.insert("content_path", content_path);
     vars.insert("user_context", user_context_rendered.as_str());
 
-    let prompt = settings::config::render_prompt("synthesize", &workflow.prompts, &vars)
+    let prompt = settings::render_prompt("synthesize", &workflow.prompts, &vars)
         .map_err(|e| anyhow::anyhow!(e))?;
 
-    let model = crate::service::model_lookup::required_model(workflow, "article")?;
-    let credential = settings::credentials::pick_for_worker(pool, None)
-        .await
-        .inspect_err(|e| tracing::warn!(module = "scout-runtime-article", error = %e, "scout-article: pick_for_worker failed"))
-        .unwrap_or(None);
-    let cred_id = global_claude::credential_id(&credential);
-    let builder = global_claude::CcConfig::builder()
-        .model(model)
-        .timeout(workflow.agent.article_timeout_s)
-        .caller("scout-article");
-    let result = global_claude::CcOneShot::run_with_retry(
+    let model_owned = crate::service::model_lookup::required_model(workflow, "article")?;
+    let model = model_owned.as_str();
+    let timeout = workflow.agent.article_timeout_s;
+    let result = settings::cc_failover::run_with_credential_failover(
+        pool,
+        "scout-article",
         &prompt,
-        global_claude::with_credential(builder, &credential).build(),
-        workflow.agent.cc_max_retries,
+        |ctx| {
+            let mut builder = global_claude::CcConfig::builder()
+                .model(model)
+                .timeout(timeout)
+                .caller("scout-article");
+            builder = global_claude::with_credential(builder, &ctx.credential);
+            if let Some(rid) = &ctx.resume_session_id {
+                builder = builder.resume(rid);
+            }
+            builder.build()
+        },
     )
     .await?;
+    let cred_id = result.credential_id;
 
     Ok(ArticleResult {
         text: result.text,

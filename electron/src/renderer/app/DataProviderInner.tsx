@@ -1,17 +1,16 @@
 import React, { useMemo, useState } from 'react';
-import { subscribeObsDegraded } from '#renderer/global/providers/obsHealth';
 import { hasConfig } from '#renderer/global/providers/native/app';
 import log from '#renderer/global/service/logger';
 import { useDesktopNotifications } from '#renderer/global/runtime/useDesktopNotifications';
+import { useFeedbackObsDegraded } from '#renderer/global/runtime/useFeedbackObsDegraded';
 import { useMountEffect } from '#renderer/global/runtime/useMountEffect';
 import { useNativeActions } from '#renderer/global/runtime/useNativeActions';
-import { toast } from '#renderer/global/runtime/useFeedback';
 import { RetryButton } from '#renderer/domains/captain/ui/RetryButton';
-import { Skeleton } from '#renderer/global/ui/skeleton';
+import { Skeleton } from '#renderer/global/ui/primitives/skeleton';
 import { useSseSync } from '#renderer/global/runtime/useSseSync';
 import type { SSEConnectionStatus } from '#renderer/global/types';
 import { DataContext } from '#renderer/global/runtime/dataContext';
-import { OnboardingPlaceholder } from '#renderer/domains/onboarding/ui/OnboardingPlaceholder';
+import { OnboardingLoader } from '#renderer/domains/onboarding/ui/OnboardingLoader';
 
 const INIT_FALLBACK_MS = 3_000;
 
@@ -26,14 +25,10 @@ export function DataProviderInner({
   const [initError, setInitError] = useState<string | null>(null);
   const [needsOnboarding, setNeedsOnboarding] = useState(false);
   const [sseStatus, setSseStatus] = useState<SSEConnectionStatus>('disconnected');
-  const { restartDaemon } = useNativeActions();
+  const { restartDaemon } = useNativeActions().app;
   const { processEvent: processNotification } = useDesktopNotifications();
 
-  useMountEffect(() =>
-    subscribeObsDegraded(() => {
-      toast.error('Observability pipeline degraded -- logs not being sent');
-    }),
-  );
+  useFeedbackObsDegraded();
 
   useSseSync({
     onStatusChange: (status) => {
@@ -71,17 +66,16 @@ export function DataProviderInner({
 
   const contextValue = useMemo(() => ({ sseStatus, resetDataPlane }), [resetDataPlane, sseStatus]);
 
-  const handleRestartDaemon = () => {
-    void restartDaemon()
-      .then(() => {
-        setInitError(null);
-        setNeedsOnboarding(false);
-        setInitialized(false);
-        resetDataPlane();
-      })
-      .catch((err) => {
-        log.error('[DataProvider] restartDaemon failed:', err);
-      });
+  const handleRestartDaemon = async () => {
+    try {
+      await restartDaemon();
+      setInitError(null);
+      setNeedsOnboarding(false);
+      setInitialized(false);
+      resetDataPlane();
+    } catch (err) {
+      log.error('[DataProvider] restartDaemon failed:', err);
+    }
   };
 
   if (!initialized) {
@@ -112,7 +106,7 @@ export function DataProviderInner({
 
   return (
     <DataContext value={contextValue}>
-      {needsOnboarding ? <OnboardingPlaceholder /> : children}
+      {needsOnboarding ? <OnboardingLoader /> : children}
     </DataContext>
   );
 }

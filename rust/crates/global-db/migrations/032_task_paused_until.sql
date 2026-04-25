@@ -1,0 +1,14 @@
+-- Task-level pause for credential-pool exhaustion.
+--
+-- When every healthy credential is in rate-limit cooldown and captain
+-- cannot dispatch a task's next stage, the task is parked with
+-- `paused_until` set to the soonest cooldown boundary (unix seconds).
+-- Captain tick filters tasks where `paused_until > unixepoch()`; when the
+-- clock passes, the task is eligible for dispatch again and the next
+-- pick_credential call picks up a now-thawed credential.
+--
+-- Distinct from `captain_review_trigger` and rework state: the task's
+-- logical status (`new`, `clarifying`, `queued`, etc.) is unchanged —
+-- this column only gates dispatch timing. UI reads both fields and
+-- renders "Paused until HH:MM" when paused_until > now.
+ALTER TABLE tasks ADD COLUMN paused_until INTEGER;

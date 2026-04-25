@@ -72,7 +72,13 @@ export function createUrlLinkProvider(opts: {
         range: createRange(bufferLineNumber, index, value),
         decorations: { pointerCursor: true, underline: true },
         activate: () => {
-          void openUrlImpl(value).catch((err) => log.warn('Failed to open terminal URL', err));
+          void (async () => {
+            try {
+              await openUrlImpl(value);
+            } catch (err) {
+              log.warn('Failed to open terminal URL', err);
+            }
+          })();
         },
       });
     }
@@ -117,34 +123,39 @@ export function createFileLinkProvider(opts: {
         return;
       }
 
-      void Promise.all(
-        matches.map(async (match) => {
-          const matchedText = match[1];
-          const startIndex = (match.index ?? -1) + match[0].indexOf(matchedText);
-          if (!matchedText || startIndex < 0) return null;
-          const parsed = parsePathTarget(matchedText);
-          const resolved = await resolveCached(parsed.filePath);
-          if (!resolved) return null;
-          return {
-            text: matchedText,
-            range: createRange(bufferLineNumber, startIndex, matchedText),
-            decorations: { pointerCursor: true, underline: true },
-            activate: () => {
-              void opts
-                .openPath(resolved)
-                .catch((err) => log.warn('Failed to open terminal file path', err));
-            },
-          } satisfies ILink;
-        }),
-      )
-        .then((links) => {
+      void (async () => {
+        try {
+          const links = await Promise.all(
+            matches.map(async (match) => {
+              const matchedText = match[1];
+              const startIndex = (match.index ?? -1) + match[0].indexOf(matchedText);
+              if (!matchedText || startIndex < 0) return null;
+              const parsed = parsePathTarget(matchedText);
+              const resolved = await resolveCached(parsed.filePath);
+              if (!resolved) return null;
+              return {
+                text: matchedText,
+                range: createRange(bufferLineNumber, startIndex, matchedText),
+                decorations: { pointerCursor: true, underline: true },
+                activate: () => {
+                  void (async () => {
+                    try {
+                      await opts.openPath(resolved);
+                    } catch (err) {
+                      log.warn('Failed to open terminal file path', err);
+                    }
+                  })();
+                },
+              } satisfies ILink;
+            }),
+          );
           const validLinks = links.filter(Boolean) as ILink[];
           callback(validLinks.length > 0 ? validLinks : undefined);
-        })
-        .catch((err) => {
+        } catch (err) {
           log.warn('Failed to resolve terminal file links', err);
           callback(undefined);
-        });
+        }
+      })();
     },
   };
 }

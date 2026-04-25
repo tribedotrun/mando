@@ -38,7 +38,7 @@ use std::time::Duration;
 use anyhow::Result;
 use tracing::{info, warn};
 
-use global_claude::{CcConfig, CcOneShot, CcResult};
+use global_claude::{CcConfig, CcResult};
 use global_types::now_rfc3339;
 
 /// Build a completed (Stopped) session log entry from a CcResult.
@@ -221,21 +221,37 @@ impl CcSessionManager {
         task_id: Option<i64>,
         max_turns: Option<u32>,
     ) -> Result<CcResult<serde_json::Value>> {
-        let credential = crate::runtime::tick_spawn::pick_credential(&self.pool, None).await;
-        let cred_id = global_claude::credential_id(&credential);
-        let mut builder = CcConfig::builder()
-            .model(model.unwrap_or(&self.default_model))
-            .cwd(cwd)
-            .timeout(call_timeout)
-            .caller(key);
-        if let Some(tid) = task_id {
-            builder = builder.task_id(tid.to_string());
-        }
-        if let Some(n) = max_turns {
-            builder = builder.max_turns(n);
-        }
-        builder = global_claude::with_credential(builder, &credential);
-        let result = CcOneShot::run(prompt, builder.build()).await?;
+        let resolved_model = model.unwrap_or(&self.default_model).to_string();
+        let model_ref = resolved_model.as_str();
+        let cwd_ref = cwd;
+        let key_ref = key;
+        let task_id_copy = task_id;
+        let max_turns_copy = max_turns;
+        let result = settings::cc_failover::run_with_credential_failover(
+            &self.pool,
+            key_ref,
+            prompt,
+            |ctx| {
+                let mut builder = CcConfig::builder()
+                    .model(model_ref)
+                    .cwd(cwd_ref.to_path_buf())
+                    .timeout(call_timeout)
+                    .caller(key_ref);
+                if let Some(tid) = task_id_copy {
+                    builder = builder.task_id(tid.to_string());
+                }
+                if let Some(n) = max_turns_copy {
+                    builder = builder.max_turns(n);
+                }
+                builder = global_claude::with_credential(builder, &ctx.credential);
+                if let Some(rid) = &ctx.resume_session_id {
+                    builder = builder.resume(rid);
+                }
+                builder.build()
+            },
+        )
+        .await?;
+        let cred_id = result.credential_id;
 
         crate::io::headless_cc::log_cc_session(
             &self.pool,
@@ -292,19 +308,35 @@ impl CcSessionManager {
                 .ok_or_else(|| anyhow::anyhow!("no active session for '{}'", key))?
         };
 
-        let credential = crate::runtime::tick_spawn::pick_credential(&self.pool, None).await;
-        let cred_id = global_claude::credential_id(&credential);
-        let builder = CcConfig::builder()
-            .model(&self.default_model)
-            .cwd(cwd)
-            .timeout(Duration::from_secs(session.call_timeout_s))
-            .caller(key)
-            .resume(session.session_id.clone());
-        let result = CcOneShot::run(
+        let cwd_ref = cwd;
+        let key_ref = key;
+        let session_sid = session.session_id.clone();
+        let session_sid_ref = session_sid.as_str();
+        let model_ref = self.default_model.as_str();
+        let call_timeout = Duration::from_secs(session.call_timeout_s);
+        let result = settings::cc_failover::run_with_credential_failover(
+            &self.pool,
+            key_ref,
             message,
-            global_claude::with_credential(builder, &credential).build(),
+            |ctx| {
+                // Resume the key's anchor session unless the failover
+                // wrapper overrides it with a later resume id (e.g. the
+                // just-failed session after a 429 swap — which in this
+                // path is the same id anyway since CC keeps the sid on
+                // --resume).
+                let resume_sid = ctx.resume_session_id.as_deref().unwrap_or(session_sid_ref);
+                let mut builder = CcConfig::builder()
+                    .model(model_ref)
+                    .cwd(cwd_ref.to_path_buf())
+                    .timeout(call_timeout)
+                    .caller(key_ref)
+                    .resume(resume_sid);
+                builder = global_claude::with_credential(builder, &ctx.credential);
+                builder.build()
+            },
         )
         .await?;
+        let cred_id = result.credential_id;
 
         crate::io::headless_cc::log_cc_session(
             &self.pool,

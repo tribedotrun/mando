@@ -3,12 +3,11 @@
 //! Each handler receives a pool, wraps it in ScoutDb, performs the operation, and returns JSON.
 
 use crate::service::lifecycle::{apply_item_command, ScoutItemCommand};
-use crate::{ScoutError, ScoutStatus};
+use crate::ScoutError;
 use anyhow::{bail, Context, Result};
 use rustc_hash::FxHashMap;
-use serde_json::{json, Value};
-use settings::config::Config;
-use settings::config::ScoutWorkflow;
+use settings::Config;
+use settings::ScoutWorkflow;
 use sqlx::SqlitePool;
 use tracing::{info, warn};
 
@@ -17,8 +16,11 @@ use crate::io::file_store;
 use crate::runtime::article::{
     build_article_from_summary, build_local_article_if_short, normalize_article_markdown,
 };
+use crate::runtime::dashboard_support::{
+    api_scout_item, api_scout_status, bulk_result_status, should_repair_article,
+};
 use crate::service::url_detect::classify_url;
-use crate::types::dashboard_payloads::{ScoutArticlePayload, ScoutItemPayload};
+use crate::types::dashboard_payloads::ScoutActDraft;
 
 /// List scout items with optional search, status/type filter, and pagination.
 #[tracing::instrument(skip_all)]
@@ -29,7 +31,7 @@ pub async fn list_scout_items(
     item_type: Option<&str>,
     page: Option<usize>,
     per_page: Option<usize>,
-) -> Result<Value> {
+) -> Result<api_types::ScoutResponse> {
     let db = ScoutDb::new(pool.clone());
     let q = ListQuery {
         search: search.filter(|s| !s.is_empty()).map(String::from),
@@ -44,28 +46,27 @@ pub async fn list_scout_items(
     let result = db.query_items(&q).await?;
     let status_counts = db.count_by_status(&q).await?;
     let total_pages = result.total.div_ceil(q.per_page.max(1));
+    let count = result.items.len();
 
-    let items_json: Vec<Value> = result
-        .items
-        .iter()
-        .map(|item| serde_json::to_value(item).unwrap_or(Value::Null))
-        .collect();
-
-    Ok(json!({
-        "items": items_json,
-        "count": result.items.len(),
-        "total": result.total,
-        "page": q.page,
-        "pages": total_pages,
-        "per_page": q.per_page,
-        "filter": status,
-        "status_counts": status_counts,
-    }))
+    Ok(api_types::ScoutResponse {
+        items: result
+            .items
+            .into_iter()
+            .map(|item| api_scout_item(item, None, None))
+            .collect(),
+        count,
+        total: result.total,
+        page: q.page,
+        pages: total_pages,
+        per_page: q.per_page,
+        filter: status.map(str::to_owned),
+        status_counts: Some(status_counts),
+    })
 }
 
 /// Get a single scout item with its summary + article injected from the DB.
 #[tracing::instrument(skip_all)]
-pub async fn get_scout_item(pool: &SqlitePool, id: i64) -> Result<Value> {
+pub async fn get_scout_item(pool: &SqlitePool, id: i64) -> Result<api_types::ScoutItem> {
     let db = ScoutDb::new(pool.clone());
     let item = db.get_item(id).await?.ok_or(ScoutError::NotFound(id))?;
 
@@ -79,32 +80,15 @@ pub async fn get_scout_item(pool: &SqlitePool, id: i64) -> Result<Value> {
             None
         };
 
-    let payload = ScoutItemPayload {
-        id: item.id,
-        rev: item.rev,
-        url: item.url,
-        title: item.title,
-        status: item.status.to_string(),
-        item_type: Some(item.item_type),
-        summary: summary.clone(),
-        has_summary: Some(summary.is_some()),
-        relevance: item.relevance,
-        quality: item.quality,
-        date_added: Some(item.date_added),
-        date_processed: item.date_processed,
-        added_by: item.added_by,
-        source_name: item.source_name,
-        date_published: item.date_published,
-        error_count: Some(item.error_count),
-        research_run_id: item.research_run_id,
-        telegraph_url,
-    };
-    Ok(serde_json::to_value(payload)?)
+    Ok(api_scout_item(item, summary, telegraph_url))
 }
 
 /// Get the full article content for a scout item.
 #[tracing::instrument(skip_all)]
-pub async fn get_scout_article(pool: &SqlitePool, id: i64) -> Result<Value> {
+pub async fn get_scout_article(
+    pool: &SqlitePool,
+    id: i64,
+) -> Result<api_types::ScoutArticleResponse> {
     let db = ScoutDb::new(pool.clone());
     let item = db.get_item(id).await?.ok_or(ScoutError::NotFound(id))?;
 
@@ -115,12 +99,12 @@ pub async fn get_scout_article(pool: &SqlitePool, id: i64) -> Result<Value> {
         .as_deref()
         .and_then(|md| crate::io::telegraph::get_cached_url_if_fresh(id, &title, md));
 
-    Ok(serde_json::to_value(ScoutArticlePayload {
+    Ok(api_types::ScoutArticleResponse {
         id,
         title: item.title,
         article,
         telegraph_url,
-    })?)
+    })
 }
 
 /// Get the full article content for a scout item, healing stale processed
@@ -130,7 +114,7 @@ pub async fn ensure_scout_article(
     pool: &SqlitePool,
     id: i64,
     workflow: &ScoutWorkflow,
-) -> Result<Value> {
+) -> Result<api_types::ScoutArticleResponse> {
     let db = ScoutDb::new(pool.clone());
     let item = db.get_item(id).await?.ok_or(ScoutError::NotFound(id))?;
 
@@ -201,12 +185,12 @@ pub async fn ensure_scout_article(
         .as_deref()
         .and_then(|md| crate::io::telegraph::get_cached_url_if_fresh(id, &title, md));
 
-    Ok(serde_json::to_value(ScoutArticlePayload {
+    Ok(api_types::ScoutArticleResponse {
         id,
         title: item.title,
         article,
         telegraph_url,
-    })?)
+    })
 }
 
 #[tracing::instrument(skip_all)]
@@ -215,9 +199,7 @@ pub async fn publish_scout_item_to_telegraph(
     id: i64,
     workflow: &ScoutWorkflow,
 ) -> Result<String> {
-    let article_val = ensure_scout_article(pool, id, workflow).await?;
-    let article: ScoutArticlePayload = serde_json::from_value(article_val)
-        .context("decode scout article payload for telegraph publish")?;
+    let article = ensure_scout_article(pool, id, workflow).await?;
     let title = article.title.as_deref().unwrap_or("Untitled");
     let article_md = article
         .article
@@ -227,16 +209,13 @@ pub async fn publish_scout_item_to_telegraph(
     crate::io::telegraph::publish_article(id, title, article_md).await
 }
 
-fn should_repair_article(status: ScoutStatus) -> bool {
-    matches!(
-        status,
-        ScoutStatus::Processed | ScoutStatus::Saved | ScoutStatus::Archived
-    )
-}
-
 /// Add a URL to scout.
 #[tracing::instrument(skip_all)]
-pub async fn add_scout_item(pool: &SqlitePool, url: &str, title: Option<&str>) -> Result<Value> {
+pub async fn add_scout_item(
+    pool: &SqlitePool,
+    url: &str,
+    title: Option<&str>,
+) -> Result<api_types::ScoutAddResponse> {
     let db = ScoutDb::new(pool.clone());
     let url_type = classify_url(url);
     let (item, is_new) = db.add_item(url, url_type.as_str(), None).await?;
@@ -247,28 +226,28 @@ pub async fn add_scout_item(pool: &SqlitePool, url: &str, title: Option<&str>) -
         }
     }
 
-    Ok(json!({
-        "added": is_new,
-        "id": item.id,
-        "url": item.url,
-        "type": item.item_type,
-        "status": item.status.as_str(),
-    }))
+    Ok(api_types::ScoutAddResponse {
+        added: is_new,
+        id: item.id,
+        url: item.url,
+        item_type: item.item_type,
+        status: api_scout_status(item.status),
+    })
 }
 
 /// Delete a scout item, its cached files, and linked sessions.
 #[tracing::instrument(skip_all)]
-pub async fn delete_scout_item(pool: &SqlitePool, id: i64) -> Result<Value> {
+pub async fn delete_scout_item(
+    pool: &SqlitePool,
+    id: i64,
+) -> Result<api_types::ScoutDeleteResponse> {
     let db = ScoutDb::new(pool.clone());
     let existed = db.delete_item(id).await?;
     if !existed {
         return Err(ScoutError::NotFound(id).into());
     }
     file_store::delete_item_files(id);
-    Ok(json!({
-        "removed": true,
-        "id": id,
-    }))
+    Ok(api_types::ScoutDeleteResponse { removed: true, id })
 }
 
 /// Apply a typed scout-item lifecycle command.
@@ -293,20 +272,27 @@ pub async fn bulk_apply_scout_item_command(
     pool: &SqlitePool,
     ids: &[i64],
     command: ScoutItemCommand,
-) -> Value {
+) -> api_types::ScoutBulkUpdateResponse {
     let mut updated = 0u32;
-    let mut failed: Vec<Value> = Vec::new();
+    let mut failed: Vec<api_types::BulkFailure> = Vec::new();
 
     for id in ids {
         if let Err(err) = apply_scout_item_command(pool, *id, command).await {
-            failed.push(json!({"id": id, "error": err.to_string()}));
+            failed.push(api_types::BulkFailure {
+                id: *id,
+                error: err.to_string(),
+            });
         } else {
             updated += 1;
         }
     }
 
     let status = bulk_result_status(updated, failed.len());
-    json!({"updated": updated, "failed": failed, "status": status})
+    api_types::ScoutBulkUpdateResponse {
+        updated,
+        failed,
+        status,
+    }
 }
 
 /// Process items — single item or all pending.
@@ -316,17 +302,23 @@ pub async fn process_scout(
     pool: &SqlitePool,
     id: Option<i64>,
     workflow: &ScoutWorkflow,
-) -> Result<Value> {
+) -> Result<api_types::ProcessResponse> {
     let db = ScoutDb::new(pool.clone());
 
     match id {
         Some(item_id) => {
             crate::runtime::process::process_item(config, &db, item_id, workflow).await?;
-            Ok(json!({ "ok": true, "processed": 1 }))
+            Ok(api_types::ProcessResponse {
+                ok: true,
+                processed: 1,
+            })
         }
         None => {
             let count = crate::runtime::process::process_all(config, &db, workflow).await?;
-            Ok(json!({ "ok": true, "processed": count }))
+            Ok(api_types::ProcessResponse {
+                ok: true,
+                processed: count,
+            })
         }
     }
 }
@@ -340,8 +332,8 @@ pub async fn act_on_scout_item(
     project: &str,
     user_prompt: Option<&str>,
     workflow: &ScoutWorkflow,
-) -> Result<Value> {
-    let (_, project_config) = settings::config::resolve_project_config(Some(project), config)
+) -> Result<ScoutActDraft> {
+    let (_, project_config) = settings::resolve_project_config(Some(project), config)
         .ok_or_else(|| ScoutError::UnknownProject(project.to_string()))?;
     let project_name = project_config.name.clone();
     let project_preamble = project_config.worker_preamble.clone();
@@ -372,8 +364,8 @@ pub async fn act_on_scout_item(
     vars.insert("project_preamble", project_preamble.as_str());
     vars.insert("user_prompt", user_prompt_str);
 
-    let prompt = settings::config::render_prompt("act", &workflow.prompts, &vars)
-        .map_err(|e| anyhow::anyhow!(e))?;
+    let prompt =
+        settings::render_prompt("act", &workflow.prompts, &vars).map_err(|e| anyhow::anyhow!(e))?;
 
     info!(id, %project_name, "act: calling AI");
 
@@ -433,7 +425,7 @@ pub async fn act_on_scout_item(
             .unwrap_or("not actionable for this project")
             .to_string();
         info!(id, %reason, "act: skipped");
-        return Ok(json!({ "skipped": true, "reason": reason }));
+        return Ok(ScoutActDraft::Skip { reason });
     }
 
     let task_title = parsed["title"]
@@ -447,54 +439,42 @@ pub async fn act_on_scout_item(
 
     info!(id, %task_title, "act: creating task");
 
-    Ok(json!({
-        "task_title": task_title,
-        "task_description": task_description,
-        "project": project_name,
-        "scout_item_id": id,
-    }))
+    Ok(ScoutActDraft::Create {
+        task_title,
+        task_description,
+        project: project_name,
+        scout_item_id: id,
+    })
 }
 
 #[tracing::instrument(skip_all)]
-pub async fn bulk_delete_scout_items(pool: &SqlitePool, ids: &[i64]) -> Value {
+pub async fn bulk_delete_scout_items(
+    pool: &SqlitePool,
+    ids: &[i64],
+) -> api_types::ScoutBulkDeleteResponse {
     let mut deleted = 0u32;
-    let mut failed: Vec<Value> = Vec::new();
+    let mut failed: Vec<api_types::BulkFailure> = Vec::new();
 
     for id in ids {
         if let Err(err) = delete_scout_item(pool, *id).await {
-            failed.push(json!({"id": id, "error": err.to_string()}));
+            failed.push(api_types::BulkFailure {
+                id: *id,
+                error: err.to_string(),
+            });
         } else {
             deleted += 1;
         }
     }
 
     let status = bulk_result_status(deleted, failed.len());
-    json!({"deleted": deleted, "failed": failed, "status": status})
+    api_types::ScoutBulkDeleteResponse {
+        deleted,
+        failed,
+        status,
+    }
 }
 
 #[tracing::instrument(skip_all)]
 pub async fn scrape_with_firecrawl(url: &str) -> Result<String> {
-    crate::io::firecrawl::scrape(url).await
-}
-
-fn bulk_result_status(success_count: u32, failure_count: usize) -> &'static str {
-    if failure_count > 0 && success_count == 0 {
-        "error"
-    } else if failure_count > 0 {
-        "partial"
-    } else {
-        "ok"
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn bulk_result_status_preserves_route_contract() {
-        assert_eq!(bulk_result_status(2, 0), "ok");
-        assert_eq!(bulk_result_status(2, 1), "partial");
-        assert_eq!(bulk_result_status(0, 1), "error");
-    }
+    crate::io::firecrawl::scrape(url).await.map(|r| r.markdown)
 }

@@ -15,7 +15,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { queryKeys } from '../../../global/repo/queryKeys.ts';
-import type { ClarifierFailedPayload } from '../ui/ClarifierFailedCard.tsx';
+import type { ClarifierFailedPayload } from '../ui/ClarifierFailedCard';
 
 describe('ClarifierFailedCard contract', () => {
   it('renders_retry_button_on_clarifier_failed: payload type accepts api-types wire shape', () => {

@@ -3,6 +3,8 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+use crate::TerminalAgent;
+
 #[derive(Debug, Clone, Serialize, Deserialize, TS, Default)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ClassifyRule {
@@ -89,7 +91,7 @@ pub struct CaptainConfig {
     pub max_concurrent_workers: Option<usize>,
     pub tick_interval_s: u64,
     pub tz: String,
-    pub default_terminal_agent: String,
+    pub default_terminal_agent: TerminalAgent,
     pub claude_terminal_args: String,
     pub codex_terminal_args: String,
     pub projects: HashMap<String, ProjectConfig>,

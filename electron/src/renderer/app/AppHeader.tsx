@@ -1,7 +1,7 @@
 import React from 'react';
 import { cn } from '#renderer/global/service/cn';
-import { useAppHeader } from '#renderer/domains/captain';
-import { CollapsedNavIcons } from '#renderer/app/AppHeaderParts';
+import { useAppHeader } from '#renderer/domains/captain/shell';
+import { AppHeaderNav } from '#renderer/app/AppHeaderNav';
 import { TaskTitleRow, HeaderMetaRow } from '#renderer/app/AppHeaderTask';
 
 interface AppHeaderProps {
@@ -22,7 +22,7 @@ export function AppHeader({
   const { ctx, isTerminalTab, pageTitle, sessions, resumeMut, taskIsRateLimited } = useAppHeader();
 
   const navIcons = sidebarCollapsed ? (
-    <CollapsedNavIcons
+    <AppHeaderNav
       onToggleSidebar={onToggleSidebar}
       onGoBack={onGoBack}
       onGoForward={onGoForward}

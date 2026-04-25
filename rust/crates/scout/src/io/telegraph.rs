@@ -106,15 +106,11 @@ fn cached_url_if_fresh(cache: &TelegraphCache, title: &str, article_md: &str) ->
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 struct TelegraphCache {
     url: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     title: Option<String>,
-    #[serde(
-        default,
-        rename = "articleSha256",
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(rename = "articleSha256", skip_serializing_if = "Option::is_none")]
     article_sha256: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     raw: Option<Value>,
 }
 

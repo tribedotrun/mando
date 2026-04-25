@@ -1,6 +1,6 @@
 import React from 'react';
 import { useScoutPage } from '#renderer/domains/scout/runtime/useScoutPage';
-import { BulkBar } from '#renderer/global/ui/BulkBar';
+import { SelectionToast } from '#renderer/domains/scout/ui/SelectionToast';
 import { ScoutTable } from '#renderer/domains/scout/ui/ScoutTable';
 import { ScoutReader } from '#renderer/domains/scout/ui/ScoutReader';
 import { ScoutQA } from '#renderer/domains/scout/ui/ScoutQA';
@@ -22,27 +22,7 @@ export function ScoutPage({
   onOpenItem,
   onBackToList,
 }: ScoutPageProps): React.ReactElement {
-  const {
-    query,
-    items,
-    page,
-    pages,
-    setQuery,
-    selectedIds,
-    toggleSelect,
-    clearSelection,
-    view,
-    setView,
-    qaOpen,
-    setQaOpen,
-    qaEverOpened,
-    setQaEverOpened,
-    clampedFocusedIndex,
-    searchRef,
-    researchModalOpenRef,
-    handleBulkStatus,
-    handleBulkDelete,
-  } = useScoutPage({ active, activeItemId, onOpenItem, onBackToList });
+  const page = useScoutPage({ active, activeItemId, onOpenItem, onBackToList });
 
   // URL-driven activeItemId takes priority over local view state.
   if (activeItemId) {
@@ -53,55 +33,63 @@ export function ScoutPage({
             key={activeItemId}
             itemId={activeItemId}
             onAsk={() => {
-              setQaOpen((v) => !v);
-              setQaEverOpened(true);
+              page.qa.setOpen((v) => !v);
+              page.qa.setEverOpened(true);
             }}
-            qaOpen={qaOpen}
+            qaOpen={page.qa.open}
           />
         </div>
-        {qaEverOpened && (
-          <div className={`w-[380px] shrink-0 bg-card ${qaOpen ? '' : 'hidden'}`}>
-            <ScoutQA key={activeItemId} itemId={activeItemId} onClose={() => setQaOpen(false)} />
+        {page.qa.everOpened && (
+          <div className={`w-[380px] shrink-0 bg-card ${page.qa.open ? '' : 'hidden'}`}>
+            <ScoutQA
+              key={activeItemId}
+              itemId={activeItemId}
+              onClose={() => page.qa.setOpen(false)}
+            />
           </div>
         )}
       </div>
     );
   }
 
-  if (view === 'research') {
+  if (page.list.view === 'research') {
     return <ScoutResearch />;
   }
 
   return (
     <div className="flex flex-col gap-4">
       <ScoutListHeader
-        query={query}
-        searchRef={searchRef}
-        onQueryChange={setQuery}
-        onResearchHistoryClick={() => setView('research')}
+        query={page.query.params}
+        searchRef={page.focus.searchRef}
+        onQueryChange={page.query.set}
+        onResearchHistoryClick={() => page.list.setView('research')}
         onResearchModalOpenChange={(open) => {
-          researchModalOpenRef.current = open;
+          page.focus.researchModalOpenRef.current = open;
         }}
       />
 
       <ScoutTable
-        items={items}
-        selectedIds={selectedIds}
+        items={page.list.items}
+        selectedIds={page.selection.selectedIds}
         callbacks={{
-          onToggleSelect: toggleSelect,
+          onToggleSelect: page.selection.toggleSelect,
           onSelect: (id) => onOpenItem?.(id),
         }}
-        focusedIndex={clampedFocusedIndex}
+        focusedIndex={page.focus.clampedIndex}
       />
 
-      <ScoutPagination page={page} pages={pages} onPageChange={(p) => setQuery({ page: p })} />
+      <ScoutPagination
+        page={page.query.page}
+        pages={page.query.pages}
+        onPageChange={(p) => page.query.set({ page: p })}
+      />
 
-      <BulkBar
-        count={selectedIds.size}
-        statuses={USER_SETTABLE_STATUSES as unknown as string[]}
-        onDelete={handleBulkDelete}
-        onBulkStatus={handleBulkStatus}
-        onCancel={clearSelection}
+      <SelectionToast
+        count={page.selection.selectedIds.size}
+        statuses={USER_SETTABLE_STATUSES}
+        onDelete={page.actions.handleBulkDelete}
+        onBulkStatus={page.actions.handleBulkStatus}
+        onCancel={page.selection.clearSelection}
       />
     </div>
   );

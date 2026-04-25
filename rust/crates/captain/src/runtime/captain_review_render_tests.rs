@@ -26,8 +26,8 @@ fn base_vars() -> rustc_hash::FxHashMap<&'static str, &'static str> {
 }
 
 fn render(vars: &rustc_hash::FxHashMap<&str, &str>) -> String {
-    let workflow = settings::config::workflow::CaptainWorkflow::compiled_default();
-    settings::config::render_prompt("captain_review", &workflow.prompts, vars).unwrap()
+    let workflow = settings::CaptainWorkflow::compiled_default();
+    settings::render_prompt("captain_review", &workflow.prompts, vars).unwrap()
 }
 
 #[test]
@@ -60,8 +60,8 @@ fn test_template_renders_gates_pass_verdicts() {
         "should have reset_budget verdict"
     );
     assert!(
-        !rendered.contains("**escalate**"),
-        "no escalate for gates_pass"
+        rendered.contains("**escalate**"),
+        "gates_pass now includes escalate as an escape hatch"
     );
     assert!(
         !rendered.contains("**retry_clarifier**"),
@@ -88,8 +88,64 @@ fn test_template_renders_timeout_verdicts() {
         "timeout should have reset_budget"
     );
     assert!(
-        !rendered.contains("**escalate**"),
-        "timeout should NOT have escalate"
+        rendered.contains("**escalate**"),
+        "timeout now includes escalate as an escape hatch"
+    );
+}
+
+#[test]
+fn test_template_renders_broken_session_verdicts() {
+    // broken_session gets its own tier: ship if the work is already done,
+    // respawn if a fresh worker can recover, escalate if respawn would hit
+    // the same wall. It must not offer in-place resume actions.
+    let mut vars = base_vars();
+    vars.insert("trigger", "broken_session");
+    vars.insert("is_broken_session", "true");
+
+    let rendered = render(&vars);
+
+    assert!(
+        rendered.contains("**ship**"),
+        "broken_session should have ship"
+    );
+    assert!(
+        rendered.contains("**respawn**"),
+        "broken_session should have respawn"
+    );
+    assert!(
+        rendered.contains("**escalate**"),
+        "broken_session should have escalate"
+    );
+    assert!(
+        !rendered.contains("**nudge** —"),
+        "broken_session must not offer nudge"
+    );
+    assert!(
+        !rendered.contains("**reset_budget** —"),
+        "broken_session must not offer reset_budget"
+    );
+    assert!(
+        !rendered.contains("Escalation is not available at this tier"),
+        "the old escalation-blocked prose must be gone"
+    );
+}
+
+#[test]
+fn test_template_renders_repeated_nudge_verdicts() {
+    // repeated_nudge also rides the else tier. Same escape-hatch rationale.
+    let mut vars = base_vars();
+    vars.insert("trigger", "repeated_nudge");
+    vars.insert("is_repeated_nudge", "true");
+
+    let rendered = render(&vars);
+
+    assert!(
+        rendered.contains("**escalate**"),
+        "repeated_nudge should have escalate"
+    );
+    assert!(
+        !rendered.contains("Escalation is not available at this tier"),
+        "repeated_nudge no longer blocks escalate"
     );
 }
 

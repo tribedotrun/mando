@@ -6,6 +6,7 @@ use serde_json::json;
 use sqlx::SqlitePool;
 
 use crate::service::lifecycle::{apply_item_command, ScoutItemCommand};
+use crate::ScoutStatus;
 async fn load_status_and_rev(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     id: i64,
@@ -72,7 +73,7 @@ pub async fn update_status(pool: &SqlitePool, id: i64, status: &str) -> Result<(
         bail!("item #{id} not found");
     };
     let command = command_for_status(status)?;
-    let current = super::parse_status(&current_status);
+    let current = super::parse_status(&current_status)?;
     let next = apply_item_command(current, command)?;
     if next == current {
         tx.rollback().await?;
@@ -125,7 +126,7 @@ pub async fn update_status_if(
         return Ok(false);
     }
     let command = command_for_status(status)?;
-    let current = super::parse_status(&current_status);
+    let current = super::parse_status(&current_status)?;
     let next = apply_item_command(current, command)?;
     if next == current {
         tx.rollback().await?;
@@ -175,7 +176,7 @@ pub async fn update_processed(
     let Some((current_status, current_rev)) = load_status_and_rev(&mut tx, id).await? else {
         return Ok(false);
     };
-    let current = super::parse_status(&current_status);
+    let current = super::parse_status(&current_status)?;
     let next = match apply_item_command(current, ScoutItemCommand::MarkProcessed) {
         Ok(next) => next,
         Err(_) => {
@@ -235,7 +236,7 @@ pub async fn increment_error_count(pool: &SqlitePool, id: i64) -> Result<()> {
     let Some((current_status, current_rev)) = load_status_and_rev(&mut tx, id).await? else {
         bail!("item #{id} not found");
     };
-    let current = super::parse_status(&current_status);
+    let current = super::parse_status(&current_status)?;
     let next = apply_item_command(current, ScoutItemCommand::MarkError)?;
     let result = sqlx::query(
         "UPDATE scout_items
@@ -266,12 +267,57 @@ pub async fn increment_error_count(pool: &SqlitePool, id: i64) -> Result<()> {
     Ok(())
 }
 
+pub async fn increment_error_count_if_status(
+    pool: &SqlitePool,
+    id: i64,
+    allowed_statuses: &[ScoutStatus],
+) -> Result<bool> {
+    let mut tx = pool.begin().await?;
+    let Some((current_status, current_rev)) = load_status_and_rev(&mut tx, id).await? else {
+        bail!("item #{id} not found");
+    };
+    let current = super::parse_status(&current_status)?;
+    if !allowed_statuses.contains(&current) {
+        tx.rollback().await?;
+        return Ok(false);
+    }
+    let next = apply_item_command(current, ScoutItemCommand::MarkError)?;
+    let result = sqlx::query(
+        "UPDATE scout_items
+         SET error_count = COALESCE(error_count, 0) + 1, status = ?, rev = rev + 1
+         WHERE id = ? AND rev = ?",
+    )
+    .bind(next.as_str())
+    .bind(id)
+    .bind(current_rev)
+    .execute(&mut *tx)
+    .await?;
+    if result.rows_affected() == 0 {
+        tx.rollback().await?;
+        return Ok(false);
+    }
+    let metadata = json!({"id": id, "from": current_status.clone(), "to": next.as_str()});
+    let transition_id = record_item_transition(
+        &mut tx,
+        id,
+        ScoutItemCommand::MarkError.as_str(),
+        Some(current_status.as_str()),
+        next.as_str(),
+        current_rev,
+        &metadata,
+    )
+    .await?;
+    tx.commit().await?;
+    drain_record_only_outbox(pool, transition_id).await?;
+    Ok(true)
+}
+
 pub async fn reset_error_state(pool: &SqlitePool, id: i64) -> Result<()> {
     let mut tx = pool.begin().await?;
     let Some((current_status, current_rev)) = load_status_and_rev(&mut tx, id).await? else {
         bail!("item #{id} not found");
     };
-    let current = super::parse_status(&current_status);
+    let current = super::parse_status(&current_status)?;
     let next = apply_item_command(current, ScoutItemCommand::MarkPending)?;
     let result = sqlx::query(
         "UPDATE scout_items

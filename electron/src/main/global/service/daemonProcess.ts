@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { SIGTERM_POLL_MS, SIGKILL_SETTLE_MS } from '#main/global/config/lifecycle';
+import { mustParsePositiveIntegerText } from '#main/global/service/boundaryText';
 import { isProcessAlive } from '#main/global/service/lifecycle';
 
 function cleanupStaleDaemonFiles(dataDir: string): void {
@@ -54,10 +55,7 @@ export async function killDaemonByPid(pid: number, dataDir: string) {
 export function readExistingDaemonPid(dataDir: string): number | null {
   const pidFile = path.join(dataDir, 'daemon.pid');
   try {
-    const raw = fs.readFileSync(pidFile, 'utf-8').trim();
-    if (!/^[1-9]\d*$/.test(raw)) return null;
-    const pid = Number(raw);
-    return Number.isSafeInteger(pid) ? pid : null;
+    return mustParsePositiveIntegerText(fs.readFileSync(pidFile, 'utf-8'), `file:${pidFile}`);
   } catch {
     return null;
   }

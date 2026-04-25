@@ -7,7 +7,7 @@
 use anyhow::Result;
 use api_types::TimelineEventPayload;
 use rustc_hash::FxHashMap;
-use settings::config::workflow::CaptainWorkflow;
+use settings::CaptainWorkflow;
 
 use super::dashboard::truncate_utf8;
 
@@ -50,8 +50,7 @@ pub fn build_initial_prompt(
     vars.insert("timeline", timeline_text);
     vars.insert("question", question);
 
-    settings::config::render_prompt("task_ask", &workflow.prompts, &vars)
-        .map_err(|e| anyhow::anyhow!(e))
+    settings::render_prompt("task_ask", &workflow.prompts, &vars).map_err(|e| anyhow::anyhow!(e))
 }
 
 /// Build timeline text from recent events. DB errors are propagated so the

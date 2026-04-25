@@ -3,7 +3,7 @@
 use tracing::warn;
 
 use crate::{ItemStatus, Task, TimelineEventPayload};
-use settings::config::workflow::CaptainWorkflow;
+use settings::CaptainWorkflow;
 
 use super::captain_review_helpers::escaped_title;
 use super::notify::Notifier;

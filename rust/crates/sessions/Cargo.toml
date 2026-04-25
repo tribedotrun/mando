@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+api-types = { path = "../api-types" }
 global-types = { path = "../global-types" }
 global-db = { path = "../global-db" }
 sessions-db = { path = "../sessions-db" }

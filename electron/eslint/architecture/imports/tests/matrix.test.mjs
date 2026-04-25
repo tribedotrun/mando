@@ -186,7 +186,7 @@ describe('renderer app layer', () => {
 
   it('app can import global ui', () => {
     expectClean(
-      lint('src/renderer/app/routes/Foo.tsx', `import { x } from '#renderer/global/ui/button';`),
+      lint('src/renderer/app/routes/Foo.tsx', `import { x } from '#renderer/global/ui/primitives/button';`),
     );
   });
 });

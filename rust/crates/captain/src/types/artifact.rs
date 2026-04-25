@@ -27,7 +27,7 @@ pub struct ArtifactMedia {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub remote_url: Option<String>,
     /// Per-file caption describing what this media shows.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub caption: Option<String>,
 }
 

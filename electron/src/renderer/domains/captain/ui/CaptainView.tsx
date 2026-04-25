@@ -1,14 +1,14 @@
 import React, { useState, useCallback, useRef } from 'react';
 import { useViewKeyHandler } from '#renderer/global/runtime/useKeyboardShortcuts';
-import { MetricsRow } from '#renderer/domains/captain/ui/MetricsRow';
+import { WorkersPanel } from '#renderer/domains/captain/ui/WorkersPanel';
 import { PipelineStats } from '#renderer/domains/captain/ui/PipelineStats';
 import { ActivityStrip } from '#renderer/domains/captain/ui/ActivityStrip';
 import {
   InlineTaskCreate,
   type InlineTaskCreateHandle,
 } from '#renderer/domains/captain/ui/InlineTaskCreate';
-import { ImageFeedbackModal } from '#renderer/global/ui/FeedbackModal';
-import { useTaskNudge, useTaskHandoff } from '#renderer/domains/captain/runtime/hooks';
+import { ImagePromptModal } from '#renderer/global/ui/PromptModal';
+import { useTaskNudge, useTaskStop } from '#renderer/domains/captain/runtime/hooks';
 import type { WorkerDetail } from '#renderer/global/types';
 
 interface Props {
@@ -19,7 +19,7 @@ interface Props {
 export function CaptainView({ active = true, inlineRef: externalRef }: Props): React.ReactElement {
   const [nudgeWorker, setNudgeWorker] = useState<WorkerDetail | null>(null);
   const nudgeMut = useTaskNudge();
-  const handoffMut = useTaskHandoff();
+  const stopMut = useTaskStop();
   const ownRef = useRef<InlineTaskCreateHandle>(null);
   const inlineRef = externalRef ?? ownRef;
 
@@ -44,10 +44,10 @@ export function CaptainView({ active = true, inlineRef: externalRef }: Props): R
 
       {/* Worker panel */}
       <div className="mt-4 w-full max-w-[640px]">
-        <MetricsRow
+        <WorkersPanel
           onNudge={setNudgeWorker}
           onStopWorker={async (worker) => {
-            await handoffMut.mutateAsync({ id: worker.id });
+            await stopMut.mutateAsync({ id: worker.id });
           }}
         />
       </div>
@@ -65,20 +65,19 @@ export function CaptainView({ active = true, inlineRef: externalRef }: Props): R
 
       {/* Nudge modal */}
       {nudgeWorker && (
-        <ImageFeedbackModal
+        <ImagePromptModal
           testId="nudge-modal"
           title="Nudge worker"
           subtitle={nudgeWorker.title}
           placeholder="Nudge message"
           initialValue="Keep going. Ship the next concrete step."
+          draftKey={`nudge:${nudgeWorker.id}`}
           buttonLabel="Nudge"
           pendingLabel="Nudging..."
           isPending={nudgeMut.isPending}
-          onSubmit={(msg, images) => {
-            nudgeMut.mutate(
-              { id: nudgeWorker.id, message: msg, images },
-              { onSuccess: () => setNudgeWorker(null) },
-            );
+          onSubmit={async (msg, images) => {
+            await nudgeMut.mutateAsync({ id: nudgeWorker.id, message: msg, images });
+            setNudgeWorker(null);
           }}
           onCancel={() => setNudgeWorker(null)}
         />

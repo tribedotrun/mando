@@ -19,7 +19,7 @@ export {
   useScoutResearch,
   useScoutAsk,
   useScoutPublishTelegraph,
-} from '#renderer/domains/scout/repo/mutations';
+} from '#renderer/domains/scout/runtime/useFeedbackMutations';
 export { useScoutQASession } from '#renderer/domains/scout/runtime/useScoutQASession';
 
 /** Invalidates all scout queries. Wraps queryKeys so UI never imports repo. */

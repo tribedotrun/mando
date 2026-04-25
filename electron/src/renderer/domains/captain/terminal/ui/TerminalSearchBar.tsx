@@ -1,6 +1,6 @@
 import { Search, ChevronUp, ChevronDown, X } from 'lucide-react';
-import { Button } from '#renderer/global/ui/button';
-import { Input } from '#renderer/global/ui/input';
+import { Button } from '#renderer/global/ui/primitives/button';
+import { Input } from '#renderer/global/ui/primitives/input';
 
 interface TerminalSearchBarProps {
   query: string;

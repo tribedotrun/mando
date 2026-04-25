@@ -91,6 +91,6 @@ pub(crate) async fn get_telegram_health(
         last_error: status.last_error,
         degraded: status.degraded,
         restart_count: u64::from(status.restart_count),
-        mode: status.mode.to_string(),
+        mode: status.mode,
     })
 }

@@ -26,6 +26,8 @@ export default [
     ignores: [
       'src/renderer/global/runtime/useMountEffect.ts',
       'src/renderer/domains/captain/runtime/useDraft.ts',
+      'src/renderer/domains/sessions/runtime/useStickyScroll.ts',
+      'src/renderer/domains/sessions/runtime/useTranscriptEventsStream.ts',
     ],
     rules: {
       'no-restricted-syntax': [

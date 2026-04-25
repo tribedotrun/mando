@@ -4,8 +4,8 @@ use std::collections::{HashMap, HashSet};
 
 use crate::{ItemStatus, Task};
 use global_bus::EventBus;
-use settings::config::settings::Config;
-use settings::config::workflow::CaptainWorkflow;
+use settings::CaptainWorkflow;
+use settings::Config;
 use tokio_util::task::TaskTracker;
 
 use crate::runtime::dashboard::truncate_utf8;
@@ -232,19 +232,6 @@ pub(crate) async fn dispatch_new_work(
         max_clarifier_retries,
         pool,
         bus,
-        task_tracker,
-    )
-    .await;
-
-    super::dispatch_reclarify::reclarify_items(
-        items,
-        config,
-        workflow,
-        dry_run,
-        dry_actions,
-        alerts,
-        max_clarifier_retries,
-        pool,
         task_tracker,
     )
     .await;

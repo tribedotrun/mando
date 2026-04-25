@@ -74,36 +74,10 @@ pub fn first_project_path(cfg: &Config) -> Option<String> {
         .map(|rc| rc.path.clone())
 }
 
-pub fn detect_github_repo(path: &str) -> Option<String> {
-    let abs = global_infra::paths::expand_tilde(path);
-    let child = std::process::Command::new("git")
-        .args(["remote", "get-url", "origin"])
-        .current_dir(&abs)
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .ok()?;
-    let output = child.wait_with_output().ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let url = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    parse_github_slug(&url)
+pub async fn detect_github_repo(path: &str) -> Option<String> {
+    global_git::detect_github_repo(path).await
 }
 
 pub fn parse_github_slug(url: &str) -> Option<String> {
-    let url = url.trim();
-    if let Some(rest) = url.strip_prefix("git@github.com:") {
-        let slug = rest.trim_end_matches(".git");
-        if slug.contains('/') {
-            return Some(slug.to_string());
-        }
-    }
-    if let Some(idx) = url.find("github.com/") {
-        let slug = url[idx + "github.com/".len()..].trim_end_matches(".git");
-        if slug.contains('/') && !slug.contains(' ') {
-            return Some(slug.to_string());
-        }
-    }
-    None
+    global_git::parse_github_slug(url)
 }

@@ -1,4 +1,5 @@
 pub use binary::resolve_claude_binary;
+pub use broken_session::{ detect_image_dimension_blocked, stream_broken_session_symptom, BrokenSessionMatch, BrokenSessionOrigin, };
 pub use codex_exec::codex_exec;
 pub use config::{CcConfig, CcConfigBuilder, Effort, PermissionMode, TaskBudget, ThinkingConfig};
 pub use credentials::{credential_id, with_credential};
@@ -6,11 +7,13 @@ pub use error::{CcError, ErrorClass};
 pub use json_parse::{parse_llm_json, parse_llm_json_as};
 pub use message::{ AssistantMessage, CcMessage, ContentBlock, InitMessage, RateLimitEvent, RateLimitStatus, ResultMessage, ResultSubtype, };
 pub use oneshot::CcOneShot;
+pub use pricing::{fallback_rate, rate_for_model, ModelRate};
 pub use process::{get_cpu_time, is_process_alive, kill_process, spawn_detached};
 pub use session::CcSession;
 pub use stream::{ get_last_assistant_text, get_stream_cost, get_stream_file_size, get_stream_result, has_rate_limit_rejection, is_clean_result, last_rate_limit_status, stream_has_broken_session, stream_stale_seconds, write_error_result, RateLimitRejection, StreamCostInfo, StreamRateLimitInfo, };
-pub use stream_symptoms::{detect_cc_stream_symptom, CcStreamSymptom};
-pub use transcript::{ parse_messages, session_cost, tool_usage, SessionCost, ToolUsageSummary, TranscriptMessage, };
+pub use stream_symptoms::{CcStreamSymptom, StreamSymptomMatcher, StreamSymptomRule};
+pub use transcript::{ parse_messages, session_cost, session_cost_or_estimate, tool_usage, ModelUsage, SessionCost, ToolUsageSummary, TranscriptMessage, };
+pub use transcript_events::{ parse_events, parse_events_from_offset, parse_events_with_size, stream_file_size, };
 pub struct CcEnvelope
 pub struct CcResult
 pub struct SessionMeta

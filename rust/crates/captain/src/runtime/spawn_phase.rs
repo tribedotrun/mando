@@ -2,9 +2,9 @@
 
 use crate::{Action, ActionKind, Task};
 use anyhow::Result;
-use settings::config::settings::Config;
+use settings::Config;
 
-use settings::config::workflow::CaptainWorkflow;
+use settings::CaptainWorkflow;
 
 /// Execute a single captain action against the live item list.
 #[tracing::instrument(skip_all, fields(module = "captain", action_kind = ?action.action, worker = %action.worker))]

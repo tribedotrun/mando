@@ -5,6 +5,8 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+use crate::ItemStatus;
+
 // ── Timeline event payloads (replaces Value on TimelineEvent.data) ──────
 //
 // Tagged discriminated union: one variant per event kind, selected by the
@@ -148,8 +150,8 @@ pub enum TimelineEventPayload {
         content: String,
         worker: String,
         session_id: String,
-        from: String,
-        to: String,
+        from: ItemStatus,
+        to: ItemStatus,
         source: String,
     },
     HumanAsk {
@@ -166,7 +168,7 @@ pub enum TimelineEventPayload {
     },
     ReworkRequested {
         content: String,
-        to: String,
+        to: ItemStatus,
     },
     Merged {
         pr: String,
@@ -188,9 +190,11 @@ pub enum TimelineEventPayload {
         fail_count: i64,
     },
     /// The clarifier turn failed at the CC transport layer (as opposed to a
-    /// structured "escalate" verdict). Emitted both by the HTTP inline path
-    /// (`answer_and_reclarify` error) and by the captain tick path
-    /// (background clarifier revert). Renderer surfaces a "CC errored —
+    /// structured "escalate" verdict). Emitted by the HTTP inline path
+    /// (`answer_and_reclarify` error), by the captain tick path's
+    /// initial-clarifier revert (`dispatch_redispatch::revert_clarifier_start`),
+    /// and by startup reconciliation when a task is unstranded from
+    /// `Clarifying` after a daemon crash. Renderer surfaces a "CC errored —
     /// retry" card distinct from stale `needs-clarification`.
     ///
     /// Sentinel encoding (per PR #889's no-`Option` rule):
@@ -210,8 +214,11 @@ pub enum TimelineEventPayload {
         canceled_by: String,
     },
     HandedOff {
-        to: String,
+        to: ItemStatus,
         handed_off_by: String,
+    },
+    Stopped {
+        stopped_by: String,
     },
     CompletedNoPr {
         action: String,
@@ -224,26 +231,26 @@ pub enum TimelineEventPayload {
         session_id: String,
     },
     StatusChanged {
-        from: String,
-        to: String,
+        from: ItemStatus,
+        to: ItemStatus,
     },
     StatusChangedByCommand {
-        from: String,
-        to: String,
+        from: ItemStatus,
+        to: ItemStatus,
         command: String,
     },
     StatusChangedQueued {
-        to: String,
+        to: ItemStatus,
         reason: String,
     },
     StatusChangedRetryMerge {
-        from: String,
-        to: String,
+        from: ItemStatus,
+        to: ItemStatus,
         pr: i64,
     },
     StatusChangedClarifierFail {
-        from: String,
-        to: String,
+        from: ItemStatus,
+        to: ItemStatus,
         session_id: String,
         error: String,
     },
@@ -339,6 +346,7 @@ impl TimelineEventPayload {
             Self::Canceled { .. } => "canceled",
             Self::CanceledByHuman { .. } => "canceled_by_human",
             Self::HandedOff { .. } => "handed_off",
+            Self::Stopped { .. } => "stopped",
             Self::CompletedNoPr { .. } => "completed_no_pr",
             Self::ClarifierCompletedNoPr { .. } => "clarifier_completed_no_pr",
             Self::StatusChanged { .. } => "status_changed",

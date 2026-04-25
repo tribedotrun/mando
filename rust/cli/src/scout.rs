@@ -2,6 +2,7 @@
 
 use clap::{Args, Subcommand};
 
+use crate::gateway_paths as paths;
 use crate::http::DaemonClient;
 
 #[derive(Args)]
@@ -148,7 +149,7 @@ async fn handle_list(status: Option<&str>) -> anyhow::Result<()> {
     if let Some(s) = status {
         params.push(format!("status={s}"));
     }
-    let path = format!("/api/scout/items?{}", params.join("&"));
+    let path = paths::scout_items_query(params.join("&"));
     let result: api_types::ScoutResponse = client.get_json(&path).await?;
 
     println!("{:>4}  {:<10}  {:<12}  TITLE", "ID", "STATUS", "TYPE");
@@ -173,7 +174,7 @@ async fn handle_add(url: &str, title: Option<&str>) -> anyhow::Result<()> {
     let client = DaemonClient::discover()?;
     let result: api_types::ScoutAddResponse = client
         .post_json(
-            "/api/scout/items",
+            paths::SCOUT_ITEMS,
             &api_types::ScoutAddRequest {
                 url: url.to_string(),
                 title: title.map(str::to_string),
@@ -186,7 +187,7 @@ async fn handle_add(url: &str, title: Option<&str>) -> anyhow::Result<()> {
 
 async fn handle_show(id: i64) -> anyhow::Result<()> {
     let client = DaemonClient::discover()?;
-    let result: api_types::ScoutItem = client.get_json(&format!("/api/scout/items/{id}")).await?;
+    let result: api_types::ScoutItem = client.get_json(&paths::scout_item(id)).await?;
 
     println!(
         "Item #{id}: {}",
@@ -219,7 +220,7 @@ fn lifecycle_command_for_status(
 async fn handle_delete(id: i64) -> anyhow::Result<()> {
     let client = DaemonClient::discover()?;
     client
-        .delete_json::<api_types::ScoutDeleteResponse>(&format!("/api/scout/items/{id}"))
+        .delete_json::<api_types::ScoutDeleteResponse>(&paths::scout_item(id))
         .await?;
     println!("Deleted scout item #{id}.");
     Ok(())
@@ -232,7 +233,7 @@ async fn handle_bulk_delete(ids: &[i64]) -> anyhow::Result<()> {
     let client = DaemonClient::discover()?;
     let result: api_types::ScoutBulkDeleteResponse = client
         .post_json(
-            "/api/scout/bulk-delete",
+            paths::SCOUT_BULK_DELETE,
             &api_types::ScoutBulkDeleteRequest { ids: ids.to_vec() },
         )
         .await?;
@@ -245,7 +246,7 @@ async fn handle_status(id: i64, status: &str) -> anyhow::Result<()> {
     let command = lifecycle_command_for_status(status)?;
     client
         .patch_json::<api_types::BoolOkResponse, _>(
-            &format!("/api/scout/items/{id}"),
+            &paths::scout_item(id),
             &api_types::ScoutLifecycleCommandRequest { command },
         )
         .await?;
@@ -261,7 +262,7 @@ async fn handle_bulk_status(status: &str, ids: &[i64]) -> anyhow::Result<()> {
     let command = lifecycle_command_for_status(status)?;
     let result: api_types::ScoutBulkUpdateResponse = client
         .post_json(
-            "/api/scout/bulk",
+            paths::SCOUT_BULK,
             &api_types::ScoutBulkCommandRequest {
                 ids: ids.to_vec(),
                 command,
@@ -278,7 +279,7 @@ async fn handle_list_with_summaries(status: Option<&str>) -> anyhow::Result<()> 
     if let Some(s) = status {
         params.push(format!("status={s}"));
     }
-    let path = format!("/api/scout/items?{}", params.join("&"));
+    let path = paths::scout_items_query(params.join("&"));
     let result: api_types::ScoutResponse = client.get_json(&path).await?;
 
     for item in &result.items {
@@ -290,7 +291,7 @@ async fn handle_list_with_summaries(status: Option<&str>) -> anyhow::Result<()> 
         println!("#{} [{}] {title}{scores}", item.id, item.status);
 
         match client
-            .get_json::<api_types::ScoutItem>(&format!("/api/scout/items/{}", item.id))
+            .get_json::<api_types::ScoutItem>(&paths::scout_item(item.id))
             .await
         {
             Ok(full) => {
@@ -313,9 +314,8 @@ async fn handle_list_with_summaries(status: Option<&str>) -> anyhow::Result<()> 
 
 async fn handle_read(id: i64) -> anyhow::Result<()> {
     let client = DaemonClient::discover()?;
-    let result: api_types::ScoutArticleResponse = client
-        .get_json(&format!("/api/scout/items/{id}/article"))
-        .await?;
+    let result: api_types::ScoutArticleResponse =
+        client.get_json(&paths::scout_article(id)).await?;
 
     println!("# {}\n", result.title.as_deref().unwrap_or("(no title)"));
     if let Some(article) = result.article.as_deref() {
@@ -333,7 +333,7 @@ async fn handle_ask(id: i64, session: Option<&str>, question: &str) -> anyhow::R
     let client = DaemonClient::discover()?;
     let result: api_types::AskResponse = client
         .post_json(
-            "/api/scout/ask",
+            paths::SCOUT_ASK,
             &api_types::ScoutAskRequest {
                 id,
                 question: question.to_string(),
@@ -358,7 +358,7 @@ async fn handle_research(topic: &str) -> anyhow::Result<()> {
     println!("Researching: {topic}...");
     let result: api_types::ResearchStartResponse = client
         .post_json(
-            "/api/scout/research",
+            paths::SCOUT_RESEARCH,
             &api_types::ScoutResearchRequest {
                 topic: topic.to_string(),
                 process: Some(true),
@@ -370,9 +370,8 @@ async fn handle_research(topic: &str) -> anyhow::Result<()> {
 
     loop {
         tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-        let run: api_types::ScoutResearchRun = client
-            .get_json(&format!("/api/scout/research/{run_id}"))
-            .await?;
+        let run: api_types::ScoutResearchRun =
+            client.get_json(&paths::scout_research_run(run_id)).await?;
         match run.status.as_str() {
             "done" => {
                 println!("Research complete: {} link(s) added.", run.added_count);
@@ -395,7 +394,7 @@ async fn handle_act(id: i64, project: &str, prompt: &str) -> anyhow::Result<()> 
     let client = DaemonClient::discover()?;
     let result: api_types::ActResponse = client
         .post_json(
-            &format!("/api/scout/items/{id}/act"),
+            &paths::scout_act(id),
             &api_types::ScoutActRequest {
                 project: project.to_string(),
                 prompt: (!prompt.is_empty()).then(|| prompt.to_string()),
@@ -408,18 +407,16 @@ async fn handle_act(id: i64, project: &str, prompt: &str) -> anyhow::Result<()> 
 
 async fn handle_publish(id: i64) -> anyhow::Result<()> {
     let client = DaemonClient::discover()?;
-    let result: api_types::TelegraphPublishResponse = client
-        .post_no_body(&format!("/api/scout/items/{id}/telegraph"))
-        .await?;
+    let result: api_types::TelegraphPublishResponse =
+        client.post_no_body(&paths::scout_telegraph(id)).await?;
     println!("{}", result.url);
     Ok(())
 }
 
 async fn handle_sessions(id: i64) -> anyhow::Result<()> {
     let client = DaemonClient::discover()?;
-    let result: Vec<api_types::ScoutItemSession> = client
-        .get_json(&format!("/api/scout/items/{id}/sessions"))
-        .await?;
+    let result: Vec<api_types::ScoutItemSession> =
+        client.get_json(&paths::scout_sessions(id)).await?;
     if result.is_empty() {
         println!("No sessions linked to scout item #{id}.");
         return Ok(());

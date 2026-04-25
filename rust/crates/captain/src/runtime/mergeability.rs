@@ -2,8 +2,8 @@
 
 use crate::Task;
 use anyhow::Result;
-use settings::config::settings::Config;
-use settings::config::workflow::CaptainWorkflow;
+use settings::CaptainWorkflow;
+use settings::Config;
 
 use crate::io::health_store::HealthState;
 use crate::runtime::mergeability_rebase::{
@@ -42,7 +42,7 @@ pub(crate) async fn check_done_mergeability(
                 let repo = it
                     .github_repo
                     .clone()
-                    .or_else(|| settings::config::resolve_github_repo(Some(&it.project), config))?;
+                    .or_else(|| settings::resolve_github_repo(Some(&it.project), config))?;
                 Some((i, repo, branch))
             })
             .collect();
@@ -50,7 +50,7 @@ pub(crate) async fn check_done_mergeability(
         if !discover_jobs.is_empty() {
             let futs: Vec<_> = discover_jobs
                 .iter()
-                .map(|(_, repo, branch)| crate::io::github::discover_pr_for_branch(repo, branch))
+                .map(|(_, repo, branch)| global_github::discover_pr_for_branch(repo, branch))
                 .collect();
             let results = futures::future::join_all(futs).await;
 
@@ -83,7 +83,7 @@ pub(crate) async fn check_done_mergeability(
             let repo = item
                 .github_repo
                 .clone()
-                .or_else(|| settings::config::resolve_github_repo(Some(&item.project), config))
+                .or_else(|| settings::resolve_github_repo(Some(&item.project), config))
                 .or_else(|| {
                     tracing::debug!(
                         module = "captain",
@@ -151,7 +151,7 @@ pub(crate) async fn check_done_mergeability(
             let repo = item
                 .github_repo
                 .clone()
-                .or_else(|| settings::config::resolve_github_repo(Some(&item.project), config))?;
+                .or_else(|| settings::resolve_github_repo(Some(&item.project), config))?;
             let pr = crate::pr_url(&repo, pr_num);
             Some((idx, pr, repo))
         })

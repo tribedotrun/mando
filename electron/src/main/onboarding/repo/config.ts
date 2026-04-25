@@ -107,7 +107,12 @@ export function registerConfigHandlers(): void {
           body: { config },
         });
         if (!resp.ok) {
-          const detail = await resp.text().catch(() => '');
+          let detail = '';
+          try {
+            detail = await resp.text();
+          } catch {
+            detail = '';
+          }
           throw new Error(
             `postConfigSetup failed: HTTP ${resp.status}${detail ? ` ${detail.slice(0, 120)}` : ''}`,
           );

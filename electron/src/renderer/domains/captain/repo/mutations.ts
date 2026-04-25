@@ -6,6 +6,7 @@ export {
   useTaskRetry,
   useResumeRateLimited,
   useTaskHandoff,
+  useTaskStop,
   useTaskReopen,
   useTaskAskReopen,
   useTaskRework,

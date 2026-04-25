@@ -1,5 +1,5 @@
 import React from 'react';
-import { Input } from '#renderer/global/ui/input';
+import { Input } from '#renderer/global/ui/primitives/input';
 import { useWorkbenchRenameInput } from '#renderer/global/runtime/useWorkbenchRenameInput';
 
 interface RenameInputProps {

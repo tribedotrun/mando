@@ -1,5 +1,6 @@
 //! I/O layer for the settings domain.
 
+pub mod cc_failover;
 pub mod config_fs;
 pub mod credentials;
 pub mod git_repo;

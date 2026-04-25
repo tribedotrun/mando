@@ -122,22 +122,9 @@ export function useImageLightbox({ imageCount, index, onClose, onNavigate }: Arg
   const hasNext = safeIndex < imageCount - 1;
 
   return {
-    safeIndex,
-    zoom,
-    pan,
-    dragging,
-    imgError,
-    hasPrev,
-    hasNext,
-    imgRef,
-    dialogRef,
-    navigate,
-    onKeyDown,
-    onWheel,
-    onPointerDown,
-    onPointerMove,
-    onPointerUp,
-    onBackdropClick,
-    onImgError: () => setImgError(true),
+    view: { safeIndex, zoom, pan, dragging, imgError, hasPrev, hasNext },
+    refs: { imgRef, dialogRef },
+    actions: { navigate, onImgError: () => setImgError(true) },
+    events: { onKeyDown, onWheel, onPointerDown, onPointerMove, onPointerUp, onBackdropClick },
   };
 }

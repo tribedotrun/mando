@@ -2,8 +2,11 @@
 
 use super::*;
 
+#[path = "deterministic_stream_symptom_tests.rs"]
+mod stream_symptom;
+
 fn test_nudges() -> HashMap<String, String> {
-    settings::config::workflow::CaptainWorkflow::compiled_default().nudges
+    settings::CaptainWorkflow::compiled_default().nudges
 }
 
 const TIMEOUT: std::time::Duration = std::time::Duration::from_secs(21600);
@@ -13,6 +16,7 @@ const STALE: std::time::Duration = std::time::Duration::from_secs(1200);
 /// These test constants are the equivalent f64 forms for building contexts.
 const STALE_F64: f64 = 1200.0;
 const MAX_INT: u32 = 50;
+const NO_PR_MIN_ACTIVE: std::time::Duration = std::time::Duration::from_secs(180);
 
 fn base_ctx() -> WorkerContext {
     WorkerContext {
@@ -57,18 +61,62 @@ fn base_item() -> Task {
     item
 }
 
+fn test_symptoms() -> global_claude::StreamSymptomMatcher {
+    global_claude::StreamSymptomMatcher::new(
+        settings::CaptainWorkflow::compiled_default().stream_symptoms,
+    )
+}
+
 fn classify(ctx: &WorkerContext, item: &Task, stream: Option<bool>) -> Action {
     classify_worker(
         ctx,
         Some(item),
         stream,
         false,
+        None,
         &test_nudges(),
+        &test_symptoms(),
         TIMEOUT,
         STALE,
         MAX_INT,
+        NO_PR_MIN_ACTIVE,
     )
     .expect("nudge templates render")
+}
+
+/// Classify with a stream_path — used by tests that exercise the structural
+/// broken-session detector. Callers own the path (typically a `tempfile`
+/// or a unique temp-dir entry so parallel nextest runs don't collide).
+fn classify_with_path(
+    ctx: &WorkerContext,
+    item: &Task,
+    stream: Option<bool>,
+    stream_path: &std::path::Path,
+) -> Action {
+    classify_worker(
+        ctx,
+        Some(item),
+        stream,
+        false,
+        Some(stream_path),
+        &test_nudges(),
+        &test_symptoms(),
+        TIMEOUT,
+        STALE,
+        MAX_INT,
+        NO_PR_MIN_ACTIVE,
+    )
+    .expect("nudge templates render")
+}
+
+/// Write a JSONL stream file under a unique temp dir and return its path.
+/// Returned path is valid for the test's lifetime (OS cleans tmp eventually).
+pub(super) fn write_test_stream(test_name: &str, lines: &[&str]) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!("mando-captain-det-{}", test_name));
+    std::fs::create_dir_all(&dir).expect("create temp dir");
+    let path = dir.join(format!("{test_name}.jsonl"));
+    std::fs::write(&path, lines.join("\n")).expect("write stream");
+    path
 }
 
 // ── Rule 1: TIMEOUT ──
@@ -106,10 +154,13 @@ fn timeout_disabled_when_zero() {
         Some(&base_item()),
         None,
         false,
+        None,
         &test_nudges(),
+        &test_symptoms(),
         std::time::Duration::ZERO,
         STALE,
         MAX_INT,
+        NO_PR_MIN_ACTIVE,
     )
     .expect("nudge templates render");
     // Should NOT be CaptainReview with reason "timeout"
@@ -302,12 +353,23 @@ fn reopen_ack_missing_nudge() {
 
 #[test]
 fn image_dimension_blocked_nudge() {
+    // Dimension errors show up as `user/tool_result/is_error:true` content —
+    // structural detection walks the stream events, finds this shape, and
+    // routes the nudge. Previously ctx.stream_tail carried a `[user]` marker
+    // and the substring check missed the error entirely (dead code).
+    let path = write_test_stream(
+        "image_dimension_nudge",
+        &[
+            r#"{"type":"system","subtype":"init"}"#,
+            r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"Read","input":{}}]}}"#,
+            r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","is_error":true,"content":"Error: image exceeds the dimension limit of 2000px"}]}}"#,
+        ],
+    );
     let mut ctx = base_ctx();
     ctx.process_alive = false;
-    ctx.stream_tail = "Error: image exceeds the dimension limit of 2000px".into();
-    // Use Some(false) — errored stream so gates don't pass, but stream result exists
-    // so missing_gate_nudge kicks in and finds image blocking.
-    let a = classify(&ctx, &base_item(), Some(false));
+    // Use Some(false) — errored stream so gates don't pass, but stream result
+    // exists so missing_gate_nudge kicks in and finds image blocking.
+    let a = classify_with_path(&ctx, &base_item(), Some(false), &path);
     assert_eq!(a.action, ActionKind::Nudge);
     assert!(a.reason.unwrap().contains("image"));
 }
@@ -373,10 +435,13 @@ fn broken_session_with_error_result_triggers_review() {
         Some(&base_item()),
         Some(false), // error result exists
         true,        // has_broken_session = true (content, no init)
+        None,
         &test_nudges(),
+        &test_symptoms(),
         TIMEOUT,
         STALE,
         MAX_INT,
+        NO_PR_MIN_ACTIVE,
     )
     .expect("nudge templates render");
     assert_eq!(a.action, ActionKind::CaptainReview);
@@ -419,10 +484,13 @@ fn always_returns_action() {
         Some(&base_item()),
         None,
         false,
+        None,
         &test_nudges(),
+        &test_symptoms(),
         TIMEOUT,
         STALE,
         MAX_INT,
+        NO_PR_MIN_ACTIVE,
     )
     .expect("nudge templates render");
 }

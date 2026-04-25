@@ -1,42 +1,75 @@
 use std::collections::HashSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::Context;
 use sqlx::SqlitePool;
 
+/// Snapshot payload for `/api/sessions/{id}/events` + starting cursor for the
+/// SSE tail loop. The `stream_path` + `byte_offset` let the stream handler
+/// resume parsing new JSONL lines without re-reading history.
+pub struct EventsSnapshot {
+    pub events: Vec<api_types::TranscriptEvent>,
+    pub is_running: bool,
+    pub stream_path: Option<PathBuf>,
+    pub byte_offset: u64,
+    pub next_line: u32,
+}
+
 #[tracing::instrument(skip_all)]
-pub async fn load_transcript_markdown(
+pub async fn load_events_snapshot(
+    pool: &SqlitePool,
+    session_id: &str,
+) -> anyhow::Result<Option<EventsSnapshot>> {
+    // Prefer the Mando-owned `cc-streams/` path; otherwise fall back to the
+    // CC-native `~/.claude/projects/` layout so sessions started outside
+    // Mando or recovered after cache eviction still surface (regression
+    // from the old markdown path, flagged on PR #975 devin review).
+    let stream = match stream_path_for_session(session_id).await? {
+        Some(stream) => stream,
+        None => {
+            let cwd = crate::io::queries::session_cwd(pool, session_id).await?;
+            match find_cc_transcript_path(session_id, cwd.as_deref()).await? {
+                Some(path) => path,
+                None => return Ok(None),
+            }
+        }
+    };
+    // Atomic read: events + byte_offset + line_count all come from the
+    // same read so (a) the SSE tail cannot skip lines that appended
+    // between two separate reads, and (b) next_line stays aligned with
+    // the source file even when empty lines are present (both flagged
+    // on PR #975 review).
+    let (events, byte_offset, line_count) = global_claude::parse_events_with_size(&stream);
+    let next_line = line_count.saturating_add(1);
+    let is_running = is_session_running(session_id).await;
+    Ok(Some(EventsSnapshot {
+        events,
+        is_running,
+        stream_path: Some(stream),
+        byte_offset,
+        next_line,
+    }))
+}
+
+/// Resolve the absolute path of the session's underlying JSONL file on disk,
+/// preferring the Mando-owned stream under `~/.mando/state/cc-streams/` and
+/// falling back to the CC-native `~/.claude/projects/` layout. Returns `None`
+/// when neither file exists.
+#[tracing::instrument(skip_all)]
+pub async fn load_jsonl_path(
     pool: &SqlitePool,
     session_id: &str,
 ) -> anyhow::Result<Option<String>> {
-    let cache_dir = global_infra::paths::state_dir().join("transcripts");
-    let md_path = cache_dir.join(format!("{session_id}.md"));
-    if let Ok(content) = tokio::fs::read_to_string(&md_path).await {
-        return Ok(Some(content));
+    if let Some(stream) = stream_path_for_session(session_id).await? {
+        return Ok(Some(stream.to_string_lossy().into_owned()));
     }
 
     let cwd = crate::io::queries::session_cwd(pool, session_id).await?;
-    let Some(jsonl) = find_cc_transcript(session_id, cwd.as_deref()).await? else {
-        return Ok(None);
-    };
-
-    let markdown = crate::io::transcript::jsonl_to_markdown(&jsonl);
-    if !is_session_running(session_id).await {
-        if let Err(err) = tokio::fs::create_dir_all(&cache_dir).await {
-            tracing::warn!(module = "sessions", error = %err, "failed to create transcript cache dir");
-        } else if let Err(err) =
-            tokio::fs::write(cache_dir.join(format!("{session_id}.md")), &markdown).await
-        {
-            tracing::warn!(
-                module = "sessions",
-                session_id = %session_id,
-                error = %err,
-                "failed to cache transcript",
-            );
-        }
+    if let Some(path) = find_cc_transcript_path(session_id, cwd.as_deref()).await? {
+        return Ok(Some(path.to_string_lossy().into_owned()));
     }
 
-    Ok(Some(markdown))
+    Ok(None)
 }
 
 #[tracing::instrument(skip_all)]
@@ -167,25 +200,19 @@ async fn is_session_running(session_id: &str) -> bool {
         StreamMeta::Missing => false,
     }
 }
-
-async fn find_cc_transcript(session_id: &str, cwd: Option<&str>) -> anyhow::Result<Option<String>> {
-    let Some(home) = std::env::var("HOME").ok() else {
+async fn find_cc_transcript_path(
+    session_id: &str,
+    cwd: Option<&str>,
+) -> anyhow::Result<Option<PathBuf>> {
+    let Some(projects_dir) = cc_projects_dir() else {
         return Ok(None);
     };
-    let projects_dir = PathBuf::from(home).join(".claude").join("projects");
     let target = format!("{session_id}.jsonl");
+    let effective_cwd = resolve_effective_cwd(session_id, cwd).await;
 
-    let effective_cwd = match cwd.map(String::from) {
-        Some(cwd) => Some(cwd),
-        None => lookup_cwd_from_meta(session_id).await,
-    };
-    if let Some(cwd) = effective_cwd {
-        if !cwd.is_empty() {
-            let sanitized = cwd.replace('/', "-");
-            let path = projects_dir.join(&sanitized).join(&target);
-            if let Ok(content) = tokio::fs::read_to_string(&path).await {
-                return Ok(Some(content));
-            }
+    if let Some(path) = cwd_candidate(&projects_dir, effective_cwd.as_deref(), &target) {
+        if tokio::fs::try_exists(&path).await.unwrap_or(false) {
+            return Ok(Some(path));
         }
     }
 
@@ -198,12 +225,34 @@ async fn find_cc_transcript(session_id: &str, cwd: Option<&str>) -> anyhow::Resu
         .with_context(|| format!("failed to read {}", projects_dir.display()))?;
     while let Some(entry) = entries.next_entry().await? {
         let candidate = entry.path().join(&target);
-        if let Ok(content) = tokio::fs::read_to_string(&candidate).await {
-            return Ok(Some(content));
+        if tokio::fs::try_exists(&candidate).await.unwrap_or(false) {
+            return Ok(Some(candidate));
         }
     }
 
     Ok(None)
+}
+
+fn cc_projects_dir() -> Option<PathBuf> {
+    std::env::var("HOME")
+        .ok()
+        .map(|home| PathBuf::from(home).join(".claude").join("projects"))
+}
+
+async fn resolve_effective_cwd(session_id: &str, cwd: Option<&str>) -> Option<String> {
+    match cwd.map(String::from) {
+        Some(cwd) => Some(cwd),
+        None => lookup_cwd_from_meta(session_id).await,
+    }
+}
+
+fn cwd_candidate(projects_dir: &Path, cwd: Option<&str>, target: &str) -> Option<PathBuf> {
+    let cwd = cwd?;
+    if cwd.is_empty() {
+        return None;
+    }
+    let sanitized = cwd.replace('/', "-");
+    Some(projects_dir.join(sanitized).join(target))
 }
 
 async fn lookup_cwd_from_meta(session_id: &str) -> Option<String> {

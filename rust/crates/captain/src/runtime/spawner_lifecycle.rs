@@ -5,47 +5,86 @@ use std::path::Path;
 use crate::Task;
 use anyhow::{Context, Result};
 use rustc_hash::FxHashMap;
-use settings::config::settings::{Config, ProjectConfig};
-use settings::config::workflow::CaptainWorkflow;
+use settings::CaptainWorkflow;
+use settings::{Config, ProjectConfig};
 
-use crate::io::{git, pid_registry, process_manager};
+use crate::io::{pid_registry, process_manager};
 use crate::runtime::spawner;
 
 /// Result of a lifecycle operation (restart/rework/reopen).
-#[allow(dead_code)]
 pub struct LifecycleResult {
     pub session_name: String,
     pub session_id: String,
-    pub pid: crate::Pid,
     pub branch: String,
     pub worktree: String,
+    /// Post-op absolute state: the PR the task is on *after* this call.
+    /// Resume carries the existing PR through; fresh-spawn surfaces the
+    /// freshly-created one, or `None` when `create_draft_pr` failed. Caller
+    /// overwrites `item.pr_number` with this value unconditionally.
+    pub pr_number: Option<i64>,
 }
 
-/// Clean old worktree and spawn a completely fresh worker.
+/// Reset the worktree in place and spawn a fresh worker.
+///
+/// Invoked when reopen detects a broken CC session (no init event in the
+/// stream). Captain invariant #4 in CLAUDE.md: a task's worktree is
+/// permanent once assigned, so we do NOT delete the worktree dir. Clearing
+/// `item.branch` steers the spawner's 3-way match (`spawner.rs:51-75`)
+/// into its Rework arm, which does `git reset --hard && git clean -fd &&
+/// git checkout -B <new_branch> origin/main` to wipe broken-session state
+/// in place without losing the worktree binding.
+#[allow(clippy::too_many_arguments)]
 async fn clean_and_spawn_fresh(
     item: &mut Task,
     slug: &str,
     project_config: &ProjectConfig,
     config: &Config,
     workflow: &CaptainWorkflow,
-    wt_path: &str,
+    _wt_path: &str,
     pool: &sqlx::SqlitePool,
 ) -> Result<LifecycleResult> {
-    let old_wt = global_infra::paths::expand_tilde(wt_path);
-    if tokio::fs::try_exists(&old_wt).await.unwrap_or(false) {
-        let repo_path = global_infra::paths::expand_tilde(&project_config.path);
-        match git::remove_worktree(&repo_path, &old_wt).await {
-            Ok(_) => {
-                tracing::info!(module = "lifecycle", path = %old_wt.display(), "cleaned old worktree")
-            }
-            Err(e) => {
-                tracing::warn!(module = "lifecycle", path = %old_wt.display(), error = %e, "failed to clean old worktree")
-            }
-        }
-    }
+    item.branch = None;
     item.worker_seq += 1;
     // Pick credential for the reworked worker. Balance on worker sessions only.
     let credential = super::tick_spawn::pick_credential(pool, Some("worker")).await;
+    // If the pool has credentials configured but every one is cooling
+    // down, park the task with `paused_until` rather than spawning a
+    // worker that will immediately 429 against the host's ambient auth.
+    // Matches the oneshot failover wrapper's exhaustion behaviour.
+    if credential.is_none() {
+        if let Ok(true) = settings::credentials::has_any(pool).await {
+            // DB error on the cooldown query must NOT fall through to
+            // `paused_until = now`: the tick filter treats that as
+            // eligible and the task loops into the same exhausted state
+            // next tick. 10-minute conservative fallback matches
+            // `cc_failover::FALLBACK_PARK_SECS`.
+            let remaining = settings::credentials::earliest_cooldown_remaining_secs(pool)
+                .await
+                .unwrap_or(600);
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs() as i64;
+            let earliest_reset = now + remaining;
+            if let Err(e) =
+                crate::io::queries::tasks::set_paused_until(pool, item.id, earliest_reset).await
+            {
+                tracing::warn!(
+                    module = "spawner",
+                    task_id = item.id,
+                    error = %e,
+                    "failed to pause task after all credentials exhausted"
+                );
+            }
+            tracing::warn!(
+                module = "spawner",
+                task_id = item.id,
+                earliest_reset,
+                "paused worker dispatch — every credential in pool is rate-limited"
+            );
+            anyhow::bail!("all credentials rate-limited; task paused until {earliest_reset}");
+        }
+    }
     let worker_cred = credential.as_ref().map(|c| spawner::WorkerCredential {
         id: c.0,
         token: &c.1,
@@ -63,9 +102,9 @@ async fn clean_and_spawn_fresh(
     Ok(LifecycleResult {
         session_name: result.session_name,
         session_id: result.session_id,
-        pid: result.pid,
         branch: result.branch,
         worktree: result.worktree,
+        pr_number: result.pr_number,
     })
 }
 
@@ -97,7 +136,7 @@ pub(crate) async fn reopen_worker(
     // DB and is only populated during captain ticks by tick_branch_sync.  HTTP
     // handlers load the task fresh from DB where branch is always None.
     let wt_expanded = global_infra::paths::expand_tilde(&wt_path);
-    let branch = git::current_branch(&wt_expanded)
+    let branch = global_git::current_branch(&wt_expanded)
         .await
         .with_context(|| format!("failed to read branch from worktree {}", wt_path))?;
     if branch == "HEAD" {
@@ -169,6 +208,27 @@ pub(crate) async fn reopen_worker(
         )
         .await;
     }
+    let symptoms = global_claude::StreamSymptomMatcher::new(workflow.stream_symptoms.clone());
+    if let Some(m) = global_claude::stream_broken_session_symptom(&stream_path, &symptoms) {
+        tracing::warn!(
+            module = "lifecycle",
+            worker = %session_name,
+            cc_sid,
+            symptom = %m.reason,
+            origin = %m.origin.tag(),
+            "resume session already emitted a broken-session symptom — spawning fresh"
+        );
+        return clean_and_spawn_fresh(
+            item,
+            &slug,
+            project_config,
+            config,
+            workflow,
+            &wt_path,
+            pool,
+        )
+        .await;
+    }
 
     let model = &workflow.models.worker;
     let (mut env, reopen_cred_id) = super::spawner::credential_env_for_session(pool, &cc_sid).await;
@@ -177,7 +237,7 @@ pub(crate) async fn reopen_worker(
     let reopen_seq_str = reopen_seq.to_string();
     let mut vars: FxHashMap<&str, &str> = FxHashMap::default();
     vars.insert("reopen_seq", reopen_seq_str.as_str());
-    let resume_msg = settings::config::render_prompt("reopen_resume", &workflow.prompts, &vars)
+    let resume_msg = settings::render_prompt("reopen_resume", &workflow.prompts, &vars)
         .map_err(|e| anyhow::anyhow!(e))?;
 
     let item_id = Some(item.id);
@@ -232,9 +292,13 @@ pub(crate) async fn reopen_worker(
             Ok(LifecycleResult {
                 session_name,
                 session_id: cc_sid,
-                pid: new_pid,
                 branch,
                 worktree: wt_path,
+                // Resume preserves the existing PR — no new branch, no new
+                // `create_draft_pr`. `reopen_worker` does not mutate
+                // `item.pr_number` before this point, so re-capturing it
+                // here matches the task's on-disk PR.
+                pr_number: item.pr_number,
             })
         }
         Err(e) => {
@@ -258,7 +322,7 @@ pub(crate) async fn reopen_worker(
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 fn resolve_project<'a>(item: &Task, config: &'a Config) -> Result<(&'a str, &'a ProjectConfig)> {
-    settings::config::resolve_project_config(Some(&item.project), config)
+    settings::resolve_project_config(Some(&item.project), config)
         .ok_or_else(|| anyhow::anyhow!("no project config for item '{}'", item.title))
 }
 

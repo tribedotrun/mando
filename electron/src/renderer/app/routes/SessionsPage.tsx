@@ -1,6 +1,6 @@
 import React, { useCallback } from 'react';
 import { useNavigate } from '@tanstack/react-router';
-import { SessionsCard } from '#renderer/domains/sessions/ui/SessionsCard';
+import { SessionsView } from '#renderer/domains/sessions/ui/SessionsView';
 import { ErrorBoundary } from '#renderer/global/ui/ErrorBoundary';
 import type { SessionEntry } from '#renderer/global/types';
 
@@ -25,7 +25,7 @@ export function SessionsPage(): React.ReactElement {
   return (
     <div className="absolute inset-0 overflow-auto bg-background px-8 pb-6">
       <ErrorBoundary fallbackLabel="Sessions view">
-        <SessionsCard active onOpenSession={handleOpenSession} />
+        <SessionsView active onOpenSession={handleOpenSession} />
       </ErrorBoundary>
     </div>
   );

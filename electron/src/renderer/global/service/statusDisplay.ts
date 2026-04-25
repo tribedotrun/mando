@@ -1,12 +1,14 @@
+import type { ItemStatus } from '#renderer/global/types';
+
 /** Human-action states get a subtle inline label before the title. */
-export const ACTION_LABELS: Record<string, { color: string; label: string }> = {
+export const ACTION_LABELS: Partial<Record<ItemStatus, { color: string; label: string }>> = {
   'awaiting-review': { color: 'var(--review)', label: 'Review' },
   escalated: { color: 'var(--destructive)', label: 'Escalated' },
   'needs-clarification': { color: 'var(--needs-human)', label: 'Needs input' },
 };
 
 /** Human-readable tooltip for each task status. */
-export const STATUS_TOOLTIP: Record<string, string> = {
+export const STATUS_TOOLTIP: Record<ItemStatus, string> = {
   new: 'Queued',
   queued: 'Queued',
   clarifying: 'Clarifying',
@@ -23,4 +25,5 @@ export const STATUS_TOOLTIP: Record<string, string> = {
   'completed-no-pr': 'Done',
   'plan-ready': 'Plan ready',
   canceled: 'Canceled',
+  stopped: 'Stopped',
 };

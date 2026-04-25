@@ -1,0 +1,2 @@
+{"type":"system","subtype":"init"}
+{"type":"result","subtype":"error","is_error":true,"error":"clarifier failed: failed to spawn claude binary at claude: No such file or directory (os error 2)"}

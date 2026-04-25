@@ -1,6 +1,7 @@
 //! `/timeline [id] [chat]` — full lifecycle timeline for a task.
 
 use crate::bot::TelegramBot;
+use crate::gateway_paths as paths;
 use crate::telegram_format::escape_html;
 use anyhow::Result;
 use tracing::warn;
@@ -47,7 +48,7 @@ pub async fn handle(bot: &TelegramBot, chat_id: &str, args: &str) -> Result<()> 
 
     // The gateway timeline endpoint returns all events (ignores query params).
     // We filter locally when `chat` mode is requested.
-    let path = format!("/api/tasks/{}/timeline", item_id);
+    let path = paths::task_timeline(item_id);
 
     match bot
         .gw()
@@ -100,10 +101,7 @@ pub async fn handle(bot: &TelegramBot, chat_id: &str, args: &str) -> Result<()> 
                 // Q&A history
                 if let Ok(hist_resp) = bot
                     .gw()
-                    .get_typed::<api_types::AskHistoryResponse>(&format!(
-                        "/api/tasks/{}/history",
-                        item_id
-                    ))
+                    .get_typed::<api_types::AskHistoryResponse>(&paths::task_history(item_id))
                     .await
                 {
                     if !hist_resp.history.is_empty() {

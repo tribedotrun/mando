@@ -18,26 +18,23 @@ export function TerminalPage({
   resumeName,
   onResumeConsumed,
 }: TerminalPageProps) {
-  const {
-    relevantSessions,
-    activeTab,
-    setActiveTab,
-    activeSession,
-    resumePending,
-    resumeFailed,
-    handleNewTerminal,
-    handleCloseTab,
-    handleExit,
-  } = useTerminalOrchestration({ project, cwd, resumeSessionId, resumeName, onResumeConsumed });
+  const terminal = useTerminalOrchestration({
+    project,
+    cwd,
+    resumeSessionId,
+    resumeName,
+    onResumeConsumed,
+  });
+  const activeSession = terminal.sessions.activeSession;
 
   return (
     <div className="flex h-full flex-col bg-bg">
       <TerminalTabBar
-        sessions={relevantSessions}
-        activeTab={activeTab}
-        onSelectTab={setActiveTab}
-        onCloseTab={(id) => void handleCloseTab(id)}
-        onNewTerminal={(agent) => void handleNewTerminal(agent)}
+        sessions={terminal.sessions.relevantSessions}
+        activeTab={terminal.tabs.activeTab}
+        onSelectTab={terminal.tabs.setActiveTab}
+        onCloseTab={(id) => void terminal.actions.handleCloseTab(id)}
+        onNewTerminal={(agent) => void terminal.actions.handleNewTerminal(agent)}
       />
 
       <div className="min-h-0 flex-1">
@@ -45,14 +42,14 @@ export function TerminalPage({
           <TerminalView
             key={activeSession.id}
             session={activeSession}
-            onExit={(code) => handleExit(activeSession.id, code)}
+            onExit={(code) => terminal.actions.handleExit(activeSession.id, code)}
           />
-        ) : resumePending ? (
+        ) : terminal.resume.pending ? (
           <div className="flex h-full items-center justify-center gap-2 text-caption text-text-3">
             <Loader2 size={14} className="animate-spin" />
             Resuming session...
           </div>
-        ) : resumeFailed ? (
+        ) : terminal.resume.failed ? (
           <div className="flex h-full items-center justify-center text-caption text-text-3">
             Session resume failed. Start a new terminal to continue.
           </div>

@@ -29,6 +29,7 @@ export {
 
 export {
   parseWith,
+  parseTextWith,
   parseJsonText,
   parseJsonTextWith,
   fromResponse,

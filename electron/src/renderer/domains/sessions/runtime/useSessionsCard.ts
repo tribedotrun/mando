@@ -1,13 +1,14 @@
 import React, { useState, useCallback, useRef } from 'react';
 import { useSessionsList } from '#renderer/domains/sessions/repo/queries';
 import { useViewKeyHandler } from '#renderer/global/runtime/useKeyboardShortcuts';
-import type { SessionEntry } from '#renderer/global/types';
+import type { SessionCategory, SessionEntry } from '#renderer/global/types';
 import { getErrorMessage, indexNext, indexPrev } from '#renderer/global/service/utils';
 import { copyToClipboard } from '#renderer/global/runtime/useFeedback';
 import {
   buildSessionSequence,
   sortCategories,
   buildResumeCmd,
+  type SessionStatusFilter,
 } from '#renderer/domains/sessions/service/helpers';
 
 interface UseSessionsCardOptions {
@@ -16,26 +17,36 @@ interface UseSessionsCardOptions {
 }
 
 export interface SessionsCardState {
-  page: number;
-  setPage: React.Dispatch<React.SetStateAction<number>>;
-  filterCategory: string;
-  filterStatus: string;
-  setFilterStatus: (v: string) => void;
-  showFilterMenu: boolean;
-  setShowFilterMenu: (v: boolean) => void;
-  sessions: SessionEntry[];
-  totalPages: number;
-  categories: Record<string, number>;
-  loading: boolean;
-  error: string | null;
-  hasLoadedRef: React.MutableRefObject<boolean>;
-  sessionSeqMap: ReturnType<typeof buildSessionSequence>;
-  clampedFocusedIndex: number;
-  isFiltered: boolean;
-  allTotal: number;
-  sortedCats: string[];
-  handleCatClick: (cat: string) => void;
-  openSession: (s: SessionEntry) => void;
+  pagination: {
+    page: number;
+    setPage: React.Dispatch<React.SetStateAction<number>>;
+    totalPages: number;
+  };
+  filters: {
+    category: SessionCategory | '';
+    status: SessionStatusFilter;
+    setStatus: (v: SessionStatusFilter) => void;
+    menuOpen: boolean;
+    setMenuOpen: (v: boolean) => void;
+    isFiltered: boolean;
+    handleCatClick: (cat: SessionCategory | '') => void;
+  };
+  list: {
+    sessions: SessionEntry[];
+    loading: boolean;
+    error: string | null;
+    hasLoadedRef: React.MutableRefObject<boolean>;
+    sessionSeqMap: ReturnType<typeof buildSessionSequence>;
+    clampedFocusedIndex: number;
+  };
+  categories: {
+    counts: Record<string, number>;
+    total: number;
+    sorted: SessionCategory[];
+  };
+  actions: {
+    openSession: (s: SessionEntry) => void;
+  };
 }
 
 export function useSessionsCard({
@@ -43,15 +54,19 @@ export function useSessionsCard({
   onOpenSession,
 }: UseSessionsCardOptions): SessionsCardState {
   const [page, setPage] = useState(1);
-  const [filterCategory, setFilterCategory] = useState('');
-  const [filterStatus, setFilterStatus] = useState<string>('all');
+  const [filterCategory, setFilterCategory] = useState<SessionCategory | ''>('');
+  const [filterStatus, setFilterStatus] = useState<SessionStatusFilter>('all');
   const [focusedIndex, setFocusedIndex] = useState(-1);
 
   const {
     data: sessionsData,
     isLoading: loading,
     error: sessionsError,
-  } = useSessionsList(page, filterCategory || undefined, filterStatus);
+  } = useSessionsList(
+    page,
+    filterCategory || undefined,
+    filterStatus === 'all' ? undefined : filterStatus,
+  );
   // Track whether we've ever loaded data -- suppress loading text on category switches
   const hasLoadedRef = useRef(false);
   if (sessionsData) hasLoadedRef.current = true;
@@ -80,7 +95,7 @@ export function useSessionsCard({
     [onOpenSession],
   );
 
-  const handleCatClick = (cat: string) => {
+  const handleCatClick = (cat: SessionCategory | '') => {
     setFilterCategory(cat);
     setPage(1);
   };
@@ -131,25 +146,25 @@ export function useSessionsCard({
   const sortedCats = sortCategories(categories);
 
   return {
-    page,
-    setPage,
-    filterCategory,
-    filterStatus,
-    setFilterStatus,
-    showFilterMenu,
-    setShowFilterMenu,
-    sessions,
-    totalPages,
-    categories,
-    loading,
-    error,
-    hasLoadedRef,
-    sessionSeqMap,
-    clampedFocusedIndex,
-    isFiltered,
-    allTotal,
-    sortedCats,
-    handleCatClick,
-    openSession,
+    pagination: { page, setPage, totalPages },
+    filters: {
+      category: filterCategory,
+      status: filterStatus,
+      setStatus: setFilterStatus,
+      menuOpen: showFilterMenu,
+      setMenuOpen: setShowFilterMenu,
+      isFiltered,
+      handleCatClick,
+    },
+    list: {
+      sessions,
+      loading,
+      error,
+      hasLoadedRef,
+      sessionSeqMap,
+      clampedFocusedIndex,
+    },
+    categories: { counts: categories, total: allTotal, sorted: sortedCats },
+    actions: { openSession },
   };
 }

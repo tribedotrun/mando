@@ -10,6 +10,8 @@ global-db = ["global-types"]
 global-bus = ["api-types", "global-types"]
 global-claude = ["api-types", "global-types", "global-infra"]
 global-net = ["global-types", "global-infra"]
+global-git = ["global-types", "global-infra"]
+global-github = ["global-infra"]
 
 # API contract
 api-types = ["global-types"]
@@ -20,7 +22,7 @@ gateway-client = ["api-types", "global-net"]
 # Domains
 captain = [
     "api-types", "global-types", "global-db", "global-claude",
-    "global-bus", "global-infra",
+    "global-bus", "global-infra", "global-git", "global-github",
     "sessions-db", "settings",
 ]
 scout = [
@@ -38,7 +40,7 @@ sessions-db = [
 ]
 settings = [
     "api-types", "global-types", "global-db",
-    "global-infra", "global-net",
+    "global-infra", "global-net", "global-git",
 ]
 
 # Terminal
@@ -67,7 +69,7 @@ mando-gateway = [
 ]
 
 # CLI client (peer to Electron, HTTP-only)
-mando-cli = ["api-types", "global-types", "global-infra"]
+mando-cli = ["api-types", "global-types", "global-infra", "global-git"]
 
 # Dev mocks (standalone, zero Mando deps)
 dev-cc-mock = []

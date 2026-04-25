@@ -1,6 +1,7 @@
 import { useCallback, useState } from 'react';
 import { useMountEffect } from '#renderer/global/runtime/useMountEffect';
 import { buildOnboardingConfig } from '#renderer/domains/onboarding/service/buildOnboardingConfig';
+import { useConfigSnapshot } from '#renderer/domains/onboarding/runtime/hooks';
 import {
   checkClaudeCode as checkClaudeCodeNative,
   saveConfigLocal,
@@ -22,6 +23,7 @@ type CCResult = {
 /** Wraps onboarding IPC calls (setup progress, config save, setup complete, Claude Code check). */
 export function useSetupIpc() {
   const [progressMsg, setProgressMsg] = useState<string | null>(null);
+  const getConfigSnapshot = useConfigSnapshot();
 
   useMountEffect(() => subscribeSetupProgress(setProgressMsg));
 
@@ -46,15 +48,21 @@ export function useSetupIpc() {
     return selectDirectoryNative();
   }, []);
 
-  const saveProgress = useCallback(async (tgToken: string) => {
-    const config = buildOnboardingConfig({ tgToken });
-    await saveConfigLocal(JSON.stringify(config, null, 2));
-  }, []);
+  const saveProgress = useCallback(
+    async (tgToken: string) => {
+      const config = buildOnboardingConfig({ tgToken }, getConfigSnapshot());
+      await saveConfigLocal(JSON.stringify(config, null, 2));
+    },
+    [getConfigSnapshot],
+  );
 
-  const completeSetup = useCallback(async (tgToken: string) => {
-    const config = buildOnboardingConfig({ tgToken, autoSchedule: true });
-    return setupComplete(JSON.stringify(config, null, 2));
-  }, []);
+  const completeSetup = useCallback(
+    async (tgToken: string) => {
+      const config = buildOnboardingConfig({ tgToken, autoSchedule: true }, getConfigSnapshot());
+      return setupComplete(JSON.stringify(config, null, 2));
+    },
+    [getConfigSnapshot],
+  );
 
   return { progressMsg, saveProgress, completeSetup, checkClaudeCode, selectDirectory };
 }

@@ -5,7 +5,6 @@ use axum::http::StatusCode;
 use axum::Json;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
-use serde_json::Value;
 
 use crate::response::{error_response, internal_error, ApiError};
 use crate::AppState;
@@ -22,9 +21,11 @@ pub(crate) async fn get_sessions(
         .list_sessions(sessions::SessionListRequest {
             page: params.page,
             per_page: params.per_page,
-            category: params.category,
-            caller: params.caller,
-            status: params.status,
+            category: params
+                .category
+                .map(|category| category.as_str().to_string()),
+            caller: params.caller.map(|caller| caller.as_str().to_string()),
+            status: params.status.map(|status| status.as_str().to_string()),
         })
         .await
         .map_err(|e| internal_error(e, "session query failed"))?;
@@ -32,8 +33,12 @@ pub(crate) async fn get_sessions(
     let sessions = listing
         .sessions
         .into_iter()
-        .map(|entry| session_entry_from_value(entry, &config))
-        .collect::<Result<Vec<_>, _>>()?;
+        .map(|mut entry| {
+            let project = cwd_to_project(&entry.cwd);
+            entry.github_repo = crate::resolve_github_repo(project.as_deref(), &config);
+            entry
+        })
+        .collect();
 
     Ok(Json(api_types::SessionsListResponse {
         total: listing.total,
@@ -56,45 +61,56 @@ fn cwd_to_project(cwd: &str) -> Option<String> {
         .map(|n| n.to_string_lossy().into_owned())
 }
 
-fn session_entry_from_value(
-    mut value: Value,
-    config: &settings::config::Config,
-) -> Result<api_types::SessionEntry, ApiError> {
-    if let Value::Object(ref mut map) = value {
-        if let Some(task_id) = map.get("task_id").and_then(Value::as_i64) {
-            map.insert("task_id".into(), Value::String(task_id.to_string()));
-        }
-        if let Some(resumed) = map.get("resumed").and_then(Value::as_i64) {
-            map.insert("resumed".into(), Value::Bool(resumed != 0));
-        }
-        let project = cwd_to_project(map.get("cwd").and_then(Value::as_str).unwrap_or(""));
-        let github_repo = crate::resolve_github_repo(project.as_deref(), config);
-        map.insert(
-            "github_repo".into(),
-            github_repo.map(Value::String).unwrap_or(Value::Null),
-        );
-    }
-    roundtrip(value, "session entry")
-}
-
-/// GET /api/sessions/{id}/transcript
-#[crate::instrument_api(method = "GET", path = "/api/sessions/{id}/transcript")]
-pub(crate) async fn get_session_transcript(
+/// GET /api/sessions/{id}/events
+///
+/// Snapshot of every typed transcript event currently on disk for this
+/// session. Used by the CLI and by the renderer's first-paint load; the
+/// live-tail `/events/stream` route consumes the same underlying parser.
+#[crate::instrument_api(method = "GET", path = "/api/sessions/{id}/events")]
+pub(crate) async fn get_session_events(
     State(state): State<AppState>,
     Path(api_types::SessionIdParams { id }): Path<api_types::SessionIdParams>,
-) -> Result<Json<api_types::TranscriptResponse>, ApiError> {
-    let markdown = state
+) -> Result<Json<api_types::TranscriptEventsResponse>, ApiError> {
+    let snapshot = state
         .sessions
-        .transcript_markdown(&id)
+        .events_snapshot(&id)
         .await
-        .map_err(|e| internal_error(e, "failed to load transcript"))?
+        .map_err(|e| internal_error(e, "failed to load session events"))?
         .ok_or_else(|| {
-            error_response(StatusCode::NOT_FOUND, &format!("transcript {id} not found"))
+            error_response(
+                StatusCode::NOT_FOUND,
+                &format!("session {id} events not found"),
+            )
         })?;
 
-    Ok(Json(api_types::TranscriptResponse {
+    Ok(Json(api_types::TranscriptEventsResponse {
         session_id: id,
-        markdown,
+        events: snapshot.events,
+        is_running: snapshot.is_running,
+    }))
+}
+
+/// GET /api/sessions/{id}/jsonl-path
+///
+/// Resolves the on-disk path of the session's underlying JSONL stream so the
+/// renderer can open it with the user's default app for `.jsonl`. Prefers the
+/// Mando-owned stream under `~/.mando/state/cc-streams/` and falls back to the
+/// CC-native `~/.claude/projects/` layout. Returns `{ path: null }` when
+/// neither file exists so the UI can disable the action.
+#[crate::instrument_api(method = "GET", path = "/api/sessions/{id}/jsonl-path")]
+pub(crate) async fn get_session_jsonl_path(
+    State(state): State<AppState>,
+    Path(api_types::SessionIdParams { id }): Path<api_types::SessionIdParams>,
+) -> Result<Json<api_types::SessionJsonlPathResponse>, ApiError> {
+    let path = state
+        .sessions
+        .session_jsonl_path(&id)
+        .await
+        .map_err(|e| internal_error(e, "failed to resolve session jsonl path"))?;
+
+    Ok(Json(api_types::SessionJsonlPathResponse {
+        session_id: id,
+        path,
     }))
 }
 

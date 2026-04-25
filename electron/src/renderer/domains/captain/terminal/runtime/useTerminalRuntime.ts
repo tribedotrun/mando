@@ -44,7 +44,8 @@ export function useTerminalRuntime({
   runtimeRef.current?.updateSession(session, onExit);
 
   useMountEffect(() => {
-    if (!containerRef.current) return;
+    const container = containerRef.current;
+    if (!container) return;
 
     const runtime = new TerminalRuntime(session, {
       onConnectionStateChange: setConnectionState,
@@ -53,10 +54,14 @@ export function useTerminalRuntime({
     });
     runtimeRef.current = runtime;
 
-    void runtime.attach(containerRef.current).catch((err) => {
-      log.error('Failed to attach terminal runtime', err);
-      setConnectionState('disconnected');
-    });
+    void (async () => {
+      try {
+        await runtime.attach(container);
+      } catch (err) {
+        log.error('Failed to attach terminal runtime', err);
+        setConnectionState('disconnected');
+      }
+    })();
 
     return () => {
       runtime.dispose();

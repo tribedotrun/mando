@@ -1,0 +1,4 @@
+{"type":"system","subtype":"init"}
+{"type":"assistant","message":{"content":[{"type":"thinking","thinking":"I should check whether this API call might hit a rate limit. Let me look at the docs.","signature":""}]}}
+{"type":"assistant","message":{"content":[{"type":"text","text":"Looking at the rate limit documentation..."}]}}
+{"type":"result","subtype":"success","is_error":false,"result":"done","num_turns":2}

@@ -1,5 +1,5 @@
 import React from 'react';
-import { CommandPaletteInner } from '#renderer/global/ui/CommandPaletteParts';
+import { CommandPaletteInner } from '#renderer/global/ui/CommandPaletteInner';
 
 interface Props {
   open: boolean;

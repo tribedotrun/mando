@@ -1,7 +1,7 @@
 import React from 'react';
 import { useActivityStripData } from '#renderer/domains/captain/runtime/hooks';
 import { cellStyle, formatActivityDate } from '#renderer/domains/captain/service/activityStrip';
-import { Tooltip, TooltipContent, TooltipTrigger } from '#renderer/global/ui/tooltip';
+import { Tooltip, TooltipContent, TooltipTrigger } from '#renderer/global/ui/primitives/tooltip';
 
 export function ActivityStrip(): React.ReactElement | null {
   const { grid, countMap, thresholds, hasMerges } = useActivityStripData();

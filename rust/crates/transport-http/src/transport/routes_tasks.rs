@@ -22,6 +22,70 @@ async fn field_text(field: Field<'_>) -> Result<Option<String>, ApiError> {
     Ok(if val.is_empty() { None } else { Some(val) })
 }
 
+#[derive(Default)]
+struct TaskAddMultipartFields {
+    title: String,
+    repo: Option<String>,
+    context: Option<String>,
+    plan: Option<String>,
+    no_pr: Option<String>,
+    no_auto_merge: Option<String>,
+    planning: Option<String>,
+    source: Option<String>,
+    saved_images: Vec<String>,
+}
+
+async fn extract_task_add_multipart(
+    mut multipart: Multipart,
+) -> Result<TaskAddMultipartFields, ApiError> {
+    let mut fields = TaskAddMultipartFields::default();
+
+    let result = async {
+        while let Some(field) = multipart.next_field().await.map_err(|e| {
+            error_response(StatusCode::BAD_REQUEST, &format!("multipart error: {e}"))
+        })? {
+            let name = field.name().unwrap_or("").to_string();
+            match name.as_str() {
+                "title" => {
+                    fields.title = field_text(field).await?.unwrap_or_default();
+                }
+                "project" | "repo" => {
+                    if let Some(val) = field_text(field).await? {
+                        fields.repo = Some(val);
+                    }
+                }
+                "context" => fields.context = field_text(field).await?.or(fields.context.take()),
+                "plan" => fields.plan = field_text(field).await?.or(fields.plan.take()),
+                "no_pr" => fields.no_pr = field_text(field).await?.or(fields.no_pr.take()),
+                "no_auto_merge" => {
+                    fields.no_auto_merge = field_text(field).await?.or(fields.no_auto_merge.take())
+                }
+                "planning" => fields.planning = field_text(field).await?.or(fields.planning.take()),
+                "source" => fields.source = field_text(field).await?.or(fields.source.take()),
+                "images" => {
+                    fields
+                        .saved_images
+                        .push(crate::image_upload::save_image_field(field).await?);
+                }
+                _ => {
+                    return Err(crate::image_upload::unexpected_multipart_field(Some(
+                        name.as_str(),
+                    )))
+                }
+            }
+        }
+        Ok(())
+    }
+    .await;
+
+    if let Err(err) = result {
+        crate::image_upload::cleanup_saved_images(&fields.saved_images).await;
+        return Err(err);
+    }
+
+    Ok(fields)
+}
+
 fn task_update_error_status(err: &anyhow::Error) -> StatusCode {
     match err.downcast_ref::<captain::TaskUpdateError>() {
         Some(e) if e.is_not_found() => StatusCode::NOT_FOUND,
@@ -54,80 +118,22 @@ pub(crate) async fn get_tasks(
 #[crate::instrument_api(method = "POST", path = "/api/tasks/add")]
 pub(crate) async fn post_task_add(
     State(state): State<AppState>,
-    mut multipart: Multipart,
+    multipart: Multipart,
 ) -> Result<ApiCreated<api_types::TaskItem>, ApiError> {
-    let mut title = String::new();
-    let mut repo: Option<String> = None;
-    let mut context: Option<String> = None;
-    let mut plan: Option<String> = None;
-    let mut no_pr: Option<String> = None;
-    let mut no_auto_merge: Option<String> = None;
-    let mut planning: Option<String> = None;
-    let mut source: Option<String> = None;
-    let mut saved_images: Vec<String> = Vec::new();
-
-    let images_dir = global_infra::paths::images_dir();
-
-    while let Some(field) = multipart
-        .next_field()
-        .await
-        .map_err(|e| error_response(StatusCode::BAD_REQUEST, &format!("multipart error: {e}")))?
-    {
-        let name = field.name().unwrap_or("").to_string();
-        match name.as_str() {
-            "title" => {
-                title = field_text(field).await?.unwrap_or_default();
-            }
-            "project" | "repo" => {
-                if let Some(val) = field_text(field).await? {
-                    repo = Some(val);
-                }
-            }
-            "context" => context = field_text(field).await?.or(context),
-            "plan" => plan = field_text(field).await?.or(plan),
-            "no_pr" => no_pr = field_text(field).await?.or(no_pr),
-            "no_auto_merge" => no_auto_merge = field_text(field).await?.or(no_auto_merge),
-            "planning" => planning = field_text(field).await?.or(planning),
-            "source" => source = field_text(field).await?.or(source),
-            "images" => {
-                let filename = field.file_name().unwrap_or("upload").to_string();
-                let ext = filename
-                    .rsplit('.')
-                    .next()
-                    .filter(|e| e.len() <= 5)
-                    .unwrap_or("bin");
-                let uuid = global_infra::uuid::Uuid::v4();
-                let dest_name = format!("{uuid}.{ext}");
-
-                let data = field
-                    .bytes()
-                    .await
-                    .map_err(|e| error_response(StatusCode::BAD_REQUEST, &e.to_string()))?;
-
-                tokio::fs::create_dir_all(&images_dir).await.map_err(|e| {
-                    crate::response::internal_error_with(
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        e,
-                        "failed to save image",
-                    )
-                })?;
-                tokio::fs::write(images_dir.join(&dest_name), &data)
-                    .await
-                    .map_err(|e| {
-                        crate::response::internal_error_with(
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            e,
-                            "failed to save image",
-                        )
-                    })?;
-
-                saved_images.push(dest_name);
-            }
-            _ => {}
-        }
-    }
+    let TaskAddMultipartFields {
+        title,
+        repo,
+        context,
+        plan,
+        no_pr,
+        no_auto_merge,
+        planning,
+        source,
+        saved_images,
+    } = extract_task_add_multipart(multipart).await?;
 
     if title.trim().is_empty() {
+        crate::image_upload::cleanup_saved_images(&saved_images).await;
         return Err(error_response(StatusCode::BAD_REQUEST, "title is required"));
     }
 
@@ -136,7 +142,8 @@ pub(crate) async fn post_task_add(
     // Validate project name before calling add_task so the client gets a 400
     // with the helpful message instead of a generic 500.
     if let Some(ref name) = repo {
-        if settings::config::resolve_project_config(Some(name), &config).is_none() {
+        if settings::resolve_project_config(Some(name), &config).is_none() {
+            crate::image_upload::cleanup_saved_images(&saved_images).await;
             let mut valid: Vec<&str> = config
                 .captain
                 .projects
@@ -157,11 +164,18 @@ pub(crate) async fn post_task_add(
     }
 
     let created = {
-        let created = state
+        let created = match state
             .captain
             .add_task(title.trim(), repo.as_deref(), source.as_deref())
             .await
-            .map_err(map_task_create_error)?;
+            .map_err(map_task_create_error)
+        {
+            Ok(created) => created,
+            Err(err) => {
+                crate::image_upload::cleanup_saved_images(&saved_images).await;
+                return Err(err);
+            }
+        };
 
         let task_id = created.id;
 
@@ -185,17 +199,14 @@ pub(crate) async fn post_task_add(
                 no_auto_merge: no_auto_merge.as_deref().map(|v| v == "true"),
                 ..Default::default()
             };
-            state
-                .captain
-                .update_task(task_id, updates)
-                .await
-                .map_err(|e| {
-                    crate::response::internal_error_with(
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        e,
-                        "failed to update task",
-                    )
-                })?;
+            if let Err(err) = state.captain.update_task(task_id, updates).await {
+                crate::image_upload::cleanup_saved_images(&saved_images).await;
+                return Err(crate::response::internal_error_with(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    err,
+                    "failed to update task",
+                ));
+            }
         }
 
         if let Some(ref value) = planning {
@@ -275,10 +286,14 @@ pub(crate) async fn post_task_add(
             .map_err(|e| internal_error(e, "failed to dispatch task creation side effects"))?;
     }
 
-    let fallback = serde_json::to_value(&created)
-        .map_err(|e| internal_error(e, "failed to serialize created task"))?;
-    let response = serde_json::from_value(task_payload.unwrap_or(fallback))
-        .map_err(|e| internal_error(e, "failed to serialize created task"))?;
+    let response = match task_payload {
+        Some(task) => task,
+        None => serde_json::from_value(
+            serde_json::to_value(&created)
+                .map_err(|e| internal_error(e, "failed to serialize created task"))?,
+        )
+        .map_err(|e| internal_error(e, "failed to convert created task to api type"))?,
+    };
     Ok(ApiCreated(response))
 }
 
@@ -343,16 +358,7 @@ pub(crate) async fn post_task_delete(
         .await
     {
         Ok(warnings) => {
-            for id in ids {
-                state.bus.send(global_bus::BusPayload::Tasks(Some(
-                    api_types::TaskEventData {
-                        action: Some("deleted".into()),
-                        item: None,
-                        id: Some(*id),
-                        cleared_by: None,
-                    },
-                )));
-            }
+            emit_task_delete_events(&state.bus, ids);
             Ok(Json(api_types::DeleteTasksResponse {
                 ok: true,
                 deleted: ids.len(),
@@ -361,6 +367,23 @@ pub(crate) async fn post_task_delete(
         }
         Err(e) => Err(internal_error(e, "failed to delete tasks")),
     }
+}
+
+/// Emit bus events after a successful task delete: one `Tasks(deleted)` event
+/// per id, then a single `Workbenches(None)` resync so renderers drop the
+/// soft-deleted workbench rows that `cleanup_task` wrote.
+fn emit_task_delete_events(bus: &global_bus::EventBus, ids: &[i64]) {
+    for id in ids {
+        bus.send(global_bus::BusPayload::Tasks(Some(
+            api_types::TaskEventData {
+                action: Some("deleted".into()),
+                item: None,
+                id: Some(*id),
+                cleared_by: None,
+            },
+        )));
+    }
+    bus.send(global_bus::BusPayload::Workbenches(None));
 }
 
 /// DELETE /api/tasks  (same logic as POST /api/tasks/delete)
@@ -402,13 +425,8 @@ pub(crate) async fn patch_task_item(
     match state.captain.update_task(id_num, updates).await {
         Ok(()) => {
             let updated = state.captain.task_json(id_num).await.ok().flatten();
-            let wb_id = updated
-                .as_ref()
-                .and_then(|v| v.get("workbench_id"))
-                .and_then(|v| v.as_i64())
-                .unwrap_or(0);
-            let task_item: Option<api_types::TaskItem> =
-                updated.and_then(|v| serde_json::from_value(v).ok());
+            let wb_id = updated.as_ref().map(|task| task.workbench_id).unwrap_or(0);
+            let task_item = updated;
             state.bus.send(global_bus::BusPayload::Tasks(Some(
                 api_types::TaskEventData {
                     action: Some("updated".into()),
@@ -424,5 +442,40 @@ pub(crate) async fn patch_task_item(
             let msg = e.to_string();
             Err(error_response(task_update_error_status(&e), &msg))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use global_bus::{BusPayload, EventBus};
+
+    #[tokio::test]
+    async fn emit_task_delete_events_sends_tasks_and_workbenches_resync() {
+        let bus = EventBus::new();
+        let mut rx = bus.subscribe();
+
+        emit_task_delete_events(&bus, &[42, 43]);
+
+        let mut deleted_ids = Vec::new();
+        let mut workbench_resync = false;
+        for _ in 0..3 {
+            match rx.recv().await.expect("bus recv") {
+                BusPayload::Tasks(Some(data)) => {
+                    assert_eq!(data.action.as_deref(), Some("deleted"));
+                    if let Some(id) = data.id {
+                        deleted_ids.push(id);
+                    }
+                }
+                BusPayload::Workbenches(None) => workbench_resync = true,
+                other => panic!("unexpected bus payload: {other:?}"),
+            }
+        }
+        deleted_ids.sort_unstable();
+        assert_eq!(deleted_ids, vec![42, 43]);
+        assert!(
+            workbench_resync,
+            "expected Workbenches(None) resync event after task delete"
+        );
     }
 }

@@ -2,13 +2,29 @@
 //!
 //! Strategy chain:
 //! 1. Twitter/X URLs → oEmbed API (tweet text + resolve linked URLs)
-//! 2. Readability (reqwest + HTML extraction) — fast, free, static pages
-//! 3. Firecrawl fallback — JS-rendered pages
+//! 2. YouTube URLs → yt-dlp (transcript + info.json metadata)
+//! 3. Readability (reqwest + HTML extraction) — fast, free, static pages
+//! 4. Firecrawl fallback — JS-rendered pages
+//!
+//! Every path populates the same `FetchedContent` shape so the caller never
+//! has to guess whether a title/date is available.
 
 use anyhow::{Context, Result};
 use tracing::{info, warn};
 
 use super::firecrawl;
+use super::metadata_probe::{self, HtmlMetadata};
+
+/// Unified result of a content fetch. Every strategy below fills what it can
+/// and leaves the rest as `None` so the caller never needs to probe a
+/// side-channel.
+#[derive(Debug)]
+pub struct FetchedContent {
+    pub text: String,
+    pub extracted_title: Option<String>,
+    /// Publication date normalized to `YYYY-MM-DD`.
+    pub extracted_date: Option<String>,
+}
 
 /// Shared HTTP client for content fetching — governed in `global-net` so
 /// all outbound HTTP is centralized.
@@ -24,8 +40,8 @@ fn shared_redirect_client() -> std::sync::Arc<reqwest::Client> {
 /// Minimum characters for a valid content extraction.
 const MIN_CONTENT_CHARS: usize = 200;
 
-/// Fetch and extract readable article content from a URL.
-pub async fn fetch_content(url: &str) -> Result<String> {
+/// Fetch and extract readable article content plus any available metadata.
+pub async fn fetch_content(url: &str) -> Result<FetchedContent> {
     // Tweet status URLs: oEmbed is the only viable path. Firecrawl blocks X,
     // so there is no fallback — return the error instead of a stub that would
     // be scored and summarized as if it were real content.
@@ -39,7 +55,13 @@ pub async fn fetch_content(url: &str) -> Result<String> {
     // Return the underlying error if both fail; never synthesize a stub.
     if is_youtube_url(url) {
         match super::youtube::extract_youtube_transcript(url).await {
-            Ok(content) => return Ok(content),
+            Ok(yt) => {
+                return Ok(FetchedContent {
+                    text: yt.transcript,
+                    extracted_title: yt.title,
+                    extracted_date: yt.publish_date,
+                });
+            }
             Err(e) => {
                 warn!(url, error = %e, "yt-dlp failed, trying firecrawl");
                 return firecrawl_fallback(url).await.with_context(|| {
@@ -49,9 +71,9 @@ pub async fn fetch_content(url: &str) -> Result<String> {
         }
     }
 
-    // Standard path: readability → firecrawl fallback
+    // Standard path: readability → firecrawl fallback.
     match try_readability(url).await {
-        Ok(content) => Ok(content),
+        Ok(result) => Ok(result),
         Err(e) => {
             info!(url, error = %e, "readability failed, trying firecrawl");
             firecrawl_fallback(url).await
@@ -90,12 +112,12 @@ fn extract_host(url: &str) -> Option<&str> {
 }
 
 /// True for tweet/status URLs only — NOT for x.com articles or other content.
-fn is_tweet_status_url(url: &str) -> bool {
+pub fn is_tweet_status_url(url: &str) -> bool {
     is_twitter_url(url) && url.to_lowercase().contains("/status/")
 }
 
 /// Fetch tweet via oEmbed, resolve embedded links, fetch linked content.
-async fn fetch_twitter(url: &str) -> Result<String> {
+async fn fetch_twitter(url: &str) -> Result<FetchedContent> {
     info!(url, "twitter URL detected, using oEmbed");
 
     let oembed_url = format!(
@@ -118,10 +140,9 @@ async fn fetch_twitter(url: &str) -> Result<String> {
     let author = oembed["author_name"].as_str().unwrap_or("Unknown");
     let html = oembed["html"].as_str().unwrap_or("");
 
-    // Extract text from the blockquote HTML
     let tweet_text = extract_tweet_text(html);
 
-    // Find t.co links and resolve them — fetch the actual linked content
+    // Find t.co links and resolve them — fetch the actual linked content.
     let links = extract_tco_links(html);
     let mut resolved_content = String::new();
 
@@ -137,7 +158,6 @@ async fn fetch_twitter(url: &str) -> Result<String> {
                 continue;
             }
             info!(tco = link, resolved = %resolved, "resolved t.co link");
-            // Try fetching the linked content (readability → firecrawl)
             if let Ok(content) = try_fetch_linked(&resolved).await {
                 resolved_content = content;
                 break;
@@ -158,16 +178,32 @@ async fn fetch_twitter(url: &str) -> Result<String> {
         anyhow::bail!("oEmbed returned empty tweet text for {url}");
     }
 
-    Ok(result)
+    Ok(FetchedContent {
+        text: result,
+        extracted_title: Some(tweet_title(author, &tweet_text)),
+        extracted_date: metadata_probe::snowflake_date_from_tweet_url(url),
+    })
 }
 
-/// Try readability then firecrawl on a resolved linked URL.
+/// Build a deterministic title for a tweet: "Tweet by @author: first-bit".
+fn tweet_title(author: &str, text: &str) -> String {
+    let snippet: String = text.chars().take(80).collect();
+    let snippet = snippet.trim();
+    if snippet.is_empty() {
+        format!("Tweet by @{author}")
+    } else {
+        format!("Tweet by @{author}: {snippet}")
+    }
+}
+
+/// Try readability then firecrawl on a resolved linked URL. Returns plain
+/// text only — linked-content metadata is not propagated.
 async fn try_fetch_linked(url: &str) -> Result<String> {
     match try_readability(url).await {
-        Ok(content) => Ok(content),
+        Ok(result) => Ok(result.text),
         Err(e) => {
             info!(url, error = %e, "readability failed on linked URL, trying firecrawl");
-            firecrawl_fallback(url).await
+            firecrawl_fallback(url).await.map(|f| f.text)
         }
     }
 }
@@ -211,9 +247,14 @@ async fn resolve_tco(tco_url: &str) -> Result<String> {
         .with_context(|| format!("no redirect location for {tco_url}"))
 }
 
-/// Try readability-based extraction (fast path).
-async fn try_readability(url: &str) -> Result<String> {
+/// Try readability-based extraction (fast path). Probes the raw HTML for
+/// title and publish date BEFORE readability strips meta/time/JSON-LD.
+async fn try_readability(url: &str) -> Result<FetchedContent> {
     let html = fetch_raw(url).await?;
+    let HtmlMetadata {
+        title,
+        date_published,
+    } = metadata_probe::probe_html(&html);
     let article = global_net::readability::extract(&html)
         .map_err(|e| anyhow::anyhow!("readability extraction failed: {e}"))?;
     if article.text_content.len() < MIN_CONTENT_CHARS {
@@ -223,22 +264,36 @@ async fn try_readability(url: &str) -> Result<String> {
             "readability extraction short, returning as-is"
         );
     }
-    Ok(article.text_content)
+    Ok(FetchedContent {
+        text: article.text_content,
+        // Readability's own title is a reasonable last resort; raw-HTML probe
+        // is our first choice because it reads og:title / <title> directly.
+        extracted_title: title.or(article.title),
+        extracted_date: date_published,
+    })
 }
 
 /// Firecrawl fallback for JS-rendered pages.
-async fn firecrawl_fallback(url: &str) -> Result<String> {
-    let content = firecrawl::scrape(url)
+async fn firecrawl_fallback(url: &str) -> Result<FetchedContent> {
+    let result = firecrawl::scrape(url)
         .await
         .with_context(|| format!("firecrawl scrape failed for {url}"))?;
-    if content.len() < MIN_CONTENT_CHARS {
+    if result.markdown.len() < MIN_CONTENT_CHARS {
         anyhow::bail!(
             "firecrawl content too short ({} chars) for {url}",
-            content.len()
+            result.markdown.len()
         );
     }
-    info!(url, chars = content.len(), "firecrawl extraction succeeded");
-    Ok(content)
+    info!(
+        url,
+        chars = result.markdown.len(),
+        "firecrawl extraction succeeded"
+    );
+    Ok(FetchedContent {
+        text: result.markdown,
+        extracted_title: result.title,
+        extracted_date: result.date_published,
+    })
 }
 
 /// Fetch raw HTML from a URL.
@@ -295,5 +350,27 @@ mod tests {
         let text = extract_tweet_text(html);
         assert!(text.contains("Hello world"));
         assert!(text.contains("link"));
+    }
+
+    #[test]
+    fn tweet_title_with_text() {
+        let t = tweet_title("alice", "check this amazing thread about rust async");
+        assert_eq!(
+            t,
+            "Tweet by @alice: check this amazing thread about rust async"
+        );
+    }
+
+    #[test]
+    fn tweet_title_empty_text_falls_back_to_author() {
+        assert_eq!(tweet_title("bob", ""), "Tweet by @bob");
+        assert_eq!(tweet_title("bob", "   "), "Tweet by @bob");
+    }
+
+    #[test]
+    fn tweet_title_truncates_long_text() {
+        let long = "a".repeat(200);
+        let t = tweet_title("u", &long);
+        assert!(t.len() <= "Tweet by @u: ".len() + 80);
     }
 }

@@ -1,9 +1,9 @@
 import React, { useRef } from 'react';
 import { useScoutItem, useScoutQASession } from '#renderer/domains/scout/runtime/hooks';
 import { scoutItemTitle } from '#renderer/domains/scout/service/researchHelpers';
-import { MarkdownImageQAChat } from '#renderer/global/ui/QAChat';
-import { Button } from '#renderer/global/ui/button';
-import { Separator } from '#renderer/global/ui/separator';
+import { MarkdownImageQAChat } from '#renderer/domains/scout/ui/QAChat';
+import { Button } from '#renderer/global/ui/primitives/button';
+import { Separator } from '#renderer/global/ui/primitives/separator';
 
 interface Props {
   itemId: number;
@@ -16,7 +16,10 @@ export function ScoutQA({ itemId, onClose }: Props): React.ReactElement {
   const { history, pending, suggestions, ask } = useScoutQASession(itemId);
 
   const handleAsk = (q: string, images?: File[]) => {
-    void ask(q, images).then(() => scrollRef.current?.());
+    void (async () => {
+      await ask(q, images);
+      scrollRef.current?.();
+    })();
   };
 
   const title = item ? scoutItemTitle(item) : 'Untitled';
@@ -51,6 +54,7 @@ export function ScoutQA({ itemId, onClose }: Props): React.ReactElement {
   return (
     <MarkdownImageQAChat
       testId="scout-qa"
+      draftKey={`scoutQA:${itemId}`}
       className="flex h-full flex-col"
       header={
         <>

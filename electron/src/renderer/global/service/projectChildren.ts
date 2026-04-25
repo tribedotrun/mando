@@ -1,4 +1,8 @@
-import { type TaskItem, type WorkbenchItem } from '#renderer/global/types';
+import {
+  type TaskItem,
+  type WorkbenchItem,
+  type WorkbenchStatusFilter,
+} from '#renderer/global/types';
 
 /** Sidebar child: a workbench with optional task metadata. */
 export interface SidebarChild {
@@ -30,7 +34,7 @@ export function assembleProjectChildren(opts: {
   wbTaskMap: Map<number, TaskItem>;
   pinnedWbIds: Set<number>;
   pathToName: Record<string, string>;
-  workbenchFilter: 'active' | 'archived' | 'all';
+  workbenchFilter: WorkbenchStatusFilter;
 }): {
   projectCounts: Record<string, number>;
   projectChildren: Record<string, SidebarChild[]>;

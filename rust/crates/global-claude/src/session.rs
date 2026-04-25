@@ -313,6 +313,7 @@ impl CcSession {
                 stream_path: self.stream_path.clone(),
                 rate_limit: self.last_rate_limit.clone(),
                 pid: self.pid,
+                credential_id: self.config.credential_id,
             });
         }
 
@@ -331,7 +332,7 @@ impl CcSession {
         let cost = result.total_cost_usd;
         let duration = result.duration_ms.or(Some(elapsed.as_millis() as u64));
 
-        match Self::classify_result_message(result, &self.session_id) {
+        match Self::classify_result_message(result, &self.session_id, self.config.credential_id) {
             Ok(mut classified) => {
                 crate::update_stream_meta_status(&classified.session_id, "done", cost);
                 info!(
@@ -346,6 +347,7 @@ impl CcSession {
                 classified.stream_path = self.stream_path.clone();
                 classified.rate_limit = self.last_rate_limit.clone();
                 classified.pid = self.pid;
+                classified.credential_id = self.config.credential_id;
                 Ok(classified)
             }
             Err(err) => {
@@ -353,6 +355,7 @@ impl CcSession {
                     api_error_status,
                     message,
                     session_id,
+                    credential_id,
                 } = &err
                 {
                     warn!(
@@ -360,6 +363,7 @@ impl CcSession {
                         caller = %self.config.caller,
                         session_id = %session_id,
                         api_error_status = ?api_error_status,
+                        credential_id = ?credential_id,
                         error = %message,
                         "session ended with is_error=true — failing closed"
                     );
@@ -393,6 +397,7 @@ impl CcSession {
     pub(crate) fn classify_result_message(
         result: ResultMessage,
         fallback_sid: &str,
+        credential_id: Option<i64>,
     ) -> Result<CcResult<serde_json::Value>, CcError> {
         let actual_sid = if result.session_id.is_empty() {
             fallback_sid.to_string()
@@ -415,6 +420,7 @@ impl CcSession {
                 api_error_status,
                 message,
                 session_id: actual_sid,
+                credential_id,
             });
         }
 
@@ -431,6 +437,10 @@ impl CcSession {
             stream_path: std::path::PathBuf::new(),
             rate_limit: None,
             pid: global_types::Pid::from(0u32),
+            // build_result overwrites this from self.config.credential_id;
+            // tests that call classify_result_message directly see the
+            // param value they passed in.
+            credential_id,
         })
     }
 
@@ -475,13 +485,14 @@ mod tests {
             "api_error_status": 400
         });
         let result = parse_result_value(val);
-        let err = CcSession::classify_result_message(result, "fallback")
+        let err = CcSession::classify_result_message(result, "fallback", None)
             .expect_err("is_error=true must fail closed");
         match err {
             CcError::ApiError {
                 api_error_status,
                 message,
                 session_id,
+                ..
             } => {
                 assert_eq!(api_error_status, Some(400));
                 assert!(message.contains("API Error: 400"));
@@ -501,13 +512,14 @@ mod tests {
             "session_id": "sess-bare"
         });
         let result = parse_result_value(val);
-        let err = CcSession::classify_result_message(result, "fallback")
+        let err = CcSession::classify_result_message(result, "fallback", None)
             .expect_err("is_error=true must fail closed even without status");
         match err {
             CcError::ApiError {
                 api_error_status,
                 message,
                 session_id,
+                ..
             } => {
                 assert!(api_error_status.is_none());
                 assert_eq!(message, "upstream failed");
@@ -529,7 +541,7 @@ mod tests {
             "duration_ms": 1234
         });
         let result = parse_result_value(val);
-        let ok = CcSession::classify_result_message(result, "fallback")
+        let ok = CcSession::classify_result_message(result, "fallback", None)
             .expect("success envelope should decode to CcResult");
         assert_eq!(ok.session_id, "sess-ok");
         assert_eq!(ok.text, "done");
@@ -545,7 +557,7 @@ mod tests {
             "api_error_status": 529
         });
         let result = parse_result_value(val);
-        let err = CcSession::classify_result_message(result, "session-from-session")
+        let err = CcSession::classify_result_message(result, "session-from-session", None)
             .expect_err("is_error=true must fail closed");
         match err {
             CcError::ApiError {
@@ -555,6 +567,32 @@ mod tests {
             } => {
                 assert_eq!(api_error_status, Some(529));
                 assert_eq!(session_id, "session-from-session");
+            }
+            other => panic!("expected CcError::ApiError, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classify_threads_credential_id_into_api_error() {
+        let val = serde_json::json!({
+            "type": "result",
+            "subtype": "error_during_execution",
+            "is_error": true,
+            "result": "You've hit your limit — resets 9:40am",
+            "session_id": "sess-429",
+            "api_error_status": 429
+        });
+        let result = parse_result_value(val);
+        let err = CcSession::classify_result_message(result, "fallback", Some(42))
+            .expect_err("is_error=true must fail closed");
+        match err {
+            CcError::ApiError {
+                api_error_status,
+                credential_id,
+                ..
+            } => {
+                assert_eq!(api_error_status, Some(429));
+                assert_eq!(credential_id, Some(42));
             }
             other => panic!("expected CcError::ApiError, got {other:?}"),
         }

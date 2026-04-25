@@ -32,3 +32,11 @@ enforcement = "scanner"
 # payload parsing still touches upstream Value fields.
 allow-value = true
 allow-value-reason = "Research SSE payload fields arrive as opaque JSON until the lifecycle-event schema is tightened; outgoing markup is typed via api_types::TelegramReplyMarkup."
+
+[[consumer]]
+name        = "electron-onboarding-validation"
+path        = "electron/src/main/onboarding/runtime/setupValidation.ts"
+transports  = ["http"]
+role        = "Onboarding token-validation probe — hits getMe with a user-supplied bot token and zod-parses the response"
+enforcement = "zod-schema"
+allow-value = false

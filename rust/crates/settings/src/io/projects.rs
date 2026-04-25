@@ -1,6 +1,7 @@
 //! Project queries.
 
-use anyhow::Result;
+use anyhow::{Context, Result};
+use serde::de::DeserializeOwned;
 use sqlx::SqlitePool;
 
 const SELECT_COLS: &str = "\
@@ -169,39 +170,59 @@ pub async fn delete(pool: &SqlitePool, id: i64) -> Result<bool> {
 
 // ── Conversion helpers ──────────────────────────────────────────────────────
 
+fn parse_project_json<T>(row: &ProjectRow, field_name: &str, raw: &str) -> Result<T>
+where
+    T: DeserializeOwned,
+{
+    serde_json::from_str(raw).with_context(|| {
+        format!(
+            "project {} has invalid {field_name} JSON in persisted settings",
+            row.name
+        )
+    })
+}
+
 /// Convert a DB row to the config-layer ProjectConfig type.
-pub fn row_to_config(row: &ProjectRow) -> crate::config::settings::ProjectConfig {
-    crate::config::settings::ProjectConfig {
+pub fn row_to_config(row: &ProjectRow) -> Result<crate::config::settings::ProjectConfig> {
+    Ok(crate::config::settings::ProjectConfig {
         name: row.name.clone(),
         path: row.path.clone(),
         github_repo: row.github_repo.clone(),
-        aliases: serde_json::from_str(&row.aliases).unwrap_or_default(),
-        hooks: serde_json::from_str(&row.hooks).unwrap_or_default(),
+        aliases: parse_project_json(row, "aliases", &row.aliases)?,
+        hooks: parse_project_json(row, "hooks", &row.hooks)?,
         worker_preamble: row.worker_preamble.clone(),
         check_command: row.check_command.clone(),
         logo: row.logo.clone(),
         scout_summary: row.scout_summary.clone(),
-        classify_rules: serde_json::from_str(&row.classify_rules).unwrap_or_default(),
-    }
+        classify_rules: parse_project_json(row, "classify_rules", &row.classify_rules)?,
+    })
 }
 
 /// Convert a config-layer ProjectConfig to a DB row for upsert.
-pub fn config_to_row(pc: &crate::config::settings::ProjectConfig) -> ProjectRow {
-    ProjectRow {
+///
+/// Fail-fast: returns `Err` on serde failures. Previously this function
+/// silently substituted empty `[]`/`{}` defaults, which would
+/// round-trip back from DB as if the user had cleared the field — a
+/// data-loss event mirroring (and violating) CLAUDE.md's "Persisted
+/// project JSON reads surface corruption" invariant.
+pub fn config_to_row(
+    pc: &crate::config::settings::ProjectConfig,
+) -> Result<ProjectRow, serde_json::Error> {
+    Ok(ProjectRow {
         id: 0,
         name: pc.name.clone(),
         path: pc.path.clone(),
         github_repo: pc.github_repo.clone(),
-        aliases: serde_json::to_string(&pc.aliases).unwrap_or_else(|_| "[]".into()),
-        hooks: serde_json::to_string(&pc.hooks).unwrap_or_else(|_| "{}".into()),
+        aliases: serde_json::to_string(&pc.aliases)?,
+        hooks: serde_json::to_string(&pc.hooks)?,
         worker_preamble: pc.worker_preamble.clone(),
         check_command: pc.check_command.clone(),
         logo: pc.logo.clone(),
         scout_summary: pc.scout_summary.clone(),
-        classify_rules: serde_json::to_string(&pc.classify_rules).unwrap_or_else(|_| "[]".into()),
+        classify_rules: serde_json::to_string(&pc.classify_rules)?,
         created_at: String::new(),
         updated_at: String::new(),
-    }
+    })
 }
 
 /// Load all projects from DB and populate config.captain.projects.
@@ -213,7 +234,7 @@ pub async fn load_into_config(
     let rows = list(pool).await?;
     config.captain.projects.clear();
     for row in &rows {
-        let pc = row_to_config(row);
+        let pc = row_to_config(row)?;
         config.captain.projects.insert(pc.path.clone(), pc);
     }
     Ok(())
@@ -229,7 +250,9 @@ pub async fn startup_sync(
     if crate::io::logo::backfill_project_logos(config) {
         for pc in config.captain.projects.values() {
             if pc.logo.is_some() {
-                let row = config_to_row(pc);
+                let row = config_to_row(pc).with_context(|| {
+                    format!("failed to serialize project {} for logo backfill", pc.name)
+                })?;
                 if let Err(e) = upsert_full(pool, &row).await {
                     tracing::warn!(
                         module = "settings",

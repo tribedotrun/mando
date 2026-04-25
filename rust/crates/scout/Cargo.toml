@@ -31,6 +31,7 @@ thiserror.workspace = true
 rustc-hash.workspace = true
 urlencoding = "2"
 sha2 = { workspace = true }
+regex = { workspace = true }
 
 [features]
 dev-mocks = []

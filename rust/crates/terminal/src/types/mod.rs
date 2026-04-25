@@ -48,7 +48,6 @@ impl std::fmt::Display for Agent {
 }
 
 #[derive(Debug, Default, Deserialize)]
-#[serde(default)]
 pub struct CreateRequest {
     pub project: String,
     pub cwd: PathBuf,

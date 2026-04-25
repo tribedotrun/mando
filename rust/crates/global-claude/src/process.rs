@@ -94,9 +94,6 @@ pub(crate) async fn spawn_process(
 
     // Environment.
     cmd.env("CLAUDE_CODE_EXIT_AFTER_STOP_DELAY", "5000");
-    // Enable CC's streaming watchdog — aborts hung API connections (not tool
-    // execution). Without this, a silently-dropped SSE connection hangs forever.
-    cmd.env("CLAUDE_ENABLE_STREAM_WATCHDOG", "1");
     cmd.env_remove("CLAUDECODE");
     // Strip daemon-specific env vars so workers don't inherit state that
     // causes mando-dev commands to silently change mode (e.g. start dev
@@ -222,7 +219,6 @@ pub async fn spawn_detached(
 
     // Environment.
     cmd.env("CLAUDE_CODE_EXIT_AFTER_STOP_DELAY", "5000");
-    cmd.env("CLAUDE_ENABLE_STREAM_WATCHDOG", "1");
     cmd.env_remove("CLAUDECODE");
     for key in DAEMON_ENV_STRIP {
         cmd.env_remove(key);

@@ -4,7 +4,9 @@ import type {
   SseEnvelope,
   StatusEventData,
   TaskItem,
+  WorkbenchStatusFilter,
 } from '#shared/daemon-contract';
+import { itemStatusSchema, workbenchStatusFilterSchema } from '#shared/daemon-contract/schemas';
 
 export type {
   ActResponse,
@@ -17,6 +19,8 @@ export type {
   AskHistoryEntry,
   AskHistoryResponse,
   AskResponse,
+  BulkResultStatus,
+  ClarifyOutcome,
   ClarifyResponse,
   ClarifierQuestion,
   ClarifierQuestionPayload,
@@ -35,10 +39,16 @@ export type {
   ScoutEventData,
   ScoutItem,
   ScoutItemSession,
+  ScoutItemLifecycleCommand,
+  ScoutItemStatus,
+  ScoutItemStatusFilter,
   ScoutResearchRun,
+  ScoutResearchRunStatus,
   SessionsEventData,
+  SessionStatus,
   ScoutResponse,
   SessionEntry,
+  SessionCategory,
   SessionIds,
   SessionSummary,
   SessionsResponse,
@@ -50,15 +60,61 @@ export type {
   TaskItem,
   TaskListResponse,
   TelegramHealth,
+  TerminalState,
   TerminalSessionInfo,
   TickResult,
   TimelineEvent,
   TimelineResponse,
-  TranscriptResponse,
+  TranscriptEvent,
+  TranscriptEventEnvelope,
+  TranscriptEventsResponse,
+  AssistantContentBlock,
+  UserContentBlock,
+  UserToolResultBlock,
+  ToolName,
+  ToolInput,
+  ResultEvent,
+  ResultOutcome,
+  ResultSummary,
+  SystemInitEvent,
+  SystemCompactBoundaryEvent,
+  SystemStatusEvent,
+  SystemApiRetryEvent,
+  SystemLocalCommandOutputEvent,
+  SystemHookEvent,
+  SystemRateLimitEvent,
+  HookPhase,
+  AssistantEvent,
+  AssistantToolUseBlock,
+  UserEvent,
+  ToolProgressEvent,
+  UnknownEvent,
+  EventMeta,
+  CcTodoItemStatus,
+  CcTodoItem,
+  McpToolName,
+  OtherToolName,
+  BashInput,
+  ReadInput,
+  EditInput,
+  WriteInput,
+  GrepInput,
+  GlobInput,
+  TodoWriteInput,
+  WebFetchInput,
+  WebSearchInput,
+  TaskInput,
+  NotebookEditInput,
+  SkillInput,
+  StructuredOutputInput,
+  OpaqueInput,
+  ModelUsageBreakdown,
+  TranscriptUsageInfo,
   ResearchEventData,
   ArtifactEventData,
   WorkbenchEventData,
   WorkbenchItem,
+  WorkbenchStatusFilter,
   WorkerDetail,
   WorkersResponse,
 } from '#shared/daemon-contract';
@@ -72,23 +128,23 @@ export type {
   UiConfig,
 } from '#renderer/global/types/config';
 
-export const FINALIZED_STATUSES: ItemStatus[] = ['merged', 'completed-no-pr', 'canceled'];
+export const FINALIZED_STATUSES: readonly ItemStatus[] = ['merged', 'completed-no-pr', 'canceled'];
 
-export const ACTION_NEEDED_STATUSES: ItemStatus[] = [
+export const ACTION_NEEDED_STATUSES: readonly ItemStatus[] = [
   'awaiting-review',
   'escalated',
   'needs-clarification',
   'plan-ready',
 ];
 
-export const IN_PROGRESS_STATUSES: ItemStatus[] = [
+export const IN_PROGRESS_STATUSES: readonly ItemStatus[] = [
   'clarifying',
   'in-progress',
   'captain-reviewing',
   'captain-merging',
 ];
 
-export const WORKING_STATUSES: ItemStatus[] = [
+export const WORKING_STATUSES: readonly ItemStatus[] = [
   'in-progress',
   'clarifying',
   'rework',
@@ -97,24 +153,7 @@ export const WORKING_STATUSES: ItemStatus[] = [
   'captain-merging',
 ];
 
-export const ALL_STATUSES: ItemStatus[] = [
-  'new',
-  'clarifying',
-  'needs-clarification',
-  'queued',
-  'in-progress',
-  'captain-reviewing',
-  'captain-merging',
-  'awaiting-review',
-  'rework',
-  'handed-off',
-  'escalated',
-  'errored',
-  'merged',
-  'completed-no-pr',
-  'plan-ready',
-  'canceled',
-];
+export const ALL_STATUSES: readonly ItemStatus[] = itemStatusSchema.options;
 
 export type SSEConnectionStatus = 'connected' | 'connecting' | 'disconnected';
 
@@ -130,8 +169,6 @@ export interface SseEntityPayload<T> {
 
 export type SseStatusPayload = StatusEventData;
 export type SseSessionsPayload = SessionsEventData;
-
-export type WorkbenchStatusFilter = 'active' | 'archived' | 'all';
 
 export interface PinnedWorkbench {
   id: number;
@@ -149,7 +186,8 @@ export interface PinnedEntry {
   project: string;
 }
 
-export const WORKBENCH_FILTER_OPTIONS: WorkbenchStatusFilter[] = ['active', 'archived', 'all'];
+export const WORKBENCH_FILTER_OPTIONS: readonly WorkbenchStatusFilter[] =
+  workbenchStatusFilterSchema.options;
 
 export type { NotificationKind, NotificationPayload, NotifyLevel } from '#shared/notifications';
 

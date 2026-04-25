@@ -26,19 +26,22 @@ pub(crate) async fn sse_events(
     // empty-state silently.
     let snapshot_event = match build_snapshot(&state).await {
         Ok(data) => {
-            let envelope =
-                api_types::SseEnvelope::Snapshot(api_types::SnapshotPayload { ts: now_ts(), data });
+            let envelope = api_types::SseEnvelope::Snapshot(Box::new(api_types::SnapshotPayload {
+                ts: now_ts(),
+                data,
+            }));
             encode_envelope(&envelope)
         }
         Err(e) => {
             tracing::error!(module = "transport-http-transport-sse", error = %e, "SSE snapshot: failed to build snapshot");
-            let envelope = api_types::SseEnvelope::SnapshotError(api_types::SnapshotErrorPayload {
-                ts: now_ts(),
-                data: api_types::SseSnapshotErrorData {
-                    message: format!("snapshot build failed: {e}"),
-                    retry: true,
-                },
-            });
+            let envelope =
+                api_types::SseEnvelope::SnapshotError(Box::new(api_types::SnapshotErrorPayload {
+                    ts: now_ts(),
+                    data: api_types::SseSnapshotErrorData {
+                        message: format!("snapshot build failed: {e}"),
+                        retry: true,
+                    },
+                }));
             encode_envelope(&envelope)
         }
     };
@@ -65,7 +68,7 @@ pub(crate) async fn sse_events(
                     error = %skipped,
                     "SSE client lagged, broadcast events dropped"
                 );
-                let envelope = api_types::SseEnvelope::Resync(api_types::ResyncPayload {
+                let envelope = api_types::SseEnvelope::Resync(Box::new(api_types::ResyncPayload {
                     ts: now_ts(),
                     data: api_types::SseResyncData {
                         reason: skipped,
@@ -79,7 +82,7 @@ pub(crate) async fn sse_events(
                             "/api/credentials".into(),
                         ],
                     },
-                });
+                }));
                 Some(Ok(encode_envelope(&envelope)))
             }
         }
@@ -112,40 +115,46 @@ fn encode_envelope(envelope: &api_types::SseEnvelope) -> Event {
 fn bus_payload_to_envelope(payload: global_bus::BusPayload, ts: f64) -> api_types::SseEnvelope {
     match payload {
         global_bus::BusPayload::Tasks(data) => {
-            api_types::SseEnvelope::Tasks(api_types::TasksPayload { ts, data })
+            api_types::SseEnvelope::Tasks(Box::new(api_types::TasksPayload { ts, data }))
         }
         global_bus::BusPayload::Scout(data) => {
-            api_types::SseEnvelope::Scout(api_types::ScoutPayload { ts, data })
+            api_types::SseEnvelope::Scout(Box::new(api_types::ScoutPayload { ts, data }))
         }
         global_bus::BusPayload::Status(data) => {
-            api_types::SseEnvelope::Status(api_types::StatusPayload { ts, data })
+            api_types::SseEnvelope::Status(Box::new(api_types::StatusPayload { ts, data }))
         }
         global_bus::BusPayload::Sessions(data) => {
-            api_types::SseEnvelope::Sessions(api_types::SessionsPayload { ts, data })
+            api_types::SseEnvelope::Sessions(Box::new(api_types::SessionsPayload { ts, data }))
         }
         global_bus::BusPayload::Notification(data) => {
-            api_types::SseEnvelope::Notification(api_types::NotificationEventPayload {
+            api_types::SseEnvelope::Notification(Box::new(api_types::NotificationEventPayload {
                 ts,
                 data: Some(data),
-            })
+            }))
         }
         global_bus::BusPayload::Workbenches(data) => {
-            api_types::SseEnvelope::Workbenches(api_types::WorkbenchesPayload { ts, data })
+            api_types::SseEnvelope::Workbenches(Box::new(api_types::WorkbenchesPayload {
+                ts,
+                data,
+            }))
         }
         global_bus::BusPayload::Config(data) => {
-            api_types::SseEnvelope::Config(api_types::ConfigPayload {
+            api_types::SseEnvelope::Config(Box::new(api_types::ConfigPayload {
                 ts,
                 data: data.map(|b| *b),
-            })
+            }))
         }
         global_bus::BusPayload::Research(data) => {
-            api_types::SseEnvelope::Research(api_types::ResearchPayload { ts, data })
+            api_types::SseEnvelope::Research(Box::new(api_types::ResearchPayload { ts, data }))
         }
         global_bus::BusPayload::Credentials(data) => {
-            api_types::SseEnvelope::Credentials(api_types::CredentialsPayload { ts, data })
+            api_types::SseEnvelope::Credentials(Box::new(api_types::CredentialsPayload {
+                ts,
+                data,
+            }))
         }
         global_bus::BusPayload::Artifacts(data) => {
-            api_types::SseEnvelope::Artifacts(api_types::ArtifactsPayload { ts, data })
+            api_types::SseEnvelope::Artifacts(Box::new(api_types::ArtifactsPayload { ts, data }))
         }
     }
 }
@@ -161,16 +170,15 @@ fn now_ts() -> f64 {
 async fn build_snapshot(state: &AppState) -> anyhow::Result<api_types::SseSnapshotData> {
     let (all_items, worker_rows, workbench_rows) = state.captain.load_sse_snapshot_data().await?;
     let tasks = roundtrip::<Vec<api_types::TaskItem>>(&all_items, "tasks")?;
-    let workers = roundtrip::<Vec<api_types::WorkerDetail>>(worker_rows, "workers")?;
+    let workers = worker_rows;
     let workbenches = roundtrip::<Vec<api_types::WorkbenchItem>>(workbench_rows, "workbenches")?;
     let terminals =
         roundtrip::<Vec<api_types::TerminalSessionInfo>>(state.terminal.list(), "terminals")?;
 
     let config = {
         let cfg = state.settings.load_config();
-        let mut value = serde_json::to_value(&*cfg).context("failed to serialize config")?;
-        crate::runtime::config_support::inject_projects(&cfg, &mut value);
-        roundtrip::<api_types::MandoConfig>(value, "config")?
+        crate::runtime::config_support::config_to_api(&cfg)
+            .with_context(|| "failed to deserialize config into api-types")?
     };
 
     let uptime = state.start_time.elapsed().as_secs();
@@ -190,7 +198,7 @@ async fn build_snapshot(state: &AppState) -> anyhow::Result<api_types::SseSnapsh
 
 #[cfg(test)]
 pub(crate) fn resync_envelope(ts: f64, reason: String) -> api_types::SseEnvelope {
-    api_types::SseEnvelope::Resync(api_types::ResyncPayload {
+    api_types::SseEnvelope::Resync(Box::new(api_types::ResyncPayload {
         ts,
         data: api_types::SseResyncData {
             reason,
@@ -204,7 +212,7 @@ pub(crate) fn resync_envelope(ts: f64, reason: String) -> api_types::SseEnvelope
                 "/api/credentials".into(),
             ],
         },
-    })
+    }))
 }
 
 fn roundtrip<T: DeserializeOwned>(value: impl Serialize, label: &'static str) -> anyhow::Result<T> {

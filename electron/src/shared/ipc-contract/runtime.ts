@@ -5,7 +5,7 @@ import { ipcRenderer, type IpcRendererEvent } from 'electron';
 import { channels, type ChannelName, type ArgsOf, type ResultOf, type PayloadOf } from './channels';
 
 // inferIpcApi: maps the channel registry into the renderer-facing API shape.
-// MandoAPI in preload/types/api.ts is `type MandoAPI = inferIpcApi<typeof channels>`,
+// MandoAPI in preload/providers/ipc.ts is `type MandoAPI = inferIpcApi<typeof channels>`,
 // eliminating the duplicate type definition that previously drifted from runtime.
 
 export type InvokeApi = {

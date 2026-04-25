@@ -9,6 +9,7 @@ pub const TASKS_BULK: &str = "/api/tasks/bulk";
 pub const TASKS_HANDOFF: &str = "/api/tasks/handoff";
 pub const TASKS_REOPEN: &str = "/api/tasks/reopen";
 pub const TASKS_REWORK: &str = "/api/tasks/rework";
+pub const TASKS_STOP: &str = "/api/tasks/stop";
 pub const TASKS_MERGE: &str = "/api/tasks/merge";
 pub const CAPTAIN_NUDGE: &str = "/api/captain/nudge";
 pub const CAPTAIN_STOP: &str = "/api/captain/stop";
@@ -18,8 +19,37 @@ pub const SCOUT_ITEMS: &str = "/api/scout/items";
 pub const SCOUT_PROCESS: &str = "/api/scout/process";
 pub const SCOUT_RESEARCH: &str = "/api/scout/research";
 
+pub const AI_PARSE_TODOS: &str = "/api/ai/parse-todos";
+pub const CHANNELS_TELEGRAM_OWNER: &str = "/api/channels/telegram/owner";
+pub const HEALTH: &str = "/api/health";
+pub const HEALTH_SYSTEM: &str = "/api/health/system";
+pub const TASKS_ASK: &str = "/api/tasks/ask";
+pub const TASKS_ASK_END: &str = "/api/tasks/ask/end";
+pub const TASKS_WITH_ARCHIVED: &str = "/api/tasks?include_archived=true";
+pub const WORKERS: &str = "/api/workers";
+
 pub fn task_item(id: impl Display) -> String {
     format!("{TASKS}/{id}")
+}
+
+pub fn task_clarify(id: impl Display) -> String {
+    format!("{TASKS}/{id}/clarify")
+}
+
+pub fn task_history(id: impl Display) -> String {
+    format!("{TASKS}/{id}/history")
+}
+
+pub fn task_pr_summary(id: impl Display) -> String {
+    format!("{TASKS}/{id}/pr-summary")
+}
+
+pub fn task_sessions(id: impl Display) -> String {
+    format!("{TASKS}/{id}/sessions")
+}
+
+pub fn task_timeline(id: impl Display) -> String {
+    format!("{TASKS}/{id}/timeline")
 }
 
 pub fn scout_item(id: impl Display) -> String {

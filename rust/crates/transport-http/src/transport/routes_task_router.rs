@@ -129,6 +129,15 @@ pub(crate) fn task_routes() -> ApiRouter<AppState> {
     );
     let router = crate::api_route!(
         router,
+        POST "/api/tasks/stop",
+        transport = Json,
+        auth = Protected,
+        handler = routes_task_actions::post_task_stop,
+        body = api_types::TaskIdRequest,
+        res = api_types::BoolOkResponse
+    );
+    let router = crate::api_route!(
+        router,
         POST "/api/tasks/ask",
         transport = Multipart,
         auth = Protected,

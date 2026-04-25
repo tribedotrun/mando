@@ -1,17 +1,18 @@
 import React from 'react';
 import { ChevronRight } from 'lucide-react';
 import type { ScoutItem } from '#renderer/global/types';
+import type { ScoutUserSettableStatus } from '#renderer/domains/scout/service/researchHelpers';
 import { useScoutTableRow } from '#renderer/domains/scout/runtime/useScoutTableRow';
-import { Badge } from '#renderer/global/ui/badge';
-import { TableRow, TableCell } from '#renderer/global/ui/table';
-import { Checkbox } from '#renderer/global/ui/checkbox';
+import { Badge } from '#renderer/global/ui/primitives/badge';
+import { TableRow, TableCell } from '#renderer/global/ui/primitives/table';
+import { Checkbox } from '#renderer/global/ui/primitives/checkbox';
 import { ExpandedSummaryRow, StatusCell } from '#renderer/domains/scout/ui/ScoutTableRowParts';
 
 export interface ScoutTableRowCallbacks {
   onToggleSelect: (id: number) => void;
   onSelect: (id: number) => void;
   onToggleExpand: (id: number) => void;
-  onStatusChange: (id: number, status: string) => void;
+  onStatusChange: (id: number, status: ScoutUserSettableStatus) => void;
   onStartEdit: (id: number) => void;
 }
 

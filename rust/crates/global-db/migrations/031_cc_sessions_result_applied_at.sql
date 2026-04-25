@@ -1,0 +1,12 @@
+-- Idempotency marker for clarifier result apply.
+--
+-- Once a clarifier session's structured output has been committed into its
+-- task via `apply_clarifier_result`, this column is set. `tick_clarify_poll`
+-- then skips that session so the prior (already-consumed) stream cannot be
+-- re-applied on top of a fresh human answer during the inline HTTP
+-- reclarifier window. Before this column existed, the HTTP path cleared
+-- `tasks.session_ids.clarifier` to defend against the same race, but that
+-- clearing made the task look stuck to `dispatch_reclarify` and caused a
+-- second concurrent writer to fire. Removing that safety net plus this
+-- column replaces the coordination hack with a per-session idempotency flag.
+ALTER TABLE cc_sessions ADD COLUMN result_applied_at TEXT;

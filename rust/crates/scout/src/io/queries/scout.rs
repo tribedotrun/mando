@@ -7,8 +7,8 @@ use sqlx::SqlitePool;
 mod lifecycle;
 
 pub use lifecycle::{
-    increment_error_count, reset_error_state, reset_stale_fetched, update_processed, update_status,
-    update_status_if,
+    increment_error_count, increment_error_count_if_status, reset_error_state, reset_stale_fetched,
+    update_processed, update_status, update_status_if,
 };
 
 /// Column list for ItemRow queries - single source of truth.
@@ -68,14 +68,14 @@ pub async fn add_item(
 pub async fn get_item(pool: &SqlitePool, id: i64) -> Result<Option<ScoutItem>> {
     let sql = format!("{} WHERE id = ?", select_items_sql());
     let row: Option<ItemRow> = sqlx::query_as(&sql).bind(id).fetch_optional(pool).await?;
-    Ok(row.map(|r| r.into_item()))
+    row.map(ItemRow::into_item).transpose()
 }
 
 /// Get item by URL.
 pub async fn get_item_by_url(pool: &SqlitePool, url: &str) -> Result<Option<ScoutItem>> {
     let sql = format!("{} WHERE url = ?", select_items_sql());
     let row: Option<ItemRow> = sqlx::query_as(&sql).bind(url).fetch_optional(pool).await?;
-    Ok(row.map(|r| r.into_item()))
+    row.map(ItemRow::into_item).transpose()
 }
 
 /// List items, optionally filtered by status.
@@ -94,7 +94,7 @@ pub async fn list_items(pool: &SqlitePool, status: Option<&str>) -> Result<Vec<S
         q = q.bind(s);
     }
     let rows = q.fetch_all(pool).await?;
-    Ok(rows.into_iter().map(|r| r.into_item()).collect())
+    rows.into_iter().map(ItemRow::into_item).collect()
 }
 
 /// List processable items.
@@ -104,7 +104,7 @@ pub async fn list_processable(pool: &SqlitePool) -> Result<Vec<ScoutItem>> {
         select_items_sql()
     );
     let rows: Vec<ItemRow> = sqlx::query_as(&sql).fetch_all(pool).await?;
-    Ok(rows.into_iter().map(|r| r.into_item()).collect())
+    rows.into_iter().map(ItemRow::into_item).collect()
 }
 
 /// Paginated query with status/type filters and SQL-level LIMIT/OFFSET.
@@ -165,7 +165,9 @@ pub async fn query_items_paginated(
     let rows = q.fetch_all(pool).await?;
 
     Ok((
-        rows.into_iter().map(|r| r.into_item()).collect(),
+        rows.into_iter()
+            .map(ItemRow::into_item)
+            .collect::<Result<Vec<_>>>()?,
         total as usize,
     ))
 }
@@ -312,10 +314,10 @@ struct ItemRow {
 }
 
 impl ItemRow {
-    fn into_item(self) -> ScoutItem {
+    fn into_item(self) -> Result<ScoutItem> {
         let status_str = self.status.unwrap_or_else(|| "pending".into());
-        let status = parse_status(&status_str);
-        ScoutItem {
+        let status = parse_status(&status_str)?;
+        Ok(ScoutItem {
             id: self.id,
             url: self.url,
             item_type: self.r#type,
@@ -331,7 +333,7 @@ impl ItemRow {
             date_published: self.date_published,
             rev: self.rev,
             research_run_id: self.research_run_id,
-        }
+        })
     }
 }
 
@@ -342,7 +344,7 @@ pub async fn list_items_by_run(pool: &SqlitePool, run_id: i64) -> Result<Vec<Sco
         select_items_sql()
     );
     let rows: Vec<ItemRow> = sqlx::query_as(&sql).bind(run_id).fetch_all(pool).await?;
-    Ok(rows.into_iter().map(|r| r.into_item()).collect())
+    rows.into_iter().map(ItemRow::into_item).collect()
 }
 
 /// Set the research_run_id FK on a scout item.
@@ -355,13 +357,7 @@ pub async fn set_research_run_id(pool: &SqlitePool, id: i64, run_id: i64) -> Res
     Ok(())
 }
 
-fn parse_status(s: &str) -> ScoutStatus {
-    s.parse().unwrap_or_else(|_| {
-        tracing::warn!(
-            module = "scout-io-queries-scout",
-            status = s,
-            "unknown scout status, defaulting to Pending"
-        );
-        ScoutStatus::Pending
-    })
+fn parse_status(s: &str) -> Result<ScoutStatus> {
+    s.parse()
+        .map_err(|err: String| anyhow::anyhow!("invalid scout status in database: {err}"))
 }

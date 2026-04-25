@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+api-types = { path = "../api-types" }
 global-types = { path = "../global-types" }
 global-infra = { path = "../global-infra" }
 tokio.workspace = true
