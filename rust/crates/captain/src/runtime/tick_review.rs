@@ -1,8 +1,8 @@
 //! Captain review polling extracted from the main tick loop.
 
 use crate::{ItemStatus, Task};
-use settings::config::settings::Config;
-use settings::config::workflow::CaptainWorkflow;
+use settings::CaptainWorkflow;
+use settings::Config;
 
 use super::{captain_review, credential_rate_limit, notify::Notifier, timeline_emit};
 

@@ -7,8 +7,8 @@ use tracing::Instrument;
 
 use crate::{ItemStatus, TickMode, TickResult};
 use global_bus::EventBus;
-use settings::config::settings::Config;
-use settings::config::workflow::CaptainWorkflow;
+use settings::CaptainWorkflow;
+use settings::Config;
 use tokio::sync::RwLock;
 use tokio_util::sync::CancellationToken;
 
@@ -443,8 +443,12 @@ async fn run_captain_tick_inner(
                 store
                     .merge_changed_items(&pre_tick_snapshot_json, &changed_items)
                     .await?;
-                super::lifecycle_effects::drain_pending(store.pool(), bus, store_lock).await?;
             }
+            // Always drain: persist_status_transition inserts outbox rows
+            // without going through changed_items, so gating on non-empty
+            // diff strands timeline events mergeability_auto_merge keys off.
+            let pool_for_drain = store_lock.read().await.pool().clone();
+            super::lifecycle_effects::drain_pending(&pool_for_drain, bus, store_lock).await?;
         }
     }
     // ── §5 POST — persist, SSE, prune ─────────────────────────────────

@@ -32,7 +32,12 @@ async function postUiTransition<T extends UiTransition>(
       return false;
     }
 
-    const detail = await resp.text().catch(() => '');
+    let detail = '';
+    try {
+      detail = await resp.text();
+    } catch {
+      detail = '';
+    }
     log.warn(
       `[ui] /api/ui/${transition} failed: HTTP ${resp.status}${
         detail ? ` ${detail.slice(0, 120)}` : ''

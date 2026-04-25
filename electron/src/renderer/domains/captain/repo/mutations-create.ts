@@ -1,5 +1,4 @@
 import { useMutation } from '@tanstack/react-query';
-import { toast } from '#renderer/global/runtime/useFeedback';
 import log from '#renderer/global/service/logger';
 import { addTask, parseTodos, type AddTaskInput } from '#renderer/domains/captain/repo/api';
 import { toReactQuery } from '#result';
@@ -7,12 +6,6 @@ import { toReactQuery } from '#result';
 export function useTaskCreate() {
   return useMutation({
     mutationFn: (input: AddTaskInput) => toReactQuery(addTask(input)),
-    onSuccess: () => {
-      toast.success('Task created');
-    },
-    onError: (err: Error) => {
-      toast.error(err.message || 'Failed to create task');
-    },
   });
 }
 
@@ -37,12 +30,6 @@ export function useTaskBulkCreate() {
         }
       }
       return results;
-    },
-    onSuccess: (results) => {
-      const ok = results.filter((r) => r.ok).length;
-      const failed = results.filter((r) => !r.ok).length;
-      if (ok > 0) toast.success(`Created ${ok} task${ok > 1 ? 's' : ''}`);
-      if (failed > 0) toast.error(`${failed} task${failed > 1 ? 's' : ''} failed`);
     },
   });
 }

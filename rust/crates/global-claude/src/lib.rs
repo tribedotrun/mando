@@ -1,4 +1,5 @@
 mod binary;
+mod broken_session;
 mod codex_exec;
 mod config;
 mod credentials;
@@ -6,14 +7,20 @@ mod error;
 mod json_parse;
 mod message;
 mod oneshot;
+mod pricing;
 mod process;
 mod protocol;
 mod session;
 mod stream;
 mod stream_symptoms;
 mod transcript;
+mod transcript_events;
 
 pub use binary::resolve_claude_binary;
+pub use broken_session::{
+    detect_image_dimension_blocked, stream_broken_session_symptom, BrokenSessionMatch,
+    BrokenSessionOrigin,
+};
 pub use codex_exec::codex_exec;
 pub use config::{CcConfig, CcConfigBuilder, Effort, PermissionMode, TaskBudget, ThinkingConfig};
 pub use credentials::{credential_id, with_credential};
@@ -24,6 +31,7 @@ pub use message::{
     ResultMessage, ResultSubtype,
 };
 pub use oneshot::CcOneShot;
+pub use pricing::{fallback_rate, rate_for_model, ModelRate};
 pub use process::{get_cpu_time, is_process_alive, kill_process, spawn_detached};
 pub use session::CcSession;
 pub use stream::{
@@ -32,9 +40,13 @@ pub use stream::{
     stream_stale_seconds, write_error_result, RateLimitRejection, StreamCostInfo,
     StreamRateLimitInfo,
 };
-pub use stream_symptoms::{detect_cc_stream_symptom, CcStreamSymptom};
+pub use stream_symptoms::{CcStreamSymptom, StreamSymptomMatcher, StreamSymptomRule};
 pub use transcript::{
-    parse_messages, session_cost, tool_usage, SessionCost, ToolUsageSummary, TranscriptMessage,
+    parse_messages, session_cost, session_cost_or_estimate, tool_usage, ModelUsage, SessionCost,
+    ToolUsageSummary, TranscriptMessage,
+};
+pub use transcript_events::{
+    parse_events, parse_events_from_offset, parse_events_with_size, stream_file_size,
 };
 
 /// Opaque wrapper for the raw Claude session JSON envelope.
@@ -57,6 +69,12 @@ pub struct CcResult<T> {
     pub stream_path: std::path::PathBuf,
     pub rate_limit: Option<RateLimitEvent>,
     pub pid: global_types::Pid,
+    /// Settings-managed credential id whose OAuth token billed this result.
+    /// Propagated from `CcConfig.credential_id` so per-credential cost
+    /// accounting stays accurate after failover (the final successful
+    /// attempt may have used a different credential than the first).
+    /// `None` means ambient auth (no credential rows configured).
+    pub credential_id: Option<i64>,
 }
 
 pub struct SessionMeta<'a> {

@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+use crate::SessionStatus;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
 pub enum ItemStatus {
     #[serde(rename = "new")]
@@ -35,6 +37,69 @@ pub enum ItemStatus {
     PlanReady,
     #[serde(rename = "canceled")]
     Canceled,
+    #[serde(rename = "stopped")]
+    Stopped,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+pub enum ScoutItemStatus {
+    #[serde(rename = "pending")]
+    Pending,
+    #[serde(rename = "fetched")]
+    Fetched,
+    #[serde(rename = "processed")]
+    Processed,
+    #[serde(rename = "saved")]
+    Saved,
+    #[serde(rename = "archived")]
+    Archived,
+    #[serde(rename = "error")]
+    Error,
+}
+
+impl ScoutItemStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Pending => "pending",
+            Self::Fetched => "fetched",
+            Self::Processed => "processed",
+            Self::Saved => "saved",
+            Self::Archived => "archived",
+            Self::Error => "error",
+        }
+    }
+}
+
+impl std::fmt::Display for ScoutItemStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str((*self).as_str())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+pub enum ScoutResearchRunStatus {
+    #[serde(rename = "running")]
+    Running,
+    #[serde(rename = "done")]
+    Done,
+    #[serde(rename = "failed")]
+    Failed,
+}
+
+impl ScoutResearchRunStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Running => "running",
+            Self::Done => "done",
+            Self::Failed => "failed",
+        }
+    }
+}
+
+impl std::fmt::Display for ScoutResearchRunStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str((*self).as_str())
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, TS)]
@@ -45,6 +110,7 @@ pub enum ReviewTrigger {
     BrokenSession,
     BudgetExhausted,
     ClarifierFail,
+    SpawnFail,
     RebaseFail,
     CiFailure,
     DegradedContext,
@@ -104,6 +170,12 @@ pub struct TaskItem {
     pub spawn_fail_count: i64,
     pub merge_fail_count: i64,
     pub source: Option<String>,
+    /// Unix seconds after which captain may dispatch this task again.
+    /// Set when every healthy credential is in rate-limit cooldown and
+    /// the failover layer surfaces `AllCredentialsExhausted`. Captain
+    /// tick excludes tasks where `paused_until > unixepoch()`; UI shows
+    /// "Paused until HH:MM". `None` means not paused.
+    pub paused_until: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -143,7 +215,7 @@ pub struct ScoutItem {
     pub rev: i64,
     pub url: String,
     pub title: Option<String>,
-    pub status: String,
+    pub status: ScoutItemStatus,
     pub item_type: Option<String>,
     pub summary: Option<String>,
     pub has_summary: Option<bool>,
@@ -165,7 +237,7 @@ pub struct ScoutItem {
 pub struct ScoutResearchRun {
     pub id: i64,
     pub research_prompt: String,
-    pub status: String,
+    pub status: ScoutResearchRunStatus,
     pub error: Option<String>,
     pub session_id: Option<String>,
     pub added_count: i64,
@@ -273,9 +345,10 @@ pub struct WorkbenchItem {
     pub deleted_at: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "lowercase")]
 pub enum TerminalAgent {
+    #[default]
     Claude,
     Codex,
 }
@@ -286,6 +359,12 @@ pub enum TerminalState {
     Live,
     Restored,
     Exited,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "lowercase")]
+pub enum TelegramMode {
+    Embedded,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -381,7 +460,7 @@ pub struct TelegramHealth {
     pub last_error: Option<String>,
     pub degraded: bool,
     pub restart_count: u64,
-    pub mode: String,
+    pub mode: TelegramMode,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -389,7 +468,7 @@ pub struct TelegramHealth {
 pub struct ScoutItemSession {
     pub session_id: String,
     pub caller: String,
-    pub status: String,
+    pub status: SessionStatus,
     pub created_at: String,
     pub model: Option<String>,
     pub duration_ms: Option<i64>,

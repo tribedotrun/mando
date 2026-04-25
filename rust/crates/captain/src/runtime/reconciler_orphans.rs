@@ -1,6 +1,6 @@
 //! Orphaned worktree detection and cleanup on startup.
 
-use settings::config::settings::Config;
+use settings::Config;
 
 use crate::io::task_store::TaskStore;
 
@@ -61,7 +61,7 @@ pub(crate) async fn reconcile_orphaned_worktrees(
             .and_then(|n| n.to_str())
             .unwrap_or("repo")
             .to_string();
-        match crate::io::git::list_worktrees(&project_path).await {
+        match global_git::list_worktrees(&project_path).await {
             Ok(paths) => {
                 all_git_tracked.extend(paths);
                 project_prefixes.push((project_path, format!("{repo_name}-")));
@@ -80,7 +80,7 @@ pub(crate) async fn reconcile_orphaned_worktrees(
         }
     }
 
-    let worktrees_dir = crate::io::git::worktrees_dir();
+    let worktrees_dir = global_git::worktrees_dir();
     if !worktrees_dir.is_dir() {
         return report;
     }
@@ -115,7 +115,7 @@ pub(crate) async fn reconcile_orphaned_worktrees(
         if tracked.contains(&path) || all_git_tracked.contains(&path) {
             continue;
         }
-        match crate::io::git::remove_worktree(project_path, &path).await {
+        match global_git::remove_worktree(project_path, &path).await {
             Ok(_) => {
                 tracing::info!(
                     module = "reconciler",

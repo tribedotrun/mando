@@ -1,10 +1,11 @@
 //! mando CLI — thin HTTP client for the mando-gw daemon.
 //!
 //! All domain operations are proxied through HTTP to the running daemon.
-//! Only worktree management runs locally (git commands).
+//! Local repository inspection uses the shared global-git provider boundary.
 
 mod captain;
 mod gateway;
+mod gateway_paths;
 mod http;
 mod project;
 mod scout;
@@ -12,10 +13,12 @@ mod sessions;
 mod todo;
 mod todo_artifacts;
 mod todo_display;
+mod transcript_render;
 mod worktree;
 
 use clap::{Args, Parser, Subcommand};
 
+use crate::gateway_paths as paths;
 use crate::http::{find_daemon_error, DaemonClient};
 
 #[derive(Parser)]
@@ -137,6 +140,7 @@ fn task_status_label(status: api_types::ItemStatus) -> &'static str {
         api_types::ItemStatus::CompletedNoPr => "completed-no-pr",
         api_types::ItemStatus::PlanReady => "plan-ready",
         api_types::ItemStatus::Canceled => "canceled",
+        api_types::ItemStatus::Stopped => "stopped",
     }
 }
 
@@ -187,7 +191,7 @@ async fn main() {
 
 async fn handle_channels() -> anyhow::Result<()> {
     let client = DaemonClient::discover()?;
-    let result: api_types::ChannelsResponse = client.get_json("/api/channels").await?;
+    let result: api_types::ChannelsResponse = client.get_json(paths::CHANNELS).await?;
     println!("Channels:");
     println!("{}", serde_json::to_string_pretty(&result)?);
     Ok(())
@@ -201,7 +205,7 @@ async fn handle_notify(args: NotifyArgs) -> anyhow::Result<()> {
     let client = DaemonClient::discover()?;
     client
         .post_json::<api_types::NotifyResponse, _>(
-            "/api/notify",
+            paths::NOTIFY,
             &api_types::NotifyRequest {
                 message: args.message,
                 chat_id: args.chat_id,
@@ -218,7 +222,7 @@ async fn handle_firecrawl(args: FirecrawlArgs) -> anyhow::Result<()> {
         FirecrawlCommand::Scrape { url } => {
             let result: api_types::FirecrawlScrapeResponse = client
                 .post_json(
-                    "/api/firecrawl/scrape",
+                    paths::FIRECRAWL_SCRAPE,
                     &api_types::FirecrawlScrapeRequest { url },
                 )
                 .await?;
@@ -234,9 +238,9 @@ async fn handle_tasks(args: TasksArgs) -> anyhow::Result<()> {
     let client = DaemonClient::discover()?;
 
     let api_path = if args.all {
-        "/api/tasks?include_archived=true"
+        paths::TASKS_WITH_ARCHIVED
     } else {
-        "/api/tasks"
+        paths::TASKS
     };
 
     let result: api_types::TaskListResponse = client.get_json(api_path).await?;
@@ -260,6 +264,7 @@ async fn handle_tasks(args: TasksArgs) -> anyhow::Result<()> {
         api_types::ItemStatus::Rework,
         api_types::ItemStatus::Escalated,
         api_types::ItemStatus::Errored,
+        api_types::ItemStatus::Stopped,
         api_types::ItemStatus::Merged,
         api_types::ItemStatus::CompletedNoPr,
         api_types::ItemStatus::Canceled,
@@ -336,7 +341,7 @@ async fn handle_tasks(args: TasksArgs) -> anyhow::Result<()> {
 async fn handle_health() -> anyhow::Result<()> {
     let client = DaemonClient::discover()?;
     let health: api_types::SystemHealthResponse = client
-        .get_json_with_body_on_5xx("/api/health/system")
+        .get_json_with_body_on_5xx(paths::HEALTH_SYSTEM)
         .await?;
     let version = health.version;
     let pid = health.pid;
@@ -362,7 +367,7 @@ async fn handle_health() -> anyhow::Result<()> {
 async fn handle_ui_launch() -> anyhow::Result<()> {
     let client = DaemonClient::discover()?;
     client
-        .post_no_body::<api_types::BoolOkResponse>("/api/ui/launch")
+        .post_no_body::<api_types::BoolOkResponse>(paths::UI_LAUNCH)
         .await?;
     println!("UI launch requested");
     Ok(())

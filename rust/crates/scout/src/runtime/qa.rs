@@ -15,7 +15,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
-use settings::config::ScoutWorkflow;
+use settings::ScoutWorkflow;
 use tokio::sync::Mutex;
 use tracing::{info, warn};
 

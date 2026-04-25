@@ -1,10 +1,10 @@
 import React from 'react';
-import { Card, CardContent } from '#renderer/global/ui/card';
-import { Separator } from '#renderer/global/ui/separator';
+import { Card, CardContent } from '#renderer/global/ui/primitives/card';
+import { Separator } from '#renderer/global/ui/primitives/separator';
 import { useConfig, useConfigPatch } from '#renderer/domains/settings/runtime/hooks';
 import { featuresPatch } from '#renderer/global/service/configPatches';
 import type { FeaturesConfig } from '#renderer/global/types';
-import { Switch } from '#renderer/global/ui/switch';
+import { Switch } from '#renderer/global/ui/primitives/switch';
 
 const EMPTY_FEATURES: FeaturesConfig = Object.freeze({});
 

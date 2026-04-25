@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState } from 'react';
 import { useSidebar } from '#renderer/global/runtime/SidebarContext';
 import type { SidebarChild } from '#renderer/global/service/utils';
 
@@ -16,55 +16,35 @@ export function useSidebarProjectItem({ name, items }: Args) {
   const [expanded, setExpanded] = useState(hasActiveWt);
   // Auto-expand when this project gains the active workbench.
   if (hasActiveWt && !expanded) setExpanded(true);
-  const [renameValue, setRenameValue] = useState(name);
-  const submittedRef = useRef(false);
   const [renamingWbId, setRenamingWbId] = useState<number | null>(null);
 
-  const inputRefCb = useCallback((el: HTMLInputElement | null) => {
-    if (el) {
-      el.focus();
-      el.select();
-    }
-  }, []);
-
-  const submitRename = async () => {
-    if (submittedRef.current) return;
-    submittedRef.current = true;
+  const commitRename = async (value: string) => {
     setRenaming(false);
-    const trimmed = renameValue.trim();
+    const trimmed = value.trim();
     if (trimmed && trimmed !== name) {
       await actions.renameProject(name, trimmed);
     }
   };
 
   const cancelRename = () => {
-    submittedRef.current = true;
     setRenaming(false);
-    setRenameValue(name);
   };
 
   const startRename = () => {
-    submittedRef.current = false;
     setRenaming(true);
-    setRenameValue(name);
   };
 
   return {
     actions,
-    menuOpen,
-    setMenuOpen,
-    renaming,
-    confirmOpen,
-    setConfirmOpen,
-    expanded,
-    setExpanded,
-    renameValue,
-    setRenameValue,
-    renamingWbId,
-    setRenamingWbId,
-    inputRefCb,
-    submitRename,
-    cancelRename,
-    startRename,
+    menu: { open: menuOpen, setOpen: setMenuOpen },
+    rename: {
+      active: renaming,
+      commit: commitRename,
+      cancel: cancelRename,
+      start: startRename,
+    },
+    delete: { confirmOpen, setConfirmOpen },
+    expanded: { value: expanded, setValue: setExpanded },
+    childRename: { id: renamingWbId, setId: setRenamingWbId },
   };
 }

@@ -59,7 +59,9 @@ for (const file of files) {
 
 let violations = 0;
 for (const [globalPath, { domains, appConsumer, globalConsumer }] of globalConsumers) {
-  if (globalPath.startsWith('ui/')) continue;
+  // Primitives (shadcn-style reusable controls) are exempt even at single-caller count;
+  // they are shared by nature and their first caller is not a signal of ownership.
+  if (globalPath.startsWith('ui/primitives/')) continue;
   if (globalConsumer) continue;
   if (domains.size === 1 && !appConsumer) {
     const [domain] = domains;

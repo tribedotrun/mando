@@ -29,7 +29,6 @@ use global_infra::load_json_file;
 /// `ps -p <pid> -o lstart=` which is stable for the lifetime of the
 /// process and differs across PID reuse.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-#[serde(default)]
 pub struct PidEntry {
     pub pid: Pid,
     /// Process start-time fingerprint. Empty if `ps` was unavailable at

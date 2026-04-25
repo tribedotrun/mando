@@ -50,9 +50,11 @@ pub fn error_response(status: StatusCode, msg: &str) -> ApiError {
 }
 
 /// Sanitize an error for INTERNAL_SERVER_ERROR: log the raw form, return
-/// an operation-specific client-safe message.
+/// an operation-specific client-safe message. When the error carries an
+/// anyhow-style chain, the alternate Display formatter (`{:#}`) expands
+/// it so downstream operators see *why*, not just the outermost context.
 pub fn internal_error(e: impl std::fmt::Display, msg: &str) -> ApiError {
-    let raw = e.to_string();
+    let raw = format!("{e:#}");
     tracing::error!(module = "transport-http-response", error = %raw, client_msg = msg, "internal error returned to client");
     error_response(StatusCode::INTERNAL_SERVER_ERROR, msg)
 }
@@ -90,10 +92,12 @@ pub fn resolve_task_cwd(
     item: &captain::Task,
     state: &AppState,
 ) -> Result<std::path::PathBuf, ApiError> {
-    state.captain.resolve_task_cwd(item).map_err(|_| {
-        error_response(
-            StatusCode::BAD_REQUEST,
-            "no worktree or project configured -- cannot run session",
-        )
-    })
+    // Surface the captain's error text verbatim — it already distinguishes
+    // "no worktree assigned" from "worktree missing on disk" so the user
+    // sees actionable detail (reopen the task, etc.) instead of a generic
+    // message that masks the real state.
+    state
+        .captain
+        .resolve_task_cwd(item)
+        .map_err(|e| error_response(StatusCode::CONFLICT, &format!("{e}")))
 }

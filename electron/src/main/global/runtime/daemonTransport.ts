@@ -22,10 +22,12 @@ import {
   httpError as makeHttpError,
   networkError as makeNetworkError,
   parseError as makeParseError,
+  parseJsonText,
   SchemaParseError,
   timeoutError as makeTimeoutError,
   ok,
 } from '#result';
+import { parseNonEmptyText } from '#main/global/service/boundaryText';
 import { readPort, readToken } from '#main/global/service/daemonDiscovery';
 
 export type DaemonRouteFetchOptions<K extends JsonRouteWithResKey> = Omit<
@@ -47,6 +49,14 @@ async function daemonFetch(urlPath: string, options?: RequestInit) {
     headers['Content-Type'] = 'application/json';
   }
   return fetch(`http://127.0.0.1:${port}${urlPath}`, { ...options, headers });
+}
+
+async function responseTextOr(response: Response, fallback: string) {
+  try {
+    return await response.text();
+  } catch {
+    return fallback;
+  }
 }
 
 export async function daemonRouteFetch<K extends JsonRouteWithResKey>(
@@ -82,18 +92,16 @@ export function daemonRouteJsonR<K extends JsonRouteWithResKey>(
     return makeNetworkError(String(cause), `route:${String(key)}`);
   }).andThen(async (response): Promise<Result<RouteRes<K>, ApiError>> => {
     if (!response.ok) {
-      const detail = await response
-        .text()
-        .catch(() => response.statusText)
-        .then((text) => text.trim());
+      const detailText = await responseTextOr(response, response.statusText);
+      const detail = parseNonEmptyText(detailText, `route:${String(key)} error`);
       return err(makeHttpError(response.status, detail || null, `HTTP ${response.status}`));
     }
-    let raw: unknown;
-    try {
-      raw = await response.json();
-    } catch {
-      return err(makeParseError([], `daemon:${String(key)} (invalid JSON body)`));
+    const rawText = await responseTextOr(response, '');
+    const rawResult = parseJsonText(rawText, `daemon:${String(key)}`);
+    if (rawResult.isErr()) {
+      return err(makeParseError(rawResult.error.issues, rawResult.error.where, rawText));
     }
+    const raw = rawResult.value;
     const schema = (resSchemas as Record<string, ZodType<unknown> | undefined>)[key as string];
     if (!schema) {
       log.warn(

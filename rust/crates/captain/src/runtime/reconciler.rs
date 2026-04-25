@@ -2,7 +2,7 @@
 
 use anyhow::Result;
 use serde::Deserialize;
-use settings::config::settings::Config;
+use settings::Config;
 
 use crate::io::ops_log;
 use crate::io::task_store::TaskStore;
@@ -45,6 +45,12 @@ pub async fn reconcile_on_startup(config: &Config, pool: &sqlx::SqlitePool) -> R
     // sessions stuck in running. The gateway's `MANDO_UNSAFE_START` gate
     // is the authoritative opt-out for operators who want to boot anyway.
     super::startup_session_reconcile::reconcile_startup_sessions(pool).await?;
+    // Unstick any task stranded in `Clarifying` from a prior daemon run.
+    // Replaces what the deleted `dispatch_reclarify` safety net used to
+    // catch during normal ticks: with a single writer for follow-up
+    // clarifier work and the HTTP path no longer nulling the session id,
+    // the only way a task lands here is a daemon crash mid-inline-call.
+    super::startup_session_reconcile::reconcile_stranded_clarifying_tasks(pool).await;
     super::dispatch_planning::reconcile_orphaned_planning(pool).await;
 
     let log_path = ops_log::ops_log_path();
@@ -183,11 +189,20 @@ async fn reconcile_session_costs(pool: &sqlx::SqlitePool) {
                 continue;
             }
         };
-        if meta.status != "done" {
-            continue;
-        }
-        let cost = meta.cost_usd;
-        if cost.is_none() {
+        // Meta with `status == "done"` AND a recorded cost is the happy
+        // path — use it verbatim. Meta with `status != "done"` or missing
+        // cost is the abnormal-exit case (watchdog abort, process kill):
+        // fall back to aggregating per-message usage from the stream file
+        // and estimating cost from the per-model pricing table so the DB
+        // row stops silently recording NULL for real token spend.
+        let cost = match meta.cost_usd {
+            Some(c) if c > 0.0 && meta.status == "done" => Some(c),
+            _ => {
+                let stream_path = global_infra::paths::stream_path_for_session(&session.session_id);
+                global_claude::session_cost_or_estimate(&stream_path).total_cost_usd
+            }
+        };
+        if cost.is_none() || cost.unwrap_or(0.0) <= 0.0 {
             continue;
         }
         // Compute duration from started_at / finished_at in the meta.

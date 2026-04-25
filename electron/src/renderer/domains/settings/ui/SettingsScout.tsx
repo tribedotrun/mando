@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
-import { Card, CardContent } from '#renderer/global/ui/card';
-import { Input } from '#renderer/global/ui/input';
-import { Label } from '#renderer/global/ui/label';
-import { Badge } from '#renderer/global/ui/badge';
-import { Button } from '#renderer/global/ui/button';
+import { Card, CardContent } from '#renderer/global/ui/primitives/card';
+import { Input } from '#renderer/global/ui/primitives/input';
+import { Label } from '#renderer/global/ui/primitives/label';
+import { Badge } from '#renderer/global/ui/primitives/badge';
+import { Button } from '#renderer/global/ui/primitives/button';
 import { useConfig, useConfigPatch } from '#renderer/domains/settings/runtime/hooks';
 import {
   scoutInterestsPatch,

@@ -3,7 +3,6 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use futures_util::FutureExt;
-use serde_json::Value;
 use tokio::sync::Semaphore;
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
@@ -61,7 +60,7 @@ impl ScoutRuntime {
         item_type: Option<&str>,
         page: Option<usize>,
         per_page: Option<usize>,
-    ) -> Result<Value> {
+    ) -> Result<api_types::ScoutResponse> {
         crate::runtime::dashboard::list_scout_items(
             &self.pool, status, search, item_type, page, per_page,
         )
@@ -69,30 +68,39 @@ impl ScoutRuntime {
     }
 
     #[tracing::instrument(skip_all)]
-    pub async fn get_item_value(&self, id: i64) -> Result<Value> {
+    pub async fn get_item(&self, id: i64) -> Result<api_types::ScoutItem> {
         crate::runtime::dashboard::get_scout_item(&self.pool, id).await
     }
 
     #[tracing::instrument(skip_all)]
-    pub async fn get_article_value(&self, id: i64) -> Result<Value> {
+    pub async fn get_article(&self, id: i64) -> Result<api_types::ScoutArticleResponse> {
         let workflow = self.settings.load_scout_workflow();
         crate::runtime::dashboard::ensure_scout_article(&self.pool, id, &workflow).await
     }
 
     #[tracing::instrument(skip_all)]
-    pub async fn add_item(&self, url: &str, title: Option<&str>) -> Result<Value> {
+    pub async fn add_item(
+        &self,
+        url: &str,
+        title: Option<&str>,
+    ) -> Result<api_types::ScoutAddResponse> {
         crate::runtime::dashboard::add_scout_item(&self.pool, url, title).await
     }
 
     #[tracing::instrument(skip_all)]
-    pub async fn process_item(&self, id: Option<i64>) -> Result<Value> {
+    pub async fn process_item(&self, id: Option<i64>) -> Result<api_types::ProcessResponse> {
         let config = self.settings.load_config();
         let workflow = self.settings.load_scout_workflow();
         crate::runtime::dashboard::process_scout(&config, &self.pool, id, &workflow).await
     }
 
     #[tracing::instrument(skip_all)]
-    pub async fn act_on_item(&self, id: i64, project: &str, prompt: Option<&str>) -> Result<Value> {
+    pub async fn act_on_item(
+        &self,
+        id: i64,
+        project: &str,
+        prompt: Option<&str>,
+    ) -> Result<crate::ScoutActDraft> {
         let config = self.settings.load_config();
         let workflow = self.settings.load_scout_workflow();
         crate::runtime::dashboard::act_on_scout_item(
@@ -111,7 +119,7 @@ impl ScoutRuntime {
     }
 
     #[tracing::instrument(skip_all)]
-    pub async fn delete_item(&self, id: i64) -> Result<Value> {
+    pub async fn delete_item(&self, id: i64) -> Result<api_types::ScoutDeleteResponse> {
         crate::runtime::dashboard::delete_scout_item(&self.pool, id).await
     }
 
@@ -125,12 +133,12 @@ impl ScoutRuntime {
         &self,
         ids: &[i64],
         command: crate::service::lifecycle::ScoutItemCommand,
-    ) -> Value {
+    ) -> api_types::ScoutBulkUpdateResponse {
         crate::runtime::dashboard::bulk_apply_scout_item_command(&self.pool, ids, command).await
     }
 
     #[tracing::instrument(skip_all)]
-    pub async fn bulk_delete_items(&self, ids: &[i64]) -> Value {
+    pub async fn bulk_delete_items(&self, ids: &[i64]) -> api_types::ScoutBulkDeleteResponse {
         crate::bulk_delete_scout_items(&self.pool, ids).await
     }
 
@@ -146,14 +154,10 @@ impl ScoutRuntime {
         let article_data =
             crate::runtime::dashboard::ensure_scout_article(&self.pool, id, &workflow).await?;
 
-        let summary = item["summary"]
-            .as_str()
-            .unwrap_or("(no summary)")
-            .to_string();
-        let article = article_data["article"]
-            .as_str()
-            .unwrap_or("(no article content)")
-            .to_string();
+        let summary = item.summary.unwrap_or_else(|| "(no summary)".to_string());
+        let article = article_data
+            .article
+            .unwrap_or_else(|| "(no article content)".to_string());
 
         let raw_path = crate::content_path(id);
         let raw_note = if raw_path.exists() {
@@ -254,9 +258,6 @@ impl ScoutRuntime {
             let result = AssertUnwindSafe(async {
                 if let Err(err) = crate::process_scout(&config, &pool, Some(id), &workflow).await {
                     tracing::warn!(module = "scout-runtime-daemon", scout_id = id, error = %err, "auto-process failed");
-                    if let Err(db_err) = crate::io::queries::scout::increment_error_count(&pool, id).await {
-                        tracing::error!(module = "scout-runtime-daemon", scout_id = id, error = %db_err, "failed to increment error count after process failure");
-                    }
                     daemon_research_runtime::emit_scout_process_failed(
                         &bus,
                         id,
@@ -272,11 +273,9 @@ impl ScoutRuntime {
                         None
                     }
                 };
-                let scout_item: Option<api_types::ScoutItem> =
-                    scout_payload.and_then(|v| serde_json::from_value(v).ok());
                 bus.send(global_bus::BusPayload::Scout(Some(api_types::ScoutEventData {
                     action: Some("updated".into()),
-                    item: scout_item,
+                    item: scout_payload,
                     id: Some(id),
                 })));
                 daemon_research_runtime::emit_scout_processed(&bus, &pool, id).await;

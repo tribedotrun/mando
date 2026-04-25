@@ -8,6 +8,7 @@ use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 
 use crate::config::{AUTO_REGISTER_WAIT, MAX_SPAWN_FAILURES};
+use crate::io::state_fs::PersistedUiState;
 use crate::io::{process, state_fs};
 use crate::service::{autolaunch, lifecycle};
 use crate::types::{UiAutoLaunchOptions, UiDesiredState, UiLaunchSpec, UiStatus};
@@ -32,7 +33,22 @@ pub struct UiRuntime {
 
 impl UiRuntime {
     pub fn new(state_path: PathBuf) -> Self {
-        let persisted = state_fs::load_state(&state_path);
+        // `load_state` fails fast on any read/parse error except
+        // NotFound (first launch). Log and use defaults rather than
+        // panicking at startup — a corrupt or unreadable state file
+        // shouldn't kill the daemon, but the error must be visible.
+        let persisted = match state_fs::load_state(&state_path) {
+            Ok(state) => state,
+            Err(err) => {
+                tracing::error!(
+                    module = "ui",
+                    path = %state_path.display(),
+                    error = %err,
+                    "failed to load ui-state.json — starting with defaults (desired_state=Running, no persisted launch_spec)"
+                );
+                PersistedUiState::default()
+            }
+        };
         let launch_spec = persisted
             .launch_spec
             .map(Into::<UiLaunchSpec>::into)

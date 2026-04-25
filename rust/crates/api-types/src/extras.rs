@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::{ArtifactMedia, TelegramHealth};
+use crate::{ArtifactMedia, TelegramHealth, TelegramMode};
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(deny_unknown_fields)]
@@ -9,7 +9,7 @@ pub struct ChannelStatus {
     pub name: String,
     pub enabled: bool,
     pub running: bool,
-    pub mode: String,
+    pub mode: TelegramMode,
     pub token: String,
     pub owner: String,
     #[serde(rename = "lastError")]

@@ -1,6 +1,3 @@
-use serde_json::json;
-use serde_json::Value;
-
 use super::CaptainRuntime;
 
 impl CaptainRuntime {
@@ -15,7 +12,7 @@ impl CaptainRuntime {
     #[tracing::instrument(skip_all)]
     pub async fn trigger_captain_tick(
         &self,
-        workflow: &settings::config::CaptainWorkflow,
+        workflow: &settings::CaptainWorkflow,
         dry_run: bool,
         emit_notifications: bool,
     ) -> anyhow::Result<crate::TickResult> {
@@ -69,8 +66,8 @@ impl CaptainRuntime {
     #[tracing::instrument(skip_all)]
     pub async fn workers_dashboard(
         &self,
-        workflow: &settings::config::CaptainWorkflow,
-    ) -> anyhow::Result<Vec<Value>> {
+        workflow: &settings::CaptainWorkflow,
+    ) -> anyhow::Result<Vec<api_types::WorkerDetail>> {
         let all_items = self.load_all_tasks(false).await?;
         let health_path = crate::config::worker_health_path();
         let health = crate::io::health_store::load_health_state(&health_path)?;
@@ -122,26 +119,29 @@ impl CaptainRuntime {
                         (false, _) => true,
                     }
                 };
-                json!({
-                    "id": task.id,
-                    "title": task.title,
-                    "status": task.status.as_str(),
-                    "worker": task.worker,
-                    "project": task.project,
-                    "github_repo": task.github_repo,
-                    "worktree": task.worktree,
-                    "branch": task.branch,
-                    "pr_number": task.pr_number,
-                    "started_at": task.worker_started_at,
-                    "last_activity_at": task.last_activity_at,
-                    "cc_session_id": task.session_ids.worker,
-                    "intervention_count": task.intervention_count,
-                    "nudge_count": nudge_count,
-                    "nudge_budget": nudge_budget,
-                    "last_action": last_action,
-                    "pid": pid,
-                    "is_stale": is_stale,
-                })
+                api_types::WorkerDetail {
+                    id: task.id,
+                    title: task.title.clone(),
+                    status: serde_json::from_value(
+                        serde_json::to_value(task.status).unwrap_or_default(),
+                    )
+                    .ok(),
+                    project: task.project.clone(),
+                    github_repo: task.github_repo.clone(),
+                    branch: task.branch.clone(),
+                    cc_session_id: task.session_ids.worker.clone(),
+                    worker: task.worker.clone(),
+                    worktree: task.worktree.clone(),
+                    pr_number: task.pr_number,
+                    started_at: task.worker_started_at.clone(),
+                    last_activity_at: task.last_activity_at.clone(),
+                    intervention_count: Some(task.intervention_count),
+                    nudge_count: Some(nudge_count),
+                    nudge_budget: Some(nudge_budget),
+                    last_action: Some(last_action.to_string()),
+                    pid,
+                    is_stale: Some(is_stale),
+                }
             })
             .collect())
     }

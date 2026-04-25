@@ -193,7 +193,7 @@ pub async fn get_run(pool: &SqlitePool, id: i64) -> Result<Option<ScoutResearchR
     .bind(id)
     .fetch_optional(pool)
     .await?;
-    Ok(row.map(|r| r.into_run()))
+    row.map(RunRow::into_run).transpose()
 }
 
 /// Mark all runs stuck at `running` as failed (called on startup to
@@ -259,7 +259,7 @@ pub async fn list_runs(pool: &SqlitePool, limit: i64) -> Result<Vec<ScoutResearc
     .bind(limit)
     .fetch_all(pool)
     .await?;
-    Ok(rows.into_iter().map(|r| r.into_run()).collect())
+    rows.into_iter().map(RunRow::into_run).collect()
 }
 
 #[derive(sqlx::FromRow)]
@@ -276,12 +276,14 @@ struct RunRow {
 }
 
 impl RunRow {
-    fn into_run(self) -> ScoutResearchRun {
+    fn into_run(self) -> Result<ScoutResearchRun> {
         let status = self
             .status
             .parse::<ResearchRunStatus>()
-            .unwrap_or(ResearchRunStatus::Running);
-        ScoutResearchRun {
+            .map_err(|err: String| {
+                anyhow::anyhow!("invalid scout research run status in database: {err}")
+            })?;
+        Ok(ScoutResearchRun {
             id: self.id,
             research_prompt: self.research_prompt,
             status,
@@ -291,6 +293,6 @@ impl RunRow {
             created_at: self.created_at,
             completed_at: self.completed_at,
             rev: self.rev,
-        }
+        })
     }
 }

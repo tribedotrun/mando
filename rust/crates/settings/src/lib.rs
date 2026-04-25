@@ -1,9 +1,11 @@
-pub mod config;
+mod config;
 mod io;
 mod runtime;
 mod service;
 mod types;
 
+pub use config::*;
+pub use io::cc_failover;
 pub use io::config_fs;
 pub use io::credentials;
 pub use io::credentials::{CredentialInfo, CredentialRow, CredentialWindowInfo};

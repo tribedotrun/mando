@@ -12,4 +12,5 @@ tracing.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 time.workspace = true
+global-infra.workspace = true
 global-types.workspace = true

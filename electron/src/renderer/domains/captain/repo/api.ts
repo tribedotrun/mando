@@ -13,6 +13,7 @@ const taskAddMultipartInputSchema = z
     title: z.string(),
     project: z.string().optional(),
     noAutoMerge: z.boolean().optional(),
+    planning: z.boolean().optional(),
     images: z.array(z.instanceof(File)).optional(),
   })
   .strict();
@@ -27,6 +28,7 @@ export interface AddTaskInput {
   title: string;
   project?: string;
   noAutoMerge?: boolean;
+  planning?: boolean;
   images?: File[];
 }
 
@@ -45,6 +47,7 @@ export function addTask(input: AddTaskInput): ResultAsync<TaskItem, ApiError> {
   form.append('source', 'electron');
   if (data.project) form.append('project', data.project);
   if (data.noAutoMerge) form.append('no_auto_merge', 'true');
+  if (data.planning) form.append('planning', 'true');
   if (data.images) {
     for (const img of data.images) {
       form.append('images', img, img.name);
@@ -169,6 +172,7 @@ export function nudgeWorker(
 }
 
 export const handoffItem = (id: number) => apiPostRouteR('postTasksHandoff', { id });
+export const stopItem = (id: number) => apiPostRouteR('postTasksStop', { id });
 export const cancelItem = (id: number) => apiPostRouteR('postTasksCancel', { id });
 
 // Workers

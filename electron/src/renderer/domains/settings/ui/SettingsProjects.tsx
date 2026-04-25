@@ -7,19 +7,10 @@ import {
 import { useSettingsProjects } from '#renderer/domains/settings/runtime/useSettingsProjects';
 
 export function SettingsProjects(): React.ReactElement {
-  const {
-    projects,
-    editing,
-    setEditing,
-    removing,
-    setRemoving,
-    editMut,
-    removeMut,
-    handleSave,
-    handleRemove,
-  } = useSettingsProjects();
+  const settings = useSettingsProjects();
 
-  const pathKeys = Object.keys(projects);
+  const pathKeys = Object.keys(settings.projects.items);
+  const removing = settings.removing.value;
 
   return (
     <div data-testid="settings-projects" className="space-y-8">
@@ -31,17 +22,17 @@ export function SettingsProjects(): React.ReactElement {
         )}
 
         {pathKeys.map((pathKey) => {
-          const project = projects[pathKey];
-          if (editing === pathKey) {
+          const project = settings.projects.items[pathKey];
+          if (settings.editing.value === pathKey) {
             return (
               <ProjectEditor
                 key={pathKey}
                 pathKey={pathKey}
                 project={project}
-                existingProjects={projects}
-                saving={editMut.isPending}
-                onSave={(_k, updated) => handleSave(pathKey, project, updated)}
-                onCancel={() => setEditing(null)}
+                existingProjects={settings.projects.items}
+                saving={settings.mutations.editMut.isPending}
+                onSave={(_k, updated) => settings.actions.handleSave(pathKey, project, updated)}
+                onCancel={() => settings.editing.set(null)}
               />
             );
           }
@@ -50,20 +41,20 @@ export function SettingsProjects(): React.ReactElement {
               key={pathKey}
               pathKey={pathKey}
               project={project}
-              removePending={removeMut.isPending}
-              onEdit={setEditing}
-              onRemove={setRemoving}
+              removePending={settings.mutations.removeMut.isPending}
+              onEdit={settings.editing.set}
+              onRemove={settings.removing.set}
             />
           );
         })}
       </div>
 
-      {removing && projects[removing] && (
+      {removing && settings.projects.items[removing] && (
         <RemoveProjectDialog
-          project={projects[removing]}
-          isPending={removeMut.isPending}
-          onConfirm={() => handleRemove(removing)}
-          onCancel={() => setRemoving(null)}
+          project={settings.projects.items[removing]}
+          isPending={settings.mutations.removeMut.isPending}
+          onConfirm={() => settings.actions.handleRemove(removing)}
+          onCancel={() => settings.removing.set(null)}
         />
       )}
     </div>

@@ -6,8 +6,8 @@ use std::panic::AssertUnwindSafe;
 use crate::{ItemStatus, Task};
 use futures::FutureExt;
 use global_bus::EventBus;
-use settings::config::settings::Config;
-use settings::config::workflow::CaptainWorkflow;
+use settings::CaptainWorkflow;
+use settings::Config;
 use tokio_util::task::TaskTracker;
 
 use crate::runtime::clarifier;
@@ -209,6 +209,36 @@ pub(crate) async fn clarify_new_items(
                             error = %e,
                             "async clarifier failed"
                         );
+                        // If the failover layer exhausted all healthy
+                        // credentials, park the task with `paused_until`
+                        // set to the soonest cooldown. Captain tick will
+                        // exclude it from dispatch until the clock passes.
+                        if let Some(global_claude::CcError::AllCredentialsExhausted {
+                            earliest_reset,
+                        }) = e.downcast_ref::<global_claude::CcError>()
+                        {
+                            if let Err(e2) = crate::io::queries::tasks::set_paused_until(
+                                &pool,
+                                task_id_num,
+                                *earliest_reset,
+                            )
+                            .await
+                            {
+                                tracing::warn!(
+                                    module = "captain",
+                                    task_id = task_id_num,
+                                    error = %e2,
+                                    "failed to set paused_until on AllCredentialsExhausted"
+                                );
+                            } else {
+                                tracing::warn!(
+                                    module = "captain",
+                                    task_id = task_id_num,
+                                    earliest_reset,
+                                    "task paused — all credentials rate-limited"
+                                );
+                            }
+                        }
                         let stream_path = global_infra::paths::stream_path_for_session(&session_id);
                         global_claude::write_error_result(
                             &stream_path,

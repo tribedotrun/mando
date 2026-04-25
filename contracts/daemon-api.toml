@@ -29,6 +29,12 @@ role       = "/api/events SSE emitter — encodes api_types::SseEnvelope"
 transports = ["sse"]
 
 [[producer]]
+name       = "sse-session-events"
+path       = "rust/crates/transport-http/src/transport/sse_session_events.rs"
+role       = "/api/sessions/{id}/events/stream SSE emitter — encodes api_types::TranscriptEventEnvelope"
+transports = ["sse"]
+
+[[producer]]
 name       = "event-bus"
 path       = "rust/crates/global-bus/src/lib.rs"
 role       = "in-process broadcast channel driving the SSE emitter"
@@ -83,5 +89,13 @@ name        = "electron-renderer"
 path        = "electron/src/renderer"
 transports  = ["http", "sse"]
 role        = "Electron renderer React Query daemon consumer"
+enforcement = "ts-rs-codegen"
+allow-value = false
+
+[[consumer]]
+name        = "electron-main-daemon-transport"
+path        = "electron/src/main/global/runtime/daemonTransport.ts"
+transports  = ["http"]
+role        = "Electron main-process daemon HTTP funnel — schema-validates every request/response against daemon-contract"
 enforcement = "ts-rs-codegen"
 allow-value = false

@@ -4,7 +4,7 @@ use api_types::TaskCreateResponse;
 
 use crate::{ItemStatus, Task, TimelineEvent, TimelineEventPayload, UpdateTaskInput};
 use anyhow::{Context, Result};
-use settings::config::settings::Config;
+use settings::Config;
 
 use crate::io::task_store::TaskStore;
 use crate::runtime::task_notes::append_tagged_note;
@@ -94,8 +94,7 @@ pub async fn add_task(
 ) -> Result<TaskCreateResponse> {
     let projects = &config.captain.projects;
     let (resolved_project, clean_title) = if let Some(r) = project {
-        let name = settings::config::resolve_project_config(Some(r), config)
-            .map(|(_, pc)| pc.name.clone());
+        let name = settings::resolve_project_config(Some(r), config).map(|(_, pc)| pc.name.clone());
         if name.is_none() {
             let mut valid: Vec<String> = projects.values().map(|pc| pc.name.clone()).collect();
             valid.sort();
@@ -107,7 +106,7 @@ pub async fn add_task(
         }
         (name, title.to_string())
     } else {
-        let (matched, cleaned) = settings::config::match_project_by_prefix(title, projects);
+        let (matched, cleaned) = settings::match_project_by_prefix(title, projects);
         if matched.is_some() {
             (matched, cleaned.to_string())
         } else if let Some(only) = projects.values().next().filter(|_| projects.len() == 1) {
@@ -119,7 +118,7 @@ pub async fn add_task(
 
     // Resolve project_id, upserting into the projects table if needed.
     let (project_id, project_name) = if let Some(ref name) = resolved_project {
-        let resolved = settings::config::resolve_project_config(Some(name), config);
+        let resolved = settings::resolve_project_config(Some(name), config);
         let (path, github_repo) = match resolved {
             Some((_, pc)) => (pc.path.as_str(), pc.github_repo.as_deref()),
             None => ("", None),
@@ -194,7 +193,7 @@ pub async fn delete_tasks(
 #[allow(clippy::too_many_arguments)]
 pub async fn trigger_captain_tick(
     config: &Config,
-    workflow: &settings::config::workflow::CaptainWorkflow,
+    workflow: &settings::CaptainWorkflow,
     dry_run: bool,
     bus: Option<&global_bus::EventBus>,
     emit_notifications: bool,
@@ -247,7 +246,7 @@ pub async fn queue_item(store: &TaskStore, id: i64, reason: &str) -> Result<()> 
         TaskLifecycleCommand::Queue,
         "Queued for captain dispatch".to_string(),
         TimelineEventPayload::StatusChangedQueued {
-            to: "queued".to_string(),
+            to: api_types::ItemStatus::Queued,
             reason: reason.to_string(),
         },
     )
@@ -334,7 +333,7 @@ pub async fn rework_item(store: &TaskStore, id: i64, feedback: &str) -> Result<(
         summary,
         TimelineEventPayload::ReworkRequested {
             content: feedback.to_string(),
-            to: "rework".to_string(),
+            to: api_types::ItemStatus::Rework,
         },
     )
     .await
@@ -363,8 +362,45 @@ pub async fn handoff_item(store: &TaskStore, id: i64, pool: &sqlx::SqlitePool) -
         TaskLifecycleCommand::Handoff,
         "Handed off by human".to_string(),
         TimelineEventPayload::HandedOff {
-            to: "handed-off".to_string(),
+            to: api_types::ItemStatus::HandedOff,
             handed_off_by: "human".to_string(),
+        },
+    )
+    .await
+}
+
+/// Stop a single in-progress task on user request. Kills the worker process
+/// but preserves the worktree + branch for inspection, transitions to the
+/// terminal-but-reopenable `Stopped` status, and leaves `intervention_count`
+/// untouched — a manual stop is not a nudge.
+#[tracing::instrument(skip_all)]
+pub async fn stop_item(store: &TaskStore, id: i64, pool: &sqlx::SqlitePool) -> Result<()> {
+    let id_str = id.to_string();
+    let _lock = crate::io::item_lock::acquire_item_lock(&id_str, "stop")?;
+
+    // Terminate ALL running sessions for this task (clarifier, worker, any
+    // captain-spawned followups). Same shape as `cancel_item` — leaving a
+    // secondary session alive would orphan a live process behind a `stopped`
+    // status. If we can't enumerate we must NOT mark the task stopped.
+    let running = sessions_db::list_running_sessions_for_task(pool, id)
+        .await
+        .with_context(|| format!("stop_item: failed to list running sessions for task {id}"))?;
+    for row in &running {
+        crate::io::session_terminate::terminate_session(
+            pool,
+            &row.session_id,
+            global_types::SessionStatus::Stopped,
+            None,
+        )
+        .await;
+    }
+    apply_task_lifecycle_command(
+        store,
+        id,
+        TaskLifecycleCommand::Stop,
+        "Stopped by human".to_string(),
+        TimelineEventPayload::Stopped {
+            stopped_by: "human".to_string(),
         },
     )
     .await

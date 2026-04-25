@@ -16,6 +16,7 @@ const TESTS_RE = /\/__tests__\/|\.test\./;
 // produce Promise<T> as part of the boundary contract.
 const ALLOWED = [
   /\/renderer\/global\/providers\/http\.ts$/,
+  /\/renderer\/global\/providers\/httpRoutes\.ts$/,
   /\/main\/global\/runtime\/lifecycle\.ts$/,
   /\/main\/global\/runtime\/launchd\.ts$/,
   /\/main\/global\/runtime\/portCheck\.ts$/,

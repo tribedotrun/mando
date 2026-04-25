@@ -1,6 +1,7 @@
 import { useCallback, useState } from 'react';
 import { useScoutResearch, type ScoutQueryParams } from '#renderer/domains/scout/runtime/hooks';
 import { useDebouncedCallback } from '#renderer/domains/scout/runtime/useDebouncedCallback';
+import type { ScoutStatusFilter } from '#renderer/domains/scout/service/researchHelpers';
 
 const SEARCH_DEBOUNCE_MS = 300;
 
@@ -10,16 +11,22 @@ interface UseScoutListHeaderOptions {
 }
 
 export interface ScoutListHeaderState {
-  searchInput: string;
-  filterOpen: boolean;
-  setFilterOpen: (v: boolean) => void;
-  researchModalOpen: boolean;
-  researchPending: boolean;
-  setResearchOpen: (open: boolean) => void;
-  runResearch: (topic: string) => void;
-  handleSearchChange: (value: string) => void;
-  handleStatusChange: (status: string) => void;
-  handleTypeChange: (type: string) => void;
+  search: {
+    input: string;
+    handleChange: (value: string) => void;
+  };
+  filter: {
+    open: boolean;
+    setOpen: (v: boolean) => void;
+    handleStatusChange: (status: ScoutStatusFilter) => void;
+    handleTypeChange: (type: string) => void;
+  };
+  research: {
+    open: boolean;
+    pending: boolean;
+    setOpen: (open: boolean) => void;
+    run: (topic: string) => Promise<void>;
+  };
 }
 
 export function useScoutListHeader({
@@ -40,8 +47,9 @@ export function useScoutListHeader({
   );
 
   const runResearch = useCallback(
-    (topic: string) => {
-      researchMut.mutate({ topic }, { onSuccess: () => setResearchOpen(false) });
+    async (topic: string) => {
+      await researchMut.mutateAsync({ topic });
+      setResearchOpen(false);
     },
     [researchMut, setResearchOpen],
   );
@@ -60,8 +68,8 @@ export function useScoutListHeader({
   );
 
   const handleStatusChange = useCallback(
-    (status: string) => {
-      onQueryChange({ status: status === 'all' ? 'all' : status, page: 0 });
+    (status: ScoutStatusFilter) => {
+      onQueryChange({ status, page: 0 });
     },
     [onQueryChange],
   );
@@ -74,15 +82,18 @@ export function useScoutListHeader({
   );
 
   return {
-    searchInput,
-    filterOpen,
-    setFilterOpen,
-    researchModalOpen,
-    researchPending: researchMut.isPending,
-    setResearchOpen,
-    runResearch,
-    handleSearchChange,
-    handleStatusChange,
-    handleTypeChange,
+    search: { input: searchInput, handleChange: handleSearchChange },
+    filter: {
+      open: filterOpen,
+      setOpen: setFilterOpen,
+      handleStatusChange,
+      handleTypeChange,
+    },
+    research: {
+      open: researchModalOpen,
+      pending: researchMut.isPending,
+      setOpen: setResearchOpen,
+      run: runResearch,
+    },
   };
 }

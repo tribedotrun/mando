@@ -10,6 +10,7 @@ use serde_json::json;
 
 use crate::bot::TelegramBot;
 use crate::commands;
+use crate::gateway_paths as paths;
 
 pub(crate) use super::action_sessions::{
     fetch_clarifier_questions, handle_ask_text, handle_input_text,
@@ -32,7 +33,7 @@ pub async fn handle(bot: &mut TelegramBot, chat_id: &str, args: &str) -> Result<
                 global_infra::best_effort!(
                     bot.gw()
                         .post_typed::<_, api_types::AskEndResponse>(
-                            "/api/tasks/ask/end",
+                            paths::TASKS_ASK_END,
                             &json!({"id": task_id}),
                         )
                         .await,
@@ -182,6 +183,7 @@ pub(crate) fn action_buttons(
             actions.push(("\u{1f4ac} Ask", "ask"));
             actions.push(("\u{1f4e3} Nudge", "nudge"));
             actions.push(("\u{1f91d} Handoff", "handoff"));
+            actions.push(("\u{1f6d1} Stop", "stop"));
             actions.push(("\u{274c} Cancel", "cancel"));
         }
         ItemStatus::CaptainReviewing | ItemStatus::CaptainMerging => {
@@ -223,6 +225,12 @@ pub(crate) fn action_buttons(
         ItemStatus::Canceled => {
             actions.push(("\u{1f504} Reopen", "reopen"));
             actions.push(("\u{1f501} Rework", "rework"));
+        }
+        ItemStatus::Stopped => {
+            actions.push(("\u{1f4ac} Ask", "ask"));
+            actions.push(("\u{1f504} Reopen", "reopen"));
+            actions.push(("\u{1f501} Rework", "rework"));
+            actions.push(("\u{274c} Cancel", "cancel"));
         }
     }
 
@@ -267,6 +275,7 @@ pub(crate) fn status_short(s: ItemStatus) -> &'static str {
         ItemStatus::CompletedNoPr => "[done]",
         ItemStatus::PlanReady => "[plan-ready]",
         ItemStatus::Canceled => "[canceled]",
+        ItemStatus::Stopped => "[stopped]",
     }
 }
 

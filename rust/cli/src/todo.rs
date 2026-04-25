@@ -3,6 +3,7 @@
 use clap::{Args, Subcommand};
 use serde_json::json;
 
+use crate::gateway_paths as paths;
 use crate::http::{parse_id, DaemonClient};
 use crate::todo_display::fetch_task_by_id;
 
@@ -183,7 +184,7 @@ async fn handle_add(
     if discuss {
         form = form.text("planning", "true");
     }
-    let result: api_types::TaskItem = client.post_multipart_json("/api/tasks/add", form).await?;
+    let result: api_types::TaskItem = client.post_multipart_json(paths::TASKS_ADD, form).await?;
     println!("Added item #{}: {title}", result.id);
     Ok(())
 }
@@ -215,7 +216,7 @@ async fn handle_bulk(
             form = form.text("project", p.to_string());
         }
         let result: api_types::TaskItem =
-            client.post_multipart_json("/api/tasks/add", form).await?;
+            client.post_multipart_json(paths::TASKS_ADD, form).await?;
         println!("  #{}: {line}", result.id);
         count += 1;
     }
@@ -227,7 +228,7 @@ async fn handle_delete(item_id: &str) -> anyhow::Result<()> {
     let client = DaemonClient::discover()?;
     client
         .post_json::<api_types::DeleteTasksResponse, _>(
-            "/api/tasks/delete",
+            paths::TASKS_DELETE,
             &json!({"ids": [parse_id(item_id, "item")?]}),
         )
         .await?;
@@ -241,7 +242,7 @@ async fn handle_ask(item_id: &str, message: Option<&str>, end: bool) -> anyhow::
         let client = DaemonClient::discover()?;
         client
             .post_json::<api_types::AskEndResponse, _>(
-                "/api/tasks/ask/end",
+                paths::TASKS_ASK_END,
                 &api_types::TaskIdRequest { id },
             )
             .await?;
@@ -253,7 +254,7 @@ async fn handle_ask(item_id: &str, message: Option<&str>, end: bool) -> anyhow::
             let client = DaemonClient::discover()?;
             let result: api_types::AskResponse = client
                 .post_json(
-                    "/api/tasks/ask",
+                    paths::TASKS_ASK,
                     &api_types::TaskAskRequest {
                         id,
                         question: msg.to_string(),
@@ -279,10 +280,10 @@ async fn handle_ask(item_id: &str, message: Option<&str>, end: bool) -> anyhow::
 
 async fn handle_timeline(item_id: &str, last: Option<usize>) -> anyhow::Result<()> {
     let client = DaemonClient::discover()?;
-    let mut path = format!("/api/tasks/{item_id}/timeline");
-    if let Some(n) = last {
-        path = format!("{path}?last={n}");
-    }
+    let path = match last {
+        Some(n) => paths::task_timeline_last(item_id, n),
+        None => paths::task_timeline(item_id),
+    };
     let events: api_types::TimelineResponse = client.get_json(&path).await?;
 
     if events.events.is_empty() {
@@ -312,9 +313,8 @@ async fn handle_input(item_id: &str, message: &str) -> anyhow::Result<()> {
         }
         api_types::ItemStatus::PlanReady => {
             // Re-queue as a normal worker with the plan injected into context.
-            let timeline: api_types::TimelineResponse = client
-                .get_json(&format!("/api/tasks/{id_num}/timeline"))
-                .await?;
+            let timeline: api_types::TimelineResponse =
+                client.get_json(&paths::task_timeline(id_num)).await?;
             let plan_text = timeline
                 .events
                 .iter()
@@ -334,7 +334,7 @@ async fn handle_input(item_id: &str, message: &str) -> anyhow::Result<()> {
             };
             client
                 .patch_json::<api_types::TaskItem, _>(
-                    &format!("/api/tasks/{id_num}"),
+                    &paths::task_item(id_num),
                     &api_types::TaskPatchRequest {
                         context: Some(new_ctx),
                         original_prompt: None,
@@ -343,7 +343,7 @@ async fn handle_input(item_id: &str, message: &str) -> anyhow::Result<()> {
                 .await?;
             client
                 .post_json::<api_types::BoolOkResponse, _>(
-                    "/api/tasks/queue",
+                    paths::TASKS_QUEUE,
                     &api_types::TaskIdRequest { id: id_num },
                 )
                 .await?;
@@ -355,11 +355,12 @@ async fn handle_input(item_id: &str, message: &str) -> anyhow::Result<()> {
         | api_types::ItemStatus::Escalated
         | api_types::ItemStatus::AwaitingReview
         | api_types::ItemStatus::HandedOff
-        | api_types::ItemStatus::Errored => {
+        | api_types::ItemStatus::Errored
+        | api_types::ItemStatus::Stopped => {
             // Reopen with feedback.
             client
                 .post_json::<api_types::BoolOkResponse, _>(
-                    "/api/tasks/reopen",
+                    paths::TASKS_REOPEN,
                     &api_types::TaskFeedbackRequest {
                         id: id_num,
                         feedback: message.to_string(),
@@ -372,7 +373,7 @@ async fn handle_input(item_id: &str, message: &str) -> anyhow::Result<()> {
             // Use unified clarify endpoint.
             let result: api_types::ClarifyResponse = client
                 .post_json(
-                    &format!("/api/tasks/{item_id}/clarify"),
+                    &paths::task_clarify(item_id),
                     &api_types::ClarifyRequest {
                         answers: None,
                         answer: Some(message.to_string()),
@@ -405,7 +406,7 @@ async fn handle_input(item_id: &str, message: &str) -> anyhow::Result<()> {
             // Append context via patch.
             client
                 .patch_json::<api_types::TaskItem, _>(
-                    &format!("/api/tasks/{item_id}"),
+                    &paths::task_item(item_id),
                     &api_types::TaskPatchRequest {
                         context: Some(format!("[Human input] {message}")),
                         original_prompt: None,
@@ -420,9 +421,8 @@ async fn handle_input(item_id: &str, message: &str) -> anyhow::Result<()> {
 
 async fn handle_history(item_id: &str) -> anyhow::Result<()> {
     let client = DaemonClient::discover()?;
-    let entries: api_types::AskHistoryResponse = client
-        .get_json(&format!("/api/tasks/{item_id}/history"))
-        .await?;
+    let entries: api_types::AskHistoryResponse =
+        client.get_json(&paths::task_history(item_id)).await?;
 
     if entries.history.is_empty() {
         println!("No Q&A history for item #{item_id}.");

@@ -1,3 +1,4 @@
+use api_types::TelegramMode;
 use serde::Serialize;
 
 #[derive(Debug, Clone, Serialize)]
@@ -9,5 +10,5 @@ pub struct TelegramStatus {
     pub last_error: Option<String>,
     pub degraded: bool,
     pub restart_count: u32,
-    pub mode: &'static str,
+    pub mode: TelegramMode,
 }

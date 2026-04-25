@@ -4,7 +4,7 @@ use api_types::TaskCreateResponse;
 use global_db::lifecycle::LifecycleEffect;
 use serde_json::Value;
 use sessions_db::SessionRow;
-use settings::config::workflow::CaptainWorkflow;
+use settings::CaptainWorkflow;
 
 use crate::types::EffectRequest;
 
@@ -12,7 +12,7 @@ use super::CaptainRuntime;
 
 impl CaptainRuntime {
     pub fn worktrees_dir(&self) -> PathBuf {
-        crate::io::git::worktrees_dir()
+        global_git::worktrees_dir()
     }
 
     #[tracing::instrument(skip_all)]
@@ -27,10 +27,10 @@ impl CaptainRuntime {
     }
 
     #[tracing::instrument(skip_all)]
-    pub async fn task_json(&self, id: i64) -> anyhow::Result<Option<Value>> {
+    pub async fn task_json(&self, id: i64) -> anyhow::Result<Option<api_types::TaskItem>> {
         self.load_task(id)
             .await?
-            .map(serde_json::to_value)
+            .map(|task| serde_json::to_value(task).and_then(serde_json::from_value))
             .transpose()
             .map_err(anyhow::Error::from)
     }
@@ -189,7 +189,7 @@ impl CaptainRuntime {
 
     #[tracing::instrument(skip_all)]
     pub async fn fetch_pr_body(&self, repo: &str, pr_number: u32) -> anyhow::Result<String> {
-        crate::io::github_pr::get_pr_body(repo, pr_number).await
+        global_github::get_pr_body(repo, pr_number).await
     }
 
     #[tracing::instrument(skip_all)]
@@ -287,7 +287,7 @@ impl CaptainRuntime {
         &self,
         item: &mut crate::Task,
         feedback: &str,
-        workflow: &settings::config::CaptainWorkflow,
+        workflow: &settings::CaptainWorkflow,
         notifier: &crate::runtime::notify::Notifier,
     ) -> anyhow::Result<crate::runtime::action_contract::ReopenOutcome> {
         let config = self.settings.load_config();
@@ -302,7 +302,7 @@ impl CaptainRuntime {
         &self,
         item: &mut crate::Task,
         message: Option<&str>,
-        workflow: &settings::config::CaptainWorkflow,
+        workflow: &settings::CaptainWorkflow,
         notifier: &crate::runtime::notify::Notifier,
         alerts: &mut Vec<String>,
     ) -> anyhow::Result<()> {
@@ -318,11 +318,13 @@ impl CaptainRuntime {
         &self,
         item: &crate::Task,
         answer: &str,
-        workflow: &settings::config::CaptainWorkflow,
+        workflow: &settings::CaptainWorkflow,
     ) -> anyhow::Result<crate::runtime::clarifier::ClarifierResult> {
         let config = self.settings.load_config();
-        crate::runtime::clarifier::answer_and_reclarify(item, answer, workflow, &config, &self.pool)
-            .await
+        crate::runtime::clarifier_reclarify::answer_and_reclarify(
+            item, answer, workflow, &config, &self.pool,
+        )
+        .await
     }
 
     #[tracing::instrument(skip_all)]
@@ -330,7 +332,7 @@ impl CaptainRuntime {
         &self,
         item: &mut crate::Task,
         result: crate::runtime::clarifier::ClarifierResult,
-        workflow: &settings::config::CaptainWorkflow,
+        workflow: &settings::CaptainWorkflow,
     ) -> anyhow::Result<()> {
         let notifier = crate::runtime::notify::Notifier::new(self.bus.clone());
         let session_id = result
@@ -393,21 +395,22 @@ impl CaptainRuntime {
 
         let suffix = format!("todo-{task_id}");
         let branch = format!("mando/{suffix}");
-        let wt_path = crate::io::git::worktree_path(&project_path, &suffix);
+        let wt_path = global_git::worktree_path(&project_path, &suffix);
 
-        crate::io::git::fetch_origin(&project_path).await?;
-        let default_branch = crate::io::git::default_branch(&project_path).await?;
+        global_git::fetch_origin(&project_path).await?;
+        let default_branch = global_git::default_branch(&project_path).await?;
         if wt_path.exists() {
             global_infra::best_effort!(
-                crate::io::git::remove_worktree(&project_path, &wt_path).await,
-                "daemon_task_runtime: crate::io::git::remove_worktree(&project_path, &wt_path).awa"
+                global_git::remove_worktree(&project_path, &wt_path).await,
+                "daemon_task_runtime: global_git::remove_worktree(&project_path, &wt_path).awa"
             );
         }
         global_infra::best_effort!(
-            crate::io::git::delete_local_branch(&project_path, &branch).await,
-            "daemon_task_runtime: crate::io::git::delete_local_branch(&project_path, &branch)."
+            global_git::delete_local_branch(&project_path, &branch).await,
+            "daemon_task_runtime: global_git::delete_local_branch(&project_path, &branch)."
         );
-        crate::io::git::create_worktree(&project_path, &branch, &wt_path, &default_branch).await?;
+        global_git::create_worktree(&project_path, &branch, &wt_path, &default_branch).await?;
+        crate::io::worktree_bootstrap::copy_local_files(&project_path, &wt_path).await;
 
         let workbench = crate::Workbench::new(
             project_row.id,

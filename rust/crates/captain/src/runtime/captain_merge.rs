@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use tracing::warn;
 
 use crate::{ItemStatus, Task, TimelineEventPayload};
-use settings::config::workflow::CaptainWorkflow;
+use settings::CaptainWorkflow;
 
 use super::notify::Notifier;
 use super::timeline_emit;

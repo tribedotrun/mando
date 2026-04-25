@@ -1,5 +1,6 @@
 //! Display-only task subcommands (show, list).
 
+use crate::gateway_paths as paths;
 use crate::http::{parse_id, DaemonClient};
 
 fn item_status_label(status: api_types::ItemStatus) -> &'static str {
@@ -20,6 +21,7 @@ fn item_status_label(status: api_types::ItemStatus) -> &'static str {
         api_types::ItemStatus::CompletedNoPr => "completed-no-pr",
         api_types::ItemStatus::PlanReady => "plan-ready",
         api_types::ItemStatus::Canceled => "canceled",
+        api_types::ItemStatus::Stopped => "stopped",
     }
 }
 
@@ -30,8 +32,7 @@ pub(crate) async fn fetch_task_by_id(
     client: &DaemonClient,
     id_num: i64,
 ) -> anyhow::Result<api_types::TaskItem> {
-    let resp: api_types::TaskListResponse =
-        client.get_json("/api/tasks?include_archived=true").await?;
+    let resp: api_types::TaskListResponse = client.get_json(paths::TASKS_WITH_ARCHIVED).await?;
     resp.items
         .into_iter()
         .find(|item| item.id == id_num)
@@ -72,9 +73,8 @@ pub(crate) async fn handle_show(item_id: &str) -> anyhow::Result<()> {
     println!("  Interventions: {intervention}");
 
     // Fetch sessions for this task.
-    let sessions_result: api_types::ItemSessionsResponse = client
-        .get_json(&format!("/api/tasks/{item_id}/sessions"))
-        .await?;
+    let sessions_result: api_types::ItemSessionsResponse =
+        client.get_json(&paths::task_sessions(item_id)).await?;
     if !sessions_result.sessions.is_empty() {
         println!("\n  Sessions ({}):", sessions_result.sessions.len());
         for s in sessions_result.sessions {
@@ -103,9 +103,9 @@ pub(crate) async fn handle_show(item_id: &str) -> anyhow::Result<()> {
 pub(crate) async fn handle_list(all: bool) -> anyhow::Result<()> {
     let client = DaemonClient::discover()?;
     let path = if all {
-        "/api/tasks?include_archived=true"
+        paths::TASKS_WITH_ARCHIVED
     } else {
-        "/api/tasks"
+        paths::TASKS
     };
     let resp: api_types::TaskListResponse = client.get_json(path).await?;
 

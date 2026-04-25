@@ -1,5 +1,5 @@
 import React from 'react';
-import { Card, CardContent } from '#renderer/global/ui/card';
+import { Card, CardContent } from '#renderer/global/ui/primitives/card';
 import { useConfig, useConfigPatch } from '#renderer/domains/settings/runtime/hooks';
 import {
   captainPatch,
@@ -7,7 +7,7 @@ import {
   CODEX_ARGS_DEFAULT,
 } from '#renderer/global/service/configPatches';
 import type { CaptainConfig } from '#renderer/global/types';
-import { Switch } from '#renderer/global/ui/switch';
+import { Switch } from '#renderer/global/ui/primitives/switch';
 
 const EMPTY_CAPTAIN: CaptainConfig = Object.freeze({});
 

@@ -2,7 +2,7 @@
 
 use crate::{Action, Task, WorkerContext};
 use anyhow::Result;
-use settings::config::workflow::CaptainWorkflow;
+use settings::CaptainWorkflow;
 
 use crate::io::{health_store, health_store::HealthState};
 
@@ -29,6 +29,9 @@ pub(super) fn classify_and_update_health(
 ) -> Result<ClassifyResult> {
     let mut actions_to_execute = Vec::new();
     let mut dry_actions = Vec::new();
+    // One matcher per tick — lowercases and owns the configured rule list so
+    // per-worker `detect()` calls stay cheap.
+    let symptoms = global_claude::StreamSymptomMatcher::new(workflow.stream_symptoms.clone());
 
     for ctx in worker_contexts {
         // Look up the task for this worker.
@@ -52,10 +55,13 @@ pub(super) fn classify_and_update_health(
             item_ref,
             stream_clean,
             has_broken_session,
+            stream_path.as_deref(),
             &workflow.nudges,
+            &symptoms,
             workflow.agent.worker_timeout_s,
             workflow.agent.stale_threshold_s,
             workflow.agent.max_interventions,
+            workflow.agent.no_pr_min_active_s,
         )?;
 
         if dry_run {

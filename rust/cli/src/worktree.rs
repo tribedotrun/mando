@@ -2,6 +2,7 @@
 
 use clap::{Args, Subcommand};
 
+use crate::gateway_paths as paths;
 use crate::http::DaemonClient;
 
 #[derive(Args)]
@@ -53,7 +54,7 @@ async fn handle_open(name: Option<String>, project: Option<String>) -> anyhow::R
     let client = DaemonClient::discover()?;
     let result: api_types::CreateWorktreeResponse = client
         .post_json(
-            "/api/worktrees",
+            paths::WORKTREES,
             &api_types::CreateWorktreeRequest { name, project },
         )
         .await?;
@@ -86,7 +87,7 @@ async fn handle_open(name: Option<String>, project: Option<String>) -> anyhow::R
 
 async fn handle_list() -> anyhow::Result<()> {
     let client = DaemonClient::discover()?;
-    let result: api_types::WorktreeListResponse = client.get_json("/api/worktrees").await?;
+    let result: api_types::WorktreeListResponse = client.get_json(paths::WORKTREES).await?;
 
     match result.worktrees.as_slice() {
         [] => println!("No worktrees found."),
@@ -111,7 +112,7 @@ async fn handle_list() -> anyhow::Result<()> {
 async fn handle_prune() -> anyhow::Result<()> {
     let client = DaemonClient::discover()?;
     let result: api_types::WorktreePruneResponse =
-        client.post_no_body("/api/worktrees/prune").await?;
+        client.post_no_body(paths::WORKTREES_PRUNE).await?;
     let pruned = result.pruned.len();
     println!("Pruned stale worktrees for {pruned} project(s).");
     Ok(())
@@ -121,7 +122,7 @@ async fn handle_remove(path: &str) -> anyhow::Result<()> {
     let client = DaemonClient::discover()?;
     client
         .post_json::<api_types::BoolOkResponse, _>(
-            "/api/worktrees/remove",
+            paths::WORKTREES_REMOVE,
             &api_types::RemoveWorktreeRequest {
                 path: path.to_string(),
             },
@@ -135,7 +136,7 @@ async fn handle_cleanup(dry_run: bool) -> anyhow::Result<()> {
     let client = DaemonClient::discover()?;
     let result: api_types::WorktreeCleanupResponse = client
         .post_json(
-            "/api/worktrees/cleanup",
+            paths::WORKTREES_CLEANUP,
             &api_types::WorktreeCleanupRequest { dry_run },
         )
         .await?;

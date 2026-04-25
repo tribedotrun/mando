@@ -21,20 +21,10 @@ pub(super) async fn read_worktree_head_sha(worktree: Option<&str>) -> String {
     let Some(wt) = worktree else {
         return UNKNOWN_SHA.to_string();
     };
-    let Ok(output) = tokio::process::Command::new("git")
-        .args(["-C", wt, "rev-parse", "HEAD"])
-        .output()
-        .await
-    else {
+    let wt_path = global_infra::paths::expand_tilde(wt);
+    let Ok(sha) = global_git::head_sha(&wt_path).await else {
         return UNKNOWN_SHA.to_string();
     };
-    if !output.status.success() {
-        return UNKNOWN_SHA.to_string();
-    }
-    let Ok(sha) = String::from_utf8(output.stdout) else {
-        return UNKNOWN_SHA.to_string();
-    };
-    let sha = sha.trim().to_string();
     if !matches!(sha.len(), 40 | 64) || !sha.chars().all(|c| c.is_ascii_hexdigit()) {
         return UNKNOWN_SHA.to_string();
     }

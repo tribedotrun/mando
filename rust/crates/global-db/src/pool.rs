@@ -4,7 +4,7 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
-use sqlx::SqlitePool;
+use sqlx::{Acquire, SqlitePool};
 
 /// Shared database handle. All crates receive an `Arc<Db>` from the gateway.
 pub struct Db {
@@ -80,17 +80,18 @@ impl Db {
 
         for (version, sql) in MIGRATIONS {
             if *version > current {
-                // PRAGMA foreign_keys is a no-op inside a transaction, so
-                // disable FKs before the tx for migrations that need it.
+                // PRAGMA foreign_keys is a no-op inside a transaction AND is
+                // scoped to a single connection. The pool may hand different
+                // queries to different connections, so the OFF/tx/ON triple
+                // must all run on the same acquired connection — otherwise a
+                // migration that drops a table with incoming FK references
+                // fails with FOREIGN KEY constraint (19) on an unrelated
+                // pool connection that still has FKs ON.
                 let needs_fk_off = sql.contains("PRAGMA foreign_keys = OFF");
-                if needs_fk_off {
-                    sqlx::query("PRAGMA foreign_keys = OFF")
-                        .execute(&self.pool)
-                        .await?;
-                }
 
                 // Strip PRAGMA foreign_keys statements from the SQL since
-                // they're handled outside the transaction.
+                // they're handled outside the transaction (a transaction is
+                // a no-op context for this PRAGMA in SQLite).
                 let cleaned = if needs_fk_off {
                     sql.lines()
                         .filter(|l| {
@@ -103,22 +104,51 @@ impl Db {
                     sql.to_string()
                 };
 
-                let mut tx = self.pool.begin().await?;
-                sqlx::raw_sql(&cleaned)
-                    .execute(&mut *tx)
-                    .await
-                    .with_context(|| format!("migration v{version} failed"))?;
-                sqlx::query("INSERT INTO _schema_version (version) VALUES (?)")
-                    .bind(*version)
-                    .execute(&mut *tx)
-                    .await?;
-                tx.commit().await?;
-
+                let mut conn = self.pool.acquire().await?;
                 if needs_fk_off {
-                    sqlx::query("PRAGMA foreign_keys = ON")
-                        .execute(&self.pool)
+                    sqlx::query("PRAGMA foreign_keys = OFF")
+                        .execute(&mut *conn)
                         .await?;
                 }
+
+                // Run the migration body inside a block so we can ALWAYS
+                // attempt to restore FK enforcement before the connection
+                // returns to the pool — even on commit failure, mid-tx
+                // error, or a panicked early return. Leaking `foreign_keys
+                // = OFF` into a pooled connection silently disables FK
+                // checks for whoever acquires it next.
+                let migration_result: Result<()> = async {
+                    let mut tx = conn.begin().await?;
+                    sqlx::raw_sql(&cleaned)
+                        .execute(&mut *tx)
+                        .await
+                        .with_context(|| format!("migration v{version} failed"))?;
+                    sqlx::query("INSERT INTO _schema_version (version) VALUES (?)")
+                        .bind(*version)
+                        .execute(&mut *tx)
+                        .await?;
+                    tx.commit().await?;
+                    Ok(())
+                }
+                .await;
+
+                if needs_fk_off {
+                    // A pool connection stuck with FK OFF is a silent
+                    // correctness bug, worse than a dropped PRAGMA error
+                    // that the surrounding migration_result will almost
+                    // always surface anyway — route the restore through
+                    // best_effort! so the log still carries a breadcrumb
+                    // if the restore itself fails.
+                    global_infra::best_effort!(
+                        sqlx::query("PRAGMA foreign_keys = ON")
+                            .execute(&mut *conn)
+                            .await,
+                        "restore foreign_keys=ON after migration"
+                    );
+                }
+                drop(conn);
+
+                migration_result?;
                 tracing::info!(module = "global-db-pool", version, "migration applied");
             }
         }
@@ -147,6 +177,162 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(count, 0);
+    }
+
+    /// Regression: the FK-off PRAGMA and the migration transaction must
+    /// execute on the same pooled connection. If they land on different
+    /// connections, a migration that drops a table referenced by another
+    /// table's FK fails with `FOREIGN KEY constraint failed (19)` on a
+    /// connection that never saw the OFF. We simulate that scenario with a
+    /// file-backed pool (max_connections > 1) and an ad-hoc migration SQL.
+    #[tokio::test]
+    async fn fk_off_pragma_pins_to_migration_connection() {
+        use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+
+        let db_path = std::env::temp_dir().join(format!(
+            "mando-pool-fk-test-{}-{}.db",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let options = SqliteConnectOptions::new()
+            .filename(&db_path)
+            .create_if_missing(true)
+            .foreign_keys(true);
+        let pool = SqlitePoolOptions::new()
+            .max_connections(4)
+            .connect_with(options)
+            .await
+            .unwrap();
+
+        sqlx::raw_sql(
+            "CREATE TABLE parent (id INTEGER PRIMARY KEY);
+             CREATE TABLE child (
+                id INTEGER PRIMARY KEY,
+                parent_id INTEGER REFERENCES parent(id)
+             );
+             INSERT INTO parent(id) VALUES (1);
+             INSERT INTO child(id, parent_id) VALUES (1, 1);",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        // Warm multiple connections so the pool has >1 ready. Without
+        // connection pinning, the PRAGMA would likely land on one and the
+        // transaction on another.
+        let mut warmups = Vec::new();
+        for _ in 0..4 {
+            warmups.push(pool.acquire().await.unwrap());
+        }
+        drop(warmups);
+
+        // Drive the same flow as `run_migrations`: acquire a connection,
+        // PRAGMA OFF on it, run a tx that drops the referenced table,
+        // PRAGMA ON, release.
+        let mut conn = pool.acquire().await.unwrap();
+        sqlx::query("PRAGMA foreign_keys = OFF")
+            .execute(&mut *conn)
+            .await
+            .unwrap();
+        let mut tx = conn.begin().await.unwrap();
+        sqlx::raw_sql(
+            "CREATE TABLE parent_new (id INTEGER PRIMARY KEY, extra TEXT);
+             INSERT INTO parent_new (id) SELECT id FROM parent;
+             DROP TABLE parent;
+             ALTER TABLE parent_new RENAME TO parent;",
+        )
+        .execute(&mut *tx)
+        .await
+        .expect("DROP TABLE must succeed when PRAGMA and tx share a connection");
+        tx.commit().await.unwrap();
+        sqlx::query("PRAGMA foreign_keys = ON")
+            .execute(&mut *conn)
+            .await
+            .unwrap();
+        drop(conn);
+
+        // Child row still resolves and new parent has the extra column.
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM child WHERE parent_id = 1")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(count, 1);
+
+        drop(pool);
+        let _ = std::fs::remove_file(&db_path);
+        let _ = std::fs::remove_file(format!("{}-shm", db_path.display()));
+        let _ = std::fs::remove_file(format!("{}-wal", db_path.display()));
+    }
+
+    /// Regression: if a migration errors after `PRAGMA foreign_keys = OFF`,
+    /// `run_migrations` must still restore `foreign_keys = ON` on the
+    /// acquired connection before it returns to the pool. Otherwise the
+    /// connection silently disables FK enforcement for the next caller.
+    #[tokio::test]
+    async fn fk_state_restored_even_when_migration_fails() {
+        use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+
+        let db_path = std::env::temp_dir().join(format!(
+            "mando-pool-fk-restore-{}-{}.db",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let options = SqliteConnectOptions::new()
+            .filename(&db_path)
+            .create_if_missing(true)
+            .foreign_keys(true);
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1) // force the same conn to be reused
+            .connect_with(options)
+            .await
+            .unwrap();
+
+        // Simulate the FK-off wrapper with a migration body that always
+        // errors — mirrors run_migrations semantics.
+        let mut conn = pool.acquire().await.unwrap();
+        sqlx::query("PRAGMA foreign_keys = OFF")
+            .execute(&mut *conn)
+            .await
+            .unwrap();
+        let result: std::result::Result<(), sqlx::Error> = async {
+            let mut tx = conn.begin().await?;
+            sqlx::raw_sql("INSERT INTO nonexistent_table VALUES (1)")
+                .execute(&mut *tx)
+                .await?;
+            tx.commit().await?;
+            Ok(())
+        }
+        .await;
+        global_infra::best_effort!(
+            sqlx::query("PRAGMA foreign_keys = ON")
+                .execute(&mut *conn)
+                .await,
+            "test restore foreign_keys=ON"
+        );
+        drop(conn);
+        assert!(result.is_err(), "migration body must fail for this test");
+
+        // Next caller on the same (now-recycled) connection should see
+        // foreign_keys = ON, not the leaked OFF state.
+        let fk_state: i64 = sqlx::query_scalar("PRAGMA foreign_keys")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(
+            fk_state, 1,
+            "pool connection must not leak foreign_keys=OFF after a failed migration"
+        );
+
+        drop(pool);
+        let _ = std::fs::remove_file(&db_path);
+        let _ = std::fs::remove_file(format!("{}-shm", db_path.display()));
+        let _ = std::fs::remove_file(format!("{}-wal", db_path.display()));
     }
 
     #[tokio::test]

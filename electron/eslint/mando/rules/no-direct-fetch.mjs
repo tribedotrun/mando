@@ -4,6 +4,7 @@
 
 const FUNNEL_FILES = [
   'src/renderer/global/providers/http.ts',
+  'src/renderer/global/providers/httpRoutes.ts',
   'src/renderer/global/providers/httpObsQueue.ts',
   'src/main/global/runtime/lifecycle.ts',
   'src/main/global/runtime/daemonTransport.ts',

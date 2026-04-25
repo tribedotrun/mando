@@ -15,7 +15,7 @@ import {
 import { ClarifierFailedRow } from '#renderer/domains/captain/ui/ClarifierFailedCard';
 import type { TaskItem, FeedItem, TaskArtifact, AskHistoryEntry } from '#renderer/global/types';
 
-export function FeedBlock({
+export function FeedBlocks({
   item,
   task,
   isLatestClarify,

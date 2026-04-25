@@ -24,10 +24,10 @@ static PR_REF_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)\bPR\s*#(\
 
 /// Extract `owner/repo` from a git remote URL (SSH or HTTPS).
 ///
-/// Delegates to `settings::config::parse_github_slug` — single implementation.
+/// Delegates to `settings::parse_github_slug` — single implementation.
 #[cfg(test)]
 pub fn repo_slug_from_remote(remote_url: &str) -> Option<String> {
-    settings::config::parse_github_slug(remote_url)
+    settings::parse_github_slug(remote_url)
 }
 
 /// Scan `text` for PR references (`#123`, `PR #123`) and replace each with
@@ -48,6 +48,31 @@ pub fn linkify_pr_refs(text: &str, repo_slug: &str) -> String {
 }
 
 // ── Core formatting ─────────────────────────────────────────────────
+
+/// Resolve the paused-state display for a task. Returns
+/// `(icon, label)` when `paused_until` is in the future, else `None` so
+/// the caller falls through to the lifecycle-status icon/label.
+///
+/// `now_secs` is injected so the caller controls the clock (tests pass a
+/// fixed epoch, production passes `SystemTime::now`).
+pub fn paused_badge(paused_until: Option<i64>, now_secs: i64) -> Option<(&'static str, String)> {
+    let until = paused_until?;
+    if until <= now_secs {
+        return None;
+    }
+    // Format as `HH:MM` in UTC since Telegram users may be in any
+    // timezone; the credential cooldown is a server-side wall-clock value
+    // and showing UTC avoids ambiguous local-time renderings.
+    let reset = time::OffsetDateTime::from_unix_timestamp(until)
+        .ok()
+        .and_then(|dt| {
+            time::format_description::parse("[hour]:[minute] UTC")
+                .ok()
+                .and_then(|fmt| dt.format(&fmt).ok())
+        })
+        .unwrap_or_else(|| until.to_string());
+    Some(("\u{23f8}\u{fe0f}", format!("Paused · resumes {reset}")))
+}
 
 /// Return an emoji icon for each item status.
 ///
@@ -245,6 +270,29 @@ mod tests {
     #[test]
     fn status_icon_unknown() {
         assert_eq!(status_icon("unknown-status"), "\u{2022}");
+    }
+
+    #[test]
+    fn paused_badge_none_when_no_timestamp() {
+        assert!(paused_badge(None, 1_700_000_000).is_none());
+    }
+
+    #[test]
+    fn paused_badge_none_when_already_elapsed() {
+        // Reset 10 min in the past — treated as not paused so UI falls
+        // through to the task's lifecycle status.
+        assert!(paused_badge(Some(1_700_000_000 - 600), 1_700_000_000).is_none());
+    }
+
+    #[test]
+    fn paused_badge_emits_icon_and_utc_reset() {
+        // 2023-11-14 22:13:20 UTC + 1 hour = 23:13 UTC
+        let future = 1_700_000_000 + 3600;
+        let (icon, label) =
+            paused_badge(Some(future), 1_700_000_000).expect("future reset is paused");
+        assert_eq!(icon, "\u{23f8}\u{fe0f}");
+        assert!(label.starts_with("Paused · resumes "));
+        assert!(label.ends_with("UTC"), "label should end in UTC: {label}");
     }
 
     #[test]

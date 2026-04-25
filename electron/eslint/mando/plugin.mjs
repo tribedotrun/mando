@@ -15,6 +15,9 @@ import noBareThrow from './rules/no-bare-throw.mjs';
 import requireSchemaOnFunnel from './rules/require-schema-on-funnel.mjs';
 import requireResultReturn from './rules/require-result-return.mjs';
 import noUnusedErrorParam from './rules/no-unused-error-param.mjs';
+import filenameMatchesExport from './rules/filename-matches-export.mjs';
+import noWeakComponentSuffix from './rules/no-weak-component-suffix.mjs';
+import noPromiseChaining from './rules/no-promise-chaining.mjs';
 
 // Note: actual fire-and-forget detection lives in
 // @typescript-eslint/no-floating-promises (configured in external.mjs).
@@ -37,6 +40,9 @@ const plugin = {
     'require-schema-on-funnel': requireSchemaOnFunnel,
     'require-result-return': requireResultReturn,
     'no-unused-error-param': noUnusedErrorParam,
+    'filename-matches-export': filenameMatchesExport,
+    'no-weak-component-suffix': noWeakComponentSuffix,
+    'no-promise-chaining': noPromiseChaining,
   },
 };
 
@@ -58,6 +64,7 @@ export default [
       'mando/require-schema-on-funnel': 'error',
       'mando/require-result-return': 'error',
       'mando/no-unused-error-param': 'error',
+      'mando/no-promise-chaining': 'error',
       // PR #883 invariant #2: ban empty try/catch (ESLint core no-empty
       // already runs at 'error' by default, we just disable the
       // allowEmptyCatch carve-out). The mando/no-empty-catch rule
@@ -72,7 +79,11 @@ export default [
   },
   {
     files: RENDERER_TS,
-    rules: { 'mando/no-direct-dom-mutation': 'error' },
+    rules: {
+      'mando/no-direct-dom-mutation': 'error',
+      'mando/filename-matches-export': 'error',
+      'mando/no-weak-component-suffix': 'error',
+    },
   },
   // PR #883 invariant #3: named exemptions from `no-console`. These two
   // files are the project's self-referential failure paths — the logger

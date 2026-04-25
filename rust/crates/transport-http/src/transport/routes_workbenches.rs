@@ -45,9 +45,13 @@ pub(crate) async fn get_workbenches(
     State(state): State<AppState>,
     Query(query): Query<api_types::WorkbenchListQuery>,
 ) -> Result<Json<api_types::WorkbenchesResponse>, ApiError> {
+    let status = query
+        .status
+        .unwrap_or(api_types::WorkbenchStatusFilter::Active)
+        .as_str();
     let items = state
         .captain
-        .list_workbenches(query.status.as_deref().unwrap_or("active"))
+        .list_workbenches(status)
         .await
         .map_err(|e| internal_error(e, "failed to load workbenches"))?;
     let workbenches = items

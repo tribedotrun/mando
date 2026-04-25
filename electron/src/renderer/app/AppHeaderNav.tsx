@@ -1,9 +1,9 @@
 import React from 'react';
 import { PanelLeft, ArrowLeft, ArrowRight, SquarePen } from 'lucide-react';
-import { Tooltip, TooltipTrigger, TooltipContent } from '#renderer/global/ui/tooltip';
-import { Kbd } from '#renderer/global/ui/kbd';
+import { Tooltip, TooltipTrigger, TooltipContent } from '#renderer/global/ui/primitives/tooltip';
+import { Kbd } from '#renderer/global/ui/primitives/kbd';
 
-export function CollapsedNavIcons({
+export function AppHeaderNav({
   onToggleSidebar,
   onGoBack,
   onGoForward,

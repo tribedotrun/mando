@@ -7,7 +7,6 @@ use serde::{Deserialize, Serialize};
 
 /// Context gathered for a single worker during captain tick.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(default)]
 pub struct WorkerContext {
     pub session_name: String,
     pub item_title: String,
@@ -76,9 +75,9 @@ pub enum ActionKind {
 pub struct Action {
     pub worker: String,
     pub action: ActionKind,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
 }
 
@@ -104,7 +103,6 @@ impl fmt::Display for TickMode {
 
 /// Structured result from a captain tick.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(default)]
 pub struct TickResult {
     pub mode: TickMode,
     #[serde(skip_serializing_if = "Option::is_none")]

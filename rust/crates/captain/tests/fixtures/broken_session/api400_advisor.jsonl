@@ -1,0 +1,2 @@
+{"type":"system","subtype":"init"}
+{"type":"result","subtype":"success","is_error":true,"result":"API Error: 400 {\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"message\":\"Advisor tool result content could not be processed.\"},\"request_id\":\"req_011CaEkdgsSyJ88x8mPTziW9\"}"}

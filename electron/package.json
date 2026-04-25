@@ -1,6 +1,6 @@
 {
   "name": "mando",
-  "version": "0.1.18-beta.6",
+  "version": "0.1.18-beta.7",
   "description": "Desktop app for managing AI coding agents",
   "license": "Apache-2.0",
   "repository": {
@@ -23,7 +23,7 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint src/ tests/",
     "lint:test": "node --test 'eslint/**/tests/*.test.mjs'",
-    "arch:check": "node eslint/architecture/checks/app-shell-shape.mjs && node eslint/architecture/checks/cross-domain-leak.mjs && node eslint/architecture/checks/daemon-contract-schema-coverage.mjs && node eslint/architecture/checks/global-thinness.mjs && node eslint/architecture/checks/no-cross-tier-relative.mjs && node eslint/architecture/checks/ownership-pressure.mjs",
+    "arch:check": "node eslint/architecture/checks/app-shell-shape.mjs && node eslint/architecture/checks/app-shell-ownership.mjs && node eslint/architecture/checks/cross-domain-leak.mjs && node eslint/architecture/checks/daemon-contract-schema-coverage.mjs && node eslint/architecture/checks/global-thinness.mjs && node eslint/architecture/checks/no-cross-tier-relative.mjs && node eslint/architecture/checks/ownership-pressure.mjs && node eslint/architecture/checks/preload-bridge-single-source.mjs",
     "test:unit": "node --experimental-strip-types --test 'src/**/__tests__/*.test.ts'",
     "gen:schemas": "node scripts/gen-schemas.mjs",
     "format": "prettier --write 'src/**/*.{ts,tsx}' 'tests/**/*.ts' '*.{ts,mjs,mts}'",

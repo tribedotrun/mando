@@ -1,4 +1,8 @@
-import type { AskResponse } from '#renderer/global/types';
+import type {
+  AskResponse,
+  ScoutItemLifecycleCommand,
+  ScoutItemStatusFilter,
+} from '#renderer/global/types';
 import {
   apiGetRouteR,
   apiMultipartRouteR,
@@ -8,7 +12,7 @@ import {
 import type { ApiError, ResultAsync } from '#result';
 
 export interface ScoutQueryParams {
-  status?: string;
+  status?: ScoutItemStatusFilter;
   q?: string;
   type?: string;
   page?: number;
@@ -26,11 +30,10 @@ export const fetchScoutArticle = (id: number) =>
   apiGetRouteR('getScoutItemsByIdArticle', { params: { id } });
 export const addScoutUrl = (scoutUrl: string, title?: string) =>
   apiPostRouteR('postScoutItems', { url: scoutUrl, title });
-export type ScoutCommand = 'mark_pending' | 'mark_processed' | 'save' | 'archive';
 
-export const updateScoutStatus = (id: number, command: ScoutCommand) =>
+export const updateScoutStatus = (id: number, command: ScoutItemLifecycleCommand) =>
   apiPatchRouteR('patchScoutItemsById', { command }, { params: { id } });
-export const bulkUpdateScout = (ids: number[], command: ScoutCommand) =>
+export const bulkUpdateScout = (ids: number[], command: ScoutItemLifecycleCommand) =>
   apiPostRouteR('postScoutBulk', { ids, command });
 export const bulkDeleteScout = (ids: number[]) => apiPostRouteR('postScoutBulkdelete', { ids });
 export function askScout(

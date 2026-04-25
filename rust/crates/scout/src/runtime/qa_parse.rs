@@ -1,9 +1,39 @@
 //! Q&A response parsing and prompt rendering helpers.
 
-use settings::config::ScoutWorkflow;
+use settings::ScoutWorkflow;
 use tracing::warn;
 
 use super::qa::QaResult;
+
+pub(super) trait QaResultSource {
+    fn text(&self) -> &str;
+    fn structured_json(&self) -> Option<&serde_json::Value>;
+    fn session_id(&self) -> &str;
+    fn cost_usd(&self) -> Option<f64>;
+    fn duration_ms(&self) -> Option<u64>;
+}
+
+impl QaResultSource for global_claude::CcResult<serde_json::Value> {
+    fn text(&self) -> &str {
+        &self.text
+    }
+
+    fn structured_json(&self) -> Option<&serde_json::Value> {
+        self.structured.as_ref()
+    }
+
+    fn session_id(&self) -> &str {
+        &self.session_id
+    }
+
+    fn cost_usd(&self) -> Option<f64> {
+        self.cost_usd
+    }
+
+    fn duration_ms(&self) -> Option<u64> {
+        self.duration_ms
+    }
+}
 
 /// JSON schema for structured Q&A responses.
 pub(super) fn qa_json_schema() -> serde_json::Value {
@@ -37,7 +67,7 @@ pub(super) fn render_first_turn_prompt(
     vars.insert("raw_content_note", raw_note);
     vars.insert("user_context", user_context_rendered.as_str());
 
-    settings::config::render_prompt("qa", &workflow.prompts, &vars).map_err(|e| anyhow::anyhow!(e))
+    settings::render_prompt("qa", &workflow.prompts, &vars).map_err(|e| anyhow::anyhow!(e))
 }
 
 fn extract_followups(val: &serde_json::Value) -> Vec<String> {
@@ -51,37 +81,34 @@ fn extract_followups(val: &serde_json::Value) -> Vec<String> {
         .unwrap_or_default()
 }
 
-pub(super) fn parse_qa_result(
-    result: &global_claude::CcResult<serde_json::Value>,
-    ctx_sid: &str,
-) -> QaResult {
+pub(super) fn parse_qa_result(result: &impl QaResultSource, ctx_sid: &str) -> QaResult {
     let make = |answer: String, followups: Vec<String>| QaResult {
         answer,
-        session_id: Some(result.session_id.clone()),
+        session_id: Some(result.session_id().to_string()),
         suggested_followups: followups,
         session_reset: false,
-        cost_usd: result.cost_usd,
-        duration_ms: result.duration_ms,
+        cost_usd: result.cost_usd(),
+        duration_ms: result.duration_ms(),
         credential_id: None,
     };
 
-    if let Some(ref structured) = result.structured {
+    if let Some(structured) = result.structured_json() {
         let answer = structured["answer"]
             .as_str()
             .map(String::from)
             .unwrap_or_else(|| {
                 warn!(module = "scout-qa", session_id = %ctx_sid, "structured output has no 'answer', falling back to text");
-                result.text.clone()
+                result.text().to_string()
             });
         return make(answer, extract_followups(structured));
     }
 
     warn!(module = "scout-qa", session_id = %ctx_sid, "no structured output, trying text JSON extraction");
-    let parsed = match global_claude::parse_llm_json(&result.text) {
+    let parsed = match global_claude::parse_llm_json(result.text()) {
         Ok(v) => v,
         Err(e) => {
             warn!(module = "scout-qa", error = %e, "JSON extraction failed, using raw text");
-            return make(result.text.clone(), Vec::new());
+            return make(result.text().to_string(), Vec::new());
         }
     };
     if let Some(answer) = parsed["answer"].as_str() {
@@ -89,5 +116,5 @@ pub(super) fn parse_qa_result(
     }
 
     warn!(module = "scout-qa", session_id = %ctx_sid, "JSON extraction failed, using raw text as answer");
-    make(result.text.clone(), Vec::new())
+    make(result.text().to_string(), Vec::new())
 }

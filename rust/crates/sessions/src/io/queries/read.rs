@@ -14,10 +14,11 @@ pub async fn category_counts(pool: &SqlitePool) -> Result<HashMap<String, usize>
 
     let mut group_counts: HashMap<String, usize> = HashMap::new();
     for (caller_str, count) in rows {
-        let group_name = SessionCaller::parse(&caller_str)
-            .map(|c| c.group().as_str().to_string())
-            .unwrap_or_else(|| caller_str.clone());
-        *group_counts.entry(group_name).or_default() += count as usize;
+        if let Some(group_name) = SessionCaller::parse(&caller_str).map(|c| c.group()) {
+            *group_counts
+                .entry(group_name.as_str().to_string())
+                .or_default() += count as usize;
+        }
     }
     Ok(group_counts)
 }

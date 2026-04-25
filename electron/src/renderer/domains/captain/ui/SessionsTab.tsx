@@ -3,7 +3,7 @@ import type { SessionSummary } from '#renderer/global/types';
 import { fmtDuration, relativeTime } from '#renderer/global/service/utils';
 import { formatCallerLabel, buildSequenceFromSummaries } from '#renderer/domains/sessions';
 import { SessionDot } from '#renderer/global/ui/SessionDot';
-import { Button } from '#renderer/global/ui/button';
+import { Button } from '#renderer/global/ui/primitives/button';
 
 export function SessionsTab({
   sessions,

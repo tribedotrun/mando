@@ -14,6 +14,7 @@ mod responses_daemon;
 mod routes;
 mod sessions;
 mod timeline_payload;
+mod transcript_events;
 
 pub use config::*;
 pub use events::*;
@@ -27,3 +28,4 @@ pub use responses_daemon::*;
 pub use routes::{route_registrations, RouteAuth, RouteMethod, RouteRegistration, RouteTransport};
 pub use sessions::*;
 pub use timeline_payload::*;
+pub use transcript_events::*;

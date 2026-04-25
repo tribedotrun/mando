@@ -3,7 +3,7 @@
 use tracing::warn;
 
 use crate::Task;
-use settings::config::workflow::CaptainWorkflow;
+use settings::CaptainWorkflow;
 
 use sqlx::SqlitePool;
 
@@ -38,6 +38,17 @@ pub(super) async fn inline_resume_worker(
         warn!(
             module = "captain", worker = %w,
             "verdict skipped resume; stream is broken, next tick will handle"
+        );
+        return false;
+    }
+    let symptoms = global_claude::StreamSymptomMatcher::new(workflow.stream_symptoms.clone());
+    if let Some(m) = global_claude::stream_broken_session_symptom(&stream_path, &symptoms) {
+        warn!(
+            module = "captain",
+            worker = %w,
+            symptom = %m.reason,
+            origin = %m.origin.tag(),
+            "verdict skipped resume; stream already carries a broken-session symptom"
         );
         return false;
     }

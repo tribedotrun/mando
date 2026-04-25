@@ -76,95 +76,37 @@ pub struct TickResult {
     pub rate_limited: bool,
 }
 
-// ── Claude transcript line envelope (ndjson) ───────────────────────────
-
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum TranscriptLine {
-    Init(TranscriptInit),
-    User(TranscriptUserEntry),
-    Assistant(TranscriptAssistantEntry),
-    ToolUse(TranscriptToolUse),
-    ToolResult(TranscriptToolResult),
-    Result(TranscriptResult),
-    System(TranscriptSystem),
+/// Why the drain loop exited. Wire-named, closed set.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "kebab-case")]
+pub enum DrainStop {
+    /// A tick reported zero state changes from the previous pass.
+    Idle,
+    /// Hit the iteration ceiling (request-level or server-clamped).
+    MaxTicks,
+    /// Hit the wall-clock ceiling before the requested condition met.
+    WallClock,
+    /// Target task reached one of the `until_status` values.
+    UntilStatus,
+    /// Daemon cancellation fired mid-drain.
+    Cancelled,
 }
 
-// `TranscriptLine` inner variants below. `deny_unknown_fields` is intentionally
-// omitted: serde's internally-tagged enum deserialization passes the `type`
-// discriminator into the inner deserializer, so a strict inner struct would
-// reject it as an unknown field. Strictness is enforced at the enum level.
+/// Response for `/api/captain/tick`. Wraps the final iteration's `TickResult`
+/// with drain metadata. A caller that supplied no drain-triggering fields
+/// still receives this shape with `iterations = 1` and
+/// `stopped_reason = max-ticks` — single-tick is just drain-with-cap-1.
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct TranscriptInit {
-    pub uuid: String,
-    pub session_id: String,
-    pub cwd: Option<String>,
-    pub model: Option<String>,
-    pub timestamp: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct TranscriptUserEntry {
-    pub uuid: String,
-    pub parent_uuid: Option<String>,
-    pub session_id: String,
-    pub text: String,
-    pub timestamp: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct TranscriptAssistantEntry {
-    pub uuid: String,
-    pub parent_uuid: Option<String>,
-    pub session_id: String,
-    pub text: String,
-    pub timestamp: Option<String>,
-    pub usage: Option<crate::TranscriptUsageInfo>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct TranscriptToolUse {
-    pub uuid: String,
-    pub parent_uuid: Option<String>,
-    pub tool_use_id: String,
-    pub name: String,
-    pub input_summary: String,
-    pub timestamp: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct TranscriptToolResult {
-    pub uuid: String,
-    pub parent_uuid: Option<String>,
-    pub tool_use_id: String,
-    pub is_error: bool,
-    pub text: String,
-    pub timestamp: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct TranscriptResult {
-    pub session_id: String,
-    pub duration_ms: Option<i64>,
-    pub cost_usd: Option<f64>,
-    pub is_error: bool,
-    pub error: Option<String>,
-    pub timestamp: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct TranscriptSystem {
-    pub uuid: String,
-    pub session_id: String,
-    pub text: String,
-    pub timestamp: Option<String>,
+#[serde(deny_unknown_fields)]
+pub struct TickDrainResult {
+    pub iterations: u32,
+    pub stopped_reason: DrainStop,
+    /// Wall-clock duration of the drain, in milliseconds.
+    pub elapsed_ms: u64,
+    /// Final tick's `TickResult`. Always present — even a 0-iteration drain
+    /// (no-op request) surfaces the last tick it ran, and the guarded empty
+    /// result when nothing ran.
+    pub last: TickResult,
 }
 
 // ── Client log context (replaces Value in ClientLogEntry.context) ──────

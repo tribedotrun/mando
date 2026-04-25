@@ -4,10 +4,9 @@ use std::collections::HashMap;
 
 use crate::{TickMode, TickResult};
 use anyhow::Result;
-use settings::config::settings::Config;
-use settings::config::workflow::CaptainWorkflow;
+use settings::CaptainWorkflow;
+use settings::Config;
 
-#[allow(dead_code)]
 pub struct ItemSpawnResult {
     pub session_name: String,
     pub session_id: String,
@@ -17,7 +16,6 @@ pub struct ItemSpawnResult {
     pub started_at: String,
     /// Worktree-relative path to the plan/brief file, if one was found.
     pub plan: Option<String>,
-    pub credential_id: Option<i64>,
     pub pr_number: Option<i64>,
 }
 
@@ -138,7 +136,7 @@ pub async fn spawn_worker_for_item(
     pool: &sqlx::SqlitePool,
 ) -> Result<ItemSpawnResult> {
     let (slug, project_config) =
-        settings::config::resolve_project_config(Some(item.project.as_str()), config)
+        settings::resolve_project_config(Some(item.project.as_str()), config)
             .ok_or_else(|| anyhow::anyhow!("no project config for '{}'", item.project))?;
 
     if !item.no_pr && project_config.github_repo.is_none() {
@@ -168,7 +166,6 @@ pub async fn spawn_worker_for_item(
     // Pick credential for multi-account load balancing.
     // Workers dominate token spend, so balance on worker sessions only.
     let credential = pick_credential(pool, Some("worker")).await;
-    let cred_id = credential.as_ref().map(|c| c.0);
     let worker_cred = credential
         .as_ref()
         .map(|c| super::spawner::WorkerCredential {
@@ -216,7 +213,6 @@ pub async fn spawn_worker_for_item(
         workbench_id,
         started_at: now,
         plan: result.plan,
-        credential_id: cred_id,
         pr_number: result.pr_number,
     })
 }

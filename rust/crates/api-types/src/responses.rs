@@ -4,8 +4,9 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::{
-    AskHistoryEntry, ClarifierQuestion, DailyMerge, FeedItem, ProjectSummary, ScoutItem,
-    SessionSummary, TaskArtifact, TaskItem, TimelineEvent, WorkbenchItem, WorkerDetail,
+    AskHistoryEntry, ClarifierQuestion, DailyMerge, FeedItem, ItemStatus, ProjectSummary,
+    ScoutItem, ScoutItemStatus, SessionSummary, TaskArtifact, TaskItem, TimelineEvent,
+    WorkbenchItem, WorkerDetail,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -45,12 +46,20 @@ pub struct BulkFailure {
     pub error: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "lowercase")]
+pub enum BulkResultStatus {
+    Ok,
+    Partial,
+    Error,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(deny_unknown_fields)]
 pub struct ScoutBulkUpdateResponse {
     pub updated: u32,
     pub failed: Vec<BulkFailure>,
-    pub status: String,
+    pub status: BulkResultStatus,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -58,7 +67,7 @@ pub struct ScoutBulkUpdateResponse {
 pub struct ScoutBulkDeleteResponse {
     pub deleted: u32,
     pub failed: Vec<BulkFailure>,
-    pub status: String,
+    pub status: BulkResultStatus,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -76,11 +85,37 @@ pub struct DeleteTasksResponse {
     pub warnings: Option<Vec<String>>,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum ClarifyOutcome {
+    Ready,
+    Clarifying,
+    Escalate,
+    Answered,
+}
+
+impl ClarifyOutcome {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Ready => "ready",
+            Self::Clarifying => "clarifying",
+            Self::Escalate => "escalate",
+            Self::Answered => "answered",
+        }
+    }
+}
+
+impl std::fmt::Display for ClarifyOutcome {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str((*self).as_str())
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(deny_unknown_fields)]
 pub struct ClarifyResponse {
     pub ok: bool,
-    pub status: String,
+    pub status: ClarifyOutcome,
     pub context: Option<String>,
     pub questions: Option<Vec<ClarifierQuestion>>,
     pub session_id: Option<String>,
@@ -93,7 +128,7 @@ pub struct NudgeResponse {
     pub ok: bool,
     pub worker: Option<String>,
     pub pid: Option<u32>,
-    pub status: Option<String>,
+    pub status: Option<ItemStatus>,
     pub alerts: Option<Vec<String>>,
 }
 
@@ -234,7 +269,7 @@ pub struct ScoutAddResponse {
     pub url: String,
     #[serde(rename = "type")]
     pub item_type: String,
-    pub status: String,
+    pub status: ScoutItemStatus,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -274,7 +309,7 @@ pub struct ActResponse {
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(deny_unknown_fields)]
 pub struct MergeResponse {
-    pub status: String,
+    pub status: ItemStatus,
     pub item_id: i64,
     pub pr: i64,
 }

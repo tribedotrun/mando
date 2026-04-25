@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::sync::LazyLock;
 
 use regex::Regex;
-use settings::config::settings::ClassifyRule;
+use settings::ClassifyRule;
 
 use crate::service::text::truncate_utf8;
 

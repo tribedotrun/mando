@@ -34,23 +34,27 @@ pub enum CcError {
         source: io::Error,
     },
 
-    /// CC reported a hard rate-limit rejection. `resets_at` is the unix
-    /// timestamp at which the rate limit window resets, if known.
-    #[error("rate limit rejected: {message}")]
-    RateLimit {
-        resets_at: Option<i64>,
-        message: String,
-    },
-
     /// CC ended its turn with an API error envelope (`is_error: true`). We no
     /// longer launder these into `Ok(CcResult)` — the error goes up as an
     /// error, so callers and observability see the failure.
+    ///
+    /// `credential_id` identifies the settings-managed credential whose OAuth
+    /// token was in use; the failover layer reads it to cool down exactly that
+    /// credential on 429s without a reverse lookup. `None` means ambient auth.
     #[error("CC API error (status {api_error_status:?}): {message}")]
     ApiError {
         api_error_status: Option<u16>,
         message: String,
         session_id: String,
+        credential_id: Option<i64>,
     },
+
+    /// Every healthy credential is in rate-limit cooldown and the caller
+    /// cannot make progress right now. `earliest_reset` is the unix timestamp
+    /// (seconds) of the soonest cooldown in the pool. Callers park the work
+    /// (e.g. task → Paused) and retry after that time.
+    #[error("all credentials rate-limited (earliest reset {earliest_reset})")]
+    AllCredentialsExhausted { earliest_reset: i64 },
 
     /// The CC stream closed unexpectedly (stdin/stdout pipe broke, process
     /// exited without emitting a result envelope).
@@ -88,16 +92,19 @@ impl CcError {
 
     /// Classify whether this error is worth retrying. Only `ApiError` carries
     /// an HTTP-like status today; every other variant is `Fatal`.
+    ///
+    /// 429 is NOT transient here. A 429 from CC ("You've hit your limit…")
+    /// resets on the account's rate-limit window boundary (up to ~5h away),
+    /// so the failover layer (`run_with_credential_failover`) handles it by
+    /// cooling down the failing credential and re-picking, rather than any
+    /// inner retry loop busy-looping.
     pub fn classify(&self) -> ErrorClass {
         match self {
             CcError::ApiError {
                 api_error_status, ..
             } => classify_status(*api_error_status),
-            // Rate limit rejections carry their own retry-after signal and
-            // have dedicated handling upstream; treat as fatal here so a naked
-            // `run_with_retry` does not busy-loop on them.
-            CcError::RateLimit { .. } => ErrorClass::Fatal,
-            CcError::SpawnFailed { .. }
+            CcError::AllCredentialsExhausted { .. }
+            | CcError::SpawnFailed { .. }
             | CcError::StreamClosed
             | CcError::InvalidConfig(_)
             | CcError::Io(_)
@@ -106,11 +113,11 @@ impl CcError {
     }
 }
 
-/// Transient = retry makes sense (rate limits, gateway/capacity errors);
-/// Fatal = retrying will see the same error.
+/// Transient = retry makes sense (gateway/capacity errors that recover in
+/// seconds); Fatal = retrying will see the same error.
 fn classify_status(status: Option<u16>) -> ErrorClass {
     match status {
-        Some(429) | Some(502) | Some(503) | Some(504) | Some(529) => ErrorClass::Transient,
+        Some(502) | Some(503) | Some(504) | Some(529) => ErrorClass::Transient,
         _ => ErrorClass::Fatal,
     }
 }
@@ -124,18 +131,29 @@ mod tests {
             api_error_status: status,
             message: "upstream error".into(),
             session_id: "sid".into(),
+            credential_id: None,
         }
     }
 
     #[test]
-    fn classify_transient_on_capacity_and_rate_limit_codes() {
-        for status in [429u16, 502, 503, 504, 529] {
+    fn classify_transient_on_capacity_codes_only() {
+        for status in [502u16, 503, 504, 529] {
             assert_eq!(
                 api_err(Some(status)).classify(),
                 ErrorClass::Transient,
                 "status {status} should be Transient"
             );
         }
+    }
+
+    #[test]
+    fn classify_fatal_on_429_so_failover_layer_owns_it() {
+        assert_eq!(
+            api_err(Some(429)).classify(),
+            ErrorClass::Fatal,
+            "429 must be Fatal — failover layer handles credential cooldown, \
+             inner retry would busy-loop against an account-scoped limit"
+        );
     }
 
     #[test]
@@ -152,6 +170,14 @@ mod tests {
     #[test]
     fn classify_fatal_when_status_missing() {
         assert_eq!(api_err(None).classify(), ErrorClass::Fatal);
+    }
+
+    #[test]
+    fn classify_fatal_on_all_credentials_exhausted() {
+        let err = CcError::AllCredentialsExhausted {
+            earliest_reset: 1_700_000_000,
+        };
+        assert_eq!(err.classify(), ErrorClass::Fatal);
     }
 
     #[test]

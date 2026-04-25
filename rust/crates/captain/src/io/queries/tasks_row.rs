@@ -44,6 +44,7 @@ pub(super) struct TaskRow {
     pub escalation_report: Option<String>,
     pub source: Option<String>,
     pub rev: i64,
+    pub paused_until: Option<i64>,
     /// JOINed from projects.github_repo
     pub github_repo: Option<String>,
 }
@@ -100,6 +101,7 @@ impl TaskRow {
             escalation_report: self.escalation_report,
             source: self.source,
             rev: self.rev,
+            paused_until: self.paused_until,
             github_repo: self.github_repo,
             rebase_worker: None,
             rebase_retries: 0,

@@ -1,8 +1,10 @@
 //! Tests for mando-config: settings and basic path utilities.
 
+use super::loader::parse_config;
 use super::settings::Config;
 use global_infra::ids::slugify;
 use global_infra::paths::expand_tilde;
+use std::path::Path;
 
 // ---------------------------------------------------------------------------
 // settings: full config parse
@@ -12,8 +14,24 @@ use global_infra::paths::expand_tilde;
 fn parse_full_config() {
     let json = r#"{
         "workspace": "~/my-workspace",
+        "ui": {
+            "openAtLogin": false
+        },
         "features": {
-            "scout": true
+            "scout": true,
+            "setupDismissed": false,
+            "claudeCodeVerified": true
+        },
+        "scout": {
+            "interests": {
+                "high": [],
+                "low": []
+            },
+            "userContext": {
+                "role": "",
+                "knownDomains": [],
+                "explainDomains": []
+            }
         },
         "channels": {
             "telegram": {
@@ -29,7 +47,12 @@ fn parse_full_config() {
         },
         "captain": {
             "autoSchedule": true,
+            "autoMerge": false,
             "tickIntervalS": 60,
+            "tz": "UTC",
+            "defaultTerminalAgent": "claude",
+            "claudeTerminalArgs": "--dangerously-skip-permissions",
+            "codexTerminalArgs": "--full-auto",
             "projects": {
                 "/code/repo": {
                     "name": "repo",
@@ -68,28 +91,80 @@ fn parse_full_config() {
     assert!(cfg.captain.auto_schedule);
     assert_eq!(cfg.captain.tick_interval_s, 60);
     assert!(cfg.captain.projects.is_empty());
+    assert!(cfg.captain.task_db_path.ends_with("mando.db"));
+    assert!(cfg.captain.lockfile_path.ends_with("captain.lock"));
+    assert!(cfg
+        .captain
+        .worker_health_path
+        .ends_with("worker-health.json"));
 
     // Env
     assert_eq!(cfg.env.get("TELEGRAM_MANDO_BOT_TOKEN").unwrap(), "tok-123");
 }
 
 // ---------------------------------------------------------------------------
-// settings: defaults on minimal config
+// settings: raw serde still rejects partial input (documents strictness
+// contract — `parse_config` is the forgiving entry point)
 // ---------------------------------------------------------------------------
 
 #[test]
-fn parse_minimal_config_uses_defaults() {
+fn raw_serde_rejects_missing_fields() {
     let json = "{}";
-    let cfg: Config = serde_json::from_str(json).unwrap();
+    assert!(serde_json::from_str::<Config>(json).is_err());
+}
 
-    assert_eq!(cfg.workspace, "~/.mando/workspace");
-    assert!(!cfg.features.scout);
-    assert!(!cfg.channels.telegram.enabled);
-    assert_eq!(cfg.channels.telegram.token, "");
-    assert_eq!(cfg.gateway.dashboard.port, 18791);
-    assert!(!cfg.captain.auto_schedule);
-    assert_eq!(cfg.captain.tick_interval_s, 30);
-    assert!(cfg.env.is_empty());
+// ---------------------------------------------------------------------------
+// parse_config: partial configs inherit defaults for missing fields
+// ---------------------------------------------------------------------------
+
+#[test]
+fn parse_config_empty_object_yields_defaults() {
+    let cfg = parse_config("{}", Path::new("test.json")).expect("empty {} should parse");
+    let defaults = Config::default();
+    assert_eq!(cfg.workspace, defaults.workspace);
+    assert_eq!(cfg.gateway.dashboard.port, defaults.gateway.dashboard.port);
+    assert_eq!(
+        cfg.captain.tick_interval_s,
+        defaults.captain.tick_interval_s
+    );
+    assert!(cfg.captain.task_db_path.ends_with("mando.db"));
+}
+
+#[test]
+fn parse_config_partial_overrides_selected_fields() {
+    let json = r#"{
+        "workspace": "~/custom-ws",
+        "gateway": { "dashboard": { "port": 9999 } },
+        "captain": { "tickIntervalS": 7 }
+    }"#;
+    let cfg = parse_config(json, Path::new("test.json")).expect("partial should parse");
+    // Overridden
+    assert_eq!(cfg.workspace, "~/custom-ws");
+    assert_eq!(cfg.gateway.dashboard.port, 9999);
+    assert_eq!(cfg.captain.tick_interval_s, 7);
+    // Sibling fields keep defaults
+    let defaults = Config::default();
+    assert_eq!(cfg.gateway.dashboard.host, defaults.gateway.dashboard.host);
+    assert_eq!(
+        cfg.captain.default_terminal_agent,
+        defaults.captain.default_terminal_agent
+    );
+    // Runtime-only paths still populate
+    assert!(cfg.captain.task_db_path.ends_with("mando.db"));
+}
+
+#[test]
+fn parse_config_unknown_keys_in_top_level_ignored() {
+    // Fields not present on Config silently drop (no deny_unknown_fields on
+    // settings structs). Kept loose on purpose so old fields from prior
+    // versions don't break boot.
+    let json = r#"{ "legacyField": 42 }"#;
+    let cfg = parse_config(json, Path::new("test.json"));
+    assert!(
+        cfg.is_ok(),
+        "unknown top-level key should not error: {:?}",
+        cfg.err()
+    );
 }
 
 // ---------------------------------------------------------------------------

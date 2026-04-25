@@ -3,7 +3,7 @@
 //! Owner is defined by `TelegramConfig.owner` (ID or `"id|username"` pipe-delimited).
 //! The bot only operates in DMs with the owner — group chats are rejected.
 
-use settings::config::settings::TelegramConfig;
+use settings::TelegramConfig;
 
 /// Check if `user_id` matches the configured owner.
 ///

@@ -1,0 +1,16 @@
+[package]
+name = "global-git"
+version.workspace = true
+edition = "2021"
+description = "Local git CLI provider boundary"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+
+[dependencies]
+global-types = { path = "../global-types" }
+global-infra = { path = "../global-infra" }
+tokio.workspace = true
+tracing.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true

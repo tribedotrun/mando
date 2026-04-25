@@ -116,7 +116,7 @@ impl ScoutRuntime {
         run_id: i64,
         output: crate::runtime::research::ResearchOutput,
         process: bool,
-        workflow: &settings::config::ScoutWorkflow,
+        workflow: &settings::ScoutWorkflow,
     ) {
         let scout_db = crate::ScoutDb::new(self.pool.clone());
         if let Err(err) = scout_db
@@ -162,17 +162,46 @@ impl ScoutRuntime {
             tracing::warn!(module = "scout-runtime-daemon_research_runtime", run_id, error = %err, "failed to complete research run");
         }
 
-        let links: Option<Vec<api_types::ResearchLink>> =
-            serde_json::from_value(serde_json::Value::Array(links_json)).ok();
-        let errs: Option<Vec<api_types::ResearchError>> =
-            serde_json::from_value(serde_json::Value::Array(errors)).ok();
+        // Fail-fast on schema drift: if link/error deserialization
+        // fails we log and SKIP the "completed" event entirely rather
+        // than emit a partial payload with `links: None`. The DB rows
+        // already persisted so the UI recovers on its next refetch —
+        // emitting no event beats misrepresenting the result set.
+        let links: Vec<api_types::ResearchLink> = match serde_json::from_value(
+            serde_json::Value::Array(links_json),
+        ) {
+            Ok(v) => v,
+            Err(e) => {
+                tracing::error!(
+                    module = "scout-runtime-daemon_research_runtime",
+                    run_id,
+                    error = %e,
+                    "skipping research 'completed' event — links failed to deserialize into wire type (api-types schema drift)"
+                );
+                return;
+            }
+        };
+        let errs: Vec<api_types::ResearchError> = match serde_json::from_value(
+            serde_json::Value::Array(errors),
+        ) {
+            Ok(v) => v,
+            Err(e) => {
+                tracing::error!(
+                    module = "scout-runtime-daemon_research_runtime",
+                    run_id,
+                    error = %e,
+                    "skipping research 'completed' event — errors failed to deserialize into wire type (api-types schema drift)"
+                );
+                return;
+            }
+        };
         self.bus.send(global_bus::BusPayload::Research(Some(
             api_types::ResearchEventData {
                 action: "completed".into(),
                 run_id,
-                links,
+                links: Some(links),
                 added_count: Some(added_count),
-                errors: errs,
+                errors: Some(errs),
                 research_prompt: None,
                 elapsed_s: None,
                 error: None,
@@ -191,10 +220,8 @@ impl ScoutRuntime {
     ) {
         match crate::add_scout_item(&self.pool, &link.url, Some(&link.title)).await {
             Ok(val) => {
-                let added_item: Option<api_types::ScoutAddResponse> =
-                    serde_json::from_value(val).ok();
-                let id = added_item.as_ref().map(|r| r.id);
-                let was_added = added_item.as_ref().map(|r| r.added) == Some(true);
+                let id = Some(val.id);
+                let was_added = val.added;
 
                 if let Some(id) = id {
                     if was_added {
@@ -237,7 +264,7 @@ impl ScoutRuntime {
 
     async fn retry_existing_research_item(&self, id: i64, url: &str) {
         let current_status = match crate::get_scout_item(&self.pool, id).await {
-            Ok(value) => value["status"].as_str().map(str::to_string),
+            Ok(value) => Some(value.status.as_str().to_string()),
             Err(err) => {
                 tracing::warn!(module = "scout-runtime-daemon_research_runtime", scout_id = id, error = %err, "failed to fetch scout item status");
                 None
@@ -282,7 +309,7 @@ impl ScoutRuntime {
         )));
     }
 
-    async fn fetch_scout_payload(&self, id: i64) -> Option<Value> {
+    async fn fetch_scout_payload(&self, id: i64) -> Option<api_types::ScoutItem> {
         match crate::get_scout_item(&self.pool, id).await {
             Ok(value) => Some(value),
             Err(err) => {
@@ -292,13 +319,11 @@ impl ScoutRuntime {
         }
     }
 
-    fn send_scout_event(&self, action: &str, id: i64, item: Option<Value>) {
-        let scout_item: Option<api_types::ScoutItem> =
-            item.and_then(|v| serde_json::from_value(v).ok());
+    fn send_scout_event(&self, action: &str, id: i64, item: Option<api_types::ScoutItem>) {
         self.bus.send(global_bus::BusPayload::Scout(Some(
             api_types::ScoutEventData {
                 action: Some(action.to_string()),
-                item: scout_item,
+                item,
                 id: Some(id),
             },
         )));
@@ -342,11 +367,11 @@ pub(super) async fn emit_scout_processed(
             return;
         }
     };
-    let title = item["title"].as_str().unwrap_or("Untitled").to_string();
-    let relevance = item["relevance"].as_i64().unwrap_or(0);
-    let quality = item["quality"].as_i64().unwrap_or(0);
-    let source_name = item["source_name"].as_str().map(ToOwned::to_owned);
-    let telegraph_url = item["telegraphUrl"].as_str().map(ToOwned::to_owned);
+    let title = item.title.unwrap_or_else(|| "Untitled".to_string());
+    let relevance = item.relevance.unwrap_or(0);
+    let quality = item.quality.unwrap_or(0);
+    let source_name = item.source_name;
+    let telegraph_url = item.telegraph_url;
     let escaped_title = escape_html(&title);
     let source_label = source_name
         .as_deref()

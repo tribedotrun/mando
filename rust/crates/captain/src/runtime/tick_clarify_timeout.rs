@@ -3,7 +3,7 @@
 use api_types::TimelineEventPayload;
 
 use crate::{ItemStatus, Task};
-use settings::config::workflow::CaptainWorkflow;
+use settings::CaptainWorkflow;
 
 use super::dashboard::truncate_utf8;
 use super::notify::Notifier;

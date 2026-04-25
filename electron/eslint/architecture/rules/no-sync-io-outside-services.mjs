@@ -26,6 +26,9 @@ const SYNC_IO_NAMES = new Set([
 // short and intent-clear.
 const ALLOWLIST_FRAGMENTS = [
   '/main/global/runtime/launchd.ts',
+  '/main/global/runtime/launchdPaths.ts',
+  '/main/global/runtime/launchdServices.ts',
+  '/main/global/runtime/launchdInstall.ts',
   '/main/global/runtime/portCheck.ts',
   '/main/global/runtime/appPackage.ts',
   '/main/global/runtime/devGitInfo.ts',

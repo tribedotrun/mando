@@ -3,6 +3,15 @@
  * Every query key uses a hierarchical ['domain', 'sub', ...params] scheme
  * so that invalidation can target a specific entry or an entire domain.
  */
+import type {
+  ScoutItemStatusFilter,
+  SessionCategory,
+  SessionStatus,
+  WorkbenchStatusFilter,
+} from '#renderer/global/types';
+
+type SessionStatusFilter = 'all' | SessionStatus;
+
 export const queryKeys = {
   // ── Tasks ──
   tasks: {
@@ -18,7 +27,7 @@ export const queryKeys = {
   // ── Scout ──
   scout: {
     all: ['scout'] as const,
-    list: (params?: { status?: string; page?: number; q?: string; type?: string }) =>
+    list: (params?: { status?: ScoutItemStatusFilter; page?: number; q?: string; type?: string }) =>
       [
         'scout',
         'list',
@@ -36,9 +45,10 @@ export const queryKeys = {
   // ── Sessions ──
   sessions: {
     all: ['sessions'] as const,
-    list: (page: number, category?: string, status?: string) =>
+    list: (page: number, category?: SessionCategory, status?: SessionStatusFilter) =>
       ['sessions', 'list', page, category ?? 'all', status ?? 'all'] as const,
-    transcript: (sessionId: string) => ['sessions', 'transcript', sessionId] as const,
+    events: (sessionId: string) => ['sessions', 'events', sessionId] as const,
+    jsonlPath: (sessionId: string) => ['sessions', 'jsonl-path', sessionId] as const,
   },
 
   // ── Terminals ──
@@ -50,7 +60,7 @@ export const queryKeys = {
   // ── Workbenches ──
   workbenches: {
     all: ['workbenches'] as const,
-    list: (status?: string) =>
+    list: (status?: WorkbenchStatusFilter) =>
       !status || status === 'active'
         ? (['workbenches', 'list'] as const)
         : (['workbenches', 'list', status] as const),

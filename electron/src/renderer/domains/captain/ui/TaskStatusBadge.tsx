@@ -3,9 +3,10 @@ import type { SessionSummary, TaskItem } from '#renderer/global/types';
 import {
   getStatusBadge,
   isStreamingStatus,
+  resolvePausedBadge,
 } from '#renderer/domains/captain/service/statusBadgeConfig';
-import { fmtDuration } from '#renderer/global/service/utils';
-import { StatusDot } from '#renderer/global/ui/CardShell';
+import { fmtDuration, nowEpochSeconds } from '#renderer/global/service/utils';
+import { StatusDot } from '#renderer/domains/captain/ui/CardFrame';
 
 interface HeaderBadgeProps {
   item: TaskItem;
@@ -37,7 +38,14 @@ function Badge({
   );
 }
 
-export function HeaderStatusBadge({ item, sessions }: HeaderBadgeProps): React.ReactElement {
+export function TaskStatusBadge({ item, sessions }: HeaderBadgeProps): React.ReactElement {
+  // Paused takes precedence over the underlying lifecycle status: every
+  // credential is in cooldown and captain skips dispatch until
+  // `paused_until` passes. Service owns the time comparison.
+  const paused = resolvePausedBadge(item.paused_until, nowEpochSeconds());
+  if (paused) {
+    return <Badge color={paused.color}>{paused.label}</Badge>;
+  }
   const cfg = getStatusBadge(item.status);
   let label = cfg.label;
   if (isStreamingStatus(item.status)) {

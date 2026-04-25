@@ -14,6 +14,7 @@ path = "src/main.rs"
 [dependencies]
 api-types = { path = "../crates/api-types" }
 global-infra = { path = "../crates/global-infra" }
+global-git = { path = "../crates/global-git" }
 global-types = { path = "../crates/global-types" }
 serde.workspace = true
 serde_json.workspace = true

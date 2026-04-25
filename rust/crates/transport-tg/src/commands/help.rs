@@ -18,6 +18,7 @@ fn format_line(spec: &CommandSpec) -> String {
         "todo" => " [items]",
         "tasks" => " [all]",
         "timeline" => " &lt;id&gt;",
+        "stop" => " [id]",
         "scout_add" => " &lt;url&gt;",
         "scout_research" => " &lt;topic&gt;",
         "scout_list" => " [status]",

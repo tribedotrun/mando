@@ -59,7 +59,7 @@ export interface Routes {
     transport: 'json';
     auth: 'protected';
     body: Types.TickRequest;
-    res: Types.TickResult;
+    res: Types.TickDrainResult;
   };
   postCaptainTriage: {
     method: 'POST';
@@ -406,6 +406,30 @@ export interface Routes {
     params: Types.SessionIdParams;
     res: Types.SessionCostResponse;
   };
+  getSessionsByIdEvents: {
+    method: 'GET';
+    path: '/api/sessions/{id}/events';
+    transport: 'json';
+    auth: 'protected';
+    params: Types.SessionIdParams;
+    res: Types.TranscriptEventsResponse;
+  };
+  getSessionsByIdEventsStream: {
+    method: 'GET';
+    path: '/api/sessions/{id}/events/stream';
+    transport: 'sse';
+    auth: 'protected';
+    params: Types.SessionIdParams;
+    event: Types.TranscriptEventEnvelope;
+  };
+  getSessionsByIdJsonlpath: {
+    method: 'GET';
+    path: '/api/sessions/{id}/jsonl-path';
+    transport: 'json';
+    auth: 'protected';
+    params: Types.SessionIdParams;
+    res: Types.SessionJsonlPathResponse;
+  };
   getSessionsByIdMessages: {
     method: 'GET';
     path: '/api/sessions/{id}/messages';
@@ -430,14 +454,6 @@ export interface Routes {
     auth: 'protected';
     params: Types.SessionIdParams;
     res: Types.SessionToolUsageResponse;
-  };
-  getSessionsByIdTranscript: {
-    method: 'GET';
-    path: '/api/sessions/{id}/transcript';
-    transport: 'json';
-    auth: 'protected';
-    params: Types.SessionIdParams;
-    res: Types.TranscriptResponse;
   };
   getStatsActivity: {
     method: 'GET';
@@ -580,6 +596,14 @@ export interface Routes {
     transport: 'multipart';
     auth: 'protected';
     body: Types.TaskFeedbackRequest;
+    res: Types.BoolOkResponse;
+  };
+  postTasksStop: {
+    method: 'POST';
+    path: '/api/tasks/stop';
+    transport: 'json';
+    auth: 'protected';
+    body: Types.TaskIdRequest;
     res: Types.BoolOkResponse;
   };
   patchTasksById: {
@@ -1185,6 +1209,24 @@ export const routes = {
     transport: 'json',
     auth: 'protected',
   },
+  getSessionsByIdEvents: {
+    method: 'GET',
+    path: '/api/sessions/{id}/events',
+    transport: 'json',
+    auth: 'protected',
+  },
+  getSessionsByIdEventsStream: {
+    method: 'GET',
+    path: '/api/sessions/{id}/events/stream',
+    transport: 'sse',
+    auth: 'protected',
+  },
+  getSessionsByIdJsonlpath: {
+    method: 'GET',
+    path: '/api/sessions/{id}/jsonl-path',
+    transport: 'json',
+    auth: 'protected',
+  },
   getSessionsByIdMessages: {
     method: 'GET',
     path: '/api/sessions/{id}/messages',
@@ -1200,12 +1242,6 @@ export const routes = {
   getSessionsByIdTools: {
     method: 'GET',
     path: '/api/sessions/{id}/tools',
-    transport: 'json',
-    auth: 'protected',
-  },
-  getSessionsByIdTranscript: {
-    method: 'GET',
-    path: '/api/sessions/{id}/transcript',
     transport: 'json',
     auth: 'protected',
   },
@@ -1302,6 +1338,7 @@ export const routes = {
     transport: 'multipart',
     auth: 'protected',
   },
+  postTasksStop: { method: 'POST', path: '/api/tasks/stop', transport: 'json', auth: 'protected' },
   patchTasksById: {
     method: 'PATCH',
     path: '/api/tasks/{id}',

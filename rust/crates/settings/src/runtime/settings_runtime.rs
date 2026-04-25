@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
@@ -8,6 +8,7 @@ use arc_swap::ArcSwap;
 use sqlx::SqlitePool;
 use tokio::sync::{watch, Mutex};
 
+use super::runtime_helpers::{clamped_tick_duration, classify_change, sync_process_env};
 use crate::config::{
     captain_workflow_path, scout_workflow_path, CaptainWorkflow, Config, ScoutWorkflow,
 };
@@ -62,7 +63,8 @@ impl SettingsRuntime {
         workflow_mode: WorkflowRuntimeMode,
     ) -> SettingsResult<Self> {
         crate::io::projects::startup_sync(&db_pool, &mut config).await?;
-        let (captain_workflow, scout_workflow) = load_workflows_for_mode(&config, workflow_mode)?;
+        let (captain_workflow, scout_workflow) =
+            load_workflows_for_mode(&mut config, workflow_mode)?;
         Ok(Self::new_with_loaded(
             config,
             captain_workflow,
@@ -79,7 +81,10 @@ impl SettingsRuntime {
         db_pool: SqlitePool,
         workflow_mode: WorkflowRuntimeMode,
     ) -> Self {
-        let (tick_tx, _) = watch::channel(clamped_tick_duration(config.captain.tick_interval_s));
+        let (tick_tx, _) = watch::channel(clamped_tick_duration(
+            config.captain.tick_interval_s,
+            workflow_mode,
+        ));
         Self {
             config: Arc::new(ArcSwap::from_pointee(config)),
             captain_workflow: Arc::new(ArcSwap::from_pointee(captain_workflow)),
@@ -117,7 +122,7 @@ impl SettingsRuntime {
         let old_config = (*self.config.load_full()).clone();
         hydrate_projects(&self.db_pool, &old_config, &mut new_config).await;
         validate_captain_workflow(&new_config)?;
-        let workflows = load_workflows_for_mode(&new_config, self.workflow_mode)
+        let workflows = load_workflows_for_mode(&mut new_config, self.workflow_mode)
             .map_err(|err| ApplyConfigError::WorkflowReload(err.to_string()))?;
         let change = self
             .commit_locked(old_config, new_config, Some(workflows))
@@ -136,7 +141,7 @@ impl SettingsRuntime {
         mutator(&mut new_config)?;
         new_config.populate_runtime_fields();
         hydrate_projects(&self.db_pool, &old_config, &mut new_config).await;
-        let workflows = load_workflows_for_mode(&new_config, self.workflow_mode)?;
+        let workflows = load_workflows_for_mode(&mut new_config, self.workflow_mode)?;
         self.commit_locked(old_config, new_config, Some(workflows))
             .await
             .map_err(Into::into)
@@ -250,8 +255,13 @@ impl SettingsRuntime {
     }
 
     #[tracing::instrument(skip_all)]
-    pub async fn earliest_credential_cooldown_remaining_secs(&self) -> i64 {
-        crate::io::credentials::earliest_cooldown_remaining_secs(&self.db_pool).await
+    pub async fn earliest_credential_cooldown_remaining_secs(&self) -> SettingsResult<i64> {
+        // Wrap the anyhow error from the io layer into the typed
+        // SettingsError envelope so the public SettingsRuntime API
+        // stays C2-compliant (no raw anyhow on the boundary).
+        crate::io::credentials::earliest_cooldown_remaining_secs(&self.db_pool)
+            .await
+            .map_err(SettingsError::Other)
     }
 
     #[tracing::instrument(skip_all)]
@@ -336,15 +346,17 @@ impl SettingsRuntime {
             .map_err(Into::into)
     }
 
-    pub fn detect_github_repo(&self, path: &str) -> Option<String> {
-        crate::config::detect_github_repo(path)
+    #[tracing::instrument(skip_all)]
+    pub async fn detect_github_repo(&self, path: &str) -> Option<String> {
+        crate::config::detect_github_repo(path).await
     }
 
     pub fn project_row_from_config(
         &self,
         config: &crate::config::settings::ProjectConfig,
-    ) -> crate::ProjectRow {
+    ) -> SettingsResult<crate::ProjectRow> {
         crate::io::projects::config_to_row(config)
+            .map_err(|e| SettingsError::Other(anyhow::anyhow!(e)))
     }
 
     pub fn detect_project_logo(&self, project_path: &Path, project_name: &str) -> Option<String> {
@@ -374,7 +386,10 @@ impl SettingsRuntime {
 
         if self
             .tick_tx
-            .send(clamped_tick_duration(new_config.captain.tick_interval_s))
+            .send(clamped_tick_duration(
+                new_config.captain.tick_interval_s,
+                self.workflow_mode,
+            ))
             .is_err()
         {
             tracing::warn!(
@@ -404,7 +419,7 @@ fn validate_captain_workflow(config: &Config) -> Result<(), ApplyConfigError> {
 }
 
 fn load_workflows_for_mode(
-    config: &Config,
+    config: &mut Config,
     workflow_mode: WorkflowRuntimeMode,
 ) -> anyhow::Result<(CaptainWorkflow, ScoutWorkflow)> {
     let mut captain_workflow = crate::io::config_fs::load_captain_workflow(
@@ -413,7 +428,12 @@ fn load_workflows_for_mode(
     )?;
     let mut scout_workflow =
         crate::io::config_fs::load_scout_workflow(&scout_workflow_path(), config)?;
-    apply_workflow_mode_overrides(workflow_mode, &mut captain_workflow, &mut scout_workflow);
+    apply_workflow_mode_overrides(
+        workflow_mode,
+        config,
+        &mut captain_workflow,
+        &mut scout_workflow,
+    );
     match workflow_mode {
         WorkflowRuntimeMode::Normal => {}
         WorkflowRuntimeMode::Dev => tracing::info!(
@@ -422,76 +442,10 @@ fn load_workflows_for_mode(
         ),
         WorkflowRuntimeMode::Sandbox => tracing::info!(
             module = "settings-runtime-settings_runtime",
-            "sandbox mode: all models forced to haiku"
+            tick_interval_s = config.captain.tick_interval_s,
+            stale_threshold_s = captain_workflow.agent.stale_threshold_s.as_secs(),
+            "sandbox mode: models forced to haiku + timing overrides applied"
         ),
     }
     Ok((captain_workflow, scout_workflow))
-}
-
-fn clamped_tick_duration(raw: u64) -> Duration {
-    Duration::from_secs(raw.max(10))
-}
-
-fn classify_change(old_config: &Config, new_config: &Config) -> ConfigChangeEvent {
-    let telegram_changed = old_config.channels.telegram.enabled
-        != new_config.channels.telegram.enabled
-        || old_config.channels.telegram.owner != new_config.channels.telegram.owner
-        || old_config.channels.telegram.token != new_config.channels.telegram.token
-        || old_config.env.get("TELEGRAM_MANDO_BOT_TOKEN")
-            != new_config.env.get("TELEGRAM_MANDO_BOT_TOKEN");
-    let captain_changed = old_config.captain.auto_schedule != new_config.captain.auto_schedule
-        || old_config.captain.tick_interval_s != new_config.captain.tick_interval_s;
-    let ui_changed = old_config.ui.open_at_login != new_config.ui.open_at_login;
-
-    let changed: HashSet<ConfigChangeEvent> = [
-        telegram_changed.then_some(ConfigChangeEvent::Telegram),
-        captain_changed.then_some(ConfigChangeEvent::Captain),
-        ui_changed.then_some(ConfigChangeEvent::Ui),
-    ]
-    .into_iter()
-    .flatten()
-    .collect();
-
-    let configs_equal = match (
-        serde_json::to_value(old_config),
-        serde_json::to_value(new_config),
-    ) {
-        (Ok(left), Ok(right)) => left == right,
-        _ => {
-            tracing::warn!(
-                module = "config",
-                "config serialization failed during change classification, treating as changed"
-            );
-            false
-        }
-    };
-    if changed.is_empty() && configs_equal {
-        return ConfigChangeEvent::None;
-    }
-    match changed.len() {
-        1 => changed
-            .iter()
-            .copied()
-            .next()
-            .unwrap_or(ConfigChangeEvent::Full),
-        _ => ConfigChangeEvent::Full,
-    }
-}
-
-// SAFETY: env-backed integration keys hot-swap at runtime from this centralized path.
-// A wider removal of process-wide env mutation would be a broader runtime-contract change.
-fn sync_process_env(
-    old_env: &std::collections::HashMap<String, String>,
-    new_env: &std::collections::HashMap<String, String>,
-) {
-    for key in old_env.keys() {
-        if !new_env.contains_key(key) {
-            unsafe { std::env::remove_var(key) };
-        }
-    }
-    for (key, value) in new_env {
-        if old_env.get(key) != Some(value) {
-            unsafe { std::env::set_var(key, value) };
-        }
-    }
 }

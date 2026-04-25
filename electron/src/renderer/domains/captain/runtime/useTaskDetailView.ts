@@ -1,7 +1,13 @@
 import { useCallback, useRef, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { useMountEffect } from '#renderer/global/runtime/useMountEffect';
 import { subscribeViewTaskBrief } from '#renderer/global/providers/viewBriefBus';
-import { useTaskTimelineData, useTaskPrSummary } from '#renderer/domains/captain/runtime/hooks';
+import {
+  useTaskTimelineData,
+  useTaskPrSummary,
+  useTaskStop,
+} from '#renderer/domains/captain/runtime/hooks';
+import { invalidateTaskDetail } from '#renderer/domains/captain/repo/taskDetailInvalidation';
 import { FINALIZED_STATUSES, type TaskItem, type SessionSummary } from '#renderer/global/types';
 import { buildSessionsFromTimeline } from '#renderer/domains/sessions';
 
@@ -33,6 +39,8 @@ export function useTaskDetailView({
   const activeTab: DetailTab = (activeTabProp as DetailTab) || 'feed';
   const [prRefreshing, setPrRefreshing] = useState(false);
   const [contextModalOpen, setContextModalOpen] = useState(false);
+  const queryClient = useQueryClient();
+  const stopMut = useTaskStop();
 
   // Open the modal whenever the header overflow menu requests "View brief"
   // via the typed view-brief bus. The bus returns an unsubscribe function.
@@ -95,6 +103,17 @@ export function useTaskDetailView({
     [onResumeInTerminal],
   );
 
+  const handleStop = async () => {
+    try {
+      await stopMut.mutateAsync({ id: item.id });
+    } catch {
+      // Toast is surfaced by useTaskStop's useMutationFeedback wrapper;
+      // swallow here to avoid an unhandled rejection at the `void` callsite.
+    } finally {
+      void invalidateTaskDetail(queryClient, item.id);
+    }
+  };
+
   const handlePrRefresh = async () => {
     const startedAt = Date.now();
     setPrRefreshing(true);
@@ -117,16 +136,15 @@ export function useTaskDetailView({
   const effectiveTab = validKeys.includes(activeTab) ? activeTab : 'feed';
 
   return {
-    tabs,
-    effectiveTab,
-    prRefreshing,
-    contextModalOpen,
-    setContextModalOpen,
-    prBody,
-    prPending,
-    sessions,
-    handleSessionClick,
-    handleResumeSession,
-    handlePrRefresh,
+    tabs: { items: tabs, effectiveTab },
+    pr: {
+      refreshing: prRefreshing,
+      body: prBody,
+      pending: prPending,
+      handleRefresh: handlePrRefresh,
+    },
+    context: { open: contextModalOpen, setOpen: setContextModalOpen },
+    sessions: { items: sessions, handleSessionClick, handleResumeSession },
+    stop: { pending: stopMut.isPending, handle: handleStop },
   };
 }

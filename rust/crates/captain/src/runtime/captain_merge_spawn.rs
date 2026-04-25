@@ -8,8 +8,8 @@ use rustc_hash::FxHashMap;
 use tracing::{info, warn};
 
 use crate::{ItemStatus, Task, TimelineEventPayload};
-use settings::config::settings::Config;
-use settings::config::workflow::CaptainWorkflow;
+use settings::CaptainWorkflow;
+use settings::Config;
 
 use super::captain_merge::merge_json_schema;
 use super::notify::Notifier;
@@ -50,7 +50,7 @@ pub(crate) async fn spawn_merge(
     let repo = item
         .github_repo
         .clone()
-        .or_else(|| settings::config::resolve_github_repo(Some(&item.project), config))
+        .or_else(|| settings::resolve_github_repo(Some(&item.project), config))
         .ok_or_else(|| anyhow::anyhow!("no github_repo for project {:?}", item.project))?;
 
     let pr_url = format!("https://github.com/{repo}/pull/{pr_number}");
@@ -62,7 +62,7 @@ pub(crate) async fn spawn_merge(
     vars.insert("repo", repo.as_str());
     vars.insert("pr_number", pr_number.as_str());
     vars.insert("title", item.title.as_str());
-    let prompt = settings::config::render_prompt("captain_merge", &workflow.prompts, &vars)
+    let prompt = settings::render_prompt("captain_merge", &workflow.prompts, &vars)
         .map_err(|e| anyhow::anyhow!("render captain_merge prompt: {e}"))?;
 
     item.last_activity_at = Some(global_types::now_rfc3339());

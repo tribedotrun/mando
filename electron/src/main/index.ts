@@ -81,12 +81,15 @@ function registerShortcuts(): void {
 // ---------------------------------------------------------------------------
 
 handleChannel('get-gateway-url', async () => {
-  const port =
-    process.env.MANDO_GATEWAY_PORT ||
-    (await readPort().catch((err: unknown) => {
+  let port = process.env.MANDO_GATEWAY_PORT;
+  if (!port) {
+    try {
+      port = await readPort();
+    } catch (err: unknown) {
       log.error('get-gateway-url: failed to read daemon port -- daemon may not be running:', err);
       return null;
-    }));
+    }
+  }
   if (!port) return null;
   return `http://127.0.0.1:${port}`;
 });
@@ -129,7 +132,8 @@ registerTerminalBridgeHandlers();
 // App lifecycle
 // ---------------------------------------------------------------------------
 
-void app.whenReady().then(async () => {
+async function main(): Promise<void> {
+  await app.whenReady();
   log.initialize();
   log.info('mando-electron starting');
 
@@ -186,7 +190,9 @@ void app.whenReady().then(async () => {
       showAndFocusMainWindow();
     }
   });
-});
+}
+
+void main();
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {

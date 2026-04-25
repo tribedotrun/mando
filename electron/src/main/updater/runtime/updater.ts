@@ -1,61 +1,29 @@
 /**
  * DIY auto-updater -- download, stage, and apply a signed app bundle without
- * Squirrel.Mac. This owner coordinates the explicit updater state machine while
- * feed, channel, and filesystem concerns live in dedicated service modules.
+ * Squirrel.Mac. Feed, staging, install, and broadcast concerns each live in
+ * dedicated helpers; this owner keeps the IPC/timer wiring thin.
  */
-import { app, BrowserWindow } from 'electron';
-import { handleChannel, sendChannel } from '#main/global/runtime/ipcSecurity';
+import { app } from 'electron';
+import { handleChannel } from '#main/global/runtime/ipcSecurity';
 import { readAppPackageVersion } from '#main/global/runtime/appPackage';
-import { updateDaemonBinary } from '#main/global/runtime/launchd';
-import { announceUiUpdating } from '#main/global/runtime/uiLifecycle';
 import log from '#main/global/providers/logger';
-import { getDataDir } from '#main/global/config/lifecycle';
 import { UPDATE_CHECK_INTERVAL_MS, INITIAL_CHECK_DELAY_MS } from '#main/updater/config/updater';
 import { createUpdaterRuntimeState } from '#main/updater/runtime/updaterState';
+import { broadcastToWindows } from '#main/updater/runtime/updaterBroadcast';
+import { applyPendingUpdateFlow } from '#main/updater/runtime/applyPendingUpdateFlow';
 import { readChannel, writeChannel } from '#main/updater/service/channelConfig';
 import { fetchFeed, downloadFile } from '#main/updater/service/feedClient';
 import {
-  applyStagedUpdate,
-  ensureStagingDir,
   cleanupStagedUpdateArtifacts,
   downloadPath,
+  ensureStagingDir,
   extractAndStage,
   readPendingUpdate,
-  removePendingUpdateMarker,
   stagingAppExists,
   writePendingUpdate,
 } from '#main/updater/service/stagedUpdate';
 
 const runtime = createUpdaterRuntimeState();
-
-type UpdateBroadcastChannel =
-  | 'update-ready'
-  | 'update-checking'
-  | 'update-no-update'
-  | 'update-check-error'
-  | 'update-check-done';
-
-function broadcastToWindows(
-  channel: 'update-ready',
-  payload: { version: string; notes: string },
-): void;
-function broadcastToWindows(channel: 'update-check-done', payload: { found: boolean }): void;
-function broadcastToWindows(
-  channel: Exclude<UpdateBroadcastChannel, 'update-ready' | 'update-check-done'>,
-): void;
-function broadcastToWindows(channel: UpdateBroadcastChannel, payload?: unknown): void {
-  for (const window of BrowserWindow.getAllWindows()) {
-    if (channel === 'update-ready') {
-      sendChannel(window.webContents, channel, payload as { version: string; notes: string });
-      continue;
-    }
-    if (channel === 'update-check-done') {
-      sendChannel(window.webContents, channel, payload as { found: boolean });
-      continue;
-    }
-    sendChannel(window.webContents, channel);
-  }
-}
 
 async function stageUpdate(feed: { url: string; name: string; notes: string }) {
   ensureStagingDir();
@@ -112,26 +80,7 @@ export async function applyPendingUpdateIfAny() {
     return false;
   }
 
-  log.info(`auto-update: applying staged update to ${staged.version}`);
-  removePendingUpdateMarker();
-  await announceUiUpdating();
-
-  try {
-    updateDaemonBinary(getDataDir(), staged.appPath);
-  } catch (err) {
-    log.warn('auto-update: pre-swap daemon binary update failed (will retry on relaunch)', err);
-  }
-
-  try {
-    applyStagedUpdate(staged.appPath);
-    app.relaunch();
-    app.exit(0);
-    return true;
-  } catch (err) {
-    log.error('auto-update: failed to apply staged update', err);
-    cleanupStagedUpdateArtifacts();
-    return false;
-  }
+  return applyPendingUpdateFlow(staged, { removeMarkerBeforeSwap: true });
 }
 
 export function setupAutoUpdate(): void {
@@ -147,25 +96,10 @@ export function setupAutoUpdate(): void {
       return;
     }
 
-    log.info(`auto-update: user requested install of v${pendingUpdate.version}`);
-    try {
-      await announceUiUpdating();
-      try {
-        updateDaemonBinary(getDataDir(), pendingUpdate.appPath);
-      } catch (err) {
-        log.warn('auto-update: pre-swap daemon binary update failed (will retry on relaunch)', err);
-      }
-      applyStagedUpdate(pendingUpdate.appPath);
-      removePendingUpdateMarker();
-      runtime.setPending(null);
-      app.relaunch();
-      app.exit(0);
-    } catch (err) {
-      log.error('auto-update: install failed', err);
-      cleanupStagedUpdateArtifacts();
-      runtime.setPending(null);
-      throw err;
-    }
+    await applyPendingUpdateFlow(pendingUpdate, {
+      onSuccess: () => runtime.setPending(null),
+      onFailure: () => runtime.setPending(null),
+    });
   });
 
   handleChannel('updates:check', async () => {
@@ -201,18 +135,16 @@ export function setupAutoUpdate(): void {
     return;
   }
 
-  runtime.setCheckTimer(
-    setTimeout(
-      () => void checkAndDownload().catch((err) => log.error('Update check failed', err)),
-      INITIAL_CHECK_DELAY_MS,
-    ),
-  );
-  runtime.setCheckInterval(
-    setInterval(
-      () => void checkAndDownload().catch((err) => log.error('Update check failed', err)),
-      UPDATE_CHECK_INTERVAL_MS,
-    ),
-  );
+  const runScheduledCheck = async (): Promise<void> => {
+    try {
+      await checkAndDownload();
+    } catch (err) {
+      log.error('Update check failed', err);
+    }
+  };
+
+  runtime.setCheckTimer(setTimeout(() => void runScheduledCheck(), INITIAL_CHECK_DELAY_MS));
+  runtime.setCheckInterval(setInterval(() => void runScheduledCheck(), UPDATE_CHECK_INTERVAL_MS));
 }
 
 export function cleanupAutoUpdate(): void {

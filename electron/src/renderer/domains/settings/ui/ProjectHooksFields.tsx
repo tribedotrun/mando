@@ -1,10 +1,10 @@
-import { Input } from '#renderer/global/ui/input';
-import { Label } from '#renderer/global/ui/label';
+import { Input } from '#renderer/global/ui/primitives/input';
+import { Label } from '#renderer/global/ui/primitives/label';
 import {
   Collapsible,
   CollapsibleTrigger,
   CollapsibleContent,
-} from '#renderer/global/ui/collapsible';
+} from '#renderer/global/ui/primitives/collapsible';
 
 interface ProjectHooksFieldsProps {
   preSpawn: string;

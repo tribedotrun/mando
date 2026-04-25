@@ -13,10 +13,13 @@ export function formatExpiry(expiresAt: number | null): string | null {
 export function formatWindowReset(resetAtSecs: number | null | undefined): string {
   if (resetAtSecs == null) return '--';
   const resetMs = resetAtSecs * 1000;
-  const diffMs = resetMs - Date.now();
+  const nowMs = Date.now();
+  const diffMs = resetMs - nowMs;
   if (diffMs <= 0) return 'now';
   const at = new Date(resetMs);
+  const now = new Date(nowMs);
   const timeStr = at.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const datePrefix = formatResetDatePrefix(at, now);
   const totalMin = Math.round(diffMs / 60_000);
   const days = Math.floor(totalMin / 1440);
   const hours = Math.floor((totalMin % 1440) / 60);
@@ -29,7 +32,23 @@ export function formatWindowReset(resetAtSecs: number | null | undefined): strin
   } else {
     rel = `${Math.max(1, mins)}m`;
   }
-  return `${timeStr} (in ${rel})`;
+  return `${datePrefix}${timeStr} (in ${rel})`;
+}
+
+function formatResetDatePrefix(at: Date, now: Date): string {
+  // Calendar-day delta (not diffMs) so 11pm-now / 1am-tomorrow still prefixes.
+  const calendarDelta = daysBetweenCalendarDays(now, at);
+  if (calendarDelta === 0) return '';
+  if (calendarDelta >= 1 && calendarDelta <= 6) {
+    return `${at.toLocaleDateString([], { weekday: 'short' })} `;
+  }
+  return `${at.toLocaleDateString([], { month: 'short', day: 'numeric' })} `;
+}
+
+function daysBetweenCalendarDays(from: Date, to: Date): number {
+  const fromDay = Date.UTC(from.getFullYear(), from.getMonth(), from.getDate());
+  const toDay = Date.UTC(to.getFullYear(), to.getMonth(), to.getDate());
+  return Math.round((toDay - fromDay) / 86_400_000);
 }
 
 /** Utilization 0..1 -> integer percentage string. */

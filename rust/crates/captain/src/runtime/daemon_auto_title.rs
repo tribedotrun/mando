@@ -36,7 +36,7 @@ pub(super) fn spawn(runtime: &CaptainRuntime) {
 async fn process_pending(
     pool: &SqlitePool,
     bus: &global_bus::EventBus,
-    cfg: &settings::config::workflow::AutoTitleConfig,
+    cfg: &settings::AutoTitleConfig,
 ) {
     let pending = match crate::io::queries::workbenches::list_pending_title(pool).await {
         Ok(pending) => pending,
@@ -84,7 +84,7 @@ async fn title_one(
     pool: &SqlitePool,
     row: &crate::io::queries::workbenches::PendingTitleRow,
     projects_dir: &std::path::Path,
-    cfg: &settings::config::workflow::AutoTitleConfig,
+    cfg: &settings::AutoTitleConfig,
 ) -> anyhow::Result<Option<String>> {
     if let Ok(Some(current)) =
         crate::io::queries::workbenches::find_by_worktree(pool, &row.worktree).await

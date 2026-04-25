@@ -43,10 +43,15 @@ agent:
   todo_parse_timeout_s: 300
   todo_parse_idle_ttl_s: 120
   todo_parse_max_turns: 10
+  needs_clarification_timeout_s: 86400
+  archive_grace_secs: 604800
+  evidence_download_timeout_s: 30
+  evidence_ffmpeg_timeout_s: 30
   task_ask_timeout_s: 600
   task_ask_idle_ttl_s: 3600
   ops_timeout_s: 120
   ops_idle_ttl_s: 3600
+  no_pr_min_active_s: 180
 
 planning:
   feedback_rounds: 3
@@ -56,6 +61,39 @@ planning:
   feedback_max_turns: 10
   synthesizer_max_turns: 3
   final_max_turns: 3
+
+# Applied on top of the values above only when the daemon is launched with
+# --sandbox. Values are aggressive so that the full captain state machine can
+# be exercised end-to-end in seconds. Every field is optional; absent fields
+# keep the prod value.
+#
+# Behaviour note: applying `tick_interval_s` here ALSO writes the value into
+# the in-memory `Config.captain.tick_interval_s`, which on config reload is
+# persisted to the sandbox data dir's config.json. That is intentional — the
+# `/api/config` surface and the on-disk state should agree with the tick the
+# daemon actually runs. Prod and dev configs are untouched because this block
+# only applies when `WorkflowRuntimeMode::Sandbox`.
+sandbox:
+  tick_interval_s: 2
+  stale_threshold_s: 60
+  captain_review_timeout_s: 180
+  captain_merge_timeout_s: 240
+  # Haiku exploration can take a while on ambiguous clarifier prompts;
+  # 240s keeps the full clarify leg from timing out during e2e regression.
+  clarifier_timeout_s: 240
+  worker_timeout_s: 600
+  task_ask_timeout_s: 90
+  ops_timeout_s: 60
+  # No minimum runtime for no-PR gates in sandbox so fast e2e smokes
+  # (e.g. print-one-string tasks) can ship in seconds instead of waiting
+  # out the prod 180s heuristic — which would force an intermediate nudge
+  # that pollutes the stream tail before the captain gets to review.
+  no_pr_min_active_s: 0
+  # Lower than prod (50) so captain escalates quickly when haiku + the
+  # captain review prompt get stuck in a mutual-critique nudge loop.
+  # e2e rework/escalation specs then drive from escalated → rework
+  # without waiting out a 20+ minute nudge chain.
+  max_interventions: 3
 
 # ── Prompt Templates ─────────────────────────────────────────────────────────
 
@@ -420,14 +458,25 @@ prompts:
     - **respawn** — Start fresh with a new worktree.
     - **reset_budget** — Budget was burned by false alarms. Reset to zero and nudge.
     - **escalate** — Task is genuinely beyond automated recovery. Produce a CTO-level report.
+    {% elif is_broken_session %}
+    The worker session already emitted an unrecoverable broken-session signal
+    (idle-timeout watchdog abort, generic `is_error`, context overflow, rate
+    limit starvation, missing conversation, or similar). Do not resume the same
+    session in place.
+    - **ship** — Work is complete despite the broken session and the evidence still verifies the fix.
+    - **respawn** — Start fresh with a new worktree/session.
+    - **escalate** — Respawn would hit the same wall; surface the underlying problem to a human.
     {% else %}
-    Escalation is not available at this tier. Choose the action that moves
-    the task forward:
+    Prefer actions that move the task forward. Escalate only when the
+    failure is genuinely beyond automated recovery (broken-session wedge
+    that respawn cannot fix, repeated-nudge loop where each respawn hits the
+    same dead-end, environmental breakage that needs human repair):
 
     - **ship** — Work is complete, evidence type matches the change (UI: screenshot + recording; non-UI: terminal), PR is ready for human review. When shipping, you must also grade `confidence` (see Confidence Grading below).
     - **nudge** — Work needs improvement or is blocked. Provide specific actionable feedback (exact error messages, file paths, line numbers). The worker will be resumed with your instructions.
     - **respawn** — Session is broken beyond recovery or worker is stuck in a loop. Start fresh with a new worktree.
     - **reset_budget** — The intervention budget was exhausted but you identified a clear, solvable issue. Resets the intervention counter to zero and nudges with your instructions.
+    - **escalate** — Task is genuinely beyond automated recovery. Produce a CTO-level report in the `report` field explaining what went wrong, what you tried, and what a human should look at. Only use this when respawn would hit the same wall (e.g., persistent stream wedge, rate-limit starvation, context too large to compact). An empty or trivial report is rejected.
     {% endif %}
 
     ## Confidence Grading (required only when action = ship)
@@ -485,6 +534,15 @@ prompts:
     {% if is_gates_pass %}
     **Trigger: gates_pass** — All quality gates passed. Verify evidence quality before shipping.
 
+    {% if is_no_pr %}
+    **This is a no-PR task.** There is no diff, no PR, no merge. The worker
+    transcript + anything the worker added to the task's evidence files is
+    the entire deliverable. Screenshots and recordings are NOT required.
+    Ship when the transcript shows the task was actually performed and the
+    output matches the problem statement; nudge only if the transcript
+    reveals the worker did not do the stated work. Do not apply the
+    PR-oriented evidence rules below to this task.
+    {% else %}
     **Evidence type enforcement (mandatory):**
     Examine the PR diff to determine whether the change touches UI (renderer/frontend files):
     - **UI changes** require BOTH a screenshot AND a screen recording. Check:
@@ -511,6 +569,7 @@ prompts:
       reopen was purely non-behavioral (e.g., only addressed review comments with
       no functional change).
     {% endif %}
+    {% endif %}
     {% if is_degraded_context %}
     **Trigger: degraded_context** — PR data fetch partially failed. Assess whether the available
     evidence is sufficient to make a decision despite incomplete GitHub context.
@@ -521,9 +580,12 @@ prompts:
     with passing CI, ship it. If blocked, nudge with specific unblock instructions.
     {% endif %}
     {% if is_broken_session %}
-    **Trigger: broken_session** — Stream file is corrupted (content but no init event).
-    Check if the work is complete despite the broken session. If so, ship. If the session
-    needs recovery, nudge or respawn.
+    **Trigger: broken_session** — The worker session is unrecoverable in place
+    (corrupted stream or a CC broken-session symptom like idle-timeout watchdog
+    abort, structured `is_error`, rate-limit starvation, context overflow, or
+    missing conversation). Check if the work is complete despite the failure.
+    If so, ship. If the task still needs automation, respawn fresh. Escalate if
+    every respawn would hit the same wall.
     {% endif %}
     {% if is_repeated_nudge %}
     **Trigger: repeated_nudge** — Same nudge delivered multiple times. The worker may be
@@ -712,14 +774,54 @@ prompts:
     {{ question }}
 
   advisor_reopen_synthesis: |
-    Based on our conversation, produce a concise reopen message for the worker
-    who will fix this task. Include:
+    The user has chosen to {{ intent }} this task. Based on our conversation,
+    produce the {{ intent }} message now for the worker who will act on it.
+    Include:
     1. What is wrong or needs to change
     2. Specific files, functions, or behaviors discussed
     3. Clear acceptance criteria
 
-    Output ONLY the reopen message. No preamble, no markdown headers, no
-    "here is the message" wrapper.
+    ## Rules
+    - Output ONLY the message. No preamble, no markdown headers, no "here is
+      the message" wrapper.
+    - Do NOT ask the user for confirmation ("Want me to...?", "Should I
+      draft...?"). The user has already chosen to {{ intent }} and this
+      message is sent directly to the worker, not back to the user.
+
+  advisor_reopen_direct: |
+    You are the task advisor. The user has chosen to {{ intent }} this task
+    and wants you to synthesize their request into a clear, actionable
+    message for the worker. You have read access to the worktree and can
+    inspect code, git history, and prior session transcripts.
+
+    ## Task
+    - Title: {{ title }}
+    - ID: {{ id }}
+    - Status: {{ status }}
+    - Project: {{ project }}
+    - PR: {{ pr }}
+    - Branch: {{ branch }}
+    - Context: {{ context }}
+
+    ## Recent Timeline
+    {{ timeline }}
+
+    ## User's {{ intent }} request
+    {{ question }}
+
+    ## Your job
+    Produce a concise {{ intent }} message for the worker. Include:
+    1. What is wrong or needs to change
+    2. Specific files, functions, or behaviors discussed
+    3. Clear acceptance criteria
+
+    ## Rules
+    - Do NOT modify any files. This is a read-only session.
+    - Output ONLY the message. No preamble, no markdown headers, no "here is
+      the message" wrapper.
+    - Do NOT ask the user for confirmation ("Want me to...?", "Should I
+      draft...?"). The user has already chosen to {{ intent }} and this
+      message is sent directly to the worker, not back to the user.
 
   reopen_resume: |
     Captain reopened you with review feedback (reopen #{{ reopen_seq }}).
@@ -738,44 +840,26 @@ prompts:
     **Repo:** {{ repo }}
     **PR:** #{{ pr_number }}
 
-    Your job is to make this PR mergeable and merge it. Follow these steps:
+    Your job is to merge this PR. CI is informational only — no GitHub check
+    blocks merge, so do NOT wait on `gh pr checks`, do not sleep-loop on CI,
+    and do not wait for review bots.
 
-    ## Step 1: Check CI Status
+    ## Step 1: Merge
 
-    Run `gh pr checks {{ pr_number }} --repo {{ repo }} --required` to inspect the
-    required GitHub checks for this PR. Required checks are the only CI signal that
-    decides whether this PR may merge.
-
-    ## Step 2: Handle CI State
-
-    **If all required checks pass:** Proceed to Step 3.
-
-    **If required checks are failing:**
-    - Read the CI failure logs: `gh run view <run_id> --repo {{ repo }} --log-failed`
-    - Analyze the root cause and fix it: lint, format, type errors, test failures, code issues.
-    - Commit, push, and re-check CI.
-    - For flaky tests or transient infra failures: re-run the workflow and wait for it to pass.
-
-    **If required checks are pending or running:**
-    - Wait using `gh pr checks {{ pr_number }} --repo {{ repo }} --required --watch --fail-fast`
-    - Do not guess how to trigger CI manually. Do not use `/ci`, comments, workflow dispatch, or generic sleep loops.
-    - Keep waiting while the required checks are making progress.
-    - If the required checks have shown no movement for 15 minutes, treat CI as stalled and proceed to Step 3 using the admin fallback.
-
-    ## Step 3: Merge
-
-    If required checks are passing, run:
+    Run:
 
     `gh pr merge {{ pr_number }} --repo {{ repo }} --squash`
 
-    If required checks have shown no movement for 15 minutes, run:
+    If merge fails because branch protection still requires CI status checks
+    (error mentions "required status checks" or "merge queue"), bypass via
+    admin. Do NOT use admin to bypass missing human review approvals — if the
+    error mentions "required reviews" or "review approval", stop and report
+    instead of bypassing.
 
     `gh pr merge {{ pr_number }} --repo {{ repo }} --squash --admin`
 
-    If merge fails, analyze the error and fix it:
+    Other failures still need a real fix:
     - If merge conflict: rebase onto the default branch, resolve the conflicts, force-push, and retry the merge.
-    - If branch protection issue while required checks are still unresolved and the 15-minute no-movement window has NOT elapsed: return to Step 2 and keep waiting.
-    - If branch protection issue after the 15-minute no-movement window: use the admin merge.
     - If other error: diagnose, fix, and retry.
 
     ## Output
@@ -1019,3 +1103,106 @@ initial_prompts:
 
     Before updating the workpad, read {{ workpad_path }} first.
     Then update it with your assessment and plan.
+
+# ── Stream symptom classifier ─────────────────────────────────────────────────
+# Broken-session detection is structural, not substring-based. The presence
+# of a terminal `{"type":"result","is_error":true,...}` event is itself the
+# broken-session verdict (primary path); an externally-killed session (no
+# result + last non-system tool_result with `Exit code 137` /
+# `Request interrupted by user for tool use`) is the secondary path.
+#
+# These clauses do NOT decide whether a session is broken. They only LABEL
+# which kind of failure the detector routes to. If no rule matches the
+# terminal result's text fields, the detector synthesizes a generic
+# `IsError`/`cc_is_error` verdict — the session still goes to review.
+#
+# Matching is applied to narrow, structurally sourced text:
+#   most rules      ← terminal `result` event's `result` + `error` + `errors[]`
+#   SessionInterrupted ← last non-system user `tool_result`'s content
+#   ImageDimensionLimit ← last user `tool_result`'s content (nudge-path only)
+#
+# Substring false-positives from skill prompts, assistant thinking, task
+# text, and routine per-tool `is_error:true` errors are eliminated by the
+# structural scope, not by narrowing the clauses.
+#
+# Match semantics: AND across `clauses`, OR within each clause. A clause
+# matches when any of its lowercased substrings appears in the lowercased
+# text. First rule (in declaration order) that matches wins.
+#
+# `name` maps to a typed Rust variant in `global-claude::CcStreamSymptom`;
+# changing that field is a breaking API change. `reason` is a log/timeline
+# tag consumed by obs queries — also treat as stable.
+#
+# `broken_session: true` routes the symptom to captain review; `false` keeps
+# it on the nudge path (only ImageDimensionLimit, which is recoverable).
+#
+# Clauses below are anchored to real strings observed in
+# ~/.mando/state/cc-streams across 1355 real sessions + documented CC error
+# shapes. Ordering: specific failure modes before the generic fallback.
+stream_symptoms:
+  - name: RateLimitAborted
+    reason: rate_limit_aborted
+    broken_session: true
+    clauses:
+      # Observed: "You've hit your limit · resets 10am (America/Mexico_City)"
+      # (54/54 real rate-limit result events in corpus).
+      # `rate limit` is safe now that matching is scoped to terminal result
+      # event text only — the worker-86-2 FP came from skill-template text
+      # reaching the old whole-tail matcher, which is no longer possible.
+      # Session-manager API error shapes (5-hour / usage / 429) retained.
+      - ["hit your limit", "rate limit", "5-hour limit reached", "usage limit reached"]
+  - name: StreamIdleTimeout
+    reason: stream_idle_timeout
+    broken_session: true
+    clauses:
+      # Observed: "API Error: Stream idle timeout - partial response received"
+      - ["stream idle timeout"]
+  - name: ContextLengthExceeded
+    reason: context_length_exceeded
+    broken_session: true
+    clauses:
+      # Observed: "Prompt is too long".
+      # Other phrasings retained for defence in depth across CC versions.
+      - ["prompt is too long", "context length exceeded", "input is too long"]
+  - name: NoConversationFound
+    reason: no_conversation_found
+    broken_session: true
+    clauses:
+      # Observed: appears in result.errors[] as
+      # "No conversation found with session ID: <uuid>".
+      - ["no conversation found with session id"]
+  - name: SessionInterrupted
+    reason: session_killed
+    broken_session: true
+    clauses:
+      # Matched against the last non-system user tool_result's content, NOT
+      # the terminal result event. Fires when the CC CLI is killed
+      # externally (daemon SIGTERM, user interrupt) before it can write a
+      # terminal result. Detection path: crate::stream::stream_broken_session_symptom.
+      - ["request interrupted by user for tool use", "exit code 137"]
+  - name: ImageDimensionLimit
+    reason: image_dimension_blocked
+    broken_session: false
+    clauses:
+      # Matched against the last user tool_result's content. Recoverable:
+      # worker can downsample and retry; stays on the nudge path.
+      # Note: no real occurrences observed in the current stream corpus.
+      # Clauses match the shape CC's docs describe; verified via synthetic
+      # fixture. Detection path: crate::stream::detect_image_dimension_blocked.
+      - ["exceeds the dimension limit"]
+      - ["2000px"]
+  - name: IsError
+    reason: cc_is_error
+    broken_session: true
+    clauses:
+      # Generic fallback for terminal result/is_error:true events whose text
+      # didn't match any more specific rule. The detector also synthesizes
+      # this label when no configured rule matches — so even an empty
+      # clause list here would still trigger review. Keeping concrete
+      # clauses (matching the dominant "API Error:" prefix) lets the
+      # matcher short-circuit to this label without the synthetic path.
+      # Real unmatched cases: "API Error: 529 injected_by_cc_mock",
+      # "API Error: 400 invalid_request_error", "Not logged in · Please
+      # run /login", "Request timed out", "Output blocked by content
+      # filtering policy", "clarifier failed: failed to spawn claude binary".
+      - ["api error", "not logged in", "clarifier failed", "request timed out"]

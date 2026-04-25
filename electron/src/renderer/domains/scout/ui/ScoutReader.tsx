@@ -7,8 +7,8 @@ import {
   ScoutReaderHeader,
   ScoutReaderSkeleton,
 } from '#renderer/domains/scout/ui/ScoutReaderParts';
-import { Separator } from '#renderer/global/ui/separator';
-import { Skeleton } from '#renderer/global/ui/skeleton';
+import { Separator } from '#renderer/global/ui/primitives/separator';
+import { Skeleton } from '#renderer/global/ui/primitives/skeleton';
 
 interface Props {
   itemId: number;
@@ -18,60 +18,38 @@ interface Props {
 
 // Parent should render with key={itemId} so this component remounts on item change
 export function ScoutReader({ itemId, onAsk, qaOpen }: Props): React.ReactElement {
-  const {
-    item,
-    loading,
-    error,
-    displayTitle,
-    article,
-    articleLoading,
-    projects,
-    actOpen,
-    setActOpen,
-    summaryOpen,
-    setSummaryOpen,
-    setActProject,
-    effectiveActProject,
-    actPrompt,
-    setActPrompt,
-    acting,
-    actResult,
-    resetAct,
-    handleAct,
-    publishingTelegraph,
-    handlePublishTelegraph,
-  } = useScoutReader({ itemId });
+  const reader = useScoutReader({ itemId });
 
-  if (loading) {
+  if (reader.item.loading) {
     return <ScoutReaderSkeleton />;
   }
 
-  if (error || !item) {
+  if (reader.item.error || !reader.item.value) {
     return (
       <div data-testid="scout-reader" className="h-full px-5 py-4">
-        <div className="text-xs text-destructive">{error ?? `Item #${itemId} not found`}</div>
+        <div className="text-xs text-destructive">
+          {reader.item.error ?? `Item #${itemId} not found`}
+        </div>
       </div>
     );
   }
 
   const maxWidthClass = qaOpen ? '' : 'mx-auto max-w-[720px]';
+  const item = reader.item.value;
 
   return (
     <div data-testid="scout-reader" className="flex h-full flex-col">
       {/* Header - pinned above scroll */}
       <ScoutReaderHeader
         item={item}
-        displayTitle={displayTitle}
+        displayTitle={reader.item.displayTitle}
         qaOpen={qaOpen}
-        actOpen={actOpen}
-        canPublishTelegraph={!!article}
-        publishingTelegraph={publishingTelegraph}
+        actOpen={reader.act.open}
+        canPublishTelegraph={!!reader.article.body}
+        publishingTelegraph={reader.publish.telegraphPending}
         onAsk={onAsk}
-        onToggleAct={() => {
-          setActOpen(!actOpen);
-          resetAct();
-        }}
-        onPublishTelegraph={handlePublishTelegraph}
+        onToggleAct={() => reader.act.setOpen(!reader.act.open)}
+        onPublishTelegraph={reader.publish.handleTelegraph}
         maxWidthClass={maxWidthClass}
       />
 
@@ -79,25 +57,16 @@ export function ScoutReader({ itemId, onAsk, qaOpen }: Props): React.ReactElemen
       <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
         <div className={maxWidthClass}>
           {/* Act form */}
-          {actOpen && (
-            <ScoutActForm
-              projects={projects}
-              actProject={effectiveActProject}
-              setActProject={setActProject}
-              actPrompt={actPrompt}
-              setActPrompt={setActPrompt}
-              acting={acting}
-              actResult={actResult}
-              onAct={handleAct}
-            />
-          )}
+          <div className={reader.act.open ? '' : 'hidden'}>
+            <ScoutActForm itemId={itemId} open={reader.act.open} />
+          </div>
 
           {/* Summary */}
           {item.summary && (
             <ScoutSummary
               summary={item.summary}
-              summaryOpen={summaryOpen}
-              onToggle={() => setSummaryOpen(!summaryOpen)}
+              summaryOpen={reader.summary.open}
+              onToggle={() => reader.summary.setOpen(!reader.summary.open)}
             />
           )}
 
@@ -105,7 +74,7 @@ export function ScoutReader({ itemId, onAsk, qaOpen }: Props): React.ReactElemen
 
           {/* Article */}
           <div>
-            {articleLoading && (
+            {reader.article.loading && (
               <div className="space-y-3 py-8">
                 <Skeleton className="h-4 w-full" />
                 <Skeleton className="h-4 w-5/6" />
@@ -114,12 +83,12 @@ export function ScoutReader({ itemId, onAsk, qaOpen }: Props): React.ReactElemen
                 <Skeleton className="h-4 w-3/4" />
               </div>
             )}
-            {article && (
+            {reader.article.body && (
               <div className="prose-scout text-sm leading-relaxed text-foreground">
-                <Markdown>{article}</Markdown>
+                <Markdown>{reader.article.body}</Markdown>
               </div>
             )}
-            {!article && !articleLoading && (
+            {!reader.article.body && !reader.article.loading && (
               <div className="py-8 text-center text-xs text-muted-foreground">
                 No article content. Process the item first.
               </div>

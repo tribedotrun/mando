@@ -199,7 +199,11 @@ pub(crate) async fn get_task_sessions(
         .await
         .map_err(|e| internal_error(e, "failed to load task sessions"))?;
 
-    let caller_filter = params.caller.as_deref().or(params.category.as_deref());
+    let caller_filter = params
+        .caller
+        .as_ref()
+        .or(params.category.as_ref())
+        .map(|category| category.as_str());
 
     let matched: Vec<api_types::SessionSummary> = sessions
         .into_iter()

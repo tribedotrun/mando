@@ -194,23 +194,9 @@ async fn run_workbench_cleanup(pool: &sqlx::SqlitePool) -> anyhow::Result<()> {
     for wb in &stale {
         let wt_path = std::path::Path::new(&wb.worktree);
         if wt_path.exists() {
-            let repo_result = tokio::process::Command::new("git")
-                .args(["rev-parse", "--git-common-dir"])
-                .current_dir(wt_path)
-                .output()
-                .await;
-            let repo_path = repo_result.ok().and_then(|output| {
-                if output.status.success() {
-                    let git_dir = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                    std::path::Path::new(&git_dir)
-                        .parent()
-                        .map(|path| path.to_path_buf())
-                } else {
-                    None
-                }
-            });
+            let repo_path = global_git::common_repo_path(wt_path).await.ok().flatten();
             if let Some(repo) = repo_path {
-                if let Err(err) = crate::io::git::remove_worktree(&repo, wt_path).await {
+                if let Err(err) = global_git::remove_worktree(&repo, wt_path).await {
                     warn!(module = "cleanup", worktree = %wb.worktree, error = %err, "git worktree remove failed");
                 } else {
                     info!(module = "cleanup", worktree = %wb.worktree, "removed git worktree");

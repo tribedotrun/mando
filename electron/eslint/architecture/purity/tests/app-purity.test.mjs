@@ -4,7 +4,7 @@ import rule from '../rules/app-purity.mjs';
 ruleTester.run('app-purity', rule, {
   valid: [
     { code: `import { x } from '#renderer/global/runtime/useSseSync';`, filename: 'src/renderer/app/DataProvider.tsx' },
-    { code: `import { x } from '#renderer/global/ui/button';`, filename: 'src/renderer/app/routes/Foo.tsx' },
+    { code: `import { x } from '#renderer/global/ui/primitives/button';`, filename: 'src/renderer/app/routes/Foo.tsx' },
     { code: `import { x } from '#renderer/domains/captain/ui/CaptainView';`, filename: 'src/renderer/app/routes/Foo.tsx' },
     { code: `import { x } from '#renderer/global/repo/queries';`, filename: 'src/renderer/app/routes/Foo.tsx' },
     { code: `import { x } from '#renderer/global/service/utils';`, filename: 'src/renderer/app/Sidebar.tsx' },

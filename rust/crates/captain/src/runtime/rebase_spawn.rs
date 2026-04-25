@@ -1,8 +1,8 @@
 //! Rebase worker spawning — handles conflict detection response and worker lifecycle setup.
 
 use crate::{Task, TimelineEventPayload};
-use settings::config::settings::Config;
-use settings::config::workflow::CaptainWorkflow;
+use settings::CaptainWorkflow;
+use settings::Config;
 
 use crate::runtime::notify::Notifier;
 use crate::service::merge_logic;
@@ -118,8 +118,7 @@ pub(super) async fn handle_conflict(
 
     // Spawn rebase worker.
     let project_name = item.project.as_str();
-    let Some((_, project_config)) =
-        settings::config::resolve_project_config(Some(project_name), config)
+    let Some((_, project_config)) = settings::resolve_project_config(Some(project_name), config)
     else {
         tracing::warn!(
             module = "captain",
@@ -131,7 +130,7 @@ pub(super) async fn handle_conflict(
     };
 
     let repo_path = global_infra::paths::expand_tilde(&project_config.path);
-    let default_branch_raw = match crate::io::git::default_branch(&repo_path).await {
+    let default_branch_raw = match global_git::default_branch(&repo_path).await {
         Ok(db) => db,
         Err(e) => {
             tracing::warn!(
@@ -178,7 +177,7 @@ pub(super) async fn handle_conflict(
     ]
     .into_iter()
     .collect();
-    let prompt = match settings::config::render_template(&rebase_tmpl, &rebase_vars) {
+    let prompt = match settings::render_template(&rebase_tmpl, &rebase_vars) {
         Ok(p) => p,
         Err(e) => {
             tracing::error!(module = "captain", error = %e, "failed to render rebase_worker template");
@@ -190,28 +189,17 @@ pub(super) async fn handle_conflict(
     let wt_path = global_infra::paths::expand_tilde(wt);
 
     // Abort any stale rebase left over from a prior crashed worker.
-    if !wt.is_empty() {
-        let abort = tokio::process::Command::new("git")
-            .args(["rebase", "--abort"])
-            .current_dir(&wt_path)
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status()
-            .await;
-        if let Ok(s) = abort {
-            if s.success() {
-                tracing::info!(
-                    module = "captain",
-                    pr = %pr,
-                    "aborted stale rebase before spawning worker"
-                );
-            }
-        }
+    if !wt.is_empty() && matches!(global_git::abort_rebase(&wt_path).await, Ok(true)) {
+        tracing::info!(
+            module = "captain",
+            pr = %pr,
+            "aborted stale rebase before spawning worker"
+        );
     }
 
     // Record HEAD SHA *after* abort so we get the stable branch tip, not a mid-rebase commit.
     let head_sha = if !wt.is_empty() {
-        match crate::io::git::head_sha(&wt_path).await {
+        match global_git::head_sha_short(&wt_path).await {
             Ok(sha) => Some(sha),
             Err(e) => {
                 tracing::warn!(

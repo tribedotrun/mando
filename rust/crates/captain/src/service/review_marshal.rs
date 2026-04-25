@@ -232,10 +232,7 @@ fn is_clean_bot_review(body: &str) -> bool {
 /// Uses a watermark approach: the most recent `[Mando]`-prefixed comment
 /// by the PR author marks all earlier comments as addressed. Returns the
 /// count of non-author, non-noise comments after the watermark.
-pub(crate) fn issue_comment_hygiene(
-    comments: &[crate::io::github_pr::PrComment],
-    pr_author: &str,
-) -> i64 {
+pub(crate) fn issue_comment_hygiene(comments: &[global_github::PrComment], pr_author: &str) -> i64 {
     let author_norm = pr_author.to_lowercase();
 
     // Find watermark: most recent [Mando] ack by PR author.
@@ -290,7 +287,7 @@ pub(crate) fn issue_comment_hygiene(
 /// - unresolved: thread not resolved AND PR author hasn't replied
 /// - unreplied: subset — reviewer commented but author hasn't replied
 pub(crate) fn thread_hygiene(
-    threads: &[crate::io::github_pr::ReviewThread],
+    threads: &[global_github::ReviewThread],
     pr_author: &str,
 ) -> (i64, i64) {
     let author_norm = pr_author.to_lowercase();
@@ -378,7 +375,7 @@ mod tests {
 
     // ── issue_comment_hygiene tests ──
 
-    use crate::io::github_pr::{PrComment, ReviewThread, ThreadComment};
+    use global_github::{PrComment, ReviewThread, ThreadComment};
 
     fn make_comment(author: &str, body: &str, created_at: &str) -> PrComment {
         PrComment {

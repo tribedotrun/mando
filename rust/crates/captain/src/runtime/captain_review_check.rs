@@ -8,16 +8,22 @@ use super::captain_review::CaptainVerdict;
 
 fn is_verdict_allowed(trigger: &str, action: &str) -> bool {
     // Captain is the last line of defense -- it must solve problems, not punt
-    // them. Escalate and retry_clarifier are restricted to specific triggers.
+    // them. `retry_clarifier` is restricted to the clarifier-fail tier.
+    // `escalate` is available everywhere: without it, broken-session wedges
+    // (watchdog idle timeout, rate-limit starvation, repeated-nudge loops
+    // where respawn hits the same wall) have no escape hatch and the task
+    // respawns forever. Broken-session reviews are otherwise narrower than
+    // the default tier: they may ship, respawn, or escalate, but must never
+    // resume the same dead session in place. A downstream non-empty-report check in
+    // `validate_verdict` keeps escalate from being used as a lazy dodge.
     match trigger {
         "clarifier_fail" => matches!(action, "retry_clarifier" | "escalate"),
         "spawn_fail" => matches!(action, "respawn" | "escalate"),
-        "budget_exhausted" => matches!(
+        "broken_session" => matches!(action, "ship" | "respawn" | "escalate"),
+        _ => matches!(
             action,
             "ship" | "nudge" | "respawn" | "reset_budget" | "escalate"
         ),
-        // All other triggers: captain must act. No escalation, no retry_clarifier.
-        _ => matches!(action, "ship" | "nudge" | "respawn" | "reset_budget"),
     }
 }
 
@@ -152,6 +158,48 @@ pub(crate) fn validate_verdict(verdict: CaptainVerdict, item: &Task) -> CaptainV
             confidence: None,
             confidence_reason: None,
         };
+    }
+
+    // Escalate must carry a non-empty report. The prompt says so but the
+    // model sometimes skips it; without the report, the human gets an
+    // "escalated" task with no context. Synthesize a placeholder from the
+    // feedback field and log so the miss is visible, rather than silently
+    // shipping an empty report.
+    if verdict.action == "escalate" {
+        let report_missing = verdict
+            .report
+            .as_deref()
+            .map(|s| s.trim().is_empty())
+            .unwrap_or(true);
+        if report_missing {
+            let feedback_snippet = verdict.feedback.trim();
+            let synthesized = if feedback_snippet.is_empty() {
+                format!(
+                    "Captain escalated trigger '{trigger}' without filling the report field. \
+                     No feedback was provided either. Manual triage required — check the \
+                     worker's stream and recent timeline."
+                )
+            } else {
+                format!(
+                    "Captain escalated trigger '{trigger}' without a report. \
+                     Feedback provided: {feedback_snippet}. \
+                     Manual triage required."
+                )
+            };
+            warn!(
+                module = "captain",
+                item_id = item.id,
+                trigger,
+                "escalate verdict missing report; synthesizing placeholder"
+            );
+            return CaptainVerdict {
+                action: "escalate".into(),
+                feedback: verdict.feedback,
+                report: Some(synthesized),
+                confidence: None,
+                confidence_reason: None,
+            };
+        }
     }
 
     if verdict.action == "ship" {

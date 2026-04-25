@@ -3,6 +3,7 @@
 //! Mirrors the CLI's `DaemonClient` pattern but adds retry/wait logic
 //! needed for the Telegram bot process (which may start before the gateway).
 
+use crate::gateway_paths as paths;
 use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
@@ -164,7 +165,7 @@ impl GatewayClient {
     pub async fn health(&self) -> Result<api_types::HealthResponse> {
         let resp = self
             .client
-            .get(self.url("/api/health"))
+            .get(self.url(paths::HEALTH))
             .send()
             .await
             .context("gateway not reachable")?;

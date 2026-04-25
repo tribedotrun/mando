@@ -207,13 +207,8 @@ pub(crate) async fn post_task_ask_end(
     }
 
     let updated = state.captain.task_json(id).await.ok().flatten();
-    let wb_id = updated
-        .as_ref()
-        .and_then(|v| v.get("workbench_id"))
-        .and_then(|v| v.as_i64())
-        .unwrap_or(0);
-    let task_item: Option<api_types::TaskItem> =
-        updated.and_then(|v| serde_json::from_value(v).ok());
+    let wb_id = updated.as_ref().map(|task| task.workbench_id).unwrap_or(0);
+    let task_item = updated;
     state.bus.send(global_bus::BusPayload::Tasks(Some(
         api_types::TaskEventData {
             action: Some("updated".into()),
@@ -334,8 +329,8 @@ pub(crate) async fn post_task_ask_reopen(
             source: "ask-reopen".to_string(),
             worker: item.worker.clone().unwrap_or_default(),
             session_id: item.session_ids.worker.clone().unwrap_or_default(),
-            from: previous_status.as_str().to_string(),
-            to: item.status().as_str().to_string(),
+            from: previous_status.into(),
+            to: item.status().into(),
         },
     };
     let mut effects: Vec<EffectRequest> = Vec::new();
@@ -372,6 +367,7 @@ pub(crate) async fn post_task_ask_reopen(
     }
 
     if matches!(outcome, captain::ReopenOutcome::CaptainReviewing) {
+        crate::runtime::task_sessions::clear_advisor_session(&state, id).await;
         return Ok(Json(api_types::AskReopenResponse {
             ok: true,
             feedback: synthesized_feedback,
@@ -390,6 +386,7 @@ pub(crate) async fn post_task_ask_reopen(
         ));
     }
 
+    crate::runtime::task_sessions::clear_advisor_session(&state, id).await;
     Ok(Json(api_types::AskReopenResponse {
         ok: true,
         feedback: synthesized_feedback,

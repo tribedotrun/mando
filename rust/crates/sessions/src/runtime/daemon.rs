@@ -5,19 +5,34 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
+use serde::de::DeserializeOwned;
+
 pub type SessionFuture<T> = Pin<Box<dyn Future<Output = anyhow::Result<T>> + Send + 'static>>;
 pub type UnitFuture = Pin<Box<dyn Future<Output = ()> + Send + 'static>>;
 
-type StartFn = dyn Fn(SessionStartRequest) -> SessionFuture<global_claude::CcResult<serde_json::Value>>
-    + Send
-    + Sync;
-type FollowUpFn = dyn Fn(SessionFollowUpRequest) -> SessionFuture<global_claude::CcResult<serde_json::Value>>
-    + Send
-    + Sync;
+#[derive(Debug, Clone)]
+pub struct SessionStructuredOutput(serde_json::Value);
+
+impl From<serde_json::Value> for SessionStructuredOutput {
+    fn from(value: serde_json::Value) -> Self {
+        Self(value)
+    }
+}
+
+impl SessionStructuredOutput {
+    pub fn parse<T: DeserializeOwned>(&self) -> Result<T, serde_json::Error> {
+        serde_json::from_value(self.0.clone())
+    }
+}
+
+pub type SessionAiResult = global_claude::CcResult<SessionStructuredOutput>;
+
+type StartFn = dyn Fn(SessionStartRequest) -> SessionFuture<SessionAiResult> + Send + Sync;
+type FollowUpFn = dyn Fn(SessionFollowUpRequest) -> SessionFuture<SessionAiResult> + Send + Sync;
 type CloseAsyncFn = dyn Fn(String) -> UnitFuture + Send + Sync;
 type ListSessionsFn = dyn Fn(SessionListQuery) -> SessionFuture<SessionListPage> + Send + Sync;
 type SessionCwdFn = dyn Fn(String) -> SessionFuture<Option<String>> + Send + Sync;
-type TranscriptFn = dyn Fn(String) -> SessionFuture<Option<String>> + Send + Sync;
+type JsonlPathFn = dyn Fn(String) -> SessionFuture<Option<String>> + Send + Sync;
 type MessagesFn = dyn Fn(String, Option<usize>, usize) -> SessionFuture<Option<Vec<global_claude::TranscriptMessage>>>
     + Send
     + Sync;
@@ -26,6 +41,9 @@ type ToolUsageFn =
 type SessionCostFn =
     dyn Fn(String) -> SessionFuture<Option<global_claude::SessionCost>> + Send + Sync;
 type StreamFn = dyn Fn(String, Option<Vec<String>>) -> SessionFuture<Option<String>> + Send + Sync;
+type EventsSnapshotFn = dyn Fn(String) -> SessionFuture<Option<crate::runtime::transcript_access::EventsSnapshot>>
+    + Send
+    + Sync;
 
 #[derive(Debug, Clone)]
 pub struct SessionStartRequest {
@@ -77,7 +95,7 @@ pub struct SessionListPage {
     pub total_pages: usize,
     pub categories: BTreeMap<String, u64>,
     pub total_cost_usd: f64,
-    pub sessions: Vec<serde_json::Value>,
+    pub sessions: Vec<api_types::SessionEntry>,
 }
 
 pub struct SessionsRuntimeOps {
@@ -91,11 +109,12 @@ pub struct SessionsRuntimeOps {
     pub follow_up: Arc<FollowUpFn>,
     pub list_sessions: Arc<ListSessionsFn>,
     pub session_cwd: Arc<SessionCwdFn>,
-    pub transcript_markdown: Arc<TranscriptFn>,
+    pub session_jsonl_path: Arc<JsonlPathFn>,
     pub session_messages: Arc<MessagesFn>,
     pub session_tool_usage: Arc<ToolUsageFn>,
     pub session_cost: Arc<SessionCostFn>,
     pub session_stream: Arc<StreamFn>,
+    pub events_snapshot: Arc<EventsSnapshotFn>,
 }
 
 #[derive(Clone)]
@@ -110,11 +129,12 @@ pub struct SessionsRuntime {
     follow_up: Arc<FollowUpFn>,
     list_sessions: Arc<ListSessionsFn>,
     session_cwd: Arc<SessionCwdFn>,
-    transcript_markdown: Arc<TranscriptFn>,
+    session_jsonl_path: Arc<JsonlPathFn>,
     session_messages: Arc<MessagesFn>,
     session_tool_usage: Arc<ToolUsageFn>,
     session_cost: Arc<SessionCostFn>,
     session_stream: Arc<StreamFn>,
+    events_snapshot: Arc<EventsSnapshotFn>,
 }
 
 impl SessionsRuntime {
@@ -130,11 +150,12 @@ impl SessionsRuntime {
             follow_up: ops.follow_up,
             list_sessions: ops.list_sessions,
             session_cwd: ops.session_cwd,
-            transcript_markdown: ops.transcript_markdown,
+            session_jsonl_path: ops.session_jsonl_path,
             session_messages: ops.session_messages,
             session_tool_usage: ops.session_tool_usage,
             session_cost: ops.session_cost,
             session_stream: ops.session_stream,
+            events_snapshot: ops.events_snapshot,
         }
     }
 
@@ -163,7 +184,7 @@ impl SessionsRuntime {
     pub async fn start_with_item(
         &self,
         request: SessionStartRequest,
-    ) -> anyhow::Result<global_claude::CcResult<serde_json::Value>> {
+    ) -> anyhow::Result<SessionAiResult> {
         (self.start_with_item)(request).await
     }
 
@@ -171,7 +192,7 @@ impl SessionsRuntime {
     pub async fn start_replacing(
         &self,
         request: SessionStartRequest,
-    ) -> anyhow::Result<global_claude::CcResult<serde_json::Value>> {
+    ) -> anyhow::Result<SessionAiResult> {
         (self.start_replacing)(request).await
     }
 
@@ -179,7 +200,7 @@ impl SessionsRuntime {
     pub async fn follow_up(
         &self,
         request: SessionFollowUpRequest,
-    ) -> anyhow::Result<global_claude::CcResult<serde_json::Value>> {
+    ) -> anyhow::Result<SessionAiResult> {
         (self.follow_up)(request).await
     }
 
@@ -203,8 +224,8 @@ impl SessionsRuntime {
     }
 
     #[tracing::instrument(skip_all)]
-    pub async fn transcript_markdown(&self, session_id: &str) -> anyhow::Result<Option<String>> {
-        (self.transcript_markdown)(session_id.to_string()).await
+    pub async fn session_jsonl_path(&self, session_id: &str) -> anyhow::Result<Option<String>> {
+        (self.session_jsonl_path)(session_id.to_string()).await
     }
 
     #[tracing::instrument(skip_all)]
@@ -243,10 +264,15 @@ impl SessionsRuntime {
     }
 
     #[tracing::instrument(skip_all)]
-    pub async fn start_ops(
+    pub async fn events_snapshot(
         &self,
-        request: SessionStartRequest,
-    ) -> anyhow::Result<global_claude::CcResult<serde_json::Value>> {
+        session_id: &str,
+    ) -> anyhow::Result<Option<crate::runtime::transcript_access::EventsSnapshot>> {
+        (self.events_snapshot)(session_id.to_string()).await
+    }
+
+    #[tracing::instrument(skip_all)]
+    pub async fn start_ops(&self, request: SessionStartRequest) -> anyhow::Result<SessionAiResult> {
         self.start_replacing(request).await
     }
 
@@ -254,7 +280,7 @@ impl SessionsRuntime {
     pub async fn send_ops_message(
         &self,
         request: SessionFollowUpRequest,
-    ) -> anyhow::Result<Option<global_claude::CcResult<serde_json::Value>>> {
+    ) -> anyhow::Result<Option<SessionAiResult>> {
         if !self.has_session(&request.key) {
             return Ok(None);
         }
@@ -319,6 +345,7 @@ mod tests {
                         stream_path: PathBuf::from("/tmp/stream.jsonl"),
                         rate_limit: None,
                         pid: 0u32.into(),
+                        credential_id: None,
                     })
                 })
             }),
@@ -338,11 +365,12 @@ mod tests {
                 })
             }),
             session_cwd: Arc::new(|_| Box::pin(async { Ok(None) })),
-            transcript_markdown: Arc::new(|_| Box::pin(async { Ok(None) })),
+            session_jsonl_path: Arc::new(|_| Box::pin(async { Ok(None) })),
             session_messages: Arc::new(|_, _, _| Box::pin(async { Ok(None) })),
             session_tool_usage: Arc::new(|_| Box::pin(async { Ok(None) })),
             session_cost: Arc::new(|_| Box::pin(async { Ok(None) })),
             session_stream: Arc::new(|_, _| Box::pin(async { Ok(None) })),
+            events_snapshot: Arc::new(|_| Box::pin(async { Ok(None) })),
         })
     }
 

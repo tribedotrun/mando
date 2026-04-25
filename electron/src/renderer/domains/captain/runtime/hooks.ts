@@ -22,6 +22,7 @@ export {
   useTaskRetry,
   useResumeRateLimited,
   useTaskHandoff,
+  useTaskStop,
   useTaskReopen,
   useTaskAskReopen,
   useTaskRework,
@@ -33,10 +34,11 @@ export {
   useTaskClarify,
   useTaskBulkCreate,
   useStartImplementation,
-} from '#renderer/domains/captain/repo/mutations';
+} from '#renderer/domains/captain/runtime/useFeedbackTaskMutations';
 
 // Extra mutation hooks (split for file-length compliance)
-export { useEndAskSession, useAddProject } from '#renderer/domains/captain/repo/mutations-extra';
+export { useEndAskSession } from '#renderer/domains/captain/repo/mutations-extra';
+export { useAddProject } from '#renderer/domains/captain/runtime/useFeedbackTaskMutations';
 
 // Terminal mutation hooks
 export {
@@ -45,7 +47,8 @@ export {
   useWorkbenchPin,
   useWorkbenchRename,
   useWorkbenchArchive,
-} from '#renderer/domains/captain/repo/mutations-terminal';
+  useWorkbenchUnarchive,
+} from '#renderer/domains/captain/terminal/runtime/useFeedbackTerminalMutations';
 
 // Activity strip data hook (runtime, not repo)
 export { useActivityStripData } from '#renderer/domains/captain/runtime/useActivityStripData';

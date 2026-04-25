@@ -23,7 +23,7 @@ pub async fn validate_rate_limited_task(store: &TaskStore, id: i64) -> Result<()
     let pool = store.pool();
     let ambient_active = super::super::ambient_rate_limit::is_active();
     let credential_blocking =
-        settings::credentials::earliest_cooldown_remaining_secs(pool).await > 0;
+        settings::credentials::earliest_cooldown_remaining_secs(pool).await? > 0;
     anyhow::ensure!(
         ambient_active || credential_blocking,
         "rate-limit cooldown is not active"
@@ -65,8 +65,8 @@ pub async fn retry_item(store: &TaskStore, id: i64) -> Result<()> {
         actor: "human".into(),
         summary: "Retried — re-entering captain review".into(),
         data: TimelineEventPayload::StatusChanged {
-            from: "errored".to_string(),
-            to: "captain-reviewing".to_string(),
+            from: api_types::ItemStatus::Errored,
+            to: api_types::ItemStatus::CaptainReviewing,
         },
     };
     let bus_payload = crate::io::queries::tasks_persist::task_bus_effect(id, "updated");
@@ -153,8 +153,8 @@ pub async fn merge_pr(store: &TaskStore, pr_number: i64, project: &str) -> Resul
         actor: "human".into(),
         summary: format!("Queued captain merge for PR #{pr_number}"),
         data: TimelineEventPayload::StatusChangedRetryMerge {
-            from: item.status.as_str().to_string(),
-            to: "captain-merging".to_string(),
+            from: item.status.into(),
+            to: api_types::ItemStatus::CaptainMerging,
             pr: pr_number,
         },
     };
@@ -194,7 +194,7 @@ pub async fn merge_pr(store: &TaskStore, pr_number: i64, project: &str) -> Resul
     );
 
     Ok(MergeResponse {
-        status: "captain-merging".into(),
+        status: api_types::ItemStatus::CaptainMerging,
         item_id: task.id,
         pr: pr_number,
     })

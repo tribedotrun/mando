@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::sync::{OnceLock, RwLock};
 
-use settings::config::Config;
+use settings::Config;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CaptainRuntimePaths {
@@ -31,10 +31,25 @@ fn read_runtime_paths() -> Option<CaptainRuntimePaths> {
 }
 
 pub fn resolve_captain_runtime_paths(config: &Config) -> CaptainRuntimePaths {
+    let defaults = default_captain_runtime_paths();
     CaptainRuntimePaths {
-        task_db_path: global_infra::paths::expand_tilde(&config.captain.task_db_path),
-        lockfile_path: global_infra::paths::expand_tilde(&config.captain.lockfile_path),
-        worker_health_path: global_infra::paths::expand_tilde(&config.captain.worker_health_path),
+        task_db_path: config_path_or_default(&config.captain.task_db_path, defaults.task_db_path),
+        lockfile_path: config_path_or_default(
+            &config.captain.lockfile_path,
+            defaults.lockfile_path,
+        ),
+        worker_health_path: config_path_or_default(
+            &config.captain.worker_health_path,
+            defaults.worker_health_path,
+        ),
+    }
+}
+
+fn config_path_or_default(value: &str, default: PathBuf) -> PathBuf {
+    if value.trim().is_empty() {
+        default
+    } else {
+        global_infra::paths::expand_tilde(value)
     }
 }
 
@@ -54,4 +69,42 @@ pub fn captain_lock_path() -> PathBuf {
 
 pub fn worker_health_path() -> PathBuf {
     active_captain_runtime_paths().worker_health_path
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn empty_skipped_config_paths_fall_back_to_runtime_defaults() {
+        let mut config = Config::default();
+        config.captain.task_db_path.clear();
+        config.captain.lockfile_path.clear();
+        config.captain.worker_health_path.clear();
+
+        let paths = resolve_captain_runtime_paths(&config);
+
+        assert!(paths.task_db_path.ends_with("mando.db"));
+        assert!(paths.lockfile_path.ends_with("captain.lock"));
+        assert!(paths
+            .worker_health_path
+            .ends_with("state/worker-health.json"));
+    }
+
+    #[test]
+    fn explicit_config_paths_are_honored() {
+        let mut config = Config::default();
+        config.captain.task_db_path = "/tmp/custom.db".into();
+        config.captain.lockfile_path = "/tmp/custom.lock".into();
+        config.captain.worker_health_path = "/tmp/custom-health.json".into();
+
+        let paths = resolve_captain_runtime_paths(&config);
+
+        assert_eq!(paths.task_db_path, PathBuf::from("/tmp/custom.db"));
+        assert_eq!(paths.lockfile_path, PathBuf::from("/tmp/custom.lock"));
+        assert_eq!(
+            paths.worker_health_path,
+            PathBuf::from("/tmp/custom-health.json")
+        );
+    }
 }

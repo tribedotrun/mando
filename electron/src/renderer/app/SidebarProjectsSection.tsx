@@ -1,14 +1,14 @@
 import React, { useState } from 'react';
 import { Check, Filter, FolderPlus } from 'lucide-react';
 import { SidebarProjectItem } from '#renderer/global/ui/SidebarProjectItem';
-import { Button } from '#renderer/global/ui/button';
+import { Button } from '#renderer/global/ui/primitives/button';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuTrigger,
-} from '#renderer/global/ui/dropdown-menu';
+} from '#renderer/global/ui/primitives/dropdown-menu';
 import { WORKBENCH_FILTER_OPTIONS, type WorkbenchStatusFilter } from '#renderer/global/types';
 import type { SidebarChild } from '#renderer/global/service/utils';
 

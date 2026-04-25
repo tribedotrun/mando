@@ -1,19 +1,16 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { toast } from '#renderer/global/runtime/useFeedback';
 import {
   addScoutUrl,
   bulkUpdateScout,
   bulkDeleteScout,
-  type ScoutCommand,
   updateScoutStatus,
   actOnScoutItem,
   researchScout,
   askScout,
   publishScoutTelegraph,
 } from '#renderer/domains/scout/repo/api';
-import type { ScoutItem, ScoutResponse } from '#renderer/global/types';
+import type { ScoutItem, ScoutItemLifecycleCommand, ScoutResponse } from '#renderer/global/types';
 import { queryKeys } from '#renderer/global/repo/queryKeys';
-import { getErrorMessage } from '#renderer/global/service/utils';
 import { toReactQuery } from '#result';
 
 // ---------------------------------------------------------------------------
@@ -24,9 +21,6 @@ export function useScoutAdd() {
   return useMutation({
     mutationFn: (vars: { url: string; title?: string }) =>
       toReactQuery(addScoutUrl(vars.url, vars.title)),
-    onError: () => {
-      toast.error('Failed to add scout item');
-    },
     // SSE handles cache update
   });
 }
@@ -37,11 +31,8 @@ export function useScoutAdd() {
 
 export function useScoutBulkUpdate() {
   return useMutation({
-    mutationFn: (vars: { ids: number[]; command: ScoutCommand }) =>
+    mutationFn: (vars: { ids: number[]; command: ScoutItemLifecycleCommand }) =>
       toReactQuery(bulkUpdateScout(vars.ids, vars.command)),
-    onError: () => {
-      toast.error('Bulk update failed');
-    },
     // SSE handles cache update
   });
 }
@@ -74,7 +65,6 @@ export function useScoutBulkDelete() {
     onError: () => {
       // Refetch to restore correct state
       void qc.invalidateQueries({ queryKey: queryKeys.scout.all });
-      toast.error('Bulk delete failed');
     },
   });
 }
@@ -86,13 +76,10 @@ export function useScoutBulkDelete() {
 export function useScoutStatusUpdate() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (vars: { id: number; command: ScoutCommand }) =>
+    mutationFn: (vars: { id: number; command: ScoutItemLifecycleCommand }) =>
       toReactQuery(updateScoutStatus(vars.id, vars.command)),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: queryKeys.scout.all });
-    },
-    onError: (err) => {
-      toast.error(`Status update failed: ${getErrorMessage(err, 'unknown error')}`);
     },
   });
 }
@@ -116,12 +103,6 @@ export function useScoutResearch() {
   return useMutation({
     mutationFn: (vars: { topic: string; process?: boolean }) =>
       toReactQuery(researchScout(vars.topic, vars.process ?? true)),
-    onSuccess: () => {
-      toast.success('Research started');
-    },
-    onError: (err) => {
-      toast.error(getErrorMessage(err, 'Research failed'));
-    },
   });
 }
 
@@ -157,10 +138,6 @@ export function useScoutPublishTelegraph() {
           ),
         };
       });
-      toast.success('Published to Telegraph');
-    },
-    onError: (err) => {
-      toast.error(getErrorMessage(err, 'Telegraph publish failed'));
     },
   });
 }

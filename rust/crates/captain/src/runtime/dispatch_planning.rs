@@ -10,8 +10,8 @@ use std::panic::AssertUnwindSafe;
 use crate::{ItemStatus, Task, TimelineEventPayload};
 use futures::FutureExt;
 use global_bus::EventBus;
-use settings::config::settings::Config;
-use settings::config::workflow::CaptainWorkflow;
+use settings::CaptainWorkflow;
+use settings::Config;
 use tokio_util::task::TaskTracker;
 
 use crate::service::lifecycle;

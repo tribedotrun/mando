@@ -151,8 +151,8 @@ async fn post_task_reopen_inner(
             content: body.feedback.clone(),
             worker: item.worker.clone().unwrap_or_default(),
             session_id: item.session_ids.worker.clone().unwrap_or_default(),
-            from: previous_status.as_str().to_string(),
-            to: item.status().as_str().to_string(),
+            from: previous_status.into(),
+            to: item.status().into(),
             source: "direct".to_string(),
         },
     };
@@ -210,6 +210,7 @@ async fn post_task_reopen_inner(
             .enqueue_task_effects(item.id, Some("human_reopen_review"), effects)
             .await
             .map_err(|e| internal_error(e, "failed to publish reopen side effects"))?;
+        crate::runtime::task_sessions::clear_advisor_session(state, id).await;
         return Ok(Json(api_types::BoolOkResponse { ok: true }));
     }
 
@@ -225,6 +226,7 @@ async fn post_task_reopen_inner(
         ));
     }
 
+    crate::runtime::task_sessions::clear_advisor_session(state, id).await;
     Ok(Json(api_types::BoolOkResponse { ok: true }))
 }
 
@@ -273,6 +275,7 @@ async fn post_task_rework_inner(
         .rework_item(id, &body.feedback)
         .await
         .map_err(|e| map_task_action_error(e, "failed to rework task"))?;
+    crate::runtime::task_sessions::clear_advisor_session(state, id).await;
 
     if !body.saved_images.is_empty() {
         if let Err(e) = state
@@ -347,13 +350,8 @@ pub(crate) async fn post_task_resume_rate_limited(
             .await;
     }
     let updated = state.captain.task_json(id).await.ok().flatten();
-    let wb_id = updated
-        .as_ref()
-        .and_then(|v| v.get("workbench_id"))
-        .and_then(|v| v.as_i64())
-        .unwrap_or(0);
-    let task_item: Option<api_types::TaskItem> =
-        updated.and_then(|v| serde_json::from_value(v).ok());
+    let wb_id = updated.as_ref().map(|task| task.workbench_id).unwrap_or(0);
+    let task_item = updated;
     state.bus.send(global_bus::BusPayload::Tasks(Some(
         api_types::TaskEventData {
             action: Some("updated".into()),
@@ -381,4 +379,16 @@ pub(crate) async fn post_task_handoff(
 ) -> Result<Json<api_types::BoolOkResponse>, ApiError> {
     let id = body.id;
     simple_task_action(&state, id, state.captain.handoff_item(id)).await
+}
+
+/// POST /api/tasks/stop — per-task stop. Kills the worker for this task only,
+/// transitions status to `stopped`, preserves the worktree for inspection.
+/// Reopen resumes the existing session in the existing worktree.
+#[crate::instrument_api(method = "POST", path = "/api/tasks/stop")]
+pub(crate) async fn post_task_stop(
+    State(state): State<AppState>,
+    Json(body): Json<api_types::TaskIdRequest>,
+) -> Result<Json<api_types::BoolOkResponse>, ApiError> {
+    let id = body.id;
+    simple_task_action(&state, id, state.captain.stop_item(id)).await
 }

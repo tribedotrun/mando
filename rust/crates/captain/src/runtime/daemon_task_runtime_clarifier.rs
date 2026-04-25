@@ -8,13 +8,17 @@ impl CaptainRuntime {
     #[tracing::instrument(skip_all)]
     pub async fn persist_resume_clarifier(&self, item: &mut crate::Task) -> anyhow::Result<()> {
         crate::service::lifecycle::apply_transition(item, crate::ItemStatus::Clarifying)?;
-        // PR #886 (codex review): refresh the clarifier heartbeat at the
-        // same moment we enter Clarifying. Otherwise `tick_clarify_poll`
-        // can see a stale `last_activity_at` (last bumped when the task
-        // entered NeedsClarification) and time the task out while the
-        // inline `answer_and_reclarify` call is still executing, racing
-        // the HTTP path's result apply.
+        // Refresh the clarifier heartbeat at the moment we enter Clarifying so
+        // timeout detection starts counting from the inline call's actual start.
         item.last_activity_at = Some(global_types::now_rfc3339());
+        // NOTE: we intentionally preserve `session_ids.clarifier` across the
+        // NC→Clarifying transition. The previous code nulled it here so
+        // `tick_clarify_poll` couldn't re-apply the prior session's already-
+        // consumed stream on top of the fresh inline call (PR #887). That
+        // defense is now provided by per-session `result_applied_at`
+        // idempotency in `cc_sessions`: the poll skips any session whose
+        // result has already been applied. And with the `dispatch_reclarify`
+        // safety net removed, nothing else fires on "Clarifying + no session".
         crate::io::queries::tasks::persist_resume_clarifier(&self.pool, item).await
     }
 
@@ -60,7 +64,7 @@ impl CaptainRuntime {
         api_error_status: Option<u16>,
         message: &str,
     ) -> anyhow::Result<()> {
-        crate::service::lifecycle::apply_transition(item, crate::ItemStatus::NeedsClarification)?;
+        crate::service::lifecycle::apply_clarifier_failure(item)?;
         let event = crate::TimelineEvent {
             timestamp: global_types::now_rfc3339(),
             actor: "http".to_string(),

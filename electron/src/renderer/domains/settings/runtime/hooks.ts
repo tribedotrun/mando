@@ -20,7 +20,7 @@ export {
   type CredentialInfo,
   type CredentialWindowInfo,
   type CredentialRateLimitStatus,
-} from '#renderer/domains/settings/repo/credentials';
+} from '#renderer/domains/settings/runtime/useFeedbackCredentials';
 
 /**
  * Returns a stable callback that reads the latest config from the React Query cache.

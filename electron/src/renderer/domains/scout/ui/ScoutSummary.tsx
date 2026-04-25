@@ -4,7 +4,7 @@ import {
   Collapsible,
   CollapsibleTrigger,
   CollapsibleContent,
-} from '#renderer/global/ui/collapsible';
+} from '#renderer/global/ui/primitives/collapsible';
 
 interface Props {
   summary: string;

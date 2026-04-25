@@ -1,7 +1,10 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::{MandoConfig, ScoutItem, TaskItem, TerminalSessionInfo, WorkbenchItem, WorkerDetail};
+use crate::{
+    CredentialRateLimitStatus, MandoConfig, ScoutItem, TaskItem, TerminalSessionInfo,
+    WorkbenchItem, WorkerDetail,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, TS)]
 pub enum NotifyLevel {
@@ -62,11 +65,11 @@ pub enum NotificationKind {
         questions: Option<String>,
     },
     RateLimited {
-        status: String,
+        status: CredentialRateLimitStatus,
         utilization: Option<f64>,
         resets_at: Option<u64>,
         rate_limit_type: Option<String>,
-        overage_status: Option<String>,
+        overage_status: Option<CredentialRateLimitStatus>,
         overage_resets_at: Option<u64>,
         overage_disabled_reason: Option<String>,
     },
@@ -324,19 +327,19 @@ pub struct ArtifactsPayload {
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "snake_case", tag = "event", content = "data")]
 pub enum SseEnvelope {
-    Snapshot(SnapshotPayload),
-    SnapshotError(SnapshotErrorPayload),
-    Resync(ResyncPayload),
-    Tasks(TasksPayload),
-    Scout(ScoutPayload),
-    Status(StatusPayload),
-    Sessions(SessionsPayload),
-    Notification(NotificationEventPayload),
-    Workbenches(WorkbenchesPayload),
-    Config(ConfigPayload),
-    Research(ResearchPayload),
-    Credentials(CredentialsPayload),
-    Artifacts(ArtifactsPayload),
+    Snapshot(Box<SnapshotPayload>),
+    SnapshotError(Box<SnapshotErrorPayload>),
+    Resync(Box<ResyncPayload>),
+    Tasks(Box<TasksPayload>),
+    Scout(Box<ScoutPayload>),
+    Status(Box<StatusPayload>),
+    Sessions(Box<SessionsPayload>),
+    Notification(Box<NotificationEventPayload>),
+    Workbenches(Box<WorkbenchesPayload>),
+    Config(Box<ConfigPayload>),
+    Research(Box<ResearchPayload>),
+    Credentials(Box<CredentialsPayload>),
+    Artifacts(Box<ArtifactsPayload>),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]

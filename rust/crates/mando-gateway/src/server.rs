@@ -5,16 +5,13 @@ use tracing::info;
 
 pub use transport_http::build_router;
 
-pub async fn start_server(
-    cfg: settings::config::Config,
-    bus: global_bus::EventBus,
-) -> anyhow::Result<()> {
+pub async fn start_server(cfg: settings::Config, bus: global_bus::EventBus) -> anyhow::Result<()> {
     start_server_with(cfg, bus, std::future::pending::<()>(), false).await
 }
 
 /// Full `start_server` with explicit shutdown signal and unsafe-start gate.
 pub async fn start_server_with<F>(
-    config: settings::config::Config,
+    config: settings::Config,
     bus: global_bus::EventBus,
     shutdown: F,
     unsafe_start: bool,

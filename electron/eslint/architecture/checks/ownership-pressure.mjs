@@ -9,13 +9,23 @@ const SRC = path.resolve(__dirname, '../../../src');
 const RULES = [
   {
     match: (rel) => rel.startsWith('main/') && rel.includes('/runtime/'),
-    maxLines: 350,
+    maxLines: 200,
     label: 'main runtime owner',
   },
   {
     match: (rel) => rel.startsWith('renderer/global/providers/'),
-    maxLines: 400,
+    maxLines: 300,
     label: 'renderer global provider',
+  },
+  {
+    match: (rel) => rel.startsWith('renderer/global/runtime/'),
+    maxLines: 200,
+    label: 'renderer global runtime',
+  },
+  {
+    match: (rel) => rel.startsWith('renderer/global/repo/'),
+    maxLines: 200,
+    label: 'renderer global repo',
   },
   {
     match: (rel) => rel.startsWith('renderer/global/service/'),

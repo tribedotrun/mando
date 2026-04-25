@@ -16,19 +16,35 @@ fn parse_item_id(item_id: &str) -> Result<i64> {
 }
 
 /// Look up a task by ID via the gateway HTTP API.
-async fn find_task(gw: &GatewayClient, id: &str) -> Option<captain::Task> {
-    let id_num: i64 = id.parse().ok()?;
+///
+/// Fail-fast: `Err` on infrastructure failure (invalid id, gateway
+/// error, wire-type conversion failure). `Ok(None)` means the task
+/// genuinely doesn't exist. Collapsing the two under `Option<_>`
+/// previously made live tasks appear deleted whenever serde drift or a
+/// transient gateway hiccup happened.
+async fn find_task(gw: &GatewayClient, id: &str) -> anyhow::Result<Option<captain::Task>> {
+    let id_num: i64 = id
+        .parse()
+        .map_err(|e| anyhow::anyhow!("invalid task id {id}: {e}"))?;
     let resp = gw
         .get_typed::<api_types::TaskListResponse>(paths::TASKS)
         .await
-        .ok()?;
-    resp.items.into_iter().find_map(|item| {
-        if item.id == id_num {
-            serde_json::from_value(serde_json::to_value(item).ok()?).ok()
-        } else {
-            None
+        .map_err(|e| anyhow::anyhow!("gateway failed to fetch task list: {e}"))?;
+    for item in resp.items {
+        if item.id != id_num {
+            continue;
         }
-    })
+        let value = serde_json::to_value(&item).map_err(|e| {
+            anyhow::anyhow!("failed to serialize TaskItem {id_num} for TG callback: {e}")
+        })?;
+        let task = serde_json::from_value(value).map_err(|e| {
+            anyhow::anyhow!(
+                "failed to convert TaskItem {id_num} to Task (api-types schema drift): {e}"
+            )
+        })?;
+        return Ok(Some(task));
+    }
+    Ok(None)
 }
 
 // ── Merge ────────────────────────────────────────────────────────────
@@ -48,7 +64,7 @@ pub(crate) async fn merge(
 
     // Validate preconditions before sending loading message.
     let item = find_task(gw, item_id)
-        .await
+        .await?
         .ok_or_else(|| anyhow::anyhow!("item #{item_id} not found"))?;
     let pr_num = item
         .pr_number
@@ -229,6 +245,34 @@ pub(crate) async fn handoff(
         Err(e) => {
             error!("handoff: failed for #{item_id}: {e}");
             bot.send_html(cid, &format!("\u{274c} Handoff failed for {esc}: {e}"))
+                .await?;
+        }
+    }
+    Ok(())
+}
+
+// ── Stop (single task) ───────────────────────────────────────────────
+
+/// Stop a single in-progress task. Kills the worker, transitions status to
+/// `stopped`, preserves the worktree for reopen.
+pub(crate) async fn stop(bot: &TelegramBot, cid: &str, item_id: &str) -> Result<()> {
+    let id_num = parse_item_id(item_id)?;
+    match bot
+        .gw()
+        .post_typed::<api_types::TaskIdRequest, api_types::BoolOkResponse>(
+            paths::TASKS_STOP,
+            &api_types::TaskIdRequest { id: id_num },
+        )
+        .await
+    {
+        Ok(_) => {
+            info!("stop: item #{item_id} stopped");
+            bot.send_html(cid, &format!("\u{1f6d1} Stopped task #{item_id}"))
+                .await?;
+        }
+        Err(e) => {
+            error!("stop: failed for #{item_id}: {e}");
+            bot.send_html(cid, &format!("\u{274c} Stop failed for #{item_id}: {e}"))
                 .await?;
         }
     }

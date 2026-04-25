@@ -150,6 +150,16 @@ pub(crate) async fn field_id(field: Field<'_>) -> Result<i64, ApiError> {
         .map_err(|_| error_response(StatusCode::BAD_REQUEST, "invalid id"))
 }
 
+pub(crate) fn unexpected_multipart_field(field_name: Option<&str>) -> ApiError {
+    let field_name = field_name
+        .filter(|name| !name.is_empty())
+        .unwrap_or("(unnamed)");
+    error_response(
+        StatusCode::BAD_REQUEST,
+        &format!("unexpected multipart field: {field_name}"),
+    )
+}
+
 // ── Feedback (reopen/rework) ───────────────────────────────────────────
 
 /// Extract `FeedbackWithImages` from either JSON or multipart.
@@ -171,7 +181,6 @@ async fn extract_feedback_json(
         .map_err(|e| error_response(StatusCode::BAD_REQUEST, &e.to_string()))?;
 
     #[derive(Default, serde::Deserialize)]
-    #[serde(default)]
     struct Body {
         id: i64,
         feedback: String,
@@ -224,11 +233,12 @@ async fn extract_feedback_fields(
         .await
         .map_err(|e| error_response(StatusCode::BAD_REQUEST, &format!("multipart error: {e}")))?
     {
-        match field.name().unwrap_or("") {
+        let field_name = field.name().map(str::to_owned);
+        match field_name.as_deref().unwrap_or("") {
             "id" => *id = Some(field_id(field).await?),
             "feedback" => *feedback = field_text(field).await?,
             "images" => saved.push(save_image_field(field).await?),
-            _ => {}
+            _ => return Err(unexpected_multipart_field(field_name.as_deref())),
         }
     }
     Ok(())
@@ -253,7 +263,6 @@ async fn extract_ask_json(request: axum::extract::Request) -> Result<AskWithImag
         .map_err(|e| error_response(StatusCode::BAD_REQUEST, &e.to_string()))?;
 
     #[derive(Default, serde::Deserialize)]
-    #[serde(default)]
     struct Body {
         id: i64,
         question: String,
@@ -316,7 +325,8 @@ async fn extract_ask_fields(
         .await
         .map_err(|e| error_response(StatusCode::BAD_REQUEST, &format!("multipart error: {e}")))?
     {
-        match field.name().unwrap_or("") {
+        let field_name = field.name().map(str::to_owned);
+        match field_name.as_deref().unwrap_or("") {
             "id" => *id = Some(field_id(field).await?),
             "question" => *question = field_text(field).await?,
             "ask_id" => {
@@ -326,7 +336,7 @@ async fn extract_ask_fields(
                 }
             }
             "images" => saved.push(save_image_field(field).await?),
-            _ => {}
+            _ => return Err(unexpected_multipart_field(field_name.as_deref())),
         }
     }
     Ok(())

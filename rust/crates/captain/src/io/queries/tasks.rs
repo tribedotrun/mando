@@ -17,9 +17,9 @@ use update_exec::update_task_exec;
 
 // Re-export persist helpers so `queries::tasks::persist_*` paths keep working.
 pub use super::tasks_persist::{
-    persist_clarify_result, persist_clarify_start, persist_reclarify_start,
-    persist_resume_clarifier, persist_spawn, persist_status_transition,
-    persist_status_transition_with_command, persist_status_transition_with_command_and_effects,
+    persist_clarify_result, persist_clarify_start, persist_resume_clarifier, persist_spawn,
+    persist_status_transition, persist_status_transition_with_command,
+    persist_status_transition_with_command_and_effects,
 };
 
 type SqliteQuery<'q> = Query<'q, Sqlite, SqliteArguments<'q>>;
@@ -34,7 +34,7 @@ const SELECT_COLS: &str = "\
     t.intervention_count, t.captain_review_trigger, t.session_ids, t.last_activity_at, \
     t.plan, t.no_pr, t.no_auto_merge, t.planning, t.worker_seq, t.reopen_seq, t.reopened_at, t.reopen_source, t.images, \
     t.review_fail_count, t.clarifier_fail_count, t.spawn_fail_count, t.merge_fail_count, \
-    t.escalation_report, t.source, t.rev, p.github_repo";
+    t.escalation_report, t.source, t.rev, t.paused_until, p.github_repo";
 
 fn select_tasks_sql() -> &'static str {
     static SQL: OnceLock<String> = OnceLock::new();
@@ -116,6 +116,7 @@ const WRITE_COLS: &[&str] = &[
     "merge_fail_count",
     "escalation_report",
     "source",
+    "paused_until",
 ];
 
 fn insert_task_sql() -> &'static str {
@@ -187,6 +188,7 @@ pub(crate) fn bind_task_write_fields<'q>(
         .bind(task.merge_fail_count)
         .bind(&task.escalation_report)
         .bind(&task.source)
+        .bind(task.paused_until)
 }
 
 /// Insert a new task (auto-ID).
@@ -275,6 +277,28 @@ pub async fn has_active_with_source(pool: &SqlitePool, source: &str) -> Result<b
     .fetch_one(pool)
     .await?;
     Ok(exists)
+}
+
+/// Pause a task until `until_epoch_secs`. Used when the failover layer
+/// surfaces `AllCredentialsExhausted` — captain skips the task in
+/// dispatch filters until the clock passes this timestamp, at which
+/// point it rejoins the eligible pool with whatever credential is
+/// healthy at that time.
+///
+/// Pairs with a status transition back to `new` / `queued` / `rework`
+/// (whichever was running) at the caller; this function only stamps
+/// the timestamp.
+pub async fn set_paused_until(
+    pool: &SqlitePool,
+    task_id: i64,
+    until_epoch_secs: i64,
+) -> Result<bool> {
+    let result = sqlx::query("UPDATE tasks SET paused_until = ?1, rev = rev + 1 WHERE id = ?2")
+        .bind(until_epoch_secs)
+        .bind(task_id)
+        .execute(pool)
+        .await?;
+    Ok(result.rows_affected() > 0)
 }
 
 /// Count of active workers (excludes planning tasks, consistent with tick.rs).

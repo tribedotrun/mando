@@ -10,6 +10,7 @@ pub enum Effort {
     Low,
     Medium,
     High,
+    XHigh,
     Max,
 }
 
@@ -19,6 +20,7 @@ impl Effort {
             Self::Low => "low",
             Self::Medium => "medium",
             Self::High => "high",
+            Self::XHigh => "xhigh",
             Self::Max => "max",
         }
     }
@@ -84,6 +86,11 @@ pub struct CcConfig {
     pub append_system_prompt: Option<String>,
     pub resume_session_id: Option<String>,
     pub session_id: Option<String>,
+    /// Settings-managed credential row id whose OAuth token is in `env`.
+    /// Set indirectly via [`crate::credentials::with_credential`]. Propagated
+    /// into errors so the failover layer can cool down the exact credential
+    /// that failed without a reverse lookup.
+    pub credential_id: Option<i64>,
     pub cwd: PathBuf,
     pub env: HashMap<String, String>,
     pub settings: Option<String>,
@@ -117,6 +124,7 @@ impl Default for CcConfig {
             append_system_prompt: None,
             resume_session_id: None,
             session_id: None,
+            credential_id: None,
             cwd: PathBuf::new(),
             env: HashMap::new(),
             settings: None,
@@ -185,6 +193,10 @@ impl CcConfigBuilder {
     }
     pub fn session_id(mut self, id: impl Into<String>) -> Self {
         self.0.session_id = Some(id.into());
+        self
+    }
+    pub fn credential_id(mut self, id: i64) -> Self {
+        self.0.credential_id = Some(id);
         self
     }
     pub fn cwd(mut self, p: impl Into<PathBuf>) -> Self {

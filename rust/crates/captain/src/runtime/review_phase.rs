@@ -2,10 +2,12 @@
 
 use crate::{Task, WorkerContext};
 use anyhow::{anyhow, Result};
-use settings::config::settings::Config;
+use settings::Config;
 
-use crate::io::{github, github_pr, health_store, pid_registry};
+use crate::io::{health_store, pid_registry};
 use crate::service::review_marshal;
+use global_github as github;
+use global_github as github_pr;
 
 /// Compute seconds since a worker started from an RFC 3339 timestamp.
 ///
@@ -69,7 +71,7 @@ pub(crate) async fn gather_worker_contexts(
         // Build PR discovery args if needed.
         let discover_pr = if item.pr_number.is_none() {
             item.branch.as_deref().and_then(|branch| {
-                let repo = settings::config::resolve_project_config(Some(&item.project), config)
+                let repo = settings::resolve_project_config(Some(&item.project), config)
                     .and_then(|(_, pc)| pc.github_repo.clone())?;
                 Some((repo, branch.to_string()))
             })
@@ -78,7 +80,7 @@ pub(crate) async fn gather_worker_contexts(
         };
 
         // Resolve the GitHub repo slug from config for short PR ref resolution.
-        let github_repo = settings::config::resolve_github_repo(Some(&item.project), config);
+        let github_repo = settings::resolve_github_repo(Some(&item.project), config);
 
         work.push(GatherWork {
             item_idx: idx,
@@ -390,7 +392,7 @@ fn check_reopen_ack(body: &str, issue_comments: &[String], reopen_seq: i64) -> b
 #[tracing::instrument(skip_all)]
 pub(crate) async fn build_single_context(
     item: &Task,
-    config: &settings::config::Config,
+    config: &settings::Config,
 ) -> Result<(crate::WorkerContext, String)> {
     use crate::service::worker_context;
 
@@ -407,7 +409,7 @@ pub(crate) async fn build_single_context(
     let seconds_active = seconds_since(item.worker_started_at.as_deref())?;
 
     // Resolve github repo slug for PR data fetch.
-    let github_repo = settings::config::resolve_github_repo(Some(&item.project), config);
+    let github_repo = settings::resolve_github_repo(Some(&item.project), config);
     let stub = Task {
         pr_number: item.pr_number,
         github_repo: github_repo.clone(),

@@ -4,8 +4,8 @@ import { RouterProvider } from '@tanstack/react-router';
 import { DataProvider } from '#renderer/app/DataProvider';
 import { router } from '#renderer/app/router';
 import { ErrorBoundary } from '#renderer/global/ui/ErrorBoundary';
-import { Toaster } from '#renderer/global/ui/sonner';
-import { TooltipProvider } from '#renderer/global/ui/tooltip';
+import { Toaster } from '#renderer/global/ui/primitives/sonner';
+import { TooltipProvider } from '#renderer/global/ui/primitives/tooltip';
 import log from '#renderer/global/service/logger';
 import './index.css';
 

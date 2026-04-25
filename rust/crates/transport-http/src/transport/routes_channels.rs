@@ -31,7 +31,7 @@ pub(crate) async fn get_channels(
             name: "telegram".to_string(),
             enabled: tg_status.enabled,
             running: tg_status.running,
-            mode: tg_status.mode.to_string(),
+            mode: tg_status.mode,
             token: mask_token(&tg.token),
             owner: tg.owner.clone(),
             last_error: tg_status.last_error,

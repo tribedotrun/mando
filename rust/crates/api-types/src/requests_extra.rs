@@ -46,12 +46,38 @@ pub struct ClarifyRequest {
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(deny_unknown_fields)]
 pub struct ScoutQuery {
-    pub status: Option<String>,
+    pub status: Option<ScoutItemStatusFilter>,
     pub q: Option<String>,
     #[serde(rename = "type")]
     pub item_type: Option<String>,
     pub page: Option<usize>,
     pub per_page: Option<usize>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum ScoutItemStatusFilter {
+    All,
+    Pending,
+    Fetched,
+    Processed,
+    Saved,
+    Archived,
+    Error,
+}
+
+impl ScoutItemStatusFilter {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::All => "all",
+            Self::Pending => "pending",
+            Self::Fetched => "fetched",
+            Self::Processed => "processed",
+            Self::Saved => "saved",
+            Self::Archived => "archived",
+            Self::Error => "error",
+        }
+    }
 }
 
 /// POST /api/scout/ask
@@ -168,11 +194,29 @@ pub struct AdoptRequest {
     pub project: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkbenchStatusFilter {
+    Active,
+    Archived,
+    All,
+}
+
+impl WorkbenchStatusFilter {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Active => "active",
+            Self::Archived => "archived",
+            Self::All => "all",
+        }
+    }
+}
+
 /// GET /api/workbenches query params
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(deny_unknown_fields)]
 pub struct WorkbenchListQuery {
-    pub status: Option<String>,
+    pub status: Option<WorkbenchStatusFilter>,
 }
 
 /// PATCH /api/workbenches/{id}

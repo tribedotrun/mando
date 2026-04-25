@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// Stored as JSON at `~/.mando/workbenches/<id>.json`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
+#[serde(rename_all = "camelCase")]
 pub struct WorkbenchLayout {
     pub version: u32,
     #[serde(skip_serializing_if = "Option::is_none")]

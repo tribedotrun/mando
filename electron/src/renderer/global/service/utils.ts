@@ -1,4 +1,4 @@
-import { type TaskItem } from '#renderer/global/types';
+import { type ClarifyOutcome, type ItemStatus, type TaskItem } from '#renderer/global/types';
 
 export type { SidebarChild } from '#renderer/global/service/projectChildren';
 export {
@@ -29,19 +29,29 @@ export function canMerge(task: TaskItem): boolean {
 
 /** Whether a task can be reopened (terminal or review states). */
 export function canReopen(task: TaskItem): boolean {
-  return ['awaiting-review', 'escalated', 'errored', 'handed-off', 'completed-no-pr'].includes(
-    task.status,
-  );
+  return [
+    'awaiting-review',
+    'escalated',
+    'errored',
+    'handed-off',
+    'completed-no-pr',
+    'stopped',
+  ].includes(task.status);
 }
 
 /** Whether a task can be reworked (fresh worktree + new worker). */
 export function canRework(task: TaskItem): boolean {
-  return ['awaiting-review', 'handed-off', 'escalated', 'errored'].includes(task.status);
+  return ['awaiting-review', 'handed-off', 'escalated', 'errored', 'stopped'].includes(task.status);
 }
 
 /** Whether a task can be handed off to a human. */
 export function canHandoff(task: TaskItem): boolean {
   return ['awaiting-review', 'escalated'].includes(task.status);
+}
+
+/** Whether a task's worker can be stopped (user-initiated halt of in-progress work). */
+export function canStop(task: TaskItem): boolean {
+  return task.status === 'in-progress';
 }
 
 /** Whether a task can be retried after error. */
@@ -77,7 +87,7 @@ export function canAskAny(task: TaskItem): boolean {
 }
 
 /** Derive PR icon state from task status. */
-export function prState(status: string): 'open' | 'merged' | 'closed' {
+export function prState(status: ItemStatus): 'open' | 'merged' | 'closed' {
   if (status === 'merged') return 'merged';
   if (status === 'canceled') return 'closed';
   return 'open';
@@ -153,6 +163,11 @@ export function shortenPath(path: string): string {
   return match ? '~' + path.slice(match[0].length) : path;
 }
 
+/** Current wall-clock time in whole unix seconds. */
+export function nowEpochSeconds(): number {
+  return Math.floor(Date.now() / 1000);
+}
+
 /** Human-readable duration from seconds (e.g. "3m 12s"). */
 export function fmtDuration(sec: number): string {
   if (sec < 60) return `${Math.round(sec)}s`;
@@ -162,7 +177,7 @@ export function fmtDuration(sec: number): string {
 }
 
 /** Map a clarification API result status to a toast variant + message. */
-export function clarifyResultToToast(status: string | undefined): {
+export function clarifyResultToToast(status: ClarifyOutcome | undefined): {
   variant: 'success' | 'info';
   msg: string;
 } {
@@ -227,13 +242,13 @@ export function ceilMinutes(secs: number): number {
   return Math.ceil(secs / 60);
 }
 
-const RATE_LIMITED_STATUSES = Object.freeze([
+const RATE_LIMITED_STATUSES: readonly ItemStatus[] = Object.freeze([
   'captain-reviewing',
   'captain-merging',
   'clarifying',
-] as const);
+]);
 
 /** True when global rate-limit cooldown is active and this task is in a blocked status. */
-export function isRateLimited(item: { status: string }, rateLimitSecs: number): boolean {
-  return rateLimitSecs > 0 && (RATE_LIMITED_STATUSES as readonly string[]).includes(item.status);
+export function isRateLimited(item: { status: ItemStatus }, rateLimitSecs: number): boolean {
+  return rateLimitSecs > 0 && RATE_LIMITED_STATUSES.includes(item.status);
 }

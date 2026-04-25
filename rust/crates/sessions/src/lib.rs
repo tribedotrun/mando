@@ -7,7 +7,8 @@ mod types;
 pub use io::queries;
 pub use runtime::transcript_access;
 pub use runtime::{
-    RecoverStats, SessionFollowUpRequest, SessionListPage, SessionListQuery, SessionListRequest,
-    SessionStartRequest, SessionsRuntime, SessionsRuntimeOps,
+    RecoverStats, SessionAiResult, SessionFollowUpRequest, SessionListPage, SessionListQuery,
+    SessionListRequest, SessionStartRequest, SessionStructuredOutput, SessionsRuntime,
+    SessionsRuntimeOps,
 };
 pub use types::*;

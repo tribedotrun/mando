@@ -8,8 +8,8 @@ import {
   DialogTitle,
   DialogDescription,
   DialogFooter,
-} from '#renderer/global/ui/dialog';
-import { Button } from '#renderer/global/ui/button';
+} from '#renderer/global/ui/primitives/dialog';
+import { Button } from '#renderer/global/ui/primitives/button';
 
 interface Props {
   item: TaskItem;
@@ -52,6 +52,7 @@ export function MergeModal({ item, onConfirm, onCancel }: Props): React.ReactEle
             Cancel
           </Button>
           <Button
+            data-testid="merge-confirm"
             disabled={confirmed}
             onClick={() => {
               setConfirmed(true);

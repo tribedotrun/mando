@@ -4,8 +4,6 @@ use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::Json;
 use scout::find_scout_error;
-use serde::de::DeserializeOwned;
-use serde_json::Value;
 
 use crate::response::{
     error_response, internal_error, map_task_create_error, ApiCreated, ApiError,
@@ -20,6 +18,18 @@ fn scout_item_command(command: api_types::ScoutItemLifecycleCommand) -> scout::S
         }
         api_types::ScoutItemLifecycleCommand::Save => scout::ScoutItemCommand::Save,
         api_types::ScoutItemLifecycleCommand::Archive => scout::ScoutItemCommand::Archive,
+    }
+}
+
+fn scout_session_status(status: &str) -> Result<api_types::SessionStatus, ApiError> {
+    match status {
+        "running" => Ok(api_types::SessionStatus::Running),
+        "stopped" => Ok(api_types::SessionStatus::Stopped),
+        "failed" => Ok(api_types::SessionStatus::Failed),
+        other => Err(internal_error(
+            anyhow::anyhow!("unknown scout session status: {other}"),
+            "failed to parse scout session status",
+        )),
     }
 }
 
@@ -47,36 +57,24 @@ fn map_scout_error(
 // GET endpoints
 // ---------------------------------------------------------------
 
-fn decode_response<T: DeserializeOwned>(
-    value: Value,
-    context: &'static str,
-) -> Result<T, ApiError> {
-    serde_json::from_value(value).map_err(|err| internal_error(err, context))
-}
-
 /// GET /api/scout/items?status=pending
 #[crate::instrument_api(method = "GET", path = "/api/scout/items")]
 pub(crate) async fn get_scout_items(
     State(state): State<AppState>,
     Query(params): Query<api_types::ScoutQuery>,
 ) -> Result<Json<api_types::ScoutResponse>, ApiError> {
-    match state
+    state
         .scout
         .list_items(
-            params.status.as_deref(),
+            params.status.map(api_types::ScoutItemStatusFilter::as_str),
             params.q.as_deref(),
             params.item_type.as_deref(),
             params.page,
             params.per_page,
         )
         .await
-    {
-        Ok(val) => Ok(Json(decode_response(
-            val,
-            "failed to decode scout list response",
-        )?)),
-        Err(e) => Err(internal_error(e, "failed to list scout items")),
-    }
+        .map(Json)
+        .map_err(|e| internal_error(e, "failed to list scout items"))
 }
 
 /// GET /api/scout/items/{id}
@@ -85,12 +83,12 @@ pub(crate) async fn get_scout_item(
     State(state): State<AppState>,
     Path(api_types::ScoutItemIdParams { id }): Path<api_types::ScoutItemIdParams>,
 ) -> Result<Json<api_types::ScoutItem>, ApiError> {
-    let value = state
+    let item = state
         .scout
-        .get_item_value(id)
+        .get_item(id)
         .await
         .map_err(|e| map_scout_error(e, |e| internal_error(e, "failed to load scout item")))?;
-    Ok(Json(decode_response(value, "failed to decode scout item")?))
+    Ok(Json(item))
 }
 
 /// GET /api/scout/items/{id}/article
@@ -99,14 +97,11 @@ pub(crate) async fn get_scout_article(
     State(state): State<AppState>,
     Path(api_types::ScoutItemIdParams { id }): Path<api_types::ScoutItemIdParams>,
 ) -> Result<Json<api_types::ScoutArticleResponse>, ApiError> {
-    let value =
-        state.scout.get_article_value(id).await.map_err(|e| {
+    let article =
+        state.scout.get_article(id).await.map_err(|e| {
             map_scout_error(e, |e| internal_error(e, "failed to load scout article"))
         })?;
-    Ok(Json(decode_response(
-        value,
-        "failed to decode scout article",
-    )?))
+    Ok(Json(article))
 }
 
 /// POST /api/scout/items
@@ -123,32 +118,20 @@ pub(crate) async fn post_scout_items(
     }
     match state.scout.add_item(&body.url, body.title.as_deref()).await {
         Ok(val) => {
-            let scout_payload = if let Some(id) = val["id"].as_i64() {
-                state.scout.get_item_value(id).await.ok()
-            } else {
-                None
-            };
-            let scout_id = val["id"].as_i64();
-            let scout_item: Option<api_types::ScoutItem> =
-                scout_payload.and_then(|v| serde_json::from_value(v).ok());
+            let scout_item = state.scout.get_item(val.id).await.ok();
             state.bus.send(global_bus::BusPayload::Scout(Some(
                 api_types::ScoutEventData {
                     action: Some("created".into()),
                     item: scout_item,
-                    id: scout_id,
+                    id: Some(val.id),
                 },
             )));
 
-            if val["added"].as_bool() == Some(true) {
-                if let Some(id) = val["id"].as_i64() {
-                    state.scout.spawn_processing(id, body.url.clone());
-                }
+            if val.added {
+                state.scout.spawn_processing(val.id, body.url.clone());
             }
 
-            Ok(ApiCreated(decode_response(
-                val,
-                "failed to decode scout create response",
-            )?))
+            Ok(ApiCreated(val))
         }
         Err(e) => Err(internal_error(e, "failed to add scout item")),
     }
@@ -160,22 +143,20 @@ pub(crate) async fn post_scout_process(
     State(state): State<AppState>,
     Json(body): Json<api_types::ScoutProcessRequest>,
 ) -> Result<Json<api_types::ProcessResponse>, ApiError> {
-    let val = state
+    let response = state
         .scout
         .process_item(body.id)
         .await
         .map_err(|e| internal_error(e, "failed to process scout item"))?;
 
     if let Some(id) = body.id {
-        let scout_payload = match state.scout.get_item_value(id).await {
+        let scout_item = match state.scout.get_item(id).await {
             Ok(v) => Some(v),
             Err(e) => {
                 tracing::warn!(module = "transport-http-transport-routes_scout", scout_id = id, error = %e, "failed to fetch scout item for SSE event");
                 None
             }
         };
-        let scout_item: Option<api_types::ScoutItem> =
-            scout_payload.and_then(|v| serde_json::from_value(v).ok());
         state.bus.send(global_bus::BusPayload::Scout(Some(
             api_types::ScoutEventData {
                 action: Some("updated".into()),
@@ -194,10 +175,7 @@ pub(crate) async fn post_scout_process(
         )));
     }
 
-    Ok(Json(decode_response(
-        val,
-        "failed to decode scout process response",
-    )?))
+    Ok(Json(response))
 }
 
 /// POST /api/scout/items/{id}/act — generate a task from a scout item.
@@ -213,28 +191,32 @@ pub(crate) async fn post_scout_act(
         .await
         .map_err(|e| map_scout_error(e, |e| internal_error(e, "scout action failed")))?;
 
-    if ai_result["skipped"].as_bool() == Some(true) {
-        return Ok(Json(api_types::ActResponse {
-            ok: Some(true),
-            task_id: None,
-            title: None,
-            skipped: Some(true),
-            reason: ai_result["reason"].as_str().map(str::to_owned),
-        }));
-    }
-
-    let task_title = ai_result["task_title"].as_str().ok_or_else(|| {
-        error_response(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "AI response missing task_title",
-        )
-    })?;
-    let task_description = ai_result["task_description"].as_str();
-    let project_name = ai_result["project"].as_str();
+    let (task_title, task_description, project_name) = match ai_result {
+        scout::ScoutActDraft::Skip { reason } => {
+            return Ok(Json(api_types::ActResponse {
+                ok: Some(true),
+                task_id: None,
+                title: None,
+                skipped: Some(true),
+                reason: Some(reason),
+            }));
+        }
+        scout::ScoutActDraft::Create {
+            task_title,
+            task_description,
+            project,
+            scout_item_id: _,
+        } => (task_title, task_description, project),
+    };
 
     let created = state
         .captain
-        .add_task_with_context(task_title, project_name, task_description, Some("scout"))
+        .add_task_with_context(
+            &task_title,
+            Some(project_name.as_str()),
+            Some(task_description.as_str()),
+            Some("scout"),
+        )
         .await
         .map_err(map_task_create_error)?;
 
@@ -284,15 +266,13 @@ pub(crate) async fn patch_scout_item(
                 internal_error(e, "failed to apply scout lifecycle command")
             })
         })?;
-    let scout_payload = match state.scout.get_item_value(id).await {
+    let scout_item = match state.scout.get_item(id).await {
         Ok(v) => Some(v),
         Err(e) => {
             tracing::warn!(module = "transport-http-transport-routes_scout", scout_id = id, error = %e, "failed to fetch scout item for SSE event");
             None
         }
     };
-    let scout_item: Option<api_types::ScoutItem> =
-        scout_payload.and_then(|v| serde_json::from_value(v).ok());
     state.bus.send(global_bus::BusPayload::Scout(Some(
         api_types::ScoutEventData {
             action: Some("updated".into()),
@@ -313,7 +293,7 @@ pub(crate) async fn delete_scout_item(
     State(state): State<AppState>,
     Path(api_types::ScoutItemIdParams { id }): Path<api_types::ScoutItemIdParams>,
 ) -> Result<Json<api_types::ScoutDeleteResponse>, ApiError> {
-    let val =
+    let response =
         state.scout.delete_item(id).await.map_err(|e| {
             map_scout_error(e, |e| internal_error(e, "failed to delete scout item"))
         })?;
@@ -324,10 +304,7 @@ pub(crate) async fn delete_scout_item(
             id: Some(id),
         },
     )));
-    Ok(Json(decode_response(
-        val,
-        "failed to decode scout delete response",
-    )?))
+    Ok(Json(response))
 }
 
 /// GET /api/scout/items/{id}/sessions — list CC sessions for a scout item.
@@ -344,15 +321,18 @@ pub(crate) async fn get_scout_item_sessions(
     Ok(Json(
         sessions
             .into_iter()
-            .map(|session| api_types::ScoutItemSession {
-                session_id: session.session_id,
-                caller: session.caller,
-                status: session.status,
-                created_at: session.created_at,
-                model: (!session.model.is_empty()).then_some(session.model),
-                duration_ms: session.duration_ms,
-                cost_usd: session.cost_usd,
+            .map(|session| {
+                let status = scout_session_status(&session.status)?;
+                Ok(api_types::ScoutItemSession {
+                    session_id: session.session_id,
+                    caller: session.caller,
+                    status,
+                    created_at: session.created_at,
+                    model: (!session.model.is_empty()).then_some(session.model),
+                    duration_ms: session.duration_ms,
+                    cost_usd: session.cost_usd,
+                })
             })
-            .collect(),
+            .collect::<Result<Vec<_>, ApiError>>()?,
     ))
 }

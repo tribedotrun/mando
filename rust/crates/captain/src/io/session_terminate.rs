@@ -44,9 +44,23 @@ pub async fn terminate_session(
     }
 
     // 3. Read cost/duration from stream file before updating DB.
+    //
+    // Two tiers of cost recovery:
+    //   a. `get_stream_cost` reads the `type:result` envelope — authoritative
+    //      when CC exits cleanly. Absent on watchdog abort / process kill /
+    //      any `stop_reason != end_turn`.
+    //   b. When (a) is missing OR reports zero, fall back to aggregating
+    //      per-message `usage` fields via `session_cost_or_estimate` and
+    //      estimate cost from the per-model pricing table. Without this
+    //      fallback, a worker that wedged on stream-idle-timeout records
+    //      `cost_usd = NULL` despite real token spend (root cause of the
+    //      task-#81 worker-81-1 `$0.00` mystery). Duration and num_turns
+    //      stay `None` here — we don't reconstruct those without the result
+    //      envelope, and a stale/missing duration is less harmful than a
+    //      silently-zero cost.
     let stream_path = global_infra::paths::stream_path_for_session(session_id);
     let cost_info = global_claude::get_stream_cost(&stream_path);
-    let (cost_usd, duration_ms, num_turns, denials, model_usage) = match &cost_info {
+    let (mut cost_usd, duration_ms, num_turns, denials, model_usage) = match &cost_info {
         Some(info) => (
             info.cost_usd,
             info.duration_ms.map(|d| d as i64),
@@ -56,6 +70,20 @@ pub async fn terminate_session(
         ),
         None => (None, None, None, None, None),
     };
+    if cost_usd.unwrap_or(0.0) <= 0.0 {
+        let estimate = global_claude::session_cost_or_estimate(&stream_path).total_cost_usd;
+        if let Some(est) = estimate {
+            if est > 0.0 {
+                tracing::info!(
+                    module = "session_terminate",
+                    session_id,
+                    estimated_cost_usd = est,
+                    "no authoritative cost in stream; recorded per-model usage estimate"
+                );
+                cost_usd = Some(est);
+            }
+        }
+    }
 
     // 4. Update cc_sessions status + cost. DB failure must not block local
     //    cleanup -- a stale DB row is recoverable via reconciliation, but a

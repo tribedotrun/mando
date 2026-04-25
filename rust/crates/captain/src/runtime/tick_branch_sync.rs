@@ -19,9 +19,22 @@ pub(crate) async fn sync_branches(items: &mut [Task]) {
         };
         let wt_path = global_infra::paths::expand_tilde(worktree);
         if !wt_path.exists() {
+            // Captain invariant #4: worktree is permanent. The spawner's
+            // Recreate arm recovers from this, but we must (a) surface
+            // the disk drift with a loud warn and (b) clear the stale
+            // `item.branch` so the resume/rework branch decision never
+            // operates on a branch name that matches a deleted worktree.
+            tracing::warn!(
+                module = "captain",
+                task_id = item.id,
+                path = %wt_path.display(),
+                stored_branch = ?item.branch,
+                "task worktree missing on disk during branch sync — clearing stale branch so next spawn enters Recreate cleanly"
+            );
+            item.branch = None;
             continue;
         }
-        if let Ok(live) = crate::io::git::current_branch(&wt_path).await {
+        if let Ok(live) = global_git::current_branch(&wt_path).await {
             if live == "HEAD" {
                 continue; // detached HEAD
             }

@@ -36,7 +36,7 @@ async fn test_state_with_data_dir(data_dir: PathBuf) -> AppState {
 }
 
 async fn test_state_parts_with_data_dir(data_dir: PathBuf) -> TestStateParts {
-    let config = settings::config::Config::default();
+    let config = settings::Config::default();
     let runtime_paths = captain::resolve_captain_runtime_paths(&config);
     captain::set_active_captain_runtime_paths(runtime_paths.clone());
     let bus = Arc::new(global_bus::EventBus::new());
@@ -51,8 +51,8 @@ async fn test_state_parts_with_data_dir(data_dir: PathBuf) -> TestStateParts {
     let task_store = Arc::new(RwLock::new(captain::TaskStore::new(db.pool().clone())));
     let settings = Arc::new(settings::SettingsRuntime::new_with_loaded(
         config,
-        settings::config::CaptainWorkflow::compiled_default(),
-        settings::config::ScoutWorkflow::compiled_default(),
+        settings::CaptainWorkflow::compiled_default(),
+        settings::ScoutWorkflow::compiled_default(),
         db.pool().clone(),
         settings::WorkflowRuntimeMode::Normal,
     ));
@@ -63,7 +63,7 @@ async fn test_state_parts_with_data_dir(data_dir: PathBuf) -> TestStateParts {
     ));
     let telegram_runtime = Arc::new(transport_tg::TelegramRuntime::new(0, "test-token".into()));
     let qa_session_mgr =
-        scout::session_manager_from_workflow(&settings::config::ScoutWorkflow::compiled_default());
+        scout::session_manager_from_workflow(&settings::ScoutWorkflow::compiled_default());
     let terminal_host = Arc::new(terminal::TerminalHost::new(data_dir));
     let captain_runtime = Arc::new(captain::CaptainRuntime::new(captain::CaptainRuntimeDeps {
         settings: settings.clone(),

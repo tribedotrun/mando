@@ -27,7 +27,7 @@ pub fn workbench_title_now() -> String {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
+#[serde(rename_all = "camelCase")]
 pub struct Workbench {
     pub id: i64,
     /// DB column: `project_id INTEGER NOT NULL REFERENCES projects(id)`.

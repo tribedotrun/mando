@@ -38,7 +38,7 @@ use std::sync::{Arc, Mutex};
 use tokio::sync::RwLock;
 
 use anyhow::Result;
-use settings::config::settings::Config;
+use settings::Config;
 
 pub use api::{BotCommand, TelegramApi};
 pub use bot::TelegramBot;

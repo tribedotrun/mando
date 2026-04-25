@@ -79,15 +79,29 @@ pub(crate) async fn touch_affected_workbenches(
                     if let Ok(Some(wb)) =
                         crate::io::queries::workbenches::find_by_id(&pool, *wb_id).await
                     {
-                        let item: Option<api_types::WorkbenchItem> =
-                            serde_json::from_value(serde_json::to_value(&wb).unwrap_or_default())
-                                .ok();
-                        bus.send(global_bus::BusPayload::Workbenches(Some(
-                            api_types::WorkbenchEventData {
-                                action: Some("updated".into()),
-                                item,
-                            },
-                        )));
+                        match crate::runtime::daemon::workbench_runtime::to_wire_workbench_item(&wb)
+                        {
+                            Ok(item) => {
+                                bus.send(global_bus::BusPayload::Workbenches(Some(
+                                    api_types::WorkbenchEventData {
+                                        action: Some("updated".into()),
+                                        item: Some(item),
+                                    },
+                                )));
+                            }
+                            Err(e) => {
+                                // Fire-and-forget tick post phase. Skip the
+                                // bus broadcast instead of emitting an
+                                // `item: None` event — schema drift has
+                                // to be surfaced, not papered over.
+                                tracing::error!(
+                                    module = "captain-runtime-tick_post",
+                                    workbench_id = wb.id,
+                                    error = %e,
+                                    "skipping workbench bus broadcast — api-types schema drift"
+                                );
+                            }
+                        }
                     }
                 }
             }
@@ -136,7 +150,7 @@ pub(crate) fn merge_health_state(
 pub(crate) async fn run_post_cleanup(
     dry_run: bool,
     store_lock: &std::sync::Arc<tokio::sync::RwLock<crate::io::task_store::TaskStore>>,
-    workflow: &settings::config::workflow::CaptainWorkflow,
+    workflow: &settings::CaptainWorkflow,
     alerts: &mut Vec<String>,
 ) {
     if dry_run {

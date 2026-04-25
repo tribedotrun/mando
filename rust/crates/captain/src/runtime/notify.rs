@@ -303,9 +303,9 @@ impl Notifier {
     /// - `Rejected` always fires immediately.
     /// - `Allowed` clears all tiers (recovery).
     #[tracing::instrument(skip_all)]
-    pub async fn check_rate_limit(
+    pub async fn check_rate_limit<T>(
         &self,
-        result: &global_claude::CcResult<serde_json::Value>,
+        result: &global_claude::CcResult<T>,
         pool: &sqlx::SqlitePool,
         credential_id: Option<i64>,
     ) {
@@ -382,8 +382,13 @@ impl Notifier {
                         .unwrap_or_else(|| "unknown".into()),
                     account_suffix
                 );
-                self.emit_rate_limit(&msg, NotifyLevel::High, "rejected", rl)
-                    .await;
+                self.emit_rate_limit(
+                    &msg,
+                    NotifyLevel::High,
+                    api_types::CredentialRateLimitStatus::Rejected,
+                    rl,
+                )
+                .await;
             }
             global_claude::RateLimitStatus::AllowedWarning => {
                 let pct = match rl.utilization {
@@ -393,8 +398,13 @@ impl Notifier {
                         // telling us we're approaching the limit).
                         let msg =
                             format!("Rate limit warning — utilization unknown{account_suffix}");
-                        self.emit_rate_limit(&msg, NotifyLevel::Normal, "allowed_warning", rl)
-                            .await;
+                        self.emit_rate_limit(
+                            &msg,
+                            NotifyLevel::Normal,
+                            api_types::CredentialRateLimitStatus::AllowedWarning,
+                            rl,
+                        )
+                        .await;
                         return;
                     }
                 };
@@ -419,8 +429,13 @@ impl Notifier {
                 }
 
                 let msg = format!("Rate limit warning — {}% utilization{account_suffix}", pct);
-                self.emit_rate_limit(&msg, NotifyLevel::Normal, "allowed_warning", rl)
-                    .await;
+                self.emit_rate_limit(
+                    &msg,
+                    NotifyLevel::Normal,
+                    api_types::CredentialRateLimitStatus::AllowedWarning,
+                    rl,
+                )
+                .await;
             }
             _ => {}
         }
@@ -431,24 +446,41 @@ impl Notifier {
         &self,
         message: &str,
         level: NotifyLevel,
-        status_str: &str,
+        status: api_types::CredentialRateLimitStatus,
         rl: &global_claude::RateLimitEvent,
     ) {
         self.notify_typed(
             message,
             level,
             NotificationKind::RateLimited {
-                status: status_str.to_string(),
+                status,
                 utilization: rl.utilization,
                 resets_at: rl.resets_at,
                 rate_limit_type: rl.rate_limit_type.clone(),
-                overage_status: rl.overage_status.as_ref().map(|s| s.as_str().to_string()),
+                overage_status: api_rate_limit_status(rl.overage_status.as_ref()),
                 overage_resets_at: rl.overage_resets_at,
                 overage_disabled_reason: rl.overage_disabled_reason.clone(),
             },
             Some("rate-limit"),
         )
         .await;
+    }
+}
+
+fn api_rate_limit_status(
+    status: Option<&global_claude::RateLimitStatus>,
+) -> Option<api_types::CredentialRateLimitStatus> {
+    match status {
+        Some(global_claude::RateLimitStatus::Allowed) => {
+            Some(api_types::CredentialRateLimitStatus::Allowed)
+        }
+        Some(global_claude::RateLimitStatus::AllowedWarning) => {
+            Some(api_types::CredentialRateLimitStatus::AllowedWarning)
+        }
+        Some(global_claude::RateLimitStatus::Rejected) => {
+            Some(api_types::CredentialRateLimitStatus::Rejected)
+        }
+        Some(global_claude::RateLimitStatus::Unknown(_)) | None => None,
     }
 }
 
@@ -714,6 +746,7 @@ mod tests {
                 raw: serde_json::Value::Null,
             }),
             pid: crate::Pid::new(0),
+            credential_id: None,
         }
     }
 

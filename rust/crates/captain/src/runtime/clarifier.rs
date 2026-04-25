@@ -3,10 +3,10 @@
 use crate::Task;
 use anyhow::Result;
 use rustc_hash::FxHashMap;
-use settings::config::workflow::CaptainWorkflow;
+use settings::CaptainWorkflow;
 use tracing::{info, warn};
 
-use global_claude::{CcConfig, CcOneShot};
+use global_claude::CcConfig;
 
 use super::dashboard::truncate_utf8;
 use global_claude::parse_llm_json;
@@ -49,7 +49,7 @@ pub(crate) fn build_clarifier_schema() -> serde_json::Value {
 pub(crate) async fn run_clarification(
     item: &Task,
     workflow: &CaptainWorkflow,
-    config: &settings::config::Config,
+    config: &settings::Config,
     pool: &sqlx::SqlitePool,
     pre_session_id: Option<&str>,
 ) -> Result<ClarifierResult> {
@@ -59,30 +59,41 @@ pub(crate) async fn run_clarification(
     let cwd = resolve_clarifier_cwd(item, config)?;
 
     let task_id = item.id.to_string();
-    let credential = super::tick_spawn::pick_credential(pool, None).await;
-    let cred_id = global_claude::credential_id(&credential);
-    let mut builder = CcConfig::builder()
-        .model(&workflow.models.clarifier)
-        .timeout(workflow.agent.clarifier_timeout_s)
-        .caller("clarifier")
-        .task_id(&task_id)
-        .cwd(cwd.clone())
-        .allowed_tools(vec!["Read".into(), "Glob".into(), "Grep".into()])
-        .json_schema(build_clarifier_schema());
-    builder = global_claude::with_credential(builder, &credential);
-    if let Some(sid) = pre_session_id {
-        builder = builder.session_id(sid);
-    }
-    let result =
-        match CcOneShot::run_with_retry(&prompt, builder.build(), workflow.agent.cc_max_retries)
-            .await
-        {
-            Ok(result) => result,
-            Err(e) => {
-                warn!(module = "clarifier", title = %item.title, error = %e, "CC failed");
-                return Err(e.into());
+    let task_id_ref = task_id.as_str();
+    let cwd_ref = cwd.as_path();
+    let model = workflow.models.clarifier.as_str();
+    let timeout = workflow.agent.clarifier_timeout_s;
+    let result = match settings::cc_failover::run_with_credential_failover(
+        pool,
+        "clarifier",
+        &prompt,
+        |ctx| {
+            let mut builder = CcConfig::builder()
+                .model(model)
+                .timeout(timeout)
+                .caller("clarifier")
+                .task_id(task_id_ref)
+                .cwd(cwd_ref.to_path_buf())
+                .allowed_tools(vec!["Read".into(), "Glob".into(), "Grep".into()])
+                .json_schema(build_clarifier_schema());
+            builder = global_claude::with_credential(builder, &ctx.credential);
+            if let Some(rid) = &ctx.resume_session_id {
+                builder = builder.resume(rid);
+            } else if let Some(sid) = pre_session_id {
+                builder = builder.session_id(sid);
             }
-        };
+            builder.build()
+        },
+    )
+    .await
+    {
+        Ok(result) => result,
+        Err(e) => {
+            warn!(module = "clarifier", title = %item.title, error = %e, "CC failed");
+            return Err(e.into());
+        }
+    };
+    let cred_id = result.credential_id;
 
     if let Err(e) = crate::io::headless_cc::log_cc_session(
         pool,
@@ -179,9 +190,9 @@ pub fn format_questions_text(questions: &[ClarifierQuestion]) -> String {
 /// silently produced bogus results; callers now escalate instead.
 pub(crate) fn resolve_clarifier_cwd(
     item: &Task,
-    config: &settings::config::Config,
+    config: &settings::Config,
 ) -> Result<std::path::PathBuf> {
-    match settings::config::resolve_project_config(Some(&item.project), config) {
+    match settings::resolve_project_config(Some(&item.project), config) {
         Some((_key, proj)) => Ok(global_infra::paths::expand_tilde(&proj.path)),
         None => Err(anyhow::anyhow!(
             "could not resolve project {:?} for clarifier cwd on item {:?}",
@@ -239,8 +250,7 @@ fn build_clarifier_prompt(
         vars.insert("human_input", input);
     }
 
-    settings::config::render_prompt("clarifier", &workflow.prompts, &vars)
-        .map_err(|e| anyhow::anyhow!(e))
+    settings::render_prompt("clarifier", &workflow.prompts, &vars).map_err(|e| anyhow::anyhow!(e))
 }
 
 pub(crate) fn build_interactive_clarifier_turn_prompt(
@@ -265,114 +275,8 @@ pub(crate) fn build_interactive_clarifier_turn_prompt(
     vars.insert("outstanding_questions", questions_text.as_str());
     vars.insert("human_response", human_input.trim());
 
-    settings::config::render_prompt("interactive_clarifier", &workflow.prompts, &vars)
+    settings::render_prompt("interactive_clarifier", &workflow.prompts, &vars)
         .map_err(|e| anyhow::anyhow!(e))
-}
-
-/// Unified clarification answer: appends human answer to context, runs the
-/// interactive clarifier LLM inline, and returns the result. Resumes an
-/// existing CC session when `task.session_ids.clarifier` is set.
-#[tracing::instrument(skip_all)]
-pub async fn answer_and_reclarify(
-    item: &Task,
-    answer: &str,
-    workflow: &CaptainWorkflow,
-    config: &settings::config::Config,
-    pool: &sqlx::SqlitePool,
-) -> Result<ClarifierResult> {
-    let questions =
-        match crate::io::queries::timeline::latest_clarifier_questions(pool, item.id).await {
-            Ok(Some(payload_qs)) => Some(
-                payload_qs
-                    .into_iter()
-                    .map(|q| ClarifierQuestion {
-                        question: q.question,
-                        answer: q.answer,
-                        self_answered: q.self_answered,
-                        category: q.category,
-                    })
-                    .collect::<Vec<_>>(),
-            ),
-            Ok(None) => None,
-            Err(e) => {
-                warn!(
-                    module = "clarifier",
-                    task_id = item.id,
-                    error = %e,
-                    "failed to fetch outstanding questions from timeline"
-                );
-                None
-            }
-        };
-    let prompt =
-        build_interactive_clarifier_turn_prompt(item, workflow, answer, questions.as_deref())?;
-    let cwd = resolve_clarifier_cwd(item, config)?;
-    let task_id = item.id.to_string();
-    let timeout = workflow.agent.clarifier_timeout_s;
-
-    let credential = super::tick_spawn::pick_credential(pool, None).await;
-    let mut builder = CcConfig::builder()
-        .model(&workflow.models.clarifier)
-        .timeout(timeout)
-        .caller("clarifier")
-        .task_id(&task_id)
-        .cwd(cwd.clone())
-        .allowed_tools(vec!["Read".into(), "Glob".into(), "Grep".into()])
-        .json_schema(super::clarifier_cc_failure::build_interactive_clarifier_schema());
-
-    let cred_id = global_claude::credential_id(&credential);
-    builder = global_claude::with_credential(builder, &credential);
-    if let Some(ref sid) = item.session_ids.clarifier {
-        builder = builder.resume(sid.clone());
-    }
-
-    let result = match CcOneShot::run(&prompt, builder.build()).await {
-        Ok(r) => r,
-        Err(e) => {
-            super::clarifier_cc_failure::log_reclarify_failure(pool, item, &cwd, &e).await;
-            return Err(e.into());
-        }
-    };
-
-    let resumed = item.session_ids.clarifier.is_some();
-    if let Err(e) = crate::io::headless_cc::log_cc_session(
-        pool,
-        &crate::io::headless_cc::SessionLogEntry {
-            session_id: &result.session_id,
-            cwd: &cwd,
-            model: &workflow.models.clarifier,
-            caller: "clarifier",
-            cost_usd: result.cost_usd,
-            duration_ms: result.duration_ms,
-            resumed,
-            task_id: Some(item.id),
-            status: global_types::SessionStatus::Stopped,
-            worker_name: "",
-            credential_id: cred_id,
-            error: None,
-            api_error_status: None,
-        },
-    )
-    .await
-    {
-        warn!(module = "clarifier", error = %e, "failed to log clarifier session");
-    }
-
-    let text = result
-        .structured
-        .as_ref()
-        .map(|v| v.to_string())
-        .unwrap_or_else(|| result.text.clone());
-    let mut parsed = parse_clarifier_response(&text, &item.title);
-    parsed.session_id = Some(result.session_id);
-
-    info!(
-        module = "clarifier",
-        title = %truncate_utf8(&item.title, 60),
-        status = ?parsed.status,
-        "answer_and_reclarify complete"
-    );
-    Ok(parsed)
 }
 
 fn escalate(title: &str, reason: &str) -> ClarifierResult {

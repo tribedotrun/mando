@@ -55,7 +55,7 @@ pub async fn post_parse_todos(
     vars.insert("text", text.to_string());
     vars.insert("line_count", line_count.to_string());
     vars.insert("project", row.name);
-    let prompt = settings::config::render_prompt("todo_parse", &wf.prompts, &vars)
+    let prompt = settings::render_prompt("todo_parse", &wf.prompts, &vars)
         .map_err(|e| internal_error(e, "failed to render parse prompt"))?;
 
     let max_turns = wf.agent.todo_parse_max_turns;

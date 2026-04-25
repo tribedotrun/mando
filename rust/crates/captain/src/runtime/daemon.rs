@@ -2,7 +2,6 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use anyhow::Context;
 use sqlx::SqlitePool;
 use tokio::sync::{Notify, RwLock};
 use tokio_util::sync::CancellationToken;
@@ -27,7 +26,7 @@ mod daemon_transport_runtime;
 #[path = "daemon_workbench_api_runtime.rs"]
 mod daemon_workbench_api_runtime;
 #[path = "workbench_runtime.rs"]
-mod workbench_runtime;
+pub(crate) mod workbench_runtime;
 
 const DEGRADED_FAILURE_THRESHOLD: u32 = 5;
 
@@ -183,13 +182,13 @@ impl CaptainRuntime {
 
     #[tracing::instrument(skip_all)]
     pub async fn close_pr(&self, repo: &str, pr_num: &str) -> anyhow::Result<()> {
-        crate::io::github::close_pr(repo, pr_num).await
+        global_github::close_pr(repo, pr_num).await
     }
 
     #[tracing::instrument(skip_all)]
     pub async fn delete_tasks(
         &self,
-        config: &settings::config::Config,
+        config: &settings::Config,
         ids: &[i64],
         close_pr: bool,
         force: bool,
@@ -302,15 +301,30 @@ impl CaptainRuntime {
         if touched {
             match crate::io::queries::workbenches::find_by_id(&self.pool, workbench_id).await {
                 Ok(Some(updated)) => {
-                    let item: Option<api_types::WorkbenchItem> =
-                        serde_json::from_value(serde_json::to_value(&updated).unwrap_or_default())
-                            .ok();
-                    self.bus.send(global_bus::BusPayload::Workbenches(Some(
-                        api_types::WorkbenchEventData {
-                            action: Some("updated".into()),
-                            item,
-                        },
-                    )));
+                    match crate::runtime::daemon::workbench_runtime::to_wire_workbench_item(
+                        &updated,
+                    ) {
+                        Ok(item) => {
+                            self.bus.send(global_bus::BusPayload::Workbenches(Some(
+                                api_types::WorkbenchEventData {
+                                    action: Some("updated".into()),
+                                    item: Some(item),
+                                },
+                            )));
+                        }
+                        Err(e) => {
+                            // Fire-and-forget caller — we can't propagate,
+                            // but DO NOT emit an `item: None` event. The
+                            // DB already committed; the frontend will
+                            // resync on its next poll / reconnect.
+                            tracing::error!(
+                                module = "captain-runtime-daemon",
+                                workbench_id,
+                                error = %e,
+                                "skipping workbench bus broadcast — serde failure indicates api-types schema drift"
+                            );
+                        }
+                    }
                 }
                 Ok(None) => {
                     tracing::warn!(
@@ -327,17 +341,27 @@ impl CaptainRuntime {
     }
 
     pub fn resolve_task_cwd(&self, item: &crate::Task) -> anyhow::Result<PathBuf> {
-        item.worktree
+        // Fail-fast: no fallback. Running an ask/advisor session inside
+        // the wrong directory (previously: `first_project_path`, i.e.
+        // whichever project hashes first) is worse than a clean error.
+        // The caller turns this into a 4xx the user can act on by
+        // reopening the task, which recovers the worktree via spawn's
+        // WorktreePlan::Recreate path.
+        let Some(stored) = item
+            .worktree
             .as_deref()
             .map(global_infra::paths::expand_tilde)
-            .filter(|path| path.is_dir())
-            .or_else(|| {
-                let config = self.settings.load_config();
-                settings::config::paths::first_project_path(&config)
-                    .map(|path| global_infra::paths::expand_tilde(&path))
-                    .filter(|path| path.is_dir())
-            })
-            .context("no worktree or project configured -- cannot run session")
+        else {
+            anyhow::bail!("task {} has no worktree assigned", item.id);
+        };
+        if !stored.is_dir() {
+            anyhow::bail!(
+                "task {} worktree missing on disk: {} — reopen the task to recover",
+                item.id,
+                stored.display()
+            );
+        }
+        Ok(stored)
     }
 }
 

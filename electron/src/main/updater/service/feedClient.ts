@@ -67,7 +67,14 @@ export function downloadFile(
           return;
         }
         res.resume();
-        downloadFile(location, dest, redirectsLeft - 1).then(resolve, reject);
+        void (async () => {
+          try {
+            await downloadFile(location, dest, redirectsLeft - 1);
+            resolve();
+          } catch (err) {
+            reject(err);
+          }
+        })();
         return;
       }
       if (res.statusCode !== 200) {

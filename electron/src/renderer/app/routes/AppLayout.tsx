@@ -7,14 +7,13 @@ import { useNativeActions } from '#renderer/global/runtime/useNativeActions';
 import log from '#renderer/global/service/logger';
 import { usePanelLayout } from '#renderer/global/runtime/usePanelLayout';
 import { Sidebar } from '#renderer/app/Sidebar';
-import { SidebarProvider } from '#renderer/domains/captain/ui/SidebarProvider';
-import { RetryButton } from '#renderer/domains/captain/ui/RetryButton';
-import { Button } from '#renderer/global/ui/button';
+import { RetryButton, SidebarProvider } from '#renderer/domains/captain/shell';
+import { Button } from '#renderer/global/ui/primitives/button';
 import {
   ResizablePanelGroup,
   ResizablePanel,
   ResizableHandle,
-} from '#renderer/global/ui/resizable';
+} from '#renderer/global/ui/primitives/resizable';
 import { AppHeader } from '#renderer/app/AppHeader';
 import { router } from '#renderer/app/router';
 import { useUIStore } from '#renderer/global/runtime/useUIStore';
@@ -22,7 +21,9 @@ import { useUIStore } from '#renderer/global/runtime/useUIStore';
 export function AppLayout(): React.ReactElement {
   const sidebarRef = usePanelRef();
   const { sseStatus, resetDataPlane } = useDataContext();
-  const { restartDaemon, openLogsFolder } = useNativeActions();
+  const nativeActions = useNativeActions();
+  const { restartDaemon } = nativeActions.app;
+  const { openLogsFolder } = nativeActions.files;
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const { defaultLayout, onLayoutChanged } = usePanelLayout('sidebar-layout');
 
@@ -42,14 +43,13 @@ export function AppLayout(): React.ReactElement {
   const handleGoBack = useCallback(() => router.history.back(), []);
   const handleGoForward = useCallback(() => router.history.forward(), []);
   const handleNewTask = useCallback(() => useUIStore.getState().openCreateTask(), []);
-  const handleRestartDaemon = useCallback(() => {
-    void restartDaemon()
-      .then(() => {
-        resetDataPlane();
-      })
-      .catch((err) => {
-        log.warn('[AppLayout] restartDaemon failed', err);
-      });
+  const handleRestartDaemon = useCallback(async () => {
+    try {
+      await restartDaemon();
+      resetDataPlane();
+    } catch (err) {
+      log.warn('[AppLayout] restartDaemon failed', err);
+    }
   }, [restartDaemon, resetDataPlane]);
 
   // Sync initial collapsed state (panel may restore collapsed from persistence)

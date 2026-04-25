@@ -2,6 +2,7 @@
 
 use clap::{Args, Subcommand};
 
+use crate::gateway_paths as paths;
 use crate::http::{parse_id, DaemonClient};
 
 #[derive(Args)]
@@ -47,7 +48,7 @@ pub(crate) enum CaptainCommand {
         /// Feedback for the worker
         feedback: String,
     },
-    /// Rework a task (fresh worktree, new worker)
+    /// Rework a task (same worktree, new branch, new worker)
     Rework {
         /// Task ID
         id: String,
@@ -90,8 +91,11 @@ pub(crate) enum CaptainCommand {
         /// Nudge message to deliver to the worker
         message: String,
     },
-    /// Graceful stop (kill all workers, drain tasks)
-    Stop,
+    /// Stop one task (if ID provided) or drain all workers globally.
+    Stop {
+        /// Task ID — omit to stop all workers globally.
+        id: Option<String>,
+    },
 }
 
 pub(crate) async fn handle(args: CaptainArgs) -> anyhow::Result<()> {
@@ -122,22 +126,29 @@ pub(crate) async fn handle(args: CaptainArgs) -> anyhow::Result<()> {
         }
         CaptainCommand::Handoff { id } => handle_handoff(&id).await,
         CaptainCommand::Nudge { id, message } => handle_nudge(&id, &message).await,
-        CaptainCommand::Stop => handle_captain_stop().await,
+        CaptainCommand::Stop { id } => match id {
+            Some(task_id) => handle_stop_task(&task_id).await,
+            None => handle_captain_stop().await,
+        },
     }
 }
 
 async fn handle_tick(dry_run: bool) -> anyhow::Result<()> {
     let client = DaemonClient::discover()?;
-    let result: api_types::TickResult = client
+    let result: api_types::TickDrainResult = client
         .post_json(
-            "/api/captain/tick",
+            paths::CAPTAIN_TICK,
             &api_types::TickRequest {
                 dry_run: Some(dry_run),
                 emit_notifications: Some(true),
+                until_idle: None,
+                max_ticks: None,
+                until_status: None,
+                task_id: None,
             },
         )
         .await?;
-    println!("{}", serde_json::to_string_pretty(&result)?);
+    println!("{}", serde_json::to_string_pretty(&result.last)?);
     Ok(())
 }
 
@@ -146,7 +157,7 @@ async fn handle_workers(watch: bool, interval: Option<u64>) -> anyhow::Result<()
     let client = DaemonClient::discover()?;
     loop {
         let health: api_types::SystemHealthResponse = client
-            .get_json_with_body_on_5xx("/api/health/system")
+            .get_json_with_body_on_5xx(paths::HEALTH_SYSTEM)
             .await?;
 
         if watch {
@@ -171,7 +182,7 @@ pub(crate) async fn handle_triage_cmd(item_id: Option<&str>) -> anyhow::Result<(
     let client = DaemonClient::discover()?;
     let result: api_types::TriageResponse = client
         .post_json(
-            "/api/captain/triage",
+            paths::CAPTAIN_TRIAGE,
             &api_types::TriageRequest {
                 item_id: item_id.map(str::to_string),
             },
@@ -185,7 +196,7 @@ async fn handle_reopen(id: &str, feedback: &str) -> anyhow::Result<()> {
     let client = DaemonClient::discover()?;
     client
         .post_json::<api_types::BoolOkResponse, _>(
-            "/api/tasks/reopen",
+            paths::TASKS_REOPEN,
             &api_types::TaskFeedbackRequest {
                 id: parse_id(id, "task")?,
                 feedback: feedback.to_string(),
@@ -200,7 +211,7 @@ async fn handle_rework(id: &str, feedback: &str) -> anyhow::Result<()> {
     let client = DaemonClient::discover()?;
     client
         .post_json::<api_types::BoolOkResponse, _>(
-            "/api/tasks/rework",
+            paths::TASKS_REWORK,
             &api_types::TaskFeedbackRequest {
                 id: parse_id(id, "task")?,
                 feedback: feedback.to_string(),
@@ -215,7 +226,7 @@ async fn handle_retry(id: &str) -> anyhow::Result<()> {
     let client = DaemonClient::discover()?;
     client
         .post_json::<api_types::BoolOkResponse, _>(
-            "/api/tasks/retry",
+            paths::TASKS_RETRY,
             &api_types::TaskIdRequest {
                 id: parse_id(id, "task")?,
             },
@@ -229,7 +240,7 @@ async fn handle_accept(id: &str) -> anyhow::Result<()> {
     let client = DaemonClient::discover()?;
     client
         .post_json::<api_types::BoolOkResponse, _>(
-            "/api/tasks/accept",
+            paths::TASKS_ACCEPT,
             &api_types::TaskIdRequest {
                 id: parse_id(id, "task")?,
             },
@@ -243,7 +254,7 @@ async fn handle_handoff(id: &str) -> anyhow::Result<()> {
     let client = DaemonClient::discover()?;
     client
         .post_json::<api_types::BoolOkResponse, _>(
-            "/api/tasks/handoff",
+            paths::TASKS_HANDOFF,
             &api_types::TaskIdRequest {
                 id: parse_id(id, "task")?,
             },
@@ -268,22 +279,7 @@ async fn handle_adopt(
         anyhow::bail!("not a git worktree: {}", wt_path.display());
     }
 
-    let mut branch = String::new();
-    for args in [
-        ["branch", "--show-current"].as_slice(),
-        ["rev-parse", "--abbrev-ref", "HEAD"].as_slice(),
-    ] {
-        let output = tokio::process::Command::new("git")
-            .args(args)
-            .current_dir(&wt_path)
-            .output()
-            .await?;
-        let candidate = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if output.status.success() && !candidate.is_empty() && candidate != "HEAD" {
-            branch = candidate;
-            break;
-        }
-    }
+    let branch = global_git::checked_out_branch(&wt_path).await?;
     if branch.is_empty() || branch == "HEAD" {
         anyhow::bail!("could not detect branch in {}", wt_path.display());
     }
@@ -293,7 +289,7 @@ async fn handle_adopt(
         note.unwrap_or("Continue from current state. Run tests, fix failures, create PR.");
     let result: api_types::TaskCreateResponse = client
         .post_json(
-            "/api/captain/adopt",
+            paths::CAPTAIN_ADOPT,
             &api_types::AdoptRequest {
                 title: title.to_string(),
                 worktree_path: wt_path.to_string_lossy().into_owned(),
@@ -315,7 +311,7 @@ async fn handle_nudge(id: &str, message: &str) -> anyhow::Result<()> {
     let client = DaemonClient::discover()?;
     let result: api_types::NudgeResponse = client
         .post_json(
-            "/api/captain/nudge",
+            paths::CAPTAIN_NUDGE,
             &api_types::NudgeRequest {
                 item_id: id.to_string(),
                 message: message.to_string(),
@@ -330,9 +326,23 @@ async fn handle_nudge(id: &str, message: &str) -> anyhow::Result<()> {
 
 async fn handle_captain_stop() -> anyhow::Result<()> {
     let client = DaemonClient::discover()?;
-    let result: api_types::StopWorkersResponse = client.post_no_body("/api/captain/stop").await?;
+    let result: api_types::StopWorkersResponse = client.post_no_body(paths::CAPTAIN_STOP).await?;
     let killed = result.killed;
     println!("Killed {killed} worker process(es).");
+    Ok(())
+}
+
+async fn handle_stop_task(id: &str) -> anyhow::Result<()> {
+    let client = DaemonClient::discover()?;
+    client
+        .post_json::<api_types::BoolOkResponse, _>(
+            paths::TASKS_STOP,
+            &api_types::TaskIdRequest {
+                id: parse_id(id, "task")?,
+            },
+        )
+        .await?;
+    println!("Stopped task {id}. Worktree preserved; reopen to resume.");
     Ok(())
 }
 
@@ -342,7 +352,7 @@ pub(crate) async fn handle_merge_pr(pr_num: &str, project: Option<&str>) -> anyh
         parse_pr_number(pr_num).ok_or_else(|| anyhow::anyhow!("invalid PR reference: {pr_num}"))?;
     let result: api_types::MergeResponse = client
         .post_json(
-            "/api/tasks/merge",
+            paths::TASKS_MERGE,
             &api_types::MergeRequest {
                 pr_number,
                 project: project.unwrap_or("").to_string(),

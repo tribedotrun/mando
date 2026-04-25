@@ -3,6 +3,7 @@ import { Check } from 'lucide-react';
 import {
   SCOUT_TYPE_OPTIONS,
   SCOUT_STATE_OPTIONS,
+  type ScoutStatusFilter,
 } from '#renderer/domains/scout/service/researchHelpers';
 import {
   DropdownMenu,
@@ -11,7 +12,7 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from '#renderer/global/ui/dropdown-menu';
+} from '#renderer/global/ui/primitives/dropdown-menu';
 
 export function ScoutFilterMenu({
   typeValue,
@@ -23,9 +24,9 @@ export function ScoutFilterMenu({
   children,
 }: {
   typeValue: string;
-  stateValue: string;
+  stateValue: ScoutStatusFilter;
   onTypeChange: (v: string) => void;
-  onStateChange: (v: string) => void;
+  onStateChange: (v: ScoutStatusFilter) => void;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   children: React.ReactNode;

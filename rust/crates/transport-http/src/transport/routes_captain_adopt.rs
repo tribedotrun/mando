@@ -11,13 +11,13 @@ use crate::response::{error_response, internal_error, ApiError};
 use crate::AppState;
 
 fn resolve_adopt_project(
-    config: &settings::config::Config,
+    config: &settings::Config,
     requested: Option<&str>,
     wt_path: &Path,
     central_wt_dir: &Path,
 ) -> Result<String, ApiError> {
     if let Some(project) = requested {
-        return settings::config::resolve_project_config(Some(project), config)
+        return settings::resolve_project_config(Some(project), config)
             .map(|(_, pc)| pc.name.clone())
             .ok_or_else(|| error_response(StatusCode::BAD_REQUEST, "unknown project"));
     }

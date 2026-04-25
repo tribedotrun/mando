@@ -2,6 +2,7 @@ import path from 'path';
 import fs from 'fs';
 import { execSync } from 'child_process';
 import log from '#main/global/providers/logger';
+import { mustParsePortNumberText, parseLaunchctlPidText } from '#main/global/service/boundaryText';
 import {
   daemonLabel,
   errorMsg,
@@ -31,7 +32,7 @@ export function waitForPortFree(deadline: number): void {
   const portFile = path.join(dataDir, resolvePortFileName());
   let port: number;
   try {
-    port = parseInt(fs.readFileSync(portFile, 'utf-8').trim(), 10);
+    port = mustParsePortNumberText(fs.readFileSync(portFile, 'utf-8'), `file:${portFile}`);
   } catch {
     return; // No port file — nothing to wait for
   }
@@ -69,11 +70,11 @@ export function waitForServiceUnloaded(label: string, timeoutMs = 15000): void {
 export function getDaemonStatus(): DaemonStatus {
   try {
     const out = execSync(`launchctl list ${daemonLabel()} 2>/dev/null`, { encoding: 'utf-8' });
-    const pidMatch = out.match(/"PID"\s*=\s*(\d+)/);
+    const pid = parseLaunchctlPidText(out, `command:launchctl-list:${daemonLabel()}`);
     return {
       loaded: true,
-      running: pidMatch !== null && pidMatch[1] !== '0',
-      pid: pidMatch ? parseInt(pidMatch[1], 10) : null,
+      running: pid !== null,
+      pid,
     };
   } catch (e: unknown) {
     // launchctl list exits non-zero when the service isn't loaded — that's expected.

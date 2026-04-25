@@ -3,7 +3,7 @@
 
 use crate::Task;
 use anyhow::Result;
-use settings::config::settings::Config;
+use settings::Config;
 
 /// Options controlling what external resources to clean up alongside the task.
 #[derive(Debug, Clone, Default)]
@@ -24,7 +24,7 @@ pub(crate) async fn cleanup_task(
     let repo_path = if item.project.is_empty() {
         None
     } else {
-        settings::config::resolve_project_config(Some(&item.project), config)
+        settings::resolve_project_config(Some(&item.project), config)
             .map(|(_, pc)| global_infra::paths::expand_tilde(&pc.path))
     };
 
@@ -54,7 +54,7 @@ pub(crate) async fn cleanup_task(
     let live_branch = if let Some(ref wt) = item.worktree {
         let wt_path = global_infra::paths::expand_tilde(wt);
         if wt_path.exists() {
-            super::git::current_branch(&wt_path).await.ok()
+            global_git::current_branch(&wt_path).await.ok()
         } else {
             None
         }
@@ -67,7 +67,7 @@ pub(crate) async fn cleanup_task(
         let wt_path = global_infra::paths::expand_tilde(wt);
         if wt_path.exists() {
             if let Some(ref rp) = repo_path {
-                match super::git::remove_worktree(rp, &wt_path).await {
+                match global_git::remove_worktree(rp, &wt_path).await {
                     Ok(_) => {
                         tracing::info!(module = "cleanup", path = %wt_path.display(), "removed worktree")
                     }
@@ -94,7 +94,7 @@ pub(crate) async fn cleanup_task(
 
     if let Some(branch) = branch_to_delete {
         if let Some(ref rp) = repo_path {
-            if let Err(e) = super::git::delete_local_branch(rp, branch).await {
+            if let Err(e) = global_git::delete_local_branch(rp, branch).await {
                 let msg = format!("delete_local_branch {branch}: {e}");
                 tracing::warn!(module = "cleanup", branch = %branch, error = %e, "failed to delete branch");
                 warnings.push(msg);
@@ -103,7 +103,7 @@ pub(crate) async fn cleanup_task(
             }
 
             // Also remove the remote branch so it doesn't linger on GitHub.
-            if let Err(e) = super::git::delete_remote_branch(rp, branch).await {
+            if let Err(e) = global_git::delete_remote_branch(rp, branch).await {
                 let msg = format!("delete_remote_branch {branch}: {e}");
                 tracing::warn!(module = "cleanup", branch = %branch, error = %e, "failed to delete remote branch");
                 warnings.push(msg);
@@ -219,11 +219,11 @@ pub(crate) async fn cleanup_task(
                 if item.project.is_empty() {
                     None
                 } else {
-                    settings::config::resolve_github_repo(Some(&item.project), config)
+                    settings::resolve_github_repo(Some(&item.project), config)
                 }
             });
             match repo {
-                Some(repo) => match super::github::close_pr(&repo, &pr_num_str).await {
+                Some(repo) => match global_github::close_pr(&repo, &pr_num_str).await {
                     Ok(()) => {
                         tracing::info!(module = "cleanup", pr_number = pr_num, repo = %repo, "closed PR");
                     }

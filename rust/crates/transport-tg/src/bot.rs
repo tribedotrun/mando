@@ -12,8 +12,9 @@ use anyhow::Result;
 use serde_json::Value;
 use tracing::{error, info, warn};
 
-use settings::config::settings::Config;
+use settings::Config;
 
+use crate::gateway_paths as paths;
 use crate::http::GatewayClient;
 
 use crate::api::TelegramApi;
@@ -67,7 +68,6 @@ pub struct PickerState {
 
 /// One item in a picker.
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
-#[serde(default)]
 pub struct PickerItem {
     pub id: String,
     pub title: String,
@@ -333,7 +333,7 @@ impl TelegramBot {
         let save_result = self
             .gw
             .post_typed::<_, api_types::BoolOkResponse>(
-                "/api/channels/telegram/owner",
+                paths::CHANNELS_TELEGRAM_OWNER,
                 &serde_json::json!({ "owner": user_id }),
             )
             .await;

@@ -4,14 +4,16 @@
 //! Every path returns Some(Action); no LLM fallback.
 
 use std::collections::HashMap;
+use std::path::Path;
 
 use crate::{Action, ActionKind, Task, WorkerContext};
 use anyhow::Result;
+use global_claude::StreamSymptomMatcher;
 use rustc_hash::FxHashMap;
 
 use super::deterministic_helpers::{
-    action, classify_unresolved_threads, has_substantive_output, is_image_dimension_blocked,
-    render_nudge,
+    action, classify_unresolved_threads, detect_broken_session_symptom, has_substantive_output,
+    is_image_dimension_blocked, render_nudge,
 };
 use super::worker_context::has_summary_diagram;
 
@@ -25,13 +27,17 @@ pub(crate) fn classify_worker(
     item: Option<&Task>,
     stream_result_clean: Option<bool>,
     has_broken_session: bool,
+    stream_path: Option<&Path>,
     nudges: &HashMap<String, String>,
+    symptoms: &StreamSymptomMatcher,
     worker_timeout: std::time::Duration,
     stale_threshold: std::time::Duration,
     max_interventions: u32,
+    no_pr_min_active: std::time::Duration,
 ) -> Result<Action> {
     let worker_timeout_s = worker_timeout.as_secs_f64();
     let stale_threshold_s = stale_threshold.as_secs_f64();
+    let no_pr_min_active_s = no_pr_min_active.as_secs_f64();
     let is_no_pr = item.is_some_and(|it| it.no_pr);
 
     // Rule 0: BUDGET. Intervention budget exhausted -> escalate.
@@ -43,6 +49,24 @@ pub(crate) fn classify_worker(
             "",
             "budget_exhausted",
         ));
+    }
+
+    // Rule 0.5: STREAM SYMPTOM. A recognizable broken-session marker in the
+    // stream tail (watchdog abort, rate limit, is_error, context exhausted,
+    // no-conversation-found) means the session is wedged even if its stream
+    // file mtime still looks fresh. Skip mtime liveness and go straight to
+    // broken-session review so the captain can escalate or respawn without
+    // burning another nudge. Must run before Rule 2 because a watchdog-
+    // aborted session writes a fresh error line that fools mtime staleness.
+    if let Some(m) = detect_broken_session_symptom(stream_path, symptoms) {
+        tracing::info!(
+            module = "captain",
+            worker = %ctx.session_name,
+            symptom = %m.reason,
+            origin = %m.origin.tag(),
+            "stream symptom detected, routing to broken-session review"
+        );
+        return Ok(action(ctx, ActionKind::CaptainReview, "", "broken_session"));
     }
 
     // Rule 1: TIMEOUT. Alive + wall-clock exceeded -> review.
@@ -86,14 +110,21 @@ pub(crate) fn classify_worker(
             "degraded_context",
         ));
     }
-    if quality_gates_pass(ctx, is_no_pr, stream_result_clean) {
+    if quality_gates_pass(ctx, is_no_pr, stream_result_clean, no_pr_min_active_s) {
         return Ok(action(ctx, ActionKind::CaptainReview, "", "gates_pass"));
     }
 
     // Rule 4: NUDGE. Worker needs a push.
 
     // Check specific gate failures first (work done but missing something).
-    if let Some(gate_nudge) = missing_gate_nudge(ctx, is_no_pr, stream_result_clean, nudges)? {
+    if let Some(gate_nudge) = missing_gate_nudge(
+        ctx,
+        is_no_pr,
+        stream_result_clean,
+        stream_path,
+        nudges,
+        symptoms,
+    )? {
         return Ok(gate_nudge);
     }
 
@@ -107,7 +138,7 @@ pub(crate) fn classify_worker(
     }
 
     // Process dead or alive fallback. Diagnose which gates are failing.
-    let diagnosis = diagnose_failing_gates(ctx, is_no_pr, stream_result_clean);
+    let diagnosis = diagnose_failing_gates(ctx, is_no_pr, stream_result_clean, no_pr_min_active_s);
     let mut vars: FxHashMap<&str, &str> = FxHashMap::default();
     vars.insert("failures", diagnosis.as_str());
     let msg = render_nudge(nudges, "gates_incomplete", &vars)?;
@@ -130,6 +161,7 @@ fn quality_gates_pass(
     ctx: &WorkerContext,
     is_no_pr: bool,
     stream_result_clean: Option<bool>,
+    no_pr_min_active_s: f64,
 ) -> bool {
     // Degraded PR data must never pass gates: the hygiene counters cannot
     // be trusted when the underlying GitHub fetch partially failed.
@@ -153,8 +185,12 @@ fn quality_gates_pass(
     {
         return true;
     }
-    // No-PR path.
-    if is_no_pr && has_substantive_output(&ctx.stream_tail) && ctx.seconds_active >= 180.0 {
+    // No-PR path. The min-active threshold defends against premature ships
+    // from workers that produce a one-line stub and exit.
+    if is_no_pr
+        && has_substantive_output(&ctx.stream_tail)
+        && ctx.seconds_active >= no_pr_min_active_s
+    {
         return true;
     }
     false
@@ -165,6 +201,7 @@ fn diagnose_failing_gates(
     ctx: &WorkerContext,
     is_no_pr: bool,
     stream_result_clean: Option<bool>,
+    no_pr_min_active_s: f64,
 ) -> String {
     let mut failures: Vec<String> = Vec::new();
 
@@ -207,8 +244,11 @@ fn diagnose_failing_gates(
         if !has_substantive_output(&ctx.stream_tail) {
             failures.push("insufficient output (< 20 chars)".into());
         }
-        if ctx.seconds_active < 180.0 {
-            failures.push("insufficient runtime (< 3 min)".into());
+        if ctx.seconds_active < no_pr_min_active_s {
+            failures.push(format!(
+                "insufficient runtime (< {:.0}s)",
+                no_pr_min_active_s
+            ));
         }
     }
 
@@ -224,7 +264,9 @@ fn missing_gate_nudge(
     ctx: &WorkerContext,
     is_no_pr: bool,
     stream_result_clean: Option<bool>,
+    stream_path: Option<&Path>,
     nudges: &HashMap<String, String>,
+    symptoms: &StreamSymptomMatcher,
 ) -> Result<Option<Action>> {
     // Only applies when we have a stream result (work reached a conclusion).
     if stream_result_clean.is_none() {
@@ -314,7 +356,7 @@ fn missing_gate_nudge(
         )));
     }
     // Image dimension blocked.
-    if is_image_dimension_blocked(&ctx.stream_tail) {
+    if is_image_dimension_blocked(stream_path, symptoms) {
         let msg = render_nudge(nudges, "image_dimension_blocked", &vars)?;
         return Ok(Some(action(
             ctx,

@@ -5,14 +5,14 @@ import {
   useTelegramHealth,
   type TelegramHealth,
 } from '#renderer/domains/settings/runtime/hooks';
-import { Card, CardContent } from '#renderer/global/ui/card';
-import { Input } from '#renderer/global/ui/input';
-import { Label } from '#renderer/global/ui/label';
-import { Skeleton } from '#renderer/global/ui/skeleton';
+import { Card, CardContent } from '#renderer/global/ui/primitives/card';
+import { Input } from '#renderer/global/ui/primitives/input';
+import { Label } from '#renderer/global/ui/primitives/label';
+import { Skeleton } from '#renderer/global/ui/primitives/skeleton';
 import { telegramPatch, envPatch } from '#renderer/global/service/configPatches';
 import type { TelegramConfig } from '#renderer/global/types';
 import { toast } from 'sonner';
-import { Switch } from '#renderer/global/ui/switch';
+import { Switch } from '#renderer/global/ui/primitives/switch';
 
 function StatusDot({ color }: { color: string }): React.ReactElement {
   return (

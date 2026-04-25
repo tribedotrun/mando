@@ -31,16 +31,10 @@ pub(crate) async fn post_scout_bulk_update(
         .scout
         .bulk_apply_item_command(&body.ids, scout_item_command(body.command))
         .await;
-    if result["updated"].as_u64().unwrap_or(0) > 0 {
+    if result.updated > 0 {
         state.bus.send(global_bus::BusPayload::Scout(None));
     }
-    match serde_json::from_value(result) {
-        Ok(resp) => Json(resp),
-        Err(e) => global_infra::unrecoverable!(
-            "scout bulk update response did not match api-types contract",
-            e
-        ),
-    }
+    Json(result)
 }
 
 /// POST /api/scout/bulk-delete — delete multiple items.
@@ -53,14 +47,8 @@ pub(crate) async fn post_scout_bulk_delete(
     Json(body): Json<api_types::ScoutBulkDeleteRequest>,
 ) -> Json<api_types::ScoutBulkDeleteResponse> {
     let result = state.scout.bulk_delete_items(&body.ids).await;
-    if result["deleted"].as_u64().unwrap_or(0) > 0 {
+    if result.deleted > 0 {
         state.bus.send(global_bus::BusPayload::Scout(None));
     }
-    match serde_json::from_value(result) {
-        Ok(resp) => Json(resp),
-        Err(e) => global_infra::unrecoverable!(
-            "scout bulk delete response did not match api-types contract",
-            e
-        ),
-    }
+    Json(result)
 }

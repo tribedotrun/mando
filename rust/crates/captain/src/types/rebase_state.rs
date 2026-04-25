@@ -4,7 +4,6 @@ use serde::{Deserialize, Serialize};
 
 /// Rebase state for a task, stored in the `task_rebase_state` table.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(default)]
 pub struct RebaseState {
     pub task_id: i64,
     #[serde(skip_serializing_if = "Option::is_none")]

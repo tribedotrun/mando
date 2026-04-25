@@ -2,6 +2,7 @@
 
 use std::io::IsTerminal;
 
+use crate::gateway_paths as paths;
 use crate::http::{parse_id, DaemonClient};
 
 /// Resolve task ID from explicit arg, MANDO_TASK_ID env, or CWD worktree path.
@@ -48,7 +49,7 @@ pub(crate) async fn handle_summary(
 
     let result: api_types::TaskSummaryResponse = client
         .post_json(
-            &format!("/api/tasks/{task_id}/summary"),
+            &paths::task_summary(task_id),
             &api_types::TaskSummaryRequest { content },
         )
         .await?;
@@ -98,7 +99,7 @@ pub(crate) async fn handle_evidence(files: &[String], captions: &[String]) -> an
 
     let result: api_types::TaskEvidenceResponse = client
         .post_json(
-            &format!("/api/tasks/{task_id}/evidence"),
+            &paths::task_evidence(task_id),
             &api_types::TaskEvidenceRequest { files: file_inputs },
         )
         .await?;

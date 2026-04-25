@@ -2,6 +2,28 @@ use tracing::warn;
 
 use super::CaptainRuntime;
 
+/// Convert a domain `Workbench` to the wire `api_types::WorkbenchItem` for
+/// SSE bus broadcasts. Returns `Err` on schema drift so callers can
+/// refuse to emit a corrupt event (fail-fast — the previous behavior of
+/// emitting `item: None` papered over the drift and left the frontend
+/// dispatching on a half-present payload).
+pub(crate) fn to_wire_workbench_item(
+    workbench: &crate::Workbench,
+) -> anyhow::Result<api_types::WorkbenchItem> {
+    let value = serde_json::to_value(workbench).map_err(|e| {
+        anyhow::anyhow!(
+            "failed to serialize Workbench {} for bus broadcast: {e}",
+            workbench.id
+        )
+    })?;
+    serde_json::from_value(value).map_err(|e| {
+        anyhow::anyhow!(
+            "failed to deserialize Workbench {} into api_types::WorkbenchItem (likely schema drift): {e}",
+            workbench.id
+        )
+    })
+}
+
 #[tracing::instrument(skip_all)]
 pub(super) async fn prepare_terminal_workbench(
     runtime: &CaptainRuntime,
@@ -41,16 +63,28 @@ pub(super) async fn prepare_terminal_workbench(
             "updated"
         };
         match crate::io::queries::workbenches::find_by_id(runtime.pool(), id).await {
-            Ok(Some(updated)) => {
-                let item: Option<api_types::WorkbenchItem> =
-                    serde_json::from_value(serde_json::to_value(&updated).unwrap_or_default()).ok();
-                runtime.bus().send(global_bus::BusPayload::Workbenches(Some(
-                    api_types::WorkbenchEventData {
-                        action: Some(action.to_string()),
-                        item,
-                    },
-                )));
-            }
+            Ok(Some(updated)) => match to_wire_workbench_item(&updated) {
+                Ok(item) => {
+                    runtime.bus().send(global_bus::BusPayload::Workbenches(Some(
+                        api_types::WorkbenchEventData {
+                            action: Some(action.to_string()),
+                            item: Some(item),
+                        },
+                    )));
+                }
+                Err(err) => {
+                    // DB row is already committed. The SSE broadcast is
+                    // observability only — log-and-skip instead of
+                    // propagating, otherwise the caller sees 500 and
+                    // retries a mutation that already succeeded.
+                    tracing::error!(
+                        module = "captain-runtime-workbench_runtime",
+                        workbench_id = id,
+                        error = %err,
+                        "skipping workbench bus broadcast — api-types schema drift"
+                    );
+                }
+            },
             Ok(None) => tracing::warn!(
                 module = "captain-runtime-workbench_runtime",
                 workbench_id = id,
@@ -114,16 +148,27 @@ pub(super) async fn notify_terminal_activity(
         crate::io::queries::workbenches::touch_activity(runtime.pool(), workbench.id).await?;
     if touched {
         match crate::io::queries::workbenches::find_by_id(runtime.pool(), workbench.id).await {
-            Ok(Some(updated)) => {
-                let item: Option<api_types::WorkbenchItem> =
-                    serde_json::from_value(serde_json::to_value(&updated).unwrap_or_default()).ok();
-                runtime.bus().send(global_bus::BusPayload::Workbenches(Some(
-                    api_types::WorkbenchEventData {
-                        action: Some("updated".into()),
-                        item,
-                    },
-                )));
-            }
+            Ok(Some(updated)) => match to_wire_workbench_item(&updated) {
+                Ok(item) => {
+                    runtime.bus().send(global_bus::BusPayload::Workbenches(Some(
+                        api_types::WorkbenchEventData {
+                            action: Some("updated".into()),
+                            item: Some(item),
+                        },
+                    )));
+                }
+                Err(err) => {
+                    // touch_activity is already committed; skip the SSE
+                    // broadcast on schema drift rather than failing the
+                    // caller's mutation retroactively.
+                    tracing::error!(
+                        module = "captain-runtime-workbench_runtime",
+                        workbench_id = workbench.id,
+                        error = %err,
+                        "skipping workbench bus broadcast — api-types schema drift"
+                    );
+                }
+            },
             Ok(None) => tracing::warn!(
                 module = "captain-runtime-workbench_runtime",
                 workbench_id = workbench.id,

@@ -3,8 +3,8 @@
 use crate::service::lifecycle;
 use crate::{Action, Task};
 use anyhow::Result;
-use settings::config::settings::Config;
-use settings::config::workflow::CaptainWorkflow;
+use settings::CaptainWorkflow;
+use settings::Config;
 
 #[tracing::instrument(skip_all)]
 pub(crate) async fn handle_captain_review(

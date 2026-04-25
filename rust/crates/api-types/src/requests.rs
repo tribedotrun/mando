@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+use crate::{SessionCategory, SessionStatus};
+
 /// Standard JSON error envelope returned by all error responses.
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(deny_unknown_fields)]
@@ -97,12 +99,28 @@ pub struct MessagesQuery {
 }
 
 /// POST /api/captain/tick
+///
+/// Empty body runs one tick (existing behavior). Any of `until_idle`,
+/// `max_ticks`, or `until_status` flips the handler into drain mode — it
+/// loops `trigger_captain_tick` until the requested condition is met or
+/// a hard cap trips (see `TickDrainResult.stopped_reason`).
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(optional_fields)]
 #[serde(deny_unknown_fields)]
 pub struct TickRequest {
     pub dry_run: Option<bool>,
     pub emit_notifications: Option<bool>,
+    /// Drain ticks until a pass reports no state changes (iterations converge),
+    /// or until a cap trips.
+    pub until_idle: Option<bool>,
+    /// Hard upper bound on ticks in this call. Clamped to a server-side
+    /// ceiling so a misbehaving caller can't peg the daemon.
+    pub max_ticks: Option<u32>,
+    /// Drain until the task identified by `task_id` reaches any of these
+    /// statuses. Requires `task_id`; a value without `task_id` is a 400.
+    pub until_status: Option<Vec<crate::ItemStatus>>,
+    /// Target task for `until_status`.
+    pub task_id: Option<i64>,
 }
 
 /// POST /api/captain/triage
@@ -223,10 +241,10 @@ pub struct NudgeRequest {
 pub struct SessionsQuery {
     pub page: Option<u32>,
     pub per_page: Option<u32>,
-    pub category: Option<String>,
+    pub category: Option<SessionCategory>,
     /// Alias for category -- accepted from CLI which sends `caller=`.
-    pub caller: Option<String>,
-    pub status: Option<String>,
+    pub caller: Option<SessionCategory>,
+    pub status: Option<SessionStatus>,
 }
 
 /// GET /api/sessions/{id}/messages query params

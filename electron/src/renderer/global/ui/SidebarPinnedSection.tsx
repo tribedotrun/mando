@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { PinOff, Terminal } from 'lucide-react';
 import { compactRelativeTime } from '#renderer/global/service/utils';
 import { commitWorkbenchRename } from '#renderer/global/service/workbenchHelpers';
-import { StatusIcon } from '#renderer/global/ui/StatusIndicator';
+import { StatusIndicator } from '#renderer/global/ui/StatusIndicator';
 import {
   ArchivableWorkbenchContextMenu,
   WorkbenchContextMenu,
@@ -64,7 +64,7 @@ export function SidebarPinnedSection({
             <span className="relative shrink-0 translate-y-px">
               <span className="group-hover:invisible">
                 {task ? (
-                  <StatusIcon status={task.status} />
+                  <StatusIndicator status={task.status} />
                 ) : (
                   <span className="inline-flex w-4 items-center justify-center">
                     <Terminal size={14} className="text-text-3" />

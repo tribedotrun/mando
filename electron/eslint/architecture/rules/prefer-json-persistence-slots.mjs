@@ -25,6 +25,32 @@ function isJsonMethodCall(node, method) {
   );
 }
 
+function isTrackedStringLiteral(node) {
+  return (
+    node?.type === 'Literal' &&
+    (node.value === '0' || node.value === '1' || node.value === 'false' || node.value === 'true')
+  );
+}
+
+function isReadCall(node) {
+  return (
+    node?.type === 'CallExpression' &&
+    node.callee?.type === 'MemberExpression' &&
+    node.callee.property.type === 'Identifier' &&
+    node.callee.property.name === 'read'
+  );
+}
+
+function isWriteSentinelCall(node) {
+  return (
+    node.callee?.type === 'MemberExpression' &&
+    node.callee.property.type === 'Identifier' &&
+    node.callee.property.name === 'write' &&
+    node.arguments.length > 0 &&
+    isTrackedStringLiteral(node.arguments[0])
+  );
+}
+
 /** @type {import('eslint').Rule.RuleModule} */
 export default {
   meta: {
@@ -36,6 +62,8 @@ export default {
     messages: {
       useJsonSlots:
         'Persistence-backed JSON belongs in defineJsonSlot(...) or defineJsonKeyspace(...), not manual JSON. See .claude/skills/s-arch/invariants.md#r16.',
+      useTypedSlots:
+        'Persistence-backed booleans and structured state belong in defineJsonSlot(...) or defineJsonKeyspace(...), not string sentinels. See .claude/skills/s-arch/invariants.md#r16.',
     },
   },
   create(context) {
@@ -57,6 +85,19 @@ export default {
         if (!importsStringSlots) return;
         if (isJsonMethodCall(node, 'parse') || isJsonMethodCall(node, 'stringify')) {
           context.report({ node, messageId: 'useJsonSlots' });
+          return;
+        }
+        if (isWriteSentinelCall(node)) {
+          context.report({ node, messageId: 'useTypedSlots' });
+        }
+      },
+      BinaryExpression(node) {
+        if (!importsStringSlots) return;
+        if (
+          (isReadCall(node.left) && isTrackedStringLiteral(node.right)) ||
+          (isTrackedStringLiteral(node.left) && isReadCall(node.right))
+        ) {
+          context.report({ node, messageId: 'useTypedSlots' });
         }
       },
     };

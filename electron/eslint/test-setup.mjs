@@ -2,7 +2,7 @@
 // surface as discrete test results.
 import { RuleTester } from 'eslint';
 import { describe, it } from 'node:test';
-import tsParser from '@typescript-eslint/parser';
+import { parser as tsParser } from 'typescript-eslint';
 
 RuleTester.describe = describe;
 RuleTester.it = it;

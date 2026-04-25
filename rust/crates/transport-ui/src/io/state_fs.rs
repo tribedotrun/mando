@@ -8,7 +8,7 @@ use crate::types::{UiDesiredState, UiLaunchSpec};
 const REDACTED_ENV_KEYS: [&str; 1] = ["MANDO_AUTH_TOKEN"];
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct PersistedUiLaunchSpec {
     pub exec_path: String,
     pub args: Vec<String>,
@@ -43,7 +43,7 @@ impl From<PersistedUiLaunchSpec> for UiLaunchSpec {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct PersistedUiState {
     pub desired_state: UiDesiredState,
     pub launch_spec: Option<PersistedUiLaunchSpec>,
@@ -58,21 +58,24 @@ impl Default for PersistedUiState {
     }
 }
 
-pub(crate) fn load_state(state_path: &Path) -> PersistedUiState {
+pub(crate) fn load_state(state_path: &Path) -> anyhow::Result<PersistedUiState> {
+    // Fail-fast: the only legitimate "use defaults" path is NotFound
+    // (first launch). Any other read error (permission denied, disk
+    // issue) and any serde failure propagate so the caller can decide
+    // whether to bail or surface a user-visible error, rather than
+    // silently resetting `desired_state` to Running.
     match std::fs::read_to_string(state_path) {
-        Ok(raw) => match serde_json::from_str::<PersistedUiState>(&raw) {
-            Ok(state) => state,
-            Err(err) => {
-                tracing::warn!(
-                    module = "ui",
-                    path = %state_path.display(),
-                    error = %err,
-                    "corrupt ui-state.json, falling back to defaults"
-                );
-                PersistedUiState::default()
-            }
-        },
-        Err(_) => PersistedUiState::default(),
+        Ok(raw) => serde_json::from_str::<PersistedUiState>(&raw).map_err(|err| {
+            anyhow::anyhow!(
+                "failed to parse ui-state.json at {}: {err}",
+                state_path.display()
+            )
+        }),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(PersistedUiState::default()),
+        Err(err) => Err(anyhow::anyhow!(
+            "failed to read ui-state.json at {}: {err}",
+            state_path.display()
+        )),
     }
 }
 

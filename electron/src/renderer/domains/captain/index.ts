@@ -13,6 +13,7 @@ export { useTaskList, useWorkbenchList, useWorkers } from '#renderer/domains/cap
 export {
   useResumeRateLimited,
   useWorkbenchArchive,
+  useWorkbenchUnarchive,
   useWorkbenchPin,
   useWorkbenchRename,
 } from '#renderer/domains/captain/runtime/hooks';

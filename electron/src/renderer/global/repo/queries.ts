@@ -1,7 +1,8 @@
 import { useQuery } from '@tanstack/react-query';
 import { highlight } from '#renderer/global/providers/highlighter';
-import { fromWireConfig } from '#renderer/global/repo/configMutations';
+import { fromWireConfig } from '#renderer/global/config/wireConfig';
 import { queryKeys } from '#renderer/global/repo/queryKeys';
+import { daemonSyncMeta } from '#renderer/global/repo/syncPolicy';
 import { apiGetRouteR } from '#renderer/global/providers/http';
 import {
   getAppMode,
@@ -62,6 +63,7 @@ export function useHighlight(code: string, lang: string) {
 export function useConfig() {
   return useQuery<MandoConfig>({
     queryKey: queryKeys.config.current(),
+    meta: daemonSyncMeta('sse-invalidated', 'config SSE events invalidate current config'),
     queryFn: async (): Promise<MandoConfig> => {
       try {
         return fromWireConfig(await toReactQuery(apiGetRouteR('getConfig')));

@@ -1,4 +1,7 @@
-import type { TerminalSessionInfo } from '#renderer/domains/captain/repo/terminal-api';
+import type {
+  TerminalSessionInfo,
+  TerminalState,
+} from '#renderer/domains/captain/repo/terminal-api';
 
 /** Available terminal agent types. */
 export const TERMINAL_AGENTS = [
@@ -6,9 +9,7 @@ export const TERMINAL_AGENTS = [
   { id: 'codex' as const, label: 'codex', icon: '@' },
 ] as const;
 
-export type TerminalSessionState = 'live' | 'restored' | 'exited';
-
-export function getTerminalSessionState(session: TerminalSessionInfo): TerminalSessionState {
+export function getTerminalSessionState(session: TerminalSessionInfo): TerminalState {
   if (session.state) return session.state;
   if (session.restored) return 'restored';
   return session.running ? 'live' : 'exited';

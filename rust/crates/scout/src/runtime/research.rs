@@ -3,7 +3,7 @@
 use crate::{ScoutItem, ScoutResearchRun};
 use anyhow::Result;
 use rustc_hash::FxHashMap;
-use settings::config::ScoutWorkflow;
+use settings::ScoutWorkflow;
 
 /// Research result — a list of discovered links.
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
@@ -23,7 +23,6 @@ pub struct ResearchOutput {
 
 /// A single discovered link.
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
-#[serde(default)]
 pub struct ResearchLink {
     pub url: String,
     pub title: String,
@@ -48,44 +47,50 @@ pub async fn run_research(
     vars.insert("interests_high", interests_high.as_str());
     vars.insert("user_context", user_context_rendered.as_str());
 
-    let prompt = settings::config::render_prompt("research", &workflow.prompts, &vars)
+    let prompt = settings::render_prompt("research", &workflow.prompts, &vars)
         .map_err(|e| anyhow::anyhow!(e))?;
 
-    let model = crate::service::model_lookup::required_model(workflow, "research")?;
-    let credential = settings::credentials::pick_for_worker(pool, None)
-        .await
-        .inspect_err(|e| tracing::warn!(module = "scout-runtime-research", error = %e, "scout-research: pick_for_worker failed"))
-        .unwrap_or(None);
-    let cred_id = global_claude::credential_id(&credential);
-    let builder = global_claude::CcConfig::builder()
-        .model(model)
-        .timeout(workflow.agent.research_timeout_s)
-        .caller("scout-research")
-        .json_schema(serde_json::json!({
-            "type": "object",
-            "properties": {
-                "links": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "url": { "type": "string" },
-                            "title": { "type": "string" },
-                            "type": { "type": "string" },
-                            "reason": { "type": "string" }
-                        },
-                        "required": ["url", "title", "type", "reason"]
-                    }
+    let model_owned = crate::service::model_lookup::required_model(workflow, "research")?;
+    let model = model_owned.as_str();
+    let timeout = workflow.agent.research_timeout_s;
+    let schema = serde_json::json!({
+        "type": "object",
+        "properties": {
+            "links": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "url": { "type": "string" },
+                        "title": { "type": "string" },
+                        "type": { "type": "string" },
+                        "reason": { "type": "string" }
+                    },
+                    "required": ["url", "title", "type", "reason"]
                 }
-            },
-            "required": ["links"]
-        }));
-    let result = global_claude::CcOneShot::run_with_retry(
+            }
+        },
+        "required": ["links"]
+    });
+    let result = settings::cc_failover::run_with_credential_failover(
+        pool,
+        "scout-research",
         &prompt,
-        global_claude::with_credential(builder, &credential).build(),
-        workflow.agent.cc_max_retries,
+        |ctx| {
+            let mut builder = global_claude::CcConfig::builder()
+                .model(model)
+                .timeout(timeout)
+                .caller("scout-research")
+                .json_schema(schema.clone());
+            builder = global_claude::with_credential(builder, &ctx.credential);
+            if let Some(rid) = &ctx.resume_session_id {
+                builder = builder.resume(rid);
+            }
+            builder.build()
+        },
     )
     .await?;
+    let cred_id = result.credential_id;
 
     let parsed: ResearchResult = if let Some(structured) = result.structured {
         serde_json::from_value(structured).map_err(|e| {

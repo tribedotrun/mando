@@ -1,6 +1,5 @@
 import { useRef, useState } from 'react';
-import { useDraft } from '#renderer/domains/captain/runtime/useDraft';
-import { useImageAttachment } from '#renderer/global/runtime/useImageAttachment';
+import { useTextImageDraft } from '#renderer/global/runtime/useTextImageDraft';
 import { useTaskFormPersistence } from '#renderer/domains/captain/runtime/useTaskFormPersistence';
 import { useMountEffect } from '#renderer/global/runtime/useMountEffect';
 import { useProjects } from '#renderer/global/runtime/useProjects';
@@ -18,7 +17,15 @@ interface Args {
 }
 
 export function useAddTaskForm({ onClose, initialProject }: Args) {
-  const [title, setTitle, clearTitleDraft] = useDraft('mando:draft:newTask');
+  const {
+    text: title,
+    setText: setTitle,
+    image,
+    preview,
+    setImageFile,
+    removeImage,
+    clearDraft,
+  } = useTextImageDraft('newTask', { legacyTextSuffix: 'newTask' });
   const hasDraft = title !== '';
   const {
     bulk,
@@ -34,9 +41,9 @@ export function useAddTaskForm({ onClose, initialProject }: Args) {
     hasDraft,
     initialProject,
   });
-  const { image, preview, setImageFile, removeImage } = useImageAttachment();
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [noAutoMerge, setNoAutoMerge] = useState(false);
+  const [planning, setPlanning] = useState(false);
 
   const titleRef = useRef(title);
   titleRef.current = title;
@@ -60,11 +67,11 @@ export function useAddTaskForm({ onClose, initialProject }: Args) {
 
   const resetForm = () => {
     setBulk(false);
-    clearTitleDraft();
+    clearDraft();
     resetDrafts();
     setSubmitError(null);
     setNoAutoMerge(false);
-    removeImage();
+    setPlanning(false);
   };
 
   const canSubmit =
@@ -84,6 +91,7 @@ export function useAddTaskForm({ onClose, initialProject }: Args) {
         title: trimmedTitle,
         project: effectiveProject || undefined,
         noAutoMerge: (globalAutoMerge && noAutoMerge) || undefined,
+        planning: planning || undefined,
         images: image ? [image] : undefined,
       });
     }
@@ -105,29 +113,12 @@ export function useAddTaskForm({ onClose, initialProject }: Args) {
   };
 
   return {
-    title,
-    setTitle,
-    bulk,
-    setBulk,
-    project,
-    handleProjectChange,
-    image,
-    preview,
-    setImageFile,
-    removeImage,
-    submitError,
-    noAutoMerge,
-    setNoAutoMerge,
-    inputRef,
-    createPhase,
-    projects,
-    globalAutoMerge,
-    effectiveProject,
-    projectRequired,
-    textareaRows,
-    canSubmit,
-    handleSubmit,
-    handleKeyDown,
-    handlePaste,
+    draft: { title, setTitle, bulk, setBulk, textareaRows, inputRef, submitError },
+    project: { projects, effectiveProject, projectRequired, handleProjectChange },
+    image: { image, preview, setImageFile, removeImage },
+    autoMerge: { globalAutoMerge, noAutoMerge, setNoAutoMerge },
+    planMode: { planning, setPlanning },
+    submit: { createPhase, canSubmit, handleSubmit },
+    events: { handleKeyDown, handlePaste },
   };
 }

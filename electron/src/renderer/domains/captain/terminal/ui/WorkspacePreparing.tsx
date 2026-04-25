@@ -1,4 +1,4 @@
-import { Spinner } from '#renderer/global/ui/Spinner';
+import { Spinner } from '#renderer/domains/captain/ui/Spinner';
 
 interface WorkspacePreparingProps {
   project: string;

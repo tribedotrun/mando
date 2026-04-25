@@ -1,10 +1,10 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { toast } from '#renderer/global/runtime/useFeedback';
 import log from '#renderer/global/service/logger';
 import {
   createTerminal,
   deleteTerminal,
   archiveWorkbench,
+  unarchiveWorkbench,
   pinWorkbench,
   renameWorkbench,
   type CreateTerminalParams,
@@ -29,7 +29,6 @@ export function useTerminalCreate() {
     },
     onError: (err) => {
       log.error('useTerminalCreate', err);
-      toast.error('Failed to create terminal');
     },
   });
 }
@@ -53,7 +52,6 @@ export function useTerminalDelete() {
     onError: (err, _vars, context) => {
       if (context?.prev) qc.setQueryData(queryKeys.terminals.list(), context.prev);
       log.error('useTerminalDelete', err);
-      toast.error('Failed to delete terminal');
     },
   });
 }
@@ -87,7 +85,6 @@ export function useWorkbenchPin() {
     onError: (err, vars, context) => {
       if (context?.prev) qc.setQueryData(queryKeys.workbenches.list(), context.prev);
       log.error('useWorkbenchPin', err);
-      toast.error(vars.pinned ? 'Failed to pin workbench' : 'Failed to unpin workbench');
     },
     onSettled: () => {
       void qc.invalidateQueries({ queryKey: queryKeys.workbenches.all });
@@ -120,7 +117,6 @@ export function useWorkbenchRename() {
     onError: (err, _vars, context) => {
       if (context?.prev) qc.setQueryData(queryKeys.workbenches.list(), context.prev);
       log.error('useWorkbenchRename', err);
-      toast.error('Failed to rename workbench');
     },
     onSettled: () => {
       void qc.invalidateQueries({ queryKey: queryKeys.workbenches.all });
@@ -159,7 +155,54 @@ export function useWorkbenchArchive() {
     onError: (err, _vars, context) => {
       if (context?.prev) qc.setQueryData(queryKeys.workbenches.list(), context.prev);
       log.error('useWorkbenchArchive', err);
-      toast.error('Failed to archive workbench');
+    },
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: queryKeys.workbenches.all });
+    },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// useWorkbenchUnarchive
+// ---------------------------------------------------------------------------
+
+export function useWorkbenchUnarchive() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { id: number }) => toReactQuery(unarchiveWorkbench(vars.id)),
+    onMutate: async (vars) => {
+      await qc.cancelQueries({ queryKey: queryKeys.workbenches.all });
+      const prev = qc.getQueryData<WorkbenchItem[]>(queryKeys.workbenches.list());
+      // Find the workbench in 'all' or 'archived' caches so we can restore it
+      // to the active list variant without waiting for a refetch.
+      const fromAll = qc.getQueryData<WorkbenchItem[]>(queryKeys.workbenches.list('all'));
+      const fromArchived = qc.getQueryData<WorkbenchItem[]>(queryKeys.workbenches.list('archived'));
+      const found =
+        fromAll?.find((wb) => wb.id === vars.id) ?? fromArchived?.find((wb) => wb.id === vars.id);
+      // Clear archivedAt on the matching workbench in every cached list variant.
+      qc.setQueriesData<WorkbenchItem[]>({ queryKey: queryKeys.workbenches.all }, (old) =>
+        old?.map((wb) => (wb.id === vars.id ? { ...wb, archivedAt: null, rev: wb.rev + 1 } : wb)),
+      );
+      // Drop the row from the archived-only list variant.
+      qc.setQueryData<WorkbenchItem[]>(queryKeys.workbenches.list('archived'), (old) =>
+        old?.filter((wb) => wb.id !== vars.id),
+      );
+      // Splice the row back into the active list variant when we have a copy.
+      if (found) {
+        qc.setQueryData<WorkbenchItem[]>(queryKeys.workbenches.list(), (old) => {
+          if (!old) return old;
+          if (old.some((wb) => wb.id === vars.id)) return old;
+          return [...old, { ...found, archivedAt: null, rev: found.rev + 1 }];
+        });
+      }
+      return { prev };
+    },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: queryKeys.tasks.all });
+    },
+    onError: (err, _vars, context) => {
+      if (context?.prev) qc.setQueryData(queryKeys.workbenches.list(), context.prev);
+      log.error('useWorkbenchUnarchive', err);
     },
     onSettled: () => {
       void qc.invalidateQueries({ queryKey: queryKeys.workbenches.all });

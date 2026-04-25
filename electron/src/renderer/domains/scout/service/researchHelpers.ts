@@ -1,4 +1,10 @@
-import type { ActResponse, ScoutItem, ScoutResearchRun } from '#renderer/global/types';
+import type {
+  ActResponse,
+  ScoutItem,
+  ScoutItemStatus,
+  ScoutItemStatusFilter,
+  ScoutResearchRun,
+} from '#renderer/global/types';
 import { getErrorMessage } from '#renderer/global/service/utils';
 
 /** Formats the result of a scout "act" mutation for display. */
@@ -12,11 +18,24 @@ export function formatActResult(data: ActResponse | undefined, error: Error | nu
 export const SCOUT_DEFAULT_PER_PAGE = 25;
 
 /** Statuses a user can manually set on scout items. */
-export const USER_SETTABLE_STATUSES = ['pending', 'processed', 'saved', 'archived'] as const;
+export const USER_SETTABLE_STATUSES = [
+  'pending',
+  'processed',
+  'saved',
+  'archived',
+] as const satisfies readonly ScoutItemStatus[];
+
+export type ScoutUserSettableStatus = (typeof USER_SETTABLE_STATUSES)[number];
+
+const USER_SETTABLE_STATUS_VALUES: readonly string[] = USER_SETTABLE_STATUSES;
+
+export function isUserSettableScoutStatus(status: string): status is ScoutUserSettableStatus {
+  return USER_SETTABLE_STATUS_VALUES.includes(status);
+}
 
 /** Badge variant for each scout item status. */
 export const SCOUT_STATUS_VARIANT: Record<
-  string,
+  ScoutItemStatus,
   'default' | 'secondary' | 'destructive' | 'outline'
 > = {
   pending: 'outline',
@@ -39,8 +58,14 @@ export const SCOUT_TYPE_BADGE: Record<string, { label: string; variant: 'outline
 /** Filter options for the scout item type dropdown. */
 export const SCOUT_TYPE_OPTIONS = ['all', 'github', 'youtube', 'arxiv', 'other'] as const;
 
+export type ScoutStatusFilter = ScoutItemStatusFilter;
+
 /** Filter options for the scout item state dropdown. */
-export const SCOUT_STATE_OPTIONS = ['all', 'saved', 'archived'] as const;
+export const SCOUT_STATE_OPTIONS = [
+  'all',
+  'saved',
+  'archived',
+] as const satisfies readonly ScoutStatusFilter[];
 
 /** Whether a scout item can have the "act" (create task) action performed. */
 export function isScoutItemActionable(item: ScoutItem): boolean {
@@ -78,7 +103,7 @@ export function statusBadgeConfig(status: ScoutResearchRun['status']): StatusBad
       return { variant: 'secondary', label: 'Done', spinning: false, showElapsed: false };
     case 'failed':
       return { variant: 'destructive', label: 'Failed', spinning: false, showElapsed: false };
-    default:
-      return { variant: 'outline', label: status, spinning: false, showElapsed: false };
   }
+  const exhaustive: never = status;
+  return exhaustive;
 }

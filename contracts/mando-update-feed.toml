@@ -1,0 +1,22 @@
+[contract]
+name        = "mando-update-feed"
+kind        = "external"
+# The feed client lives in Electron TS; `types-crate` points at the
+# folder that owns the interaction semantics (same convention as other
+# external contracts where we don't import an upstream-authored crate).
+types-crate = "electron/src/main/updater"
+transports  = ["http"]
+base-url    = "https://mando-update.gm-e6e.workers.dev"
+docs        = "electron/src/main/updater/runtime/updater.ts"
+
+# Cloudflare Worker that serves the signed-bundle update feed consumed
+# by the DIY Electron auto-updater. Response is a small JSON manifest
+# (zod-validated via `feedResponseSchema`); binaries are streamed
+# straight to disk, so no wire types cross the daemon boundary.
+[[consumer]]
+name        = "electron-update-feed-client"
+path        = "electron/src/main/updater/service/feedClient.ts"
+transports  = ["http"]
+role        = "DIY auto-updater feed client — fetches signed update manifest and streams the bundle download"
+enforcement = "zod-schema"
+allow-value = false

@@ -2,7 +2,7 @@ use std::time::{Duration, Instant};
 
 use crate::config::{DEGRADED_FAILURE_COUNT, MAX_BACKOFF_SECS};
 
-pub(crate) fn telegram_enabled(config: &settings::config::Config) -> bool {
+pub(crate) fn telegram_enabled(config: &settings::Config) -> bool {
     config.channels.telegram.enabled && !config.channels.telegram.token.is_empty()
 }
 

@@ -1,6 +1,6 @@
 import React from 'react';
-import { Kbd } from '#renderer/global/ui/kbd';
-import { Button } from '#renderer/global/ui/button';
+import { Kbd } from '#renderer/global/ui/primitives/kbd';
+import { Button } from '#renderer/global/ui/primitives/button';
 
 interface ShortcutEntry {
   keys: string[];

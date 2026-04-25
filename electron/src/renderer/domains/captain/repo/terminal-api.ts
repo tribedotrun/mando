@@ -15,10 +15,12 @@ import type {
   TerminalSessionInfo,
 } from '#renderer/global/types';
 import { type ApiError, type ResultAsync, ApiErrorThrown, parseSseMessage } from '#result';
+import { decodeTerminalOutputPayload } from '#renderer/domains/captain/repo/terminalOutput.ts';
 
 export type {
   WorkbenchItem,
   WorkbenchStatusFilter,
+  TerminalState,
   TerminalSessionInfo,
 } from '#renderer/global/types';
 
@@ -36,6 +38,10 @@ export function fetchWorkbenches(
 
 export function archiveWorkbench(id: number): ResultAsync<WorkbenchItem, ApiError> {
   return apiPatchRouteR('patchWorkbenchesById', { archived: true }, { params: { id } });
+}
+
+export function unarchiveWorkbench(id: number): ResultAsync<WorkbenchItem, ApiError> {
+  return apiPatchRouteR('patchWorkbenchesById', { archived: false }, { params: { id } });
 }
 
 export function pinWorkbench(id: number, pinned: boolean): ResultAsync<WorkbenchItem, ApiError> {
@@ -90,7 +96,7 @@ export async function writeTerminalBytes(id: string, bytes: Uint8Array): Promise
     { data: encoded },
     { params: { id } },
   );
-  // Fire-and-forget: callers in terminalRuntime use void promise.catch(log.warn).
+  // Fire-and-forget: callers in terminalRuntime log best-effort write failures.
   // No mutation hook depends on rejection, so log-only is intentional.
   result.match(
     () => undefined,
@@ -100,7 +106,7 @@ export async function writeTerminalBytes(id: string, bytes: Uint8Array): Promise
 
 export async function resizeTerminal(id: string, rows: number, cols: number): Promise<void> {
   const result = await apiPostRouteR('postTerminalByIdResize', { rows, cols }, { params: { id } });
-  // Fire-and-forget: callers in terminalRuntime use void promise.catch(log.warn).
+  // Fire-and-forget: callers in terminalRuntime log best-effort resize failures.
   // No mutation hook depends on rejection, so log-only is intentional.
   result.match(
     () => undefined,
@@ -142,18 +148,14 @@ export function connectTerminalStream(
 
     switch (envelope.event) {
       case 'output': {
-        try {
-          const raw = atob(envelope.data.dataB64);
-          const bytes = new Uint8Array(raw.length);
-          for (let i = 0; i < raw.length; i++) {
-            bytes[i] = raw.charCodeAt(i);
-          }
-          onOutput(bytes);
-        } catch (err) {
-          log.error('terminal stream output base64 decode failed', err);
+        const decoded = decodeTerminalOutputPayload(envelope.data);
+        if (decoded.isErr()) {
+          log.error('terminal stream output parse failed', decoded.error);
           onExit(null);
           es.close();
+          return;
         }
+        onOutput(decoded.value);
         return;
       }
 

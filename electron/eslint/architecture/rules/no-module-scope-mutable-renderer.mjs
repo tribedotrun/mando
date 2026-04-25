@@ -1,32 +1,22 @@
 // Renderer-wide ban on module-scope mutable state.
 //
 // The M3 rule (no-module-scope-mutable-state) is scoped to main-process
-// lifecycle.ts. Step D1 extends the principle to the renderer. Targeting
-// `let` alone is insufficient: `const viewHandlers = new Set()` is still
-// a shared mutable container at module scope. This rule catches both.
+// lifecycle.ts. Step D1 extends the principle to every renderer file.
+// Targeting `let` alone is insufficient: `const viewHandlers = new Set()` is
+// still a shared mutable container at module scope. This rule catches both.
 //
-// - Bans top-level `let` declarations (except in the providers/ allowlist).
+// - Bans top-level `let` declarations.
 // - Bans top-level `const` bound to `new Set()`, `new Map()`, `new Array()`,
 //   `new WeakMap()`, `new WeakSet()`, array literals, and object literals
 //   (mutable containers). Primitives and frozen objects are allowed.
 //
-// Providers (`**/providers/**`) are exempt — that tier intentionally owns
-// shared state funnels (HTTP batch queues, IPC subscription registries).
+// Singleton closures remain allowed: `const x = createThing()` is fine because
+// the mutable state stays encapsulated inside the function scope instead of
+// leaking as a renderer-global bag.
 //
 // Codifies invariant R11 in .claude/skills/s-arch/invariants.md.
 
-const MUTABLE_CONSTRUCTORS = new Set([
-  'Set',
-  'Map',
-  'WeakSet',
-  'WeakMap',
-  'Array',
-]);
-
-function isProvidersFile(filename) {
-  if (!filename) return false;
-  return filename.replaceAll('\\', '/').includes('/providers/');
-}
+const MUTABLE_CONSTRUCTORS = new Set(['Set', 'Map', 'WeakSet', 'WeakMap', 'Array']);
 
 function isObjectFreezeCall(node) {
   return (
@@ -133,20 +123,16 @@ export default {
   meta: {
     type: 'problem',
     docs: {
-      description:
-        'Ban module-scope mutable state (let + mutable-const containers) outside providers/ in the renderer.',
+      description: 'Ban module-scope mutable state in renderer files.',
     },
     messages: {
       noModuleLet:
-        'Module-scope `let {{name}}` is banned in the renderer outside `providers/`. Encapsulate state in a provider, React Query cache, or Zustand store. See .claude/skills/s-arch/invariants.md#r11.',
+        'Module-scope `let {{name}}` is banned in the renderer. Encapsulate state in a provider factory, React Query cache, or Zustand store. See .claude/skills/s-arch/invariants.md#r11.',
       noMutableConst:
-        'Module-scope `const {{name}} = {{kind}}` is a mutable container. Move it into a `providers/` module or wrap it in a function closure. See .claude/skills/s-arch/invariants.md#r11.',
+        'Module-scope `const {{name}} = {{kind}}` is a mutable container. Move it into a closure, React Query cache, or Zustand store. See .claude/skills/s-arch/invariants.md#r11.',
     },
   },
   create(context) {
-    const filename = context.filename || (context.getFilename && context.getFilename());
-    if (isProvidersFile(filename)) return {};
-
     const source = context.sourceCode ?? context.getSourceCode?.();
 
     return {

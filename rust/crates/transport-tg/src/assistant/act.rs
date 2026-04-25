@@ -2,7 +2,7 @@
 
 use anyhow::Result;
 
-use settings::config::settings::Config;
+use settings::Config;
 
 use super::formatting::{act_project_picker_kb, act_prompt_kb};
 use crate::bot::TelegramBot;

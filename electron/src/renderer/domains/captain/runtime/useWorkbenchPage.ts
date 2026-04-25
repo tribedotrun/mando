@@ -1,7 +1,8 @@
 import { useNavigate, useParams, useSearch } from '@tanstack/react-router';
 import { useCallback, useRef } from 'react';
 import { useWorkbenchNav } from '#renderer/domains/captain/runtime/useWorkbenchNav';
-import { useTaskList, useWorkbenchList } from '#renderer/domains/captain/runtime/hooks';
+import { useWorkbenchList } from '#renderer/domains/captain/runtime/hooks';
+import { useTaskForWorkbench } from '#renderer/domains/captain/runtime/useTaskForWorkbench';
 import { useWorktreeTerminal } from '#renderer/domains/captain/terminal/runtime/useWorktreeTerminal';
 import { useMountEffect } from '#renderer/global/runtime/useMountEffect';
 
@@ -54,9 +55,8 @@ export function useWorkbenchPage() {
     wbId && !activeMatch ? 'all' : undefined,
   );
   const workbenchesLoading = activeLoading || (!activeMatch && allLoading);
-  const { data: taskData, isLoading: tasksLoading } = useTaskList();
   const workbench = activeMatch ?? (wbId ? (allWbs.find((w) => w.id === wbId) ?? null) : null);
-  const task = taskData?.items.find((t) => t.workbench_id === wbId) ?? null;
+  const { task, isLoading: tasksLoading } = useTaskForWorkbench(wbId, workbench);
 
   const handleCancelNew = useCallback(() => {
     cancelPreparing();
@@ -66,17 +66,11 @@ export function useWorkbenchPage() {
   const nav = useWorkbenchNav(workbenchId, search);
 
   return {
-    workbenchId,
-    wbId,
-    isNewWorkbench,
+    ids: { workbenchId, wbId, isNewWorkbench },
     search,
-    terminalKey,
-    terminalPage,
-    workbench,
-    task,
-    workbenchesLoading,
-    tasksLoading,
-    handleCancelNew,
-    ...nav,
+    terminal: { key: terminalKey, page: terminalPage },
+    data: { workbench, task, workbenchesLoading, tasksLoading },
+    actions: { handleCancelNew },
+    nav,
   };
 }

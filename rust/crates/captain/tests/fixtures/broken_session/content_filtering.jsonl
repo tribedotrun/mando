@@ -1,0 +1,2 @@
+{"type":"system","subtype":"init"}
+{"type":"result","subtype":"success","is_error":true,"result":"API Error: {\"type\":\"error\",\"error\":{\"details\":null,\"type\":\"invalid_request_error\",\"message\":\"Output blocked by content filtering policy\"},\"request_id\":\"req_011Ca2aknwZ57rWxraGmezER\"}"}

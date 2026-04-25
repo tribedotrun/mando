@@ -13,21 +13,34 @@ import log from '#renderer/global/service/logger';
 
 type Listener = () => void;
 
-const listeners = new Set<Listener>();
+function createViewBriefBus() {
+  const listeners = new Set<Listener>();
+
+  return {
+    request(): void {
+      for (const fn of listeners) {
+        try {
+          fn();
+        } catch (err) {
+          log.warn('[viewBriefBus] subscriber threw during requestViewTaskBrief:', err);
+        }
+      }
+    },
+    subscribe(fn: Listener): () => void {
+      listeners.add(fn);
+      return () => {
+        listeners.delete(fn);
+      };
+    },
+  };
+}
+
+const viewBriefBus = createViewBriefBus();
 
 export function requestViewTaskBrief(): void {
-  for (const fn of listeners) {
-    try {
-      fn();
-    } catch (err) {
-      log.warn('[viewBriefBus] subscriber threw during requestViewTaskBrief:', err);
-    }
-  }
+  viewBriefBus.request();
 }
 
 export function subscribeViewTaskBrief(fn: Listener): () => void {
-  listeners.add(fn);
-  return () => {
-    listeners.delete(fn);
-  };
+  return viewBriefBus.subscribe(fn);
 }

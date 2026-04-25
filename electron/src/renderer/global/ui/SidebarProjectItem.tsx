@@ -1,7 +1,7 @@
 import React from 'react';
 import { DeleteProjectDialog } from '#renderer/global/ui/DeleteProjectDialog';
 import type { SidebarChild } from '#renderer/global/service/utils';
-import { WorkbenchRow } from '#renderer/global/ui/SidebarChildRows';
+import { WorkbenchRow } from '#renderer/global/ui/WorkbenchRow';
 import { useSidebarProjectItem } from '#renderer/global/runtime/useSidebarProjectItem';
 import {
   ProjectRenameInput,
@@ -23,62 +23,43 @@ export function SidebarProjectItem({
   count,
   items = [],
 }: SidebarProjectItemProps): React.ReactElement {
-  const {
-    actions,
-    menuOpen,
-    setMenuOpen,
-    renaming,
-    confirmOpen,
-    setConfirmOpen,
-    expanded,
-    setExpanded,
-    renameValue,
-    setRenameValue,
-    renamingWbId,
-    setRenamingWbId,
-    inputRefCb,
-    submitRename,
-    cancelRename,
-    startRename,
-  } = useSidebarProjectItem({ name, items });
+  const project = useSidebarProjectItem({ name, items });
 
   return (
     <div
       className="sidebar-project-item relative min-w-0 overflow-hidden"
-      data-menu-open={menuOpen || undefined}
+      data-menu-open={project.menu.open || undefined}
     >
-      {renaming ? (
+      {project.rename.active ? (
         <ProjectRenameInput
-          value={renameValue}
-          inputRefCb={inputRefCb}
-          onChange={setRenameValue}
-          onSubmit={() => void submitRename()}
-          onCancel={cancelRename}
+          initialValue={name}
+          onCommit={(newName) => void project.rename.commit(newName)}
+          onCancel={project.rename.cancel}
         />
       ) : (
         <ProjectHeaderButton
           name={name}
           logo={logo}
-          expanded={expanded}
-          menuOpen={menuOpen}
-          actions={actions}
-          onToggleExpand={() => setExpanded((v) => !v)}
-          onContextMenu={() => setMenuOpen(true)}
-          onMenuChange={setMenuOpen}
-          onStartRename={startRename}
-          onStartDelete={() => setConfirmOpen(true)}
+          expanded={project.expanded.value}
+          menuOpen={project.menu.open}
+          actions={project.actions}
+          onToggleExpand={() => project.expanded.setValue((v) => !v)}
+          onContextMenu={() => project.menu.setOpen(true)}
+          onMenuChange={project.menu.setOpen}
+          onStartRename={project.rename.start}
+          onStartDelete={() => project.delete.setConfirmOpen(true)}
         />
       )}
 
       <DeleteProjectDialog
-        open={confirmOpen}
-        onOpenChange={setConfirmOpen}
+        open={project.delete.confirmOpen}
+        onOpenChange={project.delete.setConfirmOpen}
         name={name}
         count={count}
       />
 
       {/* Expanded children: workbench-first rows, sorted by last activity. */}
-      {expanded && items.length > 0 && (
+      {project.expanded.value && items.length > 0 && (
         <div className="flex flex-col gap-0.5 pb-1 pt-0.5">
           {items.map((child) => (
             <WorkbenchRow
@@ -86,8 +67,8 @@ export function SidebarProjectItem({
               projectName={name}
               wb={child.wb}
               task={child.task}
-              renamingWbId={renamingWbId}
-              setRenamingWbId={setRenamingWbId}
+              renamingWbId={project.childRename.id}
+              setRenamingWbId={project.childRename.setId}
             />
           ))}
         </div>

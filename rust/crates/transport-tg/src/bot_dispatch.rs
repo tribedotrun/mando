@@ -4,6 +4,8 @@
 
 use anyhow::Result;
 use serde_json::Value;
+use std::future::Future;
+use std::pin::Pin;
 use tracing::{debug, warn};
 
 use crate::bot::TelegramBot;
@@ -26,9 +28,11 @@ pub(crate) enum CommandVisibility {
     Hidden,
 }
 
-/// Single source of truth for a Telegram command. The dispatch match arms in
-/// `dispatch_command` must cover every `name` and every entry in `aliases`;
-/// `/help` text is generated from the `Public` specs filtered by feature gate.
+/// Single source of truth for a Telegram command. The handler, `/help` text,
+/// and Bot API registration are all derived from this table.
+type CommandFuture<'a> = Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>>;
+type CommandHandler = for<'a> fn(&'a mut TelegramBot, &'a str, &'a str) -> CommandFuture<'a>;
+
 pub(crate) struct CommandSpec {
     pub name: &'static str,
     pub aliases: &'static [&'static str],
@@ -36,6 +40,7 @@ pub(crate) struct CommandSpec {
     pub visibility: CommandVisibility,
     pub feature_gate: FeatureGate,
     pub section: HelpSection,
+    pub handler: CommandHandler,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -43,6 +48,116 @@ pub(crate) enum HelpSection {
     Tasks,
     System,
     Scout,
+}
+
+fn dispatch_help<'a>(
+    bot: &'a mut TelegramBot,
+    chat_id: &'a str,
+    args: &'a str,
+) -> CommandFuture<'a> {
+    Box::pin(async move { commands::help::handle(&*bot, chat_id, args).await })
+}
+
+fn dispatch_todo<'a>(
+    bot: &'a mut TelegramBot,
+    chat_id: &'a str,
+    args: &'a str,
+) -> CommandFuture<'a> {
+    Box::pin(async move { commands::todo::handle(bot, chat_id, args).await })
+}
+
+fn dispatch_tasks<'a>(
+    bot: &'a mut TelegramBot,
+    chat_id: &'a str,
+    args: &'a str,
+) -> CommandFuture<'a> {
+    Box::pin(async move { commands::status::handle(&*bot, chat_id, args).await })
+}
+
+fn dispatch_action<'a>(
+    bot: &'a mut TelegramBot,
+    chat_id: &'a str,
+    args: &'a str,
+) -> CommandFuture<'a> {
+    Box::pin(async move { commands::action::handle(bot, chat_id, args).await })
+}
+
+fn dispatch_triage<'a>(
+    bot: &'a mut TelegramBot,
+    chat_id: &'a str,
+    args: &'a str,
+) -> CommandFuture<'a> {
+    Box::pin(async move { commands::triage::handle(&*bot, chat_id, args).await })
+}
+
+fn dispatch_health<'a>(
+    bot: &'a mut TelegramBot,
+    chat_id: &'a str,
+    args: &'a str,
+) -> CommandFuture<'a> {
+    Box::pin(async move { commands::health::handle(&*bot, chat_id, args).await })
+}
+
+fn dispatch_stop<'a>(
+    bot: &'a mut TelegramBot,
+    chat_id: &'a str,
+    args: &'a str,
+) -> CommandFuture<'a> {
+    Box::pin(async move { commands::stop::handle(&*bot, chat_id, args).await })
+}
+
+fn dispatch_timeline<'a>(
+    bot: &'a mut TelegramBot,
+    chat_id: &'a str,
+    args: &'a str,
+) -> CommandFuture<'a> {
+    Box::pin(async move { commands::timeline::handle(&*bot, chat_id, args).await })
+}
+
+fn dispatch_scout_add<'a>(
+    bot: &'a mut TelegramBot,
+    chat_id: &'a str,
+    args: &'a str,
+) -> CommandFuture<'a> {
+    Box::pin(async move { crate::assistant::commands::cmd_addlink(bot, chat_id, args).await })
+}
+
+fn dispatch_scout_research<'a>(
+    bot: &'a mut TelegramBot,
+    chat_id: &'a str,
+    args: &'a str,
+) -> CommandFuture<'a> {
+    Box::pin(async move { crate::assistant::commands::cmd_research(bot, chat_id, args).await })
+}
+
+fn dispatch_scout_list<'a>(
+    bot: &'a mut TelegramBot,
+    chat_id: &'a str,
+    args: &'a str,
+) -> CommandFuture<'a> {
+    Box::pin(async move { crate::assistant::commands::cmd_simplelist(bot, chat_id, args).await })
+}
+
+fn dispatch_scout_saved<'a>(
+    bot: &'a mut TelegramBot,
+    chat_id: &'a str,
+    _args: &'a str,
+) -> CommandFuture<'a> {
+    Box::pin(async move { crate::assistant::commands::cmd_simplelist(bot, chat_id, "saved").await })
+}
+
+fn dispatch_scout<'a>(
+    bot: &'a mut TelegramBot,
+    chat_id: &'a str,
+    args: &'a str,
+) -> CommandFuture<'a> {
+    Box::pin(async move {
+        if args.is_empty() {
+            crate::assistant::commands::cmd_scout(bot, chat_id).await
+        } else {
+            crate::assistant::commands::send_help(bot, chat_id, "/scout takes no arguments.").await
+        }
+    })
 }
 
 pub(crate) const REGISTERED_COMMANDS: &[CommandSpec] = &[
@@ -53,6 +168,7 @@ pub(crate) const REGISTERED_COMMANDS: &[CommandSpec] = &[
         visibility: CommandVisibility::Hidden,
         feature_gate: FeatureGate::Always,
         section: HelpSection::System,
+        handler: dispatch_help,
     },
     CommandSpec {
         name: "todo",
@@ -61,6 +177,7 @@ pub(crate) const REGISTERED_COMMANDS: &[CommandSpec] = &[
         visibility: CommandVisibility::Public,
         feature_gate: FeatureGate::Always,
         section: HelpSection::Tasks,
+        handler: dispatch_todo,
     },
     CommandSpec {
         name: "tasks",
@@ -69,6 +186,7 @@ pub(crate) const REGISTERED_COMMANDS: &[CommandSpec] = &[
         visibility: CommandVisibility::Public,
         feature_gate: FeatureGate::Always,
         section: HelpSection::Tasks,
+        handler: dispatch_tasks,
     },
     CommandSpec {
         name: "action",
@@ -77,6 +195,7 @@ pub(crate) const REGISTERED_COMMANDS: &[CommandSpec] = &[
         visibility: CommandVisibility::Public,
         feature_gate: FeatureGate::Always,
         section: HelpSection::Tasks,
+        handler: dispatch_action,
     },
     CommandSpec {
         name: "triage",
@@ -85,6 +204,7 @@ pub(crate) const REGISTERED_COMMANDS: &[CommandSpec] = &[
         visibility: CommandVisibility::Public,
         feature_gate: FeatureGate::Always,
         section: HelpSection::System,
+        handler: dispatch_triage,
     },
     CommandSpec {
         name: "health",
@@ -93,14 +213,16 @@ pub(crate) const REGISTERED_COMMANDS: &[CommandSpec] = &[
         visibility: CommandVisibility::Public,
         feature_gate: FeatureGate::Always,
         section: HelpSection::System,
+        handler: dispatch_health,
     },
     CommandSpec {
         name: "stop",
         aliases: &[],
-        help_short: "Stop all active workers",
+        help_short: "Stop one task (stop <id>) or drain all workers (stop)",
         visibility: CommandVisibility::Public,
         feature_gate: FeatureGate::Always,
         section: HelpSection::System,
+        handler: dispatch_stop,
     },
     CommandSpec {
         name: "timeline",
@@ -109,6 +231,7 @@ pub(crate) const REGISTERED_COMMANDS: &[CommandSpec] = &[
         visibility: CommandVisibility::Public,
         feature_gate: FeatureGate::Always,
         section: HelpSection::System,
+        handler: dispatch_timeline,
     },
     CommandSpec {
         name: "scout_add",
@@ -117,6 +240,7 @@ pub(crate) const REGISTERED_COMMANDS: &[CommandSpec] = &[
         visibility: CommandVisibility::Public,
         feature_gate: FeatureGate::ScoutEnabled,
         section: HelpSection::Scout,
+        handler: dispatch_scout_add,
     },
     CommandSpec {
         name: "scout_research",
@@ -125,6 +249,7 @@ pub(crate) const REGISTERED_COMMANDS: &[CommandSpec] = &[
         visibility: CommandVisibility::Public,
         feature_gate: FeatureGate::ScoutEnabled,
         section: HelpSection::Scout,
+        handler: dispatch_scout_research,
     },
     CommandSpec {
         name: "scout_list",
@@ -133,6 +258,7 @@ pub(crate) const REGISTERED_COMMANDS: &[CommandSpec] = &[
         visibility: CommandVisibility::Public,
         feature_gate: FeatureGate::ScoutEnabled,
         section: HelpSection::Scout,
+        handler: dispatch_scout_list,
     },
     CommandSpec {
         name: "scout_saved",
@@ -141,6 +267,7 @@ pub(crate) const REGISTERED_COMMANDS: &[CommandSpec] = &[
         visibility: CommandVisibility::Public,
         feature_gate: FeatureGate::ScoutEnabled,
         section: HelpSection::Scout,
+        handler: dispatch_scout_saved,
     },
     CommandSpec {
         name: "scout",
@@ -149,6 +276,7 @@ pub(crate) const REGISTERED_COMMANDS: &[CommandSpec] = &[
         visibility: CommandVisibility::Public,
         feature_gate: FeatureGate::ScoutEnabled,
         section: HelpSection::Scout,
+        handler: dispatch_scout,
     },
 ];
 
@@ -182,33 +310,7 @@ impl TelegramBot {
             debug!("Unknown: /{command}");
             return Ok(());
         };
-        match spec.name {
-            "start" => commands::help::handle(self, chat_id, args).await,
-            "todo" => commands::todo::handle(self, chat_id, args).await,
-            "tasks" => commands::status::handle(self, chat_id, args).await,
-            "action" => commands::action::handle(self, chat_id, args).await,
-            "timeline" => commands::timeline::handle(self, chat_id, args).await,
-            "triage" => commands::triage::handle(self, chat_id, args).await,
-            "stop" => commands::stop::handle(self, chat_id, args).await,
-            "health" => commands::health::handle(self, chat_id, args).await,
-            "scout_add" => crate::assistant::commands::cmd_addlink(self, chat_id, args).await,
-            "scout_research" => crate::assistant::commands::cmd_research(self, chat_id, args).await,
-            "scout_list" => crate::assistant::commands::cmd_simplelist(self, chat_id, args).await,
-            "scout_saved" => {
-                crate::assistant::commands::cmd_simplelist(self, chat_id, "saved").await
-            }
-            "scout" if args.is_empty() => {
-                crate::assistant::commands::cmd_scout(self, chat_id).await
-            }
-            "scout" => {
-                crate::assistant::commands::send_help(self, chat_id, "/scout takes no arguments.")
-                    .await
-            }
-            other => {
-                debug!("Registered command /{other} has no dispatch arm — did you forget to wire it up after adding it to REGISTERED_COMMANDS?");
-                Ok(())
-            }
-        }
+        (spec.handler)(self, chat_id, args).await
     }
 
     pub(crate) async fn handle_plain_text(

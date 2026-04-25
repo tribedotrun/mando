@@ -53,23 +53,22 @@ pub(crate) async fn get_projects(
     let projects = rows
         .iter()
         .map(|row| {
-            let aliases: Vec<String> = serde_json::from_str(&row.aliases).unwrap_or_default();
-            let hooks: std::collections::HashMap<String, String> =
-                serde_json::from_str(&row.hooks).unwrap_or_default();
-            api_types::ProjectSummary {
-                key: row.path.clone(),
-                name: row.name.clone(),
-                path: row.path.clone(),
-                github_repo: row.github_repo.clone(),
-                logo: row.logo.clone(),
-                aliases,
-                hooks,
-                worker_preamble: row.worker_preamble.clone(),
-                scout_summary: row.scout_summary.clone(),
-                check_command: row.check_command.clone(),
-            }
+            let project = settings::projects::row_to_config(row)
+                .map_err(|e| internal_error(e, "failed to decode stored project config"))?;
+            Ok(api_types::ProjectSummary {
+                key: project.path.clone(),
+                name: project.name,
+                path: project.path,
+                github_repo: project.github_repo,
+                logo: project.logo,
+                aliases: project.aliases,
+                hooks: project.hooks,
+                worker_preamble: project.worker_preamble,
+                scout_summary: project.scout_summary,
+                check_command: project.check_command,
+            })
         })
-        .collect();
+        .collect::<Result<Vec<_>, ApiError>>()?;
 
     Ok(Json(api_types::ProjectsListResponse { projects }))
 }
@@ -119,7 +118,7 @@ pub(crate) async fn post_projects(
     }
 
     // Auto-detect GitHub repo — reject if not found.
-    let github_repo = state.settings.detect_github_repo(&abs_path_str);
+    let github_repo = state.settings.detect_github_repo(&abs_path_str).await;
     if github_repo.is_none() {
         return Err(error_response(
             StatusCode::BAD_REQUEST,
@@ -158,7 +157,7 @@ pub(crate) async fn post_projects(
     let scout_summary = detect_project_summary(&abs_path).await;
     let logo = state.settings.detect_project_logo(&abs_path, &name);
 
-    let pc = settings::config::settings::ProjectConfig {
+    let pc = settings::ProjectConfig {
         name: name.clone(),
         path: abs_path_str.clone(),
         github_repo: github_repo.clone(),
@@ -168,7 +167,10 @@ pub(crate) async fn post_projects(
         ..Default::default()
     };
 
-    let row = state.settings.project_row_from_config(&pc);
+    let row = state
+        .settings
+        .project_row_from_config(&pc)
+        .map_err(|e| internal_error(e, "failed to serialize project for persistence"))?;
     state
         .settings
         .upsert_project(&row)
@@ -263,11 +265,12 @@ pub(crate) async fn delete_project(
     Path(api_types::ProjectNameParams { name }): Path<api_types::ProjectNameParams>,
 ) -> Result<Json<api_types::ProjectDeleteResponse>, ApiError> {
     let row = resolve_project(&state, &name).await?;
-    let aliases: Vec<String> = serde_json::from_str(&row.aliases).unwrap_or_default();
+    let project = settings::projects::row_to_config(&row)
+        .map_err(|e| internal_error(e, "failed to decode stored project config"))?;
 
     // Collect all identifiers tasks might use to reference this project.
     let mut identifiers = vec![row.path.clone(), row.name.clone()];
-    identifiers.extend(aliases);
+    identifiers.extend(project.aliases);
 
     // Cascade-delete tasks belonging to this project.
     let config = state.settings.load_config();

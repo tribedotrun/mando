@@ -1,6 +1,6 @@
 import React from 'react';
 import { useNotificationsPref } from '#renderer/global/runtime/useDesktopNotifications';
-import { Switch } from '#renderer/global/ui/switch';
+import { Switch } from '#renderer/global/ui/primitives/switch';
 import { useConfig, useLoginItemToggle } from '#renderer/domains/settings/runtime/hooks';
 import {
   useUpdateLifecycle,
@@ -17,19 +17,11 @@ export function SettingsGeneral(): React.ReactElement {
   const { data: config } = useConfig();
   const openAtLogin = config?.ui?.openAtLogin ?? false;
 
-  const {
-    appVersion,
-    updateChannel,
-    updateCheckStatus,
-    savingChannel,
-    changeChannel,
-    checkForUpdates,
-    installUpdate,
-    setLoginItem,
-    onInstallError,
-  } = useUpdateLifecycle();
+  const lifecycle = useUpdateLifecycle();
 
-  const { toggle: toggleLoginItem, saving: savingLoginItem } = useLoginItemToggle(setLoginItem);
+  const { toggle: toggleLoginItem, saving: savingLoginItem } = useLoginItemToggle(
+    lifecycle.login.setLoginItem,
+  );
 
   return (
     <div data-testid="settings-general">
@@ -37,12 +29,12 @@ export function SettingsGeneral(): React.ReactElement {
 
       <SettingsRow label="Version">
         <span className="flex items-center gap-3">
-          <span className="text-code text-foreground">{appVersion || '\u2014'}</span>
+          <span className="text-code text-foreground">{lifecycle.app.version || '\u2014'}</span>
           <UpdateCheckButton
-            status={updateCheckStatus}
-            onCheck={checkForUpdates}
-            onInstall={installUpdate}
-            onInstallError={onInstallError}
+            status={lifecycle.update.status}
+            onCheck={lifecycle.update.check}
+            onInstall={lifecycle.update.install}
+            onInstallError={lifecycle.events.onInstallError}
           />
         </span>
       </SettingsRow>
@@ -50,9 +42,9 @@ export function SettingsGeneral(): React.ReactElement {
       <SettingsRow label="Update channel">
         <SegmentedControl
           options={UPDATE_CHANNELS}
-          value={updateChannel}
-          onChange={changeChannel}
-          disabled={savingChannel}
+          value={lifecycle.channel.value}
+          onChange={lifecycle.channel.change}
+          disabled={lifecycle.channel.saving}
         />
       </SettingsRow>
 

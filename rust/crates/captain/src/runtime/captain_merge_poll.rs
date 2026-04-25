@@ -1,8 +1,8 @@
 //! Parallel merge polling — checks GitHub merge status concurrently.
 
 use crate::{ItemStatus, Task};
-use settings::config::settings::Config;
-use settings::config::workflow::CaptainWorkflow;
+use settings::CaptainWorkflow;
+use settings::Config;
 
 use super::captain_merge::{
     apply_merge_result, check_merge, handle_merge_error, spawn_merge, MergeResult,
@@ -71,7 +71,7 @@ pub(crate) async fn poll_merging_items(
         let repo = item
             .github_repo
             .clone()
-            .or_else(|| settings::config::resolve_github_repo(Some(&item.project), config));
+            .or_else(|| settings::resolve_github_repo(Some(&item.project), config));
         match repo {
             Some(repo) if !repo.is_empty() => {
                 checks.push(MergeCheck {
@@ -112,7 +112,7 @@ pub(crate) async fn poll_merging_items(
     if !checks.is_empty() {
         let futs: Vec<_> = checks
             .iter()
-            .map(|c| crate::io::github::is_pr_merged(&c.repo, &c.pr_num))
+            .map(|c| global_github::is_pr_merged(&c.repo, &c.pr_num))
             .collect();
         let merge_results = futures::future::join_all(futs).await;
 
@@ -178,7 +178,7 @@ pub(crate) async fn poll_merging_items(
             let repo = item
                 .github_repo
                 .clone()
-                .or_else(|| settings::config::resolve_github_repo(Some(&item.project), config));
+                .or_else(|| settings::resolve_github_repo(Some(&item.project), config));
             if let Some(repo) = repo {
                 if !repo.is_empty() {
                     pending_github_check.push((idx, repo, pr_num.to_string()));
@@ -197,7 +197,7 @@ pub(crate) async fn poll_merging_items(
     if !pending_github_check.is_empty() {
         let futs: Vec<_> = pending_github_check
             .iter()
-            .map(|(_, repo, pr_num)| crate::io::github::is_pr_merged(repo, pr_num))
+            .map(|(_, repo, pr_num)| global_github::is_pr_merged(repo, pr_num))
             .collect();
         let gh_results = futures::future::join_all(futs).await;
 

@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use crate::ScoutItem;
+use crate::{ScoutItem, ScoutStatus};
 use anyhow::Result;
 use sqlx::SqlitePool;
 
@@ -105,6 +105,14 @@ impl ScoutDb {
 
     pub async fn increment_error_count(&self, id: i64) -> Result<()> {
         dq::increment_error_count(&self.pool, id).await
+    }
+
+    pub async fn increment_error_count_if_status(
+        &self,
+        id: i64,
+        allowed_statuses: &[ScoutStatus],
+    ) -> Result<bool> {
+        dq::increment_error_count_if_status(&self.pool, id, allowed_statuses).await
     }
 
     /// Record a CC session via the unified sessions table.
@@ -265,7 +273,6 @@ impl ScoutDb {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ScoutStatus;
     use global_db::Db;
 
     async fn test_db() -> ScoutDb {
@@ -512,6 +519,48 @@ mod tests {
         db.increment_error_count(item.id).await.unwrap();
         let updated2 = db.get_item(item.id).await.unwrap().unwrap();
         assert_eq!(updated2.error_count, 2);
+    }
+
+    #[tokio::test]
+    async fn increment_error_count_marks_fetched_item_error() {
+        let db = test_db().await;
+        let (item, _) = db
+            .add_item("https://err-fetched.com", "other", None)
+            .await
+            .unwrap();
+        db.update_status(item.id, "fetched").await.unwrap();
+
+        db.increment_error_count(item.id).await.unwrap();
+
+        let updated = db.get_item(item.id).await.unwrap().unwrap();
+        assert_eq!(updated.error_count, 1);
+        assert_eq!(updated.status, ScoutStatus::Error);
+    }
+
+    #[tokio::test]
+    async fn guarded_increment_error_count_skips_processed_item() {
+        let db = test_db().await;
+        let (item, _) = db
+            .add_item("https://err-race.com", "other", None)
+            .await
+            .unwrap();
+        db.update_status(item.id, "fetched").await.unwrap();
+        let changed = db
+            .update_processed(item.id, "Winner", 80, 80, None, None, "sum", "art")
+            .await
+            .unwrap();
+        assert!(changed);
+
+        let marked = db
+            .increment_error_count_if_status(item.id, &[ScoutStatus::Fetched])
+            .await
+            .unwrap();
+
+        assert!(!marked);
+        let updated = db.get_item(item.id).await.unwrap().unwrap();
+        assert_eq!(updated.error_count, 0);
+        assert_eq!(updated.status, ScoutStatus::Processed);
+        assert_eq!(updated.title.as_deref(), Some("Winner"));
     }
 
     #[tokio::test]

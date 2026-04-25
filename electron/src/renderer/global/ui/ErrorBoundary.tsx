@@ -1,6 +1,6 @@
 import React from 'react';
 import log from '#renderer/global/service/logger';
-import { Button } from '#renderer/global/ui/button';
+import { Button } from '#renderer/global/ui/primitives/button';
 
 interface ErrorBoundaryProps {
   children: React.ReactNode;
