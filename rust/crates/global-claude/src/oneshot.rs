@@ -115,7 +115,11 @@ where
     }
 }
 
+// `impl CcOneShot { run_with_pid_hook }` follows this test module. Moving
+// the impl in front would shuffle a large block for no behavioral gain;
+// allow the lint instead.
 #[cfg(test)]
+#[allow(clippy::items_after_test_module)]
 mod tests {
     use super::*;
     use crate::CcEnvelope;

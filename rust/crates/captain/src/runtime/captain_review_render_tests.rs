@@ -193,3 +193,82 @@ fn test_template_renders_spawn_fail_verdicts() {
         "spawn_fail must NOT render retry_clarifier"
     );
 }
+
+#[test]
+fn bug_fix_evidence_rule_uses_typed_flags() {
+    // Bug-fix tasks must surface the typed gate values to the reviewer
+    // and instruct it to nudge when either flag is false. The gate replaces
+    // the old caption-prefix heuristic.
+    let mut vars = base_vars();
+    vars.insert("trigger", "gates_pass");
+    vars.insert("is_gates_pass", "true");
+    vars.insert("is_bug_fix", "true");
+    vars.insert("has_before_fix", "false");
+    vars.insert("has_after_fix", "true");
+    vars.insert("has_cannot_reproduce", "false");
+
+    let rendered = render(&vars);
+
+    assert!(
+        rendered.contains("Bug-fix evidence"),
+        "bug-fix evidence section must render when is_bug_fix is true"
+    );
+    assert!(
+        rendered.contains("`has_before_fix`: false"),
+        "the typed before-fix flag must be threaded through to the prompt"
+    );
+    assert!(
+        rendered.contains("`has_after_fix`: true"),
+        "the typed after-fix flag must be threaded through to the prompt"
+    );
+    assert!(
+        rendered.contains("--kind before"),
+        "nudge instructions must reference the typed --kind flag"
+    );
+    assert!(
+        rendered.contains("--kind after"),
+        "nudge instructions must reference the typed --kind flag"
+    );
+}
+
+#[test]
+fn cannot_reproduce_routes_to_escalate() {
+    // When the worker tagged an evidence file `cannot_reproduce`, the rule
+    // must instruct the reviewer to escalate, NOT to nudge for before/after.
+    let mut vars = base_vars();
+    vars.insert("trigger", "gates_pass");
+    vars.insert("is_gates_pass", "true");
+    vars.insert("is_bug_fix", "true");
+    vars.insert("has_before_fix", "false");
+    vars.insert("has_after_fix", "false");
+    vars.insert("has_cannot_reproduce", "true");
+
+    let rendered = render(&vars);
+
+    assert!(
+        rendered.contains("`has_cannot_reproduce`: true"),
+        "cannot_reproduce flag must be surfaced to the prompt"
+    );
+    assert!(
+        rendered.contains("**escalate**: \"Worker reported the bug cannot be reproduced"),
+        "cannot_reproduce must route deterministically to escalate"
+    );
+}
+
+#[test]
+fn bug_fix_section_omitted_when_not_a_bug_fix() {
+    let mut vars = base_vars();
+    vars.insert("trigger", "gates_pass");
+    vars.insert("is_gates_pass", "true");
+    vars.insert("is_bug_fix", "");
+    vars.insert("has_before_fix", "false");
+    vars.insert("has_after_fix", "false");
+    vars.insert("has_cannot_reproduce", "false");
+
+    let rendered = render(&vars);
+
+    assert!(
+        !rendered.contains("Bug-fix evidence"),
+        "bug-fix section must not render when the task is not a bug fix"
+    );
+}

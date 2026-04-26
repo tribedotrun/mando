@@ -36,9 +36,10 @@ pub(crate) fn build_clarifier_schema() -> serde_json::Value {
             },
             "title": { "type": "string" },
             "no_pr": { "type": ["boolean", "null"] },
-            "resource": { "type": ["string", "null"] }
+            "resource": { "type": ["string", "null"] },
+            "is_bug_fix": { "type": "boolean" }
         },
-        "required": ["status", "context", "title"]
+        "required": ["status", "context", "title", "is_bug_fix"]
     })
 }
 
@@ -157,6 +158,7 @@ pub struct ClarifierResult {
     pub generated_title: Option<String>,
     pub no_pr: Option<bool>,
     pub resource: Option<String>,
+    pub is_bug_fix: Option<bool>,
     pub session_id: Option<String>,
 }
 
@@ -292,6 +294,7 @@ fn escalate(title: &str, reason: &str) -> ClarifierResult {
         generated_title: None,
         no_pr: None,
         resource: None,
+        is_bug_fix: None,
         session_id: None,
     }
 }
@@ -358,6 +361,19 @@ pub(crate) fn parse_clarifier_response(text: &str, item_title: &str) -> Clarifie
 
     let no_pr = parsed["no_pr"].as_bool();
     let resource = parsed["resource"].as_str().map(String::from);
+    let is_bug_fix = parsed["is_bug_fix"].as_bool();
+    // The schema requires `is_bug_fix` as a non-null boolean. If we still see
+    // `None`, the LLM violated the schema — log loudly so the failure is
+    // visible instead of silently defaulting downstream consumers to `false`
+    // (the prior behavior, which suppressed the bug-fix protocol on
+    // misclassified tasks).
+    if is_bug_fix.is_none() {
+        tracing::warn!(
+            module = "captain-runtime-clarifier",
+            "clarifier returned null is_bug_fix despite schema requiring boolean — \
+             downstream defaults to false; investigate the model output"
+        );
+    }
 
     ClarifierResult {
         status,
@@ -366,6 +382,7 @@ pub(crate) fn parse_clarifier_response(text: &str, item_title: &str) -> Clarifie
         generated_title,
         no_pr,
         resource,
+        is_bug_fix,
         session_id: None,
     }
 }

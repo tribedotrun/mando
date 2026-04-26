@@ -65,7 +65,24 @@ impl TaskStore {
         Ok(tasks)
     }
 
+    /// Low-level task INSERT that bypasses workbench creation. The DB
+    /// FK rejects any task whose `workbench_id` doesn't reference a
+    /// real workbench row; production task creation goes through
+    /// [`crate::create_task_with_workbench`], which inserts the
+    /// workbench and the task in a single transaction. This entry
+    /// point survives only for the captain tick-merge path (which
+    /// writes tasks already loaded from the DB with valid FKs) and
+    /// for tests that pre-seed a workbench via
+    /// `crate::io::test_support::seed_workbench`. The runtime check
+    /// makes a misuse loud and immediate instead of waiting for the
+    /// downstream INSERT to fail with a generic FK error.
     pub async fn add(&self, task: Task) -> Result<i64> {
+        anyhow::ensure!(
+            task.workbench_id > 0,
+            "TaskStore::add requires a real workbench_id; \
+             production callers must use create_task_with_workbench, \
+             tests must seed a workbench first via io::test_support::seed_workbench"
+        );
         tasks::insert_task(&self.pool, &task).await
     }
 
@@ -300,33 +317,36 @@ mod tests {
     use super::*;
     use crate::ItemStatus;
 
-    async fn test_store() -> TaskStore {
+    async fn test_store() -> (TaskStore, i64) {
         let db = global_db::Db::open_in_memory().await.unwrap();
         // Seed a test project so FK constraints are satisfied.
-        settings::projects::upsert(db.pool(), "test", "", None)
+        let project_id = settings::projects::upsert(db.pool(), "test", "", None)
             .await
             .unwrap();
-        TaskStore::new(db.pool().clone())
+        let store = TaskStore::new(db.pool().clone());
+        let wb_id = crate::io::test_support::seed_workbench(store.pool(), project_id).await;
+        (store, wb_id)
     }
 
-    fn test_task(title: &str) -> Task {
+    fn test_task(title: &str, wb_id: i64) -> Task {
         let mut t = Task::new(title);
         t.project_id = 1;
         t.project = "test".into();
+        t.workbench_id = wb_id;
         t
     }
 
     #[tokio::test]
     async fn open_empty() {
-        let store = test_store().await;
+        let (store, _wb_id) = test_store().await;
         assert!(store.load_all().await.unwrap().is_empty());
         assert!(store.routing().await.unwrap().is_empty());
     }
 
     #[tokio::test]
     async fn add_and_find() {
-        let store = test_store().await;
-        let mut task = test_task("Test task");
+        let (store, wb_id) = test_store().await;
+        let mut task = test_task("Test task", wb_id);
         task.status = ItemStatus::New;
         let id = store.add(task).await.unwrap();
         assert!(id > 0);
@@ -338,8 +358,8 @@ mod tests {
 
     #[tokio::test]
     async fn update_task() {
-        let store = test_store().await;
-        let task = test_task("Update me");
+        let (store, wb_id) = test_store().await;
+        let task = test_task("Update me", wb_id);
         let id = store.add(task).await.unwrap();
 
         store
@@ -352,19 +372,19 @@ mod tests {
 
     #[tokio::test]
     async fn remove_task() {
-        let store = test_store().await;
-        let id = store.add(test_task("Remove me")).await.unwrap();
+        let (store, wb_id) = test_store().await;
+        let id = store.add(test_task("Remove me", wb_id)).await.unwrap();
         assert!(store.remove(id).await.unwrap());
         assert!(store.find_by_id(id).await.unwrap().is_none());
     }
 
     #[tokio::test]
     async fn status_counts() {
-        let store = test_store().await;
-        let mut t1 = test_task("A");
+        let (store, wb_id) = test_store().await;
+        let mut t1 = test_task("A", wb_id);
         t1.status = ItemStatus::New;
         store.add(t1).await.unwrap();
-        let mut t2 = test_task("B");
+        let mut t2 = test_task("B", wb_id);
         t2.status = ItemStatus::Queued;
         store.add(t2).await.unwrap();
 
@@ -375,8 +395,8 @@ mod tests {
 
     #[tokio::test]
     async fn update_fields_sets_context() {
-        let store = test_store().await;
-        let id = store.add(test_task("Strict task")).await.unwrap();
+        let (store, wb_id) = test_store().await;
+        let id = store.add(test_task("Strict task", wb_id)).await.unwrap();
 
         store
             .update_fields(
@@ -396,8 +416,8 @@ mod tests {
 
     #[tokio::test]
     async fn update_fields_sets_intervention_count() {
-        let store = test_store().await;
-        let id = store.add(test_task("Counter task")).await.unwrap();
+        let (store, wb_id) = test_store().await;
+        let id = store.add(test_task("Counter task", wb_id)).await.unwrap();
 
         store
             .update_fields(
@@ -416,8 +436,11 @@ mod tests {
 
     #[tokio::test]
     async fn merge_changed_items_preserves_concurrent_human_edits() {
-        let store = test_store().await;
-        let id = store.add(test_task("Concurrent edit")).await.unwrap();
+        let (store, wb_id) = test_store().await;
+        let id = store
+            .add(test_task("Concurrent edit", wb_id))
+            .await
+            .unwrap();
         let original = store.find_by_id(id).await.unwrap().unwrap();
         let snapshots = HashMap::from([(id, TaskSnapshotJson::from_task(&original).unwrap())]);
 
@@ -449,8 +472,8 @@ mod tests {
     /// even though `skip_serializing_if` omits the key from the JSON.
     #[tokio::test]
     async fn merge_propagates_field_cleared_to_none() {
-        let store = test_store().await;
-        let mut task = test_task("Rework merge test");
+        let (store, wb_id) = test_store().await;
+        let mut task = test_task("Rework merge test", wb_id);
         task.pr_number = Some(594);
         task.worker = Some("worker-1".into());
         let id = store.add(task).await.unwrap();
@@ -487,8 +510,8 @@ mod tests {
     /// new value, the human's value wins (it is more recent).
     #[tokio::test]
     async fn merge_clear_preserves_concurrent_human_set() {
-        let store = test_store().await;
-        let mut task = test_task("Concurrent set vs clear");
+        let (store, wb_id) = test_store().await;
+        let mut task = test_task("Concurrent set vs clear", wb_id);
         task.pr_number = Some(594);
         let id = store.add(task).await.unwrap();
         let original = store.find_by_id(id).await.unwrap().unwrap();

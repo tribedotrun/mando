@@ -128,9 +128,6 @@ async fn touch_workbench_activity(
     bus: Option<&global_bus::EventBus>,
     workbench_id: i64,
 ) -> anyhow::Result<()> {
-    if workbench_id == 0 {
-        return Ok(());
-    }
     let touched = crate::io::queries::workbenches::touch_activity(pool, workbench_id).await?;
     if touched {
         if let Some(bus) = bus {

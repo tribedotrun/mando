@@ -38,6 +38,31 @@ export function isCarrierUserEvent(event: TranscriptEvent): boolean {
   return event.data.blocks.every((block) => block.kind === 'tool_result');
 }
 
+const SKILL_PROMPT_PREFIX = 'Base directory for this skill:';
+
+/**
+ * CC injects every skill body into the transcript as a user text turn that
+ * starts with this literal prefix. The renderer collapses those turns so the
+ * skill prompt doesn't dominate the transcript.
+ */
+export function isSkillPromptBody(body: string): boolean {
+  return body.startsWith(SKILL_PROMPT_PREFIX);
+}
+
+/**
+ * Pull a short skill identifier out of the prompt body — the last path
+ * segment of the `Base directory for this skill:` line (e.g. `x-land`).
+ * Returns `null` when the line is missing or the path is empty.
+ */
+export function extractSkillName(body: string): string | null {
+  const firstLine = body.split('\n', 1)[0]?.trim() ?? '';
+  if (!firstLine.startsWith(SKILL_PROMPT_PREFIX)) return null;
+  const path = firstLine.slice(SKILL_PROMPT_PREFIX.length).trim();
+  if (!path) return null;
+  const last = path.split('/').filter(Boolean).pop();
+  return last ?? null;
+}
+
 /**
  * Tools whose usage is read-only/search and collapses cleanly when grouped
  * with its neighbors. Mirrors CC's `getToolSearchOrReadInfo` — Write / Edit /

@@ -4,7 +4,7 @@ import { useScoutListHeader } from '#renderer/domains/scout/runtime/useScoutList
 import type { ScoutQueryParams } from '#renderer/domains/scout/runtime/hooks';
 import { ScoutFilterMenu } from '#renderer/domains/scout/ui/ScoutFilterMenu';
 import { AddUrlForm } from '#renderer/domains/scout/ui/AddUrlForm';
-import { PromptModal } from '#renderer/global/ui/PromptModal';
+import { PromptModal } from '#renderer/domains/scout/ui/PromptModal';
 import { Button } from '#renderer/global/ui/primitives/button';
 import { Input } from '#renderer/global/ui/primitives/input';
 

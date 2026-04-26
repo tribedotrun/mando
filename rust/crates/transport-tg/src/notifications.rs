@@ -424,7 +424,7 @@ mod tests {
         // Serde round-trip comparison since TelegramReplyMarkup doesn't
         // derive PartialEq.
         assert_eq!(
-            serde_json::to_value(&markup.unwrap()).unwrap(),
+            serde_json::to_value(markup.unwrap()).unwrap(),
             serde_json::to_value(&custom).unwrap(),
         );
     }

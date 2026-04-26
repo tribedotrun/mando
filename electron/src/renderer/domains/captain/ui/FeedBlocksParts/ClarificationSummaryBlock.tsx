@@ -1,6 +1,7 @@
 import React from 'react';
 import { formatEventTime } from '#renderer/domains/captain/service/feedHelpers';
 import type { TimelineEvent, ClarifierQuestion } from '#renderer/global/types';
+import { InlineMarkdown } from '#renderer/global/ui/InlineMarkdown';
 import { MessageSquare } from 'lucide-react';
 
 export function ClarificationSummaryBlock({
@@ -29,7 +30,8 @@ export function ClarificationSummaryBlock({
       </div>
       {questions.map((question, index) => (
         <div key={index} className="mb-1 text-body text-text-2">
-          <span className="text-text-3">{index + 1}.</span> {question.question}
+          <span className="text-text-3">{index + 1}.</span>{' '}
+          <InlineMarkdown text={question.question} />
           {question.self_answered && (
             <span className="ml-1 text-caption text-text-3">(auto-resolved)</span>
           )}

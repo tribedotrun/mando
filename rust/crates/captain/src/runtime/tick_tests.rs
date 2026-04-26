@@ -46,9 +46,11 @@ async fn tick_dry_run_does_not_mutate() {
     let store_lock = test_store_lock(&dir).await;
     {
         let store = store_lock.write().await;
+        let wb_id = crate::io::test_support::seed_workbench(store.pool(), 1).await;
         let mut t = crate::Task::new("Test task");
         t.project_id = 1;
         t.project = "test".into();
+        t.workbench_id = wb_id;
         t.status = ItemStatus::New;
         store.add(t).await.unwrap();
     }
@@ -108,9 +110,11 @@ async fn tick_live_retries_clarifier_on_failure() {
         let acme_id = settings::projects::upsert(store.pool(), "acme/widgets", "", None)
             .await
             .unwrap();
+        let wb_id = crate::io::test_support::seed_workbench(store.pool(), acme_id).await;
         let mut t = crate::Task::new("Lifecycle test item");
         t.project_id = acme_id;
         t.project = "acme/widgets".into();
+        t.workbench_id = wb_id;
         t.status = ItemStatus::New;
         store.add(t).await.unwrap();
     }

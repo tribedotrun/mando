@@ -37,8 +37,43 @@ case "$EVENT" in
     if ! command -v jq >/dev/null 2>&1; then
       echo "$(date -u +%FT%TZ) jq not found on PATH" >>"$LOG"; exit 0
     fi
-    SESSION_ID=$(jq -r '.session_id // empty')
+    PAYLOAD=$(cat)
+    SESSION_ID=$(echo "$PAYLOAD" | jq -r '.session_id // empty')
     [ -z "$SESSION_ID" ] && exit 0
+    # Skip when CC ran from a different cwd than the terminal's home (user
+    # cd'd inside the shell and started a fresh `claude`). CC keys conversation
+    # files by the cwd at startup, so capturing this session id under the
+    # terminal's home cwd would break `claude --resume` after a daemon
+    # restart with "No conversation found".
+    #
+    # Both sides are canonicalized via `realpath` before comparison so that
+    # symlinked components (e.g. `/var` ↔ `/private/var` on macOS) don't
+    # produce a false mismatch. Daemon-side: terminal::session canonicalizes
+    # before exporting MANDO_TERMINAL_CWD. Hook-side: realpath here.
+    if [ -n "$MANDO_TERMINAL_CWD" ]; then
+      CC_CWD=$(echo "$PAYLOAD" | jq -r '.cwd // empty')
+      if [ -z "$CC_CWD" ]; then
+        # CC version old enough to omit `.cwd` from the SessionStart payload.
+        # Log so operators can spot when the guard couldn't fire and decide
+        # whether the upgrade is worth pushing; pass through to preserve the
+        # legacy capture path.
+        echo "$(date -u +%FT%TZ) cc-session payload missing .cwd for terminal ${MANDO_TERMINAL_ID} — guard cannot fire, falling back to capture" >>"$LOG"
+      else
+        # realpath is in coreutils on Linux and shipped with macOS. Fall back
+        # to the raw path if it's missing or the path doesn't resolve.
+        if command -v realpath >/dev/null 2>&1; then
+          CC_CWD_CANON=$(realpath "$CC_CWD" 2>/dev/null || echo "$CC_CWD")
+          TERM_CWD_CANON=$(realpath "$MANDO_TERMINAL_CWD" 2>/dev/null || echo "$MANDO_TERMINAL_CWD")
+        else
+          CC_CWD_CANON="$CC_CWD"
+          TERM_CWD_CANON="$MANDO_TERMINAL_CWD"
+        fi
+        if [ "$CC_CWD_CANON" != "$TERM_CWD_CANON" ]; then
+          echo "$(date -u +%FT%TZ) skipping cc-session capture for terminal ${MANDO_TERMINAL_ID} (cc_cwd=${CC_CWD_CANON} terminal_cwd=${TERM_CWD_CANON})" >>"$LOG"
+          exit 0
+        fi
+      fi
+    fi
     curl -sf "http://127.0.0.1:${MANDO_PORT}/api/terminal/${MANDO_TERMINAL_ID}/cc-session" \
       -H "Authorization: Bearer ${MANDO_AUTH_TOKEN}" \
       -H "Content-Type: application/json" \
@@ -153,6 +188,66 @@ fn sync_claude_settings(hook_path: &Path) -> anyhow::Result<()> {
     std::fs::rename(&tmp_path, &settings_path)?;
 
     Ok(())
+}
+
+// `setup_session_hooks` follows the test module; allow the clippy lint
+// instead of moving the test block to the end of the file.
+#[cfg(test)]
+#[allow(clippy::items_after_test_module)]
+mod tests {
+    use super::HOOK_SCRIPT;
+
+    #[test]
+    fn hook_script_skips_session_capture_on_cwd_mismatch() {
+        let script = HOOK_SCRIPT;
+        // The capture must happen before the curl POST and gate on the
+        // CC-reported cwd matching the terminal's home cwd.
+        assert!(
+            script.contains("MANDO_TERMINAL_CWD"),
+            "hook must consult MANDO_TERMINAL_CWD"
+        );
+        assert!(
+            script.contains("CC_CWD") && script.contains(".cwd // empty"),
+            "hook must read cwd from the CC payload"
+        );
+        let guard = script
+            .find(r#""$CC_CWD_CANON" != "$TERM_CWD_CANON""#)
+            .expect("hook must compare canonicalized payload cwd to terminal cwd");
+        let curl = script
+            .find("api/terminal/${MANDO_TERMINAL_ID}/cc-session")
+            .expect("hook must POST to /cc-session");
+        assert!(
+            guard < curl,
+            "cwd guard must run before the cc-session POST"
+        );
+    }
+
+    #[test]
+    fn hook_script_canonicalizes_both_paths() {
+        // Symlink resolution avoids false mismatches like /var vs /private/var
+        // on macOS. Both sides must run through realpath before comparison.
+        let script = HOOK_SCRIPT;
+        assert!(
+            script.contains(r#"CC_CWD_CANON=$(realpath "$CC_CWD""#),
+            "hook must canonicalize CC's reported cwd via realpath"
+        );
+        assert!(
+            script.contains(r#"TERM_CWD_CANON=$(realpath "$MANDO_TERMINAL_CWD""#),
+            "hook must canonicalize MANDO_TERMINAL_CWD via realpath"
+        );
+    }
+
+    #[test]
+    fn hook_script_logs_when_cc_payload_omits_cwd() {
+        // Older CC builds omit `.cwd` from the SessionStart payload. Pass
+        // through (legacy capture path) but log so the operator can see the
+        // guard couldn't fire — silent fallback would mask a regression.
+        let script = HOOK_SCRIPT;
+        assert!(
+            script.contains("cc-session payload missing .cwd"),
+            "hook must log when CC omits cwd"
+        );
+    }
 }
 
 /// Run at daemon startup: write hook script and sync settings.json.

@@ -11,6 +11,31 @@ pub enum ArtifactType {
     WorkSummary,
 }
 
+/// Typed role for an evidence media file. Mirrors `api_types::EvidenceKind`.
+/// `None` (legacy) is treated by captain as `Other` for gate purposes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum EvidenceKind {
+    #[serde(rename = "before_fix")]
+    BeforeFix,
+    #[serde(rename = "after_fix")]
+    AfterFix,
+    #[serde(rename = "cannot_reproduce")]
+    CannotReproduce,
+    #[serde(rename = "other")]
+    Other,
+}
+
+impl From<api_types::EvidenceKind> for EvidenceKind {
+    fn from(k: api_types::EvidenceKind) -> Self {
+        match k {
+            api_types::EvidenceKind::BeforeFix => Self::BeforeFix,
+            api_types::EvidenceKind::AfterFix => Self::AfterFix,
+            api_types::EvidenceKind::CannotReproduce => Self::CannotReproduce,
+            api_types::EvidenceKind::Other => Self::Other,
+        }
+    }
+}
+
 /// A single media attachment in an artifact.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ArtifactMedia {
@@ -29,6 +54,11 @@ pub struct ArtifactMedia {
     /// Per-file caption describing what this media shows.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub caption: Option<String>,
+    /// Typed role: `BeforeFix` / `AfterFix` for bug-fix tasks, `Other` (or
+    /// `None` legacy) otherwise. Captain gates the bug-fix evidence rule
+    /// off this field rather than caption text.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kind: Option<EvidenceKind>,
 }
 
 #[derive(Debug, Clone)]
@@ -36,6 +66,7 @@ pub struct EvidenceFileSpec {
     pub filename: String,
     pub ext: String,
     pub caption: String,
+    pub kind: Option<EvidenceKind>,
 }
 
 /// A task artifact stored in the database.

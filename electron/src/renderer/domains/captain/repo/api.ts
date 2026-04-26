@@ -112,10 +112,25 @@ export function startImplementation(
   });
 }
 
+// Manual override for the clarifier's bug-fix classification. When the user
+// flips the toggle in the task editor we PATCH only the `is_bug_fix` field;
+// the captain workflow picks it up on the next worker spawn / review tick.
+export const setTaskIsBugFix = (id: number, value: boolean) =>
+  apiPatchRouteR('patchTasksById', { is_bug_fix: value }, { params: { id } });
+
 // Retry / Resume / Clarify
 export const retryItem = (id: number) => apiPostRouteR('postTasksRetry', { id });
 export const resumeRateLimited = (id: number) =>
   apiPostRouteR('postTasksResumeratelimited', { id });
+
+// `wait: false` makes the clarify endpoint ack as soon as the answer
+// is committed and spawn the follow-up CC reclarify call on the daemon
+// task tracker. The renderer relies on SSE for the next state, so the
+// clarification form unblocks immediately rather than waiting on the
+// long CC roundtrip.
+function clarifyOptions(id: number) {
+  return { params: { id }, query: { wait: false } };
+}
 
 export function answerClarification(
   id: number,
@@ -126,9 +141,9 @@ export function answerClarification(
     const form = new FormData();
     form.append('answers', JSON.stringify(answers));
     for (const img of images) form.append('images', img, img.name);
-    return apiMultipartRouteR('postTasksByIdClarify', form, { params: { id } }, { answers });
+    return apiMultipartRouteR('postTasksByIdClarify', form, clarifyOptions(id), { answers });
   }
-  return apiMultipartRouteR('postTasksByIdClarify', { answers }, { params: { id } });
+  return apiMultipartRouteR('postTasksByIdClarify', { answers }, clarifyOptions(id));
 }
 
 /** Flat-text answer for Telegram-style input */
@@ -141,9 +156,9 @@ export function answerClarificationText(
     const form = new FormData();
     form.append('answer', answer);
     for (const img of images) form.append('images', img, img.name);
-    return apiMultipartRouteR('postTasksByIdClarify', form, { params: { id } }, { answer });
+    return apiMultipartRouteR('postTasksByIdClarify', form, clarifyOptions(id), { answer });
   }
-  return apiMultipartRouteR('postTasksByIdClarify', { answer }, { params: { id } });
+  return apiMultipartRouteR('postTasksByIdClarify', { answer }, clarifyOptions(id));
 }
 
 // Captain

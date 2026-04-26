@@ -106,7 +106,6 @@ pub(crate) async fn dispatch_new_work(
                             item.worker = Some(spawn_result.session_name.clone());
                             item.branch = Some(spawn_result.branch);
                             item.worktree = Some(spawn_result.worktree.clone());
-                            item.workbench_id = spawn_result.workbench_id;
                             item.worker_started_at = Some(spawn_result.started_at);
                             item.session_ids.worker = Some(spawn_result.session_id);
                             item.plan = spawn_result.plan;

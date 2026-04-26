@@ -3,6 +3,8 @@
 //!
 //! Tier discipline: types -> config -> io -> service -> runtime
 
+#![recursion_limit = "256"]
+
 mod config;
 mod io;
 mod runtime;
@@ -21,6 +23,7 @@ pub use io::task_store::TaskStore;
 pub use runtime::daemon::CaptainRuntimeDeps;
 pub use runtime::notify::Notifier;
 pub use runtime::reconciler::reconcile_on_startup;
+pub use runtime::task_creation::create_task_with_workbench;
 pub(crate) use runtime::worker_exit::{watch_worker_exit, WORKER_EXIT_SIGNAL};
 pub use runtime::CaptainRuntime;
 pub use runtime::{action_contract::ReopenOutcome, clarifier::ClarifierStatus};

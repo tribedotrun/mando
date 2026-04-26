@@ -11,6 +11,11 @@ use sqlx::SqlitePool;
 use crate::io::usage_probe::UsageSnapshot;
 
 /// A credential row from the database.
+///
+/// New Codex-only columns (`provider`, `refresh_token`, `id_token`,
+/// `account_id`, `plan_type`, `credits_balance`, `credits_unlimited`) come
+/// from migration 036. Existing Claude rows have `provider='claude'` (DB
+/// default) and `NULL` Codex fields.
 #[derive(Debug, Clone, sqlx::FromRow, serde::Serialize)]
 pub struct CredentialRow {
     pub id: i64,
@@ -29,6 +34,13 @@ pub struct CredentialRow {
     pub unified_status: Option<String>,
     pub representative_claim: Option<String>,
     pub last_probed_at: Option<i64>,
+    pub provider: String,
+    pub refresh_token: Option<String>,
+    pub id_token: Option<String>,
+    pub account_id: Option<String>,
+    pub plan_type: Option<String>,
+    pub credits_balance: Option<String>,
+    pub credits_unlimited: i64,
 }
 
 /// Per-window usage snapshot included in the public credential info payload.
@@ -43,6 +55,16 @@ pub struct CredentialWindowInfo {
     pub status: String,
 }
 
+/// Codex-only fields surfaced on `CredentialInfo` for `provider == "codex"` rows.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CodexInfo {
+    pub account_id: String,
+    pub plan_type: Option<String>,
+    pub credits_balance: Option<String>,
+    pub credits_unlimited: bool,
+}
+
 /// Public credential info (no secrets).
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -50,6 +72,9 @@ pub struct CredentialInfo {
     pub id: i64,
     pub label: String,
     pub token_masked: String,
+    /// `"claude"` or `"codex"`. Mapped to the `CredentialProvider` enum at
+    /// the wire boundary.
+    pub provider: String,
     pub expires_at: Option<i64>,
     pub rate_limit_cooldown_until: Option<i64>,
     pub created_at: String,
@@ -70,16 +95,30 @@ pub struct CredentialInfo {
     /// Never a substitute for a real probe.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cost_since_probe_usd: Option<f64>,
+    /// Set only when `provider == "codex"`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub codex: Option<CodexInfo>,
 }
 
 impl CredentialRow {
     pub fn to_info(&self) -> CredentialInfo {
         let now_ms = time::OffsetDateTime::now_utc().unix_timestamp() * 1000;
         let now_secs = now_ms / 1000;
+        let codex = if self.provider == "codex" {
+            self.account_id.clone().map(|account_id| CodexInfo {
+                account_id,
+                plan_type: self.plan_type.clone(),
+                credits_balance: self.credits_balance.clone(),
+                credits_unlimited: self.credits_unlimited != 0,
+            })
+        } else {
+            None
+        };
         CredentialInfo {
             id: self.id,
             label: self.label.clone(),
             token_masked: mask_token(&self.access_token),
+            provider: self.provider.clone(),
             expires_at: self.expires_at,
             rate_limit_cooldown_until: self.rate_limit_cooldown_until,
             created_at: self.created_at.clone(),
@@ -101,6 +140,7 @@ impl CredentialRow {
             representative_claim: self.representative_claim.clone(),
             last_probed_at: self.last_probed_at,
             cost_since_probe_usd: None,
+            codex,
         }
     }
 }
@@ -150,11 +190,18 @@ pub async fn labels_by_ids(pool: &SqlitePool, ids: &[i64]) -> Result<HashMap<i64
     Ok(rows.into_iter().collect())
 }
 
-/// Check if any credentials are configured.
+/// Check if any Claude credentials are configured. Pre-PR-1006 callers
+/// (`tick.rs`, `cc_failover.rs`) use this to distinguish "no credentials,
+/// fall back to ambient login" from "credentials exist but none are
+/// usable right now". Codex rows live in the same table but are not
+/// eligible for Claude-Code worker spawn, so they must not satisfy this
+/// predicate — otherwise a user with only a Codex credential would block
+/// the ambient-login fallback.
 pub async fn has_any(pool: &SqlitePool) -> Result<bool> {
-    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM credentials")
-        .fetch_one(pool)
-        .await?;
+    let count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM credentials WHERE provider = 'claude'")
+            .fetch_one(pool)
+            .await?;
     Ok(count > 0)
 }
 
@@ -361,6 +408,11 @@ pub async fn pick_for_worker(
     let now_ms = time::OffsetDateTime::now_utc().unix_timestamp() * 1000;
     let now_secs = now_ms / 1000;
 
+    // PR #1006: explicitly filter to provider='claude'. Codex credentials
+    // live in the same table now but their access_token is an OpenAI JWT;
+    // handing it to a Claude Code worker as CLAUDE_CODE_OAUTH_TOKEN would
+    // make every spawn fail at the API layer. Worker-side Codex routing
+    // would be a separate provider parameter, not a fallback.
     let row: Option<(i64, String)> = sqlx::query_as(
         "SELECT c.id, c.access_token
          FROM credentials c
@@ -371,7 +423,8 @@ pub async fn pick_for_worker(
                AND (?3 IS NULL OR caller = ?3)
              GROUP BY credential_id
          ) s ON s.credential_id = c.id
-         WHERE (c.expires_at IS NULL OR c.expires_at > ?1)
+         WHERE c.provider = 'claude'
+           AND (c.expires_at IS NULL OR c.expires_at > ?1)
            AND (c.rate_limit_cooldown_until IS NULL OR c.rate_limit_cooldown_until <= ?2)
          ORDER BY
             COALESCE(s.active, 0) ASC,

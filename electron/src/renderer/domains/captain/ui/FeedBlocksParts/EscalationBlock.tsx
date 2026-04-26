@@ -26,13 +26,9 @@ export function EscalationBlock({
         <span className="text-body font-medium text-destructive">Escalated</span>
         <span className="text-caption text-text-3">{time}</span>
       </div>
-      {report ? (
-        <div className="text-body text-text-1">
-          <PrMarkdown text={report} />
-        </div>
-      ) : (
-        <p className="break-words text-body text-text-1">{event.summary}</p>
-      )}
+      <div className="break-words text-body text-text-1">
+        <PrMarkdown text={report || event.summary} />
+      </div>
     </div>
   );
 }

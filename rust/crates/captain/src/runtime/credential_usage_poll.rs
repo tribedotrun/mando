@@ -15,31 +15,26 @@
 //!    keeps one source of truth.
 //! 5. Emits `BusEvent::Credentials` so the Electron UI refetches live.
 //!
-//! Cadence is adaptive: the baseline sleep is 10 minutes, but drops to 2
-//! minutes when any credential has a window at or above
-//! [`HOT_UTILIZATION_THRESHOLD`]. A per-credential throttle prevents
-//! redundant back-to-back probes when the manual refresh endpoint fires at
-//! the same time as the scheduled tick.
+//! Cadence is a flat 10 minutes for all credentials regardless of
+//! provider or utilization (PR #1006 simplification). A per-credential
+//! throttle prevents redundant back-to-back probes when the manual
+//! refresh endpoint fires at the same time as the scheduled tick.
 
 use std::sync::Arc;
 use std::time::Duration;
 
 use sqlx::SqlitePool;
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, info, warn};
+use tracing::{info, warn};
 
 use global_bus::EventBus;
 use settings::credentials::{self, CredentialRow};
-use settings::usage_probe::{self, ProbeError, RateLimitStatus, UsageSnapshot};
+use settings::usage_probe::{ProbeError, RateLimitStatus, UsageSnapshot};
 
 use super::credential_rate_limit;
 
-/// Baseline sleep between poll ticks.
-const BASELINE_TICK: Duration = Duration::from_secs(600);
-/// Sleep when any credential is in the hot zone.
-const HOT_TICK: Duration = Duration::from_secs(120);
-/// Utilization threshold that switches the poller into hot mode.
-const HOT_UTILIZATION_THRESHOLD: f64 = 0.80;
+/// Sleep between poll ticks. Flat for all providers and all utilizations.
+const TICK_INTERVAL: Duration = Duration::from_secs(600);
 /// Do not re-probe a credential whose `last_probed_at` is within this window.
 /// Protects against manual-refresh + scheduled-tick collisions.
 const PER_CREDENTIAL_THROTTLE_SECS: i64 = 60;
@@ -53,9 +48,8 @@ const STARTUP_DELAY: Duration = Duration::from_secs(15);
 pub async fn run(pool: SqlitePool, bus: Arc<EventBus>, cancel: CancellationToken) {
     info!(
         module = "captain",
-        "credential usage poll started (baseline={}s hot={}s)",
-        BASELINE_TICK.as_secs(),
-        HOT_TICK.as_secs()
+        "credential usage poll started (interval={}s)",
+        TICK_INTERVAL.as_secs()
     );
     tokio::select! {
         _ = tokio::time::sleep(STARTUP_DELAY) => {}
@@ -70,26 +64,16 @@ pub async fn run(pool: SqlitePool, bus: Arc<EventBus>, cancel: CancellationToken
             break;
         }
 
-        let next_sleep = match tick_once(&pool, &bus).await {
-            Ok(hot) => {
-                if hot {
-                    HOT_TICK
-                } else {
-                    BASELINE_TICK
-                }
-            }
-            Err(e) => {
-                warn!(
-                    module = "captain",
-                    error = %e,
-                    "credential usage poll tick failed"
-                );
-                BASELINE_TICK
-            }
-        };
+        if let Err(e) = tick_once(&pool, &bus).await {
+            warn!(
+                module = "captain",
+                error = %e,
+                "credential usage poll tick failed"
+            );
+        }
 
         tokio::select! {
-            _ = tokio::time::sleep(next_sleep) => {}
+            _ = tokio::time::sleep(TICK_INTERVAL) => {}
             _ = cancel.cancelled() => break,
         }
     }
@@ -97,35 +81,23 @@ pub async fn run(pool: SqlitePool, bus: Arc<EventBus>, cancel: CancellationToken
     info!(module = "captain", "credential usage poll stopped");
 }
 
-/// Probe every eligible credential once. Returns `true` when the run saw any
-/// credential at or above [`HOT_UTILIZATION_THRESHOLD`], telling the caller
-/// to pick the hot cadence next.
-async fn tick_once(pool: &SqlitePool, bus: &EventBus) -> anyhow::Result<bool> {
+/// Probe every eligible credential once. Persistence and bus emission
+/// happen inline; the caller does not need a return value.
+async fn tick_once(pool: &SqlitePool, bus: &EventBus) -> anyhow::Result<()> {
     let rows = credentials::list_all(pool).await?;
     if rows.is_empty() {
-        return Ok(false);
+        return Ok(());
     }
     let now_secs = time::OffsetDateTime::now_utc().unix_timestamp();
-    let mut any_hot = false;
     let mut dirty = false;
 
     for row in rows {
         if !should_probe(&row, now_secs) {
-            if let Some(hot) = max_window_util(&row) {
-                if hot >= HOT_UTILIZATION_THRESHOLD {
-                    any_hot = true;
-                }
-            }
             continue;
         }
 
         match probe_and_persist(pool, &row).await {
             Ok(snapshot) => {
-                let hot = snapshot.five_hour.utilization >= HOT_UTILIZATION_THRESHOLD
-                    || snapshot.seven_day.utilization >= HOT_UTILIZATION_THRESHOLD;
-                if hot {
-                    any_hot = true;
-                }
                 dirty = true;
                 info!(
                     module = "captain",
@@ -173,7 +145,11 @@ async fn tick_once(pool: &SqlitePool, bus: &EventBus) -> anyhow::Result<bool> {
                 );
             }
             Err(e) => {
-                debug!(
+                // Bumped from debug to warn so a sustained Codex/Claude
+                // probe outage is visible at the default log level.
+                // Transient blips will produce noise, but operator
+                // visibility into upstream rate-limit/token outages wins.
+                warn!(
                     module = "captain",
                     credential_id = row.id,
                     error = %e,
@@ -186,7 +162,7 @@ async fn tick_once(pool: &SqlitePool, bus: &EventBus) -> anyhow::Result<bool> {
     if dirty {
         bus.send(global_bus::BusPayload::Credentials(None));
     }
-    Ok(any_hot)
+    Ok(())
 }
 
 /// Returns whether we should probe this credential right now.
@@ -210,15 +186,6 @@ fn recently_probed(row: &CredentialRow, now_secs: i64) -> bool {
         .is_some_and(|last| now_secs - last < PER_CREDENTIAL_THROTTLE_SECS)
 }
 
-fn max_window_util(row: &CredentialRow) -> Option<f64> {
-    match (row.five_hour_utilization, row.seven_day_utilization) {
-        (Some(a), Some(b)) => Some(a.max(b)),
-        (Some(a), None) => Some(a),
-        (None, Some(b)) => Some(b),
-        (None, None) => None,
-    }
-}
-
 /// Probe a single credential and persist the result.
 ///
 /// Shared between the scheduled poller and the manual-refresh HTTP route.
@@ -236,7 +203,10 @@ pub async fn probe_and_persist(
     pool: &SqlitePool,
     row: &CredentialRow,
 ) -> Result<UsageSnapshot, ProbeError> {
-    let snapshot = usage_probe::probe(&row.access_token).await?;
+    // Boxed to keep the outer future shape simple; provider_probe holds
+    // h2/hyper internals whose Send-bound trait recursion blows the
+    // default limit when inlined into the tracing::instrument span.
+    let snapshot = Box::pin(settings::provider_probe::probe(pool, row)).await?;
     credentials::set_usage_snapshot(pool, row.id, &snapshot)
         .await
         .map_err(|e| {
@@ -315,6 +285,13 @@ mod tests {
             unified_status: None,
             representative_claim: None,
             last_probed_at: last_probed,
+            provider: "claude".into(),
+            refresh_token: None,
+            id_token: None,
+            account_id: None,
+            plan_type: None,
+            credits_balance: None,
+            credits_unlimited: 0,
         }
     }
 

@@ -15,6 +15,18 @@ export const actionKindSchema = z.enum(['skip', 'nudge', 'captain-review']);
 export const activityStatsResponseSchema = z
   .object({ merged_7d: z.number(), daily_merges: z.array(z.lazy(() => dailyMergeSchema)) })
   .strict();
+export const addCodexCredentialRequestSchema = z
+  .object({ label: z.string(), authJson: z.string() })
+  .strict();
+export const addCodexCredentialResponseSchema = z
+  .object({
+    ok: z.boolean(),
+    id: z.number(),
+    label: z.string(),
+    accountId: z.string(),
+    planType: z.string().nullable(),
+  })
+  .strict();
 export const addProjectRequestSchema = z
   .object({ name: z.string().optional(), path: z.string(), aliases: z.array(z.string()) })
   .strict();
@@ -61,6 +73,7 @@ export const artifactMediaSchema = z
     local_path: z.string().nullable(),
     remote_url: z.string().nullable(),
     caption: z.string().nullable(),
+    kind: z.lazy(() => evidenceKindSchema).nullable(),
   })
   .strict();
 export const artifactMediaParamsSchema = z.object({ id: z.number(), index: z.number() }).strict();
@@ -209,6 +222,7 @@ export const clarifierQuestionPayloadSchema = z
   .strict();
 export const clarifyAnswerSchema = z.object({ question: z.string(), answer: z.string() }).strict();
 export const clarifyOutcomeSchema = z.enum(['ready', 'clarifying', 'escalate', 'answered']);
+export const clarifyQuerySchema = z.object({ wait: z.boolean().nullable() }).strict();
 export const clarifyRequestSchema = z
   .object({
     answers: z.array(z.lazy(() => clarifyAnswerSchema)).optional(),
@@ -251,6 +265,20 @@ export const clientLogEntrySchema = z
     message: z.string(),
     context: z.lazy(() => clientLogContextSchema).nullable(),
     timestamp: z.string().nullable(),
+  })
+  .strict();
+export const codexActivateResponseSchema = z
+  .object({ ok: z.boolean(), accountId: z.string() })
+  .strict();
+export const codexActiveResponseSchema = z
+  .object({ activeAccountId: z.string().nullable(), matchedCredentialId: z.number().nullable() })
+  .strict();
+export const codexCredentialDetailsSchema = z
+  .object({
+    accountId: z.string(),
+    planType: z.string().nullable(),
+    creditsBalance: z.string().nullable(),
+    creditsUnlimited: z.boolean(),
   })
   .strict();
 export const configPathsResponseSchema = z
@@ -323,6 +351,7 @@ export const credentialInfoSchema = z
     id: z.number(),
     label: z.string(),
     tokenMasked: z.string(),
+    provider: z.lazy(() => credentialProviderSchema),
     expiresAt: z.number().nullable(),
     rateLimitCooldownUntil: z.number().nullable(),
     createdAt: z.string(),
@@ -343,6 +372,10 @@ export const credentialInfoSchema = z
     representativeClaim: z.string().nullable().optional(),
     lastProbedAt: z.number().nullable().optional(),
     costSinceProbeUsd: z.number().nullable().optional(),
+    codex: z
+      .lazy(() => codexCredentialDetailsSchema)
+      .nullable()
+      .optional(),
   })
   .strict();
 export const credentialListResponseSchema = z
@@ -351,9 +384,16 @@ export const credentialListResponseSchema = z
 export const credentialMutationResponseSchema = z
   .object({ ok: z.boolean(), error: z.string().nullable() })
   .strict();
+export const credentialPickSchema = z
+  .object({ id: z.number(), label: z.string(), token: z.string() })
+  .strict();
+export const credentialPickResponseSchema = z
+  .object({ pick: z.lazy(() => credentialPickSchema).nullable() })
+  .strict();
 export const credentialProbeResponseSchema = z
   .object({ ok: z.boolean(), snapshot: z.lazy(() => credentialUsageSnapshotSchema) })
   .strict();
+export const credentialProviderSchema = z.enum(['claude', 'codex']);
 export const credentialRateLimitStatusSchema = z.enum(['allowed', 'allowed_warning', 'rejected']);
 export const credentialTokenResponseSchema = z.object({ token: z.string() }).strict();
 export const credentialUsageSnapshotSchema = z
@@ -437,11 +477,17 @@ export const evidenceFileInputSchema = z
   .object({ filename: z.string(), ext: z.string(), caption: z.string() })
   .strict();
 export const evidenceFileRequestSchema = z
-  .object({ filename: z.string(), ext: z.string(), caption: z.string() })
+  .object({
+    filename: z.string(),
+    ext: z.string(),
+    caption: z.string(),
+    kind: z.lazy(() => evidenceKindSchema).nullable(),
+  })
   .strict();
 export const evidenceFilesRequestSchema = z
   .object({ files: z.array(z.lazy(() => evidenceFileInputSchema)) })
   .strict();
+export const evidenceKindSchema = z.enum(['before_fix', 'after_fix', 'cannot_reproduce', 'other']);
 export const featuresConfigSchema = z
   .object({ scout: z.boolean(), setupDismissed: z.boolean(), claudeCodeVerified: z.boolean() })
   .strict();
@@ -1327,6 +1373,7 @@ export const taskItemSchema = z
     no_pr: z.boolean(),
     no_auto_merge: z.boolean(),
     planning: z.boolean(),
+    is_bug_fix: z.boolean(),
     resource: z.string().nullable(),
     images: z.string().nullable(),
     created_at: z.string().nullable(),
@@ -1349,7 +1396,11 @@ export const taskListResponseSchema = z
   .object({ items: z.array(z.lazy(() => taskItemSchema)), count: z.number() })
   .strict();
 export const taskPatchRequestSchema = z
-  .object({ context: z.string().optional(), original_prompt: z.string().optional() })
+  .object({
+    context: z.string().optional(),
+    original_prompt: z.string().optional(),
+    is_bug_fix: z.boolean().optional(),
+  })
   .strict();
 export const taskSummaryRequestSchema = z.object({ content: z.string() }).strict();
 export const taskSummaryResponseSchema = z
@@ -2141,6 +2192,7 @@ export const resSchemas = {
   getConfigStatus: configStatusResponseSchema,
   getCredentials: credentialsListResponseSchema,
   getCredentialsByIdToken: credentialTokenResponseSchema,
+  getCredentialsCodexActive: codexActiveResponseSchema,
   getHealth: healthResponseSchema,
   getHealthSystem: systemHealthResponseSchema,
   getHealthTelegram: telegramHealthSchema,
@@ -2184,7 +2236,10 @@ export const resSchemas = {
   postChannelsTelegramOwner: boolOkResponseSchema,
   postClientlogs: clientLogBatchResponseSchema,
   postConfigSetup: configSetupResponseSchema,
+  postCredentialsByIdCodexactivate: codexActivateResponseSchema,
   postCredentialsByIdProbe: probeCredentialResponseSchema,
+  postCredentialsCodex: addCodexCredentialResponseSchema,
+  postCredentialsPick: credentialPickResponseSchema,
   postCredentialsSetuptoken: setupTokenResponseSchema,
   postFirecrawlScrape: firecrawlScrapeResponseSchema,
   postNotify: notifyResponseSchema,
@@ -2254,7 +2309,10 @@ export const bodySchemas = {
   postChannelsTelegramOwner: telegramOwnerRequestSchema,
   postClientlogs: clientLogBatchRequestSchema,
   postConfigSetup: configSetupRequestSchema,
+  postCredentialsByIdCodexactivate: emptyRequestSchema,
   postCredentialsByIdProbe: emptyRequestSchema,
+  postCredentialsCodex: addCodexCredentialRequestSchema,
+  postCredentialsPick: emptyRequestSchema,
   postCredentialsSetuptoken: setupTokenRequestSchema,
   postFirecrawlScrape: firecrawlScrapeRequestSchema,
   postNotify: notifyRequestSchema,
@@ -2313,6 +2371,7 @@ export const querySchemas = {
   getTasksByIdSessions: sessionsQuerySchema,
   getTerminalByIdStream: terminalStreamQuerySchema,
   getWorkbenches: workbenchListQuerySchema,
+  postTasksByIdClarify: clarifyQuerySchema,
 } as const;
 export const paramsSchemas = {
   deleteCredentialsById: credentialIdParamsSchema,
@@ -2346,6 +2405,7 @@ export const paramsSchemas = {
   patchScoutItemsById: scoutItemIdParamsSchema,
   patchTasksById: taskIdParamsSchema,
   patchWorkbenchesById: workbenchIdParamsSchema,
+  postCredentialsByIdCodexactivate: credentialIdParamsSchema,
   postCredentialsByIdProbe: credentialIdParamsSchema,
   postScoutItemsByIdAct: scoutItemIdParamsSchema,
   postScoutItemsByIdTelegraph: scoutItemIdParamsSchema,

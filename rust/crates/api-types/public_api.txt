@@ -1,4 +1,6 @@
 pub use config::*;
+pub use credentials::*;
+pub use credentials_codex::*;
 pub use events::*;
 pub use extras::*;
 pub use models::*;

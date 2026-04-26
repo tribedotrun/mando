@@ -10,44 +10,64 @@ import {
 import { Button } from '#renderer/global/ui/primitives/button';
 import { Textarea } from '#renderer/global/ui/primitives/textarea';
 import { Label } from '#renderer/global/ui/primitives/label';
+import { useTextImageDraft } from '#renderer/global/runtime/useTextImageDraft';
+import log from '#renderer/global/service/logger';
 
-export interface PromptModalFrameProps {
+interface PromptModalProps {
   testId: string;
   title: string;
   subtitle?: string;
   label?: string;
   placeholder: string;
+  initialValue?: string;
   buttonLabel: string;
   pendingLabel: string;
   isPending: boolean;
   requirePrompt?: boolean;
+  draftKey: string;
   onCancel: () => void;
-  prompt: string;
-  setPrompt: (value: string) => void;
-  onSubmitClick: () => void;
-  onPaste?: (event: React.ClipboardEvent) => void;
-  attachmentPreview?: React.ReactNode;
-  attachmentButton?: React.ReactNode;
+  /**
+   * Resolved => clear draft. Rejected => keep draft so the user can retry
+   * without retyping. Sync/void return clears eagerly.
+   */
+  onSubmit: (prompt: string) => Promise<void> | void;
 }
 
-export function PromptModalFrame({
+export function PromptModal({
   testId,
   title,
   subtitle,
   label,
   placeholder,
+  initialValue,
   buttonLabel,
   pendingLabel,
   isPending,
   requirePrompt = true,
+  draftKey,
   onCancel,
-  prompt,
-  setPrompt,
-  onSubmitClick,
-  onPaste,
-  attachmentPreview,
-  attachmentButton,
-}: PromptModalFrameProps): React.ReactElement {
+  onSubmit,
+}: PromptModalProps): React.ReactElement {
+  const {
+    text: prompt,
+    setText: setPrompt,
+    clearDraftStorage,
+  } = useTextImageDraft(draftKey, { initialText: initialValue });
+
+  const handleSubmit = async () => {
+    const result = onSubmit(prompt);
+    if (result && typeof (result as Promise<void>).then === 'function') {
+      try {
+        await result;
+        clearDraftStorage();
+      } catch (err) {
+        log.warn('[PromptModal] submit rejected; preserving draft for retry', { err });
+      }
+      return;
+    }
+    clearDraftStorage();
+  };
+
   return (
     <Dialog open={true} onOpenChange={() => onCancel()}>
       <DialogContentPlain data-testid={testId}>
@@ -72,18 +92,19 @@ export function PromptModalFrame({
           placeholder={placeholder}
           value={prompt}
           onChange={(event) => setPrompt(event.target.value)}
-          onPaste={onPaste}
           autoFocus
         />
 
-        {attachmentPreview}
-
         <DialogFooter>
-          {attachmentButton}
           <Button variant="outline" onClick={onCancel}>
             Cancel
           </Button>
-          <Button onClick={onSubmitClick} disabled={(requirePrompt && !prompt.trim()) || isPending}>
+          <Button
+            onClick={() => {
+              void handleSubmit();
+            }}
+            disabled={(requirePrompt && !prompt.trim()) || isPending}
+          >
             {isPending ? pendingLabel : buttonLabel}
           </Button>
         </DialogFooter>

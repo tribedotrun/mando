@@ -98,7 +98,6 @@ pub(crate) async fn redispatch_newly_queued(
                             item.worker = Some(spawn_result.session_name.clone());
                             item.branch = Some(spawn_result.branch);
                             item.worktree = Some(spawn_result.worktree.clone());
-                            item.workbench_id = spawn_result.workbench_id;
                             item.worker_started_at = Some(spawn_result.started_at);
                             item.session_ids.worker = Some(spawn_result.session_id);
                             item.plan = spawn_result.plan;
@@ -314,10 +313,12 @@ mod tests {
         db.pool().clone()
     }
 
-    fn clarifying_task(title: &str, session_id: &str) -> Task {
+    async fn clarifying_task(pool: &sqlx::SqlitePool, title: &str, session_id: &str) -> Task {
+        let wb_id = crate::io::test_support::seed_workbench(pool, 1).await;
         let mut task = Task::new(title);
         task.project_id = 1;
         task.project = "test".into();
+        task.workbench_id = wb_id;
         task.status = ItemStatus::Clarifying;
         task.session_ids.clarifier = Some(session_id.into());
         task.last_activity_at = Some(global_types::now_rfc3339());
@@ -342,7 +343,7 @@ mod tests {
         // `expected_status == "clarifying"` guard in
         // persist_status_transition_with_command will see a mismatch and
         // return Ok(false).
-        let mut db_task = clarifying_task("rev-conflict", "sid-conflict");
+        let mut db_task = clarifying_task(&pool, "rev-conflict", "sid-conflict").await;
         db_task.status = ItemStatus::NeedsClarification;
         let id = crate::io::queries::tasks::insert_task(&pool, &db_task)
             .await

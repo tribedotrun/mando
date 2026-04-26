@@ -11,6 +11,7 @@ pub mod routes_clarifier;
 pub mod routes_client_logs;
 pub mod routes_config;
 pub mod routes_credentials;
+pub mod routes_credentials_codex;
 pub mod routes_projects;
 pub mod routes_scout;
 pub mod routes_scout_ai;

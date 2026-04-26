@@ -57,18 +57,20 @@ export function confidenceIconOverride(event: TimelineEvent): ItemStatus | null 
   return null;
 }
 
-/** Inline preview line for verdict events -- shows the confidence grade +
- *  reason directly under the summary so the human doesn't have to click
- *  through. Returns null when the event type has no preview text. */
-export function confidencePreview(event: TimelineEvent): string | null {
+/** Inline preview parts for verdict events -- the confidence grade and
+ *  optional LLM-authored reason. Caller composes the rendered line so it
+ *  can render the LLM `reason` through markdown without letting the
+ *  fixed `Confidence:` prefix or the grade get parsed as syntax. */
+export interface ConfidencePreview {
+  confidence: string;
+  reason: string;
+}
+export function confidencePreview(event: TimelineEvent): ConfidencePreview | null {
   const payload = event.data;
-  if (payload.event_type === 'awaiting_review') {
-    const confidence = payload.confidence.trim();
-    if (!confidence) return null;
-    const reason = payload.confidence_reason.trim();
-    return reason ? `Confidence: ${confidence} — ${reason}` : `Confidence: ${confidence}`;
-  }
-  return null;
+  if (payload.event_type !== 'awaiting_review') return null;
+  const confidence = payload.confidence.trim();
+  if (!confidence) return null;
+  return { confidence, reason: payload.confidence_reason.trim() };
 }
 
 export function formatEventTime(timestamp: string): string {

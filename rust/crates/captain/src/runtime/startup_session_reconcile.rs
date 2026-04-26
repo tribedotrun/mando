@@ -392,10 +392,12 @@ mod tests {
         db.pool().clone()
     }
 
-    fn clarifying_task(title: &str) -> Task {
+    async fn clarifying_task(pool: &SqlitePool, title: &str) -> Task {
+        let wb_id = crate::io::test_support::seed_workbench(pool, 1).await;
         let mut task = Task::new(title);
         task.project_id = 1;
         task.project = "test".into();
+        task.workbench_id = wb_id;
         task.status = ItemStatus::Clarifying;
         task.last_activity_at = Some(global_types::now_rfc3339());
         task
@@ -461,7 +463,7 @@ mod tests {
         // session id at all (legacy-DB shape or pre-PR writer crashed
         // after nulling but before the inline reclarifier set a new one).
         let pool = pool_with_project().await;
-        let mut task = clarifying_task("no-session");
+        let mut task = clarifying_task(&pool, "no-session").await;
         task.session_ids.clarifier = None;
         let id = crate::io::queries::tasks::insert_task(&pool, &task)
             .await
@@ -484,7 +486,7 @@ mod tests {
         // then died during the follow-up inline call, leaving the task
         // stuck in Clarifying. Revert so the user resends their answer.
         let pool = pool_with_project().await;
-        let mut task = clarifying_task("applied-session");
+        let mut task = clarifying_task(&pool, "applied-session").await;
         task.session_ids.clarifier = Some("clarifier-applied".into());
         let id = crate::io::queries::tasks::insert_task(&pool, &task)
             .await
@@ -521,7 +523,7 @@ mod tests {
         // startup ordering is covered by the session-level reconcile
         // tests above.
         let pool = pool_with_project().await;
-        let mut task = clarifying_task("live-session");
+        let mut task = clarifying_task(&pool, "live-session").await;
         task.session_ids.clarifier = Some("clarifier-live".into());
         let id = crate::io::queries::tasks::insert_task(&pool, &task)
             .await

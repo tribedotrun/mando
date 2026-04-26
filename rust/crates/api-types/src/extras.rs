@@ -168,12 +168,36 @@ pub struct TriageResponse {
     pub table: String,
 }
 
+/// Typed role for an evidence media file. Replaces the prior caption-prefix
+/// convention (`before:` / `after:`) with a structured value the reviewer
+/// can gate on programmatically. `None` means legacy/unspecified — captain's
+/// bug-fix evidence rule treats it the same as `Other`.
+///
+/// `CannotReproduce` is the typed "I couldn't trigger the bug" signal: the
+/// worker writes its repro attempt log to a file, submits it with
+/// `--kind cannot-reproduce`, and captain routes deterministically to
+/// `escalate` instead of asking for before/after evidence that doesn't exist.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub enum EvidenceKind {
+    #[serde(rename = "before_fix")]
+    BeforeFix,
+    #[serde(rename = "after_fix")]
+    AfterFix,
+    #[serde(rename = "cannot_reproduce")]
+    CannotReproduce,
+    #[serde(rename = "other")]
+    Other,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(deny_unknown_fields)]
 pub struct EvidenceFileRequest {
     pub filename: String,
     pub ext: String,
     pub caption: String,
+    /// Optional typed role. When the task is classified `is_bug_fix`, captain
+    /// requires at least one `BeforeFix` and one `AfterFix` artifact.
+    pub kind: Option<EvidenceKind>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]

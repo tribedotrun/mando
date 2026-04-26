@@ -59,10 +59,10 @@ export function TranscriptMessageList({
       return <SystemMessage key={index} event={{ kind: 'ratelimit', data: event.data }} />;
     }
     if (event.kind === 'unknown') {
-      return <SystemMessage key={index} event={{ kind: 'unknown', data: event.data }} />;
+      return null;
     }
     if (event.kind === 'user') {
-      return <UserMessage key={index} event={event.data} />;
+      return <UserMessage key={index} event={event.data} eventIndex={index} />;
     }
     if (event.kind === 'assistant') {
       return (

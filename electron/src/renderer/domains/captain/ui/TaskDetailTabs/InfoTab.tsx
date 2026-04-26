@@ -4,9 +4,12 @@ import { shortenPath } from '#renderer/global/service/utils';
 import { taskImageUrl } from '#renderer/global/runtime/useApi';
 import { ImageLightbox } from '#renderer/global/ui/ImageLightbox';
 import { CopyValue } from '#renderer/domains/captain/ui/CopyValue';
+import { useTaskSetIsBugFix } from '#renderer/domains/captain/runtime/hooks';
 
 export function InfoTab({ item }: { item: TaskItem }): React.ReactElement {
   const [lightbox, setLightbox] = useState<{ images: string[]; index: number } | null>(null);
+  const setBugFix = useTaskSetIsBugFix();
+  const bugFixPending = setBugFix.isPending;
   const imageFilenames =
     item.images
       ?.split(',')
@@ -54,6 +57,24 @@ export function InfoTab({ item }: { item: TaskItem }): React.ReactElement {
             <span className="text-caption text-text-2">Plan</span>
           </>
         )}
+
+        <span className="text-caption text-text-4">Bug fix</span>
+        <label className="inline-flex items-center gap-2 text-caption text-text-2">
+          <input
+            type="checkbox"
+            checked={item.is_bug_fix}
+            disabled={bugFixPending}
+            onChange={(e) => setBugFix.mutate({ id: item.id, value: e.currentTarget.checked })}
+            data-testid="info-tab-bug-fix-toggle"
+            aria-label="Treat this task as a bug fix"
+          />
+          <span>
+            {item.is_bug_fix ? 'Yes' : 'No'}
+            <span className="ml-2 text-text-4">
+              (worker reproduces + captures before/after evidence)
+            </span>
+          </span>
+        </label>
       </div>
 
       {(item.original_prompt || imageUrls.length > 0) && (

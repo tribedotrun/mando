@@ -42,6 +42,12 @@ const BROWSER_USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7
 /// need to match the user's installed binary.
 const PROBE_USER_AGENT: &str = "claude-code/2.1.0";
 
+/// User-Agent for the Codex usage probe and OAuth refresh. `chatgpt.com`'s
+/// `/backend-api/wham/usage` and `auth.openai.com/oauth/token` accept any
+/// UA today, but a Codex-CLI-shaped value keeps us identifiable in
+/// upstream logs without pinning to a specific version.
+const CODEX_PROBE_USER_AGENT: &str = "codex-cli/0.0.0";
+
 static SHARED: OnceLock<Arc<reqwest::Client>> = OnceLock::new();
 static SSE: OnceLock<Arc<reqwest::Client>> = OnceLock::new();
 static HTML_FETCH: OnceLock<Arc<reqwest::Client>> = OnceLock::new();
@@ -50,6 +56,7 @@ static FIRECRAWL: OnceLock<Arc<reqwest::Client>> = OnceLock::new();
 static TELEGRAPH: OnceLock<Arc<reqwest::Client>> = OnceLock::new();
 static YT_DLP: OnceLock<Arc<reqwest::Client>> = OnceLock::new();
 static USAGE_PROBE: OnceLock<Arc<reqwest::Client>> = OnceLock::new();
+static CODEX_PROBE: OnceLock<Arc<reqwest::Client>> = OnceLock::new();
 
 fn cached<F>(cell: &'static OnceLock<Arc<reqwest::Client>>, build: F) -> Arc<reqwest::Client>
 where
@@ -156,5 +163,17 @@ pub fn usage_probe_client() -> Arc<reqwest::Client> {
             .timeout(Duration::from_secs(15))
             .build()
             .unwrap_or_else(|e| global_infra::unrecoverable!("usage_probe_client build failed", e))
+    })
+}
+
+/// Client for the Codex credential usage probe (`/backend-api/wham/usage`)
+/// and OAuth refresh (`auth.openai.com/oauth/token`). 15s timeout.
+pub fn codex_probe_client() -> Arc<reqwest::Client> {
+    cached(&CODEX_PROBE, || {
+        reqwest::Client::builder()
+            .user_agent(CODEX_PROBE_USER_AGENT)
+            .timeout(Duration::from_secs(15))
+            .build()
+            .unwrap_or_else(|e| global_infra::unrecoverable!("codex_probe_client build failed", e))
     })
 }

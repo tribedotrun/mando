@@ -211,15 +211,18 @@ mod tests {
 
     async fn test_pool() -> sqlx::SqlitePool {
         let db = global_db::Db::open_in_memory().await.unwrap();
-        settings::projects::upsert(db.pool(), "test", "", None)
+        let project_id = settings::projects::upsert(db.pool(), "test", "", None)
             .await
             .unwrap();
+        let wb_id = crate::io::test_support::seed_workbench(db.pool(), project_id).await;
         // Insert a minimal task row the FOREIGN KEY constraint needs.
         sqlx::query(
-            "INSERT INTO tasks (id, title, project_id, status, created_at, last_activity_at,
-                 session_ids, no_pr, rev)
-             VALUES (1, 'test task', 1, 'awaiting-review', ?, ?, '{}', 0, 1)",
+            "INSERT INTO tasks (id, title, project_id, workbench_id, status, created_at,
+                 last_activity_at, session_ids, no_pr, rev)
+             VALUES (1, 'test task', ?, ?, 'awaiting-review', ?, ?, '{}', 0, 1)",
         )
+        .bind(project_id)
+        .bind(wb_id)
         .bind(now_rfc3339())
         .bind(now_rfc3339())
         .execute(db.pool())

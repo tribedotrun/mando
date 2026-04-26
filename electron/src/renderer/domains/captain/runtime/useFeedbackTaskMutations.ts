@@ -18,6 +18,7 @@ import {
   useTaskReopen as useTaskReopenMutation,
   useTaskRework as useTaskReworkMutation,
   useTaskRetry as useTaskRetryMutation,
+  useTaskSetIsBugFix as useTaskSetIsBugFixMutation,
   useResumeRateLimited as useResumeRateLimitedMutation,
   useStartImplementation as useStartImplementationMutation,
 } from '#renderer/domains/captain/repo/mutations';
@@ -214,6 +215,15 @@ export function useStartImplementation() {
   return useMutationFeedback(mutation, {
     onError: () => {
       toast.error('Start implementation failed');
+    },
+  });
+}
+
+export function useTaskSetIsBugFix() {
+  const mutation = useTaskSetIsBugFixMutation();
+  return useMutationFeedback(mutation, {
+    onError: () => {
+      toast.error('Could not update bug-fix flag');
     },
   });
 }

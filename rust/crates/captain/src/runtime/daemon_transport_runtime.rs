@@ -30,6 +30,7 @@ impl CaptainRuntime {
                 )),
                 remote_url: None,
                 caption: Some(file.caption.clone()),
+                kind: file.kind,
             })
             .collect();
 

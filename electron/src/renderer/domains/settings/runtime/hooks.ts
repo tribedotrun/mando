@@ -22,6 +22,12 @@ export {
   type CredentialRateLimitStatus,
 } from '#renderer/domains/settings/runtime/useFeedbackCredentials';
 
+export {
+  useCodexActiveCredential,
+  useCodexCredentialAdd,
+  useCodexCredentialActivate,
+} from '#renderer/domains/settings/runtime/useFeedbackCodexCredentials';
+
 /**
  * Returns a stable callback that reads the latest config from the React Query cache.
  * Returns `null` when the cache hasn't loaded the config yet — callers should defend.

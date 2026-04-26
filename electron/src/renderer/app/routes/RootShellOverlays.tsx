@@ -1,6 +1,5 @@
 import React, { useCallback } from 'react';
-import { useRouterState } from '@tanstack/react-router';
-import { CreateTaskModal, MergeModal, useTaskActions } from '#renderer/domains/captain/shell';
+import { MergeModal, useTaskActions } from '#renderer/domains/captain/shell';
 import { useUIStore } from '#renderer/global/runtime/useUIStore';
 import { CommandPalette } from '#renderer/global/ui/CommandPalette';
 import { ShortcutOverlay } from '#renderer/global/ui/ShortcutOverlay';
@@ -12,13 +11,8 @@ interface Props {
 export function RootShellOverlays({ onPaletteAction }: Props): React.ReactElement {
   const actions = useTaskActions();
   const paletteOpen = useUIStore((s) => s.paletteOpen);
-  const createTaskOpen = useUIStore((s) => s.createTaskOpen);
   const shortcutsOpen = useUIStore((s) => s.shortcutsOpen);
   const mergeItem = useUIStore((s) => s.mergeItem);
-
-  const currentProject = useRouterState({
-    select: (s) => (s.location.search as { project?: string }).project ?? null,
-  });
 
   const handleMergeConfirm = useCallback(
     (itemId: number, pr: number, project: string) => {
@@ -41,11 +35,6 @@ export function RootShellOverlays({ onPaletteAction }: Props): React.ReactElemen
         open={paletteOpen}
         onClose={() => useUIStore.getState().closePalette()}
         onAction={onPaletteAction}
-      />
-      <CreateTaskModal
-        open={createTaskOpen}
-        onClose={() => useUIStore.getState().closeCreateTask()}
-        initialProject={currentProject}
       />
       <ShortcutOverlay
         open={shortcutsOpen}

@@ -240,31 +240,15 @@ pub(crate) async fn post_task_add(
         created
     };
 
-    // Create a workbench for the new task so it is clickable in the sidebar
-    // from the moment it appears.  Uses the same pattern as POST /api/worktrees.
-    // Resolve the project from the created task (it may have been inferred).
+    // The workbench (and its on-disk worktree) was created atomically with
+    // the task itself by `captain.add_task` -> `create_task_with_workbench`,
+    // so there is no second workbench-creation step here. The deleted
+    // `create_task_workbench` helper used to emit
+    // `BusPayload::Workbenches(None)` to refresh the sidebar — preserve
+    // that signal so the new workbench appears immediately without
+    // waiting for the next SSE reconnect.
+    state.bus.send(global_bus::BusPayload::Workbenches(None));
     let task_id = created.id;
-    {
-        let project_name = state
-            .captain
-            .load_task(task_id)
-            .await
-            .ok()
-            .flatten()
-            .map(|t| t.project.clone());
-        if let Some(ref pname) = project_name {
-            if let Err(e) = create_workbench_for_task(&state, task_id, pname, title.trim()).await {
-                // Non-fatal: the task exists, captain will create the workbench
-                // at spawn time if we fail here.
-                tracing::warn!(
-                    module = "tasks",
-                    task_id,
-                    error = %e,
-                    "failed to create workbench at task creation"
-                );
-            }
-        }
-    }
 
     // Reload the created task to include any field updates (context, plan, images, workbench_id).
     let task_payload = state.captain.task_json(task_id).await.ok().flatten();
@@ -295,19 +279,6 @@ pub(crate) async fn post_task_add(
         .map_err(|e| internal_error(e, "failed to convert created task to api type"))?,
     };
     Ok(ApiCreated(response))
-}
-
-/// Create a worktree + workbench for a freshly inserted task and link them.
-async fn create_workbench_for_task(
-    state: &AppState,
-    task_id: i64,
-    project_name: &str,
-    title: &str,
-) -> anyhow::Result<()> {
-    state
-        .captain
-        .create_task_workbench(task_id, project_name, title)
-        .await
 }
 
 /// POST /api/tasks/bulk
@@ -420,6 +391,7 @@ pub(crate) async fn patch_task_item(
     let updates = UpdateTaskInput {
         context: body.context.map(Some),
         original_prompt: body.original_prompt.map(Some),
+        is_bug_fix: body.is_bug_fix,
         ..Default::default()
     };
     match state.captain.update_task(id_num, updates).await {

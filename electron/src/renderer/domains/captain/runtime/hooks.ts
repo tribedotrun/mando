@@ -33,6 +33,7 @@ export {
   useTaskDelete,
   useTaskClarify,
   useTaskBulkCreate,
+  useTaskSetIsBugFix,
   useStartImplementation,
 } from '#renderer/domains/captain/runtime/useFeedbackTaskMutations';
 

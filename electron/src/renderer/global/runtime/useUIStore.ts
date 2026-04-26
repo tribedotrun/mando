@@ -2,17 +2,20 @@ import { create } from 'zustand';
 import type { TaskItem } from '#renderer/global/types';
 
 interface UIState {
-  createTaskOpen: boolean;
   paletteOpen: boolean;
   shortcutsOpen: boolean;
   mergeItem: TaskItem | null;
   inlineFocusHandler: (() => void) | null;
+  homeNavigator: (() => void) | null;
+  pendingInlineFocus: boolean;
   // Owned by AppLayout; called from anywhere via toggleSidebar().
   sidebarToggleHandler: (() => void) | null;
   openCreateTask: () => void;
-  closeCreateTask: () => void;
   registerInlineFocus: (handler: () => void) => void;
   unregisterInlineFocus: () => void;
+  registerHomeNavigator: (handler: () => void) => void;
+  unregisterHomeNavigator: () => void;
+  clearPendingInlineFocus: () => void;
   togglePalette: () => void;
   closePalette: () => void;
   toggleShortcuts: () => void;
@@ -24,23 +27,29 @@ interface UIState {
 }
 
 export const useUIStore = create<UIState>((set, get) => ({
-  createTaskOpen: false,
   paletteOpen: false,
   shortcutsOpen: false,
   mergeItem: null,
   inlineFocusHandler: null,
+  homeNavigator: null,
+  pendingInlineFocus: false,
   sidebarToggleHandler: null,
   openCreateTask: () => {
-    const handler = get().inlineFocusHandler;
-    if (handler) {
-      handler();
-    } else {
-      set({ createTaskOpen: true });
+    const focus = get().inlineFocusHandler;
+    if (focus) {
+      focus();
+      return;
     }
+    const navigateHome = get().homeNavigator;
+    if (!navigateHome) return;
+    set({ pendingInlineFocus: true });
+    navigateHome();
   },
-  closeCreateTask: () => set({ createTaskOpen: false }),
   registerInlineFocus: (handler) => set({ inlineFocusHandler: handler }),
   unregisterInlineFocus: () => set({ inlineFocusHandler: null }),
+  registerHomeNavigator: (handler) => set({ homeNavigator: handler }),
+  unregisterHomeNavigator: () => set({ homeNavigator: null }),
+  clearPendingInlineFocus: () => set({ pendingInlineFocus: false }),
   togglePalette: () => set((s) => ({ paletteOpen: !s.paletteOpen })),
   closePalette: () => set({ paletteOpen: false }),
   toggleShortcuts: () => set((s) => ({ shortcutsOpen: !s.shortcutsOpen })),

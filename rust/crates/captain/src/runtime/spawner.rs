@@ -69,10 +69,11 @@ pub(crate) async fn spawn_worker(
         WorktreePlan::Recreate { wt, stored_branch } => {
             // Worktree binding set, directory missing on disk. Captain
             // invariant #4 keeps the assigned worktree permanent, so we
-            // recreate it at the stored path with a fresh branch instead
-            // of silently reserving a new slot. Allocating a fresh slot
-            // here would mint a second workbench row, archive the first,
-            // and desync the sidebar.
+            // recreate it at the stored path with a fresh branch. Eager
+            // workbench creation made the workbench-per-task mapping
+            // permanent: spawn never mints workbench rows, so the only
+            // safe response to a missing directory is to rebuild it at
+            // the stored path.
             tracing::warn!(
                 module = "spawner",
                 task_id = item.id,
@@ -83,22 +84,15 @@ pub(crate) async fn spawn_worker(
             let branch = recreate_worktree_at(item, &repo_path, &default_branch, &wt).await?;
             (branch, wt)
         }
-        WorktreePlan::Fresh {
-            stored_branch: None,
-        } => reserve_fresh_worktree(item, &repo_path, &default_branch).await?,
-        WorktreePlan::Fresh {
-            stored_branch: Some(b),
-        } => {
-            // Fail-fast: branch set without a worktree binding is an
-            // impossible state. `tick_branch_sync` only populates
-            // `item.branch` when a worktree exists; getting here means
-            // some upstream path cleared worktree without clearing
-            // branch. Refuse to spawn — captain's spawn_fail_count +
-            // escalation path will surface the state corruption.
+        WorktreePlan::MissingBinding => {
+            // After eager workbench+worktree creation, every task reaches
+            // spawn with a stored worktree binding. Reaching this branch
+            // means upstream code dropped the binding (or a tick saw the
+            // task pre-creation, which the lifecycle now disallows).
+            // Refuse to spawn rather than silently reallocating.
             anyhow::bail!(
-                "task {} has branch '{}' set but no worktree binding — refusing to spawn (impossible state; check tick_branch_sync and verdict/reopen paths)",
+                "task {} reached spawn without a worktree binding -- refusing to spawn (impossible state after eager workbench creation)",
                 item.id,
-                b
             );
         }
     };
@@ -269,29 +263,7 @@ pub(crate) async fn credential_env_for_session(
     (env, None)
 }
 
-fn next_worker_slot(state_dir: &std::path::Path) -> Result<u64> {
-    let counter_path = state_dir.join("worker-counter.txt");
-    let current = match std::fs::read_to_string(&counter_path) {
-        Ok(contents) => contents.trim().parse::<u64>().map_err(|e| {
-            anyhow::anyhow!(
-                "corrupt worker counter file at {}: {:?} ({e}); refusing to reset to 0 because the counter must be monotonic",
-                counter_path.display(),
-                contents.trim()
-            )
-        })?,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => 0,
-        Err(e) => anyhow::bail!(
-            "failed to read worker counter at {}: {e}",
-            counter_path.display()
-        ),
-    };
-    let next = current + 1;
-    if let Some(parent) = counter_path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    std::fs::write(&counter_path, next.to_string())?;
-    Ok(next)
-}
+use super::task_creation::next_worker_slot;
 
 fn new_slug(item: &Task, slot: u64) -> String {
     format!("todo-{}-{}", item.id, slot)
@@ -300,10 +272,12 @@ fn new_slug(item: &Task, slot: u64) -> String {
 /// Decision for how `spawn_worker` should resolve a task's worktree + branch.
 ///
 /// Captain invariant #4 (see CLAUDE.md): once a task has a worktree
-/// assigned, that path is permanent for the task's lifetime. The plan
-/// below never silently drops a stored worktree binding — a missing
-/// directory on disk yields [`WorktreePlan::Recreate`], not
-/// [`WorktreePlan::Fresh`].
+/// assigned, that path is permanent for the task's lifetime. After
+/// PR #991 the workbench + worktree are created atomically with the
+/// task itself, so spawn never allocates a fresh slot — it only resumes
+/// (`Reuse`), reworks the existing tree (`Rework`), or recreates the
+/// worktree at its stored path when the directory disappears
+/// (`Recreate`).
 #[derive(Debug)]
 pub(crate) enum WorktreePlan {
     /// Reopen — worktree exists on disk, branch is known. Reuse as-is.
@@ -318,10 +292,11 @@ pub(crate) enum WorktreePlan {
         wt: PathBuf,
         stored_branch: Option<String>,
     },
-    /// No worktree assigned yet. Reserve a fresh slot. A stored branch
-    /// without a stored worktree is an impossible-state warning passed
-    /// through so the caller can log it.
-    Fresh { stored_branch: Option<String> },
+    /// Impossible state — task reached spawn with no stored worktree.
+    /// Eager workbench+worktree creation removed the legitimate "fresh"
+    /// path; this variant exists so spawn can refuse cleanly instead of
+    /// silently allocating.
+    MissingBinding,
 }
 
 /// Pure decision: which worktree plan should `spawn_worker` execute?
@@ -340,9 +315,7 @@ pub(crate) fn plan_worktree(stored_wt: Option<&PathBuf>, branch: Option<&str>) -
             wt: wt.clone(),
             stored_branch: stored.map(str::to_string),
         },
-        (None, stored) => WorktreePlan::Fresh {
-            stored_branch: stored.map(str::to_string),
-        },
+        (None, _) => WorktreePlan::MissingBinding,
     }
 }
 
@@ -394,60 +367,6 @@ async fn recreate_worktree_at(
     anyhow::bail!(
         "failed to recreate worktree at {} after {} attempts for task {}",
         wt.display(),
-        MAX_ATTEMPTS,
-        item.id
-    );
-}
-
-async fn reserve_fresh_worktree(
-    item: &Task,
-    repo_path: &std::path::Path,
-    default_branch: &str,
-) -> Result<(String, PathBuf)> {
-    const MAX_ATTEMPTS: usize = 20;
-
-    for attempt in 0..MAX_ATTEMPTS {
-        let slot_state_dir = global_infra::paths::state_dir();
-        let slot = tokio::task::spawn_blocking(move || next_worker_slot(&slot_state_dir)).await??;
-        let slug = new_slug(item, slot);
-        let branch = format!("mando/{}", slug);
-        let wt = global_git::worktree_path(repo_path, &slug);
-
-        if let Err(e) = global_git::prune_worktrees(repo_path).await {
-            tracing::warn!(module = "spawner", error = %e, "failed to prune stale git worktrees");
-        }
-        if let Err(e) = global_git::delete_local_branch(repo_path, &branch).await {
-            tracing::warn!(
-                module = "spawner",
-                branch = %branch,
-                error = %e,
-                "failed to delete stale local branch"
-            );
-        }
-
-        match global_git::create_worktree(repo_path, &branch, &wt, default_branch).await {
-            Ok(()) => {
-                crate::io::worktree_bootstrap::copy_local_files(repo_path, &wt).await;
-                return Ok((branch, wt));
-            }
-            Err(e)
-                if crate::find_git_error(&e).is_some_and(|g| {
-                    matches!(g, crate::GitError::WorktreeAlreadyExists { .. })
-                }) && attempt + 1 < MAX_ATTEMPTS =>
-            {
-                tracing::warn!(
-                    module = "spawner",
-                    branch = %branch,
-                    attempt = attempt + 1,
-                    "branch/worktree already exists — retrying with a fresh slot"
-                );
-            }
-            Err(e) => return Err(e),
-        }
-    }
-
-    anyhow::bail!(
-        "failed to reserve a fresh worktree after {} attempts for task {}",
         MAX_ATTEMPTS,
         item.id
     );
@@ -534,9 +453,11 @@ mod tests {
     #[test]
     fn plan_recreate_when_wt_missing_on_disk_with_branch() {
         // Captain invariant #4 — the stored worktree binding is permanent.
-        // A missing directory must route to Recreate (recreate at the stored
-        // path), never to Fresh (allocate a new slot). A fresh slot would
-        // mint a second workbench row and archive the first.
+        // A missing directory must route to Recreate (recreate at the
+        // stored path), never to MissingBinding. After eager workbench
+        // creation, the workbench's worktree path is permanent; spawn
+        // recovers the directory rather than allocating a new slot or
+        // minting a second workbench row.
         let wt: PathBuf =
             std::env::temp_dir().join(format!("mando-missing-{}", global_infra::uuid::Uuid::v4()));
         assert!(!wt.exists(), "sanity: missing path must not exist");
@@ -574,25 +495,26 @@ mod tests {
     }
 
     #[test]
-    fn plan_fresh_when_no_worktree_binding() {
+    fn plan_missing_binding_when_no_worktree_stored() {
+        // Eager workbench+worktree creation makes the no-worktree case
+        // impossible during spawn. plan_worktree surfaces it as a typed
+        // variant so the spawn caller can refuse cleanly.
         let plan = plan_worktree(None, None);
         match plan {
-            WorktreePlan::Fresh { stored_branch } => assert!(stored_branch.is_none()),
-            other => panic!("expected Fresh, got {other:?}"),
+            WorktreePlan::MissingBinding => {}
+            other => panic!("expected MissingBinding, got {other:?}"),
         }
     }
 
     #[test]
-    fn plan_fresh_surfaces_impossible_state_branch_without_worktree() {
-        // Impossible state — a branch without a worktree binding. Surface
-        // the stored branch so the caller can WARN instead of silently
-        // discarding it.
+    fn plan_missing_binding_when_branch_set_without_worktree() {
+        // A branch without a worktree binding is the same impossible
+        // state — the eager-creation lifecycle never produces it, so
+        // spawn rejects it.
         let plan = plan_worktree(None, Some("mando/orphan"));
         match plan {
-            WorktreePlan::Fresh { stored_branch } => {
-                assert_eq!(stored_branch.as_deref(), Some("mando/orphan"));
-            }
-            other => panic!("expected Fresh with stored_branch, got {other:?}"),
+            WorktreePlan::MissingBinding => {}
+            other => panic!("expected MissingBinding, got {other:?}"),
         }
     }
 }

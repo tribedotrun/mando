@@ -12,7 +12,6 @@ pub struct ItemSpawnResult {
     pub session_id: String,
     pub branch: String,
     pub worktree: String,
-    pub workbench_id: i64,
     pub started_at: String,
     /// Worktree-relative path to the plan/brief file, if one was found.
     pub plan: Option<String>,
@@ -185,66 +184,18 @@ pub async fn spawn_worker_for_item(
     .await?;
     let now = global_types::now_rfc3339();
 
-    // Create a workbench row for this worktree. Use the clarified title
-    // (clarification has already run by the time a task reaches spawn).
-    let wb_title = &item.title;
-    let workbench_id =
-        create_workbench_for_spawn(pool, item.project_id, slug, &result.worktree, wb_title).await?;
-
-    // Archive the previous workbench when a rework/redispatch creates a new
-    // one. Without this, the old workbench lingers as an orphan in the sidebar.
-    if item.workbench_id != 0 && item.workbench_id != workbench_id {
-        if let Err(e) = crate::io::queries::workbenches::archive(pool, item.workbench_id).await {
-            tracing::warn!(
-                module = "captain",
-                old_wb = item.workbench_id,
-                new_wb = workbench_id,
-                error = %e,
-                "failed to archive previous workbench"
-            );
-        }
-    }
-
+    // The workbench was created at task-creation time (atomic with the
+    // task INSERT). Spawn just resumes a worker against the existing
+    // workbench's worktree -- no new workbench row, no slot allocation.
     Ok(ItemSpawnResult {
         session_name: result.session_name,
         session_id: result.session_id,
         branch: result.branch,
         worktree: result.worktree,
-        workbench_id,
         started_at: now,
         plan: result.plan,
         pr_number: result.pr_number,
     })
-}
-
-/// Create a workbench row for a newly spawned worker, returning the ID.
-/// If a workbench already exists for this worktree path, reuse it.
-async fn create_workbench_for_spawn(
-    pool: &sqlx::SqlitePool,
-    project_id: i64,
-    project_slug: &str,
-    worktree: &str,
-    task_prompt: &str,
-) -> Result<i64> {
-    // Check if a workbench already exists for this worktree.
-    if let Some(existing) =
-        crate::io::queries::workbenches::find_by_worktree(pool, worktree).await?
-    {
-        return Ok(existing.id);
-    }
-    let title = if task_prompt.is_empty() {
-        crate::workbench_title_now()
-    } else {
-        task_prompt.to_string()
-    };
-    let wb = crate::Workbench::new(
-        project_id,
-        project_slug.to_string(),
-        worktree.to_string(),
-        title,
-    );
-    let id = crate::io::queries::workbenches::insert(pool, &wb).await?;
-    Ok(id)
 }
 
 pub(crate) fn default_tick_result() -> TickResult {

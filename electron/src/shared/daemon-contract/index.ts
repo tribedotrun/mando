@@ -8,6 +8,20 @@ export type ActResponse = {
 };
 export type ActionKind = 'skip' | 'nudge' | 'captain-review';
 export type ActivityStatsResponse = { merged_7d: number; daily_merges: Array<DailyMerge> };
+export type AddCodexCredentialRequest = {
+  label: string;
+  /**
+   * Raw contents of an OpenAI Codex `auth.json` file. Validated server-side.
+   */
+  authJson: string;
+};
+export type AddCodexCredentialResponse = {
+  ok: boolean;
+  id: number;
+  label: string;
+  accountId: string;
+  planType: string | null;
+};
 export type AddProjectRequest = { name?: string; path: string; aliases: Array<string> };
 export type AdoptRequest = {
   title: string;
@@ -36,6 +50,7 @@ export type ArtifactMedia = {
   local_path: string | null;
   remote_url: string | null;
   caption: string | null;
+  kind: EvidenceKind | null;
 };
 export type ArtifactMediaParams = { id: number; index: number };
 export type ArtifactMediaUpdateRequest = { media: Array<ArtifactRemoteUrlPatch> };
@@ -125,6 +140,7 @@ export type ClarifierQuestionPayload = {
 };
 export type ClarifyAnswer = { question: string; answer: string };
 export type ClarifyOutcome = 'ready' | 'clarifying' | 'escalate' | 'answered';
+export type ClarifyQuery = { wait: boolean | null };
 export type ClarifyRequest = { answers?: Array<ClarifyAnswer>; answer?: string };
 export type ClarifyResponse = {
   ok: boolean;
@@ -153,6 +169,17 @@ export type ClientLogEntry = {
   message: string;
   context: ClientLogContext | null;
   timestamp: string | null;
+};
+export type CodexActivateResponse = { ok: boolean; accountId: string };
+export type CodexActiveResponse = {
+  activeAccountId: string | null;
+  matchedCredentialId: number | null;
+};
+export type CodexCredentialDetails = {
+  accountId: string;
+  planType: string | null;
+  creditsBalance: string | null;
+  creditsUnlimited: boolean;
 };
 export type ConfigPathsResponse = {
   dataDir: string;
@@ -207,6 +234,7 @@ export type CredentialInfo = {
   id: number;
   label: string;
   tokenMasked: string;
+  provider: CredentialProvider;
   expiresAt: number | null;
   rateLimitCooldownUntil: number | null;
   createdAt: string;
@@ -218,10 +246,17 @@ export type CredentialInfo = {
   representativeClaim?: string | null;
   lastProbedAt?: number | null;
   costSinceProbeUsd?: number | null;
+  /**
+   * Set only when `provider == Codex`.
+   */
+  codex?: CodexCredentialDetails | null;
 };
 export type CredentialListResponse = { credentials: Array<CredentialInfo> };
 export type CredentialMutationResponse = { ok: boolean; error: string | null };
+export type CredentialPick = { id: number; label: string; token: string };
+export type CredentialPickResponse = { pick: CredentialPick | null };
 export type CredentialProbeResponse = { ok: boolean; snapshot: CredentialUsageSnapshot };
+export type CredentialProvider = 'claude' | 'codex';
 export type CredentialRateLimitStatus = 'allowed' | 'allowed_warning' | 'rejected';
 export type CredentialTokenResponse = { token: string };
 export type CredentialUsageSnapshot = {
@@ -278,8 +313,18 @@ export type EvidenceCreatedResponse = {
   media: Array<ArtifactMedia>;
 };
 export type EvidenceFileInput = { filename: string; ext: string; caption: string };
-export type EvidenceFileRequest = { filename: string; ext: string; caption: string };
+export type EvidenceFileRequest = {
+  filename: string;
+  ext: string;
+  caption: string;
+  /**
+   * Optional typed role. When the task is classified `is_bug_fix`, captain
+   * requires at least one `BeforeFix` and one `AfterFix` artifact.
+   */
+  kind: EvidenceKind | null;
+};
 export type EvidenceFilesRequest = { files: Array<EvidenceFileInput> };
+export type EvidenceKind = 'before_fix' | 'after_fix' | 'cannot_reproduce' | 'other';
 export type FeaturesConfig = {
   scout: boolean;
   setupDismissed: boolean;
@@ -890,6 +935,13 @@ export type TaskItem = {
   no_pr: boolean;
   no_auto_merge: boolean;
   planning: boolean;
+  /**
+   * Set by the clarifier when it identifies the task as fixing existing
+   * broken behavior (vs. a new feature, refactor, or research). Worker
+   * prompts use this to require reproduce-first + before-state evidence;
+   * captain review requires both before+after evidence to ship.
+   */
+  is_bug_fix: boolean;
   resource: string | null;
   images: string | null;
   created_at: string | null;
@@ -915,7 +967,17 @@ export type TaskItem = {
 };
 export type TaskListQuery = { include_archived: boolean | null };
 export type TaskListResponse = { items: Array<TaskItem>; count: number };
-export type TaskPatchRequest = { context?: string; original_prompt?: string };
+export type TaskPatchRequest = {
+  context?: string;
+  original_prompt?: string;
+  /**
+   * Manual override for the clarifier's bug-fix classification. Sent from
+   * the task editor when the user disagrees with the auto-classified value
+   * (or wants to correct it after a misread). The captain workflow reads
+   * this on the next worker spawn and captain review tick.
+   */
+  is_bug_fix?: boolean;
+};
 export type TaskSummaryRequest = { content: string };
 export type TaskSummaryResponse = { artifact_id: number; task_id: number };
 export type TasksPayload = { ts: number; data: TaskEventData | null };

@@ -397,17 +397,19 @@ mod tests {
         db.pool().clone()
     }
 
-    fn test_task(title: &str) -> Task {
+    fn test_task(title: &str, wb_id: i64) -> Task {
         let mut task = Task::new(title);
         task.project_id = 1;
         task.project = "test".into();
+        task.workbench_id = wb_id;
         task
     }
 
     #[tokio::test]
     async fn persist_merge_spawn_records_lifecycle_transition() {
         let pool = test_pool().await;
-        let mut task = test_task("merge me");
+        let wb_id = crate::io::test_support::seed_workbench(&pool, 1).await;
+        let mut task = test_task("merge me", wb_id);
         task.status = ItemStatus::CaptainMerging;
         task.last_activity_at = Some(global_types::now_rfc3339());
         let id = tasks::insert_task(&pool, &task).await.unwrap();

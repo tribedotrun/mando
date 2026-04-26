@@ -607,41 +607,43 @@ mod tests {
             rendered.contains("## Confidence Grading"),
             "missing Confidence Grading section"
         );
-        // Single-question anchor for high confidence. The prompt wraps the
-        // question across lines in the YAML source, so match on stable
-        // substrings either side of the wrap.
+        // Two-grade enum is announced up front (high = auto-merge, mid =
+        // human review). `low` was dropped from the rubric and the JSON
+        // schema since the auto-merge gate only acts on `high`.
         assert!(
-            rendered.contains("stated problem is") && rendered.contains("fully solved"),
-            "missing single-question anchor"
+            rendered.contains("`high` / `mid`"),
+            "missing confidence enum (`high` / `mid`)"
         );
-        // Three-level enum.
+        // The rubric reframes `high` as the exception, not the default;
+        // anchor on stable substrings either side of the line wrap.
         assert!(
-            rendered.contains("**high**")
-                && rendered.contains("**mid**")
-                && rendered.contains("**low**"),
-            "missing one of the confidence levels"
+            rendered.contains("`high` is the exception") && rendered.contains("not the default"),
+            "missing `high` is the exception framing"
         );
-        // UI evidence rule requires a screenshot and a recording.
+        // Three required principles for `high` confidence.
         assert!(
-            rendered.contains("screenshot AND a recording"),
-            "missing UI screenshot+recording rule"
+            rendered.contains("**Evidence artifacts**"),
+            "missing Evidence artifacts principle"
         );
-        // Video recordings must be inspected with ffmpeg/ffprobe, not taken
-        // on caption alone. `ffprobe` is a single token that will not be
-        // split by line wrapping in the render.
         assert!(
-            rendered.contains("ffprobe"),
-            "missing video-inspection rule (ffmpeg/ffprobe guidance)"
+            rendered.contains("**Code diff**") && rendered.contains("root cause"),
+            "missing Code diff / root cause principle"
         );
-        // Mixed UI + non-UI rule.
         assert!(
-            rendered.contains("Mixed UI + non-UI"),
-            "missing mixed-change rule"
+            rendered.contains("**Scope match**"),
+            "missing Scope match principle"
         );
-        // Representative evidence exception.
+        // The fallback grade for any non-`high` case.
         assert!(
-            rendered.contains("Representative evidence"),
-            "missing representative-evidence exception"
+            rendered.contains("When in doubt, `mid`"),
+            "missing `When in doubt, mid` fallback"
+        );
+        // confidence_reason must cite both an artifact and a diff hunk per
+        // facet — anchor on the per-facet citation contract directly.
+        assert!(
+            rendered.contains("(a) the specific evidence artifact")
+                && rendered.contains("(b) the specific diff hunk"),
+            "missing per-facet artifact + diff hunk citation requirement"
         );
         // Output section lists the new fields as required on ship.
         assert!(
@@ -651,6 +653,22 @@ mod tests {
         assert!(
             rendered.contains("**confidence_reason** (required when action = ship)"),
             "missing confidence_reason field in Output section"
+        );
+
+        // Second pass with a different trigger (timeout) to confirm the
+        // Confidence Grading section is unconditional across all non-clarifier
+        // triggers, not silently gated on `is_gates_pass`.
+        let mut vars2 = vars.clone();
+        vars2.insert("trigger", "timeout");
+        vars2.insert("is_gates_pass", "false");
+        vars2.insert("is_timeout", "true");
+        let rendered2 = render_prompt("captain_review", &prompts, &vars2).unwrap();
+        assert!(
+            rendered2.contains("## Confidence Grading")
+                && rendered2.contains("**Evidence artifacts**")
+                && rendered2.contains("**Code diff**")
+                && rendered2.contains("**Scope match**"),
+            "Confidence Grading section missing under non-gates_pass trigger"
         );
     }
 
@@ -811,5 +829,176 @@ mod tests {
 
         let rendered = render_prompt("qa", &prompts, &vars).unwrap();
         assert_no_triple_blanks(&rendered, "scout qa (no context, no raw)");
+    }
+
+    #[test]
+    fn worker_initial_includes_bug_fix_protocol_when_flagged() {
+        let prompts = captain_prompts();
+        let mut vars: FxHashMap<&str, &str> = FxHashMap::default();
+        vars.insert("title", "Login overflow");
+        vars.insert("context", "viewport < 375px");
+        vars.insert("id", "1");
+        vars.insert("branch", "mando/login-1");
+        vars.insert("no_pr", "false");
+        vars.insert("is_bug_fix", "true");
+        vars.insert("original_prompt", "");
+        vars.insert("worker_preamble", "");
+        vars.insert("check_command", "`mando-dev check`");
+        vars.insert("workpad_path", "/tmp/plans/1/workpad.md");
+
+        let rendered = render_prompt("worker_initial", &prompts, &vars).unwrap();
+        assert!(
+            rendered.contains("## Bug Fix Protocol"),
+            "bug-fix flagged worker_initial should include the protocol section"
+        );
+        assert!(
+            rendered.contains("Reproduce first."),
+            "bug-fix protocol should include the reproduce-first rule"
+        );
+        assert!(
+            rendered.contains("before-state evidence"),
+            "bug-fix protocol should require before-state evidence"
+        );
+        assert!(
+            rendered.contains("regression test"),
+            "bug-fix protocol should require a regression test"
+        );
+    }
+
+    #[test]
+    fn worker_initial_omits_bug_fix_protocol_when_not_flagged() {
+        let prompts = captain_prompts();
+        let mut vars: FxHashMap<&str, &str> = FxHashMap::default();
+        vars.insert("title", "Add dark mode");
+        vars.insert("context", "feature work");
+        vars.insert("id", "2");
+        vars.insert("branch", "mando/dark-2");
+        vars.insert("no_pr", "false");
+        vars.insert("is_bug_fix", "");
+        vars.insert("original_prompt", "");
+        vars.insert("worker_preamble", "");
+        vars.insert("check_command", "`mando-dev check`");
+        vars.insert("workpad_path", "/tmp/plans/2/workpad.md");
+
+        let rendered = render_prompt("worker_initial", &prompts, &vars).unwrap();
+        assert!(
+            !rendered.contains("Bug Fix Protocol"),
+            "non-bug-fix worker_initial should NOT include the protocol"
+        );
+    }
+
+    #[test]
+    fn captain_review_includes_bug_fix_evidence_rule_when_flagged() {
+        let prompts = captain_prompts();
+        let mut vars: FxHashMap<&str, &str> = FxHashMap::default();
+        vars.insert("trigger", "gates_pass");
+        vars.insert("problem_statement", "Login overflow on mobile");
+        vars.insert("worker_contexts", "Worker fixed flex layout");
+        vars.insert("knowledge_base", "");
+        vars.insert("evidence_images", "");
+        vars.insert("is_gates_pass", "true");
+        vars.insert("is_degraded_context", "false");
+        vars.insert("is_timeout", "false");
+        vars.insert("is_broken_session", "false");
+        vars.insert("is_repeated_nudge", "false");
+        vars.insert("is_rebase_fail", "false");
+        vars.insert("is_ci_failure", "false");
+        vars.insert("is_merge_fail", "false");
+        vars.insert("is_budget_exhausted", "false");
+        vars.insert("is_clarifier_fail", "false");
+        vars.insert("is_spawn_fail", "false");
+        vars.insert("intervention_count", "0");
+        vars.insert("has_screenshot", "true");
+        vars.insert("has_recording", "true");
+        vars.insert("is_bug_fix", "true");
+        vars.insert("is_no_pr", "");
+
+        let rendered = render_prompt("captain_review", &prompts, &vars).unwrap();
+        assert!(
+            rendered.contains("Bug-fix evidence (mandatory"),
+            "captain_review should include the bug-fix evidence rule when flagged"
+        );
+        assert!(
+            rendered.contains("before-state") && rendered.contains("after-state"),
+            "bug-fix evidence rule should require both before and after"
+        );
+        assert!(
+            rendered.contains("regression test"),
+            "bug-fix evidence rule should check for a regression test"
+        );
+    }
+
+    #[test]
+    fn captain_review_omits_bug_fix_rule_when_not_flagged() {
+        let prompts = captain_prompts();
+        let mut vars: FxHashMap<&str, &str> = FxHashMap::default();
+        vars.insert("trigger", "gates_pass");
+        vars.insert("problem_statement", "Add dark mode");
+        vars.insert("worker_contexts", "Worker added theme toggle");
+        vars.insert("knowledge_base", "");
+        vars.insert("evidence_images", "");
+        vars.insert("is_gates_pass", "true");
+        vars.insert("is_degraded_context", "false");
+        vars.insert("is_timeout", "false");
+        vars.insert("is_broken_session", "false");
+        vars.insert("is_repeated_nudge", "false");
+        vars.insert("is_rebase_fail", "false");
+        vars.insert("is_ci_failure", "false");
+        vars.insert("is_merge_fail", "false");
+        vars.insert("is_budget_exhausted", "false");
+        vars.insert("is_clarifier_fail", "false");
+        vars.insert("is_spawn_fail", "false");
+        vars.insert("intervention_count", "0");
+        vars.insert("has_screenshot", "true");
+        vars.insert("has_recording", "true");
+        vars.insert("is_bug_fix", "");
+        vars.insert("is_no_pr", "");
+
+        let rendered = render_prompt("captain_review", &prompts, &vars).unwrap();
+        assert!(
+            !rendered.contains("Bug-fix evidence"),
+            "non-bug-fix captain_review should NOT include the bug-fix evidence rule"
+        );
+    }
+
+    #[test]
+    fn task_header_partial_substitutes_in_advisor_family() {
+        let prompts = captain_prompts();
+        let mut vars: FxHashMap<&str, &str> = FxHashMap::default();
+        vars.insert("title", "Login button overflow");
+        vars.insert("id", "42");
+        vars.insert("status", "AwaitingReview");
+        vars.insert("project", "mando");
+        vars.insert("pr", "123");
+        vars.insert("branch", "mando/login-fix-42");
+        vars.insert("context", "Worker fixed flex layout");
+        vars.insert(
+            "timeline",
+            "[2026-04-25T10:00] captain — gates_pass\n[2026-04-25T10:05] captain — ship",
+        );
+        vars.insert("question", "Why was this shipped at mid?");
+        vars.insert("intent", "rework");
+
+        for name in ["task_ask", "advisor", "advisor_reopen_direct"] {
+            let rendered = render_prompt(name, &prompts, &vars)
+                .unwrap_or_else(|e| panic!("{name} render failed: {e}"));
+            assert_no_triple_blanks(&rendered, name);
+            assert!(
+                rendered.contains("- Title: Login button overflow"),
+                "{name}: title row missing"
+            );
+            assert!(
+                rendered.contains("- PR: 123"),
+                "{name}: pr row missing (var substitution failed)"
+            );
+            assert!(
+                rendered.contains("## Recent Timeline"),
+                "{name}: timeline section missing"
+            );
+            assert!(
+                rendered.contains("[2026-04-25T10:00] captain"),
+                "{name}: timeline body missing"
+            );
+        }
     }
 }

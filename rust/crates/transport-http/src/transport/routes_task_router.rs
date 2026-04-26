@@ -188,6 +188,7 @@ pub(crate) fn task_routes() -> ApiRouter<AppState> {
         auth = Protected,
         handler = routes_clarifier::post_task_clarify,
         body = api_types::ClarifyRequest,
+        query = api_types::ClarifyQuery,
         params = api_types::TaskIdParams,
         res = api_types::ClarifyResponse
     )

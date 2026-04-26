@@ -30,7 +30,8 @@ pub async fn codex_exec(prompt: &str, cwd: &Path, timeout: Duration) -> Result<C
 
     let start = Instant::now();
 
-    let child = Command::new("codex")
+    let mut command = Command::new("codex");
+    command
         .arg("exec")
         .arg("--full-auto")
         .arg("-o")
@@ -40,9 +41,11 @@ pub async fn codex_exec(prompt: &str, cwd: &Path, timeout: Duration) -> Result<C
         .kill_on_drop(true)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
-        .context("failed to spawn codex exec")?;
+        .stderr(std::process::Stdio::piped());
+    for key in crate::process::DAEMON_ENV_STRIP {
+        command.env_remove(key);
+    }
+    let child = command.spawn().context("failed to spawn codex exec")?;
 
     let result = tokio::time::timeout(timeout, child.wait_with_output()).await;
     let duration_ms = start.elapsed().as_millis() as u64;

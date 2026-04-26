@@ -27,10 +27,10 @@ pub struct CaptainWorkflow {
     pub agent: AgentConfig,
     pub planning: PlanningConfig,
     pub auto_title: AutoTitleConfig,
+    pub sandbox: SandboxOverrides,
     pub prompts: HashMap<String, String>,
     pub nudges: HashMap<String, String>,
     pub initial_prompts: HashMap<String, String>,
-    pub sandbox: SandboxOverrides,
     /// Stream-symptom classifier rules. Order matters (first match wins).
     /// See `captain-workflow.yaml::stream_symptoms` for wire format.
     pub stream_symptoms: Vec<global_claude::StreamSymptomRule>,
@@ -85,6 +85,12 @@ pub struct ModelsConfig {
 }
 
 impl Default for ModelsConfig {
+    /// Placeholder model names — production runs always load the YAML
+    /// (`captain-workflow.yaml::models`), which overrides these to the real
+    /// model id (e.g. `opus[1m]`). The "default" string is what `claude`
+    /// resolves when no model is pinned, which keeps tests that construct
+    /// `CaptainWorkflow::default()` directly working without depending on
+    /// a specific Anthropic model.
     fn default() -> Self {
         Self {
             worker: "default".into(),
@@ -234,10 +240,6 @@ pub struct AgentConfig {
     pub needs_clarification_timeout_s: std::time::Duration,
     #[serde(with = "duration_seconds")]
     pub archive_grace_secs: std::time::Duration,
-    #[serde(with = "duration_seconds")]
-    pub evidence_download_timeout_s: std::time::Duration,
-    #[serde(with = "duration_seconds")]
-    pub evidence_ffmpeg_timeout_s: std::time::Duration,
     /// Circuit breaker: route to captain review after this many consecutive
     /// nudges with the identical reason.
     pub max_repeated_nudges: u32,
@@ -285,8 +287,6 @@ impl Default for AgentConfig {
             todo_parse_max_turns: 10,
             needs_clarification_timeout_s: Duration::from_secs(86400), // 24 hours
             archive_grace_secs: Duration::from_secs(604800),
-            evidence_download_timeout_s: Duration::from_secs(30),
-            evidence_ffmpeg_timeout_s: Duration::from_secs(30),
             max_repeated_nudges: 3,
             task_ask_timeout_s: Duration::from_secs(600),
             task_ask_idle_ttl_s: Duration::from_secs(3600),

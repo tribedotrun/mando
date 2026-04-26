@@ -7,10 +7,21 @@ use anyhow::{Context, Result};
 use crate::config::CcConfig;
 use crate::error::CcError;
 
-/// Daemon env vars stripped from worker processes so they don't inherit mode
-/// state that silently changes mando-dev behavior (e.g. MANDO_PROD_MODE
-/// turning `start dev` into prod-local).
-const DAEMON_ENV_STRIP: &[&str] = &[
+/// Daemon env vars stripped from worker processes so they don't inherit
+/// state from the parent context. Two reasons covered here:
+///
+/// - mode state that silently changes mando-dev behavior (e.g. MANDO_PROD_MODE
+///   turning `start dev` into prod-local);
+/// - terminal-session attribution (MANDO_TERMINAL_ID / MANDO_TERMINAL_CWD).
+///   If the daemon was launched from inside a mando-spawned terminal, these
+///   leak into every captain CC subprocess. The CC SessionStart hook then
+///   POSTs the captain session's id to /api/terminal/{leaked_id}/cc-session,
+///   overwriting that terminal's cc_session_id with a conversation file that
+///   lives under the captain's cwd hash — a different project hash than the
+///   terminal's home cwd. After a daemon restart, auto-resume launches
+///   `claude --resume <id>` from the terminal's cwd, CC computes the wrong
+///   project hash, and exits with "No conversation found".
+pub const DAEMON_ENV_STRIP: &[&str] = &[
     "MANDO_PROD_MODE",
     "MANDO_APP_MODE",
     "MANDO_SANDBOX",
@@ -19,6 +30,8 @@ const DAEMON_ENV_STRIP: &[&str] = &[
     "MANDO_ELECTRON_INSPECT_PORT",
     "MANDO_ELECTRON_CDP_PORT",
     "MANDO_EXTERNAL_GATEWAY",
+    "MANDO_TERMINAL_ID",
+    "MANDO_TERMINAL_CWD",
 ];
 
 /// Spawn a claude subprocess with stream-json input/output.
@@ -355,5 +368,24 @@ mod tests {
     #[test]
     fn pid_zero_not_alive() {
         assert!(!is_process_alive(global_types::Pid::new(0)));
+    }
+
+    #[test]
+    fn daemon_env_strip_includes_terminal_attribution_keys() {
+        // Captain CC subprocesses must NOT inherit MANDO_TERMINAL_ID /
+        // MANDO_TERMINAL_CWD from the daemon process. If the daemon was
+        // launched from inside a mando-spawned terminal, these would leak
+        // and the SessionStart hook would attribute the captain session to
+        // that terminal — breaking subsequent `claude --resume` because the
+        // conversation file lives under the captain's cwd hash, not the
+        // terminal's home cwd.
+        assert!(
+            DAEMON_ENV_STRIP.contains(&"MANDO_TERMINAL_ID"),
+            "MANDO_TERMINAL_ID must be stripped from CC subprocess env"
+        );
+        assert!(
+            DAEMON_ENV_STRIP.contains(&"MANDO_TERMINAL_CWD"),
+            "MANDO_TERMINAL_CWD must be stripped from CC subprocess env"
+        );
     }
 }
