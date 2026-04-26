@@ -116,10 +116,14 @@ async fn title_one(
 
     let claude = global_claude::resolve_claude_binary();
     let full_prompt = format!("{}\n\n{prompt_text}", cfg.prompt);
-    let cmd = tokio::process::Command::new(&claude)
+    let mut command = tokio::process::Command::new(&claude);
+    command
         .args(["-p", &full_prompt, "--model", &cfg.model])
-        .kill_on_drop(true)
-        .output();
+        .kill_on_drop(true);
+    for key in global_claude::DAEMON_ENV_STRIP {
+        command.env_remove(key);
+    }
+    let cmd = command.output();
     let output = tokio::time::timeout(cfg.timeout_s, cmd)
         .await
         .map_err(|_| anyhow::anyhow!("claude -p timed out"))??;

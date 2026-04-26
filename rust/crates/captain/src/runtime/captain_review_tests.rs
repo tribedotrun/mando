@@ -159,13 +159,15 @@ async fn test_spawn_review_preserves_existing_review_fail_count() {
     std::fs::create_dir_all(&worktree).unwrap();
 
     // Seed a test project so FK constraints are satisfied.
-    settings::projects::upsert(&pool, "test", "", None)
+    let project_id = settings::projects::upsert(&pool, "test", "", None)
         .await
         .unwrap();
+    let wb_id = crate::io::test_support::seed_workbench(&pool, project_id).await;
 
     let mut item = Task::new("test");
-    item.project_id = 1;
+    item.project_id = project_id;
     item.project = "test".into();
+    item.workbench_id = wb_id;
     item.status = crate::ItemStatus::CaptainReviewing;
     item.review_fail_count = 4;
     item.worktree = Some(worktree.to_string_lossy().to_string());

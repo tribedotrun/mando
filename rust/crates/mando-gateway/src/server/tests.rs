@@ -291,6 +291,24 @@ async fn sessions_endpoint_returns_runtime_backed_enrichment() {
     let mut task = captain::Task::new("Runtime-backed task title");
     task.project_id = project_id;
     task.project = "test".into();
+    // Seed a workbench row so the new tasks.workbench_id NOT NULL FK is satisfied.
+    let now = global_types::now_rfc3339();
+    let wb_id: i64 = sqlx::query_scalar(
+        "INSERT INTO workbenches (project_id, worktree, title, created_at, last_activity_at) \
+         VALUES (?, ?, ?, ?, ?) RETURNING id",
+    )
+    .bind(project_id)
+    .bind(format!(
+        "/tmp/mando-test-wb-{}",
+        global_infra::uuid::Uuid::v4()
+    ))
+    .bind("test-workbench")
+    .bind(&now)
+    .bind(&now)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    task.workbench_id = wb_id;
     let task_id = {
         let store = task_store.read().await;
         store.add(task).await.unwrap()

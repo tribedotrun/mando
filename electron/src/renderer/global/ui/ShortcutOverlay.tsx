@@ -25,15 +25,6 @@ const NAVIGATION: readonly ShortcutEntry[] = Object.freeze([
   { keys: ['J'], label: 'Next item' },
   { keys: ['K'], label: 'Previous item' },
   { keys: ['Enter'], label: 'Expand / open' },
-  { keys: ['X'], label: 'Deselect row' },
-]);
-
-const ACTIONS: readonly ShortcutEntry[] = Object.freeze([
-  { keys: ['C'], label: 'Create task' },
-  { keys: ['M'], label: 'Merge PR' },
-  { keys: ['S'], label: 'Change status' },
-  { keys: ['R'], label: 'Restart / rework' },
-  { keys: ['\u2318', 'Enter'], label: 'Submit form' },
 ]);
 
 interface Props {
@@ -67,10 +58,9 @@ export function ShortcutOverlay({ open, onClose }: Props): React.ReactElement | 
           </Button>
         </div>
 
-        <div className="grid grid-cols-3 gap-8 px-6 py-5">
+        <div className="grid grid-cols-2 gap-8 px-6 py-5">
           <ShortcutColumn title="General" entries={GENERAL} />
           <ShortcutColumn title="Navigation" entries={NAVIGATION} />
-          <ShortcutColumn title="Actions" entries={ACTIONS} />
         </div>
 
         <div className="px-6 pb-4 text-xs text-text-4">

@@ -559,4 +559,56 @@ mod tests {
             .expect("credential must be eligible after clear");
         assert_eq!(back.0, id);
     }
+
+    /// `pick_for_worker` is the Claude-Code worker-spawn entry point — it
+    /// must never hand back a Codex row. Otherwise the OpenAI JWT in
+    /// `access_token` would be passed to `claude` as `CLAUDE_CODE_OAUTH_TOKEN`
+    /// and every spawn would 401. See PR #1006 reviewer finding.
+    #[tokio::test]
+    async fn pick_for_worker_excludes_codex_rows() {
+        let db = global_db::Db::open_in_memory()
+            .await
+            .expect("in-memory db must init");
+        let pool = db.pool().clone();
+
+        // Codex row exists and is healthy (no expiry, no cooldown).
+        let _codex_id = crate::io::codex_credentials::insert_codex(
+            &pool,
+            "b_aburra",
+            "openai-jwt-access",
+            "openai-refresh",
+            "header.payload.sig",
+            "user-acct-1",
+            Some("pro"),
+            None,
+        )
+        .await
+        .unwrap();
+
+        // No Claude row yet — must return None despite the Codex row.
+        let pick = credentials::pick_for_worker(&pool, Some("worker"))
+            .await
+            .unwrap();
+        assert!(
+            pick.is_none(),
+            "pick_for_worker must reject Codex rows; got {pick:?}"
+        );
+
+        // Add a Claude row — it must win over the (still present) Codex row.
+        let claude_id = credentials::insert(&pool, "main", "claude-oauth", None)
+            .await
+            .unwrap();
+        let pick = credentials::pick_for_worker(&pool, Some("worker"))
+            .await
+            .unwrap()
+            .expect("claude row must be picked");
+        assert_eq!(
+            pick.0, claude_id,
+            "pick_for_worker returned a non-Claude row"
+        );
+        assert_eq!(
+            pick.1, "claude-oauth",
+            "pick_for_worker returned the Codex JWT instead of the Claude OAuth token"
+        );
+    }
 }

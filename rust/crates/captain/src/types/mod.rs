@@ -17,8 +17,8 @@ pub mod workbench_layout;
 pub mod worktree;
 
 pub use artifact::{
-    ArtifactMedia, ArtifactType, EvidenceArtifactCreated, EvidenceFileSpec, TaskArtifact,
-    UpdateArtifactMediaOutcome,
+    ArtifactMedia, ArtifactType, EvidenceArtifactCreated, EvidenceFileSpec, EvidenceKind,
+    TaskArtifact, UpdateArtifactMediaOutcome,
 };
 pub use ask_history::AskHistoryEntry;
 pub use captain::{Action, ActionKind, TickMode, TickResult, WorkerContext};

@@ -8,6 +8,8 @@ import {
 } from '#renderer/domains/captain/service/feedHelpers';
 import type { TimelineEvent } from '#renderer/global/types';
 import { StatusIndicator } from '#renderer/global/ui/StatusIndicator';
+import { PrMarkdown } from '#renderer/global/ui/PrMarkdown';
+import { InlineMarkdown } from '#renderer/global/ui/InlineMarkdown';
 
 export function TimelineBlock({ event }: { event: TimelineEvent }) {
   const iconStatus =
@@ -28,14 +30,24 @@ export function TimelineBlock({ event }: { event: TimelineEvent }) {
             {event.actor}
           </span>
         </div>
-        <p className="break-words text-body text-text-1">{event.summary}</p>
+        <div className="break-words text-body text-text-1">
+          <PrMarkdown text={event.summary} />
+        </div>
         {nudgeReason ? (
-          <p className="mt-0.5 text-caption text-text-3 [overflow-wrap:anywhere]">
-            Reason: {nudgeReason}
-          </p>
+          <div className="mt-0.5 text-caption text-text-3 [overflow-wrap:anywhere]">
+            Reason: <InlineMarkdown text={nudgeReason} />
+          </div>
         ) : null}
         {triageDetail ? (
-          <p className="mt-0.5 text-caption text-text-3 [overflow-wrap:anywhere]">{triageDetail}</p>
+          <div className="mt-0.5 text-caption text-text-3 [overflow-wrap:anywhere]">
+            Confidence: {triageDetail.confidence}
+            {triageDetail.reason ? (
+              <>
+                {' — '}
+                <InlineMarkdown text={triageDetail.reason} />
+              </>
+            ) : null}
+          </div>
         ) : null}
       </div>
     </div>

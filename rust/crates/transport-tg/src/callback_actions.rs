@@ -350,6 +350,7 @@ pub(crate) async fn add_todo_items(
                 let updates = api_types::TaskPatchRequest {
                     context: None,
                     original_prompt: Some(item.title.clone()),
+                    is_bug_fix: None,
                 };
                 if let Err(e) = bot
                     .gw()

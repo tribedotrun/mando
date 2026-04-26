@@ -4,9 +4,11 @@
 //! Local repository inspection uses the shared global-git provider boundary.
 
 mod captain;
+mod credentials;
 mod gateway;
 mod gateway_paths;
 mod http;
+mod motion_check;
 mod project;
 mod scout;
 mod sessions;
@@ -64,6 +66,8 @@ enum Commands {
     Tasks(TasksArgs),
     /// Show system health (daemon, workers, config)
     Health(HealthArgs),
+    /// Manage and inspect Claude credentials (multi-account pool)
+    Credentials(credentials::CredentialsArgs),
 }
 
 // -----------------------------------------------------------------------
@@ -173,6 +177,7 @@ async fn main() {
         Commands::Triage(args) => handle_triage(args).await,
         Commands::Tasks(args) => handle_tasks(args).await,
         Commands::Health(_) => handle_health().await,
+        Commands::Credentials(args) => credentials::handle(args).await,
     };
 
     if let Err(e) = result {
@@ -463,6 +468,18 @@ mod tests {
     fn cli_parse_health() {
         let cli = Cli::try_parse_from(["mando", "health"]).unwrap();
         assert!(matches!(cli.command, Commands::Health(_)));
+    }
+
+    #[test]
+    fn cli_parse_credentials_list() {
+        let cli = Cli::try_parse_from(["mando", "credentials", "list"]).unwrap();
+        assert!(matches!(cli.command, Commands::Credentials(_)));
+    }
+
+    #[test]
+    fn cli_parse_credentials_pick() {
+        let cli = Cli::try_parse_from(["mando", "credentials", "pick"]).unwrap();
+        assert!(matches!(cli.command, Commands::Credentials(_)));
     }
 
     #[test]

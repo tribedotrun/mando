@@ -6,7 +6,7 @@
 # Global crates
 global-types = ["global-infra"]
 global-infra = []
-global-db = ["global-types"]
+global-db = ["global-infra", "global-types"]
 global-bus = ["api-types", "global-types"]
 global-claude = ["api-types", "global-types", "global-infra"]
 global-net = ["global-types", "global-infra"]
@@ -31,7 +31,7 @@ scout = [
     "sessions", "settings",
 ]
 sessions = [
-    "global-types", "global-db",
+    "api-types", "global-types", "global-db",
     "global-bus", "global-infra", "global-claude",
     "sessions-db",
 ]
@@ -39,7 +39,7 @@ sessions-db = [
     "global-types", "global-db",
 ]
 settings = [
-    "api-types", "global-types", "global-db",
+    "api-types", "global-types", "global-db", "global-claude",
     "global-infra", "global-net", "global-git",
 ]
 

@@ -283,9 +283,6 @@ impl CaptainRuntime {
 
     #[tracing::instrument(skip_all)]
     pub async fn touch_workbench_activity(&self, workbench_id: i64) {
-        if workbench_id == 0 {
-            return;
-        }
         let touched = match crate::io::queries::workbenches::touch_activity(
             &self.pool,
             workbench_id,

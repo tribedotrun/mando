@@ -6,11 +6,15 @@ mod types;
 
 pub use config::*;
 pub use io::cc_failover;
+pub use io::codex_credentials;
+pub use io::codex_oauth_refresh;
+pub use io::codex_probe;
 pub use io::config_fs;
 pub use io::credentials;
-pub use io::credentials::{CredentialInfo, CredentialRow, CredentialWindowInfo};
+pub use io::credentials::{CodexInfo, CredentialInfo, CredentialRow, CredentialWindowInfo};
 pub use io::projects;
 pub use io::projects::ProjectRow;
+pub use io::provider_probe;
 pub use io::usage_probe;
 pub use io::usage_probe::{ProbeError, RateLimitStatus, UsageSnapshot, WindowState};
 pub use runtime::*;

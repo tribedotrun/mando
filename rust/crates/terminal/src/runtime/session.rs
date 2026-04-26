@@ -114,6 +114,24 @@ impl TerminalSession {
         // the mando session id so the hook can callback for every spawn.
         req.terminal_env
             .insert("MANDO_TERMINAL_ID".to_string(), id.clone());
+        // MANDO_TERMINAL_CWD lets the hook skip the POST when CC was launched from
+        // a different directory than the terminal's home cwd (e.g. user `cd`'d and
+        // ran `claude` again). Capturing that session would attribute a conversation
+        // file under a different project hash to this terminal, then break resume
+        // with "No conversation found" once the daemon restarts and relaunches
+        // `claude --resume <id>` from the original cwd.
+        //
+        // Canonicalize the path so symlinked components (`/var` → `/private/var`
+        // on macOS, project paths under `~/Library/Application Support/...`,
+        // worktree paths whose parent is a symlink) compare equal to whatever
+        // CC reports as its working directory. The hook canonicalizes its side
+        // too. Falls back to the raw path if canonicalize fails (cwd is created
+        // moments later — `is_dir` is asserted by the caller).
+        let canonical_cwd = std::fs::canonicalize(&req.cwd)
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_else(|_| req.cwd.to_string_lossy().to_string());
+        req.terminal_env
+            .insert("MANDO_TERMINAL_CWD".to_string(), canonical_cwd);
 
         let size = req.size.unwrap_or_default();
         let created_at = global_types::now_rfc3339();

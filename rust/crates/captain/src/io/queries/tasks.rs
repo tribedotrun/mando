@@ -32,7 +32,7 @@ const SELECT_COLS: &str = "\
     t.worker, t.resource, t.context, t.original_prompt, \
     t.created_at, t.workbench_id, w.worktree, t.pr_number, t.worker_started_at, \
     t.intervention_count, t.captain_review_trigger, t.session_ids, t.last_activity_at, \
-    t.plan, t.no_pr, t.no_auto_merge, t.planning, t.worker_seq, t.reopen_seq, t.reopened_at, t.reopen_source, t.images, \
+    t.plan, t.no_pr, t.no_auto_merge, t.planning, t.is_bug_fix, t.worker_seq, t.reopen_seq, t.reopened_at, t.reopen_source, t.images, \
     t.review_fail_count, t.clarifier_fail_count, t.spawn_fail_count, t.merge_fail_count, \
     t.escalation_report, t.source, t.rev, t.paused_until, p.github_repo";
 
@@ -105,6 +105,7 @@ const WRITE_COLS: &[&str] = &[
     "no_pr",
     "no_auto_merge",
     "planning",
+    "is_bug_fix",
     "worker_seq",
     "reopen_seq",
     "reopened_at",
@@ -177,6 +178,7 @@ pub(crate) fn bind_task_write_fields<'q>(
         .bind(task.no_pr as i64)
         .bind(task.no_auto_merge as i64)
         .bind(task.planning as i64)
+        .bind(task.is_bug_fix as i64)
         .bind(task.worker_seq)
         .bind(task.reopen_seq)
         .bind(&task.reopened_at)
@@ -194,20 +196,28 @@ pub(crate) fn bind_task_write_fields<'q>(
 /// Insert a new task (auto-ID).
 pub async fn insert_task(pool: &SqlitePool, task: &Task) -> Result<i64> {
     let mut tx = pool.begin().await?;
+    let id = insert_task_in_tx(&mut tx, task, "captain", task.source.clone()).await?;
+    tx.commit().await?;
+    Ok(id)
+}
+
+/// Insert a new task inside an existing transaction. Used by atomic
+/// workbench+task creation so the workbench INSERT and task INSERT
+/// commit together.
+pub(crate) async fn insert_task_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    task: &Task,
+    actor: &str,
+    source: Option<String>,
+) -> Result<i64> {
     let result = bind_task_write_fields(sqlx::query(insert_task_sql()), task)
-        .execute(&mut *tx)
+        .execute(&mut **tx)
         .await?;
     let id = result.last_insert_rowid();
     let mut persisted = task.clone();
     persisted.id = id;
-    super::tasks_persist::record_task_created_in_tx(
-        &mut tx,
-        &persisted,
-        "captain",
-        task.source.as_deref(),
-    )
-    .await?;
-    tx.commit().await?;
+    super::tasks_persist::record_task_created_in_tx(tx, &persisted, actor, source.as_deref())
+        .await?;
     Ok(id)
 }
 

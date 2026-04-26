@@ -10,6 +10,7 @@ import {
   reopenItem,
   reworkItem,
   askReopen,
+  setTaskIsBugFix,
   startImplementation,
 } from '#renderer/domains/captain/repo/api';
 import type { TaskListResponse } from '#renderer/global/types';
@@ -192,6 +193,30 @@ export function useTaskRework() {
     },
     onSettled: (_data, err, vars) => {
       if (err) log.warn('useTaskRework settled with error', err);
+      invalidateTaskDetail(qc, vars.id);
+    },
+  });
+}
+
+export function useTaskSetIsBugFix() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { id: number; value: boolean }) =>
+      toReactQuery(setTaskIsBugFix(vars.id, vars.value)),
+    onMutate: async (vars) => {
+      await qc.cancelQueries({ queryKey: queryKeys.tasks.list() });
+      const prev = qc.getQueryData<TaskListResponse>(queryKeys.tasks.list());
+      qc.setQueryData<TaskListResponse>(queryKeys.tasks.list(), (old) =>
+        updateTaskInList(old, vars.id, { is_bug_fix: vars.value }),
+      );
+      return { prev };
+    },
+    onError: (err, _vars, context) => {
+      if (context?.prev) qc.setQueryData(queryKeys.tasks.list(), context.prev);
+      log.error('useTaskSetIsBugFix', err);
+    },
+    onSettled: (_data, err, vars) => {
+      if (err) log.warn('useTaskSetIsBugFix settled with error', err);
       invalidateTaskDetail(qc, vars.id);
     },
   });

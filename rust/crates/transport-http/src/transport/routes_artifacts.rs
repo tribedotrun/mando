@@ -42,6 +42,7 @@ pub(crate) async fn post_task_evidence(
             filename: file.filename.clone(),
             ext: file.ext.clone(),
             caption: file.caption.clone(),
+            kind: file.kind.map(captain::EvidenceKind::from),
         })
         .collect();
     let created = state

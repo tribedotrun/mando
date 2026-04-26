@@ -47,7 +47,7 @@ pub(crate) fn credential_routes() -> ApiRouter<AppState> {
         params = api_types::CredentialIdParams,
         res = api_types::ProbeCredentialResponse
     );
-    crate::api_route!(
+    let router = crate::api_route!(
         router,
         POST "/api/credentials/setup-token",
         transport = Json,
@@ -55,7 +55,23 @@ pub(crate) fn credential_routes() -> ApiRouter<AppState> {
         handler = add_setup_token,
         body = api_types::SetupTokenRequest,
         res = api_types::SetupTokenResponse
+    );
+    crate::api_route!(
+        router,
+        POST "/api/credentials/pick",
+        transport = Json,
+        auth = Protected,
+        handler = pick_credential,
+        body = api_types::EmptyRequest,
+        res = api_types::CredentialPickResponse
     )
+}
+
+fn provider_to_api(provider: &str) -> api_types::CredentialProvider {
+    match provider {
+        "codex" => api_types::CredentialProvider::Codex,
+        _ => api_types::CredentialProvider::Claude,
+    }
 }
 
 fn api_rate_limit_status(status: &str) -> api_types::CredentialRateLimitStatus {
@@ -96,6 +112,13 @@ async fn list_credentials(
             id: cred.id,
             label: cred.label,
             token_masked: cred.token_masked,
+            provider: provider_to_api(&cred.provider),
+            codex: cred.codex.map(|c| api_types::CodexCredentialDetails {
+                account_id: c.account_id,
+                plan_type: c.plan_type,
+                credits_balance: c.credits_balance,
+                credits_unlimited: c.credits_unlimited,
+            }),
             expires_at: cred.expires_at,
             rate_limit_cooldown_until: cred.rate_limit_cooldown_until,
             created_at: cred.created_at,
@@ -234,6 +257,45 @@ async fn probe_credential(
             ))
         }
     }
+}
+
+/// POST /api/credentials/pick -- return the best-available credential for an
+/// external caller (e.g. a `claude` invocation in a user terminal).
+///
+/// Reuses the same `pick_for_worker` selection that captain uses: ordered by
+/// fewest active sessions, then lowest five-hour utilization, then id;
+/// expired and cooling-down credentials are excluded. `caller_filter = None`
+/// counts all running sessions when ranking, since terminal use is
+/// "lightweight" and should balance against worker load.
+///
+/// Returns `{ pick: null }` (HTTP 200) when nothing is usable — the caller is
+/// expected to fall back to its ambient login rather than treat that as an
+/// error.
+#[crate::instrument_api(method = "POST", path = "/api/credentials/pick")]
+async fn pick_credential(
+    State(state): State<AppState>,
+    Json(_body): Json<api_types::EmptyRequest>,
+) -> Result<Json<api_types::CredentialPickResponse>, ApiError> {
+    let picked = state
+        .settings
+        .pick_worker_credential(None)
+        .await
+        .map_err(|e| internal_error(e, "failed to pick credential"))?;
+
+    let pick = match picked {
+        None => None,
+        Some((id, token)) => {
+            let labels = state
+                .settings
+                .credential_labels_by_ids(&[id])
+                .await
+                .map_err(|e| internal_error(e, "failed to load credential label"))?;
+            let label = labels.get(&id).cloned().unwrap_or_else(|| id.to_string());
+            Some(api_types::CredentialPick { id, label, token })
+        }
+    };
+
+    Ok(Json(api_types::CredentialPickResponse { pick }))
 }
 
 /// POST /api/credentials/setup-token -- add a setup-token credential.

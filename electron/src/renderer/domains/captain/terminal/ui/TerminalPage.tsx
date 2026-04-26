@@ -6,6 +6,8 @@ import { Loader2 } from 'lucide-react';
 interface TerminalPageProps {
   project: string;
   cwd: string;
+  /** Extra acceptable cwds for the workbench. See {@link useTerminalOrchestration}. */
+  extraCwds?: readonly string[];
   resumeSessionId?: string | null;
   resumeName?: string | null;
   onResumeConsumed?: () => void;
@@ -14,6 +16,7 @@ interface TerminalPageProps {
 export function TerminalPage({
   project,
   cwd,
+  extraCwds,
   resumeSessionId,
   resumeName,
   onResumeConsumed,
@@ -21,6 +24,7 @@ export function TerminalPage({
   const terminal = useTerminalOrchestration({
     project,
     cwd,
+    extraCwds,
     resumeSessionId,
     resumeName,
     onResumeConsumed,

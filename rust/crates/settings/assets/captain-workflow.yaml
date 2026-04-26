@@ -10,16 +10,6 @@ models:
   clarifier: "opus[1m]"
   todo_parse: "opus[1m]"
 
-auto_title:
-  model: "haiku"
-  prompt: >-
-    Generate a concise 3-5 word title for this conversation.
-    Output ONLY the title, nothing else:
-  timeout_s: 30
-  poll_interval_s: 60
-  expiry_s: 300
-  max_input_chars: 200
-
 agent:
   max_concurrent: 3
   resource_limits:
@@ -45,8 +35,6 @@ agent:
   todo_parse_max_turns: 10
   needs_clarification_timeout_s: 86400
   archive_grace_secs: 604800
-  evidence_download_timeout_s: 30
-  evidence_ffmpeg_timeout_s: 30
   task_ask_timeout_s: 600
   task_ask_idle_ttl_s: 3600
   ops_timeout_s: 120
@@ -61,6 +49,16 @@ planning:
   feedback_max_turns: 10
   synthesizer_max_turns: 3
   final_max_turns: 3
+
+auto_title:
+  model: "haiku"
+  prompt: >-
+    Generate a concise 3-5 word title for this conversation.
+    Output ONLY the title, nothing else:
+  timeout_s: 30
+  poll_interval_s: 60
+  expiry_s: 300
+  max_input_chars: 200
 
 # Applied on top of the values above only when the daemon is launched with
 # --sandbox. Values are aggressive so that the full captain state machine can
@@ -146,6 +144,35 @@ prompts:
     Before you stop, hand off, or mark the task done, clean up ALL processes you started — dev servers, preview servers, watchers, streaming commands (`tail -f`, `obs tail`, `watch`), and any other Bash commands still running. Run `ps --ppid $$ -o pid,command 2>/dev/null || true` to find orphaned children, kill them, and verify they are gone. Lingering subprocesses block session exit and prevent captain from advancing the task.
     {% endif %}
 
+  _task_header: |
+    ## Task
+    - Title: {{ title }}
+    - ID: {{ id }}
+    - Status: {{ status }}
+    - Project: {{ project }}
+    - PR: {{ pr }}
+    - Branch: {{ branch }}
+    - Context: {{ context }}
+
+    ## Recent Timeline
+    {{ timeline }}
+
+  _bug_fix_protocol: |
+    {% if is_bug_fix %}
+
+    ## Bug Fix Protocol (this task is a bug fix)
+
+    Bug fixes need proof the bug existed AND proof the fix works. Follow this order:
+
+    1. **Reproduce first.** Before any code change, set up the conditions that trigger the bug and confirm it actually fires. If you cannot reproduce after a thorough attempt, write the exact steps you tried plus the observed (non-buggy) behavior to a text file (e.g., `/tmp/repro-attempts.txt`), submit it via `mando todo evidence /tmp/repro-attempts.txt --caption "repro attempts and observed behavior" --kind cannot-reproduce`, then stop. Captain will route this to the human deterministically — do not guess at a fix without a reproducer.
+    2. **Capture before-state evidence.** With the bug reproducing, capture proof of the broken behavior: a screenshot/recording of the broken UI, terminal output of the crash/wrong result, a failing test that demonstrates the bug, or `obs` query output showing the regression. Save it via `mando todo evidence <before.png|.txt> --caption "<one-line description of the bug>" --kind before`. The `--kind before` tag is mandatory — captain pairs `before` with `after` programmatically, not by reading caption text.
+    3. **Implement the fix.**
+    4. **Capture after-state evidence.** Re-run the same scenario you used in step 1. Capture proof the bug no longer fires, the same shape as the before evidence (UI screenshot/recording, terminal output, test now passing). Save via `mando todo evidence <after.png|.txt> --caption "<one-line description of the fixed behavior>" --kind after`. The `--kind after` tag is mandatory.
+    5. **Add a regression test** that would have caught the bug. The test must fail on the pre-fix code and pass on the post-fix code. If a test framework already exists for this code path, extend it; only add a new one if there's a real gap.
+
+    Captain will reject the PR if before-state and after-state evidence are not both attached (detected from the typed `--kind` flag, not caption text), or if no regression test landed (unless you explicitly justify in the PR body why a test is not feasible — e.g., infrastructure outage, environment-specific bug). Skipping reproduction is the most common failure mode here; do not skip it. You can pass multiple files in a single call: `mando todo evidence before.png after.png --caption "..." --caption "..." --kind before --kind after`.
+    {% endif %}
+
   # ── Worker Prompts ────────────────────────────────────────────────────
   worker_initial: |
     # Captain Brief
@@ -174,6 +201,7 @@ prompts:
        - Evidence must be **actual runtime output** you captured, NOT diagrams, ASCII art, mockups, or sample output you write by hand. Test results prove correctness but are NOT evidence — you need both.
        - **After evidence is required.** Before evidence is optional (nice-to-have if convenient).
        - **UI changes**: capture BOTH a screenshot AND a screen recording (always use isolated/sandbox env; never `--visible`). Both are mandatory — captain will reject if either is missing. Save both files together in ONE final evidence call so the feed UI shows them in a single block. Do not upload intermediate screenshots one-by-one across iterations.
+       - **Recordings must capture the action, not the settled state.** `mando todo evidence` rejects recordings whose frames don't change (motion check floor: 0.1% changed pixels). Start the recorder *before* triggering the action so the transition itself is captured; do not record an already-finished UI. Pass `--allow-static` only when "nothing happens" is itself the evidence.
        - **Non-UI changes**: run the relevant command, capture terminal output, save it to a file (e.g. `evidence.txt`), and submit as evidence.
        - **Save evidence**: pass ALL evidence files in ONE call. UI changes: `mando todo evidence <screenshot.png> <recording.mp4> --caption "what the screenshot shows" --caption "what the recording demonstrates"`. Every file needs a caption.
        - **Self-verify**: after capturing, read the screenshot or extract frames with ffmpeg. If evidence doesn't show the fix working, fix → recapture → verify.
@@ -193,6 +221,7 @@ prompts:
 
     {{ worker_preamble }}
     {% endif %}
+    {% include "_bug_fix_protocol" %}
 
     {% include "_escape_hatch" %}
 
@@ -247,6 +276,7 @@ prompts:
 
     {{ worker_preamble }}
     {% endif %}
+    {% include "_bug_fix_protocol" %}
 
     {% include "_escape_hatch" %}
 
@@ -324,6 +354,7 @@ prompts:
     - Treat every task as a single deliverable — never split into subtasks.
     - Determine `no_pr`: set to `true` for audit, research, investigation, or read-only tasks.
     - Determine `resource`: what shared resource does this task consume? Default `"cc"`. Available: {{ resource_list }}
+    - Determine `is_bug_fix`: set to `true` ONLY when the task is to make existing broken behavior work correctly. Bug fixes need a reproducer first, before-state evidence, then after-state evidence. Set to `false` for new features, refactors, additions, polish, performance work, copy changes, design tweaks, or research. **You MUST commit a boolean — `is_bug_fix` is required, not optional.** If the task description is genuinely ambiguous, lean false (so the worker is not forced into the bug-fix protocol unnecessarily) but err toward true when the task names a symptom already occurring (crash, wrong result, broken layout, regression).
 
     ## Output
 
@@ -333,6 +364,7 @@ prompts:
     - `context`: enriched context with ALL your findings — file paths, patterns, component names.
       This is the most important output — it gives the worker a head start.
     - `questions`: array of objects, each with `question` (string), `answer` (string or null), `self_answered` (boolean), and `category` ("code" or "intent"). Include ALL questions — both self-answered and unanswered. Self-answered questions are internal context only (not shown to user).
+    - `is_bug_fix`: required boolean (no null). See classification rule above.
     {% if human_input %}
 
     Human provided additional details: {{ human_input }}
@@ -481,53 +513,37 @@ prompts:
 
     ## Confidence Grading (required only when action = ship)
 
-    When you choose **ship**, you must also answer one more question:
+    When you ship, you must also grade `confidence` (`high` / `mid`) plus
+    a short `confidence_reason`.
 
-    > **Can a human, reading only this PR, verify that the stated problem is
-    > fully solved -- without running the code themselves?**
+    **`high` is the exception, not the default.** Grade `high` only if all
+    of the following are *entirely obvious to you right now* -- no benefit
+    of the doubt, no "probably works":
 
-    Grade your answer as `confidence` plus a short `confidence_reason`:
+    1. **Evidence artifacts** -- the screenshots, recordings, and CLI
+       output you actually opened unambiguously show the stated problem in
+       its solved state, end-to-end, for every facet.
+    2. **Code diff** -- you have read the diff hunks yourself and the
+       change obviously addresses the *root cause* of the stated problem.
+       A fix that masks the symptom, suppresses a signal, narrows a test,
+       or relocates the problem is not a `high`-confidence fix even if the
+       artifacts look clean.
+    3. **Scope match** -- the diff touches what the problem demands and
+       nothing surprising. Anything you can't justify out loud in
+       `confidence_reason` knocks the grade down.
 
-    - **high** -- Yes. The evidence you opened maps cleanly to every facet
-      of the stated problem and shows it fully solved. Screenshots and
-      recordings actually show the fixed state; CLI output actually shows
-      the fixed behavior. A reviewer does not need to run the code to be
-      convinced. Auto-merge is safe here.
-    - **mid** -- Ships, but evidence is partial, ambiguous, or leaves at
-      least one facet of the problem unverified. A human reviewer would
-      want to open more files, see more cases, or run the code to be
-      sure. Keep the PR open for human review.
-    - **low** -- You are forced to ship despite weak or missing evidence
-      (e.g. `budget_exhausted` trigger with a partially-working fix). A
-      human must review before merging.
+    If any of those is unclear, partial, or rests on assumption rather
+    than inspection, grade `mid`.
 
-    **Evidence type rules carry over exactly from Evidence type enforcement above:**
-    - UI changes need a screenshot AND a recording. For video recordings
-      (MP4, MOV, WebM) use Bash + ffprobe/ffmpeg to extract frames (contact
-      sheet or targeted `-ss` frames, see Video inspection above) and Read
-      the PNG -- do not accept the caption at face value. Confidence is
-      graded on evidence quality, not file type: a WebM you inspected
-      thoroughly that clearly shows every facet of the fix can back
-      **high**; a WebM (or any artifact) that only shows a generic state
-      still grades **mid** or **low**.
-    - Non-UI changes need CLI output (before/after, runtime API responses,
-      DB query output, daemon log lines, terminal transcripts). "Tests
-      pass" alone does not qualify.
-    - Mixed UI + non-UI PRs need UI evidence for every UI facet AND CLI
-      output for every non-UI facet. A screenshot of the UI half does not
-      cover a backend facet.
-    - Representative evidence is acceptable for mechanical or repetitive
-      changes (one sample for a pattern applied across many call sites).
-      Name the exception in `confidence_reason` when you use it.
+    `high` means: you, captain, would stake your reputation on this
+    auto-merging without further human review. When in doubt, `mid`.
 
-    The `confidence_reason` field must state (a) the specific problem
-    facets, (b) which evidence artifact verifies each facet, and (c) why
-    the grade follows from the mapping. Keep it under 120 words but
-    concrete -- no adjectives about scope or risk.
-
-    Reminder: if the evidence is missing, wrong type, or cannot verify
-    the fix, the action is **nudge**, not `ship` + low. Use `confidence:
-    low` only when you are forced to ship anyway (e.g. `budget_exhausted`).
+    The `confidence_reason` field must, for each facet of the stated
+    problem, cite (a) the specific evidence artifact that shows it solved
+    and (b) the specific diff hunk that delivers the fix (or, for no-PR
+    tasks where there is no diff, the workpad entry that records the
+    work), then explain why the grade follows. Under 120 words, concrete,
+    no adjectives about scope or risk.
 
     ## Trigger-Specific Guidance
 
@@ -568,6 +584,24 @@ prompts:
       post-reopen changes. Stale pre-reopen evidence is not acceptable unless the
       reopen was purely non-behavioral (e.g., only addressed review comments with
       no functional change).
+    {% if is_bug_fix %}
+
+    **Bug-fix evidence (mandatory — this task was classified as a bug fix):**
+    Bug fixes need TWO pieces of evidence: before-state showing the bug existed, and after-state showing the fix works. The two captures must be the same kind (both UI artifacts or both terminal/text), recorded under the same scenario, so a reviewer can compare them side-by-side.
+
+    Typed gates already computed from the `--kind` flag on each evidence file:
+      - `has_before_fix`: {{ has_before_fix | default("false") }}
+      - `has_after_fix`: {{ has_after_fix | default("false") }}
+      - `has_cannot_reproduce`: {{ has_cannot_reproduce | default("false") }}
+
+    1. If `has_cannot_reproduce=true`, **escalate**: "Worker reported the bug cannot be reproduced. The repro attempt is in the evidence file tagged `cannot_reproduce` — read it and route the task to the human." Do NOT nudge for before/after evidence in this case; before/after gates are not applicable to a bug that doesn't reproduce.
+    2. Else if `has_before_fix=false`, **nudge**: "Bug-fix task is missing before-state evidence. Re-run the scenario that triggers the bug, capture proof, and submit it with `mando todo evidence <file> --caption \"...\" --kind before`. If the bug cannot be reproduced, write a text file describing the attempts you made and submit it with `--kind cannot-reproduce` instead."
+    3. Else if `has_after_fix=false`, **nudge**: "Bug-fix task is missing after-state evidence. Re-run the same scenario you used for the before capture, on the post-fix code, and submit it with `mando todo evidence <file> --caption \"...\" --kind after`."
+    4. If before+after gates are true, verify the artifact *content*: the file tagged `before_fix` must actually show the broken behavior (a generic screenshot tagged `before` does NOT count); the file tagged `after_fix` must show the same scenario producing correct behavior. Read the files. If content does not match the tag, **nudge** asking the worker to recapture.
+    5. Verify a regression test landed in the diff (search for new/edited test files asserting the bug-trigger condition no longer fires). Nudge if no test landed AND the PR body does not justify the omission.
+
+    Do NOT ship a bug fix where `has_before_fix` or `has_after_fix` is false (unless `has_cannot_reproduce=true`, in which case escalate) — there is no proof the bug existed, so there is no proof the fix actually fixed it. The typed flags are the deterministic floor; your content-quality check sits on top.
+    {% endif %}
     {% endif %}
     {% endif %}
     {% if is_degraded_context %}
@@ -677,6 +711,7 @@ prompts:
     5. **Evidence requirements** — your PR MUST include runtime proof:
        - After evidence is **required**. Before evidence is **optional**.
        - **UI changes**: capture BOTH a screenshot AND a screen recording using the evidence tool for your repo (see Repo-Specific Instructions). **Always use an isolated/sandbox environment**. Never use `--visible` — CDP works windowless. Captain will reject if either is missing.
+       - **Recordings must capture the action, not the settled state.** `mando todo evidence` rejects recordings whose frames don't change (motion check floor: 0.1% changed pixels). Start the recorder *before* triggering the action; pass `--allow-static` only when "nothing happens" is itself the evidence.
        - **Non-UI changes**: run the relevant command, capture terminal output, save to a file, and submit as evidence. NOT diagrams, ASCII art, mockups, or test-only results.
        - **Self-verify**: read the screenshot or extract frames with ffmpeg. Fix → recapture if evidence doesn't show the fix.
        - **Keep current**: recapture and update PR if code changes after evidence.
@@ -694,6 +729,7 @@ prompts:
 
     {{ worker_preamble }}
     {% endif %}
+    {% include "_bug_fix_protocol" %}
 
     {% include "_escape_hatch" %}
 
@@ -715,17 +751,7 @@ prompts:
     You can read files, search code, and inspect git history to answer questions.
     Do NOT modify any files — this is a read-only session.
 
-    ## Task
-    - Title: {{ title }}
-    - ID: {{ id }}
-    - Status: {{ status }}
-    - Project: {{ project }}
-    - PR: {{ pr }}
-    - Branch: {{ branch }}
-    - Context: {{ context }}
-
-    ## Recent Timeline
-    {{ timeline }}
+    {% include "_task_header" %}
 
     ## Question
     {{ question }}
@@ -745,17 +771,7 @@ prompts:
     task's worktree and can inspect code, git history, and prior session
     transcripts to answer questions.
 
-    ## Task
-    - Title: {{ title }}
-    - ID: {{ id }}
-    - Status: {{ status }}
-    - Project: {{ project }}
-    - PR: {{ pr }}
-    - Branch: {{ branch }}
-    - Context: {{ context }}
-
-    ## Recent Timeline
-    {{ timeline }}
+    {% include "_task_header" %}
 
     ## Capabilities
     You can:
@@ -794,17 +810,7 @@ prompts:
     message for the worker. You have read access to the worktree and can
     inspect code, git history, and prior session transcripts.
 
-    ## Task
-    - Title: {{ title }}
-    - ID: {{ id }}
-    - Status: {{ status }}
-    - Project: {{ project }}
-    - PR: {{ pr }}
-    - Branch: {{ branch }}
-    - Context: {{ context }}
-
-    ## Recent Timeline
-    {{ timeline }}
+    {% include "_task_header" %}
 
     ## User's {{ intent }} request
     {{ question }}
@@ -1025,20 +1031,6 @@ nudges:
 
     **Verify:** read the screenshot or extract frames from the recording with
     ffmpeg. Fix and recapture if evidence doesn't show the fix.
-
-  missing_screenshot: |
-    Your evidence has a recording but is missing a screenshot. UI changes
-    require BOTH a screenshot AND a recording.
-
-    Capture a screenshot and re-save evidence:
-    `mando todo evidence <screenshot.png> <recording.gif> --caption "..." --caption "..."`
-
-  missing_recording: |
-    Your evidence has a screenshot but is missing a screen recording. UI changes
-    require BOTH a screenshot AND a recording.
-
-    Capture a recording and re-save evidence:
-    `mando todo evidence <screenshot.png> <recording.gif> --caption "..." --caption "..."`
 
   stale_evidence: |
     Your evidence predates the latest reopen and no longer reflects the

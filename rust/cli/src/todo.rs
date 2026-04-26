@@ -79,6 +79,18 @@ pub(crate) enum TodoCommand {
         /// Per-file caption (one per file, same order)
         #[arg(long = "caption", num_args = 1)]
         captions: Vec<String>,
+        /// Per-file role tag, one per file in the same order (`before`,
+        /// `after`, `cannot-reproduce`, or `other`). Required for bug-fix
+        /// tasks: captain pairs at least one `before` with one `after`
+        /// before shipping. Pass `cannot-reproduce` (with a text file
+        /// explaining the repro attempt) when the bug cannot be triggered
+        /// — captain escalates to the human deterministically. Omit (or
+        /// pass `other`) for non-bug-fix tasks.
+        #[arg(long = "kind", num_args = 1)]
+        kinds: Vec<String>,
+        /// Skip the motion check on video files. Use only when "nothing happens" is itself the evidence.
+        #[arg(long = "allow-static")]
+        allow_static: bool,
     },
     /// Multi-turn Q&A on an item
     Ask {
@@ -143,9 +155,12 @@ pub(crate) async fn handle(args: TodoArgs) -> anyhow::Result<()> {
         TodoCommand::Summary { item_id, file } => {
             crate::todo_artifacts::handle_summary(item_id.as_deref(), file.as_deref()).await
         }
-        TodoCommand::Evidence { files, captions } => {
-            crate::todo_artifacts::handle_evidence(&files, &captions).await
-        }
+        TodoCommand::Evidence {
+            files,
+            captions,
+            kinds,
+            allow_static,
+        } => crate::todo_artifacts::handle_evidence(&files, &captions, &kinds, allow_static).await,
         TodoCommand::Ask {
             item_id,
             message,
@@ -338,6 +353,7 @@ async fn handle_input(item_id: &str, message: &str) -> anyhow::Result<()> {
                     &api_types::TaskPatchRequest {
                         context: Some(new_ctx),
                         original_prompt: None,
+                        is_bug_fix: None,
                     },
                 )
                 .await?;
@@ -410,6 +426,7 @@ async fn handle_input(item_id: &str, message: &str) -> anyhow::Result<()> {
                     &api_types::TaskPatchRequest {
                         context: Some(format!("[Human input] {message}")),
                         original_prompt: None,
+                        is_bug_fix: None,
                     },
                 )
                 .await?;

@@ -156,6 +156,11 @@ pub struct TaskItem {
     pub no_pr: bool,
     pub no_auto_merge: bool,
     pub planning: bool,
+    /// Set by the clarifier when it identifies the task as fixing existing
+    /// broken behavior (vs. a new feature, refactor, or research). Worker
+    /// prompts use this to require reproduce-first + before-state evidence;
+    /// captain review requires both before+after evidence to ship.
+    pub is_bug_fix: bool,
     pub resource: Option<String>,
     pub images: Option<String>,
     pub created_at: Option<String>,
@@ -294,6 +299,7 @@ pub struct ArtifactMedia {
     pub local_path: Option<String>,
     pub remote_url: Option<String>,
     pub caption: Option<String>,
+    pub kind: Option<crate::extras::EvidenceKind>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -388,67 +394,6 @@ pub struct TerminalSessionInfo {
     pub name: Option<String>,
     #[serde(rename = "ccSessionId")]
     pub cc_session_id: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct CredentialInfo {
-    pub id: i64,
-    pub label: String,
-    pub token_masked: String,
-    pub expires_at: Option<i64>,
-    pub rate_limit_cooldown_until: Option<i64>,
-    pub created_at: String,
-    pub is_expired: bool,
-    pub is_rate_limited: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[ts(optional = nullable)]
-    pub five_hour: Option<CredentialWindowInfo>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[ts(optional = nullable)]
-    pub seven_day: Option<CredentialWindowInfo>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[ts(optional = nullable)]
-    pub unified_status: Option<CredentialRateLimitStatus>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[ts(optional = nullable)]
-    pub representative_claim: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[ts(optional = nullable)]
-    pub last_probed_at: Option<i64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[ts(optional = nullable)]
-    pub cost_since_probe_usd: Option<f64>,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, TS)]
-#[serde(rename_all = "snake_case")]
-pub enum CredentialRateLimitStatus {
-    Allowed,
-    AllowedWarning,
-    Rejected,
-}
-
-pub type RateLimitStatus = CredentialRateLimitStatus;
-
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct CredentialWindowInfo {
-    pub utilization: f64,
-    pub reset_at: i64,
-    pub status: CredentialRateLimitStatus,
-}
-
-pub type UsageWindowState = CredentialWindowInfo;
-
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct CredentialUsageSnapshot {
-    pub five_hour: CredentialWindowInfo,
-    pub seven_day: CredentialWindowInfo,
-    pub unified_status: CredentialRateLimitStatus,
-    pub representative_claim: Option<String>,
-    pub probed_at: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]

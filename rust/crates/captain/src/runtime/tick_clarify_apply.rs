@@ -47,6 +47,18 @@ pub async fn apply_clarifier_result(
                     crate::ReviewTrigger::ClarifierFail,
                 );
                 item.context = Some(result.context);
+
+                crate::io::queries::tasks::persist_clarify_result(pool, item)
+                    .await
+                    .inspect_err(|e| {
+                        tracing::error!(
+                            module = "captain",
+                            id = item.id,
+                            error = %e,
+                            "failed to persist trivial-context escalation"
+                        );
+                    })?;
+
                 notifier
                     .high(&format!(
                         "\u{26a0}\u{fe0f} Clarifier returned trivial output for <b>{}</b>",
@@ -64,6 +76,9 @@ pub async fn apply_clarifier_result(
                 }
                 if let Some(no_pr) = result.no_pr {
                     item.no_pr = no_pr;
+                }
+                if let Some(is_bug_fix) = result.is_bug_fix {
+                    item.is_bug_fix = is_bug_fix;
                 }
                 if let Some(ref resource) = result.resource {
                     let is_known = resource == "cc" || resource_limits.contains_key(resource);
@@ -91,7 +106,7 @@ pub async fn apply_clarifier_result(
                     })?;
 
                 // Propagate the clarified title to the parent workbench.
-                if item.workbench_id != 0 {
+                {
                     let wb_id = item.workbench_id;
                     if let Err(e) =
                         crate::io::queries::workbenches::update_title(pool, wb_id, &item.title)
@@ -137,6 +152,9 @@ pub async fn apply_clarifier_result(
                 if !title.is_empty() {
                     item.title = title;
                 }
+            }
+            if let Some(is_bug_fix) = result.is_bug_fix {
+                item.is_bug_fix = is_bug_fix;
             }
 
             crate::io::queries::tasks::persist_clarify_result(pool, item)
@@ -189,6 +207,9 @@ pub async fn apply_clarifier_result(
             item.context = Some(result.context);
             if let Some(ref sid) = result.session_id {
                 item.session_ids.clarifier = Some(sid.clone());
+            }
+            if let Some(is_bug_fix) = result.is_bug_fix {
+                item.is_bug_fix = is_bug_fix;
             }
 
             crate::io::queries::tasks::persist_clarify_result(pool, item)

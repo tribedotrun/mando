@@ -1,4 +1,22 @@
 //! Task advisor route handlers -- persistent per-task advisor sessions.
+//!
+//! This is intentionally separate from `routes_task_ask` (POST `/api/tasks/{id}/ask`).
+//! The two endpoints share a near-identical task-header preamble (extracted into
+//! the `_task_header` Jinja partial in `captain-workflow.yaml`) but back distinct
+//! UI surfaces and persist independent histories:
+//!
+//! - **ask** (`session_ids.ask`, persisted as `ask_history` rows): Q&A in the
+//!   task detail view (`TaskDetailView` / `TaskComposer`). Read-only assistant
+//!   that answers free-form questions about the task.
+//! - **advisor** (`session_ids.advisor`): the feed view's advisor button
+//!   (`TaskFeedView`). Same Q&A capability, plus action-synthesis verdicts
+//!   that feed `reopen` / `rework` / `revise-plan` transitions directly.
+//!
+//! Consolidating into a single endpoint would require migrating both
+//! persistence schemes and merging two distinct UI flows -- out of scope for
+//! prompt-template hygiene. The two endpoints are documented as a deliberate
+//! split; if a future refactor wants to unify them, it must also unify the
+//! `cc_sessions` rows and the renderer history queries.
 
 use axum::extract::{Path, State};
 use axum::http::StatusCode;

@@ -49,7 +49,7 @@ pub struct SettingsRuntime {
     config: Arc<ArcSwap<Config>>,
     captain_workflow: Arc<ArcSwap<CaptainWorkflow>>,
     scout_workflow: Arc<ArcSwap<ScoutWorkflow>>,
-    db_pool: SqlitePool,
+    pub(crate) db_pool: SqlitePool,
     workflow_mode: WorkflowRuntimeMode,
     write_mu: Arc<Mutex<()>>,
     tick_tx: watch::Sender<Duration>,

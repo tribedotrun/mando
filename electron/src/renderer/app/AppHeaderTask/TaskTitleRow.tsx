@@ -7,7 +7,11 @@ import { requestViewTaskBrief } from '#renderer/global/providers/viewBriefBus';
 import { Button } from '#renderer/global/ui/primitives/button';
 import { canMerge } from '#renderer/global/service/utils';
 import { AppHeaderOpenMenu } from '#renderer/app/AppHeaderOpenMenu';
-import type { useResumeRateLimited, useWorkbenchCtx } from '#renderer/domains/captain';
+import {
+  useTaskActions,
+  type useResumeRateLimited,
+  type useWorkbenchCtx,
+} from '#renderer/domains/captain';
 
 interface TaskTitleRowProps {
   ctx: NonNullable<ReturnType<typeof useWorkbenchCtx>>;
@@ -26,6 +30,8 @@ export function TaskTitleRow({
   taskIsRateLimited,
   resumeMut,
 }: TaskTitleRowProps): React.ReactElement {
+  const taskActions = useTaskActions();
+  const taskId = ctx.task!.id;
   return (
     <div className={cn('flex min-w-0 items-center gap-3', sidebarCollapsed && 'pl-[70px]')}>
       {navIcons}
@@ -61,6 +67,7 @@ export function TaskTitleRow({
         <DetailOverflowMenu
           item={ctx.task!}
           onViewContext={isTerminalTab ? undefined : () => requestViewTaskBrief()}
+          onCancel={() => taskActions.flow.handleCancel(taskId)}
         />
       </div>
     </div>

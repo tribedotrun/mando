@@ -95,6 +95,7 @@ pub struct UpdateTaskInput {
     pub plan: Option<Option<String>>,
     pub no_pr: Option<bool>,
     pub no_auto_merge: Option<bool>,
+    pub is_bug_fix: Option<bool>,
     pub worker_seq: Option<i64>,
     pub reopen_seq: Option<i64>,
     pub reopened_at: Option<Option<String>>,

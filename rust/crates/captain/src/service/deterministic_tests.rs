@@ -1,4 +1,6 @@
-//! Tests for deterministic classifier.
+//! Tests for deterministic classifier. Inner `#[cfg(test)]` makes the
+//! dep-graph service-purity scanner treat the file as test-only.
+#![cfg(test)]
 
 use super::*;
 

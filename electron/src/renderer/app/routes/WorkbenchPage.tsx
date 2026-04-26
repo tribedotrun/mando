@@ -58,9 +58,10 @@ export function WorkbenchPage(): React.ReactElement {
       <div className="h-full px-3 pt-2">
         <ErrorBoundary fallbackLabel="Terminal">
           <TerminalPage
-            key={`terminal-${page.data.workbench.id}-${page.terminal.key}`}
+            key={`terminal-${page.data.workbench.id}`}
             project={page.data.workbench.project}
             cwd={page.data.workbench.worktree}
+            extraCwds={page.terminal.extraCwds}
             resumeSessionId={page.search.resume}
             resumeName={page.search.name}
             onResumeConsumed={page.nav.handleResumeConsumed}
@@ -74,9 +75,10 @@ export function WorkbenchPage(): React.ReactElement {
   // This prevents eagerly creating terminal sessions on every task navigation.
   const terminalSlot = page.nav.terminalVisited ? (
     <TerminalPage
-      key={`terminal-${page.data.workbench.id}-${page.terminal.key}`}
+      key={`terminal-${page.data.workbench.id}`}
       project={page.data.workbench.project}
       cwd={page.data.workbench.worktree}
+      extraCwds={page.terminal.extraCwds}
       resumeSessionId={page.search.tab === 'terminal' ? (page.search.resume ?? null) : null}
       resumeName={page.search.tab === 'terminal' ? (page.search.name ?? null) : null}
       onResumeConsumed={page.nav.handleResumeConsumed}

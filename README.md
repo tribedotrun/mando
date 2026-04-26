@@ -4,7 +4,7 @@ CTO for your AI coding agents.
 
 Autonomously works through your backlog: assigns tasks to Claude Code agents, reviews their PRs, nudges them when they go off track, and merges when the work is ready.
 
-![Mando](https://storage.googleapis.com/hypertribe-public/mando/readme-hero.png)
+![Mando](https://api.hypertribe.run/public/mando/readme-hero.png)
 
 ## Key Features
 

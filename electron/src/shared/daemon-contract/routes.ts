@@ -136,6 +136,29 @@ export interface Routes {
     auth: 'protected';
     res: Types.CredentialsListResponse;
   };
+  postCredentialsCodex: {
+    method: 'POST';
+    path: '/api/credentials/codex';
+    transport: 'json';
+    auth: 'protected';
+    body: Types.AddCodexCredentialRequest;
+    res: Types.AddCodexCredentialResponse;
+  };
+  getCredentialsCodexActive: {
+    method: 'GET';
+    path: '/api/credentials/codex/active';
+    transport: 'json';
+    auth: 'protected';
+    res: Types.CodexActiveResponse;
+  };
+  postCredentialsPick: {
+    method: 'POST';
+    path: '/api/credentials/pick';
+    transport: 'json';
+    auth: 'protected';
+    body: Types.EmptyRequest;
+    res: Types.CredentialPickResponse;
+  };
   postCredentialsSetuptoken: {
     method: 'POST';
     path: '/api/credentials/setup-token';
@@ -151,6 +174,15 @@ export interface Routes {
     auth: 'protected';
     params: Types.CredentialIdParams;
     res: Types.CredentialMutationResponse;
+  };
+  postCredentialsByIdCodexactivate: {
+    method: 'POST';
+    path: '/api/credentials/{id}/codex-activate';
+    transport: 'json';
+    auth: 'protected';
+    body: Types.EmptyRequest;
+    params: Types.CredentialIdParams;
+    res: Types.CodexActivateResponse;
   };
   postCredentialsByIdProbe: {
     method: 'POST';
@@ -638,6 +670,7 @@ export interface Routes {
     transport: 'multipart';
     auth: 'protected';
     body: Types.ClarifyRequest;
+    query: Types.ClarifyQuery;
     params: Types.TaskIdParams;
     res: Types.ClarifyResponse;
   };
@@ -1045,6 +1078,24 @@ export const routes = {
     auth: 'protected',
   },
   getCredentials: { method: 'GET', path: '/api/credentials', transport: 'json', auth: 'protected' },
+  postCredentialsCodex: {
+    method: 'POST',
+    path: '/api/credentials/codex',
+    transport: 'json',
+    auth: 'protected',
+  },
+  getCredentialsCodexActive: {
+    method: 'GET',
+    path: '/api/credentials/codex/active',
+    transport: 'json',
+    auth: 'protected',
+  },
+  postCredentialsPick: {
+    method: 'POST',
+    path: '/api/credentials/pick',
+    transport: 'json',
+    auth: 'protected',
+  },
   postCredentialsSetuptoken: {
     method: 'POST',
     path: '/api/credentials/setup-token',
@@ -1054,6 +1105,12 @@ export const routes = {
   deleteCredentialsById: {
     method: 'DELETE',
     path: '/api/credentials/{id}',
+    transport: 'json',
+    auth: 'protected',
+  },
+  postCredentialsByIdCodexactivate: {
+    method: 'POST',
+    path: '/api/credentials/{id}/codex-activate',
     transport: 'json',
     auth: 'protected',
   },

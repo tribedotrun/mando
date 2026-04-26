@@ -10,6 +10,7 @@ export {
   useTaskReopen,
   useTaskAskReopen,
   useTaskRework,
+  useTaskSetIsBugFix,
   useStartImplementation,
 } from '#renderer/domains/captain/repo/mutations-lifecycle';
 

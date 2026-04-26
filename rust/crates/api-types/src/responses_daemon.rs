@@ -68,6 +68,29 @@ pub struct CredentialMutationResponse {
     pub error: Option<String>,
 }
 
+/// A credential the daemon picked for a caller. Carries the secret token —
+/// only returned to authenticated callers (Bearer token required by the
+/// route). Mirrors the worker-spawn injection: the consumer exports
+/// `token` into the environment as `CLAUDE_CODE_OAUTH_TOKEN`.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct CredentialPick {
+    pub id: i64,
+    pub label: String,
+    pub token: String,
+}
+
+/// POST /api/credentials/pick -- response.
+///
+/// `pick` is `None` when no credential is usable right now (table empty,
+/// all expired, or all in rate-limit cooldown). The shell wrapper treats
+/// `None` as "fall through to ambient login" rather than an error.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct CredentialPickResponse {
+    pub pick: Option<CredentialPick>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(deny_unknown_fields)]
 pub struct SetupTokenResponse {

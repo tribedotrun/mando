@@ -176,16 +176,26 @@ export function fmtDuration(sec: number): string {
   return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
 }
 
-/** Map a clarification API result status to a toast variant + message. */
+/** Map a clarification API result status to a toast variant + message.
+ *
+ * Renderer always submits with `wait=false`, so the daemon acks
+ * `'clarifying'` immediately and runs the CC reclarify call in the
+ * background. The `'ready' | 'escalate' | 'answered'` branches are not
+ * reachable from `useTaskClarify` today — they remain to keep the toast
+ * function exhaustive over `ClarifyOutcome`, in case a future caller
+ * opts back into the synchronous response.
+ */
 export function clarifyResultToToast(status: ClarifyOutcome | undefined): {
   variant: 'success' | 'info';
   msg: string;
 } {
   switch (status) {
+    case 'clarifying':
+      return { variant: 'success', msg: 'Answer submitted' };
     case 'ready':
       return { variant: 'success', msg: 'Clarified, task queued' };
-    case 'clarifying':
-      return { variant: 'info', msg: 'Still needs more info' };
+    case 'answered':
+      return { variant: 'success', msg: 'Clarifier answered your task' };
     case 'escalate':
       return { variant: 'info', msg: 'Escalated to captain review' };
     default:

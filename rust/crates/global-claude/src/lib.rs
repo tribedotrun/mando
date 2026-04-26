@@ -32,7 +32,7 @@ pub use message::{
 };
 pub use oneshot::CcOneShot;
 pub use pricing::{fallback_rate, rate_for_model, ModelRate};
-pub use process::{get_cpu_time, is_process_alive, kill_process, spawn_detached};
+pub use process::{get_cpu_time, is_process_alive, kill_process, spawn_detached, DAEMON_ENV_STRIP};
 pub use session::CcSession;
 pub use stream::{
     get_last_assistant_text, get_stream_cost, get_stream_file_size, get_stream_result,

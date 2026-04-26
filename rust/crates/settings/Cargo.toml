@@ -26,3 +26,4 @@ sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite"] }
 tokio.workspace = true
 reqwest.workspace = true
 arc-swap.workspace = true
+base64 = "0.22"

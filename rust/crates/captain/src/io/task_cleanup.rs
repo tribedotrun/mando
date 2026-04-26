@@ -244,7 +244,7 @@ pub(crate) async fn cleanup_task(
     }
 
     // Soft-delete the workbench so it disappears from the sidebar.
-    if item.workbench_id > 0 {
+    {
         let wb_id = item.workbench_id;
         if let Err(e) = crate::io::queries::workbenches::mark_deleted(pool, wb_id).await {
             let msg = format!("mark_deleted workbench {wb_id}: {e}");

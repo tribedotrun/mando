@@ -88,6 +88,11 @@ pub struct Task {
     pub no_pr: bool,
     pub no_auto_merge: bool,
     pub planning: bool,
+    /// Set by the clarifier when it identifies the task as fixing existing
+    /// broken behavior (vs. a feature/refactor/research task). Drives the
+    /// reproduce-first + before-evidence requirement on workers and the
+    /// before+after evidence enforcement during captain review.
+    pub is_bug_fix: bool,
     pub worker_seq: i64,
     pub reopen_seq: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -202,6 +207,7 @@ impl Task {
             no_pr: false,
             no_auto_merge: false,
             planning: false,
+            is_bug_fix: false,
             worker_seq: 0,
             reopen_seq: 0,
             reopened_at: None,
@@ -288,6 +294,9 @@ impl Task {
         }
         if let Some(v) = input.no_auto_merge {
             self.no_auto_merge = v;
+        }
+        if let Some(v) = input.is_bug_fix {
+            self.is_bug_fix = v;
         }
         if let Some(v) = input.worker_seq {
             self.worker_seq = v;

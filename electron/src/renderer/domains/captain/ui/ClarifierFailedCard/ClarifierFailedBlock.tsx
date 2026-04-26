@@ -2,6 +2,7 @@ import React from 'react';
 import { formatEventTime } from '#renderer/domains/captain/service/feedHelpers';
 import { RetryButton } from '#renderer/domains/captain/ui/RetryButton';
 import type { TimelineEvent } from '#renderer/global/types';
+import { InlineMarkdown } from '#renderer/global/ui/InlineMarkdown';
 import { AlertTriangle } from 'lucide-react';
 
 export function ClarifierFailedBlock({
@@ -33,7 +34,9 @@ export function ClarifierFailedBlock({
         <span className="text-caption text-text-3">({statusLabel})</span>
       </div>
       {message ? (
-        <p className="mb-2 break-words text-body text-text-1 [overflow-wrap:anywhere]">{message}</p>
+        <div className="mb-2 break-words text-body text-text-1 [overflow-wrap:anywhere]">
+          <InlineMarkdown text={message} />
+        </div>
       ) : null}
       <RetryButton
         onRetry={onRetry}

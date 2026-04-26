@@ -19,6 +19,7 @@ interface InlineTaskCreateProps {
 
 export function InlineTaskCreate({ ref }: InlineTaskCreateProps): React.ReactElement {
   const form = useInlineTaskCreate();
+  const { bulk, setBulk } = form.draft;
 
   useImperativeHandle(ref, () => ({
     focus: () => form.draft.inputRef.current?.focus(),
@@ -34,13 +35,17 @@ export function InlineTaskCreate({ ref }: InlineTaskCreateProps): React.ReactEle
           onChange={(event) => form.draft.setTitle(event.target.value)}
           onKeyDown={form.events.handleKeyDown}
           onPaste={form.events.handlePaste}
-          placeholder="What needs to be done?"
-          rows={3}
+          placeholder={
+            bulk
+              ? 'Describe your tasks, one per line, or free-form.\nAI will parse individual items.'
+              : 'What needs to be done?'
+          }
+          rows={form.draft.textareaRows}
           className="w-full resize-none rounded-xl bg-transparent px-4 pb-2 pt-4 text-sm text-foreground placeholder:text-text-3 focus:outline-none"
           style={{ caretColor: 'var(--foreground)' }}
         />
 
-        {form.image.preview && form.image.image && (
+        {!bulk && form.image.preview && form.image.image && (
           <div className="flex items-center gap-3 px-4 pb-3">
             <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-secondary">
               <img
@@ -70,23 +75,36 @@ export function InlineTaskCreate({ ref }: InlineTaskCreateProps): React.ReactEle
             onValueChange={form.project.handleProjectChange}
             testId="inline-task-project"
           />
-          <TaskAttachmentButton
-            onImageSelect={form.image.setImageFile}
-            size="icon-sm"
-            className="text-text-3"
-          />
-          {form.autoMerge.globalAutoMerge && (
-            <TaskAutoMergeToggle
-              checked={form.autoMerge.noAutoMerge}
-              onCheckedChange={form.autoMerge.setNoAutoMerge}
-              className="flex items-center gap-1.5 text-caption text-text-3"
-            />
+          {!bulk && (
+            <>
+              <TaskAttachmentButton
+                onImageSelect={form.image.setImageFile}
+                size="icon-sm"
+                className="text-text-3"
+              />
+              {form.autoMerge.globalAutoMerge && (
+                <TaskAutoMergeToggle
+                  checked={form.autoMerge.noAutoMerge}
+                  onCheckedChange={form.autoMerge.setNoAutoMerge}
+                  className="flex items-center gap-1.5 text-caption text-text-3"
+                />
+              )}
+              <TaskPlanModeToggle
+                checked={form.planMode.planning}
+                onCheckedChange={form.planMode.setPlanning}
+                className="flex items-center gap-1.5 text-caption text-text-3"
+              />
+            </>
           )}
-          <TaskPlanModeToggle
-            checked={form.planMode.planning}
-            onCheckedChange={form.planMode.setPlanning}
-            className="flex items-center gap-1.5 text-caption text-text-3"
-          />
+          <Button
+            variant={bulk ? 'outline' : 'ghost'}
+            size="xs"
+            onClick={() => setBulk(!bulk)}
+            className={bulk ? 'text-foreground' : 'text-text-3'}
+            data-testid="inline-task-bulk-toggle"
+          >
+            Bulk
+          </Button>
 
           <span className="flex-1" />
 
@@ -98,7 +116,7 @@ export function InlineTaskCreate({ ref }: InlineTaskCreateProps): React.ReactEle
             testId="inline-task-submit"
             disabled={!form.submit.canSubmit}
             pending={form.submit.pending}
-            onSubmit={form.submit.handleSubmit}
+            onSubmit={() => void form.submit.handleSubmit()}
           />
         </div>
       </div>

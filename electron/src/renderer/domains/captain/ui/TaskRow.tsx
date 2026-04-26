@@ -95,6 +95,15 @@ export const TaskRow = React.memo(function TaskRow({
               {' \u00b7 '}
             </span>
           )}
+          {item.is_bug_fix && (
+            <span
+              className="mr-1.5 inline-flex items-center rounded-full bg-secondary px-1.5 py-0 align-middle text-[11px] font-medium uppercase tracking-wide text-text-3"
+              title="Clarifier classified this as a bug fix. Worker will be required to reproduce + capture before/after evidence."
+              data-testid="task-row-bug-fix-badge"
+            >
+              bug
+            </span>
+          )}
           {item.title || item.original_prompt || 'Untitled task'}
         </span>
         {item.pr_number && (item.github_repo || item.project) && (

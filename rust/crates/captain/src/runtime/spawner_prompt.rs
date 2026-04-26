@@ -30,6 +30,7 @@ pub(crate) fn prepare_initial_worker_prompt(
     let original_prompt = item.original_prompt.as_deref().unwrap_or("");
     let task_id_str = item.id.to_string();
     let no_pr = if item.no_pr { "true" } else { "" };
+    let is_bug_fix = if item.is_bug_fix { "true" } else { "" };
     let workpad_path = ensure_workpad_path(item)?;
 
     let check_command = check_command_or_fallback(project_config);
@@ -43,6 +44,7 @@ pub(crate) fn prepare_initial_worker_prompt(
     brief_vars.insert("worker_preamble", project_config.worker_preamble.clone());
     brief_vars.insert("check_command", check_command.clone());
     brief_vars.insert("no_pr", no_pr.to_string());
+    brief_vars.insert("is_bug_fix", is_bug_fix.to_string());
     brief_vars.insert("workpad_path", workpad_path.clone());
     if let Some(ref plan_path) = plan {
         brief_vars.insert("plan", plan_path.clone());

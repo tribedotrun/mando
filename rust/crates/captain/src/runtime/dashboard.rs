@@ -84,10 +84,17 @@ async fn apply_task_lifecycle_command(
     Ok(())
 }
 
+/// Insert a new task with a freshly-allocated workbench and on-disk
+/// worktree.
+///
+/// Takes `&SqlitePool` instead of `&TaskStore` so the daemon can
+/// invoke this without holding the `task_store` read lock during the
+/// `git fetch origin` + `git worktree add` calls. A slow remote would
+/// otherwise stall the captain tick's `task_store.write()` writers.
 #[tracing::instrument(skip_all)]
 pub async fn add_task(
     config: &Config,
-    store: &TaskStore,
+    pool: &sqlx::SqlitePool,
     title: &str,
     project: Option<&str>,
     source: Option<&str>,
@@ -123,7 +130,7 @@ pub async fn add_task(
             Some((_, pc)) => (pc.path.as_str(), pc.github_repo.as_deref()),
             None => ("", None),
         };
-        let id = settings::projects::upsert(store.pool(), name, path, github_repo).await?;
+        let id = settings::projects::upsert(pool, name, path, github_repo).await?;
         (id, name.clone())
     } else if projects.is_empty() {
         return Err(crate::TaskCreateError::NoProjectConfigured.into());
@@ -138,7 +145,8 @@ pub async fn add_task(
     new_task.created_at = Some(global_types::now_rfc3339());
     new_task.source = source.map(String::from);
 
-    let id = store.add(new_task).await?;
+    let id =
+        crate::runtime::task_creation::create_task_with_workbench(pool, config, new_task).await?;
 
     Ok(TaskCreateResponse {
         id,
@@ -214,29 +222,10 @@ pub async fn trigger_captain_tick(
     .await
 }
 
-#[tracing::instrument(skip_all)]
-pub async fn add_task_with_context(
-    config: &Config,
-    store: &TaskStore,
-    title: &str,
-    project: Option<&str>,
-    context: Option<&str>,
-    source: Option<&str>,
-) -> Result<TaskCreateResponse> {
-    let result = add_task(config, store, title, project, source).await?;
-    if let Some(ctx) = context {
-        update_task(
-            store,
-            result.id,
-            UpdateTaskInput {
-                context: Some(Some(ctx.to_string())),
-                ..Default::default()
-            },
-        )
-        .await?;
-    }
-    Ok(result)
-}
+// `add_task_with_context` previously composed `add_task` with a
+// follow-up `update_task`. The daemon now drives that composition
+// directly (so it can release the `task_store` read lock before the
+// git work) — see `runtime::daemon_task_runtime::add_task_with_context`.
 
 #[tracing::instrument(skip_all)]
 pub async fn queue_item(store: &TaskStore, id: i64, reason: &str) -> Result<()> {
@@ -418,12 +407,16 @@ mod tests {
             .await
             .unwrap();
 
+        let wb_id = crate::io::test_support::seed_workbench(db.pool(), project_id).await;
+
         let mut task_a = crate::Task::new("a");
         task_a.project_id = project_id;
         task_a.project = "test".into();
+        task_a.workbench_id = wb_id;
         let mut task_b = crate::Task::new("b");
         task_b.project_id = project_id;
         task_b.project = "test".into();
+        task_b.workbench_id = wb_id;
 
         let id_a = store.add(task_a).await.unwrap();
         let id_b = store.add(task_b).await.unwrap();

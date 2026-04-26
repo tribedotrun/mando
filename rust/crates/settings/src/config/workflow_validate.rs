@@ -29,10 +29,19 @@ const REQUIRED_CAPTAIN_PROMPTS: &[&str] = &[
     "captain_review",
     "rebase_worker",
     "task_ask",
+    "task_ask_reopen_synthesis",
+    "advisor",
+    "advisor_reopen_synthesis",
+    "advisor_reopen_direct",
     "reopen_resume",
     "review_reopen_message",
     "captain_merge",
     "todo_parse",
+    "planning_initial",
+    "planning_cc_feedback",
+    "planning_codex_feedback",
+    "planning_synthesize",
+    "planning_final",
 ];
 
 /// Required nudge keys for captain workflow.
@@ -47,6 +56,7 @@ const REQUIRED_CAPTAIN_NUDGES: &[&str] = &[
     "reopen_ack",
     "nudge_default",
     "nopr_insufficient_output",
+    "gates_incomplete",
 ];
 
 /// Required initial prompt keys for captain workflow.

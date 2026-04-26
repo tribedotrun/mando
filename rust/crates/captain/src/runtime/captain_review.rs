@@ -32,8 +32,9 @@ pub use super::captain_review_verdict::apply_verdict;
 /// Structured verdict from a captain review CC session.
 ///
 /// When `action == "ship"`, the verdict MUST also carry `confidence` and
-/// `confidence_reason` fields graded against the evidence-verifies-problem
-/// rubric in `captain_review` prompt. The mergeability tick consumes
+/// `confidence_reason` fields graded against the three-principle Confidence
+/// Grading rubric in the `captain_review` prompt (evidence artifacts, code
+/// diff root cause, scope match). The mergeability tick consumes
 /// `confidence == "high"` as the sole auto-merge gate.
 ///
 /// `Default` is exposed only for test construction via `..Default::default()`;
@@ -45,11 +46,12 @@ pub struct CaptainVerdict {
     pub feedback: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub report: Option<String>,
-    /// Set when action = ship. One of "high", "mid", "low".
+    /// Set when action = ship. One of "high", "mid".
     #[serde(skip_serializing_if = "Option::is_none")]
     pub confidence: Option<String>,
-    /// Set when action = ship. Structured justification (problem facets
-    /// mapped to evidence artifacts) per the Confidence Grading rubric.
+    /// Set when action = ship. Structured justification per the Confidence
+    /// Grading rubric: each problem facet cites both the evidence artifact
+    /// that shows it solved and the diff hunk that delivers the fix.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub confidence_reason: Option<String>,
 }
@@ -112,12 +114,12 @@ fn verdict_json_schema(trigger: &str) -> serde_json::Value {
             },
             "confidence": {
                 "type": "string",
-                "enum": ["high", "mid", "low"],
-                "description": "Required when action = ship. Graded against the evidence-verifies-problem rubric."
+                "enum": ["high", "mid"],
+                "description": "Required when action = ship. Graded against the three-principle Confidence Grading rubric (evidence artifacts, code diff root cause, scope match)."
             },
             "confidence_reason": {
                 "type": "string",
-                "description": "Required when action = ship. Problem facets mapped to evidence artifacts."
+                "description": "Required when action = ship. Per problem facet, cites the evidence artifact that shows it solved and the diff hunk that delivers the fix."
             }
         },
         "required": ["action", "feedback"]
@@ -276,6 +278,7 @@ pub(crate) async fn spawn_review(
     let item_title = item.title.clone();
     let item_id = item.id.to_string();
     let item_no_pr = item.no_pr;
+    let item_is_bug_fix = item.is_bug_fix;
 
     // Build problem statement from task metadata.
     let problem_statement = {
@@ -290,49 +293,14 @@ pub(crate) async fn spawn_review(
     };
 
     // Build evidence file listing from DB artifacts and detect evidence types.
-    let db_evidence_listing = {
-        let artifacts = crate::io::queries::artifacts::list_for_task(pool, item.id)
-            .await
-            .unwrap_or_default();
-        let data_dir = global_types::data_dir();
-        let mut listing = String::new();
-        let mut has_screenshot = false;
-        let mut has_recording = false;
-        use super::review_phase_artifacts::{RECORDING_EXTS, SCREENSHOT_EXTS};
-        let freshness_threshold = item.reopened_at.as_deref().unwrap_or("");
-        let is_reopened = item.reopen_seq > 0 && item.reopened_at.is_some();
-        for artifact in &artifacts {
-            if artifact.artifact_type == crate::ArtifactType::Evidence {
-                let is_fresh = !is_reopened || artifact.created_at.as_str() > freshness_threshold;
-                for media in &artifact.media {
-                    let ext_lower = media.ext.to_lowercase();
-                    if is_fresh && SCREENSHOT_EXTS.contains(&ext_lower.as_str()) {
-                        has_screenshot = true;
-                    }
-                    if is_fresh && RECORDING_EXTS.contains(&ext_lower.as_str()) {
-                        has_recording = true;
-                    }
-                    if let Some(ref local) = media.local_path {
-                        let caption = media.caption.as_deref().unwrap_or("(no caption)");
-                        listing.push_str(&format!(
-                            "- {} ({})\n",
-                            data_dir.join(local).display(),
-                            caption
-                        ));
-                    }
-                }
-            }
-        }
-        // Latest work summary content.
-        let latest_summary = artifacts
-            .iter()
-            .rfind(|a| a.artifact_type == crate::ArtifactType::WorkSummary)
-            .map(|a| a.content.clone())
-            .unwrap_or_default();
-        (listing, latest_summary, has_screenshot, has_recording)
-    };
-    let (evidence_file_listing, work_summary_content, has_screenshot, has_recording) =
-        db_evidence_listing;
+    let evidence = super::captain_review_evidence::compute_evidence_listing(pool, item).await;
+    let evidence_file_listing = evidence.listing;
+    let work_summary_content = evidence.work_summary;
+    let has_screenshot = evidence.has_screenshot;
+    let has_recording = evidence.has_recording;
+    let has_before_fix = evidence.has_before_fix;
+    let has_after_fix = evidence.has_after_fix;
+    let has_cannot_reproduce = evidence.has_cannot_reproduce;
     let intervention_count_str = item.intervention_count.to_string();
     let trigger_flags: Vec<(String, String)> = TRIGGERS
         .iter()
@@ -401,6 +369,26 @@ pub(crate) async fn spawn_review(
             "has_recording",
             if has_recording { "true" } else { "false" }.into(),
         );
+        // Typed bug-fix gates. When `is_bug_fix` is also true, the reviewer
+        // prompt routes deterministically: missing before/after kind tags
+        // produce a nudge with hardcoded text, so the LLM cannot accidentally
+        // ship a fix without paired before/after evidence.
+        vars.insert(
+            "has_before_fix",
+            if has_before_fix { "true" } else { "false" }.into(),
+        );
+        vars.insert(
+            "has_after_fix",
+            if has_after_fix { "true" } else { "false" }.into(),
+        );
+        // Worker-typed signal that the bug cannot be triggered. The reviewer
+        // prompt is wired to escalate to the human deterministically when this
+        // flag is set, instead of nudging for before/after evidence that
+        // doesn't exist.
+        vars.insert(
+            "has_cannot_reproduce",
+            if has_cannot_reproduce { "true" } else { "false" }.into(),
+        );
         // no_pr tasks have no diff, no PR, no merge step — the worker
         // transcript and any DB-backed evidence is the entire deliverable.
         // The prompt uses this flag to relax the screenshot + recording gate
@@ -408,6 +396,13 @@ pub(crate) async fn spawn_review(
         vars.insert(
             "is_no_pr",
             if item_no_pr { "true" } else { "" }.into(),
+        );
+        // Threaded into the bug-fix evidence rule in `captain_review`. When
+        // set, captain demands BOTH before-state (showing the bug) and
+        // after-state (showing the fix) evidence; nudges if either is missing.
+        vars.insert(
+            "is_bug_fix",
+            if item_is_bug_fix { "true" } else { "" }.into(),
         );
         for (key, flag) in &trigger_flags {
             vars.insert(key.as_str(), flag.clone());

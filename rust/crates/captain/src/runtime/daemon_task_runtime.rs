@@ -371,60 +371,26 @@ impl CaptainRuntime {
         source: Option<&str>,
     ) -> anyhow::Result<TaskCreateResponse> {
         let config = self.settings.load_config();
-        let store = self.task_store.read().await;
-        let value = crate::runtime::dashboard::add_task_with_context(
-            &config, &store, title, project, context, source,
-        )
-        .await?;
-        drop(store);
+        // Run the git fetch + worktree creation half WITHOUT holding the
+        // task_store read lock — a slow remote would otherwise stall the
+        // captain tick's `task_store.write()` writers. Only acquire the
+        // lock for the optional context-update step that follows.
+        let value =
+            crate::runtime::dashboard::add_task(&config, &self.pool, title, project, source)
+                .await?;
+        if let Some(ctx) = context {
+            let store = self.task_store.read().await;
+            crate::runtime::dashboard::update_task(
+                &store,
+                value.id,
+                crate::UpdateTaskInput {
+                    context: Some(Some(ctx.to_string())),
+                    ..Default::default()
+                },
+            )
+            .await?;
+        }
         self.drain_pending_lifecycle_effects().await?;
         Ok(value)
-    }
-
-    #[tracing::instrument(skip_all)]
-    pub async fn create_task_workbench(
-        &self,
-        task_id: i64,
-        project_name: &str,
-        title: &str,
-    ) -> anyhow::Result<()> {
-        let project_row = settings::projects::resolve(&self.pool, project_name)
-            .await?
-            .ok_or_else(|| anyhow::anyhow!("project not found: {project_name}"))?;
-        let project_path = global_infra::paths::expand_tilde(&project_row.path);
-
-        let suffix = format!("todo-{task_id}");
-        let branch = format!("mando/{suffix}");
-        let wt_path = global_git::worktree_path(&project_path, &suffix);
-
-        global_git::fetch_origin(&project_path).await?;
-        let default_branch = global_git::default_branch(&project_path).await?;
-        if wt_path.exists() {
-            global_infra::best_effort!(
-                global_git::remove_worktree(&project_path, &wt_path).await,
-                "daemon_task_runtime: global_git::remove_worktree(&project_path, &wt_path).awa"
-            );
-        }
-        global_infra::best_effort!(
-            global_git::delete_local_branch(&project_path, &branch).await,
-            "daemon_task_runtime: global_git::delete_local_branch(&project_path, &branch)."
-        );
-        global_git::create_worktree(&project_path, &branch, &wt_path, &default_branch).await?;
-        crate::io::worktree_bootstrap::copy_local_files(&project_path, &wt_path).await;
-
-        let workbench = crate::Workbench::new(
-            project_row.id,
-            project_row.name.clone(),
-            wt_path.to_string_lossy().to_string(),
-            title.to_string(),
-        );
-        let workbench_id = crate::io::queries::workbenches::insert(&self.pool, &workbench).await?;
-        let patch = crate::UpdateTaskInput {
-            workbench_id: Some(workbench_id),
-            ..Default::default()
-        };
-        self.update_task(task_id, patch).await?;
-        self.bus.send(global_bus::BusPayload::Workbenches(None));
-        Ok(())
     }
 }

@@ -4,6 +4,7 @@
     "useActivityStats",
     "useAppVersion",
     "useClaudeCodeCheck",
+    "useCodexActiveCredential",
     "useConfig",
     "useCredentialsList",
     "useDevInfoQuery",

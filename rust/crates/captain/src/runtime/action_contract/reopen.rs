@@ -198,9 +198,6 @@ pub(super) async fn trigger_review(
 }
 
 async fn try_unarchive_workbench(item: &Task, context: &str, pool: &sqlx::SqlitePool) {
-    if item.workbench_id == 0 {
-        return;
-    }
     if let Err(e) = crate::io::queries::workbenches::unarchive(pool, item.workbench_id).await {
         tracing::warn!(module = "captain-runtime-action_contract-reopen", workbench_id = item.workbench_id, error = %e, "failed to unarchive workbench {context}");
     }

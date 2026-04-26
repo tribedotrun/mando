@@ -62,6 +62,29 @@ pub async fn insert(pool: &SqlitePool, wb: &Workbench) -> Result<i64> {
     Ok(result.last_insert_rowid())
 }
 
+/// Insert a workbench inside an existing transaction. Used by atomic
+/// task+workbench creation so both INSERTs commit together.
+pub(crate) async fn insert_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    project_id: i64,
+    worktree: &str,
+    title: &str,
+    now: &str,
+) -> Result<i64> {
+    let id: i64 = sqlx::query_scalar(
+        "INSERT INTO workbenches (project_id, worktree, title, created_at, last_activity_at) \
+         VALUES (?, ?, ?, ?, ?) RETURNING id",
+    )
+    .bind(project_id)
+    .bind(worktree)
+    .bind(title)
+    .bind(now)
+    .bind(now)
+    .fetch_one(&mut **tx)
+    .await?;
+    Ok(id)
+}
+
 /// Bump `last_activity_at` to now and increment `rev`. Returns `true` if a row
 /// was updated. Skips archived/deleted rows so stale hook callbacks can't
 /// resurrect them in the sidebar.
@@ -205,7 +228,6 @@ pub async fn archive_terminal(pool: &SqlitePool, grace_secs: u64) -> Result<usiz
          WHERE archived_at IS NULL AND deleted_at IS NULL AND pinned_at IS NULL
            AND id IN (
              SELECT workbench_id FROM tasks
-             WHERE workbench_id IS NOT NULL
              GROUP BY workbench_id
              HAVING
                COUNT(CASE WHEN status NOT IN ('merged','completed-no-pr','canceled') THEN 1 END) = 0

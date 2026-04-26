@@ -24,6 +24,12 @@ pub struct TaskPatchRequest {
     pub context: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub original_prompt: Option<String>,
+    /// Manual override for the clarifier's bug-fix classification. Sent from
+    /// the task editor when the user disagrees with the auto-classified value
+    /// (or wants to correct it after a misread). The captain workflow reads
+    /// this on the next worker spawn and captain review tick.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_bug_fix: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -40,6 +46,18 @@ pub struct ClarifyAnswer {
 pub struct ClarifyRequest {
     pub answers: Option<Vec<ClarifyAnswer>>,
     pub answer: Option<String>,
+}
+
+/// POST /api/tasks/{id}/clarify query params.
+///
+/// `wait = Some(false)` makes the route return as soon as the answer is
+/// committed and the follow-up CC reclarify call is spawned; the result
+/// arrives via SSE. Default (`None` / `Some(true)`) preserves the
+/// synchronous response that CLI / Telegram callers rely on.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct ClarifyQuery {
+    pub wait: Option<bool>,
 }
 
 /// GET /api/scout/items query params

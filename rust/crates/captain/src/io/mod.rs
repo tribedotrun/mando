@@ -18,3 +18,6 @@ pub mod task_store;
 pub mod timeline_store;
 pub mod transcript;
 pub(crate) mod worktree_bootstrap;
+
+#[cfg(test)]
+pub(crate) mod test_support;

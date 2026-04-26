@@ -78,8 +78,31 @@ export function EvidenceBlock({
                     <track kind="captions" />
                   </video>
                 )}
-                {(m.caption || m.filename) && (
-                  <p className="mt-1 text-caption text-text-3">{m.caption ?? m.filename}</p>
+                {(m.caption || m.filename || m.kind) && (
+                  <div className="mt-1 flex items-baseline gap-2">
+                    {m.kind === 'before_fix' && (
+                      <span className="rounded bg-secondary px-1.5 text-[10px] font-medium uppercase tracking-wide text-text-2">
+                        before
+                      </span>
+                    )}
+                    {m.kind === 'after_fix' && (
+                      <span
+                        className="rounded px-1.5 text-[10px] font-medium uppercase tracking-wide"
+                        style={{
+                          backgroundColor: 'var(--success-bg)',
+                          color: 'var(--success)',
+                        }}
+                      >
+                        after
+                      </span>
+                    )}
+                    {m.kind === 'cannot_reproduce' && (
+                      <span className="rounded bg-secondary px-1.5 text-[10px] font-medium uppercase tracking-wide text-text-2">
+                        no repro
+                      </span>
+                    )}
+                    <p className="text-caption text-text-3">{m.caption ?? m.filename}</p>
+                  </div>
                 )}
               </div>
             );

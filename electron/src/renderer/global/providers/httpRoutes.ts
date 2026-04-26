@@ -20,7 +20,7 @@ import type {
   PostMultipartRouteWithResKey,
   PutJsonRouteWithResKey,
 } from '#shared/daemon-contract/routes';
-import { resSchemas, errorResponseSchema } from '#shared/daemon-contract/schemas';
+import { bodySchemas, resSchemas, errorResponseSchema } from '#shared/daemon-contract/schemas';
 import type { ZodType } from 'zod';
 import { parseJsonText, SchemaParseError } from '#result';
 import { buildUrl } from '#renderer/global/providers/httpBase';
@@ -53,15 +53,24 @@ async function apiRequestInternal<T>(
 ): Promise<T> {
   assertRouteBody(routeKey, body);
   const start = performance.now();
-  const hasBody = method !== 'GET' && body != null;
-  const headers = hasBody ? { 'Content-Type': 'application/json' } : undefined;
+  // Gate Content-Type on whether the route declares a body in the contract,
+  // not on whether the caller passed a value. Routes whose body type is
+  // EmptyRequest accept `undefined` from callers and still need a JSON
+  // content-type and `{}` payload on the wire (axum's Json<EmptyRequest>
+  // extractor returns 415 without it). Mirrors the Rust `post_no_body`
+  // helper convention.
+  const declaresBody =
+    method !== 'GET' &&
+    (bodySchemas as Partial<Record<RouteKey, ZodType<unknown> | undefined>>)[routeKey] !==
+      undefined;
+  const headers = declaresBody ? { 'Content-Type': 'application/json' } : undefined;
   const schema = (resSchemas as Partial<Record<RouteKey, ZodType<unknown> | undefined>>)[routeKey];
 
   try {
     const response = await fetch(buildUrl(apiPath), {
       method,
       headers,
-      body: hasBody && body != null ? JSON.stringify(body) : undefined,
+      body: declaresBody ? JSON.stringify(body ?? {}) : undefined,
     });
     const ms = (performance.now() - start).toFixed(0);
     if (!response.ok) {
