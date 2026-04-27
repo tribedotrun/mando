@@ -28,6 +28,7 @@ pub struct CreateTerminalArgs {
     pub size: Option<TerminalSize>,
     pub terminal_id: Option<String>,
     pub name: Option<String>,
+    pub workbench_id: i64,
 }
 
 impl TerminalRuntime {
@@ -106,6 +107,7 @@ impl TerminalRuntime {
             terminal_id: args.terminal_id,
             extra_args,
             name: args.name,
+            workbench_id: args.workbench_id,
         };
         self.host.create(req)
     }
@@ -199,6 +201,7 @@ impl TerminalRuntime {
                     terminal_id: old.terminal_id.clone(),
                     extra_args,
                     name: old.name.clone(),
+                    workbench_id: old.workbench_id,
                 };
 
                 match host.create(req) {

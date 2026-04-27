@@ -13,6 +13,7 @@ import { featuresPatch } from '#renderer/global/service/configPatches';
 import { useNativeActions } from '#renderer/global/runtime/useNativeActions';
 import { copyToClipboard } from '#renderer/global/runtime/useFeedback';
 import { useProjectWorkflows } from '#renderer/domains/captain/runtime/useProjectWorkflows';
+import { newTerminalNavOptions } from '#renderer/domains/captain/service/sidebarNavHelpers';
 import { TAB_ROUTES } from '#renderer/global/service/routeHelpers';
 import type { SidebarActions, Tab } from '#renderer/global/runtime/SidebarContext';
 
@@ -33,7 +34,7 @@ export function useSidebarActions({
   const { save: saveConfig } = useConfigPatch();
   const { openInFinder } = useNativeActions().files;
 
-  const { navigate, openTaskWorkbench, openWorktreeWorkbench, handleNewTerminal } = useSidebarNav();
+  const { navigate, openTaskWorkbench, openWorktreeWorkbench } = useSidebarNav();
 
   const archiveMutate = archiveMut.mutate;
   const unarchiveMutate = unarchiveMut.mutate;
@@ -61,7 +62,9 @@ export function useSidebarActions({
       openSettings: () =>
         void navigate({ to: '/settings/$section', params: { section: 'general' } }),
       newTask: () => useUIStore.getState().openCreateTask(),
-      newTerminal: (project: string) => void handleNewTerminal(project),
+      newTerminal: (project: string) => {
+        void navigate(newTerminalNavOptions(project));
+      },
       goBack: () => router.history.back(),
       goForward: () => router.history.forward(),
       toggleSidebar: () => useUIStore.getState().toggleSidebar(),
@@ -101,7 +104,6 @@ export function useSidebarActions({
       navigate,
       openTaskWorkbench,
       openWorktreeWorkbench,
-      handleNewTerminal,
       router,
       archiveMutate,
       unarchiveMutate,

@@ -47,7 +47,7 @@ impl std::fmt::Display for Agent {
     }
 }
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Deserialize)]
 pub struct CreateRequest {
     pub project: String,
     pub cwd: PathBuf,
@@ -62,6 +62,10 @@ pub struct CreateRequest {
     /// Extra CLI arguments parsed from config (shell-split).
     pub extra_args: Vec<String>,
     pub name: Option<String>,
+    /// Workbench owning this session. Stamped at create time and used by
+    /// the renderer to scope a workbench's terminal tab bar by identity
+    /// instead of the leaky `project + cwd` heuristic.
+    pub workbench_id: i64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -85,6 +89,9 @@ pub struct SessionInfo {
     pub name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none", rename = "ccSessionId")]
     pub cc_session_id: Option<String>,
+    /// Workbench owning this session. See `CreateRequest::workbench_id`.
+    #[serde(rename = "workbenchId")]
+    pub workbench_id: i64,
     /// Last-known PTY size, used to restore correct dimensions on auto-resume.
     #[serde(skip)]
     pub size: TerminalSize,

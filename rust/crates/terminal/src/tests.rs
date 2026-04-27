@@ -75,6 +75,7 @@ async fn host_keeps_exited_session_history_distinct_from_restored_sessions() {
             terminal_id: Some("wb:panel".into()),
             extra_args: Vec::new(),
             name: None,
+            workbench_id: 1,
         })
         .unwrap();
 
@@ -120,7 +121,8 @@ fn host_marks_unclean_history_as_restored() {
             "ended_at": null,
             "exit_code": null,
             "size": { "rows": 24, "cols": 80 },
-            "state": "live"
+            "state": "live",
+            "workbench_id": 1
         })
         .to_string(),
     )
@@ -158,7 +160,8 @@ fn take_restorable_returns_only_restored_sessions() {
             "exit_code": null,
             "size": { "rows": 24, "cols": 80 },
             "state": "live",
-            "name": "work-session"
+            "name": "work-session",
+            "workbench_id": 1
         })
         .to_string(),
     )
@@ -179,7 +182,8 @@ fn take_restorable_returns_only_restored_sessions() {
             "ended_at": "2026-04-10T00:05:00Z",
             "exit_code": 0,
             "size": { "rows": 24, "cols": 80 },
-            "state": "exited"
+            "state": "exited",
+            "workbench_id": 2
         })
         .to_string(),
     )

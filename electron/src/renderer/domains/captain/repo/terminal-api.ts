@@ -64,6 +64,7 @@ export function createWorktree(
 }
 
 export interface CreateTerminalParams {
+  workbenchId: number;
   project: string;
   cwd: string;
   agent: 'claude' | 'codex';

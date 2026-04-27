@@ -5,6 +5,7 @@ pub mod codex_credentials;
 pub mod codex_oauth_refresh;
 pub mod codex_probe;
 pub mod config_fs;
+pub mod credential_types;
 pub mod credentials;
 pub mod git_repo;
 pub mod logo;

@@ -20,6 +20,7 @@ pub use io::pid_registry::{
 };
 pub use io::queries::tasks::routing as task_routing;
 pub use io::task_store::TaskStore;
+pub use runtime::daemon::workbench_runtime::BindTerminalError;
 pub use runtime::daemon::CaptainRuntimeDeps;
 pub use runtime::notify::Notifier;
 pub use runtime::reconciler::reconcile_on_startup;

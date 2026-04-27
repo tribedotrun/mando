@@ -22,22 +22,16 @@ export function isRestoredTerminalSession(session: TerminalSessionInfo): boolean
 /**
  * Pick the terminal sessions that belong to a given workbench.
  *
- * A workbench has a primary cwd (its worktree) and may have additional
- * acceptable cwds — notably the project root for clarifier-resumed
- * sessions, whose stored cwd is the project root rather than the worktree
- * (clarifier runs from the project root, see captain::runtime::clarifier
- * `resolve_clarifier_cwd`). The cc_sessions row's cwd is preserved when
- * resuming, so the resumed terminal also lives at the project root.
- *
- * Filtering by project alone would leak sessions from sibling workbenches;
- * filtering by worktree alone drops the resumed clarifier. The accepted
- * cwd set is the workbench's "address book": one or more concrete paths
- * that map back to this workbench.
+ * Sessions are stamped with their owning workbench id at create time
+ * (see `routes_terminal::post_terminal_create`), so the renderer scopes
+ * by identity instead of cwd. The previous cwd-based filter widened
+ * `acceptedCwds` to include the project root for clarifier-resumed
+ * sessions, which leaked any session whose cwd happened to equal the
+ * project root into every other workbench in the same project.
  */
-export function selectWorkbenchTerminalSessions<T extends { project: string; cwd: string }>(
+export function selectWorkbenchTerminalSessions<T extends { workbenchId: number }>(
   sessions: readonly T[],
-  project: string,
-  acceptedCwds: readonly string[],
+  workbenchId: number,
 ): T[] {
-  return sessions.filter((s) => s.project === project && acceptedCwds.includes(s.cwd));
+  return sessions.filter((s) => s.workbenchId === workbenchId);
 }

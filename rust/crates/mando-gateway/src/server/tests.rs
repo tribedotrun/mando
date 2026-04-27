@@ -168,7 +168,8 @@ fn seed_terminal_history(data_dir: &std::path::Path, id: &str, _output: &[u8], c
         "ended_at": clean_exit.then_some("2026-04-08T00:05:00Z"),
         "exit_code": clean_exit.then_some(0),
         "size": { "rows": 24, "cols": 80 },
-        "state": if clean_exit { "exited" } else { "live" }
+        "state": if clean_exit { "exited" } else { "live" },
+        "workbench_id": 1,
     });
     std::fs::write(
         session_dir.join("meta.json"),

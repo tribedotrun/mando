@@ -4,27 +4,26 @@ import { TerminalTabBar } from '#renderer/domains/captain/terminal/ui/TerminalTa
 import { Loader2 } from 'lucide-react';
 
 interface TerminalPageProps {
+  workbenchId: number;
   project: string;
   cwd: string;
-  /** Extra acceptable cwds for the workbench. See {@link useTerminalOrchestration}. */
-  extraCwds?: readonly string[];
   resumeSessionId?: string | null;
   resumeName?: string | null;
   onResumeConsumed?: () => void;
 }
 
 export function TerminalPage({
+  workbenchId,
   project,
   cwd,
-  extraCwds,
   resumeSessionId,
   resumeName,
   onResumeConsumed,
 }: TerminalPageProps) {
   const terminal = useTerminalOrchestration({
+    workbenchId,
     project,
     cwd,
-    extraCwds,
     resumeSessionId,
     resumeName,
     onResumeConsumed,

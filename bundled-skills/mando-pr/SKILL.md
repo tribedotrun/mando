@@ -5,128 +5,54 @@ description: Commit, push, create PR, and tag AI reviewers. Use when ready to op
 
 ## Arguments
 
-- `--fast` — Skip internal review agents and monitoring loop. Single-pass comment addressing only. Use for low-risk changes you'd self-approve.
+- `--fast` — single-pass comment addressing, no internal review, no monitoring loop. Use only when the user explicitly passes `--fast`; never infer from context, risk, or your own judgment.
 
-## Workflow
+## Step 1 — Rebase, gate, push
 
-1. **Sync with main**: Run `git fetch origin main && git merge origin/main --no-edit` to merge latest main and resolve any conflicts before proceeding. If conflicts require user input, stop and report.
+Rebase `origin/main`, resolve conflicts (stop if user input is needed). Review the diff: every new public symbol must be reachable from a user-facing entry point — honor any project-specific surfacing rules in `CLAUDE.md` / `AGENTS.md`.
 
-2. **Verify wiring and UI surfacing**: Review `git diff origin/main..HEAD` and confirm: (a) every new public function, route handler, component, config field, and CLI/TG command is called, registered, rendered, or read from a user-facing entry point; (b) every user-visible feature added to the daemon, API, captain, CLI, or Telegram has a corresponding Electron UI update (view, indicator, setting, notification, or SSE event). Fix any gaps before proceeding.
+Run the project's full quality gate. Fix every failure before pushing; if a failure needs human judgment, credentials, or infra, stop and report — do not push a broken branch. Then commit and push.
 
-3. **Run quality gate**: Run `mando-dev build && mando-dev check`. This runs fmt, clippy, nextest (unit tests via `cargo nextest --workspace --lib`), Electron format/lint/typecheck, ESLint rule unit tests, and all scanners (contract, wire, renderer, file-length, generated-doc-sync). Fix every failure before proceeding — do not push a PR that does not pass the local gate.
+## Step 2 — Create PR + run `/mando-pr-summary`
 
-4. **Commit & push**: Stage changes, commit with a descriptive message, and `git push`
+If no PR exists and the branch name is generic, rename to `<type>/<kebab-summary>` first (renaming after PR creation closes it). **Skip renaming** if the branch starts with `mando/` (captain-managed branches stay as-is) or follows another project-managed naming convention documented in `CLAUDE.md` / `AGENTS.md`.
 
-5. **Rename branch if needed** (MUST happen before PR creation -- renaming after closes the PR):
+Create the PR with an empty body, or convert an existing draft to ready. **Do NOT** use Claude Code's built-in PR template — `/mando-pr-summary` owns the body. Run it; verify the result contains `## Problem` / `## Solution`.
 
-   **Skip renaming** if the branch starts with `mando/` (captain-managed branches stay as-is) or if a PR already exists (`gh pr view --json number 2>/dev/null` succeeds -- renaming would close the PR).
+## Step 3 — Trigger reviews
 
-   Rename if branch name is generic (e.g., `feat/1`, `feat/wt-0211-2120`, `codex/c29a-coverage-100`) or doesn't describe the changes. Read `git log main..HEAD --oneline` to understand changes, then pick prefix from dominant commit type (`feat/`, `fix/`, `chore/`, `refactor/`) + kebab-case summary (3-5 words max). Rename local, push new, delete old remote, set upstream.
+External (idempotent — only post each if not already on the PR):
 
-6. **Create PR** (skip if one already exists — e.g. draft from captain spawner; check with `gh pr view --json number 2>/dev/null`). Create with an empty body — `/mando-pr-summary` (step 8) fills in the full structure:
+1. `@codex review this PR`
+2. `cursor review`
 
-   ```bash
-   gh pr create --title "<short descriptive title>" --body ""
-   ```
+Internal (skip if `--fast`; otherwise idempotent — cache the reviewed SHA in `/tmp/.x-pr-reviewed-${PR_NUM}`). Wait for results; do NOT background:
 
-7. **Convert draft to ready** (ALWAYS check and convert):
+1. `pr-review-toolkit:code-reviewer` on the diff.
+2. `pr-review-toolkit:silent-failure-hunter` if the change touches error handling.
 
-   ```bash
-   gh pr view --json isDraft,number --jq 'select(.isDraft) | .number' | xargs -I {} gh pr ready {}
-   ```
+Hold findings; address them in step 4.
 
-8. **Update PR summary**: Run `/mando-pr-summary`
+## Step 4 — Address everything until merge-ready
 
-   - `/mando-pr-summary` should write the work summary to the task DB **only** when `MANDO_TASK_ID` is set for the current session (that is, the PR is coming from a real Mando task worktree).
-   - If `MANDO_TASK_ID` is unset, it must still update the PR body and plan-folder summary, but skip the task-DB write.
+Fix every internal-review finding from step 3, commit, push. Then loop the status check until exit 0:
 
-9. **Trigger external AI reviews** (idempotent — skip if already triggered):
+```bash
+python3 ~/.claude/skills/mando-pr/pr_status.py <pr_number>
+```
 
-   ```bash
-   # Only post trigger comments if they don't already exist
-   PR_NUM=$(gh pr view --json number -q .number)
-   EXISTING=$(gh pr view "$PR_NUM" --json comments -q '.comments[].body' 2>/dev/null || true)
+1. `[FAIL]` CI → fix, commit, push.
+2. `UNADDRESSED COMMENTS` → fix, reply per thread, commit, push.
+3. `[WAIT]` → sleep 10s, re-check.
+4. `ALL CLEAR` → done.
 
-   echo "$EXISTING" | grep -qF "@codex review" || gh pr comment -b "@codex review this PR"
-   echo "$EXISTING" | grep -qF "cursor review" || gh pr comment -b "cursor review"
-   ```
+`--fast`: run the status check once, address what it surfaces in a single pass, stop.
 
-10. **Address comments and reviews**:
+Reply to threads via `gh api repos/{owner}/{repo}/pulls/{pr}/comments` with `in_reply_to={comment_id}` (top-level `gh pr comment` won't thread). The status script considers a thread "addressed" once the PR author has replied.
 
-   **If `--fast`**: single pass, no loop, no internal review agents.
-
-   Run the status check once:
-
-   ```bash
-   python3 ~/.claude/skills/mando-pr/pr_status.py <pr_number>
-   ```
-
-   - `UNADDRESSED COMMENTS` → fix ALL issues, reply to EACH comment, commit & push with `git add . && git commit -m "..." && git push`
-   - `[FAIL]` CI checks → inspect, fix code, commit & push with `git add . && git commit -m "..." && git push`
-   - `[WAIT]` or `ALL CLEAR` → proceed to step 11
-
-   **If not `--fast`**: internal review + monitoring loop.
-
-   a. **Run internal review** (idempotent — skip if HEAD already reviewed):
-
-      ```bash
-      PR_NUM=$(gh pr view --json number -q .number)
-      HEAD=$(git rev-parse HEAD)
-      REVIEW_FILE="/tmp/.x-pr-reviewed-${PR_NUM}"
-      if [ -f "$REVIEW_FILE" ] && [ "$(cat "$REVIEW_FILE")" = "$HEAD" ]; then
-        echo "Skipping internal review — HEAD $HEAD already reviewed"
-      fi
-      ```
-
-      If not skipped (DO NOT run in background — wait for results):
-      - Use `pr-review-toolkit:code-reviewer` agent to review the diff
-      - Use `pr-review-toolkit:silent-failure-hunter` agent if error handling is involved
-
-      After review completes, record the reviewed SHA:
-
-      ```bash
-      echo "$HEAD" > "$REVIEW_FILE"
-      ```
-
-   b. **Fix all internal issues**: Address problems, commit & push with `git add . && git commit -m "..." && git push`. Repeat review if significant changes were made.
-
-   c. **Monitor PR status** (loop until all clear):
-
-      ```bash
-      python3 ~/.claude/skills/mando-pr/pr_status.py <pr_number>
-      ```
-
-      **Exit codes**: `0` = all clear, `1` = has issues (details in stdout).
-
-      **Loop logic** (repeat until exit 0):
-      - `[FAIL]` CI checks → inspect, fix code, commit & push with `git add . && git commit -m "..." && git push`, re-trigger CI (see below), re-check
-      - `UNADDRESSED COMMENTS` → fix ALL issues, reply to EACH comment (see below), commit & push, re-trigger CI (see below), re-check
-      - `[WAIT]` required CI pending → sleep 10s, re-check
-      - `[INFO]` non-blocking checks (review bots) → ignore, do NOT wait
-      - `ALL CLEAR` → proceed to step 11
-
-   d. **Consolidate** remaining issues into a table with Reviewer, Issue, and Location columns. Fix all in ONE commit with `git add . && git commit -m "..." && git push`.
-
-   **Replying to review comments** (both modes — required for each unaddressed comment):
-
-   ```bash
-   gh api repos/{owner}/{repo}/pulls/{pr}/comments -X POST \
-     -f body="Fixed in <commit_sha>: <brief explanation>" \
-     -F in_reply_to={comment_id}
-   ```
-
-   The status script detects unaddressed threads — a comment is "addressed" when the PR author has replied in the thread.
-
-11. **Verify clean git state** (MUST be last step):
-
-    ```bash
-    git status --short
-    ```
-
-    If there are unstaged changes, modified files, or untracked files (screenshots, temp files, build artifacts): commit them with `git add . && git commit -m "..." && git push` or delete them. A dirty worktree means forgotten work or leaked artifacts. Do NOT proceed until `git status` is clean.
+`git status` must be clean before finishing — commit or delete leftover screenshots, temp files, build artifacts.
 
 ## Notes
 
-- If on `main` branch, create a feature branch first
-- Use squash merge convention (one commit per feature)
-- **`--fast` requires explicit opt-in**: Only use `--fast` mode when the user literally passes `--fast` as an argument (e.g. `/mando-pr --fast`). Never infer fast mode from context, risk level, or your own judgment. Default is always the full review + monitoring loop.
+1. If on `main`, branch first.
+2. Squash-merge convention.

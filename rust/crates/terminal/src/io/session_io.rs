@@ -249,6 +249,7 @@ mod tests {
             terminal_id: None,
             extra_args: Vec::new(),
             name: None,
+            workbench_id: 1,
         });
 
         assert_eq!(env.get("TERM"), Some(&"vt100".to_string()));
