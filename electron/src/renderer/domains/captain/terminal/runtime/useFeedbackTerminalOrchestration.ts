@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTerminalCache } from '#renderer/domains/captain/runtime/useTerminalCache';
 import {
   isRestoredTerminalSession,
@@ -14,25 +14,18 @@ import { toast } from '#renderer/global/runtime/useFeedback';
 import log from '#renderer/global/service/logger';
 
 interface OrchestrationInput {
+  workbenchId: number;
   project: string;
   cwd: string;
-  /**
-   * Additional acceptable cwds for this workbench. The clarifier's
-   * cc_sessions row stores cwd = project root rather than worktree, so
-   * resuming it lands a terminal session whose cwd does not match
-   * `workbench.worktree`. Pass the project root here so those resumed
-   * clarifier terminals still appear in this workbench's tab bar.
-   */
-  extraCwds?: readonly string[];
   resumeSessionId?: string | null;
   resumeName?: string | null;
   onResumeConsumed?: () => void;
 }
 
 export function useTerminalOrchestration({
+  workbenchId,
   project,
   cwd,
-  extraCwds,
   resumeSessionId,
   resumeName,
   onResumeConsumed,
@@ -79,21 +72,12 @@ export function useTerminalOrchestration({
   const { data: config } = useConfig();
   const defaultAgent = config?.captain?.defaultTerminalAgent ?? 'claude';
 
-  const acceptedCwds = useMemo(() => {
-    const extras = extraCwds?.filter((c) => c && c !== cwd) ?? [];
-    return [cwd, ...extras];
-  }, [cwd, extraCwds]);
-
   const sessionsWithExitState = sessions.map((session) => {
     const override = exitStates[session.id];
     return override ? { ...session, ...override } : session;
   });
 
-  const relevantSessions = selectWorkbenchTerminalSessions(
-    sessionsWithExitState,
-    project,
-    acceptedCwds,
-  );
+  const relevantSessions = selectWorkbenchTerminalSessions(sessionsWithExitState, workbenchId);
 
   // -- Handlers ---------------------------------------------------------------
 
@@ -102,14 +86,19 @@ export function useTerminalOrchestration({
       setResumeFailed(false);
       autoSelectedRef.current = true;
       try {
-        const session = await createMutation.mutateAsync({ project, cwd, agent });
+        const session = await createMutation.mutateAsync({
+          workbenchId,
+          project,
+          cwd,
+          agent,
+        });
         setActiveTab(session.id);
       } catch (err) {
         log.error('Failed to create terminal', err);
         toast.error(err instanceof Error ? err.message : 'Failed to create terminal');
       }
     },
-    [createMutation, cwd, project],
+    [createMutation, cwd, project, workbenchId],
   );
 
   // Empty-workbench auto-create. Distinct from `handleNewTerminal` because
@@ -123,7 +112,12 @@ export function useTerminalOrchestration({
       setResumeFailed(false);
       autoSelectedRef.current = true;
       try {
-        const session = await createMutation.mutateAsync({ project, cwd, agent });
+        const session = await createMutation.mutateAsync({
+          workbenchId,
+          project,
+          cwd,
+          agent,
+        });
         blankIdsRef.current.add(session.id);
         setActiveTab(session.id);
       } catch (err) {
@@ -131,7 +125,7 @@ export function useTerminalOrchestration({
         toast.error(err instanceof Error ? err.message : 'Failed to create terminal');
       }
     },
-    [createMutation, cwd, project],
+    [createMutation, cwd, project, workbenchId],
   );
 
   const handleCloseTab = useCallback(
@@ -161,6 +155,7 @@ export function useTerminalOrchestration({
       setStartingShellForId(sessionId);
       try {
         const next = await createMutation.mutateAsync({
+          workbenchId: session.workbenchId,
           project: session.project,
           cwd: session.cwd,
           agent: session.agent,
@@ -202,6 +197,7 @@ export function useTerminalOrchestration({
       void (async () => {
         try {
           const session = await createMutation.mutateAsync({
+            workbenchId,
             project,
             cwd,
             agent: 'claude',
@@ -223,13 +219,10 @@ export function useTerminalOrchestration({
           // `resumeSessionId === null` and spawn a blank before the resume
           // id arrives.
           const cached = getTerminals() ?? [];
-          const acceptedSet = new Set(acceptedCwds);
           let blankToDelete: string | null = null;
           for (const id of blankIdsRef.current) {
             if (id === session.id) continue;
-            const match = cached.find(
-              (s) => s.id === id && s.project === project && acceptedSet.has(s.cwd),
-            );
+            const match = cached.find((s) => s.id === id && s.workbenchId === workbenchId);
             if (match) {
               blankToDelete = id;
               break;
@@ -248,7 +241,7 @@ export function useTerminalOrchestration({
         }
       })();
     },
-    [acceptedCwds, createMutation, cwd, deleteMutation, getTerminals, onResumeConsumed, project],
+    [createMutation, cwd, deleteMutation, getTerminals, onResumeConsumed, project, workbenchId],
   );
 
   // Reactive resume: fire a fresh attempt every time the URL prop
@@ -284,11 +277,11 @@ export function useTerminalOrchestration({
     !resumeFailed &&
     sessionsLoaded
   ) {
-    const relevant = selectWorkbenchTerminalSessions(sessions, project, acceptedCwds);
+    const relevant = selectWorkbenchTerminalSessions(sessions, workbenchId);
     if (relevant.length > 0) {
       autoSelectedRef.current = true;
       setActiveTab(relevant[relevant.length - 1].id);
-    } else if (sessions.length === 0 || relevant.length === 0) {
+    } else {
       autoSelectedRef.current = true;
       queueMicrotask(() => void autoCreateBlank(defaultAgent));
     }

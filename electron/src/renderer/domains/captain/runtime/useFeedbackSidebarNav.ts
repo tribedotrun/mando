@@ -1,30 +1,13 @@
-import { useCallback, useState } from 'react';
+import { useCallback } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import { useQueryClient } from '@tanstack/react-query';
-import { toast } from '#renderer/global/runtime/useFeedback';
-import { toReactQuery } from '#result';
 import { queryKeys } from '#renderer/global/repo/queryKeys';
-import { getErrorMessage } from '#renderer/global/service/utils';
 import log from '#renderer/global/service/logger';
 import type { WorkbenchItem } from '#renderer/global/types';
-import { createWorktree } from '#renderer/domains/captain/repo/terminal-api';
-
-function formatWorktreeSuffix(): string {
-  const now = new Date();
-  return [
-    String(now.getMonth() + 1).padStart(2, '0'),
-    String(now.getDate()).padStart(2, '0'),
-    '-',
-    String(now.getHours()).padStart(2, '0'),
-    String(now.getMinutes()).padStart(2, '0'),
-    String(now.getSeconds()).padStart(2, '0'),
-  ].join('');
-}
 
 export function useSidebarNav() {
   const navigate = useNavigate();
   const qc = useQueryClient();
-  const [preparingProject, setPreparingProject] = useState<string | null>(null);
 
   const navigateToWorkbench = useCallback(
     (wbId: number, tab?: string) => {
@@ -79,32 +62,10 @@ export function useSidebarNav() {
     [qc, navigateToWorkbench],
   );
 
-  const handleNewTerminal = useCallback(
-    async (project: string) => {
-      if (preparingProject) return;
-      setPreparingProject(project);
-      try {
-        const suffix = formatWorktreeSuffix();
-        const result = await toReactQuery(createWorktree(project, suffix));
-        void qc.invalidateQueries({ queryKey: queryKeys.workbenches.all });
-        if (result.workbenchId) {
-          navigateToWorkbench(result.workbenchId, 'terminal');
-        }
-      } catch (err) {
-        log.error('createWorktree failed', err);
-        toast.error(getErrorMessage(err, 'Failed to create workspace'));
-      } finally {
-        setPreparingProject(null);
-      }
-    },
-    [preparingProject, qc, navigateToWorkbench],
-  );
-
   return {
     navigate,
     navigateToWorkbench,
     openTaskWorkbench,
     openWorktreeWorkbench,
-    handleNewTerminal,
   };
 }

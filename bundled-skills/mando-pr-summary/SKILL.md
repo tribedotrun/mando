@@ -1,142 +1,64 @@
 ---
 name: mando-pr-summary
-description: Generate end-to-end PR summary diagram + reviewer checklist. Auto-creates a PR if none exists. Updates PR description and saves to plan folder.
+description: Generate end-to-end PR summary diagram + reviewer checklist. Auto-creates a PR if none exists. Updates PR description and saves to plan folder. Built for a normal coding-agent session; Mando-task extras apply only when MANDO_TASK_ID is set.
 ---
 
-## Instructions
+## Session context
 
-### Step 1 — Get PR data (auto-create if missing)
+**Default — regular coding session:** No Mando task in play. Run the steps as written; ignore every **Mando task only** subsection.
 
-Check if a PR exists for the current branch:
+**Mando task session:** `MANDO_TASK_ID` is set. Do everything the default path does **and** follow each **Mando task only** subsection.
 
-```bash
-PR_NUM=$(gh pr view --json number -q '.number' 2>/dev/null)
-```
+---
 
-If no PR exists (`$PR_NUM` is empty or the command fails), create one automatically as a prerequisite:
+## Step 1 — Get PR data
 
-1. Commit any uncommitted changes (`git add . && git commit -m "..." && git push`).
-2. Push the branch: `git push -u origin HEAD`
-3. Create a minimal PR:
-   ```bash
-   gh pr create --title "<short title from branch name or recent commits>" --body ""
-   ```
-4. Re-read the PR number:
-   ```bash
-   PR_NUM=$(gh pr view --json number -q '.number')
-   ```
+Resolve the current branch's PR number. If none exists, create a minimal PR with an empty body (commit and push first).
 
-> **Note**: This uses a minimal `gh pr create` (not the full `/mando-pr` flow) to avoid circular invocation, since `mando-pr` step 7 calls `/mando-pr-summary`.
+## Step 2 — Analyze and diagram
 
-Then fetch PR data:
+Read the full diff. Identify the trigger, end-to-end data path (trigger → API/service → processing → response → UI), parallel steps, key transformations, and the response shape. Capture a 1–2 sentence "What changed" delta.
 
-```bash
-gh pr view $PR_NUM --json title,body,files,commits,headRefName,baseRefName
-gh pr diff $PR_NUM
-```
+Generate an ASCII diagram using `┌─┐│└─┘` for boxes, `▼ ──→ ←` for flow. Show component names, responsibilities, data shapes at boundaries; hide internal helpers. Surface PR-specific details that matter for review when the diff actually involves them — caching, parallel boundaries, external calls, response shape, thresholds, key architectural names.
 
-### Step 2 — Analyze the diff
+Align via `python3 ~/.claude/skills/mando-pr-summary/fix-diagram.py` (pipe in, use the output).
 
-Read the full diff. Identify:
+## Step 3 — Build the reviewer checklist
 
-- **Trigger**: what user action or system event starts the flow
-- **Data path**: end-to-end from trigger → API/service → processing → response → UI
-- **Parallel steps**: any `Promise.all`, `Promise.allSettled`, concurrent fetches
-- **Key data transformations**: filtering, enrichment, aggregation, caching
-- **Response shape**: what the caller receives
-
-### Step 3 — Generate the diagram
-
-Generate the diagram inline following these conventions:
-- Use `┌─┐│└─┘` box-drawing characters for boxes
-- Use `▼` for vertical flow, `──→` for horizontal, `←` for responses
-- All boxes within a container share the same width (pad with spaces)
-- Keep lines under 80 chars where possible, max 100
-- Show: component names, responsibilities, data shapes at boundaries
-- Don't show: internal helpers, implementation details
-
-Enhance with PR-specific details:
-- Stage names, data shapes, cache strategies, parallel boundaries, external service calls
-- Specific details that matter for review (TTLs, thresholds, graceful degradation)
-- Key architectural names — stores, hooks, services, route paths, repo modules
-- **Cache patterns**: Show as decision flow: `cache (TTL) → fallback on miss`
-- **Response shape**: Show the actual JSON structure the caller receives
-
-### Step 4 — Generate the reviewer checklist
-
-Start with the universal checklist. Then check if the repo's `CLAUDE.md` has a `## PR Checklist` section -- if so, append those items.
+Universal items (no heading — Step 5's body supplies it). Append items from the repo's `## PR Checklist` if present.
 
 ```markdown
-## Reviewer Checklist
-
-- [ ] **DB migration**: <describe columns/tables, or "none">
-- [ ] **Env vars**: <list new vars, or "none">
-- [ ] **New dependencies**: <list packages, or "none">
-- [ ] **Backend deploy**: <which services need deploy, or "no backend changes">
-- [ ] **Breaking changes**: <describe, or "none">
-- [ ] **External API calls**: <service + rate limit/cache info, or "none added">
-- [ ] **No backward-compat / legacy code**: <confirm no shims, deprecated re-exports, or legacy fallbacks>
-- [ ] **Wiring**: <for each new function, route, component, config field, or command -- confirm it is called/registered/rendered/read from a user-facing entry point; list any gaps>
-<if CLAUDE.md has ## PR Checklist, append each item here>
+1. [ ] **DB migration**: <columns/tables, or "none">
+2. [ ] **Env vars**: <new vars, or "none">
+3. [ ] **New dependencies**: <packages, or "none">
+4. [ ] **Backend deploy**: <which services, or "no backend changes">
+5. [ ] **Breaking changes**: <describe, or "none">
+6. [ ] **External API calls**: <service + rate limit/cache, or "none added">
+7. [ ] **No backward-compat / legacy code**: <confirm no shims, deprecated re-exports, or legacy fallbacks>
+8. [ ] **Wiring**: <every new function, route, component, config field, or command is called/registered/rendered/read from a user-facing entry point; list any gaps>
 ```
 
-### Step 5 — Fix diagram alignment
+## Step 4 — Handle evidence
 
-```bash
-echo '<diagram>' | python3 ~/.claude/skills/mando-pr-summary/fix-diagram.py
-```
+**Default:** Find local before/after or proof media the session or human saved (images, recordings).
 
-Use the script's output as the final diagram.
+**Mando task only:** Also include artifacts attached via `mando todo evidence`.
 
-### Step 6 — Output the summary in the conversation
+1. No qualifying files → say so in `## Evidence`.
+2. Files exist → host and embed:
+   1. `MANDO_DEV_GCS_BUCKET` set → upload to `gs://$MANDO_DEV_GCS_BUCKET/pr-$PR_NUM/<filename>`; reference at `https://storage.googleapis.com/$MANDO_DEV_GCS_BUCKET/pr-$PR_NUM/<filename>`.
+   2. Otherwise → attach to a GitHub prerelease tagged `pr-$PR_NUM-evidence` (create if it doesn't exist), and link the published download URLs.
 
-**Before** writing to files or updating the PR, output the full summary directly so the user sees it in Claude Code:
+## Step 5 — Preview, compose, persist
 
-1. The ASCII diagram in a fenced code block (after alignment)
-2. The "What changed" sentence
-3. The reviewer checklist
-4. Whether e2e verification is missing (flag it)
+**Preview first.** Output the aligned diagram (fenced), the "What changed" sentence, the reviewer checklist, and any e2e-verification gap so the user sees it in conversation.
 
-### Step 7 — Evidence (screenshots/recordings)
+**Compose the canonical PR body.** This skill owns the entire body — regenerate every section fresh from diff + brief + evidence.
 
-Check for local evidence files saved via `mando todo evidence` (stored as task artifacts) or in the plan folder (`before-*.{png,mp4}`, `evidence-*.{png,mp4}`).
-
-- **No evidence files**: omit `## Evidence`.
-- **Evidence files exist**: upload and embed URLs in `## Evidence`.
-  1. If `MANDO_DEV_GCS_BUCKET` is set: upload to GCS (`gcloud storage cp <file> gs://$MANDO_DEV_GCS_BUCKET/pr-$PR_NUM/<filename>`), reference via `https://storage.googleapis.com/$MANDO_DEV_GCS_BUCKET/pr-$PR_NUM/<filename>`.
-  2. Otherwise: upload to GitHub as release assets. Create a prerelease tagged `pr-$PR_NUM-evidence`, upload files, and embed the download URLs:
-     ```bash
-     gh release create "pr-$PR_NUM-evidence" <file1> <file2> \
-       --prerelease --title "PR #$PR_NUM evidence" --notes ""
-     # Get URL for each file:
-     gh api repos/{owner}/{repo}/releases/tags/pr-$PR_NUM-evidence \
-       --jq '.assets[] | select(.name=="<filename>") | .browser_download_url'
-     ```
-     If the release already exists, upload additional assets with `gh release upload`.
-
-### Step 8 — Flag missing e2e verification
-
-Scan the existing PR body for the `### E2E verification` subsection. If it is empty or contains only placeholder text, insert a warning:
-
-```markdown
-> **Warning**
-> E2E verification is missing. This PR has no bespoke proof that the new behavior works against a running system.
-```
-
-### Step 9 — Compose and update PR description
-
-Always produce the full canonical PR structure below. This skill owns the entire PR body -- generate every section fresh from the diff, brief, and evidence.
-
-For `## Evidence`, follow the Step 7 hosting decision exactly:
-- evidence uploaded (GCS or GitHub release) → embed the URLs
-- no evidence files → omit the section
-
-Canonical structure:
-
-```markdown
+````markdown
 ## Problem
 
-<what's broken, missing, or suboptimal -- the motivation for this PR. Include the original request verbatim if available from the brief.>
+<what's broken/missing/suboptimal — the motivation. Include the original request verbatim if available from the brief.>
 
 ## Solution
 
@@ -144,63 +66,42 @@ Canonical structure:
 <ASCII diagram>
 \```
 
-**What changed**: <1-2 sentence high-level delta -- what was the old behavior vs new>
+**What changed**: <1–2 sentence delta>
 
 ## Evidence
 
-<per Step 7 hosting decision -- or omit if none>
+<per Step 4>
 
 ## Reviewer Checklist
 
-<enriched checklist from Step 4>
+<universal + project-specific items from Step 3>
 
 ## Testing & Verification
 
-<Carry forward substantive content from the existing PR body for this
-section. Only generate fresh if empty or placeholder.>
-
 ### Unit tests
+
+<what ran or should run; scope of change>
+
 ### E2E regression
+
+<implied suites, or "not run" / N/A with reason>
+
 ### E2E verification
+
+<per-PR verify plan path or concrete proof; or what would suffice>
+````
+
+If **E2E verification** has no concrete proof (no plan path, no run noted, no artifact), prepend:
+
+```markdown
+> **Warning**
+> E2E verification is missing. This PR has no bespoke proof that the new behavior works against a running system.
 ```
 
-Preserve third-party integration blocks (e.g., "Open in Devin", review badges, deploy previews) by appending them after the canonical sections.
+Preserve third-party blocks (Open in Devin, review badges, deploy previews) by appending after the canonical sections. Update via `gh pr edit $PR_NUM --body` using a HEREDOC.
 
-Update with HEREDOC to avoid escaping:
+**Persist the work summary** (ASCII diagram + "What changed" sentence):
 
-```bash
-gh pr edit $PR_NUM --body "$(cat <<'PRBODY'
-<full composed body here>
-PRBODY
-)"
-```
+**Default:** Write to `.ai/plans/pr-$PR_NUM/pr-summary.md` (overwrite). Create the folder if missing. Never write into another `.ai/plans/*` folder, even if a slug looks related.
 
-### Step 10 — Save work summary to the right place
-
-**Save to DB only for real Mando-task PRs**: Write the ASCII diagram + "What changed" sentence to a temp file, then persist it as a work summary artifact **only when the current session is attached to a Mando task**.
-
-Use `MANDO_TASK_ID` as the gate. If it is set, write to the task DB:
-
-```bash
-cat > /tmp/work-summary.md << 'SUMMARY'
-```
-<ASCII diagram>
-```
-
-**What changed**: <1-2 sentence delta>
-SUMMARY
-
-if [ -n "${MANDO_TASK_ID:-}" ]; then
-  mando todo summary --file /tmp/work-summary.md
-else
-  echo "Skipping task DB summary: not a Mando-task PR (MANDO_TASK_ID is unset)"
-fi
-
-rm /tmp/work-summary.md
-```
-
-If `MANDO_TASK_ID` is unset, do **not** try to infer a task from PR number, branch name, or plan folder. Skip the DB write cleanly and continue.
-
-**Save to plan folder** (always): Resolve the plan folder (same priority as Step 7). Write the same summary to `.ai/plans/<resolved>/pr-summary.md`. Create folder if needed. Overwrite if exists (always regenerated from current diff).
-
-**Important**: Never write into a plan folder that doesn't belong to the current PR. If no matching folder exists, create `.ai/plans/pr-$PR_NUM/`.
+**Mando task only:** After the plan file, write the same summary to a temp file and run `mando todo summary --file <path>`. Never infer a task id from PR number, branch, or plan folder — only the env var qualifies.

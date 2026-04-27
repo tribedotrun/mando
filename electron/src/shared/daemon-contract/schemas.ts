@@ -1456,6 +1456,7 @@ export const terminalCreateRequestSchema = z
     size: z.lazy(() => terminalSizeSchema).optional(),
     terminal_id: z.string().optional(),
     name: z.string().optional(),
+    workbenchId: z.number(),
   })
   .strict();
 export const terminalExitPayloadSchema = z.object({ code: z.number().nullable() }).strict();
@@ -1477,6 +1478,7 @@ export const terminalSessionInfoSchema = z
     terminalId: z.string().nullable(),
     name: z.string().nullable(),
     ccSessionId: z.string().nullable(),
+    workbenchId: z.number(),
   })
   .strict();
 export const terminalSizeSchema = z.object({ rows: z.number(), cols: z.number() }).strict();

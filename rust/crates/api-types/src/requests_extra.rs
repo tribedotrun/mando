@@ -266,6 +266,12 @@ pub struct TerminalCreateRequest {
     pub size: Option<TerminalSize>,
     pub terminal_id: Option<String>,
     pub name: Option<String>,
+    /// Workbench that should own this terminal session. The renderer
+    /// resolves this from `useWorkbenchPage` and the server stamps it
+    /// onto the resulting `TerminalSessionInfo` so the renderer can
+    /// scope its tab bar by identity instead of cwd.
+    #[serde(rename = "workbenchId")]
+    pub workbench_id: i64,
 }
 
 /// POST /api/terminal/{id}/write

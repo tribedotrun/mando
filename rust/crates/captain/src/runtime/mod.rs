@@ -62,6 +62,7 @@ mod tick_classify;
 mod tick_guard;
 pub mod tick_persist;
 mod tick_post;
+mod tick_rate_limit;
 mod tick_review;
 mod tick_rework;
 pub mod tick_spawn;

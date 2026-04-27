@@ -1015,6 +1015,13 @@ export type TerminalCreateRequest = {
   size?: TerminalSize;
   terminal_id?: string;
   name?: string;
+  /**
+   * Workbench that should own this terminal session. The renderer
+   * resolves this from `useWorkbenchPage` and the server stamps it
+   * onto the resulting `TerminalSessionInfo` so the renderer can
+   * scope its tab bar by identity instead of cwd.
+   */
+  workbenchId: number;
 };
 export type TerminalExitPayload = { code: number | null };
 export type TerminalIdParams = { id: string };
@@ -1034,6 +1041,12 @@ export type TerminalSessionInfo = {
   terminalId: string | null;
   name: string | null;
   ccSessionId: string | null;
+  /**
+   * Workbench owning this session. The renderer scopes a workbench's
+   * terminal tab bar by this id instead of the leaky `project + cwd`
+   * heuristic.
+   */
+  workbenchId: number;
 };
 export type TerminalSize = { rows: number; cols: number };
 export type TerminalState = 'live' | 'restored' | 'exited';

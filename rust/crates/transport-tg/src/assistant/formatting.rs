@@ -547,6 +547,59 @@ mod tests {
     }
 
     #[test]
+    fn format_card_shows_date_published() {
+        let item = json!({
+            "id": 1,
+            "title": "Test",
+            "url": "https://example.com",
+            "item_type": "blog",
+            "relevance": 85,
+            "quality": 70,
+            "source_name": "TechBlog",
+            "date_published": "2026-04-15",
+            "date_added": "2026-04-20T10:00:00Z",
+        });
+        let card = format_swipe_card(&item, None);
+        // Raw YYYY-MM-DD between source and Added, no "Pub:" / "Published:" label.
+        assert!(card.contains("TechBlog \u{00b7} 2026-04-15 \u{00b7} Added: Apr 20"));
+        assert!(!card.contains("Pub:"));
+        assert!(!card.contains("Published:"));
+    }
+
+    #[test]
+    fn format_card_no_date_published_when_missing() {
+        let item_missing = json!({
+            "id": 1,
+            "title": "Test",
+            "url": "https://example.com",
+            "item_type": "blog",
+            "relevance": 85,
+            "quality": 70,
+            "source_name": "TechBlog",
+            "date_added": "2026-04-20T10:00:00Z",
+        });
+        let card = format_swipe_card(&item_missing, None);
+        // No date, no extra dot separator: source flows straight into Added.
+        assert!(card.contains("TechBlog \u{00b7} Added: Apr 20"));
+        assert!(!card.contains("\u{00b7} \u{00b7}"));
+
+        let item_empty = json!({
+            "id": 1,
+            "title": "Test",
+            "url": "https://example.com",
+            "item_type": "blog",
+            "relevance": 85,
+            "quality": 70,
+            "source_name": "TechBlog",
+            "date_published": "",
+            "date_added": "2026-04-20T10:00:00Z",
+        });
+        let card_empty = format_swipe_card(&item_empty, None);
+        assert!(card_empty.contains("TechBlog \u{00b7} Added: Apr 20"));
+        assert!(!card_empty.contains("\u{00b7} \u{00b7}"));
+    }
+
+    #[test]
     fn strip_summary_metadata_removes_prefix() {
         let summary = "# Title\n\n\
                         **Source**: Blog\n\

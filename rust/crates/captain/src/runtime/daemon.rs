@@ -26,7 +26,7 @@ mod daemon_transport_runtime;
 #[path = "daemon_workbench_api_runtime.rs"]
 mod daemon_workbench_api_runtime;
 #[path = "workbench_runtime.rs"]
-pub(crate) mod workbench_runtime;
+pub mod workbench_runtime;
 
 const DEGRADED_FAILURE_THRESHOLD: u32 = 5;
 
@@ -221,18 +221,12 @@ impl CaptainRuntime {
     }
 
     #[tracing::instrument(skip_all)]
-    pub async fn prepare_terminal_workbench(
+    pub async fn bind_terminal_workbench(
         &self,
+        workbench_id: i64,
         project_name: &str,
-        cwd: &str,
-        is_resume: bool,
-    ) -> anyhow::Result<Option<i64>> {
-        workbench_runtime::prepare_terminal_workbench(self, project_name, cwd, is_resume).await
-    }
-
-    #[tracing::instrument(skip_all)]
-    pub async fn rollback_terminal_workbench(&self, workbench_id: i64) {
-        workbench_runtime::rollback_terminal_workbench(self, workbench_id).await;
+    ) -> Result<(), workbench_runtime::BindTerminalError> {
+        workbench_runtime::bind_terminal_workbench(self, workbench_id, project_name).await
     }
 
     #[tracing::instrument(skip_all)]

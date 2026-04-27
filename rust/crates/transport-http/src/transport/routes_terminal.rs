@@ -6,8 +6,9 @@ use base64::Engine;
 use futures_util::stream::Stream;
 use std::convert::Infallible;
 
-use crate::response::{error_response, ApiError};
+use crate::response::{error_response, internal_error, ApiError};
 use crate::{ApiRouter, AppState};
+use captain::BindTerminalError;
 use terminal::{Agent, TerminalSize};
 
 pub(crate) fn routes() -> ApiRouter<AppState> {
@@ -191,17 +192,18 @@ pub(crate) async fn post_terminal_create(
             "cwd must be an existing directory",
         ));
     }
-    let project_name = body.project.clone();
-    let cwd_str = cwd.to_string_lossy().to_string();
-    let workbench_id = state
+    // Trust the renderer's workbench_id — cwd-based lookup leaks for
+    // clarifier resumes whose stored cwd is the project root.
+    // Validation → 400 sanitized; DB/IO → 500 via internal_error.
+    state
         .captain
-        .prepare_terminal_workbench(&project_name, &cwd_str, body.resume_session_id.is_some())
+        .bind_terminal_workbench(body.workbench_id, &body.project)
         .await
-        .map_err(|e| {
-            error_response(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                &format!("failed to prepare workbench: {e}"),
-            )
+        .map_err(|err| match err {
+            BindTerminalError::NotFound { .. } | BindTerminalError::WrongProject { .. } => {
+                error_response(StatusCode::BAD_REQUEST, &err.to_string())
+            }
+            BindTerminalError::Db(db) => internal_error(db, "failed to validate workbench_id"),
         })?;
     let create_args = terminal::CreateTerminalArgs {
         project: body.project,
@@ -211,19 +213,14 @@ pub(crate) async fn post_terminal_create(
         size: body.size.map(terminal_size_from_wire),
         terminal_id: body.terminal_id,
         name: body.name,
+        workbench_id: body.workbench_id,
     };
-    let session = match state.terminal.create(create_args) {
-        Ok(s) => s,
-        Err(e) => {
-            if let Some(id) = workbench_id {
-                state.captain.rollback_terminal_workbench(id).await;
-            }
-            return Err(error_response(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                &format!("failed to create terminal: {e}"),
-            ));
-        }
-    };
+    let session = state.terminal.create(create_args).map_err(|e| {
+        error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            &format!("failed to create terminal: {e}"),
+        )
+    })?;
 
     Ok(Json(terminal_info_from_session(session.info())?))
 }

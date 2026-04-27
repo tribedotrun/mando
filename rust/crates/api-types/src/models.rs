@@ -394,6 +394,11 @@ pub struct TerminalSessionInfo {
     pub name: Option<String>,
     #[serde(rename = "ccSessionId")]
     pub cc_session_id: Option<String>,
+    /// Workbench owning this session. The renderer scopes a workbench's
+    /// terminal tab bar by this id instead of the leaky `project + cwd`
+    /// heuristic.
+    #[serde(rename = "workbenchId")]
+    pub workbench_id: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]

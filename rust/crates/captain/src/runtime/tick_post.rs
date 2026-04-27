@@ -1,16 +1,25 @@
 //! §5 POST — persist health, prune WAL, SSE, summary.
 
 use std::path::Path;
+use std::sync::Arc;
 
 use anyhow::{Context, Result};
 
 use global_bus::EventBus;
+use tokio::sync::RwLock;
 
-use crate::io::{health_store, health_store::HealthState, ops_log};
+use crate::io::{health_store, health_store::HealthState, ops_log, task_store::TaskStore};
 use crate::service::tick_logic;
 
 /// Persist health state, prune stale WAL entries, flush notifications,
 /// and publish SSE events. Called at the end of every non-dry-run tick.
+///
+/// `changed_task_ids` are the task ids that the tick actually mutated; one
+/// typed `Tasks(Some(..))` event is emitted per id so renderer detail caches
+/// (`tasks.feed`, `tasks.timeline`, `tasks.askHistory`, `tasks.artifacts`)
+/// invalidate without waiting for a remount. The bare `Tasks(None)` catch-all
+/// only invalidates the list, leaving per-task caches stale.
+#[allow(clippy::too_many_arguments)]
 #[tracing::instrument(skip_all)]
 pub(crate) async fn run_post_phase(
     dry_run: bool,
@@ -20,6 +29,8 @@ pub(crate) async fn run_post_phase(
     notifier: &super::notify::Notifier,
     bus: Option<&EventBus>,
     affected_task_ids: &[i64],
+    changed_task_ids: &[i64],
+    store_lock: &Arc<RwLock<TaskStore>>,
 ) -> Result<()> {
     if !dry_run {
         let mut fresh = health_store::load_health_state(health_path)
@@ -46,7 +57,9 @@ pub(crate) async fn run_post_phase(
 
     // SSE publish — notify UI of state changes.
     if let Some(bus) = bus {
-        bus.send(global_bus::BusPayload::Tasks(None));
+        if !dry_run {
+            broadcast_changed_tasks(bus, store_lock, changed_task_ids).await;
+        }
         bus.send(global_bus::BusPayload::Status(Some(
             api_types::StatusEventData {
                 action: Some("tick".into()),
@@ -61,6 +74,64 @@ pub(crate) async fn run_post_phase(
     }
 
     Ok(())
+}
+
+/// Emit one typed `Tasks(Some({action: "updated", item, id, cleared_by: None}))`
+/// event per changed task id, using the freshly-persisted DB row so the rev
+/// matches what readers will see. Mirrors `daemon::broadcast_task_update`.
+///
+/// A missing or unreadable row is logged and skipped — the corresponding
+/// renderer query falls back to the next snapshot/refresh rather than getting
+/// an `item: None` event that would dodge the rev guard.
+async fn broadcast_changed_tasks(
+    bus: &EventBus,
+    store_lock: &Arc<RwLock<TaskStore>>,
+    changed_task_ids: &[i64],
+) {
+    if changed_task_ids.is_empty() {
+        return;
+    }
+    let store = store_lock.read().await;
+    for &task_id in changed_task_ids {
+        match store.find_by_id(task_id).await {
+            Ok(Some(task)) => {
+                let item: Option<api_types::TaskItem> = serde_json::to_value(&task)
+                    .ok()
+                    .and_then(|v| serde_json::from_value(v).ok());
+                if item.is_none() {
+                    tracing::warn!(
+                        module = "captain-runtime-tick_post",
+                        task_id,
+                        "skipping tick task broadcast — api-types schema drift"
+                    );
+                    continue;
+                }
+                bus.send(global_bus::BusPayload::Tasks(Some(
+                    api_types::TaskEventData {
+                        action: Some("updated".into()),
+                        item,
+                        id: Some(task_id),
+                        cleared_by: None,
+                    },
+                )));
+            }
+            Ok(None) => {
+                tracing::debug!(
+                    module = "captain-runtime-tick_post",
+                    task_id,
+                    "skipping tick task broadcast — task not found (likely just deleted)"
+                );
+            }
+            Err(e) => {
+                tracing::warn!(
+                    module = "captain-runtime-tick_post",
+                    task_id,
+                    error = %e,
+                    "skipping tick task broadcast — DB read failed"
+                );
+            }
+        }
+    }
 }
 
 /// Touch workbench `last_activity_at` for changed tasks and broadcast
@@ -305,5 +376,157 @@ mod tests {
 
         let cwd = health_store::get_health_str(&on_disk, "w1", "cwd");
         assert_eq!(cwd.as_deref(), Some("/new/path"));
+    }
+
+    /// Regression for the bug where the captain tick emitted only `Tasks(None)`
+    /// after every tick — list-only invalidation that left per-task feed,
+    /// timeline, askHistory, and artifacts caches stale until the user
+    /// remounted the workbench page. This test pins the typed broadcast.
+    #[tokio::test]
+    async fn broadcast_changed_tasks_emits_typed_event_per_id() {
+        let db = global_db::Db::open_in_memory().await.unwrap();
+        let pool = db.pool().clone();
+        settings::projects::upsert(&pool, "test", "", None)
+            .await
+            .unwrap();
+        let wb_id = crate::io::test_support::seed_workbench(&pool, 1).await;
+
+        let mut task = crate::Task::new("watch me");
+        task.project_id = 1;
+        task.project = "test".into();
+        task.workbench_id = wb_id;
+        let task_id = crate::io::queries::tasks::insert_task(&pool, &task)
+            .await
+            .unwrap();
+
+        let store_lock = std::sync::Arc::new(tokio::sync::RwLock::new(
+            crate::io::task_store::TaskStore::new(pool),
+        ));
+        let bus = global_bus::EventBus::new();
+        let mut rx = bus.subscribe();
+
+        broadcast_changed_tasks(&bus, &store_lock, &[task_id]).await;
+
+        let payload = tokio::time::timeout(std::time::Duration::from_secs(1), rx.recv())
+            .await
+            .expect("bus event must arrive within 1s")
+            .expect("bus channel must yield a payload");
+        let global_bus::BusPayload::Tasks(Some(data)) = payload else {
+            panic!("expected typed Tasks(Some(..)) event, got {payload:?}");
+        };
+        assert_eq!(data.action.as_deref(), Some("updated"));
+        assert_eq!(data.id, Some(task_id));
+        assert!(data.cleared_by.is_none());
+        let item = data
+            .item
+            .expect("item must be present so list cache can patch");
+        assert_eq!(item.id, task_id);
+        assert_eq!(item.title, "watch me");
+    }
+
+    #[tokio::test]
+    async fn broadcast_changed_tasks_skips_missing_rows_silently() {
+        let db = global_db::Db::open_in_memory().await.unwrap();
+        let pool = db.pool().clone();
+        let store_lock = std::sync::Arc::new(tokio::sync::RwLock::new(
+            crate::io::task_store::TaskStore::new(pool),
+        ));
+        let bus = global_bus::EventBus::new();
+        let mut rx = bus.subscribe();
+
+        broadcast_changed_tasks(&bus, &store_lock, &[9999]).await;
+
+        let recv = tokio::time::timeout(std::time::Duration::from_millis(100), rx.recv()).await;
+        assert!(
+            recv.is_err(),
+            "expected no bus event for missing task, got {recv:?}"
+        );
+    }
+
+    /// End-to-end guard that `run_post_phase` actually wires `changed_task_ids`
+    /// into the bus broadcast. Catches a regression where someone keeps the
+    /// helper but stops calling it from the post phase.
+    #[tokio::test]
+    async fn run_post_phase_emits_typed_task_event_for_changed_id() {
+        let db = global_db::Db::open_in_memory().await.unwrap();
+        let pool = db.pool().clone();
+        settings::projects::upsert(&pool, "test", "", None)
+            .await
+            .unwrap();
+        let wb_id = crate::io::test_support::seed_workbench(&pool, 1).await;
+
+        let mut task = crate::Task::new("post-phase typed event");
+        task.project_id = 1;
+        task.project = "test".into();
+        task.workbench_id = wb_id;
+        let task_id = crate::io::queries::tasks::insert_task(&pool, &task)
+            .await
+            .unwrap();
+
+        let store_lock = std::sync::Arc::new(tokio::sync::RwLock::new(
+            crate::io::task_store::TaskStore::new(pool),
+        ));
+        let bus = global_bus::EventBus::new();
+        let mut rx = bus.subscribe();
+        let notifier = super::super::notify::Notifier::new(std::sync::Arc::new(bus.clone()));
+
+        // Health-state bookkeeping is best-effort; point both reads/writes at
+        // a unique temp file so concurrent tests don't collide.
+        let health_path = std::env::temp_dir().join(format!(
+            "tick_post_run_post_phase_{}.json",
+            global_infra::uuid::Uuid::v4()
+        ));
+        std::fs::write(&health_path, "{}").unwrap();
+        let health_state = HealthState::new();
+
+        run_post_phase(
+            false,
+            &health_path,
+            &health_state,
+            &[],
+            &notifier,
+            Some(&bus),
+            &[task_id],
+            &[task_id],
+            &store_lock,
+        )
+        .await
+        .unwrap();
+        let _ = std::fs::remove_file(&health_path);
+
+        // Drain events; the typed Tasks(Some(..)) for our task id must be among them.
+        let mut found_typed = false;
+        for _ in 0..10 {
+            match tokio::time::timeout(std::time::Duration::from_millis(200), rx.recv()).await {
+                Ok(Ok(global_bus::BusPayload::Tasks(Some(data))))
+                    if data.id == Some(task_id) && data.action.as_deref() == Some("updated") =>
+                {
+                    found_typed = true;
+                    break;
+                }
+                Ok(Ok(_)) => continue,
+                _ => break,
+            }
+        }
+        assert!(
+            found_typed,
+            "run_post_phase must emit a typed Tasks(Some(..)) event for each changed task id"
+        );
+    }
+
+    #[tokio::test]
+    async fn broadcast_changed_tasks_no_op_on_empty_slice() {
+        let db = global_db::Db::open_in_memory().await.unwrap();
+        let pool = db.pool().clone();
+        let store_lock = std::sync::Arc::new(tokio::sync::RwLock::new(
+            crate::io::task_store::TaskStore::new(pool),
+        ));
+        let bus = global_bus::EventBus::new();
+        let mut rx = bus.subscribe();
+
+        broadcast_changed_tasks(&bus, &store_lock, &[]).await;
+
+        let recv = tokio::time::timeout(std::time::Duration::from_millis(100), rx.recv()).await;
+        assert!(recv.is_err(), "empty changed list must not emit any event");
     }
 }

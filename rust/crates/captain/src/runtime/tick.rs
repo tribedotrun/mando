@@ -184,33 +184,7 @@ async fn run_captain_tick_inner(
         "tick status"
     );
 
-    // ── Rate-limit cooldown check ──────────────────────────────────────
-    // Two independent systems:
-    // - Credentials configured: blocked when all credentials are rate-limited
-    //   (pick_for_worker returns None).
-    // - No credentials: blocked by ambient (host login) cooldown.
-    let has_credentials = settings::credentials::has_any(&pool).await.unwrap_or(false);
-    let rate_limited = if has_credentials {
-        // All credentials rate-limited = no available credential to pick.
-        settings::credentials::pick_for_worker(&pool, None)
-            .await
-            .unwrap_or(None)
-            .is_none()
-    } else {
-        super::ambient_rate_limit::is_active()
-    };
-    if rate_limited {
-        let remaining = if has_credentials {
-            0 // per-credential cooldowns have their own DB timestamps
-        } else {
-            super::ambient_rate_limit::remaining_secs()
-        };
-        tracing::warn!(
-            module = "captain",
-            remaining_s = remaining,
-            "rate limit cooldown active — CC session spawning suppressed"
-        );
-    }
+    let rate_limited = super::tick_rate_limit::detect_cooldown(&pool).await;
 
     // ── §2 GATHER — context for ALL non-terminal items ────────────────
 
@@ -318,6 +292,7 @@ async fn run_captain_tick_inner(
 
     // ── §4 EXECUTE — all actions ──────────────────────────────────────
     let mut changed_wb_ids: rustc_hash::FxHashSet<i64> = rustc_hash::FxHashSet::default();
+    let mut changed_task_ids: Vec<i64> = Vec::new();
     if !dry_run {
         for action in &actions_to_execute {
             // During rate-limit cooldown, skip actions that spawn CC sessions.
@@ -410,6 +385,7 @@ async fn run_captain_tick_inner(
                     .map(|t| t.workbench_id)
                     .filter(|&id| id != 0),
             );
+            changed_task_ids = changed_items.iter().map(|t| t.id).collect();
             if !changed_items.is_empty() {
                 let store = match tokio::time::timeout(
                     std::time::Duration::from_secs(30),
@@ -465,6 +441,8 @@ async fn run_captain_tick_inner(
         &notifier,
         bus,
         &affected_task_ids,
+        &changed_task_ids,
+        store_lock,
     )
     .await?;
     super::tick_post::run_post_cleanup(dry_run, store_lock, workflow, &mut alerts).await;
