@@ -111,7 +111,7 @@ fn dispatch_timeline<'a>(
     chat_id: &'a str,
     args: &'a str,
 ) -> CommandFuture<'a> {
-    Box::pin(async move { commands::timeline::handle(&*bot, chat_id, args).await })
+    Box::pin(async move { commands::timeline::handle(bot, chat_id, args).await })
 }
 
 fn dispatch_scout_add<'a>(
@@ -321,6 +321,15 @@ impl TelegramBot {
     ) -> Result<()> {
         if self.pending_todo.remove(chat_id) {
             return commands::todo::execute_todo(self, chat_id, text).await;
+        }
+        if self.pending_timeline.remove(chat_id) {
+            return commands::timeline::execute(self, chat_id, text).await;
+        }
+        if self.pending_scout_add.remove(chat_id) {
+            return crate::assistant::commands::execute_addlink(self, chat_id, text).await;
+        }
+        if self.pending_scout_research.remove(chat_id) {
+            return crate::assistant::commands::execute_research(self, chat_id, text).await;
         }
         if let Some((item_id, title)) = self.pending_reopen.remove(chat_id) {
             return crate::callback_actions::reopen_with_feedback(

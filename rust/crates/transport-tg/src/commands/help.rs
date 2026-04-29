@@ -17,10 +17,10 @@ fn format_line(spec: &CommandSpec) -> String {
     let args = match spec.name {
         "todo" => " [items]",
         "tasks" => " [all]",
-        "timeline" => " &lt;id&gt;",
+        "timeline" => " [id]",
         "stop" => " [id]",
-        "scout_add" => " &lt;url&gt;",
-        "scout_research" => " &lt;topic&gt;",
+        "scout_add" => " [url]",
+        "scout_research" => " [topic]",
         "scout_list" => " [status]",
         _ => "",
     };

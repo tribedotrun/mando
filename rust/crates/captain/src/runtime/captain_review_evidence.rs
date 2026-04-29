@@ -21,6 +21,15 @@ pub(crate) struct EvidenceListing {
     pub has_before_fix: bool,
     pub has_after_fix: bool,
     pub has_cannot_reproduce: bool,
+    /// Screenshot-extension media tagged `--kind before`. The intersection
+    /// stops a `--kind before` terminal log or a `--kind other` screenshot
+    /// from satisfying the universal UI before-screenshot rule.
+    pub has_before_screenshot: bool,
+    /// Screenshot-extension media tagged `--kind after`.
+    pub has_after_screenshot: bool,
+    /// Recording-extension media tagged `--kind after`. Recording is only
+    /// required on the after side per the universal UI rule.
+    pub has_after_recording: bool,
 }
 
 /// Load fresh evidence + work summary for `item` and produce the listing
@@ -45,16 +54,31 @@ pub(crate) async fn compute_evidence_listing(
         let is_fresh = !is_reopened || artifact.created_at.as_str() > freshness_threshold;
         for media in &artifact.media {
             let ext_lower = media.ext.to_lowercase();
-            if is_fresh && SCREENSHOT_EXTS.contains(&ext_lower.as_str()) {
+            let is_screenshot_ext = SCREENSHOT_EXTS.contains(&ext_lower.as_str());
+            let is_recording_ext = RECORDING_EXTS.contains(&ext_lower.as_str());
+            if is_fresh && is_screenshot_ext {
                 out.has_screenshot = true;
             }
-            if is_fresh && RECORDING_EXTS.contains(&ext_lower.as_str()) {
+            if is_fresh && is_recording_ext {
                 out.has_recording = true;
             }
             if is_fresh {
                 match media.kind {
-                    Some(crate::EvidenceKind::BeforeFix) => out.has_before_fix = true,
-                    Some(crate::EvidenceKind::AfterFix) => out.has_after_fix = true,
+                    Some(crate::EvidenceKind::BeforeFix) => {
+                        out.has_before_fix = true;
+                        if is_screenshot_ext {
+                            out.has_before_screenshot = true;
+                        }
+                    }
+                    Some(crate::EvidenceKind::AfterFix) => {
+                        out.has_after_fix = true;
+                        if is_screenshot_ext {
+                            out.has_after_screenshot = true;
+                        }
+                        if is_recording_ext {
+                            out.has_after_recording = true;
+                        }
+                    }
                     Some(crate::EvidenceKind::CannotReproduce) => out.has_cannot_reproduce = true,
                     Some(crate::EvidenceKind::Other) | None => {}
                 }

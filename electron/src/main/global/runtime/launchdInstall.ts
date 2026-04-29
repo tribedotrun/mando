@@ -19,16 +19,19 @@ import {
  *  When `stagedAppPath` is provided, binaries are copied from the staged app
  *  bundle instead of the currently running app — used by the update flow to
  *  install the NEW binary before swapping the .app bundle. */
-export function updateDaemonBinary(dataDir: string, stagedAppPath?: string): boolean {
+export async function updateDaemonBinary(
+  dataDir: string,
+  stagedAppPath?: string,
+): Promise<boolean> {
   const dest = daemonInstallPath();
   const prev = `${dest}.prev`;
 
   const label = daemonLabel();
-  if (isServiceLoaded(label)) {
-    launchctlBootout(label);
-    waitForServiceUnloaded(label);
+  if (await isServiceLoaded(label)) {
+    await launchctlBootout(label);
+    await waitForServiceUnloaded(label);
   }
-  cleanupTelegramArtifacts();
+  await cleanupTelegramArtifacts();
 
   if (fs.existsSync(dest)) {
     try {
@@ -49,38 +52,41 @@ export function updateDaemonBinary(dataDir: string, stagedAppPath?: string): boo
     return false;
   }
 
-  installDaemonPlist(dataDir);
+  await installDaemonPlist(dataDir);
   return true;
 }
 
 /** Rollback to previous daemon binary if available. */
-export function rollbackDaemonBinary(dataDir: string): boolean {
+export async function rollbackDaemonBinary(dataDir: string): Promise<boolean> {
   const dest = daemonInstallPath();
   const prev = `${dest}.prev`;
   if (!fs.existsSync(prev)) return false;
 
   const label = daemonLabel();
-  if (isServiceLoaded(label)) {
-    launchctlBootout(label);
-    waitForServiceUnloaded(label);
+  if (await isServiceLoaded(label)) {
+    await launchctlBootout(label);
+    await waitForServiceUnloaded(label);
   }
-  cleanupTelegramArtifacts();
+  await cleanupTelegramArtifacts();
   try {
     fs.renameSync(prev, dest);
   } catch (err) {
     log.warn('[launchd] rollback rename failed:', err);
     return false;
   }
-  installDaemonPlist(dataDir);
+  await installDaemonPlist(dataDir);
   return true;
 }
 
-export function installCliAndPlists(dataDir: string, opts?: { skipDaemonPlist?: boolean }): void {
+export async function installCliAndPlists(
+  dataDir: string,
+  opts?: { skipDaemonPlist?: boolean },
+): Promise<void> {
   copyCliBinary();
   fs.mkdirSync(path.join(dataDir, 'logs'), { recursive: true });
 
   if (!opts?.skipDaemonPlist) {
     stageDaemonBinary();
-    installDaemonPlist(dataDir);
+    await installDaemonPlist(dataDir);
   }
 }

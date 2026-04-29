@@ -35,11 +35,34 @@ fn timeline_icon(kind: &str) -> &'static str {
 }
 
 /// Handle `/timeline [id] [chat]`.
-pub async fn handle(bot: &TelegramBot, chat_id: &str, args: &str) -> Result<()> {
+///
+/// If no args, sets pending state so the next plain-text message is treated
+/// as the timeline args. Otherwise runs `execute` directly.
+pub async fn handle(bot: &mut TelegramBot, chat_id: &str, args: &str) -> Result<()> {
+    if args.trim().is_empty() {
+        bot.set_pending_timeline(chat_id);
+        bot.send_html(
+            chat_id,
+            "Send the task ID below (optionally followed by <code>chat</code> for Q&amp;A only).\nAny other command cancels.",
+        )
+        .await?;
+        return Ok(());
+    }
+
+    bot.clear_pending_timeline(chat_id);
+    execute(bot, chat_id, args).await
+}
+
+/// Render the timeline for a task. Reachable from inline args and from the
+/// drained `pending_timeline` follow-up text.
+pub async fn execute(bot: &TelegramBot, chat_id: &str, args: &str) -> Result<()> {
     let parts: Vec<&str> = args.split_whitespace().collect();
     if parts.is_empty() {
-        bot.send_html(chat_id, "Usage: /timeline &lt;task_id&gt; [chat]")
-            .await?;
+        bot.send_html(
+            chat_id,
+            "\u{26a0}\u{fe0f} No task ID provided. Try <code>/timeline &lt;id&gt;</code>.",
+        )
+        .await?;
         return Ok(());
     }
 

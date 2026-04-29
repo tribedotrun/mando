@@ -1,6 +1,7 @@
 import path from 'path';
 import fs from 'fs';
-import { execSync } from 'child_process';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
 import log from '#main/global/providers/logger';
 import { isServiceLoaded, waitForServiceUnloaded } from '#main/global/runtime/portCheck';
 import { parseNonEmptyText } from '#main/global/service/boundaryText';
@@ -17,40 +18,43 @@ import {
   generateDaemonPlist,
 } from '#main/global/service/launchd';
 
+const execFileAsync = promisify(execFile);
+
 /** Load a launchd service: bootout first if already loaded, then bootstrap. */
-export function launchctlLoad(plistPath: string, label: string): void {
-  if (isServiceLoaded(label)) {
-    launchctlBootout(label);
-    waitForServiceUnloaded(label);
+export async function launchctlLoad(plistPath: string, label: string): Promise<void> {
+  if (await isServiceLoaded(label)) {
+    await launchctlBootout(label);
+    await waitForServiceUnloaded(label);
   }
   const uid = process.getuid?.() ?? 501;
-  execSync(`launchctl bootstrap gui/${uid} "${plistPath}"`);
+  await execFileAsync('launchctl', ['bootstrap', `gui/${uid}`, plistPath]);
 }
 
 /** Bootout a loaded launchd service. Caller checks isServiceLoaded() first. */
-export function launchctlBootout(label: string): void {
+export async function launchctlBootout(label: string): Promise<void> {
   const uid = process.getuid?.() ?? 501;
   try {
-    execSync(`launchctl bootout gui/${uid}/${label}`);
+    await execFileAsync('launchctl', ['bootout', `gui/${uid}/${label}`]);
   } catch (e: unknown) {
     log.warn(`[launchd] bootout ${label} failed (likely unloaded concurrently):`, errorMsg(e));
   }
 }
 
-export function kickstartDaemon(): boolean {
+export async function kickstartDaemon(): Promise<boolean> {
   const label = daemonLabel();
-  if (!isServiceLoaded(label)) return false;
+  if (!(await isServiceLoaded(label))) return false;
   const uid = process.getuid?.() ?? 501;
   try {
-    execSync(`launchctl kickstart gui/${uid}/${label}`, {
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
+    await execFileAsync('launchctl', ['kickstart', `gui/${uid}/${label}`]);
     log.info('[launchd] daemon kickstarted');
     return true;
   } catch (e: unknown) {
-    const status = (e as { status?: number }).status;
+    // promisify(execFile) errors expose the exit code on `.code` (number for
+    // non-zero exits, string for spawn-level errors like 'ENOENT'), not on
+    // `.status` like execFileSync did. https://github.com/nodejs/node/issues/7241
+    const code = (e as { code?: string | number }).code;
     const stderr = parseNonEmptyText(stderrString(e), 'command:launchctl-kickstart stderr');
-    log.warn(`[launchd] kickstart daemon failed (status=${status}): ${stderr ?? errorMsg(e)}`);
+    log.warn(`[launchd] kickstart daemon failed (code=${code}): ${stderr ?? errorMsg(e)}`);
     return false;
   }
 }
@@ -61,17 +65,17 @@ function ensureLaunchdDirs(dataDir: string): void {
   fs.mkdirSync(path.join(dataDir, 'logs'), { recursive: true });
 }
 
-function migrateOldLaunchdLabels(): void {
+async function migrateOldLaunchdLabels(): Promise<void> {
   const oldLabels = ['run.tribe.mando.daemon', 'run.tribe.mando.telegram'];
   for (const label of oldLabels) {
-    if (isServiceLoaded(label)) {
-      launchctlBootout(label);
-      waitForServiceUnloaded(label);
+    if (await isServiceLoaded(label)) {
+      await launchctlBootout(label);
+      await waitForServiceUnloaded(label);
       log.info(`[launchd] migrated legacy service: ${label}`);
     }
     const plist = path.join(launchAgentsDir(), `${label}.plist`);
     try {
-      fs.unlinkSync(plist);
+      await fs.promises.unlink(plist);
     } catch (e: unknown) {
       const code = (e as NodeJS.ErrnoException)?.code;
       if (code === 'ENOENT') {
@@ -83,15 +87,15 @@ function migrateOldLaunchdLabels(): void {
   }
 }
 
-export function cleanupTelegramArtifacts(): void {
+export async function cleanupTelegramArtifacts(): Promise<void> {
   const label = isPreview()
     ? 'build.mando.preview.telegram'
     : isDev()
       ? 'build.mando.telegram.dev'
       : 'build.mando.telegram';
-  if (isServiceLoaded(label)) {
-    launchctlBootout(label);
-    waitForServiceUnloaded(label);
+  if (await isServiceLoaded(label)) {
+    await launchctlBootout(label);
+    await waitForServiceUnloaded(label);
     log.info(`[launchd] removed deprecated Telegram service: ${label}`);
   }
 
@@ -112,7 +116,7 @@ export function cleanupTelegramArtifacts(): void {
 
   for (const file of [plistPath, tgBinaryPath]) {
     try {
-      fs.unlinkSync(file);
+      await fs.promises.unlink(file);
     } catch (e: unknown) {
       const code = (e as NodeJS.ErrnoException)?.code;
       if (code !== 'ENOENT') {
@@ -123,11 +127,11 @@ export function cleanupTelegramArtifacts(): void {
 }
 
 /** Install and load the daemon LaunchAgent plist. */
-export function installDaemonPlist(dataDir: string): void {
-  migrateOldLaunchdLabels();
-  cleanupTelegramArtifacts();
+export async function installDaemonPlist(dataDir: string): Promise<void> {
+  await migrateOldLaunchdLabels();
+  await cleanupTelegramArtifacts();
   ensureLaunchdDirs(dataDir);
   const plistFile = daemonPlistPath();
   fs.writeFileSync(plistFile, generateDaemonPlist(dataDir), 'utf-8');
-  launchctlLoad(plistFile, daemonLabel());
+  await launchctlLoad(plistFile, daemonLabel());
 }

@@ -58,6 +58,14 @@ pub(super) fn spawn_auto_tick(runtime: &CaptainRuntime) {
 
                     let cfg = settings.load_config();
                     if cfg.captain.auto_schedule {
+                        // Hot-reload the captain workflow from disk so edits to
+                        // workflow.yaml (per-state caps, timeouts, prompts) take
+                        // effect within one tick without restarting the daemon.
+                        // On parse failure the setter logs a warning and keeps
+                        // the previous in-memory copy.
+                        settings
+                            .reload_captain_workflow_from_disk(&settings::captain_workflow_path())
+                            .await;
                         let wf = settings.load_captain_workflow();
                         match crate::runtime::dashboard::trigger_captain_tick(
                             &cfg,

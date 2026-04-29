@@ -12,17 +12,35 @@ use crate::bot::TelegramBot;
 use crate::gateway_paths as paths;
 
 // Re-export scout commands used by the dispatcher.
-pub use super::scout_commands::{cmd_research, cmd_scout};
+pub use super::scout_commands::{cmd_research, cmd_scout, execute_research};
 
 // ── /scout_add ─────────────────────────────────────────────────────
 
 pub async fn cmd_addlink(bot: &mut TelegramBot, chat_id: &str, args: &str) -> Result<()> {
+    if args.trim().is_empty() {
+        bot.set_pending_scout_add(chat_id);
+        send_html(
+            bot,
+            chat_id,
+            "Send a URL below (or several URLs space-separated). Add an optional title after a single URL.\nAny other command cancels.",
+        )
+        .await?;
+        return Ok(());
+    }
+
+    bot.clear_pending_scout_add(chat_id);
+    execute_addlink(bot, chat_id, args).await
+}
+
+/// Add one or more URLs to Scout. Reachable from inline args and from the
+/// drained `pending_scout_add` follow-up text.
+pub async fn execute_addlink(bot: &mut TelegramBot, chat_id: &str, args: &str) -> Result<()> {
     let args = args.trim();
     if args.is_empty() {
         send_html(
             bot,
             chat_id,
-            "Usage: /scout_add &lt;url&gt; [title]\nMultiple: /scout_add &lt;url1&gt; &lt;url2&gt; ...",
+            "\u{26a0}\u{fe0f} No URL provided. Try <code>/scout_add &lt;url&gt;</code>.",
         )
         .await?;
         return Ok(());
@@ -44,7 +62,7 @@ pub async fn cmd_addlink(bot: &mut TelegramBot, chat_id: &str, args: &str) -> Re
         send_html(
             bot,
             chat_id,
-            "\u{274c} Not a valid URL. Usage: /scout_add &lt;url&gt; [title]",
+            "\u{274c} Not a valid URL. Try <code>/scout_add &lt;url&gt; [title]</code>.",
         )
         .await?;
         return Ok(());

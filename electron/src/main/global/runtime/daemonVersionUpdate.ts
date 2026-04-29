@@ -26,7 +26,7 @@ export async function checkVersionAndUpdate(
   log.info(`Version mismatch: daemon=${result.version}, bundled=${bundledVersion}. Updating...`);
   connection.dispatch({ type: 'updating' });
 
-  const success = updateDaemonBinary(dataDir);
+  const success = await updateDaemonBinary(dataDir);
   if (!success) {
     log.error('Daemon binary update failed');
     connection.dispatch({ type: 'disconnected' });
@@ -38,7 +38,7 @@ export async function checkVersionAndUpdate(
   if (ready) return;
 
   log.error('Updated daemon failed health check, rolling back');
-  rollbackDaemonBinary(dataDir);
+  await rollbackDaemonBinary(dataDir);
   invalidateDiscoveryCache();
   await waitForDaemon(connection, 10000);
 }

@@ -21,7 +21,7 @@ use super::error::ConfigError;
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CaptainWorkflow {
     pub models: ModelsConfig,
     pub agent: AgentConfig,
@@ -84,23 +84,6 @@ pub struct ModelsConfig {
     pub todo_parse: String,
 }
 
-impl Default for ModelsConfig {
-    /// Placeholder model names — production runs always load the YAML
-    /// (`captain-workflow.yaml::models`), which overrides these to the real
-    /// model id (e.g. `opus[1m]`). The "default" string is what `claude`
-    /// resolves when no model is pinned, which keeps tests that construct
-    /// `CaptainWorkflow::default()` directly working without depending on
-    /// a specific Anthropic model.
-    fn default() -> Self {
-        Self {
-            worker: "default".into(),
-            captain: "default".into(),
-            clarifier: "default".into(),
-            todo_parse: "default".into(),
-        }
-    }
-}
-
 /// Configuration for the autonomous planning pipeline.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlanningConfig {
@@ -113,21 +96,6 @@ pub struct PlanningConfig {
     pub feedback_max_turns: u32,
     pub synthesizer_max_turns: u32,
     pub final_max_turns: u32,
-}
-
-impl Default for PlanningConfig {
-    fn default() -> Self {
-        use std::time::Duration;
-        Self {
-            feedback_rounds: 3,
-            cc_timeout_s: Duration::from_secs(300),
-            codex_timeout_s: Duration::from_secs(180),
-            planner_max_turns: 15,
-            feedback_max_turns: 10,
-            synthesizer_max_turns: 3,
-            final_max_turns: 3,
-        }
-    }
 }
 
 /// Configuration for auto-generating terminal workbench titles.
@@ -146,21 +114,6 @@ pub struct AutoTitleConfig {
     pub expiry_s: std::time::Duration,
     /// Truncate the user's first message to this many characters.
     pub max_input_chars: usize,
-}
-
-impl Default for AutoTitleConfig {
-    fn default() -> Self {
-        Self {
-            model: "haiku".into(),
-            prompt: "Generate a concise 3-5 word title for this conversation. \
-                     Output ONLY the title, nothing else:"
-                .into(),
-            timeout_s: std::time::Duration::from_secs(30),
-            poll_interval_s: std::time::Duration::from_secs(60),
-            expiry_s: std::time::Duration::from_secs(300),
-            max_input_chars: 200,
-        }
-    }
 }
 
 /// Serde adapter that reads/writes a `Duration` as a floating-point seconds value.
@@ -201,6 +154,11 @@ mod duration_seconds {
 pub struct AgentConfig {
     pub max_concurrent: usize,
     pub resource_limits: HashMap<String, usize>,
+    /// Per-lifecycle-state concurrency caps, keyed by `ItemStatus` wire name
+    /// (kebab-case). Restricted to states with a live CC/Codex session:
+    /// `in-progress`, `clarifying`, `captain-reviewing`, `captain-merging`.
+    /// Empty map disables all per-state limits (today's behaviour).
+    pub per_state_limits: HashMap<String, usize>,
     pub max_interventions: u32,
     /// Seconds a stream can go without activity before workers are nudged.
     #[serde(with = "duration_seconds")]
@@ -261,40 +219,6 @@ pub struct AgentConfig {
     /// don't have to wait out the minimum.
     #[serde(with = "duration_seconds")]
     pub no_pr_min_active_s: std::time::Duration,
-}
-
-impl Default for AgentConfig {
-    fn default() -> Self {
-        use std::time::Duration;
-        Self {
-            max_concurrent: 3,
-            resource_limits: HashMap::new(),
-            max_interventions: 50,
-            stale_threshold_s: Duration::from_secs(1200),
-            captain_review_timeout_s: Duration::from_secs(1200),
-            captain_merge_timeout_s: Duration::from_secs(1800),
-            max_review_retries: 5,
-            max_merge_retries: 3,
-            max_clarifier_retries: 3,
-            max_rebase_retries: 5,
-            max_advisor_retries: 3,
-            cc_max_retries: 2,
-            rebase_base_delay_s: Duration::from_secs(30),
-            worker_timeout_s: Duration::from_secs(21600),
-            clarifier_timeout_s: Duration::from_secs(1800),
-            todo_parse_timeout_s: Duration::from_secs(300),
-            todo_parse_idle_ttl_s: Duration::from_secs(120),
-            todo_parse_max_turns: 10,
-            needs_clarification_timeout_s: Duration::from_secs(86400), // 24 hours
-            archive_grace_secs: Duration::from_secs(604800),
-            max_repeated_nudges: 3,
-            task_ask_timeout_s: Duration::from_secs(600),
-            task_ask_idle_ttl_s: Duration::from_secs(3600),
-            ops_timeout_s: Duration::from_secs(120),
-            ops_idle_ttl_s: Duration::from_secs(3600),
-            no_pr_min_active_s: Duration::from_secs(180),
-        }
-    }
 }
 
 // ── Embedded defaults ────────────────────────────────────────────────────────

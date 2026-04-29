@@ -91,7 +91,7 @@ function scheduleReconnect(): void {
         !process.env.MANDO_EXTERNAL_GATEWAY
       ) {
         log.info('[daemon] reconnect attempts exhausted — kickstarting via launchd');
-        kickstartDaemon();
+        await kickstartDaemon();
       }
 
       scheduleReconnect();
@@ -161,7 +161,7 @@ export async function ensureDaemon(dataDir: string): Promise<boolean> {
   }
 
   stageDaemonBinary();
-  installDaemonPlist(dataDir);
+  await installDaemonPlist(dataDir);
 
   const ready = await waitForDaemon(connection, 15000);
   if (!ready) {

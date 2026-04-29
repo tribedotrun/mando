@@ -60,6 +60,9 @@ export function useTaskAccept() {
 export function useTaskCancel() {
   const mutation = useTaskCancelMutation();
   return useMutationFeedback(mutation, {
+    onSuccess: () => {
+      toast.success('Task canceled');
+    },
     onError: () => {
       toast.error('Cancel failed');
     },

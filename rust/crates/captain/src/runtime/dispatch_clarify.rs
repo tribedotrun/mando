@@ -52,17 +52,43 @@ pub(crate) async fn clarify_new_items(
     // overwhelming the LLM provider with a burst of concurrent sessions.
     let max_parallel = max_workers.saturating_sub(active_workers);
 
+    // Per-state cap for `clarifying`: count items already running a
+    // clarifier session, then refuse to start more once the cap is hit.
+    let per_state_limits = &workflow.agent.per_state_limits;
+    let clarifying_cap = per_state_limits.get("clarifying").copied();
+    let mut clarifying_active = dispatch_logic::count_active_states(items)
+        .get("clarifying")
+        .copied()
+        .unwrap_or(0);
+
     // Phase 1: Pre-process — set Clarifying status, persist to DB, log sessions.
     let mut jobs: Vec<ClarifyJob> = Vec::new();
     for idx in new_items {
         if jobs.len() >= max_parallel {
             break;
         }
+        if let Some(cap) = clarifying_cap {
+            if clarifying_active >= cap {
+                tracing::debug!(
+                    module = "captain",
+                    state = "clarifying",
+                    current = clarifying_active,
+                    cap = cap,
+                    title = %items[idx].title,
+                    "per-state cap reached — deferring dispatch"
+                );
+                break;
+            }
+        }
         if dry_run {
             dry_actions.push(format!(
                 "would clarify '{}'",
                 truncate_utf8(&items[idx].title, 60)
             ));
+            // Reserve the cap slot so subsequent iterations in this dry
+            // run see the projected count and stop at the cap, matching
+            // what the live path does once the job is pushed.
+            clarifying_active += 1;
             continue;
         }
 
@@ -140,6 +166,7 @@ pub(crate) async fn clarify_new_items(
             .await,
             "dispatch_clarify: super::timeline_emit::emit_for_task( item, 'Clarification st"
         );
+        clarifying_active += 1;
         jobs.push(ClarifyJob { idx, session_id });
     }
 
@@ -298,5 +325,160 @@ fn emit_live_refresh(bus: Option<&EventBus>, affected_task_ids: &[i64]) {
                 affected_task_ids: Some(affected_task_ids.to_vec()),
             },
         )));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    async fn test_pool() -> sqlx::SqlitePool {
+        let db = global_db::Db::open_in_memory().await.unwrap();
+        db.pool().clone()
+    }
+
+    /// Per-state cap on `clarifying` defers a New item from entering
+    /// the clarifier path even when worker slots are available. Worker
+    /// dispatch is unaffected — covered by dispatch_phase_tests.
+    #[tokio::test]
+    async fn clarify_dry_run_defers_when_clarifying_cap_full() {
+        let pool = test_pool().await;
+        // Two New items + an item already Clarifying (occupying the cap).
+        let mut live = Task::new("Live clarifier");
+        live.id = 1;
+        live.status = ItemStatus::Clarifying;
+        live.session_ids.clarifier = Some("sess-c".into());
+
+        let mut new_a = Task::new("New A");
+        new_a.id = 2;
+        new_a.status = ItemStatus::New;
+        let mut new_b = Task::new("New B");
+        new_b.id = 3;
+        new_b.status = ItemStatus::New;
+
+        let config = Config::default();
+        let mut workflow = CaptainWorkflow::compiled_default();
+        workflow
+            .agent
+            .per_state_limits
+            .insert("clarifying".into(), 1);
+        let notifier = Notifier::new(std::sync::Arc::new(global_bus::EventBus::new()));
+        let mut items = vec![live, new_a, new_b];
+        let mut dry = Vec::new();
+        let mut alerts = Vec::new();
+
+        clarify_new_items(
+            &mut items,
+            &config,
+            0,
+            10,
+            &workflow,
+            &notifier,
+            true,
+            &mut dry,
+            &mut alerts,
+            &HashMap::new(),
+            3,
+            &pool,
+            None,
+            &tokio_util::task::TaskTracker::new(),
+        )
+        .await;
+
+        assert!(
+            dry.is_empty(),
+            "no clarifier dispatches should run while clarifying cap is full, got {:?}",
+            dry
+        );
+    }
+
+    /// Multi-item dry run honors the clarifying cap: with two New items
+    /// and a clarifying cap of 1 (no live clarifier), exactly one item
+    /// goes into the dry-action list. Without bumping
+    /// `clarifying_active` on the dry-run continue, both items would
+    /// erroneously be reported as "would clarify".
+    #[tokio::test]
+    async fn clarify_dry_run_caps_count_across_iterations() {
+        let pool = test_pool().await;
+
+        let mut a = Task::new("New A");
+        a.id = 1;
+        a.status = ItemStatus::New;
+        let mut b = Task::new("New B");
+        b.id = 2;
+        b.status = ItemStatus::New;
+
+        let config = Config::default();
+        let mut workflow = CaptainWorkflow::compiled_default();
+        workflow
+            .agent
+            .per_state_limits
+            .insert("clarifying".into(), 1);
+        let notifier = Notifier::new(std::sync::Arc::new(global_bus::EventBus::new()));
+        let mut items = vec![a, b];
+        let mut dry = Vec::new();
+        let mut alerts = Vec::new();
+
+        clarify_new_items(
+            &mut items,
+            &config,
+            0,
+            10,
+            &workflow,
+            &notifier,
+            true,
+            &mut dry,
+            &mut alerts,
+            &HashMap::new(),
+            3,
+            &pool,
+            None,
+            &tokio_util::task::TaskTracker::new(),
+        )
+        .await;
+
+        assert_eq!(dry.len(), 1, "dry run must respect cap=1, got {dry:?}");
+    }
+
+    #[tokio::test]
+    async fn clarify_dry_run_proceeds_when_under_cap() {
+        let pool = test_pool().await;
+        let mut new_a = Task::new("New A");
+        new_a.id = 1;
+        new_a.status = ItemStatus::New;
+        let mut new_b = Task::new("New B");
+        new_b.id = 2;
+        new_b.status = ItemStatus::New;
+
+        let config = Config::default();
+        let mut workflow = CaptainWorkflow::compiled_default();
+        workflow
+            .agent
+            .per_state_limits
+            .insert("clarifying".into(), 5);
+        let notifier = Notifier::new(std::sync::Arc::new(global_bus::EventBus::new()));
+        let mut items = vec![new_a, new_b];
+        let mut dry = Vec::new();
+        let mut alerts = Vec::new();
+
+        clarify_new_items(
+            &mut items,
+            &config,
+            0,
+            10,
+            &workflow,
+            &notifier,
+            true,
+            &mut dry,
+            &mut alerts,
+            &HashMap::new(),
+            3,
+            &pool,
+            None,
+            &tokio_util::task::TaskTracker::new(),
+        )
+        .await;
+
+        assert_eq!(dry.len(), 2, "both items should clarify under cap=5");
     }
 }

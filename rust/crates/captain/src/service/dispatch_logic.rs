@@ -21,19 +21,29 @@ pub enum DispatchDecision {
     NoSlot,
     /// Item blocked by resource limit.
     ResourceBlocked(String),
+    /// Item blocked by per-state concurrency cap (kebab-case wire name).
+    StateBlocked(String),
     /// Item not dispatchable (wrong status, etc.).
     NotReady,
 }
 
+/// Wire name for the `in-progress` state — the target state for any item
+/// dispatched by `check_dispatch`. Mirrors `ItemStatus::InProgress.as_str()`
+/// but lives here so the per-state cap lookup is local to the dispatcher.
+pub(crate) const IN_PROGRESS_WIRE: &str = "in-progress";
+
 /// Check if a ready item can be dispatched.
 ///
-/// Returns `Spawn` if a slot is available, `NoSlot` otherwise.
+/// Returns `Spawn` when a slot is available, otherwise the specific reason
+/// it was blocked (`NoSlot`, `ResourceBlocked`, or `StateBlocked`).
 pub(crate) fn check_dispatch(
     item: &Task,
     active_workers: usize,
     max_workers: usize,
     resource_limits: &HashMap<String, usize>,
     resource_counts: &HashMap<String, usize>,
+    per_state_limits: &HashMap<String, usize>,
+    state_counts: &HashMap<String, usize>,
 ) -> DispatchDecision {
     match item.status {
         ItemStatus::Queued | ItemStatus::Rework => {}
@@ -42,6 +52,17 @@ pub(crate) fn check_dispatch(
 
     if active_workers >= max_workers {
         return DispatchDecision::NoSlot;
+    }
+
+    // Per-state cap for `in-progress` (the state this item would enter on
+    // spawn). The global `max_concurrent` already bounds total in-progress
+    // workers; per-state lets operators set a tighter ceiling without
+    // touching the global cap.
+    if let Some(&limit) = per_state_limits.get(IN_PROGRESS_WIRE) {
+        let current = state_counts.get(IN_PROGRESS_WIRE).copied().unwrap_or(0);
+        if current >= limit {
+            return DispatchDecision::StateBlocked(IN_PROGRESS_WIRE.to_string());
+        }
     }
 
     // Check resource-specific limits.
@@ -65,6 +86,29 @@ pub(crate) fn count_resources(items: &[Task]) -> HashMap<String, usize> {
             let resource = item.resource.as_deref().unwrap_or(DEFAULT_RESOURCE);
             *counts.entry(resource.to_string()).or_insert(0) += 1;
         }
+    }
+    counts
+}
+
+/// Count items currently occupying each per-state cap, keyed by kebab-case
+/// wire name. The `InProgress` predicate matches the existing global
+/// counter at `tick.rs::run_captain_tick_inner` (`worker.is_some() &&
+/// !planning`); the other three states mirror the same shape on their
+/// own session id field. A candidate that already transitioned but
+/// hasn't spawned yet does not self-block because it has no session id.
+pub(crate) fn count_active_states(items: &[Task]) -> HashMap<String, usize> {
+    let mut counts = HashMap::new();
+    for item in items {
+        let wire = match item.status {
+            ItemStatus::InProgress if item.worker.is_some() && !item.planning => IN_PROGRESS_WIRE,
+            ItemStatus::Clarifying if item.session_ids.clarifier.is_some() => "clarifying",
+            ItemStatus::CaptainReviewing if item.session_ids.review.is_some() => {
+                "captain-reviewing"
+            }
+            ItemStatus::CaptainMerging if item.session_ids.merge.is_some() => "captain-merging",
+            _ => continue,
+        };
+        *counts.entry(wire.to_string()).or_insert(0) += 1;
     }
     counts
 }
@@ -133,17 +177,35 @@ mod tests {
         item
     }
 
+    fn check(
+        item: &Task,
+        active: usize,
+        max: usize,
+        res_limits: &HashMap<String, usize>,
+        res_counts: &HashMap<String, usize>,
+    ) -> DispatchDecision {
+        check_dispatch(
+            item,
+            active,
+            max,
+            res_limits,
+            res_counts,
+            &HashMap::new(),
+            &HashMap::new(),
+        )
+    }
+
     #[test]
     fn spawn_when_slot_available() {
         let item = make_ready_item(None);
-        let result = check_dispatch(&item, 0, 10, &HashMap::new(), &HashMap::new());
+        let result = check(&item, 0, 10, &HashMap::new(), &HashMap::new());
         assert_eq!(result, DispatchDecision::Spawn);
     }
 
     #[test]
     fn no_slot_when_full() {
         let item = make_ready_item(None);
-        let result = check_dispatch(&item, 10, 10, &HashMap::new(), &HashMap::new());
+        let result = check(&item, 10, 10, &HashMap::new(), &HashMap::new());
         assert_eq!(result, DispatchDecision::NoSlot);
     }
 
@@ -154,7 +216,7 @@ mod tests {
         limits.insert("emulator".to_string(), 1);
         let mut counts = HashMap::new();
         counts.insert("emulator".to_string(), 1);
-        let result = check_dispatch(&item, 0, 10, &limits, &counts);
+        let result = check(&item, 0, 10, &limits, &counts);
         assert_eq!(result, DispatchDecision::ResourceBlocked("emulator".into()));
     }
 
@@ -162,7 +224,7 @@ mod tests {
     fn not_ready_status() {
         let mut item = Task::new("In progress");
         item.status = ItemStatus::InProgress;
-        let result = check_dispatch(&item, 0, 10, &HashMap::new(), &HashMap::new());
+        let result = check(&item, 0, 10, &HashMap::new(), &HashMap::new());
         assert_eq!(result, DispatchDecision::NotReady);
     }
 
@@ -170,7 +232,7 @@ mod tests {
     fn rework_dispatches() {
         let mut item = Task::new("Rework task");
         item.status = ItemStatus::Rework;
-        let result = check_dispatch(&item, 0, 10, &HashMap::new(), &HashMap::new());
+        let result = check(&item, 0, 10, &HashMap::new(), &HashMap::new());
         assert_eq!(result, DispatchDecision::Spawn);
     }
 
@@ -215,5 +277,134 @@ mod tests {
 
         let result = new_items(&[a, b, c]);
         assert_eq!(result, vec![0, 2]);
+    }
+
+    fn live(status: ItemStatus) -> Task {
+        let mut t = Task::new("live");
+        t.status = status;
+        match status {
+            ItemStatus::InProgress => {
+                t.worker = Some("w-1".into());
+                t.session_ids.worker = Some("sess-w".into());
+            }
+            ItemStatus::Clarifying => t.session_ids.clarifier = Some("sess-c".into()),
+            ItemStatus::CaptainReviewing => t.session_ids.review = Some("sess-r".into()),
+            ItemStatus::CaptainMerging => t.session_ids.merge = Some("sess-m".into()),
+            _ => {}
+        }
+        t
+    }
+
+    #[test]
+    fn count_active_states_buckets_by_wire_name() {
+        let items = [
+            live(ItemStatus::InProgress),
+            live(ItemStatus::InProgress),
+            live(ItemStatus::Clarifying),
+            live(ItemStatus::CaptainReviewing),
+            live(ItemStatus::CaptainMerging),
+        ];
+        let counts = count_active_states(&items);
+        assert_eq!(counts.get("in-progress"), Some(&2));
+        assert_eq!(counts.get("clarifying"), Some(&1));
+        assert_eq!(counts.get("captain-reviewing"), Some(&1));
+        assert_eq!(counts.get("captain-merging"), Some(&1));
+    }
+
+    #[test]
+    fn count_active_states_excludes_planning_and_sessionless() {
+        // InProgress with no session id (e.g. transitioning) shouldn't count.
+        let mut a = Task::new("a");
+        a.status = ItemStatus::InProgress;
+        // worker + session_ids.worker missing
+        // InProgress + planning excluded.
+        let mut b = Task::new("b");
+        b.status = ItemStatus::InProgress;
+        b.worker = Some("w".into());
+        b.session_ids.worker = Some("sess".into());
+        b.planning = true;
+        // Captain reviewing without a session id (transitional).
+        let mut c = Task::new("c");
+        c.status = ItemStatus::CaptainReviewing;
+
+        let counts = count_active_states(&[a, b, c]);
+        assert!(counts.is_empty(), "got {:?}", counts);
+    }
+
+    #[test]
+    fn state_blocked_when_in_progress_cap_full() {
+        let item = make_ready_item(None);
+        let mut state_limits = HashMap::new();
+        state_limits.insert("in-progress".to_string(), 2);
+        let mut state_counts = HashMap::new();
+        state_counts.insert("in-progress".to_string(), 2);
+        let decision = check_dispatch(
+            &item,
+            0,
+            10,
+            &HashMap::new(),
+            &HashMap::new(),
+            &state_limits,
+            &state_counts,
+        );
+        assert_eq!(
+            decision,
+            DispatchDecision::StateBlocked("in-progress".into())
+        );
+    }
+
+    #[test]
+    fn state_cap_under_limit_allows_spawn() {
+        let item = make_ready_item(None);
+        let mut state_limits = HashMap::new();
+        state_limits.insert("in-progress".to_string(), 5);
+        let mut state_counts = HashMap::new();
+        state_counts.insert("in-progress".to_string(), 2);
+        let decision = check_dispatch(
+            &item,
+            2,
+            10,
+            &HashMap::new(),
+            &HashMap::new(),
+            &state_limits,
+            &state_counts,
+        );
+        assert_eq!(decision, DispatchDecision::Spawn);
+    }
+
+    #[test]
+    fn global_cap_dominates_when_more_restrictive() {
+        // Global cap is 1, per-state cap is 5. Global wins.
+        let item = make_ready_item(None);
+        let mut state_limits = HashMap::new();
+        state_limits.insert("in-progress".to_string(), 5);
+        let state_counts = HashMap::new();
+        let decision = check_dispatch(
+            &item,
+            1,
+            1,
+            &HashMap::new(),
+            &HashMap::new(),
+            &state_limits,
+            &state_counts,
+        );
+        assert_eq!(decision, DispatchDecision::NoSlot);
+    }
+
+    #[test]
+    fn empty_per_state_limits_matches_legacy_behaviour() {
+        // Regression guard: empty map = no per-state gating, same outcome
+        // as before this field existed.
+        let item = make_ready_item(None);
+        let decision = check_dispatch(
+            &item,
+            0,
+            10,
+            &HashMap::new(),
+            &HashMap::new(),
+            &HashMap::new(),
+            &HashMap::new(),
+        );
+        assert_eq!(decision, DispatchDecision::Spawn);
     }
 }

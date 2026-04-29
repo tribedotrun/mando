@@ -19,6 +19,8 @@ const ALLOWED = [
   /\/renderer\/global\/providers\/httpRoutes\.ts$/,
   /\/main\/global\/runtime\/lifecycle\.ts$/,
   /\/main\/global\/runtime\/launchd\.ts$/,
+  /\/main\/global\/runtime\/launchdInstall\.ts$/,
+  /\/main\/global\/runtime\/launchdServices\.ts$/,
   /\/main\/global\/runtime\/portCheck\.ts$/,
   /\/main\/global\/runtime\/uiLifecycle\.ts$/,
   /\/main\/global\/runtime\/devGitInfo\.ts$/,
