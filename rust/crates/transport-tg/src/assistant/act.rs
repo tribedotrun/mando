@@ -10,7 +10,7 @@ use crate::gateway_paths as paths;
 
 /// Act button — show project picker or act directly if single project.
 pub(super) async fn cb_act(
-    bot: &mut TelegramBot,
+    bot: &TelegramBot,
     cb_id: &str,
     chat_id: &str,
     id: i64,
@@ -50,24 +50,28 @@ pub(super) async fn cb_act(
 
 /// Act with a selected project — open prompt session for optional user context.
 pub(super) async fn cb_act_with_project(
-    bot: &mut TelegramBot,
+    bot: &TelegramBot,
     cb_id: &str,
     chat_id: &str,
     id: i64,
     project: &str,
 ) -> Result<()> {
     bot.api.answer_callback_query(cb_id, None).await?;
-    bot.open_act_session(chat_id, id, project);
 
+    // Send the prompt first so we can capture its message_id, then register
+    // the act session against that prompt for reply-disambiguation.
     let msg = format!(
         "\u{2699}\u{fe0f} Acting on <b>#{id}</b> in <b>{}</b>\n\n\
          Type additional context, or tap <b>Skip</b> to proceed without.",
         crate::telegram_format::escape_html(project),
     );
     let kb = act_prompt_kb(id);
-    bot.api
+    let sent = bot
+        .api
         .send_message(chat_id, &msg, Some("HTML"), Some(kb), true)
         .await?;
+    let prompt_mid = sent.get("message_id").and_then(|v| v.as_i64()).unwrap_or(0);
+    bot.open_act_session(chat_id, id, project, prompt_mid).await;
     Ok(())
 }
 

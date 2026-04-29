@@ -42,6 +42,7 @@ pub(crate) async fn post_task_advisor_action(
         workflow,
         task_id,
         cwd,
+        ask_id,
         intent,
         message,
     )
@@ -78,6 +79,7 @@ async fn handle_advisor_action(
     workflow: &settings::CaptainWorkflow,
     task_id: i64,
     cwd: &std::path::Path,
+    ask_id: &str,
     intent: &str,
     message: &str,
 ) -> Result<Json<api_types::AdvisorResponse>, ApiError> {
@@ -97,6 +99,7 @@ async fn handle_advisor_action(
         workflow,
         task_id,
         cwd,
+        ask_id,
         intent,
         message,
     )
@@ -255,6 +258,7 @@ async fn run_advisor_action_cc(
     workflow: &settings::CaptainWorkflow,
     task_id: i64,
     cwd: &std::path::Path,
+    ask_id: &str,
     intent: &str,
     message: &str,
 ) -> Result<String, ApiError> {
@@ -309,6 +313,14 @@ async fn run_advisor_action_cc(
         {
             tracing::warn!(module = "transport-http-transport-routes_task_advisor_action", task_id, error = %e, "failed to persist session_ids.advisor");
         }
+    }
+
+    if let Err(e) = state
+        .captain
+        .backfill_ask_pending_session_id(task_id, ask_id, &result.session_id)
+        .await
+    {
+        tracing::warn!(module = "transport-http-transport-routes_task_advisor_action", task_id, error = %e, "failed to backfill advisor action pending session id");
     }
 
     Ok(result.text)

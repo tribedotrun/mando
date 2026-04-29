@@ -2,9 +2,37 @@
 
 use crate::bot::TelegramBot;
 use crate::gateway_paths as paths;
-use crate::telegram_format::escape_html;
+use crate::telegram_format::{escape_html, render_markdown_reply_html};
 use anyhow::Result;
 use tracing::warn;
+
+/// Visible-text budget for an LLM-authored timeline event summary line.
+const EVENT_SUMMARY_VISIBLE_BUDGET: usize = 80;
+
+/// Visible-text budget for an LLM-authored Q&A history entry line.
+const QA_ENTRY_VISIBLE_BUDGET: usize = 120;
+
+/// Build a single timeline event line: ts code-span, icon, escaped event
+/// kind, then the renderer-formatted summary (LLM markdown).
+fn format_event_line(short_ts: &str, kind: &str, icon: &str, summary_markdown: &str) -> String {
+    format!(
+        "<code>{}</code> {} <b>{}</b> {}",
+        escape_html(short_ts),
+        icon,
+        escape_html(kind),
+        render_markdown_reply_html(summary_markdown, EVENT_SUMMARY_VISIBLE_BUDGET),
+    )
+}
+
+/// Build a single Q&A history line: role icon plus renderer-formatted
+/// entry content (LLM-authored answer markdown).
+fn format_qa_history_line(icon: &str, content_markdown: &str) -> String {
+    format!(
+        "{} {}",
+        icon,
+        render_markdown_reply_html(content_markdown, QA_ENTRY_VISIBLE_BUDGET),
+    )
+}
 
 /// Map timeline event kind to an emoji icon.
 fn timeline_icon(kind: &str) -> &'static str {
@@ -38,18 +66,25 @@ fn timeline_icon(kind: &str) -> &'static str {
 ///
 /// If no args, sets pending state so the next plain-text message is treated
 /// as the timeline args. Otherwise runs `execute` directly.
-pub async fn handle(bot: &mut TelegramBot, chat_id: &str, args: &str) -> Result<()> {
+pub async fn handle(bot: &TelegramBot, chat_id: &str, args: &str) -> Result<()> {
     if args.trim().is_empty() {
-        bot.set_pending_timeline(chat_id);
-        bot.send_html(
-            chat_id,
-            "Send the task ID below (optionally followed by <code>chat</code> for Q&amp;A only).\nAny other command cancels.",
-        )
-        .await?;
+        // Send the prompt first so we can capture its message_id; the
+        // pending entry stores that id so a quote-reply routes back here.
+        let prompt = bot
+            .send_html(
+                chat_id,
+                "Send the task ID below (optionally followed by <code>chat</code> for Q&amp;A only).\nReply to this prompt to disambiguate.",
+            )
+            .await?;
+        let prompt_mid = prompt
+            .get("message_id")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0);
+        bot.set_pending_timeline(chat_id, prompt_mid).await;
         return Ok(());
     }
 
-    bot.clear_pending_timeline(chat_id);
+    bot.take_pending_timeline(chat_id).await;
     execute(bot, chat_id, args).await
 }
 
@@ -108,13 +143,7 @@ pub async fn execute(bot: &TelegramBot, chat_id: &str, args: &str) -> Result<()>
                     let detail = event.summary.as_str();
                     let short_ts = super::truncate(ts, 16);
                     let icon = timeline_icon(kind);
-                    lines.push(format!(
-                        "<code>{}</code> {} <b>{}</b> {}",
-                        escape_html(short_ts),
-                        icon,
-                        escape_html(kind),
-                        escape_html(super::truncate(detail, 80)),
-                    ));
+                    lines.push(format_event_line(short_ts, kind, icon, detail));
                 }
 
                 if events.len() > 20 {
@@ -135,8 +164,7 @@ pub async fn execute(bot: &TelegramBot, chat_id: &str, args: &str) -> Result<()>
                             } else {
                                 "\u{1f916}"
                             };
-                            let truncated = super::truncate(&entry.content, 120);
-                            lines.push(format!("{} {}", icon, escape_html(truncated)));
+                            lines.push(format_qa_history_line(icon, &entry.content));
                         }
                         if hist_resp.history.len() > 5 {
                             lines
@@ -181,4 +209,46 @@ pub async fn execute(bot: &TelegramBot, chat_id: &str, args: &str) -> Result<()>
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn event_line_renders_inline_code_in_summary() {
+        let line = format_event_line(
+            "2026-04-29T00:00",
+            "worker_completed",
+            "\u{2705}",
+            "Done — `cargo test` passed",
+        );
+
+        assert!(line.contains("<code>cargo test</code>"), "line: {line}");
+        assert!(!line.contains("`cargo test`"), "literal backticks: {line}");
+        assert!(line.contains("<b>worker_completed</b>"));
+    }
+
+    #[test]
+    fn event_line_renders_bold_in_summary() {
+        let line = format_event_line("ts", "kind", "icon", "made it **really** fast");
+        assert!(line.contains("<b>really</b>"));
+        assert!(!line.contains("**"));
+    }
+
+    #[test]
+    fn qa_history_line_renders_markdown_answer() {
+        let line = format_qa_history_line("\u{1f916}", "## Summary\n- step one\n- step `two`");
+
+        assert!(line.contains("Summary"));
+        assert!(!line.contains("##"));
+        assert!(line.contains("\u{2022} step one"));
+        assert!(line.contains("<code>two</code>"));
+    }
+
+    #[test]
+    fn qa_history_line_starts_with_role_icon() {
+        let line = format_qa_history_line("\u{1f464}", "human question");
+        assert!(line.starts_with("\u{1f464} "));
+    }
 }

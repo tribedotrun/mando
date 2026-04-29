@@ -8,23 +8,22 @@ import { ErrorBoundary } from '#renderer/global/ui/ErrorBoundary';
 export function WorkbenchPage(): React.ReactElement {
   const page = useWorkbenchPage();
 
-  // New workbench creation flow
+  // New workbench creation flow. The URL (`workbenchId === 'new'`) is the
+  // single source of truth: useWorkbenchPage's render-body re-entry block
+  // re-fires `openNewTerminal` on every workbenchId/project transition, so
+  // there is no longer a "preparing flag is false but URL is /wb/new" gap
+  // that previously fell through to a silent dead text. On failure
+  // useWorkbenchPage navigates back to '/' rather than leaving the user
+  // stuck here.
   if (page.ids.isNewWorkbench) {
-    if (page.terminal.page?.preparing) {
-      return (
-        <div className="h-full px-3 pt-2">
-          <ErrorBoundary fallbackLabel="Workspace preparing">
-            <WorkspacePreparing
-              project={page.search.project ?? ''}
-              onCancel={page.actions.handleCancelNew}
-            />
-          </ErrorBoundary>
-        </div>
-      );
-    }
     return (
-      <div className="flex h-full items-center justify-center text-muted-foreground">
-        Preparing workspace...
+      <div className="h-full px-3 pt-2">
+        <ErrorBoundary fallbackLabel="Workspace preparing">
+          <WorkspacePreparing
+            project={page.search.project ?? ''}
+            onCancel={page.actions.handleCancelNew}
+          />
+        </ErrorBoundary>
       </div>
     );
   }

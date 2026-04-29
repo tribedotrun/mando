@@ -7,6 +7,29 @@ use settings::Config;
 
 use crate::runtime::notify::Notifier;
 
+/// Visible-text budget for the LLM-authored verdict feedback body. 1500
+/// keeps headroom under TG's 4096-char message cap once the title and
+/// structural prefix are added.
+const REOPEN_BODY_VISIBLE_BUDGET: usize = 1500;
+
+/// Build the review-reopen notification message: a structural HTML prefix
+/// with an escaped title plus a renderer-formatted markdown verdict body.
+fn format_reopen_notification(
+    reopen_source: &str,
+    seq: i64,
+    title: &str,
+    message_markdown: &str,
+) -> String {
+    let body = global_infra::tg_markdown::render_markdown_reply_html(
+        message_markdown,
+        REOPEN_BODY_VISIBLE_BUDGET,
+    );
+    format!(
+        "\u{1f504} {reopen_source}-reopened (seq={seq}): <b>{}</b>\n{body}",
+        global_infra::html::escape_html(title),
+    )
+}
+
 /// Check pending-review items for unaddressed review comments and CI failures.
 ///
 /// For each pending-review item with a PR and a worker (i.e. can be reopened):
@@ -187,13 +210,7 @@ pub(crate) async fn check_done_review_threads(
                 let it = &mut items[idx];
                 let seq = it.reopen_seq;
 
-                let msg = format!(
-                    "\u{1f504} {}-reopened (seq={}): <b>{}</b>\n{}",
-                    reopen_source,
-                    seq,
-                    global_infra::html::escape_html(&it.title),
-                    global_infra::html::escape_html(&message),
-                );
+                let msg = format_reopen_notification(&reopen_source, seq, &it.title, &message);
                 notifier.high(&msg).await;
             }
             Ok(super::action_contract::ReopenOutcome::CaptainReviewing) => {}
@@ -410,5 +427,26 @@ mod tests {
         assert_eq!(source, "review");
         assert!(msg.contains("stale"));
         assert!(msg.contains("1 unresolved threads"));
+    }
+
+    #[test]
+    fn reopen_notification_renders_verdict_markdown_and_escapes_title() {
+        let msg = super::format_reopen_notification(
+            "review",
+            3,
+            "fix <auth> & log",
+            "## Verdict\n- bullet `code`",
+        );
+
+        // Title is escape_html'd.
+        assert!(
+            msg.contains("<b>fix &lt;auth&gt; &amp; log</b>"),
+            "msg: {msg}"
+        );
+        // Markdown rendered: heading stripped, bullet converted, inline code wrapped.
+        assert!(!msg.contains("##"), "literal `##` survived: {msg}");
+        assert!(msg.contains("\u{2022} bullet"));
+        assert!(msg.contains("<code>code</code>"));
+        assert!(msg.starts_with("\u{1f504} review-reopened (seq=3):"));
     }
 }

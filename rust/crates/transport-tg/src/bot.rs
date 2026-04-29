@@ -1,140 +1,96 @@
-//! Polling loop and command dispatch.
+//! Telegram bot core — session state container and per-message dispatch.
 //!
-//! `TelegramBot` wraps the raw API, holds session state, and dispatches
-//! incoming updates to the correct command/callback handler.
+//! The polling loop and spawn-per-update machinery live in
+//! [`crate::bot_runtime`]; type definitions live in [`crate::bot_types`].
+//!
+//! `TelegramBot` is held behind `Arc` so each incoming update can be
+//! dispatched on its own task without blocking the polling loop. All
+//! pending-session state moves through `tokio::sync::Mutex`-guarded maps so
+//! handlers take `&TelegramBot` rather than `&mut TelegramBot`.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Duration;
-use tokio::sync::RwLock;
 
 use anyhow::Result;
 use serde_json::Value;
-use tracing::{error, info, warn};
+use tokio::sync::{Mutex, RwLock};
+use tracing::{error, info};
 
 use settings::Config;
 
-use crate::gateway_paths as paths;
-use crate::http::GatewayClient;
-
 use crate::api::TelegramApi;
-use crate::bot_helpers::{
-    extract_chat_id, extract_photo_todo, extract_user_id, parse_command, to_picker_state,
-};
+use crate::bot_helpers::{extract_chat_id, extract_photo_todo, extract_user_id, parse_command};
 use crate::callbacks;
 use crate::commands;
+use crate::gateway_paths as paths;
+use crate::http::GatewayClient;
 use crate::permissions;
 use crate::PendingMessages;
 
-// ── Session state types ──────────────────────────────────────────────
-
-/// Lightweight session tracker for /ask.
-#[derive(Debug)]
-pub struct Session {
-    pub task_id: i64,
-    pub rounds: u32,
-}
-
-impl Session {
-    pub fn new(task_id: i64) -> Self {
-        Self { task_id, rounds: 0 }
-    }
-}
-
-/// Active Q&A session for a chat (scout items).
-#[derive(Debug)]
-pub struct QaSession {
-    pub item_id: i64,
-    pub rounds: u32,
-    /// CC session ID from first Q&A response — used to resume on follow-ups.
-    pub cc_session_id: Option<String>,
-}
-
-/// Pending Act session — waiting for optional user prompt (scout items).
-#[derive(Debug)]
-pub struct ActSession {
-    pub item_id: i64,
-    pub project: String,
-}
-
-/// Picker state stored while an inline keyboard is active.
-#[derive(Debug)]
-pub struct PickerState {
-    pub chat_id: String,
-    pub items: Vec<PickerItem>,
-    /// Indices of selected items (for multi-select pickers).
-    pub selected: std::collections::HashSet<usize>,
-}
-
-/// One item in a picker.
-#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
-pub struct PickerItem {
-    pub id: String,
-    pub title: String,
-    /// Item status string (e.g. "needs-clarification").
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub status: Option<String>,
-    /// Whether this task has a PR attached.
-    pub has_pr: bool,
-}
-
-/// One parsed todo item with optional project assignment.
-#[derive(Debug, Clone)]
-pub struct TodoItem {
-    pub title: String,
-    /// Project slug resolved via prefix match or single-project auto-select.
-    pub project: Option<String>,
-    /// Telegram photo file_id (highest-res) — only set on first item.
-    pub photo_file_id: Option<String>,
-}
-
-/// Pending /todo confirmation state.
-#[derive(Debug)]
-pub struct TodoConfirmState {
-    pub chat_id: String,
-    pub items: Vec<TodoItem>,
-    /// Ordered project slugs for the picker (indices used in callback_data).
-    pub picker_slugs: Vec<String>,
-}
+pub(crate) use crate::bot_types::SessionKind;
+pub use crate::bot_types::{
+    ActSession, InputSession, PendingAction, PickerItem, PickerState, PromptMeta, QaSession,
+    Session, TodoConfirmState, TodoItem,
+};
 
 // ── Macro for repetitive picker store/take ───────────────────────────
 
+/// Defines `pub async fn $store(...)` and `pub async fn $take(...)` for a
+/// picker-state map. The stored entry is keyed by `action_id` (callback-data
+/// payload), not chat_id, so it does not participate in reply-disambiguation.
 macro_rules! picker_methods {
     ($store:ident, $take:ident, $field:ident) => {
-        pub fn $store(&mut self, action_id: &str, chat_id: &str, items: &[&captain::Task]) {
-            self.$field
-                .insert(action_id.to_string(), to_picker_state(chat_id, items));
-            self.save_picker_state();
+        pub async fn $store(&self, action_id: &str, chat_id: &str, items: &[&captain::Task]) {
+            let mut map = self.$field.lock().await;
+            map.insert(
+                action_id.to_string(),
+                crate::bot_helpers::to_picker_state(chat_id, items),
+            );
+            self.save_picker_state_locked(&map);
         }
 
-        pub fn $take(&mut self, action_id: &str) -> Option<PickerState> {
-            let result = self.$field.remove(action_id);
+        pub async fn $take(&self, action_id: &str) -> Option<PickerState> {
+            let mut map = self.$field.lock().await;
+            let result = map.remove(action_id);
             if result.is_some() {
-                self.save_picker_state();
+                self.save_picker_state_locked(&map);
             }
             result
         }
     };
 }
 
-/// The Telegram bot — polling loop, command dispatch, session state.
+/// The Telegram bot — owns session state and the raw API clients.
+///
+/// Held behind `Arc` so each incoming update can run on its own tokio task
+/// without blocking the polling loop. Eight chat_id-keyed pending-session
+/// maps and two callback-id-keyed picker maps are wrapped in `tokio::Mutex`
+/// for shared interior mutability.
 pub struct TelegramBot {
     pub(crate) api: TelegramApi,
     config: Arc<RwLock<Config>>,
     pub(crate) gw: GatewayClient,
-    pub(crate) pending_todo: HashSet<String>,
-    pub(crate) pending_timeline: HashSet<String>,
-    pub(crate) pending_scout_add: HashSet<String>,
-    pub(crate) pending_scout_research: HashSet<String>,
-    pub(crate) ask_sessions: HashMap<String, Session>,
-    pub(crate) input_sessions: HashMap<String, String>,
-    pub(crate) pending_reopen: HashMap<String, (String, String)>,
-    pub(crate) pending_rework: HashMap<String, (String, String)>,
-    pub(crate) pending_nudge: HashMap<String, (String, String)>,
-    pub(crate) qa_sessions: HashMap<String, QaSession>,
-    pub(crate) act_sessions: HashMap<String, ActSession>,
-    todo_confirm: HashMap<String, TodoConfirmState>,
-    action_pickers: HashMap<String, PickerState>,
+
+    // Chat_id-keyed pending-session maps. Every entry carries a
+    // `PromptMeta` so plain-text replies can be routed by reply target
+    // (`reply_to_message.message_id`) or by most-recent-wins fallback.
+    pub(crate) pending_todo: Mutex<HashMap<String, PromptMeta>>,
+    pub(crate) pending_timeline: Mutex<HashMap<String, PromptMeta>>,
+    pub(crate) pending_scout_add: Mutex<HashMap<String, PromptMeta>>,
+    pub(crate) pending_scout_research: Mutex<HashMap<String, PromptMeta>>,
+    pub(crate) ask_sessions: Mutex<HashMap<String, Session>>,
+    pub(crate) input_sessions: Mutex<HashMap<String, InputSession>>,
+    pub(crate) pending_reopen: Mutex<HashMap<String, PendingAction>>,
+    pub(crate) pending_rework: Mutex<HashMap<String, PendingAction>>,
+    pub(crate) pending_nudge: Mutex<HashMap<String, PendingAction>>,
+    pub(crate) qa_sessions: Mutex<HashMap<String, QaSession>>,
+    pub(crate) act_sessions: Mutex<HashMap<String, ActSession>>,
+
+    // Callback-id-keyed pickers; not chat_id-scoped, so out of scope for
+    // reply-disambiguation.
+    todo_confirm: Mutex<HashMap<String, TodoConfirmState>>,
+    action_pickers: Mutex<HashMap<String, PickerState>>,
+
     /// Shared with `NotificationHandler` — scout "processing..." message IDs
     /// so SSE notifications can edit them in-place with the full card.
     pub(crate) pending_scout_msgs: PendingMessages,
@@ -162,61 +118,24 @@ impl TelegramBot {
             api,
             config,
             gw,
-            pending_todo: HashSet::new(),
-            pending_timeline: HashSet::new(),
-            pending_scout_add: HashSet::new(),
-            pending_scout_research: HashSet::new(),
-            ask_sessions: HashMap::new(),
-            input_sessions: HashMap::new(),
-            pending_reopen: HashMap::new(),
-            pending_rework: HashMap::new(),
-            pending_nudge: HashMap::new(),
-            qa_sessions: HashMap::new(),
-            act_sessions: HashMap::new(),
-            todo_confirm: HashMap::new(),
-            action_pickers: HashMap::new(),
+            pending_todo: Mutex::new(HashMap::new()),
+            pending_timeline: Mutex::new(HashMap::new()),
+            pending_scout_add: Mutex::new(HashMap::new()),
+            pending_scout_research: Mutex::new(HashMap::new()),
+            ask_sessions: Mutex::new(HashMap::new()),
+            input_sessions: Mutex::new(HashMap::new()),
+            pending_reopen: Mutex::new(HashMap::new()),
+            pending_rework: Mutex::new(HashMap::new()),
+            pending_nudge: Mutex::new(HashMap::new()),
+            qa_sessions: Mutex::new(HashMap::new()),
+            act_sessions: Mutex::new(HashMap::new()),
+            todo_confirm: Mutex::new(HashMap::new()),
+            action_pickers: Mutex::new(HashMap::new()),
             pending_scout_msgs,
         })
     }
 
-    /// Main polling loop.
-    pub async fn start(&mut self) -> Result<()> {
-        // Wait for the gateway to be reachable before processing commands.
-        info!("Waiting for gateway at {}", self.gw.base_url());
-        self.gw.wait_for_gateway(Duration::from_secs(30)).await?;
-        info!("Gateway reachable");
-
-        let me = self.api.get_me().await?;
-        let username = me
-            .get("username")
-            .and_then(|v| v.as_str())
-            .unwrap_or("unknown");
-        info!("Telegram bot @{username} connected");
-        self.load_picker_state();
-        self.register_commands().await;
-
-        let mut offset: i64 = 0;
-        loop {
-            let updates = match self.api.get_updates(offset, 30).await {
-                Ok(u) => u,
-                Err(e) => {
-                    warn!("getUpdates failed: {e}");
-                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-                    continue;
-                }
-            };
-            for update in updates {
-                if let Some(uid) = update.get("update_id").and_then(|v| v.as_i64()) {
-                    offset = uid + 1;
-                }
-                if let Err(e) = self.handle_update(update).await {
-                    error!("Error handling update: {e}");
-                }
-            }
-        }
-    }
-
-    async fn handle_update(&mut self, update: Value) -> Result<()> {
+    pub(crate) async fn handle_update(self: &Arc<Self>, update: Value) -> Result<()> {
         if let Some(cb) = update.get("callback_query") {
             return callbacks::handle_callback(self, cb).await;
         }
@@ -226,7 +145,7 @@ impl TelegramBot {
         Ok(())
     }
 
-    async fn handle_message(&mut self, message: &Value) -> Result<()> {
+    async fn handle_message(self: &Arc<Self>, message: &Value) -> Result<()> {
         let chat_id = extract_chat_id(message);
         let user_id = extract_user_id(message);
 
@@ -261,7 +180,7 @@ impl TelegramBot {
                 .unwrap_or("");
             let (command, args) = parse_command(caption);
             if command == "todo" && !args.is_empty() {
-                self.pending_todo.remove(&chat_id);
+                self.take_pending_todo(&chat_id).await;
                 commands::todo::execute_todo_with_photo(self, &chat_id, args, Some(photo_fid)).await
             } else {
                 self.dispatch_text(message, &chat_id).await
@@ -306,19 +225,26 @@ impl TelegramBot {
     }
 
     /// Dispatch a text message to the appropriate command handler.
-    async fn dispatch_text(&mut self, message: &serde_json::Value, chat_id: &str) -> Result<()> {
+    ///
+    /// A `/command` no longer wipes unrelated pending sessions; only
+    /// re-issuing `/todo` resets a prior `/todo` pending. The previous
+    /// blanket wipe was the concurrency bug: a slow `/scout_research` plus a
+    /// quick `/help` would silently kill the research's pending follow-up.
+    async fn dispatch_text(self: &Arc<Self>, message: &Value, chat_id: &str) -> Result<()> {
         let text = message.get("text").and_then(|t| t.as_str()).unwrap_or("");
 
         if text.starts_with('/') {
             let (command, args) = parse_command(text);
-            self.clear_stale_pendings(chat_id, &command);
+            // Re-issuing the same text-command resets its own pending entry
+            // so the user can restart a flow. Unrelated pendings (especially
+            // callback-opened reopen/rework/nudge/ask/input/qa/act) survive,
+            // which is the concurrency-correct behavior.
+            self.reset_same_command_pending(chat_id, &command).await;
             return self.dispatch_command(chat_id, &command, args).await;
         }
 
         self.handle_plain_text(chat_id, text, message).await
     }
-
-    // dispatch_command, handle_plain_text, register_commands are in bot_dispatch.rs
 
     // ── Owner auto-registration ────────────────────────────────────────
 
@@ -328,7 +254,7 @@ impl TelegramBot {
     /// sends any message in a direct chat. Persists the owner to config.json.
     /// The caller is responsible for restarting the process after the current
     /// command finishes so the SSE notification listener picks up the new owner.
-    async fn auto_register_owner(&mut self, user_id: &str, chat_id: &str) -> Result<()> {
+    async fn auto_register_owner(&self, user_id: &str, chat_id: &str) -> Result<()> {
         info!(user_id, chat_id, "Auto-registering bot owner");
         let save_result = self
             .gw
@@ -450,14 +376,15 @@ impl TelegramBot {
 
     // ── Todo confirm ─────────────────────────────────────────────────
 
-    pub fn store_todo_confirm(
-        &mut self,
+    pub async fn store_todo_confirm(
+        &self,
         aid: &str,
         cid: &str,
         items: Vec<TodoItem>,
         picker_slugs: Vec<String>,
     ) {
-        self.todo_confirm.insert(
+        let mut map = self.todo_confirm.lock().await;
+        map.insert(
             aid.to_string(),
             TodoConfirmState {
                 chat_id: cid.to_string(),
@@ -466,25 +393,28 @@ impl TelegramBot {
             },
         );
     }
-    pub fn take_todo_confirm(&mut self, aid: &str) -> Option<TodoConfirmState> {
-        self.todo_confirm.remove(aid)
+    pub async fn take_todo_confirm(&self, aid: &str) -> Option<TodoConfirmState> {
+        let mut map = self.todo_confirm.lock().await;
+        map.remove(aid)
     }
 
     // Picker state — persisted to ~/.mando/state/picker-state.json (#359).
     picker_methods!(store_action_picker, take_action_picker, action_pickers);
 
-    /// Persist all picker state to disk.
-    pub fn save_picker_state(&self) {
-        let json = crate::picker_store::collect_json(&self.action_pickers);
+    /// Persist all picker state to disk while the lock is already held.
+    pub(crate) fn save_picker_state_locked(&self, map: &HashMap<String, PickerState>) {
+        let json = crate::picker_store::collect_json(map);
         crate::picker_store::save(&json);
     }
 
-    /// Load picker state from disk on startup.
-    pub fn load_picker_state(&mut self) {
+    /// Load picker state from disk on startup (called once before polling).
+    pub async fn load_picker_state(&self) {
         if let Some(maps) = crate::picker_store::load() {
-            self.action_pickers = maps.action;
+            let mut current = self.action_pickers.lock().await;
+            *current = maps.action;
         }
     }
 
-    // Input/ops/ask session methods are in bot_sessions.rs
+    // Session helpers (input/ask/qa/act/pending_*) live in `bot_sessions.rs`.
+    // Disambiguation lookup helpers live in `bot_sessions.rs` as well.
 }

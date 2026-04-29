@@ -259,6 +259,26 @@ impl CaptainRuntime {
         .await
     }
 
+    /// Replace the `'pending'` placeholder on every row in the
+    /// `(task_id, ask_id)` group with the real CC session id. Called from
+    /// the success path of the ask / advisor HTTP routes once the CC call
+    /// returns and the question + assistant rows can be tied together.
+    #[tracing::instrument(skip_all)]
+    pub async fn backfill_ask_pending_session_id(
+        &self,
+        task_id: i64,
+        ask_id: &str,
+        real_session_id: &str,
+    ) -> anyhow::Result<()> {
+        crate::runtime::task_ask::backfill_pending_session_id(
+            &self.pool,
+            task_id,
+            ask_id,
+            real_session_id,
+        )
+        .await
+    }
+
     pub fn append_task_note(
         &self,
         existing: Option<&str>,

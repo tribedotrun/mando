@@ -32,6 +32,27 @@ use crate::AppState;
 
 const PENDING_SESSION: &str = "pending";
 
+/// Pick the `session_id` value to persist on the advisor question row.
+///
+/// Resume case (`should_resume = true`): both the in-memory session manager
+/// and the task carry the same id; persisting it directly avoids the
+/// post-hoc backfill round-trip and keeps history coherent. Start-new case
+/// (`should_resume = false`): the row gets `'pending'` and the success path
+/// backfills it once the CC call returns the real id.
+///
+/// Gating on `should_resume` (not just on `existing.is_some()`) is the
+/// invariant that matters: the route's stale-session branch (`!mgr_has_session
+/// && task_has_session`) clears the disk state but not the in-memory `item`,
+/// so reading the existing id directly would persist a stale id that the
+/// backfill cannot touch (it only updates `'pending'` rows).
+fn pick_initial_session_id(should_resume: bool, existing: Option<&str>) -> &str {
+    if should_resume {
+        existing.unwrap_or(PENDING_SESSION)
+    } else {
+        PENDING_SESSION
+    }
+}
+
 /// POST /api/tasks/{id}/advisor -- send a message to the task's advisor.
 ///
 /// - `ask` intent: conversational Q&A. Lazily spawns a CC session on first
@@ -92,9 +113,12 @@ pub(crate) async fn post_task_advisor(
 
     let ask_id = global_infra::uuid::Uuid::v4().to_string();
 
+    let initial_session_id =
+        pick_initial_session_id(should_resume, item.session_ids.advisor.as_deref());
+
     state
         .captain
-        .persist_task_question(task_id, &ask_id, PENDING_SESSION, &body.message)
+        .persist_task_question(task_id, &ask_id, initial_session_id, &body.message)
         .await
         .map_err(|e| internal_error(e, "failed to persist advisor question"))?;
     broadcast_task_update(&state, task_id).await;
@@ -153,6 +177,14 @@ pub(crate) async fn post_task_advisor(
         )
         .await
         .map_err(|e| internal_error(e, "failed to persist advisor answer"))?;
+
+    if let Err(e) = state
+        .captain
+        .backfill_ask_pending_session_id(task_id, &ask_id, &session_id)
+        .await
+    {
+        tracing::warn!(module = "transport-http-transport-routes_task_advisor", task_id, error = %e, "failed to backfill advisor pending session id");
+    }
 
     broadcast_task_update(&state, task_id).await;
     touch_workbench_activity(&state, item.workbench_id).await;
@@ -276,4 +308,42 @@ async fn run_advisor_cc(
         StatusCode::INTERNAL_SERVER_ERROR,
         "advisor session failed after all retries",
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Regression for codex P1: when the in-memory session manager has
+    /// dropped the advisor session but the task still carries
+    /// `session_ids.advisor`, the route's stale-session branch clears it
+    /// on disk but cannot reach into the local `item`. Picking the
+    /// persisted id off `item` would write a stale uuid that the backfill
+    /// (`session_id = 'pending'`) would then refuse to touch. Gating on
+    /// `should_resume` is the only safe path. PR #1035.
+    #[test]
+    fn start_new_uses_pending_even_when_existing_session_id_is_set() {
+        assert_eq!(
+            pick_initial_session_id(false, Some("stale-advisor-uuid")),
+            PENDING_SESSION
+        );
+    }
+
+    #[test]
+    fn start_new_uses_pending_when_existing_is_none() {
+        assert_eq!(pick_initial_session_id(false, None), PENDING_SESSION);
+    }
+
+    #[test]
+    fn resume_uses_existing_session_id() {
+        assert_eq!(
+            pick_initial_session_id(true, Some("real-advisor-uuid")),
+            "real-advisor-uuid"
+        );
+    }
+
+    #[test]
+    fn resume_with_no_existing_falls_back_to_pending() {
+        assert_eq!(pick_initial_session_id(true, None), PENDING_SESSION);
+    }
 }

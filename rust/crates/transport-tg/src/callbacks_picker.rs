@@ -9,7 +9,7 @@ use crate::gateway_paths as paths;
 
 /// Handle all `act:*` callbacks.
 pub(crate) async fn handle_action_callback(
-    bot: &mut TelegramBot,
+    bot: &TelegramBot,
     parts: &[&str],
     cb_id: &str,
     cid: &str,
@@ -20,19 +20,19 @@ pub(crate) async fn handle_action_callback(
     match action {
         "cancel" => {
             let aid = parts.get(2).copied().unwrap_or("");
-            bot.take_action_picker(aid);
+            bot.take_action_picker(aid).await;
             bot.api()
                 .answer_callback_query(cb_id, Some("Cancelled"))
                 .await?;
             global_infra::best_effort!(
                 bot.edit_message(cid, mid, "\u{23ed} Cancelled").await,
-                "callbacks_picker: bot.edit_message(cid, mid, '/u{23ed} Cancelled').await"
+                "callbacks_picker: edit on action-picker cancel"
             );
         }
         "pick" => handle_pick(bot, parts, cb_id, cid, mid).await?,
         "do" => handle_do(bot, parts, cb_id, cid, mid).await?,
         "ask_end" => {
-            if let Some(task_id) = bot.ask_session_task_id(cid) {
+            if let Some(task_id) = bot.ask_session_task_id(cid).await {
                 if let Err(e) = bot
                     .gw()
                     .post_typed::<_, api_types::AskEndResponse>(
@@ -48,17 +48,17 @@ pub(crate) async fn handle_action_callback(
                     );
                 }
             }
-            bot.close_ask_session(cid);
+            bot.close_ask_session(cid).await;
             bot.api()
                 .answer_callback_query(cb_id, Some("Session ended"))
                 .await?;
             global_infra::best_effort!(
                 bot.remove_keyboard(cid, mid).await,
-                "callbacks_picker: bot.remove_keyboard(cid, mid).await"
+                "callbacks_picker: remove keyboard on ask-end"
             );
             global_infra::best_effort!(
                 bot.send_html(cid, "Ask session ended.").await,
-                "callbacks_picker: bot.send_html(cid, 'Ask session ended.').await"
+                "callbacks_picker: send 'Ask session ended.'"
             );
         }
         "noop" => {
@@ -76,7 +76,7 @@ pub(crate) async fn handle_action_callback(
 
 /// User picked a task from the picker → show action buttons.
 async fn handle_pick(
-    bot: &mut TelegramBot,
+    bot: &TelegramBot,
     parts: &[&str],
     cb_id: &str,
     cid: &str,
@@ -88,7 +88,7 @@ async fn handle_pick(
         .and_then(|s| s.parse().ok())
         .unwrap_or(usize::MAX);
 
-    let picker = bot.take_action_picker(aid);
+    let picker = bot.take_action_picker(aid).await;
 
     match picker {
         Some(p) if idx < p.items.len() => {
@@ -132,7 +132,7 @@ async fn handle_pick(
 
 /// User tapped an action button → execute it.
 async fn handle_do(
-    bot: &mut TelegramBot,
+    bot: &TelegramBot,
     parts: &[&str],
     cb_id: &str,
     cid: &str,
@@ -150,7 +150,7 @@ async fn handle_do(
         "merge" => {
             global_infra::best_effort!(
                 bot.edit_message(cid, mid, "\u{23f3} Merging\u{2026}").await,
-                "callbacks_picker: bot.edit_message(cid, mid, '/u{23f3} Merging/u{2026}').await"
+                "callbacks_picker: edit on merge action"
             );
             crate::callback_actions::merge(bot, cid, task_id, Some(mid)).await?;
         }
@@ -207,56 +207,54 @@ async fn handle_do(
                 }
             }
         }
-        // Text-requiring actions — prompt for input
+        // Text-requiring actions — edit the picker message into a prompt and
+        // register the pending session against that message id, so a
+        // quote-reply routes back here under concurrent dispatch.
         "reopen" => {
             let title = fetch_task_title(bot, task_id).await;
-            bot.pending_reopen
-                .insert(cid.to_string(), (task_id.to_string(), title.clone()));
             let _ignored = bot
                 .edit_message(
                     cid,
                     mid,
                     &format!(
-                        "\u{1f504} Reopen: {}\n\nType your feedback \u{2014} what changes are needed?",
+                        "\u{1f504} Reopen: {}\n\nReply to this prompt with your feedback \u{2014} what changes are needed?",
                         crate::telegram_format::escape_html(&title)
                     ),
                 )
                 .await;
+            bot.set_pending_reopen(cid, task_id, &title, mid).await;
         }
         "rework" => {
             let title = fetch_task_title(bot, task_id).await;
-            bot.pending_rework
-                .insert(cid.to_string(), (task_id.to_string(), title.clone()));
             let _ignored = bot
                 .edit_message(
                     cid,
                     mid,
                     &format!(
-                        "\u{1f501} Rework: {}\n\nType the new instructions.",
+                        "\u{1f501} Rework: {}\n\nReply to this prompt with the new instructions.",
                         crate::telegram_format::escape_html(&title)
                     ),
                 )
                 .await;
+            bot.set_pending_rework(cid, task_id, &title, mid).await;
         }
         "nudge" => {
             let title = fetch_task_title(bot, task_id).await;
-            bot.pending_nudge
-                .insert(cid.to_string(), (task_id.to_string(), title.clone()));
             let _ignored = bot
                 .edit_message(
                     cid,
                     mid,
                     &format!(
-                        "\u{1f4e3} Nudge: {}\n\nType the message for the worker.",
+                        "\u{1f4e3} Nudge: {}\n\nReply to this prompt with the message for the worker.",
                         crate::telegram_format::escape_html(&title)
                     ),
                 )
                 .await;
+            bot.set_pending_nudge(cid, task_id, &title, mid).await;
         }
         // Session-based actions
         "input" => {
             let title = fetch_task_title(bot, task_id).await;
-            bot.open_input_session(cid, &title);
             let questions = action::fetch_clarifier_questions(bot, task_id).await;
             let msg = if let Some(ref q) = questions {
                 format!(
@@ -272,24 +270,24 @@ async fn handle_do(
             };
             global_infra::best_effort!(
                 bot.edit_message(cid, mid, &msg).await,
-                "callbacks_picker: bot.edit_message(cid, mid, &msg).await"
+                "callbacks_picker: edit on input prompt"
             );
+            bot.open_input_session(cid, &title, mid).await;
         }
         "ask" => {
             let id_num: i64 = task_id.parse().unwrap_or(0);
-            bot.close_ask_session(cid);
-            bot.open_ask_session(cid, id_num);
             let title = fetch_task_title(bot, task_id).await;
             let _ignored = bot
                 .edit_message(
                     cid,
                     mid,
                     &format!(
-                        "\u{1f4ac} Ask: {}\n\nType your question.",
+                        "\u{1f4ac} Ask: {}\n\nReply to this prompt with your question.",
                         crate::telegram_format::escape_html(&title)
                     ),
                 )
                 .await;
+            bot.open_ask_session(cid, id_num, mid).await;
         }
         _ => {}
     }

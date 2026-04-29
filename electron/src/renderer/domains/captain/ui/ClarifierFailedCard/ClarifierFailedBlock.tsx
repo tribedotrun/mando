@@ -1,6 +1,6 @@
 import React from 'react';
 import { formatEventTime } from '#renderer/domains/captain/service/feedHelpers';
-import { RetryButton } from '#renderer/domains/captain/ui/RetryButton';
+import { Button } from '#renderer/global/ui/primitives/button';
 import type { TimelineEvent } from '#renderer/global/types';
 import { InlineMarkdown } from '#renderer/global/ui/InlineMarkdown';
 import { AlertTriangle } from 'lucide-react';
@@ -9,13 +9,15 @@ export function ClarifierFailedBlock({
   event,
   apiErrorStatus,
   message,
-  onRetry,
+  onReanswer,
 }: {
   event: TimelineEvent;
   // PR #889: sentinel 0 == non-HTTP error.
   apiErrorStatus: number;
   message: string;
-  onRetry: () => Promise<unknown> | void;
+  // Undefined when the task is not in `needs-clarification` and there's no
+  // answer form to focus — the banner becomes purely informational.
+  onReanswer?: () => void;
 }): React.ReactElement {
   const time = formatEventTime(event.timestamp);
   const statusLabel = apiErrorStatus > 0 ? `status ${apiErrorStatus}` : 'no status';
@@ -29,7 +31,9 @@ export function ClarifierFailedBlock({
     >
       <div className="mb-2 flex items-center gap-2">
         <AlertTriangle size={14} className="text-destructive" />
-        <span className="text-body font-medium text-destructive">CC errored — retry</span>
+        <span className="text-body font-medium text-destructive">
+          {onReanswer ? 'CC errored — retry' : 'CC errored'}
+        </span>
         <span className="text-caption text-text-3">{time}</span>
         <span className="text-caption text-text-3">({statusLabel})</span>
       </div>
@@ -38,13 +42,11 @@ export function ClarifierFailedBlock({
           <InlineMarkdown text={message} />
         </div>
       ) : null}
-      <RetryButton
-        onRetry={onRetry}
-        label="Refresh and re-answer"
-        retryingLabel="Refreshing…"
-        size="sm"
-        variant="destructive"
-      />
+      {onReanswer ? (
+        <Button onClick={onReanswer} size="sm" variant="destructive">
+          Re-answer
+        </Button>
+      ) : null}
     </div>
   );
 }

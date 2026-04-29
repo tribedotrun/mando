@@ -23,7 +23,11 @@ export function useWorktreeTerminal() {
   const creatingRef = useRef(false);
 
   const openNewTerminal = useCallback(
-    async (project: string, onReady?: (cwd: string, result?: { workbenchId?: number }) => void) => {
+    async (
+      project: string,
+      onReady?: (cwd: string, result?: { workbenchId?: number }) => void,
+      onError?: (err: unknown) => void,
+    ) => {
       if (creatingRef.current) return;
       creatingRef.current = true;
       const gen = ++wtGenRef.current;
@@ -55,6 +59,7 @@ export function useWorktreeTerminal() {
         log.error('createWorktree failed', err);
         toast.error(getErrorMessage(err, 'Failed to create workspace'));
         setTerminalPage(null);
+        onError?.(err);
       } finally {
         creatingRef.current = false;
       }
@@ -62,8 +67,15 @@ export function useWorktreeTerminal() {
     [],
   );
 
+  // Cancel resets `creatingRef` too: a caller that supersedes an in-flight
+  // creation (e.g. clicking "+ New terminal" for a different project while
+  // /wb/new is still preparing the first one) needs the next
+  // `openNewTerminal` to start, not silently no-op behind the `creatingRef`
+  // guard. The bumped `wtGenRef` cleans up the superseded createWorktree
+  // response when it finally resolves.
   const cancelPreparing = useCallback(() => {
     ++wtGenRef.current;
+    creatingRef.current = false;
     setTerminalPage(null);
   }, []);
 

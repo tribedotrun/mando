@@ -6,66 +6,67 @@
 use regex::Regex;
 use std::sync::LazyLock;
 
-use super::{convert_md_tables, escape_html};
+use super::convert_md_tables;
+use crate::html::escape_html;
 
 // ── Regexes ────────────────────────────────────────────────────────
 
 static CODE_BLOCK_RE: LazyLock<Regex> =
     LazyLock::new(|| match Regex::new(r"(?s)```[\w]*\n?(.*?)\n?```") {
         Ok(re) => re,
-        Err(e) => global_infra::unrecoverable!("regex compile failed", e),
+        Err(e) => crate::unrecoverable!("regex compile failed", e),
     });
 
 static INLINE_CODE_RE: LazyLock<Regex> = LazyLock::new(|| match Regex::new(r"`([^`]+)`") {
     Ok(re) => re,
-    Err(e) => global_infra::unrecoverable!("regex compile failed", e),
+    Err(e) => crate::unrecoverable!("regex compile failed", e),
 });
 
 static HEADING_RE: LazyLock<Regex> = LazyLock::new(|| match Regex::new(r"(?m)^#{1,6}\s+(.+)$") {
     Ok(re) => re,
-    Err(e) => global_infra::unrecoverable!("regex compile failed", e),
+    Err(e) => crate::unrecoverable!("regex compile failed", e),
 });
 
 static BLOCKQUOTE_RE: LazyLock<Regex> = LazyLock::new(|| match Regex::new(r"(?m)^>\s*(.*)$") {
     Ok(re) => re,
-    Err(e) => global_infra::unrecoverable!("regex compile failed", e),
+    Err(e) => crate::unrecoverable!("regex compile failed", e),
 });
 
 static MARKDOWN_LINK_RE: LazyLock<Regex> =
     LazyLock::new(|| match Regex::new(r"\[([^\]]+)\]\((https?://[^)]+)\)") {
         Ok(re) => re,
-        Err(e) => global_infra::unrecoverable!("MARKDOWN_LINK_RE compile failed", e),
+        Err(e) => crate::unrecoverable!("MARKDOWN_LINK_RE compile failed", e),
     });
 
 static BARE_URL_RE: LazyLock<Regex> =
     LazyLock::new(|| match Regex::new(r"(?i)https?://[^\s<>()]+") {
         Ok(re) => re,
-        Err(e) => global_infra::unrecoverable!("regex compile failed", e),
+        Err(e) => crate::unrecoverable!("regex compile failed", e),
     });
 
 static BOLD_STAR_RE: LazyLock<Regex> = LazyLock::new(|| match Regex::new(r"\*\*(.+?)\*\*") {
     Ok(re) => re,
-    Err(e) => global_infra::unrecoverable!("regex compile failed", e),
+    Err(e) => crate::unrecoverable!("regex compile failed", e),
 });
 
 static BOLD_UNDER_RE: LazyLock<Regex> = LazyLock::new(|| match Regex::new(r"__(.+?)__") {
     Ok(re) => re,
-    Err(e) => global_infra::unrecoverable!("regex compile failed", e),
+    Err(e) => crate::unrecoverable!("regex compile failed", e),
 });
 
 static ITALIC_RE: LazyLock<Regex> = LazyLock::new(|| match Regex::new(r"_([^_]+)_") {
     Ok(re) => re,
-    Err(e) => global_infra::unrecoverable!("regex compile failed", e),
+    Err(e) => crate::unrecoverable!("regex compile failed", e),
 });
 
 static STRIKE_RE: LazyLock<Regex> = LazyLock::new(|| match Regex::new(r"~~(.+?)~~") {
     Ok(re) => re,
-    Err(e) => global_infra::unrecoverable!("regex compile failed", e),
+    Err(e) => crate::unrecoverable!("regex compile failed", e),
 });
 
 static LIST_BULLET_RE: LazyLock<Regex> = LazyLock::new(|| match Regex::new(r"(?m)^[-*]\s+") {
     Ok(re) => re,
-    Err(e) => global_infra::unrecoverable!("regex compile failed", e),
+    Err(e) => crate::unrecoverable!("regex compile failed", e),
 });
 
 const TRAILING_URL_PUNCT: &str = ".,;:!?)]";

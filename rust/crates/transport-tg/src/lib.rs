@@ -17,7 +17,9 @@ mod assistant;
 mod bot;
 mod bot_dispatch;
 mod bot_helpers;
+mod bot_runtime;
 mod bot_sessions;
+mod bot_types;
 mod callback_actions;
 mod callbacks;
 mod callbacks_picker;
@@ -31,7 +33,6 @@ mod picker_store;
 mod sse;
 mod telegram_format;
 mod telegram_markup;
-mod telegram_tables;
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -99,6 +100,6 @@ pub async fn start_bot(
         Some(g) => g,
         None => http::GatewayClient::discover()?,
     };
-    let mut bot = TelegramBot::with_base_url(config, &token, base_url.as_deref(), gw, pending)?;
-    bot.start().await
+    let bot = TelegramBot::with_base_url(config, &token, base_url.as_deref(), gw, pending)?;
+    bot_runtime::run_polling_loop(Arc::new(bot)).await
 }

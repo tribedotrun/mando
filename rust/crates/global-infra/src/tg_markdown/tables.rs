@@ -10,7 +10,7 @@ static TABLE_SEP_RE: LazyLock<Regex> =
     LazyLock::new(
         || match Regex::new(r"^\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)+\|?\s*$") {
             Ok(re) => re,
-            Err(e) => global_infra::unrecoverable!("regex compile failed", e),
+            Err(e) => crate::unrecoverable!("regex compile failed", e),
         },
     );
 

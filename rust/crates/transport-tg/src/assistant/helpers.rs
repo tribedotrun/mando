@@ -86,7 +86,7 @@ pub(crate) fn register_pending(pending: &PendingMessages, scout_id: i64, message
 // ── Implicit addlink ────────────────────────────────────────────────
 
 pub(crate) async fn handle_implicit_addlink(
-    bot: &mut TelegramBot,
+    bot: &TelegramBot,
     chat_id: &str,
     message: &Value,
 ) -> Result<()> {

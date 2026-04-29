@@ -14,7 +14,7 @@ use crate::gateway_paths as paths;
 use crate::permissions;
 
 /// Handle an incoming callback query on the assistant bot.
-pub async fn handle_callback(bot: &mut TelegramBot, cb: &Value) -> Result<()> {
+pub async fn handle_callback(bot: &TelegramBot, cb: &Value) -> Result<()> {
     let config = bot.config().read().await.clone();
     let cb_id = cb.get("id").and_then(|v| v.as_str()).unwrap_or_default();
 
@@ -80,7 +80,7 @@ pub async fn handle_callback(bot: &mut TelegramBot, cb: &Value) -> Result<()> {
 
     // Abandon any pending act session when user interacts with other buttons
     if action != "actskip" && action != "actpick" {
-        bot.take_act_session(&chat_id);
+        bot.take_act_session(&chat_id).await;
     }
 
     // No-op callback (page indicator button)
@@ -118,11 +118,14 @@ pub async fn handle_callback(bot: &mut TelegramBot, cb: &Value) -> Result<()> {
             .get(2)
             .and_then(|s| s.parse::<i64>().ok())
             .unwrap_or(0);
-        let session = bot.take_act_session(&chat_id);
+        let session = bot.take_act_session(&chat_id).await;
         if let Some(s) = session {
             if s.item_id != cb_item_id {
-                // Stale button from a previous act flow — restore current session
-                bot.open_act_session(&chat_id, s.item_id, &s.project);
+                // Stale button from a previous act flow — restore the current
+                // session pointing at the prompt the user actually saw.
+                let prompt_mid = s.prompt.prompt_message_id;
+                bot.open_act_session(&chat_id, s.item_id, &s.project, prompt_mid)
+                    .await;
                 bot.api
                     .send_message(
                         &chat_id,
@@ -223,8 +226,10 @@ pub async fn handle_callback(bot: &mut TelegramBot, cb: &Value) -> Result<()> {
                     .await?;
                 item.title.unwrap_or_else(|| "item".to_string())
             };
-            bot.open_qa_session(&chat_id, id);
-            bot.api
+            // Send the prompt first so we can capture its message_id, then
+            // register the QA session against that prompt.
+            let sent = bot
+                .api
                 .send_message(
                     &chat_id,
                     &format!(
@@ -236,11 +241,13 @@ pub async fn handle_callback(bot: &mut TelegramBot, cb: &Value) -> Result<()> {
                     true,
                 )
                 .await?;
+            let prompt_mid = sent.get("message_id").and_then(|v| v.as_i64()).unwrap_or(0);
+            bot.open_qa_session(&chat_id, id, prompt_mid).await;
             Ok(())
         }
         "act" => act::cb_act(bot, cb_id, &chat_id, id, &config).await,
         "endqa" => {
-            bot.close_qa_session(&chat_id);
+            bot.close_qa_session(&chat_id).await;
             bot.api
                 .answer_callback_query(cb_id, Some("Session ended"))
                 .await?;

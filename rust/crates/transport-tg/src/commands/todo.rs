@@ -12,29 +12,36 @@ use serde_json::json;
 ///
 /// If no items provided, sets pending state so next plain-text message
 /// is treated as todo input. If items given, parses and shows confirmation.
-pub async fn handle(bot: &mut TelegramBot, chat_id: &str, args: &str) -> Result<()> {
+pub async fn handle(bot: &TelegramBot, chat_id: &str, args: &str) -> Result<()> {
     if args.trim().is_empty() {
-        bot.set_pending_todo(chat_id);
-        bot.send_html(
-            chat_id,
-            "Type your todo item(s) below (multi-line supported).\nAny other command cancels.",
-        )
-        .await?;
+        // Send the prompt first so we can capture its message_id; the
+        // pending entry stores that id so a quote-reply routes back here.
+        let prompt = bot
+            .send_html(
+                chat_id,
+                "Type your todo item(s) below (multi-line supported).\nReply to this prompt to disambiguate.",
+            )
+            .await?;
+        let prompt_mid = prompt
+            .get("message_id")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0);
+        bot.set_pending_todo(chat_id, prompt_mid).await;
         return Ok(());
     }
 
-    bot.clear_pending_todo(chat_id);
+    bot.take_pending_todo(chat_id).await;
     execute_todo(bot, chat_id, args).await
 }
 
 /// Process todo text -- all input goes through AI parsing.
-pub async fn execute_todo(bot: &mut TelegramBot, chat_id: &str, raw_text: &str) -> Result<()> {
+pub async fn execute_todo(bot: &TelegramBot, chat_id: &str, raw_text: &str) -> Result<()> {
     execute_todo_with_photo(bot, chat_id, raw_text, None).await
 }
 
 /// Process todo text with optional photo attachment.
 pub async fn execute_todo_with_photo(
-    bot: &mut TelegramBot,
+    bot: &TelegramBot,
     chat_id: &str,
     raw_text: &str,
     photo_file_id: Option<String>,
@@ -86,7 +93,8 @@ pub async fn execute_todo_with_photo(
                 photo_file_id,
             }];
             let keyboard = build_project_picker(&action_id, &names);
-            bot.store_todo_confirm(&action_id, chat_id, todo_items, names);
+            bot.store_todo_confirm(&action_id, chat_id, todo_items, names)
+                .await;
             bot.api()
                 .send_message(
                     chat_id,
@@ -143,7 +151,8 @@ pub async fn execute_todo_with_photo(
             photo_file_id,
         }];
         let keyboard = build_project_picker(&action_id, &names);
-        bot.store_todo_confirm(&action_id, chat_id, todo_items, names);
+        bot.store_todo_confirm(&action_id, chat_id, todo_items, names)
+            .await;
 
         let line_count = lines.len();
         bot.api()

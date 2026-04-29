@@ -9,6 +9,28 @@ use api_types::{ClarifierQuestionPayload, TimelineEventPayload};
 use super::{clarifier, notify::Notifier};
 use crate::runtime::dashboard::truncate_utf8;
 
+/// Visible-text budget for the LLM-authored body of a clarify notification.
+/// 1500 keeps headroom under TG's 4096-char message cap once the title and
+/// structural prefix are added.
+const CLARIFY_BODY_VISIBLE_BUDGET: usize = 1500;
+
+/// Build a clarify-flow notification: a structural HTML prefix line with
+/// an escaped title plus a renderer-formatted markdown body. The title is
+/// user-input text, so it goes through `escape_html`; the body comes from
+/// the LLM (questions or answer preview), so it goes through the markdown
+/// renderer.
+fn format_clarify_notification(prefix: &str, title: &str, body_markdown: &str) -> String {
+    let body = global_infra::tg_markdown::render_markdown_reply_html(
+        body_markdown,
+        CLARIFY_BODY_VISIBLE_BUDGET,
+    );
+    format!(
+        "{prefix} <b>{}</b>\n{}",
+        global_infra::html::escape_html(title),
+        body,
+    )
+}
+
 /// Applies a parsed clarifier result to the in-memory task and persists the
 /// transition to the DB.
 ///
@@ -188,10 +210,10 @@ pub async fn apply_clarifier_result(
                 .take(500)
                 .collect::<String>();
             notifier
-                .high(&format!(
-                    "\u{2705} Answered: <b>{}</b>\n{}",
-                    global_infra::html::escape_html(&item.title),
-                    global_infra::html::escape_html(&answer_preview),
+                .high(&format_clarify_notification(
+                    "\u{2705} Answered:",
+                    &item.title,
+                    &answer_preview,
                 ))
                 .await;
 
@@ -251,10 +273,10 @@ pub async fn apply_clarifier_result(
             );
             if let Some(ref questions) = result.questions {
                 let text = clarifier::format_questions_text(questions);
-                let msg = format!(
-                    "\u{2753} Needs clarification: <b>{}</b>\n{}",
-                    global_infra::html::escape_html(&item.title),
-                    global_infra::html::escape_html(&text),
+                let msg = format_clarify_notification(
+                    "\u{2753} Needs clarification:",
+                    &item.title,
+                    &text,
                 );
                 notifier
                     .notify_typed(
@@ -315,11 +337,8 @@ pub async fn apply_clarifier_result(
             );
             if let Some(ref questions) = result.questions {
                 let text = clarifier::format_questions_text(questions);
-                let msg = format!(
-                    "\u{2753} Needs human input: <b>{}</b>\n{}",
-                    global_infra::html::escape_html(&item.title),
-                    global_infra::html::escape_html(&text),
-                );
+                let msg =
+                    format_clarify_notification("\u{2753} Needs human input:", &item.title, &text);
                 notifier
                     .notify_typed(
                         &msg,
@@ -335,4 +354,58 @@ pub async fn apply_clarifier_result(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn answered_message_renders_markdown_body_and_escapes_title() {
+        let msg = format_clarify_notification(
+            "\u{2705} Answered:",
+            "Bug & fix <html>",
+            "**ready** to ship",
+        );
+
+        // Title is escape_html'd, so `<` and `&` become entities.
+        assert!(
+            msg.contains("<b>Bug &amp; fix &lt;html&gt;</b>"),
+            "msg: {msg}"
+        );
+        // Body markdown rendered.
+        assert!(
+            msg.contains("<b>ready</b>"),
+            "body bold not rendered: {msg}"
+        );
+        // No literal `**` survives.
+        assert!(!msg.contains("**"), "literal `**` survived: {msg}");
+        assert!(msg.starts_with("\u{2705} Answered:"));
+    }
+
+    #[test]
+    fn needs_clarification_message_renders_question_list_markdown() {
+        // Use markdown that the renderer actually rewrites: heading at line
+        // start, list-bullet at line start, and inline code anywhere.
+        let questions = "## Step one\n- bullet `code`";
+        let msg =
+            format_clarify_notification("\u{2753} Needs clarification:", "feature x", questions);
+
+        assert!(msg.contains("<b>feature x</b>"));
+        assert!(!msg.contains("##"), "literal `##` survived: {msg}");
+        assert!(msg.contains("Step one"));
+        assert!(msg.contains("\u{2022} bullet"));
+        assert!(msg.contains("<code>code</code>"));
+    }
+
+    #[test]
+    fn needs_human_input_message_strips_dangling_markdown() {
+        let questions = "1. **why** does this happen?";
+        let msg =
+            format_clarify_notification("\u{2753} Needs human input:", "investigate", questions);
+
+        assert!(msg.contains("<b>investigate</b>"));
+        assert!(msg.contains("<b>why</b>"), "body bold not rendered: {msg}");
+        assert!(!msg.contains("**"), "literal `**` survived: {msg}");
+    }
 }

@@ -16,25 +16,31 @@ pub use super::scout_commands::{cmd_research, cmd_scout, execute_research};
 
 // ── /scout_add ─────────────────────────────────────────────────────
 
-pub async fn cmd_addlink(bot: &mut TelegramBot, chat_id: &str, args: &str) -> Result<()> {
+pub async fn cmd_addlink(bot: &TelegramBot, chat_id: &str, args: &str) -> Result<()> {
     if args.trim().is_empty() {
-        bot.set_pending_scout_add(chat_id);
-        send_html(
+        // Send the prompt first so we can capture its message_id; the
+        // pending entry stores that id so a quote-reply routes back here.
+        let prompt = send_html(
             bot,
             chat_id,
-            "Send a URL below (or several URLs space-separated). Add an optional title after a single URL.\nAny other command cancels.",
+            "Send a URL below (or several URLs space-separated). Add an optional title after a single URL.\nReply to this prompt to disambiguate.",
         )
         .await?;
+        let prompt_mid = prompt
+            .get("message_id")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0);
+        bot.set_pending_scout_add(chat_id, prompt_mid).await;
         return Ok(());
     }
 
-    bot.clear_pending_scout_add(chat_id);
+    bot.take_pending_scout_add(chat_id).await;
     execute_addlink(bot, chat_id, args).await
 }
 
 /// Add one or more URLs to Scout. Reachable from inline args and from the
 /// drained `pending_scout_add` follow-up text.
-pub async fn execute_addlink(bot: &mut TelegramBot, chat_id: &str, args: &str) -> Result<()> {
+pub async fn execute_addlink(bot: &TelegramBot, chat_id: &str, args: &str) -> Result<()> {
     let args = args.trim();
     if args.is_empty() {
         send_html(
@@ -79,7 +85,7 @@ pub async fn execute_addlink(bot: &mut TelegramBot, chat_id: &str, args: &str) -
     Ok(())
 }
 
-async fn addlink_batch(bot: &mut TelegramBot, chat_id: &str, urls: &[&str]) -> Result<()> {
+async fn addlink_batch(bot: &TelegramBot, chat_id: &str, urls: &[&str]) -> Result<()> {
     let sent = send_html(
         bot,
         chat_id,
@@ -125,7 +131,7 @@ async fn addlink_batch(bot: &mut TelegramBot, chat_id: &str, urls: &[&str]) -> R
 
 // ── /scout_list ───────────────────────────────────────────────────
 
-pub async fn cmd_simplelist(bot: &mut TelegramBot, chat_id: &str, args: &str) -> Result<()> {
+pub async fn cmd_simplelist(bot: &TelegramBot, chat_id: &str, args: &str) -> Result<()> {
     if let Err(e) = send_simplelist_page(bot, chat_id, args.trim(), 0).await {
         send_html(
             bot,

@@ -51,6 +51,7 @@ export function ClarificationTab({
             </div>
             <Textarea
               data-testid="clarifier-answer"
+              data-clarifier-target="answer"
               data-answer-index={i}
               className="min-h-0 w-full resize-none bg-muted text-body leading-snug"
               rows={1}

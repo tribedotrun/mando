@@ -1,15 +1,15 @@
 //! Telegram HTML formatting utilities.
 //!
 //! Converts tasks and messages into Telegram-safe HTML.
+//!
+//! The markdown converter and visible-length truncating renderer live in
+//! `global_infra::tg_markdown` so the captain biz tier can render LLM
+//! markdown without depending on the transport tier. Re-exported here so
+//! existing call sites keep their imports.
 
-mod markdown;
-mod render;
-
-pub use markdown::{markdown_to_telegram_html, markdown_to_telegram_plain_text};
-pub use render::{render_markdown_reply_html, TELEGRAM_TEXT_MAX_LEN};
-
-// Re-export table conversion from dedicated module.
-pub use crate::telegram_tables::convert_md_tables;
+pub use global_infra::tg_markdown::{
+    markdown_to_telegram_html, render_markdown_reply_html, TELEGRAM_TEXT_MAX_LEN,
+};
 
 // ── PR / issue linkification ────────────────────────────────────────
 

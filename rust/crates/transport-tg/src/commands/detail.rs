@@ -2,12 +2,18 @@
 
 use crate::bot::TelegramBot;
 use crate::gateway_paths as paths;
-use crate::telegram_format::{escape_html, paused_badge, status_icon};
+use crate::telegram_format::{escape_html, paused_badge, render_markdown_reply_html, status_icon};
 use anyhow::Result;
 use tracing::warn;
 
-/// Max number of inline photos sent alongside the detail card.
 const MAX_INLINE_PHOTOS: usize = 3;
+const ORIGINAL_PROMPT_VISIBLE_BUDGET: usize = 200;
+const RECENT_ACTIVITY_VISIBLE_BUDGET: usize = 60;
+const ESCALATION_REPORT_VISIBLE_BUDGET: usize = 300;
+
+fn render_prompt_block(prompt_text: &str) -> String {
+    render_markdown_reply_html(prompt_text, ORIGINAL_PROMPT_VISIBLE_BUDGET)
+}
 
 /// Render a task detail card by editing the given message in place.
 pub async fn handle_view(bot: &TelegramBot, chat_id: &str, mid: i64, task_id: &str) -> Result<()> {
@@ -99,10 +105,7 @@ pub async fn handle_view(bot: &TelegramBot, chat_id: &str, mid: i64, task_id: &s
         .unwrap_or("");
     if !prompt_text.is_empty() {
         lines.push(String::new());
-        lines.push(format!(
-            "<i>{}</i>",
-            escape_html(super::truncate(prompt_text, 200)),
-        ));
+        lines.push(render_prompt_block(prompt_text));
     }
 
     // -- Evidence --
@@ -164,7 +167,7 @@ pub async fn handle_view(bot: &TelegramBot, chat_id: &str, mid: i64, task_id: &s
                     "<code>{}</code> {} {}",
                     escape_html(super::truncate(ts, 16)),
                     timeline_icon(kind),
-                    escape_html(super::truncate(detail, 60)),
+                    render_markdown_reply_html(detail, RECENT_ACTIVITY_VISIBLE_BUDGET),
                 ));
             }
         }
@@ -236,7 +239,10 @@ fn collect_evidence(
     }
 
     if let Some(ref report) = task.escalation_report {
-        return EvidenceKind::Escalation(escape_html(super::truncate(report, 300)));
+        return EvidenceKind::Escalation(render_markdown_reply_html(
+            report,
+            ESCALATION_REPORT_VISIBLE_BUDGET,
+        ));
     }
 
     EvidenceKind::None
@@ -485,4 +491,67 @@ fn truncate_for_telegram(text: &str, max: usize) -> String {
     let char_boundary = text.floor_char_boundary(max.saturating_sub(4));
     let boundary = text[..char_boundary].rfind('\n').unwrap_or(char_boundary);
     format!("{}\n...", &text[..boundary])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use captain::Task;
+
+    /// Regression test for #125: the escalation report card showed raw
+    /// markdown (`## Header`, `- bullet`, `` `code` ``) instead of rendered
+    /// HTML. `collect_evidence` now routes the body through the renderer.
+    #[test]
+    fn collect_evidence_renders_escalation_report_markdown() {
+        let mut task = Task::new("anything");
+        task.escalation_report = Some("## Header\n- bullet one\n`code`".into());
+
+        let rendered = match collect_evidence(None, &task) {
+            EvidenceKind::Escalation(s) => s,
+            other => panic!("expected Escalation evidence, got: {:?}", kind_name(&other)),
+        };
+
+        assert!(rendered.contains("Header"), "rendered: {rendered}");
+        assert!(
+            !rendered.contains("##"),
+            "literal `##` survived: {rendered}"
+        );
+        assert!(
+            rendered.contains("\u{2022} bullet one"),
+            "bullet not converted: {rendered}",
+        );
+        assert!(
+            !rendered.lines().any(|l| l.starts_with("- ")),
+            "literal `- ` survived: {rendered}",
+        );
+        assert!(
+            rendered.contains("<code>code</code>"),
+            "inline code not rendered: {rendered}",
+        );
+    }
+
+    #[test]
+    fn collect_evidence_returns_none_when_no_evidence() {
+        let task = Task::new("nothing to see");
+        match collect_evidence(None, &task) {
+            EvidenceKind::None => {}
+            other => panic!("expected None, got: {:?}", kind_name(&other)),
+        }
+    }
+
+    #[test]
+    fn render_prompt_block_renders_markdown() {
+        let html = render_prompt_block("**important** with `code`");
+        assert!(html.contains("<b>important</b>"), "html: {html}");
+        assert!(html.contains("<code>code</code>"));
+        assert!(!html.contains("**"));
+    }
+
+    fn kind_name(k: &EvidenceKind) -> &'static str {
+        match k {
+            EvidenceKind::PrEvidence { .. } => "PrEvidence",
+            EvidenceKind::Escalation(_) => "Escalation",
+            EvidenceKind::None => "None",
+        }
+    }
 }
