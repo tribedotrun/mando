@@ -84,7 +84,7 @@ checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
 
 [[package]]
 name = "api-types"
-version = "0.1.19-beta.1"
+version = "0.1.19-beta.2"
 dependencies = [
  "global-types",
  "inventory",
@@ -96,7 +96,7 @@ dependencies = [
 
 [[package]]
 name = "api-types-codegen"
-version = "0.1.19-beta.1"
+version = "0.1.19-beta.2"
 dependencies = [
  "anyhow",
  "api-types",
@@ -276,7 +276,7 @@ checksum = "1e748733b7cbc798e1434b6ac524f0c1ff2ab456fe201501e6497c8417a4fc33"
 
 [[package]]
 name = "captain"
-version = "0.1.19-beta.1"
+version = "0.1.19-beta.2"
 dependencies = [
  "anyhow",
  "api-types",
@@ -794,7 +794,7 @@ dependencies = [
 
 [[package]]
 name = "gateway-client"
-version = "0.1.19-beta.1"
+version = "0.1.19-beta.2"
 dependencies = [
  "anyhow",
  "api-types",
@@ -855,7 +855,7 @@ dependencies = [
 
 [[package]]
 name = "global-bus"
-version = "0.1.19-beta.1"
+version = "0.1.19-beta.2"
 dependencies = [
  "api-types",
  "global-types",
@@ -866,7 +866,7 @@ dependencies = [
 
 [[package]]
 name = "global-claude"
-version = "0.1.19-beta.1"
+version = "0.1.19-beta.2"
 dependencies = [
  "anyhow",
  "api-types",
@@ -884,7 +884,7 @@ dependencies = [
 
 [[package]]
 name = "global-db"
-version = "0.1.19-beta.1"
+version = "0.1.19-beta.2"
 dependencies = [
  "anyhow",
  "global-infra",
@@ -899,7 +899,7 @@ dependencies = [
 
 [[package]]
 name = "global-git"
-version = "0.1.19-beta.1"
+version = "0.1.19-beta.2"
 dependencies = [
  "anyhow",
  "global-infra",
@@ -911,7 +911,7 @@ dependencies = [
 
 [[package]]
 name = "global-github"
-version = "0.1.19-beta.1"
+version = "0.1.19-beta.2"
 dependencies = [
  "anyhow",
  "global-infra",
@@ -923,7 +923,7 @@ dependencies = [
 
 [[package]]
 name = "global-infra"
-version = "0.1.19-beta.1"
+version = "0.1.19-beta.2"
 dependencies = [
  "anyhow",
  "getrandom 0.2.17",
@@ -938,7 +938,7 @@ dependencies = [
 
 [[package]]
 name = "global-net"
-version = "0.1.19-beta.1"
+version = "0.1.19-beta.2"
 dependencies = [
  "anyhow",
  "global-infra",
@@ -953,7 +953,7 @@ dependencies = [
 
 [[package]]
 name = "global-types"
-version = "0.1.19-beta.1"
+version = "0.1.19-beta.2"
 dependencies = [
  "global-infra",
  "serde",
@@ -1498,7 +1498,7 @@ checksum = "c41e0c4fef86961ac6d6f8a82609f55f31b05e4fce149ac5710e439df7619ba4"
 
 [[package]]
 name = "mando-cli"
-version = "0.1.19-beta.1"
+version = "0.1.19-beta.2"
 dependencies = [
  "anyhow",
  "api-types",
@@ -1518,7 +1518,7 @@ dependencies = [
 
 [[package]]
 name = "mando-gateway"
-version = "0.1.19-beta.1"
+version = "0.1.19-beta.2"
 dependencies = [
  "anyhow",
  "api-types",
@@ -1638,9 +1638,9 @@ dependencies = [
 
 [[package]]
 name = "metrics"
-version = "0.24.4"
+version = "0.24.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b7cd3e9eb685089c784f5769b1197d348c7274bc20d4e1349650f63b91b6d0af"
+checksum = "ff56c2e7dce6bd462e3b8919986a617027481b1dcc703175b58cf9dd98a2f071"
 dependencies = [
  "portable-atomic",
  "rapidhash",
@@ -2560,7 +2560,7 @@ checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 
 [[package]]
 name = "scout"
-version = "0.1.19-beta.1"
+version = "0.1.19-beta.2"
 dependencies = [
  "anyhow",
  "api-types",
@@ -2749,7 +2749,7 @@ dependencies = [
 
 [[package]]
 name = "sessions"
-version = "0.1.19-beta.1"
+version = "0.1.19-beta.2"
 dependencies = [
  "anyhow",
  "api-types",
@@ -2769,7 +2769,7 @@ dependencies = [
 
 [[package]]
 name = "sessions-db"
-version = "0.1.19-beta.1"
+version = "0.1.19-beta.2"
 dependencies = [
  "anyhow",
  "global-db",
@@ -2783,7 +2783,7 @@ dependencies = [
 
 [[package]]
 name = "settings"
-version = "0.1.19-beta.1"
+version = "0.1.19-beta.2"
 dependencies = [
  "anyhow",
  "api-types",
@@ -3274,7 +3274,7 @@ dependencies = [
 
 [[package]]
 name = "terminal"
-version = "0.1.19-beta.1"
+version = "0.1.19-beta.2"
 dependencies = [
  "anyhow",
  "dirs",
@@ -3713,7 +3713,7 @@ dependencies = [
 
 [[package]]
 name = "transport-http"
-version = "0.1.19-beta.1"
+version = "0.1.19-beta.2"
 dependencies = [
  "anyhow",
  "api-types",
@@ -3754,7 +3754,7 @@ dependencies = [
 
 [[package]]
 name = "transport-http-macros"
-version = "0.1.19-beta.1"
+version = "0.1.19-beta.2"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3763,7 +3763,7 @@ dependencies = [
 
 [[package]]
 name = "transport-tg"
-version = "0.1.19-beta.1"
+version = "0.1.19-beta.2"
 dependencies = [
  "anyhow",
  "api-types",
@@ -3789,7 +3789,7 @@ dependencies = [
 
 [[package]]
 name = "transport-ui"
-version = "0.1.19-beta.1"
+version = "0.1.19-beta.2"
 dependencies = [
  "anyhow",
  "libc",

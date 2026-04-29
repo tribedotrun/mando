@@ -19,17 +19,17 @@ pub(crate) use super::action_sessions::{
 // ── Command handler ─────────────────────────────────────────────────
 
 /// Handle `/action [cancel]`.
-pub async fn handle(bot: &mut TelegramBot, chat_id: &str, args: &str) -> Result<()> {
+pub async fn handle(bot: &TelegramBot, chat_id: &str, args: &str) -> Result<()> {
     let subcmd = args.trim().to_lowercase();
 
     if subcmd == "cancel" {
-        let had_input = bot.has_input_session(chat_id);
-        let had_ask = bot.has_ask_session(chat_id);
+        let had_input = bot.has_input_session(chat_id).await;
+        let had_ask = bot.has_ask_session(chat_id).await;
         if had_input {
-            bot.close_input_session(chat_id);
+            bot.close_input_session(chat_id).await;
         }
         if had_ask {
-            if let Some(task_id) = bot.ask_session_task_id(chat_id) {
+            if let Some(task_id) = bot.ask_session_task_id(chat_id).await {
                 global_infra::best_effort!(
                     bot.gw()
                         .post_typed::<_, api_types::AskEndResponse>(
@@ -37,10 +37,10 @@ pub async fn handle(bot: &mut TelegramBot, chat_id: &str, args: &str) -> Result<
                             &json!({"id": task_id}),
                         )
                         .await,
-                    "action: bot .gw() .post_typed::<_, api_types::AskEndResponse>( '/api"
+                    "action: ask/end gateway POST"
                 );
             }
-            bot.close_ask_session(chat_id);
+            bot.close_ask_session(chat_id).await;
         }
         if had_input || had_ask {
             bot.send_html(chat_id, "\u{2705} Session cancelled.")
@@ -52,8 +52,8 @@ pub async fn handle(bot: &mut TelegramBot, chat_id: &str, args: &str) -> Result<
     }
 
     // Active session check
-    if bot.has_input_session(chat_id) {
-        let title = bot.input_session_title(chat_id).unwrap_or_default();
+    if bot.has_input_session(chat_id).await {
+        let title = bot.input_session_title(chat_id).await.unwrap_or_default();
         bot.send_html(
             chat_id,
             &format!(
@@ -65,8 +65,8 @@ pub async fn handle(bot: &mut TelegramBot, chat_id: &str, args: &str) -> Result<
         .await?;
         return Ok(());
     }
-    if bot.has_ask_session(chat_id) {
-        let rounds = bot.ask_session_rounds(chat_id);
+    if bot.has_ask_session(chat_id).await {
+        let rounds = bot.ask_session_rounds(chat_id).await;
         bot.send_html(
             chat_id,
             &format!(
@@ -83,7 +83,7 @@ pub async fn handle(bot: &mut TelegramBot, chat_id: &str, args: &str) -> Result<
 
 // ── Picker ──────────────────────────────────────────────────────────
 
-async fn show_picker(bot: &mut TelegramBot, chat_id: &str) -> Result<()> {
+async fn show_picker(bot: &TelegramBot, chat_id: &str) -> Result<()> {
     let items = match commands::load_tasks_or_notify(bot, chat_id).await {
         Some(items) => items,
         None => return Ok(()),
@@ -105,7 +105,7 @@ async fn show_picker(bot: &mut TelegramBot, chat_id: &str) -> Result<()> {
     let display: Vec<_> = sorted.iter().take(10).collect();
     let action_id = commands::short_uuid();
 
-    bot.store_action_picker(&action_id, chat_id, &display);
+    bot.store_action_picker(&action_id, chat_id, &display).await;
 
     use api_types::InlineKeyboardButton;
     let mut lines = vec!["\u{2699}\u{fe0f} <b>Pick a task</b>\n".to_string()];

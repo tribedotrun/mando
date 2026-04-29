@@ -11,7 +11,7 @@ use crate::gateway_paths as paths;
 
 // ── /scout (swipe flow only) ────────────────────────────────────────
 
-pub async fn cmd_scout(bot: &mut TelegramBot, chat_id: &str) -> Result<()> {
+pub async fn cmd_scout(bot: &TelegramBot, chat_id: &str) -> Result<()> {
     swipe_start(bot, chat_id).await
 }
 
@@ -72,25 +72,29 @@ pub async fn show_card(bot: &TelegramBot, chat_id: &str, id: i64) -> Result<()> 
 
 // ── /scout_research ────────────────────────────────────────────────
 
-pub async fn cmd_research(bot: &mut TelegramBot, chat_id: &str, args: &str) -> Result<()> {
+pub async fn cmd_research(bot: &TelegramBot, chat_id: &str, args: &str) -> Result<()> {
     if args.trim().is_empty() {
-        bot.set_pending_scout_research(chat_id);
-        send_html(
+        let prompt = send_html(
             bot,
             chat_id,
-            "Send your research topic below.\nAny other command cancels.",
+            "Send your research topic below.\nReply to this prompt to disambiguate.",
         )
         .await?;
+        let prompt_mid = prompt
+            .get("message_id")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0);
+        bot.set_pending_scout_research(chat_id, prompt_mid).await;
         return Ok(());
     }
 
-    bot.clear_pending_scout_research(chat_id);
+    bot.take_pending_scout_research(chat_id).await;
     execute_research(bot, chat_id, args).await
 }
 
 /// Run an AI-powered research run for the given topic. Reachable from inline
 /// args and from the drained `pending_scout_research` follow-up text.
-pub async fn execute_research(bot: &mut TelegramBot, chat_id: &str, args: &str) -> Result<()> {
+pub async fn execute_research(bot: &TelegramBot, chat_id: &str, args: &str) -> Result<()> {
     let topic = args.trim();
     if topic.is_empty() {
         send_html(

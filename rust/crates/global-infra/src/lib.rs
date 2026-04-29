@@ -11,6 +11,7 @@ mod panic_hook;
 pub mod paths;
 pub mod retry;
 mod test_support;
+pub mod tg_markdown;
 mod unrecoverable;
 pub mod uuid;
 

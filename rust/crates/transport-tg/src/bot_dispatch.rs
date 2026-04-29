@@ -8,7 +8,7 @@ use std::future::Future;
 use std::pin::Pin;
 use tracing::{debug, warn};
 
-use crate::bot::TelegramBot;
+use crate::bot::{SessionKind, TelegramBot};
 use crate::bot_helpers::bc;
 use crate::commands;
 
@@ -31,7 +31,7 @@ pub(crate) enum CommandVisibility {
 /// Single source of truth for a Telegram command. The handler, `/help` text,
 /// and Bot API registration are all derived from this table.
 type CommandFuture<'a> = Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>>;
-type CommandHandler = for<'a> fn(&'a mut TelegramBot, &'a str, &'a str) -> CommandFuture<'a>;
+type CommandHandler = for<'a> fn(&'a TelegramBot, &'a str, &'a str) -> CommandFuture<'a>;
 
 pub(crate) struct CommandSpec {
     pub name: &'static str,
@@ -50,64 +50,36 @@ pub(crate) enum HelpSection {
     Scout,
 }
 
-fn dispatch_help<'a>(
-    bot: &'a mut TelegramBot,
-    chat_id: &'a str,
-    args: &'a str,
-) -> CommandFuture<'a> {
-    Box::pin(async move { commands::help::handle(&*bot, chat_id, args).await })
+fn dispatch_help<'a>(bot: &'a TelegramBot, chat_id: &'a str, args: &'a str) -> CommandFuture<'a> {
+    Box::pin(async move { commands::help::handle(bot, chat_id, args).await })
 }
 
-fn dispatch_todo<'a>(
-    bot: &'a mut TelegramBot,
-    chat_id: &'a str,
-    args: &'a str,
-) -> CommandFuture<'a> {
+fn dispatch_todo<'a>(bot: &'a TelegramBot, chat_id: &'a str, args: &'a str) -> CommandFuture<'a> {
     Box::pin(async move { commands::todo::handle(bot, chat_id, args).await })
 }
 
-fn dispatch_tasks<'a>(
-    bot: &'a mut TelegramBot,
-    chat_id: &'a str,
-    args: &'a str,
-) -> CommandFuture<'a> {
-    Box::pin(async move { commands::status::handle(&*bot, chat_id, args).await })
+fn dispatch_tasks<'a>(bot: &'a TelegramBot, chat_id: &'a str, args: &'a str) -> CommandFuture<'a> {
+    Box::pin(async move { commands::status::handle(bot, chat_id, args).await })
 }
 
-fn dispatch_action<'a>(
-    bot: &'a mut TelegramBot,
-    chat_id: &'a str,
-    args: &'a str,
-) -> CommandFuture<'a> {
+fn dispatch_action<'a>(bot: &'a TelegramBot, chat_id: &'a str, args: &'a str) -> CommandFuture<'a> {
     Box::pin(async move { commands::action::handle(bot, chat_id, args).await })
 }
 
-fn dispatch_triage<'a>(
-    bot: &'a mut TelegramBot,
-    chat_id: &'a str,
-    args: &'a str,
-) -> CommandFuture<'a> {
-    Box::pin(async move { commands::triage::handle(&*bot, chat_id, args).await })
+fn dispatch_triage<'a>(bot: &'a TelegramBot, chat_id: &'a str, args: &'a str) -> CommandFuture<'a> {
+    Box::pin(async move { commands::triage::handle(bot, chat_id, args).await })
 }
 
-fn dispatch_health<'a>(
-    bot: &'a mut TelegramBot,
-    chat_id: &'a str,
-    args: &'a str,
-) -> CommandFuture<'a> {
-    Box::pin(async move { commands::health::handle(&*bot, chat_id, args).await })
+fn dispatch_health<'a>(bot: &'a TelegramBot, chat_id: &'a str, args: &'a str) -> CommandFuture<'a> {
+    Box::pin(async move { commands::health::handle(bot, chat_id, args).await })
 }
 
-fn dispatch_stop<'a>(
-    bot: &'a mut TelegramBot,
-    chat_id: &'a str,
-    args: &'a str,
-) -> CommandFuture<'a> {
-    Box::pin(async move { commands::stop::handle(&*bot, chat_id, args).await })
+fn dispatch_stop<'a>(bot: &'a TelegramBot, chat_id: &'a str, args: &'a str) -> CommandFuture<'a> {
+    Box::pin(async move { commands::stop::handle(bot, chat_id, args).await })
 }
 
 fn dispatch_timeline<'a>(
-    bot: &'a mut TelegramBot,
+    bot: &'a TelegramBot,
     chat_id: &'a str,
     args: &'a str,
 ) -> CommandFuture<'a> {
@@ -115,7 +87,7 @@ fn dispatch_timeline<'a>(
 }
 
 fn dispatch_scout_add<'a>(
-    bot: &'a mut TelegramBot,
+    bot: &'a TelegramBot,
     chat_id: &'a str,
     args: &'a str,
 ) -> CommandFuture<'a> {
@@ -123,7 +95,7 @@ fn dispatch_scout_add<'a>(
 }
 
 fn dispatch_scout_research<'a>(
-    bot: &'a mut TelegramBot,
+    bot: &'a TelegramBot,
     chat_id: &'a str,
     args: &'a str,
 ) -> CommandFuture<'a> {
@@ -131,7 +103,7 @@ fn dispatch_scout_research<'a>(
 }
 
 fn dispatch_scout_list<'a>(
-    bot: &'a mut TelegramBot,
+    bot: &'a TelegramBot,
     chat_id: &'a str,
     args: &'a str,
 ) -> CommandFuture<'a> {
@@ -139,18 +111,14 @@ fn dispatch_scout_list<'a>(
 }
 
 fn dispatch_scout_saved<'a>(
-    bot: &'a mut TelegramBot,
+    bot: &'a TelegramBot,
     chat_id: &'a str,
     _args: &'a str,
 ) -> CommandFuture<'a> {
     Box::pin(async move { crate::assistant::commands::cmd_simplelist(bot, chat_id, "saved").await })
 }
 
-fn dispatch_scout<'a>(
-    bot: &'a mut TelegramBot,
-    chat_id: &'a str,
-    args: &'a str,
-) -> CommandFuture<'a> {
+fn dispatch_scout<'a>(bot: &'a TelegramBot, chat_id: &'a str, args: &'a str) -> CommandFuture<'a> {
     Box::pin(async move {
         if args.is_empty() {
             crate::assistant::commands::cmd_scout(bot, chat_id).await
@@ -300,7 +268,7 @@ impl FeatureGate {
 impl TelegramBot {
     #[tracing::instrument(skip_all, fields(module = "telegram", command = command))]
     pub(crate) async fn dispatch_command(
-        &mut self,
+        &self,
         chat_id: &str,
         command: &str,
         args: &str,
@@ -313,107 +281,132 @@ impl TelegramBot {
         (spec.handler)(self, chat_id, args).await
     }
 
+    /// Handle a plain-text (non-`/command`) message.
+    ///
+    /// Reads `reply_to_message.message_id` and routes to the matching pending
+    /// session via [`pick_session_for_text`]. With no reply target, the
+    /// most-recently-created pending session wins. Empty pendings fall
+    /// through to implicit URL detection (scout).
     pub(crate) async fn handle_plain_text(
-        &mut self,
+        &self,
         chat_id: &str,
         text: &str,
         message: &Value,
     ) -> Result<()> {
-        if self.pending_todo.remove(chat_id) {
-            return commands::todo::execute_todo(self, chat_id, text).await;
-        }
-        if self.pending_timeline.remove(chat_id) {
-            return commands::timeline::execute(self, chat_id, text).await;
-        }
-        if self.pending_scout_add.remove(chat_id) {
-            return crate::assistant::commands::execute_addlink(self, chat_id, text).await;
-        }
-        if self.pending_scout_research.remove(chat_id) {
-            return crate::assistant::commands::execute_research(self, chat_id, text).await;
-        }
-        if let Some((item_id, title)) = self.pending_reopen.remove(chat_id) {
-            return crate::callback_actions::reopen_with_feedback(
-                self, chat_id, &item_id, &title, text,
-            )
-            .await;
-        }
-        if let Some((item_id, title)) = self.pending_rework.remove(chat_id) {
-            return crate::callback_actions::rework_with_feedback(
-                self, chat_id, &item_id, &title, text,
-            )
-            .await;
-        }
-        if let Some((item_id, _title)) = self.pending_nudge.remove(chat_id) {
-            let mid = self
-                .send_loading(
-                    chat_id,
-                    &format!(
-                        "\u{23f3} Nudging #{}...",
-                        crate::telegram_format::escape_html(&item_id)
-                    ),
-                )
-                .await?;
-            let gw = self.gw().clone();
-            match gw
-                .post_typed::<_, api_types::NudgeResponse>(
-                    crate::gateway_paths::CAPTAIN_NUDGE,
-                    &serde_json::json!({"item_id": item_id, "message": text}),
-                )
-                .await
-            {
-                Ok(resp) => {
-                    let worker = resp.worker.as_deref().unwrap_or("worker");
-                    self.edit_message(
-                        chat_id,
-                        mid,
-                        &format!(
-                            "\u{1f4e3} Nudged {} for #{}",
-                            crate::telegram_format::escape_html(worker),
-                            crate::telegram_format::escape_html(&item_id),
-                        ),
-                    )
-                    .await?;
-                }
-                Err(e) => {
-                    self.edit_message(
-                        chat_id,
-                        mid,
-                        &format!(
-                            "\u{274c} Nudge failed for #{}: {}",
-                            crate::telegram_format::escape_html(&item_id),
-                            crate::telegram_format::escape_html(&e.to_string()),
-                        ),
-                    )
-                    .await?;
+        let reply_to = message
+            .get("reply_to_message")
+            .and_then(|m| m.get("message_id"))
+            .and_then(|v| v.as_i64());
+
+        match self.pick_session_for_text(chat_id, reply_to).await {
+            // Each text-command branch must atomically claim its pending
+            // entry: under concurrent dispatch, two plain-text updates from
+            // the same chat can both pick the same SessionKind from the
+            // snapshot. Only the task whose `take_*` returns `Some` may run
+            // the handler; the loser falls through to implicit URL detection
+            // so its text is not silently misrouted into the same command.
+            Some(SessionKind::PendingTodo) => {
+                if self.take_pending_todo(chat_id).await.is_some() {
+                    commands::todo::execute_todo(self, chat_id, text).await
+                } else {
+                    crate::assistant::helpers::handle_implicit_addlink(self, chat_id, message).await
                 }
             }
-            return Ok(());
-        }
-        if commands::action::handle_input_text(self, chat_id, text).await? {
-            return Ok(());
-        }
-        if commands::action::handle_ask_text(self, chat_id, text).await? {
-            return Ok(());
-        }
-        // Scout act session: take atomically to avoid TOCTOU
-        if !text.is_empty() {
-            if let Some(session) = self.act_sessions.remove(chat_id) {
-                return crate::assistant::act::execute_act(
+            Some(SessionKind::PendingTimeline) => {
+                if self.take_pending_timeline(chat_id).await.is_some() {
+                    commands::timeline::execute(self, chat_id, text).await
+                } else {
+                    crate::assistant::helpers::handle_implicit_addlink(self, chat_id, message).await
+                }
+            }
+            Some(SessionKind::PendingScoutAdd) => {
+                if self.take_pending_scout_add(chat_id).await.is_some() {
+                    crate::assistant::commands::execute_addlink(self, chat_id, text).await
+                } else {
+                    crate::assistant::helpers::handle_implicit_addlink(self, chat_id, message).await
+                }
+            }
+            Some(SessionKind::PendingScoutResearch) => {
+                if self.take_pending_scout_research(chat_id).await.is_some() {
+                    crate::assistant::commands::execute_research(self, chat_id, text).await
+                } else {
+                    crate::assistant::helpers::handle_implicit_addlink(self, chat_id, message).await
+                }
+            }
+            Some(SessionKind::PendingReopen) => {
+                let Some(action) = self.take_pending_reopen(chat_id).await else {
+                    return Ok(());
+                };
+                crate::callback_actions::reopen_with_feedback(
                     self,
                     chat_id,
-                    session.item_id,
-                    &session.project,
-                    Some(text),
+                    &action.item_id,
+                    &action.title,
+                    text,
                 )
-                .await;
+                .await
+            }
+            Some(SessionKind::PendingRework) => {
+                let Some(action) = self.take_pending_rework(chat_id).await else {
+                    return Ok(());
+                };
+                crate::callback_actions::rework_with_feedback(
+                    self,
+                    chat_id,
+                    &action.item_id,
+                    &action.title,
+                    text,
+                )
+                .await
+            }
+            Some(SessionKind::PendingNudge) => {
+                let Some(action) = self.take_pending_nudge(chat_id).await else {
+                    return Ok(());
+                };
+                handle_nudge_text(self, chat_id, &action.item_id, text).await
+            }
+            Some(SessionKind::InputSession) => {
+                if commands::action::handle_input_text(self, chat_id, text).await? {
+                    return Ok(());
+                }
+                // Session vanished between snapshot and consume — fall through.
+                crate::assistant::helpers::handle_implicit_addlink(self, chat_id, message).await
+            }
+            Some(SessionKind::AskSession) => {
+                if commands::action::handle_ask_text(self, chat_id, text).await? {
+                    return Ok(());
+                }
+                crate::assistant::helpers::handle_implicit_addlink(self, chat_id, message).await
+            }
+            Some(SessionKind::ActSession) => {
+                if !text.is_empty() {
+                    if let Some(session) = self.take_act_session(chat_id).await {
+                        return crate::assistant::act::execute_act(
+                            self,
+                            chat_id,
+                            session.item_id,
+                            &session.project,
+                            Some(text),
+                        )
+                        .await;
+                    }
+                }
+                crate::assistant::helpers::handle_implicit_addlink(self, chat_id, message).await
+            }
+            Some(SessionKind::QaSession) => {
+                if self.handle_qa_text(chat_id, text).await? {
+                    return Ok(());
+                }
+                // Session vanished between snapshot and consume (e.g.
+                // `endqa` on a concurrent task) — fall through so the
+                // user's text is not silently dropped.
+                crate::assistant::helpers::handle_implicit_addlink(self, chat_id, message).await
+            }
+            None => {
+                // No pending session for this chat — try implicit URL detection.
+                crate::assistant::helpers::handle_implicit_addlink(self, chat_id, message).await
             }
         }
-        // Scout QA session: intercept plain text as questions
-        if self.qa_sessions.contains_key(chat_id) {
-            return self.handle_qa_text(chat_id, text).await;
-        }
-        // Implicit URL detection (scout)
-        crate::assistant::helpers::handle_implicit_addlink(self, chat_id, message).await
     }
 
     pub(crate) async fn register_commands(&self) {
@@ -430,6 +423,61 @@ impl TelegramBot {
             warn!("Failed to register bot commands: {e}");
         }
     }
+}
+
+/// Send a captain-nudge for the given item with the user's text as the
+/// follow-up message. Extracted from the inline body of `handle_plain_text`
+/// so the dispatch site reads as a flat match.
+async fn handle_nudge_text(
+    bot: &TelegramBot,
+    chat_id: &str,
+    item_id: &str,
+    text: &str,
+) -> Result<()> {
+    let mid = bot
+        .send_loading(
+            chat_id,
+            &format!(
+                "\u{23f3} Nudging #{}...",
+                crate::telegram_format::escape_html(item_id)
+            ),
+        )
+        .await?;
+    match bot
+        .gw()
+        .post_typed::<_, api_types::NudgeResponse>(
+            crate::gateway_paths::CAPTAIN_NUDGE,
+            &serde_json::json!({"item_id": item_id, "message": text}),
+        )
+        .await
+    {
+        Ok(resp) => {
+            let worker = resp.worker.as_deref().unwrap_or("worker");
+            bot.edit_message(
+                chat_id,
+                mid,
+                &format!(
+                    "\u{1f4e3} Nudged {} for #{}",
+                    crate::telegram_format::escape_html(worker),
+                    crate::telegram_format::escape_html(item_id),
+                ),
+            )
+            .await?;
+        }
+        Err(e) => {
+            bot.edit_message(
+                chat_id,
+                mid,
+                &format!(
+                    "\u{274c} Nudge failed for #{}: {}",
+                    crate::telegram_format::escape_html(item_id),
+                    crate::telegram_format::escape_html(&e.to_string()),
+                ),
+            )
+            .await?;
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]

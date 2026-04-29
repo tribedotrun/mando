@@ -142,6 +142,29 @@ pub async fn persist_answer(
     .await
 }
 
+/// Backfill `'pending'` `session_id` rows for an `(task_id, ask_id)` group
+/// once the real CC session id is known. Question (and any retry-error) rows
+/// are persisted before the CC call returns, so they land with the
+/// `'pending'` placeholder. The success path calls this helper once the
+/// matching `assistant` row is written so every row in the group carries the
+/// real id.
+#[tracing::instrument(skip_all)]
+pub async fn backfill_pending_session_id(
+    pool: &sqlx::SqlitePool,
+    task_id: i64,
+    ask_id: &str,
+    real_session_id: &str,
+) -> Result<()> {
+    crate::io::queries::ask_history::update_pending_session_id(
+        pool,
+        task_id,
+        ask_id,
+        real_session_id,
+    )
+    .await
+    .map_err(|e| anyhow::anyhow!("backfill ask session id for task {task_id}: {e}"))
+}
+
 /// Persist an error to ask_history and emit a HumanAskFailed timeline event.
 #[tracing::instrument(skip_all)]
 pub async fn persist_error(

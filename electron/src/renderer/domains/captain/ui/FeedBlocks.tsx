@@ -1,5 +1,8 @@
 import React from 'react';
-import { shouldSuppressTimelineEvent } from '#renderer/domains/captain/service/feedHelpers';
+import {
+  shouldSuppressTimelineEvent,
+  type RenderableFeedItem,
+} from '#renderer/domains/captain/service/feedHelpers';
 import {
   CompletedPlanBlock,
   ReadyPlanBlock,
@@ -9,11 +12,12 @@ import { EvidenceBlock, WorkSummaryBlock } from '#renderer/domains/captain/ui/Ar
 import {
   ActiveClarificationBlock,
   ClarificationSummaryBlock,
+  ClarifierAnsweredBlock,
   EscalationBlock,
   TimelineBlock,
 } from '#renderer/domains/captain/ui/FeedBlocksParts';
 import { ClarifierFailedRow } from '#renderer/domains/captain/ui/ClarifierFailedCard';
-import type { TaskItem, FeedItem, TaskArtifact, AskHistoryEntry } from '#renderer/global/types';
+import type { TaskItem, AskHistoryEntry } from '#renderer/global/types';
 
 export function FeedBlocks({
   item,
@@ -21,7 +25,7 @@ export function FeedBlocks({
   isLatestClarify,
   isArtifactExpanded,
 }: {
-  item: FeedItem;
+  item: RenderableFeedItem;
   task: TaskItem;
   isLatestClarify: (timestamp: string) => boolean;
   isArtifactExpanded: (id: number) => boolean;
@@ -44,7 +48,14 @@ export function FeedBlocks({
         );
       }
       if (payload.event_type === 'clarifier_failed') {
-        return <ClarifierFailedRow taskId={task.id} event={event} payload={payload} />;
+        return <ClarifierFailedRow taskStatus={task.status} event={event} payload={payload} />;
+      }
+      if (payload.event_type === 'clarifier_completed_no_pr') {
+        return task.status === 'completed-no-pr' ? (
+          <ClarifierAnsweredBlock event={event} taskContext={task.context ?? ''} />
+        ) : (
+          <TimelineBlock event={event} />
+        );
       }
       if (payload.event_type === 'plan_completed') {
         return task.status === 'plan-ready' ? (
@@ -57,13 +68,17 @@ export function FeedBlocks({
       return <TimelineBlock event={event} />;
     }
     case 'artifact': {
-      const artifact = item.data as TaskArtifact;
+      const artifact = item.data;
       const expanded = isArtifactExpanded(artifact.id);
       if (artifact.artifact_type === 'evidence')
-        return <EvidenceBlock artifact={artifact} initialExpanded={expanded} />;
+        return <EvidenceBlock artifacts={[artifact]} initialExpanded={expanded} />;
       if (artifact.artifact_type === 'work_summary')
         return <WorkSummaryBlock artifact={artifact} initialExpanded={expanded} />;
       return null;
+    }
+    case 'evidence-group': {
+      const expanded = item.artifacts.some((a) => isArtifactExpanded(a.id));
+      return <EvidenceBlock artifacts={item.artifacts} initialExpanded={expanded} />;
     }
     case 'message':
       return <MessageBlock entry={item.data as AskHistoryEntry} />;

@@ -178,6 +178,11 @@ prompts:
     If your bug fix touches UI, your before/after artifacts already satisfy the universal UI rule when they are screenshots tagged `--kind before` and `--kind after` respectively, plus an after-state recording also tagged `--kind after`. Capture all three together so you don't double-capture: `mando todo evidence before.png after.png demo.webm --caption "..." --caption "..." --caption "..." --kind before --kind after --kind after`.
     {% endif %}
 
+  _out_of_scope_discoveries: |
+    ## Out-of-Scope Discoveries
+
+    If mid-task you spot work that is genuinely a separate task (an unrelated bug, a cleanup, an unrelated follow-up), do NOT expand the current PR. Invoke `/mando-task <one-line description>` to file a new Mando task, then continue with the task you were given. The `mando-task` skill researches the codebase and queues a well-informed task for captain.
+
   # ── Worker Prompts ────────────────────────────────────────────────────
   worker_initial: |
     # Captain Brief
@@ -228,6 +233,8 @@ prompts:
     {% endif %}
     {% include "_bug_fix_protocol" %}
 
+    {% include "_out_of_scope_discoveries" %}
+
     {% include "_escape_hatch" %}
 
     {% include "_branch_done" %}
@@ -277,6 +284,8 @@ prompts:
     {{ worker_preamble }}
     {% endif %}
     {% include "_bug_fix_protocol" %}
+
+    {% include "_out_of_scope_discoveries" %}
 
     {% include "_escape_hatch" %}
 
@@ -672,6 +681,8 @@ prompts:
     {{ worker_preamble }}
     {% endif %}
     {% include "_bug_fix_protocol" %}
+
+    {% include "_out_of_scope_discoveries" %}
 
     {% include "_escape_hatch" %}
 

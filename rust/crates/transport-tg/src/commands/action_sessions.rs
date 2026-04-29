@@ -16,8 +16,8 @@ use super::action::status_short;
 // ── Input text handler (multi-turn clarification) ───────────────────
 
 /// Handle plain-text messages for active input session. Returns `true` if consumed.
-pub async fn handle_input_text(bot: &mut TelegramBot, chat_id: &str, text: &str) -> Result<bool> {
-    let item_title = match bot.input_session_title(chat_id) {
+pub async fn handle_input_text(bot: &TelegramBot, chat_id: &str, text: &str) -> Result<bool> {
+    let item_title = match bot.input_session_title(chat_id).await {
         Some(t) => t,
         None => return Ok(false),
     };
@@ -52,7 +52,7 @@ pub async fn handle_input_text(bot: &mut TelegramBot, chat_id: &str, text: &str)
     let item = match item {
         Some(it) => it,
         None => {
-            bot.close_input_session(chat_id);
+            bot.close_input_session(chat_id).await;
             bot.send_html(chat_id, "\u{26a0}\u{fe0f} Task no longer exists.")
                 .await?;
             return Ok(true);
@@ -65,7 +65,7 @@ pub async fn handle_input_text(bot: &mut TelegramBot, chat_id: &str, text: &str)
         | ItemStatus::NeedsClarification
         | ItemStatus::Queued => {}
         _ => {
-            bot.close_input_session(chat_id);
+            bot.close_input_session(chat_id).await;
             bot.send_html(
                 chat_id,
                 &format!(
@@ -110,7 +110,7 @@ pub async fn handle_input_text(bot: &mut TelegramBot, chat_id: &str, text: &str)
 }
 
 async fn handle_clarify_response(
-    bot: &mut TelegramBot,
+    bot: &TelegramBot,
     chat_id: &str,
     mid: i64,
     title: &str,
@@ -119,7 +119,7 @@ async fn handle_clarify_response(
     let status = resp.get("status").and_then(|v| v.as_str()).unwrap_or("");
     match status {
         "ready" => {
-            bot.close_input_session(chat_id);
+            bot.close_input_session(chat_id).await;
             global_infra::best_effort!(
                 bot.edit_message(
                     chat_id,
@@ -185,7 +185,7 @@ async fn handle_clarify_response(
 }
 
 async fn append_context_fallback(
-    bot: &mut TelegramBot,
+    bot: &TelegramBot,
     chat_id: &str,
     mid: i64,
     title: &str,
@@ -246,14 +246,14 @@ async fn append_context_fallback(
             );
         }
     }
-    bot.close_input_session(chat_id);
+    bot.close_input_session(chat_id).await;
 }
 
 // ── Ask text handler (multi-turn Q&A) ───────────────────────────────
 
 /// Handle plain-text messages for active ask session. Returns `true` if consumed.
-pub async fn handle_ask_text(bot: &mut TelegramBot, chat_id: &str, text: &str) -> Result<bool> {
-    if !bot.has_ask_session(chat_id) {
+pub async fn handle_ask_text(bot: &TelegramBot, chat_id: &str, text: &str) -> Result<bool> {
+    if !bot.has_ask_session(chat_id).await {
         return Ok(false);
     }
     ask_turn(bot, chat_id, text).await?;
@@ -261,11 +261,11 @@ pub async fn handle_ask_text(bot: &mut TelegramBot, chat_id: &str, text: &str) -
 }
 
 /// Execute one ask turn.
-pub(crate) async fn ask_turn(bot: &mut TelegramBot, chat_id: &str, text: &str) -> Result<()> {
-    let task_id = match bot.ask_session_task_id(chat_id) {
+pub(crate) async fn ask_turn(bot: &TelegramBot, chat_id: &str, text: &str) -> Result<()> {
+    let task_id = match bot.ask_session_task_id(chat_id).await {
         Some(id) => id,
         None => {
-            bot.close_ask_session(chat_id);
+            bot.close_ask_session(chat_id).await;
             bot.send_html(
                 chat_id,
                 "Ask session lost \u{2014} use /action to pick a task.",
@@ -275,7 +275,7 @@ pub(crate) async fn ask_turn(bot: &mut TelegramBot, chat_id: &str, text: &str) -
         }
     };
 
-    bot.increment_ask_rounds(chat_id);
+    bot.increment_ask_rounds(chat_id).await;
 
     let ack = bot.send_html(chat_id, "\u{1f914} Thinking\u{2026}").await?;
     let ack_mid = ack.get("message_id").and_then(|v| v.as_i64()).unwrap_or(0);

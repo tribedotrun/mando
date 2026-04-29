@@ -1,4 +1,45 @@
-import type { FeedItem, ItemStatus, TimelineEvent } from '#renderer/global/types';
+import type { FeedItem, ItemStatus, TaskArtifact, TimelineEvent } from '#renderer/global/types';
+
+/** Renderer-only feed item that bundles consecutive evidence artifacts into
+ *  one visual card. Computed at render time from the wire FeedItem stream;
+ *  the daemon and SSE cache shape are unchanged. */
+export type RenderableFeedItem =
+  | FeedItem
+  | { type: 'evidence-group'; timestamp: string; artifacts: TaskArtifact[] };
+
+/** Collapse runs of consecutive evidence artifacts into a single
+ *  `evidence-group` item. Any non-evidence feed item (timeline event,
+ *  message, work_summary artifact) breaks the run. The group preserves
+ *  artifact order and uses the latest artifact's timestamp so the merged
+ *  card sorts where the most recent member already sits. */
+export function groupEvidenceArtifacts(feedItems: FeedItem[]): RenderableFeedItem[] {
+  const out: RenderableFeedItem[] = [];
+  let buffer: TaskArtifact[] = [];
+
+  const flushBuffer = () => {
+    if (buffer.length === 0) return;
+    if (buffer.length === 1) {
+      const only = buffer[0];
+      out.push({ type: 'artifact', timestamp: only.created_at, data: only });
+    } else {
+      const latest = buffer.reduce((acc, a) => (a.created_at > acc ? a.created_at : acc), '');
+      out.push({ type: 'evidence-group', timestamp: latest, artifacts: [...buffer] });
+    }
+    buffer = [];
+  };
+
+  for (const fi of feedItems) {
+    const isEvidence = fi.type === 'artifact' && fi.data.artifact_type === 'evidence';
+    if (isEvidence) {
+      buffer.push(fi.data);
+    } else {
+      flushBuffer();
+      out.push(fi);
+    }
+  }
+  flushBuffer();
+  return out;
+}
 
 export const EVENT_ICON_MAP: Record<string, ItemStatus> = {
   created: 'queued',

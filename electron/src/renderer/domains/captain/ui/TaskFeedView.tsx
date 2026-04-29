@@ -3,7 +3,10 @@ import { useTaskFeed, useTaskAdvisor } from '#renderer/domains/captain/runtime/h
 import { useExpandedArtifactIds } from '#renderer/domains/captain/runtime/useExpandedArtifactIds';
 import { FeedBlocks } from '#renderer/domains/captain/ui/FeedBlocks';
 import { AdvisorInputBar } from '#renderer/domains/captain/ui/AdvisorInputBar';
-import { latestClarifyTimestamp } from '#renderer/domains/captain/service/feedHelpers';
+import {
+  groupEvidenceArtifacts,
+  latestClarifyTimestamp,
+} from '#renderer/domains/captain/service/feedHelpers';
 import type { TaskItem } from '#renderer/global/types';
 import { Clock } from 'lucide-react';
 
@@ -21,7 +24,11 @@ export function TaskFeedView({ item }: TaskFeedViewProps): React.ReactElement {
   const latestClarifyTs = useMemo(() => latestClarifyTimestamp(feedItems), [feedItems]);
   const isLatestClarify = useCallback((ts: string) => ts === latestClarifyTs, [latestClarifyTs]);
 
+  // useExpandedArtifactIds reads the un-grouped feed so its
+  // "latest screenshot/recording" tracking still sees every individual
+  // evidence artifact. Grouping happens only at the render layer below.
   const isArtifactExpanded = useExpandedArtifactIds(feedItems);
+  const renderableItems = useMemo(() => groupEvidenceArtifacts(feedItems), [feedItems]);
 
   const prevCountRef = useRef(0);
   const feedEndCallbackRef = useCallback(
@@ -55,15 +62,24 @@ export function TaskFeedView({ item }: TaskFeedViewProps): React.ReactElement {
           </div>
         ) : (
           <div className="pt-2">
-            {feedItems.map((entry, i) => (
-              <FeedBlocks
-                key={`${entry.type}-${entry.timestamp}-${i}`}
-                item={entry}
-                task={item}
-                isLatestClarify={isLatestClarify}
-                isArtifactExpanded={isArtifactExpanded}
-              />
-            ))}
+            {renderableItems.map((entry, i) => {
+              // Earliest artifact id keeps the React key stable when a new
+              // evidence artifact is appended to the group — local expand
+              // state in EvidenceBlock survives the re-render.
+              const key =
+                entry.type === 'evidence-group'
+                  ? `evidence-group-${entry.artifacts[0]?.id ?? i}`
+                  : `${entry.type}-${entry.timestamp}-${i}`;
+              return (
+                <FeedBlocks
+                  key={key}
+                  item={entry}
+                  task={item}
+                  isLatestClarify={isLatestClarify}
+                  isArtifactExpanded={isArtifactExpanded}
+                />
+              );
+            })}
             <div ref={feedEndCallbackRef} />
           </div>
         )}

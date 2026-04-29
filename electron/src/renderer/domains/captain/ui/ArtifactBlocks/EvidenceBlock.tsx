@@ -1,9 +1,12 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { formatEventTime } from '#renderer/domains/captain/service/feedHelpers';
 import {
-  deriveArtifactMedia,
   artifactMediaUrl,
+  deriveArtifactMedia,
+  flattenArtifactMedia,
   IMAGE_EXTS,
+  lightboxKey,
+  summarizeArtifactGroup,
   VIDEO_EXTS,
 } from '#renderer/domains/captain/runtime/artifactHelpers';
 import type { TaskArtifact } from '#renderer/global/types';
@@ -11,18 +14,25 @@ import { Image, Video, ChevronDown, ChevronRight } from 'lucide-react';
 import { ImageLightbox } from '#renderer/global/ui/ImageLightbox';
 
 export function EvidenceBlock({
-  artifact,
+  artifacts,
   initialExpanded = false,
 }: {
-  artifact: TaskArtifact;
+  artifacts: TaskArtifact[];
   initialExpanded?: boolean;
 }) {
   const [expanded, setExpanded] = useState(initialExpanded);
   const [lightbox, setLightbox] = useState<{ images: string[]; index: number } | null>(null);
-  const time = formatEventTime(artifact.created_at);
-  const mediaCount = artifact.media?.length ?? 0;
 
-  const { hasVideo, imageUrls, imageCaptions, lightboxIndexOf } = deriveArtifactMedia(artifact);
+  const { mediaCount, latestTimestamp, hasVideo } = useMemo(
+    () => summarizeArtifactGroup(artifacts),
+    [artifacts],
+  );
+  const { imageUrls, imageCaptions, lightboxKeyOf } = useMemo(
+    () => deriveArtifactMedia(artifacts),
+    [artifacts],
+  );
+  const flatMedia = useMemo(() => flattenArtifactMedia(artifacts), [artifacts]);
+  const time = formatEventTime(latestTimestamp);
   const EvidenceIcon = hasVideo ? Video : Image;
 
   return (
@@ -49,13 +59,13 @@ export function EvidenceBlock({
       </button>
       {expanded && (
         <div className="mt-3 space-y-3">
-          {artifact.media?.map((m) => {
+          {flatMedia.map(({ artifactId, media: m }) => {
             const isImage = IMAGE_EXTS.includes(m.ext);
             const isVideo = VIDEO_EXTS.includes(m.ext);
-            const mediaUrl = artifactMediaUrl(artifact.id, m.index);
-            const lbIdx = lightboxIndexOf.get(m.index);
+            const mediaUrl = artifactMediaUrl(artifactId, m.index);
+            const lbIdx = lightboxKeyOf.get(lightboxKey(artifactId, m.index));
             return (
-              <div key={m.index}>
+              <div key={lightboxKey(artifactId, m.index)}>
                 {isImage && m.local_path && (
                   <img
                     src={mediaUrl}

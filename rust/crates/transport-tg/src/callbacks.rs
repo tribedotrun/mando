@@ -10,7 +10,7 @@ use crate::bot::TelegramBot;
 use crate::callbacks_picker;
 
 /// Handle an incoming callback query.
-pub async fn handle_callback(bot: &mut TelegramBot, callback: &Value) -> Result<()> {
+pub async fn handle_callback(bot: &TelegramBot, callback: &Value) -> Result<()> {
     let data = callback.get("data").and_then(|d| d.as_str()).unwrap_or("");
     let cb_id = callback.get("id").and_then(|v| v.as_str()).unwrap_or("");
     let chat_id = callback
@@ -54,7 +54,7 @@ pub async fn handle_callback(bot: &mut TelegramBot, callback: &Value) -> Result<
 // ── Todo confirm ─────────────────────────────────────────────────────
 
 async fn handle_todo_confirm(
-    bot: &mut TelegramBot,
+    bot: &TelegramBot,
     parts: &[&str],
     cb_id: &str,
     cid: &str,
@@ -66,7 +66,7 @@ async fn handle_todo_confirm(
         "confirm" => {
             // Confirm is only shown when all items already have a project
             // (prefix match or single project). Multi-project uses todo_project directly.
-            if let Some(state) = bot.take_todo_confirm(aid) {
+            if let Some(state) = bot.take_todo_confirm(aid).await {
                 bot.api()
                     .answer_callback_query(cb_id, Some("Writing\u{2026}"))
                     .await?;
@@ -95,7 +95,7 @@ async fn handle_todo_confirm(
             }
         }
         "cancel" => {
-            bot.take_todo_confirm(aid);
+            bot.take_todo_confirm(aid).await;
             bot.api()
                 .answer_callback_query(cb_id, Some("Cancelled"))
                 .await?;
@@ -113,7 +113,7 @@ async fn handle_todo_confirm(
 // ── Todo project picker ──────────────────────────────────────────────
 
 async fn handle_todo_project(
-    bot: &mut TelegramBot,
+    bot: &TelegramBot,
     parts: &[&str],
     cb_id: &str,
     cid: &str,
@@ -122,7 +122,7 @@ async fn handle_todo_project(
     let aid = parts.get(1).copied().unwrap_or("");
     let sel = parts.get(2).copied().unwrap_or("");
     if sel == "cancel" {
-        bot.take_todo_confirm(aid);
+        bot.take_todo_confirm(aid).await;
         bot.api()
             .answer_callback_query(cb_id, Some("Cancelled"))
             .await?;
@@ -131,7 +131,7 @@ async fn handle_todo_project(
         }
         return Ok(());
     }
-    if let Some(state) = bot.take_todo_confirm(aid) {
+    if let Some(state) = bot.take_todo_confirm(aid).await {
         let idx: usize = sel.parse().unwrap_or(usize::MAX);
         let name = state.picker_slugs.get(idx).cloned().unwrap_or_default();
         if name.is_empty() {

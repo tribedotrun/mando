@@ -179,6 +179,8 @@ mod tests {
                 .display()
                 .to_string()
         ));
+        assert!(brief.contains("Out-of-Scope Discoveries"));
+        assert!(brief.contains("/mando-task"));
     }
 
     #[test]
@@ -199,6 +201,8 @@ mod tests {
         assert!(brief.contains("Human-Curated Plan"));
         assert!(brief.contains(&wt.join(".ai/briefs/source-brief.md").display().to_string()));
         assert!(wt.join(".ai/briefs/source-brief.md").exists());
+        assert!(brief.contains("Out-of-Scope Discoveries"));
+        assert!(brief.contains("/mando-task"));
     }
 
     #[test]
@@ -264,6 +268,8 @@ mod tests {
         ));
         let brief = std::fs::read_to_string(wt.join(".ai/briefs/todo-0-3.md")).unwrap();
         assert!(brief.contains("Mid-Implementation Handoff"));
+        assert!(brief.contains("Out-of-Scope Discoveries"));
+        assert!(brief.contains("/mando-task"));
     }
 
     #[test]
