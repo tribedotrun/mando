@@ -28,13 +28,13 @@ export async function applyPendingUpdateFlow(
   await announceUiUpdating();
 
   try {
-    updateDaemonBinary(getDataDir(), pendingUpdate.appPath);
+    await updateDaemonBinary(getDataDir(), pendingUpdate.appPath);
   } catch (err) {
     log.warn('auto-update: pre-swap daemon binary update failed (will retry on relaunch)', err);
   }
 
   try {
-    applyStagedUpdate(pendingUpdate.appPath);
+    await applyStagedUpdate(pendingUpdate.appPath);
     if (!options?.removeMarkerBeforeSwap) {
       removePendingUpdateMarker();
     }

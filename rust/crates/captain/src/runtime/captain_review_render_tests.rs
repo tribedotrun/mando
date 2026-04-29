@@ -272,3 +272,125 @@ fn bug_fix_section_omitted_when_not_a_bug_fix() {
         "bug-fix section must not render when the task is not a bug fix"
     );
 }
+
+#[test]
+fn ui_evidence_rule_surfaces_typed_screenshot_recording_gates() {
+    // Universal UI rule: every UI change requires a typed before screenshot,
+    // a typed after screenshot, and a typed after recording. The reviewer
+    // prompt must surface each new gate value and instruct nudges that name
+    // the missing artifact AND the `--kind` tag the worker must use. This
+    // applies regardless of `is_bug_fix` — the rule lives outside the bug-fix
+    // branch.
+    let mut vars = base_vars();
+    vars.insert("trigger", "gates_pass");
+    vars.insert("is_gates_pass", "true");
+    vars.insert("is_bug_fix", "");
+    vars.insert("has_screenshot", "false");
+    vars.insert("has_recording", "false");
+    vars.insert("has_before_screenshot", "false");
+    vars.insert("has_after_screenshot", "false");
+    vars.insert("has_after_recording", "false");
+
+    let rendered = render(&vars);
+
+    assert!(
+        rendered.contains("`has_before_screenshot`: false"),
+        "before-screenshot gate must be threaded through to the prompt"
+    );
+    assert!(
+        rendered.contains("`has_after_screenshot`: false"),
+        "after-screenshot gate must be threaded through to the prompt"
+    );
+    assert!(
+        rendered.contains("`has_after_recording`: false"),
+        "after-recording gate must be threaded through to the prompt"
+    );
+    assert!(
+        rendered.contains("before-state screenshot"),
+        "nudge wording must call out the missing before screenshot"
+    );
+    assert!(
+        rendered.contains("after-state screenshot"),
+        "nudge wording must call out the missing after screenshot"
+    );
+    assert!(
+        rendered.contains("after-state screen recording"),
+        "nudge wording must call out the missing after recording"
+    );
+    assert!(
+        rendered.contains("--kind before"),
+        "nudge instructions must reference the typed --kind before flag"
+    );
+    assert!(
+        rendered.contains("--kind after"),
+        "nudge instructions must reference the typed --kind after flag"
+    );
+    assert!(
+        !rendered.contains("Bug-fix evidence"),
+        "bug-fix branch must stay out when is_bug_fix is empty"
+    );
+}
+
+#[test]
+fn ui_evidence_rule_drops_satisfied_gates() {
+    // When all three new typed gates are true, the prompt still surfaces
+    // their values (so the reviewer can verify them) but the rendered
+    // output should report each as satisfied.
+    let mut vars = base_vars();
+    vars.insert("trigger", "gates_pass");
+    vars.insert("is_gates_pass", "true");
+    vars.insert("is_bug_fix", "");
+    vars.insert("has_screenshot", "true");
+    vars.insert("has_recording", "true");
+    vars.insert("has_before_screenshot", "true");
+    vars.insert("has_after_screenshot", "true");
+    vars.insert("has_after_recording", "true");
+
+    let rendered = render(&vars);
+
+    assert!(
+        rendered.contains("`has_before_screenshot`: true"),
+        "satisfied before-screenshot gate must surface as true"
+    );
+    assert!(
+        rendered.contains("`has_after_screenshot`: true"),
+        "satisfied after-screenshot gate must surface as true"
+    );
+    assert!(
+        rendered.contains("`has_after_recording`: true"),
+        "satisfied after-recording gate must surface as true"
+    );
+}
+
+#[test]
+fn ui_evidence_rule_renders_alongside_bug_fix_branch() {
+    // A bug-fix UI task triggers BOTH the universal UI gates and the
+    // bug-fix protocol section. The two branches are independent — the
+    // universal section sits outside `{% if is_bug_fix %}` so flipping
+    // the bug-fix flag doesn't drop the UI gate enforcement.
+    let mut vars = base_vars();
+    vars.insert("trigger", "gates_pass");
+    vars.insert("is_gates_pass", "true");
+    vars.insert("is_bug_fix", "true");
+    vars.insert("has_before_fix", "true");
+    vars.insert("has_after_fix", "true");
+    vars.insert("has_cannot_reproduce", "false");
+    vars.insert("has_before_screenshot", "false");
+    vars.insert("has_after_screenshot", "false");
+    vars.insert("has_after_recording", "false");
+
+    let rendered = render(&vars);
+
+    assert!(
+        rendered.contains("Bug-fix evidence"),
+        "bug-fix branch must still render when is_bug_fix is true"
+    );
+    assert!(
+        rendered.contains("`has_before_screenshot`: false"),
+        "universal UI gate must still be threaded through alongside the bug-fix branch"
+    );
+    assert!(
+        rendered.contains("`has_after_recording`: false"),
+        "after-recording gate must still surface for a bug-fix UI task"
+    );
+}

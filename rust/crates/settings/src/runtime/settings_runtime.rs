@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
@@ -8,10 +7,11 @@ use arc_swap::ArcSwap;
 use sqlx::SqlitePool;
 use tokio::sync::{watch, Mutex};
 
-use super::runtime_helpers::{clamped_tick_duration, classify_change, sync_process_env};
-use crate::config::{
-    captain_workflow_path, scout_workflow_path, CaptainWorkflow, Config, ScoutWorkflow,
+use super::runtime_helpers::{
+    clamped_tick_duration, classify_change, hydrate_projects, load_workflows_for_mode,
+    sync_process_env, validate_captain_workflow,
 };
+use crate::config::{scout_workflow_path, CaptainWorkflow, Config, ScoutWorkflow};
 use crate::service::{
     apply_scout_workflow_mode_overrides, apply_workflow_mode_overrides, build_config_apply_outcome,
 };
@@ -112,6 +112,71 @@ impl SettingsRuntime {
         self.tick_tx.subscribe()
     }
 
+    /// Re-read the captain workflow YAML at `override_path`, apply the
+    /// current `WorkflowRuntimeMode` overrides, and atomically swap the
+    /// in-memory `CaptainWorkflow`. On parse or validation failure, the
+    /// previous in-memory copy is preserved and a warning is logged.
+    /// Used by the captain auto-tick loop so operators can edit per-state
+    /// caps, timeouts, prompts, or other workflow fields without
+    /// restarting the gateway.
+    ///
+    /// `config.json` is not written. `apply_workflow_mode_overrides`
+    /// runs against a discarded `Config` clone so any sandbox timing
+    /// side-effects on `tick_interval_s` do not leak into the live
+    /// config — that path is reserved for `apply_api_config` /
+    /// `update_config`, which persist to disk. Returns `true` when the
+    /// in-memory workflow was swapped, `false` when the previous copy
+    /// was kept.
+    #[tracing::instrument(skip_all)]
+    pub async fn reload_captain_workflow_from_disk(&self, override_path: &Path) -> bool {
+        let _guard = self.write_mu.lock().await;
+        let mut config_clone = (*self.config.load_full()).clone();
+        let mut captain_workflow = match crate::io::config_fs::try_load_captain_workflow(
+            override_path,
+            config_clone.captain.tick_interval_s,
+        ) {
+            Ok(wf) => wf,
+            Err(err) => {
+                tracing::warn!(
+                    module = "settings-runtime-settings_runtime",
+                    error = %err,
+                    "captain workflow reload failed; keeping in-memory copy"
+                );
+                return false;
+            }
+        };
+        let mut scout_workflow_clone = (*self.scout_workflow.load_full()).clone();
+        // `apply_workflow_mode_overrides` re-validates the agent config
+        // after Sandbox timing overrides via the panicking
+        // `validate_agent_config`. Wrap in `catch_unwind` so an invalid
+        // sandbox override (e.g. `stale_threshold_s` < 2 *
+        // `tick_interval_s`) keeps the previous in-memory copy and logs
+        // a warning rather than unwinding the auto-tick loop.
+        let override_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            apply_workflow_mode_overrides(
+                self.workflow_mode,
+                &mut config_clone,
+                &mut captain_workflow,
+                &mut scout_workflow_clone,
+            );
+        }));
+        if let Err(panic) = override_result {
+            let msg = panic
+                .downcast_ref::<String>()
+                .cloned()
+                .or_else(|| panic.downcast_ref::<&str>().map(|s| (*s).to_string()))
+                .unwrap_or_else(|| "panic during apply_workflow_mode_overrides".into());
+            tracing::warn!(
+                module = "settings-runtime-settings_runtime",
+                error = %msg,
+                "captain workflow override re-validation failed; keeping in-memory copy"
+            );
+            return false;
+        }
+        self.captain_workflow.store(Arc::new(captain_workflow));
+        true
+    }
+
     #[tracing::instrument(skip_all)]
     pub async fn apply_api_config(
         &self,
@@ -164,114 +229,6 @@ impl SettingsRuntime {
         )
         .await
         .map_err(Into::into)
-    }
-
-    #[tracing::instrument(skip_all)]
-    pub async fn list_credentials(&self) -> Vec<crate::io::credentials::CredentialInfo> {
-        match crate::io::credentials::list_all(&self.db_pool).await {
-            Ok(rows) => {
-                let mut out = Vec::with_capacity(rows.len());
-                for row in rows {
-                    let mut info = row.to_info();
-                    if let Some(last) = row.last_probed_at {
-                        let cost =
-                            crate::io::credentials::cost_since(&self.db_pool, row.id, last).await;
-                        if cost > 0.0 {
-                            info.cost_since_probe_usd = Some(cost);
-                        }
-                    }
-                    out.push(info);
-                }
-                out
-            }
-            Err(err) => {
-                tracing::warn!(module = "credentials", error = %err, "failed to list credentials");
-                Vec::new()
-            }
-        }
-    }
-
-    #[tracing::instrument(skip_all)]
-    pub async fn get_credential_token(&self, id: i64) -> SettingsResult<Option<String>> {
-        crate::io::credentials::get_token_by_id(&self.db_pool, id)
-            .await
-            .map_err(Into::into)
-    }
-
-    #[tracing::instrument(skip_all)]
-    pub async fn get_credential_row(
-        &self,
-        id: i64,
-    ) -> SettingsResult<Option<crate::io::credentials::CredentialRow>> {
-        crate::io::credentials::get_row_by_id(&self.db_pool, id)
-            .await
-            .map_err(Into::into)
-    }
-
-    #[tracing::instrument(skip_all)]
-    pub async fn store_credential(
-        &self,
-        label: &str,
-        access_token: &str,
-        expires_at: Option<i64>,
-    ) -> SettingsResult<i64> {
-        let id =
-            crate::io::credentials::insert(&self.db_pool, label, access_token, expires_at).await?;
-        tracing::info!(module = "credentials", id, "stored credential");
-        Ok(id)
-    }
-
-    #[tracing::instrument(skip_all)]
-    pub async fn remove_credential(&self, id: i64) -> SettingsResult<bool> {
-        let removed = crate::io::credentials::delete(&self.db_pool, id).await?;
-        if removed {
-            tracing::info!(module = "credentials", id, "removed credential");
-        }
-        Ok(removed)
-    }
-
-    #[tracing::instrument(skip_all)]
-    pub async fn mark_credential_expired(&self, id: i64) -> SettingsResult<bool> {
-        crate::io::credentials::mark_expired(&self.db_pool, id)
-            .await
-            .map_err(Into::into)
-    }
-
-    #[tracing::instrument(skip_all)]
-    pub async fn has_any_credentials(&self) -> SettingsResult<bool> {
-        crate::io::credentials::has_any(&self.db_pool)
-            .await
-            .map_err(Into::into)
-    }
-
-    #[tracing::instrument(skip_all)]
-    pub async fn pick_worker_credential(
-        &self,
-        caller_filter: Option<&str>,
-    ) -> SettingsResult<Option<(i64, String)>> {
-        crate::io::credentials::pick_for_worker(&self.db_pool, caller_filter)
-            .await
-            .map_err(Into::into)
-    }
-
-    #[tracing::instrument(skip_all)]
-    pub async fn earliest_credential_cooldown_remaining_secs(&self) -> SettingsResult<i64> {
-        // Wrap the anyhow error from the io layer into the typed
-        // SettingsError envelope so the public SettingsRuntime API
-        // stays C2-compliant (no raw anyhow on the boundary).
-        crate::io::credentials::earliest_cooldown_remaining_secs(&self.db_pool)
-            .await
-            .map_err(SettingsError::Other)
-    }
-
-    #[tracing::instrument(skip_all)]
-    pub async fn credential_labels_by_ids(
-        &self,
-        ids: &[i64],
-    ) -> SettingsResult<HashMap<i64, String>> {
-        crate::io::credentials::labels_by_ids(&self.db_pool, ids)
-            .await
-            .map_err(Into::into)
     }
 
     #[tracing::instrument(skip_all)]
@@ -402,50 +359,105 @@ impl SettingsRuntime {
     }
 }
 
-async fn hydrate_projects(db_pool: &SqlitePool, old_config: &Config, new_config: &mut Config) {
-    if let Err(err) = crate::io::projects::load_into_config(db_pool, new_config).await {
-        tracing::warn!(module = "config", error = %err, "failed to reload projects after config save");
-        new_config.captain.projects = old_config.captain.projects.clone();
-    }
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
 
-fn validate_captain_workflow(config: &Config) -> Result<(), ApplyConfigError> {
-    crate::io::config_fs::try_load_captain_workflow(
-        &captain_workflow_path(),
-        config.captain.tick_interval_s,
-    )
-    .map(|_| ())
-    .map_err(|err| ApplyConfigError::Validation(err.to_string()))
-}
-
-fn load_workflows_for_mode(
-    config: &mut Config,
-    workflow_mode: WorkflowRuntimeMode,
-) -> anyhow::Result<(CaptainWorkflow, ScoutWorkflow)> {
-    let mut captain_workflow = crate::io::config_fs::load_captain_workflow(
-        &captain_workflow_path(),
-        config.captain.tick_interval_s,
-    )?;
-    let mut scout_workflow =
-        crate::io::config_fs::load_scout_workflow(&scout_workflow_path(), config)?;
-    apply_workflow_mode_overrides(
-        workflow_mode,
-        config,
-        &mut captain_workflow,
-        &mut scout_workflow,
-    );
-    match workflow_mode {
-        WorkflowRuntimeMode::Normal => {}
-        WorkflowRuntimeMode::Dev => tracing::info!(
-            module = "settings-runtime-settings_runtime",
-            "dev mode: all models forced to sonnet"
-        ),
-        WorkflowRuntimeMode::Sandbox => tracing::info!(
-            module = "settings-runtime-settings_runtime",
-            tick_interval_s = config.captain.tick_interval_s,
-            stale_threshold_s = captain_workflow.agent.stale_threshold_s.as_secs(),
-            "sandbox mode: models forced to haiku + timing overrides applied"
-        ),
+    async fn make_runtime() -> SettingsRuntime {
+        let db = global_db::Db::open_in_memory().await.unwrap();
+        SettingsRuntime::new_with_loaded(
+            Config::default(),
+            CaptainWorkflow::compiled_default(),
+            ScoutWorkflow::compiled_default(),
+            db.pool().clone(),
+            WorkflowRuntimeMode::Normal,
+        )
     }
-    Ok((captain_workflow, scout_workflow))
+
+    /// Hot-reload smoke test: write a workflow yaml that bumps
+    /// per_state_limits to a tempfile, call the reload setter, and
+    /// confirm the in-memory captain workflow swaps to the new value.
+    #[tokio::test]
+    async fn reload_picks_up_new_per_state_limits() {
+        let runtime = make_runtime().await;
+        // Default ships with empty per_state_limits.
+        assert!(runtime
+            .load_captain_workflow()
+            .agent
+            .per_state_limits
+            .is_empty());
+
+        // Build YAML that overrides only the agent block plus the
+        // mandatory template / nudge / stream-symptoms keys. Easiest
+        // path: serialize the compiled default, mutate, write to disk.
+        let mut wf = CaptainWorkflow::compiled_default();
+        wf.agent.per_state_limits.insert("clarifying".into(), 7);
+        let yaml = serde_yaml::to_string(&wf).expect("serialize wf");
+
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        write!(tmp.as_file(), "{yaml}").unwrap();
+
+        let swapped = runtime.reload_captain_workflow_from_disk(tmp.path()).await;
+        assert!(swapped, "reload should succeed");
+        let after = runtime.load_captain_workflow();
+        assert_eq!(after.agent.per_state_limits.get("clarifying"), Some(&7));
+    }
+
+    /// On parse failure the reload setter must keep the previous
+    /// in-memory copy and return false — operators editing the YAML
+    /// shouldn't crash the daemon mid-edit.
+    #[tokio::test]
+    async fn reload_keeps_old_copy_on_parse_failure() {
+        let runtime = make_runtime().await;
+        let before_arc = runtime.load_captain_workflow();
+
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        write!(tmp.as_file(), "this: is: not: valid: yaml: [").unwrap();
+
+        let swapped = runtime.reload_captain_workflow_from_disk(tmp.path()).await;
+        assert!(!swapped, "reload should fail and keep old copy");
+        let after_arc = runtime.load_captain_workflow();
+        // Same Arc pointer = no swap occurred.
+        assert!(Arc::ptr_eq(&before_arc, &after_arc));
+    }
+
+    /// Sandbox-mode override re-validation must not crash the
+    /// auto-tick loop. A workflow with a sandbox block whose timing
+    /// overrides violate `validate_agent_config` (e.g. `stale_threshold_s`
+    /// below 2 * the overridden `tick_interval_s`) panics inside
+    /// `apply_workflow_mode_overrides`; the reload setter should catch
+    /// that, log a warning, and keep the previous in-memory copy.
+    #[tokio::test]
+    async fn reload_keeps_old_copy_on_sandbox_override_panic() {
+        let db = global_db::Db::open_in_memory().await.unwrap();
+        let runtime = SettingsRuntime::new_with_loaded(
+            Config::default(),
+            CaptainWorkflow::compiled_default(),
+            ScoutWorkflow::compiled_default(),
+            db.pool().clone(),
+            WorkflowRuntimeMode::Sandbox,
+        );
+        let before_arc = runtime.load_captain_workflow();
+
+        // Sandbox tick_interval=2s but stale_threshold=1s violates the
+        // 2x rule and trips `validate_agent_config` after the override
+        // applies. Compiled-default top-level values are valid on their
+        // own, so `try_load_captain_workflow` succeeds; the panic only
+        // surfaces from the post-override re-validation.
+        let mut wf = CaptainWorkflow::compiled_default();
+        wf.sandbox.tick_interval_s = Some(2);
+        wf.sandbox.stale_threshold_s = Some(1);
+        let yaml = serde_yaml::to_string(&wf).expect("serialize wf");
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        write!(tmp.as_file(), "{yaml}").unwrap();
+
+        let swapped = runtime.reload_captain_workflow_from_disk(tmp.path()).await;
+        assert!(!swapped, "reload should reject panicking sandbox override");
+        let after_arc = runtime.load_captain_workflow();
+        assert!(
+            Arc::ptr_eq(&before_arc, &after_arc),
+            "in-memory workflow must stay on the previous Arc"
+        );
+    }
 }

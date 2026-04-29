@@ -236,7 +236,7 @@ async fn handle_detail_cb(
             bot.api()
                 .answer_callback_query(cb_id, Some("Loading\u{2026}"))
                 .await?;
-            crate::commands::timeline::handle(bot, cid, item_id).await
+            crate::commands::timeline::execute(bot, cid, item_id).await
         }
         _ => {
             bot.api().answer_callback_query(cb_id, None).await?;

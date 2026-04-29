@@ -65,6 +65,18 @@ const REQUIRED_CAPTAIN_INITIAL_PROMPTS: &[&str] = &["worker", "adopted"];
 /// Required prompt keys for scout workflow.
 const REQUIRED_SCOUT_PROMPTS: &[&str] = &["process", "synthesize", "qa", "research", "act"];
 
+/// Allowed keys for `AgentConfig.per_state_limits`. These are the kebab-case
+/// wire names of `ItemStatus` variants with a live CC/Codex session — the
+/// only states where a per-instance concurrency cap makes sense. Mirrors
+/// `captain::ItemStatus::is_active` (kept in sync by hand because the
+/// `settings` crate does not depend on `captain`).
+pub const ALLOWED_PER_STATE_LIMIT_KEYS: &[&str] = &[
+    "in-progress",
+    "clarifying",
+    "captain-reviewing",
+    "captain-merging",
+];
+
 /// Check required keys exist in a template map and collect syntax errors.
 fn validate_template_map(
     scope: &str,
@@ -179,6 +191,22 @@ pub fn try_validate_agent_config(agent: &AgentConfig, tick_interval_s: u64) -> R
         ));
     }
 
+    for (key, value) in &agent.per_state_limits {
+        if !ALLOWED_PER_STATE_LIMIT_KEYS.contains(&key.as_str()) {
+            errors.push(format!(
+                "per_state_limits: unknown state '{}' (allowed: {})",
+                key,
+                ALLOWED_PER_STATE_LIMIT_KEYS.join(", ")
+            ));
+        }
+        if *value == 0 {
+            errors.push(format!(
+                "per_state_limits.{} must be > 0 (zero would block all dispatch in that state)",
+                key
+            ));
+        }
+    }
+
     if errors.is_empty() {
         Ok(())
     } else {
@@ -213,12 +241,13 @@ mod tests {
     use super::*;
 
     fn default_agent() -> AgentConfig {
-        AgentConfig::default()
+        CaptainWorkflow::compiled_default().agent
     }
 
     #[test]
     fn default_agent_config_is_valid() {
-        // Default tick_interval_s = 30, default stale_threshold_s = 1200 → 1200 >= 60 ✓
+        // Bundled YAML's tick_interval_s and stale_threshold_s satisfy the
+        // stale_threshold_s >= 2 * tick_interval_s constraint.
         validate_agent_config(&default_agent(), 30);
     }
 
@@ -292,6 +321,39 @@ mod tests {
         let mut errors = Vec::new();
         validate_stream_symptoms(&wf.stream_symptoms, &mut errors);
         assert!(errors.is_empty(), "compiled default failed: {:?}", errors);
+    }
+
+    #[test]
+    fn empty_per_state_limits_is_valid() {
+        // Default behaviour is unchanged — empty map is the no-op state.
+        let mut ac = default_agent();
+        ac.per_state_limits.clear();
+        validate_agent_config(&ac, 30);
+    }
+
+    #[test]
+    fn known_per_state_keys_are_valid() {
+        let mut ac = default_agent();
+        for key in ALLOWED_PER_STATE_LIMIT_KEYS {
+            ac.per_state_limits.insert((*key).into(), 1);
+        }
+        validate_agent_config(&ac, 30);
+    }
+
+    #[test]
+    #[should_panic(expected = "per_state_limits: unknown state 'queued'")]
+    fn unknown_per_state_key_rejected() {
+        let mut ac = default_agent();
+        ac.per_state_limits.insert("queued".into(), 1);
+        validate_agent_config(&ac, 30);
+    }
+
+    #[test]
+    #[should_panic(expected = "per_state_limits.in-progress must be > 0")]
+    fn zero_per_state_limit_rejected() {
+        let mut ac = default_agent();
+        ac.per_state_limits.insert("in-progress".into(), 0);
+        validate_agent_config(&ac, 30);
     }
 
     #[test]

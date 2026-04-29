@@ -8,6 +8,7 @@ use super::captain_merge::{
     apply_merge_result, check_merge, handle_merge_error, spawn_merge, MergeResult,
 };
 use super::notify::Notifier;
+use crate::service::dispatch_logic;
 
 /// Poll all CaptainMerging items — spawn sessions, check results, handle timeouts.
 ///
@@ -23,6 +24,18 @@ pub(crate) async fn poll_merging_items(
 ) {
     let merge_timeout = workflow.agent.captain_merge_timeout_s;
     let max_merge_retries = workflow.agent.max_merge_retries;
+    let merge_cap = workflow
+        .agent
+        .per_state_limits
+        .get("captain-merging")
+        .copied();
+    // Items already running a merge session occupy the cap. Items pending
+    // a spawn (CaptainMerging without a session id) are candidates and
+    // must not be counted, otherwise each candidate self-blocks.
+    let mut merge_active = dispatch_logic::count_active_states(items)
+        .get("captain-merging")
+        .copied()
+        .unwrap_or(0);
 
     // Categorize CaptainMerging items by state.
     let mut needs_spawn: Vec<usize> = Vec::new();
@@ -136,9 +149,27 @@ pub(crate) async fn poll_merging_items(
                     feedback: "PR already merged on GitHub; skipped merge session".into(),
                 };
                 apply_merge_result(item, &result, notifier, workflow, pool).await;
-            } else {
-                item.last_activity_at = Some(global_types::now_rfc3339());
-                if let Err(e) = spawn_merge(item, config, workflow, notifier, pool).await {
+                continue;
+            }
+            if let Some(cap) = merge_cap {
+                if merge_active >= cap {
+                    tracing::debug!(
+                        module = "captain",
+                        state = "captain-merging",
+                        current = merge_active,
+                        cap = cap,
+                        title = %item.title,
+                        "per-state cap reached — deferring dispatch"
+                    );
+                    continue;
+                }
+            }
+            item.last_activity_at = Some(global_types::now_rfc3339());
+            match spawn_merge(item, config, workflow, notifier, pool).await {
+                Ok(()) => {
+                    merge_active += 1;
+                }
+                Err(e) => {
                     tracing::warn!(module = "captain", item_id = item.id, error = %e, "spawn_merge failed");
                     handle_merge_error(
                         item,

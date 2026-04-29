@@ -73,12 +73,30 @@ pub async fn show_card(bot: &TelegramBot, chat_id: &str, id: i64) -> Result<()> 
 // ── /scout_research ────────────────────────────────────────────────
 
 pub async fn cmd_research(bot: &mut TelegramBot, chat_id: &str, args: &str) -> Result<()> {
+    if args.trim().is_empty() {
+        bot.set_pending_scout_research(chat_id);
+        send_html(
+            bot,
+            chat_id,
+            "Send your research topic below.\nAny other command cancels.",
+        )
+        .await?;
+        return Ok(());
+    }
+
+    bot.clear_pending_scout_research(chat_id);
+    execute_research(bot, chat_id, args).await
+}
+
+/// Run an AI-powered research run for the given topic. Reachable from inline
+/// args and from the drained `pending_scout_research` follow-up text.
+pub async fn execute_research(bot: &mut TelegramBot, chat_id: &str, args: &str) -> Result<()> {
     let topic = args.trim();
     if topic.is_empty() {
         send_html(
             bot,
             chat_id,
-            "Usage: /scout_research &lt;topic&gt;\nExample: /scout_research Rust async patterns",
+            "\u{26a0}\u{fe0f} No topic provided. Try <code>/scout_research &lt;topic&gt;</code>.",
         )
         .await?;
         return Ok(());

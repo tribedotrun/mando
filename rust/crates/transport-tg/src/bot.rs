@@ -123,6 +123,9 @@ pub struct TelegramBot {
     config: Arc<RwLock<Config>>,
     pub(crate) gw: GatewayClient,
     pub(crate) pending_todo: HashSet<String>,
+    pub(crate) pending_timeline: HashSet<String>,
+    pub(crate) pending_scout_add: HashSet<String>,
+    pub(crate) pending_scout_research: HashSet<String>,
     pub(crate) ask_sessions: HashMap<String, Session>,
     pub(crate) input_sessions: HashMap<String, String>,
     pub(crate) pending_reopen: HashMap<String, (String, String)>,
@@ -160,6 +163,9 @@ impl TelegramBot {
             config,
             gw,
             pending_todo: HashSet::new(),
+            pending_timeline: HashSet::new(),
+            pending_scout_add: HashSet::new(),
+            pending_scout_research: HashSet::new(),
             ask_sessions: HashMap::new(),
             input_sessions: HashMap::new(),
             pending_reopen: HashMap::new(),
@@ -305,13 +311,7 @@ impl TelegramBot {
 
         if text.starts_with('/') {
             let (command, args) = parse_command(text);
-            if command != "todo" {
-                self.pending_todo.remove(chat_id);
-            }
-            self.pending_reopen.remove(chat_id);
-            self.pending_rework.remove(chat_id);
-            self.pending_nudge.remove(chat_id);
-            self.act_sessions.remove(chat_id);
+            self.clear_stale_pendings(chat_id, &command);
             return self.dispatch_command(chat_id, &command, args).await;
         }
 
@@ -446,14 +446,6 @@ impl TelegramBot {
                 Some(api_types::TelegramReplyMarkup::InlineKeyboard { rows: vec![] }),
             )
             .await
-    }
-
-    // ── Pending todo ─────────────────────────────────────────────────
-    pub fn set_pending_todo(&mut self, chat_id: &str) {
-        self.pending_todo.insert(chat_id.to_string());
-    }
-    pub fn clear_pending_todo(&mut self, chat_id: &str) {
-        self.pending_todo.remove(chat_id);
     }
 
     // ── Todo confirm ─────────────────────────────────────────────────

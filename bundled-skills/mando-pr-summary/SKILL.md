@@ -40,7 +40,7 @@ Universal items (no heading — Step 5's body supplies it). Append items from th
 
 ## Step 4 — Handle evidence
 
-**Default:** Find local before/after or proof media the session or human saved (images, recordings).
+**Default:** Find local proof media the session or human saved. UI changes ship three artifacts (a before screenshot, an after screenshot, and an after recording); non-UI changes ship terminal output.
 
 **Mando task only:** Also include artifacts attached via `mando todo evidence`.
 

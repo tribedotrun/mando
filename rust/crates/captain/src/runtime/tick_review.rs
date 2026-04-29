@@ -5,6 +5,7 @@ use settings::CaptainWorkflow;
 use settings::Config;
 
 use super::{captain_review, credential_rate_limit, notify::Notifier, timeline_emit};
+use crate::service::dispatch_logic;
 
 #[tracing::instrument(skip_all)]
 pub(super) async fn poll_reviewing_items(
@@ -16,6 +17,19 @@ pub(super) async fn poll_reviewing_items(
     rate_limited: bool,
 ) {
     let review_timeout = workflow.agent.captain_review_timeout_s;
+    let review_cap = workflow
+        .agent
+        .per_state_limits
+        .get("captain-reviewing")
+        .copied();
+    // Count items that already have a live review session — these are the
+    // ones that occupy the cap. Items in CaptainReviewing without a session
+    // id are the candidates we might spawn this tick, so they must not be
+    // counted (else each candidate would self-block on its own spawn).
+    let mut review_active = dispatch_logic::count_active_states(items)
+        .get("captain-reviewing")
+        .copied()
+        .unwrap_or(0);
     for item in items
         .iter_mut()
         .filter(|it| it.status == ItemStatus::CaptainReviewing)
@@ -35,11 +49,24 @@ pub(super) async fn poll_reviewing_items(
                 );
                 continue;
             }
+            if let Some(cap) = review_cap {
+                if review_active >= cap {
+                    tracing::debug!(
+                        module = "captain",
+                        state = "captain-reviewing",
+                        current = review_active,
+                        cap = cap,
+                        title = %item.title,
+                        "per-state cap reached — deferring dispatch"
+                    );
+                    continue;
+                }
+            }
             let trigger = item
                 .captain_review_trigger
                 .unwrap_or(crate::ReviewTrigger::Retry);
             item.last_activity_at = Some(global_types::now_rfc3339());
-            if let Err(e) = captain_review::spawn_review(
+            match captain_review::spawn_review(
                 item,
                 trigger.as_str(),
                 None, // already CaptainReviewing in DB
@@ -50,15 +77,20 @@ pub(super) async fn poll_reviewing_items(
             )
             .await
             {
-                tracing::warn!(module = "captain", item_id = item.id, error = %e, "spawn_review failed");
-                captain_review::handle_review_error(
-                    item,
-                    &format!("spawn_review failed: {e}"),
-                    workflow,
-                    notifier,
-                    pool,
-                )
-                .await;
+                Ok(()) => {
+                    review_active += 1;
+                }
+                Err(e) => {
+                    tracing::warn!(module = "captain", item_id = item.id, error = %e, "spawn_review failed");
+                    captain_review::handle_review_error(
+                        item,
+                        &format!("spawn_review failed: {e}"),
+                        workflow,
+                        notifier,
+                        pool,
+                    )
+                    .await;
+                }
             }
             continue;
         }

@@ -47,6 +47,8 @@ pub(crate) async fn dispatch_new_work(
     .await;
 
     let mut resource_counts = dispatch_logic::count_resources(items);
+    let mut state_counts = dispatch_logic::count_active_states(items);
+    let per_state_limits = &workflow.agent.per_state_limits;
     let max_clarifier_retries = workflow.agent.max_clarifier_retries as i64;
     let mut needs_live_refresh = false;
 
@@ -61,6 +63,8 @@ pub(crate) async fn dispatch_new_work(
             max_workers,
             resource_limits,
             &resource_counts,
+            per_state_limits,
+            &state_counts,
         );
 
         match decision {
@@ -77,6 +81,9 @@ pub(crate) async fn dispatch_new_work(
                         .unwrap_or(dispatch_logic::DEFAULT_RESOURCE)
                         .to_string();
                     *resource_counts.entry(resource).or_insert(0) += 1;
+                    *state_counts
+                        .entry(dispatch_logic::IN_PROGRESS_WIRE.to_string())
+                        .or_insert(0) += 1;
                 } else {
                     items[idx].worker_seq += 1;
                     match super::tick::spawn_worker_for_item(config, &items[idx], workflow, pool)
@@ -118,6 +125,9 @@ pub(crate) async fn dispatch_new_work(
                                 .unwrap_or(dispatch_logic::DEFAULT_RESOURCE)
                                 .to_string();
                             *resource_counts.entry(resource).or_insert(0) += 1;
+                            *state_counts
+                                .entry(dispatch_logic::IN_PROGRESS_WIRE.to_string())
+                                .or_insert(0) += 1;
 
                             // Persist worker fields immediately so the DB
                             // reflects the running worker even if captain
@@ -144,6 +154,11 @@ pub(crate) async fn dispatch_new_work(
                                     .unwrap_or(dispatch_logic::DEFAULT_RESOURCE)
                                     .to_string();
                                 if let Some(c) = resource_counts.get_mut(&resource) {
+                                    *c = c.saturating_sub(1);
+                                }
+                                if let Some(c) =
+                                    state_counts.get_mut(dispatch_logic::IN_PROGRESS_WIRE)
+                                {
                                     *c = c.saturating_sub(1);
                                 }
                                 continue;
@@ -209,6 +224,18 @@ pub(crate) async fn dispatch_new_work(
             dispatch_logic::DispatchDecision::ResourceBlocked(res) => {
                 tracing::debug!(module = "captain", resource = %res, title = %item.title, "resource at limit");
             }
+            dispatch_logic::DispatchDecision::StateBlocked(state) => {
+                let current = state_counts.get(&state).copied().unwrap_or(0);
+                let cap = per_state_limits.get(&state).copied().unwrap_or(0);
+                tracing::debug!(
+                    module = "captain",
+                    state = %state,
+                    current = current,
+                    cap = cap,
+                    title = %item.title,
+                    "per-state cap reached — deferring dispatch"
+                );
+            }
             dispatch_logic::DispatchDecision::NotReady => {}
         }
     }
@@ -249,6 +276,8 @@ pub(crate) async fn dispatch_new_work(
         alerts,
         resource_limits,
         &mut resource_counts,
+        per_state_limits,
+        &mut state_counts,
         pool,
         &already_dispatched,
     )

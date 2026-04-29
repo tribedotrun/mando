@@ -8,11 +8,15 @@ import {
   writeFileSync,
 } from 'fs';
 import path from 'path';
-import { execFileSync, execSync } from 'child_process';
+import { exec, execFile, execFileSync } from 'child_process';
+import { promisify } from 'util';
 import { getAppBundlePath, getPendingPath, getStagingDir } from '#main/updater/config/updater';
 import { pendingUpdateSchema, type PendingUpdate } from '#main/updater/types/updater';
 import { errCode } from '#main/updater/service/updater';
 import { parseJsonTextWith } from '#result';
+
+const execFileAsync = promisify(execFile);
+const execAsync = promisify(exec);
 
 export function downloadPath(): string {
   return path.join(getStagingDir(), 'update.zip');
@@ -49,17 +53,17 @@ export function extractAndStage(zipPath: string): string {
   throw new Error('No .app bundle found in ZIP');
 }
 
-function verifyCodeSignature(appPath: string): void {
-  execFileSync('codesign', ['--verify', '--deep', '--strict', appPath], {
+async function verifyCodeSignature(appPath: string): Promise<void> {
+  await execFileAsync('codesign', ['--verify', '--deep', '--strict', appPath], {
     timeout: 30_000,
   });
 }
 
-export function applyStagedUpdate(newAppPath: string): void {
+export async function applyStagedUpdate(newAppPath: string): Promise<void> {
   const currentApp = getAppBundlePath();
   const oldAppPath = path.join(getStagingDir(), 'Mando-old.app');
 
-  verifyCodeSignature(newAppPath);
+  await verifyCodeSignature(newAppPath);
   if (existsSync(oldAppPath)) rmSync(oldAppPath, { recursive: true });
 
   try {
@@ -83,7 +87,7 @@ export function applyStagedUpdate(newAppPath: string): void {
         cause: err,
       });
     }
-    execSync(
+    await execAsync(
       `osascript -e 'do shell script "rm -rf \\"${currentApp}\\"" with administrator privileges'`,
       { timeout: 60_000 },
     );

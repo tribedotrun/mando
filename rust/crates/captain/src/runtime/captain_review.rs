@@ -301,6 +301,9 @@ pub(crate) async fn spawn_review(
     let has_before_fix = evidence.has_before_fix;
     let has_after_fix = evidence.has_after_fix;
     let has_cannot_reproduce = evidence.has_cannot_reproduce;
+    let has_before_screenshot = evidence.has_before_screenshot;
+    let has_after_screenshot = evidence.has_after_screenshot;
+    let has_after_recording = evidence.has_after_recording;
     let intervention_count_str = item.intervention_count.to_string();
     let trigger_flags: Vec<(String, String)> = TRIGGERS
         .iter()
@@ -388,6 +391,22 @@ pub(crate) async fn spawn_review(
         vars.insert(
             "has_cannot_reproduce",
             if has_cannot_reproduce { "true" } else { "false" }.into(),
+        );
+        // Universal UI evidence gates. Each intersects extension AND
+        // `--kind` tag so a `--kind before` terminal log cannot satisfy
+        // the UI before-screenshot rule. Recording is required only on
+        // the after side.
+        vars.insert(
+            "has_before_screenshot",
+            if has_before_screenshot { "true" } else { "false" }.into(),
+        );
+        vars.insert(
+            "has_after_screenshot",
+            if has_after_screenshot { "true" } else { "false" }.into(),
+        );
+        vars.insert(
+            "has_after_recording",
+            if has_after_recording { "true" } else { "false" }.into(),
         );
         // no_pr tasks have no diff, no PR, no merge step — the worker
         // transcript and any DB-backed evidence is the entire deliverable.

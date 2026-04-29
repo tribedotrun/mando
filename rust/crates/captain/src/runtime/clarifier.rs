@@ -521,6 +521,29 @@ mod tests {
         assert!(!prompt.contains("Attached Images"));
     }
 
+    /// Guards the prompt-side fix for jargon-heavy human-facing questions.
+    /// If this section is removed by mistake, the LLM will drift back to
+    /// asking devs-to-devs questions referencing function/file names.
+    #[test]
+    fn build_prompt_includes_human_phrasing_guidance() {
+        let workflow = CaptainWorkflow::compiled_default();
+        let item = Task::new("Fix bug");
+        let prompt = build_clarifier_prompt(&item, None, &workflow).unwrap();
+        assert!(prompt.contains("Phrasing the questions you ask the human"));
+        assert!(prompt.contains("plain English"));
+        assert!(prompt.contains("Avoid code identifiers"));
+    }
+
+    #[test]
+    fn build_interactive_prompt_includes_plain_english_rule() {
+        let workflow = CaptainWorkflow::compiled_default();
+        let item = Task::new("Fix bug");
+        let prompt =
+            build_interactive_clarifier_turn_prompt(&item, &workflow, "the answer", None).unwrap();
+        assert!(prompt.contains("plain English"));
+        assert!(prompt.contains("Avoid code identifiers"));
+    }
+
     #[test]
     fn parse_unknown_status_escalates() {
         let json = r#"{"status":"pending","context":"ctx"}"#;
