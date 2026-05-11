@@ -13,6 +13,9 @@ use crate::gateway_paths as paths;
 
 use super::action::status_short;
 
+const RECLARIFYING_FOLLOW_UP_NOTE: &str =
+    "We'll send the next question here when ready. Tap Answer or use /action to reply.";
+
 // ── Input text handler (multi-turn clarification) ───────────────────
 
 /// Handle plain-text messages for active input session. Returns `true` if consumed.
@@ -88,14 +91,32 @@ pub async fn handle_input_text(bot: &TelegramBot, chat_id: &str, text: &str) -> 
         match bot
             .gw()
             .post_typed::<_, api_types::ClarifyResponse>(
-                &paths::task_clarify(item_id),
+                &paths::task_clarify_async(item_id),
                 &json!({"answer": text}),
             )
             .await
         {
-            Ok(resp) => {
-                let resp_val = serde_json::to_value(&resp).unwrap_or_default();
-                handle_clarify_response(bot, chat_id, ack_mid, &item_title, &resp_val).await;
+            Ok(_) => {
+                // Async ack: the daemon committed the answer and spawned the
+                // follow-up CC call on its task tracker. The next question (or
+                // ready/escalate state) arrives via the existing TG notify
+                // path, so close this session. The user re-engages via the
+                // notification's Answer button or `/action` when the next
+                // message lands.
+                bot.close_input_session(chat_id).await;
+                global_infra::best_effort!(
+                    bot.edit_message(
+                        chat_id,
+                        ack_mid,
+                        &format!(
+                            "\u{1f9ed} Got your answer for <b>{}</b>.\n\n{}",
+                            escape_html(&item_title),
+                            RECLARIFYING_FOLLOW_UP_NOTE,
+                        ),
+                    )
+                    .await,
+                    "action_sessions: ack edit after async clarify"
+                );
             }
             Err(e) => {
                 info!("[input] clarify failed for '{}': {}", item_title, e);
@@ -107,81 +128,6 @@ pub async fn handle_input_text(bot: &TelegramBot, chat_id: &str, text: &str) -> 
     }
 
     Ok(true)
-}
-
-async fn handle_clarify_response(
-    bot: &TelegramBot,
-    chat_id: &str,
-    mid: i64,
-    title: &str,
-    resp: &serde_json::Value,
-) {
-    let status = resp.get("status").and_then(|v| v.as_str()).unwrap_or("");
-    match status {
-        "ready" => {
-            bot.close_input_session(chat_id).await;
-            global_infra::best_effort!(
-                bot.edit_message(
-                    chat_id,
-                    mid,
-                    &format!("\u{2705} Clarified <b>{}</b>.", escape_html(title)),
-                )
-                .await,
-                "action_sessions: bot .edit_message( chat_id, mid, &format!('\u{2705} Clarifie"
-            );
-        }
-        "clarifying" | "escalate" => {
-            let q = resp
-                .get("questions")
-                .and_then(|v| v.as_str())
-                .unwrap_or("More details?");
-            global_infra::best_effort!(
-                bot.edit_message(
-                    chat_id,
-                    mid,
-                    &format!(
-                        "\u{1f9ed} {}\n\nReply here, or /action cancel.",
-                        escape_html(q)
-                    ),
-                )
-                .await,
-                "action_sessions: bot .edit_message( chat_id, mid, &format!( '\u{1f9ed} {}\n\n"
-            );
-        }
-        "needs-clarification" => {
-            let error = resp
-                .get("error")
-                .and_then(|v| v.as_str())
-                .unwrap_or("LLM unavailable");
-            let q = resp.get("questions").and_then(|v| v.as_str()).unwrap_or("");
-            let msg = if q.is_empty() {
-                format!(
-                    "\u{26a0}\u{fe0f} Answer saved, re-clarification failed ({}).",
-                    escape_html(error)
-                )
-            } else {
-                format!(
-                    "\u{26a0}\u{fe0f} Answer saved, re-clarification failed.\n\n{}\n\nReply or /action cancel.",
-                    escape_html(q)
-                )
-            };
-            global_infra::best_effort!(
-                bot.edit_message(chat_id, mid, &msg).await,
-                "action_sessions: bot.edit_message(chat_id, mid, &msg).await"
-            );
-        }
-        _ => {
-            global_infra::best_effort!(
-                bot.edit_message(
-                    chat_id,
-                    mid,
-                    &format!("\u{2705} Updated <b>{}</b>.", escape_html(title)),
-                )
-                .await,
-                "action_sessions: bot .edit_message( chat_id, mid, &format!('\u{2705} Updated "
-            );
-        }
-    }
 }
 
 async fn append_context_fallback(

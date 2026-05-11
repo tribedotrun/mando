@@ -66,6 +66,16 @@ impl SettingsRuntime {
     }
 
     #[tracing::instrument(skip_all)]
+    pub async fn find_credential_by_label(
+        &self,
+        label: &str,
+    ) -> SettingsResult<Option<(i64, String)>> {
+        crate::io::credentials::find_by_label(&self.db_pool, label)
+            .await
+            .map_err(Into::into)
+    }
+
+    #[tracing::instrument(skip_all)]
     pub async fn remove_credential(&self, id: i64) -> SettingsResult<bool> {
         let removed = crate::io::credentials::delete(&self.db_pool, id).await?;
         if removed {

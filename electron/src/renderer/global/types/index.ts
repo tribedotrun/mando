@@ -196,5 +196,6 @@ declare global {
     mandoAPI: import('#preload/index').MandoAPI;
     __devInspectorCopy?: () => void;
     __buildComponentMap?: () => unknown[];
+    __mandoTestNotificationClick?: (kind: import('#shared/notifications').NotificationKind) => void;
   }
 }

@@ -582,11 +582,11 @@ mod tests {
 
         let cost = session_cost_or_estimate(&path);
         let estimate = cost.total_cost_usd.expect("estimate must be populated");
-        // 1000 input * $15/Mtok + 500 output * $75/Mtok + 50k cache-read * $1.5/Mtok
-        // = 0.015 + 0.0375 + 0.075 = 0.1275
+        // 1000 input * $5/Mtok + 500 output * $25/Mtok + 50k cache-read * $0.5/Mtok
+        // = 0.005 + 0.0125 + 0.025 = 0.0425
         assert!(
-            (estimate - 0.1275).abs() < 0.0001,
-            "expected ~0.1275, got {estimate}"
+            (estimate - 0.0425).abs() < 0.0001,
+            "expected ~0.0425, got {estimate}"
         );
 
         std::fs::remove_file(&path).ok();
@@ -641,11 +641,11 @@ mod tests {
             ]),
         };
 
-        // Opus: 0.1M * $15 + 0.05M * $75 = 1.5 + 3.75 = 5.25
+        // Opus: 0.1M * $5 + 0.05M * $25 = 0.5 + 1.25 = 1.75
         // Haiku: 1M * $1 + 0.55M * $5 = 1.0 + 2.75 = 3.75
-        // Total: 9.00
+        // Total: 5.50
         let total = cost.estimated_cost_usd();
-        assert!((total - 9.0).abs() < 0.0001, "got {total}");
+        assert!((total - 5.5).abs() < 0.0001, "got {total}");
     }
 
     #[test]

@@ -16,13 +16,18 @@ use crate::AppState;
 
 /// POST /api/tasks/{id}/clarify (JSON or multipart with optional images).
 ///
-/// Default (`?wait=true` or absent): synchronous — the response carries the
-/// reclarifier outcome. Used by `mando todo input` and the Telegram bot,
-/// both of which render the immediate result.
+/// Default (`?wait=true` or absent): synchronous; the response carries the
+/// reclarifier outcome. Used by `mando todo input` (CLI), which renders
+/// the immediate result. Not safe for callers whose HTTP client has a
+/// short timeout — clarifier rounds take minutes.
 ///
 /// `?wait=false`: returns as soon as the answer is committed and the
-/// follow-up CC reclarify call is spawned. The renderer uses this to keep
-/// the clarification form responsive; the next state arrives via SSE.
+/// follow-up CC reclarify call is spawned. Used by the renderer (to keep
+/// the clarification form responsive) and the Telegram bot (whose shared
+/// client times out at 60s, far short of clarifier latency). The next
+/// state arrives via SSE for the renderer and via typed notification for
+/// TG; rollback after async failure also emits a `NeedsClarification`
+/// notification so TG can re-prompt.
 #[crate::instrument_api(method = "POST", path = "/api/tasks/{id}/clarify")]
 pub(crate) async fn post_task_clarify(
     State(state): State<AppState>,
@@ -395,5 +400,32 @@ fn spawn_inline_reclarify(
         }
 
         state.captain.broadcast_task_update(id).await;
+
+        // If rollback fired, the task is back at NeedsClarification. The
+        // renderer learns via the Tasks SSE envelope above, but the
+        // Telegram bot drops Tasks events and listens only to typed
+        // Notifications. Without this, a TG-originated clarify whose
+        // async reclarifier later failed would leave the user with the
+        // optimistic ack and no follow-up. The `NeedsClarification`
+        // notification renders an "Answer" inline button in TG and a
+        // toast in the renderer.
+        if matches!(item.status(), captain::ItemStatus::NeedsClarification) {
+            let notifier = captain::Notifier::new(state.captain.bus().clone());
+            let msg = format!(
+                "\u{26a0}\u{fe0f} Re-clarification failed for <b>{}</b>. Tap Answer to retry.",
+                global_infra::html::escape_html(&item.title),
+            );
+            notifier
+                .notify_typed(
+                    &msg,
+                    api_types::NotifyLevel::High,
+                    api_types::NotificationKind::NeedsClarification {
+                        item_id: id.to_string(),
+                        questions: None,
+                    },
+                    Some(&id.to_string()),
+                )
+                .await;
+        }
     });
 }

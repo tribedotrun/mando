@@ -9,9 +9,9 @@
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::Json;
-use settings::CodexCredentialError;
+use settings::{CodexActiveError, CodexCredentialError};
 
-use crate::response::{error_response, internal_error, ApiCreated, ApiError};
+use crate::response::{error_response, internal_error, internal_error_with, ApiCreated, ApiError};
 use crate::{ApiRouter, AppState};
 
 pub(crate) fn codex_credential_routes() -> ApiRouter<AppState> {
@@ -94,14 +94,21 @@ async fn add_codex_credential(
                 ),
             ))
         }
+        Err(CodexCredentialError::DuplicateLabel {
+            label,
+            id,
+            provider,
+        }) => Err(error_response(
+            StatusCode::CONFLICT,
+            &format!(
+                "label {label:?} is already in use by an existing {provider} credential (id={id})"
+            ),
+        )),
         Err(CodexCredentialError::Probe(e)) => Err(error_response(
             StatusCode::BAD_GATEWAY,
             &format!("upstream usage probe failed: {e}"),
         )),
-        Err(e) => Err(internal_error(
-            anyhow::Error::msg(e.to_string()),
-            "failed to store codex credential",
-        )),
+        Err(e) => Err(internal_error(e, "failed to store codex credential")),
     }
 }
 
@@ -118,7 +125,14 @@ async fn get_codex_active(
                 matched_credential_id,
             }))
         }
-        Err(e) => Err(internal_error(e, "failed to read codex active account")),
+        Err(CodexActiveError::Read(read_err)) => Err(internal_error_with(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            &read_err,
+            &format!("could not read ~/.codex/auth.json: {read_err}"),
+        )),
+        Err(CodexActiveError::Db(e)) => {
+            Err(internal_error(e, "failed to look up active codex account"))
+        }
     }
 }
 
@@ -154,9 +168,16 @@ async fn activate_codex_credential(
             StatusCode::UNAUTHORIZED,
             &format!("stored refresh token permanently invalid ({reason}); re-add the credential",),
         )),
-        Err(e) => Err(internal_error(
-            anyhow::Error::msg(e.to_string()),
-            "failed to activate codex credential",
+        Err(CodexCredentialError::Io(e)) => Err(internal_error_with(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            &e,
+            &format!("could not write ~/.codex/auth.json: {e}"),
         )),
+        Err(CodexCredentialError::Serialize(e)) => Err(internal_error_with(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            &e,
+            &format!("could not serialize auth.json: {e}"),
+        )),
+        Err(e) => Err(internal_error(e, "failed to activate codex credential")),
     }
 }

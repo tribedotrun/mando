@@ -69,6 +69,18 @@ pub async fn get_row_by_id(pool: &SqlitePool, id: i64) -> Result<Option<Credenti
     Ok(row)
 }
 
+/// Look up a credential id + provider by `label`. Used by add paths to
+/// pre-empt the table-wide `label TEXT NOT NULL UNIQUE` constraint with a
+/// typed conflict instead of a generic SQL error.
+pub async fn find_by_label(pool: &SqlitePool, label: &str) -> Result<Option<(i64, String)>> {
+    let row: Option<(i64, String)> =
+        sqlx::query_as("SELECT id, provider FROM credentials WHERE label = ?")
+            .bind(label)
+            .fetch_optional(pool)
+            .await?;
+    Ok(row)
+}
+
 /// Get the access token for a credential by ID.
 pub async fn get_token_by_id(pool: &SqlitePool, id: i64) -> Result<Option<String>> {
     let token: Option<(String,)> =

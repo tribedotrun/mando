@@ -26,12 +26,16 @@ External (idempotent — only post each if not already on the PR):
 1. `@codex review this PR`
 2. `cursor review`
 
-Internal (skip if `--fast`; otherwise idempotent — cache the reviewed SHA in `/tmp/.x-pr-reviewed-${PR_NUM}`). Wait for results; do NOT background:
+Internal (skip if `--fast`; otherwise idempotent — cache the reviewed SHA in `/tmp/.x-pr-reviewed-${PR_NUM}`). If the cache file already contains the current PR head SHA, skip this internal-review block. Otherwise wait for results; do NOT background:
 
-1. `pr-review-toolkit:code-reviewer` on the diff.
-2. `pr-review-toolkit:silent-failure-hunter` if the change touches error handling.
+1. **Claude Code runtime:** run `pr-review-toolkit:code-reviewer` on the diff.
+2. **Claude Code runtime:** run `pr-review-toolkit:silent-failure-hunter` if the change touches error handling.
+3. **Codex runtime:** spawn a review-only Codex subagent for general code review of the PR diff against `origin/main`. Tell it to read `AGENTS.md` / `CLAUDE.md`, make no edits, and return numbered findings with severity, confidence, file:line, impact, and exact fix.
+4. **Codex runtime:** if the change touches error handling, spawn a second review-only Codex subagent using the silent-failure-hunter contract: find swallowed errors, broad/empty catch blocks, log-and-continue paths, hidden fallbacks, unawaited async work, retry exhaustion without user-visible failure, and missing log/user-feedback context. Tell it to make no edits and return numbered findings with severity, confidence, file:line, hidden failure, user/debugging impact, and exact fix.
 
-Hold findings; address them in step 4.
+No fallback: if the current runtime cannot run its required internal reviewer(s), stop and report that internal review could not be completed; do not run an inline substitute and do not proceed to step 4.
+
+Hold findings; address them in step 4. After all required internal reviews complete for the current PR head SHA, write that SHA to `/tmp/.x-pr-reviewed-${PR_NUM}`.
 
 ## Step 4 — Address everything until merge-ready
 

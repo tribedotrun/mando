@@ -32,8 +32,13 @@ pub fn task_item(id: impl Display) -> String {
     format!("{TASKS}/{id}")
 }
 
-pub fn task_clarify(id: impl Display) -> String {
-    format!("{TASKS}/{id}/clarify")
+/// Async clarify: ack as soon as the answer is committed; the daemon runs
+/// the follow-up CC reclarify on its task tracker. TG must use this. Its
+/// shared HTTP client times out at 60s while clarifier work takes minutes,
+/// and a synchronous call gets cancelled on TG-side timeout, leaving the
+/// task stranded in `Clarifying` with no rollback.
+pub fn task_clarify_async(id: impl Display) -> String {
+    format!("{TASKS}/{id}/clarify?wait=false")
 }
 
 pub fn task_history(id: impl Display) -> String {
@@ -83,13 +88,14 @@ pub fn processed_scout_items(per_page: usize) -> String {
 mod tests {
     use super::{
         processed_scout_items, scout_act, scout_item, scout_items_with_status, scout_telegraph,
-        task_item, TASKS,
+        task_clarify_async, task_item, TASKS,
     };
 
     #[test]
     fn builds_task_paths() {
         assert_eq!(TASKS, "/api/tasks");
         assert_eq!(task_item(42), "/api/tasks/42");
+        assert_eq!(task_clarify_async(42), "/api/tasks/42/clarify?wait=false");
     }
 
     #[test]
