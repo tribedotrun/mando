@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useSidebar } from '#renderer/global/runtime/SidebarContext';
 import type { SidebarChild } from '#renderer/global/service/utils';
 
@@ -14,8 +14,15 @@ export function useSidebarProjectItem({ name, items }: Args) {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const hasActiveWt = items.some((c) => c.wb.worktree === state.activeTerminalCwd) ?? false;
   const [expanded, setExpanded] = useState(hasActiveWt);
-  // Auto-expand when this project gains the active workbench.
-  if (hasActiveWt && !expanded) setExpanded(true);
+  // Auto-expand only when the active workbench transitions into this project,
+  // so a manual collapse sticks while the same active workbench is still here.
+  // React permits same-component setState during render for this "store
+  // previous props" pattern (see useScoutPage for the same shape).
+  const prevActiveCwdRef = useRef(state.activeTerminalCwd);
+  if (state.activeTerminalCwd !== prevActiveCwdRef.current && hasActiveWt && !expanded) {
+    setExpanded(true);
+  }
+  prevActiveCwdRef.current = state.activeTerminalCwd;
   const [renamingWbId, setRenamingWbId] = useState<number | null>(null);
 
   const commitRename = async (value: string) => {

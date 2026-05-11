@@ -315,6 +315,19 @@ async fn add_setup_token(
 
     let expires_at = decode_jwt_expiry(&token);
 
+    match state.settings.find_credential_by_label(&label).await {
+        Ok(Some((existing_id, existing_provider))) => {
+            return Err(error_response(
+                StatusCode::CONFLICT,
+                &format!(
+                    "label {label:?} is already in use by an existing {existing_provider} credential (id={existing_id})"
+                ),
+            ));
+        }
+        Ok(None) => {}
+        Err(e) => return Err(internal_error(e, "failed to check credential label")),
+    }
+
     match state
         .settings
         .store_credential(&label, &token, expires_at)
@@ -328,6 +341,22 @@ async fn add_setup_token(
                 label: Some(label),
             }))
         }
-        Err(e) => Err(internal_error(e, "failed to store credential")),
+        Err(e) => {
+            // Race window: a concurrent add with the same label could slip
+            // past the pre-check above and lose to the table-wide UNIQUE
+            // constraint here. Re-query so the racing caller still sees 409
+            // instead of a generic 500.
+            if let Ok(Some((existing_id, existing_provider))) =
+                state.settings.find_credential_by_label(&label).await
+            {
+                return Err(error_response(
+                    StatusCode::CONFLICT,
+                    &format!(
+                        "label {label:?} is already in use by an existing {existing_provider} credential (id={existing_id})"
+                    ),
+                ));
+            }
+            Err(internal_error(e, "failed to store credential"))
+        }
     }
 }

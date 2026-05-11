@@ -83,8 +83,6 @@ pub fn rate_for_model(model: &str) -> ModelRate {
         };
     }
 
-    // Opus: top-tier. Also the fallback for unknown models — see module
-    // docstring for the overestimate-is-safer rationale.
     if lower.contains("opus") {
         return opus_rate();
     }
@@ -94,10 +92,10 @@ pub fn rate_for_model(model: &str) -> ModelRate {
 
 fn opus_rate() -> ModelRate {
     ModelRate {
-        input_per_mtok: 15.0,
-        output_per_mtok: 75.0,
-        cache_creation_per_mtok: 18.75,
-        cache_read_per_mtok: 1.5,
+        input_per_mtok: 5.0,
+        output_per_mtok: 25.0,
+        cache_creation_per_mtok: 6.25,
+        cache_read_per_mtok: 0.5,
     }
 }
 
@@ -114,9 +112,9 @@ mod tests {
     #[test]
     fn opus_rate_matches_public_pricing() {
         let rate = rate_for_model("claude-opus-4-7");
-        assert!((rate.input_per_mtok - 15.0).abs() < 0.01);
-        assert!((rate.output_per_mtok - 75.0).abs() < 0.01);
-        assert!((rate.cache_read_per_mtok - 1.5).abs() < 0.01);
+        assert!((rate.input_per_mtok - 5.0).abs() < 0.01);
+        assert!((rate.output_per_mtok - 25.0).abs() < 0.01);
+        assert!((rate.cache_read_per_mtok - 0.5).abs() < 0.01);
     }
 
     #[test]

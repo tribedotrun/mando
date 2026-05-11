@@ -186,7 +186,7 @@ pub(crate) const REGISTERED_COMMANDS: &[CommandSpec] = &[
     CommandSpec {
         name: "stop",
         aliases: &[],
-        help_short: "Stop one task (stop <id>) or drain all workers (stop)",
+        help_short: "Stop one task (stop [id]) or drain all workers (stop)",
         visibility: CommandVisibility::Public,
         feature_gate: FeatureGate::Always,
         section: HelpSection::System,

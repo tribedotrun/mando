@@ -1,14 +1,13 @@
 import React, { useCallback, useRef } from 'react';
 import { Outlet, useNavigate, useRouterState } from '@tanstack/react-router';
 import { useGlobalKeyboard } from '#renderer/global/runtime/useKeyboardShortcuts';
-import { useMainShortcuts, useNotificationClicks } from '#renderer/global/runtime/useNativeActions';
-import { useTaskWorkbenchLookup } from '#renderer/global/runtime/useTaskCacheLookup';
+import { useMainShortcuts } from '#renderer/global/runtime/useNativeActions';
+import { useNotificationClickRouter } from '#renderer/global/runtime/useNotificationClickRouter';
 import { useClaudeCodeVerification } from '#renderer/global/runtime/useClaudeCodeVerification';
 import { useMountEffect } from '#renderer/global/runtime/useMountEffect';
 import { useUIStore } from '#renderer/global/runtime/useUIStore';
 import { DevInfoBar } from '#renderer/global/ui/DevInfoBar';
 import { RootShellOverlays } from '#renderer/app/routes/RootShellOverlays';
-import log from '#renderer/global/service/logger';
 import { TAB_ROUTES } from '#renderer/global/service/routeHelpers';
 import { router } from '#renderer/app/router';
 import type { Tab } from '#renderer/app/Sidebar';
@@ -78,31 +77,8 @@ export function RootFrame(): React.ReactElement {
     if (action === 'add-task') openCreateTask();
   });
 
-  // Desktop notification click -> navigate to workbench
-  const lookupWorkbench = useTaskWorkbenchLookup();
-  const lookupRef = useRef(lookupWorkbench);
-  lookupRef.current = lookupWorkbench;
-  useNotificationClicks((data) => {
-    if (data.item_id) {
-      const id = Number(data.item_id);
-      if (!Number.isNaN(id)) {
-        const wbId = lookupRef.current(id);
-        if (wbId) {
-          void navigateRef.current({
-            to: '/wb/$workbenchId',
-            params: { workbenchId: String(wbId) },
-          });
-          return;
-        }
-        log.warn('notification click: no workbench for task', { taskId: id });
-        void navigateRef.current({ to: '/' });
-        return;
-      }
-    }
-    if (data.kind.type === 'RateLimited') {
-      void navigateRef.current({ to: '/' });
-    }
-  });
+  // Desktop notification click -> route by NotificationKind (task→workbench, scout→reader)
+  useNotificationClickRouter();
 
   // Command palette actions
   const handlePaletteAction = useCallback(

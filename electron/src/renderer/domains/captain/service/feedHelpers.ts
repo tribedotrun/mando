@@ -7,38 +7,50 @@ export type RenderableFeedItem =
   | FeedItem
   | { type: 'evidence-group'; timestamp: string; artifacts: TaskArtifact[] };
 
-/** Collapse runs of consecutive evidence artifacts into a single
- *  `evidence-group` item. Any non-evidence feed item (timeline event,
- *  message, work_summary artifact) breaks the run. The group preserves
- *  artifact order and uses the latest artifact's timestamp so the merged
- *  card sorts where the most recent member already sits. */
+/** Merge the LAST TWO feed items into a single `evidence-group` iff they
+ *  form a labeled before/after pair — both are evidence artifacts, one
+ *  carries a `before_fix` media kind, the other carries `after_fix`. Any
+ *  other shape of trailing items stays chronological so iterative
+ *  re-shoots (task 103) and exploratory untyped uploads preceding a pair
+ *  are not re-fused into the merged card. PR #1038's pairing case
+ *  (two consecutive `mando todo evidence --kind` calls) still merges.
+ *
+ *  Suppressed timeline events (`evidence_updated`, `work_summary_updated`,
+ *  `human_ask`) are dropped up front: FeedBlocks renders them as null but
+ *  they still occupy slots in `feedItems`, and the daemon emits
+ *  `evidence_updated` immediately after each upload — without filtering,
+ *  it would always be the tail item and starve the last-pair check. */
 export function groupEvidenceArtifacts(feedItems: FeedItem[]): RenderableFeedItem[] {
-  const out: RenderableFeedItem[] = [];
-  let buffer: TaskArtifact[] = [];
+  const visible = feedItems.filter(
+    (fi) => !(fi.type === 'timeline' && shouldSuppressTimelineEvent(fi.data.data.event_type)),
+  );
+  const n = visible.length;
+  if (n < 2) return visible;
 
-  const flushBuffer = () => {
-    if (buffer.length === 0) return;
-    if (buffer.length === 1) {
-      const only = buffer[0];
-      out.push({ type: 'artifact', timestamp: only.created_at, data: only });
-    } else {
-      const latest = buffer.reduce((acc, a) => (a.created_at > acc ? a.created_at : acc), '');
-      out.push({ type: 'evidence-group', timestamp: latest, artifacts: [...buffer] });
-    }
-    buffer = [];
-  };
-
-  for (const fi of feedItems) {
-    const isEvidence = fi.type === 'artifact' && fi.data.artifact_type === 'evidence';
-    if (isEvidence) {
-      buffer.push(fi.data);
-    } else {
-      flushBuffer();
-      out.push(fi);
-    }
+  const last = visible[n - 1];
+  const prev = visible[n - 2];
+  if (
+    last.type !== 'artifact' ||
+    last.data.artifact_type !== 'evidence' ||
+    prev.type !== 'artifact' ||
+    prev.data.artifact_type !== 'evidence'
+  ) {
+    return visible;
   }
-  flushBuffer();
-  return out;
+
+  const lastKinds = new Set((last.data.media ?? []).map((m) => m.kind));
+  const prevKinds = new Set((prev.data.media ?? []).map((m) => m.kind));
+  const isPair =
+    (lastKinds.has('before_fix') && prevKinds.has('after_fix')) ||
+    (lastKinds.has('after_fix') && prevKinds.has('before_fix'));
+  if (!isPair) return visible;
+
+  const latest =
+    last.data.created_at > prev.data.created_at ? last.data.created_at : prev.data.created_at;
+  return [
+    ...visible.slice(0, n - 2),
+    { type: 'evidence-group', timestamp: latest, artifacts: [prev.data, last.data] },
+  ];
 }
 
 export const EVENT_ICON_MAP: Record<string, ItemStatus> = {

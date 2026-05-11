@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use anyhow::Result;
 use tracing::{debug, warn};
 
-use crate::io::codex_credentials::{self, AuthJsonError, CodexJwtClaims};
+use crate::io::codex_credentials::{self, AuthJsonError, CodexJwtClaims, ReadActiveError};
 use crate::io::codex_oauth_refresh;
 use crate::io::codex_probe::{self, CodexProbeOutcome};
 use crate::io::credentials;
@@ -35,6 +35,12 @@ pub enum CodexCredentialError {
     NoAccountId,
     #[error("a Codex credential for account {0} already exists (id={1})")]
     DuplicateAccount(String, i64),
+    #[error("a {provider} credential with label {label:?} already exists (id={id})")]
+    DuplicateLabel {
+        label: String,
+        id: i64,
+        provider: String,
+    },
     #[error("upstream usage probe failed: {0}")]
     Probe(#[from] ProbeError),
     #[error("database error: {0}")]
@@ -51,6 +57,19 @@ pub enum CodexCredentialError {
     MissingTokens,
     #[error("credential id={0} not found")]
     NotFound(i64),
+}
+
+/// Why we couldn't compute the "active Codex account" badge. Splits the
+/// `~/.codex/auth.json` read path (which carries a bounded `std::io::Error`
+/// or `AuthJsonError` and is safe to surface verbatim to the UI) from the
+/// DB lookup path (which wraps `sqlx::Error` via anyhow and could carry
+/// query text — kept opaque to clients).
+#[derive(Debug, thiserror::Error)]
+pub enum CodexActiveError {
+    #[error(transparent)]
+    Read(#[from] ReadActiveError),
+    #[error("database lookup failed: {0}")]
+    Db(#[from] anyhow::Error),
 }
 
 impl SettingsRuntime {
@@ -82,6 +101,16 @@ impl SettingsRuntime {
             ));
         }
 
+        if let Some((existing_id, existing_provider)) =
+            credentials::find_by_label(&self.db_pool, label).await?
+        {
+            return Err(CodexCredentialError::DuplicateLabel {
+                label: label.to_string(),
+                id: existing_id,
+                provider: existing_provider,
+            });
+        }
+
         // Probe immediately to confirm the tokens are live and seed
         // plan_type/credits state. If the probe says 401, surface that —
         // a freshly-pasted auth.json that's already dead is a paste mistake.
@@ -94,7 +123,7 @@ impl SettingsRuntime {
         // refresh path returns a permanent error (`mark_expired`), so
         // freshly-added Codex credentials always start un-expired.
 
-        let id = codex_credentials::insert_codex(
+        let id = match codex_credentials::insert_codex(
             &self.db_pool,
             label,
             &parsed.access_token,
@@ -104,7 +133,26 @@ impl SettingsRuntime {
             plan_type.as_deref(),
             None,
         )
-        .await?;
+        .await
+        {
+            Ok(id) => id,
+            Err(insert_err) => {
+                // Race window: a concurrent add with the same label could
+                // slip past the pre-check above and lose to the table-wide
+                // UNIQUE constraint here. Re-query so the racing caller still
+                // sees a typed DuplicateLabel instead of a generic 500.
+                if let Ok(Some((existing_id, existing_provider))) =
+                    credentials::find_by_label(&self.db_pool, label).await
+                {
+                    return Err(CodexCredentialError::DuplicateLabel {
+                        label: label.to_string(),
+                        id: existing_id,
+                        provider: existing_provider,
+                    });
+                }
+                return Err(CodexCredentialError::Db(insert_err));
+            }
+        };
 
         // Best-effort persistence of the snapshot fields. If it fails the
         // row is still in place; the next probe tick will fill them.
@@ -137,10 +185,11 @@ impl SettingsRuntime {
     /// absent is the only `Ok((None, None))` case, so the badge can't
     /// silently lie when the file is corrupt or unreadable.
     #[tracing::instrument(skip(self))]
-    pub async fn get_codex_active_account(&self) -> Result<(Option<String>, Option<i64>)> {
+    pub async fn get_codex_active_account(
+        &self,
+    ) -> std::result::Result<(Option<String>, Option<i64>), CodexActiveError> {
         let path = codex_credentials::default_auth_json_path();
-        let active = codex_credentials::read_active_account_id(&path)
-            .map_err(|e| anyhow::anyhow!("failed to read active codex account: {e}"))?;
+        let active = codex_credentials::read_active_account_id(&path)?;
         let matched = if let Some(ref acct) = active {
             codex_credentials::find_codex_id_by_account(&self.db_pool, acct).await?
         } else {
