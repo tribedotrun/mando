@@ -112,7 +112,13 @@ export type CaptainConfig = {
   codexTerminalArgs: string;
   projects: { [key in string]: ProjectConfig };
 };
-export type CcPermissionMode = 'default' | 'acceptEdits' | 'bypassPermissions' | 'plan' | 'dontAsk';
+export type CcPermissionMode =
+  | 'default'
+  | 'acceptEdits'
+  | 'bypassPermissions'
+  | 'plan'
+  | 'dontAsk'
+  | 'auto';
 export type CcTodoItem = { content: string; activeForm: string | null; status: CcTodoItemStatus };
 export type CcTodoItemStatus = 'pending' | 'in_progress' | 'completed';
 export type ChannelStatus = {

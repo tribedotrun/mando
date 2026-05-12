@@ -33,6 +33,7 @@ pub enum CcPermissionMode {
     BypassPermissions,
     Plan,
     DontAsk,
+    Auto,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]

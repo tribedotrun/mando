@@ -19,6 +19,8 @@ Resolve the current branch's PR number. If none exists, create a minimal PR with
 
 Read the full diff. Identify the trigger, end-to-end data path (trigger → API/service → processing → response → UI), parallel steps, key transformations, and the response shape. Capture a 1–2 sentence "What changed" delta.
 
+Treat the code grouping as the key feature of the summary. Group the changed code into a few logical Code Diff sections, usually 3–6. Use reviewer-facing domains such as "API route", "runtime ingest", "DB schema", "UI", "SDK", "tests", or PR-specific names. Each section must explain: what changed, why it matters, how to review it, and representative files or surfaces. Do not list files one-by-one when a logical group communicates the review path better.
+
 Generate an ASCII diagram using `┌─┐│└─┘` for boxes, `▼ ──→ ←` for flow. Show component names, responsibilities, data shapes at boundaries; hide internal helpers. Surface PR-specific details that matter for review when the diff actually involves them — caching, parallel boundaries, external calls, response shape, thresholds, key architectural names.
 
 Align via `python3 ~/.claude/skills/mando-pr-summary/fix-diagram.py` (pipe in, use the output).
@@ -51,7 +53,7 @@ Universal items (no heading — Step 5's body supplies it). Append items from th
 
 ## Step 5 — Preview, compose, persist
 
-**Preview first.** Output the aligned diagram (fenced), the "What changed" sentence, the reviewer checklist, and any e2e-verification gap so the user sees it in conversation.
+**Preview first.** Output the Code Diff groups first, then the aligned diagram (fenced), the "What changed" sentence, the reviewer checklist, and any e2e-verification gap so the user sees it in conversation.
 
 **Compose the canonical PR body.** This skill owns the entire body — regenerate every section fresh from diff + brief + evidence.
 
@@ -67,6 +69,10 @@ Universal items (no heading — Step 5's body supplies it). Append items from th
 \```
 
 **What changed**: <1–2 sentence delta>
+
+## Code Diff
+
+<3–6 logical code groups. Each group: what changed, why it matters, how to review it, and representative files/surfaces. This is the main reviewer navigation feature.>
 
 ## Evidence
 
@@ -100,8 +106,10 @@ If **E2E verification** has no concrete proof (no plan path, no run noted, no ar
 
 Preserve third-party blocks (Open in Devin, review badges, deploy previews) by appending after the canonical sections. Update via `gh pr edit $PR_NUM --body` using a HEREDOC.
 
-**Persist the work summary** (ASCII diagram + "What changed" sentence):
+**Persist the work summary** (Code Diff groups + ASCII diagram + "What changed" sentence):
 
 **Default:** Write to `.ai/plans/pr-$PR_NUM/pr-summary.md` (overwrite). Create the folder if missing. Never write into another `.ai/plans/*` folder, even if a slug looks related.
 
 **Mando task only:** After the plan file, write the same summary to a temp file and run `mando todo summary --file <path>`. Never infer a task id from PR number, branch, or plan folder — only the env var qualifies.
+
+**Optional HTML summary:** When the human asks for an HTML PR summary, copy `templates/pr-summary.html` to `.ai/plans/pr-$PR_NUM/pr-summary.html` and replace the `window.PR_SUMMARY` object at the top. This HTML is only for humans to understand the PR faster; it is not the authoritative PR description, not a required reviewer artifact, and not a second source of truth. Keep it disposable and PR-scoped. It should mirror the canonical PR body sections and make the Code Diff groups the primary tab so reviewers can navigate the change logically before reading Problem/Solution or checklist details.

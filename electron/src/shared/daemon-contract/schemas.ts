@@ -178,6 +178,7 @@ export const ccPermissionModeSchema = z.enum([
   'bypassPermissions',
   'plan',
   'dontAsk',
+  'auto',
 ]);
 export const ccTodoItemSchema = z
   .object({
