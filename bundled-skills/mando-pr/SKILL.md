@@ -26,14 +26,19 @@ External (idempotent — only post each if not already on the PR):
 1. `@codex review this PR`
 2. `cursor review`
 
-Internal (skip if `--fast`; otherwise idempotent — cache the reviewed SHA in `/tmp/.x-pr-reviewed-${PR_NUM}`). If the cache file already contains the current PR head SHA, skip this internal-review block. Otherwise wait for results; do NOT background:
+Internal (skip if `--fast`; otherwise idempotent — cache the reviewed SHA in `/tmp/.x-pr-reviewed-${PR_NUM}`). If the cache file already contains the current PR head SHA, skip this internal-review block. Otherwise choose the branch for the current runtime, run both reviewers in that branch, and wait for results; do NOT background:
 
-1. **Claude Code runtime:** run `pr-review-toolkit:code-reviewer` on the diff.
-2. **Claude Code runtime:** run `pr-review-toolkit:silent-failure-hunter` if the change touches error handling.
-3. **Codex runtime:** spawn a review-only Codex subagent for general code review of the PR diff against `origin/main`. Tell it to read `AGENTS.md` / `CLAUDE.md`, make no edits, and return numbered findings with severity, confidence, file:line, impact, and exact fix.
-4. **Codex runtime:** if the change touches error handling, spawn a second review-only Codex subagent using the silent-failure-hunter contract: find swallowed errors, broad/empty catch blocks, log-and-continue paths, hidden fallbacks, unawaited async work, retry exhaustion without user-visible failure, and missing log/user-feedback context. Tell it to make no edits and return numbered findings with severity, confidence, file:line, hidden failure, user/debugging impact, and exact fix.
+**If running in Claude Code:**
 
-No fallback: if the current runtime cannot run its required internal reviewer(s), stop and report that internal review could not be completed; do not run an inline substitute and do not proceed to step 4.
+1. Run `pr-review-toolkit:code-reviewer` on the diff.
+2. Run `pr-review-toolkit:silent-failure-hunter` on the diff.
+
+**If running in Codex:**
+
+1. Spawn a review-only Codex subagent for general code review of the PR diff against `origin/main`. Tell it to read `AGENTS.md` / `CLAUDE.md`, make no edits, and return numbered findings with severity, confidence, file:line, impact, and exact fix.
+2. Spawn a second review-only Codex subagent using the silent-failure-hunter contract: find swallowed errors, broad/empty catch blocks, log-and-continue paths, hidden fallbacks, unawaited async work, retry exhaustion without user-visible failure, and missing log/user-feedback context. Tell it to make no edits and return numbered findings with severity, confidence, file:line, hidden failure, user/debugging impact, and exact fix.
+
+No fallback: if the current runtime cannot run both internal reviewers in its branch, stop and report that internal review could not be completed; do not run a cross-runtime substitute, do not run an inline substitute, and do not proceed to step 4.
 
 Hold findings; address them in step 4. After all required internal reviews complete for the current PR head SHA, write that SHA to `/tmp/.x-pr-reviewed-${PR_NUM}`.
 

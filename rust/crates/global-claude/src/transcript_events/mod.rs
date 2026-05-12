@@ -387,6 +387,24 @@ mod tests {
     }
 
     #[test]
+    fn parse_init_event_auto_permission_mode() {
+        let line = r#"{"type":"system","subtype":"init","session_id":"s1","uuid":"u0","cwd":"/tmp","model":"claude-opus-4-7","permissionMode":"auto","tools":["Read"],"slash_commands":[],"mcp_servers":[]}"#;
+        let path = temp_file(line);
+        let events = parse_events(&path);
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            TranscriptEvent::SystemInit(init) => {
+                assert_eq!(
+                    init.permission_mode,
+                    Some(api_types::CcPermissionMode::Auto)
+                );
+            }
+            other => panic!("expected SystemInit, got {other:?}"),
+        }
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
     fn parse_assistant_with_tool_use_maps_named_tool() {
         let line = r#"{"type":"assistant","uuid":"a1","message":{"model":"opus","content":[{"type":"text","text":"hi"},{"type":"tool_use","id":"tu1","name":"Bash","input":{"command":"ls -la","description":"list"}}]}}"#;
         let path = temp_file(line);

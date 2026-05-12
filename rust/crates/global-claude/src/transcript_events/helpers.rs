@@ -19,6 +19,7 @@ pub(super) fn parse_permission_mode(s: &str) -> Option<CcPermissionMode> {
         "bypassPermissions" => Some(CcPermissionMode::BypassPermissions),
         "plan" => Some(CcPermissionMode::Plan),
         "dontAsk" => Some(CcPermissionMode::DontAsk),
+        "auto" => Some(CcPermissionMode::Auto),
         _ => None,
     }
 }
