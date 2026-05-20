@@ -42,18 +42,17 @@ No fallback: if the current runtime cannot run both internal reviewers in its br
 
 Hold findings; address them in step 4. After all required internal reviews complete for the current PR head SHA, write that SHA to `/tmp/.x-pr-reviewed-${PR_NUM}`.
 
+Do not run internal review again during the same `/mando-pr` invocation, even if step 4 creates fix commits; the PR status/comment loop still runs normally.
+
 ## Step 4 — Address everything until merge-ready
 
-Fix every internal-review finding from step 3, commit, push. Then loop the status check until exit 0:
+Fix every internal-review finding from step 3, commit, push. Then use the wait-aware PR status gate:
 
 ```bash
-python3 ~/.claude/skills/mando-pr/pr_status.py <pr_number>
+python3 ~/.claude/skills/mando-pr/pr_status.py --watch <pr_number>
 ```
 
-1. `[FAIL]` CI → fix, commit, push.
-2. `UNADDRESSED COMMENTS` → fix, reply per thread, commit, push.
-3. `[WAIT]` → sleep 10s, re-check.
-4. `ALL CLEAR` → done.
+Address anything it reports, reply to review threads when appropriate, commit and push fixes, then rerun until `ALL CLEAR`. Do not wrap `pr_status.py` in manual shell delay or polling commands.
 
 `--fast`: run the status check once, address what it surfaces in a single pass, stop.
 
