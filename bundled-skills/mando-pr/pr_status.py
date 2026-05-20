@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-"""PR status check — one-shot report of CI, comments, and reviewers.
+"""PR status check — one-shot or wait-aware report of CI, comments, and reviewers.
 
-Returns current PR state so the caller can decide what to do.
-Run in a loop from the skill: check -> fix -> check -> fix -> done.
+Default mode returns the current PR state so the caller can decide what to do.
+Watch mode re-checks wait-only states internally and exits as soon as the PR is
+clear or needs an agent action.
 
 Exit codes:
   0 — All clear (CI green, no unaddressed comments, all reviewers responded)
-  1 — Has issues (details in stdout)
+  1 — Has issues, timed out, or needs agent action (details in stdout)
 """
 
 from __future__ import annotations
@@ -14,6 +15,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import sys
+from dataclasses import dataclass
 
 from gh_async import (
     dedupe_check_runs,
@@ -24,16 +26,20 @@ from gh_async import (
     run_gh,
 )
 
-# Cursor excluded: its review manifests as a CI check (cursor-bugbot)
 REVIEWERS = {
     "claude": {"login": "github-actions[bot]"},
     "codex": {"login": "chatgpt-codex-connector[bot]"},
+    "cursor": {"login": "cursor[bot]"},
     "devin": {"login": "devin-ai-integration[bot]"},
 }
 
 TRIGGER_PATTERNS = {
     "codex": ["@codex review", "@codex r"],
+    "cursor": ["cursor review", "bugbot run"],
 }
+
+WATCH_POLL_SECONDS = 15
+WATCH_MAX_WAIT_SECONDS = 900
 
 ERROR_PATTERNS = [
     "usage limit",
@@ -45,6 +51,17 @@ ERROR_PATTERNS = [
     "internal error",
     "temporarily unavailable",
 ]
+
+
+@dataclass(frozen=True)
+class StatusResult:
+    exit_code: int
+    has_wait: bool
+    has_actionable: bool
+
+    @property
+    def wait_only(self) -> bool:
+        return self.exit_code != 0 and self.has_wait and not self.has_actionable
 
 
 def _is_error_response(body: str) -> bool:
@@ -120,7 +137,7 @@ async def check_status(
     repo: str,
     pr: int,
     wanted: list[str] | None,
-) -> int:
+) -> StatusResult:
     pr_author = await get_pr_author(pr)
     if not pr_author:
         raise RuntimeError("Could not determine PR author")
@@ -132,7 +149,8 @@ async def check_status(
     if wanted is None:
         wanted = detect_triggered_reviewers(data)
 
-    has_issues = False
+    has_wait = False
+    has_actionable = False
 
     # --- CI ---
     # Only checks whose name starts with "checks" are required CI.
@@ -149,7 +167,7 @@ async def check_status(
             if status != "completed":
                 if required:
                     print(f"  [WAIT] {name}")
-                    has_issues = True
+                    has_wait = True
                 else:
                     print(f"  [INFO] {name} (pending, non-blocking)")
             elif conclusion in ("success", "skipped", "neutral"):
@@ -157,7 +175,7 @@ async def check_status(
             else:
                 if required:
                     print(f"  [FAIL] {name}: {conclusion}")
-                    has_issues = True
+                    has_actionable = True
                 else:
                     print(f"  [INFO] {name}: {conclusion} (non-blocking)")
     else:
@@ -166,7 +184,7 @@ async def check_status(
     # --- Unaddressed comments ---
     unaddressed = find_unaddressed_comments(data, pr_author)
     if unaddressed:
-        has_issues = True
+        has_actionable = True
         print(f"\nUNADDRESSED COMMENTS ({len(unaddressed)}):")
         for c in unaddressed:
             cid = c.get("id", "?")
@@ -187,23 +205,68 @@ async def check_status(
             status = check_reviewer_status(name, data)
             if status == "none":
                 print(f"  [WAIT] {name}")
-                has_issues = True
+                has_wait = True
             elif status == "error":
                 print(f"  [ERR]  {name}")
+                has_actionable = True
             else:
                 print(f"  [DONE] {name}")
     else:
         print("\nREVIEWERS: none triggered")
 
     print()
-    if not has_issues:
+    if not has_wait and not has_actionable:
         print("ALL CLEAR")
-    return 1 if has_issues else 0
+        return StatusResult(exit_code=0, has_wait=False, has_actionable=False)
+    return StatusResult(exit_code=1, has_wait=has_wait, has_actionable=has_actionable)
+
+
+async def watch_status(
+    owner: str,
+    repo: str,
+    pr: int,
+    wanted: list[str] | None,
+) -> int:
+    loop = asyncio.get_running_loop()
+    started_at = loop.time()
+    attempt = 1
+    while True:
+        if attempt > 1:
+            print(f"--- PR status attempt {attempt} ---")
+        result = await check_status(owner, repo, pr, wanted)
+        if result.exit_code == 0 or not result.wait_only:
+            return result.exit_code
+
+        elapsed = loop.time() - started_at
+        if elapsed + WATCH_POLL_SECONDS > WATCH_MAX_WAIT_SECONDS:
+            print(
+                f"Timed out after {elapsed:.0f}s while PR had only wait-state blockers; "
+                "run the watch command again when ready."
+            )
+            return 1
+
+        print(f"WAIT_ONLY: rechecking in {WATCH_POLL_SECONDS:g}s inside pr_status.py.\n")
+        await asyncio.sleep(WATCH_POLL_SECONDS)
+        attempt += 1
+
+
+def parse_reviewers(raw: str) -> list[str] | None:
+    if raw == "auto":
+        return None
+    wanted = [r.strip().lower() for r in raw.split(",") if r.strip()]
+    for r in wanted:
+        if r not in REVIEWERS:
+            print(
+                f"error: unknown reviewer '{r}'. Known: {', '.join(REVIEWERS)}",
+                file=sys.stderr,
+            )
+            raise SystemExit(2)
+    return wanted
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="PR status check — one-shot CI + comments + reviewers report",
+        description="PR status check — CI + comments + reviewers report",
     )
     parser.add_argument("pr", type=int, help="PR number")
     parser.add_argument(
@@ -211,23 +274,27 @@ def main() -> int:
         default="auto",
         help="Comma-separated reviewer names, or 'auto' to detect",
     )
+    parser.add_argument(
+        "--watch",
+        action="store_true",
+        help="Keep polling wait-only states until clear, actionable, or timed out",
+    )
     args = parser.parse_args()
 
-    wanted: list[str] | None = None
-    if args.reviewers != "auto":
-        wanted = [r.strip().lower() for r in args.reviewers.split(",") if r.strip()]
-        for r in wanted:
-            if r not in REVIEWERS:
-                print(
-                    f"error: unknown reviewer '{r}'. Known: {', '.join(REVIEWERS)}",
-                    file=sys.stderr,
-                )
-                return 2
-
+    wanted = parse_reviewers(args.reviewers)
     owner, repo = detect_repo()
 
     try:
-        return asyncio.run(check_status(owner, repo, args.pr, wanted))
+        if args.watch:
+            return asyncio.run(
+                watch_status(
+                    owner,
+                    repo,
+                    args.pr,
+                    wanted,
+                )
+            )
+        return asyncio.run(check_status(owner, repo, args.pr, wanted)).exit_code
     except RuntimeError as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
