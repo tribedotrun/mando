@@ -160,33 +160,33 @@ fn resolve_resume_cwd(
     stored_path
 }
 
+async fn lookup_resume_cwd(state: &AppState, sid: Option<&str>) -> Option<String> {
+    let sid = sid?;
+    state.sessions.session_cwd(sid).await.unwrap_or_else(|e| {
+        tracing::warn!(module = "routes_terminal", resume_session_id = sid, error = %e, "stored-cwd lookup failed; using caller cwd");
+        None
+    })
+}
+
 #[crate::instrument_api(method = "POST", path = "/api/terminal")]
 pub(crate) async fn post_terminal_create(
     State(state): State<AppState>,
     Json(body): Json<api_types::TerminalCreateRequest>,
 ) -> Result<Json<api_types::TerminalSessionInfo>, ApiError> {
     let caller_cwd: std::path::PathBuf = body.cwd.clone().into();
-    let stored_cwd_lookup = match body.resume_session_id.as_deref() {
-        Some(sid) => match state.sessions.session_cwd(sid).await {
-            Ok(stored) => stored,
-            Err(e) => {
-                tracing::warn!(
-                    module = "routes_terminal",
-                    resume_session_id = sid,
-                    error = %e,
-                    "failed to look up stored cwd for resume; falling back to caller-supplied cwd"
-                );
-                None
-            }
-        },
-        None => None,
-    };
+    let stored_cwd_lookup = lookup_resume_cwd(&state, body.resume_session_id.as_deref()).await;
     let cwd = resolve_resume_cwd(
         caller_cwd,
         body.resume_session_id.as_deref(),
         stored_cwd_lookup,
     );
     if !cwd.is_dir() {
+        // Push fresh `worktreeExists` so the renderer transitions to the
+        // missing-worktree surface immediately instead of next snapshot.
+        state
+            .captain
+            .refresh_workbench_broadcast(body.workbench_id)
+            .await;
         return Err(error_response(
             StatusCode::BAD_REQUEST,
             "cwd must be an existing directory",

@@ -88,6 +88,10 @@ export function assembleProjectChildren(opts: {
       pinnedAt: null,
       archivedAt: null,
       deletedAt: null,
+      // Synthesized from a task with no companion workbench row; the
+      // sidebar treats it as present so we don't false-positive a missing
+      // worktree on rows the user can't archive from this surface anyway.
+      worktreeExists: true,
     };
     (children[pName] ??= []).push({ wb: syntheticWb, task });
   }

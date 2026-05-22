@@ -85,6 +85,21 @@ pub(crate) async fn insert_in_tx(
     Ok(id)
 }
 
+/// Increment `rev` only (no activity touch). The renderer's SSE cache
+/// patcher rejects same-or-older `rev`, so any out-of-band broadcast
+/// that carries a fresh derived field (e.g. `worktreeExists` flipping
+/// after the filesystem changed) must persist a higher rev first.
+pub async fn bump_rev(pool: &SqlitePool, id: i64) -> Result<bool> {
+    let result = sqlx::query(
+        "UPDATE workbenches SET rev = rev + 1 \
+         WHERE id = ? AND archived_at IS NULL AND deleted_at IS NULL",
+    )
+    .bind(id)
+    .execute(pool)
+    .await?;
+    Ok(result.rows_affected() > 0)
+}
+
 /// Bump `last_activity_at` to now and increment `rev`. Returns `true` if a row
 /// was updated. Skips archived/deleted rows so stale hook callbacks can't
 /// resurrect them in the sidebar.

@@ -26,7 +26,7 @@ External (idempotent — only post each if not already on the PR):
 1. `@codex review this PR`
 2. `cursor review`
 
-Internal (skip if `--fast`; otherwise idempotent — cache the reviewed SHA in `/tmp/.x-pr-reviewed-${PR_NUM}`). If the cache file already contains the current PR head SHA, skip this internal-review block. Otherwise choose the branch for the current runtime, run both reviewers in that branch, and wait for results; do NOT background:
+Internal (skip if `--fast`; otherwise run exactly once per `/mando-pr` invocation). Before starting this block, record the current PR head SHA as `INTERNAL_REVIEW_SHA`. If `/tmp/.x-pr-reviewed-${PR_NUM}` already contains `INTERNAL_REVIEW_SHA`, skip this internal-review block. Otherwise choose the branch for the current runtime, run both reviewers in that branch, and wait for results; do NOT background:
 
 **If running in Claude Code:**
 
@@ -40,9 +40,9 @@ Internal (skip if `--fast`; otherwise idempotent — cache the reviewed SHA in `
 
 No fallback: if the current runtime cannot run both internal reviewers in its branch, stop and report that internal review could not be completed; do not run a cross-runtime substitute, do not run an inline substitute, and do not proceed to step 4.
 
-Hold findings; address them in step 4. After all required internal reviews complete for the current PR head SHA, write that SHA to `/tmp/.x-pr-reviewed-${PR_NUM}`.
+Hold findings; address them in step 4. After both required internal reviewers complete for `INTERNAL_REVIEW_SHA`, immediately write `INTERNAL_REVIEW_SHA` to `/tmp/.x-pr-reviewed-${PR_NUM}`.
 
-Do not run internal review again during the same `/mando-pr` invocation, even if step 4 creates fix commits; the PR status/comment loop still runs normally.
+Do not run internal review again during the same `/mando-pr` invocation, even if step 4 creates fix commits, the PR head SHA changes, a reviewer reports real findings, or a later head has no cache hit. The reviewed-SHA cache is a cross-invocation skip only; it is not permission to launch a second internal-review wave after fixes in the current invocation. After Step 3 completes, all further validation flows through Step 4's PR status/comment loop.
 
 ## Step 4 — Address everything until merge-ready
 

@@ -32,12 +32,9 @@ pub(crate) fn routes() -> ApiRouter<AppState> {
 
 // ── GET /api/workbenches ───────────────────────────────────────────────
 
-fn wire_workbench(workbench: impl serde::Serialize) -> Result<api_types::WorkbenchItem, ApiError> {
-    serde_json::from_value(
-        serde_json::to_value(workbench)
-            .map_err(|e| internal_error(e, "failed to serialize workbench"))?,
-    )
-    .map_err(|e| internal_error(e, "failed to convert workbench to api type"))
+fn wire_workbench(workbench: &captain::Workbench) -> Result<api_types::WorkbenchItem, ApiError> {
+    captain::to_wire_workbench_item(workbench)
+        .map_err(|e| internal_error(e, "failed to convert workbench to api type"))
 }
 
 #[crate::instrument_api(method = "GET", path = "/api/workbenches")]
@@ -55,7 +52,7 @@ pub(crate) async fn get_workbenches(
         .await
         .map_err(|e| internal_error(e, "failed to load workbenches"))?;
     let workbenches = items
-        .into_iter()
+        .iter()
         .map(wire_workbench)
         .collect::<Result<Vec<_>, _>>()?;
     Ok(Json(api_types::WorkbenchesResponse { workbenches }))
@@ -83,7 +80,7 @@ pub(crate) async fn patch_workbench(
         .map_err(|e| internal_error(e, "failed to update workbench"))?;
 
     match outcome {
-        captain::WorkbenchPatchOutcome::Updated(updated) => Ok(Json(wire_workbench(updated)?)),
+        captain::WorkbenchPatchOutcome::Updated(updated) => Ok(Json(wire_workbench(&updated)?)),
         captain::WorkbenchPatchOutcome::NotFound => {
             Err(error_response(StatusCode::NOT_FOUND, "workbench not found"))
         }

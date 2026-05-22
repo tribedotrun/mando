@@ -1455,6 +1455,13 @@ export type WorkbenchItem = {
   pinnedAt: string | null;
   archivedAt: string | null;
   deletedAt: string | null;
+  /**
+   * Derived at wire-conversion time from `Path::new(&worktree).is_dir()`.
+   * Drives the renderer's "worktree missing" surface so a stale workbench
+   * stops showing a misleading `[Process exited with code N]` for a session
+   * whose cwd no longer exists.
+   */
+  worktreeExists: boolean;
 };
 export type WorkbenchListQuery = { status: WorkbenchStatusFilter | null };
 export type WorkbenchPatchRequest = { title?: string; archived?: boolean; pinned?: boolean };
