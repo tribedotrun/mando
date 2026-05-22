@@ -349,6 +349,11 @@ pub struct WorkbenchItem {
     pub pinned_at: Option<String>,
     pub archived_at: Option<String>,
     pub deleted_at: Option<String>,
+    /// Derived at wire-conversion time from `Path::new(&worktree).is_dir()`.
+    /// Drives the renderer's "worktree missing" surface so a stale workbench
+    /// stops showing a misleading `[Process exited with code N]` for a session
+    /// whose cwd no longer exists.
+    pub worktree_exists: bool,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, TS)]

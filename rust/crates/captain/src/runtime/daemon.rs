@@ -229,6 +229,15 @@ impl CaptainRuntime {
         workbench_runtime::bind_terminal_workbench(self, workbench_id, project_name).await
     }
 
+    /// Re-probe a workbench and broadcast its current wire state without
+    /// mutating activity. Route handlers call this on rejection paths
+    /// (e.g. cwd-missing 400 on terminal-create) so the renderer sees
+    /// the fresh `worktreeExists` value immediately.
+    #[tracing::instrument(skip_all)]
+    pub async fn refresh_workbench_broadcast(&self, workbench_id: i64) {
+        workbench_runtime::refresh_workbench_broadcast(self, workbench_id).await
+    }
+
     #[tracing::instrument(skip_all)]
     pub async fn record_terminal_cc_session(
         &self,

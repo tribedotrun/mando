@@ -2114,6 +2114,7 @@ export const workbenchItemSchema = z
     pinnedAt: z.string().nullable(),
     archivedAt: z.string().nullable(),
     deletedAt: z.string().nullable(),
+    worktreeExists: z.boolean(),
   })
   .strict();
 export const workbenchListQuerySchema = z

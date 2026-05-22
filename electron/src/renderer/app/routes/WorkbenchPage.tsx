@@ -3,6 +3,7 @@ import { useWorkbenchPage } from '#renderer/domains/captain';
 import { TaskDetailView } from '#renderer/domains/captain/ui/TaskDetailView';
 import { TerminalPage } from '#renderer/domains/captain/terminal/ui/TerminalPage';
 import { WorkspacePreparing } from '#renderer/domains/captain/terminal/ui/WorkspacePreparing';
+import { WorktreeMissing } from '#renderer/domains/captain/terminal/ui/WorktreeMissing';
 import { ErrorBoundary } from '#renderer/global/ui/ErrorBoundary';
 
 export function WorkbenchPage(): React.ReactElement {
@@ -51,20 +52,34 @@ export function WorkbenchPage(): React.ReactElement {
     );
   }
 
+  // Worktree missing: replace the terminal surface with a clear actionable
+  // banner instead of letting TerminalPage mount, fail to start a session at
+  // a deleted cwd, and render a misleading `[Process exited with code N]`
+  // from a stale prior exit. Fail-closed semantics: only the daemon's
+  // affirmative `false` triggers the missing surface — an absent or
+  // `undefined` value falls through to the regular terminal.
+  const wb = page.data.workbench;
+  const worktreeMissing = wb.worktreeExists === false;
+  const missingNode = <WorktreeMissing workbenchId={wb.id} worktree={wb.worktree} />;
+
   // Taskless workbench: render terminal directly
   if (!page.data.task) {
     return (
       <div className="h-full px-3 pt-2">
         <ErrorBoundary fallbackLabel="Terminal">
-          <TerminalPage
-            key={`terminal-${page.data.workbench.id}`}
-            workbenchId={page.data.workbench.id}
-            project={page.data.workbench.project}
-            cwd={page.data.workbench.worktree}
-            resumeSessionId={page.search.resume}
-            resumeName={page.search.name}
-            onResumeConsumed={page.nav.handleResumeConsumed}
-          />
+          {worktreeMissing ? (
+            missingNode
+          ) : (
+            <TerminalPage
+              key={`terminal-${wb.id}`}
+              workbenchId={wb.id}
+              project={wb.project}
+              cwd={wb.worktree}
+              resumeSessionId={page.search.resume}
+              resumeName={page.search.name}
+              onResumeConsumed={page.nav.handleResumeConsumed}
+            />
+          )}
         </ErrorBoundary>
       </div>
     );
@@ -73,15 +88,19 @@ export function WorkbenchPage(): React.ReactElement {
   // Task workbench: lazy-mount terminal only after user visits the terminal tab.
   // This prevents eagerly creating terminal sessions on every task navigation.
   const terminalSlot = page.nav.terminalVisited ? (
-    <TerminalPage
-      key={`terminal-${page.data.workbench.id}`}
-      workbenchId={page.data.workbench.id}
-      project={page.data.workbench.project}
-      cwd={page.data.workbench.worktree}
-      resumeSessionId={page.search.tab === 'terminal' ? (page.search.resume ?? null) : null}
-      resumeName={page.search.tab === 'terminal' ? (page.search.name ?? null) : null}
-      onResumeConsumed={page.nav.handleResumeConsumed}
-    />
+    worktreeMissing ? (
+      missingNode
+    ) : (
+      <TerminalPage
+        key={`terminal-${wb.id}`}
+        workbenchId={wb.id}
+        project={wb.project}
+        cwd={wb.worktree}
+        resumeSessionId={page.search.tab === 'terminal' ? (page.search.resume ?? null) : null}
+        resumeName={page.search.tab === 'terminal' ? (page.search.name ?? null) : null}
+        onResumeConsumed={page.nav.handleResumeConsumed}
+      />
+    )
   ) : null;
 
   return (

@@ -171,7 +171,26 @@ async fn build_snapshot(state: &AppState) -> anyhow::Result<api_types::SseSnapsh
     let (all_items, worker_rows, workbench_rows) = state.captain.load_sse_snapshot_data().await?;
     let tasks = roundtrip::<Vec<api_types::TaskItem>>(&all_items, "tasks")?;
     let workers = worker_rows;
-    let workbenches = roundtrip::<Vec<api_types::WorkbenchItem>>(workbench_rows, "workbenches")?;
+    // Match the bus-broadcast convention: log per-row drift and keep
+    // every healthy workbench in the snapshot. A single corrupt row
+    // must not blackhole the renderer's entire initial state.
+    let workbenches = workbench_rows
+        .iter()
+        .filter_map(
+            |workbench| match captain::to_wire_workbench_item(workbench) {
+                Ok(item) => Some(item),
+                Err(err) => {
+                    tracing::error!(
+                        module = "transport-http-sse-snapshot",
+                        workbench_id = workbench.id,
+                        error = %err,
+                        "skipping workbench in SSE snapshot — wire conversion failed"
+                    );
+                    None
+                }
+            },
+        )
+        .collect::<Vec<_>>();
     let terminals =
         roundtrip::<Vec<api_types::TerminalSessionInfo>>(state.terminal.list(), "terminals")?;
 
