@@ -74,76 +74,69 @@ impl CaptainRuntime {
         let nudge_budget = workflow.agent.max_interventions;
         let stale_threshold_s = workflow.agent.stale_threshold_s.as_secs_f64();
 
-        Ok(all_items
-            .iter()
-            .filter(|task| {
-                matches!(
-                    task.status,
-                    crate::ItemStatus::InProgress
-                        | crate::ItemStatus::CaptainReviewing
-                        | crate::ItemStatus::CaptainMerging
-                ) && task.worker.is_some()
-            })
-            .map(|task| {
-                let worker_name = task.worker.as_deref().unwrap_or("");
-                let nudge_count =
-                    crate::io::health_store::get_health_u32(&health, worker_name, "nudge_count");
-                let cc_sid = task.session_ids.worker.as_deref().unwrap_or("");
-                let pid = self.resolve_worker_pid(cc_sid, worker_name);
-                let last_action = health
-                    .get(worker_name)
-                    .and_then(|v| v.get("last_action"))
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
-                let stream_stale_s = task
-                    .session_ids
-                    .worker
-                    .as_deref()
-                    .map(global_infra::paths::stream_path_for_session)
-                    .and_then(|path: std::path::PathBuf| {
-                        global_claude::stream_stale_seconds(path.as_path())
-                    });
-                let process_alive = pid
-                    .map(crate::Pid::new)
-                    .is_some_and(global_claude::is_process_alive);
-                let in_captain_phase = matches!(
-                    task.status,
-                    crate::ItemStatus::CaptainReviewing | crate::ItemStatus::CaptainMerging
-                );
-                let is_stale = if in_captain_phase {
-                    false
-                } else {
-                    match (process_alive, stream_stale_s) {
-                        (true, Some(s)) => s >= stale_threshold_s,
-                        (true, None) => false,
-                        (false, _) => true,
-                    }
-                };
-                api_types::WorkerDetail {
-                    id: task.id,
-                    title: task.title.clone(),
-                    status: serde_json::from_value(
-                        serde_json::to_value(task.status).unwrap_or_default(),
-                    )
-                    .ok(),
-                    project: task.project.clone(),
-                    github_repo: task.github_repo.clone(),
-                    branch: task.branch.clone(),
-                    cc_session_id: task.session_ids.worker.clone(),
-                    worker: task.worker.clone(),
-                    worktree: task.worktree.clone(),
-                    pr_number: task.pr_number,
-                    started_at: task.worker_started_at.clone(),
-                    last_activity_at: task.last_activity_at.clone(),
-                    intervention_count: Some(task.intervention_count),
-                    nudge_count: Some(nudge_count),
-                    nudge_budget: Some(nudge_budget),
-                    last_action: Some(last_action.to_string()),
-                    pid,
-                    is_stale: Some(is_stale),
-                }
-            })
-            .collect())
+        let mut workers = Vec::new();
+        for task in all_items.iter().filter(|task| {
+            matches!(
+                task.status,
+                crate::ItemStatus::InProgress
+                    | crate::ItemStatus::CaptainReviewing
+                    | crate::ItemStatus::CaptainMerging
+            ) && task.worker.is_some()
+        }) {
+            let worker_name = task.worker.as_deref().unwrap_or("");
+            let nudge_count =
+                crate::io::health_store::get_health_u32(&health, worker_name, "nudge_count");
+            let cc_sid = task.session_ids.worker.as_deref().unwrap_or("");
+            let pid = self.resolve_worker_pid(cc_sid, worker_name);
+            let last_action = health
+                .get(worker_name)
+                .and_then(|v| v.get("last_action"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let stream_path = crate::runtime::agent_runtime::stream_path(task.provider, cc_sid);
+            let stream_stale_s = global_claude::stream_stale_seconds(&stream_path);
+            let liveness = crate::runtime::agent_runtime::session_liveness(
+                task.provider,
+                cc_sid,
+                pid.map(crate::Pid::new).unwrap_or(crate::Pid::new(0)),
+                &stream_path,
+            )
+            .await;
+            let in_captain_phase = matches!(
+                task.status,
+                crate::ItemStatus::CaptainReviewing | crate::ItemStatus::CaptainMerging
+            );
+            let is_stale = worker_is_stale(
+                liveness,
+                stream_stale_s,
+                stale_threshold_s,
+                in_captain_phase,
+            );
+            workers.push(api_types::WorkerDetail {
+                id: task.id,
+                title: task.title.clone(),
+                status: serde_json::from_value(
+                    serde_json::to_value(task.status).unwrap_or_default(),
+                )
+                .ok(),
+                project: task.project.clone(),
+                github_repo: task.github_repo.clone(),
+                branch: task.branch.clone(),
+                cc_session_id: task.session_ids.worker.clone(),
+                worker: task.worker.clone(),
+                worktree: task.worktree.clone(),
+                pr_number: task.pr_number,
+                started_at: task.worker_started_at.clone(),
+                last_activity_at: task.last_activity_at.clone(),
+                intervention_count: Some(task.intervention_count),
+                nudge_count: Some(nudge_count),
+                nudge_budget: Some(nudge_budget),
+                last_action: Some(last_action.to_string()),
+                pid,
+                is_stale: Some(is_stale),
+            });
+        }
+        Ok(workers)
     }
 
     #[tracing::instrument(skip_all)]
@@ -161,5 +154,65 @@ impl CaptainRuntime {
             .await?
             .into_iter()
             .find(|task| task.session_ids.worker.as_deref() == Some(id)))
+    }
+}
+
+fn worker_is_stale(
+    liveness: crate::runtime::agent_runtime::AgentLivenessStatus,
+    stream_stale_s: Option<f64>,
+    stale_threshold_s: f64,
+    in_captain_phase: bool,
+) -> bool {
+    if in_captain_phase || liveness.is_terminal() {
+        return false;
+    }
+    match (liveness, stream_stale_s) {
+        (crate::runtime::agent_runtime::AgentLivenessStatus::Active, Some(s)) => {
+            s >= stale_threshold_s
+        }
+        (crate::runtime::agent_runtime::AgentLivenessStatus::Active, None) => false,
+        (crate::runtime::agent_runtime::AgentLivenessStatus::Inactive, _) => true,
+        (crate::runtime::agent_runtime::AgentLivenessStatus::Completed, _)
+        | (crate::runtime::agent_runtime::AgentLivenessStatus::Failed, _) => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::runtime::agent_runtime::AgentLivenessStatus;
+
+    #[test]
+    fn stale_dashboard_uses_provider_liveness_not_process_shape() {
+        assert!(worker_is_stale(
+            AgentLivenessStatus::Inactive,
+            Some(1.0),
+            60.0,
+            false
+        ));
+        assert!(!worker_is_stale(
+            AgentLivenessStatus::Active,
+            Some(1.0),
+            60.0,
+            false
+        ));
+        assert!(worker_is_stale(
+            AgentLivenessStatus::Active,
+            Some(61.0),
+            60.0,
+            false
+        ));
+        assert!(!worker_is_stale(
+            AgentLivenessStatus::Completed,
+            Some(61.0),
+            60.0,
+            false
+        ));
+        assert!(!worker_is_stale(
+            AgentLivenessStatus::Failed,
+            Some(61.0),
+            60.0,
+            true
+        ));
     }
 }

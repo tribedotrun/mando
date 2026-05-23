@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::SessionStatus;
+use crate::{SessionStatus, TaskProvider};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
 pub enum ItemStatus {
@@ -137,6 +137,7 @@ pub struct TaskItem {
     pub id: i64,
     pub rev: i64,
     pub title: String,
+    pub provider: TaskProvider,
     pub status: ItemStatus,
     pub project: Option<String>,
     pub github_repo: Option<String>,

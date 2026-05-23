@@ -318,6 +318,7 @@ async fn sessions_endpoint_returns_runtime_backed_enrichment() {
     sessions::queries::upsert_session(
         db.pool(),
         &sessions::queries::SessionUpsert {
+            provider: global_types::TaskProvider::Claude,
             session_id: "sess-runtime-1",
             created_at: "2026-04-17T00:00:00Z",
             caller: "ops",

@@ -5,6 +5,10 @@ use axum::http::StatusCode;
 use axum::Json;
 use captain::EffectRequest;
 
+use super::routes_task_agent_session::{
+    run_task_agent_session, should_clear_missing_manager_session,
+    should_close_orphan_manager_session, should_resume_task_session, TaskAgentSessionRequest,
+};
 use crate::response::{
     broadcast_task_update, error_response, internal_error, resolve_task_cwd,
     touch_workbench_activity, ApiError,
@@ -19,7 +23,7 @@ const PENDING_SESSION: &str = "pending";
 /// and the task carry the same id; persisting it directly avoids the
 /// post-hoc backfill round-trip and keeps history coherent. Start-new case
 /// (`should_resume = false`): the row gets `'pending'` and the success path
-/// backfills it once the CC call returns the real id.
+/// backfills it once the agent call returns the real id.
 ///
 /// Gating on `should_resume` (not just on `existing.is_some()`) is the
 /// invariant that matters: the route's stale-session branch (`!mgr_has_session
@@ -36,8 +40,8 @@ fn pick_initial_session_id(should_resume: bool, existing: Option<&str>) -> &str 
 
 /// POST /api/tasks/ask (JSON or multipart with optional images)
 ///
-/// First ask creates a new CC session in the task's worktree.
-/// Follow-up asks resume the same session via `--resume`.
+/// First ask creates a new provider-backed session in the task's worktree.
+/// Follow-up asks resume the same logical session.
 #[crate::instrument_api(method = "POST", path = "/api/tasks/ask")]
 pub(crate) async fn post_task_ask(
     State(state): State<AppState>,
@@ -71,17 +75,22 @@ async fn post_task_ask_inner(
     let sessions = state.sessions.clone();
 
     let mgr_has_session = sessions.has_session(&session_key);
-    let task_has_session = item.session_ids.ask.is_some();
-    let should_resume = mgr_has_session && task_has_session;
+    let existing_session_id = item.session_ids.ask.as_deref();
+    let should_resume =
+        should_resume_task_session(item.provider, mgr_has_session, existing_session_id);
 
-    if mgr_has_session && !task_has_session {
+    if should_close_orphan_manager_session(item.provider, mgr_has_session, existing_session_id) {
         tracing::info!(
             module = "transport-http-transport-routes_task_ask",
             task_id = id,
             "session_ids.ask cleared by lifecycle — closing stale session"
         );
         sessions.close(&session_key);
-    } else if !mgr_has_session && task_has_session {
+    } else if should_clear_missing_manager_session(
+        item.provider,
+        mgr_has_session,
+        existing_session_id,
+    ) {
         tracing::warn!(
             module = "transport-http-transport-routes_task_ask",
             task_id = id,
@@ -97,8 +106,7 @@ async fn post_task_ask_inner(
         .clone()
         .unwrap_or_else(|| global_infra::uuid::Uuid::v4().to_string());
 
-    let initial_session_id =
-        pick_initial_session_id(should_resume, item.session_ids.ask.as_deref());
+    let initial_session_id = pick_initial_session_id(should_resume, existing_session_id);
 
     state
         .captain
@@ -107,7 +115,7 @@ async fn post_task_ask_inner(
         .map_err(|e| internal_error(e, "failed to persist ask question"))?;
     broadcast_task_update(state, id).await;
 
-    let question_for_cc = if body.saved_images.is_empty() {
+    let question_for_agent = if body.saved_images.is_empty() {
         body.question.clone()
     } else {
         format!(
@@ -117,36 +125,30 @@ async fn post_task_ask_inner(
         )
     };
 
-    let cc_result = if should_resume {
-        sessions
-            .follow_up(::sessions::SessionFollowUpRequest {
-                key: session_key.clone(),
-                message: question_for_cc.clone(),
-                cwd: cwd.clone(),
-            })
-            .await
+    let start_prompt = if should_resume {
+        String::new()
     } else {
-        let prompt = state
+        state
             .captain
-            .build_task_ask_initial_prompt(&item, &question_for_cc, &workflow)
+            .build_task_ask_initial_prompt(&item, &question_for_agent, &workflow)
             .await
-            .map_err(|e| internal_error(e, "failed to build ask prompt"))?;
-
-        sessions
-            .start_with_item(::sessions::SessionStartRequest {
-                key: session_key.clone(),
-                prompt,
-                cwd: cwd.clone(),
-                model: Some(workflow.models.captain.clone()),
-                idle_ttl: workflow.agent.task_ask_idle_ttl_s,
-                call_timeout: workflow.agent.task_ask_timeout_s,
-                task_id: Some(id),
-                max_turns: None,
-            })
-            .await
+            .map_err(|e| internal_error(e, "failed to build ask prompt"))?
     };
+    let session_result = run_task_agent_session(TaskAgentSessionRequest {
+        state,
+        sessions: &sessions,
+        session_key: &session_key,
+        item: &item,
+        should_resume,
+        existing_session_id,
+        start_prompt,
+        follow_up_message: question_for_agent.clone(),
+        cwd: &cwd,
+        workflow: &workflow,
+    })
+    .await;
 
-    match cc_result {
+    match session_result {
         Ok(result) => {
             let answer = result.text.clone();
             let session_id = result.session_id.clone();
@@ -199,7 +201,7 @@ async fn post_task_ask_inner(
         }
         Err(e) => {
             let error_msg = e.to_string();
-            tracing::error!(module = "transport-http-transport-routes_task_ask", task_id = id, error = %error_msg, "ask CC session failed");
+            tracing::error!(module = "transport-http-transport-routes_task_ask", task_id = id, error = %error_msg, "ask agent session failed");
 
             state.sessions.close(&session_key);
             if let Err(e) = state.captain.set_task_ask_session(id, None).await {
@@ -305,7 +307,12 @@ pub(crate) async fn post_task_ask_reopen(
     let session_key = format!("task-ask:{id}");
     let sessions = state.sessions.clone();
 
-    if item.session_ids.ask.is_none() || !sessions.has_session(&session_key) {
+    let existing_session_id = item.session_ids.ask.as_deref();
+    if !should_resume_task_session(
+        item.provider,
+        sessions.has_session(&session_key),
+        existing_session_id,
+    ) {
         return Err(error_response(
             StatusCode::BAD_REQUEST,
             "no active Q&A session — use the standard reopen action instead",
@@ -323,14 +330,20 @@ pub(crate) async fn post_task_ask_reopen(
         })?
         .clone();
 
-    let result = sessions
-        .follow_up(::sessions::SessionFollowUpRequest {
-            key: session_key.clone(),
-            message: synthesis_prompt,
-            cwd: cwd.clone(),
-        })
-        .await
-        .map_err(|e| internal_error(e, "ask synthesis session failed"))?;
+    let result = run_task_agent_session(TaskAgentSessionRequest {
+        state: &state,
+        sessions: &sessions,
+        session_key: &session_key,
+        item: &item,
+        should_resume: true,
+        existing_session_id,
+        start_prompt: String::new(),
+        follow_up_message: synthesis_prompt,
+        cwd: &cwd,
+        workflow: &workflow,
+    })
+    .await
+    .map_err(|e| internal_error(e, "ask synthesis session failed"))?;
     let synthesized_feedback = result.text.clone();
 
     let config = state.settings.load_config();

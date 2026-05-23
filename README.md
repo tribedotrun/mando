@@ -2,7 +2,7 @@
 
 CTO for your AI coding agents.
 
-Autonomously works through your backlog: assigns tasks to Claude Code agents, reviews their PRs, nudges them when they go off track, and merges when the work is ready.
+Autonomously works through your backlog: assigns tasks to coding agents, reviews their PRs, nudges them when they go off track, and merges when the work is ready.
 
 ![Mando](https://api.hypertribe.run/public/mando/readme-hero.png)
 
@@ -10,7 +10,14 @@ Autonomously works through your backlog: assigns tasks to Claude Code agents, re
 
 ### Captain: Autonomous Agent Orchestration
 
-Captain is the tick-based engine that runs your AI coding agents end-to-end. It assigns tasks to Claude Code workers, monitors their progress, nudges stalled sessions, and intervenes when things go off track. No babysitting required.
+Captain is the tick-based engine that runs your AI coding agents end-to-end. It assigns tasks to Claude Code or Codex workers, monitors their progress, nudges stalled sessions, and intervenes when things go off track. No babysitting required.
+
+
+### Task Provider Choice
+
+Each task runs on one coding-agent provider for its whole lifecycle. New tasks default to Claude Code; choose Codex in the task composer to run the clarifier, worker, review, mergeability, reopen, nudge, stop, history, and session UI through Codex. Codex tasks use the local authenticated Codex app-server (`codex app-server --listen stdio://`) with workspace-write sandboxing, explicit writable roots, network access for normal PR handoff, and non-interactive approvals. Session ids stay provider-native: Claude Code session ids for Claude tasks and Codex `thread.id` values for Codex tasks.
+
+Current Codex support relies on the active local Codex login. Planning mode remains Claude Code-only until the planning pipeline is routed through the provider-neutral runtime boundary. The adapter boundary is shaped so future releases can isolate per-session `CODEX_HOME` or add more providers without rewriting Captain lifecycle logic.
 
 ### AI Code Review
 

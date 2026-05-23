@@ -44,6 +44,34 @@ pub fn cc_streams_dir() -> PathBuf {
     state_dir().join("cc-streams")
 }
 
+pub fn session_jsonl_dir() -> PathBuf {
+    state_dir().join("session-jsonl")
+}
+
+pub fn session_jsonl_provider_dir(provider: &str) -> PathBuf {
+    session_jsonl_dir().join(provider)
+}
+
+pub fn session_jsonl_path_for_provider(provider: &str, session_id: &str) -> PathBuf {
+    session_jsonl_provider_dir(provider).join(format!("{session_id}.jsonl"))
+}
+
+pub fn codex_session_jsonl_path(session_id: &str) -> PathBuf {
+    session_jsonl_path_for_provider("codex", session_id)
+}
+
+pub fn codex_derived_streams_dir() -> PathBuf {
+    session_jsonl_provider_dir("codex-derived")
+}
+
+pub fn codex_derived_stream_path_for_session(session_id: &str) -> PathBuf {
+    codex_derived_streams_dir().join(format!("{session_id}.jsonl"))
+}
+
+pub fn codex_derived_stream_meta_path_for_session(session_id: &str) -> PathBuf {
+    codex_derived_streams_dir().join(format!("{session_id}.meta.json"))
+}
+
 pub fn stream_path_for_session(session_id: &str) -> PathBuf {
     cc_streams_dir().join(format!("{session_id}.jsonl"))
 }

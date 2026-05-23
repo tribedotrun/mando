@@ -191,6 +191,15 @@ fn render_assistant(out: &mut String, evt: &AssistantEvent, turn_num: u32) {
                 }
             }
             AssistantContentBlock::ToolUse(tu) => render_tool_use(out, tu),
+            AssistantContentBlock::ServerToolUse(s) => {
+                out.push_str(&format!("\n> _(server tool)_ `{}`\n", s.name));
+            }
+            AssistantContentBlock::AdvisorToolResult(a) => {
+                let trimmed = a.text.trim();
+                if !trimmed.is_empty() {
+                    out.push_str(&format!("\n> _(advisor)_ {trimmed}\n"));
+                }
+            }
         }
     }
 }

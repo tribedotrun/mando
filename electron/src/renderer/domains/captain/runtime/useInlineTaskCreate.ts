@@ -8,6 +8,11 @@ import { useTaskCreate, useTaskBulkCreate } from '#renderer/domains/captain/runt
 import { resolveEffectiveProject } from '#renderer/domains/captain/service/projectHelpers';
 import { bulkTextareaRows } from '#renderer/global/service/utils';
 import { extractImageFromClipboard } from '#renderer/global/service/clipboardImage';
+import type { TaskProvider } from '#renderer/global/types';
+import {
+  applyPlanningProviderChange,
+  TASK_PROVIDER_DEFAULT,
+} from '#renderer/domains/captain/runtime/useInlineTaskCreate.helpers';
 
 export function useInlineTaskCreate() {
   const initialProject = useRouterState({
@@ -38,6 +43,20 @@ export function useInlineTaskCreate() {
   });
   const [noAutoMerge, setNoAutoMerge] = useState(false);
   const [planning, setPlanning] = useState(false);
+  const [provider, setProvider] = useState<TaskProvider>(TASK_PROVIDER_DEFAULT);
+  const prePlanningProviderRef = useRef<TaskProvider>(TASK_PROVIDER_DEFAULT);
+
+  const handlePlanningChange = (next: boolean) => {
+    const nextProvider = applyPlanningProviderChange({
+      nextPlanning: next,
+      wasPlanning: planning,
+      provider,
+      prePlanningProvider: prePlanningProviderRef.current,
+    });
+    prePlanningProviderRef.current = nextProvider.prePlanningProvider;
+    setPlanning(next);
+    setProvider(nextProvider.provider);
+  };
 
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const createMut = useTaskCreate();
@@ -56,6 +75,8 @@ export function useInlineTaskCreate() {
     resetDrafts();
     setNoAutoMerge(false);
     setPlanning(false);
+    prePlanningProviderRef.current = TASK_PROVIDER_DEFAULT;
+    setProvider(TASK_PROVIDER_DEFAULT);
   };
 
   const canSubmit = !!trimmedTitle && (!projectRequired || !!effectiveProject) && !pending;
@@ -72,6 +93,7 @@ export function useInlineTaskCreate() {
           project: effectiveProject || undefined,
           noAutoMerge: (globalAutoMerge && noAutoMerge) || undefined,
           planning: planning || undefined,
+          provider,
           images: image ? [image] : undefined,
         });
       }
@@ -99,7 +121,8 @@ export function useInlineTaskCreate() {
     draft: { title, setTitle, bulk, setBulk, textareaRows, inputRef },
     image: { image, preview, setImageFile, removeImage },
     autoMerge: { globalAutoMerge, noAutoMerge, setNoAutoMerge },
-    planMode: { planning, setPlanning },
+    planMode: { planning, setPlanning: handlePlanningChange },
+    provider: { provider, setProvider },
     project: { projects, effectiveProject, projectRequired, handleProjectChange },
     submit: { pending, canSubmit, handleSubmit },
     events: { handleKeyDown, handlePaste },

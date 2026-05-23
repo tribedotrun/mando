@@ -3,6 +3,7 @@ import type {
   SessionEntry,
   SessionStatus,
   SessionSummary,
+  TaskProvider,
   TaskItem,
   TimelineEvent,
 } from '#renderer/global/types';
@@ -45,6 +46,7 @@ export function buildSessionsFromTimeline(
     const existing = sessionMap[sid];
     seen.set(sid, {
       session_id: sid,
+      provider: existing?.provider ?? item.provider,
       status: existing?.status ?? 'stopped',
       caller: existing?.caller ?? CALLER_MAP[payload.event_type] ?? 'worker',
       started_at: existing?.started_at ?? ev.timestamp,
@@ -169,8 +171,13 @@ export function sessionSubtitle(s: SessionEntry): string | null {
   return null;
 }
 
-/** Builds a `claude -r <id>` command, optionally prefixed with `cd`. */
-export function buildResumeCmd(sessionId: string, cwd?: string | null): string {
+/** Builds a provider-native terminal resume command when one is available. */
+export function buildResumeCmd(
+  sessionId: string,
+  provider: TaskProvider | undefined,
+  cwd?: string | null,
+): string | null {
+  if (!provider || provider === 'codex') return null;
   return cwd ? `cd "${cwd}" && claude -r ${sessionId}` : `claude -r ${sessionId}`;
 }
 
@@ -182,6 +189,7 @@ export function buildSequenceFromSummaries(
   return buildSessionSequence(
     summaries.map((s) => ({
       session_id: s.session_id,
+      provider: s.provider,
       created_at: s.started_at || '',
       cwd: s.cwd || '',
       model: s.model || '',

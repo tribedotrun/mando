@@ -16,7 +16,7 @@ models:
 agent:
   max_concurrent: 3
   resource_limits:
-    emulator: 1
+    emulator: 3
   # Per-lifecycle-state concurrency caps. Empty = unlimited (subject to
   # max_concurrent for in-progress). Allowed keys are the kebab-case wire
   # names of ItemStatus variants with a live CC/Codex session:
@@ -42,11 +42,21 @@ agent:
   todo_parse_idle_ttl_s: 120
   todo_parse_max_turns: 10
   needs_clarification_timeout_s: 86400
-  archive_grace_secs: 604800
   task_ask_timeout_s: 600
   task_ask_idle_ttl_s: 3600
   ops_timeout_s: 120
   ops_idle_ttl_s: 3600
+  # Codex app-server permission posture. `on-request` routes permission
+  # prompts through Codex approval review instead of failing them outright.
+  codex_approval_policy: "on-request"
+  codex_approvals_reviewer: "auto_review"
+  # Codex app-server sandbox posture. Mando-owned workers need
+  # danger-full-access so local Electron verification can launch without the
+  # macOS workspace-write seatbelt blocking LaunchServices/WindowServer.
+  codex_sandbox_policy: "danger-full-access"
+  # Codex app-server model/runtime settings. Null means use the user's Codex
+  # defaults in normal/dev; sandbox overrides this below.
+  codex: null
   no_pr_min_active_s: 180
 
 planning:
@@ -99,6 +109,12 @@ sandbox:
   # e2e rework/escalation specs then drive from escalated → rework
   # without waiting out a 20+ minute nudge chain.
   max_interventions: 3
+  # Sandbox Codex tasks should be cheap and predictable: GPT-5.4, medium
+  # reasoning, and explicit standard routing (`default` means not fast).
+  codex:
+    model: "gpt-5.4"
+    reasoning_effort: "medium"
+    service_tier: "default"
 
 # ── Prompt Templates ─────────────────────────────────────────────────────────
 
@@ -367,7 +383,7 @@ prompts:
     - Self-answer code questions from the codebase. Only surface genuine ambiguity to the human.
     - Treat every task as a single deliverable — never split into subtasks.
     - Determine `no_pr`: set to `true` for audit, research, investigation, or read-only tasks.
-    - Determine `resource`: what shared resource does this task consume? Default `"cc"`. Available: {{ resource_list }}
+    - Determine `resource`: set a listed scarce shared resource only when the task consumes one; otherwise set `null`. Available scarce resources: {{ resource_list }}
     - Determine `is_bug_fix`: set to `true` ONLY when the task is to make existing broken behavior work correctly. Bug fixes need a reproducer first, before-state evidence, then after-state evidence. Set to `false` for new features, refactors, additions, polish, performance work, copy changes, design tweaks, or research. **You MUST commit a boolean — `is_bug_fix` is required, not optional.** If the task description is genuinely ambiguous, lean false (so the worker is not forced into the bug-fix protocol unnecessarily) but err toward true when the task names a symptom already occurring (crash, wrong result, broken layout, regression).
 
     ## Output
@@ -376,7 +392,7 @@ prompts:
     - `status`: "ready" if the task is clear after your exploration, "clarifying" if you have 1-2 questions the human must answer, "answered" if the task is just a question you can answer, "escalate" for truly broken tasks.
     - `title`: concise (<=80 char) imperative form.
     - `context`: enriched context with ALL your findings — file paths, patterns, component names. This is the most important output — it gives the worker a head start.
-    - `questions`: array of objects, each with `question` (string), `answer` (string or null), `self_answered` (boolean), and `category` ("code" or "intent"). Include ALL questions — both self-answered and unanswered. Self-answered questions are internal context only (not shown to user).
+    - `questions`: unanswered human-facing questions only. Do not include self-answered, already-answered, or historical questions; put those findings in `context`. For every returned question, set `answer` to null and `self_answered` to false.
     - `is_bug_fix`: required boolean (no null). See classification rule above.
     {% if human_input %}
 
@@ -396,7 +412,8 @@ prompts:
     2. Only ask follow-up questions if critical information is still missing.
     3. Keep questions concise and concrete.
     4. Phrase any follow-up question in plain English about user-visible behavior, intent, scope, or tradeoffs. Avoid code identifiers (function names, type names, variable names, file paths) unless absolutely necessary, and never paste code or schema fragments. The `current_context` you write is for the worker and should stay code-rich; the questions are for the human.
-    5. Output JSON only. No markdown.
+    5. In `questions`, return only new unanswered follow-up questions that require human input. Do not repeat answered questions. Put incorporated answers and self-answered findings in `context`; returned questions should have `answer` null and `self_answered` false.
+    6. Output JSON only. No markdown.
 
     ## Task
 
@@ -931,6 +948,9 @@ nudges:
 
   missing_work_summary: |
     Your task is missing a work summary. Run `/mando-pr-summary` to generate the diagram and save it via `mando todo summary`. Tasks cannot be marked done without a work summary.
+
+  draft_pr: |
+    Your PR is still a draft. Run `/mando-pr` to mark it ready for review, then continue until the task is ready for Captain review.
 
   missing_evidence: |
     Your task has no evidence.

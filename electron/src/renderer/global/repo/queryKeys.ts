@@ -45,8 +45,9 @@ export const queryKeys = {
   // ── Sessions ──
   sessions: {
     all: ['sessions'] as const,
-    list: (page: number, category?: SessionCategory, status?: SessionStatusFilter) =>
-      ['sessions', 'list', page, category ?? 'all', status ?? 'all'] as const,
+    list: (page: number, category?: SessionCategory, status?: SessionStatusFilter, perPage = 50) =>
+      ['sessions', 'list', page, perPage, category ?? 'all', status ?? 'all'] as const,
+    detail: (sessionId: string) => ['sessions', 'detail', sessionId] as const,
     events: (sessionId: string) => ['sessions', 'events', sessionId] as const,
     jsonlPath: (sessionId: string) => ['sessions', 'jsonl-path', sessionId] as const,
   },

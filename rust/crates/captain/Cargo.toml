@@ -22,6 +22,7 @@ global-infra = { path = "../global-infra" }
 global-git = { path = "../global-git" }
 global-github = { path = "../global-github" }
 global-claude = { path = "../global-claude" }
+global-codex-app-server = { path = "../global-codex-app-server" }
 global-bus = { path = "../global-bus" }
 global-db = { path = "../global-db" }
 sessions-db = { path = "../sessions-db" }

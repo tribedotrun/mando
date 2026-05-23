@@ -113,6 +113,26 @@ pub(super) async fn reap_dead_rebase_workers(items: &mut [Task], pool: &sqlx::Sq
                             "failed to log rebase session completion"
                         );
                     }
+                    if !succeeded {
+                        // Codex app-server turns finalize themselves before
+                        // this SHA-based reaper can classify the rebase
+                        // outcome. Preserve recorded cost/duration, but
+                        // downgrade the row to Failed when HEAD did not move.
+                        if let Err(e) = sessions_db::update_session_status(
+                            pool,
+                            &sid,
+                            global_types::SessionStatus::Failed,
+                        )
+                        .await
+                        {
+                            tracing::warn!(
+                                module = "captain",
+                                session_id = %sid,
+                                error = %e,
+                                "failed to mark unsuccessful rebase session failed"
+                            );
+                        }
+                    }
                 } else {
                     tracing::info!(
                         module = "captain",
@@ -307,6 +327,70 @@ mod tests {
         );
 
         // Cleanup.
+        global_infra::best_effort!(
+            std::fs::remove_dir_all(&data_dir),
+            "mergeability_rebase: std::fs::remove_dir_all(&data_dir)"
+        );
+    }
+
+    #[tokio::test]
+    async fn reap_marks_stopped_failed_when_rebase_sha_did_not_change() {
+        let _lock = global_infra::PROCESS_ENV_LOCK.lock().await;
+        let (data_dir, _guard) = isolate_data_dir();
+        let pool = test_pool().await;
+
+        let session_id = global_infra::uuid::Uuid::v4().to_string();
+        let worker_name = "mando-rebase-stopped";
+
+        crate::io::headless_cc::log_running_session(
+            &pool,
+            &session_id,
+            std::path::Path::new("/tmp"),
+            "rebase",
+            worker_name,
+            Some(100),
+            false,
+            None,
+        )
+        .await
+        .unwrap();
+        sessions_db::update_session_status(
+            &pool,
+            &session_id,
+            global_types::SessionStatus::Stopped,
+        )
+        .await
+        .unwrap();
+
+        crate::io::pid_registry::register(worker_name, crate::Pid::new(999999)).unwrap();
+
+        let streams_dir = data_dir.join("state/cc-streams");
+        std::fs::create_dir_all(&streams_dir).unwrap();
+        let stream_file = streams_dir.join(format!("{session_id}.jsonl"));
+        std::fs::write(
+            &stream_file,
+            [
+                r#"{"type":"system","subtype":"init"}"#,
+                r#"{"type":"result","subtype":"success","duration_ms":5000}"#,
+            ]
+            .join("\n"),
+        )
+        .unwrap();
+
+        let mut task = Task::new("Test stopped failed rebase");
+        task.id = 100;
+        task.rebase_worker = Some(worker_name.to_string());
+        let mut items = vec![task];
+
+        reap_dead_rebase_workers(&mut items, &pool).await;
+
+        let row = sessions_db::session_by_id(&pool, &session_id)
+            .await
+            .unwrap()
+            .expect("session should exist");
+        assert_eq!(row.status, "failed");
+        assert!(items[0].rebase_worker.is_none());
+
         global_infra::best_effort!(
             std::fs::remove_dir_all(&data_dir),
             "mergeability_rebase: std::fs::remove_dir_all(&data_dir)"

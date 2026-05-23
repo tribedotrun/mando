@@ -148,10 +148,11 @@ export function groupAssistantBlocks(
  * main thread. Sidechain expansion is a future UI affordance.
  */
 export function resolveActiveBranch(events: readonly TranscriptEvent[]): TranscriptEvent[] {
-  return events.filter((event) => {
+  const branch = events.filter((event) => {
     const isSide = metaOf(event)?.isSidechain === true;
     return !isSide;
   });
+  return coalesceStreamingAssistantDeltas(branch);
 }
 
 function metaOf(event: TranscriptEvent) {
@@ -170,6 +171,74 @@ function metaOf(event: TranscriptEvent) {
     case 'unknown':
       return event.data.meta;
   }
+}
+
+function coalesceStreamingAssistantDeltas(events: readonly TranscriptEvent[]): TranscriptEvent[] {
+  const out: TranscriptEvent[] = [];
+  for (const event of events) {
+    const previous = out[out.length - 1];
+    if (previous && canMergeAssistantDelta(previous, event)) {
+      out[out.length - 1] = mergeAssistantDelta(previous, event);
+      continue;
+    }
+    out.push(event);
+  }
+  return out;
+}
+
+function canMergeAssistantDelta(left: TranscriptEvent, right: TranscriptEvent): boolean {
+  if (left.kind !== 'assistant' || right.kind !== 'assistant') return false;
+  const leftUuid = left.data.meta.uuid;
+  if (!leftUuid || leftUuid !== right.data.meta.uuid) return false;
+  const leftBlock = left.data.blocks[0];
+  const rightBlock = right.data.blocks[0];
+  if (
+    !leftBlock ||
+    !rightBlock ||
+    left.data.blocks.length !== 1 ||
+    right.data.blocks.length !== 1
+  ) {
+    return false;
+  }
+  return (
+    (leftBlock.kind === 'text' && rightBlock.kind === 'text') ||
+    (leftBlock.kind === 'thinking' && rightBlock.kind === 'thinking')
+  );
+}
+
+function mergeAssistantDelta(left: TranscriptEvent, right: TranscriptEvent): TranscriptEvent {
+  if (left.kind !== 'assistant' || right.kind !== 'assistant') return left;
+  const leftBlock = left.data.blocks[0];
+  const rightBlock = right.data.blocks[0];
+  if (!leftBlock || !rightBlock) return left;
+  if (leftBlock.kind === 'text' && rightBlock.kind === 'text') {
+    return {
+      ...left,
+      data: {
+        ...left.data,
+        usage: right.data.usage ?? left.data.usage,
+        stopReason: right.data.stopReason ?? left.data.stopReason,
+        blocks: [{ kind: 'text', data: { text: leftBlock.data.text + rightBlock.data.text } }],
+      },
+    };
+  }
+  if (leftBlock.kind === 'thinking' && rightBlock.kind === 'thinking') {
+    return {
+      ...left,
+      data: {
+        ...left.data,
+        usage: right.data.usage ?? left.data.usage,
+        stopReason: right.data.stopReason ?? left.data.stopReason,
+        blocks: [{ kind: 'thinking', data: { text: leftBlock.data.text + rightBlock.data.text } }],
+      },
+    };
+  }
+  return left;
+}
+
+export function unknownEventTitle(event: { rawType: string | null; rawSubtype: string | null }) {
+  const base = event.rawType ?? 'app-server event';
+  return event.rawSubtype ? `${base} · ${event.rawSubtype}` : base;
 }
 
 /**

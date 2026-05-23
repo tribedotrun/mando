@@ -123,13 +123,6 @@ impl TaskStore {
         Ok(())
     }
 
-    pub(crate) async fn archive_terminal_workbenches(
-        &self,
-        grace: std::time::Duration,
-    ) -> Result<usize> {
-        crate::io::queries::workbenches::archive_terminal(&self.pool, grace.as_secs()).await
-    }
-
     /// Merge tick-changed items into the store, preserving concurrent human edits.
     ///
     /// For items with a pre-tick snapshot, uses 3-way merge (base vs tick-changed vs current DB).

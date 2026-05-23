@@ -88,17 +88,9 @@ pub(super) async fn poll_clarifying_items(
             _ => {}
         }
 
-        let stream_path = global_infra::paths::stream_path_for_session(&session_id);
-
-        // Check for error result first (like check_review_failed).
-        if let Some(result) = global_claude::get_stream_result(&stream_path) {
-            if result.get("is_error").and_then(|v| v.as_bool()) == Some(true) {
-                let error_msg = result
-                    .get("error")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("clarifier CC process failed")
-                    .to_string();
-
+        match super::agent_runtime::poll_structured_session_output(item.provider, &session_id) {
+            super::agent_runtime::AgentSessionPoll::Failed(error_msg)
+            | super::agent_runtime::AgentSessionPoll::UnusableOutput(error_msg) => {
                 tracing::warn!(
                     module = "captain",
                     item_id = item.id,
@@ -127,7 +119,6 @@ pub(super) async fn poll_clarifying_items(
                     continue;
                 }
 
-                // Revert: mark session failed, revert status to New
                 super::dispatch_redispatch::revert_clarifier_start(
                     item,
                     &session_id,
@@ -201,69 +192,11 @@ pub(super) async fn poll_clarifying_items(
                 }
                 continue;
             }
-
-            // Success result — parse the ClarifierResult from structured_output.
-            let text = result
-                .get("structured_output")
-                .filter(|v| !v.is_null())
-                .map(|v| v.to_string())
-                .or_else(|| {
-                    result
-                        .get("result")
-                        .and_then(|v| v.as_str())
-                        .map(String::from)
-                })
-                .unwrap_or_default();
-
-            if text.is_empty() {
-                // Session completed but produced no output — treat as an error.
-                // Try last assistant text as a fallback.
-                if let Some(assistant_text) = global_claude::get_last_assistant_text(&stream_path) {
-                    let parsed = clarifier::parse_clarifier_response(&assistant_text, &item.title);
-                    log_apply_err(
-                        item.id,
-                        apply_clarifier_result(
-                            item,
-                            parsed,
-                            &session_id,
-                            notifier,
-                            resource_limits,
-                            pool,
-                        )
-                        .await,
-                    );
-                } else {
-                    tracing::warn!(
-                        module = "captain",
-                        item_id = item.id,
-                        "clarifier completed but produced no output — escalating"
-                    );
-                    super::action_contract::reset_review_retry(
-                        item,
-                        crate::ReviewTrigger::ClarifierFail,
-                    );
-                }
-                continue;
-            }
-
-            let mut parsed = clarifier::parse_clarifier_response(&text, &item.title);
-            parsed.session_id = Some(session_id.to_string());
-
-            log_apply_err(
-                item.id,
-                apply_clarifier_result(item, parsed, &session_id, notifier, resource_limits, pool)
-                    .await,
-            );
-            continue;
-        }
-
-        // No `type: "result"` entry in the stream. If the session is already
-        // finished (stopped/failed/timeout), try extracting the answer from the
-        // last assistant message instead of waiting for the full timeout.
-        if global_claude::is_session_finished(&session_id) {
-            if let Some(assistant_text) = global_claude::get_last_assistant_text(&stream_path) {
-                let mut parsed = clarifier::parse_clarifier_response(&assistant_text, &item.title);
+            super::agent_runtime::AgentSessionPoll::Completed(output) => {
+                let text = super::agent_runtime::session_output_text(output);
+                let mut parsed = clarifier::parse_clarifier_response(&text, &item.title);
                 parsed.session_id = Some(session_id.to_string());
+
                 log_apply_err(
                     item.id,
                     apply_clarifier_result(
@@ -278,29 +211,7 @@ pub(super) async fn poll_clarifying_items(
                 );
                 continue;
             }
-            // Session finished but produced nothing useful — treat as error.
-            tracing::warn!(
-                module = "captain",
-                item_id = item.id,
-                %session_id,
-                "clarifier session finished without result or assistant text"
-            );
-            super::dispatch_redispatch::revert_clarifier_start(
-                item,
-                &session_id,
-                &anyhow::anyhow!("session finished without usable output"),
-                pool,
-            )
-            .await;
-            let count = item.clarifier_fail_count + 1;
-            item.clarifier_fail_count = count;
-            if count >= max_clarifier_retries {
-                super::action_contract::reset_review_retry(
-                    item,
-                    crate::ReviewTrigger::ClarifierFail,
-                );
-            }
-            continue;
+            super::agent_runtime::AgentSessionPoll::Pending => {}
         }
 
         // No result yet — check timeout.

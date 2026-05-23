@@ -103,7 +103,7 @@ pub async fn apply_clarifier_result(
                     item.is_bug_fix = is_bug_fix;
                 }
                 if let Some(ref resource) = result.resource {
-                    let is_known = resource == "cc" || resource_limits.contains_key(resource);
+                    let is_known = resource_limits.contains_key(resource);
                     if is_known {
                         item.resource = Some(resource.clone());
                     } else {

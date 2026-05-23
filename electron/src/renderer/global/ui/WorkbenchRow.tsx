@@ -12,6 +12,7 @@ import {
 } from '#renderer/global/ui/WorkbenchContextMenu';
 import { WorkbenchRowHoverActions } from '#renderer/global/ui/WorkbenchRowHoverActions';
 import { useSidebar } from '#renderer/global/runtime/SidebarContext';
+import { ProviderLogo } from '#renderer/global/ui/ProviderLogo';
 
 export function WorkbenchRow({
   projectName,
@@ -108,6 +109,7 @@ export function WorkbenchRow({
           </span>
         )}
       </span>
+      {task && <ProviderLogo provider={task.provider} />}
       <span className="min-w-0 flex-1 truncate">{wb.title}</span>
       <WorkbenchRowHoverActions
         activity={activity}

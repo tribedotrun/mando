@@ -3,6 +3,7 @@ import type {
   GrepInput,
   ReadInput,
   ResultOutcome,
+  TranscriptUsageInfo,
   UserToolResultBlock,
 } from '#renderer/global/types';
 import { toolLabel } from '#renderer/domains/sessions/service/transcriptEvents';
@@ -33,6 +34,17 @@ export function formatDuration(ms: number): string {
 
 export function formatCost(usd: number): string {
   return `$${usd.toFixed(4)}`;
+}
+
+export function formatTotalUsage(usage: TranscriptUsageInfo | null): string | null {
+  if (!usage) return null;
+  const tokens =
+    usage.input_tokens +
+    usage.output_tokens +
+    usage.cache_read_tokens +
+    usage.cache_creation_tokens;
+  if (tokens <= 0) return null;
+  return `${tokens} tok`;
 }
 
 export function buildGrepSummary(input: GrepInput): string {

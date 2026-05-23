@@ -1,23 +1,43 @@
 import { keepPreviousData, skipToken, useQuery } from '@tanstack/react-query';
 import { queryKeys } from '#renderer/global/repo/queryKeys';
 import { daemonSyncMeta } from '#renderer/global/repo/syncPolicy';
-import { fetchSessionJsonlPath, fetchSessions } from '#renderer/domains/sessions/repo/api';
+import {
+  fetchSession,
+  fetchSessionJsonlPath,
+  fetchSessions,
+} from '#renderer/domains/sessions/repo/api';
 import type {
   SessionCategory,
+  SessionEntry,
   SessionsResponse,
   SessionStatus,
   TranscriptEventsResponse,
 } from '#renderer/global/types';
 import { toReactQuery } from '#result';
 
-export function useSessionsList(page: number, category?: SessionCategory, status?: SessionStatus) {
+export function useSessionsList(
+  page: number,
+  category?: SessionCategory,
+  status?: SessionStatus,
+  perPage = 50,
+) {
   return useQuery<SessionsResponse>({
-    queryKey: queryKeys.sessions.list(page, category, status),
+    queryKey: queryKeys.sessions.list(page, category, status, perPage),
     meta: daemonSyncMeta('sse-invalidated', 'session events invalidate session lists'),
-    queryFn: () => toReactQuery(fetchSessions(page, 50, category, status)),
+    queryFn: () => toReactQuery(fetchSessions(page, perPage, category, status)),
     // Only retain stale data while paginating (page > 1); clear immediately on
     // filter changes (page resets to 1) so stale mismatched rows are not shown.
     placeholderData: page > 1 ? keepPreviousData : undefined,
+  });
+}
+
+export function useSession(sessionId: string | null) {
+  const keySessionId = sessionId ?? '__disabled__';
+  return useQuery<SessionEntry>({
+    queryKey: queryKeys.sessions.detail(keySessionId),
+    meta: daemonSyncMeta('manual', 'single session metadata for transcript routes'),
+    queryFn: () => toReactQuery(fetchSession(sessionId!)),
+    enabled: !!sessionId,
   });
 }
 

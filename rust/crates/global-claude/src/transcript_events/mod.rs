@@ -455,6 +455,28 @@ mod tests {
     }
 
     #[test]
+    fn parse_server_tool_use_and_advisor_result() {
+        let line = r#"{"type":"assistant","uuid":"a1","message":{"content":[{"type":"server_tool_use","id":"srvtoolu_01X","name":"advisor","input":{}},{"type":"advisor_tool_result","tool_use_id":"srvtoolu_01X","content":{"type":"advisor_result","text":"advice here"}}]}}"#;
+        let path = temp_file(line);
+        let events = parse_events(&path);
+        let TranscriptEvent::Assistant(evt) = &events[0] else {
+            panic!("expected Assistant");
+        };
+        assert_eq!(evt.blocks.len(), 2);
+        let AssistantContentBlock::ServerToolUse(stu) = &evt.blocks[0] else {
+            panic!("expected ServerToolUse");
+        };
+        assert_eq!(stu.id, "srvtoolu_01X");
+        assert_eq!(stu.name, "advisor");
+        let AssistantContentBlock::AdvisorToolResult(atr) = &evt.blocks[1] else {
+            panic!("expected AdvisorToolResult");
+        };
+        assert_eq!(atr.tool_use_id, "srvtoolu_01X");
+        assert_eq!(atr.text, "advice here");
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
     fn parse_user_tool_result_blocks() {
         let line = r#"{"type":"user","uuid":"u1","message":{"content":[{"type":"tool_result","tool_use_id":"tu1","content":"ok","is_error":false}]}}"#;
         let path = temp_file(line);

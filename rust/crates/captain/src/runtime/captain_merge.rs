@@ -47,54 +47,52 @@ pub(super) fn merge_json_schema() -> serde_json::Value {
 /// Check if a captain merge session has completed. Returns the result if done.
 pub(crate) fn check_merge(item: &Task) -> Option<MergeResult> {
     let session_id = item.session_ids.merge.as_deref()?;
-    let stream_path = global_infra::paths::stream_path_for_session(session_id);
-    let result = match global_claude::get_stream_result(&stream_path) {
-        Some(r) => r,
-        None => {
-            let stream_size = std::fs::metadata(&stream_path)
-                .map(|m| m.len())
-                .unwrap_or(u64::MAX);
-            tracing::debug!(
-                module = "captain",
-                item_id = item.id,
-                %session_id,
-                stream_file_bytes = stream_size,
-                stream_path = %stream_path.display(),
-                "check_merge: no result in stream file"
-            );
-            return None;
-        }
-    };
-
-    // Try structured_output first.
-    if let Some(so) = result.get("structured_output").filter(|v| !v.is_null()) {
-        match serde_json::from_value::<MergeResult>(so.clone()) {
-            Ok(mr) => return Some(mr),
-            Err(e) => {
-                warn!(module = "captain", %e, %session_id, "merge structured_output parse failed");
-            }
-        }
-    }
-
-    // Fall back to result text.
-    let mut text = result
-        .get("result")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string();
-
-    if text.is_empty() {
-        if let Some(t) = global_claude::get_last_assistant_text(&stream_path) {
-            text = t;
-        } else {
+    let output = match super::agent_runtime::poll_structured_session_output(
+        item.provider,
+        session_id,
+    ) {
+        super::agent_runtime::AgentSessionPoll::Pending => return None,
+        super::agent_runtime::AgentSessionPoll::Failed(msg) => {
+            warn!(module = "captain", %session_id, %msg, "merge session failed");
             return Some(MergeResult {
                 action: "failed".into(),
-                feedback: "Merge session completed but produced no output".into(),
+                feedback: msg,
             });
         }
-    }
+        super::agent_runtime::AgentSessionPoll::UnusableOutput(msg) => {
+            warn!(module = "captain", %session_id, %msg, "merge session produced no usable output");
+            return Some(MergeResult {
+                action: "failed".into(),
+                feedback: msg,
+            });
+        }
+        super::agent_runtime::AgentSessionPoll::Completed(output) => output,
+    };
 
-    match serde_json::from_str::<MergeResult>(&text) {
+    match output {
+        super::agent_runtime::AgentSessionOutput::Structured {
+            value,
+            fallback_text,
+        } => match serde_json::from_value::<MergeResult>(value.clone()) {
+            Ok(mr) => Some(mr),
+            Err(e) => {
+                warn!(module = "captain", %e, %session_id, "merge structured_output parse failed");
+                if let Some(text) = fallback_text {
+                    parse_merge_text(&text)
+                } else {
+                    Some(MergeResult {
+                        action: "failed".into(),
+                        feedback: format!("Failed to parse structured merge result: {e}"),
+                    })
+                }
+            }
+        },
+        super::agent_runtime::AgentSessionOutput::Text(text) => parse_merge_text(&text),
+    }
+}
+
+fn parse_merge_text(text: &str) -> Option<MergeResult> {
+    match serde_json::from_str::<MergeResult>(text) {
         Ok(mr) => Some(mr),
         Err(e) => {
             warn!(module = "captain", %e, "failed to parse merge result");

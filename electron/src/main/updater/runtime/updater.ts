@@ -7,10 +7,12 @@ import { app } from 'electron';
 import { handleChannel } from '#main/global/runtime/ipcSecurity';
 import { readAppPackageVersion } from '#main/global/runtime/appPackage';
 import log from '#main/global/providers/logger';
+import { announceUiUpdating } from '#main/global/runtime/uiLifecycle';
 import { UPDATE_CHECK_INTERVAL_MS, INITIAL_CHECK_DELAY_MS } from '#main/updater/config/updater';
 import { createUpdaterRuntimeState } from '#main/updater/runtime/updaterState';
 import { broadcastToWindows } from '#main/updater/runtime/updaterBroadcast';
 import { applyPendingUpdateFlow } from '#main/updater/runtime/applyPendingUpdateFlow';
+import { quitForPendingUpdate } from '#main/updater/runtime/installClickPath';
 import { readChannel, writeChannel } from '#main/updater/service/channelConfig';
 import { fetchFeed, downloadFile } from '#main/updater/service/feedClient';
 import {
@@ -96,9 +98,17 @@ export function setupAutoUpdate(): void {
       return;
     }
 
-    await applyPendingUpdateFlow(pendingUpdate, {
-      onSuccess: () => runtime.setPending(null),
-      onFailure: () => runtime.setPending(null),
+    // Defer the daemon bootout + .app swap to the next process boot's
+    // `applyPendingUpdateIfAny()` so the renderer is gone before the daemon
+    // disappears. Doing the work in-process leaves the renderer alive while
+    // SSE drops, which surfaces a "Daemon disconnected — Reconnecting…"
+    // banner for several seconds before the window finally closes. The
+    // pending marker is already on disk from `stageUpdate()`.
+    log.info(`auto-update: deferring apply of v${pendingUpdate.version} to next launch`);
+    await quitForPendingUpdate({
+      announceUiUpdating,
+      relaunch: () => app.relaunch(),
+      exit: (code) => app.exit(code),
     });
   });
 

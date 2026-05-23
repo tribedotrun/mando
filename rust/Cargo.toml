@@ -18,6 +18,7 @@ members = [
     "crates/global-db",
     "crates/global-bus",
     "crates/global-claude",
+    "crates/global-codex-app-server",
     "crates/global-net",
     "crates/global-git",
     "crates/global-github",
@@ -36,7 +37,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.20-beta.0"
+version = "0.1.20-beta.1"
 edition = "2021"
 license = "Apache-2.0"
 repository = "https://github.com/tribedotrun/mando"
@@ -91,6 +92,7 @@ global-infra = { path = "crates/global-infra" }
 global-db = { path = "crates/global-db" }
 global-bus = { path = "crates/global-bus" }
 global-claude = { path = "crates/global-claude" }
+global-codex-app-server = { path = "crates/global-codex-app-server" }
 global-net = { path = "crates/global-net" }
 global-git = { path = "crates/global-git" }
 global-github = { path = "crates/global-github" }

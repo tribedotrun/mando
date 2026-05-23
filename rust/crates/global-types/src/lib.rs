@@ -2,11 +2,13 @@ mod events;
 mod pid;
 mod rate_limit;
 mod session;
+mod task_provider;
 
 pub use events::BusEvent;
 pub use pid::Pid;
 pub use rate_limit::RateLimitStatus;
 pub use session::{SessionEntry, SessionStatus};
+pub use task_provider::TaskProvider;
 
 pub use global_infra::clock::now_rfc3339;
 pub use global_infra::ids::parse_i64_id;

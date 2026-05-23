@@ -1,8 +1,8 @@
 import type { ClarifierQuestion } from '#renderer/global/types';
 
-/** Filters questions that haven't been self-answered by the AI. */
+/** Filters questions that still need a human answer. */
 export function getUnansweredQuestions(questions: ClarifierQuestion[]): ClarifierQuestion[] {
-  return questions.filter((q) => !q.self_answered);
+  return questions.filter((q) => !q.self_answered && !q.answer?.trim());
 }
 
 /** Builds a fingerprint string for draft key derivation. */

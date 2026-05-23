@@ -149,6 +149,7 @@ pub(crate) async fn post_captain_adopt(
                 Some(project_name.as_str()),
                 Some(&ctx),
                 Some("adopt"),
+                api_types::TaskProvider::Claude,
             )
             .await
             .map_err(|e| internal_error(e, "failed to create task for adoption"))?;

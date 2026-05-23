@@ -44,6 +44,7 @@ pub(crate) fn format_context(ctx: &WorkerContext) -> String {
          - Status: {status}\n\
          - Branch: {branch}\n\
          - PR: {pr}\n\
+         - PR draft: {draft}\n\
          - CI: {ci}\n\
          - PR comments: {comments} top-level, {unresolved} unresolved threads, \
            {unreplied} unreplied threads, {unaddressed} unaddressed issue comments\n\
@@ -67,6 +68,7 @@ pub(crate) fn format_context(ctx: &WorkerContext) -> String {
         status = ctx.status,
         branch = ctx.branch.as_deref().unwrap_or("none"),
         pr = ctx.pr.as_deref().unwrap_or("none"),
+        draft = ctx.pr_is_draft,
         ci = ctx.pr_ci_status.as_deref().unwrap_or("n/a"),
         comments = ctx.pr_comments,
         unresolved = ctx.unresolved_threads,
@@ -115,6 +117,7 @@ mod tests {
             unaddressed_issue_comments: 0,
             pr_body: String::new(),
             changed_files: vec![],
+            pr_is_draft: false,
             branch_ahead: true,
             process_alive: false,
             cpu_time_s: Some(100.0),

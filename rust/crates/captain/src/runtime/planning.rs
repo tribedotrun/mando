@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 use crate::{Task, TimelineEventPayload};
 use anyhow::{Context, Result};
-use global_claude::{codex_exec, CcConfig};
+use global_claude::{codex_exec_with_config, CcConfig, CodexExecConfig};
 use rustc_hash::FxHashMap;
 use settings::CaptainWorkflow;
 use settings::Config;
@@ -239,8 +239,27 @@ async fn run_codex_feedback(
     let prompt = settings::render_prompt("planning_codex_feedback", &workflow.prompts, &vars)
         .map_err(|e| anyhow::anyhow!("failed to render planning_codex_feedback prompt: {e}"))?;
 
-    let result = codex_exec(&prompt, cwd, workflow.planning.codex_timeout_s).await?;
+    let result = codex_exec_with_config(
+        &prompt,
+        cwd,
+        workflow.planning.codex_timeout_s,
+        &codex_exec_config(workflow.agent.codex.as_ref()),
+    )
+    .await?;
     Ok(result.text)
+}
+
+fn codex_exec_config(config: Option<&settings::CodexAgentConfig>) -> CodexExecConfig {
+    match config {
+        Some(config) => CodexExecConfig {
+            model: config.model.clone(),
+            reasoning_effort: config
+                .reasoning_effort
+                .map(|effort| effort.as_app_server_str().to_string()),
+            service_tier: config.service_tier.clone(),
+        },
+        None => CodexExecConfig::default(),
+    }
 }
 
 #[allow(clippy::too_many_arguments)]

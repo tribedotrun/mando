@@ -65,6 +65,7 @@ fn session_entry_from_row(
 
     Ok(api_types::SessionEntry {
         session_id: entry.session_id,
+        provider: entry.provider,
         created_at: entry.created_at,
         cwd: entry.cwd,
         model: entry.model,
@@ -262,6 +263,36 @@ pub fn build_sessions_runtime(
                     })
                 })
             },
+            session_by_id: {
+                let pool = query_pool.clone();
+                Arc::new(move |session_id: String| {
+                    let pool = pool.clone();
+                    Box::pin(async move {
+                        let Some(entry) =
+                            sessions::queries::session_by_id(&pool, &session_id).await?
+                        else {
+                            return Ok(None);
+                        };
+                        let task_titles = captain::task_routing(&pool)
+                            .await?
+                            .into_iter()
+                            .map(|task| (task.id, task.title))
+                            .collect::<std::collections::HashMap<_, _>>();
+                        let scout_titles = match entry.scout_item_id {
+                            Some(id) => scout::item_titles(&pool, &[id]).await.unwrap_or_default(),
+                            None => std::collections::HashMap::new(),
+                        };
+                        let cred_labels = match entry.credential_id {
+                            Some(id) => settings::credentials::labels_by_ids(&pool, &[id])
+                                .await
+                                .unwrap_or_default(),
+                            None => std::collections::HashMap::new(),
+                        };
+                        session_entry_from_row(entry, &task_titles, &scout_titles, &cred_labels)
+                            .map(Some)
+                    })
+                })
+            },
             session_cwd: {
                 let pool = query_pool.clone();
                 Arc::new(move |session_id: String| {
@@ -280,26 +311,49 @@ pub fn build_sessions_runtime(
                     })
                 })
             },
-            session_messages: Arc::new(move |session_id: String, limit, offset| {
-                Box::pin(async move {
-                    sessions::transcript_access::load_messages(&session_id, limit, offset).await
+            session_messages: {
+                let pool = query_pool.clone();
+                Arc::new(move |session_id: String, limit, offset| {
+                    let pool = pool.clone();
+                    Box::pin(async move {
+                        sessions::transcript_access::load_messages(
+                            &pool,
+                            &session_id,
+                            limit,
+                            offset,
+                        )
+                        .await
+                    })
                 })
-            }),
-            session_tool_usage: Arc::new(move |session_id: String| {
-                Box::pin(
-                    async move { sessions::transcript_access::load_tool_usage(&session_id).await },
-                )
-            }),
-            session_cost: Arc::new(move |session_id: String| {
-                Box::pin(async move {
-                    sessions::transcript_access::load_session_cost(&session_id).await
+            },
+            session_tool_usage: {
+                let pool = query_pool.clone();
+                Arc::new(move |session_id: String| {
+                    let pool = pool.clone();
+                    Box::pin(async move {
+                        sessions::transcript_access::load_tool_usage(&pool, &session_id).await
+                    })
                 })
-            }),
-            session_stream: Arc::new(move |session_id: String, types| {
-                Box::pin(async move {
-                    sessions::transcript_access::load_session_stream(&session_id, types).await
+            },
+            session_cost: {
+                let pool = query_pool.clone();
+                Arc::new(move |session_id: String| {
+                    let pool = pool.clone();
+                    Box::pin(async move {
+                        sessions::transcript_access::load_session_cost(&pool, &session_id).await
+                    })
                 })
-            }),
+            },
+            session_stream: {
+                let pool = query_pool.clone();
+                Arc::new(move |session_id: String, types| {
+                    let pool = pool.clone();
+                    Box::pin(async move {
+                        sessions::transcript_access::load_session_stream(&pool, &session_id, types)
+                            .await
+                    })
+                })
+            },
             events_snapshot: {
                 let pool = query_pool.clone();
                 Arc::new(move |session_id: String| {

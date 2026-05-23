@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use crate::config::settings::Config;
-use crate::config::workflow::AgentConfig;
+use crate::config::workflow::{AgentConfig, CodexAgentConfig};
 use crate::config::{CaptainWorkflow, SandboxOverrides, ScoutWorkflow};
 use crate::types::WorkflowRuntimeMode;
 
@@ -16,7 +16,7 @@ pub fn apply_workflow_mode_overrides(
     }
     if matches!(mode, WorkflowRuntimeMode::Sandbox) {
         let overrides = captain_workflow.sandbox.clone();
-        apply_sandbox_timing_overrides(&overrides, config, &mut captain_workflow.agent);
+        apply_sandbox_overrides(&overrides, config, &mut captain_workflow.agent);
         // The YAML passed validate_agent_config at load time against the
         // pre-override tick interval; re-validate now so a bad sandbox block
         // (e.g. stale_threshold_s < 2 * overridden tick_interval_s) surfaces
@@ -61,7 +61,7 @@ fn apply_model_overrides(
     }
 }
 
-fn apply_sandbox_timing_overrides(
+fn apply_sandbox_overrides(
     overrides: &SandboxOverrides,
     config: &mut Config,
     agent: &mut AgentConfig,
@@ -96,6 +96,27 @@ fn apply_sandbox_timing_overrides(
     if let Some(v) = overrides.max_interventions {
         agent.max_interventions = v;
     }
+    if let Some(codex) = &overrides.codex {
+        merge_codex_config(&mut agent.codex, codex);
+    }
+}
+
+fn merge_codex_config(target: &mut Option<CodexAgentConfig>, overrides: &CodexAgentConfig) {
+    let mut merged = target.clone().unwrap_or(CodexAgentConfig {
+        model: None,
+        reasoning_effort: None,
+        service_tier: None,
+    });
+    if overrides.model.is_some() {
+        merged.model = overrides.model.clone();
+    }
+    if overrides.reasoning_effort.is_some() {
+        merged.reasoning_effort = overrides.reasoning_effort;
+    }
+    if overrides.service_tier.is_some() {
+        merged.service_tier = overrides.service_tier.clone();
+    }
+    *target = Some(merged);
 }
 
 #[cfg(test)]
@@ -114,6 +135,11 @@ mod tests {
             task_ask_timeout_s: Some(60),
             ops_timeout_s: Some(30),
             no_pr_min_active_s: Some(0),
+            codex: Some(CodexAgentConfig {
+                model: Some("gpt-5.4".into()),
+                reasoning_effort: Some(crate::config::workflow::CodexReasoningEffort::Medium),
+                service_tier: Some("default".into()),
+            }),
             max_interventions: Some(1),
         };
         captain
@@ -154,6 +180,15 @@ mod tests {
         assert_eq!(captain.agent.task_ask_timeout_s, Duration::from_secs(60));
         assert_eq!(captain.agent.ops_timeout_s, Duration::from_secs(30));
         assert_eq!(captain.agent.no_pr_min_active_s, Duration::from_secs(0));
+        let codex = captain.agent.codex.as_ref().expect("sandbox codex config");
+        assert_eq!(codex.model.as_deref(), Some("gpt-5.4"));
+        assert_eq!(
+            codex
+                .reasoning_effort
+                .map(|effort| effort.as_app_server_str()),
+            Some("medium")
+        );
+        assert_eq!(codex.service_tier.as_deref(), Some("default"));
         assert_eq!(captain.models.worker, "haiku");
     }
 

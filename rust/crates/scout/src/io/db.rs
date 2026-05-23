@@ -132,6 +132,7 @@ impl ScoutDb {
         sq::upsert_session(
             &self.pool,
             &sq::SessionUpsert {
+                provider: global_types::TaskProvider::Claude,
                 session_id,
                 created_at: &now,
                 caller,

@@ -189,16 +189,16 @@ pub enum TimelineEventPayload {
         error: String,
         fail_count: i64,
     },
-    /// The clarifier turn failed at the CC transport layer (as opposed to a
+    /// The clarifier turn failed at the agent transport layer (as opposed to a
     /// structured "escalate" verdict). Emitted by the HTTP inline path
     /// (`answer_and_reclarify` error), by the captain tick path's
     /// initial-clarifier revert (`dispatch_redispatch::revert_clarifier_start`),
     /// and by startup reconciliation when a task is unstranded from
-    /// `Clarifying` after a daemon crash. Renderer surfaces a "CC errored —
+    /// `Clarifying` after a daemon crash. Renderer surfaces an "Agent errored —
     /// retry" card distinct from stale `needs-clarification`.
     ///
     /// Sentinel encoding (per PR #889's no-`Option` rule):
-    /// - `session_id == ""` — failure surfaced before a CC session was
+    /// - `session_id == ""` — failure surfaced before an agent session was
     ///   established (spawn failure, pre-prompt timeout).
     /// - `api_error_status == 0` — the underlying error was not an HTTP
     ///   status (transport/internal panic, not an API response).

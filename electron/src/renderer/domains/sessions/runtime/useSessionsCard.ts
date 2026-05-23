@@ -100,7 +100,8 @@ export function useSessionsCard({
     setPage(1);
   };
 
-  const resumeCmd = (s: SessionEntry) => buildResumeCmd(s.session_id, s.resume_cwd || s.cwd);
+  const resumeCmd = (s: SessionEntry) =>
+    buildResumeCmd(s.session_id, s.provider, s.resume_cwd || s.cwd);
 
   const handleKey = useCallback(
     (key: string, e: KeyboardEvent) => {
@@ -125,7 +126,11 @@ export function useSessionsCard({
           const s = sessions[clampedFocusedIndex];
           if (s) {
             e.preventDefault();
-            void copyToClipboard(resumeCmd(s), 'Command copied');
+            const cmd = resumeCmd(s);
+            void copyToClipboard(
+              cmd ?? 'Codex sessions resume through Mando task actions.',
+              cmd ? 'Command copied' : 'Codex resume is task-scoped',
+            );
           }
           break;
         }

@@ -38,6 +38,8 @@ struct GhPrViewResponse {
     body: Option<String>,
     #[serde(rename = "headRefOid")]
     head_ref_oid: Option<String>,
+    #[serde(rename = "isDraft")]
+    is_draft: Option<bool>,
     #[serde(rename = "statusCheckRollup")]
     status_check_rollup: Option<Vec<GhStatusCheck>>,
     comments: Option<Vec<serde_json::Value>>,
@@ -79,7 +81,7 @@ pub async fn fetch_pr_status(repo: &str, pr_number: &str) -> Result<PrStatus> {
         "--repo",
         repo,
         "--json",
-        "number,author,body,headRefOid,statusCheckRollup,comments,files",
+        "number,author,body,headRefOid,isDraft,statusCheckRollup,comments,files",
     ])
     .await?;
     let parsed: GhPrViewResponse = serde_json::from_str(&text).context("parse gh pr view JSON")?;
@@ -87,6 +89,7 @@ pub async fn fetch_pr_status(repo: &str, pr_number: &str) -> Result<PrStatus> {
     let author = parsed.author.and_then(|a| a.login).unwrap_or_default();
     let body = parsed.body.unwrap_or_default();
     let head_sha = parsed.head_ref_oid.unwrap_or_default();
+    let is_draft = parsed.is_draft.unwrap_or(false);
 
     let ci_status = parsed.status_check_rollup.map(|arr| {
         let is_failure = |c: &GhStatusCheck| -> bool {
@@ -134,6 +137,7 @@ pub async fn fetch_pr_status(repo: &str, pr_number: &str) -> Result<PrStatus> {
         unaddressed_issue_comments: 0,
         body,
         head_sha,
+        is_draft,
         changed_files,
     })
 }

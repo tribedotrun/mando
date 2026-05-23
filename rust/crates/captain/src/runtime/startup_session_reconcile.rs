@@ -57,7 +57,7 @@ pub async fn reconcile_startup_sessions(pool: &SqlitePool) -> Result<()> {
     let mut failed = 0u32;
     for row in &running {
         let sid = row.session_id.as_str();
-        let stream_path = global_infra::paths::stream_path_for_session(sid);
+        let stream_path = super::agent_runtime::stream_path(row.provider, sid);
         let status = match global_claude::get_stream_result(&stream_path) {
             Some(result) if global_claude::is_clean_result(&result) => {
                 salvaged += 1;
@@ -237,6 +237,7 @@ mod tests {
         upsert_session(
             pool,
             &SessionUpsert {
+                provider: global_types::TaskProvider::Claude,
                 session_id: sid,
                 created_at: "2026-04-14T00:00:00Z",
                 caller,
@@ -407,6 +408,7 @@ mod tests {
         upsert_session(
             pool,
             &SessionUpsert {
+                provider: global_types::TaskProvider::Claude,
                 session_id: sid,
                 created_at: "2026-04-24T00:00:00Z",
                 caller: "clarifier",
@@ -434,6 +436,7 @@ mod tests {
         upsert_session(
             pool,
             &SessionUpsert {
+                provider: global_types::TaskProvider::Claude,
                 session_id: sid,
                 created_at: "2026-04-24T00:00:00Z",
                 caller: "clarifier",

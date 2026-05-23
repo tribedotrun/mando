@@ -59,6 +59,20 @@ export function AssistantMessage({
               />
             );
           }
+          if (block.kind === 'advisor_tool_result') {
+            return (
+              <ThinkingBlock
+                key={`${item.eventIndex}-${item.blockIndex}`}
+                id={`advisor-${item.eventIndex}-${item.blockIndex}`}
+                text={block.data.text}
+                label="advisor"
+              />
+            );
+          }
+          if (block.kind === 'server_tool_use') {
+            // Hidden: the paired advisor_tool_result carries the user-visible payload.
+            return null;
+          }
           return (
             <ToolCallBlock
               key={block.data.id}

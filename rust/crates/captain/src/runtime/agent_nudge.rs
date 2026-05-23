@@ -1,0 +1,110 @@
+//! Provider-neutral nudge/resume delivery for active workers.
+
+use anyhow::Result;
+use settings::CaptainWorkflow;
+
+use crate::{Pid, Task};
+
+pub(crate) struct AgentNudgeDelivery {
+    pub(crate) pid: Pid,
+    pub(crate) stream_size_before: u64,
+}
+
+pub(crate) enum AgentNudgeOutcome {
+    Delivered(AgentNudgeDelivery),
+    BrokenSession { alert: String },
+}
+
+#[allow(clippy::too_many_arguments)]
+#[tracing::instrument(skip_all, fields(provider = %item.provider.as_str(), task_id = item.id, session_id))]
+pub(crate) async fn nudge_worker(
+    pool: &sqlx::SqlitePool,
+    item: &Task,
+    worker_name: &str,
+    cwd: &std::path::Path,
+    prompt: &str,
+    session_id: &str,
+    model: &str,
+    workflow: &CaptainWorkflow,
+    current_pid: Pid,
+) -> Result<AgentNudgeOutcome> {
+    let stream_path = super::agent_session_result::stream_path(item.provider, session_id);
+    if let Some(reason) = super::agent_runtime::worker_resume_replacement_reason(
+        item.provider,
+        &stream_path,
+        workflow,
+    ) {
+        if current_pid.as_u32() > 0 {
+            if let Err(e) = crate::io::pid_registry::register(session_id, current_pid) {
+                tracing::warn!(
+                    module = "agent_runtime",
+                    worker = %worker_name,
+                    session_id,
+                    pid = %current_pid,
+                    error = %e,
+                    "failed to refresh stale worker pid before broken-session cleanup"
+                );
+            }
+        }
+        super::agent_runtime::terminate_worker_process(item.provider, session_id).await?;
+        return Ok(AgentNudgeOutcome::BrokenSession {
+            alert: format!(
+                "Broken session symptom ({reason}) for {worker_name} — captain review triggered"
+            ),
+        });
+    }
+
+    let stream_size_before =
+        super::agent_session_result::stream_file_size(item.provider, session_id);
+    match item.provider {
+        global_types::TaskProvider::Codex => {
+            match super::agent_runtime::steer(item.provider, session_id, prompt.to_string()).await {
+                Ok(true) => Ok(AgentNudgeOutcome::Delivered(AgentNudgeDelivery {
+                    pid: current_pid,
+                    stream_size_before,
+                })),
+                Ok(false) => {
+                    tracing::info!(
+                        module = "captain",
+                        worker = %worker_name,
+                        session_id,
+                        "Codex turn is inactive; resuming thread for nudge delivery"
+                    );
+                    let resume = super::agent_runtime::resume_worker(
+                        pool,
+                        item,
+                        worker_name,
+                        cwd,
+                        prompt,
+                        session_id,
+                        model,
+                        workflow,
+                    )
+                    .await?;
+                    Ok(AgentNudgeOutcome::Delivered(AgentNudgeDelivery {
+                        pid: resume.pid,
+                        stream_size_before,
+                    }))
+                }
+                Err(e) => Err(e),
+            }
+        }
+        global_types::TaskProvider::Claude => {
+            let resume = super::agent_runtime::resume_worker(
+                pool,
+                item,
+                worker_name,
+                cwd,
+                prompt,
+                session_id,
+                model,
+                workflow,
+            )
+            .await?;
+            Ok(AgentNudgeOutcome::Delivered(AgentNudgeDelivery {
+                pid: resume.pid,
+                stream_size_before,
+            }))
+        }
+    }
+}

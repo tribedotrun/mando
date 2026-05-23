@@ -51,6 +51,24 @@ pub(crate) async fn get_sessions(
     }))
 }
 
+/// GET /api/sessions/{id}
+#[crate::instrument_api(method = "GET", path = "/api/sessions/{id}")]
+pub(crate) async fn get_session(
+    State(state): State<AppState>,
+    Path(api_types::SessionIdParams { id }): Path<api_types::SessionIdParams>,
+) -> Result<Json<api_types::SessionEntry>, ApiError> {
+    let config = state.settings.load_config();
+    let mut entry = state
+        .sessions
+        .session_by_id(&id)
+        .await
+        .map_err(|e| internal_error(e, "session lookup failed"))?
+        .ok_or_else(|| error_response(StatusCode::NOT_FOUND, &format!("session {id} not found")))?;
+    let project = cwd_to_project(&entry.cwd);
+    entry.github_repo = crate::resolve_github_repo(project.as_deref(), &config);
+    Ok(Json(entry))
+}
+
 /// Derive a project name from a CWD path (last path component).
 fn cwd_to_project(cwd: &str) -> Option<String> {
     if cwd.is_empty() {
@@ -93,10 +111,11 @@ pub(crate) async fn get_session_events(
 /// GET /api/sessions/{id}/jsonl-path
 ///
 /// Resolves the on-disk path of the session's underlying JSONL stream so the
-/// renderer can open it with the user's default app for `.jsonl`. Prefers the
-/// Mando-owned stream under `~/.mando/state/cc-streams/` and falls back to the
-/// CC-native `~/.claude/projects/` layout. Returns `{ path: null }` when
-/// neither file exists so the UI can disable the action.
+/// renderer can open it with the user's default app for `.jsonl`. Codex
+/// sessions prefer Mando-owned app-server logs under `state/session-jsonl`,
+/// while Claude Code sessions prefer `cc-streams` with the CC-native fallback.
+/// Returns `{ path: null }` when no file exists so the UI can disable the
+/// action.
 #[crate::instrument_api(method = "GET", path = "/api/sessions/{id}/jsonl-path")]
 pub(crate) async fn get_session_jsonl_path(
     State(state): State<AppState>,

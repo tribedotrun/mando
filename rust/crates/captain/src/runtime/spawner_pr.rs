@@ -41,7 +41,28 @@ pub(crate) async fn create_draft_pr(
     let original_prompt = item.original_prompt.as_deref().unwrap_or("");
     let problem = format!("{}\n\n{}\n\n{}", item.title, context, original_prompt);
     let body = format!("## Problem\n\n{problem}\n");
-    let pr_num = global_github::create_draft_pr(wt_path, &item.title, &body).await?;
+    let pr_num = match global_github::create_draft_pr(wt_path, &item.title, &body).await {
+        Ok(pr_num) => pr_num,
+        Err(e) => {
+            if let Some(repo) = item.github_repo.as_deref() {
+                if let Some(pr_num) = global_github::discover_pr_for_branch(repo, branch).await {
+                    tracing::warn!(
+                        module = "spawner_pr",
+                        task_id = item.id,
+                        branch,
+                        pr_number = pr_num,
+                        error = %e,
+                        "draft PR creation failed because an open PR already exists for this branch; reusing it"
+                    );
+                    pr_num
+                } else {
+                    return Err(e);
+                }
+            } else {
+                return Err(e);
+            }
+        }
+    };
 
     Ok(pr_num)
 }

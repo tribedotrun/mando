@@ -16,7 +16,7 @@
 //! persistence schemes and merging two distinct UI flows -- out of scope for
 //! prompt-template hygiene. The two endpoints are documented as a deliberate
 //! split; if a future refactor wants to unify them, it must also unify the
-//! `cc_sessions` rows and the renderer history queries.
+//! session rows and the renderer history queries.
 
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
@@ -24,6 +24,10 @@ use axum::Json;
 
 use super::routes_task_advisor_action::post_task_advisor_action;
 use super::routes_task_advisor_helpers::build_advisor_prompt;
+use super::routes_task_agent_session::{
+    run_task_agent_session, should_clear_missing_manager_session,
+    should_close_orphan_manager_session, should_resume_task_session, TaskAgentSessionRequest,
+};
 use crate::response::{
     broadcast_task_update, error_response, internal_error, resolve_task_cwd,
     touch_workbench_activity, ApiError,
@@ -38,7 +42,7 @@ const PENDING_SESSION: &str = "pending";
 /// and the task carry the same id; persisting it directly avoids the
 /// post-hoc backfill round-trip and keeps history coherent. Start-new case
 /// (`should_resume = false`): the row gets `'pending'` and the success path
-/// backfills it once the CC call returns the real id.
+/// backfills it once the agent call returns the real id.
 ///
 /// Gating on `should_resume` (not just on `existing.is_some()`) is the
 /// invariant that matters: the route's stale-session branch (`!mgr_has_session
@@ -55,7 +59,7 @@ fn pick_initial_session_id(should_resume: bool, existing: Option<&str>) -> &str 
 
 /// POST /api/tasks/{id}/advisor -- send a message to the task's advisor.
 ///
-/// - `ask` intent: conversational Q&A. Lazily spawns a CC session on first
+/// - `ask` intent: conversational Q&A. Lazily spawns an agent session on first
 ///   message, resumes the same session for follow-ups, and persists the
 ///   assistant reply as an `ask_history` `assistant` row.
 /// - `reopen` / `rework` / `revise-plan`: single synthesis call whose output
@@ -92,17 +96,22 @@ pub(crate) async fn post_task_advisor(
     let sessions = state.sessions.clone();
 
     let mgr_has_session = sessions.has_session(&session_key);
-    let task_has_session = item.session_ids.advisor.is_some();
-    let should_resume = mgr_has_session && task_has_session;
+    let existing_session_id = item.session_ids.advisor.as_deref();
+    let should_resume =
+        should_resume_task_session(item.provider, mgr_has_session, existing_session_id);
 
-    if mgr_has_session && !task_has_session {
+    if should_close_orphan_manager_session(item.provider, mgr_has_session, existing_session_id) {
         tracing::info!(
             module = "transport-http-transport-routes_task_advisor",
             task_id,
             "session_ids.advisor cleared -- closing stale session"
         );
         crate::runtime::task_sessions::close_advisor_session(&state, task_id).await;
-    } else if !mgr_has_session && task_has_session {
+    } else if should_clear_missing_manager_session(
+        item.provider,
+        mgr_has_session,
+        existing_session_id,
+    ) {
         tracing::warn!(
             module = "transport-http-transport-routes_task_advisor",
             task_id,
@@ -113,8 +122,7 @@ pub(crate) async fn post_task_advisor(
 
     let ask_id = global_infra::uuid::Uuid::v4().to_string();
 
-    let initial_session_id =
-        pick_initial_session_id(should_resume, item.session_ids.advisor.as_deref());
+    let initial_session_id = pick_initial_session_id(should_resume, existing_session_id);
 
     state
         .captain
@@ -129,6 +137,7 @@ pub(crate) async fn post_task_advisor(
             &sessions,
             &session_key,
             should_resume,
+            existing_session_id,
             &item,
             &workflow,
             task_id,
@@ -140,11 +149,12 @@ pub(crate) async fn post_task_advisor(
         .await;
     }
 
-    let result = run_advisor_cc(
+    let result = run_advisor_session(
         &state,
         &sessions,
         &session_key,
         should_resume,
+        existing_session_id,
         &body.message,
         &item,
         &workflow,
@@ -223,14 +233,15 @@ pub(crate) async fn post_task_advisor(
     )))
 }
 
-/// Run the advisor CC session with up to max_retries attempts.
+/// Run the advisor agent session with up to max_retries attempts.
 /// Each failure is persisted to ask_history so it surfaces in the feed.
 #[allow(clippy::too_many_arguments)]
-async fn run_advisor_cc(
+async fn run_advisor_session(
     state: &AppState,
     sessions: &::sessions::SessionsRuntime,
     session_key: &str,
     should_resume: bool,
+    existing_session_id: Option<&str>,
     message: &str,
     item: &captain::Task,
     workflow: &settings::CaptainWorkflow,
@@ -251,28 +262,24 @@ async fn run_advisor_cc(
     let mut should_resume_attempt = should_resume;
 
     for attempt in 1..=max_retries {
-        let result = if should_resume_attempt {
-            sessions
-                .follow_up(::sessions::SessionFollowUpRequest {
-                    key: session_key.to_string(),
-                    message: message.to_string(),
-                    cwd: cwd.to_path_buf(),
-                })
-                .await
+        let start_prompt = if should_resume_attempt {
+            String::new()
         } else {
-            sessions
-                .start_with_item(::sessions::SessionStartRequest {
-                    key: session_key.to_string(),
-                    prompt: prompt.clone(),
-                    cwd: cwd.to_path_buf(),
-                    model: Some(workflow.models.captain.clone()),
-                    idle_ttl: workflow.agent.task_ask_idle_ttl_s,
-                    call_timeout: workflow.agent.task_ask_timeout_s,
-                    task_id: Some(task_id),
-                    max_turns: None,
-                })
-                .await
+            prompt.clone()
         };
+        let result = run_task_agent_session(TaskAgentSessionRequest {
+            state,
+            sessions,
+            session_key,
+            item,
+            should_resume: should_resume_attempt,
+            existing_session_id,
+            start_prompt,
+            follow_up_message: message.to_string(),
+            cwd,
+            workflow,
+        })
+        .await;
 
         match result {
             Ok(r) => return Ok(r),
@@ -280,7 +287,7 @@ async fn run_advisor_cc(
                 let error_msg = e.to_string();
                 tracing::error!(
                     module = "transport-http-transport-routes_task_advisor", task_id, attempt, max_retries = max_retries,
-                    error = %error_msg, "advisor CC session failed"
+                    error = %error_msg, "advisor agent session failed"
                 );
 
                 crate::runtime::task_sessions::clear_advisor_session(state, task_id).await;

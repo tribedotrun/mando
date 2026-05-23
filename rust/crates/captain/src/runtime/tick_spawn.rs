@@ -145,43 +145,9 @@ pub async fn spawn_worker_for_item(
         );
     }
 
-    let claude_path = global_claude::resolve_claude_binary();
-    if !claude_path.exists() && claude_path.to_str() == Some("claude") {
-        let which = tokio::process::Command::new("which")
-            .arg("claude")
-            .output()
-            .await;
-        match which {
-            Ok(out) if out.status.success() => {}
-            _ => {
-                anyhow::bail!(
-                    "claude binary not found (checked {:?} and PATH)",
-                    claude_path
-                );
-            }
-        }
-    }
-
-    // Pick credential for multi-account load balancing.
-    // Workers dominate token spend, so balance on worker sessions only.
-    let credential = pick_credential(pool, Some("worker")).await;
-    let worker_cred = credential
-        .as_ref()
-        .map(|c| super::spawner::WorkerCredential {
-            id: c.0,
-            token: &c.1,
-        });
-
-    let result = super::spawner::spawn_worker(
-        item,
-        slug,
-        project_config,
-        &config.captain,
-        workflow,
-        pool,
-        worker_cred.as_ref(),
-    )
-    .await?;
+    let result =
+        super::agent_runtime::spawn_worker(config, slug, project_config, item, workflow, pool)
+            .await?;
     let now = global_types::now_rfc3339();
 
     // The workbench was created at task-creation time (atomic with the

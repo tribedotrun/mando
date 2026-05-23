@@ -53,12 +53,13 @@ pub(crate) async fn gather_worker_contexts(
             .session_ids
             .worker
             .as_deref()
-            .map(global_infra::paths::stream_path_for_session)
+            .map(|sid| super::agent_runtime::stream_path(item.provider, sid))
             .unwrap_or_default();
 
         let cc_sid = item.session_ids.worker.as_deref().unwrap_or("");
         let pid = pid_registry::get_pid(cc_sid).unwrap_or(crate::Pid::new(0));
-        let process_alive = pid.as_u32() > 0 && global_claude::is_process_alive(pid);
+        let process_alive =
+            super::agent_runtime::is_session_active(item.provider, cc_sid, pid).await;
         let stream_tail = crate::io::transcript::extract_stream_tail(&stream_path, 50);
         let stream_stale_s = global_claude::stream_stale_seconds(&stream_path);
         let prev_cpu_time_s =
@@ -159,6 +160,7 @@ pub(crate) async fn gather_worker_contexts(
             unaddressed_issue_comments: result.pr_data.unaddressed_issue_comments,
             pr_body: result.pr_data.body,
             changed_files: result.pr_data.changed_files,
+            pr_is_draft: result.pr_data.is_draft,
             branch_ahead: result.pr_data.branch_ahead,
             process_alive: w.process_alive,
             cpu_time_s: result.cpu_time_s,
@@ -269,6 +271,7 @@ pub struct PrData {
     pub unaddressed_issue_comments: i64,
     pub body: String,
     pub changed_files: Vec<String>,
+    pub is_draft: bool,
     pub branch_ahead: bool,
     pub head_sha: String,
     pub issue_comment_bodies: Vec<String>,
@@ -355,6 +358,7 @@ pub(crate) async fn fetch_pr_data(item: &Task) -> PrData {
                 unaddressed_issue_comments: unaddressed,
                 body: status.body,
                 changed_files: status.changed_files,
+                is_draft: status.is_draft,
                 branch_ahead: ahead,
                 head_sha: status.head_sha,
                 issue_comment_bodies: comment_bodies,
@@ -401,7 +405,7 @@ pub(crate) async fn build_single_context(
         .session_ids
         .worker
         .as_deref()
-        .map(global_infra::paths::stream_path_for_session)
+        .map(|sid| super::agent_runtime::stream_path(item.provider, sid))
         .unwrap_or_default();
     let stream_tail = crate::io::transcript::extract_stream_tail(&stream_path, 50);
     let stream_stale_s = global_claude::stream_stale_seconds(&stream_path);
@@ -446,6 +450,7 @@ pub(crate) async fn build_single_context(
         unaddressed_issue_comments: pr_data.unaddressed_issue_comments,
         pr_body: pr_data.body,
         changed_files: pr_data.changed_files,
+        pr_is_draft: pr_data.is_draft,
         branch_ahead: pr_data.branch_ahead,
         // process_alive and cpu_time require health_state (PID tracking), which
         // is not available in the async review path. The trigger context already

@@ -211,7 +211,7 @@ pub async fn find_session_id_by_worker_name(
     worker_name: &str,
 ) -> Result<Option<String>> {
     let row: Option<(String,)> = sqlx::query_as(
-        "SELECT session_id FROM cc_sessions WHERE worker_name = ? AND status = 'running' LIMIT 1",
+        "SELECT session_id FROM cc_sessions WHERE worker_name = ? ORDER BY created_at DESC LIMIT 1",
     )
     .bind(worker_name)
     .fetch_optional(pool)

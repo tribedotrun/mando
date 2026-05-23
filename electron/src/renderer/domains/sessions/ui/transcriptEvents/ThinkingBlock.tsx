@@ -13,9 +13,14 @@ import {
 interface ThinkingBlockProps {
   id: string;
   text: string;
+  label?: string;
 }
 
-export function ThinkingBlock({ id, text }: ThinkingBlockProps): React.ReactElement {
+export function ThinkingBlock({
+  id,
+  text,
+  label = 'thinking',
+}: ThinkingBlockProps): React.ReactElement {
   const open = useTranscriptUi(selectIsThinkingOpen(id));
   const toggle = useTranscriptUi((s) => s.toggleThinking);
   const preview = text.trim().slice(0, 120);
@@ -23,7 +28,7 @@ export function ThinkingBlock({ id, text }: ThinkingBlockProps): React.ReactElem
     <Collapsible open={open} onOpenChange={() => toggle(id)} className="my-0.5">
       <CollapsibleTrigger asChild>
         <button className="flex w-full items-center gap-1.5 rounded px-2 py-1 text-left text-label italic text-muted-foreground hover:bg-muted">
-          <span className="font-medium">thinking</span>
+          <span className="font-medium">{label}</span>
           {!open && <span className="min-w-0 truncate opacity-70">{preview}…</span>}
           <span className="ml-auto">
             {open ? <ChevronDown size={11} /> : <ChevronRight size={11} />}

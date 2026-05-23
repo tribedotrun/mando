@@ -13,9 +13,6 @@ fn test_nudges() -> HashMap<String, String> {
 
 const TIMEOUT: std::time::Duration = std::time::Duration::from_secs(21600);
 const STALE: std::time::Duration = std::time::Duration::from_secs(1200);
-/// The `stream_stale_s` field on `WorkerContext` stays as `f64` seconds so
-/// the classifier can compare fractional staleness against the threshold.
-/// These test constants are the equivalent f64 forms for building contexts.
 const STALE_F64: f64 = 1200.0;
 const MAX_INT: u32 = 50;
 const NO_PR_MIN_ACTIVE: std::time::Duration = std::time::Duration::from_secs(180);
@@ -34,6 +31,7 @@ fn base_ctx() -> WorkerContext {
         unaddressed_issue_comments: 0,
         pr_body: "## Solution\n```\n┌─ diagram ─┐\n```\n**What changed**: fixed the thing".into(),
         changed_files: vec![],
+        pr_is_draft: false,
         branch_ahead: true,
         process_alive: false,
         cpu_time_s: Some(100.0),
@@ -199,6 +197,9 @@ fn gates_pass_pr_captain_review() {
     assert_eq!(a.action, ActionKind::CaptainReview);
     assert_eq!(a.reason.as_deref(), Some("gates_pass"));
 }
+
+#[path = "deterministic_draft_tests.rs"]
+mod draft;
 
 #[test]
 fn gates_pass_nopr_captain_review() {

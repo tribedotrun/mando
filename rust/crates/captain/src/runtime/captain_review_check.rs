@@ -30,61 +30,60 @@ fn is_verdict_allowed(trigger: &str, action: &str) -> bool {
 /// Check if a captain review has completed. Returns the verdict if done.
 pub(crate) fn check_review(item: &Task) -> Option<CaptainVerdict> {
     let session_id = item.session_ids.review.as_deref()?;
-    let stream_path = global_infra::paths::stream_path_for_session(session_id);
-    let result = global_claude::get_stream_result(&stream_path)?;
-
-    // Skip error results -- handled separately by check_review_failed().
-    if result.get("is_error").and_then(|v| v.as_bool()) == Some(true) {
-        return None;
-    }
-
-    // Try structured_output first (populated when --json-schema was used).
-    if let Some(so) = result.get("structured_output").filter(|v| !v.is_null()) {
-        match serde_json::from_value::<CaptainVerdict>(so.clone()) {
-            Ok(verdict) => return Some(validate_verdict(verdict, item)),
-            Err(e) => {
-                let raw_preview: String = so.to_string().chars().take(300).collect();
-                warn!(module = "captain", %e, %session_id, raw = %raw_preview,
-                    "structured_output present but failed to parse, trying fallbacks");
-            }
-        }
-    }
-
-    // Fall back to result text field.
-    let mut verdict_text = result
-        .get("result")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string();
-
-    // If result field is empty, recover from the last assistant text block.
-    if verdict_text.is_empty() {
-        if let Some(text) = global_claude::get_last_assistant_text(&stream_path) {
-            warn!(module = "captain", %session_id,
-                "check_review: result field empty, recovered from last assistant text");
-            verdict_text = text;
-        } else {
-            // Session completed but produced no extractable verdict -- escalate.
-            warn!(module = "captain", %session_id,
-                "check_review: session completed but all extraction paths empty, escalating");
+    let output = match super::agent_runtime::poll_structured_session_output(
+        item.provider,
+        session_id,
+    ) {
+        super::agent_runtime::AgentSessionPoll::Pending
+        | super::agent_runtime::AgentSessionPoll::Failed(_) => return None,
+        super::agent_runtime::AgentSessionPoll::UnusableOutput(msg) => {
+            warn!(module = "captain", %session_id, %msg, "captain review produced no extractable verdict");
             return Some(CaptainVerdict {
                 action: "escalate".into(),
-                feedback: "Captain review session completed but produced no extractable verdict"
-                    .into(),
-                report: Some(
-                    "Captain review session completed but all extraction paths \
-                     (structured_output, result text, last assistant text) were empty. \
-                     The CC session may have failed silently or produced no usable output. \
-                     Manual review required."
-                        .into(),
-                ),
+                feedback: format!("Captain review produced no extractable verdict: {msg}"),
+                report: Some(format!(
+                    "Captain review session completed but produced no extractable verdict. {msg}"
+                )),
                 confidence: None,
                 confidence_reason: None,
             });
         }
-    }
+        super::agent_runtime::AgentSessionPoll::Completed(output) => output,
+    };
 
-    match serde_json::from_str::<CaptainVerdict>(&verdict_text) {
+    match output {
+        super::agent_runtime::AgentSessionOutput::Structured {
+            value,
+            fallback_text,
+        } => match serde_json::from_value::<CaptainVerdict>(value.clone()) {
+            Ok(verdict) => Some(validate_verdict(verdict, item)),
+            Err(e) => {
+                let raw_preview: String = value.to_string().chars().take(300).collect();
+                warn!(module = "captain", %e, %session_id, raw = %raw_preview,
+                    "structured_output present but failed to parse");
+                if let Some(verdict_text) = fallback_text {
+                    parse_review_text(&verdict_text, item)
+                } else {
+                    Some(CaptainVerdict {
+                        action: "escalate".into(),
+                        feedback: format!("Failed to parse structured review verdict: {e}"),
+                        report: Some(format!(
+                            "Structured captain review output was present but invalid JSON for the expected schema. Raw output (first 300 chars): {raw_preview}"
+                        )),
+                        confidence: None,
+                        confidence_reason: None,
+                    })
+                }
+            }
+        },
+        super::agent_runtime::AgentSessionOutput::Text(verdict_text) => {
+            parse_review_text(&verdict_text, item)
+        }
+    }
+}
+
+fn parse_review_text(verdict_text: &str, item: &Task) -> Option<CaptainVerdict> {
+    match serde_json::from_str::<CaptainVerdict>(verdict_text) {
         Ok(verdict) => Some(validate_verdict(verdict, item)),
         Err(e) => {
             warn!(module = "captain", %e,
@@ -94,8 +93,7 @@ pub(crate) fn check_review(item: &Task) -> Option<CaptainVerdict> {
                 action: "escalate".into(),
                 feedback: format!("Failed to parse review verdict: {e}"),
                 report: Some(format!(
-                    "Captain review verdict could not be parsed as JSON. \
-                     Raw text (first 200 chars): {}",
+                    "Captain review verdict could not be parsed as JSON. Raw text (first 200 chars): {}",
                     &verdict_text[..verdict_text.floor_char_boundary(200)]
                 )),
                 confidence: None,
@@ -105,23 +103,36 @@ pub(crate) fn check_review(item: &Task) -> Option<CaptainVerdict> {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_review_text_error_report_has_normal_spacing() {
+        let task = Task::new("review spacing");
+        let verdict = parse_review_text("not json", &task).expect("invalid JSON escalates");
+        let report = verdict.report.expect("escalate report");
+
+        assert!(report.starts_with("Captain review verdict could not be parsed as JSON. Raw text"));
+        assert!(
+            !report.contains("JSON.  Raw"),
+            "report should not contain collapsed indentation spaces: {report:?}"
+        );
+    }
+}
+
 /// Check if the async CC task wrote an error result to the stream file.
 ///
 /// Returns the error message if a failure marker is present.
 pub(crate) fn check_review_failed(item: &Task) -> Option<String> {
     let session_id = item.session_ids.review.as_deref()?;
-    let stream_path = global_infra::paths::stream_path_for_session(session_id);
-    let result = global_claude::get_stream_result(&stream_path)?;
-    if result.get("is_error").and_then(|v| v.as_bool()) != Some(true) {
-        return None;
+    match super::agent_runtime::poll_structured_session_output(item.provider, session_id) {
+        super::agent_runtime::AgentSessionPoll::Failed(msg) => {
+            warn!(module = "captain", %session_id, %msg, "captain review async task failed");
+            Some(msg)
+        }
+        _ => None,
     }
-    let msg = result
-        .get("error")
-        .and_then(|v| v.as_str())
-        .unwrap_or("CC process failed")
-        .to_string();
-    warn!(module = "captain", %session_id, %msg, "captain review async task failed");
-    Some(msg)
 }
 
 /// Validate a parsed verdict against the trigger's allowed actions.

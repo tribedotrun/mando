@@ -25,7 +25,27 @@ pub use settings::cc_failover::{rate_limit_activate as activate, rate_limit_clea
 /// Returns `true` if a rejection was found.
 #[tracing::instrument(skip_all)]
 pub async fn check_and_activate_from_stream(pool: &SqlitePool, session_id: &str) -> bool {
-    let stream_path = global_infra::paths::stream_path_for_session(session_id);
+    let provider = match sessions_db::session_by_id(pool, session_id).await {
+        Ok(Some(session)) => session.provider,
+        Ok(None) => {
+            tracing::warn!(
+                module = "captain",
+                session_id,
+                "rate-limit stream check could not find session; skipping"
+            );
+            return false;
+        }
+        Err(e) => {
+            tracing::warn!(
+                module = "captain",
+                session_id,
+                error = %e,
+                "rate-limit stream check could not load session provider; skipping"
+            );
+            return false;
+        }
+    };
+    let stream_path = super::agent_runtime::stream_path(provider, session_id);
     match global_claude::has_rate_limit_rejection(&stream_path) {
         Some(rej) => {
             let resets = if rej.resets_at > 0 {

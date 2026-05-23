@@ -1,5 +1,6 @@
 //! Task cleanup. Removes worktree, branches (local + remote), health entry,
-//! workbench, CC stream files, plans, and closes the PR when deleting tasks.
+//! workbench, plans, and closes the PR when deleting tasks. Session JSONL files
+//! are durable history and are never removed by cleanup.
 
 use crate::Task;
 use anyhow::Result;
@@ -158,16 +159,6 @@ pub(crate) async fn cleanup_task(
         }
     }
 
-    // Collect session IDs before deleting DB rows so we can clean up stream
-    // files on disk. The stream files (jsonl, meta.json, stderr) are not
-    // managed by the DB and would otherwise be orphaned.
-    let session_ids: Vec<String> = sessions_db::list_sessions_for_task(pool, item.id)
-        .await
-        .unwrap_or_default()
-        .into_iter()
-        .map(|s| s.session_id)
-        .collect();
-
     {
         match sessions_db::delete_sessions_for_task(pool, item.id).await {
             Ok(n) => {
@@ -181,20 +172,6 @@ pub(crate) async fn cleanup_task(
                 warnings.push(msg);
             }
         }
-    }
-
-    // Remove CC stream files (.jsonl, .meta.json, .stderr) for each session.
-    for sid in &session_ids {
-        for ext in &["jsonl", "meta.json", "stderr"] {
-            let path = global_infra::paths::cc_streams_dir().join(format!("{sid}.{ext}"));
-            global_infra::best_effort!(
-                tokio::fs::remove_file(&path).await,
-                "task_cleanup: tokio::fs::remove_file(&path).await"
-            );
-        }
-    }
-    if !session_ids.is_empty() {
-        tracing::info!(module = "cleanup", item_id = %item.id, count = session_ids.len(), "removed CC stream files");
     }
 
     // Remove the plans/brief file for this task.

@@ -3,6 +3,11 @@
 //! All functions are async.
 
 pub mod action_contract;
+mod agent_liveness;
+mod agent_nudge;
+pub(crate) mod agent_runtime;
+mod agent_session_result;
+pub(crate) mod agent_text_session;
 pub mod ambient_rate_limit;
 pub mod captain_merge;
 mod captain_merge_poll;
@@ -17,6 +22,26 @@ mod captain_review_verdict;
 pub mod clarifier;
 mod clarifier_cc_failure;
 pub mod clarifier_reclarify;
+mod claude_clarifier_dispatch;
+mod claude_clarifier_reclarify;
+mod claude_merge_spawn;
+mod claude_rebase_spawn;
+mod claude_review_spawn;
+pub(crate) mod claude_worker_control;
+pub(crate) mod codex_app_server;
+mod codex_app_server_watch;
+mod codex_clarifier_dispatch;
+mod codex_clarifier_reclarify;
+mod codex_merge_spawn;
+pub(crate) mod codex_output_schema;
+mod codex_rebase_spawn;
+mod codex_review_spawn;
+pub(crate) mod codex_stream;
+pub(crate) mod codex_structured;
+mod codex_text_session;
+pub(crate) mod codex_worker_control;
+pub(crate) mod codex_worker_prompt;
+pub(crate) mod codex_worker_spawn;
 pub mod credential_rate_limit;
 pub mod credential_usage_poll;
 pub mod daemon;

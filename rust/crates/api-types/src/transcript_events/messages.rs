@@ -96,6 +96,8 @@ pub enum AssistantContentBlock {
     Text(AssistantTextBlock),
     Thinking(AssistantThinkingBlock),
     ToolUse(AssistantToolUseBlock),
+    ServerToolUse(ServerToolUseBlock),
+    AdvisorToolResult(AdvisorToolResultBlock),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -116,4 +118,18 @@ pub struct AssistantToolUseBlock {
     pub id: String,
     pub name: ToolName,
     pub input: ToolInput,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ServerToolUseBlock {
+    pub id: String,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AdvisorToolResultBlock {
+    pub tool_use_id: String,
+    pub text: String,
 }

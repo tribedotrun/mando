@@ -5,6 +5,7 @@ import { taskImageUrl } from '#renderer/global/runtime/useApi';
 import { ImageLightbox } from '#renderer/global/ui/ImageLightbox';
 import { CopyValue } from '#renderer/domains/captain/ui/CopyValue';
 import { useTaskSetIsBugFix } from '#renderer/domains/captain/runtime/hooks';
+import { taskProviderLabel } from '#renderer/global/service/providerDisplay';
 
 export function InfoTab({ item }: { item: TaskItem }): React.ReactElement {
   const [lightbox, setLightbox] = useState<{ images: string[]; index: number } | null>(null);
@@ -22,6 +23,11 @@ export function InfoTab({ item }: { item: TaskItem }): React.ReactElement {
       <div className="grid grid-cols-[auto_1fr] items-baseline gap-x-6 gap-y-2.5">
         <span className="text-caption text-text-4">ID</span>
         <span className="font-mono text-caption text-text-2">#{item.id}</span>
+
+        <span className="text-caption text-text-4">Provider</span>
+        <span className="text-caption text-text-2" data-testid={`task-provider-${item.provider}`}>
+          {taskProviderLabel(item.provider)}
+        </span>
 
         {item.worktree && (
           <>

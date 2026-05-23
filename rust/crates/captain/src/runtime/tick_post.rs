@@ -216,7 +216,7 @@ pub(crate) fn merge_health_state(
     }
 }
 
-/// Archive terminal tasks and reconcile stale sessions.
+/// Reconcile stale sessions after a tick.
 #[tracing::instrument(skip_all)]
 pub(crate) async fn run_post_cleanup(
     dry_run: bool,
@@ -226,26 +226,6 @@ pub(crate) async fn run_post_cleanup(
 ) {
     if dry_run {
         return;
-    }
-    // Archive workbenches whose tasks have been finalized longer than the grace period.
-    {
-        let store = store_lock.read().await;
-        match store
-            .archive_terminal_workbenches(workflow.agent.archive_grace_secs)
-            .await
-        {
-            Ok(n) if n > 0 => {
-                tracing::info!(
-                    module = "captain",
-                    archived = n,
-                    "archived terminal workbenches"
-                );
-            }
-            Err(e) => {
-                tracing::warn!(module = "captain", error = %e, "archive terminal workbenches failed");
-            }
-            _ => {}
-        }
     }
     // Reconcile stale "running" sessions against stream ground truth.
     {

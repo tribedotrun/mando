@@ -41,6 +41,7 @@ export type AdvisorRequest = { message: string; intent: string };
 export type AdvisorResponse =
   | ({ kind: 'ask' } & AdvisorAskResponse)
   | ({ kind: 'action' } & AdvisorActionResponse);
+export type AdvisorToolResultBlock = { toolUseId: string; text: string };
 export type ArtifactEventData = { action: string; task_id: number; artifact_id: number };
 export type ArtifactIdParams = { id: number };
 export type ArtifactMedia = {
@@ -80,7 +81,9 @@ export type AskResponse = {
 export type AssistantContentBlock =
   | { kind: 'text'; data: AssistantTextBlock }
   | { kind: 'thinking'; data: AssistantThinkingBlock }
-  | { kind: 'tool_use'; data: AssistantToolUseBlock };
+  | { kind: 'tool_use'; data: AssistantToolUseBlock }
+  | { kind: 'server_tool_use'; data: ServerToolUseBlock }
+  | { kind: 'advisor_tool_result'; data: AdvisorToolResultBlock };
 export type AssistantEvent = {
   meta: EventMeta;
   model: string | null;
@@ -687,6 +690,7 @@ export type ScoutResponse = {
   filter: string | null;
   status_counts: { [key in string]: number } | null;
 };
+export type ServerToolUseBlock = { id: string; name: string };
 export type SessionCategory =
   | 'workers'
   | 'clarifier'
@@ -708,6 +712,7 @@ export type SessionCostSummary = {
 };
 export type SessionEntry = {
   session_id: string;
+  provider: TaskProvider;
   created_at: string;
   cwd: string;
   model: string;
@@ -750,6 +755,7 @@ export type SessionStatus = 'running' | 'stopped' | 'failed';
 export type SessionStreamQuery = { types?: string };
 export type SessionSummary = {
   session_id: string;
+  provider: TaskProvider;
   status: SessionStatus;
   caller: string;
   started_at: string;
@@ -885,6 +891,7 @@ export type SystemStatusEvent = { meta: EventMeta; status: string | null; messag
 export type TaskAddRequest = {
   title: string;
   project: string | null;
+  provider: TaskProvider | null;
   plan: boolean;
   no_pr: boolean;
 };
@@ -922,6 +929,7 @@ export type TaskItem = {
   id: number;
   rev: number;
   title: string;
+  provider: TaskProvider;
   status: ItemStatus;
   project: string | null;
   github_repo: string | null;
@@ -984,6 +992,7 @@ export type TaskPatchRequest = {
    */
   is_bug_fix?: boolean;
 };
+export type TaskProvider = 'claude' | 'codex';
 export type TaskSummaryRequest = { content: string };
 export type TaskSummaryResponse = { artifact_id: number; task_id: number };
 export type TasksPayload = { ts: number; data: TaskEventData | null };

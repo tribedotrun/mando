@@ -7,6 +7,7 @@ import { PrIcon } from '#renderer/global/ui/primitives/icons';
 import { StatusIndicator, ACTION_LABELS } from '#renderer/global/ui/StatusIndicator';
 import { Checkbox } from '#renderer/global/ui/primitives/checkbox';
 import { TaskRowActions } from '#renderer/domains/captain/ui/TaskRowActions';
+import { taskProviderShortLabel } from '#renderer/global/service/providerDisplay';
 
 export interface TaskRowCallbacks {
   onToggleSelect: (id: number) => void;
@@ -95,6 +96,13 @@ export const TaskRow = React.memo(function TaskRow({
               {' \u00b7 '}
             </span>
           )}
+          <span
+            className="mr-1.5 inline-flex items-center rounded-full bg-secondary px-1.5 py-0 align-middle text-[11px] font-medium uppercase tracking-wide text-text-3"
+            data-testid={`task-row-provider-${item.provider}`}
+            title={`Provider: ${taskProviderShortLabel(item.provider)}`}
+          >
+            {taskProviderShortLabel(item.provider)}
+          </span>
           {item.is_bug_fix && (
             <span
               className="mr-1.5 inline-flex items-center rounded-full bg-secondary px-1.5 py-0 align-middle text-[11px] font-medium uppercase tracking-wide text-text-3"

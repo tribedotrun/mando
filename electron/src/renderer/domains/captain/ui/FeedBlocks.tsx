@@ -3,6 +3,7 @@ import {
   shouldSuppressTimelineEvent,
   type RenderableFeedItem,
 } from '#renderer/domains/captain/service/feedHelpers';
+import { getUnansweredQuestions } from '#renderer/domains/captain/service/clarifyHelpers';
 import {
   CompletedPlanBlock,
   ReadyPlanBlock,
@@ -39,10 +40,11 @@ export function FeedBlocks({
       }
       if (payload.event_type === 'clarify_question') {
         const questions = payload.questions ?? [];
+        const unanswered = getUnansweredQuestions(questions);
         return task.status === 'needs-clarification' &&
           isLatestClarify(event.timestamp) &&
-          questions.length > 0 ? (
-          <ActiveClarificationBlock taskId={task.id} questions={questions} />
+          unanswered.length > 0 ? (
+          <ActiveClarificationBlock taskId={task.id} questions={unanswered} />
         ) : (
           <ClarificationSummaryBlock event={event} questions={questions} />
         );

@@ -214,6 +214,31 @@ impl CaptainRuntime {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
+    #[tracing::instrument(skip_all)]
+    pub async fn run_task_text_session(
+        &self,
+        item: &crate::Task,
+        caller: &str,
+        cwd: &std::path::Path,
+        prompt: &str,
+        resume_session_id: Option<&str>,
+        call_timeout: std::time::Duration,
+        agent_config: &settings::AgentConfig,
+    ) -> anyhow::Result<crate::runtime::agent_text_session::AgentTextSessionResult> {
+        crate::runtime::agent_text_session::run_text_session(
+            &self.pool,
+            item,
+            caller,
+            cwd,
+            prompt,
+            resume_session_id,
+            call_timeout,
+            agent_config,
+        )
+        .await
+    }
+
     #[tracing::instrument(skip_all)]
     pub async fn persist_task_question(
         &self,
@@ -260,8 +285,8 @@ impl CaptainRuntime {
     }
 
     /// Replace the `'pending'` placeholder on every row in the
-    /// `(task_id, ask_id)` group with the real CC session id. Called from
-    /// the success path of the ask / advisor HTTP routes once the CC call
+    /// `(task_id, ask_id)` group with the real agent session id. Called from
+    /// the success path of the ask / advisor HTTP routes once the agent call
     /// returns and the question + assistant rows can be tied together.
     #[tracing::instrument(skip_all)]
     pub async fn backfill_ask_pending_session_id(
@@ -377,8 +402,9 @@ impl CaptainRuntime {
         title: &str,
         project: Option<&str>,
         source: Option<&str>,
+        provider: api_types::TaskProvider,
     ) -> anyhow::Result<TaskCreateResponse> {
-        self.add_task_with_context(title, project, None, source)
+        self.add_task_with_context(title, project, None, source, provider)
             .await
     }
 
@@ -389,15 +415,17 @@ impl CaptainRuntime {
         project: Option<&str>,
         context: Option<&str>,
         source: Option<&str>,
+        provider: api_types::TaskProvider,
     ) -> anyhow::Result<TaskCreateResponse> {
         let config = self.settings.load_config();
         // Run the git fetch + worktree creation half WITHOUT holding the
         // task_store read lock — a slow remote would otherwise stall the
         // captain tick's `task_store.write()` writers. Only acquire the
         // lock for the optional context-update step that follows.
-        let value =
-            crate::runtime::dashboard::add_task(&config, &self.pool, title, project, source)
-                .await?;
+        let value = crate::runtime::dashboard::add_task(
+            &config, &self.pool, title, project, source, provider,
+        )
+        .await?;
         if let Some(ctx) = context {
             let store = self.task_store.read().await;
             crate::runtime::dashboard::update_task(

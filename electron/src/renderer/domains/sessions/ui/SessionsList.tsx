@@ -2,6 +2,7 @@ import React from 'react';
 import { useScrollIntoViewRef } from '#renderer/global/runtime/useScrollIntoViewRef';
 import type { SessionEntry } from '#renderer/global/types';
 import { relativeTime } from '#renderer/global/service/utils';
+import { taskProviderShortLabel } from '#renderer/global/service/providerDisplay';
 import { sessionTitle, sessionSubtitle } from '#renderer/domains/sessions/service/helpers';
 import { SessionDot } from '#renderer/global/ui/SessionDot';
 import { Table, TableBody, TableRow, TableCell } from '#renderer/global/ui/primitives/table';
@@ -45,6 +46,12 @@ export function SessionsList({
                 <span className="flex min-w-0 items-baseline gap-2">
                   <span className="shrink-0 text-[13px] text-foreground" title={title}>
                     {title}
+                  </span>
+                  <span
+                    className="shrink-0 rounded bg-secondary px-1 text-[10px] uppercase text-text-3"
+                    data-testid={`session-list-provider-${s.provider}`}
+                  >
+                    {taskProviderShortLabel(s.provider)}
                   </span>
                   {subtitle && (
                     <span

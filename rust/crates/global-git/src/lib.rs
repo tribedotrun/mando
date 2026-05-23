@@ -180,8 +180,30 @@ pub async fn head_sha_short(cwd: &Path) -> Result<String> {
 
 /// Return the main repository path for a linked worktree.
 pub async fn common_repo_path(wt_path: &Path) -> Result<Option<PathBuf>> {
-    let git_dir = run_git(wt_path, &["rev-parse", "--git-common-dir"]).await?;
+    let git_dir = common_git_dir(wt_path).await?;
     Ok(Path::new(&git_dir).parent().map(Path::to_path_buf))
+}
+
+/// Return the per-worktree git directory for a repository or linked worktree.
+pub async fn git_dir(wt_path: &Path) -> Result<PathBuf> {
+    let git_dir = run_git(wt_path, &["rev-parse", "--git-dir"]).await?;
+    let path = PathBuf::from(git_dir);
+    if path.is_absolute() {
+        Ok(path)
+    } else {
+        Ok(wt_path.join(path))
+    }
+}
+
+/// Return the git common directory backing a repository or linked worktree.
+pub async fn common_git_dir(wt_path: &Path) -> Result<PathBuf> {
+    let git_dir = run_git(wt_path, &["rev-parse", "--git-common-dir"]).await?;
+    let path = PathBuf::from(git_dir);
+    if path.is_absolute() {
+        Ok(path)
+    } else {
+        Ok(wt_path.join(path))
+    }
 }
 
 /// Abort an in-progress rebase. Returns true when git reported success.

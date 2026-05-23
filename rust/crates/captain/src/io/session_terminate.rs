@@ -5,16 +5,17 @@ use sqlx::SqlitePool;
 
 /// Terminate a session: kill process, update DB, stream meta, PID registry, health store.
 /// No-op if session is already stopped/failed.
-/// Attempts process kill even if DB is unavailable — a dead process should be
-/// killed regardless of whether we can read its session row.
+/// Skips process kill when the provider cannot be loaded; Codex sessions share
+/// one daemon-scoped app-server process, so an unknown provider must fail closed
+/// instead of risking a shared-process kill.
 pub async fn terminate_session(
     pool: &SqlitePool,
     session_id: &str,
     new_status: SessionStatus,
     health_state: Option<&mut super::health_store::HealthState>,
 ) {
-    // 1. Check if session is running. If DB is unavailable, proceed with kill
-    //    anyway — fail-open on the kill side, not the cleanup side.
+    // 1. Check if session is running. If DB is unavailable, continue with
+    //    status cleanup, but only kill a process when the provider row loads.
     match sessions_db::is_session_running(pool, session_id).await {
         Ok(false) => return,
         Err(e) => {
@@ -22,25 +23,59 @@ pub async fn terminate_session(
                 module = "session_terminate",
                 session_id,
                 error = %e,
-                "DB query failed — proceeding with kill attempt"
+                "DB query failed — proceeding with session cleanup"
             );
         }
         Ok(true) => {}
     }
 
-    // 2. Kill process via pid_registry (fingerprint-verified to avoid PID reuse).
-    if let Some(pid) = super::pid_registry::get_verified_pid(session_id) {
-        if pid.as_u32() > 0 && global_claude::is_process_alive(pid) {
-            if let Err(e) = global_claude::kill_process(pid).await {
-                tracing::warn!(
-                    module = "session_terminate",
-                    session_id,
-                    pid = %pid,
-                    error = %e,
-                    "kill failed"
-                );
+    let mut provider = None;
+    match sessions_db::session_by_id(pool, session_id).await {
+        Ok(Some(row)) => {
+            provider = Some(row.provider);
+            if let Err(e) = crate::runtime::agent_runtime::interrupt_session_before_kill(
+                row.provider,
+                session_id,
+            )
+            .await
+            {
+                tracing::warn!(module = "session_terminate", session_id, error = %e, "failed to interrupt agent turn before kill");
             }
         }
+        Ok(None) => {}
+        Err(e) => {
+            tracing::warn!(
+                module = "session_terminate",
+                session_id,
+                error = %e,
+                "failed to load session row before agent interrupt"
+            );
+        }
+    }
+
+    // 2. Kill provider-owned process via pid_registry. Codex sessions share one
+    // daemon-scoped app-server, so per-session termination only interrupts the
+    // active turn and must not signal that shared process group.
+    if should_kill_provider_process(provider) {
+        if let Some(pid) = super::pid_registry::get_verified_pid(session_id) {
+            if pid.as_u32() > 0 && global_claude::is_process_alive(pid) {
+                if let Err(e) = global_claude::kill_process(pid).await {
+                    tracing::warn!(
+                        module = "session_terminate",
+                        session_id,
+                        pid = %pid,
+                        error = %e,
+                        "kill failed"
+                    );
+                }
+            }
+        }
+    } else if provider.is_none() {
+        tracing::warn!(
+            module = "session_terminate",
+            session_id,
+            "skipping pid kill because session provider is unknown"
+        );
     }
 
     // 3. Read cost/duration from stream file before updating DB.
@@ -58,7 +93,8 @@ pub async fn terminate_session(
     //      stay `None` here — we don't reconstruct those without the result
     //      envelope, and a stale/missing duration is less harmful than a
     //      silently-zero cost.
-    let stream_path = global_infra::paths::stream_path_for_session(session_id);
+    let stream_provider = provider.unwrap_or_default();
+    let stream_path = crate::runtime::agent_runtime::stream_path(stream_provider, session_id);
     let cost_info = global_claude::get_stream_cost(&stream_path);
     let (mut cost_usd, duration_ms, num_turns, denials, model_usage) = match &cost_info {
         Some(info) => (
@@ -111,7 +147,12 @@ pub async fn terminate_session(
     };
 
     // 5. Update stream meta.
-    global_claude::update_stream_meta_status(session_id, "stopped", cost_usd);
+    global_claude::update_stream_meta_status_at(
+        &crate::runtime::agent_runtime::stream_meta_path(stream_provider, session_id),
+        session_id,
+        "stopped",
+        cost_usd,
+    );
 
     // 6. Unregister PID. Always, even if DB update failed.
     if let Err(e) = super::pid_registry::unregister(session_id) {
@@ -158,5 +199,36 @@ pub async fn terminate_session(
             permission_denials = ?denials,
             "session terminated (PID + health cleaned, DB update failed)"
         );
+    }
+}
+
+fn should_kill_provider_process(provider: Option<global_types::TaskProvider>) -> bool {
+    matches!(
+        provider,
+        Some(provider) if !crate::runtime::agent_runtime::uses_shared_process(provider)
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unknown_provider_does_not_kill_provider_process() {
+        assert!(!should_kill_provider_process(None));
+    }
+
+    #[test]
+    fn codex_provider_does_not_kill_shared_process() {
+        assert!(!should_kill_provider_process(Some(provider("codex"))));
+    }
+
+    #[test]
+    fn claude_provider_can_kill_session_process() {
+        assert!(should_kill_provider_process(Some(provider("claude"))));
+    }
+
+    fn provider(value: &str) -> global_types::TaskProvider {
+        value.parse().expect("known provider")
     }
 }

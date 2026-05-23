@@ -157,6 +157,15 @@ fn session_routes() -> ApiRouter<AppState> {
     );
     let router = crate::api_route!(
         router,
+        GET "/api/sessions/{id}",
+        transport = Json,
+        auth = Protected,
+        handler = routes_sessions::get_session,
+        params = api_types::SessionIdParams,
+        res = api_types::SessionEntry
+    );
+    let router = crate::api_route!(
+        router,
         GET "/api/sessions/{id}/events",
         transport = Json,
         auth = Protected,

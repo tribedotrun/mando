@@ -1,6 +1,6 @@
 pub use binary::resolve_claude_binary;
 pub use broken_session::{ detect_image_dimension_blocked, stream_broken_session_symptom, BrokenSessionMatch, BrokenSessionOrigin, };
-pub use codex_exec::codex_exec;
+pub use codex_exec::{codex_exec, codex_exec_with_config, CodexExecConfig};
 pub use config::{CcConfig, CcConfigBuilder, Effort, PermissionMode, TaskBudget, ThinkingConfig};
 pub use credentials::{credential_id, with_credential};
 pub use error::{CcError, ErrorClass};
@@ -18,5 +18,8 @@ pub struct CcEnvelope
 pub struct CcResult
 pub struct SessionMeta
 pub fn write_stream_meta
+pub fn write_stream_meta_at
 pub fn update_stream_meta_status
+pub fn update_stream_meta_status_at
 pub fn is_session_finished
+pub fn is_stream_meta_finished_at
