@@ -31,6 +31,7 @@ type StartFn = dyn Fn(SessionStartRequest) -> SessionFuture<SessionAiResult> + S
 type FollowUpFn = dyn Fn(SessionFollowUpRequest) -> SessionFuture<SessionAiResult> + Send + Sync;
 type CloseAsyncFn = dyn Fn(String) -> UnitFuture + Send + Sync;
 type ListSessionsFn = dyn Fn(SessionListQuery) -> SessionFuture<SessionListPage> + Send + Sync;
+type SessionByIdFn = dyn Fn(String) -> SessionFuture<Option<api_types::SessionEntry>> + Send + Sync;
 type SessionCwdFn = dyn Fn(String) -> SessionFuture<Option<String>> + Send + Sync;
 type JsonlPathFn = dyn Fn(String) -> SessionFuture<Option<String>> + Send + Sync;
 type MessagesFn = dyn Fn(String, Option<usize>, usize) -> SessionFuture<Option<Vec<global_claude::TranscriptMessage>>>
@@ -108,6 +109,7 @@ pub struct SessionsRuntimeOps {
     pub start_replacing: Arc<StartFn>,
     pub follow_up: Arc<FollowUpFn>,
     pub list_sessions: Arc<ListSessionsFn>,
+    pub session_by_id: Arc<SessionByIdFn>,
     pub session_cwd: Arc<SessionCwdFn>,
     pub session_jsonl_path: Arc<JsonlPathFn>,
     pub session_messages: Arc<MessagesFn>,
@@ -128,6 +130,7 @@ pub struct SessionsRuntime {
     start_replacing: Arc<StartFn>,
     follow_up: Arc<FollowUpFn>,
     list_sessions: Arc<ListSessionsFn>,
+    session_by_id: Arc<SessionByIdFn>,
     session_cwd: Arc<SessionCwdFn>,
     session_jsonl_path: Arc<JsonlPathFn>,
     session_messages: Arc<MessagesFn>,
@@ -149,6 +152,7 @@ impl SessionsRuntime {
             start_replacing: ops.start_replacing,
             follow_up: ops.follow_up,
             list_sessions: ops.list_sessions,
+            session_by_id: ops.session_by_id,
             session_cwd: ops.session_cwd,
             session_jsonl_path: ops.session_jsonl_path,
             session_messages: ops.session_messages,
@@ -216,6 +220,14 @@ impl SessionsRuntime {
             status: request.status,
         };
         (self.list_sessions)(query).await
+    }
+
+    #[tracing::instrument(skip_all)]
+    pub async fn session_by_id(
+        &self,
+        session_id: &str,
+    ) -> anyhow::Result<Option<api_types::SessionEntry>> {
+        (self.session_by_id)(session_id.to_string()).await
     }
 
     #[tracing::instrument(skip_all)]
@@ -364,6 +376,7 @@ mod tests {
                     })
                 })
             }),
+            session_by_id: Arc::new(|_| Box::pin(async { Ok(None) })),
             session_cwd: Arc::new(|_| Box::pin(async { Ok(None) })),
             session_jsonl_path: Arc::new(|_| Box::pin(async { Ok(None) })),
             session_messages: Arc::new(|_, _, _| Box::pin(async { Ok(None) })),

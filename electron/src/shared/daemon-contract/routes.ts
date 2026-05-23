@@ -430,6 +430,14 @@ export interface Routes {
     query: Types.SessionsQuery;
     res: Types.SessionsListResponse;
   };
+  getSessionsById: {
+    method: 'GET';
+    path: '/api/sessions/{id}';
+    transport: 'json';
+    auth: 'protected';
+    params: Types.SessionIdParams;
+    res: Types.SessionEntry;
+  };
   getSessionsByIdCost: {
     method: 'GET';
     path: '/api/sessions/{id}/cost';
@@ -1260,6 +1268,12 @@ export const routes = {
     auth: 'protected',
   },
   getSessions: { method: 'GET', path: '/api/sessions', transport: 'json', auth: 'protected' },
+  getSessionsById: {
+    method: 'GET',
+    path: '/api/sessions/{id}',
+    transport: 'json',
+    auth: 'protected',
+  },
   getSessionsByIdCost: {
     method: 'GET',
     path: '/api/sessions/{id}/cost',

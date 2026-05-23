@@ -140,7 +140,13 @@ pub(crate) fn load_workflows_for_mode(
             module = "settings-runtime-settings_runtime",
             tick_interval_s = config.captain.tick_interval_s,
             stale_threshold_s = captain_workflow.agent.stale_threshold_s.as_secs(),
-            "sandbox mode: models forced to haiku + timing overrides applied"
+            codex_model = captain_workflow
+                .agent
+                .codex
+                .as_ref()
+                .and_then(|codex| codex.model.as_deref())
+                .unwrap_or("default"),
+            "sandbox mode: Claude models, Codex settings, and timing overrides applied"
         ),
     }
     Ok((captain_workflow, scout_workflow))

@@ -23,6 +23,7 @@ pub mod routes_task_actions;
 pub mod routes_task_advisor;
 pub mod routes_task_advisor_action;
 pub mod routes_task_advisor_helpers;
+pub mod routes_task_agent_session;
 pub mod routes_task_ask;
 pub mod routes_task_detail;
 pub mod routes_task_router;

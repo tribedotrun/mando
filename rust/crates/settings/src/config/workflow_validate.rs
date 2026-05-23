@@ -2,7 +2,9 @@
 //!
 //! Ensures all required prompt/nudge keys exist at gateway startup.
 
-use super::workflow::{AgentConfig, CaptainWorkflow, ScoutWorkflow};
+use super::workflow::{
+    AgentConfig, CaptainWorkflow, CodexApprovalPolicy, CodexApprovalsReviewer, ScoutWorkflow,
+};
 use global_claude::CcStreamSymptom;
 
 /// Every `CcStreamSymptom` variant the compiled binary routes on. A user
@@ -169,6 +171,33 @@ pub fn try_validate_agent_config(agent: &AgentConfig, tick_interval_s: u64) -> R
     if agent.captain_review_timeout_s.is_zero() {
         errors.push("captain_review_timeout_s must be > 0".into());
     }
+    if agent.ops_timeout_s.is_zero() {
+        errors.push("ops_timeout_s must be > 0".into());
+    }
+    if agent.codex_approval_policy != CodexApprovalPolicy::Never
+        && agent.codex_approvals_reviewer == CodexApprovalsReviewer::User
+    {
+        errors.push(
+            "codex_approvals_reviewer must be auto_review unless codex_approval_policy is never"
+                .into(),
+        );
+    }
+    if let Some(codex) = &agent.codex {
+        if codex
+            .model
+            .as_deref()
+            .is_some_and(|value| value.trim().is_empty())
+        {
+            errors.push("codex.model must not be empty when set".into());
+        }
+        if codex
+            .service_tier
+            .as_deref()
+            .is_some_and(|value| value.trim().is_empty())
+        {
+            errors.push("codex.service_tier must not be empty when set".into());
+        }
+    }
 
     // Relative checks only when individual values are positive.
     if !agent.worker_timeout_s.is_zero()
@@ -264,6 +293,27 @@ mod tests {
     fn zero_max_interventions_panics() {
         let mut ac = default_agent();
         ac.max_interventions = 0;
+        validate_agent_config(&ac, 30);
+    }
+
+    #[test]
+    #[should_panic(expected = "codex_approvals_reviewer")]
+    fn codex_on_request_requires_auto_review_panics() {
+        let mut ac = default_agent();
+        ac.codex_approval_policy = CodexApprovalPolicy::OnRequest;
+        ac.codex_approvals_reviewer = CodexApprovalsReviewer::User;
+        validate_agent_config(&ac, 30);
+    }
+
+    #[test]
+    #[should_panic(expected = "codex.model")]
+    fn empty_codex_model_panics() {
+        let mut ac = default_agent();
+        ac.codex = Some(super::super::workflow::CodexAgentConfig {
+            model: Some(" ".into()),
+            reasoning_effort: None,
+            service_tier: Some("default".into()),
+        });
         validate_agent_config(&ac, 30);
     }
 

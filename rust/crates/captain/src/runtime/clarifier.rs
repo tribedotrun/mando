@@ -4,18 +4,22 @@ use crate::Task;
 use anyhow::Result;
 use rustc_hash::FxHashMap;
 use settings::CaptainWorkflow;
-use tracing::{info, warn};
+use tracing::warn;
 
-use global_claude::CcConfig;
-
-use super::dashboard::truncate_utf8;
 use global_claude::parse_llm_json;
 
 /// JSON schema enforced on clarifier structured output. The task's project is
 /// fixed at creation and never inferred here, so the schema has no `repo`
 /// field — the clarifier only decides readiness, enriches context, and
 /// (optionally) refines the title / resource / no_pr hint.
-pub(crate) fn build_clarifier_schema() -> serde_json::Value {
+pub(crate) fn build_clarifier_schema(
+    workflow: &CaptainWorkflow,
+) -> super::agent_runtime::AgentOutputSchema {
+    super::agent_runtime::AgentOutputSchema(build_clarifier_schema_value(workflow))
+}
+
+fn build_clarifier_schema_value(workflow: &CaptainWorkflow) -> serde_json::Value {
+    let resource_schema = build_resource_schema_value(&workflow.agent.resource_limits);
     serde_json::json!({
         "type": "object",
         "properties": {
@@ -36,105 +40,27 @@ pub(crate) fn build_clarifier_schema() -> serde_json::Value {
             },
             "title": { "type": "string" },
             "no_pr": { "type": ["boolean", "null"] },
-            "resource": { "type": ["string", "null"] },
+            "resource": resource_schema,
             "is_bug_fix": { "type": "boolean" }
         },
         "required": ["status", "context", "title", "is_bug_fix"]
     })
 }
 
-// ── Single-turn (captain tick auto-clarification) ───────────────────
-
-/// Run the clarification flow for a new task (single-turn).
-#[tracing::instrument(skip_all)]
-pub(crate) async fn run_clarification(
-    item: &Task,
-    workflow: &CaptainWorkflow,
-    config: &settings::Config,
-    pool: &sqlx::SqlitePool,
-    pre_session_id: Option<&str>,
-) -> Result<ClarifierResult> {
-    let prompt = build_clarifier_prompt(item, None, workflow)?;
-
-    // Resolve project cwd so the clarifier can read project files.
-    let cwd = resolve_clarifier_cwd(item, config)?;
-
-    let task_id = item.id.to_string();
-    let task_id_ref = task_id.as_str();
-    let cwd_ref = cwd.as_path();
-    let model = workflow.models.clarifier.as_str();
-    let timeout = workflow.agent.clarifier_timeout_s;
-    let result = match settings::cc_failover::run_with_credential_failover(
-        pool,
-        "clarifier",
-        &prompt,
-        |ctx| {
-            let mut builder = CcConfig::builder()
-                .model(model)
-                .timeout(timeout)
-                .caller("clarifier")
-                .task_id(task_id_ref)
-                .cwd(cwd_ref.to_path_buf())
-                .allowed_tools(vec!["Read".into(), "Glob".into(), "Grep".into()])
-                .json_schema(build_clarifier_schema());
-            builder = global_claude::with_credential(builder, &ctx.credential);
-            if let Some(rid) = &ctx.resume_session_id {
-                builder = builder.resume(rid);
-            } else if let Some(sid) = pre_session_id {
-                builder = builder.session_id(sid);
-            }
-            builder.build()
-        },
-    )
-    .await
-    {
-        Ok(result) => result,
-        Err(e) => {
-            warn!(module = "clarifier", title = %item.title, error = %e, "CC failed");
-            return Err(e.into());
-        }
-    };
-    let cred_id = result.credential_id;
-
-    if let Err(e) = crate::io::headless_cc::log_cc_session(
-        pool,
-        &crate::io::headless_cc::SessionLogEntry {
-            session_id: &result.session_id,
-            cwd: &cwd,
-            model: &workflow.models.clarifier,
-            caller: "clarifier",
-            cost_usd: result.cost_usd,
-            duration_ms: result.duration_ms,
-            resumed: false,
-            task_id: Some(item.id),
-            status: global_types::SessionStatus::Stopped,
-            worker_name: "",
-            credential_id: cred_id,
-            error: None,
-            api_error_status: None,
-        },
-    )
-    .await
-    {
-        warn!(module = "clarifier", error = %e, "failed to log clarifier session");
+fn build_resource_schema_value(
+    resource_limits: &std::collections::HashMap<String, usize>,
+) -> serde_json::Value {
+    let mut enum_values = vec![serde_json::Value::Null];
+    for name in sorted_resource_names(resource_limits) {
+        enum_values.push(serde_json::Value::String(name.to_string()));
     }
-
-    let text = result
-        .structured
-        .as_ref()
-        .map(|v| v.to_string())
-        .unwrap_or_else(|| result.text.clone());
-    let mut parsed = parse_clarifier_response(&text, &item.title);
-    parsed.session_id = Some(result.session_id.clone());
-
-    info!(
-        module = "clarifier",
-        title = %truncate_utf8(&item.title, 60),
-        status = ?parsed.status,
-        "clarification complete"
-    );
-    Ok(parsed)
+    serde_json::json!({
+        "type": ["string", "null"],
+        "enum": enum_values,
+    })
 }
+
+// ── Single-turn (captain tick auto-clarification) ───────────────────
 
 // ── Types ───────────────────────────────────────────────────────────
 
@@ -172,11 +98,11 @@ pub enum ClarifierStatus {
 }
 
 /// Format structured questions into human-readable text.
-/// Self-answered questions are excluded — users only see what needs their input.
+/// Answered questions are excluded — users only see what needs their input.
 pub fn format_questions_text(questions: &[ClarifierQuestion]) -> String {
     questions
         .iter()
-        .filter(|q| !q.self_answered)
+        .filter(|q| !q.self_answered && q.answer.as_deref().is_none_or(|a| a.trim().is_empty()))
         .enumerate()
         .map(|(i, q)| format!("{}. {}", i + 1, q.question))
         .collect::<Vec<_>>()
@@ -204,7 +130,7 @@ pub(crate) fn resolve_clarifier_cwd(
     }
 }
 
-fn build_clarifier_prompt(
+pub(crate) fn build_clarifier_prompt(
     item: &Task,
     human_input: Option<&str>,
     workflow: &CaptainWorkflow,
@@ -212,14 +138,7 @@ fn build_clarifier_prompt(
     let context = item.context.as_deref().unwrap_or("none");
     let project = item.project.as_str();
 
-    let mut resource_names: Vec<&str> = vec!["cc"];
-    for key in workflow.agent.resource_limits.keys() {
-        if key != "cc" {
-            resource_names.push(key.as_str());
-        }
-    }
-    resource_names[1..].sort();
-    let resource_list = resource_names.join(", ");
+    let resource_list = resource_list_text(&workflow.agent.resource_limits);
 
     let images = item
         .images
@@ -253,6 +172,23 @@ fn build_clarifier_prompt(
     }
 
     settings::render_prompt("clarifier", &workflow.prompts, &vars).map_err(|e| anyhow::anyhow!(e))
+}
+
+fn resource_list_text(resource_limits: &std::collections::HashMap<String, usize>) -> String {
+    let names = sorted_resource_names(resource_limits);
+    if names.is_empty() {
+        "none".to_string()
+    } else {
+        names.join(", ")
+    }
+}
+
+pub(super) fn sorted_resource_names(
+    resource_limits: &std::collections::HashMap<String, usize>,
+) -> Vec<&str> {
+    let mut names: Vec<&str> = resource_limits.keys().map(String::as_str).collect();
+    names.sort_unstable();
+    names
 }
 
 pub(crate) fn build_interactive_clarifier_turn_prompt(
@@ -326,7 +262,7 @@ pub(crate) fn parse_clarifier_response(text: &str, item_title: &str) -> Clarifie
             "escalate"
         }
     };
-    let status = match status_str {
+    let mut status = match status_str {
         "clarifying" => ClarifierStatus::Clarifying,
         "escalate" => ClarifierStatus::Escalate,
         "answered" => ClarifierStatus::Answered,
@@ -342,8 +278,9 @@ pub(crate) fn parse_clarifier_response(text: &str, item_title: &str) -> Clarifie
     };
 
     let context = parsed["context"].as_str().unwrap_or(item_title).to_string();
-    let questions = parsed["questions"].as_array().map(|arr| {
-        arr.iter()
+    let questions = parsed["questions"].as_array().and_then(|arr| {
+        let unanswered: Vec<_> = arr
+            .iter()
             .filter_map(|v| {
                 Some(ClarifierQuestion {
                     question: v["question"].as_str()?.to_string(),
@@ -352,8 +289,22 @@ pub(crate) fn parse_clarifier_response(text: &str, item_title: &str) -> Clarifie
                     category: v["category"].as_str().map(String::from),
                 })
             })
-            .collect()
+            .filter(|q| !q.self_answered && q.answer.as_deref().is_none_or(|a| a.trim().is_empty()))
+            .collect();
+        if unanswered.is_empty() {
+            None
+        } else {
+            Some(unanswered)
+        }
     });
+    if status == ClarifierStatus::Clarifying && questions.is_none() {
+        warn!(
+            module = "clarifier",
+            "clarifier requested follow-up but returned no unanswered questions — marking ready"
+        );
+        status = ClarifierStatus::Ready;
+    }
+
     let generated_title = parsed["title"]
         .as_str()
         .or_else(|| parsed["generated_title"].as_str())
@@ -404,20 +355,16 @@ mod tests {
     }
 
     #[test]
-    fn parse_structured_questions() {
-        let json = r#"{"status":"clarifying","context":"partial","questions":[{"question":"What repo?","answer":null,"self_answered":false,"category":"intent"},{"question":"Where is the code?","answer":"In src/lib.rs","self_answered":true,"category":"code"}]}"#;
+    fn parse_structured_questions_keeps_only_unanswered() {
+        let json = r#"{"status":"clarifying","context":"partial","questions":[{"question":"What repo?","answer":null,"self_answered":false,"category":"intent"},{"question":"Where is the code?","answer":"In src/lib.rs","self_answered":true,"category":"code"},{"question":"Which UI?","answer":"Sidebar","self_answered":false,"category":"intent"}]}"#;
         let result = parse_clarifier_response(json, "fallback");
         assert_eq!(result.status, ClarifierStatus::Clarifying);
         let qs = result.questions.unwrap();
-        assert_eq!(qs.len(), 2);
+        assert_eq!(qs.len(), 1);
         assert_eq!(qs[0].question, "What repo?");
         assert!(!qs[0].self_answered);
         assert!(qs[0].answer.is_none());
         assert_eq!(qs[0].category.as_deref(), Some("intent"));
-        assert_eq!(qs[1].question, "Where is the code?");
-        assert!(qs[1].self_answered);
-        assert_eq!(qs[1].answer.as_deref(), Some("In src/lib.rs"));
-        assert_eq!(qs[1].category.as_deref(), Some("code"));
     }
 
     #[test]
@@ -428,24 +375,47 @@ mod tests {
     }
 
     #[test]
+    fn clarifying_with_no_unanswered_questions_becomes_ready() {
+        let json = r#"{"status":"clarifying","context":"ctx","questions":[{"question":"Which UI?","answer":"Sidebar","self_answered":false,"category":"intent"}]}"#;
+        let result = parse_clarifier_response(json, "fallback");
+        assert_eq!(result.status, ClarifierStatus::Ready);
+        assert!(result.questions.is_none());
+    }
+
+    #[test]
     fn parse_code_fenced_json() {
-        let fenced = "```json\n{\"status\":\"understood\",\"context\":\"enriched\",\"title\":\"Better\",\"resource\":\"cc\",\"no_pr\":false}\n```";
+        let fenced = "```json\n{\"status\":\"understood\",\"context\":\"enriched\",\"title\":\"Better\",\"resource\":\"emulator\",\"no_pr\":false}\n```";
         let result = parse_clarifier_response(fenced, "fallback");
         assert_eq!(result.status, ClarifierStatus::Ready);
         assert_eq!(result.context, "enriched");
         assert_eq!(result.generated_title.as_deref(), Some("Better"));
         assert_eq!(result.no_pr, Some(false));
-        assert_eq!(result.resource.as_deref(), Some("cc"));
+        assert_eq!(result.resource.as_deref(), Some("emulator"));
     }
 
     #[test]
     fn schema_has_no_repo_field() {
-        let schema = build_clarifier_schema();
+        let workflow = CaptainWorkflow::compiled_default();
+        let schema = build_clarifier_schema(&workflow).0;
         assert!(schema["properties"].get("repo").is_none());
         let required = schema["required"].as_array().unwrap();
         assert!(required.contains(&serde_json::json!("status")));
         assert!(required.contains(&serde_json::json!("context")));
         assert!(required.contains(&serde_json::json!("title")));
+    }
+
+    #[test]
+    fn schema_enumerates_configured_resources_and_null_only() {
+        let workflow = CaptainWorkflow::compiled_default();
+        let schema = build_clarifier_schema(&workflow).0;
+        assert_eq!(
+            schema["properties"]["resource"]["enum"],
+            serde_json::json!([null, "emulator"])
+        );
+        assert!(!schema["properties"]["resource"]["enum"]
+            .as_array()
+            .unwrap()
+            .contains(&serde_json::json!("cc")));
     }
 
     #[test]
@@ -463,12 +433,18 @@ mod tests {
                 self_answered: true,
                 category: Some("code".into()),
             },
+            ClarifierQuestion {
+                question: "Which screen?".into(),
+                answer: Some("Settings".into()),
+                self_answered: false,
+                category: Some("intent".into()),
+            },
         ];
         let text = format_questions_text(&qs);
         assert!(text.contains("1. What DB?"));
-        // Self-answered questions are excluded from user-facing output.
+        // Answered questions are excluded from user-facing output.
         assert!(!text.contains("HTTP client"));
-        assert!(!text.contains("self-answered"));
+        assert!(!text.contains("Which screen"));
     }
 
     #[test]
@@ -532,6 +508,7 @@ mod tests {
         assert!(prompt.contains("Phrasing the questions you ask the human"));
         assert!(prompt.contains("plain English"));
         assert!(prompt.contains("Avoid code identifiers"));
+        assert!(prompt.contains("unanswered human-facing questions only"));
     }
 
     #[test]
@@ -542,6 +519,7 @@ mod tests {
             build_interactive_clarifier_turn_prompt(&item, &workflow, "the answer", None).unwrap();
         assert!(prompt.contains("plain English"));
         assert!(prompt.contains("Avoid code identifiers"));
+        assert!(prompt.contains("Do not repeat answered questions"));
     }
 
     #[test]

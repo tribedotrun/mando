@@ -1,10 +1,10 @@
 //! User / assistant content-block parsers.
 
 use api_types::{
-    AssistantContentBlock, AssistantEvent, AssistantTextBlock, AssistantThinkingBlock,
-    AssistantToolUseBlock, EventMeta, ToolResultBlocks, ToolResultChildBlock, ToolResultContent,
-    ToolResultText, ToolResultUnknownBlock, UserContentBlock, UserImageBlock, UserTextBlock,
-    UserToolResultBlock,
+    AdvisorToolResultBlock, AssistantContentBlock, AssistantEvent, AssistantTextBlock,
+    AssistantThinkingBlock, AssistantToolUseBlock, EventMeta, ServerToolUseBlock, ToolResultBlocks,
+    ToolResultChildBlock, ToolResultContent, ToolResultText, ToolResultUnknownBlock,
+    UserContentBlock, UserImageBlock, UserTextBlock, UserToolResultBlock,
 };
 
 use crate::transcript_events::helpers::parse_usage;
@@ -146,6 +146,36 @@ fn parse_assistant_block(block: &serde_json::Value) -> Option<AssistantContentBl
                 .to_string(),
         })),
         "tool_use" => Some(AssistantContentBlock::ToolUse(parse_tool_use(block))),
+        "server_tool_use" => Some(AssistantContentBlock::ServerToolUse(ServerToolUseBlock {
+            id: block
+                .get("id")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
+                .to_string(),
+            name: block
+                .get("name")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
+                .to_string(),
+        })),
+        "advisor_tool_result" => {
+            let text = block
+                .pointer("/content/text")
+                .and_then(|v| v.as_str())
+                .or_else(|| block.get("content").and_then(|v| v.as_str()))
+                .unwrap_or_default()
+                .to_string();
+            Some(AssistantContentBlock::AdvisorToolResult(
+                AdvisorToolResultBlock {
+                    tool_use_id: block
+                        .get("tool_use_id")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or_default()
+                        .to_string(),
+                    text,
+                },
+            ))
+        }
         _ => None,
     }
 }

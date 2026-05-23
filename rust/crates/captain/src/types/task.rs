@@ -8,6 +8,7 @@ pub use super::task_status::{
     REOPENABLE, REWORKABLE,
 };
 pub use super::task_update::{TaskUpdateError, UpdateTaskInput};
+use api_types::TaskProvider;
 
 /// Routing fields — lightweight struct for captain tick hot path.
 /// Populated from tasks WHERE the owning workbench is not archived.
@@ -15,6 +16,7 @@ pub use super::task_update::{TaskUpdateError, UpdateTaskInput};
 pub struct TaskRouting {
     pub id: i64,
     pub title: String,
+    pub provider: TaskProvider,
     pub status: ItemStatus,
     pub project_id: i64,
     pub project: String,
@@ -29,6 +31,7 @@ impl Default for TaskRouting {
         Self {
             id: 0,
             title: String::new(),
+            provider: TaskProvider::default(),
             status: ItemStatus::New,
             project_id: 0,
             project: String::new(),
@@ -43,6 +46,7 @@ impl Default for TaskRouting {
 pub struct Task {
     pub id: i64,
     pub title: String,
+    pub provider: TaskProvider,
     /// Intentionally crate-private. Writes go through
     /// `service::lifecycle::apply_transition` (or the test-only
     /// `set_status_for_tests` shim). External crates read via the
@@ -186,6 +190,7 @@ impl Task {
         Self {
             id: 0,
             title: title.into(),
+            provider: TaskProvider::default(),
             status: ItemStatus::New,
             project_id: 0,
             project: String::new(),
@@ -234,6 +239,7 @@ impl Task {
         TaskRouting {
             id: self.id,
             title: self.title.clone(),
+            provider: self.provider,
             status: self.status,
             project_id: self.project_id,
             project: self.project.clone(),

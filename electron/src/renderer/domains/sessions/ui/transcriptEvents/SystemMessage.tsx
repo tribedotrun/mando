@@ -9,6 +9,8 @@ import type {
   SystemStatusEvent,
   UnknownEvent,
 } from '#renderer/global/types';
+import { unknownEventTitle } from '#renderer/domains/sessions/service/transcriptEvents';
+import { prettyJson } from '#renderer/domains/sessions/service/transcriptRenderHelpers';
 
 type SystemEventPayload =
   | { kind: 'init'; data: SystemInitEvent; isBoundary: boolean }
@@ -69,9 +71,14 @@ export function SystemMessage({ event }: { event: SystemEventPayload }): React.R
       );
     case 'unknown':
       return (
-        <div className="py-1 text-label italic text-muted-foreground opacity-60">
-          unknown event {event.data.rawType ? `(${event.data.rawType})` : ''}
-        </div>
+        <details className="rounded-md border border-border/50 bg-muted/20 px-3 py-2 text-label text-muted-foreground">
+          <summary className="cursor-pointer select-none uppercase tracking-wider text-text-3">
+            {unknownEventTitle(event.data)}
+          </summary>
+          <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap rounded bg-background/70 px-3 py-2 font-mono text-[11px] leading-4 text-muted-foreground">
+            {prettyJson(event.data.raw)}
+          </pre>
+        </details>
       );
   }
 }

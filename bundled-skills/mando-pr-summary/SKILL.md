@@ -50,6 +50,10 @@ Universal items (no heading — Step 5's body supplies it). Append items from th
 2. Files exist → host and embed:
    1. `MANDO_DEV_GCS_BUCKET` set → upload to `gs://$MANDO_DEV_GCS_BUCKET/pr-$PR_NUM/<filename>`; reference at `https://storage.googleapis.com/$MANDO_DEV_GCS_BUCKET/pr-$PR_NUM/<filename>`.
    2. Otherwise → attach to a GitHub prerelease tagged `pr-$PR_NUM-evidence` (create if it doesn't exist), and link the published download URLs.
+3. Embed each artifact — plain `[label](url)` does not render inline:
+   1. `.png` / `.jpg` / `.gif` / `.webp` → `![<caption>](<url>)` on its own line.
+   2. `.webm` / `.mp4` / `.mov` → convert with `ffmpeg -i in.webm -vf "fps=12,scale=720:-1:flags=lanczos" -loop 0 out.gif`, upload both, embed the GIF and link the original. GitHub strips `<video src=ext>`.
+   3. JSON / text logs → `[<filename>](<url>)`.
 
 ## Step 5 — Preview, compose, persist
 
@@ -76,7 +80,13 @@ Universal items (no heading — Step 5's body supplies it). Append items from th
 
 ## Evidence
 
-<per Step 4>
+<per Step 4. UI shape:>
+
+![before-<name>](<png url>)
+![after-<name>](<png url>)
+![after-<name>](<gif url>)
+
+Full-quality video: [<name>.webm](<webm url>)
 
 ## Reviewer Checklist
 

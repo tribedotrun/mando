@@ -222,6 +222,7 @@ pub(crate) async fn get_task_sessions(
             })?;
             Ok(api_types::SessionSummary {
                 session_id: e.session_id,
+                provider: e.provider,
                 status,
                 caller: e.caller,
                 started_at: e.created_at,

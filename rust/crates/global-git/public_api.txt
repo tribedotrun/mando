@@ -17,6 +17,8 @@ pub fn checked_out_branch
 pub fn head_sha
 pub fn head_sha_short
 pub fn common_repo_path
+pub fn git_dir
+pub fn common_git_dir
 pub fn abort_rebase
 pub fn add_force
 pub fn commit_allow_empty

@@ -75,15 +75,16 @@ pub const FINALIZED: [ItemStatus; 3] = [
 /// Statuses from which an item can be reworked (same worktree, new branch + new worker)
 /// or reopened (resume existing session). Currently identical; separate names
 /// kept for semantic clarity in call sites.
-pub const ACTIONABLE_TERMINAL: [ItemStatus; 5] = [
+pub const ACTIONABLE_TERMINAL: [ItemStatus; 6] = [
     ItemStatus::AwaitingReview,
     ItemStatus::HandedOff,
     ItemStatus::Escalated,
     ItemStatus::Errored,
+    ItemStatus::CompletedNoPr,
     ItemStatus::Stopped,
 ];
-pub const REWORKABLE: [ItemStatus; 5] = ACTIONABLE_TERMINAL;
-pub const REOPENABLE: [ItemStatus; 5] = ACTIONABLE_TERMINAL;
+pub const REWORKABLE: [ItemStatus; 6] = ACTIONABLE_TERMINAL;
+pub const REOPENABLE: [ItemStatus; 6] = ACTIONABLE_TERMINAL;
 
 impl ItemStatus {
     #[must_use]

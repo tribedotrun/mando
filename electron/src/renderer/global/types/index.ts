@@ -59,6 +59,7 @@ export type {
   SseSnapshotData,
   TaskItem,
   TaskListResponse,
+  TaskProvider,
   TelegramHealth,
   TerminalState,
   TerminalSessionInfo,

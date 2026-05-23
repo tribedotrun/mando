@@ -11,7 +11,16 @@ use crate::Task;
 /// human answer). Distinct from the initial clarifier schema — this one
 /// carries the `status` enum used to decide readiness after a human
 /// answer.
-pub(super) fn build_interactive_clarifier_schema() -> serde_json::Value {
+pub(super) fn build_interactive_clarifier_schema(
+    workflow: &settings::CaptainWorkflow,
+) -> super::agent_runtime::AgentOutputSchema {
+    super::agent_runtime::AgentOutputSchema(build_interactive_clarifier_schema_value(workflow))
+}
+
+fn build_interactive_clarifier_schema_value(
+    workflow: &settings::CaptainWorkflow,
+) -> serde_json::Value {
+    let resource_schema = build_resource_schema_value(&workflow.agent.resource_limits);
     serde_json::json!({
         "type": "object",
         "properties": {
@@ -19,7 +28,7 @@ pub(super) fn build_interactive_clarifier_schema() -> serde_json::Value {
             "context": { "type": "string" },
             "title": { "type": "string" },
             "no_pr": { "type": ["boolean", "null"] },
-            "resource": { "type": ["string", "null"] },
+            "resource": resource_schema,
             "questions": {
                 "type": ["array", "null"],
                 "items": {
@@ -35,6 +44,19 @@ pub(super) fn build_interactive_clarifier_schema() -> serde_json::Value {
             }
         },
         "required": ["status", "context", "title"]
+    })
+}
+
+fn build_resource_schema_value(
+    resource_limits: &std::collections::HashMap<String, usize>,
+) -> serde_json::Value {
+    let mut enum_values = vec![serde_json::Value::Null];
+    for name in super::clarifier::sorted_resource_names(resource_limits) {
+        enum_values.push(serde_json::Value::String(name.to_string()));
+    }
+    serde_json::json!({
+        "type": ["string", "null"],
+        "enum": enum_values,
     })
 }
 

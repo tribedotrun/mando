@@ -6,6 +6,8 @@ use tracing::{info, warn};
 
 use super::{degraded_failure_threshold, CaptainRuntime};
 
+const STALE_ARCHIVED_WORKBENCH_RETENTION_DAYS: i64 = 180;
+
 pub(super) fn spawn_auto_tick(runtime: &CaptainRuntime) {
     let settings = runtime.settings().clone();
     let tick_rx = settings.subscribe_tick();
@@ -190,7 +192,11 @@ pub(super) fn spawn_workbench_cleanup(runtime: &CaptainRuntime) {
 }
 
 async fn run_workbench_cleanup(pool: &sqlx::SqlitePool) -> anyhow::Result<()> {
-    let stale = crate::io::queries::workbenches::stale_archived(pool, 30).await?;
+    let stale = crate::io::queries::workbenches::stale_archived(
+        pool,
+        STALE_ARCHIVED_WORKBENCH_RETENTION_DAYS,
+    )
+    .await?;
     if stale.is_empty() {
         return Ok(());
     }

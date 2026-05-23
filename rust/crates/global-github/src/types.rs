@@ -12,6 +12,7 @@ pub struct PrStatus {
     pub unaddressed_issue_comments: i64,
     pub body: String,
     pub head_sha: String,
+    pub is_draft: bool,
     pub changed_files: Vec<String>,
 }
 

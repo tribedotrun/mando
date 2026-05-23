@@ -216,6 +216,7 @@ pub(crate) async fn post_scout_act(
             Some(project_name.as_str()),
             Some(task_description.as_str()),
             Some("scout"),
+            api_types::TaskProvider::Claude,
         )
         .await
         .map_err(map_task_create_error)?;

@@ -2,6 +2,7 @@
 
 use crate::{ItemStatus, SessionIds, Task, TaskRouting};
 use anyhow::{Context, Result};
+use api_types::TaskProvider;
 
 /// sqlx row type for the full task table.
 /// SELECT includes JOINed columns: project (from projects.name),
@@ -10,6 +11,7 @@ use anyhow::{Context, Result};
 pub(super) struct TaskRow {
     pub id: i64,
     pub title: String,
+    pub provider: String,
     pub status: String,
     pub project_id: i64,
     /// JOINed from projects.name
@@ -55,6 +57,13 @@ impl TaskRow {
         let status: ItemStatus = self.status.parse().map_err(|e| {
             anyhow::anyhow!("task {} has unknown status {:?}: {e}", self.id, self.status)
         })?;
+        let provider: TaskProvider = self.provider.parse().map_err(|e| {
+            anyhow::anyhow!(
+                "task {} has unknown provider {:?}: {e}",
+                self.id,
+                self.provider
+            )
+        })?;
         let captain_review_trigger = match self.captain_review_trigger {
             Some(s) => Some(s.parse().map_err(|e| {
                 anyhow::anyhow!(
@@ -69,6 +78,7 @@ impl TaskRow {
         Ok(Task {
             id: self.id,
             title: self.title,
+            provider,
             status,
             project_id: self.project_id,
             project: self.project,
@@ -116,6 +126,7 @@ impl TaskRow {
 pub(super) struct RoutingRow {
     pub id: i64,
     pub title: String,
+    pub provider: String,
     pub status: String,
     pub project_id: i64,
     pub project: String,
@@ -132,9 +143,17 @@ impl RoutingRow {
                 self.status,
             )
         })?;
+        let provider: TaskProvider = self.provider.parse().map_err(|e| {
+            anyhow::anyhow!(
+                "routing row {} has unknown provider {:?}: {e}",
+                self.id,
+                self.provider,
+            )
+        })?;
         Ok(TaskRouting {
             id: self.id,
             title: self.title,
+            provider,
             status,
             project_id: self.project_id,
             project: self.project,

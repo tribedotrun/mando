@@ -41,7 +41,9 @@ pub(super) fn classify_and_update_health(
 
         // Get stream result for this worker via session_id.
         let cc_sid = item_ref.and_then(|it| it.session_ids.worker.as_deref());
-        let stream_path = cc_sid.map(global_infra::paths::stream_path_for_session);
+        let stream_path = item_ref
+            .zip(cc_sid)
+            .map(|(item, sid)| super::agent_runtime::stream_path(item.provider, sid));
         let stream_result = stream_path
             .as_deref()
             .and_then(global_claude::get_stream_result);
@@ -95,4 +97,82 @@ pub(super) fn classify_and_update_health(
         actions_to_execute,
         dry_actions,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn isolate_data_dir() -> (std::path::PathBuf, global_infra::EnvVarGuard) {
+        let dir = std::env::temp_dir().join(format!(
+            "mando-tick-classify-{}",
+            global_infra::uuid::Uuid::v4()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let guard = global_infra::EnvVarGuard::set("MANDO_DATA_DIR", &dir);
+        (dir, guard)
+    }
+
+    #[tokio::test]
+    async fn codex_classification_reads_codex_derived_stream_result() {
+        let _lock = global_infra::PROCESS_ENV_LOCK.lock().await;
+        let (_dir, _guard) = isolate_data_dir();
+        let sid = "codex-derived-classify";
+        let stream_path =
+            crate::runtime::agent_runtime::stream_path(global_types::TaskProvider::Codex, sid);
+        std::fs::create_dir_all(stream_path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &stream_path,
+            concat!(
+                r#"{"type":"system","subtype":"init"}"#,
+                "\n",
+                r#"{"type":"result","subtype":"success","is_error":false}"#,
+                "\n"
+            ),
+        )
+        .unwrap();
+        assert!(
+            !global_infra::paths::stream_path_for_session(sid).exists(),
+            "test must prove classification does not require the Claude stream path"
+        );
+
+        let mut item = Task::new("Codex classify proof");
+        item.provider = global_types::TaskProvider::Codex;
+        item.worker = Some("codex-worker".into());
+        item.session_ids.worker = Some(sid.into());
+        item.status = crate::ItemStatus::InProgress;
+        item.no_pr = true;
+
+        let ctx = WorkerContext {
+            session_name: "codex-worker".into(),
+            item_title: item.title.clone(),
+            status: "in-progress".into(),
+            stream_tail: "Codex produced enough no-PR output to pass review gates.".into(),
+            seconds_active: workflow_no_pr_min_active_s(),
+            ..WorkerContext::default()
+        };
+        let result = classify_and_update_health(
+            &[ctx],
+            &[item],
+            &mut HealthState::default(),
+            &CaptainWorkflow::compiled_default(),
+            true,
+        )
+        .unwrap();
+
+        assert_eq!(result.dry_actions.len(), 1);
+        assert_eq!(
+            result.dry_actions[0].action,
+            crate::ActionKind::CaptainReview
+        );
+        assert_eq!(result.dry_actions[0].reason.as_deref(), Some("gates_pass"));
+    }
+
+    fn workflow_no_pr_min_active_s() -> f64 {
+        settings::CaptainWorkflow::compiled_default()
+            .agent
+            .no_pr_min_active_s
+            .as_secs_f64()
+            + 1.0
+    }
 }

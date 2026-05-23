@@ -1,5 +1,5 @@
-//! `/api/sessions/{id}/events/stream` — live SSE tail of a CC session's
-//! typed transcript events.
+//! `/api/sessions/{id}/events/stream` — live SSE tail of a session's typed
+//! transcript events.
 //!
 //! Lifecycle:
 //! 1. Load the snapshot (all events currently in the JSONL file plus the
@@ -16,7 +16,6 @@
 //! and Linux, and keeps the dep graph flat.
 
 use std::convert::Infallible;
-use std::path::PathBuf;
 use std::time::Duration;
 
 use axum::extract::{Path, State};
@@ -83,7 +82,7 @@ async fn run_tail(
     };
 
     let is_running = snapshot.is_running;
-    let stream_path = snapshot.stream_path.clone();
+    let source = snapshot.source.clone();
     let mut byte_offset = snapshot.byte_offset;
     let mut next_line = snapshot.next_line;
 
@@ -109,7 +108,7 @@ async fn run_tail(
         return;
     }
 
-    let Some(stream_path) = stream_path else {
+    let Some(source) = source else {
         global_infra::best_effort!(
             tx.send(encode_closed("no stream file")),
             "send no-stream close to SSE client",
@@ -124,19 +123,12 @@ async fn run_tail(
         return;
     }
 
-    poll_loop(
-        session_id,
-        stream_path,
-        &tx,
-        &mut byte_offset,
-        &mut next_line,
-    )
-    .await;
+    poll_loop(session_id, source, &tx, &mut byte_offset, &mut next_line).await;
 }
 
 async fn poll_loop(
     session_id: String,
-    stream_path: PathBuf,
+    source: sessions::transcript_access::TranscriptSource,
     tx: &mpsc::UnboundedSender<Result<Event, Infallible>>,
     byte_offset: &mut u64,
     next_line: &mut u32,
@@ -152,14 +144,15 @@ async fn poll_loop(
         // blocking task to avoid re-entering the tokio runtime with sync file
         // I/O twice per tick.
         let (events, new_offset, session_finished) = tokio::task::spawn_blocking({
-            let stream_path = stream_path.clone();
+            let source = source.clone();
             let session_id = session_id.clone();
             let offset = *byte_offset;
             let line = *next_line;
             move || {
                 let (events, new_offset) =
-                    global_claude::parse_events_from_offset(&stream_path, offset, line);
-                let finished = global_claude::is_session_finished(&session_id);
+                    sessions::transcript_access::parse_events_from_source(&source, offset, line);
+                let finished =
+                    sessions::transcript_access::is_source_finished(&session_id, &source);
                 (events, new_offset, finished)
             }
         })
@@ -208,10 +201,10 @@ async fn poll_loop(
         }
         // Session meta says finished — drain one more read and close.
         let (final_events, final_offset) = tokio::task::spawn_blocking({
-            let stream_path = stream_path.clone();
+            let source = source.clone();
             let offset = *byte_offset;
             let line = *next_line;
-            move || global_claude::parse_events_from_offset(&stream_path, offset, line)
+            move || sessions::transcript_access::parse_events_from_source(&source, offset, line)
         })
         .await
         .unwrap_or_else(|_| (Vec::new(), *byte_offset));

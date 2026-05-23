@@ -207,6 +207,7 @@ pub fn known_type_decls() -> BTreeMap<String, String> {
         api_types::TaskListQuery,
         api_types::TaskListResponse,
         api_types::TaskPatchRequest,
+        api_types::TaskProvider,
         api_types::TaskSummaryRequest,
         api_types::TaskSummaryResponse,
         api_types::TasksPayload,

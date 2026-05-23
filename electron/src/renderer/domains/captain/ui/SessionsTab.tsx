@@ -4,6 +4,7 @@ import { fmtDuration, relativeTime } from '#renderer/global/service/utils';
 import { formatCallerLabel, buildSequenceFromSummaries } from '#renderer/domains/sessions';
 import { SessionDot } from '#renderer/global/ui/SessionDot';
 import { Button } from '#renderer/global/ui/primitives/button';
+import { taskProviderShortLabel } from '#renderer/global/service/providerDisplay';
 
 export function SessionsTab({
   sessions,
@@ -50,6 +51,12 @@ export function SessionsTab({
                 >
                   {title}
                   {s.worker_name ? ` (${s.worker_name})` : ''}
+                  <span
+                    className="ml-2 rounded bg-secondary px-1 text-[10px] uppercase text-text-3"
+                    data-testid={`session-provider-${s.provider}`}
+                  >
+                    {taskProviderShortLabel(s.provider)}
+                  </span>
                 </div>
                 <div className="text-caption text-text-3">
                   {s.started_at && <span>{relativeTime(s.started_at)}</span>}

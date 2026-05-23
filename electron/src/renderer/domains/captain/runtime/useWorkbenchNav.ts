@@ -1,11 +1,13 @@
 import { useCallback, useRef, useState } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import { useUIStore } from '#renderer/global/runtime/useUIStore';
+import type { TaskProvider } from '#renderer/global/types';
 
 type OpenTranscriptOpts = {
   sessionId: string;
   caller?: string;
   cwd?: string;
+  provider?: TaskProvider;
   project?: string;
   taskTitle?: string;
 };
@@ -26,6 +28,7 @@ export function useWorkbenchNav(workbenchId: string, search: { tab?: string; res
         search: {
           caller: opts.caller,
           cwd: opts.cwd,
+          provider: opts.provider,
           project: opts.project,
           taskTitle: opts.taskTitle,
         },

@@ -27,6 +27,7 @@ struct TaskAddMultipartFields {
     title: String,
     repo: Option<String>,
     context: Option<String>,
+    provider: Option<String>,
     plan: Option<String>,
     no_pr: Option<String>,
     no_auto_merge: Option<String>,
@@ -55,6 +56,7 @@ async fn extract_task_add_multipart(
                     }
                 }
                 "context" => fields.context = field_text(field).await?.or(fields.context.take()),
+                "provider" => fields.provider = field_text(field).await?.or(fields.provider.take()),
                 "plan" => fields.plan = field_text(field).await?.or(fields.plan.take()),
                 "no_pr" => fields.no_pr = field_text(field).await?.or(fields.no_pr.take()),
                 "no_auto_merge" => {
@@ -124,6 +126,7 @@ pub(crate) async fn post_task_add(
         title,
         repo,
         context,
+        provider,
         plan,
         no_pr,
         no_auto_merge,
@@ -138,6 +141,24 @@ pub(crate) async fn post_task_add(
     }
 
     let config = state.settings.load_config();
+    let provider = match provider
+        .as_deref()
+        .unwrap_or(api_types::TaskProvider::Claude.as_str())
+        .parse::<api_types::TaskProvider>()
+    {
+        Ok(provider) => provider,
+        Err(e) => {
+            crate::image_upload::cleanup_saved_images(&saved_images).await;
+            return Err(error_response(StatusCode::BAD_REQUEST, &e));
+        }
+    };
+    if planning.as_deref() == Some("true") && provider == api_types::TaskProvider::Codex {
+        crate::image_upload::cleanup_saved_images(&saved_images).await;
+        return Err(error_response(
+            StatusCode::BAD_REQUEST,
+            "planning mode currently requires Claude Code provider",
+        ));
+    }
 
     // Validate project name before calling add_task so the client gets a 400
     // with the helpful message instead of a generic 500.
@@ -166,7 +187,7 @@ pub(crate) async fn post_task_add(
     let created = {
         let created = match state
             .captain
-            .add_task(title.trim(), repo.as_deref(), source.as_deref())
+            .add_task(title.trim(), repo.as_deref(), source.as_deref(), provider)
             .await
             .map_err(map_task_create_error)
         {

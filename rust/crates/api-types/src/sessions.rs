@@ -3,6 +3,8 @@ use std::collections::{BTreeMap, HashMap};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+use crate::TaskProvider;
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, TS)]
 pub enum SessionStatus {
     #[serde(rename = "running")]
@@ -69,6 +71,7 @@ impl std::fmt::Display for SessionCategory {
 #[serde(deny_unknown_fields)]
 pub struct SessionEntry {
     pub session_id: String,
+    pub provider: TaskProvider,
     pub created_at: String,
     pub cwd: String,
     pub model: String,
@@ -100,6 +103,7 @@ pub struct SessionEntry {
 #[serde(deny_unknown_fields)]
 pub struct SessionSummary {
     pub session_id: String,
+    pub provider: TaskProvider,
     pub status: SessionStatus,
     pub caller: String,
     pub started_at: String,

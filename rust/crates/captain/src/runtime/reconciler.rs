@@ -171,7 +171,8 @@ async fn reconcile_session_costs(pool: &sqlx::SqlitePool) {
 
     let mut count = 0u32;
     for session in &sessions {
-        let meta_path = global_infra::paths::stream_meta_path_for_session(&session.session_id);
+        let meta_path =
+            super::agent_runtime::stream_meta_path(session.provider, &session.session_id);
         let data = match std::fs::read_to_string(&meta_path) {
             Ok(d) => d,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
@@ -198,7 +199,8 @@ async fn reconcile_session_costs(pool: &sqlx::SqlitePool) {
         let cost = match meta.cost_usd {
             Some(c) if c > 0.0 && meta.status == "done" => Some(c),
             _ => {
-                let stream_path = global_infra::paths::stream_path_for_session(&session.session_id);
+                let stream_path =
+                    super::agent_runtime::stream_path(session.provider, &session.session_id);
                 global_claude::session_cost_or_estimate(&stream_path).total_cost_usd
             }
         };

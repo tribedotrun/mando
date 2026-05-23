@@ -3,6 +3,7 @@ import type { ResultEvent } from '#renderer/global/types';
 import {
   formatCost,
   formatDuration,
+  formatTotalUsage,
   humanOutcome,
 } from '#renderer/domains/sessions/service/transcriptRenderHelpers';
 
@@ -11,6 +12,7 @@ export function SessionFooter({ event }: { event: ResultEvent }): React.ReactEle
   const isError = summary.isError;
   const totalCost =
     typeof summary.totalCostUsd === 'number' ? formatCost(summary.totalCostUsd) : '—';
+  const totalUsage = formatTotalUsage(summary.usage);
   const duration =
     typeof summary.durationMs === 'number' ? formatDuration(summary.durationMs) : '—';
   const turns = summary.numTurns != null ? `${summary.numTurns} turns` : '—';
@@ -29,6 +31,7 @@ export function SessionFooter({ event }: { event: ResultEvent }): React.ReactEle
         <span>· {turns}</span>
         <span>· {duration}</span>
         <span>· {totalCost}</span>
+        {totalUsage && <span>· {totalUsage}</span>}
         {summary.stopReason && <span>· {summary.stopReason}</span>}
       </div>
       {summary.permissionDenials.length > 0 && (

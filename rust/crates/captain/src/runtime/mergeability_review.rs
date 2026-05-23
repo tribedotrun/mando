@@ -74,10 +74,28 @@ pub(crate) async fn check_done_review_threads(
         };
         let pr_data = super::review_phase::fetch_pr_data(&stub).await;
 
+        let draft_decision = if pr_data.is_draft {
+            classify_review_state(
+                pr_data.ci_status.as_deref(),
+                true,
+                pr_data.unresolved_threads,
+                pr_data.unreplied_threads,
+                pr_data.unaddressed_issue_comments,
+                &pr_data.body,
+                workflow,
+                items[idx].reopen_seq,
+                &pr_data.head_sha,
+                true,
+                true,
+            )
+        } else {
+            None
+        };
+
         // CI failure → CaptainReviewing with ci_failure trigger.
         // Captain reads CI logs and decides how to proceed (precise reopen or escalate).
         let has_ci_failure = pr_data.ci_status.as_deref() == Some("failure");
-        if has_ci_failure {
+        if draft_decision.is_none() && has_ci_failure {
             let item = &mut items[idx];
             let snap = super::action_contract::ReviewFieldsSnapshot::capture(item);
             let title = global_infra::html::escape_html(&item.title);
@@ -122,35 +140,41 @@ pub(crate) async fn check_done_review_threads(
             continue;
         }
 
-        // Query artifact gates from DB.
-        let artifacts = crate::io::queries::artifacts::list_for_task(pool, items[idx].id)
-            .await
-            .unwrap_or_default();
-        let has_evidence_db = artifacts
-            .iter()
-            .any(|a| a.artifact_type == crate::ArtifactType::Evidence);
-        let evidence_fresh_db = if items[idx].reopen_seq == 0 || items[idx].reopened_at.is_none() {
-            has_evidence_db
+        let decision = if draft_decision.is_some() {
+            draft_decision
         } else {
-            let threshold = items[idx].reopened_at.as_deref().unwrap_or("");
-            artifacts.iter().any(|a| {
-                a.artifact_type == crate::ArtifactType::Evidence
-                    && a.created_at.as_str() > threshold
-            })
-        };
+            // Query artifact gates from DB.
+            let artifacts = crate::io::queries::artifacts::list_for_task(pool, items[idx].id)
+                .await
+                .unwrap_or_default();
+            let has_evidence_db = artifacts
+                .iter()
+                .any(|a| a.artifact_type == crate::ArtifactType::Evidence);
+            let evidence_fresh_db =
+                if items[idx].reopen_seq == 0 || items[idx].reopened_at.is_none() {
+                    has_evidence_db
+                } else {
+                    let threshold = items[idx].reopened_at.as_deref().unwrap_or("");
+                    artifacts.iter().any(|a| {
+                        a.artifact_type == crate::ArtifactType::Evidence
+                            && a.created_at.as_str() > threshold
+                    })
+                };
 
-        let decision = classify_review_state(
-            pr_data.ci_status.as_deref(),
-            pr_data.unresolved_threads,
-            pr_data.unreplied_threads,
-            pr_data.unaddressed_issue_comments,
-            &pr_data.body,
-            workflow,
-            items[idx].reopen_seq,
-            &pr_data.head_sha,
-            has_evidence_db,
-            evidence_fresh_db,
-        );
+            classify_review_state(
+                pr_data.ci_status.as_deref(),
+                false,
+                pr_data.unresolved_threads,
+                pr_data.unreplied_threads,
+                pr_data.unaddressed_issue_comments,
+                &pr_data.body,
+                workflow,
+                items[idx].reopen_seq,
+                &pr_data.head_sha,
+                has_evidence_db,
+                evidence_fresh_db,
+            )
+        };
 
         let (reopen_source, message) = match decision {
             Some(d) => d,
@@ -230,11 +254,12 @@ pub(crate) async fn check_done_review_threads(
 /// Decide whether a pending-review item needs reopening based on PR state.
 ///
 /// CI failures are handled upstream (CaptainReviewing with ci_failure trigger)
-/// before this function is called. This only handles review comments and
-/// missing evidence.
+/// before this function is called. This handles draft PRs, review comments,
+/// and missing evidence.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn classify_review_state(
     _ci_status: Option<&str>,
+    is_draft: bool,
     unresolved: i64,
     unreplied: i64,
     unaddressed: i64,
@@ -245,6 +270,25 @@ pub(crate) fn classify_review_state(
     has_evidence_db: bool,
     evidence_fresh_db: bool,
 ) -> Option<(String, String)> {
+    if is_draft {
+        let issues_text =
+            "PR is still draft. Run `/mando-pr` to mark it ready for review before returning to human review.";
+        let mut vars: FxHashMap<&str, &str> = FxHashMap::default();
+        vars.insert("issues", issues_text);
+        let message = match settings::render_prompt(
+            "review_reopen_message",
+            &workflow.prompts,
+            &vars,
+        ) {
+            Ok(m) => m,
+            Err(e) => {
+                tracing::error!(module = "captain", error = %e, "failed to render review_reopen_message");
+                return None;
+            }
+        };
+        return Some(("draft".to_string(), message));
+    }
+
     let has_comments = unresolved > 0 || unreplied > 0 || unaddressed > 0;
 
     // DB-backed evidence checks replace PR body parsing.
@@ -328,6 +372,7 @@ mod tests {
     ) -> Option<(String, String)> {
         classify_review_state(
             ci,
+            false,
             unresolved,
             unreplied,
             unaddressed,
@@ -343,6 +388,28 @@ mod tests {
     #[test]
     fn clean_pr_returns_none() {
         assert!(classify(Some("success"), 0, 0, 0, 0, true, true).is_none());
+    }
+
+    #[test]
+    fn draft_pr_triggers_reopen_before_ci_comments_or_evidence() {
+        let (source, msg) = classify_review_state(
+            Some("failure"),
+            true,
+            2,
+            1,
+            3,
+            "",
+            &wf(),
+            1,
+            "",
+            false,
+            false,
+        )
+        .unwrap();
+        assert_eq!(source, "draft");
+        assert!(msg.contains("PR is still draft"));
+        assert!(!msg.contains("unresolved threads"));
+        assert!(!msg.contains("missing runtime evidence"));
     }
 
     #[test]

@@ -8,9 +8,6 @@ use rustc_hash::FxHashMap;
 use settings::CaptainWorkflow;
 use settings::{Config, ProjectConfig};
 
-use crate::io::{pid_registry, process_manager};
-use crate::runtime::spawner;
-
 /// Result of a lifecycle operation (restart/rework/reopen).
 pub struct LifecycleResult {
     pub session_name: String,
@@ -45,60 +42,9 @@ async fn clean_and_spawn_fresh(
 ) -> Result<LifecycleResult> {
     item.branch = None;
     item.worker_seq += 1;
-    // Pick credential for the reworked worker. Balance on worker sessions only.
-    let credential = super::tick_spawn::pick_credential(pool, Some("worker")).await;
-    // If the pool has credentials configured but every one is cooling
-    // down, park the task with `paused_until` rather than spawning a
-    // worker that will immediately 429 against the host's ambient auth.
-    // Matches the oneshot failover wrapper's exhaustion behaviour.
-    if credential.is_none() {
-        if let Ok(true) = settings::credentials::has_any(pool).await {
-            // DB error on the cooldown query must NOT fall through to
-            // `paused_until = now`: the tick filter treats that as
-            // eligible and the task loops into the same exhausted state
-            // next tick. 10-minute conservative fallback matches
-            // `cc_failover::FALLBACK_PARK_SECS`.
-            let remaining = settings::credentials::earliest_cooldown_remaining_secs(pool)
-                .await
-                .unwrap_or(600);
-            let now = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs() as i64;
-            let earliest_reset = now + remaining;
-            if let Err(e) =
-                crate::io::queries::tasks::set_paused_until(pool, item.id, earliest_reset).await
-            {
-                tracing::warn!(
-                    module = "spawner",
-                    task_id = item.id,
-                    error = %e,
-                    "failed to pause task after all credentials exhausted"
-                );
-            }
-            tracing::warn!(
-                module = "spawner",
-                task_id = item.id,
-                earliest_reset,
-                "paused worker dispatch — every credential in pool is rate-limited"
-            );
-            anyhow::bail!("all credentials rate-limited; task paused until {earliest_reset}");
-        }
-    }
-    let worker_cred = credential.as_ref().map(|c| spawner::WorkerCredential {
-        id: c.0,
-        token: &c.1,
-    });
-    let result = spawner::spawn_worker(
-        item,
-        slug,
-        project_config,
-        &config.captain,
-        workflow,
-        pool,
-        worker_cred.as_ref(),
-    )
-    .await?;
+    let result =
+        super::agent_runtime::spawn_worker(config, slug, project_config, item, workflow, pool)
+            .await?;
     Ok(LifecycleResult {
         session_name: result.session_name,
         session_id: result.session_id,
@@ -146,12 +92,15 @@ pub(crate) async fn reopen_worker(
         );
     }
 
-    // Kill existing worker (fingerprint-verified to avoid PID reuse).
-    let pid = pid_registry::get_verified_pid(&cc_sid).unwrap_or(crate::Pid::new(0));
-    if pid.as_u32() > 0 {
-        if let Err(e) = global_claude::kill_process(pid).await {
-            tracing::warn!(module = "captain", pid = %pid, error = %e, "failed to kill existing worker for reopen");
-        }
+    // Stop any existing provider-owned worker process before resuming.
+    if let Err(e) = super::agent_runtime::terminate_worker_process(item.provider, &cc_sid).await {
+        tracing::warn!(
+            module = "captain",
+            provider = %item.provider.as_str(),
+            session_id = %cc_sid,
+            error = %e,
+            "failed to terminate existing worker for reopen"
+        );
     }
 
     // Write reopen context (include image paths if any are attached).
@@ -188,74 +137,66 @@ pub(crate) async fn reopen_worker(
     )
     .await?;
 
-    // Check if the session was ever created — broken session guard.
-    let stream_path = global_infra::paths::stream_path_for_session(&cc_sid);
-    if global_claude::stream_has_broken_session(&stream_path) {
-        tracing::warn!(
-            module = "lifecycle",
-            worker = %session_name,
-            cc_sid,
-            "no init event in stream — session was never created, spawning fresh"
-        );
-        return clean_and_spawn_fresh(
-            item,
-            &slug,
-            project_config,
-            config,
-            workflow,
-            &wt_path,
-            pool,
-        )
-        .await;
-    }
-    let symptoms = global_claude::StreamSymptomMatcher::new(workflow.stream_symptoms.clone());
-    if let Some(m) = global_claude::stream_broken_session_symptom(&stream_path, &symptoms) {
-        tracing::warn!(
-            module = "lifecycle",
-            worker = %session_name,
-            cc_sid,
-            symptom = %m.reason,
-            origin = %m.origin.tag(),
-            "resume session already emitted a broken-session symptom — spawning fresh"
-        );
-        return clean_and_spawn_fresh(
-            item,
-            &slug,
-            project_config,
-            config,
-            workflow,
-            &wt_path,
-            pool,
-        )
-        .await;
-    }
-
-    let model = &workflow.models.worker;
-    let (mut env, reopen_cred_id) = super::spawner::credential_env_for_session(pool, &cc_sid).await;
-    env.insert("MANDO_TASK_ID".to_string(), item.id.to_string());
-
     let reopen_seq_str = reopen_seq.to_string();
     let mut vars: FxHashMap<&str, &str> = FxHashMap::default();
     vars.insert("reopen_seq", reopen_seq_str.as_str());
     let resume_msg = settings::render_prompt("reopen_resume", &workflow.prompts, &vars)
         .map_err(|e| anyhow::anyhow!(e))?;
 
-    let item_id = Some(item.id);
-
     // Record stream file size before resume for zero-byte detection.
-    let stream_size_before = global_claude::get_stream_file_size(&stream_path);
+    let stream_path = super::agent_session_result::stream_path(item.provider, &cc_sid);
+    let stream_size_before = std::fs::metadata(&stream_path)
+        .map(|m| m.len())
+        .unwrap_or(0);
 
-    match process_manager::resume_worker_process(&resume_msg, &wt_expanded, model, &cc_sid, &env)
-        .await
+    if let Some(reason) = super::agent_runtime::worker_resume_replacement_reason(
+        item.provider,
+        &stream_path,
+        workflow,
+    ) {
+        tracing::warn!(
+            module = "lifecycle",
+            worker = %session_name,
+            provider = %item.provider,
+            cc_sid,
+            reason = %reason,
+            "resume session is not reusable — spawning fresh"
+        );
+        return clean_and_spawn_fresh(
+            item,
+            &slug,
+            project_config,
+            config,
+            workflow,
+            &wt_path,
+            pool,
+        )
+        .await;
+    }
+
+    match super::agent_runtime::resume_worker(
+        pool,
+        item,
+        &session_name,
+        &wt_expanded,
+        &resume_msg,
+        &cc_sid,
+        &workflow.models.worker,
+        workflow,
+    )
+    .await
     {
-        Ok((new_pid, _)) => {
-            // Register PID in the session registry.
-            pid_registry::register(&cc_sid, new_pid)?;
-
+        Ok(resume) => {
             let health_path = crate::config::worker_health_path();
             let mut state = crate::io::health_store::load_health_state_async(&health_path)
                 .await
                 .with_context(|| format!("load health state from {}", health_path.display()))?;
+            crate::io::health_store::set_health_field(
+                &mut state,
+                &session_name,
+                "pid",
+                serde_json::json!(resume.pid),
+            );
             crate::io::health_store::set_health_field(
                 &mut state,
                 &session_name,
@@ -270,28 +211,17 @@ pub(crate) async fn reopen_worker(
                     "failed to persist health state; zero-byte resume detection may be disabled"
                 );
             }
-            crate::io::headless_cc::log_running_session(
-                pool,
-                &cc_sid,
-                &wt_expanded,
-                "worker",
-                &session_name,
-                item_id,
-                true,
-                reopen_cred_id,
-            )
-            .await?;
             tracing::info!(
                 module = "lifecycle",
                 worker = %session_name,
-                pid = %new_pid,
+                pid = %resume.pid,
                 reopen_seq = reopen_seq,
                 title = %item.title,
                 "reopened worker"
             );
             Ok(LifecycleResult {
                 session_name,
-                session_id: cc_sid,
+                session_id: resume.session_id,
                 branch,
                 worktree: wt_path,
                 // Resume preserves the existing PR — no new branch, no new

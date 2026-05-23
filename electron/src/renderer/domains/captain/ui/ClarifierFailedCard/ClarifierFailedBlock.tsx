@@ -32,7 +32,7 @@ export function ClarifierFailedBlock({
       <div className="mb-2 flex items-center gap-2">
         <AlertTriangle size={14} className="text-destructive" />
         <span className="text-body font-medium text-destructive">
-          {onReanswer ? 'CC errored — retry' : 'CC errored'}
+          {onReanswer ? 'Agent errored — retry' : 'Agent errored'}
         </span>
         <span className="text-caption text-text-3">{time}</span>
         <span className="text-caption text-text-3">({statusLabel})</span>

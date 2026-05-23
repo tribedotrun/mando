@@ -139,77 +139,30 @@ pub async fn nudge_item(
 
     let old_pid =
         crate::io::pid_lookup::resolve_pid(&cc_sid, &worker).unwrap_or(crate::Pid::new(0));
-    if old_pid.as_u32() > 0 {
-        if let Err(e) = global_claude::kill_process(old_pid).await {
-            tracing::warn!(module = "captain", worker = %worker, pid = %old_pid, error = %e, "failed to kill old process before nudge");
-        }
-    }
-
-    let stream_path = global_infra::paths::stream_path_for_session(&cc_sid);
-    if global_claude::stream_has_broken_session(&stream_path) {
-        item.intervention_count = new_count as i64;
-        reopen::trigger_review(
-            item,
-            ReviewTrigger::BrokenSession,
-            config,
-            workflow,
-            notifier,
-            pool,
-        )
-        .await?;
-        alerts.push(format!(
-            "Broken session for {} — captain review triggered",
-            worker
-        ));
-        return Ok(());
-    }
-    let symptoms = global_claude::StreamSymptomMatcher::new(workflow.stream_symptoms.clone());
-    if let Some(m) = global_claude::stream_broken_session_symptom(&stream_path, &symptoms) {
-        // Structured log mirrors the spawner_lifecycle / captain_review_helpers
-        // broken-session paths so obs queries keyed on `symptom=` / `origin=`
-        // see every broken-session decision, not just the reopen/resume ones.
-        tracing::warn!(
-            module = "captain",
-            worker = %worker,
-            cc_sid = %cc_sid,
-            symptom = %m.reason,
-            origin = %m.origin.tag(),
-            "nudge detected broken-session symptom — captain review triggered"
-        );
-        item.intervention_count = new_count as i64;
-        reopen::trigger_review(
-            item,
-            ReviewTrigger::BrokenSession,
-            config,
-            workflow,
-            notifier,
-            pool,
-        )
-        .await?;
-        alerts.push(format!(
-            "Broken session symptom ({}, origin={}) for {} — captain review triggered",
-            m.reason,
-            m.origin.tag(),
-            worker
-        ));
-        return Ok(());
-    }
-
-    let stream_size_before = global_claude::get_stream_file_size(&stream_path);
     let wt_path = global_infra::paths::expand_tilde(&wt);
-    let (env, cred_id) = super::spawner::credential_env_for_session(pool, &cc_sid).await;
 
-    match crate::io::process_manager::resume_worker_process(
-        msg,
+    match super::agent_runtime::nudge_worker(
+        pool,
+        item,
+        &worker,
         &wt_path,
-        &workflow.models.worker,
+        msg,
         &cc_sid,
-        &env,
+        &workflow.models.worker,
+        workflow,
+        old_pid,
     )
     .await
     {
-        Ok((pid, _)) => {
-            persist_nudge_health(&cc_sid, &worker, pid, stream_size_before, new_count, reason)?;
+        Ok(super::agent_runtime::AgentNudgeOutcome::Delivered(delivery)) => {
+            persist_nudge_health(
+                &cc_sid,
+                &worker,
+                delivery.pid,
+                delivery.stream_size_before,
+                new_count,
+                reason,
+            )?;
 
             // Clear AI feedback only after the nudge was successfully delivered.
             if ai_feedback.is_some() {
@@ -219,21 +172,6 @@ pub async fn nudge_item(
                     serde_json::Value::Null,
                     "failed to clear pending_ai_feedback; next nudge may re-deliver stale feedback",
                 );
-            }
-
-            if let Err(e) = crate::io::headless_cc::log_running_session(
-                pool,
-                &cc_sid,
-                &wt_path,
-                "worker",
-                &worker,
-                Some(item.id),
-                true,
-                cred_id,
-            )
-            .await
-            {
-                tracing::warn!(module = "captain", worker = %worker, %e, "failed to log running session after nudge");
             }
 
             item.intervention_count = new_count as i64;
@@ -256,6 +194,20 @@ pub async fn nudge_item(
                 .await,
                 "action_contract: timeline_emit::emit_for_task( item, &format!( 'Nudged {} ({}"
             );
+            Ok(())
+        }
+        Ok(super::agent_runtime::AgentNudgeOutcome::BrokenSession { alert }) => {
+            item.intervention_count = new_count as i64;
+            reopen::trigger_review(
+                item,
+                ReviewTrigger::BrokenSession,
+                config,
+                workflow,
+                notifier,
+                pool,
+            )
+            .await?;
+            alerts.push(alert);
             Ok(())
         }
         Err(e) => {

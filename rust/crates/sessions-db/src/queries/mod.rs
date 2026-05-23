@@ -9,9 +9,9 @@ use sqlx::SqlitePool;
 
 use global_types::SessionStatus;
 
-use crate::{CallerGroup, SessionCaller};
-
 mod read;
+mod result_applied;
+mod types;
 
 pub use read::{
     category_counts, delete_sessions_for_task, find_session_id_by_worker_name, get_credential_id,
@@ -22,7 +22,7 @@ pub use read::{
 
 /// Column list for SessionRow queries — single source of truth.
 const SELECT_COLS: &str = "\
-    session_id, created_at, caller, cwd, model, status, \
+    session_id, provider, created_at, caller, cwd, model, status, \
     cost_usd, duration_ms, resumed, turn_count, \
     task_id, scout_item_id, worker_name, resumed_at, credential_id, \
     error, api_error_status, result_applied_at, rev";
@@ -89,36 +89,38 @@ async fn update_existing_session_row(
             caller = CASE WHEN ?2 != '' THEN ?2 ELSE caller END,
             cwd = CASE WHEN ?3 != '' THEN ?3 ELSE cwd END,
             model = CASE WHEN ?4 != '' THEN ?4 ELSE model END,
-            status = ?5,
+            provider = ?5,
+            status = ?6,
             cost_usd = CASE
-                WHEN ?6 IS NOT NULL AND cost_usd IS NOT NULL THEN cost_usd + ?6
-                WHEN ?6 IS NOT NULL THEN ?6
+                WHEN ?7 IS NOT NULL AND cost_usd IS NOT NULL THEN cost_usd + ?7
+                WHEN ?7 IS NOT NULL THEN ?7
                 ELSE cost_usd
             END,
             duration_ms = CASE
-                WHEN ?7 IS NOT NULL AND duration_ms IS NOT NULL THEN duration_ms + ?7
-                WHEN ?7 IS NOT NULL THEN ?7
+                WHEN ?8 IS NOT NULL AND duration_ms IS NOT NULL THEN duration_ms + ?8
+                WHEN ?8 IS NOT NULL THEN ?8
                 ELSE duration_ms
             END,
-            resumed = MAX(resumed, ?8),
+            resumed = MAX(resumed, ?9),
             turn_count = CASE
-                WHEN ?6 IS NOT NULL THEN turn_count + 1
+                WHEN ?7 IS NOT NULL THEN turn_count + 1
                 ELSE turn_count
             END,
-            task_id = COALESCE(?9, task_id),
-            scout_item_id = COALESCE(?10, scout_item_id),
-            worker_name = COALESCE(?11, worker_name),
-            resumed_at = CASE WHEN ?12 IS NOT NULL THEN ?12 ELSE resumed_at END,
-            credential_id = COALESCE(?13, credential_id),
-            error = COALESCE(?14, error),
-            api_error_status = COALESCE(?15, api_error_status),
-            rev = CASE WHEN ?5 != status THEN rev + 1 ELSE rev END
-         WHERE session_id = ?16 AND rev = ?17",
+            task_id = COALESCE(?10, task_id),
+            scout_item_id = COALESCE(?11, scout_item_id),
+            worker_name = COALESCE(?12, worker_name),
+            resumed_at = CASE WHEN ?13 IS NOT NULL THEN ?13 ELSE resumed_at END,
+            credential_id = COALESCE(?14, credential_id),
+            error = COALESCE(?15, error),
+            api_error_status = COALESCE(?16, api_error_status),
+            rev = CASE WHEN ?6 != status THEN rev + 1 ELSE rev END
+         WHERE session_id = ?17 AND rev = ?18",
     )
     .bind(input.created_at)
     .bind(input.caller)
     .bind(input.cwd)
     .bind(input.model)
+    .bind(input.provider.as_str())
     .bind(next_status)
     .bind(input.cost_usd)
     .bind(input.duration_ms)
@@ -194,64 +196,8 @@ async fn update_session_status_with_cost_row(
     .rows_affected())
 }
 
-/// A session row from the unified sessions table.
-#[derive(Debug, Clone, sqlx::FromRow, serde::Serialize)]
-pub struct SessionRow {
-    pub session_id: String,
-    pub created_at: String,
-    pub caller: String,
-    pub cwd: String,
-    pub model: String,
-    pub status: String,
-    pub cost_usd: Option<f64>,
-    pub duration_ms: Option<i64>,
-    pub resumed: i64,
-    pub turn_count: i64,
-    pub task_id: Option<i64>,
-    pub scout_item_id: Option<i64>,
-    pub worker_name: Option<String>,
-    pub resumed_at: Option<String>,
-    pub credential_id: Option<i64>,
-    pub error: Option<String>,
-    pub api_error_status: Option<i64>,
-    /// RFC3339 timestamp set once a clarifier session's structured result
-    /// has been applied to its parent task. `tick_clarify_poll` skips
-    /// sessions where this is `Some` so a prior-round stream cannot be
-    /// re-applied during the HTTP inline reclarifier window.
-    pub result_applied_at: Option<String>,
-}
-
-impl SessionRow {
-    /// Parse the caller string into the enum.
-    pub fn parsed_caller(&self) -> Option<SessionCaller> {
-        SessionCaller::parse(&self.caller)
-    }
-
-    /// Get the display group for this session.
-    pub fn group(&self) -> Option<CallerGroup> {
-        self.parsed_caller().map(|c| c.group())
-    }
-}
-
-/// Input for upserting a session.
-pub struct SessionUpsert<'a> {
-    pub session_id: &'a str,
-    pub created_at: &'a str,
-    pub caller: &'a str,
-    pub cwd: &'a str,
-    pub model: &'a str,
-    pub status: SessionStatus,
-    pub cost_usd: Option<f64>,
-    pub duration_ms: Option<i64>,
-    pub resumed: bool,
-    pub task_id: Option<i64>,
-    pub scout_item_id: Option<i64>,
-    pub worker_name: Option<&'a str>,
-    pub resumed_at: Option<&'a str>,
-    pub credential_id: Option<i64>,
-    pub error: Option<&'a str>,
-    pub api_error_status: Option<i64>,
-}
+pub use result_applied::{mark_session_result_applied, mark_session_result_applied_in_tx};
+pub use types::{SessionRow, SessionUpsert};
 
 /// Upsert a session with cumulative cost tracking.
 /// On conflict: cost and duration are ADDED (not replaced), turn_count increments,
@@ -262,6 +208,7 @@ pub async fn upsert_session(pool: &SqlitePool, input: &SessionUpsert<'_>) -> Res
     let next_status = input.status.as_str();
     let metadata = json!({
         "session_id": input.session_id,
+        "provider": input.provider.as_str(),
         "caller": input.caller,
         "task_id": input.task_id,
         "scout_item_id": input.scout_item_id,
@@ -270,13 +217,14 @@ pub async fn upsert_session(pool: &SqlitePool, input: &SessionUpsert<'_>) -> Res
 
     if current.is_none() {
         let inserted = sqlx::query(
-            "INSERT INTO cc_sessions (session_id, created_at, caller, cwd, model, status,
+            "INSERT INTO cc_sessions (session_id, provider, created_at, caller, cwd, model, status,
                 cost_usd, duration_ms, resumed, turn_count, task_id, scout_item_id, worker_name,
                 resumed_at, credential_id, error, api_error_status, rev)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 0, ?10, ?11, ?12, ?13, ?14, ?15, ?16, 1)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 0, ?11, ?12, ?13, ?14, ?15, ?16, ?17, 1)
              ON CONFLICT(session_id) DO NOTHING",
         )
         .bind(input.session_id)
+        .bind(input.provider.as_str())
         .bind(input.created_at)
         .bind(input.caller)
         .bind(input.cwd)
@@ -341,50 +289,6 @@ pub async fn upsert_session(pool: &SqlitePool, input: &SessionUpsert<'_>) -> Res
             tx.commit().await?;
         }
     }
-    Ok(())
-}
-
-/// Mark a clarifier session's result as applied to its parent task.
-///
-/// Idempotency guardrail: once this is set, `tick_clarify_poll` skips the
-/// session even if the task re-enters `Clarifying` (e.g. the human answered
-/// a follow-up question and the HTTP inline path preserved the old
-/// session id). Without this, the poll would re-apply the prior round's
-/// already-consumed stream on top of the fresh human answer.
-///
-/// Safe to call multiple times: subsequent calls are no-ops because the
-/// column's first write wins. No-op if the session doesn't exist.
-pub async fn mark_session_result_applied(pool: &SqlitePool, session_id: &str) -> Result<()> {
-    sqlx::query(
-        "UPDATE cc_sessions
-         SET result_applied_at = ?1
-         WHERE session_id = ?2 AND result_applied_at IS NULL",
-    )
-    .bind(global_types::now_rfc3339())
-    .bind(session_id)
-    .execute(pool)
-    .await
-    .context("mark_session_result_applied")?;
-    Ok(())
-}
-
-/// Transaction variant of `mark_session_result_applied` for callers that
-/// want the marker write to land in the same transaction as the task
-/// transition.
-pub async fn mark_session_result_applied_in_tx(
-    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
-    session_id: &str,
-) -> Result<()> {
-    sqlx::query(
-        "UPDATE cc_sessions
-         SET result_applied_at = ?1
-         WHERE session_id = ?2 AND result_applied_at IS NULL",
-    )
-    .bind(global_types::now_rfc3339())
-    .bind(session_id)
-    .execute(&mut **tx)
-    .await
-    .context("mark_session_result_applied_in_tx")?;
     Ok(())
 }
 
@@ -511,6 +415,7 @@ mod tests {
         upsert_session(
             &pool,
             &SessionUpsert {
+                provider: global_types::TaskProvider::Claude,
                 session_id: "s1",
                 created_at: "2026-03-26T00:00:00Z",
                 caller: "worker",
@@ -546,6 +451,7 @@ mod tests {
         upsert_session(
             &pool,
             &SessionUpsert {
+                provider: global_types::TaskProvider::Claude,
                 session_id: "s1",
                 created_at: "2026-03-26T00:00:00Z",
                 caller: "worker",
@@ -571,6 +477,7 @@ mod tests {
         upsert_session(
             &pool,
             &SessionUpsert {
+                provider: global_types::TaskProvider::Claude,
                 session_id: "s1",
                 created_at: "",
                 caller: "worker",

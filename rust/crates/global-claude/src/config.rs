@@ -31,7 +31,6 @@ impl Effort {
 pub enum ThinkingConfig {
     Adaptive,
     Enabled { budget_tokens: u32 },
-    Disabled,
 }
 
 /// Task budget — API-side token budget that lets the model pace itself.
@@ -274,8 +273,8 @@ impl CcConfig {
                     args.push("--max-thinking-tokens".into());
                     args.push(budget_tokens.to_string());
                 }
-                ThinkingConfig::Adaptive | ThinkingConfig::Disabled => {
-                    // Adaptive is the default; disabled has no CLI flag (use effort=low).
+                ThinkingConfig::Adaptive => {
+                    // Adaptive is the default — no CLI flag needed.
                 }
             }
         }

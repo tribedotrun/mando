@@ -15,6 +15,7 @@ export function SessionsPage(): React.ReactElement {
         search: {
           caller: s.caller || undefined,
           cwd: s.resume_cwd || s.cwd || undefined,
+          provider: s.provider,
           taskTitle: s.task_title || s.scout_item_title || undefined,
         },
       });

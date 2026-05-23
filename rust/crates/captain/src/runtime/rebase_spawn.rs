@@ -216,93 +216,60 @@ pub(super) async fn handle_conflict(
     };
 
     let session_name = format!("mando-rebase-{}", pr_num);
-    let session_id = global_infra::uuid::Uuid::v4().to_string();
 
-    // Pick credential so the rebase worker participates in load balancing.
-    let credential = super::tick_spawn::pick_credential(pool, None).await;
-    let cred_id = global_claude::credential_id(&credential);
-    let mut env: std::collections::HashMap<String, String> = std::collections::HashMap::new();
-    if let Some((_id, token)) = &credential {
-        env.insert("CLAUDE_CODE_OAUTH_TOKEN".into(), token.clone());
-    }
-
-    match crate::io::process_manager::spawn_worker_process(
-        &prompt,
+    let session = match super::agent_runtime::spawn_rebase_worker(
+        item,
+        pool,
+        &session_name,
         &wt_path,
+        &prompt,
         &workflow.models.worker,
-        &session_id,
-        &env,
+        workflow,
     )
     .await
     {
-        Ok((pid, _)) => {
-            // Register under both session_name (for reap_dead_rebase_workers
-            // lifecycle) and session_id (for session reconciler + terminator).
-            if let Err(e) = crate::io::pid_registry::register(&session_name, pid) {
-                tracing::warn!(module = "captain", worker = %session_name, %e, "pid_registry register failed");
-            }
-            if let Err(e) = crate::io::pid_registry::register(&session_id, pid) {
-                tracing::warn!(module = "captain", session_id = %session_id, %e, "pid_registry register (session_id) failed");
-            }
-            // Log "running" session entry so the UI shows it immediately.
-            if let Err(e) = crate::io::headless_cc::log_running_session(
-                pool,
-                &session_id,
-                &wt_path,
-                "rebase",
-                &session_name,
-                Some(items[idx].id),
-                false,
-                cred_id,
-            )
-            .await
-            {
-                tracing::warn!(
-                    module = "captain",
-                    session_id = %session_id,
-                    error = %e,
-                    "failed to log rebase session"
-                );
-            }
-            let item = &mut items[idx];
-            item.rebase_worker = Some(session_name.clone());
-            item.rebase_retries = merge_logic::next_rebase_retry(item) as i64;
-            item.rebase_head_sha = head_sha;
-            item.last_activity_at = Some(
-                time::OffsetDateTime::now_utc()
-                    .format(&time::format_description::well_known::Rfc3339)
-                    .unwrap_or_default(),
-            );
-            tracing::info!(
-                module = "captain",
-                worker = %session_name,
-                pid = %pid,
-                "rebase worker spawned"
-            );
-            global_infra::best_effort!(
-                super::timeline_emit::emit_for_task(
-                    item,
-                    &format!(
-                        "Rebase worker {} spawned (attempt {}/{})",
-                        session_name,
-                        rebase_retries + 1,
-                        max_rebase_retries
-                    ),
-                    TimelineEventPayload::RebaseTriggered {
-                        worker: session_name.clone(),
-                        session_id: session_id.clone(),
-                        pr: pr.to_string(),
-                        attempt: (rebase_retries + 1) as i64,
-                        max_retries: max_rebase_retries as i64,
-                    },
-                    pool,
-                )
-                .await,
-                "rebase_spawn: super::timeline_emit::emit_for_task( item, &format!( 'Rebase"
-            );
-        }
+        Ok(session) => session,
         Err(e) => {
             alerts.push(format!("Rebase spawn failed for PR {pr}: {e}"));
+            return;
         }
-    }
+    };
+
+    let item = &mut items[idx];
+    item.rebase_worker = Some(session_name.clone());
+    item.rebase_retries = merge_logic::next_rebase_retry(item) as i64;
+    item.rebase_head_sha = head_sha;
+    item.last_activity_at = Some(
+        time::OffsetDateTime::now_utc()
+            .format(&time::format_description::well_known::Rfc3339)
+            .unwrap_or_default(),
+    );
+    tracing::info!(
+        module = "captain",
+        worker = %session_name,
+        pid = %session.pid,
+        provider = %item.provider,
+        "provider rebase worker spawned"
+    );
+    global_infra::best_effort!(
+        super::timeline_emit::emit_for_task(
+            item,
+            &format!(
+                "Rebase worker {} spawned (attempt {}/{})",
+                session_name,
+                rebase_retries + 1,
+                max_rebase_retries
+            ),
+            TimelineEventPayload::RebaseTriggered {
+                worker: session_name.clone(),
+                session_id: session.session_id.clone(),
+                pr: pr.to_string(),
+                attempt: (rebase_retries + 1) as i64,
+                max_retries: max_rebase_retries as i64,
+            },
+            pool,
+        )
+        .await,
+        "rebase_spawn: provider timeline emit"
+    );
 }

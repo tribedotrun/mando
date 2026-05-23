@@ -7,17 +7,15 @@
 //! place.
 
 use anyhow::Result;
-use global_claude::CcConfig;
 use settings::CaptainWorkflow;
-use tracing::{info, warn};
+use tracing::warn;
 
 use crate::Task;
 
 use super::clarifier::{
-    build_interactive_clarifier_turn_prompt, parse_clarifier_response, resolve_clarifier_cwd,
-    ClarifierQuestion, ClarifierResult,
+    build_interactive_clarifier_turn_prompt, resolve_clarifier_cwd, ClarifierQuestion,
+    ClarifierResult,
 };
-use super::dashboard::truncate_utf8;
 
 /// Unified clarification answer: appends human answer to context, runs
 /// the interactive clarifier LLM inline, and returns the result. Resumes
@@ -34,92 +32,17 @@ pub async fn answer_and_reclarify(
     let prompt =
         build_interactive_clarifier_turn_prompt(item, workflow, answer, questions.as_deref())?;
     let cwd = resolve_clarifier_cwd(item, config)?;
-    let task_id = item.id.to_string();
-    let timeout = workflow.agent.clarifier_timeout_s;
-
     let prior_resume_sid = resolve_prior_resume_sid(item, pool).await;
 
-    let task_id_ref = task_id.as_str();
-    let cwd_ref = cwd.as_path();
-    let model = workflow.models.clarifier.as_str();
-    let result = match settings::cc_failover::run_with_credential_failover(
-        pool,
-        "clarifier",
+    super::agent_runtime::answer_and_reclarify_session(
+        item,
         &prompt,
-        |ctx| {
-            let mut builder = CcConfig::builder()
-                .model(model)
-                .timeout(timeout)
-                .caller("clarifier")
-                .task_id(task_id_ref)
-                .cwd(cwd_ref.to_path_buf())
-                .allowed_tools(vec!["Read".into(), "Glob".into(), "Grep".into()])
-                .json_schema(super::clarifier_cc_failure::build_interactive_clarifier_schema());
-            builder = global_claude::with_credential(builder, &ctx.credential);
-            // Failover wrapper's resume_session_id (the just-failed
-            // session) takes precedence over the caller's pre-existing
-            // clarifier session: after the first attempt hits a 429, the
-            // transcript to continue from is what CC actually ran, not
-            // what we entered with. On the first attempt they are the
-            // same when prior_resume_sid is set.
-            if let Some(rid) = ctx.resume_session_id.as_ref().or(prior_resume_sid.as_ref()) {
-                builder = builder.resume(rid.clone());
-            }
-            builder.build()
-        },
-    )
-    .await
-    {
-        Ok(r) => r,
-        Err(e) => {
-            super::clarifier_cc_failure::log_reclarify_failure(pool, item, &cwd, &e).await;
-            return Err(e.into());
-        }
-    };
-
-    let cred_id = result.credential_id;
-    // `resumed` reflects what CC saw on the first attempt — if the first
-    // attempt resumed the prior session, the cc_sessions row records
-    // `resumed=true` even if later failover attempts also resumed.
-    let resumed = prior_resume_sid.is_some();
-    if let Err(e) = crate::io::headless_cc::log_cc_session(
+        &cwd,
+        workflow,
+        prior_resume_sid.as_deref(),
         pool,
-        &crate::io::headless_cc::SessionLogEntry {
-            session_id: &result.session_id,
-            cwd: &cwd,
-            model: &workflow.models.clarifier,
-            caller: "clarifier",
-            cost_usd: result.cost_usd,
-            duration_ms: result.duration_ms,
-            resumed,
-            task_id: Some(item.id),
-            status: global_types::SessionStatus::Stopped,
-            worker_name: "",
-            credential_id: cred_id,
-            error: None,
-            api_error_status: None,
-        },
     )
     .await
-    {
-        warn!(module = "clarifier", error = %e, "failed to log clarifier session");
-    }
-
-    let text = result
-        .structured
-        .as_ref()
-        .map(|v| v.to_string())
-        .unwrap_or_else(|| result.text.clone());
-    let mut parsed = parse_clarifier_response(&text, &item.title);
-    parsed.session_id = Some(result.session_id);
-
-    info!(
-        module = "clarifier",
-        title = %truncate_utf8(&item.title, 60),
-        status = ?parsed.status,
-        "answer_and_reclarify complete"
-    );
-    Ok(parsed)
 }
 
 /// Pull the outstanding (unanswered) clarifier questions from the

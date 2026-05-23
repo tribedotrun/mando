@@ -1,5 +1,5 @@
 //! Action-path helpers for the task advisor route: synthesize the reopen /
-//! rework / revise-plan message via a single CC call and apply the resulting
+//! rework / revise-plan message via a single agent call and apply the resulting
 //! transition. Kept separate so `routes_task_advisor.rs` stays under the
 //! file-length limit.
 
@@ -11,13 +11,14 @@ use captain::EffectRequest;
 use super::routes_task_advisor_helpers::{
     action_eligible, build_advisor_action_prompt, build_advisor_synthesis_prompt,
 };
+use super::routes_task_agent_session::{run_task_agent_session, TaskAgentSessionRequest};
 use crate::response::{broadcast_task_update, error_response, internal_error, ApiError};
 use crate::AppState;
 
 const PENDING_SESSION: &str = "pending";
 
 /// Entry point for the `reopen` / `rework` / `revise-plan` branch of the
-/// advisor endpoint. Runs one CC call for synthesis and applies the
+/// advisor endpoint. Runs one agent call for synthesis and applies the
 /// transition. Persists a `persist_task_error` entry if the call fails.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn post_task_advisor_action(
@@ -25,6 +26,7 @@ pub(crate) async fn post_task_advisor_action(
     sessions: &::sessions::SessionsRuntime,
     session_key: &str,
     should_resume: bool,
+    existing_session_id: Option<&str>,
     item: &captain::Task,
     workflow: &settings::CaptainWorkflow,
     task_id: i64,
@@ -38,6 +40,7 @@ pub(crate) async fn post_task_advisor_action(
         sessions,
         session_key,
         should_resume,
+        existing_session_id,
         item,
         workflow,
         task_id,
@@ -65,16 +68,17 @@ pub(crate) async fn post_task_advisor_action(
     action_result
 }
 
-/// Synthesize a single action-message via CC and apply the reopen / rework /
-/// revise-plan transition. Runs exactly one CC call: `follow_up` when the
-/// advisor session from a prior Ask is still live, `start_with_item` with
-/// the full-context direct prompt otherwise.
+/// Synthesize a single action-message via the selected agent and apply the reopen / rework /
+/// revise-plan transition. Runs exactly one provider-backed session call: resume when the
+/// advisor session from a prior Ask is still live, start with the full-context
+/// direct prompt otherwise.
 #[allow(clippy::too_many_arguments)]
 async fn handle_advisor_action(
     state: &AppState,
     sessions: &::sessions::SessionsRuntime,
     session_key: &str,
     should_resume: bool,
+    existing_session_id: Option<&str>,
     item: &captain::Task,
     workflow: &settings::CaptainWorkflow,
     task_id: i64,
@@ -90,11 +94,12 @@ async fn handle_advisor_action(
         ));
     }
 
-    let synthesized_feedback = run_advisor_action_cc(
+    let synthesized_feedback = run_advisor_action_session(
         state,
         sessions,
         session_key,
         should_resume,
+        existing_session_id,
         item,
         workflow,
         task_id,
@@ -247,13 +252,14 @@ async fn handle_advisor_action(
     )))
 }
 
-/// Single CC call that produces the synthesized action message.
+/// Single agent call that produces the synthesized action message.
 #[allow(clippy::too_many_arguments)]
-async fn run_advisor_action_cc(
+async fn run_advisor_action_session(
     state: &AppState,
     sessions: &::sessions::SessionsRuntime,
     session_key: &str,
     should_resume: bool,
+    existing_session_id: Option<&str>,
     item: &captain::Task,
     workflow: &settings::CaptainWorkflow,
     task_id: i64,
@@ -262,16 +268,10 @@ async fn run_advisor_action_cc(
     intent: &str,
     message: &str,
 ) -> Result<String, ApiError> {
-    let result = if should_resume {
+    let (start_prompt, follow_up_message) = if should_resume {
         let synthesis_prompt = build_advisor_synthesis_prompt(intent, workflow)
             .map_err(|e| internal_error(e, "failed to build advisor synthesis prompt"))?;
-        sessions
-            .follow_up(::sessions::SessionFollowUpRequest {
-                key: session_key.to_string(),
-                message: synthesis_prompt,
-                cwd: cwd.to_path_buf(),
-            })
-            .await
+        (String::new(), synthesis_prompt)
     } else {
         let task_id_str = task_id.to_string();
         let timeline_text = state
@@ -288,20 +288,21 @@ async fn run_advisor_action_cc(
             &timeline_text,
         )
         .map_err(|e| internal_error(e, "failed to build advisor action prompt"))?;
-
-        sessions
-            .start_with_item(::sessions::SessionStartRequest {
-                key: session_key.to_string(),
-                prompt,
-                cwd: cwd.to_path_buf(),
-                model: Some(workflow.models.captain.clone()),
-                idle_ttl: workflow.agent.task_ask_idle_ttl_s,
-                call_timeout: workflow.agent.task_ask_timeout_s,
-                task_id: Some(task_id),
-                max_turns: None,
-            })
-            .await
+        (prompt, message.to_string())
     };
+    let result = run_task_agent_session(TaskAgentSessionRequest {
+        state,
+        sessions,
+        session_key,
+        item,
+        should_resume,
+        existing_session_id,
+        start_prompt,
+        follow_up_message,
+        cwd,
+        workflow,
+    })
+    .await;
 
     let result = result.map_err(|e| internal_error(e, "advisor synthesis session failed"))?;
 

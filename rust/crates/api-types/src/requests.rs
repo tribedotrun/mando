@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::{SessionCategory, SessionStatus};
+use crate::{SessionCategory, SessionStatus, TaskProvider};
 
 /// Standard JSON error envelope returned by all error responses.
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -30,6 +30,7 @@ pub struct EmptyResponse {}
 pub struct TaskAddRequest {
     pub title: String,
     pub project: Option<String>,
+    pub provider: Option<TaskProvider>,
     pub plan: bool,
     pub no_pr: bool,
 }

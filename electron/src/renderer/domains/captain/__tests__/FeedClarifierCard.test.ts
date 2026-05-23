@@ -43,14 +43,14 @@ describe('ClarifierFailedCard contract', () => {
     assert.equal(payload.api_error_status, 0);
   });
 
-  // PR #889: session_id sentinel "" == no CC session established (pre-prompt
+  // PR #889: session_id sentinel "" == no agent session established (pre-prompt
   // failure), replacing the prior Option<String>::None wire shape.
   it('clarifier_failed session_id sentinel "" means pre-session failure', () => {
     const payload: ClarifierFailedPayload = {
       event_type: 'clarifier_failed',
       session_id: '',
       api_error_status: 0,
-      message: 'spawn failed before CC session established',
+      message: 'spawn failed before agent session established',
     };
     assert.equal(payload.session_id, '');
   });

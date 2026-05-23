@@ -4,14 +4,6 @@ use std::collections::HashMap;
 
 use crate::{ItemStatus, Task};
 
-/// Default resource name when a task has no explicit `resource` field.
-///
-/// Tasks without a resource are scheduled against the generic `cc` pool
-/// (Claude Code). This default is intentional and documented — callers must
-/// treat `item.resource.as_deref().unwrap_or(DEFAULT_RESOURCE)` as the single
-/// source of truth for resource lookup rather than hard-coding the literal.
-pub const DEFAULT_RESOURCE: &str = "cc";
-
 /// Result of a dispatch check for a single item.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DispatchDecision {
@@ -65,12 +57,14 @@ pub(crate) fn check_dispatch(
         }
     }
 
-    // Check resource-specific limits.
-    let resource = item.resource.as_deref().unwrap_or(DEFAULT_RESOURCE);
-    if let Some(&limit) = resource_limits.get(resource) {
-        let current = resource_counts.get(resource).copied().unwrap_or(0);
-        if current >= limit {
-            return DispatchDecision::ResourceBlocked(resource.to_string());
+    // Check resource-specific limits. `None` means the task consumes no scarce
+    // shared resource and is governed only by global/provider scheduling caps.
+    if let Some(resource) = item.resource.as_deref() {
+        if let Some(&limit) = resource_limits.get(resource) {
+            let current = resource_counts.get(resource).copied().unwrap_or(0);
+            if current >= limit {
+                return DispatchDecision::ResourceBlocked(resource.to_string());
+            }
         }
     }
 
@@ -83,8 +77,9 @@ pub(crate) fn count_resources(items: &[Task]) -> HashMap<String, usize> {
     let mut counts = HashMap::new();
     for item in items {
         if item.status == ItemStatus::InProgress && !item.planning {
-            let resource = item.resource.as_deref().unwrap_or(DEFAULT_RESOURCE);
-            *counts.entry(resource.to_string()).or_insert(0) += 1;
+            if let Some(resource) = item.resource.as_deref() {
+                *counts.entry(resource.to_string()).or_insert(0) += 1;
+            }
         }
     }
     counts
@@ -251,19 +246,20 @@ mod tests {
     fn count_resources_basic() {
         let mut a = Task::new("A");
         a.status = ItemStatus::InProgress;
-        a.resource = Some("cc".into());
+        a.resource = Some("emulator".into());
 
         let mut b = Task::new("B");
         b.status = ItemStatus::InProgress;
-        b.resource = Some("emulator".into());
+        b.resource = Some("browser".into());
 
         let mut c = Task::new("C");
         c.status = ItemStatus::InProgress;
-        // Default resource is "cc".
+        // No scarce resource.
 
         let counts = count_resources(&[a, b, c]);
-        assert_eq!(counts.get("cc"), Some(&2));
         assert_eq!(counts.get("emulator"), Some(&1));
+        assert_eq!(counts.get("browser"), Some(&1));
+        assert_eq!(counts.get("cc"), None);
     }
 
     #[test]

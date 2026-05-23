@@ -61,6 +61,9 @@ export const advisorResponseSchema = z.union([
     .strict()
     .and(z.lazy(() => advisorActionResponseSchema)),
 ]);
+export const advisorToolResultBlockSchema = z
+  .object({ toolUseId: z.string(), text: z.string() })
+  .strict();
 export const artifactEventDataSchema = z
   .object({ action: z.string(), task_id: z.number(), artifact_id: z.number() })
   .strict();
@@ -122,6 +125,15 @@ export const assistantContentBlockSchema = z.union([
     .strict(),
   z
     .object({ kind: z.literal('tool_use'), data: z.lazy(() => assistantToolUseBlockSchema) })
+    .strict(),
+  z
+    .object({ kind: z.literal('server_tool_use'), data: z.lazy(() => serverToolUseBlockSchema) })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('advisor_tool_result'),
+      data: z.lazy(() => advisorToolResultBlockSchema),
+    })
     .strict(),
 ]);
 export const assistantEventSchema = z
@@ -1013,6 +1025,7 @@ export const scoutResponseSchema = z
     status_counts: z.record(z.string(), z.number()).nullable(),
   })
   .strict();
+export const serverToolUseBlockSchema = z.object({ id: z.string(), name: z.string() }).strict();
 export const sessionCategorySchema = z.enum([
   'workers',
   'clarifier',
@@ -1040,6 +1053,7 @@ export const sessionCostSummarySchema = z
 export const sessionEntrySchema = z
   .object({
     session_id: z.string(),
+    provider: z.lazy(() => taskProviderSchema),
     created_at: z.string(),
     cwd: z.string(),
     model: z.string(),
@@ -1092,6 +1106,7 @@ export const sessionStreamQuerySchema = z.object({ types: z.string().optional() 
 export const sessionSummarySchema = z
   .object({
     session_id: z.string(),
+    provider: z.lazy(() => taskProviderSchema),
     status: z.lazy(() => sessionStatusSchema),
     caller: z.string(),
     started_at: z.string(),
@@ -1292,6 +1307,7 @@ export const taskAddRequestSchema = z
   .object({
     title: z.string(),
     project: z.string().nullable(),
+    provider: z.lazy(() => taskProviderSchema).nullable(),
     plan: z.boolean(),
     no_pr: z.boolean(),
   })
@@ -1355,6 +1371,7 @@ export const taskItemSchema = z
     id: z.number(),
     rev: z.number(),
     title: z.string(),
+    provider: z.lazy(() => taskProviderSchema),
     status: z.lazy(() => itemStatusSchema),
     project: z.string().nullable(),
     github_repo: z.string().nullable(),
@@ -1403,6 +1420,7 @@ export const taskPatchRequestSchema = z
     is_bug_fix: z.boolean().optional(),
   })
   .strict();
+export const taskProviderSchema = z.enum(['claude', 'codex']);
 export const taskSummaryRequestSchema = z.object({ content: z.string() }).strict();
 export const taskSummaryResponseSchema = z
   .object({ artifact_id: z.number(), task_id: z.number() })
@@ -2209,6 +2227,7 @@ export const resSchemas = {
   getScoutResearchById: scoutResearchRunSchema,
   getScoutResearchByIdItems: z.array(scoutItemSchema),
   getSessions: sessionsListResponseSchema,
+  getSessionsById: sessionEntrySchema,
   getSessionsByIdCost: sessionCostResponseSchema,
   getSessionsByIdEvents: transcriptEventsResponseSchema,
   getSessionsByIdJsonlpath: sessionJsonlPathResponseSchema,
@@ -2390,6 +2409,7 @@ export const paramsSchemas = {
   getScoutItemsByIdSessions: scoutItemIdParamsSchema,
   getScoutResearchById: scoutResearchIdParamsSchema,
   getScoutResearchByIdItems: scoutResearchIdParamsSchema,
+  getSessionsById: sessionIdParamsSchema,
   getSessionsByIdCost: sessionIdParamsSchema,
   getSessionsByIdEvents: sessionIdParamsSchema,
   getSessionsByIdEventsStream: sessionIdParamsSchema,

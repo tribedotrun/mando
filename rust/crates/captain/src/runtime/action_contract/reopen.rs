@@ -217,6 +217,7 @@ async fn emit_reopen_event(
         "review" => "review comments",
         "ci" => "CI failure",
         "evidence" => "missing evidence",
+        "draft" => "draft PR",
         _ => source,
     };
     let summary = format!(

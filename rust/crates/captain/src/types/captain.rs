@@ -23,6 +23,7 @@ pub struct WorkerContext {
     pub unaddressed_issue_comments: i64,
     pub pr_body: String,
     pub changed_files: Vec<String>,
+    pub pr_is_draft: bool,
     pub branch_ahead: bool,
     pub process_alive: bool,
     #[serde(skip_serializing_if = "Option::is_none")]

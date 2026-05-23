@@ -46,6 +46,7 @@ pub async fn log_cc_session(pool: &SqlitePool, entry: &SessionLogEntry<'_>) -> R
     sessions_db::upsert_session(
         pool,
         &sessions_db::SessionUpsert {
+            provider: global_types::TaskProvider::Claude,
             session_id: entry.session_id,
             created_at: &created_at,
             caller: entry.caller,

@@ -7,4 +7,5 @@ license.workspace = true
 [dependencies]
 global-infra = { path = "../global-infra" }
 serde.workspace = true
+ts-rs = "=12.0.1"
 serde_json.workspace = true

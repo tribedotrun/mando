@@ -1,10 +1,9 @@
 import React, { useImperativeHandle } from 'react';
+import { ListChecks } from 'lucide-react';
 import { useInlineTaskCreate } from '#renderer/domains/captain/runtime/useInlineTaskCreate';
 import { Button } from '#renderer/global/ui/primitives/button';
-import { TaskAttachmentButton } from '#renderer/domains/captain/ui/TaskAttachmentButton';
 import {
-  TaskAutoMergeToggle,
-  TaskPlanModeToggle,
+  TaskCreateOptionsMenu,
   TaskProjectSelect,
   TaskSubmitButton,
 } from '#renderer/domains/captain/ui/TaskComposerControls';
@@ -76,34 +75,28 @@ export function InlineTaskCreate({ ref }: InlineTaskCreateProps): React.ReactEle
             testId="inline-task-project"
           />
           {!bulk && (
-            <>
-              <TaskAttachmentButton
-                onImageSelect={form.image.setImageFile}
-                size="icon-sm"
-                className="text-text-3"
-              />
-              {form.autoMerge.globalAutoMerge && (
-                <TaskAutoMergeToggle
-                  checked={form.autoMerge.noAutoMerge}
-                  onCheckedChange={form.autoMerge.setNoAutoMerge}
-                  className="flex items-center gap-1.5 text-caption text-text-3"
-                />
-              )}
-              <TaskPlanModeToggle
-                checked={form.planMode.planning}
-                onCheckedChange={form.planMode.setPlanning}
-                className="flex items-center gap-1.5 text-caption text-text-3"
-              />
-            </>
+            <TaskCreateOptionsMenu
+              provider={form.provider.provider}
+              onProviderChange={form.provider.setProvider}
+              planning={form.planMode.planning}
+              onPlanningChange={form.planMode.setPlanning}
+              globalAutoMerge={form.autoMerge.globalAutoMerge}
+              noAutoMerge={form.autoMerge.noAutoMerge}
+              onNoAutoMergeChange={form.autoMerge.setNoAutoMerge}
+              onImageSelect={form.image.setImageFile}
+            />
           )}
           <Button
             variant={bulk ? 'outline' : 'ghost'}
-            size="xs"
+            size="icon-sm"
             onClick={() => setBulk(!bulk)}
-            className={bulk ? 'text-foreground' : 'text-text-3'}
+            className={bulk ? 'bg-accent text-foreground' : 'text-text-3'}
             data-testid="inline-task-bulk-toggle"
+            aria-label={bulk ? 'Disable bulk task mode' : 'Enable bulk task mode'}
+            aria-pressed={bulk}
+            title={bulk ? 'Bulk mode on' : 'Bulk mode'}
           >
-            Bulk
+            <ListChecks size={16} />
           </Button>
 
           <span className="flex-1" />

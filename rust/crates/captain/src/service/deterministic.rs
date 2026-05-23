@@ -174,6 +174,7 @@ fn quality_gates_pass(
     }
     // PR path.
     if ctx.pr.is_some()
+        && !ctx.pr_is_draft
         && ctx.branch_ahead
         && ctx.has_reopen_ack
         && ctx.unresolved_threads == 0
@@ -211,6 +212,9 @@ fn diagnose_failing_gates(
     if !is_no_pr {
         if ctx.pr.is_none() {
             failures.push("no PR created — push your branch and open a PR".into());
+        }
+        if ctx.pr.is_some() && ctx.pr_is_draft {
+            failures.push("PR is still draft".into());
         }
         if ctx.pr.is_some() && !ctx.branch_ahead {
             failures.push("branch not ahead of main".into());
@@ -275,6 +279,18 @@ fn missing_gate_nudge(
 
     let vars: FxHashMap<&str, &str> = FxHashMap::default();
 
+    // Draft PRs are a hard handoff blocker. Run this before all other PR
+    // hygiene nudges so a draft PR never reaches CaptainReview via gates_pass.
+    if !ctx.degraded && ctx.pr.is_some() && ctx.pr_is_draft {
+        let msg = render_nudge(nudges, "draft_pr", &vars)?;
+        return Ok(Some(action(
+            ctx,
+            ActionKind::Nudge,
+            &msg,
+            "PR is still draft",
+        )));
+    }
+
     // Threads.
     if !ctx.degraded
         && ctx.pr.is_some()
@@ -319,6 +335,7 @@ fn missing_gate_nudge(
                 "captain-reopen-context.md",
                 "missing evidence",
             ),
+            Some("draft") => ("Draft-Reopen", "captain-reopen-context.md", "draft PR"),
             _ => ("Reopen", "captain-reopen-context.md", "human feedback"),
         };
         let seq_str = ctx.reopen_seq.to_string();

@@ -49,6 +49,9 @@ pub struct SandboxOverrides {
     pub task_ask_timeout_s: Option<u64>,
     pub ops_timeout_s: Option<u64>,
     pub no_pr_min_active_s: Option<u64>,
+    /// Sandbox-only Codex model/runtime overrides. Each field is optional
+    /// and merges on top of `agent.codex`.
+    pub codex: Option<CodexAgentConfig>,
     // Low-intervention sandbox fails fast into `escalated` when haiku +
     // the captain review prompt get stuck in a nudge loop. That keeps the
     // rework/escalation e2e specs bounded — they can drive straight from
@@ -82,6 +85,40 @@ pub struct ModelsConfig {
     pub captain: String,
     pub clarifier: String,
     pub todo_parse: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CodexAgentConfig {
+    /// Codex app-server model id. `None` leaves the user's Codex default.
+    pub model: Option<String>,
+    /// Reasoning effort sent to app-server as `effort`.
+    pub reasoning_effort: Option<CodexReasoningEffort>,
+    /// Service tier request id. `default` means explicit standard routing.
+    pub service_tier: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CodexReasoningEffort {
+    None,
+    Minimal,
+    Low,
+    Medium,
+    High,
+    XHigh,
+}
+
+impl CodexReasoningEffort {
+    pub fn as_app_server_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Minimal => "minimal",
+            Self::Low => "low",
+            Self::Medium => "medium",
+            Self::High => "high",
+            Self::XHigh => "xhigh",
+        }
+    }
 }
 
 /// Configuration for the autonomous planning pipeline.
@@ -150,6 +187,68 @@ mod duration_seconds {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum CodexApprovalPolicy {
+    /// Ask only when the workspace is not trusted. Serialized as the app-server
+    /// protocol's legacy `untrusted` spelling.
+    #[serde(rename = "untrusted")]
+    Untrusted,
+    OnFailure,
+    OnRequest,
+    Never,
+}
+
+impl CodexApprovalPolicy {
+    pub fn as_app_server_str(self) -> &'static str {
+        match self {
+            Self::Untrusted => "untrusted",
+            Self::OnFailure => "on-failure",
+            Self::OnRequest => "on-request",
+            Self::Never => "never",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CodexApprovalsReviewer {
+    User,
+    AutoReview,
+}
+
+impl CodexApprovalsReviewer {
+    pub fn as_app_server_str(self) -> &'static str {
+        match self {
+            Self::User => "user",
+            Self::AutoReview => "auto_review",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum CodexSandboxPolicy {
+    WorkspaceWrite,
+    DangerFullAccess,
+}
+
+impl CodexSandboxPolicy {
+    pub fn as_thread_start_str(self) -> &'static str {
+        match self {
+            Self::WorkspaceWrite => "workspace-write",
+            Self::DangerFullAccess => "danger-full-access",
+        }
+    }
+
+    pub fn as_turn_policy_type(self) -> &'static str {
+        match self {
+            Self::WorkspaceWrite => "workspaceWrite",
+            Self::DangerFullAccess => "dangerFullAccess",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentConfig {
     pub max_concurrent: usize,
@@ -196,8 +295,6 @@ pub struct AgentConfig {
     /// because humans respond in hours/days, not seconds.
     #[serde(with = "duration_seconds")]
     pub needs_clarification_timeout_s: std::time::Duration,
-    #[serde(with = "duration_seconds")]
-    pub archive_grace_secs: std::time::Duration,
     /// Circuit breaker: route to captain review after this many consecutive
     /// nudges with the identical reason.
     pub max_repeated_nudges: u32,
@@ -207,9 +304,19 @@ pub struct AgentConfig {
     /// Idle TTL for task-ask CC sessions before they are reaped.
     #[serde(with = "duration_seconds")]
     pub task_ask_idle_ttl_s: std::time::Duration,
-    /// Timeout for ops CC sessions (generic ephemeral sessions).
+    /// Timeout for ops CC sessions (generic ephemeral sessions) and short
+    /// Codex app-server request/response handshakes such as initialize,
+    /// thread start/resume, turn start, steer, and interrupt.
     #[serde(with = "duration_seconds")]
     pub ops_timeout_s: std::time::Duration,
+    /// Approval mode sent to Codex app-server for Mando-owned turns.
+    pub codex_approval_policy: CodexApprovalPolicy,
+    /// Approval reviewer sent to Codex app-server for Mando-owned turns.
+    pub codex_approvals_reviewer: CodexApprovalsReviewer,
+    /// Sandbox sent to Codex app-server for Mando-owned turns.
+    pub codex_sandbox_policy: CodexSandboxPolicy,
+    /// Codex model/runtime settings sent to app-server for Mando-owned turns.
+    pub codex: Option<CodexAgentConfig>,
     /// Idle TTL for ops CC sessions.
     #[serde(with = "duration_seconds")]
     pub ops_idle_ttl_s: std::time::Duration,

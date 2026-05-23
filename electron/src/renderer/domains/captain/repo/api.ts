@@ -1,4 +1,10 @@
-import type { AskResponse, ClarifyResponse, NudgeResponse, TaskItem } from '#renderer/global/types';
+import type {
+  AskResponse,
+  ClarifyResponse,
+  NudgeResponse,
+  TaskItem,
+  TaskProvider,
+} from '#renderer/global/types';
 import { z } from 'zod';
 import {
   apiGetRouteR,
@@ -12,6 +18,7 @@ const taskAddMultipartInputSchema = z
   .object({
     title: z.string(),
     project: z.string().optional(),
+    provider: z.enum(['claude', 'codex']).optional(),
     noAutoMerge: z.boolean().optional(),
     planning: z.boolean().optional(),
     images: z.array(z.instanceof(File)).optional(),
@@ -27,6 +34,7 @@ export const fetchTasks = (includeArchived?: boolean) =>
 export interface AddTaskInput {
   title: string;
   project?: string;
+  provider?: TaskProvider;
   noAutoMerge?: boolean;
   planning?: boolean;
   images?: File[];
@@ -46,6 +54,7 @@ export function addTask(input: AddTaskInput): ResultAsync<TaskItem, ApiError> {
   form.append('title', data.title);
   form.append('source', 'electron');
   if (data.project) form.append('project', data.project);
+  if (data.provider) form.append('provider', data.provider);
   if (data.noAutoMerge) form.append('no_auto_merge', 'true');
   if (data.planning) form.append('planning', 'true');
   if (data.images) {
@@ -56,6 +65,7 @@ export function addTask(input: AddTaskInput): ResultAsync<TaskItem, ApiError> {
   return apiMultipartRouteR('postTasksAdd', form, undefined, {
     title: data.title,
     project: data.project ?? null,
+    provider: data.provider ?? null,
     plan: false,
     no_pr: false,
   });

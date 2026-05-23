@@ -17,5 +17,8 @@ export function fetchSessions(
   });
 }
 
+export const fetchSession = (sessionId: string) =>
+  apiGetRouteR('getSessionsById', { params: { id: sessionId } });
+
 export const fetchSessionJsonlPath = (sessionId: string) =>
   apiGetRouteR('getSessionsByIdJsonlpath', { params: { id: sessionId } });

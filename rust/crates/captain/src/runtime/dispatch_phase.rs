@@ -75,12 +75,9 @@ pub(crate) async fn dispatch_new_work(
                         truncate_utf8(&item.title, 60)
                     ));
                     active_workers += 1;
-                    let resource = item
-                        .resource
-                        .as_deref()
-                        .unwrap_or(dispatch_logic::DEFAULT_RESOURCE)
-                        .to_string();
-                    *resource_counts.entry(resource).or_insert(0) += 1;
+                    if let Some(resource) = item.resource.as_deref() {
+                        *resource_counts.entry(resource.to_string()).or_insert(0) += 1;
+                    }
                     *state_counts
                         .entry(dispatch_logic::IN_PROGRESS_WIRE.to_string())
                         .or_insert(0) += 1;
@@ -119,12 +116,9 @@ pub(crate) async fn dispatch_new_work(
                             item.pr_number = spawn_result.pr_number;
                             item.spawn_fail_count = 0;
                             active_workers += 1;
-                            let resource = item
-                                .resource
-                                .as_deref()
-                                .unwrap_or(dispatch_logic::DEFAULT_RESOURCE)
-                                .to_string();
-                            *resource_counts.entry(resource).or_insert(0) += 1;
+                            if let Some(resource) = item.resource.as_deref() {
+                                *resource_counts.entry(resource.to_string()).or_insert(0) += 1;
+                            }
                             *state_counts
                                 .entry(dispatch_logic::IN_PROGRESS_WIRE.to_string())
                                 .or_insert(0) += 1;
@@ -148,13 +142,10 @@ pub(crate) async fn dispatch_new_work(
                                 }
                                 super::revert_to_queued(item);
                                 active_workers -= 1;
-                                let resource = item
-                                    .resource
-                                    .as_deref()
-                                    .unwrap_or(dispatch_logic::DEFAULT_RESOURCE)
-                                    .to_string();
-                                if let Some(c) = resource_counts.get_mut(&resource) {
-                                    *c = c.saturating_sub(1);
+                                if let Some(resource) = item.resource.as_deref() {
+                                    if let Some(c) = resource_counts.get_mut(resource) {
+                                        *c = c.saturating_sub(1);
+                                    }
                                 }
                                 if let Some(c) =
                                     state_counts.get_mut(dispatch_logic::IN_PROGRESS_WIRE)

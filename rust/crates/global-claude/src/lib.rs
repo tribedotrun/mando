@@ -21,7 +21,7 @@ pub use broken_session::{
     detect_image_dimension_blocked, stream_broken_session_symptom, BrokenSessionMatch,
     BrokenSessionOrigin,
 };
-pub use codex_exec::codex_exec;
+pub use codex_exec::{codex_exec, codex_exec_with_config, CodexExecConfig};
 pub use config::{CcConfig, CcConfigBuilder, Effort, PermissionMode, TaskBudget, ThinkingConfig};
 pub use credentials::{credential_id, with_credential};
 pub use error::{CcError, ErrorClass};
@@ -88,9 +88,13 @@ pub struct SessionMeta<'a> {
 
 pub fn write_stream_meta(meta: &SessionMeta<'_>, status: &str) {
     let meta_path = global_infra::paths::stream_meta_path_for_session(meta.session_id);
+    write_stream_meta_at(&meta_path, meta, status);
+}
+
+pub fn write_stream_meta_at(meta_path: &std::path::Path, meta: &SessionMeta<'_>, status: &str) {
     if let Some(parent) = meta_path.parent() {
         if let Err(e) = std::fs::create_dir_all(parent) {
-            tracing::warn!(module = "global-claude-lib", session_id = meta.session_id, %e, "failed to create cc-streams dir");
+            tracing::warn!(module = "global-claude-lib", session_id = meta.session_id, path = %parent.display(), %e, "failed to create stream meta dir");
             return;
         }
     }
@@ -106,7 +110,7 @@ pub fn write_stream_meta(meta: &SessionMeta<'_>, status: &str) {
         "cwd": meta.cwd,
     });
     if let Err(e) = std::fs::write(
-        &meta_path,
+        meta_path,
         serde_json::to_string_pretty(&val).unwrap_or_default(),
     ) {
         tracing::warn!(module = "global-claude-lib", session_id = meta.session_id, %e, "failed to write stream meta");
@@ -115,7 +119,16 @@ pub fn write_stream_meta(meta: &SessionMeta<'_>, status: &str) {
 
 pub fn update_stream_meta_status(session_id: &str, status: &str, cost_usd: Option<f64>) {
     let meta_path = global_infra::paths::stream_meta_path_for_session(session_id);
-    let data = match std::fs::read_to_string(&meta_path) {
+    update_stream_meta_status_at(&meta_path, session_id, status, cost_usd);
+}
+
+pub fn update_stream_meta_status_at(
+    meta_path: &std::path::Path,
+    session_id: &str,
+    status: &str,
+    cost_usd: Option<f64>,
+) {
+    let data = match std::fs::read_to_string(meta_path) {
         Ok(d) => d,
         Err(e) => {
             tracing::warn!(module = "global-claude-lib", session_id, %e, "failed to read stream meta for status update");
@@ -135,7 +148,7 @@ pub fn update_stream_meta_status(session_id: &str, status: &str, cost_usd: Optio
         val["cost_usd"] = serde_json::json!(cost);
     }
     if let Err(e) = std::fs::write(
-        &meta_path,
+        meta_path,
         serde_json::to_string_pretty(&val).unwrap_or_default(),
     ) {
         tracing::warn!(module = "global-claude-lib", session_id, %e, "failed to write updated stream meta");
@@ -144,7 +157,11 @@ pub fn update_stream_meta_status(session_id: &str, status: &str, cost_usd: Optio
 
 pub fn is_session_finished(session_id: &str) -> bool {
     let meta_path = global_infra::paths::stream_meta_path_for_session(session_id);
-    let data = match std::fs::read_to_string(&meta_path) {
+    is_stream_meta_finished_at(&meta_path)
+}
+
+pub fn is_stream_meta_finished_at(meta_path: &std::path::Path) -> bool {
+    let data = match std::fs::read_to_string(meta_path) {
         Ok(d) => d,
         Err(_) => return false,
     };

@@ -8,7 +8,12 @@ import {
   useTaskStop,
 } from '#renderer/domains/captain/runtime/hooks';
 import { invalidateTaskDetail } from '#renderer/domains/captain/repo/taskDetailInvalidation';
-import { FINALIZED_STATUSES, type TaskItem, type SessionSummary } from '#renderer/global/types';
+import {
+  FINALIZED_STATUSES,
+  type TaskItem,
+  type SessionSummary,
+  type TaskProvider,
+} from '#renderer/global/types';
 import { buildSessionsFromTimeline } from '#renderer/domains/sessions';
 
 const REFRESH_INDICATOR_MS = 1500;
@@ -22,6 +27,7 @@ interface Args {
     sessionId: string;
     caller?: string;
     cwd?: string;
+    provider?: TaskProvider;
     project?: string;
     taskTitle?: string;
   }) => void;
@@ -82,18 +88,29 @@ export function useTaskDetailView({
   // Timeline is the authoritative source for session data.
   const sessions = buildSessionsFromTimeline(events, sessionMap, item);
 
-  const navigateToTranscript = (sessionId: string, caller?: string, cwd?: string) => {
+  const navigateToTranscript = (
+    sessionId: string,
+    caller?: string,
+    cwd?: string,
+    provider?: TaskProvider,
+  ) => {
     onOpenTranscript?.({
       sessionId,
       caller: caller || 'worker',
       cwd: cwd || item.worktree || undefined,
+      provider: provider ?? item.provider,
       project: item.project || undefined,
       taskTitle: item.title || undefined,
     });
   };
 
   const handleSessionClick = (s: SessionSummary) => {
-    navigateToTranscript(s.session_id, s.caller ?? undefined, s.cwd ?? item.worktree ?? undefined);
+    navigateToTranscript(
+      s.session_id,
+      s.caller ?? undefined,
+      s.cwd ?? item.worktree ?? undefined,
+      s.provider,
+    );
   };
 
   const handleResumeSession = useCallback(
