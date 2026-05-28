@@ -136,21 +136,6 @@ export interface Routes {
     auth: 'protected';
     res: Types.CredentialsListResponse;
   };
-  postCredentialsCodex: {
-    method: 'POST';
-    path: '/api/credentials/codex';
-    transport: 'json';
-    auth: 'protected';
-    body: Types.AddCodexCredentialRequest;
-    res: Types.AddCodexCredentialResponse;
-  };
-  getCredentialsCodexActive: {
-    method: 'GET';
-    path: '/api/credentials/codex/active';
-    transport: 'json';
-    auth: 'protected';
-    res: Types.CodexActiveResponse;
-  };
   postCredentialsPick: {
     method: 'POST';
     path: '/api/credentials/pick';
@@ -174,15 +159,6 @@ export interface Routes {
     auth: 'protected';
     params: Types.CredentialIdParams;
     res: Types.CredentialMutationResponse;
-  };
-  postCredentialsByIdCodexactivate: {
-    method: 'POST';
-    path: '/api/credentials/{id}/codex-activate';
-    transport: 'json';
-    auth: 'protected';
-    body: Types.EmptyRequest;
-    params: Types.CredentialIdParams;
-    res: Types.CodexActivateResponse;
   };
   postCredentialsByIdProbe: {
     method: 'POST';
@@ -1086,18 +1062,6 @@ export const routes = {
     auth: 'protected',
   },
   getCredentials: { method: 'GET', path: '/api/credentials', transport: 'json', auth: 'protected' },
-  postCredentialsCodex: {
-    method: 'POST',
-    path: '/api/credentials/codex',
-    transport: 'json',
-    auth: 'protected',
-  },
-  getCredentialsCodexActive: {
-    method: 'GET',
-    path: '/api/credentials/codex/active',
-    transport: 'json',
-    auth: 'protected',
-  },
   postCredentialsPick: {
     method: 'POST',
     path: '/api/credentials/pick',
@@ -1113,12 +1077,6 @@ export const routes = {
   deleteCredentialsById: {
     method: 'DELETE',
     path: '/api/credentials/{id}',
-    transport: 'json',
-    auth: 'protected',
-  },
-  postCredentialsByIdCodexactivate: {
-    method: 'POST',
-    path: '/api/credentials/{id}/codex-activate',
     transport: 'json',
     auth: 'protected',
   },

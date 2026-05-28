@@ -560,41 +560,34 @@ mod tests {
         assert_eq!(back.0, id);
     }
 
-    /// `pick_for_worker` is the Claude-Code worker-spawn entry point — it
-    /// must never hand back a Codex row. Otherwise the OpenAI JWT in
-    /// `access_token` would be passed to `claude` as `CLAUDE_CODE_OAUTH_TOKEN`
-    /// and every spawn would 401. See PR #1006 reviewer finding.
+    /// `pick_for_worker` is the Claude-Code worker-spawn entry point. Keep
+    /// rejecting stale Codex rows from databases that passed through the
+    /// removed Credentials-page Codex account feature.
     #[tokio::test]
-    async fn pick_for_worker_excludes_codex_rows() {
+    async fn pick_for_worker_excludes_stale_codex_rows() {
         let db = global_db::Db::open_in_memory()
             .await
             .expect("in-memory db must init");
         let pool = db.pool().clone();
 
-        // Codex row exists and is healthy (no expiry, no cooldown).
-        let _codex_id = crate::io::codex_credentials::insert_codex(
-            &pool,
-            "b_aburra",
-            "openai-jwt-access",
-            "openai-refresh",
-            "header.payload.sig",
-            "user-acct-1",
-            Some("pro"),
-            None,
+        sqlx::query(
+            "INSERT INTO credentials (label, access_token, provider, updated_at)
+             VALUES ('b_aburra', 'openai-jwt-access', 'codex', datetime('now'))",
         )
+        .execute(&pool)
         .await
         .unwrap();
 
-        // No Claude row yet — must return None despite the Codex row.
+        // No Claude row yet — must return None despite the stale Codex row.
         let pick = credentials::pick_for_worker(&pool, Some("worker"))
             .await
             .unwrap();
         assert!(
             pick.is_none(),
-            "pick_for_worker must reject Codex rows; got {pick:?}"
+            "pick_for_worker must reject stale Codex rows; got {pick:?}"
         );
 
-        // Add a Claude row — it must win over the (still present) Codex row.
+        // Add a Claude row — it must win over the (still present) stale Codex row.
         let claude_id = credentials::insert(&pool, "main", "claude-oauth", None)
             .await
             .unwrap();
@@ -608,7 +601,7 @@ mod tests {
         );
         assert_eq!(
             pick.1, "claude-oauth",
-            "pick_for_worker returned the Codex JWT instead of the Claude OAuth token"
+            "pick_for_worker returned the stale Codex JWT instead of the Claude OAuth token"
         );
     }
 }

@@ -15,9 +15,7 @@ use sqlx::SqlitePool;
 
 use crate::io::usage_probe::UsageSnapshot;
 
-pub use crate::io::credential_types::{
-    CodexInfo, CredentialInfo, CredentialRow, CredentialWindowInfo,
-};
+pub use crate::io::credential_types::{CredentialInfo, CredentialRow, CredentialWindowInfo};
 
 /// Get labels for a list of credential IDs.
 pub async fn labels_by_ids(pool: &SqlitePool, ids: &[i64]) -> Result<HashMap<i64, String>> {
@@ -37,13 +35,9 @@ pub async fn labels_by_ids(pool: &SqlitePool, ids: &[i64]) -> Result<HashMap<i64
     Ok(rows.into_iter().collect())
 }
 
-/// Check if any Claude credentials are configured. Pre-PR-1006 callers
-/// (`tick.rs`, `cc_failover.rs`) use this to distinguish "no credentials,
-/// fall back to ambient login" from "credentials exist but none are
-/// usable right now". Codex rows live in the same table but are not
-/// eligible for Claude-Code worker spawn, so they must not satisfy this
-/// predicate — otherwise a user with only a Codex credential would block
-/// the ambient-login fallback.
+/// Check if any Claude credentials are configured. The provider predicate is
+/// kept for compatibility with databases that were migrated while Codex
+/// account credentials existed.
 pub async fn has_any(pool: &SqlitePool) -> Result<bool> {
     let count: i64 =
         sqlx::query_scalar("SELECT COUNT(*) FROM credentials WHERE provider = 'claude'")
@@ -52,39 +46,41 @@ pub async fn has_any(pool: &SqlitePool) -> Result<bool> {
     Ok(count > 0)
 }
 
-/// List all credentials (full rows including tokens).
+/// List all Claude credentials (full rows including tokens).
 pub async fn list_all(pool: &SqlitePool) -> Result<Vec<CredentialRow>> {
-    let rows: Vec<CredentialRow> = sqlx::query_as("SELECT * FROM credentials ORDER BY label")
-        .fetch_all(pool)
-        .await?;
+    let rows: Vec<CredentialRow> =
+        sqlx::query_as("SELECT * FROM credentials WHERE provider = 'claude' ORDER BY label")
+            .fetch_all(pool)
+            .await?;
     Ok(rows)
 }
 
-/// Fetch the full row for a credential by ID.
+/// Fetch the full Claude credential row by ID.
 pub async fn get_row_by_id(pool: &SqlitePool, id: i64) -> Result<Option<CredentialRow>> {
-    let row: Option<CredentialRow> = sqlx::query_as("SELECT * FROM credentials WHERE id = ?")
-        .bind(id)
-        .fetch_optional(pool)
-        .await?;
-    Ok(row)
-}
-
-/// Look up a credential id + provider by `label`. Used by add paths to
-/// pre-empt the table-wide `label TEXT NOT NULL UNIQUE` constraint with a
-/// typed conflict instead of a generic SQL error.
-pub async fn find_by_label(pool: &SqlitePool, label: &str) -> Result<Option<(i64, String)>> {
-    let row: Option<(i64, String)> =
-        sqlx::query_as("SELECT id, provider FROM credentials WHERE label = ?")
-            .bind(label)
+    let row: Option<CredentialRow> =
+        sqlx::query_as("SELECT * FROM credentials WHERE id = ? AND provider = 'claude'")
+            .bind(id)
             .fetch_optional(pool)
             .await?;
     Ok(row)
 }
 
-/// Get the access token for a credential by ID.
+/// Look up a credential id by `label`. Used by add paths to
+/// pre-empt the table-wide `label TEXT NOT NULL UNIQUE` constraint with a
+/// typed conflict instead of a generic SQL error.
+pub async fn find_by_label(pool: &SqlitePool, label: &str) -> Result<Option<i64>> {
+    let row: Option<(i64,)> = sqlx::query_as("SELECT id FROM credentials WHERE label = ?")
+        .bind(label)
+        .fetch_optional(pool)
+        .await?;
+    let row = row.map(|(id,)| id);
+    Ok(row)
+}
+
+/// Get the access token for a Claude credential by ID.
 pub async fn get_token_by_id(pool: &SqlitePool, id: i64) -> Result<Option<String>> {
     let token: Option<(String,)> =
-        sqlx::query_as("SELECT access_token FROM credentials WHERE id = ?")
+        sqlx::query_as("SELECT access_token FROM credentials WHERE id = ? AND provider = 'claude'")
             .bind(id)
             .fetch_optional(pool)
             .await?;
@@ -111,7 +107,7 @@ pub async fn insert(
     Ok(id)
 }
 
-/// Delete a credential by ID. Returns true if a row was deleted.
+/// Delete a Claude credential by ID. Returns true if a row was deleted.
 /// Also nulls `credential_id` on any existing `cc_sessions` rows so there
 /// are no orphaned FK references (SQLite `ALTER TABLE` can't add ON DELETE
 /// SET NULL retroactively, so we enforce it in the delete path).
@@ -121,7 +117,7 @@ pub async fn delete(pool: &SqlitePool, id: i64) -> Result<bool> {
         .bind(id)
         .execute(&mut *tx)
         .await?;
-    let result = sqlx::query("DELETE FROM credentials WHERE id = ?")
+    let result = sqlx::query("DELETE FROM credentials WHERE id = ? AND provider = 'claude'")
         .bind(id)
         .execute(&mut *tx)
         .await?;
@@ -267,11 +263,8 @@ pub async fn pick_for_worker(
     let now_ms = time::OffsetDateTime::now_utc().unix_timestamp() * 1000;
     let now_secs = now_ms / 1000;
 
-    // PR #1006: explicitly filter to provider='claude'. Codex credentials
-    // live in the same table now but their access_token is an OpenAI JWT;
-    // handing it to a Claude Code worker as CLAUDE_CODE_OAUTH_TOKEN would
-    // make every spawn fail at the API layer. Worker-side Codex routing
-    // would be a separate provider parameter, not a fallback.
+    // Keep the provider filter for databases that still contain stale Codex
+    // rows from the removed Credentials-page Codex account feature.
     let row: Option<(i64, String)> = sqlx::query_as(
         "SELECT c.id, c.access_token
          FROM credentials c

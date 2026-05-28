@@ -1,66 +1,66 @@
 ---
 name: mando-pr
-description: Commit, push, create PR, and tag AI reviewers. Use when ready to open a pull request — NOT for intermediate commits. Pass `--fast` for low-risk changes (skips internal review + monitoring loop).
+description: Prepare branch, verify wiring, run quality gate, push, summarize PR, request reviews, address feedback, and clean up. Use when ready to open or finish a pull request — NOT for intermediate commits.
 ---
 
-## Arguments
+## Step 1 — Prepare branch
 
-- `--fast` — single-pass comment addressing, no internal review, no monitoring loop. Use only when the user explicitly passes `--fast`; never infer from context, risk, or your own judgment.
+**Do**
 
-## Step 1 — Rebase, gate, push
+- If on `main`, create a feature branch first.
+- Rebase onto `origin/main` and resolve conflicts.
+- If the branch name is generic, rename to `<type>/<kebab-summary>`. **Skip renaming** if a PR already exists (renaming after PR creation closes it), the branch starts with `mando/` (captain-managed branches stay as-is), or it follows another project-managed naming convention.
 
-Rebase `origin/main`, resolve conflicts (stop if user input is needed). Review the diff: every new public symbol must be reachable from a user-facing entry point — honor any project-specific surfacing rules in `CLAUDE.md` / `AGENTS.md`.
+**Stop if**
 
-Run the project's full quality gate. Fix every failure before pushing; if a failure needs human judgment, credentials, or infra, stop and report — do not push a broken branch. Then commit and push.
+- Rebase conflicts need user input.
 
-## Step 2 — Create PR + run `/mando-pr-summary`
+## Step 2 — Verify wiring, quality gate & push
 
-If no PR exists and the branch name is generic, rename to `<type>/<kebab-summary>` first (renaming after PR creation closes it). **Skip renaming** if the branch starts with `mando/` (captain-managed branches stay as-is) or follows another project-managed naming convention documented in `CLAUDE.md` / `AGENTS.md`.
+**Do**
 
-Create the PR with an empty body, or convert an existing draft to ready. **Do NOT** use Claude Code's built-in PR template — `/mando-pr-summary` owns the body. Run it; verify the result contains `## Problem` / `## Solution`.
+**Verify everything is wired** — review the diff against the merge base:
 
-## Step 3 — Trigger reviews
+- Every new public API, route, component, config field, or command must reach a user-facing entry point — called, registered, rendered, or read.
+- Fix dangling work before pushing; flag intentional gaps to surface in Step 3's **Wiring** checklist.
 
-External (idempotent — only post each if not already on the PR):
+**Quality gate** — run the project's full gate (`mando-dev check` in Mando). Fix every failure. Iterate until gate passes with no warning or error.
+
+**Commit & push** any remaining work.
+
+## Step 3 — Summarize PR
+
+**Do**
+
+- Run `/mando-pr-summary`. It creates the PR if none exists and owns the body. **Do NOT** use Claude Code's built-in PR template.
+- If a draft PR already exists, convert it to ready.
+
+## Step 4 — Request reviews
+
+**Do**
+
+Post each trigger only if not already on the PR (idempotent):
 
 1. `@codex review this PR`
 2. `cursor review`
 
-Internal (skip if `--fast`; otherwise run exactly once per `/mando-pr` invocation). Before starting this block, record the current PR head SHA as `INTERNAL_REVIEW_SHA`. If `/tmp/.x-pr-reviewed-${PR_NUM}` already contains `INTERNAL_REVIEW_SHA`, skip this internal-review block. Otherwise choose the branch for the current runtime, run both reviewers in that branch, and wait for results; do NOT background:
+## Step 5 — Address feedback
 
-**If running in Claude Code:**
+**Do**
 
-1. Run `pr-review-toolkit:code-reviewer` on the diff.
-2. Run `pr-review-toolkit:silent-failure-hunter` on the diff.
-
-**If running in Codex:**
-
-1. Spawn a review-only Codex subagent for general code review of the PR diff against `origin/main`. Tell it to read `AGENTS.md` / `CLAUDE.md`, make no edits, and return numbered findings with severity, confidence, file:line, impact, and exact fix.
-2. Spawn a second review-only Codex subagent using the silent-failure-hunter contract: find swallowed errors, broad/empty catch blocks, log-and-continue paths, hidden fallbacks, unawaited async work, retry exhaustion without user-visible failure, and missing log/user-feedback context. Tell it to make no edits and return numbered findings with severity, confidence, file:line, hidden failure, user/debugging impact, and exact fix.
-
-No fallback: if the current runtime cannot run both internal reviewers in its branch, stop and report that internal review could not be completed; do not run a cross-runtime substitute, do not run an inline substitute, and do not proceed to step 4.
-
-Hold findings; address them in step 4. After both required internal reviewers complete for `INTERNAL_REVIEW_SHA`, immediately write `INTERNAL_REVIEW_SHA` to `/tmp/.x-pr-reviewed-${PR_NUM}`.
-
-Do not run internal review again during the same `/mando-pr` invocation, even if step 4 creates fix commits, the PR head SHA changes, a reviewer reports real findings, or a later head has no cache hit. The reviewed-SHA cache is a cross-invocation skip only; it is not permission to launch a second internal-review wave after fixes in the current invocation. After Step 3 completes, all further validation flows through Step 4's PR status/comment loop.
-
-## Step 4 — Address everything until merge-ready
-
-Fix every internal-review finding from step 3, commit, push. Then use the wait-aware PR status gate:
+- Run the wait-aware PR status gate:
 
 ```bash
 python3 ~/.claude/skills/mando-pr/pr_status.py --watch <pr_number>
 ```
 
-Address anything it reports, reply to review threads when appropriate, commit and push fixes, then rerun until `ALL CLEAR`. Do not wrap `pr_status.py` in manual shell delay or polling commands.
+- For each review comment: verify against project context — fix when valid, push back when wrong, reply on every thread.
+- Ignore bot links to external apps (e.g. "see N more in …"); only act on findings posted inline on the PR.
+- Address anything `pr_status.py` reports. Commit, push fixes, rerun until `ALL CLEAR`. Do not wrap `pr_status.py` in manual shell delay or polling commands.
+- Reply on review *line* comments via `gh api repos/{owner}/{repo}/pulls/{pr}/comments` with `in_reply_to={comment_id}` (top-level `gh pr comment` won't thread). For top-level PR conversation comments (not anchored to a line), use `gh pr comment <pr> --body '...'`. A thread counts as addressed once the PR author has replied.
 
-`--fast`: run the status check once, address what it surfaces in a single pass, stop.
+## Step 6 — Clean up
 
-Reply to threads via `gh api repos/{owner}/{repo}/pulls/{pr}/comments` with `in_reply_to={comment_id}` (top-level `gh pr comment` won't thread). The status script considers a thread "addressed" once the PR author has replied.
+**Do**
 
-`git status` must be clean before finishing — commit or delete leftover screenshots, temp files, build artifacts.
-
-## Notes
-
-1. If on `main`, branch first.
-2. Squash-merge convention.
+- `git status` must be clean. For leftover screenshots, temp files, and build artifacts: commit referenced proof, delete, or move to `/tmp` (or similar outside the repo). Keep PR commits to current, referenced, minimal proof only.

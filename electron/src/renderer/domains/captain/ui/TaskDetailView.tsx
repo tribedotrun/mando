@@ -2,7 +2,7 @@ import React from 'react';
 import { useTaskDetailView } from '#renderer/domains/captain/runtime/useTaskDetailView';
 import { useTaskAsk } from '#renderer/domains/captain/runtime/useTaskAsk';
 import { canStop } from '#renderer/global/service/utils';
-import type { TaskItem } from '#renderer/global/types';
+import type { TaskItem, TaskProvider } from '#renderer/global/types';
 import { TaskComposer } from '#renderer/domains/captain/ui/TaskComposer';
 import { PrTab, InfoTab } from '#renderer/domains/captain/ui/TaskDetailTabs';
 import { ContextModal } from '#renderer/domains/captain/ui/ContextModal';
@@ -19,12 +19,13 @@ interface Props {
     sessionId: string;
     caller?: string;
     cwd?: string;
+    provider?: TaskProvider;
     project?: string;
     taskTitle?: string;
   }) => void;
   activeTab?: string;
   onTabChange?: (tab: string) => void;
-  onResumeInTerminal?: (sessionId: string, name?: string) => void;
+  onResumeInTerminal?: (sessionId: string, name?: string, provider?: TaskProvider) => void;
   terminalSlot?: React.ReactNode;
 }
 

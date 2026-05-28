@@ -5,7 +5,13 @@ import { useWorkbenchList } from '#renderer/domains/captain/runtime/hooks';
 import { useTaskForWorkbench } from '#renderer/domains/captain/runtime/useTaskForWorkbench';
 import { useWorktreeTerminal } from '#renderer/domains/captain/terminal/runtime/useWorktreeTerminal';
 
-type WbSearch = { tab?: string; resume?: string; name?: string; project?: string };
+type WbSearch = {
+  tab?: string;
+  resume?: string;
+  name?: string;
+  provider?: 'claude' | 'codex';
+  project?: string;
+};
 
 export function useWorkbenchPage() {
   const navigate = useNavigate();

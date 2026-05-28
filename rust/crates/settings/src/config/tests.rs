@@ -52,7 +52,7 @@ fn parse_full_config() {
             "tz": "UTC",
             "defaultTerminalAgent": "claude",
             "claudeTerminalArgs": "--dangerously-skip-permissions",
-            "codexTerminalArgs": "--full-auto",
+            "codexTerminalArgs": "--sandbox danger-full-access --ask-for-approval never",
             "projects": {
                 "/code/repo": {
                     "name": "repo",

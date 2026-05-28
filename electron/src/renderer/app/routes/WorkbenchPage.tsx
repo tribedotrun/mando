@@ -77,6 +77,7 @@ export function WorkbenchPage(): React.ReactElement {
               cwd={wb.worktree}
               resumeSessionId={page.search.resume}
               resumeName={page.search.name}
+              resumeAgent={page.search.provider}
               onResumeConsumed={page.nav.handleResumeConsumed}
             />
           )}
@@ -98,6 +99,7 @@ export function WorkbenchPage(): React.ReactElement {
         cwd={wb.worktree}
         resumeSessionId={page.search.tab === 'terminal' ? (page.search.resume ?? null) : null}
         resumeName={page.search.tab === 'terminal' ? (page.search.name ?? null) : null}
+        resumeAgent={page.search.tab === 'terminal' ? (page.search.provider ?? null) : null}
         onResumeConsumed={page.nav.handleResumeConsumed}
       />
     )

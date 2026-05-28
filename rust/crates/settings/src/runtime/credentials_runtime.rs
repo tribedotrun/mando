@@ -2,8 +2,7 @@
 //! store, remove, mark-expired, pick-for-worker, cooldown queries).
 //!
 //! Lives in its own module so `settings_runtime.rs` stays under the file
-//! length limit. Codex-specific credential flows (validate-then-store,
-//! active-account, JWT refresh) live in `codex_credentials_runtime.rs`.
+//! length limit.
 
 use std::collections::HashMap;
 
@@ -66,10 +65,7 @@ impl SettingsRuntime {
     }
 
     #[tracing::instrument(skip_all)]
-    pub async fn find_credential_by_label(
-        &self,
-        label: &str,
-    ) -> SettingsResult<Option<(i64, String)>> {
+    pub async fn find_credential_by_label(&self, label: &str) -> SettingsResult<Option<i64>> {
         crate::io::credentials::find_by_label(&self.db_pool, label)
             .await
             .map_err(Into::into)

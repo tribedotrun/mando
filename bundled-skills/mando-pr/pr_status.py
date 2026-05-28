@@ -6,7 +6,7 @@ Watch mode re-checks wait-only states internally and exits as soon as the PR is
 clear or needs an agent action.
 
 Exit codes:
-  0 — All clear (CI green, no unaddressed comments, all reviewers responded)
+  0 — All clear (CI green or non-blocking, no unaddressed comments, all reviewers responded)
   1 — Has issues, timed out, or needs agent action (details in stdout)
 """
 
@@ -27,7 +27,6 @@ from gh_async import (
 )
 
 REVIEWERS = {
-    "claude": {"login": "github-actions[bot]"},
     "codex": {"login": "chatgpt-codex-connector[bot]"},
     "cursor": {"login": "cursor[bot]"},
     "devin": {"login": "devin-ai-integration[bot]"},
@@ -39,7 +38,7 @@ TRIGGER_PATTERNS = {
 }
 
 WATCH_POLL_SECONDS = 15
-WATCH_MAX_WAIT_SECONDS = 900
+WATCH_MAX_WAIT_SECONDS = 300
 
 ERROR_PATTERNS = [
     "usage limit",
@@ -74,8 +73,16 @@ async def get_pr_author(pr: int) -> str:
 
 
 def find_unaddressed_comments(data: dict, pr_author: str) -> list[dict]:
-    """Find review comment threads not replied to by PR author."""
+    """Find review-line threads that still need PR-author action.
+
+    A thread is addressed when any of the following hold:
+      1. GitHub marks it resolved (reviewer hit "Resolve conversation").
+      2. GitHub marks it outdated (anchor line no longer in the diff).
+      3. The PR author opened the thread.
+      4. The PR author has already replied to a reviewer's root comment.
+    """
     review_comments = data.get("review_comments", [])
+    thread_meta = data.get("thread_meta", {})
     threads: dict[int, list[dict]] = {}
     for c in review_comments:
         root_id = c.get("in_reply_to_id") or c["id"]
@@ -83,6 +90,9 @@ def find_unaddressed_comments(data: dict, pr_author: str) -> list[dict]:
 
     unaddressed: list[dict] = []
     for root_id, thread in threads.items():
+        meta = thread_meta.get(root_id, {})
+        if meta.get("is_resolved") or meta.get("is_outdated"):
+            continue
         root = next((c for c in thread if c["id"] == root_id), thread[0])
         if root.get("user", {}).get("login") == pr_author:
             continue
@@ -282,19 +292,15 @@ def main() -> int:
     args = parser.parse_args()
 
     wanted = parse_reviewers(args.reviewers)
-    owner, repo = detect_repo()
+
+    async def run() -> int:
+        owner, repo = await detect_repo()
+        if args.watch:
+            return await watch_status(owner, repo, args.pr, wanted)
+        return (await check_status(owner, repo, args.pr, wanted)).exit_code
 
     try:
-        if args.watch:
-            return asyncio.run(
-                watch_status(
-                    owner,
-                    repo,
-                    args.pr,
-                    wanted,
-                )
-            )
-        return asyncio.run(check_status(owner, repo, args.pr, wanted)).exit_code
+        return asyncio.run(run())
     except RuntimeError as e:
         print(f"error: {e}", file=sys.stderr)
         return 1

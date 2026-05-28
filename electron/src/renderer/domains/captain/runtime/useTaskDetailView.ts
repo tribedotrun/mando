@@ -31,7 +31,7 @@ interface Args {
     project?: string;
     taskTitle?: string;
   }) => void;
-  onResumeInTerminal?: (sessionId: string, name?: string) => void;
+  onResumeInTerminal?: (sessionId: string, name?: string, provider?: TaskProvider) => void;
   activeTabProp: string | undefined;
 }
 
@@ -114,8 +114,8 @@ export function useTaskDetailView({
   };
 
   const handleResumeSession = useCallback(
-    (sessionId: string, name?: string) => {
-      onResumeInTerminal?.(sessionId, name);
+    (sessionId: string, name?: string, provider?: TaskProvider) => {
+      onResumeInTerminal?.(sessionId, name, provider);
     },
     [onResumeInTerminal],
   );

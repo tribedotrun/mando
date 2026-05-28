@@ -9,6 +9,7 @@ interface TerminalPageProps {
   cwd: string;
   resumeSessionId?: string | null;
   resumeName?: string | null;
+  resumeAgent?: 'claude' | 'codex' | null;
   onResumeConsumed?: () => void;
 }
 
@@ -18,6 +19,7 @@ export function TerminalPage({
   cwd,
   resumeSessionId,
   resumeName,
+  resumeAgent,
   onResumeConsumed,
 }: TerminalPageProps) {
   const terminal = useTerminalOrchestration({
@@ -26,6 +28,7 @@ export function TerminalPage({
     cwd,
     resumeSessionId,
     resumeName,
+    resumeAgent,
     onResumeConsumed,
   });
   const activeSession = terminal.sessions.activeSession;

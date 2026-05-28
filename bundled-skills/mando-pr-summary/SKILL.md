@@ -107,12 +107,7 @@ Full-quality video: [<name>.webm](<webm url>)
 <per-PR verify plan path or concrete proof; or what would suffice>
 ````
 
-If **E2E verification** has no concrete proof (no plan path, no run noted, no artifact), prepend:
-
-```markdown
-> **Warning**
-> E2E verification is missing. This PR has no bespoke proof that the new behavior works against a running system.
-```
+If **E2E verification** has no concrete proof (no plan path, no run noted, no artifact), put `E2E verification missing.` in that section.
 
 Preserve third-party blocks (Open in Devin, review badges, deploy previews) by appending after the canonical sections. Update via `gh pr edit $PR_NUM --body` using a HEREDOC.
 
