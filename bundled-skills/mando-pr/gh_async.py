@@ -7,13 +7,11 @@ and CI check run utilities.
 import asyncio
 import json
 import random
-import subprocess
 from datetime import datetime
 from typing import Any
 
 MAX_GH_RETRIES = 5
 BASE_BACKOFF_SECONDS = 2
-
 
 
 class GhError(RuntimeError):
@@ -93,99 +91,134 @@ async def run_gh(*args: str) -> str:
     raise RuntimeError("unreachable")
 
 
-def detect_repo() -> tuple[str, str]:
-    result = subprocess.run(
-        [
-            "gh",
+async def detect_repo() -> tuple[str, str]:
+    raw = (
+        await run_gh(
             "repo",
             "view",
             "--json",
             "owner,name",
             "-q",
             '.owner.login + "/" + .name',
-        ],
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
-        raise RuntimeError(
-            f"detect_repo: gh failed (exit {result.returncode}): {result.stderr.strip()}"
         )
-    raw = result.stdout.strip()
+    ).strip()
     if "/" in raw:
-        return tuple(raw.split("/", 1))  # type: ignore[return-value]
+        owner, name = raw.split("/", 1)
+        return owner, name
     raise RuntimeError("Could not detect repo from git remote")
 
 
-def parse_paginated(raw: str) -> list:
-    """Parse gh api --paginate output (concatenated JSON arrays)."""
-    if not raw:
-        return []
-    decoder = json.JSONDecoder()
-    result: list = []
-    pos = 0
-    while pos < len(raw):
-        stripped = raw[pos:].lstrip()
+async def _paginated_items(endpoint: str) -> list:
+    """Fetch a paginated REST endpoint as a flat list of items.
+
+    Uses `gh api --paginate --jq '.[]'` so each page's array is streamed as
+    newline-delimited JSON values, one item per line.
+    """
+    try:
+        raw = await run_gh("api", "--paginate", "--jq", ".[]", endpoint)
+    except GhError as exc:
+        if exc.is_not_found():
+            return []
+        raise
+    items: list = []
+    for line in raw.splitlines():
+        stripped = line.strip()
         if not stripped:
-            break
+            continue
+        items.append(json.loads(stripped))
+    return items
+
+
+_THREAD_QUERY = """
+query($owner: String!, $repo: String!, $pr: Int!, $cursor: String) {
+  repository(owner: $owner, name: $repo) {
+    pullRequest(number: $pr) {
+      reviewThreads(first: 100, after: $cursor) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          isResolved
+          isOutdated
+          comments(first: 1) { nodes { databaseId } }
+        }
+      }
+    }
+  }
+}
+"""
+
+
+async def fetch_review_threads_meta(
+    owner: str, repo: str, pr: int
+) -> dict[int, dict[str, bool]]:
+    """Per-thread `isResolved` / `isOutdated`, keyed by the root comment's databaseId.
+
+    Returns an empty map if the PR or repo cannot be reached; missing metadata
+    falls back to "needs reply" in the caller.
+    """
+    meta: dict[int, dict[str, bool]] = {}
+    cursor: str | None = None
+    while True:
+        args = [
+            "api",
+            "graphql",
+            "-f",
+            f"query={_THREAD_QUERY}",
+            "-f",
+            f"owner={owner}",
+            "-f",
+            f"repo={repo}",
+            "-F",
+            f"pr={pr}",
+        ]
+        if cursor:
+            args.extend(["-f", f"cursor={cursor}"])
         try:
-            page, end = decoder.raw_decode(stripped)
-        except json.JSONDecodeError as exc:
-            raise json.JSONDecodeError(
-                f"parse_paginated: malformed JSON at byte {pos} "
-                f"({len(result)} items parsed so far): {exc.msg}",
-                exc.doc,
-                exc.pos,
-            ) from exc
-        if isinstance(page, list):
-            result.extend(page)
-        else:
-            result.append(page)
-        pos = len(raw) - len(stripped) + end
-    return result
+            raw = await run_gh(*args)
+        except GhError as exc:
+            if exc.is_not_found():
+                return meta
+            raise
+        payload = json.loads(raw)
+        review_threads = (
+            payload.get("data", {})
+            .get("repository", {})
+            .get("pullRequest", {})
+            .get("reviewThreads", {})
+        ) or {}
+        for thread in review_threads.get("nodes") or []:
+            comments = (thread.get("comments") or {}).get("nodes") or []
+            if not comments:
+                continue
+            root_id = comments[0].get("databaseId")
+            if root_id is None:
+                continue
+            meta[int(root_id)] = {
+                "is_resolved": bool(thread.get("isResolved")),
+                "is_outdated": bool(thread.get("isOutdated")),
+            }
+        page = review_threads.get("pageInfo") or {}
+        if not page.get("hasNextPage"):
+            break
+        next_cursor = page.get("endCursor")
+        if not next_cursor or next_cursor == cursor:
+            break
+        cursor = next_cursor
+    return meta
 
 
 async def fetch_all(owner: str, repo: str, pr: int) -> dict[str, Any]:
-    """Fetch comments, reviews, review comments, reactions in parallel."""
-
-    async def paginated(endpoint: str) -> list:
-        try:
-            raw = await run_gh(
-                "api",
-                "--paginate",
-                f"repos/{owner}/{repo}/{endpoint}?per_page=100",
-            )
-        except GhError as exc:
-            if exc.is_not_found():
-                return []
-            raise
-        return parse_paginated(raw.strip())
-
-    async def single(endpoint: str) -> list:
-        try:
-            raw = await run_gh("api", f"repos/{owner}/{repo}/{endpoint}")
-        except GhError as exc:
-            if exc.is_not_found():
-                return []
-            raise
-        if not raw.strip():
-            return []
-        parsed = json.loads(raw)
-        if not isinstance(parsed, list):
-            return []
-        return parsed
-
-    comments, reviews, review_comments, reactions = await asyncio.gather(
-        paginated(f"issues/{pr}/comments"),
-        paginated(f"pulls/{pr}/reviews"),
-        paginated(f"pulls/{pr}/comments"),
-        single(f"issues/{pr}/reactions"),
+    """Fetch comments, reviews, review comments, and thread metadata in parallel."""
+    comments, reviews, review_comments, thread_meta = await asyncio.gather(
+        _paginated_items(f"repos/{owner}/{repo}/issues/{pr}/comments?per_page=100"),
+        _paginated_items(f"repos/{owner}/{repo}/pulls/{pr}/reviews?per_page=100"),
+        _paginated_items(f"repos/{owner}/{repo}/pulls/{pr}/comments?per_page=100"),
+        fetch_review_threads_meta(owner, repo, pr),
     )
     return {
         "comments": comments,
         "reviews": reviews,
         "review_comments": review_comments,
-        "reactions": reactions,
+        "thread_meta": thread_meta,
     }
 
 

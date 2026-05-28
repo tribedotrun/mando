@@ -63,12 +63,12 @@ export function useWorkbenchNav(workbenchId: string, search: { tab?: string; res
   );
 
   const handleResumeInTerminal = useCallback(
-    (sessionId: string, name?: string) => {
+    (sessionId: string, name?: string, provider?: TaskProvider) => {
       setTerminalVisited(true);
       void navigate({
         to: '/wb/$workbenchId',
         params: { workbenchId },
-        search: { tab: 'terminal', resume: sessionId, name },
+        search: { tab: 'terminal', resume: sessionId, name, provider },
         replace: true,
       });
     },

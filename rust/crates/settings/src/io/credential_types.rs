@@ -1,14 +1,13 @@
-//! Public types for the credentials table — `CredentialRow`, the public
-//! `CredentialInfo` payload, and the helpers that map between them.
+//! Public types for Claude credentials — `CredentialRow`, the public
+//! `CredentialInfo` payload, and helpers that map between them.
 //! Split out of `credentials.rs` to keep that file under the file-length
 //! budget for query code.
 
 /// A credential row from the database.
 ///
-/// New Codex-only columns (`provider`, `refresh_token`, `id_token`,
-/// `account_id`, `plan_type`, `credits_balance`, `credits_unlimited`) come
-/// from migration 036. Existing Claude rows have `provider='claude'` (DB
-/// default) and `NULL` Codex fields.
+/// Migration 036 added a `provider` column while Codex credentials existed.
+/// The column remains for already-migrated databases; runtime code filters
+/// to `provider = 'claude'` and never exposes it on the public payload.
 #[derive(Debug, Clone, sqlx::FromRow, serde::Serialize)]
 pub struct CredentialRow {
     pub id: i64,
@@ -28,12 +27,6 @@ pub struct CredentialRow {
     pub representative_claim: Option<String>,
     pub last_probed_at: Option<i64>,
     pub provider: String,
-    pub refresh_token: Option<String>,
-    pub id_token: Option<String>,
-    pub account_id: Option<String>,
-    pub plan_type: Option<String>,
-    pub credits_balance: Option<String>,
-    pub credits_unlimited: i64,
 }
 
 /// Per-window usage snapshot included in the public credential info payload.
@@ -48,16 +41,6 @@ pub struct CredentialWindowInfo {
     pub status: String,
 }
 
-/// Codex-only fields surfaced on `CredentialInfo` for `provider == "codex"` rows.
-#[derive(Debug, Clone, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CodexInfo {
-    pub account_id: String,
-    pub plan_type: Option<String>,
-    pub credits_balance: Option<String>,
-    pub credits_unlimited: bool,
-}
-
 /// Public credential info (no secrets).
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -65,9 +48,6 @@ pub struct CredentialInfo {
     pub id: i64,
     pub label: String,
     pub token_masked: String,
-    /// `"claude"` or `"codex"`. Mapped to the `CredentialProvider` enum at
-    /// the wire boundary.
-    pub provider: String,
     pub expires_at: Option<i64>,
     pub rate_limit_cooldown_until: Option<i64>,
     pub created_at: String,
@@ -88,30 +68,16 @@ pub struct CredentialInfo {
     /// Never a substitute for a real probe.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cost_since_probe_usd: Option<f64>,
-    /// Set only when `provider == "codex"`.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub codex: Option<CodexInfo>,
 }
 
 impl CredentialRow {
     pub fn to_info(&self) -> CredentialInfo {
         let now_ms = time::OffsetDateTime::now_utc().unix_timestamp() * 1000;
         let now_secs = now_ms / 1000;
-        let codex = if self.provider == "codex" {
-            self.account_id.clone().map(|account_id| CodexInfo {
-                account_id,
-                plan_type: self.plan_type.clone(),
-                credits_balance: self.credits_balance.clone(),
-                credits_unlimited: self.credits_unlimited != 0,
-            })
-        } else {
-            None
-        };
         CredentialInfo {
             id: self.id,
             label: self.label.clone(),
             token_masked: mask_token(&self.access_token),
-            provider: self.provider.clone(),
             expires_at: self.expires_at,
             rate_limit_cooldown_until: self.rate_limit_cooldown_until,
             created_at: self.created_at.clone(),
@@ -133,7 +99,6 @@ impl CredentialRow {
             representative_claim: self.representative_claim.clone(),
             last_probed_at: self.last_probed_at,
             cost_since_probe_usd: None,
-            codex,
         }
     }
 }

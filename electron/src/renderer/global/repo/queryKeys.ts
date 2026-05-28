@@ -94,7 +94,6 @@ export const queryKeys = {
   credentials: {
     all: ['credentials'] as const,
     list: () => ['credentials', 'list'] as const,
-    codexActive: () => ['credentials', 'codex-active'] as const,
   },
 
   // ── Highlighter ──

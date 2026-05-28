@@ -46,6 +46,7 @@ const workbenchRoute = createRoute({
     tab: z.string().optional().catch(undefined),
     resume: z.string().optional().catch(undefined),
     name: z.string().optional().catch(undefined),
+    provider: z.enum(['claude', 'codex']).optional().catch(undefined),
     project: z.string().optional().catch(undefined),
   }),
   beforeLoad: ({ params }) => {

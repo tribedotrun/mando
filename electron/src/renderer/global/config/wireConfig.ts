@@ -13,7 +13,7 @@ export const DEFAULT_DASHBOARD_PORT = 18791;
 export const DEFAULT_TICK_INTERVAL_S = 30;
 export const DEFAULT_TERMINAL_AGENT = 'claude';
 export const DEFAULT_CLAUDE_TERMINAL_ARGS = '--dangerously-skip-permissions';
-export const DEFAULT_CODEX_TERMINAL_ARGS = '--full-auto';
+export const DEFAULT_CODEX_TERMINAL_ARGS = '--sandbox danger-full-access --ask-for-approval never';
 
 export interface OnboardingConfigOpts {
   tgToken?: string;

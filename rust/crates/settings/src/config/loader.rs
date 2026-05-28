@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use serde_json::Value;
 
 use super::error::ConfigError;
-use super::settings::Config;
+use super::settings::{Config, DEFAULT_CODEX_TERMINAL_ARGS, LEGACY_CODEX_TERMINAL_ARGS};
 use global_infra::paths::expand_tilde;
 
 /// Return the config file path (`MANDO_CONFIG` env or `~/.mando/config.json`).
@@ -37,7 +37,8 @@ pub fn parse_config(content: &str, path: &std::path::Path) -> Result<Config, Con
         path: path.to_path_buf(),
         source: e,
     })?;
-    let merged = merge_into(defaults, user);
+    let mut merged = merge_into(defaults, user);
+    migrate_legacy_values(&mut merged);
     let mut config =
         serde_json::from_value::<Config>(merged).map_err(|e| ConfigError::JsonParse {
             path: path.to_path_buf(),
@@ -45,6 +46,18 @@ pub fn parse_config(content: &str, path: &std::path::Path) -> Result<Config, Con
         })?;
     config.populate_runtime_fields();
     Ok(config)
+}
+
+fn migrate_legacy_values(config: &mut Value) {
+    if config
+        .pointer("/captain/codexTerminalArgs")
+        .and_then(Value::as_str)
+        == Some(LEGACY_CODEX_TERMINAL_ARGS)
+    {
+        if let Some(slot) = config.pointer_mut("/captain/codexTerminalArgs") {
+            *slot = Value::String(DEFAULT_CODEX_TERMINAL_ARGS.to_string());
+        }
+    }
 }
 
 /// Serialize a `Config` struct to pretty-printed JSON.
@@ -88,6 +101,20 @@ mod tests {
         assert_eq!(
             merge_into(base, overlay),
             serde_json::json!({"a": 1, "b": 3})
+        );
+    }
+
+    #[test]
+    fn parse_config_migrates_legacy_codex_terminal_args() {
+        let parsed = parse_config(
+            r#"{"captain":{"codexTerminalArgs":"--full-auto"}}"#,
+            std::path::Path::new("config.json"),
+        )
+        .expect("config parses");
+
+        assert_eq!(
+            parsed.captain.codex_terminal_args,
+            DEFAULT_CODEX_TERMINAL_ARGS
         );
     }
 

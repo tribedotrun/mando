@@ -5,7 +5,7 @@ description: Create a Mando task directly from a Claude Code session. Takes a br
 
 The user provides a brief description as the skill argument. If no argument, ask what needs doing.
 
-1. **Research**: search the codebase (Grep/Glob) to find relevant files, patterns, and existing behavior related to the request.
+1. **Research**: search the codebase to find relevant files, patterns, and existing behavior related to the request.
 
 2. **Resolve project**: run `mando project list`, match against the current repo (`git remote get-url origin`).
 

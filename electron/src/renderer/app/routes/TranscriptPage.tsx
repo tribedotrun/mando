@@ -42,14 +42,14 @@ export function TranscriptPage(): React.ReactElement {
   const { data: workbenches = [] } = useWorkbenchList();
   const workbench = transcriptCwd ? workbenches.find((w) => w.worktree === transcriptCwd) : null;
 
-  const canResumeInTerminal = provider === 'claude' && workbench !== null;
+  const canResumeInTerminal = (provider === 'claude' || provider === 'codex') && workbench !== null;
 
   const handleResumeInTerminal = () => {
     if (workbench) {
       void router.navigate({
         to: '/wb/$workbenchId',
         params: { workbenchId: String(workbench.id) },
-        search: { tab: 'terminal', resume: sessionId },
+        search: { tab: 'terminal', resume: sessionId, provider },
       });
     }
   };
@@ -83,8 +83,8 @@ export function TranscriptPage(): React.ReactElement {
               isSessionContextLoading
                 ? 'Loading session metadata'
                 : resumeCmd
-                  ? 'Copy Claude Code resume command'
-                  : 'Codex sessions resume through Mando task actions'
+                  ? `Copy ${provider === 'codex' ? 'Codex' : 'Claude Code'} resume command`
+                  : 'Session metadata is unavailable'
             }
             className="gap-1.5"
           >

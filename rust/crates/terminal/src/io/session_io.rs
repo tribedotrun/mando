@@ -48,6 +48,10 @@ pub(crate) fn build_command(
             for arg in extra_args {
                 builder.arg(arg);
             }
+            if let Some(session_id) = resume_session_id.filter(|s| !s.is_empty()) {
+                builder.arg("resume");
+                builder.arg(session_id);
+            }
             builder
         }
     };
@@ -230,7 +234,54 @@ mod tests {
 
     use crate::types::{Agent, CreateRequest, TerminalSize};
 
-    use super::terminal_env;
+    use super::{build_command, terminal_env};
+
+    fn command_argv(
+        agent: Agent,
+        resume_session_id: Option<&str>,
+        extra_args: &[&str],
+    ) -> Vec<String> {
+        let cwd = PathBuf::from("/tmp/mando");
+        let cmd = build_command(
+            &agent,
+            &cwd,
+            resume_session_id,
+            &extra_args
+                .iter()
+                .map(|arg| (*arg).to_string())
+                .collect::<Vec<_>>(),
+        );
+        cmd.get_argv()
+            .iter()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect()
+    }
+
+    #[test]
+    fn codex_resume_uses_resume_subcommand_after_global_args() {
+        assert_eq!(
+            command_argv(
+                Agent::Codex,
+                Some("codex-thread-123"),
+                &["--sandbox", "danger-full-access"],
+            ),
+            vec![
+                "codex",
+                "--sandbox",
+                "danger-full-access",
+                "resume",
+                "codex-thread-123",
+            ],
+        );
+    }
+
+    #[test]
+    fn codex_fresh_terminal_omits_resume_subcommand() {
+        assert_eq!(
+            command_argv(Agent::Codex, None, &["--sandbox", "danger-full-access"]),
+            vec!["codex", "--sandbox", "danger-full-access"],
+        );
+    }
 
     #[test]
     fn terminal_env_keeps_explicit_values() {

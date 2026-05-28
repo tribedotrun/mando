@@ -237,7 +237,7 @@ prompts:
     {% if no_pr %}
     - This is a **research/audit task**. Do NOT create a PR. When your analysis is complete, write findings to your workpad at `{{ workpad_path }}` and stop.
     {% else %}
-    - When done, use `/mando-pr --fast` to create or update the PR. Captain will monitor follow-up review/CI state after the handoff. Then update your workpad with the PR link.
+    - When done, use `/mando-pr` to create or update the PR. Captain will monitor follow-up review/CI state after the handoff. Then update your workpad with the PR link.
     - **CI** — after creating a PR, ensure CI passes. Fix all CI failures even if the check is informational (not blocking merge). A clean CI is a quality gate, not optional.
     - Ensure your branch is ahead of origin/main.
     {% endif %}
@@ -284,7 +284,7 @@ prompts:
     {% if no_pr %}
     - [ ] **Findings** — write results to workpad at `{{ workpad_path }}` and stop. No PR needed.
     {% else %}
-    - [ ] **PR** — use `/mando-pr --fast` to create or update the PR. Captain will monitor follow-up review/CI state after the handoff. Update workpad with PR link.
+    - [ ] **PR** — use `/mando-pr` to create or update the PR. Captain will monitor follow-up review/CI state after the handoff. Update workpad with PR link.
     - [ ] **Evidence** — capture runtime proof, then save in ONE final call. UI changes require THREE typed artifacts: a before screenshot (`--kind before`), an after screenshot (`--kind after`), and an after recording (`--kind after`). Net-new UI is NOT exempt — capture the prior state where the feature now lives. Canonical UI call: `mando todo evidence before.png after.png demo.webm --caption "before: ..." --caption "after: ..." --caption "after: ..." --kind before --kind after --kind after` (always use isolated/sandbox env, never `--visible`). Non-UI: terminal output saved to file. NOT diagrams or test-only results. Self-verify screenshots/frames. Recapture all artifacts if code changes after evidence.
     - [ ] **Cleanup** — stop ALL processes you started (dev servers, watchers, streaming commands like `tail -f` or `obs tail`). Run `ps --ppid $$ -o pid,command 2>/dev/null || true` and kill any orphans. Lingering subprocesses block session exit.
     - [ ] **CI** — fix all CI failures, even informational ones. A clean CI is a quality gate, not optional.
@@ -684,7 +684,7 @@ prompts:
        - **Self-verify**: read each screenshot or extract recording frames with ffmpeg. Fix → recapture if evidence doesn't show the change.
        - **Keep current**: recapture all three artifacts and update PR if code changes after evidence.
        - **Cleanup is required**: stop ALL processes you started (dev servers, watchers, streaming commands like `tail -f` or `obs tail`). Before finishing, run `ps --ppid $$ -o pid,command 2>/dev/null || true` and kill any orphans. Lingering subprocesses block session exit.
-    6. Create or update the PR using `/mando-pr --fast`. Captain will monitor follow-up review/CI state after the handoff. Update workpad with PR link.
+    6. Create or update the PR using `/mando-pr`. Captain will monitor follow-up review/CI state after the handoff. Update workpad with PR link.
     7. **CI** — fix all CI failures, even informational ones. A clean CI is a quality gate, not optional.
     8. Ensure your branch is ahead of origin/main
     {% endif %}
@@ -1009,7 +1009,7 @@ initial_prompts:
     Before updating the workpad, read {{ workpad_path }} first. Then maintain that workpad with your implementation plan. Update it after each milestone and when done.
     {% if not no_pr %}
 
-    Use /mando-pr --fast to create or update the PR when done (not raw gh commands). Captain will monitor follow-up review/CI state after the handoff.
+    Use /mando-pr to create or update the PR when done (not raw gh commands). Captain will monitor follow-up review/CI state after the handoff.
     {% endif %}
 
   adopted: |

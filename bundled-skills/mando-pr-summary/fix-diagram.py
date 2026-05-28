@@ -4,19 +4,23 @@ Fix right-border alignment in ASCII box diagrams.
 Ensures every │ line within a ┌─┐ container aligns with the ┐ column.
 
 Approach:
-1. Find all boxes (┌─┐ ... └─┘ pairs) and their column boundaries
-2. Process innermost boxes first (so inner borders are fixed before outer)
-3. For each content line, find the misplaced │ border and relocate it
-4. Exclude only PARENT and NESTED box borders during search — not siblings
-   (sibling borders may be at wrong positions due to cascading shifts)
+1. Find all boxes (┌─┐ ... └─┘ pairs) and their column boundaries.
+2. Process innermost boxes first (so inner borders are fixed before outer).
+3. For each content line, find the misplaced │ border and relocate it.
+4. After every single-box fix, re-scan box coordinates from the current
+   line buffer. Fixing one sibling can shift the cached coordinates of
+   another; re-scanning each pass means we always work from fresh
+   positions instead of stale ones.
 
 Shift handling:
 - Border too far RIGHT (content too wide): don't compensate — trimming content
-  naturally left-shifts all subsequent characters, fixing cascaded misalignment
+  naturally left-shifts all subsequent characters, fixing cascaded misalignment.
 - Border too far LEFT (content too narrow): absorb leading spaces from "after"
-  to prevent line growth that would push subsequent borders right
+  to prevent line growth that would push subsequent borders right.
 
-Usage: echo '<diagram>' | python3 fix-diagram.py
+Usage: python3 fix-diagram.py <<'EOF'
+       <diagram>
+       EOF
    or: python3 fix-diagram.py < diagram.txt
 """
 
@@ -45,9 +49,6 @@ def build_exclude_cols(box_idx, top, bot, left_col, right_col, boxes):
     Excludes borders of:
     - PARENT boxes (contain this box) — prevents grabbing outer │ for inner box
     - NESTED boxes (inside this box) — already fixed, their borders are correct
-
-    Does NOT exclude SIBLING boxes — their borders may be at cascaded positions
-    that overlap with our misplaced border's actual location.
     """
     exclude = set()
     for bidx2, (t2, b2, l2, r2) in enumerate(boxes):
@@ -192,10 +193,30 @@ def fix_close_line(lines, bot, left_col, right_col):
     lines[bot] = before + "└" + inner + "┘" + after
 
 
-def fix_diagram(text):
-    lines = text.split("\n")
+def is_structurally_correct(box, lines):
+    """A box is correct when every │/└ on its left_col line up with │/┘ on right_col."""
+    top, bot, left_col, right_col = box
+    for k in range(top + 1, bot):
+        line = lines[k]
+        # Skip rows where the box's left border isn't present (arrows, gaps, etc.)
+        if left_col >= len(line) or line[left_col] != "│":
+            continue
+        if len(line) <= right_col or line[right_col] != "│":
+            return False
+    bot_line = lines[bot]
+    if left_col >= len(bot_line) or bot_line[left_col] != "└":
+        return False
+    if len(bot_line) <= right_col or bot_line[right_col] != "┘":
+        return False
+    return True
 
-    # Find all box openings: ┌─+┐
+
+def _scan_boxes(lines, warn_unmatched=False):
+    """Return the list of (top, bot, left_col, right_col) boxes in the current buffer.
+
+    Emits a stderr warning for every ┌─+┐ that has no matching └ at the same column
+    when `warn_unmatched` is True.
+    """
     boxes = []
     for i, line in enumerate(lines):
         for m in re.finditer(r"┌─+┐", line):
@@ -204,14 +225,38 @@ def fix_diagram(text):
             bot = find_matching_close(lines, i, left_col)
             if bot is not None:
                 boxes.append((i, bot, left_col, right_col))
+            elif warn_unmatched:
+                print(
+                    f"fix-diagram: warning: unmatched ┌ at line {i + 1}, col {left_col + 1} "
+                    "(no matching └ found at the same column)",
+                    file=sys.stderr,
+                )
+    return boxes
 
-    # Process innermost boxes first (smallest vertical span)
-    boxes.sort(key=lambda b: b[1] - b[0])
 
-    for box_idx, (top, bot, left_col, right_col) in enumerate(boxes):
-        exclude_cols = build_exclude_cols(box_idx, top, bot, left_col, right_col, boxes)
-        fix_box_content(lines, top, bot, left_col, right_col, exclude_cols)
-        fix_close_line(lines, bot, left_col, right_col)
+def fix_diagram(text):
+    lines = text.split("\n")
+
+    # One-shot warning pass for unmatched ┌. Fixes never relocate ┌/└ characters,
+    # so an unmatched opener in the original input stays unmatched.
+    _scan_boxes(lines, warn_unmatched=True)
+
+    # Each iteration fixes one innermost still-broken box, then re-scans so the
+    # next iteration sees any column shifts caused by the prior fix.
+    max_iterations = len(lines) * 4 + 16
+    for _ in range(max_iterations):
+        boxes = _scan_boxes(lines)
+        unfixed = [b for b in boxes if not is_structurally_correct(b, lines)]
+        if not unfixed:
+            break
+        unfixed.sort(key=lambda b: b[1] - b[0])
+        target = unfixed[0]
+        target_idx = boxes.index(target)
+        exclude_cols = build_exclude_cols(
+            target_idx, target[0], target[1], target[2], target[3], boxes
+        )
+        fix_box_content(lines, target[0], target[1], target[2], target[3], exclude_cols)
+        fix_close_line(lines, target[1], target[2], target[3])
 
     return "\n".join(line.rstrip() for line in lines)
 

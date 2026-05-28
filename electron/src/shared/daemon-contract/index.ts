@@ -8,20 +8,6 @@ export type ActResponse = {
 };
 export type ActionKind = 'skip' | 'nudge' | 'captain-review';
 export type ActivityStatsResponse = { merged_7d: number; daily_merges: Array<DailyMerge> };
-export type AddCodexCredentialRequest = {
-  label: string;
-  /**
-   * Raw contents of an OpenAI Codex `auth.json` file. Validated server-side.
-   */
-  authJson: string;
-};
-export type AddCodexCredentialResponse = {
-  ok: boolean;
-  id: number;
-  label: string;
-  accountId: string;
-  planType: string | null;
-};
 export type AddProjectRequest = { name?: string; path: string; aliases: Array<string> };
 export type AdoptRequest = {
   title: string;
@@ -179,17 +165,6 @@ export type ClientLogEntry = {
   context: ClientLogContext | null;
   timestamp: string | null;
 };
-export type CodexActivateResponse = { ok: boolean; accountId: string };
-export type CodexActiveResponse = {
-  activeAccountId: string | null;
-  matchedCredentialId: number | null;
-};
-export type CodexCredentialDetails = {
-  accountId: string;
-  planType: string | null;
-  creditsBalance: string | null;
-  creditsUnlimited: boolean;
-};
 export type ConfigPathsResponse = {
   dataDir: string;
   configPath: string;
@@ -243,7 +218,6 @@ export type CredentialInfo = {
   id: number;
   label: string;
   tokenMasked: string;
-  provider: CredentialProvider;
   expiresAt: number | null;
   rateLimitCooldownUntil: number | null;
   createdAt: string;
@@ -255,17 +229,12 @@ export type CredentialInfo = {
   representativeClaim?: string | null;
   lastProbedAt?: number | null;
   costSinceProbeUsd?: number | null;
-  /**
-   * Set only when `provider == Codex`.
-   */
-  codex?: CodexCredentialDetails | null;
 };
 export type CredentialListResponse = { credentials: Array<CredentialInfo> };
 export type CredentialMutationResponse = { ok: boolean; error: string | null };
 export type CredentialPick = { id: number; label: string; token: string };
 export type CredentialPickResponse = { pick: CredentialPick | null };
 export type CredentialProbeResponse = { ok: boolean; snapshot: CredentialUsageSnapshot };
-export type CredentialProvider = 'claude' | 'codex';
 export type CredentialRateLimitStatus = 'allowed' | 'allowed_warning' | 'rejected';
 export type CredentialTokenResponse = { token: string };
 export type CredentialUsageSnapshot = {

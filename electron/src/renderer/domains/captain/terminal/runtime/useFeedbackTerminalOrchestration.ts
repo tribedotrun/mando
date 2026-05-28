@@ -9,9 +9,12 @@ import {
   useTerminalCreate,
   useTerminalDelete,
 } from '#renderer/domains/captain/runtime/hooks';
+import { buildResumeTerminalCreateParams } from '#renderer/domains/captain/terminal/service/resumeTerminalCreate';
 import { useConfig } from '#renderer/global/repo/queries';
 import { toast } from '#renderer/global/runtime/useFeedback';
 import log from '#renderer/global/service/logger';
+
+type TerminalAgent = 'claude' | 'codex';
 
 interface OrchestrationInput {
   workbenchId: number;
@@ -19,6 +22,7 @@ interface OrchestrationInput {
   cwd: string;
   resumeSessionId?: string | null;
   resumeName?: string | null;
+  resumeAgent?: TerminalAgent | null;
   onResumeConsumed?: () => void;
 }
 
@@ -28,6 +32,7 @@ export function useTerminalOrchestration({
   cwd,
   resumeSessionId,
   resumeName,
+  resumeAgent,
   onResumeConsumed,
 }: OrchestrationInput) {
   const { data: sessions = [], isSuccess: sessionsLoaded } = useTerminalList();
@@ -82,7 +87,7 @@ export function useTerminalOrchestration({
   // -- Handlers ---------------------------------------------------------------
 
   const handleNewTerminal = useCallback(
-    async (agent: 'claude' | 'codex') => {
+    async (agent: TerminalAgent) => {
       setResumeFailed(false);
       autoSelectedRef.current = true;
       try {
@@ -108,7 +113,7 @@ export function useTerminalOrchestration({
   // the user explicitly opens via `+ Claude`/`+ Codex` go through
   // `handleNewTerminal` and stay out of `blankIdsRef`.
   const autoCreateBlank = useCallback(
-    async (agent: 'claude' | 'codex') => {
+    async (agent: TerminalAgent) => {
       setResumeFailed(false);
       autoSelectedRef.current = true;
       try {
@@ -159,7 +164,7 @@ export function useTerminalOrchestration({
           project: session.project,
           cwd: session.cwd,
           agent: session.agent,
-          ...(session.agent === 'claude' ? { resume_session_id: session.ccSessionId ?? '' } : {}),
+          resume_session_id: session.ccSessionId ?? '',
         });
         setActiveTab(next.id);
         await deleteMutation.mutateAsync({ id: sessionId });
@@ -188,22 +193,29 @@ export function useTerminalOrchestration({
   // -- Resume flow ------------------------------------------------------------
 
   const startResume = useCallback(
-    (sessionId: string, displayName: string | null | undefined) => {
+    (
+      sessionId: string,
+      displayName: string | null | undefined,
+      agent: TerminalAgent | null | undefined,
+    ) => {
       const myGen = ++resumeGenRef.current;
+      const resumeAgent = agent ?? 'claude';
       setResumePending(true);
       setResumeFailed(false);
       autoSelectedRef.current = true;
 
       void (async () => {
         try {
-          const session = await createMutation.mutateAsync({
-            workbenchId,
-            project,
-            cwd,
-            agent: 'claude',
-            resume_session_id: sessionId,
-            name: displayName ?? undefined,
-          });
+          const session = await createMutation.mutateAsync(
+            buildResumeTerminalCreateParams({
+              workbenchId,
+              project,
+              cwd,
+              sessionId,
+              displayName,
+              agent: resumeAgent,
+            }),
+          );
           if (resumeGenRef.current !== myGen) return;
           setResumePending(false);
           setActiveTab(session.id);
@@ -262,10 +274,11 @@ export function useTerminalOrchestration({
       lastResumeRef.current = null;
       return;
     }
-    if (lastResumeRef.current === resumeSessionId) return;
-    lastResumeRef.current = resumeSessionId;
-    startResumeRef.current(resumeSessionId, resumeName ?? null);
-  }, [resumeSessionId, resumeName]);
+    const resumeKey = `${resumeAgent ?? 'claude'}:${resumeSessionId}`;
+    if (lastResumeRef.current === resumeKey) return;
+    lastResumeRef.current = resumeKey;
+    startResumeRef.current(resumeSessionId, resumeName ?? null, resumeAgent);
+  }, [resumeSessionId, resumeName, resumeAgent]);
 
   // -- Auto-select / auto-create ----------------------------------------------
 

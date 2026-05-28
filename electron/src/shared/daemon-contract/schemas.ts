@@ -15,18 +15,6 @@ export const actionKindSchema = z.enum(['skip', 'nudge', 'captain-review']);
 export const activityStatsResponseSchema = z
   .object({ merged_7d: z.number(), daily_merges: z.array(z.lazy(() => dailyMergeSchema)) })
   .strict();
-export const addCodexCredentialRequestSchema = z
-  .object({ label: z.string(), authJson: z.string() })
-  .strict();
-export const addCodexCredentialResponseSchema = z
-  .object({
-    ok: z.boolean(),
-    id: z.number(),
-    label: z.string(),
-    accountId: z.string(),
-    planType: z.string().nullable(),
-  })
-  .strict();
 export const addProjectRequestSchema = z
   .object({ name: z.string().optional(), path: z.string(), aliases: z.array(z.string()) })
   .strict();
@@ -280,20 +268,6 @@ export const clientLogEntrySchema = z
     timestamp: z.string().nullable(),
   })
   .strict();
-export const codexActivateResponseSchema = z
-  .object({ ok: z.boolean(), accountId: z.string() })
-  .strict();
-export const codexActiveResponseSchema = z
-  .object({ activeAccountId: z.string().nullable(), matchedCredentialId: z.number().nullable() })
-  .strict();
-export const codexCredentialDetailsSchema = z
-  .object({
-    accountId: z.string(),
-    planType: z.string().nullable(),
-    creditsBalance: z.string().nullable(),
-    creditsUnlimited: z.boolean(),
-  })
-  .strict();
 export const configPathsResponseSchema = z
   .object({
     dataDir: z.string(),
@@ -364,7 +338,6 @@ export const credentialInfoSchema = z
     id: z.number(),
     label: z.string(),
     tokenMasked: z.string(),
-    provider: z.lazy(() => credentialProviderSchema),
     expiresAt: z.number().nullable(),
     rateLimitCooldownUntil: z.number().nullable(),
     createdAt: z.string(),
@@ -385,10 +358,6 @@ export const credentialInfoSchema = z
     representativeClaim: z.string().nullable().optional(),
     lastProbedAt: z.number().nullable().optional(),
     costSinceProbeUsd: z.number().nullable().optional(),
-    codex: z
-      .lazy(() => codexCredentialDetailsSchema)
-      .nullable()
-      .optional(),
   })
   .strict();
 export const credentialListResponseSchema = z
@@ -406,7 +375,6 @@ export const credentialPickResponseSchema = z
 export const credentialProbeResponseSchema = z
   .object({ ok: z.boolean(), snapshot: z.lazy(() => credentialUsageSnapshotSchema) })
   .strict();
-export const credentialProviderSchema = z.enum(['claude', 'codex']);
 export const credentialRateLimitStatusSchema = z.enum(['allowed', 'allowed_warning', 'rejected']);
 export const credentialTokenResponseSchema = z.object({ token: z.string() }).strict();
 export const credentialUsageSnapshotSchema = z
@@ -2214,7 +2182,6 @@ export const resSchemas = {
   getConfigStatus: configStatusResponseSchema,
   getCredentials: credentialsListResponseSchema,
   getCredentialsByIdToken: credentialTokenResponseSchema,
-  getCredentialsCodexActive: codexActiveResponseSchema,
   getHealth: healthResponseSchema,
   getHealthSystem: systemHealthResponseSchema,
   getHealthTelegram: telegramHealthSchema,
@@ -2259,9 +2226,7 @@ export const resSchemas = {
   postChannelsTelegramOwner: boolOkResponseSchema,
   postClientlogs: clientLogBatchResponseSchema,
   postConfigSetup: configSetupResponseSchema,
-  postCredentialsByIdCodexactivate: codexActivateResponseSchema,
   postCredentialsByIdProbe: probeCredentialResponseSchema,
-  postCredentialsCodex: addCodexCredentialResponseSchema,
   postCredentialsPick: credentialPickResponseSchema,
   postCredentialsSetuptoken: setupTokenResponseSchema,
   postFirecrawlScrape: firecrawlScrapeResponseSchema,
@@ -2332,9 +2297,7 @@ export const bodySchemas = {
   postChannelsTelegramOwner: telegramOwnerRequestSchema,
   postClientlogs: clientLogBatchRequestSchema,
   postConfigSetup: configSetupRequestSchema,
-  postCredentialsByIdCodexactivate: emptyRequestSchema,
   postCredentialsByIdProbe: emptyRequestSchema,
-  postCredentialsCodex: addCodexCredentialRequestSchema,
   postCredentialsPick: emptyRequestSchema,
   postCredentialsSetuptoken: setupTokenRequestSchema,
   postFirecrawlScrape: firecrawlScrapeRequestSchema,
@@ -2429,7 +2392,6 @@ export const paramsSchemas = {
   patchScoutItemsById: scoutItemIdParamsSchema,
   patchTasksById: taskIdParamsSchema,
   patchWorkbenchesById: workbenchIdParamsSchema,
-  postCredentialsByIdCodexactivate: credentialIdParamsSchema,
   postCredentialsByIdProbe: credentialIdParamsSchema,
   postScoutItemsByIdAct: scoutItemIdParamsSchema,
   postScoutItemsByIdTelegraph: scoutItemIdParamsSchema,

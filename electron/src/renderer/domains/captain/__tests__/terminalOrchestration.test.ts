@@ -15,6 +15,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { selectWorkbenchTerminalSessions } from '../terminal/runtime/terminalSession.ts';
+import { buildResumeTerminalCreateParams } from '../terminal/service/resumeTerminalCreate.ts';
 
 interface FakeTerminalRow {
   id: string;
@@ -64,6 +65,41 @@ describe('selectWorkbenchTerminalSessions', () => {
     ];
     const out = selectWorkbenchTerminalSessions(sessions, WORKBENCH_A);
     assert.deepEqual(out.map((s) => s.id).sort(), ['clarifier-resume', 'worker']);
+  });
+});
+
+describe('buildResumeTerminalCreateParams', () => {
+  it('preserves Codex as the provider-native resume agent', () => {
+    assert.deepEqual(
+      buildResumeTerminalCreateParams({
+        workbenchId: WORKBENCH_A,
+        project: 'mando',
+        cwd: '/tmp/mando',
+        sessionId: 'codex-thread-123',
+        displayName: 'Worker #1',
+        agent: 'codex',
+      }),
+      {
+        workbenchId: WORKBENCH_A,
+        project: 'mando',
+        cwd: '/tmp/mando',
+        agent: 'codex',
+        resume_session_id: 'codex-thread-123',
+        name: 'Worker #1',
+      },
+    );
+  });
+
+  it('defaults old resume URLs to Claude', () => {
+    assert.equal(
+      buildResumeTerminalCreateParams({
+        workbenchId: WORKBENCH_A,
+        project: 'mando',
+        cwd: '/tmp/mando',
+        sessionId: 'claude-session-123',
+      }).agent,
+      'claude',
+    );
   });
 });
 

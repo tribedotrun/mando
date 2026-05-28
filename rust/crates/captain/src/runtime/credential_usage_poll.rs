@@ -3,7 +3,7 @@
 //! Runs as an independent tokio task alongside the captain tick loop. Every
 //! tick it:
 //!
-//! 1. Lists every stored credential.
+//! 1. Lists every stored Claude credential.
 //! 2. For each credential that is not expired and not within the throttle
 //!    window, pings `/v1/messages` and reads the
 //!    `anthropic-ratelimit-unified-*` headers to capture live utilization.
@@ -15,10 +15,9 @@
 //!    keeps one source of truth.
 //! 5. Emits `BusEvent::Credentials` so the Electron UI refetches live.
 //!
-//! Cadence is a flat 10 minutes for all credentials regardless of
-//! provider or utilization (PR #1006 simplification). A per-credential
-//! throttle prevents redundant back-to-back probes when the manual
-//! refresh endpoint fires at the same time as the scheduled tick.
+//! Cadence is a flat 10 minutes regardless of utilization. A per-credential
+//! throttle prevents redundant back-to-back probes when the manual refresh
+//! endpoint fires at the same time as the scheduled tick.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -203,10 +202,7 @@ pub async fn probe_and_persist(
     pool: &SqlitePool,
     row: &CredentialRow,
 ) -> Result<UsageSnapshot, ProbeError> {
-    // Boxed to keep the outer future shape simple; provider_probe holds
-    // h2/hyper internals whose Send-bound trait recursion blows the
-    // default limit when inlined into the tracing::instrument span.
-    let snapshot = Box::pin(settings::provider_probe::probe(pool, row)).await?;
+    let snapshot = settings::usage_probe::probe(&row.access_token).await?;
     credentials::set_usage_snapshot(pool, row.id, &snapshot)
         .await
         .map_err(|e| {
@@ -286,12 +282,6 @@ mod tests {
             representative_claim: None,
             last_probed_at: last_probed,
             provider: "claude".into(),
-            refresh_token: None,
-            id_token: None,
-            account_id: None,
-            plan_type: None,
-            credits_balance: None,
-            credits_unlimited: 0,
         }
     }
 

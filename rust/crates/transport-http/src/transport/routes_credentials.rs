@@ -67,13 +67,6 @@ pub(crate) fn credential_routes() -> ApiRouter<AppState> {
     )
 }
 
-fn provider_to_api(provider: &str) -> api_types::CredentialProvider {
-    match provider {
-        "codex" => api_types::CredentialProvider::Codex,
-        _ => api_types::CredentialProvider::Claude,
-    }
-}
-
 fn api_rate_limit_status(status: &str) -> api_types::CredentialRateLimitStatus {
     match status {
         "allowed_warning" => api_types::CredentialRateLimitStatus::AllowedWarning,
@@ -112,13 +105,6 @@ async fn list_credentials(
             id: cred.id,
             label: cred.label,
             token_masked: cred.token_masked,
-            provider: provider_to_api(&cred.provider),
-            codex: cred.codex.map(|c| api_types::CodexCredentialDetails {
-                account_id: c.account_id,
-                plan_type: c.plan_type,
-                credits_balance: c.credits_balance,
-                credits_unlimited: c.credits_unlimited,
-            }),
             expires_at: cred.expires_at,
             rate_limit_cooldown_until: cred.rate_limit_cooldown_until,
             created_at: cred.created_at,
@@ -316,11 +302,11 @@ async fn add_setup_token(
     let expires_at = decode_jwt_expiry(&token);
 
     match state.settings.find_credential_by_label(&label).await {
-        Ok(Some((existing_id, existing_provider))) => {
+        Ok(Some(existing_id)) => {
             return Err(error_response(
                 StatusCode::CONFLICT,
                 &format!(
-                    "label {label:?} is already in use by an existing {existing_provider} credential (id={existing_id})"
+                    "label {label:?} is already in use by an existing credential (id={existing_id})"
                 ),
             ));
         }
@@ -346,13 +332,11 @@ async fn add_setup_token(
             // past the pre-check above and lose to the table-wide UNIQUE
             // constraint here. Re-query so the racing caller still sees 409
             // instead of a generic 500.
-            if let Ok(Some((existing_id, existing_provider))) =
-                state.settings.find_credential_by_label(&label).await
-            {
+            if let Ok(Some(existing_id)) = state.settings.find_credential_by_label(&label).await {
                 return Err(error_response(
                     StatusCode::CONFLICT,
                     &format!(
-                        "label {label:?} is already in use by an existing {existing_provider} credential (id={existing_id})"
+                        "label {label:?} is already in use by an existing credential (id={existing_id})"
                     ),
                 ));
             }

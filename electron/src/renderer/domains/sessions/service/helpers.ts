@@ -177,7 +177,10 @@ export function buildResumeCmd(
   provider: TaskProvider | undefined,
   cwd?: string | null,
 ): string | null {
-  if (!provider || provider === 'codex') return null;
+  if (!provider) return null;
+  if (provider === 'codex') {
+    return cwd ? `cd "${cwd}" && codex resume ${sessionId}` : `codex resume ${sessionId}`;
+  }
   return cwd ? `cd "${cwd}" && claude -r ${sessionId}` : `claude -r ${sessionId}`;
 }
 

@@ -4,6 +4,10 @@ use api_types::TerminalAgent;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+pub const LEGACY_CODEX_TERMINAL_ARGS: &str = "--full-auto";
+pub const DEFAULT_CODEX_TERMINAL_ARGS: &str =
+    "--sandbox danger-full-access --ask-for-approval never";
+
 // ---------------------------------------------------------------------------
 // Root
 // ---------------------------------------------------------------------------
@@ -185,7 +189,7 @@ impl Default for CaptainConfig {
             tz: iana_time_zone::get_timezone().unwrap_or_else(|_| "UTC".into()),
             default_terminal_agent: TerminalAgent::Claude,
             claude_terminal_args: "--dangerously-skip-permissions".into(),
-            codex_terminal_args: "--full-auto".into(),
+            codex_terminal_args: DEFAULT_CODEX_TERMINAL_ARGS.into(),
             projects: HashMap::new(),
             task_db_path: default_task_db_path(),
             lockfile_path: default_lockfile_path(),
