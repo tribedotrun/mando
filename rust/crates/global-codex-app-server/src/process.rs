@@ -36,7 +36,8 @@ pub(crate) fn stderr_tail_text(tail: &StderrTail) -> String {
 
 #[tracing::instrument]
 pub(crate) fn spawn_app_server() -> Result<SpawnedAppServer> {
-    let mut command = tokio::process::Command::new("codex");
+    let codex = global_claude::resolve_codex_binary();
+    let mut command = tokio::process::Command::new(codex.path());
     command
         .arg("app-server")
         .arg("--listen")
@@ -48,6 +49,7 @@ pub(crate) fn spawn_app_server() -> Result<SpawnedAppServer> {
     for key in global_claude::DAEMON_ENV_STRIP {
         command.env_remove(key);
     }
+    global_claude::apply_codex_binary_env(&mut command, &codex);
     #[cfg(unix)]
     unsafe {
         command.pre_exec(|| {
@@ -57,7 +59,9 @@ pub(crate) fn spawn_app_server() -> Result<SpawnedAppServer> {
             Ok(())
         });
     }
-    let mut child = command.spawn().context("spawn codex app-server")?;
+    let mut child = command
+        .spawn()
+        .with_context(|| format!("spawn codex app-server at {}", codex.path().display()))?;
     let pid = global_types::Pid::new(child.id().context("codex app-server child had no pid")?);
     let stdin = child
         .stdin

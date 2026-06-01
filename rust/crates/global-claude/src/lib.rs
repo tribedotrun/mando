@@ -16,7 +16,9 @@ mod stream_symptoms;
 mod transcript;
 mod transcript_events;
 
-pub use binary::resolve_claude_binary;
+pub use binary::{
+    apply_codex_binary_env, resolve_claude_binary, resolve_codex_binary, ResolvedCodexBinary,
+};
 pub use broken_session::{
     detect_image_dimension_blocked, stream_broken_session_symptom, BrokenSessionMatch,
     BrokenSessionOrigin,
