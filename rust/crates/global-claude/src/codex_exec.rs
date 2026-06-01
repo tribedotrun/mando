@@ -46,7 +46,8 @@ pub async fn codex_exec_with_config(
 
     let start = Instant::now();
 
-    let mut command = Command::new("codex");
+    let codex = crate::resolve_codex_binary();
+    let mut command = Command::new(codex.path());
     command
         .arg("exec")
         .arg("--full-auto")
@@ -62,7 +63,10 @@ pub async fn codex_exec_with_config(
     for key in crate::process::DAEMON_ENV_STRIP {
         command.env_remove(key);
     }
-    let child = command.spawn().context("failed to spawn codex exec")?;
+    crate::apply_codex_binary_env(&mut command, &codex);
+    let child = command
+        .spawn()
+        .with_context(|| format!("failed to spawn codex exec at {}", codex.path().display()))?;
 
     let result = tokio::time::timeout(timeout, child.wait_with_output()).await;
     let duration_ms = start.elapsed().as_millis() as u64;

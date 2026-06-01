@@ -28,6 +28,7 @@ const appName = APP_NAMES[appMode] || 'Mando';
 const bundleId = BUNDLE_IDS[appMode] || 'run.tribe.mando';
 
 const rustTargetDir = process.env.MANDO_RUST_TARGET_DIR || '../rust/target/release';
+const skipPackagerSign = process.env.MANDO_SKIP_PACKAGER_SIGN === '1';
 
 const config: ForgeConfig = {
   packagerConfig: {
@@ -39,12 +40,14 @@ const config: ForgeConfig = {
     darwinDarkModeSupport: true,
     extendInfo: {},
     extraResource: [`${rustTargetDir}/mando-gw`, `${rustTargetDir}/mando`, './assets'],
-    osxSign: {
-      optionsForFile: () => ({
-        entitlements: 'entitlements/entitlements.mac.plist',
-        hardenedRuntime: true,
-      }),
-    },
+    osxSign: skipPackagerSign
+      ? undefined
+      : {
+          optionsForFile: () => ({
+            entitlements: 'entitlements/entitlements.mac.plist',
+            hardenedRuntime: true,
+          }),
+        },
     osxNotarize: process.env.CI
       ? undefined // CI notarizes as a separate step for timing visibility
       : {
