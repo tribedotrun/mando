@@ -123,3 +123,11 @@ npm run package
 ## License
 
 Apache 2.0, see [LICENSE](LICENSE).
+
+<!-- hypertribe:sponsors:start -->
+## Sponsors
+
+[![mando Sponsors](https://api.hypertribe.run/tokens/zJsGgHT7vNKYmfrcdjsgQvQo7o3A8HTepMmsKU2rj1c/sponsors.svg)](https://hypertribe.run/token/zJsGgHT7vNKYmfrcdjsgQvQo7o3A8HTepMmsKU2rj1c)
+
+Become a sponsor on [Tribe.run](https://hypertribe.run/token/zJsGgHT7vNKYmfrcdjsgQvQo7o3A8HTepMmsKU2rj1c).
+<!-- hypertribe:sponsors:end -->
