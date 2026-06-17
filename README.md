@@ -127,7 +127,7 @@ Apache 2.0, see [LICENSE](LICENSE).
 <!-- hypertribe:sponsors:start -->
 ## Sponsors
 
-[![mando Sponsors](https://api.hypertribe.run/tokens/zJsGgHT7vNKYmfrcdjsgQvQo7o3A8HTepMmsKU2rj1c/sponsors.svg)](https://hypertribe.run/token/zJsGgHT7vNKYmfrcdjsgQvQo7o3A8HTepMmsKU2rj1c)
+[![mando Sponsors](https://api.hypertribe.run/tokens/ASBjF82eLJwQNsEYSsWa67CKLrREopttL3xnVXqXKXCx/sponsors.svg)](https://hypertribe.run/token/ASBjF82eLJwQNsEYSsWa67CKLrREopttL3xnVXqXKXCx)
 
-Become a sponsor on [Tribe.run](https://hypertribe.run/token/zJsGgHT7vNKYmfrcdjsgQvQo7o3A8HTepMmsKU2rj1c).
+Become a sponsor on [Tribe.run](https://hypertribe.run/token/ASBjF82eLJwQNsEYSsWa67CKLrREopttL3xnVXqXKXCx).
 <!-- hypertribe:sponsors:end -->
