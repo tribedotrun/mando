@@ -410,7 +410,7 @@ mod tests {
         let schema = build_clarifier_schema(&workflow).0;
         assert_eq!(
             schema["properties"]["resource"]["enum"],
-            serde_json::json!([null, "emulator"])
+            serde_json::json!([null, "emulator", "ios-simulator"])
         );
         assert!(!schema["properties"]["resource"]["enum"]
             .as_array()

@@ -1,7 +1,11 @@
 ---
 name: mando-pr
-description: Prepare branch, verify wiring, run quality gate, push, summarize PR, request reviews, address feedback, and clean up. Use when ready to open or finish a pull request — NOT for intermediate commits.
+description: Prepare branch, verify wiring, run quality gate, push, summarize PR, request reviews, address feedback, and clean up. Use when ready to open or finish a non-trivial pull request — NOT for simple changes or intermediate commits.
 ---
+
+## When to use
+
+Use this skill for non-trivial PRs where the review, evidence, gate, reviewer-trigger, and cleanup overhead is worth it. Simple changes can use a lighter direct commit/PR flow unless the user asks for `mando-pr`. Do not use this skill for intermediate commits.
 
 ## Step 1 — Prepare branch
 
@@ -24,6 +28,12 @@ description: Prepare branch, verify wiring, run quality gate, push, summarize PR
 - Every new public API, route, component, config field, or command must reach a user-facing entry point — called, registered, rendered, or read.
 - Fix dangling work before pushing; flag intentional gaps to surface in Step 3's **Wiring** checklist.
 
+**Verify env discipline** — diff audit:
+
+- List every new env var and env/config surface.
+- Keep env only for secrets, per-deploy/operator runtime values, or machine-local paths/tools.
+- If code can know it, replace the env before PR summary. Leave the remaining env rationale for `/mando-pr-summary`.
+
 **Quality gate** — run the project's full gate (`mando-dev check` in Mando). Fix every failure. Iterate until gate passes with no warning or error.
 
 **Commit & push** any remaining work.
@@ -33,6 +43,13 @@ description: Prepare branch, verify wiring, run quality gate, push, summarize PR
 **Do**
 
 - Run `/mando-pr-summary`. It creates the PR if none exists and owns the body. **Do NOT** use Claude Code's built-in PR template.
+- Verify the live GitHub body has the canonical `/mando-pr-summary` sections:
+
+```bash
+python3 ~/.claude/skills/mando-pr-summary/validate-pr-body.py --pr <pr_number>
+```
+
+- Do not use `.ai/plans/pr-<pr_number>/pr-summary.md` as the PR body. That file is only the persisted work-summary artifact and is intentionally missing the full PR sections.
 - If a draft PR already exists, convert it to ready.
 
 ## Step 4 — Request reviews

@@ -42,14 +42,15 @@ export function TranscriptPage(): React.ReactElement {
   const { data: workbenches = [] } = useWorkbenchList();
   const workbench = transcriptCwd ? workbenches.find((w) => w.worktree === transcriptCwd) : null;
 
-  const canResumeInTerminal = (provider === 'claude' || provider === 'codex') && workbench !== null;
+  const terminalProvider = provider === 'claude' || provider === 'codex' ? provider : null;
+  const canResumeInTerminal = terminalProvider !== null && workbench !== null;
 
   const handleResumeInTerminal = () => {
-    if (workbench) {
+    if (workbench && terminalProvider) {
       void router.navigate({
         to: '/wb/$workbenchId',
         params: { workbenchId: String(workbench.id) },
-        search: { tab: 'terminal', resume: sessionId, provider },
+        search: { tab: 'terminal', resume: sessionId, provider: terminalProvider },
       });
     }
   };
@@ -83,14 +84,20 @@ export function TranscriptPage(): React.ReactElement {
               isSessionContextLoading
                 ? 'Loading session metadata'
                 : resumeCmd
-                  ? `Copy ${provider === 'codex' ? 'Codex' : 'Claude Code'} resume command`
+                  ? `Copy ${
+                      provider === 'codex'
+                        ? 'Codex'
+                        : provider === 'opencode'
+                          ? 'OpenCode'
+                          : 'Claude Code'
+                    } resume command`
                   : 'Session metadata is unavailable'
             }
             className="gap-1.5"
           >
             {copied ? <Check size={13} /> : <Copy size={13} />}
             <span className="font-mono text-[11px]">
-              {provider === 'codex' ? 'Codex' : provider === 'claude' ? '-r' : '...'}
+              {provider === 'codex' ? 'Codex' : provider === 'opencode' ? 'OC' : '-r'}
             </span>
           </Button>
           <Button

@@ -13,6 +13,14 @@ pub struct TaskAskRequest {
     pub ask_id: Option<String>,
 }
 
+/// POST /api/tasks/implement
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct TaskImplementRequest {
+    pub id: i64,
+    pub message: String,
+}
+
 /// PATCH /api/tasks/{id}. `skip_serializing_if` on every Option is required:
 /// captain's `apply_json_updates` treats a JSON `null` as "clear this field",
 /// so unset fields must disappear from the serialized payload.

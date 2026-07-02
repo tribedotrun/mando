@@ -18,8 +18,8 @@ use std::path::Path;
 use api_types::{
     EventIndex, EventMeta, HookPhase, McpServerStatus, SystemApiRetryEvent,
     SystemCompactBoundaryEvent, SystemHookEvent, SystemInitEvent, SystemLocalCommandOutputEvent,
-    SystemRateLimitEvent, SystemStatusEvent, ToolProgressEvent, TranscriptEvent, UnknownEvent,
-    UserEvent,
+    SystemRateLimitEvent, SystemStatusEvent, SystemThinkingTokensEvent, ToolProgressEvent,
+    TranscriptEvent, UnknownEvent, UserEvent,
 };
 
 use crate::transcript_events::helpers::{parse_permission_mode, string_array};
@@ -218,6 +218,14 @@ fn parse_event_value(val: &serde_json::Value, raw_line: &str, line_number: u32) 
             }
             Some("hook_response") => {
                 TranscriptEvent::SystemHook(parse_hook(val, meta, HookPhase::Response))
+            }
+            // CC emits `system`/`thinking_tokens` events as progress signals
+            // for extended-thinking token estimates. They carry no thinking
+            // text — only counters + ids — so they're suppressed in the viewer
+            // (see SystemMessage). Parsing them as a named variant keeps the
+            // event off the `Unknown` escape hatch and the wire closed-set.
+            Some("thinking_tokens") => {
+                TranscriptEvent::SystemThinkingTokens(SystemThinkingTokensEvent { meta })
             }
             _ => unknown(meta, raw_type, raw_subtype, raw_line),
         },
@@ -514,6 +522,22 @@ mod tests {
         let events = parse_events(&path);
         assert_eq!(events.len(), 1);
         assert!(matches!(events[0], TranscriptEvent::Unknown(_)));
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn parse_thinking_tokens_emits_named_variant_not_unknown() {
+        let line = r#"{"type":"system","subtype":"thinking_tokens","session_id":"s1","uuid":"u0","estimated_tokens":128,"estimated_tokens_delta":42}"#;
+        let path = temp_file(line);
+        let events = parse_events(&path);
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            TranscriptEvent::SystemThinkingTokens(evt) => {
+                assert_eq!(evt.meta.uuid.as_deref(), Some("u0"));
+                assert_eq!(evt.meta.session_id.as_deref(), Some("s1"));
+            }
+            other => panic!("expected SystemThinkingTokens, got {other:?}"),
+        }
         std::fs::remove_file(&path).ok();
     }
 

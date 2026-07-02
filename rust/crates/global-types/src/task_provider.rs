@@ -10,6 +10,7 @@ pub enum TaskProvider {
     #[default]
     Claude,
     Codex,
+    OpenCode,
 }
 
 impl TaskProvider {
@@ -17,6 +18,7 @@ impl TaskProvider {
         match self {
             Self::Claude => "claude",
             Self::Codex => "codex",
+            Self::OpenCode => "opencode",
         }
     }
 
@@ -24,7 +26,12 @@ impl TaskProvider {
         match self {
             Self::Claude => "Claude Code",
             Self::Codex => "Codex",
+            Self::OpenCode => "OpenCode",
         }
+    }
+
+    pub fn is_premium(self) -> bool {
+        matches!(self, Self::Claude | Self::Codex)
     }
 }
 
@@ -41,6 +48,7 @@ impl FromStr for TaskProvider {
         match s {
             "claude" => Ok(Self::Claude),
             "codex" => Ok(Self::Codex),
+            "opencode" => Ok(Self::OpenCode),
             _ => Err(format!("unknown task provider: {s}")),
         }
     }

@@ -16,6 +16,7 @@ pub(super) async fn spawn_worker(
     item: &Task,
     workflow: &CaptainWorkflow,
     pool: &sqlx::SqlitePool,
+    agent_config: &settings::AgentConfig,
 ) -> Result<super::spawner::SpawnResult> {
     let (branch, wt_path) = resolve_worker_checkout(project_config, item).await?;
 
@@ -54,14 +55,8 @@ pub(super) async fn spawn_worker(
         }
     }
 
-    let started = start_codex_turn(
-        &wt_path,
-        &prompt,
-        None,
-        CodexOutputMode::Text,
-        &workflow.agent,
-    )
-    .await?;
+    let started =
+        start_codex_turn(&wt_path, &prompt, None, CodexOutputMode::Text, agent_config).await?;
     let stream_path =
         global_infra::paths::codex_derived_stream_path_for_session(&started.thread_id);
     let setup_result: Result<()> = async {

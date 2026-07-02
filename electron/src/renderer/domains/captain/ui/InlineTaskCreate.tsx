@@ -76,10 +76,13 @@ export function InlineTaskCreate({ ref }: InlineTaskCreateProps): React.ReactEle
           />
           {!bulk && (
             <TaskCreateOptionsMenu
-              provider={form.provider.provider}
-              onProviderChange={form.provider.setProvider}
-              planning={form.planMode.planning}
-              onPlanningChange={form.planMode.setPlanning}
+              provider={form.routing.provider}
+              onProviderChange={form.routing.setProvider}
+              planning={form.routing.planning}
+              onPlanningChange={form.routing.setPlanning}
+              useGlmWorker={form.routing.useGlmWorker}
+              defaultGlmWorker={form.routing.defaultGlmWorker}
+              onUseGlmWorkerChange={form.routing.setUseGlmWorker}
               globalAutoMerge={form.autoMerge.globalAutoMerge}
               noAutoMerge={form.autoMerge.noAutoMerge}
               onNoAutoMergeChange={form.autoMerge.setNoAutoMerge}

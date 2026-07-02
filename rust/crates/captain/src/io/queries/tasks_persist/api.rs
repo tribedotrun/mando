@@ -46,33 +46,42 @@ pub async fn persist_spawn(pool: &SqlitePool, task: &Task) -> Result<()> {
     Ok(())
 }
 
-#[allow(dead_code)]
-pub async fn persist_merge_spawn(pool: &SqlitePool, task: &Task) -> Result<()> {
+pub async fn persist_merge_spawn(
+    pool: &SqlitePool,
+    task: &Task,
+    event: &TimelineEvent,
+) -> Result<bool> {
+    let event_type = event.data.event_type_str();
     let metadata = json!({
         "task_id": task.id,
         "merge_session_id": task.session_ids.merge,
+        "event_type": event_type,
+        "summary": event.summary,
+        "actor": event.actor,
     });
     let noop = super::noop_effect();
+    let timeline_payload = super::timeline_effect(task.id, event_type, event)?;
     let applied = super::persist_task_transition(
         pool,
         task,
         "captain-merging",
         "merge_spawn",
-        "captain",
+        &event.actor,
         None,
         metadata,
-        vec![LifecycleEffect {
-            effect_kind: "lifecycle.transition.recorded",
-            payload: &noop,
-        }],
+        vec![
+            LifecycleEffect {
+                effect_kind: "task.timeline.project",
+                payload: &timeline_payload,
+            },
+            LifecycleEffect {
+                effect_kind: "lifecycle.transition.recorded",
+                payload: &noop,
+            },
+        ],
     )
     .await?;
-    anyhow::ensure!(
-        applied,
-        "persist_merge_spawn: transition rejected for task {}",
-        task.id,
-    );
-    Ok(())
+    Ok(applied)
 }
 
 pub async fn persist_clarify_start(pool: &SqlitePool, task: &Task) -> Result<()> {
@@ -387,7 +396,7 @@ mod tests {
     use sqlx::Row;
 
     use super::*;
-    use crate::{io::queries::tasks, ItemStatus};
+    use crate::{io::queries::tasks, ItemStatus, TimelineEventPayload};
 
     async fn test_pool() -> SqlitePool {
         let db = global_db::Db::open_in_memory().await.unwrap();
@@ -418,7 +427,19 @@ mod tests {
         persisted.session_ids.merge = Some("merge-session-1".into());
         persisted.last_activity_at = Some(global_types::now_rfc3339());
 
-        persist_merge_spawn(&pool, &persisted).await.unwrap();
+        let event = TimelineEvent {
+            timestamp: global_types::now_rfc3339(),
+            actor: "captain".to_string(),
+            summary: "Captain merge session started".to_string(),
+            data: TimelineEventPayload::CaptainMergeStarted {
+                session_id: "merge-session-1".into(),
+                pr: "https://github.com/example/repo/pull/42".into(),
+            },
+        };
+
+        assert!(persist_merge_spawn(&pool, &persisted, &event)
+            .await
+            .unwrap());
 
         let after = tasks::find_by_id(&pool, id).await.unwrap().unwrap();
         assert_eq!(after.status, ItemStatus::CaptainMerging);

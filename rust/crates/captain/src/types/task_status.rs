@@ -84,7 +84,15 @@ pub const ACTIONABLE_TERMINAL: [ItemStatus; 6] = [
     ItemStatus::Stopped,
 ];
 pub const REWORKABLE: [ItemStatus; 6] = ACTIONABLE_TERMINAL;
-pub const REOPENABLE: [ItemStatus; 6] = ACTIONABLE_TERMINAL;
+pub const REOPENABLE: [ItemStatus; 7] = [
+    ItemStatus::AwaitingReview,
+    ItemStatus::HandedOff,
+    ItemStatus::Escalated,
+    ItemStatus::Errored,
+    ItemStatus::CompletedNoPr,
+    ItemStatus::Stopped,
+    ItemStatus::Canceled,
+];
 
 impl ItemStatus {
     #[must_use]

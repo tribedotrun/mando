@@ -7,11 +7,7 @@ import { requestViewTaskBrief } from '#renderer/global/providers/viewBriefBus';
 import { Button } from '#renderer/global/ui/primitives/button';
 import { canMerge } from '#renderer/global/service/utils';
 import { AppHeaderOpenMenu } from '#renderer/app/AppHeaderOpenMenu';
-import {
-  useTaskActions,
-  type useResumeRateLimited,
-  type useWorkbenchCtx,
-} from '#renderer/domains/captain';
+import { useTaskActions, type useWorkbenchCtx } from '#renderer/domains/captain';
 
 interface TaskTitleRowProps {
   ctx: NonNullable<ReturnType<typeof useWorkbenchCtx>>;
@@ -19,7 +15,6 @@ interface TaskTitleRowProps {
   navIcons: React.ReactNode;
   isTerminalTab: boolean;
   taskIsRateLimited: boolean;
-  resumeMut: ReturnType<typeof useResumeRateLimited>;
 }
 
 export function TaskTitleRow({
@@ -28,7 +23,6 @@ export function TaskTitleRow({
   navIcons,
   isTerminalTab,
   taskIsRateLimited,
-  resumeMut,
 }: TaskTitleRowProps): React.ReactElement {
   const taskActions = useTaskActions();
   const taskId = ctx.task!.id;
@@ -57,16 +51,20 @@ export function TaskTitleRow({
           <Button
             variant="outline"
             size="xs"
-            disabled={resumeMut.isPending}
-            onClick={() => resumeMut.mutate({ id: ctx.task!.id })}
+            disabled={taskActions.flow.resumeRateLimitedPending}
+            onClick={() => taskActions.flow.handleResumeRateLimited(taskId)}
           >
-            {resumeMut.isPending ? 'Resuming...' : 'Resume'}
+            {taskActions.flow.resumeRateLimitedPending ? 'Resuming...' : 'Resume'}
           </Button>
         )}
         <AppHeaderOpenMenu worktreePath={ctx.worktreePath} />
         <DetailOverflowMenu
           item={ctx.task!}
           onViewContext={isTerminalTab ? undefined : () => requestViewTaskBrief()}
+          onResumeRateLimited={
+            taskIsRateLimited ? () => taskActions.flow.handleResumeRateLimited(taskId) : undefined
+          }
+          resumeRateLimitedPending={taskActions.flow.resumeRateLimitedPending}
           onCancel={() => taskActions.flow.handleCancel(taskId)}
         />
       </div>

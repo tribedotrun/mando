@@ -107,13 +107,6 @@ export interface Routes {
     body: Types.MandoConfig;
     res: Types.ConfigWriteResponse;
   };
-  getConfigPaths: {
-    method: 'GET';
-    path: '/api/config/paths';
-    transport: 'json';
-    auth: 'protected';
-    res: Types.ConfigPathsResponse;
-  };
   postConfigSetup: {
     method: 'POST';
     path: '/api/config/setup';
@@ -564,6 +557,14 @@ export interface Routes {
     transport: 'json';
     auth: 'protected';
     body: Types.TaskIdRequest;
+    res: Types.BoolOkResponse;
+  };
+  postTasksImplement: {
+    method: 'POST';
+    path: '/api/tasks/implement';
+    transport: 'json';
+    auth: 'protected';
+    body: Types.TaskImplementRequest;
     res: Types.BoolOkResponse;
   };
   postTasksMerge: {
@@ -1043,12 +1044,6 @@ export const routes = {
   },
   getConfig: { method: 'GET', path: '/api/config', transport: 'json', auth: 'protected' },
   putConfig: { method: 'PUT', path: '/api/config', transport: 'json', auth: 'protected' },
-  getConfigPaths: {
-    method: 'GET',
-    path: '/api/config/paths',
-    transport: 'json',
-    auth: 'protected',
-  },
   postConfigSetup: {
     method: 'POST',
     path: '/api/config/setup',
@@ -1328,6 +1323,12 @@ export const routes = {
   postTasksHandoff: {
     method: 'POST',
     path: '/api/tasks/handoff',
+    transport: 'json',
+    auth: 'protected',
+  },
+  postTasksImplement: {
+    method: 'POST',
+    path: '/api/tasks/implement',
     transport: 'json',
     auth: 'protected',
   },

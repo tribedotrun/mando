@@ -49,7 +49,7 @@ pub(crate) fn poll_structured_session_output(
         if let Some(structured) = result.get("structured_output").filter(|v| !v.is_null()) {
             let fallback_text = match provider {
                 global_types::TaskProvider::Claude => fallback_text(&result, &stream_path),
-                global_types::TaskProvider::Codex => None,
+                global_types::TaskProvider::Codex | global_types::TaskProvider::OpenCode => None,
             };
             return AgentSessionPoll::Completed(AgentSessionOutput::Structured {
                 value: structured.clone(),
@@ -57,7 +57,10 @@ pub(crate) fn poll_structured_session_output(
             });
         }
 
-        if matches!(provider, global_types::TaskProvider::Codex) {
+        if matches!(
+            provider,
+            global_types::TaskProvider::Codex | global_types::TaskProvider::OpenCode
+        ) {
             let reason = result
                 .get("structured_output_error")
                 .and_then(|v| v.as_str())
@@ -75,7 +78,10 @@ pub(crate) fn poll_structured_session_output(
     }
 
     if is_session_finished(provider, session_id) {
-        if matches!(provider, global_types::TaskProvider::Codex) {
+        if matches!(
+            provider,
+            global_types::TaskProvider::Codex | global_types::TaskProvider::OpenCode
+        ) {
             return AgentSessionPoll::UnusableOutput(
                 "structured-output agent session finished without result".to_string(),
             );
@@ -109,6 +115,9 @@ pub(crate) fn stream_path(
         global_types::TaskProvider::Codex => {
             global_infra::paths::codex_derived_stream_path_for_session(session_id)
         }
+        global_types::TaskProvider::OpenCode => {
+            global_infra::paths::opencode_stream_path_for_session(session_id)
+        }
     }
 }
 
@@ -123,6 +132,9 @@ pub(crate) fn stream_meta_path(
         global_types::TaskProvider::Codex => {
             global_infra::paths::codex_derived_stream_meta_path_for_session(session_id)
         }
+        global_types::TaskProvider::OpenCode => {
+            global_infra::paths::opencode_stream_meta_path_for_session(session_id)
+        }
     }
 }
 
@@ -130,6 +142,9 @@ pub(crate) fn is_session_finished(provider: global_types::TaskProvider, session_
     match provider {
         global_types::TaskProvider::Claude => global_claude::is_session_finished(session_id),
         global_types::TaskProvider::Codex => {
+            global_claude::is_stream_meta_finished_at(&stream_meta_path(provider, session_id))
+        }
+        global_types::TaskProvider::OpenCode => {
             global_claude::is_stream_meta_finished_at(&stream_meta_path(provider, session_id))
         }
     }

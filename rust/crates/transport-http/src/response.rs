@@ -26,18 +26,6 @@ impl<T: Serialize> IntoResponse for ApiCreated<T> {
     }
 }
 
-/// Response wrapper for 204 No Content routes. No body is serialized.
-/// Pair with `api_types::EmptyResponse` in the `res = ...` declaration when
-/// the route is documented as returning an empty envelope instead of 204.
-#[allow(dead_code)]
-pub struct ApiNoContent;
-
-impl IntoResponse for ApiNoContent {
-    fn into_response(self) -> Response {
-        StatusCode::NO_CONTENT.into_response()
-    }
-}
-
 /// Build a JSON error response. Use this for user-facing messages (BAD_REQUEST,
 /// NOT_FOUND, etc.) where the message is already safe to return as-is.
 pub fn error_response(status: StatusCode, msg: &str) -> ApiError {

@@ -211,15 +211,6 @@ impl CaptainRuntime {
         crate::io::health_store::load_health_state_async(&health_path).await
     }
 
-    pub fn health_counter(
-        &self,
-        state: &crate::io::health_store::HealthState,
-        worker_name: &str,
-        field: &str,
-    ) -> u32 {
-        crate::io::health_store::get_health_u32(state, worker_name, field)
-    }
-
     #[tracing::instrument(skip_all)]
     pub async fn bind_terminal_workbench(
         &self,

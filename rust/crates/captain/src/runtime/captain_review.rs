@@ -185,7 +185,8 @@ pub(crate) async fn spawn_review(
     // CaptainReviewing first and the context build then errored, callers like
     // action_contract::trigger_review bubble the error up with no rollback,
     // leaving the task stuck in CaptainReviewing with no review session.
-    let (_ctx, worker_contexts_text) = review_phase::build_single_context(item, config).await?;
+    let (_ctx, worker_contexts_text) =
+        review_phase::build_single_context(item, config, pool).await?;
 
     super::agent_runtime::spawn_review_session(
         item,

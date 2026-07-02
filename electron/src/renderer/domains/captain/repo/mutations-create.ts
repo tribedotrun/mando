@@ -11,7 +11,7 @@ export function useTaskCreate() {
 
 export function useTaskBulkCreate() {
   return useMutation({
-    mutationFn: async (vars: { text: string; project: string }) => {
+    mutationFn: async (vars: { text: string; project: string; useGlmWorker?: boolean }) => {
       let titles: string[];
       try {
         const parsed = await toReactQuery(parseTodos(vars.text, vars.project));
@@ -23,7 +23,9 @@ export function useTaskBulkCreate() {
       const results: { title: string; ok: boolean; error?: string }[] = [];
       for (const title of titles) {
         try {
-          await toReactQuery(addTask({ title, project: vars.project }));
+          await toReactQuery(
+            addTask({ title, project: vars.project, useGlmWorker: vars.useGlmWorker }),
+          );
           results.push({ title, ok: true });
         } catch (err) {
           results.push({ title, ok: false, error: String(err) });

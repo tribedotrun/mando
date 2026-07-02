@@ -215,10 +215,6 @@ impl TelegramBot {
         self.qa_sessions.lock().await.remove(cid);
     }
 
-    pub async fn has_qa_session(&self, cid: &str) -> bool {
-        self.qa_sessions.lock().await.contains_key(cid)
-    }
-
     /// Returns `Ok(true)` when the QA session was found and the question
     /// dispatched; `Ok(false)` when the session has vanished between the
     /// disambiguation snapshot and consume (e.g. `endqa` callback ran on

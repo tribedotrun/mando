@@ -184,20 +184,7 @@ fn parse_line_events(
 }
 
 fn event_line_number(event: &TranscriptEvent) -> u32 {
-    match event {
-        TranscriptEvent::SystemInit(event) => event.meta.index.line_number,
-        TranscriptEvent::SystemCompactBoundary(event) => event.meta.index.line_number,
-        TranscriptEvent::SystemStatus(event) => event.meta.index.line_number,
-        TranscriptEvent::SystemApiRetry(event) => event.meta.index.line_number,
-        TranscriptEvent::SystemLocalCommandOutput(event) => event.meta.index.line_number,
-        TranscriptEvent::SystemHook(event) => event.meta.index.line_number,
-        TranscriptEvent::SystemRateLimit(event) => event.meta.index.line_number,
-        TranscriptEvent::User(event) => event.meta.index.line_number,
-        TranscriptEvent::Assistant(event) => event.meta.index.line_number,
-        TranscriptEvent::ToolProgress(event) => event.meta.index.line_number,
-        TranscriptEvent::Result(event) => event.meta.index.line_number,
-        TranscriptEvent::Unknown(event) => event.meta.index.line_number,
-    }
+    event.line_number()
 }
 
 fn assistant_text(

@@ -2,6 +2,9 @@ use serde_json::{json, Map, Value};
 
 use crate::types::StartTurnRequest;
 
+const COMPUTER_USE_MCP_SERVER: &str = "computer-use";
+const COMPUTER_USE_PLUGIN: &str = "computer-use@openai-bundled";
+
 pub(crate) fn thread_params(request: &StartTurnRequest) -> Value {
     let mut params = Map::new();
     if let Some(thread_id) = &request.resume_thread_id {
@@ -65,6 +68,16 @@ pub(crate) fn turn_params(thread_id: &str, request: &StartTurnRequest) -> Value 
         params.insert("outputSchema".into(), schema.clone());
     }
     Value::Object(params)
+}
+
+pub(crate) fn computer_use_mcp_approval_params() -> Value {
+    json!({
+        "keyPath": format!("plugins.\"{COMPUTER_USE_PLUGIN}\".mcp_servers.{COMPUTER_USE_MCP_SERVER}.default_tools_approval_mode"),
+        "value": "approve",
+        "mergeStrategy": "replace",
+        "filePath": Value::Null,
+        "expectedVersion": Value::Null,
+    })
 }
 
 #[cfg(test)]
@@ -155,6 +168,20 @@ mod tests {
         assert_eq!(
             structured_turn.get("outputSchema"),
             structured_req.output_schema.as_ref()
+        );
+    }
+
+    #[test]
+    fn computer_use_mcp_approval_params_force_approve_mode() {
+        assert_eq!(
+            computer_use_mcp_approval_params(),
+            json!({
+                "keyPath": "plugins.\"computer-use@openai-bundled\".mcp_servers.computer-use.default_tools_approval_mode",
+                "value": "approve",
+                "mergeStrategy": "replace",
+                "filePath": null,
+                "expectedVersion": null,
+            })
         );
     }
 }

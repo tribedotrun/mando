@@ -341,19 +341,3 @@ pub async fn clear_all_cooldowns(pool: &SqlitePool) -> Result<u64> {
     .await?;
     Ok(result.rows_affected())
 }
-
-/// Count running sessions grouped by credential_id (for diagnostics).
-pub async fn active_counts(pool: &SqlitePool) -> Result<HashMap<i64, u32>> {
-    let rows: Vec<(i64, i64)> = sqlx::query_as(
-        "SELECT credential_id, COUNT(*) FROM cc_sessions
-         WHERE status = 'running' AND credential_id IS NOT NULL
-         GROUP BY credential_id",
-    )
-    .fetch_all(pool)
-    .await?;
-
-    Ok(rows
-        .into_iter()
-        .map(|(id, count)| (id, count as u32))
-        .collect())
-}

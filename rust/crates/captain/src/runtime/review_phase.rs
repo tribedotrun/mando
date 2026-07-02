@@ -49,17 +49,18 @@ pub(crate) async fn gather_worker_contexts(
             None => continue,
         };
 
+        let worker_provider = super::agent_runtime::persisted_worker_provider(pool, item).await;
         let stream_path = item
             .session_ids
             .worker
             .as_deref()
-            .map(|sid| super::agent_runtime::stream_path(item.provider, sid))
+            .map(|sid| super::agent_runtime::stream_path(worker_provider, sid))
             .unwrap_or_default();
 
         let cc_sid = item.session_ids.worker.as_deref().unwrap_or("");
         let pid = pid_registry::get_pid(cc_sid).unwrap_or(crate::Pid::new(0));
         let process_alive =
-            super::agent_runtime::is_session_active(item.provider, cc_sid, pid).await;
+            super::agent_runtime::is_session_active(worker_provider, cc_sid, pid).await;
         let stream_tail = crate::io::transcript::extract_stream_tail(&stream_path, 50);
         let stream_stale_s = global_claude::stream_stale_seconds(&stream_path);
         let prev_cpu_time_s =
@@ -397,15 +398,17 @@ fn check_reopen_ack(body: &str, issue_comments: &[String], reopen_seq: i64) -> b
 pub(crate) async fn build_single_context(
     item: &Task,
     config: &settings::Config,
+    pool: &sqlx::SqlitePool,
 ) -> Result<(crate::WorkerContext, String)> {
     use crate::service::worker_context;
 
     let worker_name = item.worker.as_deref().unwrap_or("unknown");
+    let worker_provider = super::agent_runtime::persisted_worker_provider(pool, item).await;
     let stream_path = item
         .session_ids
         .worker
         .as_deref()
-        .map(|sid| super::agent_runtime::stream_path(item.provider, sid))
+        .map(|sid| super::agent_runtime::stream_path(worker_provider, sid))
         .unwrap_or_default();
     let stream_tail = crate::io::transcript::extract_stream_tail(&stream_path, 50);
     let stream_stale_s = global_claude::stream_stale_seconds(&stream_path);

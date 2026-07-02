@@ -209,6 +209,8 @@ pub(crate) async fn post_scout_act(
         } => (task_title, task_description, project),
     };
 
+    let config = state.settings.load_config();
+    let provider = super::routes_tasks::default_task_provider(&config);
     let created = state
         .captain
         .add_task_with_context(
@@ -216,7 +218,8 @@ pub(crate) async fn post_scout_act(
             Some(project_name.as_str()),
             Some(task_description.as_str()),
             Some("scout"),
-            api_types::TaskProvider::Claude,
+            provider,
+            true,
         )
         .await
         .map_err(map_task_create_error)?;

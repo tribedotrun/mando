@@ -42,6 +42,83 @@ where
     Ok(Json(api_types::BoolOkResponse { ok: true }))
 }
 
+fn build_implementation_context(
+    existing_context: Option<&str>,
+    timeline: &[captain::TimelineEvent],
+    message: &str,
+) -> String {
+    let plan = timeline.iter().rev().find_map(|event| match &event.data {
+        TimelineEventPayload::PlanCompleted { plan, .. } => Some(plan.trim()),
+        _ => None,
+    });
+    let mut sections: Vec<String> = Vec::new();
+    if let Some(existing) = existing_context
+        .map(str::trim_end)
+        .filter(|text| !text.is_empty())
+    {
+        sections.push(existing.to_string());
+    }
+    if let Some(plan) = plan.filter(|text| !text.is_empty()) {
+        sections.push(format!("## Approved Plan\n{plan}"));
+    }
+    sections.push(format!("[Human] {message}"));
+    sections.join("\n\n")
+}
+
+/// POST /api/tasks/implement
+#[crate::instrument_api(method = "POST", path = "/api/tasks/implement")]
+pub(crate) async fn post_task_implement(
+    State(state): State<AppState>,
+    Json(body): Json<api_types::TaskImplementRequest>,
+) -> Result<Json<api_types::BoolOkResponse>, ApiError> {
+    let id = body.id;
+    let item = state
+        .captain
+        .load_task(id)
+        .await
+        .map_err(|e| internal_error(e, "failed to load task"))?
+        .ok_or_else(|| {
+            map_task_action_error(
+                captain::TaskActionError::NotFound(id).into(),
+                "failed to load task",
+            )
+        })?;
+    if item.status() != captain::ItemStatus::PlanReady {
+        return Err(map_task_action_error(
+            captain::TaskActionError::InvalidTransition {
+                command: "start implementation",
+                status: item.status().as_str(),
+            }
+            .into(),
+            "failed to start implementation",
+        ));
+    }
+
+    let timeline = state
+        .captain
+        .task_timeline(&id.to_string())
+        .await
+        .map_err(|e| internal_error(e, "failed to load task timeline"))?;
+    let context = build_implementation_context(item.context.as_deref(), &timeline, &body.message);
+    state
+        .captain
+        .update_task(
+            id,
+            captain::UpdateTaskInput {
+                context: Some(Some(context)),
+                ..Default::default()
+            },
+        )
+        .await
+        .map_err(|e| internal_error(e, "failed to update task context"))?;
+    simple_task_action(
+        &state,
+        id,
+        state.captain.queue_item(id, "http_start_implementation"),
+    )
+    .await
+}
+
 /// POST /api/tasks/queue
 #[crate::instrument_api(method = "POST", path = "/api/tasks/queue")]
 pub(crate) async fn post_task_queue(
@@ -62,6 +139,32 @@ pub(crate) async fn post_task_accept(
     simple_task_action(&state, id, state.captain.accept_item(id)).await
 }
 
+/// Extract `(pr_number, github_repo)` from a task for best-effort PR close.
+/// Returns `Some` only when BOTH a pr_number and github_repo are present.
+fn task_pr_close_info(item: &captain::Task) -> Option<(String, String)> {
+    item.pr_number
+        .map(|n| n.to_string())
+        .zip(item.github_repo.clone())
+}
+
+/// Load a task and extract its PR-close info. Best-effort: warns and returns
+/// `None` when the task can't be read or has no PR/repo.
+async fn load_task_pr_close_info(state: &AppState, id: i64) -> Option<(String, String)> {
+    match state.captain.load_task(id).await {
+        Ok(Some(item)) => task_pr_close_info(&item),
+        Err(e) => {
+            tracing::warn!(
+                module = "gateway",
+                task_id = id,
+                error = %e,
+                "failed to read task for PR close"
+            );
+            None
+        }
+        _ => None,
+    }
+}
+
 /// POST /api/tasks/cancel
 #[crate::instrument_api(method = "POST", path = "/api/tasks/cancel")]
 pub(crate) async fn post_task_cancel(
@@ -69,7 +172,24 @@ pub(crate) async fn post_task_cancel(
     Json(body): Json<api_types::TaskIdRequest>,
 ) -> Result<Json<api_types::BoolOkResponse>, ApiError> {
     let id = body.id;
-    simple_task_action(&state, id, state.captain.cancel_item(id)).await
+    let old_pr_info = load_task_pr_close_info(&state, id).await;
+    state
+        .captain
+        .cancel_item(id)
+        .await
+        .map_err(|e| map_task_action_error(e, "failed to cancel task"))?;
+    if let Some((pr_num, repo)) = old_pr_info {
+        if let Err(e) = state.captain.close_pr(&repo, &pr_num).await {
+            tracing::warn!(
+                module = "gateway",
+                task_id = id,
+                pr = %pr_num,
+                error = %e,
+                "failed to close PR during cancel — continuing anyway"
+            );
+        }
+    }
+    Ok(Json(api_types::BoolOkResponse { ok: true }))
 }
 
 /// POST /api/tasks/reopen (JSON or multipart with optional images)
@@ -118,7 +238,7 @@ async fn post_task_reopen_inner(
         .captain
         .reopen_item_from_human(&mut item, &body.feedback, &workflow, &notifier)
         .await
-        .map_err(|e| internal_error(e, "failed to reopen task"))?;
+        .map_err(|e| map_task_action_error(e, "failed to reopen task"))?;
 
     let summary = match outcome {
         captain::ReopenOutcome::QueuedFallback => {
@@ -252,23 +372,7 @@ async fn post_task_rework_inner(
 
     crate::runtime::task_sessions::close_ask_session(state, id).await;
 
-    let old_pr_info: Option<(String, String)> = match state.captain.load_task(id).await {
-        Ok(Some(item)) => {
-            let pr_num = item.pr_number.map(|n| n.to_string());
-            let repo = item.github_repo.clone();
-            pr_num.zip(repo)
-        }
-        Err(e) => {
-            tracing::warn!(
-                module = "gateway",
-                task_id = id,
-                error = %e,
-                "failed to read task for PR close during rework"
-            );
-            None
-        }
-        _ => None,
-    };
+    let old_pr_info: Option<(String, String)> = load_task_pr_close_info(state, id).await;
 
     state
         .captain
@@ -391,4 +495,40 @@ pub(crate) async fn post_task_stop(
 ) -> Result<Json<api_types::BoolOkResponse>, ApiError> {
     let id = body.id;
     simple_task_action(&state, id, state.captain.stop_item(id)).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn task_with(pr: Option<i64>, repo: Option<&str>) -> captain::Task {
+        let mut item = captain::Task::new("test");
+        item.pr_number = pr;
+        item.github_repo = repo.map(str::to_string);
+        item
+    }
+
+    #[test]
+    fn close_info_present_when_pr_and_repo_set() {
+        let info = task_pr_close_info(&task_with(Some(42), Some("owner/repo")));
+        assert_eq!(info, Some(("42".to_string(), "owner/repo".to_string())));
+    }
+
+    #[test]
+    fn close_info_none_without_pr() {
+        assert_eq!(
+            task_pr_close_info(&task_with(None, Some("owner/repo"))),
+            None
+        );
+    }
+
+    #[test]
+    fn close_info_none_without_repo() {
+        assert_eq!(task_pr_close_info(&task_with(Some(7), None)), None);
+    }
+
+    #[test]
+    fn close_info_none_when_both_missing() {
+        assert_eq!(task_pr_close_info(&task_with(None, None)), None);
+    }
 }

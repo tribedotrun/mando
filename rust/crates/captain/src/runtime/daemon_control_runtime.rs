@@ -93,10 +93,12 @@ impl CaptainRuntime {
                 .and_then(|v| v.get("last_action"))
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
-            let stream_path = crate::runtime::agent_runtime::stream_path(task.provider, cc_sid);
+            let worker_provider =
+                crate::runtime::agent_runtime::persisted_worker_provider(&self.pool, task).await;
+            let stream_path = crate::runtime::agent_runtime::stream_path(worker_provider, cc_sid);
             let stream_stale_s = global_claude::stream_stale_seconds(&stream_path);
             let liveness = crate::runtime::agent_runtime::session_liveness(
-                task.provider,
+                worker_provider,
                 cc_sid,
                 pid.map(crate::Pid::new).unwrap_or(crate::Pid::new(0)),
                 &stream_path,
@@ -137,23 +139,6 @@ impl CaptainRuntime {
             });
         }
         Ok(workers)
-    }
-
-    #[tracing::instrument(skip_all)]
-    pub async fn find_worker_task(&self, id: &str) -> anyhow::Result<Option<crate::Task>> {
-        let store = self.task_store.read().await;
-        let routing = store.routing().await?;
-        if let Some(idx) = routing
-            .iter()
-            .find(|idx| idx.worker.as_deref() == Some(id) || idx.id.to_string() == id)
-        {
-            return store.find_by_id(idx.id).await;
-        }
-        Ok(store
-            .load_all()
-            .await?
-            .into_iter()
-            .find(|task| task.session_ids.worker.as_deref() == Some(id)))
     }
 }
 

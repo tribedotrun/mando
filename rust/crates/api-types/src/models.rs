@@ -138,6 +138,7 @@ pub struct TaskItem {
     pub rev: i64,
     pub title: String,
     pub provider: TaskProvider,
+    pub use_glm_worker: bool,
     pub status: ItemStatus,
     pub project: Option<String>,
     pub github_repo: Option<String>,

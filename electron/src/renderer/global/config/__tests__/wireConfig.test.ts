@@ -6,6 +6,7 @@ import {
   DEFAULT_CODEX_TERMINAL_ARGS,
   DEFAULT_DASHBOARD_HOST,
   DEFAULT_DASHBOARD_PORT,
+  DEFAULT_TASK_AGENT,
   DEFAULT_TICK_INTERVAL_S,
   DEFAULT_WORKSPACE,
   toWireConfig,
@@ -31,7 +32,9 @@ describe('toWireConfig', () => {
     assert.equal(config.captain.autoMerge, false);
     assert.equal(config.captain.maxConcurrentWorkers, null);
     assert.equal(config.captain.tickIntervalS, DEFAULT_TICK_INTERVAL_S);
+    assert.equal(config.captain.defaultTaskAgent, DEFAULT_TASK_AGENT);
     assert.equal(config.captain.defaultTerminalAgent, 'claude');
+    assert.equal(config.captain.defaultGlmImplementation, false);
     assert.equal(config.captain.claudeTerminalArgs, DEFAULT_CLAUDE_TERMINAL_ARGS);
     assert.equal(config.captain.codexTerminalArgs, DEFAULT_CODEX_TERMINAL_ARGS);
     assert.ok(config.captain.tz);

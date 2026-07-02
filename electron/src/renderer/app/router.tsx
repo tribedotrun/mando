@@ -81,7 +81,7 @@ const transcriptRoute = createRoute({
   validateSearch: z.object({
     caller: z.string().optional().catch(undefined),
     cwd: z.string().optional().catch(undefined),
-    provider: z.enum(['claude', 'codex']).optional().catch(undefined),
+    provider: z.enum(['claude', 'codex', 'opencode']).optional().catch(undefined),
     project: z.string().optional().catch(undefined),
     taskTitle: z.string().optional().catch(undefined),
   }),

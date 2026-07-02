@@ -32,6 +32,9 @@ pub(crate) async fn session_liveness(
         global_types::TaskProvider::Claude => {
             pid.as_u32() > 0 && global_claude::is_process_alive(pid)
         }
+        global_types::TaskProvider::OpenCode => {
+            pid.as_u32() > 0 && global_claude::is_process_alive(pid)
+        }
     };
     if provider_active {
         return AgentLivenessStatus::Active;

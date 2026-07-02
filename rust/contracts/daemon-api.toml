@@ -75,6 +75,13 @@ transitions = [
 ]
 
 [[producer]]
+path = "POST /api/tasks/implement"
+handler = "post_task_implement"
+transitions = [
+  "plan-ready -> queued",
+]
+
+[[producer]]
 path = "POST /api/tasks/queue"
 handler = "post_task_queue"
 transitions = [

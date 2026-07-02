@@ -17,8 +17,8 @@ use update_exec::update_task_exec;
 
 // Re-export persist helpers so `queries::tasks::persist_*` paths keep working.
 pub use super::tasks_persist::{
-    persist_clarify_result, persist_clarify_start, persist_resume_clarifier, persist_spawn,
-    persist_status_transition, persist_status_transition_with_command,
+    persist_clarify_result, persist_clarify_start, persist_merge_spawn, persist_resume_clarifier,
+    persist_spawn, persist_status_transition, persist_status_transition_with_command,
     persist_status_transition_with_command_and_effects,
 };
 
@@ -28,7 +28,7 @@ type SqliteQuery<'q> = Query<'q, Sqlite, SqliteArguments<'q>>;
 /// can break after `ALTER TABLE DROP COLUMN` due to sqlx type-inference on
 /// removed column slots.
 const SELECT_COLS: &str = "\
-    t.id, t.title, t.provider, t.status, t.project_id, p.name AS project, \
+    t.id, t.title, t.provider, t.use_glm_worker, t.status, t.project_id, p.name AS project, \
     t.worker, t.resource, t.context, t.original_prompt, \
     t.created_at, t.workbench_id, w.worktree, t.pr_number, t.worker_started_at, \
     t.intervention_count, t.captain_review_trigger, t.session_ids, t.last_activity_at, \
@@ -71,7 +71,7 @@ pub async fn load_all_with_archived(pool: &SqlitePool) -> Result<Vec<Task>> {
 /// Load routing-level fields only (lighter query).
 pub async fn routing(pool: &SqlitePool) -> Result<Vec<TaskRouting>> {
     let rows: Vec<RoutingRow> = sqlx::query_as(
-        "SELECT t.id, t.title, t.provider, t.status, t.project_id, p.name AS project, t.worker, t.resource
+        "SELECT t.id, t.title, t.provider, t.use_glm_worker, t.status, t.project_id, p.name AS project, t.worker, t.resource
          FROM tasks t JOIN projects p ON p.id = t.project_id
          LEFT JOIN workbenches w ON w.id = t.workbench_id
          WHERE (w.archived_at IS NULL AND w.deleted_at IS NULL)",
@@ -88,6 +88,7 @@ pub async fn routing(pool: &SqlitePool) -> Result<Vec<TaskRouting>> {
 const WRITE_COLS: &[&str] = &[
     "title",
     "provider",
+    "use_glm_worker",
     "status",
     "project_id",
     "worker",
@@ -162,6 +163,7 @@ pub(crate) fn bind_task_write_fields<'q>(
     query
         .bind(&task.title)
         .bind(task.provider.as_str())
+        .bind(task.use_glm_worker as i64)
         .bind(task.status.as_str())
         .bind(task.project_id)
         .bind(&task.worker)

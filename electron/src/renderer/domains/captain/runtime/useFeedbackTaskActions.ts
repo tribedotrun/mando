@@ -11,6 +11,7 @@ import {
   useTaskMerge,
   useTaskDelete,
   useTaskHandoff,
+  useResumeRateLimited,
   useTaskStop,
   useTaskCancel,
   useTaskRetry,
@@ -29,6 +30,7 @@ export function useTaskActions() {
   const mergeMut = useTaskMerge();
   const deleteMut = useTaskDelete();
   const handoffMut = useTaskHandoff();
+  const resumeRateLimitedMut = useResumeRateLimited();
   const stopMut = useTaskStop();
   const cancelMut = useTaskCancel();
   const retryMut = useTaskRetry();
@@ -135,6 +137,11 @@ export function useTaskActions() {
     void invalidateTaskDetail(queryClient, id);
   };
 
+  const handleResumeRateLimited = (id: number) => {
+    resumeRateLimitedMut.mutate({ id });
+    void invalidateTaskDetail(queryClient, id);
+  };
+
   // Returns true on success so callers can decide whether to close a modal.
   // On failure the error is surfaced via toast and false is returned, allowing
   // the modal to stay open so the user does not lose their typed input.
@@ -183,6 +190,8 @@ export function useTaskActions() {
     flow: {
       handleCancel,
       handleRetry,
+      handleResumeRateLimited,
+      resumeRateLimitedPending: resumeRateLimitedMut.isPending,
       handleAnswer,
       answerPending: clarifyMut.isPending,
       handleNudge,

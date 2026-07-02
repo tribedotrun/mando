@@ -66,6 +66,7 @@ pub async fn handle_input_text(bot: &TelegramBot, chat_id: &str, text: &str) -> 
         ItemStatus::New
         | ItemStatus::Clarifying
         | ItemStatus::NeedsClarification
+        | ItemStatus::PlanReady
         | ItemStatus::Queued => {}
         _ => {
             bot.close_input_session(chat_id).await;
@@ -82,12 +83,55 @@ pub async fn handle_input_text(bot: &TelegramBot, chat_id: &str, text: &str) -> 
     }
 
     let item_id = item.id;
-    let ack = bot
-        .send_html(chat_id, "\u{1f9ed} Clarifying\u{2026}")
-        .await?;
+    let ack_text = if item.status() == ItemStatus::PlanReady {
+        "\u{1f680} Starting implementation\u{2026}"
+    } else {
+        "\u{1f9ed} Clarifying\u{2026}"
+    };
+    let ack = bot.send_html(chat_id, ack_text).await?;
     let ack_mid = ack.get("message_id").and_then(|v| v.as_i64()).unwrap_or(0);
 
-    if item.status() == ItemStatus::NeedsClarification {
+    if item.status() == ItemStatus::PlanReady {
+        match bot
+            .gw()
+            .post_typed::<_, api_types::BoolOkResponse>(
+                paths::TASKS_IMPLEMENT,
+                &api_types::TaskImplementRequest {
+                    id: item_id,
+                    message: text.to_string(),
+                },
+            )
+            .await
+        {
+            Ok(_) => {
+                bot.close_input_session(chat_id).await;
+                global_infra::best_effort!(
+                    bot.edit_message(
+                        chat_id,
+                        ack_mid,
+                        &format!(
+                            "\u{1f680} Re-queued <b>{}</b> for implementation.",
+                            escape_html(&item_title),
+                        ),
+                    )
+                    .await,
+                    "action_sessions: ack edit after implement"
+                );
+            }
+            Err(e) => {
+                warn!(
+                    "[input] start implementation failed for '{}': {e}",
+                    item_title
+                );
+                bot.close_input_session(chat_id).await;
+                global_infra::best_effort!(
+                    bot.edit_message(chat_id, ack_mid, "\u{274c} Failed to start implementation.",)
+                        .await,
+                    "action_sessions: ack edit after implement failure"
+                );
+            }
+        }
+    } else if item.status() == ItemStatus::NeedsClarification {
         match bot
             .gw()
             .post_typed::<_, api_types::ClarifyResponse>(

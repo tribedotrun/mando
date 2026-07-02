@@ -74,6 +74,11 @@ pub(crate) enum TodoCommand {
     /// Save evidence files for a task
     #[command(name = "evidence")]
     Evidence {
+        /// Task ID override. Defaults to MANDO_TASK_ID, then the daemon task
+        /// whose worktree matches the current directory, then the legacy
+        /// `*-todo-<id>` directory suffix.
+        #[arg(long = "task")]
+        task_id: Option<String>,
         /// Local file paths to save as evidence
         files: Vec<String>,
         /// Per-file caption (one per file, same order)
@@ -156,11 +161,21 @@ pub(crate) async fn handle(args: TodoArgs) -> anyhow::Result<()> {
             crate::todo_artifacts::handle_summary(item_id.as_deref(), file.as_deref()).await
         }
         TodoCommand::Evidence {
+            task_id,
             files,
             captions,
             kinds,
             allow_static,
-        } => crate::todo_artifacts::handle_evidence(&files, &captions, &kinds, allow_static).await,
+        } => {
+            crate::todo_artifacts::handle_evidence(
+                task_id.as_deref(),
+                &files,
+                &captions,
+                &kinds,
+                allow_static,
+            )
+            .await
+        }
         TodoCommand::Ask {
             item_id,
             message,
@@ -327,40 +342,13 @@ async fn handle_input(item_id: &str, message: &str) -> anyhow::Result<()> {
             anyhow::bail!("item #{item_id} has an active worker — use `captain nudge` instead");
         }
         api_types::ItemStatus::PlanReady => {
-            // Re-queue as a normal worker with the plan injected into context.
-            let timeline: api_types::TimelineResponse =
-                client.get_json(&paths::task_timeline(id_num)).await?;
-            let plan_text = timeline
-                .events
-                .iter()
-                .rev()
-                .find_map(|e| match &e.data {
-                    api_types::TimelineEventPayload::PlanCompleted { plan, .. } => {
-                        Some(plan.as_str())
-                    }
-                    _ => None,
-                })
-                .unwrap_or("");
-            let existing_ctx = item.context.as_deref().unwrap_or("");
-            let new_ctx = if plan_text.is_empty() {
-                format!("{existing_ctx}\n\n[Human] {message}")
-            } else {
-                format!("{existing_ctx}\n\n## Approved Plan\n{plan_text}\n\n[Human] {message}")
-            };
-            client
-                .patch_json::<api_types::TaskItem, _>(
-                    &paths::task_item(id_num),
-                    &api_types::TaskPatchRequest {
-                        context: Some(new_ctx),
-                        original_prompt: None,
-                        is_bug_fix: None,
-                    },
-                )
-                .await?;
             client
                 .post_json::<api_types::BoolOkResponse, _>(
-                    paths::TASKS_QUEUE,
-                    &api_types::TaskIdRequest { id: id_num },
+                    paths::TASKS_IMPLEMENT,
+                    &api_types::TaskImplementRequest {
+                        id: id_num,
+                        message: message.to_string(),
+                    },
                 )
                 .await?;
             println!("Re-queued item #{item_id} for implementation with plan.");

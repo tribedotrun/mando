@@ -404,29 +404,6 @@ pub struct ConfigSetupResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(deny_unknown_fields)]
-pub struct ConfigPathsResponse {
-    #[serde(rename = "dataDir")]
-    pub data_dir: String,
-    #[serde(rename = "configPath")]
-    pub config_path: String,
-    #[serde(rename = "taskDbPath")]
-    pub task_db_path: String,
-    #[serde(rename = "workerHealthPath")]
-    pub worker_health_path: String,
-    #[serde(rename = "lockfilePath")]
-    pub lockfile_path: String,
-    #[serde(rename = "configuredTaskDbPath")]
-    pub configured_task_db_path: String,
-    #[serde(rename = "configuredWorkerHealthPath")]
-    pub configured_worker_health_path: String,
-    #[serde(rename = "configuredLockfilePath")]
-    pub configured_lockfile_path: String,
-    #[serde(rename = "restartRequired")]
-    pub restart_required: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[serde(deny_unknown_fields)]
 pub struct ConfigSaveResponse {
     pub ok: bool,
     #[serde(rename = "restartRequired")]

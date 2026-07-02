@@ -85,8 +85,8 @@ pub(crate) async fn get_config_status(
     let configured_paths = captain::resolve_captain_runtime_paths(&config);
     let (setup_complete, error) = if exists {
         match tokio::fs::read_to_string(&config_path).await {
-            Ok(contents) => match serde_json::from_str::<settings::Config>(&contents) {
-                Ok(_) => (true, None),
+            Ok(contents) => match parse_config_status_contents(&contents, &config_path) {
+                Ok(()) => (true, None),
                 Err(err) => {
                     tracing::warn!(module = "transport-http-transport-routes_config", path = %config_path.display(), error = %err, "config.json exists but is corrupt");
                     (false, Some(format!("corrupt config: {err}")))
@@ -158,38 +158,6 @@ pub(crate) async fn post_config_setup(
     Ok(Json(api_types::ConfigSetupResponse { ok: true }))
 }
 
-/// GET /api/config/paths — returns config/runtime paths.
-#[crate::instrument_api(method = "GET", path = "/api/config/paths")]
-pub(crate) async fn get_config_paths(
-    State(state): State<AppState>,
-) -> Json<api_types::ConfigPathsResponse> {
-    let config = state.settings.load_config();
-    let active_paths = state.runtime_paths.clone();
-    let configured_paths = captain::resolve_captain_runtime_paths(&config);
-    Json(api_types::ConfigPathsResponse {
-        data_dir: global_infra::paths::data_dir()
-            .to_string_lossy()
-            .into_owned(),
-        config_path: settings::get_config_path().to_string_lossy().into_owned(),
-        task_db_path: active_paths.task_db_path.to_string_lossy().into_owned(),
-        worker_health_path: active_paths
-            .worker_health_path
-            .to_string_lossy()
-            .into_owned(),
-        lockfile_path: active_paths.lockfile_path.to_string_lossy().into_owned(),
-        configured_task_db_path: configured_paths.task_db_path.to_string_lossy().into_owned(),
-        configured_worker_health_path: configured_paths
-            .worker_health_path
-            .to_string_lossy()
-            .into_owned(),
-        configured_lockfile_path: configured_paths
-            .lockfile_path
-            .to_string_lossy()
-            .into_owned(),
-        restart_required: active_paths != configured_paths,
-    })
-}
-
 async fn apply_config_outcome(
     state: &AppState,
     committed_config: &settings::Config,
@@ -222,5 +190,50 @@ fn config_error_response(err: settings::ApplyConfigError) -> axum::response::Res
         settings::ApplyConfigError::Internal(err) => {
             crate::response::internal_error(err, "save failed").into_response()
         }
+    }
+}
+
+fn parse_config_status_contents(
+    contents: &str,
+    config_path: &std::path::Path,
+) -> Result<(), settings::ConfigError> {
+    settings::parse_config(contents, config_path).map(|_| ())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_config_status_contents;
+
+    #[test]
+    fn config_status_accepts_config_from_before_default_task_agent() {
+        let contents = r#"{
+          "workspace": "~/.mando/workspace",
+          "ui": { "openAtLogin": false },
+          "features": {
+            "scout": false,
+            "setupDismissed": false,
+            "claudeCodeVerified": true
+          },
+          "channels": { "telegram": { "enabled": false, "owner": "" } },
+          "gateway": { "dashboard": { "host": "127.0.0.1", "port": 18791 } },
+          "captain": {
+            "autoSchedule": true,
+            "autoMerge": false,
+            "maxConcurrentWorkers": null,
+            "tickIntervalS": 30,
+            "tz": "UTC",
+            "defaultTerminalAgent": "claude",
+            "claudeTerminalArgs": "--dangerously-skip-permissions",
+            "codexTerminalArgs": "--sandbox danger-full-access --ask-for-approval never"
+          },
+          "scout": {
+            "interests": { "high": [], "low": [] },
+            "userContext": { "role": "", "knownDomains": [], "explainDomains": [] }
+          },
+          "env": {}
+        }"#;
+
+        parse_config_status_contents(contents, std::path::Path::new("config.json"))
+            .expect("older config should inherit default task agent");
     }
 }

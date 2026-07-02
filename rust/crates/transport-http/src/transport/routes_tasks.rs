@@ -13,6 +13,32 @@ use crate::response::{
 };
 use crate::AppState;
 
+pub(crate) fn task_create_provider_from_terminal(
+    terminal_agent: api_types::TerminalAgent,
+) -> api_types::TaskCreateProvider {
+    match terminal_agent {
+        api_types::TerminalAgent::Claude => api_types::TaskCreateProvider::Claude,
+        api_types::TerminalAgent::Codex => api_types::TaskCreateProvider::Codex,
+    }
+}
+
+pub(crate) fn default_task_provider(config: &settings::Config) -> api_types::TaskProvider {
+    task_create_provider_from_terminal(config.captain.default_task_agent).as_task_provider()
+}
+
+fn validate_task_create_planning_provider(
+    planning: Option<&str>,
+    provider: api_types::TaskProvider,
+) -> Result<(), ApiError> {
+    if planning == Some("true") && provider == api_types::TaskProvider::Codex {
+        return Err(error_response(
+            StatusCode::BAD_REQUEST,
+            "planning mode currently requires Claude Code",
+        ));
+    }
+    Ok(())
+}
+
 /// Extract a text field from a multipart part, returning `Ok(None)` if empty.
 async fn field_text(field: Field<'_>) -> Result<Option<String>, ApiError> {
     let val = field
@@ -28,6 +54,7 @@ struct TaskAddMultipartFields {
     repo: Option<String>,
     context: Option<String>,
     provider: Option<String>,
+    use_glm_worker: Option<String>,
     plan: Option<String>,
     no_pr: Option<String>,
     no_auto_merge: Option<String>,
@@ -57,6 +84,10 @@ async fn extract_task_add_multipart(
                 }
                 "context" => fields.context = field_text(field).await?.or(fields.context.take()),
                 "provider" => fields.provider = field_text(field).await?.or(fields.provider.take()),
+                "use_glm_worker" => {
+                    fields.use_glm_worker =
+                        field_text(field).await?.or(fields.use_glm_worker.take())
+                }
                 "plan" => fields.plan = field_text(field).await?.or(fields.plan.take()),
                 "no_pr" => fields.no_pr = field_text(field).await?.or(fields.no_pr.take()),
                 "no_auto_merge" => {
@@ -127,6 +158,7 @@ pub(crate) async fn post_task_add(
         repo,
         context,
         provider,
+        use_glm_worker,
         plan,
         no_pr,
         no_auto_merge,
@@ -141,23 +173,29 @@ pub(crate) async fn post_task_add(
     }
 
     let config = state.settings.load_config();
+    let default_provider = task_create_provider_from_terminal(config.captain.default_task_agent);
     let provider = match provider
         .as_deref()
-        .unwrap_or(api_types::TaskProvider::Claude.as_str())
-        .parse::<api_types::TaskProvider>()
+        .unwrap_or(default_provider.as_str())
+        .parse::<api_types::TaskCreateProvider>()
     {
-        Ok(provider) => provider,
+        Ok(provider) => provider.as_task_provider(),
         Err(e) => {
             crate::image_upload::cleanup_saved_images(&saved_images).await;
             return Err(error_response(StatusCode::BAD_REQUEST, &e));
         }
     };
-    if planning.as_deref() == Some("true") && provider == api_types::TaskProvider::Codex {
+    // GLM routing is opt-in: an explicit "true"/"false" wins (the Electron task
+    // creator always sends one), and an omitted field falls back to the
+    // configured `captain.defaultGlmImplementation` rather than forcing GLM on.
+    let use_glm_worker = match use_glm_worker.as_deref() {
+        Some("true") => true,
+        Some("false") => false,
+        _ => config.captain.default_glm_implementation,
+    };
+    if let Err(err) = validate_task_create_planning_provider(planning.as_deref(), provider) {
         crate::image_upload::cleanup_saved_images(&saved_images).await;
-        return Err(error_response(
-            StatusCode::BAD_REQUEST,
-            "planning mode currently requires Claude Code provider",
-        ));
+        return Err(err);
     }
 
     // Validate project name before calling add_task so the client gets a 400
@@ -187,7 +225,13 @@ pub(crate) async fn post_task_add(
     let created = {
         let created = match state
             .captain
-            .add_task(title.trim(), repo.as_deref(), source.as_deref(), provider)
+            .add_task(
+                title.trim(),
+                repo.as_deref(),
+                source.as_deref(),
+                provider,
+                use_glm_worker,
+            )
             .await
             .map_err(map_task_create_error)
         {
@@ -442,6 +486,47 @@ pub(crate) async fn patch_task_item(
 mod tests {
     use super::*;
     use global_bus::{BusPayload, EventBus};
+
+    #[test]
+    fn default_task_provider_honors_codex_setting() {
+        let mut config = settings::Config::default();
+        config.captain.default_task_agent = api_types::TerminalAgent::Codex;
+
+        assert_eq!(
+            default_task_provider(&config),
+            api_types::TaskProvider::Codex
+        );
+    }
+
+    #[test]
+    fn default_task_provider_honors_claude_setting() {
+        let mut config = settings::Config::default();
+        config.captain.default_task_agent = api_types::TerminalAgent::Claude;
+
+        assert_eq!(
+            default_task_provider(&config),
+            api_types::TaskProvider::Claude
+        );
+    }
+
+    #[test]
+    fn planning_mode_rejects_codex_task_provider() {
+        let err =
+            validate_task_create_planning_provider(Some("true"), api_types::TaskProvider::Codex)
+                .unwrap_err();
+
+        assert_eq!(err.0, StatusCode::BAD_REQUEST);
+        assert_eq!(
+            err.1 .0.error,
+            "planning mode currently requires Claude Code"
+        );
+    }
+
+    #[test]
+    fn planning_mode_accepts_claude_task_provider() {
+        validate_task_create_planning_provider(Some("true"), api_types::TaskProvider::Claude)
+            .unwrap();
+    }
 
     #[tokio::test]
     async fn emit_task_delete_events_sends_tasks_and_workbenches_resync() {

@@ -1,8 +1,8 @@
 import React, { useRef } from 'react';
 import { ImagePlus, Plus } from 'lucide-react';
-import type { TaskProvider } from '#renderer/global/types';
 import { taskProviderLabel } from '#renderer/global/service/providerDisplay';
 import { TaskCreateOptionSwitchRow } from '#renderer/domains/captain/ui/TaskComposerControls/TaskCreateOptionSwitchRow';
+import type { PremiumTaskProvider } from '#renderer/domains/captain/runtime/useInlineTaskCreate.helpers';
 import { Button } from '#renderer/global/ui/primitives/button';
 import {
   DropdownMenu,
@@ -16,10 +16,13 @@ import {
 } from '#renderer/global/ui/primitives/dropdown-menu';
 
 interface TaskCreateOptionsMenuProps {
-  provider: TaskProvider;
-  onProviderChange: (provider: TaskProvider) => void;
+  provider: PremiumTaskProvider;
+  onProviderChange: (provider: PremiumTaskProvider) => void;
   planning: boolean;
   onPlanningChange: (planning: boolean) => void;
+  useGlmWorker: boolean;
+  defaultGlmWorker: boolean;
+  onUseGlmWorkerChange: (useGlmWorker: boolean) => void;
   globalAutoMerge: boolean;
   noAutoMerge: boolean;
   onNoAutoMergeChange: (noAutoMerge: boolean) => void;
@@ -31,14 +34,20 @@ export function TaskCreateOptionsMenu({
   onProviderChange,
   planning,
   onPlanningChange,
+  useGlmWorker,
+  defaultGlmWorker,
+  onUseGlmWorkerChange,
   globalAutoMerge,
   noAutoMerge,
   onNoAutoMergeChange,
   onImageSelect,
 }: TaskCreateOptionsMenuProps): React.ReactElement {
   const fileRef = useRef<HTMLInputElement>(null);
-  const optionsActive = planning || noAutoMerge || provider !== 'codex';
-  const providers: TaskProvider[] = ['codex', 'claude'];
+  // "Active" means any non-default choice — including turning GLM off when the
+  // configured default is on, so the comparison is against `defaultGlmWorker`.
+  const optionsActive =
+    planning || noAutoMerge || provider !== 'codex' || useGlmWorker !== defaultGlmWorker;
+  const providers: PremiumTaskProvider[] = ['codex', 'claude'];
 
   return (
     <>
@@ -66,7 +75,7 @@ export function TaskCreateOptionsMenu({
             <Plus size={16} />
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent side="top" align="start" className="min-w-[210px]">
+        <DropdownMenuContent side="top" align="start" className="min-w-[256px]">
           <DropdownMenuItem
             onSelect={(event) => {
               event.preventDefault();
@@ -78,36 +87,39 @@ export function TaskCreateOptionsMenu({
           </DropdownMenuItem>
 
           <DropdownMenuSeparator />
-          <DropdownMenuLabel className="text-caption uppercase tracking-[0.06em] text-text-3">
-            Provider
-          </DropdownMenuLabel>
+          <DropdownMenuLabel className="text-label text-text-3">Agent</DropdownMenuLabel>
           <DropdownMenuRadioGroup
             value={provider}
-            onValueChange={(value) => onProviderChange(value as TaskProvider)}
+            onValueChange={(value) => onProviderChange(value as PremiumTaskProvider)}
           >
             {providers.map((item) => (
               <DropdownMenuRadioItem
                 key={item}
                 value={item}
-                disabled={planning && item === 'codex'}
+                onSelect={(event) => event.preventDefault()}
               >
                 {taskProviderLabel(item)}
               </DropdownMenuRadioItem>
             ))}
           </DropdownMenuRadioGroup>
-          {planning && (
-            <div className="px-2 pb-1 text-caption text-text-3">Planning uses Claude Code.</div>
-          )}
+          <TaskCreateOptionSwitchRow
+            label="GLM worker"
+            description="Build the code with Z.ai GLM 5.2"
+            checked={useGlmWorker}
+            onCheckedChange={onUseGlmWorkerChange}
+          />
 
           <DropdownMenuSeparator />
           <TaskCreateOptionSwitchRow
-            label="Plan mode"
+            label="Plan first"
+            description="Review the plan before any code"
             checked={planning}
             onCheckedChange={onPlanningChange}
           />
           {globalAutoMerge && (
             <TaskCreateOptionSwitchRow
               label="Auto-merge"
+              description="Merge high-confidence PRs automatically"
               checked={!noAutoMerge}
               onCheckedChange={(checked) => onNoAutoMergeChange(!checked)}
             />

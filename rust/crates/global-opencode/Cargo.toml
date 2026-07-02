@@ -1,0 +1,16 @@
+[package]
+name = "global-opencode"
+version.workspace = true
+edition = "2021"
+description = "OpenCode CLI provider boundary for Mando agent stages"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+
+[dependencies]
+global-types = { path = "../global-types" }
+global-claude = { path = "../global-claude" }
+tokio.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+libc = "0.2"

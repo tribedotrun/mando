@@ -7,7 +7,7 @@ use futures::FutureExt;
 use settings::CaptainWorkflow;
 use tracing::{info, warn};
 
-use crate::{ItemStatus, Task, TimelineEventPayload};
+use crate::{Task, TimelineEventPayload};
 
 use super::captain_merge::merge_json_schema;
 use super::notify::Notifier;
@@ -36,7 +36,6 @@ pub(super) async fn spawn_claude_merge(
     // Persist status + timeline atomically so both survive tick interruption.
     // Items are already CaptainMerging when spawn_merge is called (categorized
     // in poll_merging_items). The guard ensures concurrent ticks don't double-spawn.
-    let prev_status = ItemStatus::CaptainMerging;
     let title = global_infra::html::escape_html(&item.title);
     let event = crate::TimelineEvent {
         timestamp: global_types::now_rfc3339(),
@@ -47,14 +46,7 @@ pub(super) async fn spawn_claude_merge(
             pr: pr_url.to_string(),
         },
     };
-    match crate::io::queries::tasks::persist_status_transition(
-        pool,
-        item,
-        prev_status.as_str(),
-        &event,
-    )
-    .await
-    {
+    match crate::io::queries::tasks::persist_merge_spawn(pool, item, &event).await {
         Ok(true) => {
             notifier
                 .normal(&format!(
@@ -116,6 +108,7 @@ pub(super) async fn spawn_claude_merge(
                 &pool,
                 &session_id,
                 &cwd,
+                &captain_model,
                 "captain-merge-async",
                 "",
                 Some(task_id_num),

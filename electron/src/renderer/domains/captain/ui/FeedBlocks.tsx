@@ -61,7 +61,7 @@ export function FeedBlocks({
       }
       if (payload.event_type === 'plan_completed') {
         return task.status === 'plan-ready' ? (
-          <ReadyPlanBlock event={event} taskId={task.id} taskContext={task.context ?? ''} />
+          <ReadyPlanBlock event={event} taskId={task.id} />
         ) : (
           <CompletedPlanBlock event={event} />
         );

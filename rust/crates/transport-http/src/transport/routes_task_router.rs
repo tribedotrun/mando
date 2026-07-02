@@ -84,6 +84,15 @@ pub(crate) fn task_routes() -> ApiRouter<AppState> {
     );
     let router = crate::api_route!(
         router,
+        POST "/api/tasks/implement",
+        transport = Json,
+        auth = Protected,
+        handler = routes_task_actions::post_task_implement,
+        body = api_types::TaskImplementRequest,
+        res = api_types::BoolOkResponse
+    );
+    let router = crate::api_route!(
+        router,
         POST "/api/tasks/queue",
         transport = Json,
         auth = Protected,

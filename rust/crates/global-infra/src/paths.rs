@@ -72,6 +72,18 @@ pub fn codex_derived_stream_meta_path_for_session(session_id: &str) -> PathBuf {
     codex_derived_streams_dir().join(format!("{session_id}.meta.json"))
 }
 
+pub fn opencode_streams_dir() -> PathBuf {
+    session_jsonl_provider_dir("opencode")
+}
+
+pub fn opencode_stream_path_for_session(session_id: &str) -> PathBuf {
+    opencode_streams_dir().join(format!("{session_id}.jsonl"))
+}
+
+pub fn opencode_stream_meta_path_for_session(session_id: &str) -> PathBuf {
+    opencode_streams_dir().join(format!("{session_id}.meta.json"))
+}
+
 pub fn stream_path_for_session(session_id: &str) -> PathBuf {
     cc_streams_dir().join(format!("{session_id}.jsonl"))
 }

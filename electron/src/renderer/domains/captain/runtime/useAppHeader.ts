@@ -1,10 +1,6 @@
 import React, { useRef } from 'react';
 import { useRouterState } from '@tanstack/react-router';
-import {
-  useWorkers,
-  useResumeRateLimited,
-  useTaskTimelineData,
-} from '#renderer/domains/captain/runtime/hooks';
+import { useWorkers, useTaskTimelineData } from '#renderer/domains/captain/runtime/hooks';
 import { buildSessionsFromTimeline } from '#renderer/domains/sessions';
 import { useMountEffect } from '#renderer/global/runtime/useMountEffect';
 import { isRateLimited } from '#renderer/global/service/utils';
@@ -18,8 +14,6 @@ export interface AppHeaderData {
   isTerminalTab: boolean;
   pageTitle: string;
   sessions: ReturnType<typeof buildSessionsFromTimeline>;
-  rateLimitSecs: number;
-  resumeMut: ReturnType<typeof useResumeRateLimited>;
   taskIsRateLimited: boolean;
 }
 
@@ -62,7 +56,6 @@ export function useAppHeader(): AppHeaderData {
   // Rate-limit resume for task detail header
   const { data: workersData } = useWorkers();
   const rateLimitSecs = workersData?.rate_limit_remaining_secs ?? 0;
-  const resumeMut = useResumeRateLimited();
   const taskIsRateLimited = ctx?.task ? isRateLimited(ctx.task, rateLimitSecs) : false;
 
   const pageTitle = getPageTitle(pathname);
@@ -73,8 +66,6 @@ export function useAppHeader(): AppHeaderData {
     isTerminalTab,
     pageTitle,
     sessions,
-    rateLimitSecs,
-    resumeMut,
     taskIsRateLimited,
   };
 }

@@ -169,13 +169,14 @@ fn save(map: &PidMap) -> Result<()> {
 /// later cleanup pass can detect PID reuse. Fingerprint capture runs
 /// outside the registry lock so we don't block other callers while
 /// `ps` executes.
-pub fn register(session_id: &str, pid: Pid) -> Result<()> {
+pub fn register(session_id: &str, pid: Pid) -> Result<PidEntry> {
     let started_at = capture_start_fingerprint(pid);
     let entry = PidEntry { pid, started_at };
     let _guard = acquire_lock()?;
     let mut map = load()?;
-    map.insert(session_id.to_string(), entry);
-    save(&map)
+    map.insert(session_id.to_string(), entry.clone());
+    save(&map)?;
+    Ok(entry)
 }
 
 /// Remove a session from the registry.
@@ -186,6 +187,34 @@ pub fn unregister(session_id: &str) -> Result<()> {
         save(&map)?;
     }
     Ok(())
+}
+
+/// Remove a session from the registry only if it still points at the exact
+/// process identity captured at registration. Returns `true` when an entry was
+/// removed. Prefer this over PID-only removal for watcher/finalizer cleanup
+/// where PID reuse can race a resumed process.
+pub fn unregister_entry_if_current(session_id: &str, expected: &PidEntry) -> Result<bool> {
+    let _guard = acquire_lock()?;
+    let mut map = load()?;
+    if map.get(session_id).is_some_and(|entry| entry == expected) {
+        map.remove(session_id);
+        save(&map)?;
+        return Ok(true);
+    }
+    Ok(false)
+}
+
+/// Look up the full process identity for a session. No lock needed for a single
+/// read, but the view may race with a concurrent writer; callers should treat
+/// the result as advisory.
+pub fn get_entry(session_id: &str) -> Option<PidEntry> {
+    match load() {
+        Ok(map) => map.get(session_id).cloned(),
+        Err(e) => {
+            tracing::error!(module = "pid_registry", session_id, error = %e, "pid_registry load failed");
+            None
+        }
+    }
 }
 
 /// Look up the PID for a session. No lock needed for a single read, but the
@@ -410,6 +439,37 @@ mod tests {
         map.insert("s1".into(), entry(1234));
         map.remove("s1");
         assert!(!map.contains_key("s1"));
+    }
+
+    #[test]
+    fn unregister_if_current_keeps_replacement_via_map() {
+        let mut map = PidMap::new();
+        map.insert("s1".into(), entry(2000));
+        if map
+            .get("s1")
+            .is_some_and(|entry| entry.pid == Pid::new(1000))
+        {
+            map.remove("s1");
+        }
+        assert_eq!(map.get("s1").map(|e| e.pid), Some(Pid::new(2000)));
+    }
+
+    #[test]
+    fn entry_identity_detects_same_pid_reuse_via_map() {
+        let mut map = PidMap::new();
+        let current = PidEntry {
+            pid: Pid::new(2000),
+            started_at: "new-process-start".into(),
+        };
+        let stale = PidEntry {
+            pid: Pid::new(2000),
+            started_at: "old-process-start".into(),
+        };
+        map.insert("s1".into(), current.clone());
+        if map.get("s1").is_some_and(|entry| entry == &stale) {
+            map.remove("s1");
+        }
+        assert_eq!(map.get("s1"), Some(&current));
     }
 
     #[test]

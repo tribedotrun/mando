@@ -11,7 +11,9 @@ export const DEFAULT_WORKSPACE = '~/.mando/workspace';
 export const DEFAULT_DASHBOARD_HOST = '127.0.0.1';
 export const DEFAULT_DASHBOARD_PORT = 18791;
 export const DEFAULT_TICK_INTERVAL_S = 30;
+export const DEFAULT_TASK_AGENT = 'codex';
 export const DEFAULT_TERMINAL_AGENT = 'claude';
+export const DEFAULT_GLM_IMPLEMENTATION = false;
 export const DEFAULT_CLAUDE_TERMINAL_ARGS = '--dangerously-skip-permissions';
 export const DEFAULT_CODEX_TERMINAL_ARGS = '--sandbox danger-full-access --ask-for-approval never';
 
@@ -119,7 +121,10 @@ export function toWireConfig(config: RendererMandoConfig): WireMandoConfig {
       maxConcurrentWorkers: config.captain?.maxConcurrentWorkers ?? null,
       tickIntervalS: config.captain?.tickIntervalS ?? DEFAULT_TICK_INTERVAL_S,
       tz: config.captain?.tz ?? defaultTimeZone(),
+      defaultTaskAgent: config.captain?.defaultTaskAgent ?? DEFAULT_TASK_AGENT,
       defaultTerminalAgent: config.captain?.defaultTerminalAgent ?? DEFAULT_TERMINAL_AGENT,
+      defaultGlmImplementation:
+        config.captain?.defaultGlmImplementation ?? DEFAULT_GLM_IMPLEMENTATION,
       claudeTerminalArgs: config.captain?.claudeTerminalArgs ?? DEFAULT_CLAUDE_TERMINAL_ARGS,
       codexTerminalArgs: config.captain?.codexTerminalArgs ?? DEFAULT_CODEX_TERMINAL_ARGS,
       projects: Object.fromEntries(
@@ -186,7 +191,9 @@ export function fromWireConfig(config: WireMandoConfig): RendererMandoConfig {
           maxConcurrentWorkers: config.captain.maxConcurrentWorkers ?? undefined,
           tickIntervalS: config.captain.tickIntervalS ?? undefined,
           tz: config.captain.tz || undefined,
+          defaultTaskAgent: fromWireTerminalAgent(config.captain.defaultTaskAgent),
           defaultTerminalAgent: fromWireTerminalAgent(config.captain.defaultTerminalAgent),
+          defaultGlmImplementation: config.captain.defaultGlmImplementation ?? undefined,
           claudeTerminalArgs: config.captain.claudeTerminalArgs || undefined,
           codexTerminalArgs: config.captain.codexTerminalArgs || undefined,
           projects: config.captain.projects

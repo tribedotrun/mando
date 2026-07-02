@@ -84,6 +84,7 @@ export type {
   SystemLocalCommandOutputEvent,
   SystemHookEvent,
   SystemRateLimitEvent,
+  SystemThinkingTokensEvent,
   HookPhase,
   AssistantEvent,
   AssistantToolUseBlock,

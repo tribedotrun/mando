@@ -225,8 +225,8 @@ export function useTaskSetIsBugFix() {
 export function useStartImplementation() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (vars: { id: number; context: string }) =>
-      toReactQuery(startImplementation(vars.id, vars.context)),
+    mutationFn: (vars: { id: number; message: string }) =>
+      toReactQuery(startImplementation(vars.id, vars.message)),
     onMutate: async (vars) => {
       await qc.cancelQueries({ queryKey: queryKeys.tasks.list() });
       const prev = qc.getQueryData<TaskListResponse>(queryKeys.tasks.list());
@@ -238,6 +238,10 @@ export function useStartImplementation() {
     onError: (err, _vars, context) => {
       if (context?.prev) qc.setQueryData(queryKeys.tasks.list(), context.prev);
       log.error('useStartImplementation', err);
+    },
+    onSettled: (_data, err, vars) => {
+      if (err) log.warn('useStartImplementation settled with error', err);
+      invalidateTaskDetail(qc, vars.id);
     },
   });
 }

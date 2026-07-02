@@ -5,43 +5,6 @@ use time::OffsetDateTime;
 
 use super::CaptainRuntime;
 
-fn layout_dir() -> PathBuf {
-    global_types::data_dir().join("workbenches")
-}
-
-fn layout_path(workbench_id: i64) -> PathBuf {
-    layout_dir().join(format!("{workbench_id}.json"))
-}
-
-fn read_layout(workbench_id: i64) -> anyhow::Result<crate::WorkbenchLayout> {
-    let path = layout_path(workbench_id);
-    match std::fs::read_to_string(&path) {
-        Ok(contents) => Ok(serde_json::from_str(&contents)?),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(crate::WorkbenchLayout::new()),
-        Err(err) => Err(err.into()),
-    }
-}
-
-#[cfg(test)]
-fn merge_layout_patch(layout: &mut crate::WorkbenchLayout, patch: &serde_json::Value) {
-    if let Some(active_panel) = patch.get("activePanel").and_then(|value| value.as_str()) {
-        layout.active_panel = Some(active_panel.to_string());
-    }
-    if let Some(order) = patch.get("panelOrder").and_then(|value| value.as_array()) {
-        layout.panel_order = order
-            .iter()
-            .filter_map(|value| value.as_str().map(String::from))
-            .collect();
-    }
-    if let Some(panels) = patch.get("panels").and_then(|value| value.as_object()) {
-        for (key, value) in panels {
-            if let Ok(panel) = serde_json::from_value::<crate::PanelState>(value.clone()) {
-                layout.panels.insert(key.clone(), panel);
-            }
-        }
-    }
-}
-
 fn repo_dir_name(project_path: &Path) -> String {
     project_path
         .file_name()
@@ -147,19 +110,6 @@ impl CaptainRuntime {
         }
 
         Ok(crate::WorkbenchPatchOutcome::Updated(updated))
-    }
-
-    #[tracing::instrument(skip_all)]
-    pub async fn load_workbench_layout(
-        &self,
-        id: i64,
-    ) -> anyhow::Result<Option<crate::WorkbenchLayout>> {
-        let Some(_) = crate::io::queries::workbenches::find_by_id(&self.pool, id).await? else {
-            return Ok(None);
-        };
-
-        let layout = tokio::task::spawn_blocking(move || read_layout(id)).await??;
-        Ok(Some(layout))
     }
 
     #[tracing::instrument(skip_all)]
@@ -466,36 +416,5 @@ impl CaptainRuntime {
         }
 
         Ok(report)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use serde_json::json;
-
-    use super::merge_layout_patch;
-
-    #[test]
-    fn merge_layout_patch_updates_known_fields_only() {
-        let mut layout = crate::WorkbenchLayout::new();
-        merge_layout_patch(
-            &mut layout,
-            &json!({
-                "activePanel": "p2",
-                "panelOrder": ["p2", "p1"],
-                "panels": {
-                    "p2": { "agent": "codex", "createdAt": 42 },
-                    "bad": { "agent": true }
-                }
-            }),
-        );
-
-        assert_eq!(layout.active_panel.as_deref(), Some("p2"));
-        assert_eq!(layout.panel_order, vec!["p2".to_string(), "p1".to_string()]);
-        assert_eq!(
-            layout.panels.get("p2").map(|panel| panel.agent.as_str()),
-            Some("codex")
-        );
-        assert!(!layout.panels.contains_key("bad"));
     }
 }

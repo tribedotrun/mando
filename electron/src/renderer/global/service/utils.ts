@@ -105,14 +105,6 @@ export function localizeTimestamp(ts: string): string {
   return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 
-/** Replace all ISO timestamp patterns in arbitrary text with localized times. */
-export function localizeMeta(text: string): string {
-  return text.replace(
-    /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?/g,
-    (match) => localizeTimestamp(match),
-  );
-}
-
 /** Human-readable relative time from an ISO timestamp (e.g. "3m ago", "in 2h"). */
 export function relativeTime(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
@@ -229,27 +221,9 @@ export function pct(completed: number, total: number): number {
   return Math.round((completed / total) * 100);
 }
 
-/** Format worker runtime from an ISO start timestamp (e.g. "3h 12m"). */
-export function fmtRuntime(startedAt?: string): string {
-  if (!startedAt) return '-';
-  const start = new Date(startedAt).getTime();
-  if (Number.isNaN(start)) return '-';
-  const diffMs = Date.now() - start;
-  if (diffMs < 0) return '-';
-  const totalMin = Math.floor(diffMs / 60_000);
-  const hours = Math.floor(totalMin / 60);
-  const minutes = totalMin % 60;
-  return hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
-}
-
 /** Compute textarea row count for bulk mode. */
 export function bulkTextareaRows(lineCount: number): number {
   return Math.max(6, Math.min(12, lineCount));
-}
-
-/** Ceil-based minutes remaining (e.g. rate limit countdown). */
-export function ceilMinutes(secs: number): number {
-  return Math.ceil(secs / 60);
 }
 
 const RATE_LIMITED_STATUSES: readonly ItemStatus[] = Object.freeze([

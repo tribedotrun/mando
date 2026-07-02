@@ -30,21 +30,15 @@ pub struct LifecycleResult {
 /// into its Rework arm, which does `git reset --hard && git clean -fd &&
 /// git checkout -B <new_branch> origin/main` to wipe broken-session state
 /// in place without losing the worktree binding.
-#[allow(clippy::too_many_arguments)]
 async fn clean_and_spawn_fresh(
     item: &mut Task,
-    slug: &str,
     project_config: &ProjectConfig,
-    config: &Config,
     workflow: &CaptainWorkflow,
-    _wt_path: &str,
     pool: &sqlx::SqlitePool,
 ) -> Result<LifecycleResult> {
     item.branch = None;
     item.worker_seq += 1;
-    let result =
-        super::agent_runtime::spawn_worker(config, slug, project_config, item, workflow, pool)
-            .await?;
+    let result = super::agent_runtime::spawn_worker(project_config, item, workflow, pool).await?;
     Ok(LifecycleResult {
         session_name: result.session_name,
         session_id: result.session_id,
@@ -63,8 +57,7 @@ pub(crate) async fn reopen_worker(
     workflow: &CaptainWorkflow,
     pool: &sqlx::SqlitePool,
 ) -> Result<LifecycleResult> {
-    let (slug, project_config) = resolve_project(item, config)?;
-    let slug = slug.to_string();
+    let (_, project_config) = resolve_project(item, config)?;
     let wt_path = item
         .worktree
         .clone()
@@ -91,12 +84,15 @@ pub(crate) async fn reopen_worker(
             wt_path
         );
     }
+    let fallback_provider = super::agent_runtime::implementation_provider(item, workflow);
+    let worker_provider =
+        super::agent_runtime::persisted_session_provider(pool, &cc_sid, fallback_provider).await;
 
     // Stop any existing provider-owned worker process before resuming.
-    if let Err(e) = super::agent_runtime::terminate_worker_process(item.provider, &cc_sid).await {
+    if let Err(e) = super::agent_runtime::terminate_worker_process(worker_provider, &cc_sid).await {
         tracing::warn!(
             module = "captain",
-            provider = %item.provider.as_str(),
+            provider = %worker_provider.as_str(),
             session_id = %cc_sid,
             error = %e,
             "failed to terminate existing worker for reopen"
@@ -144,34 +140,25 @@ pub(crate) async fn reopen_worker(
         .map_err(|e| anyhow::anyhow!(e))?;
 
     // Record stream file size before resume for zero-byte detection.
-    let stream_path = super::agent_session_result::stream_path(item.provider, &cc_sid);
+    let stream_path = super::agent_session_result::stream_path(worker_provider, &cc_sid);
     let stream_size_before = std::fs::metadata(&stream_path)
         .map(|m| m.len())
         .unwrap_or(0);
 
     if let Some(reason) = super::agent_runtime::worker_resume_replacement_reason(
-        item.provider,
+        worker_provider,
         &stream_path,
         workflow,
     ) {
         tracing::warn!(
             module = "lifecycle",
             worker = %session_name,
-            provider = %item.provider,
+            provider = %worker_provider,
             cc_sid,
             reason = %reason,
             "resume session is not reusable — spawning fresh"
         );
-        return clean_and_spawn_fresh(
-            item,
-            &slug,
-            project_config,
-            config,
-            workflow,
-            &wt_path,
-            pool,
-        )
-        .await;
+        return clean_and_spawn_fresh(item, project_config, workflow, pool).await;
     }
 
     match super::agent_runtime::resume_worker(

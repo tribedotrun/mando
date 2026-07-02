@@ -1,16 +1,22 @@
 #!/usr/bin/env python3
+# Twin copies: devtools/ai-kit/skills/x-diagram/fix-diagram.py and bundled-skills/mando-pr-summary/fix-diagram.py — keep in sync.
 """
 Fix right-border alignment in ASCII box diagrams.
 Ensures every │ line within a ┌─┐ container aligns with the ┐ column.
 
 Approach:
 1. Find all boxes (┌─┐ ... └─┘ pairs) and their column boundaries.
-2. Process innermost boxes first (so inner borders are fixed before outer).
-3. For each content line, find the misplaced │ border and relocate it.
-4. After every single-box fix, re-scan box coordinates from the current
-   line buffer. Fixing one sibling can shift the cached coordinates of
-   another; re-scanning each pass means we always work from fresh
-   positions instead of stale ones.
+2. Fix one innermost still-broken box per pass, then re-scan box coordinates
+   from the current line buffer. Fixing one sibling can shift the cached
+   coordinates of another; re-scanning each pass means we always work from
+   fresh positions instead of stale ones.
+3. Pre-scan each box: if any content border is past the ┐ column, expand the
+   header first, then re-scan.
+4. For each content line, find the misplaced │ border and relocate it.
+5. Exclude only PARENT and NESTED box borders during search — not siblings.
+6. Interior │ characters (state machine arrows) vs borders:
+   - Within BORDER_TOLERANCE of expected position: accepted (probably border)
+   - Far away: must pass is_likely_border (no text content after it)
 
 Shift handling:
 - Border too far RIGHT (content too wide): don't compensate — trimming content
@@ -18,14 +24,16 @@ Shift handling:
 - Border too far LEFT (content too narrow): absorb leading spaces from "after"
   to prevent line growth that would push subsequent borders right.
 
-Usage: python3 fix-diagram.py <<'EOF'
-       <diagram>
-       EOF
+Usage: echo '<diagram>' | python3 fix-diagram.py
    or: python3 fix-diagram.py < diagram.txt
 """
 
 import re
 import sys
+
+# A │ within this many chars of the expected right_col is accepted without
+# content checking. Beyond this distance, is_likely_border is required.
+BORDER_TOLERANCE = 3
 
 
 def find_matching_close(lines, start, left_col):
@@ -49,6 +57,9 @@ def build_exclude_cols(box_idx, top, bot, left_col, right_col, boxes):
     Excludes borders of:
     - PARENT boxes (contain this box) — prevents grabbing outer │ for inner box
     - NESTED boxes (inside this box) — already fixed, their borders are correct
+
+    Does NOT exclude SIBLING boxes — their borders may be at cascaded positions
+    that overlap with our misplaced border's actual location.
     """
     exclude = set()
     for bidx2, (t2, b2, l2, r2) in enumerate(boxes):
@@ -60,6 +71,52 @@ def build_exclude_cols(box_idx, top, bot, left_col, right_col, boxes):
             exclude.add(l2)
             exclude.add(r2)
     return exclude
+
+
+def is_likely_border(line, pos):
+    """Check if │ at pos looks like a right border, not interior content.
+
+    A right-border │ has only whitespace and box-drawing characters after it.
+    An interior │ (state machine arrow, tree branch) has text content after it.
+    """
+    BOX_CHARS = set("│┌┐└┘─┼┤├┬┴")
+    for j in range(pos + 1, len(line)):
+        ch = line[j]
+        if ch == " ":
+            continue
+        if ch in BOX_CHARS:
+            continue
+        return False
+    return True
+
+
+def find_right_border(line, left_col, right_col, exclude_cols):
+    """Search outward from right_col for a misplaced │ border.
+
+    Within BORDER_TOLERANCE of right_col, any │ (not excluded) is accepted.
+    Beyond that, is_likely_border is required to avoid grabbing interior arrows.
+    Returns the column position, or None if not found.
+    """
+    for offset in range(1, len(line)):
+        for candidate in [right_col - offset, right_col + offset]:
+            if candidate <= left_col or candidate >= len(line):
+                continue
+            if line[candidate] != "│" or candidate in exclude_cols:
+                continue
+            if (
+                abs(candidate - right_col) <= BORDER_TOLERANCE
+                or is_likely_border(line, candidate)
+            ):
+                return candidate
+    return None
+
+
+def expand_header(lines, top, left_col, old_right, new_right):
+    """Expand ┌─┐ header from old_right to new_right."""
+    header = lines[top]
+    new_inner_w = new_right - left_col - 1
+    after = header[old_right + 1 :] if old_right + 1 < len(header) else ""
+    lines[top] = header[:left_col] + "┌" + "─" * new_inner_w + "┐" + after
 
 
 def fix_box_content(lines, top, bot, left_col, right_col, exclude_cols):
@@ -82,17 +139,7 @@ def fix_box_content(lines, top, bot, left_col, right_col, exclude_cols):
             lines[k] = line
             continue
 
-        # Search outward from right_col for the misplaced right border
-        misplaced = None
-        for offset in range(1, len(line)):
-            for candidate in [right_col - offset, right_col + offset]:
-                if candidate <= left_col or candidate >= len(line):
-                    continue
-                if line[candidate] == "│" and candidate not in exclude_cols:
-                    misplaced = candidate
-                    break
-            if misplaced is not None:
-                break
+        misplaced = find_right_border(line, left_col, right_col, exclude_cols)
 
         if misplaced is not None:
             # Relocate border from misplaced to right_col
@@ -107,7 +154,7 @@ def fix_box_content(lines, top, bot, left_col, right_col, exclude_cols):
 
             if misplaced > right_col:
                 # Border was too far right (content too wide).
-                # Trimming content naturally shifts everything left — no compensation.
+                # Trimming content naturally shifts everything left - no compensation.
                 after = line[misplaced + 1 :]
             else:
                 # Border was too far left (content too narrow).
@@ -122,7 +169,7 @@ def fix_box_content(lines, top, bot, left_col, right_col, exclude_cols):
 
             lines[k] = line[: left_col + 1] + padded + "│" + after
         else:
-            # No misplaced border found — insert │ at right_col
+            # No misplaced border found - insert │ at right_col
             before_content = line[left_col + 1 : right_col]
             after_content = line[right_col + 1 :] if right_col + 1 <= len(line) else ""
 
@@ -163,7 +210,7 @@ def fix_close_line(lines, bot, left_col, right_col):
             break
 
     if close_pos is None:
-        # No ┘ found nearby — insert one at right_col
+        # No ┘ found nearby - insert one at right_col
         lines[bot] = line[:right_col] + "┘" + line[right_col + 1 :]
         return
 
@@ -191,6 +238,75 @@ def fix_close_line(lines, bot, left_col, right_col):
         after = after[idx:]
 
     lines[bot] = before + "└" + inner + "┘" + after
+
+
+def align_interior_verticals(lines, top, bot, left_col, right_col):
+    """Align interior │ that form vertical runs within a box.
+
+    Detects │ characters at ±1 column on adjacent lines (same vertical flow
+    line, slightly misaligned) and aligns them to the majority column by
+    swapping with the adjacent space.
+
+    Uses connected-component analysis: two │ cells are connected if they're
+    on adjacent lines and within ±1 column. This prevents merging unrelated
+    vertical lines that happen to be at similar columns but are separated by
+    blank lines.
+    """
+    # Collect all interior │ positions (excluding box borders)
+    cells = set()
+    for k in range(top + 1, bot):
+        line = lines[k]
+        for j in range(left_col + 1, min(right_col, len(line))):
+            if line[j] == "│":
+                cells.add((k, j))
+
+    if not cells:
+        return
+
+    # Build connected components via BFS
+    visited = set()
+    components = []
+    for cell in cells:
+        if cell in visited:
+            continue
+        component = []
+        queue = [cell]
+        visited.add(cell)
+        while queue:
+            ck, cj = queue.pop(0)
+            component.append((ck, cj))
+            for dk in [-1, 1]:
+                for dj in [-1, 0, 1]:
+                    n = (ck + dk, cj + dj)
+                    if n in cells and n not in visited:
+                        visited.add(n)
+                        queue.append(n)
+        components.append(component)
+
+    # For each component with ±1 column spread, align to majority
+    for component in components:
+        cols = [c for _, c in component]
+        unique_cols = set(cols)
+        if len(unique_cols) <= 1:
+            continue
+        # Only fix ±1 drift - larger spreads are intentional structure
+        if max(unique_cols) - min(unique_cols) > 1:
+            continue
+
+        col_counts = {}
+        for c in cols:
+            col_counts[c] = col_counts.get(c, 0) + 1
+        target = max(col_counts, key=col_counts.get)
+
+        for k, j in component:
+            if j == target:
+                continue
+            line = lines[k]
+            if target < len(line) and line[target] == " ":
+                char_list = list(line)
+                char_list[j] = " "
+                char_list[target] = "│"
+                lines[k] = "".join(char_list)
 
 
 def is_structurally_correct(box, lines):
@@ -252,11 +368,43 @@ def fix_diagram(text):
         unfixed.sort(key=lambda b: b[1] - b[0])
         target = unfixed[0]
         target_idx = boxes.index(target)
+        top, bot, left_col, right_col = target
         exclude_cols = build_exclude_cols(
-            target_idx, target[0], target[1], target[2], target[3], boxes
+            target_idx, top, bot, left_col, right_col, boxes
         )
-        fix_box_content(lines, target[0], target[1], target[2], target[3], exclude_cols)
-        fix_close_line(lines, target[1], target[2], target[3])
+
+        # Pre-scan: check if any content line has a border past right_col.
+        # If so, the ┌─┐ header is too narrow — expand it and re-scan so all
+        # box coordinates (including shifted siblings) are picked up fresh.
+        max_right = right_col
+        for k in range(top + 1, bot):
+            line = lines[k]
+            if left_col >= len(line) or line[left_col] != "│":
+                continue
+            padded = (
+                line
+                if len(line) > right_col
+                else line + " " * (right_col + 1 - len(line))
+            )
+            if padded[right_col] == "│":
+                continue
+            pos = find_right_border(padded, left_col, right_col, exclude_cols)
+            if pos is not None and pos > max_right:
+                max_right = pos
+
+        if max_right > right_col:
+            expand_header(lines, top, left_col, right_col, max_right)
+            continue
+
+        fix_box_content(lines, top, bot, left_col, right_col, exclude_cols)
+        fix_close_line(lines, bot, left_col, right_col)
+
+    # Borders are settled — align interior │ runs (state-machine arrows etc.),
+    # innermost boxes first.
+    for top, bot, left_col, right_col in sorted(
+        _scan_boxes(lines), key=lambda b: b[1] - b[0]
+    ):
+        align_interior_verticals(lines, top, bot, left_col, right_col)
 
     return "\n".join(line.rstrip() for line in lines)
 

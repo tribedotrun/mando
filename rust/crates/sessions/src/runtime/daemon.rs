@@ -282,31 +282,6 @@ impl SessionsRuntime {
     ) -> anyhow::Result<Option<crate::runtime::transcript_access::EventsSnapshot>> {
         (self.events_snapshot)(session_id.to_string()).await
     }
-
-    #[tracing::instrument(skip_all)]
-    pub async fn start_ops(&self, request: SessionStartRequest) -> anyhow::Result<SessionAiResult> {
-        self.start_replacing(request).await
-    }
-
-    #[tracing::instrument(skip_all)]
-    pub async fn send_ops_message(
-        &self,
-        request: SessionFollowUpRequest,
-    ) -> anyhow::Result<Option<SessionAiResult>> {
-        if !self.has_session(&request.key) {
-            return Ok(None);
-        }
-        self.follow_up(request).await.map(Some)
-    }
-
-    #[tracing::instrument(skip_all)]
-    pub async fn end_ops(&self, key: &str) -> bool {
-        if !self.has_session(key) {
-            return false;
-        }
-        self.close_async(key).await;
-        true
-    }
 }
 
 #[cfg(test)]
@@ -419,48 +394,5 @@ mod tests {
                 status: Some("running".into()),
             })
         );
-    }
-
-    #[tokio::test]
-    async fn send_ops_message_returns_none_when_session_missing() {
-        let follow_up_called = Arc::new(AtomicBool::new(false));
-        let close_called = Arc::new(AtomicBool::new(false));
-        let captured_query = Arc::new(Mutex::new(None));
-        let runtime = test_runtime(
-            false,
-            follow_up_called.clone(),
-            close_called,
-            captured_query,
-        );
-
-        let result = runtime
-            .send_ops_message(SessionFollowUpRequest {
-                key: "ops".into(),
-                message: "hello".into(),
-                cwd: PathBuf::from("/tmp"),
-            })
-            .await
-            .unwrap();
-
-        assert!(result.is_none());
-        assert!(!follow_up_called.load(Ordering::Relaxed));
-    }
-
-    #[tokio::test]
-    async fn end_ops_returns_false_when_session_missing() {
-        let follow_up_called = Arc::new(AtomicBool::new(false));
-        let close_called = Arc::new(AtomicBool::new(false));
-        let captured_query = Arc::new(Mutex::new(None));
-        let runtime = test_runtime(
-            false,
-            follow_up_called,
-            close_called.clone(),
-            captured_query,
-        );
-
-        let ended = runtime.end_ops("ops").await;
-
-        assert!(!ended);
-        assert!(!close_called.load(Ordering::Relaxed));
     }
 }

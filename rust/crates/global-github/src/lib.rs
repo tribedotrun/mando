@@ -142,11 +142,6 @@ pub async fn fetch_pr_status(repo: &str, pr_number: &str) -> Result<PrStatus> {
     })
 }
 
-#[allow(dead_code)]
-pub async fn merge_pr(repo: &str, pr_number: &str) -> Result<String> {
-    run_gh(&["pr", "merge", pr_number, "--repo", repo, "--squash"]).await
-}
-
 pub async fn is_pr_merged(repo: &str, pr_number: &str) -> Result<bool> {
     Ok(matches!(pr_state(repo, pr_number).await?, PrState::Merged))
 }

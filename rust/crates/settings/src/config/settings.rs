@@ -143,7 +143,13 @@ pub struct CaptainConfig {
     pub max_concurrent_workers: Option<usize>,
     pub tick_interval_s: u64,
     pub tz: String,
+    pub default_task_agent: TerminalAgent,
     pub default_terminal_agent: TerminalAgent,
+    /// When true, new tasks default to routing their implementation stage to
+    /// the Z.ai GLM worker instead of the task's premium provider. The task
+    /// creator seeds its per-task GLM toggle from this, and task-create
+    /// requests that omit the field fall back to it. Opt-in (default false).
+    pub default_glm_implementation: bool,
     /// Extra CLI arguments appended when spawning Claude Code terminals.
     pub claude_terminal_args: String,
     /// Extra CLI arguments appended when spawning Codex terminals.
@@ -187,7 +193,9 @@ impl Default for CaptainConfig {
             max_concurrent_workers: None,
             tick_interval_s: 30,
             tz: iana_time_zone::get_timezone().unwrap_or_else(|_| "UTC".into()),
+            default_task_agent: TerminalAgent::Codex,
             default_terminal_agent: TerminalAgent::Claude,
+            default_glm_implementation: false,
             claude_terminal_args: "--dangerously-skip-permissions".into(),
             codex_terminal_args: DEFAULT_CODEX_TERMINAL_ARGS.into(),
             projects: HashMap::new(),

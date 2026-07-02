@@ -29,14 +29,6 @@ export function getMainWindow(): BrowserWindow | null {
   return runtime.mainWindow;
 }
 
-export function getRendererUrl(): string | null {
-  return runtime.rendererUrl;
-}
-
-export function getRendererPort(): number {
-  return runtime.rendererPort;
-}
-
 export function setRenderer(url: string, port: number): void {
   runtime.rendererUrl = url;
   runtime.rendererPort = port;
@@ -44,10 +36,6 @@ export function setRenderer(url: string, port: number): void {
 
 export function setTrayAvailable(available: boolean): void {
   runtime.trayAvailable = available;
-}
-
-export function isTrayAvailable(): boolean {
-  return runtime.trayAvailable;
 }
 
 function isAppLocal(url: string): boolean {

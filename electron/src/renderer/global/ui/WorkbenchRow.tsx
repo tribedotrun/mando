@@ -109,7 +109,7 @@ export function WorkbenchRow({
           </span>
         )}
       </span>
-      {task && <ProviderLogo provider={task.provider} />}
+      {task && <ProviderLogo provider={task.provider} useGlmWorker={task.use_glm_worker} />}
       <span className="min-w-0 flex-1 truncate">{wb.title}</span>
       <WorkbenchRowHoverActions
         activity={activity}

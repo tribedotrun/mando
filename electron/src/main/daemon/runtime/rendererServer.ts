@@ -23,7 +23,7 @@ export const RENDERER_CONTENT_SECURITY_POLICY = [
   "script-src 'self'",
   "style-src 'self' 'unsafe-inline'",
   'connect-src http://127.0.0.1:*',
-  "img-src 'self' http://127.0.0.1:* data: blob:",
+  "img-src 'self' http://127.0.0.1:* https: data: blob:",
   'media-src http://127.0.0.1:*',
   "font-src 'self'",
   "object-src 'none'",

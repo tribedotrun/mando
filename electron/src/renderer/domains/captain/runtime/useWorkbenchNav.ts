@@ -64,6 +64,7 @@ export function useWorkbenchNav(workbenchId: string, search: { tab?: string; res
 
   const handleResumeInTerminal = useCallback(
     (sessionId: string, name?: string, provider?: TaskProvider) => {
+      if (provider === 'opencode') return;
       setTerminalVisited(true);
       void navigate({
         to: '/wb/$workbenchId',

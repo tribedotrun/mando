@@ -26,6 +26,7 @@ pub(crate) fn should_resume_task_session(
             manager_has_session && has_resumable_session_id(existing_session_id)
         }
         api_types::TaskProvider::Codex => has_resumable_session_id(existing_session_id),
+        api_types::TaskProvider::OpenCode => false,
     }
 }
 
@@ -68,6 +69,9 @@ pub(crate) async fn run_task_agent_session(
     match request.item.provider {
         api_types::TaskProvider::Claude => run_claude_task_session(request).await,
         api_types::TaskProvider::Codex => run_codex_task_session(request).await,
+        api_types::TaskProvider::OpenCode => {
+            anyhow::bail!("task text sessions are not enabled for OpenCode")
+        }
     }
 }
 

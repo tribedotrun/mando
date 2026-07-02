@@ -75,6 +75,7 @@ pub(crate) async fn log_running_session(
     pool: &SqlitePool,
     session_id: &str,
     cwd: &Path,
+    model: &str,
     caller: &str,
     worker_name: &str,
     task_id: Option<i64>,
@@ -86,7 +87,7 @@ pub(crate) async fn log_running_session(
         &SessionLogEntry {
             session_id,
             cwd,
-            model: "default",
+            model,
             caller,
             cost_usd: None,
             duration_ms: None,
