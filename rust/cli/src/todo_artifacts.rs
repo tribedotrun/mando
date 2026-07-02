@@ -1,6 +1,7 @@
 //! `mando todo evidence` and `mando todo summary` -- artifact CLI commands.
 
 use std::io::IsTerminal;
+use std::path::{Path, PathBuf};
 
 use crate::gateway_paths as paths;
 use crate::http::{parse_id, DaemonClient};
@@ -21,6 +22,98 @@ fn parse_evidence_kind(raw: &str) -> anyhow::Result<Option<api_types::EvidenceKi
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct TaskWorktreeRef {
+    id: i64,
+    worktree: Option<String>,
+}
+
+impl From<&api_types::TaskItem> for TaskWorktreeRef {
+    fn from(item: &api_types::TaskItem) -> Self {
+        Self {
+            id: item.id,
+            worktree: item.worktree.clone(),
+        }
+    }
+}
+
+fn todo_suffix_task_id(cwd: &Path) -> Option<i64> {
+    let dir_name = cwd.file_name().and_then(|n| n.to_str()).unwrap_or("");
+    let rest = dir_name.split("-todo-").nth(1)?;
+    let id_str = rest.split('-').next()?;
+    id_str.parse::<i64>().ok()
+}
+
+fn comparable_path(path: &Path) -> PathBuf {
+    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
+}
+
+fn worktree_matches_cwd(worktree: &str, cwd: &Path) -> bool {
+    let expanded = global_infra::paths::expand_tilde(worktree);
+    comparable_path(&expanded) == comparable_path(cwd)
+}
+
+fn task_id_for_matching_worktree(
+    tasks: &[TaskWorktreeRef],
+    cwd: &Path,
+) -> anyhow::Result<Option<i64>> {
+    let matches: Vec<i64> = tasks
+        .iter()
+        .filter(|task| {
+            task.worktree
+                .as_deref()
+                .is_some_and(|worktree| worktree_matches_cwd(worktree, cwd))
+        })
+        .map(|task| task.id)
+        .collect();
+    match matches.as_slice() {
+        [] => Ok(None),
+        [id] => Ok(Some(*id)),
+        ids => anyhow::bail!(
+            "current directory matches multiple Mando tasks: {}",
+            ids.iter()
+                .map(std::string::ToString::to_string)
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+    }
+}
+
+fn missing_task_id_message(explicit_hint: &str) -> String {
+    format!("no task ID: {explicit_hint}, set MANDO_TASK_ID, or run from a Mando task worktree")
+}
+
+async fn resolve_task_id(
+    client: &DaemonClient,
+    explicit: Option<&str>,
+    explicit_hint: &str,
+) -> anyhow::Result<i64> {
+    if let Some(id) = explicit {
+        return parse_id(id, "item");
+    }
+    if let Ok(env_id) = std::env::var("MANDO_TASK_ID") {
+        return parse_id(&env_id, "MANDO_TASK_ID");
+    }
+
+    let cwd = std::env::current_dir()?;
+    let suffix_id = todo_suffix_task_id(&cwd);
+    let resp: api_types::TaskListResponse = client.get_json(paths::TASKS_WITH_ARCHIVED).await?;
+    let task_refs: Vec<TaskWorktreeRef> = resp.items.iter().map(TaskWorktreeRef::from).collect();
+    if let Some(task_id) = task_id_for_matching_worktree(&task_refs, &cwd)? {
+        return Ok(task_id);
+    }
+    if let Some(task_id) = suffix_id {
+        if task_refs.iter().any(|task| task.id == task_id) {
+            return Ok(task_id);
+        }
+        anyhow::bail!(
+            "worktree name suggests task #{task_id}, but the daemon has no such task and no task has worktree {}",
+            cwd.display()
+        );
+    }
+    anyhow::bail!("{}", missing_task_id_message(explicit_hint))
+}
+
 /// Resolve task ID from explicit arg, MANDO_TASK_ID env, or CWD worktree path.
 pub(crate) fn resolve_task_id_from_env(explicit: Option<&str>) -> anyhow::Result<i64> {
     if let Some(id) = explicit {
@@ -29,25 +122,64 @@ pub(crate) fn resolve_task_id_from_env(explicit: Option<&str>) -> anyhow::Result
     if let Ok(env_id) = std::env::var("MANDO_TASK_ID") {
         return parse_id(&env_id, "MANDO_TASK_ID");
     }
-    // Parse from CWD worktree directory name: <repo>-todo-<id>-<slot>
     let cwd = std::env::current_dir()?;
-    let dir_name = cwd.file_name().and_then(|n| n.to_str()).unwrap_or("");
-    if let Some(rest) = dir_name.split("-todo-").nth(1) {
-        if let Some(id_str) = rest.split('-').next() {
-            if let Ok(id) = id_str.parse::<i64>() {
-                return Ok(id);
-            }
-        }
+    if let Some(id) = todo_suffix_task_id(&cwd) {
+        return Ok(id);
     }
-    anyhow::bail!("no task ID: pass it as argument, set MANDO_TASK_ID, or run from a task worktree")
+    anyhow::bail!("{}", missing_task_id_message("pass it as an argument"))
+}
+
+async fn ensure_task_exists(client: &DaemonClient, task_id: i64) -> anyhow::Result<()> {
+    let resp: api_types::TaskListResponse = client.get_json(paths::TASKS_WITH_ARCHIVED).await?;
+    if resp.items.iter().any(|item| item.id == task_id) {
+        Ok(())
+    } else {
+        anyhow::bail!("task #{task_id} not found")
+    }
+}
+
+async fn resolve_summary_task_id(
+    client: &DaemonClient,
+    item_id: Option<&str>,
+) -> anyhow::Result<i64> {
+    if item_id.is_some() || std::env::var("MANDO_TASK_ID").is_ok() {
+        let task_id = resolve_task_id_from_env(item_id)?;
+        ensure_task_exists(client, task_id).await?;
+        return Ok(task_id);
+    }
+    resolve_task_id(client, None, "pass the task id as an argument").await
+}
+
+async fn resolve_evidence_task_id(
+    client: &DaemonClient,
+    item_id: Option<&str>,
+) -> anyhow::Result<i64> {
+    if item_id.is_some() || std::env::var("MANDO_TASK_ID").is_ok() {
+        let task_id = resolve_task_id_from_env(item_id)?;
+        ensure_task_exists(client, task_id).await?;
+        return Ok(task_id);
+    }
+    resolve_task_id(client, None, "pass --task").await
+}
+
+async fn create_client_and_resolve_task(
+    item_id: Option<&str>,
+    for_evidence: bool,
+) -> anyhow::Result<(DaemonClient, i64)> {
+    let client = DaemonClient::discover()?;
+    let task_id = if for_evidence {
+        resolve_evidence_task_id(&client, item_id).await?
+    } else {
+        resolve_summary_task_id(&client, item_id).await?
+    };
+    Ok((client, task_id))
 }
 
 pub(crate) async fn handle_summary(
     item_id: Option<&str>,
     file: Option<&str>,
 ) -> anyhow::Result<()> {
-    let task_id = resolve_task_id_from_env(item_id)?;
-    let client = DaemonClient::discover()?;
+    let (client, task_id) = create_client_and_resolve_task(item_id, false).await?;
 
     let content = if let Some(path) = file {
         std::fs::read_to_string(path)?
@@ -75,6 +207,7 @@ pub(crate) async fn handle_summary(
 }
 
 pub(crate) async fn handle_evidence(
+    item_id: Option<&str>,
     files: &[String],
     captions: &[String],
     kinds: &[String],
@@ -149,8 +282,7 @@ pub(crate) async fn handle_evidence(
         }
     }
 
-    let task_id = resolve_task_id_from_env(None)?;
-    let client = DaemonClient::discover()?;
+    let (client, task_id) = create_client_and_resolve_task(item_id, true).await?;
     let data_dir = crate::http::data_dir();
 
     let file_inputs: Vec<api_types::EvidenceFileRequest> = files
@@ -338,6 +470,32 @@ mod tests {
         assert!(status.success(), "static webm build failed");
     }
 
+    #[test]
+    fn matching_worktree_wins_over_stale_directory_suffix() {
+        let dir = std::env::temp_dir().join(format!(
+            "hyper-tribe-todo-153-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        std::fs::create_dir_all(&dir).expect("mkdir");
+        let tasks = [TaskWorktreeRef {
+            id: 149,
+            worktree: Some(dir.to_string_lossy().into_owned()),
+        }];
+
+        let suffix_id = todo_suffix_task_id(&dir);
+        let matched_id = task_id_for_matching_worktree(&tasks, &dir).expect("worktree match");
+
+        global_infra::best_effort!(
+            std::fs::remove_dir_all(&dir),
+            "cleanup stale suffix resolver test dir"
+        );
+        assert_eq!(suffix_id, Some(153));
+        assert_eq!(matched_id, Some(149));
+    }
+
     // Holding `std::sync::Mutex` across `await` is intentional here: the lock
     // serializes test threads that touch process-global env/cwd, and tokio
     // tests in this file run on the current-thread runtime, so there is no
@@ -371,6 +529,7 @@ mod tests {
 
         let webm_str = webm.to_string_lossy().into_owned();
         let result = handle_evidence(
+            None,
             std::slice::from_ref(&webm_str),
             &["caption".to_string()],
             &[],
@@ -437,6 +596,7 @@ mod tests {
         std::env::set_current_dir(&dir).expect("cwd");
 
         let result = handle_evidence(
+            None,
             std::slice::from_ref(&webm_str),
             &["caption".to_string()],
             &[],

@@ -49,6 +49,7 @@ pub(super) async fn resume_worker(
         pool,
         session_id,
         cwd,
+        model,
         "worker",
         worker_name,
         Some(item.id),

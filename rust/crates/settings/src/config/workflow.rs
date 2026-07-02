@@ -7,7 +7,7 @@
 //! Binary ships a compiled-in default; user can override at `~/.mando/workflow.yaml`
 //! (captain) or `~/.mando/scout-workflow.yaml` (scout).
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
@@ -24,6 +24,7 @@ use super::error::ConfigError;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CaptainWorkflow {
     pub models: ModelsConfig,
+    pub stages: StageRoutingConfig,
     pub agent: AgentConfig,
     pub planning: PlanningConfig,
     pub auto_title: AutoTitleConfig,
@@ -85,6 +86,68 @@ pub struct ModelsConfig {
     pub captain: String,
     pub clarifier: String,
     pub todo_parse: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkflowStage {
+    TaskParse,
+    Clarification,
+    Planning,
+    PlanReview,
+    Implementation,
+    CaptainReview,
+    CaptainMerge,
+    Rebase,
+    TaskAsk,
+}
+
+impl WorkflowStage {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::TaskParse => "task_parse",
+            Self::Clarification => "clarification",
+            Self::Planning => "planning",
+            Self::PlanReview => "plan_review",
+            Self::Implementation => "implementation",
+            Self::CaptainReview => "captain_review",
+            Self::CaptainMerge => "captain_merge",
+            Self::Rebase => "rebase",
+            Self::TaskAsk => "task_ask",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct StageRoutingConfig(BTreeMap<WorkflowStage, StageAgentConfig>);
+
+impl StageRoutingConfig {
+    pub fn get(&self, stage: WorkflowStage) -> Option<&StageAgentConfig> {
+        self.0.get(&stage)
+    }
+
+    pub fn require(&self, stage: WorkflowStage) -> &StageAgentConfig {
+        self.get(stage).unwrap_or_else(|| {
+            global_infra::unrecoverable!(format!(
+                "captain workflow missing required stage routing: {}",
+                stage.label()
+            ))
+        })
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (WorkflowStage, &StageAgentConfig)> {
+        self.0.iter().map(|(stage, config)| (*stage, config))
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StageAgentConfig {
+    pub adapter: api_types::TaskProvider,
+    pub model: String,
+    pub variant: Option<String>,
+    #[serde(with = "duration_seconds")]
+    pub session_start_timeout_s: std::time::Duration,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -335,7 +398,12 @@ const DEFAULT_CAPTAIN_WORKFLOW: &str = include_str!("../../assets/captain-workfl
 // ── Loading ──────────────────────────────────────────────────────────────────
 
 fn parse_captain_workflow(yaml: &str, path: &Path) -> Result<CaptainWorkflow, ConfigError> {
-    serde_yaml::from_str(yaml).map_err(|e| ConfigError::YamlParse {
+    let merged = super::workflow_merge::merge_captain_workflow_override(
+        DEFAULT_CAPTAIN_WORKFLOW,
+        yaml,
+        path,
+    )?;
+    serde_yaml::from_value(merged).map_err(|e| ConfigError::YamlParse {
         path: path.to_path_buf(),
         source: e,
     })
@@ -431,6 +499,45 @@ mod tests {
         assert!(!wf.nudges.is_empty(), "should have nudges");
         assert!(wf.agent.max_interventions > 0);
         assert!(wf.agent.max_review_retries > 0);
+    }
+
+    #[test]
+    fn captain_workflow_override_merges_missing_stages_from_default() {
+        let wf = parse_captain_workflow_or_default(
+            Some(
+                r#"
+models:
+  worker: "sonnet-override"
+"#,
+            ),
+            Path::new("workflow.yaml"),
+        )
+        .unwrap();
+
+        assert_eq!(wf.models.worker, "sonnet-override");
+        assert_eq!(
+            wf.stages.require(WorkflowStage::Implementation).adapter,
+            api_types::TaskProvider::OpenCode
+        );
+    }
+
+    #[test]
+    fn captain_workflow_null_overlay_preserves_default_stage() {
+        let wf = parse_captain_workflow_or_default(
+            Some(
+                r#"
+stages:
+  implementation: null
+"#,
+            ),
+            Path::new("workflow.yaml"),
+        )
+        .unwrap();
+
+        assert_eq!(
+            wf.stages.require(WorkflowStage::Implementation).adapter,
+            api_types::TaskProvider::OpenCode
+        );
     }
 
     #[test]

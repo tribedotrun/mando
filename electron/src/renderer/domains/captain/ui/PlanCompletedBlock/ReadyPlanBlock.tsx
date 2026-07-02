@@ -7,11 +7,9 @@ import { PlanSummaryBlock } from '#renderer/domains/captain/ui/PlanCompletedBloc
 export function ReadyPlanBlock({
   event,
   taskId,
-  taskContext,
 }: {
   event: TimelineEvent;
   taskId: number;
-  taskContext: string;
 }): React.ReactElement {
   const implMutation = useStartImplementation();
 
@@ -24,7 +22,7 @@ export function ReadyPlanBlock({
         <button
           type="button"
           disabled={implMutation.isPending}
-          onClick={() => implMutation.mutate({ id: taskId, context: taskContext })}
+          onClick={() => implMutation.mutate({ id: taskId, message: 'Start implementation.' })}
           className="flex items-center gap-1.5 rounded-md bg-foreground px-3 py-1.5 text-body font-medium text-background hover:bg-foreground/90 disabled:opacity-50"
         >
           {implMutation.isPending ? (

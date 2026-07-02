@@ -37,7 +37,3 @@ export function StatusDot({ color, pulse, size = 'default' }: StatusDotProps): R
     />
   );
 }
-
-export function Sep(): React.ReactElement {
-  return <span className="text-caption text-text-4">&middot;</span>;
-}

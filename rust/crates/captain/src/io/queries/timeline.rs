@@ -87,26 +87,6 @@ pub async fn insert_or_ignore(
     Ok(())
 }
 
-/// Append an event to a task's timeline.
-#[allow(dead_code)]
-pub async fn append(pool: &SqlitePool, task_id: i64, event: &TimelineEvent) -> Result<()> {
-    let event_type_str = event.data.event_type_str();
-    let data_str = serde_json::to_string(&data_without_tag(&event.data)?)?;
-    sqlx::query(&format!(
-        "INSERT INTO timeline_events ({INSERT_COLS}) VALUES (?, ?, ?, ?, ?, ?, ?)"
-    ))
-    .bind(task_id)
-    .bind(event_type_str)
-    .bind(&event.timestamp)
-    .bind(&event.actor)
-    .bind(&event.summary)
-    .bind(&data_str)
-    .bind(None::<String>)
-    .execute(pool)
-    .await?;
-    Ok(())
-}
-
 /// Serialize a payload to JSON with the `event_type` tag stripped (the tag
 /// lives in the separate SQL column; duplicating it inside the blob would
 /// make round-tripping fragile). Thin crate-local wrapper around
@@ -258,7 +238,18 @@ mod tests {
             },
         };
 
-        append(&pool, 1, &event).await.unwrap();
+        insert_or_ignore(
+            &pool,
+            1,
+            event.data.event_type_str(),
+            &event.timestamp,
+            &event.actor,
+            &event.summary,
+            &serde_json::to_string(&data_without_tag(&event.data).unwrap()).unwrap(),
+            "awaiting-review-roundtrip",
+        )
+        .await
+        .unwrap();
         let loaded = load(&pool, 1).await.unwrap();
         assert_eq!(loaded.len(), 1);
         let got = &loaded[0];

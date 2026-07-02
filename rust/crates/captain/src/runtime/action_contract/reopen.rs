@@ -27,6 +27,16 @@ fn apply_lifecycle_result(item: &mut Task, result: LifecycleResult) {
     item.pr_number = result.pr_number;
 }
 
+fn validate_reopen_transition(item: &Task, to: ItemStatus) -> Result<()> {
+    lifecycle::decide_transition(item.status, item.planning, to).map_err(|_| {
+        crate::TaskActionError::InvalidTransition {
+            command: "reopen",
+            status: item.status.as_str(),
+        }
+    })?;
+    Ok(())
+}
+
 #[allow(clippy::too_many_arguments)]
 #[tracing::instrument(skip_all)]
 pub async fn reopen_item(
@@ -56,24 +66,26 @@ pub async fn reopen_item(
 
     let item_id = item.id.to_string();
     let _lock = crate::io::item_lock::acquire_item_lock(&item_id, "reopen")?;
-    if let Some(new_context) =
-        append_tagged_note(item.context.as_deref(), "Reopen feedback", feedback)
-    {
-        item.context = Some(new_context);
-    }
-
-    if reopen_source == "human" {
-        item.intervention_count = 0;
-    }
+    let starting_intervention_count = if reopen_source == "human" {
+        0
+    } else {
+        item.intervention_count
+    };
 
     let budget = spawn_logic::check_intervention(
-        item.intervention_count as u32,
+        starting_intervention_count as u32,
         1,
         workflow.agent.max_interventions,
     );
     let new_count = match budget {
         spawn_logic::InterventionResult::Proceed { new_count } => new_count,
         spawn_logic::InterventionResult::Exhausted { new_count } => {
+            validate_reopen_transition(item, ItemStatus::CaptainReviewing)?;
+            if let Some(new_context) =
+                append_tagged_note(item.context.as_deref(), "Reopen feedback", feedback)
+            {
+                item.context = Some(new_context);
+            }
             item.intervention_count = new_count as i64;
             item.last_activity_at = Some(global_types::now_rfc3339());
             trigger_review(
@@ -89,35 +101,49 @@ pub async fn reopen_item(
         }
     };
 
-    item.reopen_source = Some(reopen_source.to_string());
     let can_resume =
         item.worker.is_some() && item.session_ids.worker.is_some() && item.worktree.is_some();
-    if !can_resume {
-        if allow_queue_fallback {
-            item.intervention_count = new_count as i64;
-            item.reopen_seq += 1;
-            item.reopened_at = Some(global_types::now_rfc3339());
-            // apply_transition returns a TaskTransitionDecision describing
-            // the resolved state; callers that don't consume it pay no
-            // business-logic penalty, but clippy's must_use check surfaces
-            // the discard. Bind to `_decision` so the value is still
-            // observable in a debugger while the lint is satisfied.
-            let _decision = lifecycle::apply_transition(item, ItemStatus::Queued)?;
-            item.pr_number = None;
-            item.worker = None;
-            // worktree and workbench_id are permanent once assigned — captain
-            // invariant #4 in CLAUDE.md. Next spawn hits the spawner's Rework
-            // arm (same worktree, new branch from origin/main).
-            item.branch = None;
-            item.worker_started_at = None;
-            item.session_ids.worker = None;
-            clear_task_interaction_sessions(item);
-            item.last_activity_at = Some(global_types::now_rfc3339());
-            try_unarchive_workbench(item, "during queued fallback", pool).await;
-            emit_reopen_event(item, reopen_source, feedback, "queued", pool).await;
-            return Ok(ReopenOutcome::QueuedFallback);
-        }
+    if !can_resume && !allow_queue_fallback {
         bail!("item missing worker/session/worktree — cannot reopen");
+    }
+    validate_reopen_transition(
+        item,
+        if can_resume {
+            ItemStatus::InProgress
+        } else {
+            ItemStatus::Queued
+        },
+    )?;
+
+    if let Some(new_context) =
+        append_tagged_note(item.context.as_deref(), "Reopen feedback", feedback)
+    {
+        item.context = Some(new_context);
+    }
+    item.reopen_source = Some(reopen_source.to_string());
+    if !can_resume {
+        item.intervention_count = new_count as i64;
+        item.reopen_seq += 1;
+        item.reopened_at = Some(global_types::now_rfc3339());
+        // apply_transition returns a TaskTransitionDecision describing
+        // the resolved state; callers that don't consume it pay no
+        // business-logic penalty, but clippy's must_use check surfaces
+        // the discard. Bind to `_decision` so the value is still
+        // observable in a debugger while the lint is satisfied.
+        let _decision = lifecycle::apply_transition(item, ItemStatus::Queued)?;
+        item.pr_number = None;
+        item.worker = None;
+        // worktree and workbench_id are permanent once assigned — captain
+        // invariant #4 in CLAUDE.md. Next spawn hits the spawner's Rework
+        // arm (same worktree, new branch from origin/main).
+        item.branch = None;
+        item.worker_started_at = None;
+        item.session_ids.worker = None;
+        clear_task_interaction_sessions(item);
+        item.last_activity_at = Some(global_types::now_rfc3339());
+        try_unarchive_workbench(item, "during queued fallback", pool).await;
+        emit_reopen_event(item, reopen_source, feedback, "queued", pool).await;
+        return Ok(ReopenOutcome::QueuedFallback);
     }
 
     try_unarchive_workbench(item, "before reopen", pool).await;

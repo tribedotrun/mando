@@ -72,6 +72,13 @@ pub async fn load_jsonl_path(
         }
     }
 
+    if is_opencode_session(pool, session_id).await? {
+        if let Some(stream) = opencode_stream_path_for_session(session_id).await? {
+            return Ok(Some(stream.to_string_lossy().into_owned()));
+        }
+        return Ok(None);
+    }
+
     if let Some(stream) = stream_path_for_session(session_id).await? {
         return Ok(Some(stream.to_string_lossy().into_owned()));
     }
@@ -242,6 +249,9 @@ async fn claude_format_stream_path_for_session(
             return Ok(Some(stream));
         }
     }
+    if is_opencode_session(pool, session_id).await? {
+        return opencode_stream_path_for_session(session_id).await;
+    }
     stream_path_for_session(session_id).await
 }
 
@@ -277,6 +287,19 @@ async fn transcript_source_for_session(
                 ),
             }));
         }
+    }
+
+    if is_opencode_session(pool, session_id).await? {
+        if let Some(path) = opencode_stream_path_for_session(session_id).await? {
+            return Ok(Some(TranscriptSource {
+                path,
+                format: TranscriptFormat::ClaudeCode,
+                meta_path: Some(global_infra::paths::opencode_stream_meta_path_for_session(
+                    session_id,
+                )),
+            }));
+        }
+        return Ok(None);
     }
 
     // Prefer the Mando-owned Claude Code `cc-streams/` path; otherwise fall
@@ -316,10 +339,25 @@ async fn is_codex_session(pool: &SqlitePool, session_id: &str) -> anyhow::Result
         .is_some_and(|session| session.provider == global_types::TaskProvider::Codex))
 }
 
+async fn is_opencode_session(pool: &SqlitePool, session_id: &str) -> anyhow::Result<bool> {
+    Ok(crate::io::queries::session_by_id(pool, session_id)
+        .await?
+        .is_some_and(|session| session.provider == global_types::TaskProvider::OpenCode))
+}
+
 async fn codex_derived_stream_path_for_session(
     session_id: &str,
 ) -> anyhow::Result<Option<PathBuf>> {
     let stream = global_infra::paths::codex_derived_stream_path_for_session(session_id);
+    if path_exists(&stream).await? {
+        Ok(Some(stream))
+    } else {
+        Ok(None)
+    }
+}
+
+async fn opencode_stream_path_for_session(session_id: &str) -> anyhow::Result<Option<PathBuf>> {
+    let stream = global_infra::paths::opencode_stream_path_for_session(session_id);
     if path_exists(&stream).await? {
         Ok(Some(stream))
     } else {
@@ -433,4 +471,82 @@ async fn lookup_cwd_from_meta(session_id: &str) -> Option<String> {
         .as_str()
         .filter(|cwd| !cwd.is_empty())
         .map(String::from)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    use global_db::Db;
+    use sessions_db::SessionUpsert;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn opencode_session_resolves_owned_stream_paths() -> anyhow::Result<()> {
+        let _lock = global_infra::PROCESS_ENV_LOCK.lock().await;
+        let data_dir = std::env::temp_dir().join(format!(
+            "mando-opencode-transcript-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|duration| duration.as_nanos())
+                .unwrap_or(0)
+        ));
+        let _guard = global_infra::EnvVarGuard::set("MANDO_DATA_DIR", &data_dir);
+        let db = Db::open_in_memory().await?;
+        let pool = db.pool();
+        let session_id = "ses_opencode_transcript";
+        sessions_db::upsert_session(
+            pool,
+            &SessionUpsert {
+                provider: global_types::TaskProvider::OpenCode,
+                session_id,
+                created_at: "2026-06-28T00:00:00Z",
+                caller: "worker",
+                cwd: "/tmp",
+                model: "zai-coding-plan/glm-5.2",
+                status: global_types::SessionStatus::Stopped,
+                cost_usd: None,
+                duration_ms: None,
+                resumed: false,
+                task_id: Some(1),
+                scout_item_id: None,
+                worker_name: Some("worker-1-1"),
+                resumed_at: None,
+                credential_id: None,
+                error: None,
+                api_error_status: None,
+            },
+        )
+        .await?;
+
+        let stream_path = global_infra::paths::opencode_stream_path_for_session(session_id);
+        if let Some(parent) = stream_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(
+            &stream_path,
+            "{\"type\":\"result\",\"subtype\":\"success\"}\n",
+        )?;
+
+        assert_eq!(
+            load_jsonl_path(pool, session_id).await?,
+            Some(stream_path.to_string_lossy().into_owned())
+        );
+        let Some(source) = transcript_source_for_session(pool, session_id).await? else {
+            anyhow::bail!("OpenCode source should resolve");
+        };
+        assert_eq!(source.path, stream_path);
+        assert!(matches!(source.format, TranscriptFormat::ClaudeCode));
+        assert_eq!(
+            source.meta_path,
+            Some(global_infra::paths::opencode_stream_meta_path_for_session(
+                session_id
+            ))
+        );
+
+        std::fs::remove_dir_all(&data_dir).ok();
+        Ok(())
+    }
 }

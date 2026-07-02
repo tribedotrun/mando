@@ -1,7 +1,6 @@
 pub use review_threads::get_pr_review_threads;
 pub use types::{MergeableStatus, PrComment, PrState, PrStatus, ReviewThread, ThreadComment};
 pub fn fetch_pr_status
-pub fn merge_pr
 pub fn is_pr_merged
 pub fn is_pr_branch_ahead
 pub fn close_pr

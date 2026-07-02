@@ -18,6 +18,21 @@ fn resolve_id(id: &str, label: &str) -> Result<i64, ApiError> {
     })
 }
 
+async fn ensure_task_exists(state: &AppState, task_id: i64) -> Result<(), ApiError> {
+    match state
+        .captain
+        .load_task(task_id)
+        .await
+        .map_err(|e| internal_error(e, "failed to load task"))?
+    {
+        Some(_) => Ok(()),
+        None => Err(error_response(
+            StatusCode::NOT_FOUND,
+            &format!("task #{task_id} not found"),
+        )),
+    }
+}
+
 // ── POST /api/tasks/{id}/evidence ───────────────────────────────────
 
 /// Register evidence artifact -- metadata only. CLI copies files to disk
@@ -34,6 +49,7 @@ pub(crate) async fn post_task_evidence(
             "at least one file required",
         ));
     }
+    ensure_task_exists(&state, task_id).await?;
 
     let files: Vec<captain::EvidenceFileSpec> = body
         .files
@@ -71,6 +87,7 @@ pub(crate) async fn post_task_summary(
     Path(api_types::TaskIdParams { id: task_id }): Path<api_types::TaskIdParams>,
     Json(body): Json<api_types::TaskSummaryRequest>,
 ) -> Result<Json<api_types::TaskSummaryResponse>, ApiError> {
+    ensure_task_exists(&state, task_id).await?;
     let artifact_id = state
         .captain
         .create_work_summary_artifact(task_id, &body.content)

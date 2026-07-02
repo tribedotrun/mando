@@ -16,10 +16,14 @@ import { Button } from '#renderer/global/ui/primitives/button';
 export function DetailOverflowMenu({
   item,
   onViewContext,
+  onResumeRateLimited,
+  resumeRateLimitedPending = false,
   onCancel,
 }: {
   item: TaskItem;
   onViewContext?: () => void;
+  onResumeRateLimited?: () => void;
+  resumeRateLimitedPending?: boolean;
   onCancel?: () => void;
 }): React.ReactElement {
   const entries: { label: string; value: string }[] = [];
@@ -30,9 +34,10 @@ export function DetailOverflowMenu({
   }
 
   const showCancel = !!onCancel && !FINALIZED_STATUSES.includes(item.status);
+  const showResumeRateLimited = !!onResumeRateLimited;
   const showViewBrief = !!(item.context && onViewContext);
   const showInfoEntries = entries.length > 0;
-  const hasInfo = showViewBrief || showInfoEntries;
+  const hasInfo = showResumeRateLimited || showViewBrief || showInfoEntries;
 
   return (
     <DropdownMenu>
@@ -42,6 +47,14 @@ export function DetailOverflowMenu({
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="min-w-[220px]">
+        {showResumeRateLimited && (
+          <DropdownMenuItem disabled={resumeRateLimitedPending} onSelect={onResumeRateLimited}>
+            {resumeRateLimitedPending ? 'Resuming…' : 'Resume task'}
+          </DropdownMenuItem>
+        )}
+        {showResumeRateLimited && (showCancel || showViewBrief || showInfoEntries) && (
+          <DropdownMenuSeparator />
+        )}
         {showCancel && (
           <DropdownMenuItem variant="destructive" onSelect={onCancel}>
             Cancel task

@@ -103,3 +103,14 @@ pub struct SystemRateLimitEvent {
     pub meta: EventMeta,
     pub info: String,
 }
+
+/// CC `system`/`thinking_tokens` progress signal. Carries only estimated
+/// extended-thinking token counts plus ids — no thinking text. Not the
+/// agent's real reasoning (that arrives as `assistant.thinking` blocks and
+/// renders via `ThinkingBlock`). These events are pure progress noise; the
+/// viewer suppresses them like `SystemHookEvent`.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SystemThinkingTokensEvent {
+    pub meta: EventMeta,
+}

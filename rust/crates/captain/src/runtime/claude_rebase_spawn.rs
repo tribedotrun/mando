@@ -45,6 +45,7 @@ pub(super) async fn spawn_rebase_worker(
         pool,
         &session_id,
         cwd,
+        model,
         "rebase",
         session_name,
         Some(item.id),

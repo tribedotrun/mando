@@ -34,6 +34,7 @@ pub fn events_to_markdown(events: &[TranscriptEvent]) -> String {
             | TranscriptEvent::SystemLocalCommandOutput(_)
             | TranscriptEvent::SystemHook(_)
             | TranscriptEvent::SystemRateLimit(_)
+            | TranscriptEvent::SystemThinkingTokens(_)
             | TranscriptEvent::ToolProgress(_)
             | TranscriptEvent::Unknown(_) => {}
             TranscriptEvent::User(user) => {

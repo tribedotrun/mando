@@ -1,4 +1,6 @@
 use serde::{Deserialize, Serialize};
+use std::fmt;
+use std::str::FromStr;
 use ts_rs::TS;
 
 use crate::{SessionCategory, SessionStatus, TaskProvider};
@@ -30,9 +32,51 @@ pub struct EmptyResponse {}
 pub struct TaskAddRequest {
     pub title: String,
     pub project: Option<String>,
-    pub provider: Option<TaskProvider>,
+    pub provider: Option<TaskCreateProvider>,
+    pub use_glm_worker: bool,
     pub plan: bool,
     pub no_pr: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[serde(rename_all = "lowercase")]
+pub enum TaskCreateProvider {
+    Claude,
+    Codex,
+}
+
+impl TaskCreateProvider {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Claude => "claude",
+            Self::Codex => "codex",
+        }
+    }
+
+    pub fn as_task_provider(self) -> TaskProvider {
+        match self {
+            Self::Claude => TaskProvider::Claude,
+            Self::Codex => TaskProvider::Codex,
+        }
+    }
+}
+
+impl fmt::Display for TaskCreateProvider {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl FromStr for TaskCreateProvider {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "claude" => Ok(Self::Claude),
+            "codex" => Ok(Self::Codex),
+            _ => Err("task provider must be Codex or Claude Code".to_string()),
+        }
+    }
 }
 
 /// POST /api/worktrees/cleanup

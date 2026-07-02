@@ -44,33 +44,6 @@ function rejectUntrusted(channel: string, frame: WebFrameMain | null | undefined
   throw new Error('untrusted sender');
 }
 
-export function handleTrusted<TArgs extends unknown[], TResult>(
-  channel: string,
-  listener: (event: IpcMainInvokeEvent, ...args: TArgs) => Promise<TResult> | TResult,
-): void {
-  ipcMain.handle(channel, (event, ...args: TArgs) => {
-    if (!isTrustedSenderFrame(event.senderFrame)) {
-      rejectUntrusted(channel, event.senderFrame);
-    }
-    return listener(event, ...args);
-  });
-}
-
-export function onTrusted<TArgs extends unknown[]>(
-  channel: string,
-  listener: (event: IpcMainEvent, ...args: TArgs) => void,
-): void {
-  ipcMain.on(channel, (event, ...args: TArgs) => {
-    if (!isTrustedSenderFrame(event.senderFrame)) {
-      log.warn(
-        `[ipc] dropped untrusted event for ${channel}: ${frameUrl(event.senderFrame) || '(missing url)'}`,
-      );
-      return;
-    }
-    listener(event, ...args);
-  });
-}
-
 // Schema-aware variants. Use these for any channel registered in `channels`. The args
 // (or single payload) are parsed against the channel's Zod schema before the handler
 // runs; parse failure rejects the call with a typed error.

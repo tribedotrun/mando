@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use crate::Task;
 use anyhow::{Context, Result};
 use settings::CaptainWorkflow;
-use settings::{CaptainConfig, ProjectConfig};
+use settings::ProjectConfig;
 
 use crate::io::{hooks, pid_registry};
 
@@ -20,12 +20,11 @@ pub(crate) struct WorkerCredential<'a> {
 #[tracing::instrument(skip_all)]
 pub(crate) async fn spawn_worker(
     item: &Task,
-    _project_slug: &str,
     project_config: &ProjectConfig,
-    _captain_config: &CaptainConfig,
     workflow: &CaptainWorkflow,
     pool: &sqlx::SqlitePool,
     credential: Option<&WorkerCredential<'_>>,
+    worker_model: &str,
 ) -> Result<SpawnResult> {
     let repo_path = global_infra::paths::expand_tilde(&project_config.path);
 
@@ -156,7 +155,7 @@ pub(crate) async fn spawn_worker(
 
     // Spawn CC via mando-cc.
     let mut cc_builder = global_claude::CcConfig::builder()
-        .model(&workflow.models.worker)
+        .model(worker_model)
         .effort(global_claude::Effort::Max)
         .cwd(&wt_path)
         .session_id(&session_id)
@@ -195,6 +194,7 @@ pub(crate) async fn spawn_worker(
         pool,
         &session_id,
         &wt_path,
+        worker_model,
         "worker",
         &session_name,
         Some(item.id),

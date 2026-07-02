@@ -19,6 +19,7 @@ const taskAddMultipartInputSchema = z
     title: z.string(),
     project: z.string().optional(),
     provider: z.enum(['claude', 'codex']).optional(),
+    useGlmWorker: z.boolean().optional(),
     noAutoMerge: z.boolean().optional(),
     planning: z.boolean().optional(),
     images: z.array(z.instanceof(File)).optional(),
@@ -34,7 +35,8 @@ export const fetchTasks = (includeArchived?: boolean) =>
 export interface AddTaskInput {
   title: string;
   project?: string;
-  provider?: TaskProvider;
+  provider?: Extract<TaskProvider, 'claude' | 'codex'>;
+  useGlmWorker?: boolean;
   noAutoMerge?: boolean;
   planning?: boolean;
   images?: File[];
@@ -55,6 +57,9 @@ export function addTask(input: AddTaskInput): ResultAsync<TaskItem, ApiError> {
   form.append('source', 'electron');
   if (data.project) form.append('project', data.project);
   if (data.provider) form.append('provider', data.provider);
+  if (typeof data.useGlmWorker === 'boolean') {
+    form.append('use_glm_worker', data.useGlmWorker ? 'true' : 'false');
+  }
   if (data.noAutoMerge) form.append('no_auto_merge', 'true');
   if (data.planning) form.append('planning', 'true');
   if (data.images) {
@@ -66,6 +71,7 @@ export function addTask(input: AddTaskInput): ResultAsync<TaskItem, ApiError> {
     title: data.title,
     project: data.project ?? null,
     provider: data.provider ?? null,
+    use_glm_worker: data.useGlmWorker ?? false,
     plan: false,
     no_pr: false,
   });
@@ -103,24 +109,9 @@ export const fetchTimeline = (id: number) =>
 export const fetchItemSessions = (id: number) =>
   apiGetRouteR('getTasksByIdSessions', { params: { id } });
 
-/** Start implementation: inject plan into context and re-queue as normal worker. */
-export function startImplementation(
-  id: number,
-  existingContext: string,
-): ResultAsync<void, ApiError> {
-  return fetchTimeline(id).andThen((tl) => {
-    const completedPlan = [...tl.events]
-      .reverse()
-      .find((event) => event.data.event_type === 'plan_completed');
-    const plan = completedPlan?.data.event_type === 'plan_completed' ? completedPlan.data.plan : '';
-    const body = plan
-      ? `${existingContext}\n\n## Approved Plan\n${plan}\n\n[Human] Start implementation.`
-      : `${existingContext}\n\n[Human] Start implementation.`;
-    return apiPatchRouteR('patchTasksById', { context: body }, { params: { id } })
-      .andThen(() => apiPostRouteR('postTasksQueue', { id }))
-      .map(() => undefined);
-  });
-}
+/** Start implementation: inject the approved plan into context and queue the task. */
+export const startImplementation = (id: number, message: string): ResultAsync<void, ApiError> =>
+  apiPostRouteR('postTasksImplement', { id, message }).map(() => undefined);
 
 // Manual override for the clarifier's bug-fix classification. When the user
 // flips the toggle in the task editor we PATCH only the `is_bug_fix` field;

@@ -40,6 +40,7 @@ pub enum TranscriptEvent {
     SystemLocalCommandOutput(SystemLocalCommandOutputEvent),
     SystemHook(SystemHookEvent),
     SystemRateLimit(SystemRateLimitEvent),
+    SystemThinkingTokens(SystemThinkingTokensEvent),
     User(UserEvent),
     Assistant(AssistantEvent),
     ToolProgress(ToolProgressEvent),
@@ -72,4 +73,32 @@ pub struct EventMeta {
     pub session_id: Option<String>,
     pub timestamp: Option<String>,
     pub is_sidechain: Option<bool>,
+}
+
+impl TranscriptEvent {
+    /// Line number of this event in the source JSONL file. Every variant
+    /// carries an `EventMeta` with the same field path, so callers can
+    /// centralize the lookup here instead of re-matching the enum.
+    pub fn line_number(&self) -> u32 {
+        self.meta().index.line_number
+    }
+
+    /// Branching metadata for this event, regardless of variant.
+    pub fn meta(&self) -> &EventMeta {
+        match self {
+            TranscriptEvent::SystemInit(e) => &e.meta,
+            TranscriptEvent::SystemCompactBoundary(e) => &e.meta,
+            TranscriptEvent::SystemStatus(e) => &e.meta,
+            TranscriptEvent::SystemApiRetry(e) => &e.meta,
+            TranscriptEvent::SystemLocalCommandOutput(e) => &e.meta,
+            TranscriptEvent::SystemHook(e) => &e.meta,
+            TranscriptEvent::SystemRateLimit(e) => &e.meta,
+            TranscriptEvent::SystemThinkingTokens(e) => &e.meta,
+            TranscriptEvent::User(e) => &e.meta,
+            TranscriptEvent::Assistant(e) => &e.meta,
+            TranscriptEvent::ToolProgress(e) => &e.meta,
+            TranscriptEvent::Result(e) => &e.meta,
+            TranscriptEvent::Unknown(e) => &e.meta,
+        }
+    }
 }

@@ -9,11 +9,8 @@ import log from '#main/global/providers/logger';
 import { handleChannel, sendChannel } from '#main/global/runtime/ipcSecurity';
 import { installCliAndPlists } from '#main/global/runtime/launchd';
 import { daemonRouteFetch, daemonRouteJsonR, ensureDaemon } from '#main/global/runtime/lifecycle';
-import {
-  parseConfigJsonText,
-  requireConfigJsonText,
-  requireValidConfigJsonText,
-} from '#shared/daemon-contract/json';
+import { requireConfigJsonText, requireValidConfigJsonText } from '#shared/daemon-contract/json';
+import { hasParsableLocalConfig } from '#main/onboarding/repo/localConfigStatus';
 import { getDataDir, getConfigPath, getAppMode } from '#main/global/config/lifecycle';
 
 function parseConfigJson(configJson: string, where: string) {
@@ -29,7 +26,7 @@ export function registerConfigHandlers(): void {
     if (!fs.existsSync(configPath)) return false;
     try {
       const raw = fs.readFileSync(configPath, 'utf-8');
-      return parseConfigJsonText(raw, 'ipc:has-config local config').isOk();
+      return hasParsableLocalConfig(raw);
     } catch (e: unknown) {
       log.warn('[has-config] local config parse failed:', e);
       return false;

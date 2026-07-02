@@ -141,57 +141,59 @@ pub(crate) async fn reconcile_running_sessions(
         }
 
         match row.provider {
-            global_types::TaskProvider::Codex => match stream_freshness(&stream_path) {
-                StreamFreshness::Missing => {
-                    tracing::info!(
-                        module = "captain",
-                        session_id = %sid,
-                        provider = %row.provider.as_str(),
-                        stream_path = %stream_path.display(),
-                        reason = "codex_missing_stream",
-                        "session reconciliation failing inactive Codex session"
-                    );
-                    jobs.push(TermJob {
-                        session_id: sid.clone(),
-                        provider: row.provider,
-                        status: SessionStatus::Failed,
-                        reason: "codex_missing_stream",
-                    });
-                }
-                StreamFreshness::Present(stale_secs) if stale_secs > stale_threshold_s => {
-                    tracing::info!(
-                        module = "captain",
-                        session_id = %sid,
-                        provider = %row.provider.as_str(),
-                        stream_path = %stream_path.display(),
-                        stale_secs,
-                        reason = "codex_inactive_stale_stream",
-                        "session reconciliation failing inactive Codex session"
-                    );
-                    jobs.push(TermJob {
-                        session_id: sid.clone(),
-                        provider: row.provider,
-                        status: SessionStatus::Failed,
-                        reason: "codex_inactive_stale_stream",
-                    });
-                }
-                StreamFreshness::Present(_) => {}
-                StreamFreshness::MetadataError(message) => {
-                    tracing::warn!(
-                        module = "captain",
-                        session_id = %sid,
-                        provider = %row.provider.as_str(),
-                        stream_path = %stream_path.display(),
-                        error = %message,
-                        "session reconciliation skipped inactive Codex session because stream freshness is unknown"
-                    );
-                    alerts.push(format!(
+            global_types::TaskProvider::Codex | global_types::TaskProvider::OpenCode => {
+                match stream_freshness(&stream_path) {
+                    StreamFreshness::Missing => {
+                        tracing::info!(
+                            module = "captain",
+                            session_id = %sid,
+                            provider = %row.provider.as_str(),
+                            stream_path = %stream_path.display(),
+                            reason = "provider_missing_stream",
+                            "session reconciliation failing inactive provider session"
+                        );
+                        jobs.push(TermJob {
+                            session_id: sid.clone(),
+                            provider: row.provider,
+                            status: SessionStatus::Failed,
+                            reason: "provider_missing_stream",
+                        });
+                    }
+                    StreamFreshness::Present(stale_secs) if stale_secs > stale_threshold_s => {
+                        tracing::info!(
+                            module = "captain",
+                            session_id = %sid,
+                            provider = %row.provider.as_str(),
+                            stream_path = %stream_path.display(),
+                            stale_secs,
+                            reason = "provider_inactive_stale_stream",
+                            "session reconciliation failing inactive provider session"
+                        );
+                        jobs.push(TermJob {
+                            session_id: sid.clone(),
+                            provider: row.provider,
+                            status: SessionStatus::Failed,
+                            reason: "provider_inactive_stale_stream",
+                        });
+                    }
+                    StreamFreshness::Present(_) => {}
+                    StreamFreshness::MetadataError(message) => {
+                        tracing::warn!(
+                            module = "captain",
+                            session_id = %sid,
+                            provider = %row.provider.as_str(),
+                            stream_path = %stream_path.display(),
+                            error = %message,
+                            "session reconciliation skipped inactive Codex session because stream freshness is unknown"
+                        );
+                        alerts.push(format!(
                             "session reconciliation stream freshness failed for {sid} (provider={}, path={}): {message}",
                             row.provider.as_str(),
                             stream_path.display()
                         ));
+                    }
                 }
-            },
+            }
             global_types::TaskProvider::Claude => {
                 if pid.as_u32() > 0 {
                     jobs.push(TermJob {

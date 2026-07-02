@@ -33,5 +33,8 @@ pub(crate) async fn run_text_session(
         api_types::TaskProvider::Claude => {
             anyhow::bail!("direct Captain text sessions support Codex only; Claude is handled by the provider session bridge")
         }
+        api_types::TaskProvider::OpenCode => {
+            anyhow::bail!("direct Captain text sessions are not enabled for OpenCode")
+        }
     }
 }

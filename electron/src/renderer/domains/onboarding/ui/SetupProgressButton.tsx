@@ -27,7 +27,7 @@ export function SetupProgressButton({
       {active && (
         <div
           data-testid="setup-popover"
-          className="absolute right-0 bottom-[calc(100%+6px)] left-0 z-[200] max-h-[420px] overflow-y-auto rounded-lg bg-muted shadow-[0_-4px_20px_color-mix(in_srgb,black_50%,transparent)]"
+          className="absolute right-0 bottom-[calc(100%+6px)] left-0 z-[200] max-h-[420px] min-w-0 overflow-x-hidden overflow-y-auto rounded-lg bg-muted shadow-[0_-4px_20px_color-mix(in_srgb,black_50%,transparent)]"
         >
           <SetupChecklist onDismiss={onDismiss} onMinimize={onToggle} />
         </div>

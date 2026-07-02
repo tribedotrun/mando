@@ -301,11 +301,32 @@ impl CodexAppServerManager {
             self.reset_process("initialize failed").await;
             return Err(e);
         }
+        if let Err(e) = self.configure_mando_defaults(response_timeout).await {
+            self.reset_process("configure defaults failed").await;
+            return Err(e);
+        }
         if let Err(e) = self.notification("initialized", json!({})).await {
             self.reset_process("initialized notification failed").await;
             return Err(e);
         }
         tracing::info!(module = "codex_app_server", pid = %pid, "initialized shared Codex app-server");
+        Ok(())
+    }
+
+    async fn configure_mando_defaults(&self, response_timeout: std::time::Duration) -> Result<()> {
+        self.request(
+            "config/value/write",
+            request_params::computer_use_mcp_approval_params(),
+            response_timeout,
+        )
+        .await
+        .context("configure Computer Use MCP approval mode")?;
+        tracing::info!(
+            module = "codex_app_server",
+            mcp_server = "computer-use",
+            approval_mode = "approve",
+            "configured Mando Codex app-server MCP approval defaults"
+        );
         Ok(())
     }
 

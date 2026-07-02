@@ -227,13 +227,15 @@
         ],
         reviewerChecklist: [
           { label: "DB migration", detail: "Tables/columns, or none." },
-          { label: "Env vars", detail: "New vars, or none." },
+          { label: "Env vars", detail: "None, or each new env var with why it needs env; unnecessary envs removed." },
           { label: "New dependencies", detail: "Packages, or none." },
           { label: "Backend deploy", detail: "Services to deploy, or no backend changes." },
           { label: "Breaking changes", detail: "Describe, or none." },
           { label: "External API calls", detail: "Service + rate-limit/cache behavior, or none added." },
           { label: "No backward-compat / legacy code", detail: "Confirm no shims/fallbacks, or explain why." },
-          { label: "Wiring", detail: "New surfaces are registered, called, rendered, or documented." }
+          { label: "Wiring", detail: "New surfaces are registered, called, rendered, or documented." },
+          { label: "UI copy", detail: "All new/edited user-facing UI strings surfaced for human review, or none." },
+          { label: "Architecture surface", detail: "Domains/layers touched per repo architecture guidance, or N/A." }
         ],
         testing: {
           unit: ["Unit/build command and outcome."],

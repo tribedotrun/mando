@@ -49,14 +49,7 @@ pub(super) async fn spawn_codex_merge(
             pr: pr_url.to_string(),
         },
     };
-    match crate::io::queries::tasks::persist_status_transition(
-        pool,
-        item,
-        ItemStatus::CaptainMerging.as_str(),
-        &event,
-    )
-    .await
-    {
+    match crate::io::queries::tasks::persist_merge_spawn(pool, item, &event).await {
         Ok(true) => {
             let title = global_infra::html::escape_html(&item.title);
             notifier

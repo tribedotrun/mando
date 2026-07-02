@@ -10,7 +10,7 @@ import {
 import { StepIndicator } from '#renderer/domains/onboarding/ui/SetupChecklistParts/StepIndicator';
 import type { StepDef } from '#renderer/domains/onboarding/ui/SetupChecklistParts/types';
 
-const STEP_GRID = 'grid grid-cols-[16px_1fr_14px] items-center gap-x-2';
+const STEP_GRID = 'grid grid-cols-[16px_minmax(0,1fr)_14px] items-center gap-x-2';
 
 export function StepRow({
   step,
@@ -31,13 +31,13 @@ export function StepRow({
       {/* Step header */}
       <Button
         variant="ghost"
-        className={`${STEP_GRID} h-auto w-full rounded-none py-2 ${interactive ? 'cursor-pointer' : 'cursor-default'}`}
+        className={`${STEP_GRID} h-auto w-full min-w-0 overflow-hidden rounded-none py-2 ${interactive ? 'cursor-pointer' : 'cursor-default'}`}
         onClick={interactive ? onToggle : undefined}
         disabled={!interactive}
       >
         <StepIndicator completed={step.completed} />
         <span
-          className={`text-left text-[12px] ${step.completed ? 'font-normal text-muted-foreground line-through' : 'font-medium text-foreground'}`}
+          className={`min-w-0 truncate text-left text-[12px] ${step.completed ? 'font-normal text-muted-foreground line-through' : 'font-medium text-foreground'}`}
         >
           {step.title}
         </span>
@@ -55,7 +55,7 @@ export function StepRow({
       {expanded && (
         <div className={`${STEP_GRID} items-start pb-2`}>
           <span />
-          <div className="col-[2/-1]">
+          <div className="col-[2/-1] min-w-0 overflow-hidden">
             {step.id === 'claude-code' && (
               <ClaudeCodeContent recheckClaude={recheckClaude} checkResult={claudeResult} />
             )}

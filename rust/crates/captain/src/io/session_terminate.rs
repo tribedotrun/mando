@@ -228,6 +228,11 @@ mod tests {
         assert!(should_kill_provider_process(Some(provider("claude"))));
     }
 
+    #[test]
+    fn opencode_provider_can_kill_session_process() {
+        assert!(should_kill_provider_process(Some(provider("opencode"))));
+    }
+
     fn provider(value: &str) -> global_types::TaskProvider {
         value.parse().expect("known provider")
     }

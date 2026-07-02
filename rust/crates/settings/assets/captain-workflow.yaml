@@ -13,10 +13,24 @@ models:
   clarifier: "opus[1m]"
   todo_parse: "opus[1m]"
 
+# Stage routing is intentionally adapter-based so implementation, planning,
+# review, and merge can move between Claude Code, Codex, and OpenCode without
+# reshaping the state machine. Today only implementation is routed away from
+# the task's premium provider when the task opts into GLM.
+stages:
+  implementation:
+    adapter: "opencode"
+    model: "zai-coding-plan/glm-5.2"
+    session_start_timeout_s: 20
+    # GLM implementation runs always use max thinking. This is documented here
+    # for operator visibility; the UI does not expose a toggle.
+    variant: "max"
+
 agent:
   max_concurrent: 3
   resource_limits:
     emulator: 3
+    ios-simulator: 1
   # Per-lifecycle-state concurrency caps. Empty = unlimited (subject to
   # max_concurrent for in-progress). Allowed keys are the kebab-case wire
   # names of ItemStatus variants with a live CC/Codex session:
@@ -46,9 +60,9 @@ agent:
   task_ask_idle_ttl_s: 3600
   ops_timeout_s: 120
   ops_idle_ttl_s: 3600
-  # Codex app-server permission posture. `on-request` routes permission
-  # prompts through Codex approval review instead of failing them outright.
-  codex_approval_policy: "on-request"
+  # Codex app-server permission posture. Mando-owned workers are autonomous and
+  # expected to use local tools such as Computer Use without interactive prompts.
+  codex_approval_policy: "never"
   codex_approvals_reviewer: "auto_review"
   # Codex app-server sandbox posture. Mando-owned workers need
   # danger-full-access so local Electron verification can launch without the
@@ -197,7 +211,7 @@ prompts:
   _out_of_scope_discoveries: |
     ## Out-of-Scope Discoveries
 
-    If mid-task you spot work that is genuinely a separate task (an unrelated bug, a cleanup, an unrelated follow-up), do NOT expand the current PR. Invoke `/mando-task <one-line description>` to file a new Mando task, then continue with the task you were given. The `mando-task` skill researches the codebase and queues a well-informed task for captain.
+    If mid-task you spot work that is genuinely a separate task (an unrelated bug, a cleanup, an unrelated follow-up), do NOT expand the current PR and do NOT create a Mando task. Record it in this section with enough context for the human/captain to route later, then continue with the task you were given.
 
   # ── Worker Prompts ────────────────────────────────────────────────────
   worker_initial: |

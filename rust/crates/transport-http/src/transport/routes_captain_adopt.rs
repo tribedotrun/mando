@@ -137,6 +137,7 @@ pub(crate) async fn post_captain_adopt(
         })?;
 
     let wt_display = wt_path.display().to_string();
+    let provider = super::routes_tasks::default_task_provider(&config);
     let created = {
         let ctx = match &body.note {
             Some(note) => format!("Adopted from worktree: {wt_display}\n\nNote: {note}"),
@@ -149,7 +150,8 @@ pub(crate) async fn post_captain_adopt(
                 Some(project_name.as_str()),
                 Some(&ctx),
                 Some("adopt"),
-                api_types::TaskProvider::Claude,
+                provider,
+                true,
             )
             .await
             .map_err(|e| internal_error(e, "failed to create task for adoption"))?;

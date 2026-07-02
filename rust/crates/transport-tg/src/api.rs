@@ -184,16 +184,6 @@ impl TelegramApi {
         self.post_with_retry("editMessageReplyMarkup", &body).await
     }
 
-    /// `deleteMessage` — delete a message.
-    pub async fn delete_message(&self, chat_id: &str, message_id: i64) -> Result<()> {
-        let body = serde_json::json!({
-            "chat_id": chat_id,
-            "message_id": message_id,
-        });
-        self.post_with_retry("deleteMessage", &body).await?;
-        Ok(())
-    }
-
     /// `answerCallbackQuery` — acknowledge an inline keyboard tap.
     pub async fn answer_callback_query(
         &self,

@@ -74,6 +74,38 @@ export function SettingsCaptain(): React.ReactElement {
           </div>
           <div className="flex items-center justify-between">
             <div>
+              <h3 className="text-sm font-medium text-muted-foreground">Default Task Agent</h3>
+            </div>
+            <select
+              value={captain.defaultTaskAgent ?? 'codex'}
+              onChange={(e) => {
+                saveSection({
+                  defaultTaskAgent: e.target.value as 'claude' | 'codex',
+                });
+              }}
+              className="rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground"
+            >
+              <option value="codex">Codex</option>
+              <option value="claude">Claude Code</option>
+            </select>
+          </div>
+          <div className="flex items-center justify-between gap-6">
+            <div>
+              <h3 className="text-sm font-medium text-muted-foreground">GLM worker by default</h3>
+              <p className="mt-0.5 text-caption text-muted-foreground">
+                New tasks build with Z.ai GLM 5.2 unless turned off per task.
+              </p>
+            </div>
+            <Switch
+              data-testid="captain-default-glm"
+              checked={!!captain.defaultGlmImplementation}
+              onCheckedChange={(checked) => {
+                saveSection({ defaultGlmImplementation: checked });
+              }}
+            />
+          </div>
+          <div className="flex items-center justify-between">
+            <div>
               <h3 className="text-sm font-medium text-muted-foreground">Default Terminal Agent</h3>
             </div>
             <select

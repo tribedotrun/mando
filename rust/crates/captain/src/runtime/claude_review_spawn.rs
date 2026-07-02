@@ -100,6 +100,7 @@ pub(super) async fn spawn_claude_review(
         pool,
         &session_id,
         &cwd,
+        &workflow.models.captain,
         "captain-review-async",
         "",
         Some(item.id),

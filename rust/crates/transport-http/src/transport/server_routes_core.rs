@@ -255,7 +255,7 @@ fn config_routes() -> ApiRouter<AppState> {
         handler = routes_config::get_config_status,
         res = api_types::ConfigStatusResponse
     );
-    let router = crate::api_route!(
+    crate::api_route!(
         router,
         POST "/api/config/setup",
         transport = Json,
@@ -263,13 +263,5 @@ fn config_routes() -> ApiRouter<AppState> {
         handler = routes_config::post_config_setup,
         body = api_types::ConfigSetupRequest,
         res = api_types::ConfigSetupResponse
-    );
-    crate::api_route!(
-        router,
-        GET "/api/config/paths",
-        transport = Json,
-        auth = Protected,
-        handler = routes_config::get_config_paths,
-        res = api_types::ConfigPathsResponse
     )
 }

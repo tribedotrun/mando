@@ -52,7 +52,7 @@ export function SessionsTab({
                   {title}
                   {s.worker_name ? ` (${s.worker_name})` : ''}
                   <span
-                    className="ml-2 rounded bg-secondary px-1 text-[10px] uppercase text-text-3"
+                    className="ml-2 rounded bg-secondary px-1 text-[11px] uppercase text-text-3"
                     data-testid={`session-provider-${s.provider}`}
                   >
                     {taskProviderShortLabel(s.provider)}
@@ -66,7 +66,7 @@ export function SessionsTab({
                   )}
                 </div>
               </div>
-              {onResumeSession && s.status !== 'running' ? (
+              {onResumeSession && s.status !== 'running' && s.provider !== 'opencode' ? (
                 <Button
                   variant="outline"
                   size="xs"

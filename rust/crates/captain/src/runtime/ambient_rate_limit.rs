@@ -107,26 +107,6 @@ pub fn clear() {
     state.consecutive = 0;
 }
 
-/// Check a session's stream for rate limit rejection and activate cooldown if found.
-///
-/// Returns `true` if a rejection was found (caller should skip fail-count increment).
-#[allow(dead_code)]
-pub fn check_and_activate_from_stream(session_id: &str) -> bool {
-    let stream_path = global_infra::paths::stream_path_for_session(session_id);
-    match global_claude::has_rate_limit_rejection(&stream_path) {
-        Some(rej) => {
-            let resets = if rej.resets_at > 0 {
-                Some(rej.resets_at)
-            } else {
-                None
-            };
-            activate(resets);
-            true
-        }
-        None => false,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

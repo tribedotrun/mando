@@ -5,6 +5,7 @@ pub mod paths;
 pub mod settings;
 pub mod skills;
 pub mod workflow;
+mod workflow_merge;
 pub mod workflow_render;
 pub mod workflow_scout;
 pub mod workflow_validate;
@@ -25,7 +26,8 @@ pub use workflow::{
     captain_workflow_path, parse_captain_workflow_or_default, parse_scout_workflow_or_default,
     render_initial_prompt, render_nudge, render_prompt, render_template, scout_workflow_path,
     validate_template_syntax, AgentConfig, AutoTitleConfig, CaptainWorkflow, CodexAgentConfig,
-    CodexReasoningEffort, CodexSandboxPolicy, ModelsConfig, SandboxOverrides,
+    CodexReasoningEffort, CodexSandboxPolicy, ModelsConfig, SandboxOverrides, StageAgentConfig,
+    StageRoutingConfig, WorkflowStage,
 };
 pub use workflow_scout::{
     InterestsConfig, ScoutAgentConfig, ScoutRepo, ScoutWorkflow, ScoutWorkflowOverride,

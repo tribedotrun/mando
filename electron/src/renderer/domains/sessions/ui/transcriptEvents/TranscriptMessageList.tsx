@@ -58,6 +58,9 @@ export function TranscriptMessageList({
     if (event.kind === 'system_rate_limit') {
       return <SystemMessage key={index} event={{ kind: 'ratelimit', data: event.data }} />;
     }
+    if (event.kind === 'system_thinking_tokens') {
+      return <SystemMessage key={index} event={{ kind: 'thinking_tokens', data: event.data }} />;
+    }
     if (event.kind === 'unknown') {
       return <SystemMessage key={index} event={{ kind: 'unknown', data: event.data }} />;
     }

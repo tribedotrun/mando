@@ -154,12 +154,7 @@ pub fn parse_messages(
         let (text, tool_calls) = if msg_type == "assistant" {
             extract_assistant_content(&val)
         } else {
-            let text = val
-                .pointer("/message/content")
-                .and_then(|c| c.as_str())
-                .unwrap_or("")
-                .to_string();
-            (text, Vec::new())
+            (extract_user_content(&val), Vec::new())
         };
 
         let usage = val.pointer("/message/usage").map(|u| UsageInfo {
@@ -191,6 +186,46 @@ pub fn parse_messages(
         .map(|l| (start + l).min(messages.len()))
         .unwrap_or(messages.len());
     messages[start..end].to_vec()
+}
+
+fn extract_user_content(val: &serde_json::Value) -> String {
+    match val.pointer("/message/content") {
+        Some(serde_json::Value::String(text)) => text.clone(),
+        Some(serde_json::Value::Array(blocks)) => blocks
+            .iter()
+            .filter_map(extract_user_content_block)
+            .filter(|text| !text.is_empty())
+            .collect::<Vec<_>>()
+            .join("\n"),
+        _ => String::new(),
+    }
+}
+
+fn extract_user_content_block(block: &serde_json::Value) -> Option<String> {
+    match block.get("type").and_then(|value| value.as_str()) {
+        Some("text") => block
+            .get("text")
+            .and_then(|value| value.as_str())
+            .map(String::from),
+        Some("tool_result") => extract_tool_result_text(block.get("content")?),
+        _ => None,
+    }
+}
+
+fn extract_tool_result_text(content: &serde_json::Value) -> Option<String> {
+    match content {
+        serde_json::Value::String(text) => Some(text.clone()),
+        serde_json::Value::Array(blocks) => {
+            let text = blocks
+                .iter()
+                .filter_map(|block| block.get("text").and_then(|value| value.as_str()))
+                .filter(|text| !text.is_empty())
+                .collect::<Vec<_>>()
+                .join("\n");
+            (!text.is_empty()).then_some(text)
+        }
+        _ => None,
+    }
 }
 
 /// Get aggregated tool usage for a session.
@@ -468,9 +503,28 @@ mod tests {
         let msgs = parse_messages(&path, None, 0);
         assert_eq!(msgs.len(), 2);
         assert_eq!(msgs[0].role, "user");
+        assert_eq!(msgs[0].text, "hello");
         assert_eq!(msgs[1].role, "assistant");
         assert_eq!(msgs[1].text, "Hi there!");
         assert_eq!(msgs[1].usage.as_ref().unwrap().input_tokens, 10);
+
+        std::fs::remove_file(&path).ok();
+        std::fs::remove_dir(&dir).ok();
+    }
+
+    #[test]
+    fn parse_messages_reads_user_content_blocks() {
+        let dir = std::env::temp_dir().join("mando-cc-user-block-transcript-test");
+        let content = [
+            r#"{"type":"system","subtype":"init","session_id":"abc"}"#,
+            r#"{"type":"user","uuid":"u1","message":{"role":"user","content":[{"type":"text","text":"implement this"},{"type":"tool_result","content":[{"type":"text","text":"tool output"}]}]}}"#,
+        ].join("\n");
+        let path = write_test_stream(&dir, &content);
+
+        let msgs = parse_messages(&path, None, 0);
+        assert_eq!(msgs.len(), 1);
+        assert_eq!(msgs[0].role, "user");
+        assert_eq!(msgs[0].text, "implement this\ntool output");
 
         std::fs::remove_file(&path).ok();
         std::fs::remove_dir(&dir).ok();

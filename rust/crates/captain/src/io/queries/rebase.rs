@@ -42,18 +42,6 @@ impl RebaseRow {
     }
 }
 
-/// Get rebase state for a task (None if no rebase has been attempted).
-#[allow(dead_code)]
-pub async fn get(pool: &SqlitePool, task_id: i64) -> Result<Option<RebaseState>> {
-    let row: Option<RebaseRow> = sqlx::query_as(&format!(
-        "SELECT {SELECT_COLS} FROM task_rebase_state WHERE task_id = ?"
-    ))
-    .bind(task_id)
-    .fetch_optional(pool)
-    .await?;
-    row.map(|r| r.into_state()).transpose()
-}
-
 /// Upsert rebase state for a task.
 pub async fn upsert(pool: &SqlitePool, state: &RebaseState) -> Result<()> {
     sqlx::query(

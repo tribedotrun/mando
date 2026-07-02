@@ -167,6 +167,9 @@ pub fn infer_transition_command(
         (ItemStatus::Stopped, ItemStatus::Rework) => "rework",
         (ItemStatus::Stopped, ItemStatus::Canceled) => "cancel",
 
+        (ItemStatus::Canceled, ItemStatus::InProgress) => "resume_worker",
+        (ItemStatus::Canceled, ItemStatus::Queued) => "reopen_queued",
+
         (ItemStatus::CaptainMerging, ItemStatus::Merged) => "merge_complete",
         (ItemStatus::CaptainMerging, ItemStatus::CaptainMerging) => "merge_spawn",
         (ItemStatus::CaptainMerging, ItemStatus::CaptainReviewing) => "merge_failed_review",
@@ -504,6 +507,22 @@ mod tests {
         assert!(
             crate::types::REOPENABLE.contains(&ItemStatus::CompletedNoPr),
             "CompletedNoPr belongs in the REOPENABLE set so no-PR tasks can accept follow-up work"
+        );
+    }
+
+    #[test]
+    fn canceled_can_be_reopened_for_follow_up_work() {
+        assert_eq!(
+            infer_transition_command(ItemStatus::Canceled, ItemStatus::InProgress, false).unwrap(),
+            "resume_worker"
+        );
+        assert_eq!(
+            infer_transition_command(ItemStatus::Canceled, ItemStatus::Queued, false).unwrap(),
+            "reopen_queued"
+        );
+        assert!(
+            crate::types::REOPENABLE.contains(&ItemStatus::Canceled),
+            "Canceled belongs in the REOPENABLE set so canceled tasks can be rerun"
         );
     }
 }

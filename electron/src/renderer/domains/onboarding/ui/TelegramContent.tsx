@@ -37,8 +37,8 @@ export function TelegramContent(): React.ReactElement {
   const canSave = !!token.trim() && !validating && !saving;
 
   return (
-    <div className="flex flex-col gap-2">
-      <p className="text-xs leading-4 text-muted-foreground">
+    <div className="flex min-w-0 flex-col gap-2">
+      <p className="text-xs leading-4 text-muted-foreground [overflow-wrap:anywhere]">
         Create a bot via{' '}
         <a
           href="https://t.me/BotFather"
@@ -52,7 +52,7 @@ export function TelegramContent(): React.ReactElement {
       </p>
       <Input
         type="text"
-        className="text-xs"
+        className="min-w-0 text-xs"
         value={token}
         onChange={(e) => {
           setToken(e.target.value);

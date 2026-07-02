@@ -145,9 +145,7 @@ pub async fn spawn_worker_for_item(
         );
     }
 
-    let result =
-        super::agent_runtime::spawn_worker(config, slug, project_config, item, workflow, pool)
-            .await?;
+    let result = super::agent_runtime::spawn_worker(project_config, item, workflow, pool).await?;
     let now = global_types::now_rfc3339();
 
     // The workbench was created at task-creation time (atomic with the

@@ -7,6 +7,7 @@ import type {
   SystemLocalCommandOutputEvent,
   SystemRateLimitEvent,
   SystemStatusEvent,
+  SystemThinkingTokensEvent,
   UnknownEvent,
 } from '#renderer/global/types';
 import { unknownEventTitle } from '#renderer/domains/sessions/service/transcriptEvents';
@@ -20,6 +21,7 @@ type SystemEventPayload =
   | { kind: 'local'; data: SystemLocalCommandOutputEvent }
   | { kind: 'hook'; data: SystemHookEvent }
   | { kind: 'ratelimit'; data: SystemRateLimitEvent }
+  | { kind: 'thinking_tokens'; data: SystemThinkingTokensEvent }
   | { kind: 'unknown'; data: UnknownEvent };
 
 export function SystemMessage({ event }: { event: SystemEventPayload }): React.ReactElement | null {
@@ -62,6 +64,12 @@ export function SystemMessage({ event }: { event: SystemEventPayload }): React.R
         </pre>
       );
     case 'hook':
+      return null;
+    case 'thinking_tokens':
+      // CC progress signal — estimated token counts + ids only, no thinking
+      // text. Real thinking arrives as `assistant.thinking` blocks and
+      // renders via `ThinkingBlock`. Suppress like `hook` (raw JSONL still
+      // reachable via the "Open JSONL" button).
       return null;
     case 'ratelimit':
       return (

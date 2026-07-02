@@ -163,7 +163,9 @@ export const captainConfigSchema = z
     maxConcurrentWorkers: z.number().nullable(),
     tickIntervalS: z.number(),
     tz: z.string(),
+    defaultTaskAgent: z.lazy(() => terminalAgentSchema),
     defaultTerminalAgent: z.lazy(() => terminalAgentSchema),
+    defaultGlmImplementation: z.boolean(),
     claudeTerminalArgs: z.string(),
     codexTerminalArgs: z.string(),
     projects: z.record(
@@ -266,19 +268,6 @@ export const clientLogEntrySchema = z
     message: z.string(),
     context: z.lazy(() => clientLogContextSchema).nullable(),
     timestamp: z.string().nullable(),
-  })
-  .strict();
-export const configPathsResponseSchema = z
-  .object({
-    dataDir: z.string(),
-    configPath: z.string(),
-    taskDbPath: z.string(),
-    workerHealthPath: z.string(),
-    lockfilePath: z.string(),
-    configuredTaskDbPath: z.string(),
-    configuredWorkerHealthPath: z.string(),
-    configuredLockfilePath: z.string(),
-    restartRequired: z.boolean(),
   })
   .strict();
 export const configPayloadSchema = z
@@ -1271,11 +1260,15 @@ export const systemStatusEventSchema = z
     message: z.string().nullable(),
   })
   .strict();
+export const systemThinkingTokensEventSchema = z
+  .object({ meta: z.lazy(() => eventMetaSchema) })
+  .strict();
 export const taskAddRequestSchema = z
   .object({
     title: z.string(),
     project: z.string().nullable(),
-    provider: z.lazy(() => taskProviderSchema).nullable(),
+    provider: z.lazy(() => taskCreateProviderSchema).nullable(),
+    use_glm_worker: z.boolean(),
     plan: z.boolean(),
     no_pr: z.boolean(),
   })
@@ -1300,6 +1293,7 @@ export const taskBulkUpdateRequestSchema = z
   .object({ ids: z.array(z.number()), updates: z.lazy(() => taskBulkUpdatesSchema) })
   .strict();
 export const taskBulkUpdatesSchema = z.object({ worker: z.string().optional() }).strict();
+export const taskCreateProviderSchema = z.enum(['claude', 'codex']);
 export const taskCreateResponseSchema = z.object({ id: z.number(), title: z.string() }).strict();
 export const taskDeleteRequestSchema = z
   .object({
@@ -1331,6 +1325,9 @@ export const taskFeedbackRequestSchema = z
   .strict();
 export const taskIdParamsSchema = z.object({ id: z.number() }).strict();
 export const taskIdRequestSchema = z.object({ id: z.number() }).strict();
+export const taskImplementRequestSchema = z
+  .object({ id: z.number(), message: z.string() })
+  .strict();
 export const taskInputSchema = z
   .object({ description: z.string(), prompt: z.string(), subagentType: z.string().nullable() })
   .strict();
@@ -1340,6 +1337,7 @@ export const taskItemSchema = z
     rev: z.number(),
     title: z.string(),
     provider: z.lazy(() => taskProviderSchema),
+    use_glm_worker: z.boolean(),
     status: z.lazy(() => itemStatusSchema),
     project: z.string().nullable(),
     github_repo: z.string().nullable(),
@@ -1388,7 +1386,7 @@ export const taskPatchRequestSchema = z
     is_bug_fix: z.boolean().optional(),
   })
   .strict();
-export const taskProviderSchema = z.enum(['claude', 'codex']);
+export const taskProviderSchema = z.enum(['claude', 'codex', 'opencode']);
 export const taskSummaryRequestSchema = z.object({ content: z.string() }).strict();
 export const taskSummaryResponseSchema = z
   .object({ artifact_id: z.number(), task_id: z.number() })
@@ -1932,6 +1930,12 @@ export const transcriptEventSchema = z.union([
       data: z.lazy(() => systemRateLimitEventSchema),
     })
     .strict(),
+  z
+    .object({
+      kind: z.literal('system_thinking_tokens'),
+      data: z.lazy(() => systemThinkingTokensEventSchema),
+    })
+    .strict(),
   z.object({ kind: z.literal('user'), data: z.lazy(() => userEventSchema) }).strict(),
   z.object({ kind: z.literal('assistant'), data: z.lazy(() => assistantEventSchema) }).strict(),
   z
@@ -2178,7 +2182,6 @@ export const resSchemas = {
   deleteTerminalById: boolOkResponseSchema,
   getChannels: channelsResponseSchema,
   getConfig: mandoConfigSchema,
-  getConfigPaths: configPathsResponseSchema,
   getConfigStatus: configStatusResponseSchema,
   getCredentials: credentialsListResponseSchema,
   getCredentialsByIdToken: credentialTokenResponseSchema,
@@ -2253,6 +2256,7 @@ export const resSchemas = {
   postTasksCancel: boolOkResponseSchema,
   postTasksDelete: deleteTasksResponseSchema,
   postTasksHandoff: boolOkResponseSchema,
+  postTasksImplement: boolOkResponseSchema,
   postTasksMerge: mergeResponseSchema,
   postTasksQueue: boolOkResponseSchema,
   postTasksReopen: boolOkResponseSchema,
@@ -2324,6 +2328,7 @@ export const bodySchemas = {
   postTasksCancel: taskIdRequestSchema,
   postTasksDelete: taskDeleteRequestSchema,
   postTasksHandoff: taskIdRequestSchema,
+  postTasksImplement: taskImplementRequestSchema,
   postTasksMerge: mergeRequestSchema,
   postTasksQueue: taskIdRequestSchema,
   postTasksReopen: taskFeedbackRequestSchema,

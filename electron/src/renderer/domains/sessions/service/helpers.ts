@@ -3,12 +3,12 @@ import type {
   SessionEntry,
   SessionStatus,
   SessionSummary,
-  TaskProvider,
   TaskItem,
   TimelineEvent,
 } from '#renderer/global/types';
 import { sessionCategorySchema, sessionStatusSchema } from '#shared/daemon-contract/schemas';
 import { ApiErrorThrown } from '#result';
+export { buildResumeCmd } from '#renderer/domains/sessions/service/resumeCommand';
 
 /** Maps timeline event types to a caller label used when the session_id has no row in the session map. */
 const CALLER_MAP: Record<string, string> = Object.freeze({
@@ -130,12 +130,6 @@ const CALLER_PREFIXES: readonly (readonly [string, string])[] = Object.freeze([
   ['planning-synth-r', 'planning-synth'],
 ] as const);
 
-/** Extract skill name from prompt body that starts with "Base directory for this skill: .../name" */
-export function detectSkill(content: string): string | null {
-  const m = content.match(/^Base directory for this skill: .+\/([^/\s]+)/);
-  return m ? m[1] : null;
-}
-
 export function formatCallerLabel(caller: string): string {
   let label: string;
   const direct = CALLER_LABELS[caller];
@@ -169,19 +163,6 @@ export function sessionSubtitle(s: SessionEntry): string | null {
   if (s.task_title) return s.task_title;
   if (s.scout_item_title) return s.scout_item_title;
   return null;
-}
-
-/** Builds a provider-native terminal resume command when one is available. */
-export function buildResumeCmd(
-  sessionId: string,
-  provider: TaskProvider | undefined,
-  cwd?: string | null,
-): string | null {
-  if (!provider) return null;
-  if (provider === 'codex') {
-    return cwd ? `cd "${cwd}" && codex resume ${sessionId}` : `codex resume ${sessionId}`;
-  }
-  return cwd ? `cd "${cwd}" && claude -r ${sessionId}` : `claude -r ${sessionId}`;
 }
 
 /** Adapts SessionSummary[] to the shape buildSessionSequence expects. */

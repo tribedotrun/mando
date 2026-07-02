@@ -22,6 +22,7 @@ members = [
     "crates/global-net",
     "crates/global-git",
     "crates/global-github",
+    "crates/global-opencode",
 
     # Contract + transports + binary
     "crates/api-types",
@@ -37,7 +38,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.20-beta.12"
+version = "0.1.20-beta.13"
 edition = "2021"
 license = "Apache-2.0"
 repository = "https://github.com/tribedotrun/mando"
@@ -96,6 +97,7 @@ global-codex-app-server = { path = "crates/global-codex-app-server" }
 global-net = { path = "crates/global-net" }
 global-git = { path = "crates/global-git" }
 global-github = { path = "crates/global-github" }
+global-opencode = { path = "crates/global-opencode" }
 api-types = { path = "crates/api-types" }
 gateway-client = { path = "crates/gateway-client" }
 transport-http = { path = "crates/transport-http" }

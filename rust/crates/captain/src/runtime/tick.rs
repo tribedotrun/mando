@@ -207,8 +207,10 @@ async fn run_captain_tick_inner(
         &items,
         &mut health_state,
         workflow,
+        &pool,
         dry_run,
-    )?;
+    )
+    .await?;
     let actions_to_execute = classify_result.actions_to_execute;
     dry_actions.extend(classify_result.dry_actions);
 

@@ -164,6 +164,7 @@ function metaOf(event: TranscriptEvent) {
     case 'system_local_command_output':
     case 'system_hook':
     case 'system_rate_limit':
+    case 'system_thinking_tokens':
     case 'user':
     case 'assistant':
     case 'tool_progress':

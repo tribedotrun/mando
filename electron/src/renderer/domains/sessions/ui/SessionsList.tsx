@@ -48,7 +48,7 @@ export function SessionsList({
                     {title}
                   </span>
                   <span
-                    className="shrink-0 rounded bg-secondary px-1 text-[10px] uppercase text-text-3"
+                    className="shrink-0 rounded bg-secondary px-1 text-[11px] uppercase text-text-3"
                     data-testid={`session-list-provider-${s.provider}`}
                   >
                     {taskProviderShortLabel(s.provider)}

@@ -131,19 +131,6 @@ pub async fn find_by_worktree(pool: &SqlitePool, worktree: &str) -> Result<Optio
     Ok(row.map(|r| r.into_workbench()))
 }
 
-#[allow(dead_code)]
-pub async fn load_by_project(pool: &SqlitePool, project_id: i64) -> Result<Vec<Workbench>> {
-    let sql = format!(
-        "{} WHERE w.project_id = ? AND w.archived_at IS NULL AND w.deleted_at IS NULL",
-        select_sql()
-    );
-    let rows: Vec<Row> = sqlx::query_as(&sql)
-        .bind(project_id)
-        .fetch_all(pool)
-        .await?;
-    Ok(rows.into_iter().map(|r| r.into_workbench()).collect())
-}
-
 pub async fn load_active(pool: &SqlitePool) -> Result<Vec<Workbench>> {
     let sql = format!(
         "{} WHERE w.archived_at IS NULL AND w.deleted_at IS NULL",

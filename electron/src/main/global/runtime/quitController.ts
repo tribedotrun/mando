@@ -27,10 +27,6 @@ interface QuitRuntime {
 
 const runtime: QuitRuntime = { phase: 'idle' };
 
-export function quitPhase(): QuitPhase {
-  return runtime.phase;
-}
-
 export function isQuitRequested(): boolean {
   return runtime.phase !== 'idle';
 }

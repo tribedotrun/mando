@@ -50,7 +50,9 @@ fn parse_full_config() {
             "autoMerge": false,
             "tickIntervalS": 60,
             "tz": "UTC",
+            "defaultTaskAgent": "codex",
             "defaultTerminalAgent": "claude",
+            "defaultGlmImplementation": true,
             "claudeTerminalArgs": "--dangerously-skip-permissions",
             "codexTerminalArgs": "--sandbox danger-full-access --ask-for-approval never",
             "projects": {
@@ -90,6 +92,7 @@ fn parse_full_config() {
     // Captain (projects are serde(skip) -- loaded from DB, not config.json)
     assert!(cfg.captain.auto_schedule);
     assert_eq!(cfg.captain.tick_interval_s, 60);
+    assert!(cfg.captain.default_glm_implementation);
     assert!(cfg.captain.projects.is_empty());
     assert!(cfg.captain.task_db_path.ends_with("mando.db"));
     assert!(cfg.captain.lockfile_path.ends_with("captain.lock"));
@@ -148,6 +151,10 @@ fn parse_config_partial_overrides_selected_fields() {
     assert_eq!(
         cfg.captain.default_terminal_agent,
         defaults.captain.default_terminal_agent
+    );
+    assert_eq!(
+        cfg.captain.default_task_agent,
+        defaults.captain.default_task_agent
     );
     // Runtime-only paths still populate
     assert!(cfg.captain.task_db_path.ends_with("mando.db"));

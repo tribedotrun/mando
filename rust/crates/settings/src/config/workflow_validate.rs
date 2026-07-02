@@ -4,6 +4,7 @@
 
 use super::workflow::{
     AgentConfig, CaptainWorkflow, CodexApprovalPolicy, CodexApprovalsReviewer, ScoutWorkflow,
+    StageAgentConfig, WorkflowStage,
 };
 use global_claude::CcStreamSymptom;
 
@@ -112,10 +113,32 @@ pub fn validate_captain_workflow(wf: &CaptainWorkflow) {
         &mut errors,
     );
     validate_stream_symptoms(&wf.stream_symptoms, &mut errors);
+    if wf.stages.get(WorkflowStage::Implementation).is_none() {
+        errors.push("stages.implementation is required".to_string());
+    }
+    for (stage, config) in wf.stages.iter() {
+        validate_stage_agent(&format!("stages.{}", stage.label()), config, &mut errors);
+    }
     if !errors.is_empty() {
         global_infra::unrecoverable!(format!(
             "captain workflow missing required template keys: {}",
             errors.join(", ")
+        ));
+    }
+}
+
+fn validate_stage_agent(scope: &str, config: &StageAgentConfig, errors: &mut Vec<String>) {
+    if config.model.trim().is_empty() {
+        errors.push(format!("{scope}.model must not be empty"));
+    }
+    if config.session_start_timeout_s.is_zero() {
+        errors.push(format!("{scope}.session_start_timeout_s must be > 0"));
+    }
+    if config.adapter == api_types::TaskProvider::OpenCode
+        && config.variant.as_deref() != Some("max")
+    {
+        errors.push(format!(
+            "{scope}.variant must be max for OpenCode GLM routing"
         ));
     }
 }

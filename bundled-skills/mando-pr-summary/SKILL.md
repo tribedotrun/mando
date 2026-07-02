@@ -29,15 +29,19 @@ Align via `python3 ~/.claude/skills/mando-pr-summary/fix-diagram.py` (pipe in, u
 
 Universal items (no heading — Step 5's body supplies it). Append items from the repo's `## PR Checklist` if present.
 
+For **Env vars**, report the `/mando-pr` audit. Do not edit code here. If the audit is missing or an env lacks rationale, stop and return to `/mando-pr` Step 2. Checklist says `none` or `<VAR>: <why env boundary>`.
+
 ```markdown
 1. [ ] **DB migration**: <columns/tables, or "none">
-2. [ ] **Env vars**: <new vars, or "none">
+2. [ ] **Env vars**: <none, or each new env var with why it needs env; unnecessary envs removed>
 3. [ ] **New dependencies**: <packages, or "none">
 4. [ ] **Backend deploy**: <which services, or "no backend changes">
 5. [ ] **Breaking changes**: <describe, or "none">
 6. [ ] **External API calls**: <service + rate limit/cache, or "none added">
 7. [ ] **No backward-compat / legacy code**: <confirm no shims, deprecated re-exports, or legacy fallbacks>
 8. [ ] **Wiring**: <every new function, route, component, config field, or command is called/registered/rendered/read from a user-facing entry point; list any gaps>
+9. [ ] **UI copy**: <all new/edited user-facing UI strings surfaced for human review, or "none">
+10. [ ] **Architecture surface**: <domains/layers touched per repo architecture guidance, or "N/A">
 ```
 
 ## Step 4 — Handle evidence
@@ -55,7 +59,7 @@ Universal items (no heading — Step 5's body supplies it). Append items from th
    2. `.webm` / `.mp4` / `.mov` → convert with `ffmpeg -i in.webm -vf "fps=12,scale=720:-1:flags=lanczos" -loop 0 out.gif`, upload both, embed the GIF and link the original. GitHub strips `<video src=ext>`.
    3. JSON / text logs → `[<filename>](<url>)`.
 
-## Step 5 — Preview, compose, persist
+## Step 5 — Preview, compose, validate, persist
 
 **Preview first.** Output the Code Diff groups first, then the aligned diagram (fenced), the "What changed" sentence, the reviewer checklist, and any e2e-verification gap so the user sees it in conversation.
 
@@ -109,11 +113,33 @@ Full-quality video: [<name>.webm](<webm url>)
 
 If **E2E verification** has no concrete proof (no plan path, no run noted, no artifact), put `E2E verification missing.` in that section.
 
-Preserve third-party blocks (Open in Devin, review badges, deploy previews) by appending after the canonical sections. Update via `gh pr edit $PR_NUM --body` using a HEREDOC.
+Preserve third-party blocks (Open in Devin, review badges, deploy previews) by appending after the canonical sections. Update the PR from the composed canonical body only, using a temporary full-body file and `gh pr edit --body-file "$BODY_FILE"`. Never pass `.ai/plans/pr-$PR_NUM/pr-summary.md` to `gh pr edit`; that file is not the PR body.
 
-**Persist the work summary** (Code Diff groups + ASCII diagram + "What changed" sentence):
+**Shell safety for Markdown bodies.** PR bodies contain backticks, `$VARS`, `@skill` mentions, glob-looking route names, and checklist brackets. Do not write them with an unquoted heredoc such as `cat <<EOF`, and do not inline them through `gh pr edit --body "..."`; zsh/bash will execute command substitutions, expand globs, and may accidentally run commands named in code spans. Use one of these safe patterns:
+
+```bash
+cat > "$BODY_FILE" <<'EOF'
+<full markdown body with literal backticks, $VARS, [brackets], and @mentions>
+EOF
+
+gh pr edit "$PR_NUM" --body-file "$BODY_FILE"
+```
+
+If you need to insert generated text such as an ASCII diagram, write the body with Python or another quoted-template mechanism that treats Markdown as data, then validate the final file before calling `gh pr edit`. If a body-generation command starts emitting `command not found`, `bad pattern`, or `no matches found`, interrupt it, discard the partial body, and regenerate with a quoted template before touching the PR.
+
+**Validate the live PR body.** Immediately after `gh pr edit`, fetch and validate the GitHub body:
+
+```bash
+python3 ~/.claude/skills/mando-pr-summary/validate-pr-body.py --pr "$PR_NUM"
+```
+
+The validation must pass before this skill is considered complete. If it fails, regenerate the full canonical PR body and update GitHub again. Do not continue with a body that is missing canonical sections or that looks like the persisted work-summary-only artifact.
+
+**Persist the work-summary-only artifact** (Code Diff groups + ASCII diagram + "What changed" sentence):
 
 **Default:** Write to `.ai/plans/pr-$PR_NUM/pr-summary.md` (overwrite). Create the folder if missing. Never write into another `.ai/plans/*` folder, even if a slug looks related.
+
+This persisted artifact is for local/Mando work summaries only. It intentionally omits Problem, Evidence, Reviewer Checklist, and Testing & Verification.
 
 **Mando task only:** After the plan file, write the same summary to a temp file and run `mando todo summary --file <path>`. Never infer a task id from PR number, branch, or plan folder — only the env var qualifies.
 

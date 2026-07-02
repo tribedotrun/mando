@@ -17,6 +17,7 @@ pub struct TaskRouting {
     pub id: i64,
     pub title: String,
     pub provider: TaskProvider,
+    pub use_glm_worker: bool,
     pub status: ItemStatus,
     pub project_id: i64,
     pub project: String,
@@ -32,6 +33,7 @@ impl Default for TaskRouting {
             id: 0,
             title: String::new(),
             provider: TaskProvider::default(),
+            use_glm_worker: false,
             status: ItemStatus::New,
             project_id: 0,
             project: String::new(),
@@ -47,6 +49,7 @@ pub struct Task {
     pub id: i64,
     pub title: String,
     pub provider: TaskProvider,
+    pub use_glm_worker: bool,
     /// Intentionally crate-private. Writes go through
     /// `service::lifecycle::apply_transition` (or the test-only
     /// `set_status_for_tests` shim). External crates read via the
@@ -191,6 +194,7 @@ impl Task {
             id: 0,
             title: title.into(),
             provider: TaskProvider::default(),
+            use_glm_worker: false,
             status: ItemStatus::New,
             project_id: 0,
             project: String::new(),
@@ -240,6 +244,7 @@ impl Task {
             id: self.id,
             title: self.title.clone(),
             provider: self.provider,
+            use_glm_worker: self.use_glm_worker,
             status: self.status,
             project_id: self.project_id,
             project: self.project.clone(),

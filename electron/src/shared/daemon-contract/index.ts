@@ -96,7 +96,9 @@ export type CaptainConfig = {
   maxConcurrentWorkers: number | null;
   tickIntervalS: number;
   tz: string;
+  defaultTaskAgent: TerminalAgent;
   defaultTerminalAgent: TerminalAgent;
+  defaultGlmImplementation: boolean;
   claudeTerminalArgs: string;
   codexTerminalArgs: string;
   projects: { [key in string]: ProjectConfig };
@@ -164,17 +166,6 @@ export type ClientLogEntry = {
   message: string;
   context: ClientLogContext | null;
   timestamp: string | null;
-};
-export type ConfigPathsResponse = {
-  dataDir: string;
-  configPath: string;
-  taskDbPath: string;
-  workerHealthPath: string;
-  lockfilePath: string;
-  configuredTaskDbPath: string;
-  configuredWorkerHealthPath: string;
-  configuredLockfilePath: string;
-  restartRequired: boolean;
 };
 export type ConfigPayload = { ts: number; data: MandoConfig | null };
 export type ConfigSaveResponse = {
@@ -857,10 +848,12 @@ export type SystemLocalCommandOutputEvent = {
 };
 export type SystemRateLimitEvent = { meta: EventMeta; info: string };
 export type SystemStatusEvent = { meta: EventMeta; status: string | null; message: string | null };
+export type SystemThinkingTokensEvent = { meta: EventMeta };
 export type TaskAddRequest = {
   title: string;
   project: string | null;
-  provider: TaskProvider | null;
+  provider: TaskCreateProvider | null;
+  use_glm_worker: boolean;
   plan: boolean;
   no_pr: boolean;
 };
@@ -876,6 +869,7 @@ export type TaskAskRequest = { id: number; question: string; ask_id?: string };
 export type TaskBulkRequest = { ids: Array<number>; updates: TaskBulkUpdates };
 export type TaskBulkUpdateRequest = { ids: Array<number>; updates: TaskBulkUpdates };
 export type TaskBulkUpdates = { worker?: string };
+export type TaskCreateProvider = 'claude' | 'codex';
 export type TaskCreateResponse = { id: number; title: string };
 export type TaskDeleteRequest = { ids: Array<number>; close_pr?: boolean; force?: boolean };
 export type TaskEventData = {
@@ -893,12 +887,14 @@ export type TaskEvidenceResponse = {
 export type TaskFeedbackRequest = { id: number; feedback: string };
 export type TaskIdParams = { id: number };
 export type TaskIdRequest = { id: number };
+export type TaskImplementRequest = { id: number; message: string };
 export type TaskInput = { description: string; prompt: string; subagentType: string | null };
 export type TaskItem = {
   id: number;
   rev: number;
   title: string;
   provider: TaskProvider;
+  use_glm_worker: boolean;
   status: ItemStatus;
   project: string | null;
   github_repo: string | null;
@@ -961,7 +957,7 @@ export type TaskPatchRequest = {
    */
   is_bug_fix?: boolean;
 };
-export type TaskProvider = 'claude' | 'codex';
+export type TaskProvider = 'claude' | 'codex' | 'opencode';
 export type TaskSummaryRequest = { content: string };
 export type TaskSummaryResponse = { artifact_id: number; task_id: number };
 export type TasksPayload = { ts: number; data: TaskEventData | null };
@@ -1322,6 +1318,7 @@ export type TranscriptEvent =
   | { kind: 'system_local_command_output'; data: SystemLocalCommandOutputEvent }
   | { kind: 'system_hook'; data: SystemHookEvent }
   | { kind: 'system_rate_limit'; data: SystemRateLimitEvent }
+  | { kind: 'system_thinking_tokens'; data: SystemThinkingTokensEvent }
   | { kind: 'user'; data: UserEvent }
   | { kind: 'assistant'; data: AssistantEvent }
   | { kind: 'tool_progress'; data: ToolProgressEvent }

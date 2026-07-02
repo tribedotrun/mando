@@ -7,6 +7,7 @@ pub const TASKS_ADD: &str = "/api/tasks/add";
 pub const TASKS_ACCEPT: &str = "/api/tasks/accept";
 pub const TASKS_BULK: &str = "/api/tasks/bulk";
 pub const TASKS_HANDOFF: &str = "/api/tasks/handoff";
+pub const TASKS_IMPLEMENT: &str = "/api/tasks/implement";
 pub const TASKS_REOPEN: &str = "/api/tasks/reopen";
 pub const TASKS_REWORK: &str = "/api/tasks/rework";
 pub const TASKS_STOP: &str = "/api/tasks/stop";

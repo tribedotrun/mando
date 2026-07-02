@@ -109,8 +109,11 @@ pub async fn stop_all_workers(store: &TaskStore, pool: &sqlx::SqlitePool) -> Res
         let cc_sid = item.session_ids.worker.as_deref().unwrap_or("");
         if !cc_sid.is_empty() {
             let pid = crate::io::pid_registry::get_pid(cc_sid).unwrap_or(crate::Pid::new(0));
+            let worker_provider =
+                crate::runtime::agent_runtime::persisted_worker_provider(pool, &item).await;
             let was_alive =
-                crate::runtime::agent_runtime::is_session_active(item.provider, cc_sid, pid).await;
+                crate::runtime::agent_runtime::is_session_active(worker_provider, cc_sid, pid)
+                    .await;
             crate::io::session_terminate::terminate_session(
                 pool,
                 cc_sid,

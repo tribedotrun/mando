@@ -13,7 +13,6 @@ pub mod task_status;
 pub mod task_update;
 pub mod timeline;
 pub mod workbench;
-pub mod workbench_layout;
 pub mod worktree;
 
 pub use artifact::{
@@ -36,7 +35,6 @@ pub use task_action::{find_task_action_error, TaskActionError};
 pub use task_create::{find_task_create_error, TaskCreateError};
 pub use timeline::{TimelineEvent, TimelineEventPayload};
 pub use workbench::{workbench_title_now, Workbench, WorkbenchPatch, WorkbenchPatchOutcome};
-pub use workbench_layout::{PanelState, WorkbenchLayout};
 pub use worktree::{
     CleanupWorktreesReport, CreateWorktreeOutcome, CreatedWorktree, RemoveWorktreeOutcome,
     WorktreeEntry, WorktreePruneError,

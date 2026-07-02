@@ -99,6 +99,7 @@ pub async fn add_task(
     project: Option<&str>,
     source: Option<&str>,
     provider: api_types::TaskProvider,
+    use_glm_worker: bool,
 ) -> Result<TaskCreateResponse> {
     let projects = &config.captain.projects;
     let (resolved_project, clean_title) = if let Some(r) = project {
@@ -146,6 +147,7 @@ pub async fn add_task(
     new_task.created_at = Some(global_types::now_rfc3339());
     new_task.source = source.map(String::from);
     new_task.provider = provider;
+    new_task.use_glm_worker = use_glm_worker;
 
     let id =
         crate::runtime::task_creation::create_task_with_workbench(pool, config, new_task).await?;

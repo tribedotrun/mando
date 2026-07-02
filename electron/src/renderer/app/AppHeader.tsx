@@ -19,7 +19,7 @@ export function AppHeader({
   onGoForward,
   onNewTask,
 }: AppHeaderProps): React.ReactElement {
-  const { ctx, isTerminalTab, pageTitle, sessions, resumeMut, taskIsRateLimited } = useAppHeader();
+  const { ctx, isTerminalTab, pageTitle, sessions, taskIsRateLimited } = useAppHeader();
 
   const navIcons = sidebarCollapsed ? (
     <AppHeaderNav
@@ -69,7 +69,6 @@ export function AppHeader({
           navIcons={navIcons}
           isTerminalTab={isTerminalTab}
           taskIsRateLimited={taskIsRateLimited}
-          resumeMut={resumeMut}
         />
       ) : (
         sidebarCollapsed && (

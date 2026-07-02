@@ -122,18 +122,14 @@ impl CaptainRuntime {
         task_id: i64,
         session_id: Option<String>,
     ) -> anyhow::Result<()> {
-        match self.load_task(task_id).await? {
-            Some(mut task) => {
-                task.session_ids.ask = session_id;
-                self.write_task(&task).await?;
-            }
-            None => tracing::warn!(
-                module = "captain-runtime-daemon_task_runtime",
-                task_id,
-                "task vanished while updating ask session id"
-            ),
-        }
-        Ok(())
+        self.set_task_session_id(
+            task_id,
+            "task vanished while updating ask session id",
+            |ids| {
+                ids.ask = session_id;
+            },
+        )
+        .await
     }
 
     #[tracing::instrument(skip_all)]
@@ -142,18 +138,14 @@ impl CaptainRuntime {
         task_id: i64,
         session_id: Option<String>,
     ) -> anyhow::Result<()> {
-        match self.load_task(task_id).await? {
-            Some(mut task) => {
-                task.session_ids.advisor = session_id;
-                self.write_task(&task).await?;
-            }
-            None => tracing::warn!(
-                module = "captain-runtime-daemon_task_runtime",
-                task_id,
-                "task vanished while updating advisor session id"
-            ),
-        }
-        Ok(())
+        self.set_task_session_id(
+            task_id,
+            "task vanished while updating advisor session id",
+            |ids| {
+                ids.advisor = session_id;
+            },
+        )
+        .await
     }
 
     #[tracing::instrument(skip_all)]
@@ -403,8 +395,9 @@ impl CaptainRuntime {
         project: Option<&str>,
         source: Option<&str>,
         provider: api_types::TaskProvider,
+        use_glm_worker: bool,
     ) -> anyhow::Result<TaskCreateResponse> {
-        self.add_task_with_context(title, project, None, source, provider)
+        self.add_task_with_context(title, project, None, source, provider, use_glm_worker)
             .await
     }
 
@@ -416,6 +409,7 @@ impl CaptainRuntime {
         context: Option<&str>,
         source: Option<&str>,
         provider: api_types::TaskProvider,
+        use_glm_worker: bool,
     ) -> anyhow::Result<TaskCreateResponse> {
         let config = self.settings.load_config();
         // Run the git fetch + worktree creation half WITHOUT holding the
@@ -423,7 +417,13 @@ impl CaptainRuntime {
         // captain tick's `task_store.write()` writers. Only acquire the
         // lock for the optional context-update step that follows.
         let value = crate::runtime::dashboard::add_task(
-            &config, &self.pool, title, project, source, provider,
+            &config,
+            &self.pool,
+            title,
+            project,
+            source,
+            provider,
+            use_glm_worker,
         )
         .await?;
         if let Some(ctx) = context {
@@ -440,5 +440,25 @@ impl CaptainRuntime {
         }
         self.drain_pending_lifecycle_effects().await?;
         Ok(value)
+    }
+
+    async fn set_task_session_id(
+        &self,
+        task_id: i64,
+        missing_task_log: &'static str,
+        update: impl FnOnce(&mut crate::SessionIds),
+    ) -> anyhow::Result<()> {
+        match self.load_task(task_id).await? {
+            Some(mut task) => {
+                update(&mut task.session_ids);
+                self.write_task(&task).await?;
+            }
+            None => tracing::warn!(
+                module = "captain-runtime-daemon_task_runtime",
+                task_id,
+                "{missing_task_log}"
+            ),
+        }
+        Ok(())
     }
 }

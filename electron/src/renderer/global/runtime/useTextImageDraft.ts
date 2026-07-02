@@ -64,7 +64,7 @@ export function useTextImageDraft(
   // Invalidates late-resolving base64 encodes whose state has been superseded.
   const imageGenRef = useRef(0);
 
-  // Render-time key-change handler: matches the pattern in useImageAttachment.
+  // Render-time key-change handler: revoke/reset immediately when the owner key flips.
   if (keyRef.current !== key) {
     const prevKey = keyRef.current;
     if (timerRef.current) {
