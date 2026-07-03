@@ -55,9 +55,20 @@ function WindowRow({
 export function CredentialUsage({ cred }: { cred: CredentialInfo }): React.ReactElement | null {
   const probeMut = useCredentialProbe();
   if (cred.isExpired) {
+    const relogin =
+      cred.provider === 'codex' ? (
+        <>
+          Re-login via <code>CODEX_HOME=$(mktemp -d) codex login</code>, then re-paste{' '}
+          <code>auth.json</code> here.
+        </>
+      ) : (
+        <>
+          Re-login required — run <code>claude setup-token</code> and re-add this credential.
+        </>
+      );
     return (
       <div className="mt-2 rounded-md border border-dashed border-destructive/40 px-3 py-2 text-xs text-destructive">
-        Re-login required - run <code>claude setup-token</code> and re-add this credential.
+        {relogin}
       </div>
     );
   }

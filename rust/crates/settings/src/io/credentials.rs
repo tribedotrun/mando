@@ -46,22 +46,20 @@ pub async fn has_any(pool: &SqlitePool) -> Result<bool> {
     Ok(count > 0)
 }
 
-/// List all Claude credentials (full rows including tokens).
+/// List all credentials (full rows including tokens).
 pub async fn list_all(pool: &SqlitePool) -> Result<Vec<CredentialRow>> {
-    let rows: Vec<CredentialRow> =
-        sqlx::query_as("SELECT * FROM credentials WHERE provider = 'claude' ORDER BY label")
-            .fetch_all(pool)
-            .await?;
+    let rows: Vec<CredentialRow> = sqlx::query_as("SELECT * FROM credentials ORDER BY label")
+        .fetch_all(pool)
+        .await?;
     Ok(rows)
 }
 
-/// Fetch the full Claude credential row by ID.
+/// Fetch the full credential row by ID.
 pub async fn get_row_by_id(pool: &SqlitePool, id: i64) -> Result<Option<CredentialRow>> {
-    let row: Option<CredentialRow> =
-        sqlx::query_as("SELECT * FROM credentials WHERE id = ? AND provider = 'claude'")
-            .bind(id)
-            .fetch_optional(pool)
-            .await?;
+    let row: Option<CredentialRow> = sqlx::query_as("SELECT * FROM credentials WHERE id = ?")
+        .bind(id)
+        .fetch_optional(pool)
+        .await?;
     Ok(row)
 }
 
@@ -77,10 +75,10 @@ pub async fn find_by_label(pool: &SqlitePool, label: &str) -> Result<Option<i64>
     Ok(row)
 }
 
-/// Get the access token for a Claude credential by ID.
+/// Get the access token for a credential by ID.
 pub async fn get_token_by_id(pool: &SqlitePool, id: i64) -> Result<Option<String>> {
     let token: Option<(String,)> =
-        sqlx::query_as("SELECT access_token FROM credentials WHERE id = ? AND provider = 'claude'")
+        sqlx::query_as("SELECT access_token FROM credentials WHERE id = ?")
             .bind(id)
             .fetch_optional(pool)
             .await?;
@@ -107,7 +105,7 @@ pub async fn insert(
     Ok(id)
 }
 
-/// Delete a Claude credential by ID. Returns true if a row was deleted.
+/// Delete a credential by ID. Returns true if a row was deleted.
 /// Also nulls `credential_id` on any existing `cc_sessions` rows so there
 /// are no orphaned FK references (SQLite `ALTER TABLE` can't add ON DELETE
 /// SET NULL retroactively, so we enforce it in the delete path).
@@ -117,7 +115,7 @@ pub async fn delete(pool: &SqlitePool, id: i64) -> Result<bool> {
         .bind(id)
         .execute(&mut *tx)
         .await?;
-    let result = sqlx::query("DELETE FROM credentials WHERE id = ? AND provider = 'claude'")
+    let result = sqlx::query("DELETE FROM credentials WHERE id = ?")
         .bind(id)
         .execute(&mut *tx)
         .await?;
@@ -292,6 +290,55 @@ pub async fn pick_for_worker(
     Ok(row)
 }
 
+/// Pick the best Codex credential: not expired, not rate-limited, fewest
+/// active sessions, lowest five-hour utilization. Returns
+/// `(id, access_token, account_id)`.
+pub async fn pick_for_codex(pool: &SqlitePool) -> Result<Option<(i64, String, String)>> {
+    let now_ms = time::OffsetDateTime::now_utc().unix_timestamp() * 1000;
+    let now_secs = now_ms / 1000;
+
+    let row: Option<(i64, String, String)> = sqlx::query_as(
+        "SELECT c.id, c.access_token, c.account_id
+         FROM credentials c
+         LEFT JOIN (
+             SELECT credential_id, COUNT(*) AS active
+             FROM cc_sessions
+             WHERE status = 'running' AND credential_id IS NOT NULL
+             GROUP BY credential_id
+         ) s ON s.credential_id = c.id
+         WHERE c.provider = 'codex'
+           AND c.account_id IS NOT NULL
+           AND (c.expires_at IS NULL OR c.expires_at > ?1)
+           AND (c.rate_limit_cooldown_until IS NULL OR c.rate_limit_cooldown_until <= ?2)
+         ORDER BY
+            COALESCE(s.active, 0) ASC,
+            COALESCE(c.five_hour_utilization, 0.0) ASC,
+            COALESCE(c.last_picked_at, 0) ASC,
+            c.id ASC
+         LIMIT 1",
+    )
+    .bind(now_ms)
+    .bind(now_secs)
+    .fetch_optional(pool)
+    .await?;
+    Ok(row)
+}
+
+/// Record a Codex shell pick so the next `pick_for_codex` rotates away from
+/// this account when utilization ties.
+pub async fn record_codex_pick(pool: &SqlitePool, id: i64) -> Result<()> {
+    let now_ms = time::OffsetDateTime::now_utc().unix_timestamp() * 1000;
+    sqlx::query(
+        "UPDATE credentials SET last_picked_at = ?1, updated_at = datetime('now')
+         WHERE id = ?2 AND provider = 'codex'",
+    )
+    .bind(now_ms)
+    .bind(id)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
 /// Seconds remaining until a specific credential leaves cooldown.
 /// Returns 0 if the credential isn't cooling down (or doesn't exist).
 /// Propagates DB errors — a transient failure coerced to 0 used to
@@ -318,7 +365,9 @@ pub async fn earliest_cooldown_remaining_secs(pool: &SqlitePool) -> anyhow::Resu
     let now_secs = time::OffsetDateTime::now_utc().unix_timestamp();
     let row: Option<(Option<i64>,)> = sqlx::query_as(
         "SELECT MIN(rate_limit_cooldown_until) FROM credentials
-         WHERE rate_limit_cooldown_until IS NOT NULL AND rate_limit_cooldown_until > ?",
+         WHERE provider = 'claude'
+           AND rate_limit_cooldown_until IS NOT NULL
+           AND rate_limit_cooldown_until > ?",
     )
     .bind(now_secs)
     .fetch_optional(pool)
@@ -335,9 +384,191 @@ pub async fn earliest_cooldown_remaining_secs(pool: &SqlitePool) -> anyhow::Resu
 pub async fn clear_all_cooldowns(pool: &SqlitePool) -> Result<u64> {
     let result = sqlx::query(
         "UPDATE credentials SET rate_limit_cooldown_until = NULL, updated_at = datetime('now')
-         WHERE rate_limit_cooldown_until IS NOT NULL",
+         WHERE provider = 'claude' AND rate_limit_cooldown_until IS NOT NULL",
     )
     .execute(pool)
     .await?;
     Ok(result.rows_affected())
+}
+
+#[cfg(test)]
+mod pick_codex_tests {
+    use super::*;
+    use crate::io::codex_credentials;
+
+    #[tokio::test]
+    async fn claude_cooldown_summary_ignores_codex_rows() {
+        let db = global_db::Db::open_in_memory()
+            .await
+            .expect("in-memory db must init");
+        let pool = db.pool().clone();
+        let codex_id = codex_credentials::insert_codex(
+            &pool,
+            "codex-account",
+            "tok-codex",
+            "rt-codex",
+            Some("id-codex"),
+            "acct-codex",
+            Some("pro"),
+            None,
+        )
+        .await
+        .expect("insert codex");
+        let now_secs = time::OffsetDateTime::now_utc().unix_timestamp();
+        set_rate_limit_cooldown(&pool, codex_id, now_secs + 600)
+            .await
+            .expect("set codex cooldown");
+
+        assert_eq!(
+            earliest_cooldown_remaining_secs(&pool)
+                .await
+                .expect("earliest cooldown"),
+            0,
+            "Codex cooldowns must not block Claude worker failover"
+        );
+
+        let claude_id = insert(&pool, "claude-account", "tok-claude", None)
+            .await
+            .expect("insert claude");
+        set_rate_limit_cooldown(&pool, claude_id, now_secs + 600)
+            .await
+            .expect("set claude cooldown");
+        assert!(
+            earliest_cooldown_remaining_secs(&pool)
+                .await
+                .expect("earliest cooldown")
+                > 0
+        );
+
+        clear_all_cooldowns(&pool)
+            .await
+            .expect("clear claude cooldowns");
+        assert!(
+            cooldown_remaining_secs(&pool, codex_id)
+                .await
+                .expect("codex cooldown")
+                > 0,
+            "manual Claude resume must not clear Codex cooldowns"
+        );
+    }
+
+    #[tokio::test]
+    async fn pick_for_codex_rotates_when_first_account_has_active_session() {
+        let db = global_db::Db::open_in_memory()
+            .await
+            .expect("in-memory db must init");
+        let pool = db.pool().clone();
+
+        let id_a = codex_credentials::insert_codex(
+            &pool,
+            "account-a",
+            "tok-a",
+            "rt-a",
+            Some("id-a"),
+            "acct-a",
+            Some("pro"),
+            None,
+        )
+        .await
+        .expect("insert account-a");
+        let id_b = codex_credentials::insert_codex(
+            &pool,
+            "account-b",
+            "tok-b",
+            "rt-b",
+            Some("id-b"),
+            "acct-b",
+            Some("pro"),
+            None,
+        )
+        .await
+        .expect("insert account-b");
+
+        sqlx::query("UPDATE credentials SET five_hour_utilization = 0.1 WHERE id = ?")
+            .bind(id_a)
+            .execute(&pool)
+            .await
+            .expect("set util a");
+        sqlx::query("UPDATE credentials SET five_hour_utilization = 0.5 WHERE id = ?")
+            .bind(id_b)
+            .execute(&pool)
+            .await
+            .expect("set util b");
+
+        let first = pick_for_codex(&pool)
+            .await
+            .expect("first pick query")
+            .expect("first pick must return a credential");
+        assert_eq!(first.0, id_a, "lower-util account-a wins first pick");
+
+        sqlx::query(
+            "INSERT INTO cc_sessions (session_id, created_at, caller, cwd, status, credential_id)
+             VALUES ('pick-rotation-test', datetime('now'), 'codex', '', 'running', ?)",
+        )
+        .bind(id_a)
+        .execute(&pool)
+        .await
+        .expect("simulate active session on account-a");
+
+        let second = pick_for_codex(&pool)
+            .await
+            .expect("second pick query")
+            .expect("second pick must return a credential");
+        assert_eq!(
+            second.0, id_b,
+            "must rotate to account-b when account-a has an active session"
+        );
+    }
+
+    #[tokio::test]
+    async fn pick_for_codex_rotates_on_last_picked_at_tie() {
+        let db = global_db::Db::open_in_memory()
+            .await
+            .expect("in-memory db must init");
+        let pool = db.pool().clone();
+
+        let id_a = codex_credentials::insert_codex(
+            &pool,
+            "account-a",
+            "tok-a",
+            "rt-a",
+            Some("id-a"),
+            "acct-a",
+            Some("pro"),
+            None,
+        )
+        .await
+        .expect("insert account-a");
+        let id_b = codex_credentials::insert_codex(
+            &pool,
+            "account-b",
+            "tok-b",
+            "rt-b",
+            Some("id-b"),
+            "acct-b",
+            Some("pro"),
+            None,
+        )
+        .await
+        .expect("insert account-b");
+
+        let first = pick_for_codex(&pool)
+            .await
+            .expect("first pick query")
+            .expect("first pick must return a credential");
+        assert_eq!(first.0, id_a, "lower id wins when never picked");
+
+        record_codex_pick(&pool, id_a)
+            .await
+            .expect("record first pick");
+
+        let second = pick_for_codex(&pool)
+            .await
+            .expect("second pick query")
+            .expect("second pick must return a credential");
+        assert_eq!(
+            second.0, id_b,
+            "must rotate to account-b after account-a was picked"
+        );
+    }
 }

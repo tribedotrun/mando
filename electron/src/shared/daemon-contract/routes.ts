@@ -129,6 +129,30 @@ export interface Routes {
     auth: 'protected';
     res: Types.CredentialsListResponse;
   };
+  postCredentialsCodex: {
+    method: 'POST';
+    path: '/api/credentials/codex';
+    transport: 'json';
+    auth: 'protected';
+    body: Types.AddCodexCredentialRequest;
+    res: Types.AddCodexCredentialResponse;
+  };
+  postCredentialsCodexPick: {
+    method: 'POST';
+    path: '/api/credentials/codex/pick';
+    transport: 'json';
+    auth: 'protected';
+    body: Types.EmptyRequest;
+    res: Types.CodexCredentialPickResponse;
+  };
+  postCredentialsCodexSync: {
+    method: 'POST';
+    path: '/api/credentials/codex/sync';
+    transport: 'json';
+    auth: 'protected';
+    body: Types.SyncCodexCredentialRequest;
+    res: Types.SyncCodexCredentialResponse;
+  };
   postCredentialsPick: {
     method: 'POST';
     path: '/api/credentials/pick';
@@ -1057,6 +1081,24 @@ export const routes = {
     auth: 'protected',
   },
   getCredentials: { method: 'GET', path: '/api/credentials', transport: 'json', auth: 'protected' },
+  postCredentialsCodex: {
+    method: 'POST',
+    path: '/api/credentials/codex',
+    transport: 'json',
+    auth: 'protected',
+  },
+  postCredentialsCodexPick: {
+    method: 'POST',
+    path: '/api/credentials/codex/pick',
+    transport: 'json',
+    auth: 'protected',
+  },
+  postCredentialsCodexSync: {
+    method: 'POST',
+    path: '/api/credentials/codex/sync',
+    transport: 'json',
+    auth: 'protected',
+  },
   postCredentialsPick: {
     method: 'POST',
     path: '/api/credentials/pick',

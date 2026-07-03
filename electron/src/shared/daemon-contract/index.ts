@@ -8,6 +8,20 @@ export type ActResponse = {
 };
 export type ActionKind = 'skip' | 'nudge' | 'captain-review';
 export type ActivityStatsResponse = { merged_7d: number; daily_merges: Array<DailyMerge> };
+export type AddCodexCredentialRequest = {
+  label: string;
+  /**
+   * Raw contents of an OpenAI Codex `auth.json` file. Validated server-side.
+   */
+  authJson: string;
+};
+export type AddCodexCredentialResponse = {
+  ok: boolean;
+  id: number;
+  label: string;
+  accountId: string;
+  planType: string | null;
+};
 export type AddProjectRequest = { name?: string; path: string; aliases: Array<string> };
 export type AdoptRequest = {
   title: string;
@@ -167,6 +181,26 @@ export type ClientLogEntry = {
   context: ClientLogContext | null;
   timestamp: string | null;
 };
+export type CodexCredentialDetails = {
+  accountId: string;
+  planType: string | null;
+  creditsBalance: string | null;
+  creditsUnlimited: boolean;
+};
+export type CodexCredentialPick = {
+  id: number;
+  label: string;
+  accessToken: string;
+  accountId: string;
+  /**
+   * Serialized `auth.json` for a per-process `CODEX_HOME` (ChatGPT OAuth
+   * tokens are JWT-shaped and are misclassified when passed via
+   * `CODEX_ACCESS_TOKEN`; the shell wrapper points `CODEX_HOME` at a temp
+   * dir with this file plus symlinks back to `~/.codex` session state).
+   */
+  authJson: string;
+};
+export type CodexCredentialPickResponse = { pick: CodexCredentialPick | null };
 export type ConfigPayload = { ts: number; data: MandoConfig | null };
 export type ConfigSaveResponse = {
   ok: boolean;
@@ -209,6 +243,7 @@ export type CredentialInfo = {
   id: number;
   label: string;
   tokenMasked: string;
+  provider: CredentialProvider;
   expiresAt: number | null;
   rateLimitCooldownUntil: number | null;
   createdAt: string;
@@ -220,12 +255,17 @@ export type CredentialInfo = {
   representativeClaim?: string | null;
   lastProbedAt?: number | null;
   costSinceProbeUsd?: number | null;
+  /**
+   * Set only when `provider == Codex`.
+   */
+  codex?: CodexCredentialDetails | null;
 };
 export type CredentialListResponse = { credentials: Array<CredentialInfo> };
 export type CredentialMutationResponse = { ok: boolean; error: string | null };
 export type CredentialPick = { id: number; label: string; token: string };
 export type CredentialPickResponse = { pick: CredentialPick | null };
 export type CredentialProbeResponse = { ok: boolean; snapshot: CredentialUsageSnapshot };
+export type CredentialProvider = 'claude' | 'codex';
 export type CredentialRateLimitStatus = 'allowed' | 'allowed_warning' | 'rejected';
 export type CredentialTokenResponse = { token: string };
 export type CredentialUsageSnapshot = {
@@ -793,6 +833,8 @@ export type StatusPayload = { ts: number; data: StatusEventData | null };
 export type StopWorkersResponse = { killed: number };
 export type StructuredOutputInput = { raw: string };
 export type SummaryCreatedResponse = { artifact_id: number; task_id: number };
+export type SyncCodexCredentialRequest = { credentialId: number; authJson: string };
+export type SyncCodexCredentialResponse = { ok: boolean };
 export type SystemApiRetryEvent = {
   meta: EventMeta;
   message: string | null;

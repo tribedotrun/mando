@@ -1,7 +1,14 @@
-//! Credential wire types for Claude setup-token credentials.
+//! Credential wire types shared between Claude and Codex providers.
+//!
+//! Codex-specific add/pick request and response types live in
+//! `credentials_codex.rs`. The shape rendered to the UI for both providers
+//! is `CredentialInfo` here, with Codex-only fields hanging off the optional
+//! `codex` member.
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
+
+use crate::credentials_codex::{CodexCredentialDetails, CredentialProvider};
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -9,6 +16,7 @@ pub struct CredentialInfo {
     pub id: i64,
     pub label: String,
     pub token_masked: String,
+    pub provider: CredentialProvider,
     pub expires_at: Option<i64>,
     pub rate_limit_cooldown_until: Option<i64>,
     pub created_at: String,
@@ -32,6 +40,10 @@ pub struct CredentialInfo {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional = nullable)]
     pub cost_since_probe_usd: Option<f64>,
+    /// Set only when `provider == Codex`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub codex: Option<CodexCredentialDetails>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, TS)]

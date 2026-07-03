@@ -67,6 +67,13 @@ pub(crate) fn credential_routes() -> ApiRouter<AppState> {
     )
 }
 
+fn provider_to_api(provider: &str) -> api_types::CredentialProvider {
+    match provider {
+        "codex" => api_types::CredentialProvider::Codex,
+        _ => api_types::CredentialProvider::Claude,
+    }
+}
+
 fn api_rate_limit_status(status: &str) -> api_types::CredentialRateLimitStatus {
     match status {
         "allowed_warning" => api_types::CredentialRateLimitStatus::AllowedWarning,
@@ -105,6 +112,7 @@ async fn list_credentials(
             id: cred.id,
             label: cred.label,
             token_masked: cred.token_masked,
+            provider: provider_to_api(&cred.provider),
             expires_at: cred.expires_at,
             rate_limit_cooldown_until: cred.rate_limit_cooldown_until,
             created_at: cred.created_at,
@@ -128,6 +136,12 @@ async fn list_credentials(
             representative_claim: cred.representative_claim,
             last_probed_at: cred.last_probed_at,
             cost_since_probe_usd: cred.cost_since_probe_usd,
+            codex: cred.codex.map(|c| api_types::CodexCredentialDetails {
+                account_id: c.account_id,
+                plan_type: c.plan_type,
+                credits_balance: c.credits_balance,
+                credits_unlimited: c.credits_unlimited,
+            }),
         })
         .collect();
     Json(api_types::CredentialsListResponse { credentials: creds })

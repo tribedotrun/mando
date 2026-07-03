@@ -202,7 +202,7 @@ pub async fn probe_and_persist(
     pool: &SqlitePool,
     row: &CredentialRow,
 ) -> Result<UsageSnapshot, ProbeError> {
-    let snapshot = settings::usage_probe::probe(&row.access_token).await?;
+    let snapshot = settings::provider_probe::probe(pool, row).await?;
     credentials::set_usage_snapshot(pool, row.id, &snapshot)
         .await
         .map_err(|e| {
@@ -281,7 +281,15 @@ mod tests {
             unified_status: None,
             representative_claim: None,
             last_probed_at: last_probed,
+            last_picked_at: None,
+            token_updated_at: None,
             provider: "claude".into(),
+            refresh_token: None,
+            id_token: None,
+            account_id: None,
+            plan_type: None,
+            credits_balance: None,
+            credits_unlimited: 0,
         }
     }
 
