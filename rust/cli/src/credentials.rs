@@ -9,12 +9,15 @@
 //! }
 //! ```
 //!
-//! It prints `export CLAUDE_CODE_OAUTH_TOKEN='...'` on success, and
-//! `unset CLAUDE_CODE_OAUTH_TOKEN` on every fallback path (daemon down,
-//! no usable credential, transport error). The wrapper eval's stdout, so
-//! the explicit `unset` ensures a stale token from a prior successful
-//! pick can't leak into a later session — without it, "fall through to
-//! ambient login" would be a lie when the shell already had the var set.
+//! `pick --codex` mirrors that for Codex via a per-process `CODEX_HOME`
+//! (picked `auth.json` + symlinks to `~/.codex` session state). ChatGPT OAuth
+//! tokens are JWT-shaped and must not be passed through `CODEX_ACCESS_TOKEN`.
+//!
+//! ```sh
+//! mdo create --agent codex   # uses codex-pooled-launch.sh under the hood
+//! ```
+//! `pick --codex` emits only `unset`/`export` lines. Launchers call
+//! `codex-pooled-launch.sh` to pick, run `codex`, then `sync-codex`.
 
 use anyhow::Result;
 use clap::{Args, Subcommand};
@@ -32,18 +35,30 @@ pub(crate) struct CredentialsArgs {
 pub(crate) enum CredentialsCommand {
     /// List stored credentials (masked tokens, current rate-limit/cooldown).
     List,
-    /// Pick the best-available credential right now and emit either
-    /// `export CLAUDE_CODE_OAUTH_TOKEN='<token>'` (success) or
-    /// `unset CLAUDE_CODE_OAUTH_TOKEN` (any fallback path) so
-    /// `eval "$(mando credentials pick)"` always leaves the shell in a
-    /// correct state — never with a stale token from a prior pick.
-    Pick,
+    /// Pick the best-available credential right now and emit shell exports
+    /// (success) or unsets (any fallback path) so `eval "$(mando credentials pick)"`
+    /// always leaves the shell in a correct state.
+    Pick {
+        /// Pick a Codex OAuth credential instead of Claude.
+        #[arg(long)]
+        codex: bool,
+    },
+    /// Persist refreshed tokens from `$CODEX_HOME/auth.json` back to the daemon.
+    /// Called by `codex-pooled-launch.sh` after a Codex session ends.
+    SyncCodex,
 }
 
 pub(crate) async fn handle(args: CredentialsArgs) -> Result<()> {
     match args.command {
         CredentialsCommand::List => handle_list().await,
-        CredentialsCommand::Pick => handle_pick().await,
+        CredentialsCommand::Pick { codex } => {
+            if codex {
+                handle_pick_codex().await
+            } else {
+                handle_pick_claude().await
+            }
+        }
+        CredentialsCommand::SyncCodex => handle_sync_codex().await,
     }
 }
 
@@ -60,8 +75,8 @@ async fn handle_list() -> Result<()> {
     }
 
     println!(
-        "{:<4} {:<24} {:<14} {:>6}  TOKEN",
-        "ID", "LABEL", "STATE", "5H%"
+        "{:<4} {:<10} {:<24} {:<14} {:>6}  TOKEN",
+        "ID", "PROVIDER", "LABEL", "STATE", "5H%"
     );
     for cred in &result.credentials {
         let state = if cred.is_expired {
@@ -76,30 +91,21 @@ async fn handle_list() -> Result<()> {
             .as_ref()
             .map(|w| format!("{:>5.1}", w.utilization * 100.0))
             .unwrap_or_else(|| "  -  ".into());
+        let provider = match cred.provider {
+            api_types::CredentialProvider::Codex => "codex",
+            api_types::CredentialProvider::Claude => "claude",
+        };
         println!(
-            "{:<4} {:<24} {:<14} {:>6}  {}",
-            cred.id, cred.label, state, util, cred.token_masked
+            "{:<4} {:<10} {:<24} {:<14} {:>6}  {}",
+            cred.id, provider, cred.label, state, util, cred.token_masked
         );
     }
     Ok(())
 }
 
-/// Print one of:
-/// - `export CLAUDE_CODE_OAUTH_TOKEN='<token>'` when a credential was picked, or
-/// - `unset CLAUDE_CODE_OAUTH_TOKEN` on any fallback path (daemon down, no
-///   pick, transport error).
-///
-/// Why always emit `unset` on the fallback paths: the wrapper eval's our
-/// stdout in the user's shell, so an earlier successful pick leaves
-/// `CLAUDE_CODE_OAUTH_TOKEN` set indefinitely. Without an explicit clear,
-/// the next `claude` invocation after a daemon stop / cooldown would
-/// inherit a stale token instead of falling through to ambient login —
-/// the wrapper's advertised behavior.
-///
-/// Always exits 0 so `eval "$(...)"` never breaks the user's session.
-async fn handle_pick() -> Result<()> {
+async fn handle_pick_claude() -> Result<()> {
     let Ok(client) = DaemonClient::discover() else {
-        emit_unset();
+        emit_claude_unset();
         return Ok(());
     };
 
@@ -107,17 +113,20 @@ async fn handle_pick() -> Result<()> {
         match client.post_no_body(paths::CREDENTIALS_PICK).await {
             Ok(r) => r,
             Err(_) => {
-                emit_unset();
+                emit_claude_unset();
                 return Ok(());
             }
         };
 
     if let Some(pick) = result.pick {
         let token = shell_single_quote(&pick.token);
+        let label = shell_single_quote(&pick.label);
         println!("export CLAUDE_CODE_OAUTH_TOKEN={token}");
+        println!("export MANDO_CREDENTIAL_LABEL={label}");
+        println!("export MANDO_CREDENTIAL_ID={}", pick.id);
         eprintln!("mando: using credential '{}' (#{})", pick.label, pick.id);
     } else {
-        emit_unset();
+        emit_claude_unset();
         eprintln!(
             "mando: no credentials available (none configured, all expired, or all rate-limited); falling through to ambient login"
         );
@@ -125,8 +134,114 @@ async fn handle_pick() -> Result<()> {
     Ok(())
 }
 
-fn emit_unset() {
+async fn handle_pick_codex() -> Result<()> {
+    let Ok(client) = DaemonClient::discover() else {
+        emit_codex_unset();
+        return Ok(());
+    };
+
+    let result: api_types::CodexCredentialPickResponse =
+        match client.post_no_body(paths::CREDENTIALS_CODEX_PICK).await {
+            Ok(r) => r,
+            Err(_) => {
+                emit_codex_unset();
+                return Ok(());
+            }
+        };
+
+    if let Some(pick) = result.pick {
+        match crate::credentials_codex_pick::materialize_codex_home(&pick.auth_json) {
+            Ok(codex_home) => {
+                let account_id = shell_single_quote(&pick.account_id);
+                let label = shell_single_quote(&pick.label);
+                let home = shell_single_quote(&codex_home.to_string_lossy());
+                println!("unset CODEX_ACCESS_TOKEN");
+                println!("export CODEX_HOME={home}");
+                println!("export MANDO_CODEX_ACCOUNT_ID={account_id}");
+                println!("export MANDO_CODEX_CREDENTIAL_LABEL={label}");
+                println!("export MANDO_CODEX_CREDENTIAL_ID={}", pick.id);
+                println!("export MANDO_CODEX_HOME_MANAGED=1");
+                eprintln!(
+                    "mando: using Codex credential '{}' (#{}, account {})",
+                    pick.label, pick.id, pick.account_id
+                );
+            }
+            Err(err) => {
+                emit_codex_unset();
+                eprintln!("mando: failed to prepare Codex home: {err}");
+            }
+        }
+    } else {
+        emit_codex_unset();
+        eprintln!(
+            "mando: no Codex credentials available (none configured, all expired, or all rate-limited); falling through to ambient login"
+        );
+    }
+    Ok(())
+}
+
+fn emit_claude_unset() {
     println!("unset CLAUDE_CODE_OAUTH_TOKEN");
+    println!("unset MANDO_CREDENTIAL_LABEL");
+    println!("unset MANDO_CREDENTIAL_ID");
+}
+
+fn emit_codex_unset() {
+    println!("unset CODEX_ACCESS_TOKEN");
+    if should_clear_codex_home_on_fallback() {
+        println!("unset CODEX_HOME");
+    }
+    println!("unset MANDO_CODEX_ACCOUNT_ID");
+    println!("unset MANDO_CODEX_CREDENTIAL_LABEL");
+    println!("unset MANDO_CODEX_CREDENTIAL_ID");
+    println!("unset MANDO_CODEX_HOME_MANAGED");
+}
+
+fn should_clear_codex_home_on_fallback() -> bool {
+    if std::env::var("MANDO_CODEX_HOME_MANAGED").ok().as_deref() == Some("1") {
+        return true;
+    }
+    std::env::var_os("CODEX_HOME")
+        .map(std::path::PathBuf::from)
+        .is_some_and(|path| crate::credentials_codex_pick::is_managed_codex_home(&path))
+}
+
+async fn handle_sync_codex() -> Result<()> {
+    let credential_id = match std::env::var("MANDO_CODEX_CREDENTIAL_ID") {
+        Ok(raw) => match raw.trim().parse::<i64>() {
+            Ok(id) if id > 0 => id,
+            _ => return Ok(()),
+        },
+        Err(_) => return Ok(()),
+    };
+
+    let auth_path = crate::credentials_codex_pick::codex_home_auth_json_path()?;
+    let auth_json = match std::fs::read_to_string(&auth_path) {
+        Ok(text) => text,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(err) => return Err(err.into()),
+    };
+
+    let Ok(client) = DaemonClient::discover() else {
+        return Ok(());
+    };
+
+    let body = api_types::SyncCodexCredentialRequest {
+        credential_id,
+        auth_json,
+    };
+    let _: api_types::SyncCodexCredentialResponse = client
+        .post_json(paths::CREDENTIALS_CODEX_SYNC, &body)
+        .await?;
+
+    if let Ok(home) = std::env::var("CODEX_HOME") {
+        let path = std::path::PathBuf::from(home);
+        if crate::credentials_codex_pick::is_managed_codex_home(&path) {
+            crate::credentials_codex_pick::cleanup_managed_codex_home(&path)?;
+        }
+    }
+    eprintln!("mando: synced Codex credential #{credential_id}");
+    Ok(())
 }
 
 /// Single-quote a string for safe inclusion in a shell `export ...` line.
@@ -157,8 +272,6 @@ mod tests {
 
     #[test]
     fn shell_single_quote_embedded_single_quote() {
-        // `a'b` → `'a'\''b'` — closes, escapes, reopens. Round-trips through
-        // any POSIX shell.
         assert_eq!(shell_single_quote("a'b"), "'a'\\''b'");
     }
 

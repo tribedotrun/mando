@@ -1,0 +1,45 @@
+[contract]
+name        = "openai-codex-api"
+kind        = "external"
+types-crate = "rust/crates/settings"
+transports  = ["http"]
+base-url    = "https://chatgpt.com"
+docs        = "https://github.com/openai/codex"
+
+# OpenAI's Codex usage signal lives at chatgpt.com/backend-api/wham/usage
+# (verified live; the codex-rs test fixture path /api/codex/usage returns
+# 403 from production Cloudflare). The OAuth token endpoint is on
+# auth.openai.com — both consumed via the same client because they share
+# the codex-cli-shaped UA.
+
+[[consumer]]
+name        = "settings-codex-probe"
+path        = "rust/crates/settings/src/io/codex_probe.rs"
+transports  = ["http"]
+role        = "GET /backend-api/wham/usage — reads Codex 5h/7d windows + credits + plan_type"
+enforcement = "scanner"
+allow-value = false
+
+[[consumer]]
+name        = "settings-codex-oauth-refresh"
+path        = "rust/crates/settings/src/io/codex_oauth_refresh.rs"
+transports  = ["http"]
+role        = "POST auth.openai.com/oauth/token — exchanges refresh_token for fresh access/refresh/id tokens"
+enforcement = "scanner"
+allow-value = false
+
+[[consumer]]
+name        = "settings-codex-credentials"
+path        = "rust/crates/settings/src/io/codex_credentials.rs"
+transports  = ["http"]
+role        = "Parses ~/.codex/auth.json shape and the JWT claims (no upstream HTTP)"
+enforcement = "scanner"
+allow-value = false
+
+[[consumer]]
+name        = "settings-codex-provider-probe"
+path        = "rust/crates/settings/src/io/provider_probe.rs"
+transports  = ["http"]
+role        = "Provider-aware probe dispatcher; orchestrates refresh + probe"
+enforcement = "scanner"
+allow-value = false

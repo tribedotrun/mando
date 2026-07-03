@@ -15,6 +15,18 @@ export const actionKindSchema = z.enum(['skip', 'nudge', 'captain-review']);
 export const activityStatsResponseSchema = z
   .object({ merged_7d: z.number(), daily_merges: z.array(z.lazy(() => dailyMergeSchema)) })
   .strict();
+export const addCodexCredentialRequestSchema = z
+  .object({ label: z.string(), authJson: z.string() })
+  .strict();
+export const addCodexCredentialResponseSchema = z
+  .object({
+    ok: z.boolean(),
+    id: z.number(),
+    label: z.string(),
+    accountId: z.string(),
+    planType: z.string().nullable(),
+  })
+  .strict();
 export const addProjectRequestSchema = z
   .object({ name: z.string().optional(), path: z.string(), aliases: z.array(z.string()) })
   .strict();
@@ -270,6 +282,26 @@ export const clientLogEntrySchema = z
     timestamp: z.string().nullable(),
   })
   .strict();
+export const codexCredentialDetailsSchema = z
+  .object({
+    accountId: z.string(),
+    planType: z.string().nullable(),
+    creditsBalance: z.string().nullable(),
+    creditsUnlimited: z.boolean(),
+  })
+  .strict();
+export const codexCredentialPickSchema = z
+  .object({
+    id: z.number(),
+    label: z.string(),
+    accessToken: z.string(),
+    accountId: z.string(),
+    authJson: z.string(),
+  })
+  .strict();
+export const codexCredentialPickResponseSchema = z
+  .object({ pick: z.lazy(() => codexCredentialPickSchema).nullable() })
+  .strict();
 export const configPayloadSchema = z
   .object({ ts: z.number(), data: z.lazy(() => mandoConfigSchema).nullable() })
   .strict();
@@ -327,6 +359,7 @@ export const credentialInfoSchema = z
     id: z.number(),
     label: z.string(),
     tokenMasked: z.string(),
+    provider: z.lazy(() => credentialProviderSchema),
     expiresAt: z.number().nullable(),
     rateLimitCooldownUntil: z.number().nullable(),
     createdAt: z.string(),
@@ -347,6 +380,10 @@ export const credentialInfoSchema = z
     representativeClaim: z.string().nullable().optional(),
     lastProbedAt: z.number().nullable().optional(),
     costSinceProbeUsd: z.number().nullable().optional(),
+    codex: z
+      .lazy(() => codexCredentialDetailsSchema)
+      .nullable()
+      .optional(),
   })
   .strict();
 export const credentialListResponseSchema = z
@@ -364,6 +401,7 @@ export const credentialPickResponseSchema = z
 export const credentialProbeResponseSchema = z
   .object({ ok: z.boolean(), snapshot: z.lazy(() => credentialUsageSnapshotSchema) })
   .strict();
+export const credentialProviderSchema = z.enum(['claude', 'codex']);
 export const credentialRateLimitStatusSchema = z.enum(['allowed', 'allowed_warning', 'rejected']);
 export const credentialTokenResponseSchema = z.object({ token: z.string() }).strict();
 export const credentialUsageSnapshotSchema = z
@@ -1185,6 +1223,10 @@ export const structuredOutputInputSchema = z.object({ raw: z.string() }).strict(
 export const summaryCreatedResponseSchema = z
   .object({ artifact_id: z.number(), task_id: z.number() })
   .strict();
+export const syncCodexCredentialRequestSchema = z
+  .object({ credentialId: z.number(), authJson: z.string() })
+  .strict();
+export const syncCodexCredentialResponseSchema = z.object({ ok: z.boolean() }).strict();
 export const systemApiRetryEventSchema = z
   .object({
     meta: z.lazy(() => eventMetaSchema),
@@ -2230,6 +2272,9 @@ export const resSchemas = {
   postClientlogs: clientLogBatchResponseSchema,
   postConfigSetup: configSetupResponseSchema,
   postCredentialsByIdProbe: probeCredentialResponseSchema,
+  postCredentialsCodex: addCodexCredentialResponseSchema,
+  postCredentialsCodexPick: codexCredentialPickResponseSchema,
+  postCredentialsCodexSync: syncCodexCredentialResponseSchema,
   postCredentialsPick: credentialPickResponseSchema,
   postCredentialsSetuptoken: setupTokenResponseSchema,
   postFirecrawlScrape: firecrawlScrapeResponseSchema,
@@ -2302,6 +2347,9 @@ export const bodySchemas = {
   postClientlogs: clientLogBatchRequestSchema,
   postConfigSetup: configSetupRequestSchema,
   postCredentialsByIdProbe: emptyRequestSchema,
+  postCredentialsCodex: addCodexCredentialRequestSchema,
+  postCredentialsCodexPick: emptyRequestSchema,
+  postCredentialsCodexSync: syncCodexCredentialRequestSchema,
   postCredentialsPick: emptyRequestSchema,
   postCredentialsSetuptoken: setupTokenRequestSchema,
   postFirecrawlScrape: firecrawlScrapeRequestSchema,

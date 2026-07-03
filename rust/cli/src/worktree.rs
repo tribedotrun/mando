@@ -92,6 +92,8 @@ async fn handle_open(name: Option<String>, project: Option<String>) -> anyhow::R
         if let Some(pick) = credential {
             eprintln!("mando: using credential '{}' (#{})", pick.label, pick.id);
             cmd.env("CLAUDE_CODE_OAUTH_TOKEN", pick.token);
+            cmd.env("MANDO_CREDENTIAL_LABEL", &pick.label);
+            cmd.env("MANDO_CREDENTIAL_ID", pick.id.to_string());
         }
         let err = cmd.exec();
         anyhow::bail!("failed to exec claude: {err}");

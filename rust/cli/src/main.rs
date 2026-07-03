@@ -5,6 +5,7 @@
 
 mod captain;
 mod credentials;
+mod credentials_codex_pick;
 mod gateway;
 mod gateway_paths;
 mod http;
