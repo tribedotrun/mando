@@ -29,6 +29,14 @@ enforcement = "scanner"
 allow-value = false
 
 [[consumer]]
+name        = "settings-codex-reset-credits"
+path        = "rust/crates/settings/src/io/codex_reset_credits.rs"
+transports  = ["http"]
+role        = "GET /backend-api/wham/rate-limit-reset-credits — reads available Codex rate-limit reset credits and expiration dates"
+enforcement = "scanner"
+allow-value = false
+
+[[consumer]]
 name        = "settings-codex-credentials"
 path        = "rust/crates/settings/src/io/codex_credentials.rs"
 transports  = ["http"]

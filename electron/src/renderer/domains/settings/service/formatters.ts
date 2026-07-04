@@ -67,6 +67,11 @@ export function formatUsd(value: number): string {
   return `$${value.toFixed(2)}`;
 }
 
+export function formatResetCreditCount(count: number): string {
+  const noun = count === 1 ? 'credit' : 'credits';
+  return `${count} reset ${noun} available`;
+}
+
 /** Time since probe (seconds) -> `just now` / `4m ago` / `1h ago`. */
 export function formatSinceProbe(lastProbedAtSecs: number | null | undefined): string | null {
   if (lastProbedAtSecs == null) return null;

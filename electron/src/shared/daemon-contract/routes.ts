@@ -153,6 +153,14 @@ export interface Routes {
     body: Types.SyncCodexCredentialRequest;
     res: Types.SyncCodexCredentialResponse;
   };
+  getCredentialsCodexByIdResetcredits: {
+    method: 'GET';
+    path: '/api/credentials/codex/{id}/reset-credits';
+    transport: 'json';
+    auth: 'protected';
+    params: Types.CredentialIdParams;
+    res: Types.CodexResetCreditsResponse;
+  };
   postCredentialsPick: {
     method: 'POST';
     path: '/api/credentials/pick';
@@ -1096,6 +1104,12 @@ export const routes = {
   postCredentialsCodexSync: {
     method: 'POST',
     path: '/api/credentials/codex/sync',
+    transport: 'json',
+    auth: 'protected',
+  },
+  getCredentialsCodexByIdResetcredits: {
+    method: 'GET',
+    path: '/api/credentials/codex/{id}/reset-credits',
     transport: 'json',
     auth: 'protected',
   },

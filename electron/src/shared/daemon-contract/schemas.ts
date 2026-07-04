@@ -302,6 +302,21 @@ export const codexCredentialPickSchema = z
 export const codexCredentialPickResponseSchema = z
   .object({ pick: z.lazy(() => codexCredentialPickSchema).nullable() })
   .strict();
+export const codexResetCreditSchema = z
+  .object({
+    title: z.string(),
+    description: z.string().nullable(),
+    expiresAt: z.number(),
+    grantedAt: z.number().nullable(),
+  })
+  .strict();
+export const codexResetCreditsResponseSchema = z
+  .object({
+    availableCount: z.number(),
+    totalEarnedCount: z.number(),
+    credits: z.array(z.lazy(() => codexResetCreditSchema)),
+  })
+  .strict();
 export const configPayloadSchema = z
   .object({ ts: z.number(), data: z.lazy(() => mandoConfigSchema).nullable() })
   .strict();
@@ -2227,6 +2242,7 @@ export const resSchemas = {
   getConfigStatus: configStatusResponseSchema,
   getCredentials: credentialsListResponseSchema,
   getCredentialsByIdToken: credentialTokenResponseSchema,
+  getCredentialsCodexByIdResetcredits: codexResetCreditsResponseSchema,
   getHealth: healthResponseSchema,
   getHealthSystem: systemHealthResponseSchema,
   getHealthTelegram: telegramHealthSchema,
@@ -2419,6 +2435,7 @@ export const paramsSchemas = {
   deleteTerminalById: terminalIdParamsSchema,
   getArtifactsByIdMediaByIndex: artifactMediaParamsSchema,
   getCredentialsByIdToken: credentialIdParamsSchema,
+  getCredentialsCodexByIdResetcredits: credentialIdParamsSchema,
   getImagesByFilename: imageFilenameParamsSchema,
   getScoutItemsById: scoutItemIdParamsSchema,
   getScoutItemsByIdArticle: scoutItemIdParamsSchema,

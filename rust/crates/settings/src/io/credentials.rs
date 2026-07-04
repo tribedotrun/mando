@@ -294,10 +294,17 @@ pub async fn pick_for_worker(
 /// active sessions, lowest five-hour utilization. Returns
 /// `(id, access_token, account_id)`.
 pub async fn pick_for_codex(pool: &SqlitePool) -> Result<Option<(i64, String, String)>> {
+    Ok(pick_for_codex_candidates(pool).await?.into_iter().next())
+}
+
+/// Return Codex pick candidates in the same order used by `pick_for_codex`.
+/// The launcher walks this list so one stale/invalid OAuth account cannot
+/// block healthier accounts later in the pool.
+pub async fn pick_for_codex_candidates(pool: &SqlitePool) -> Result<Vec<(i64, String, String)>> {
     let now_ms = time::OffsetDateTime::now_utc().unix_timestamp() * 1000;
     let now_secs = now_ms / 1000;
 
-    let row: Option<(i64, String, String)> = sqlx::query_as(
+    let rows: Vec<(i64, String, String)> = sqlx::query_as(
         "SELECT c.id, c.access_token, c.account_id
          FROM credentials c
          LEFT JOIN (
@@ -314,14 +321,13 @@ pub async fn pick_for_codex(pool: &SqlitePool) -> Result<Option<(i64, String, St
             COALESCE(s.active, 0) ASC,
             COALESCE(c.five_hour_utilization, 0.0) ASC,
             COALESCE(c.last_picked_at, 0) ASC,
-            c.id ASC
-         LIMIT 1",
+            c.id ASC",
     )
     .bind(now_ms)
     .bind(now_secs)
-    .fetch_optional(pool)
+    .fetch_all(pool)
     .await?;
-    Ok(row)
+    Ok(rows)
 }
 
 /// Record a Codex shell pick so the next `pick_for_codex` rotates away from

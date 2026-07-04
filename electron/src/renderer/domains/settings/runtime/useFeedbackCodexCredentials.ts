@@ -1,6 +1,13 @@
 import { toast } from '#renderer/global/runtime/useFeedback';
 import { useMutationFeedback } from '#renderer/global/runtime/useMutationFeedback';
-import { useCodexCredentialAdd as useCodexCredentialAddMutation } from '#renderer/domains/settings/repo/credentialsCodex';
+import {
+  useCodexCredentialAdd as useCodexCredentialAddMutation,
+  useCodexResetCredits,
+  type CodexResetCreditsResponse,
+} from '#renderer/domains/settings/repo/credentialsCodex';
+
+export { useCodexResetCredits };
+export type { CodexResetCreditsResponse };
 
 export function useCodexCredentialAdd() {
   const mutation = useCodexCredentialAddMutation();

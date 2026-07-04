@@ -9,6 +9,7 @@ pub use io::cc_failover;
 pub use io::codex_credentials;
 pub use io::codex_oauth_refresh;
 pub use io::codex_probe;
+pub use io::codex_reset_credits;
 pub use io::config_fs;
 pub use io::credentials;
 pub use io::credentials::{CredentialInfo, CredentialRow, CredentialWindowInfo};

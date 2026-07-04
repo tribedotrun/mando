@@ -9,15 +9,11 @@
 //! }
 //! ```
 //!
-//! `pick --codex` mirrors that for Codex via a per-process `CODEX_HOME`
-//! (picked `auth.json` + symlinks to `~/.codex` session state). ChatGPT OAuth
+//! Codex users enter through `cx` or `mdo create --codex`. Those launchers call
+//! `codex-pooled-launch.sh`, which uses `pick --codex` as internal plumbing to
+//! materialize a per-process `CODEX_HOME` (picked `auth.json` + symlinks to
+//! `~/.codex` session state), run `codex`, then `sync-codex`. ChatGPT OAuth
 //! tokens are JWT-shaped and must not be passed through `CODEX_ACCESS_TOKEN`.
-//!
-//! ```sh
-//! mdo create --agent codex   # uses codex-pooled-launch.sh under the hood
-//! ```
-//! `pick --codex` emits only `unset`/`export` lines. Launchers call
-//! `codex-pooled-launch.sh` to pick, run `codex`, then `sync-codex`.
 
 use anyhow::Result;
 use clap::{Args, Subcommand};
@@ -39,7 +35,7 @@ pub(crate) enum CredentialsCommand {
     /// (success) or unsets (any fallback path) so `eval "$(mando credentials pick)"`
     /// always leaves the shell in a correct state.
     Pick {
-        /// Pick a Codex OAuth credential instead of Claude.
+        /// Pick a Codex OAuth credential instead of Claude. Internal plumbing for Codex launchers.
         #[arg(long)]
         codex: bool,
     },
