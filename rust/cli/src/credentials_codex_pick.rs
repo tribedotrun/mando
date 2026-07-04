@@ -1,4 +1,4 @@
-//! Per-process Codex home setup for `mando credentials pick --codex`.
+//! Per-process Codex home setup for Codex pooled launchers.
 //!
 //! ChatGPT OAuth access tokens are JWT-shaped; Codex misroutes them through
 //! the Agent Identity path when passed via `CODEX_ACCESS_TOKEN`. Instead we

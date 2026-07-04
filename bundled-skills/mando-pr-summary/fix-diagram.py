@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Twin copies: devtools/ai-kit/skills/x-diagram/fix-diagram.py and bundled-skills/mando-pr-summary/fix-diagram.py — keep in sync.
+# Also used by the standalone AI Toolkit x-diagram skill; keep behavior in sync when copying updates.
 """
 Fix right-border alignment in ASCII box diagrams.
 Ensures every │ line within a ┌─┐ container aligns with the ┐ column.

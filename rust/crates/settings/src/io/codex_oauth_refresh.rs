@@ -1,14 +1,13 @@
 //! Codex OAuth refresh-token exchange.
 //!
-//! See PR #1006. We proactively refresh only when the stored token bundle is
-//! stale; Codex's own file-backed flow handles short-lived JWT expiry during
-//! normal runs and the probe path falls back to a reactive 401-retry refresh.
+//! See PR #1006. Refresh before handing credentials to Codex when the
+//! access-token JWT is near expiry or when the stored token bundle is stale.
 
 use std::collections::HashMap;
 use std::future::Future;
 use std::sync::{Arc, OnceLock};
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use tokio::sync::Mutex;
 
 /// OpenAI's OAuth client id, hard-coded by the Codex CLI.
@@ -18,6 +17,8 @@ pub const REFRESH_TOKEN_URL: &str = "https://auth.openai.com/oauth/token";
 
 /// Stale-token threshold: refresh if the stored token bundle is older than 7 days.
 pub const REFRESH_STALE_TOKEN_SECS: i64 = 7 * 24 * 60 * 60;
+/// Expiry threshold: refresh if the access-token JWT expires within 5 minutes.
+pub const REFRESH_EXPIRY_BUFFER_SECS: i64 = 5 * 60;
 
 static REFRESH_LOCKS: OnceLock<std::sync::Mutex<HashMap<i64, Arc<Mutex<()>>>>> = OnceLock::new();
 
@@ -73,17 +74,10 @@ pub enum RefreshError {
     Parse(String),
 }
 
-#[derive(Debug, Serialize)]
-struct RefreshRequest<'a> {
-    client_id: &'a str,
-    grant_type: &'a str,
-    refresh_token: &'a str,
-}
-
 #[derive(Debug, Deserialize)]
 struct RefreshResponse {
     access_token: String,
-    refresh_token: String,
+    refresh_token: Option<String>,
     id_token: Option<String>,
 }
 
@@ -96,15 +90,15 @@ struct RefreshErrorBody {
 /// access_token + refresh_token (and possibly id_token).
 pub async fn refresh(refresh_token: &str) -> Result<RefreshedTokens, RefreshError> {
     let client = global_net::http::codex_probe_client();
-    let body = RefreshRequest {
-        client_id: CODEX_OAUTH_CLIENT_ID,
-        grant_type: "refresh_token",
-        refresh_token,
-    };
     let response = client
         .post(REFRESH_TOKEN_URL)
-        .header("Content-Type", "application/json")
-        .json(&body)
+        .header("Content-Type", "application/x-www-form-urlencoded")
+        .form(&[
+            ("grant_type", "refresh_token"),
+            ("refresh_token", refresh_token),
+            ("client_id", CODEX_OAUTH_CLIENT_ID),
+            ("scope", "openid profile email"),
+        ])
         .send()
         .await
         .map_err(|e| RefreshError::Network(e.to_string()))?;
@@ -137,21 +131,23 @@ pub async fn refresh(refresh_token: &str) -> Result<RefreshedTokens, RefreshErro
         .map_err(|e| RefreshError::Parse(e.to_string()))?;
     Ok(RefreshedTokens {
         access_token: parsed.access_token,
-        refresh_token: parsed.refresh_token,
+        refresh_token: parsed
+            .refresh_token
+            .unwrap_or_else(|| refresh_token.to_string()),
         id_token: parsed.id_token,
     })
 }
 
 /// Decide whether a Codex credential needs a proactive refresh before the
-/// next probe / pick. The short-lived `id_token` exp is deliberately ignored:
-/// Codex can run with an expired/omitted JWT as long as the auth file has a
-/// valid access/refresh token pair, and reactive 401 retry covers genuinely
-/// dead access tokens.
+/// next probe / pick.
 pub fn should_refresh(
-    _id_token_exp_secs: Option<i64>,
+    access_token_exp_secs: Option<i64>,
     token_updated_at_secs: Option<i64>,
     now_secs: i64,
 ) -> bool {
+    if access_token_exp_secs.is_some_and(|exp| exp - now_secs <= REFRESH_EXPIRY_BUFFER_SECS) {
+        return true;
+    }
     token_updated_at_secs.is_some_and(|last| now_secs - last >= REFRESH_STALE_TOKEN_SECS)
 }
 
@@ -160,8 +156,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn should_not_refresh_from_id_token_exp_alone() {
-        assert!(!should_refresh(Some(1_000_000), None, 1_000_000 - 100));
+    fn should_refresh_when_access_token_expired_or_close() {
+        let now = 1_000_000;
+        assert!(should_refresh(Some(now - 1), None, now));
+        assert!(should_refresh(
+            Some(now + REFRESH_EXPIRY_BUFFER_SECS),
+            None,
+            now
+        ));
+        assert!(!should_refresh(
+            Some(now + REFRESH_EXPIRY_BUFFER_SECS + 1),
+            None,
+            now
+        ));
     }
 
     #[test]
@@ -175,5 +182,13 @@ mod tests {
     #[test]
     fn should_not_refresh_when_no_data() {
         assert!(!should_refresh(None, None, 1_000_000));
+    }
+
+    #[test]
+    fn refresh_response_allows_omitted_refresh_token() {
+        let parsed: RefreshResponse =
+            serde_json::from_str(r#"{"access_token":"new-access"}"#).expect("parse response");
+        assert_eq!(parsed.access_token, "new-access");
+        assert_eq!(parsed.refresh_token, None);
     }
 }

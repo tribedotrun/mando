@@ -25,9 +25,9 @@ export function CodexCredentialsSection(props: CodexCredentialsSectionProps): Re
         <h3 className="text-sm font-semibold text-foreground">Codex accounts</h3>
         <p className="mt-1 text-xs text-muted-foreground">
           OAuth-only ChatGPT accounts for the Codex CLI. Use
-          <code className="mx-1">mdo create --agent codex</code> or
-          <code className="mx-1">mando credentials pick --codex</code> to load-balance without
-          changing <code>~/.codex/auth.json</code> — threads stay in the shared
+          <code className="mx-1">cx</code> or
+          <code className="mx-1">mdo create --codex</code> to load-balance without changing
+          <code>~/.codex/auth.json</code> — threads stay in the shared
           <code>~/.codex</code> home.
         </p>
       </div>

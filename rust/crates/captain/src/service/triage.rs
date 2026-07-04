@@ -26,7 +26,7 @@ const DEFAULT_RULES: &[(&str, &[&str])] = &[
             "**/*.spec.*",
         ],
     ),
-    ("skill", &["devtools/ai-kit/skills/**", ".claude/skills/**"]),
+    ("skill", &[".claude/skills/**", ".agents/skills/**"]),
     ("docs", &["*.md", ".ai/plans/**", "CLAUDE.md"]),
     (
         "config",
@@ -441,7 +441,7 @@ mod tests {
     #[test]
     fn classify_default_skill() {
         assert_eq!(
-            classify_file("devtools/ai-kit/skills/review/SKILL.md", &[]),
+            classify_file(".claude/skills/review/SKILL.md", &[]),
             "skill"
         );
     }
@@ -510,10 +510,7 @@ mod tests {
             },
             ClassifyRule {
                 category: "skill".into(),
-                patterns: vec![
-                    "devtools/ai-kit/skills/**".into(),
-                    ".claude/skills/**".into(),
-                ],
+                patterns: vec![".claude/skills/**".into(), ".agents/skills/**".into()],
             },
             ClassifyRule {
                 category: "docs".into(),
@@ -548,7 +545,7 @@ mod tests {
         );
         // Skills
         assert_eq!(
-            classify_file("devtools/ai-kit/skills/x-land/SKILL.md", &rules),
+            classify_file(".claude/skills/x-land/SKILL.md", &rules),
             "skill"
         );
         assert_eq!(

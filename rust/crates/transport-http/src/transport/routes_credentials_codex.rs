@@ -1,4 +1,4 @@
-//! Codex-specific credential routes — POST add, POST pick.
+//! Codex-specific credential routes — add, pick, sync, and reset credits.
 //!
 //! List / probe / delete paths in `routes_credentials.rs` handle Codex rows
 //! transparently because the row carries `provider`. Routes here cover
@@ -8,9 +8,9 @@
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::Json;
-use settings::CodexCredentialError;
+use settings::{CodexCredentialError, ProbeError};
 
-use crate::response::{error_response, internal_error, ApiCreated, ApiError};
+use crate::response::{error_response, internal_error, internal_error_with, ApiCreated, ApiError};
 use crate::{ApiRouter, AppState};
 
 pub(crate) fn codex_credential_routes() -> ApiRouter<AppState> {
@@ -33,7 +33,7 @@ pub(crate) fn codex_credential_routes() -> ApiRouter<AppState> {
         body = api_types::EmptyRequest,
         res = api_types::CodexCredentialPickResponse
     );
-    crate::api_route!(
+    let router = crate::api_route!(
         router,
         POST "/api/credentials/codex/sync",
         transport = Json,
@@ -41,7 +41,74 @@ pub(crate) fn codex_credential_routes() -> ApiRouter<AppState> {
         handler = sync_codex_credential,
         body = api_types::SyncCodexCredentialRequest,
         res = api_types::SyncCodexCredentialResponse
+    );
+    crate::api_route!(
+        router,
+        GET "/api/credentials/codex/{id}/reset-credits",
+        transport = Json,
+        auth = Protected,
+        handler = get_codex_reset_credits,
+        params = api_types::CredentialIdParams,
+        res = api_types::CodexResetCreditsResponse
     )
+}
+
+/// GET /api/credentials/codex/:id/reset-credits — return available Codex
+/// rate-limit reset credits for one stored OAuth credential.
+#[crate::instrument_api(method = "GET", path = "/api/credentials/codex/{id}/reset-credits")]
+async fn get_codex_reset_credits(
+    State(state): State<AppState>,
+    axum::extract::Path(api_types::CredentialIdParams { id }): axum::extract::Path<
+        api_types::CredentialIdParams,
+    >,
+) -> Result<Json<api_types::CodexResetCreditsResponse>, ApiError> {
+    match state.settings.codex_reset_credits(id).await {
+        Ok(outcome) => Ok(Json(api_types::CodexResetCreditsResponse {
+            available_count: outcome.available_count,
+            total_earned_count: outcome.total_earned_count,
+            credits: outcome
+                .credits
+                .into_iter()
+                .map(|credit| api_types::CodexResetCredit {
+                    title: credit.title,
+                    description: credit.description,
+                    expires_at: credit.expires_at,
+                    granted_at: credit.granted_at,
+                })
+                .collect(),
+        })),
+        Err(CodexCredentialError::NotFound(id)) => Err(error_response(
+            StatusCode::NOT_FOUND,
+            &format!("credential id={id} not found"),
+        )),
+        Err(CodexCredentialError::NotCodex) => Err(error_response(
+            StatusCode::BAD_REQUEST,
+            "credential is not a Codex row",
+        )),
+        Err(CodexCredentialError::NoAccountId) => Err(error_response(
+            StatusCode::BAD_REQUEST,
+            "Codex credential has no account_id",
+        )),
+        Err(CodexCredentialError::ResetCredits(ProbeError::Unauthorized))
+        | Err(CodexCredentialError::Probe(ProbeError::Unauthorized)) => Err(error_response(
+            StatusCode::UNAUTHORIZED,
+            "token expired or invalid; re-login required",
+        )),
+        Err(CodexCredentialError::ResetCredits(e)) => Err(internal_error_with(
+            StatusCode::BAD_GATEWAY,
+            e,
+            "upstream reset credits probe failed",
+        )),
+        Err(CodexCredentialError::Probe(e)) => Err(internal_error_with(
+            StatusCode::BAD_GATEWAY,
+            e,
+            "upstream usage probe failed while refreshing Codex credential",
+        )),
+        Err(e) => Err(internal_error(
+            anyhow::Error::msg(e.to_string()),
+            "failed to read Codex reset credits",
+        )),
+    }
 }
 
 /// POST /api/credentials/codex — paste an auth.json blob, validate, probe,
@@ -109,8 +176,8 @@ async fn add_codex_credential(
 }
 
 /// POST /api/credentials/codex/pick — return the best-available Codex
-/// credential for per-process env injection. Refreshes stale tokens before
-/// returning; never writes `~/.codex/auth.json`.
+/// credential for per-process env injection. Refreshes stale or near-expired
+/// tokens before returning; never writes `~/.codex/auth.json`.
 #[crate::instrument_api(method = "POST", path = "/api/credentials/codex/pick")]
 async fn pick_codex_credential(
     State(state): State<AppState>,

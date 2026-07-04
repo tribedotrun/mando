@@ -201,6 +201,23 @@ export type CodexCredentialPick = {
   authJson: string;
 };
 export type CodexCredentialPickResponse = { pick: CodexCredentialPick | null };
+export type CodexResetCredit = {
+  title: string;
+  description: string | null;
+  /**
+   * Unix seconds when the credit expires.
+   */
+  expiresAt: number;
+  /**
+   * Unix seconds when the credit was granted, when OpenAI returns it.
+   */
+  grantedAt: number | null;
+};
+export type CodexResetCreditsResponse = {
+  availableCount: number;
+  totalEarnedCount: number;
+  credits: Array<CodexResetCredit>;
+};
 export type ConfigPayload = { ts: number; data: MandoConfig | null };
 export type ConfigSaveResponse = {
   ok: boolean;

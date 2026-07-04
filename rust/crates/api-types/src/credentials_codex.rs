@@ -29,6 +29,27 @@ pub struct CodexCredentialDetails {
     pub credits_unlimited: bool,
 }
 
+/// One available Codex rate-limit reset credit.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CodexResetCredit {
+    pub title: String,
+    pub description: Option<String>,
+    /// Unix seconds when the credit expires.
+    pub expires_at: i64,
+    /// Unix seconds when the credit was granted, when OpenAI returns it.
+    pub granted_at: Option<i64>,
+}
+
+/// GET /api/credentials/codex/{id}/reset-credits
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CodexResetCreditsResponse {
+    pub available_count: i64,
+    pub total_earned_count: i64,
+    pub credits: Vec<CodexResetCredit>,
+}
+
 /// POST /api/credentials/codex
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]

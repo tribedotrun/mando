@@ -47,14 +47,14 @@ pub enum CodexCredentialError {
     DuplicateLabel(String, i64),
     #[error("upstream usage probe failed: {0}")]
     Probe(#[from] ProbeError),
+    #[error("upstream reset credits probe failed: {0}")]
+    ResetCredits(#[source] ProbeError),
     #[error("database error: {0}")]
     Db(#[from] anyhow::Error),
     #[error("refresh token permanently invalid (re-add the credential): {0}")]
     PermanentRefreshFailure(String),
     #[error("not a Codex credential")]
     NotCodex,
-    #[error("codex credential is missing the required token fields")]
-    MissingTokens,
     #[error("credential id={0} not found")]
     NotFound(i64),
     #[error("auth.json account_id {got} does not match stored credential ({expected})")]
@@ -154,61 +154,62 @@ impl SettingsRuntime {
         })
     }
 
-    /// Pick the best Codex credential, refresh tokens when stale, and return
-    /// the access token + account id for per-process env injection. Never
-    /// writes `~/.codex/auth.json`.
+    /// Pick the best Codex credential, refresh stale or near-expired tokens,
+    /// and return the access token + account id for per-process env injection.
+    /// Never writes `~/.codex/auth.json`.
     #[tracing::instrument(skip(self))]
     pub async fn pick_codex_credential(
         &self,
     ) -> Result<Option<PickedCodexCredential>, CodexCredentialError> {
-        let Some((id, access_token, account_id)) =
-            credentials::pick_for_codex(&self.db_pool).await?
-        else {
-            return Ok(None);
-        };
+        for (id, access_token, account_id) in
+            credentials::pick_for_codex_candidates(&self.db_pool).await?
+        {
+            let row = credentials::get_row_by_id(&self.db_pool, id)
+                .await?
+                .ok_or(CodexCredentialError::NotFound(id))?;
+            if row.provider != "codex" {
+                return Err(CodexCredentialError::NotCodex);
+            }
 
-        credentials::record_codex_pick(&self.db_pool, id).await?;
+            let Some(final_access) =
+                refresh_codex_access_token_on_pick(&self.db_pool, id, &row, access_token).await?
+            else {
+                continue;
+            };
 
-        let row = credentials::get_row_by_id(&self.db_pool, id)
-            .await?
-            .ok_or(CodexCredentialError::NotFound(id))?;
-        if row.provider != "codex" {
-            return Err(CodexCredentialError::NotCodex);
-        }
-
-        let final_access =
-            refresh_codex_access_token_on_pick(&self.db_pool, id, &row, access_token).await?;
-
-        let row = credentials::get_row_by_id(&self.db_pool, id)
-            .await?
-            .ok_or(CodexCredentialError::NotFound(id))?;
-
-        let refresh_token = row
-            .refresh_token
-            .as_deref()
-            .ok_or(CodexCredentialError::MissingTokens)?;
-        let last_refresh = time::OffsetDateTime::now_utc()
-            .format(&time::format_description::well_known::Rfc3339)
+            let row = credentials::get_row_by_id(&self.db_pool, id)
+                .await?
+                .ok_or(CodexCredentialError::NotFound(id))?;
+            let Some(refresh_token) = row.refresh_token.as_deref() else {
+                warn!(
+                    module = "settings",
+                    credential_id = id,
+                    "Codex credential missing refresh_token on pick; skipping"
+                );
+                continue;
+            };
+            let last_refresh = time::OffsetDateTime::now_utc()
+                .format(&time::format_description::well_known::Rfc3339)
+                .map_err(|e| CodexCredentialError::Db(anyhow::Error::msg(e.to_string())))?;
+            let auth_json = codex_credentials::serialize_auth_json(
+                &final_access,
+                refresh_token,
+                row.id_token.as_deref(),
+                Some(&account_id),
+                Some(&last_refresh),
+            )
             .map_err(|e| CodexCredentialError::Db(anyhow::Error::msg(e.to_string())))?;
-        let auth_json = codex_credentials::serialize_auth_json(
-            &final_access,
-            refresh_token,
-            row.id_token.as_deref(),
-            Some(&account_id),
-            Some(&last_refresh),
-        )
-        .map_err(|e| CodexCredentialError::Db(anyhow::Error::msg(e.to_string())))?;
 
-        let labels = credentials::labels_by_ids(&self.db_pool, &[id]).await?;
-        let label = labels.get(&id).cloned().unwrap_or_else(|| id.to_string());
-
-        Ok(Some(PickedCodexCredential {
-            id,
-            label,
-            access_token: final_access,
-            account_id,
-            auth_json,
-        }))
+            credentials::record_codex_pick(&self.db_pool, id).await?;
+            return Ok(Some(PickedCodexCredential {
+                id,
+                label: row.label,
+                access_token: final_access,
+                account_id,
+                auth_json,
+            }));
+        }
+        Ok(None)
     }
 
     /// Persist refreshed tokens from a per-process `CODEX_HOME/auth.json` back
@@ -368,9 +369,9 @@ async fn refresh_codex_access_token_on_pick(
     id: i64,
     row: &credentials::CredentialRow,
     access_token: String,
-) -> Result<String, CodexCredentialError> {
+) -> Result<Option<String>, CodexCredentialError> {
     if !codex_row_should_refresh(row) {
-        return Ok(access_token);
+        return Ok(Some(access_token));
     }
 
     codex_oauth_refresh::with_credential_refresh_lock(id, || async {
@@ -381,10 +382,15 @@ async fn refresh_codex_access_token_on_pick(
             return Err(CodexCredentialError::NotCodex);
         }
         if !codex_row_should_refresh(&current) {
-            return Ok(current.access_token);
+            return Ok(Some(current.access_token));
         }
         let Some(refresh_token) = current.refresh_token.as_deref() else {
-            return Ok(current.access_token);
+            warn!(
+                module = "settings",
+                credential_id = id,
+                "Codex access_token needs refresh but refresh_token is missing; skipping pick"
+            );
+            return Ok(None);
         };
 
         match codex_oauth_refresh::refresh(refresh_token).await {
@@ -399,7 +405,7 @@ async fn refresh_codex_access_token_on_pick(
                 )
                 .await
                 .map_err(|e| CodexCredentialError::TokenPersistFailed(e.to_string()))?;
-                Ok(refreshed.access_token)
+                Ok(Some(refreshed.access_token))
             }
             Err(codex_oauth_refresh::RefreshError::Permanent(reason)) => {
                 warn!(
@@ -416,16 +422,16 @@ async fn refresh_codex_access_token_on_pick(
                         "failed to mark Codex credential expired after permanent refresh failure"
                     );
                 }
-                Err(CodexCredentialError::PermanentRefreshFailure(reason))
+                Ok(None)
             }
             Err(err) => {
                 warn!(
                     module = "settings",
                     credential_id = id,
                     error = %err,
-                    "Codex refresh failed transiently on pick; using stored access_token"
+                    "Codex refresh failed transiently on pick; skipping credential"
                 );
-                Ok(current.access_token)
+                Ok(None)
             }
         }
     })
@@ -434,20 +440,18 @@ async fn refresh_codex_access_token_on_pick(
 
 fn codex_row_should_refresh(row: &credentials::CredentialRow) -> bool {
     let now_secs = time::OffsetDateTime::now_utc().unix_timestamp();
-    let exp_secs = row.id_token.as_deref().and_then(|token| {
-        match codex_credentials::decode_id_token_claims(token) {
-            Ok(claims) => claims.exp,
-            Err(err) => {
-                debug!(
-                    module = "settings",
-                    credential_id = row.id,
-                    error = %err,
-                    "id_token decode failed; skipping proactive refresh exp check"
-                );
-                None
-            }
+    let exp_secs = match codex_credentials::decode_id_token_claims(&row.access_token) {
+        Ok(claims) => claims.exp,
+        Err(err) => {
+            debug!(
+                module = "settings",
+                credential_id = row.id,
+                error = %err,
+                "access_token decode failed; falling back to token age refresh check"
+            );
+            None
         }
-    });
+    };
     codex_oauth_refresh::should_refresh(
         exp_secs,
         row.token_updated_at.or(row.last_probed_at),

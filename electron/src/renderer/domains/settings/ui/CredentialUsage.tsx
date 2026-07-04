@@ -3,6 +3,7 @@ import { RefreshCw } from 'lucide-react';
 import { Button } from '#renderer/global/ui/primitives/button';
 import { Progress } from '#renderer/global/ui/primitives/progress';
 import { cn } from '#renderer/global/service/cn';
+import { CodexResetCredits } from '#renderer/domains/settings/ui/CodexResetCredits';
 import {
   useCredentialProbe,
   type CredentialInfo,
@@ -95,6 +96,9 @@ export function CredentialUsage({ cred }: { cred: CredentialInfo }): React.React
     <div className="mt-2 space-y-1.5" data-testid="credential-usage">
       {fiveHour ? <WindowRow label="5h" window={fiveHour} /> : null}
       {sevenDay ? <WindowRow label="7d" window={sevenDay} /> : null}
+      {cred.provider === 'codex' ? (
+        <CodexResetCredits credentialId={cred.id} enabled={!cred.isExpired} />
+      ) : null}
       <div className="flex items-center justify-between pt-0.5 text-[11px] text-muted-foreground">
         <span>
           {sinceProbe ? `probed ${sinceProbe}` : ''}

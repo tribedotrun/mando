@@ -71,6 +71,8 @@ pub fn known_type_decls() -> BTreeMap<String, String> {
         api_types::CodexCredentialDetails,
         api_types::CodexCredentialPick,
         api_types::CodexCredentialPickResponse,
+        api_types::CodexResetCredit,
+        api_types::CodexResetCreditsResponse,
         api_types::SyncCodexCredentialRequest,
         api_types::SyncCodexCredentialResponse,
         api_types::CredentialInfo,

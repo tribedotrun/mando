@@ -6,8 +6,8 @@
 //!   parse path. No token refresh; Claude OAuth tokens don't have a
 //!   refresh-token equivalent.
 //! - `codex` → optional proactive `codex_oauth_refresh::refresh()` (if the
-//!   stored JWT exp is within 5 min or `last_probed_at` is older than 7
-//!   days), then `codex_probe::probe()`. On 401 from the probe itself, one
+//!   stored access-token JWT exp is within 5 min or `last_probed_at` is older
+//!   than 7 days), then `codex_probe::probe()`. On 401 from the probe itself, one
 //!   reactive refresh + retry as a safety net.
 //!
 //! Returns the same `UsageSnapshot` the Claude path produces so
@@ -38,27 +38,24 @@ pub async fn probe(pool: &SqlitePool, row: &CredentialRow) -> Result<UsageSnapsh
 
 async fn probe_codex(pool: &SqlitePool, row: &CredentialRow) -> Result<UsageSnapshot, ProbeError> {
     let now_secs = time::OffsetDateTime::now_utc().unix_timestamp();
-    let id_token_exp_secs =
-        row.id_token
-            .as_deref()
-            .and_then(|t| match codex_credentials::decode_id_token_claims(t) {
-                Ok(claims) => claims.exp,
-                Err(err) => {
-                    debug!(
-                        module = "settings",
-                        credential_id = row.id,
-                        error = %err,
-                        "id_token decode failed; proactive refresh exp check skipped"
-                    );
-                    None
-                }
-            });
+    let access_token_exp_secs = match codex_credentials::decode_id_token_claims(&row.access_token) {
+        Ok(claims) => claims.exp,
+        Err(err) => {
+            debug!(
+                module = "settings",
+                credential_id = row.id,
+                error = %err,
+                "access_token decode failed; proactive refresh exp check skipped"
+            );
+            None
+        }
+    };
 
     let mut access_token = row.access_token.clone();
     let mut did_proactive_refresh = false;
 
     if codex_oauth_refresh::should_refresh(
-        id_token_exp_secs,
+        access_token_exp_secs,
         row.token_updated_at.or(row.last_probed_at),
         now_secs,
     ) {
@@ -157,11 +154,9 @@ async fn try_refresh_and_persist(
         }
         if !force {
             let now_secs = time::OffsetDateTime::now_utc().unix_timestamp();
-            let exp_secs = current.id_token.as_deref().and_then(|token| {
-                codex_credentials::decode_id_token_claims(token)
-                    .ok()
-                    .and_then(|claims| claims.exp)
-            });
+            let exp_secs = codex_credentials::decode_id_token_claims(&current.access_token)
+                .ok()
+                .and_then(|claims| claims.exp);
             if !codex_oauth_refresh::should_refresh(
                 exp_secs,
                 current.token_updated_at.or(current.last_probed_at),

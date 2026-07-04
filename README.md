@@ -17,7 +17,7 @@ Captain is the tick-based engine that runs your AI coding agents end-to-end. It 
 
 Each task runs on one coding-agent provider for its whole lifecycle. New tasks default to Claude Code; choose Codex in the task composer to run the clarifier, worker, review, mergeability, reopen, nudge, stop, history, and session UI through Codex. Codex tasks use the local authenticated Codex app-server (`codex app-server --listen stdio://`) with workspace-write sandboxing, explicit writable roots, network access for normal PR handoff, and non-interactive approvals. Session ids stay provider-native: Claude Code session ids for Claude tasks and Codex `thread.id` values for Codex tasks.
 
-Current Codex support relies on the active local Codex login. Planning mode remains Claude Code-only until the planning pipeline is routed through the provider-neutral runtime boundary. The adapter boundary is shaped so future releases can isolate per-session `CODEX_HOME` or add more providers without rewriting Captain lifecycle logic.
+Codex can use the active local login or Mando-managed ChatGPT OAuth accounts. `mdo create --codex` launches Codex with load-balanced account picking through a per-process `CODEX_HOME`, while sessions stay in the shared `~/.codex` home. Planning mode remains Claude Code-only until the planning pipeline is routed through the provider-neutral runtime boundary.
 
 ### AI Code Review
 
@@ -123,3 +123,11 @@ npm run package
 ## License
 
 Apache 2.0, see [LICENSE](LICENSE).
+
+<!-- hypertribe:sponsors:start -->
+## Sponsors
+
+[![mando Sponsors](https://api.tribe.run/tokens/7UehrotjL1owwLEJra1kr72vrQAVyPzZ3PauupC2CajK/sponsors.svg)](https://tribe.run/token/7UehrotjL1owwLEJra1kr72vrQAVyPzZ3PauupC2CajK)
+
+Become a sponsor on [Tribe.run](https://tribe.run/token/7UehrotjL1owwLEJra1kr72vrQAVyPzZ3PauupC2CajK).
+<!-- hypertribe:sponsors:end -->
