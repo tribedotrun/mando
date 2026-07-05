@@ -55,14 +55,16 @@ pub struct RefreshedTokens {
 
 #[derive(Debug, thiserror::Error)]
 pub enum RefreshError {
-    /// `refresh_token_expired` / `_reused` / `_invalidated` from upstream.
-    /// The credential is dead; mark it expired and stop trying.
+    /// Any HTTP 401 from the refresh endpoint, or a recognized permanent
+    /// error code (`refresh_token_expired` / `_reused` / `_invalidated` /
+    /// `invalid_grant`) at another status. Refresh tokens are single-use
+    /// and rotating, so OpenAI has no ambiguous "maybe transient" 401 —
+    /// codex-rs (`classify_refresh_token_failure`) treats any 401 as
+    /// permanent. The credential is dead; mark it expired and stop trying.
+    /// Reason is the parsed upstream error code, or `"unauthorized"` when
+    /// the body carries no recognizable code.
     #[error("refresh token permanently invalid: {0}")]
     Permanent(String),
-    /// 401 from the token endpoint without a permanent error code. Should
-    /// not happen in practice but treated as transient just in case.
-    #[error("unauthorized")]
-    Unauthorized,
     /// Upstream returned 4xx/5xx that isn't a permanent invalidation.
     #[error("transient HTTP {status}: {body}")]
     Http { status: u16, body: String },
@@ -104,25 +106,9 @@ pub async fn refresh(refresh_token: &str) -> Result<RefreshedTokens, RefreshErro
         .map_err(|e| RefreshError::Network(e.to_string()))?;
 
     let status = response.status();
-    if status == reqwest::StatusCode::UNAUTHORIZED {
-        return Err(RefreshError::Unauthorized);
-    }
     if !status.is_success() {
         let body_text = response.text().await.unwrap_or_default();
-        if let Ok(parsed) = serde_json::from_str::<RefreshErrorBody>(&body_text) {
-            if let Some(code) = parsed.error.as_deref() {
-                if matches!(
-                    code,
-                    "refresh_token_expired" | "refresh_token_reused" | "refresh_token_invalidated"
-                ) {
-                    return Err(RefreshError::Permanent(code.to_string()));
-                }
-            }
-        }
-        return Err(RefreshError::Http {
-            status: status.as_u16(),
-            body: body_text.chars().take(500).collect(),
-        });
+        return Err(classify_refresh_failure(status, &body_text));
     }
 
     let parsed: RefreshResponse = response
@@ -136,6 +122,43 @@ pub async fn refresh(refresh_token: &str) -> Result<RefreshedTokens, RefreshErro
             .unwrap_or_else(|| refresh_token.to_string()),
         id_token: parsed.id_token,
     })
+}
+
+/// Classify a non-success HTTP response from the refresh endpoint into a
+/// [`RefreshError`]. Split out from [`refresh`] so the classification rules
+/// are unit-testable without a live HTTP call.
+///
+/// Any 401 is permanent (reason = parsed `error` code when the body parses,
+/// else `"unauthorized"`) — refresh tokens are single-use/rotating, so a
+/// 401 here always means the token is dead, not a transient blip. Aligns
+/// with codex-rs `classify_refresh_token_failure`. A handful of specific
+/// error codes are also permanent regardless of status, because OpenAI's
+/// token endpoint returns some of these (e.g. `invalid_grant`) with 400
+/// rather than 401. Everything else (5xx, unrecognized 4xx codes) is
+/// transient and the caller should retry on the next tick.
+fn classify_refresh_failure(status: reqwest::StatusCode, body_text: &str) -> RefreshError {
+    let parsed_code = serde_json::from_str::<RefreshErrorBody>(body_text)
+        .ok()
+        .and_then(|b| b.error);
+
+    if status == reqwest::StatusCode::UNAUTHORIZED {
+        return RefreshError::Permanent(parsed_code.unwrap_or_else(|| "unauthorized".to_string()));
+    }
+    if let Some(code) = parsed_code.as_deref() {
+        if matches!(
+            code,
+            "refresh_token_expired"
+                | "refresh_token_reused"
+                | "refresh_token_invalidated"
+                | "invalid_grant"
+        ) {
+            return RefreshError::Permanent(code.to_string());
+        }
+    }
+    RefreshError::Http {
+        status: status.as_u16(),
+        body: body_text.chars().take(500).collect(),
+    }
 }
 
 /// Decide whether a Codex credential needs a proactive refresh before the
@@ -190,5 +213,96 @@ mod tests {
             serde_json::from_str(r#"{"access_token":"new-access"}"#).expect("parse response");
         assert_eq!(parsed.access_token, "new-access");
         assert_eq!(parsed.refresh_token, None);
+    }
+
+    // --- classify_refresh_failure: any 401 is permanent (Fix 1) ---
+
+    #[test]
+    fn classify_401_without_recognizable_body_is_permanent_unauthorized() {
+        let err = classify_refresh_failure(reqwest::StatusCode::UNAUTHORIZED, "");
+        match err {
+            RefreshError::Permanent(reason) => assert_eq!(reason, "unauthorized"),
+            other => panic!("expected Permanent(\"unauthorized\"), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classify_401_with_unrelated_body_is_still_permanent_unauthorized() {
+        // Body doesn't parse as {"error": ...} at all — still permanent,
+        // because codex-rs treats ANY 401 from this endpoint as permanent.
+        let err = classify_refresh_failure(reqwest::StatusCode::UNAUTHORIZED, "not json");
+        match err {
+            RefreshError::Permanent(reason) => assert_eq!(reason, "unauthorized"),
+            other => panic!("expected Permanent(\"unauthorized\"), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classify_401_with_error_code_uses_parsed_reason() {
+        let err = classify_refresh_failure(
+            reqwest::StatusCode::UNAUTHORIZED,
+            r#"{"error":"refresh_token_reused"}"#,
+        );
+        match err {
+            RefreshError::Permanent(reason) => assert_eq!(reason, "refresh_token_reused"),
+            other => panic!("expected Permanent(\"refresh_token_reused\"), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classify_400_invalid_grant_is_permanent() {
+        let err = classify_refresh_failure(
+            reqwest::StatusCode::BAD_REQUEST,
+            r#"{"error":"invalid_grant"}"#,
+        );
+        match err {
+            RefreshError::Permanent(reason) => assert_eq!(reason, "invalid_grant"),
+            other => panic!("expected Permanent(\"invalid_grant\"), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classify_400_refresh_token_invalidated_is_permanent() {
+        let err = classify_refresh_failure(
+            reqwest::StatusCode::BAD_REQUEST,
+            r#"{"error":"refresh_token_invalidated"}"#,
+        );
+        assert!(
+            matches!(err, RefreshError::Permanent(reason) if reason == "refresh_token_invalidated")
+        );
+    }
+
+    #[test]
+    fn classify_400_unrecognized_code_is_transient_http() {
+        let err = classify_refresh_failure(
+            reqwest::StatusCode::BAD_REQUEST,
+            r#"{"error":"invalid_request"}"#,
+        );
+        match err {
+            RefreshError::Http { status, body } => {
+                assert_eq!(status, 400);
+                assert!(body.contains("invalid_request"));
+            }
+            other => panic!("expected transient Http, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classify_5xx_is_transient_http() {
+        let err = classify_refresh_failure(reqwest::StatusCode::BAD_GATEWAY, "upstream down");
+        match err {
+            RefreshError::Http { status, .. } => assert_eq!(status, 502),
+            other => panic!("expected transient Http, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classify_body_truncated_to_500_chars() {
+        let long_body = "x".repeat(1000);
+        let err = classify_refresh_failure(reqwest::StatusCode::BAD_GATEWAY, &long_body);
+        match err {
+            RefreshError::Http { body, .. } => assert_eq!(body.chars().count(), 500),
+            other => panic!("expected transient Http, got {other:?}"),
+        }
     }
 }

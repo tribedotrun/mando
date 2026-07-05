@@ -30,7 +30,7 @@ pub(crate) fn codex_credential_routes() -> ApiRouter<AppState> {
         transport = Json,
         auth = Protected,
         handler = pick_codex_credential,
-        body = api_types::EmptyRequest,
+        body = api_types::CredentialPickRequest,
         res = api_types::CodexCredentialPickResponse
     );
     let router = crate::api_route!(
@@ -142,6 +142,7 @@ async fn add_codex_credential(
                 label,
                 account_id: stored.account_id,
                 plan_type: stored.plan_type,
+                warning: stored.warning,
             }))
         }
         Err(CodexCredentialError::AuthJson(e)) => Err(error_response(
@@ -160,9 +161,19 @@ async fn add_codex_credential(
             StatusCode::CONFLICT,
             &format!("a Codex credential for account {account} already exists (id={id})"),
         )),
+        Err(CodexCredentialError::AmbientSessionConflict) => Err(error_response(
+            StatusCode::BAD_REQUEST,
+            "this is your live personal Codex login session (~/.codex); capture a separate \
+             session instead: CODEX_HOME=$(mktemp -d) codex login, paste that auth.json, then \
+             delete the temp dir WITHOUT running `codex logout`",
+        )),
         Err(CodexCredentialError::PermanentRefreshFailure(reason)) => Err(error_response(
-            StatusCode::UNAUTHORIZED,
-            &format!("stored refresh token permanently invalid ({reason}); re-add the credential"),
+            StatusCode::BAD_REQUEST,
+            &format!(
+                "pasted session is invalid or revoked ({reason}); capture a fresh session: \
+                 CODEX_HOME=$(mktemp -d) codex login, paste that auth.json, then delete the \
+                 temp dir WITHOUT running `codex logout`"
+            ),
         )),
         Err(CodexCredentialError::Probe(e)) => Err(error_response(
             StatusCode::BAD_GATEWAY,
@@ -177,30 +188,87 @@ async fn add_codex_credential(
 
 /// POST /api/credentials/codex/pick — return the best-available Codex
 /// credential for per-process env injection. Refreshes stale or near-expired
-/// tokens before returning; never writes `~/.codex/auth.json`.
+/// tokens before returning; never writes `~/.codex/auth.json`. Fix 5: also
+/// notifies (the same message the usage-poll poller uses) for every
+/// candidate the pick walk itself marked expired.
 #[crate::instrument_api(method = "POST", path = "/api/credentials/codex/pick")]
 async fn pick_codex_credential(
     State(state): State<AppState>,
-    Json(_body): Json<api_types::EmptyRequest>,
+    Json(body): Json<api_types::CredentialPickRequest>,
 ) -> Result<Json<api_types::CodexCredentialPickResponse>, ApiError> {
-    match state.settings.pick_codex_credential().await {
-        Ok(pick) => Ok(Json(api_types::CodexCredentialPickResponse {
-            pick: pick.map(|p| api_types::CodexCredentialPick {
-                id: p.id,
-                label: p.label,
-                access_token: p.access_token,
-                account_id: p.account_id,
-                auth_json: p.auth_json,
-            }),
-        })),
-        Err(CodexCredentialError::PermanentRefreshFailure(reason)) => Err(error_response(
-            StatusCode::UNAUTHORIZED,
-            &format!("stored refresh token permanently invalid ({reason}); re-add the credential",),
-        )),
-        Err(e) => Err(internal_error(
-            anyhow::Error::msg(e.to_string()),
-            "failed to pick codex credential",
-        )),
+    if body.id.is_some() && body.label.is_some() {
+        return Err(error_response(
+            StatusCode::BAD_REQUEST,
+            "specify only one of id or label",
+        ));
+    }
+    if let Some(label) = body.label.as_deref() {
+        if label.trim().is_empty() {
+            return Err(error_response(
+                StatusCode::BAD_REQUEST,
+                "label must not be empty",
+            ));
+        }
+    }
+
+    let explicit_label = body
+        .label
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    if body.id.is_some() || explicit_label.is_some() {
+        match state
+            .settings
+            .pick_codex_credential_explicit(body.id, explicit_label)
+            .await
+        {
+            Ok(pick) => Ok(Json(api_types::CodexCredentialPickResponse {
+                pick: pick.map(|p| api_types::CodexCredentialPick {
+                    id: p.id,
+                    label: p.label,
+                    access_token: p.access_token,
+                    account_id: p.account_id,
+                    auth_json: p.auth_json,
+                }),
+            })),
+            Err(CodexCredentialError::PermanentRefreshFailure(reason)) => Err(error_response(
+                StatusCode::UNAUTHORIZED,
+                &format!(
+                    "stored refresh token permanently invalid ({reason}); re-add the credential",
+                ),
+            )),
+            Err(e) => Err(internal_error(
+                anyhow::Error::msg(e.to_string()),
+                "failed to pick codex credential",
+            )),
+        }
+    } else {
+        match state.settings.pick_codex_credential().await {
+            Ok(outcome) => {
+                for (id, label) in &outcome.newly_expired {
+                    captain::notify_codex_credential_dead(&state.bus, *id, label);
+                }
+                Ok(Json(api_types::CodexCredentialPickResponse {
+                    pick: outcome.pick.map(|p| api_types::CodexCredentialPick {
+                        id: p.id,
+                        label: p.label,
+                        access_token: p.access_token,
+                        account_id: p.account_id,
+                        auth_json: p.auth_json,
+                    }),
+                }))
+            }
+            Err(CodexCredentialError::PermanentRefreshFailure(reason)) => Err(error_response(
+                StatusCode::UNAUTHORIZED,
+                &format!(
+                    "stored refresh token permanently invalid ({reason}); re-add the credential",
+                ),
+            )),
+            Err(e) => Err(internal_error(
+                anyhow::Error::msg(e.to_string()),
+                "failed to pick codex credential",
+            )),
+        }
     }
 }
 

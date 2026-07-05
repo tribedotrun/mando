@@ -27,8 +27,9 @@ export function CodexCredentialsSection(props: CodexCredentialsSectionProps): Re
           OAuth-only ChatGPT accounts for the Codex CLI. Use
           <code className="mx-1">cx</code> or
           <code className="mx-1">mdo create --codex</code> to load-balance without changing
-          <code>~/.codex/auth.json</code> — threads stay in the shared
-          <code>~/.codex</code> home.
+          <code>~/.codex/auth.json</code> (threads stay in the shared
+          <code className="mx-1">~/.codex</code> home, though an account added here that is also
+          your personal login shares that account&apos;s rate limits).
         </p>
       </div>
       <Card className="py-4">

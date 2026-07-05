@@ -120,6 +120,12 @@ async fn tick_once(pool: &SqlitePool, bus: &EventBus) -> anyhow::Result<()> {
                           "failed to mark credential expired");
                 } else {
                     dirty = true;
+                    // `should_probe` excludes expired rows going forward, so
+                    // this branch only runs once per credential — the
+                    // transition into expired/auth-dead, not every tick.
+                    if row.provider == "codex" {
+                        notify_codex_credential_dead(bus, row.id, &row.label);
+                    }
                 }
             }
             // Persist errors mean the snapshot arrived but didn't stick —
@@ -162,6 +168,32 @@ async fn tick_once(pool: &SqlitePool, bus: &EventBus) -> anyhow::Result<()> {
         bus.send(global_bus::BusPayload::Credentials(None));
     }
     Ok(())
+}
+
+/// Emit a user-visible notification on the transition into
+/// expired/auth-dead for a Codex pool credential. Sent directly on the bus
+/// (bypassing `captain::runtime::notify::Notifier`, which requires a full
+/// `CaptainRuntime` instance this standalone poller — and the pick-time
+/// caller in `transport-http` — do not have) — the same low-level pattern
+/// the auto-tick "degraded" alert uses in `daemon_background.rs`.
+///
+/// Exported (Fix 5) so the `POST /api/credentials/codex/pick` route can
+/// reuse the exact same message format instead of duplicating the string
+/// when the pick walk itself marks a credential expired.
+/// `task_key` stays `codex-credential-expired:{id}` regardless of caller so
+/// poll- and pick-triggered duplicates coalesce in the notification store.
+pub fn notify_codex_credential_dead(bus: &EventBus, credential_id: i64, label: &str) {
+    let payload = api_types::NotificationPayload {
+        message: format!(
+            "Codex credential '{label}' login session revoked or expired; re-add it from a \
+             fresh throwaway-home login."
+        ),
+        level: api_types::NotifyLevel::High,
+        kind: api_types::NotificationKind::Generic,
+        task_key: Some(format!("codex-credential-expired:{credential_id}")),
+        reply_markup: None,
+    };
+    bus.send(global_bus::BusPayload::Notification(payload));
 }
 
 /// Returns whether we should probe this credential right now.
@@ -330,5 +362,25 @@ mod tests {
             Some(now_secs - PER_CREDENTIAL_THROTTLE_SECS - 1),
         );
         assert!(should_probe(&row, now_secs));
+    }
+
+    #[test]
+    fn notify_codex_credential_dead_emits_high_priority_notification() {
+        let bus = EventBus::new();
+        let mut rx = bus.subscribe();
+
+        notify_codex_credential_dead(&bus, 42, "acct-alpha");
+
+        let payload = match rx.try_recv().expect("notification must be emitted") {
+            global_bus::BusPayload::Notification(p) => p,
+            other => panic!("unexpected payload: {other:?}"),
+        };
+        assert!(payload.message.contains("acct-alpha"));
+        assert!(payload.message.contains("revoked or expired"));
+        assert_eq!(payload.level, api_types::NotifyLevel::High);
+        assert_eq!(
+            payload.task_key.as_deref(),
+            Some("codex-credential-expired:42")
+        );
     }
 }

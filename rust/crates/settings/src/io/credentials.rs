@@ -331,14 +331,17 @@ pub async fn pick_for_codex_candidates(pool: &SqlitePool) -> Result<Vec<(i64, St
 }
 
 /// Record a Codex shell pick so the next `pick_for_codex` rotates away from
-/// this account when utilization ties.
+/// this account when utilization ties. `last_picked_at` is Unix seconds
+/// (migration 045 converted pre-existing ms values; `token_updated_at` was
+/// already seconds, so this keeps both credential timestamp columns in the
+/// same unit).
 pub async fn record_codex_pick(pool: &SqlitePool, id: i64) -> Result<()> {
-    let now_ms = time::OffsetDateTime::now_utc().unix_timestamp() * 1000;
+    let now_secs = time::OffsetDateTime::now_utc().unix_timestamp();
     sqlx::query(
         "UPDATE credentials SET last_picked_at = ?1, updated_at = datetime('now')
          WHERE id = ?2 AND provider = 'codex'",
     )
-    .bind(now_ms)
+    .bind(now_secs)
     .bind(id)
     .execute(pool)
     .await?;
@@ -417,6 +420,7 @@ mod pick_codex_tests {
             "acct-codex",
             Some("pro"),
             None,
+            time::OffsetDateTime::now_utc().unix_timestamp(),
         )
         .await
         .expect("insert codex");
@@ -474,6 +478,7 @@ mod pick_codex_tests {
             "acct-a",
             Some("pro"),
             None,
+            time::OffsetDateTime::now_utc().unix_timestamp(),
         )
         .await
         .expect("insert account-a");
@@ -486,6 +491,7 @@ mod pick_codex_tests {
             "acct-b",
             Some("pro"),
             None,
+            time::OffsetDateTime::now_utc().unix_timestamp(),
         )
         .await
         .expect("insert account-b");
@@ -542,6 +548,7 @@ mod pick_codex_tests {
             "acct-a",
             Some("pro"),
             None,
+            time::OffsetDateTime::now_utc().unix_timestamp(),
         )
         .await
         .expect("insert account-a");
@@ -554,6 +561,7 @@ mod pick_codex_tests {
             "acct-b",
             Some("pro"),
             None,
+            time::OffsetDateTime::now_utc().unix_timestamp(),
         )
         .await
         .expect("insert account-b");

@@ -20,6 +20,7 @@ pub use io::pid_registry::{
 };
 pub use io::queries::tasks::routing as task_routing;
 pub use io::task_store::TaskStore;
+pub use runtime::credential_usage_poll::notify_codex_credential_dead;
 pub use runtime::daemon::workbench_runtime::{to_wire_workbench_item, BindTerminalError};
 pub use runtime::daemon::CaptainRuntimeDeps;
 pub use runtime::notify::Notifier;

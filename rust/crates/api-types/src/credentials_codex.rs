@@ -67,6 +67,29 @@ pub struct AddCodexCredentialResponse {
     pub label: String,
     pub account_id: String,
     pub plan_type: Option<String>,
+    /// Set when the add succeeded but something about the pasted session
+    /// is worth a human's attention (see [`CodexCredentialAddWarning`]).
+    pub warning: Option<CodexCredentialAddWarning>,
+}
+
+/// Non-fatal warnings surfaced on a successful [`AddCodexCredentialResponse`].
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(tag = "kind", rename_all = "camelCase", deny_unknown_fields)]
+pub enum CodexCredentialAddWarning {
+    /// The pasted `account_id` matches the ambient `~/.codex` login
+    /// (`account_id` equal, tokens different — a separate session for the
+    /// same account). Pool usage will share that account's rate limits
+    /// with the user's personal Codex session.
+    SharedAccountWithAmbient { message: String },
+    /// The add-time forced refresh (session-liveness validation) failed
+    /// transiently (network/5xx); the add proceeded with the pasted
+    /// tokens as-is, unvalidated.
+    ValidationSkippedTransient { message: String },
+    /// The pasted (or rotated) tokens were persisted successfully, but the
+    /// synchronous usage/plan-info probe that normally runs right after
+    /// failed. The credential is safe to use — the next scheduled poll
+    /// tick seeds the usage snapshot — this is purely informational.
+    UsageProbeFailed { message: String },
 }
 
 /// A Codex credential picked for per-process env injection.
@@ -97,6 +120,23 @@ pub struct SyncCodexCredentialRequest {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SyncCodexCredentialResponse {
     pub ok: bool,
+}
+
+/// POST /api/credentials/pick and POST /api/credentials/codex/pick.
+///
+/// All fields optional. When both `id` and `label` are absent, the daemon
+/// auto-picks the best-available credential. When one is set, that exact row
+/// is used (even if expired or rate-limited — the caller explicitly asked).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[ts(optional_fields)]
+pub struct CredentialPickRequest {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub id: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub label: Option<String>,
 }
 
 /// POST /api/credentials/codex/pick — response.
