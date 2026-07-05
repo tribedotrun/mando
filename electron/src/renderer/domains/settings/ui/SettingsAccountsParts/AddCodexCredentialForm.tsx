@@ -27,12 +27,25 @@ export function AddCodexCredentialForm({
 
   return (
     <div className="space-y-3">
-      <p className="text-xs text-muted-foreground/70">
-        Run <code className="rounded bg-muted px-1 py-0.5">codex login</code> on a different ChatGPT
-        account (use a separate browser profile or a CODEX_HOME-overridden directory), then either
-        paste the contents of <code className="rounded bg-muted px-1 py-0.5">auth.json</code> below
-        or pick the file directly.
-      </p>
+      <div className="space-y-1.5 text-xs text-muted-foreground/70">
+        <p>
+          Run{' '}
+          <code className="rounded bg-muted px-1 py-0.5">CODEX_HOME=$(mktemp -d) codex login</code>{' '}
+          in a terminal, pick the ChatGPT account in the browser, then paste that directory&apos;s{' '}
+          <code className="rounded bg-muted px-1 py-0.5">auth.json</code> below (or pick the file).
+        </p>
+        <p>
+          Afterward, delete the temp directory, but don&apos;t run{' '}
+          <code className="rounded bg-muted px-1 py-0.5">codex logout</code> in it first: logout
+          revokes the session server-side, and any later login in that directory revokes whatever
+          was stored there before.
+        </p>
+        <p>
+          Adding your personal <code className="rounded bg-muted px-1 py-0.5">~/.codex</code>{' '}
+          account here is fine as a separate session, but it shares that account&apos;s rate limits
+          with your personal use.
+        </p>
+      </div>
       <div>
         <Label className="mb-1.5 text-xs text-muted-foreground">Label</Label>
         <Input

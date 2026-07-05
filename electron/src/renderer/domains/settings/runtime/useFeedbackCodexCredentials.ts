@@ -14,6 +14,9 @@ export function useCodexCredentialAdd() {
   return useMutationFeedback(mutation, {
     onSuccess: (res) => {
       toast.success(`Codex account added: ${res.label}`);
+      if (res.warning) {
+        toast.warning(res.warning.message);
+      }
     },
     onError: (err) => {
       toast.error(err.message ?? 'Failed to add Codex account');

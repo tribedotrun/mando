@@ -2,17 +2,22 @@
 //! shell injection). Lives in its own module so `settings_runtime.rs` stays
 //! under the file length limit.
 
-use tracing::{debug, warn};
+use tracing::warn;
 
-use global_types::RateLimitStatus;
+use api_types::CodexCredentialAddWarning;
 
-use crate::io::cc_failover;
 use crate::io::codex_credentials;
-use crate::io::codex_oauth_refresh;
-use crate::io::codex_probe::{self, CodexProbeOutcome};
+use crate::io::codex_probe;
 use crate::io::credentials;
 use crate::io::usage_probe::ProbeError;
 
+use super::codex_add_guardrails;
+use super::codex_add_persist::{persist_codex_probe_side_effects, persist_codex_row};
+use super::codex_add_refresh::{
+    force_refresh_for_add, parse_rfc3339_epoch_secs, ForceRefreshOutcome,
+};
+use super::codex_pick_helpers;
+use super::codex_pick_refresh::{refresh_codex_access_token_on_pick, PickRefreshOutcome};
 use super::settings_runtime::SettingsRuntime;
 
 /// Outcome of a successful Codex credential add. Includes the parsed
@@ -23,6 +28,9 @@ pub struct StoredCodexCredential {
     pub id: i64,
     pub account_id: String,
     pub plan_type: Option<String>,
+    /// Set when the add succeeded but something about the pasted session
+    /// is worth surfacing to the user (see [`CodexCredentialAddWarning`]).
+    pub warning: Option<CodexCredentialAddWarning>,
 }
 
 /// Credential picked for per-process env injection (never writes auth.json).
@@ -33,6 +41,18 @@ pub struct PickedCodexCredential {
     pub access_token: String,
     pub account_id: String,
     pub auth_json: String,
+}
+
+/// Outcome of a Codex credential pick attempt (Fix 5). `pick` is `None` when
+/// no credential is usable right now. `newly_expired` lists every candidate
+/// the walk marked expired along the way — pick candidates are pre-filtered
+/// to non-expired rows, so each entry here is a genuine transition into
+/// expired/auth-dead the caller should notify on (not a wire type: the HTTP
+/// response shape stays identical to before this fix).
+#[derive(Debug, Clone)]
+pub struct CodexPickOutcome {
+    pub pick: Option<PickedCodexCredential>,
+    pub newly_expired: Vec<(i64, String)>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -53,6 +73,13 @@ pub enum CodexCredentialError {
     Db(#[from] anyhow::Error),
     #[error("refresh token permanently invalid (re-add the credential): {0}")]
     PermanentRefreshFailure(String),
+    /// Fix 3 guardrail: the pasted `refresh_token` byte-equals the ambient
+    /// `~/.codex/auth.json` refresh_token — this is the user's live
+    /// personal Codex login session, not a separate pool credential.
+    #[error(
+        "this is your live personal Codex login session (~/.codex); capture a separate session instead"
+    )]
+    AmbientSessionConflict,
     #[error("not a Codex credential")]
     NotCodex,
     #[error("credential id={0} not found")]
@@ -67,8 +94,10 @@ impl SettingsRuntime {
     /// Validate-then-store a Codex `auth.json` blob. Parses the file,
     /// rejects non-chatgpt mode, decodes the JWT to extract `plan_type` +
     /// `account_id` (with fallback to the file's `tokens.account_id`),
-    /// refreshes stale pasted auth when possible, runs one synchronous usage
-    /// probe to seed a snapshot, and inserts or replaces the row.
+    /// checks the pasted session against the ambient `~/.codex` login,
+    /// force-refreshes the pasted tokens (mando takes sole ownership of the
+    /// session's rotation chain from this point), runs one synchronous
+    /// usage probe to seed a snapshot, and inserts or replaces the row.
     #[tracing::instrument(skip(self, auth_json_text))]
     pub async fn store_codex_credential(
         &self,
@@ -94,73 +123,202 @@ impl SettingsRuntime {
             }
         }
 
+        // Fix 3: ambient-session guardrails, compared BEFORE the fix-2
+        // force-refresh below rotates the pasted refresh_token — after
+        // rotation the byte comparison would never match.
+        let ambient = codex_credentials::read_ambient_auth();
+        let mut warning = codex_add_guardrails::check_ambient_session(
+            ambient.as_ref(),
+            &parsed.refresh_token,
+            &account_id,
+        )?;
+
+        let pasted_last_refresh = parsed.last_refresh.clone();
         let mut access_token = parsed.access_token;
         let mut refresh_token = parsed.refresh_token;
         let mut id_token = parsed.id_token;
-        let outcome = match codex_probe::probe(&access_token, Some(&account_id)).await {
-            Ok(outcome) => outcome,
-            Err(ProbeError::Unauthorized) => {
-                let refreshed = refresh_for_add(&refresh_token).await?;
-                access_token = refreshed.access_token;
-                refresh_token = refreshed.refresh_token;
-                id_token = refreshed.id_token;
-                claims = claims_from_optional_id_token(id_token.as_deref())?;
-                codex_probe::probe(&access_token, Some(&account_id)).await?
-            }
-            Err(err) => return Err(CodexCredentialError::Probe(err)),
-        };
-        let plan_type = outcome.plan_type.clone().or(claims.plan_type);
         // Refreshable ChatGPT OAuth creds must not store JWT exp as expires_at;
         // id_token exp is short-lived and pick/probe refresh handles rotation.
         let expires_at = None;
 
-        let id = if let Some(existing_id) = existing_id {
-            let updated = codex_credentials::replace_codex(
-                &self.db_pool,
-                existing_id,
-                label,
-                &access_token,
-                &refresh_token,
-                id_token.as_deref(),
-                &account_id,
-                plan_type.as_deref(),
-                expires_at,
-            )
-            .await?;
-            if !updated {
-                return Err(CodexCredentialError::NotFound(existing_id));
+        // Fix 2: force a refresh before persisting, bypassing staleness
+        // checks. This is add-time session-liveness validation: a revoked
+        // session still carries a JWT access_token that looks valid for
+        // days, but the refresh call hits the OAuth server directly and
+        // fails immediately if the session is dead. See
+        // `force_refresh_for_add` for the pasted-vs-stored-chain decision
+        // (an upsert may prefer revalidating mando's own stored chain over
+        // trusting a stale paste).
+        match force_refresh_for_add(
+            &self.db_pool,
+            existing_id,
+            &refresh_token,
+            pasted_last_refresh.as_deref(),
+        )
+        .await?
+        {
+            ForceRefreshOutcome::Rotated(refreshed) => {
+                access_token = refreshed.access_token;
+                refresh_token = refreshed.refresh_token;
+                id_token = refreshed.id_token;
+                claims = claims_from_optional_id_token(id_token.as_deref())?;
+
+                // Fix 1: persist the rotated tokens BEFORE the usage probe.
+                // The presented refresh_token is single-use and was just
+                // consumed by the rotation above, so a transient probe
+                // failure here must not lose the only copy of the rotated
+                // tokens — that would strand the account (the pasted token
+                // is already dead, and nothing was saved to retry with).
+                let token_updated_at = time::OffsetDateTime::now_utc().unix_timestamp();
+                let id = persist_codex_row(
+                    &self.db_pool,
+                    existing_id,
+                    label,
+                    &access_token,
+                    &refresh_token,
+                    id_token.as_deref(),
+                    &account_id,
+                    claims.plan_type.as_deref(),
+                    expires_at,
+                    token_updated_at,
+                )
+                .await?;
+
+                match codex_probe::probe(&access_token, Some(&account_id)).await {
+                    Ok(outcome) => {
+                        let plan_type = outcome
+                            .plan_type
+                            .clone()
+                            .or_else(|| claims.plan_type.clone());
+                        persist_codex_probe_side_effects(
+                            &self.db_pool,
+                            id,
+                            &outcome,
+                            plan_type.as_deref(),
+                        )
+                        .await;
+                        Ok(StoredCodexCredential {
+                            id,
+                            account_id,
+                            plan_type,
+                            warning,
+                        })
+                    }
+                    Err(err) => {
+                        warn!(
+                            module = "settings",
+                            credential_id = id,
+                            error = %err,
+                            "Codex add-time usage probe failed after persisting rotated tokens; tokens are safe, the next poll tick will seed the usage snapshot"
+                        );
+                        if warning.is_none() {
+                            warning = Some(CodexCredentialAddWarning::UsageProbeFailed {
+                                message: format!(
+                                    "credential saved, but could not fetch usage/plan info from OpenAI right now ({err}); it will be refreshed automatically within 10 minutes"
+                                ),
+                            });
+                        }
+                        Ok(StoredCodexCredential {
+                            id,
+                            account_id,
+                            plan_type: claims.plan_type.clone(),
+                            warning,
+                        })
+                    }
+                }
             }
-            existing_id
-        } else {
-            codex_credentials::insert_codex(
-                &self.db_pool,
-                label,
-                &access_token,
-                &refresh_token,
-                id_token.as_deref(),
-                &account_id,
-                plan_type.as_deref(),
-                expires_at,
-            )
-            .await?
-        };
+            ForceRefreshOutcome::KeepExistingRow { plan_type, reason } => {
+                warn!(
+                    module = "settings",
+                    error = %reason,
+                    "Codex add-time revalidation of the existing stored session failed transiently; keeping stored tokens unchanged"
+                );
+                if warning.is_none() {
+                    warning = Some(CodexCredentialAddWarning::ValidationSkippedTransient {
+                        message: format!(
+                            "the pasted session looked older than mando's stored session for \
+                             this account, so the existing stored session was kept as-is; it \
+                             could not be revalidated with OpenAI right now ({reason})"
+                        ),
+                    });
+                }
+                let id = existing_id.ok_or_else(|| {
+                    CodexCredentialError::Db(anyhow::anyhow!(
+                        "force_refresh_for_add returned KeepExistingRow without an existing credential"
+                    ))
+                })?;
+                Ok(StoredCodexCredential {
+                    id,
+                    account_id,
+                    plan_type,
+                    warning,
+                })
+            }
+            ForceRefreshOutcome::ProceedUnvalidated { reason } => {
+                warn!(
+                    module = "settings",
+                    error = %reason,
+                    "Codex add-time forced refresh failed transiently; proceeding with pasted tokens unvalidated"
+                );
+                if warning.is_none() {
+                    warning = Some(CodexCredentialAddWarning::ValidationSkippedTransient {
+                        message: format!(
+                            "could not validate the pasted session with OpenAI right now \
+                             ({reason}); added with the pasted tokens as-is"
+                        ),
+                    });
+                }
 
-        persist_codex_probe_side_effects(&self.db_pool, id, &outcome, plan_type.as_deref()).await;
-
-        Ok(StoredCodexCredential {
-            id,
-            account_id,
-            plan_type,
-        })
+                // Old order: nothing was consumed by this branch, so probe
+                // BEFORE persisting; if the probe also fails, reject the
+                // add as before (`?` propagates ProbeError).
+                let outcome = codex_probe::probe(&access_token, Some(&account_id)).await?;
+                let plan_type = outcome
+                    .plan_type
+                    .clone()
+                    .or_else(|| claims.plan_type.clone());
+                // Fix 4: unvalidated pasted tokens keep the paste's own
+                // age instead of being stamped fresh.
+                let token_updated_at = pasted_last_refresh
+                    .as_deref()
+                    .and_then(parse_rfc3339_epoch_secs)
+                    .unwrap_or_else(|| time::OffsetDateTime::now_utc().unix_timestamp());
+                let id = persist_codex_row(
+                    &self.db_pool,
+                    existing_id,
+                    label,
+                    &access_token,
+                    &refresh_token,
+                    id_token.as_deref(),
+                    &account_id,
+                    plan_type.as_deref(),
+                    expires_at,
+                    token_updated_at,
+                )
+                .await?;
+                persist_codex_probe_side_effects(&self.db_pool, id, &outcome, plan_type.as_deref())
+                    .await;
+                Ok(StoredCodexCredential {
+                    id,
+                    account_id,
+                    plan_type,
+                    warning,
+                })
+            }
+            ForceRefreshOutcome::Dead(reason) => {
+                Err(CodexCredentialError::PermanentRefreshFailure(reason))
+            }
+        }
     }
 
     /// Pick the best Codex credential, refresh stale or near-expired tokens,
-    /// and return the access token + account id for per-process env injection.
-    /// Never writes `~/.codex/auth.json`.
+    /// and return the access token + account id for per-process env
+    /// injection. Never writes `~/.codex/auth.json`. Also reports every
+    /// candidate the walk marked expired along the way (Fix 5) so the
+    /// caller can notify on each genuine expired/auth-dead transition.
     #[tracing::instrument(skip(self))]
-    pub async fn pick_codex_credential(
-        &self,
-    ) -> Result<Option<PickedCodexCredential>, CodexCredentialError> {
+    pub async fn pick_codex_credential(&self) -> Result<CodexPickOutcome, CodexCredentialError> {
+        let mut newly_expired = Vec::new();
         for (id, access_token, account_id) in
             credentials::pick_for_codex_candidates(&self.db_pool).await?
         {
@@ -171,11 +329,17 @@ impl SettingsRuntime {
                 return Err(CodexCredentialError::NotCodex);
             }
 
-            let Some(final_access) =
-                refresh_codex_access_token_on_pick(&self.db_pool, id, &row, access_token).await?
-            else {
-                continue;
-            };
+            let final_access =
+                match refresh_codex_access_token_on_pick(&self.db_pool, id, &row, access_token)
+                    .await?
+                {
+                    PickRefreshOutcome::Ready(access_token) => access_token,
+                    PickRefreshOutcome::Expired => {
+                        newly_expired.push((id, row.label.clone()));
+                        continue;
+                    }
+                    PickRefreshOutcome::SkipTransient => continue,
+                };
 
             let row = credentials::get_row_by_id(&self.db_pool, id)
                 .await?
@@ -188,9 +352,8 @@ impl SettingsRuntime {
                 );
                 continue;
             };
-            let last_refresh = time::OffsetDateTime::now_utc()
-                .format(&time::format_description::well_known::Rfc3339)
-                .map_err(|e| CodexCredentialError::Db(anyhow::Error::msg(e.to_string())))?;
+            let last_refresh =
+                codex_pick_helpers::codex_last_refresh_rfc3339(row.token_updated_at)?;
             let auth_json = codex_credentials::serialize_auth_json(
                 &final_access,
                 refresh_token,
@@ -201,15 +364,21 @@ impl SettingsRuntime {
             .map_err(|e| CodexCredentialError::Db(anyhow::Error::msg(e.to_string())))?;
 
             credentials::record_codex_pick(&self.db_pool, id).await?;
-            return Ok(Some(PickedCodexCredential {
-                id,
-                label: row.label,
-                access_token: final_access,
-                account_id,
-                auth_json,
-            }));
+            return Ok(CodexPickOutcome {
+                pick: Some(PickedCodexCredential {
+                    id,
+                    label: row.label,
+                    access_token: final_access,
+                    account_id,
+                    auth_json,
+                }),
+                newly_expired,
+            });
         }
-        Ok(None)
+        Ok(CodexPickOutcome {
+            pick: None,
+            newly_expired,
+        })
     }
 
     /// Persist refreshed tokens from a per-process `CODEX_HOME/auth.json` back
@@ -291,174 +460,6 @@ fn claims_from_optional_id_token(
     }
 }
 
-async fn refresh_for_add(
-    refresh_token: &str,
-) -> Result<codex_oauth_refresh::RefreshedTokens, CodexCredentialError> {
-    codex_oauth_refresh::refresh(refresh_token)
-        .await
-        .map_err(refresh_error_to_credential_error)
-}
-
-fn refresh_error_to_credential_error(
-    err: codex_oauth_refresh::RefreshError,
-) -> CodexCredentialError {
-    match err {
-        codex_oauth_refresh::RefreshError::Permanent(reason) => {
-            CodexCredentialError::PermanentRefreshFailure(reason)
-        }
-        codex_oauth_refresh::RefreshError::Unauthorized => CodexCredentialError::Probe(
-            ProbeError::Network("Codex OAuth refresh returned 401".to_string()),
-        ),
-        codex_oauth_refresh::RefreshError::Http { status, .. } => {
-            CodexCredentialError::Probe(ProbeError::Http(status))
-        }
-        codex_oauth_refresh::RefreshError::Network(msg) => {
-            CodexCredentialError::Probe(ProbeError::Network(msg))
-        }
-        codex_oauth_refresh::RefreshError::Parse(msg) => {
-            CodexCredentialError::Probe(ProbeError::Parse(msg))
-        }
-    }
-}
-
-async fn persist_codex_probe_side_effects(
-    pool: &sqlx::SqlitePool,
-    id: i64,
-    outcome: &CodexProbeOutcome,
-    plan_type: Option<&str>,
-) {
-    global_infra::best_effort!(
-        credentials::set_usage_snapshot(pool, id, &outcome.snapshot).await,
-        "codex_credentials_runtime: set_usage_snapshot on add"
-    );
-    global_infra::best_effort!(
-        codex_credentials::update_codex_plan_and_credits(
-            pool,
-            id,
-            plan_type,
-            outcome.credits_balance.as_deref(),
-            outcome.credits_unlimited,
-        )
-        .await,
-        "codex_credentials_runtime: update_codex_plan_and_credits on add"
-    );
-    if matches!(outcome.snapshot.unified_status, RateLimitStatus::Rejected) {
-        let reset_at = binding_reset_at(&outcome.snapshot).max(0) as u64;
-        let until = cc_failover::compute_cooldown_until(
-            time::OffsetDateTime::now_utc().unix_timestamp().max(0) as u64,
-            Some(reset_at),
-            outcome.snapshot.representative_claim.as_deref(),
-        );
-        global_infra::best_effort!(
-            credentials::set_rate_limit_cooldown(pool, id, until as i64).await,
-            "codex_credentials_runtime: set cooldown on rejected add probe"
-        );
-    }
-}
-
-fn binding_reset_at(snapshot: &crate::io::usage_probe::UsageSnapshot) -> i64 {
-    match snapshot.representative_claim.as_deref() {
-        Some("five_hour") => snapshot.five_hour.reset_at,
-        Some(s) if s.starts_with("seven_day") => snapshot.seven_day.reset_at,
-        _ => snapshot.five_hour.reset_at.max(snapshot.seven_day.reset_at),
-    }
-}
-
-async fn refresh_codex_access_token_on_pick(
-    pool: &sqlx::SqlitePool,
-    id: i64,
-    row: &credentials::CredentialRow,
-    access_token: String,
-) -> Result<Option<String>, CodexCredentialError> {
-    if !codex_row_should_refresh(row) {
-        return Ok(Some(access_token));
-    }
-
-    codex_oauth_refresh::with_credential_refresh_lock(id, || async {
-        let current = credentials::get_row_by_id(pool, id)
-            .await?
-            .ok_or(CodexCredentialError::NotFound(id))?;
-        if current.provider != "codex" {
-            return Err(CodexCredentialError::NotCodex);
-        }
-        if !codex_row_should_refresh(&current) {
-            return Ok(Some(current.access_token));
-        }
-        let Some(refresh_token) = current.refresh_token.as_deref() else {
-            warn!(
-                module = "settings",
-                credential_id = id,
-                "Codex access_token needs refresh but refresh_token is missing; skipping pick"
-            );
-            return Ok(None);
-        };
-
-        match codex_oauth_refresh::refresh(refresh_token).await {
-            Ok(refreshed) => {
-                codex_credentials::update_codex_tokens(
-                    pool,
-                    id,
-                    &refreshed.access_token,
-                    &refreshed.refresh_token,
-                    refreshed.id_token.as_deref(),
-                    None,
-                )
-                .await
-                .map_err(|e| CodexCredentialError::TokenPersistFailed(e.to_string()))?;
-                Ok(Some(refreshed.access_token))
-            }
-            Err(codex_oauth_refresh::RefreshError::Permanent(reason)) => {
-                warn!(
-                    module = "settings",
-                    credential_id = id,
-                    reason = %reason,
-                    "Codex refresh token permanently invalid on pick; marking expired"
-                );
-                if let Err(err) = credentials::mark_expired(pool, id).await {
-                    warn!(
-                        module = "settings",
-                        credential_id = id,
-                        error = %err,
-                        "failed to mark Codex credential expired after permanent refresh failure"
-                    );
-                }
-                Ok(None)
-            }
-            Err(err) => {
-                warn!(
-                    module = "settings",
-                    credential_id = id,
-                    error = %err,
-                    "Codex refresh failed transiently on pick; skipping credential"
-                );
-                Ok(None)
-            }
-        }
-    })
-    .await
-}
-
-fn codex_row_should_refresh(row: &credentials::CredentialRow) -> bool {
-    let now_secs = time::OffsetDateTime::now_utc().unix_timestamp();
-    let exp_secs = match codex_credentials::decode_id_token_claims(&row.access_token) {
-        Ok(claims) => claims.exp,
-        Err(err) => {
-            debug!(
-                module = "settings",
-                credential_id = row.id,
-                error = %err,
-                "access_token decode failed; falling back to token age refresh check"
-            );
-            None
-        }
-    };
-    codex_oauth_refresh::should_refresh(
-        exp_secs,
-        row.token_updated_at.or(row.last_probed_at),
-        now_secs,
-    )
-}
-
 fn sync_payload_is_stale(row: &credentials::CredentialRow, last_refresh: Option<&str>) -> bool {
     let Some(stored) = row.token_updated_at else {
         return false;
@@ -467,10 +468,4 @@ fn sync_payload_is_stale(row: &credentials::CredentialRow, last_refresh: Option<
         return false;
     };
     incoming < stored
-}
-
-fn parse_rfc3339_epoch_secs(value: &str) -> Option<i64> {
-    time::OffsetDateTime::parse(value, &time::format_description::well_known::Rfc3339)
-        .ok()
-        .map(|dt| dt.unix_timestamp())
 }

@@ -142,7 +142,7 @@ export interface Routes {
     path: '/api/credentials/codex/pick';
     transport: 'json';
     auth: 'protected';
-    body: Types.EmptyRequest;
+    body: Types.CredentialPickRequest;
     res: Types.CodexCredentialPickResponse;
   };
   postCredentialsCodexSync: {
@@ -166,7 +166,7 @@ export interface Routes {
     path: '/api/credentials/pick';
     transport: 'json';
     auth: 'protected';
-    body: Types.EmptyRequest;
+    body: Types.CredentialPickRequest;
     res: Types.CredentialPickResponse;
   };
   postCredentialsSetuptoken: {

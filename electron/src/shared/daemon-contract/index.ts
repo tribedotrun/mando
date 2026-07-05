@@ -21,6 +21,11 @@ export type AddCodexCredentialResponse = {
   label: string;
   accountId: string;
   planType: string | null;
+  /**
+   * Set when the add succeeded but something about the pasted session
+   * is worth a human's attention (see [`CodexCredentialAddWarning`]).
+   */
+  warning: CodexCredentialAddWarning | null;
 };
 export type AddProjectRequest = { name?: string; path: string; aliases: Array<string> };
 export type AdoptRequest = {
@@ -181,6 +186,10 @@ export type ClientLogEntry = {
   context: ClientLogContext | null;
   timestamp: string | null;
 };
+export type CodexCredentialAddWarning =
+  | { kind: 'sharedAccountWithAmbient'; message: string }
+  | { kind: 'validationSkippedTransient'; message: string }
+  | { kind: 'usageProbeFailed'; message: string };
 export type CodexCredentialDetails = {
   accountId: string;
   planType: string | null;
@@ -280,6 +289,7 @@ export type CredentialInfo = {
 export type CredentialListResponse = { credentials: Array<CredentialInfo> };
 export type CredentialMutationResponse = { ok: boolean; error: string | null };
 export type CredentialPick = { id: number; label: string; token: string };
+export type CredentialPickRequest = { id?: number | null; label?: string | null };
 export type CredentialPickResponse = { pick: CredentialPick | null };
 export type CredentialProbeResponse = { ok: boolean; snapshot: CredentialUsageSnapshot };
 export type CredentialProvider = 'claude' | 'codex';

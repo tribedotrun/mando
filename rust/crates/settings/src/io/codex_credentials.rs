@@ -170,6 +170,11 @@ fn base64_url_decode(input: &str) -> Result<Vec<u8>, String> {
 
 /// Replace tokens (and optional metadata) on an existing Codex credential row.
 /// Used when the user re-pastes an `auth.json` for the same `account_id`.
+///
+/// `token_updated_at` (Unix seconds) is caller-supplied rather than stamped
+/// as `now()` here (Fix 4): when the add proceeds with an unvalidated
+/// pasted token, the caller stamps the paste's own age instead of "now" so
+/// pick/poll staleness checks still see how old the session really is.
 #[allow(clippy::too_many_arguments)]
 pub async fn replace_codex(
     pool: &SqlitePool,
@@ -181,6 +186,7 @@ pub async fn replace_codex(
     account_id: &str,
     plan_type: Option<&str>,
     expires_at: Option<i64>,
+    token_updated_at: i64,
 ) -> Result<bool> {
     let result = sqlx::query(
         "UPDATE credentials
@@ -197,7 +203,7 @@ pub async fn replace_codex(
     .bind(account_id)
     .bind(plan_type)
     .bind(expires_at)
-    .bind(time::OffsetDateTime::now_utc().unix_timestamp())
+    .bind(token_updated_at)
     .bind(id)
     .execute(pool)
     .await?;
@@ -206,6 +212,9 @@ pub async fn replace_codex(
 
 /// Insert a Codex credential carrying the full token triple, account id,
 /// and plan-type metadata.
+///
+/// `token_updated_at` (Unix seconds) is caller-supplied — see
+/// [`replace_codex`] for why this isn't stamped as `now()` internally.
 #[allow(clippy::too_many_arguments)]
 pub async fn insert_codex(
     pool: &SqlitePool,
@@ -216,6 +225,7 @@ pub async fn insert_codex(
     account_id: &str,
     plan_type: Option<&str>,
     expires_at: Option<i64>,
+    token_updated_at: i64,
 ) -> Result<i64> {
     let id: i64 = sqlx::query_scalar(
         "INSERT INTO credentials (
@@ -232,7 +242,7 @@ pub async fn insert_codex(
     .bind(account_id)
     .bind(plan_type)
     .bind(expires_at)
-    .bind(time::OffsetDateTime::now_utc().unix_timestamp())
+    .bind(token_updated_at)
     .fetch_one(pool)
     .await?;
     Ok(id)
@@ -361,6 +371,20 @@ pub fn read_active_account_id(path: &std::path::Path) -> Result<Option<String>, 
     };
     let parsed = parse_auth_json(&content)?;
     Ok(parsed.account_id)
+}
+
+/// Best-effort read of the ambient (non-pool) Codex login at
+/// `default_auth_json_path()` — the user's personal `~/.codex/auth.json`,
+/// honoring `CODEX_HOME` if set on the daemon's own environment. Used by
+/// the add-time guardrails in `codex_credentials_runtime` to detect a
+/// pasted session that is actually the user's live personal login.
+///
+/// Returns `None` when the file is absent, unreadable, or fails to parse —
+/// this guardrail is best-effort and must not gate a credential add on the
+/// ambient file being present or well-formed.
+pub fn read_ambient_auth() -> Option<ParsedCodexAuth> {
+    let content = std::fs::read_to_string(default_auth_json_path()).ok()?;
+    parse_auth_json(&content).ok()
 }
 
 /// Atomically write `auth_json_text` to `path` with 0600 permissions. Uses

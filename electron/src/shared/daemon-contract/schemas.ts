@@ -25,6 +25,7 @@ export const addCodexCredentialResponseSchema = z
     label: z.string(),
     accountId: z.string(),
     planType: z.string().nullable(),
+    warning: z.lazy(() => codexCredentialAddWarningSchema).nullable(),
   })
   .strict();
 export const addProjectRequestSchema = z
@@ -282,6 +283,11 @@ export const clientLogEntrySchema = z
     timestamp: z.string().nullable(),
   })
   .strict();
+export const codexCredentialAddWarningSchema = z.union([
+  z.object({ kind: z.literal('sharedAccountWithAmbient'), message: z.string() }).strict(),
+  z.object({ kind: z.literal('validationSkippedTransient'), message: z.string() }).strict(),
+  z.object({ kind: z.literal('usageProbeFailed'), message: z.string() }).strict(),
+]);
 export const codexCredentialDetailsSchema = z
   .object({
     accountId: z.string(),
@@ -409,6 +415,9 @@ export const credentialMutationResponseSchema = z
   .strict();
 export const credentialPickSchema = z
   .object({ id: z.number(), label: z.string(), token: z.string() })
+  .strict();
+export const credentialPickRequestSchema = z
+  .object({ id: z.number().nullable().optional(), label: z.string().nullable().optional() })
   .strict();
 export const credentialPickResponseSchema = z
   .object({ pick: z.lazy(() => credentialPickSchema).nullable() })
@@ -2364,9 +2373,9 @@ export const bodySchemas = {
   postConfigSetup: configSetupRequestSchema,
   postCredentialsByIdProbe: emptyRequestSchema,
   postCredentialsCodex: addCodexCredentialRequestSchema,
-  postCredentialsCodexPick: emptyRequestSchema,
+  postCredentialsCodexPick: credentialPickRequestSchema,
   postCredentialsCodexSync: syncCodexCredentialRequestSchema,
-  postCredentialsPick: emptyRequestSchema,
+  postCredentialsPick: credentialPickRequestSchema,
   postCredentialsSetuptoken: setupTokenRequestSchema,
   postFirecrawlScrape: firecrawlScrapeRequestSchema,
   postNotify: notifyRequestSchema,

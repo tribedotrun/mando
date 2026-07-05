@@ -62,7 +62,7 @@ pub(crate) fn credential_routes() -> ApiRouter<AppState> {
         transport = Json,
         auth = Protected,
         handler = pick_credential,
-        body = api_types::EmptyRequest,
+        body = api_types::CredentialPickRequest,
         res = api_types::CredentialPickResponse
     )
 }
@@ -274,24 +274,52 @@ async fn probe_credential(
 #[crate::instrument_api(method = "POST", path = "/api/credentials/pick")]
 async fn pick_credential(
     State(state): State<AppState>,
-    Json(_body): Json<api_types::EmptyRequest>,
+    Json(body): Json<api_types::CredentialPickRequest>,
 ) -> Result<Json<api_types::CredentialPickResponse>, ApiError> {
-    let picked = state
-        .settings
-        .pick_worker_credential(None)
-        .await
-        .map_err(|e| internal_error(e, "failed to pick credential"))?;
+    if body.id.is_some() && body.label.is_some() {
+        return Err(error_response(
+            StatusCode::BAD_REQUEST,
+            "specify only one of id or label",
+        ));
+    }
+    if let Some(label) = body.label.as_deref() {
+        if label.trim().is_empty() {
+            return Err(error_response(
+                StatusCode::BAD_REQUEST,
+                "label must not be empty",
+            ));
+        }
+    }
 
-    let pick = match picked {
-        None => None,
-        Some((id, token)) => {
-            let labels = state
-                .settings
-                .credential_labels_by_ids(&[id])
-                .await
-                .map_err(|e| internal_error(e, "failed to load credential label"))?;
-            let label = labels.get(&id).cloned().unwrap_or_else(|| id.to_string());
-            Some(api_types::CredentialPick { id, label, token })
+    let explicit_label = body
+        .label
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    let pick = if body.id.is_some() || explicit_label.is_some() {
+        state
+            .settings
+            .pick_claude_credential_explicit(body.id, explicit_label)
+            .await
+            .map_err(|e| internal_error(e, "failed to pick credential"))?
+            .map(|(id, token, label)| api_types::CredentialPick { id, label, token })
+    } else {
+        match state
+            .settings
+            .pick_worker_credential(None)
+            .await
+            .map_err(|e| internal_error(e, "failed to pick credential"))?
+        {
+            None => None,
+            Some((id, token)) => {
+                let labels = state
+                    .settings
+                    .credential_labels_by_ids(&[id])
+                    .await
+                    .map_err(|e| internal_error(e, "failed to load credential label"))?;
+                let label = labels.get(&id).cloned().unwrap_or_else(|| id.to_string());
+                Some(api_types::CredentialPick { id, label, token })
+            }
         }
     };
 

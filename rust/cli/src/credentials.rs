@@ -1,6 +1,6 @@
 //! CLI subcommand: credential pool inspection and pick-for-shell — pure HTTP client.
 //!
-//! `pick` is the integration point for the iTerm2 shell wrapper:
+//! `pick` is the shell-wrapper integration point (iTerm2, `cc`, `cx`):
 //!
 //! ```sh
 //! claude() {
@@ -15,7 +15,7 @@
 //! `~/.codex` session state), run `codex`, then `sync-codex`. ChatGPT OAuth
 //! tokens are JWT-shaped and must not be passed through `CODEX_ACCESS_TOKEN`.
 
-use anyhow::Result;
+use anyhow::{bail, Result};
 use clap::{Args, Subcommand};
 
 use crate::gateway_paths as paths;
@@ -30,6 +30,7 @@ pub(crate) struct CredentialsArgs {
 #[derive(Subcommand)]
 pub(crate) enum CredentialsCommand {
     /// List stored credentials (masked tokens, current rate-limit/cooldown).
+    #[command(visible_alias = "ls")]
     List,
     /// Pick the best-available credential right now and emit shell exports
     /// (success) or unsets (any fallback path) so `eval "$(mando credentials pick)"`
@@ -38,6 +39,15 @@ pub(crate) enum CredentialsCommand {
         /// Pick a Codex OAuth credential instead of Claude. Internal plumbing for Codex launchers.
         #[arg(long)]
         codex: bool,
+        /// Pick this credential by database id (overrides auto-pick).
+        #[arg(long, conflicts_with_all = ["label", "account"])]
+        id: Option<i64>,
+        /// Pick this credential by label (overrides auto-pick).
+        #[arg(long, conflicts_with_all = ["id", "account"])]
+        label: Option<String>,
+        /// Shorthand for `--id` when numeric, otherwise `--label`.
+        #[arg(long, short = 'a', conflicts_with_all = ["id", "label"])]
+        account: Option<String>,
     },
     /// Persist refreshed tokens from `$CODEX_HOME/auth.json` back to the daemon.
     /// Called by `codex-pooled-launch.sh` after a Codex session ends.
@@ -47,15 +57,59 @@ pub(crate) enum CredentialsCommand {
 pub(crate) async fn handle(args: CredentialsArgs) -> Result<()> {
     match args.command {
         CredentialsCommand::List => handle_list().await,
-        CredentialsCommand::Pick { codex } => {
+        CredentialsCommand::Pick {
+            codex,
+            id,
+            label,
+            account,
+        } => {
+            let request = build_pick_request(id, label, account)?;
             if codex {
-                handle_pick_codex().await
+                handle_pick_codex(request).await
             } else {
-                handle_pick_claude().await
+                handle_pick_claude(request).await
             }
         }
         CredentialsCommand::SyncCodex => handle_sync_codex().await,
     }
+}
+
+fn build_pick_request(
+    id: Option<i64>,
+    label: Option<String>,
+    account: Option<String>,
+) -> Result<api_types::CredentialPickRequest> {
+    if let Some(account) = account {
+        let account = account.trim();
+        if account.is_empty() {
+            bail!("account must not be empty");
+        }
+        if account.chars().all(|c| c.is_ascii_digit()) {
+            let id = account
+                .parse::<i64>()
+                .map_err(|_| anyhow::anyhow!("invalid account id {account:?}"))?;
+            return Ok(api_types::CredentialPickRequest {
+                id: Some(id),
+                label: None,
+            });
+        }
+        return Ok(api_types::CredentialPickRequest {
+            id: None,
+            label: Some(account.to_string()),
+        });
+    }
+
+    let label = match label {
+        None => None,
+        Some(value) => {
+            let trimmed = value.trim();
+            if trimmed.is_empty() {
+                bail!("label must not be empty");
+            }
+            Some(trimmed.to_string())
+        }
+    };
+    Ok(api_types::CredentialPickRequest { id, label })
 }
 
 async fn handle_list() -> Result<()> {
@@ -99,14 +153,15 @@ async fn handle_list() -> Result<()> {
     Ok(())
 }
 
-async fn handle_pick_claude() -> Result<()> {
+async fn handle_pick_claude(request: api_types::CredentialPickRequest) -> Result<()> {
+    let explicit = request.id.is_some() || request.label.is_some();
     let Ok(client) = DaemonClient::discover() else {
         emit_claude_unset();
         return Ok(());
     };
 
     let result: api_types::CredentialPickResponse =
-        match client.post_no_body(paths::CREDENTIALS_PICK).await {
+        match client.post_json(paths::CREDENTIALS_PICK, &request).await {
             Ok(r) => r,
             Err(_) => {
                 emit_claude_unset();
@@ -123,27 +178,43 @@ async fn handle_pick_claude() -> Result<()> {
         eprintln!("mando: using credential '{}' (#{})", pick.label, pick.id);
     } else {
         emit_claude_unset();
-        eprintln!(
-            "mando: no credentials available (none configured, all expired, or all rate-limited); falling through to ambient login"
-        );
+        if explicit {
+            eprintln!("mando: requested Claude credential not found or wrong provider; falling through to ambient login");
+        } else {
+            eprintln!(
+                "mando: no credentials available (none configured, all expired, or all rate-limited); falling through to ambient login"
+            );
+        }
     }
     Ok(())
 }
 
-async fn handle_pick_codex() -> Result<()> {
-    let Ok(client) = DaemonClient::discover() else {
-        emit_codex_unset();
-        return Ok(());
+async fn handle_pick_codex(request: api_types::CredentialPickRequest) -> Result<()> {
+    let explicit = request.id.is_some() || request.label.is_some();
+    let client = match DaemonClient::discover() {
+        Ok(client) => client,
+        Err(err) => {
+            emit_codex_unset();
+            eprintln!(
+                "mando: codex credential pick failed: {err}; falling back to ambient ~/.codex login"
+            );
+            return Ok(());
+        }
     };
 
-    let result: api_types::CodexCredentialPickResponse =
-        match client.post_no_body(paths::CREDENTIALS_CODEX_PICK).await {
-            Ok(r) => r,
-            Err(_) => {
-                emit_codex_unset();
-                return Ok(());
-            }
-        };
+    let pick_result: Result<api_types::CodexCredentialPickResponse> = client
+        .post_json(paths::CREDENTIALS_CODEX_PICK, &request)
+        .await;
+    let result = match pick_result {
+        Ok(r) => r,
+        Err(err) => {
+            emit_codex_unset();
+            eprintln!(
+                "mando: codex credential pick failed: {err}; falling back to ambient ~/.codex login"
+            );
+            return Ok(());
+        }
+    };
 
     if let Some(pick) = result.pick {
         match crate::credentials_codex_pick::materialize_codex_home(&pick.auth_json) {
@@ -164,14 +235,20 @@ async fn handle_pick_codex() -> Result<()> {
             }
             Err(err) => {
                 emit_codex_unset();
-                eprintln!("mando: failed to prepare Codex home: {err}");
+                eprintln!(
+                    "mando: codex credential pick failed: {err}; falling back to ambient ~/.codex login"
+                );
             }
         }
     } else {
         emit_codex_unset();
-        eprintln!(
-            "mando: no Codex credentials available (none configured, all expired, or all rate-limited); falling through to ambient login"
-        );
+        if explicit {
+            eprintln!("mando: requested Codex credential not found or unusable; falling through to ambient login");
+        } else {
+            eprintln!(
+                "mando: no Codex credentials available (none configured, all expired, or all rate-limited); falling through to ambient login"
+            );
+        }
     }
     Ok(())
 }
@@ -226,9 +303,21 @@ async fn handle_sync_codex() -> Result<()> {
         credential_id,
         auth_json,
     };
-    let _: api_types::SyncCodexCredentialResponse = client
-        .post_json(paths::CREDENTIALS_CODEX_SYNC, &body)
-        .await?;
+    let sync_result: Result<api_types::SyncCodexCredentialResponse> =
+        client.post_json(paths::CREDENTIALS_CODEX_SYNC, &body).await;
+    if let Err(err) = sync_result {
+        // The daemon rejected the sync (e.g. the refresh token rotated to a
+        // value it no longer recognizes). CODEX_HOME is deliberately left in
+        // place below (we return before the cleanup call) so the rotated
+        // tokens on disk stay recoverable — surface both facts.
+        match std::env::var("CODEX_HOME") {
+            Ok(home) => eprintln!(
+                "mando: codex credential sync failed: {err}; temp CODEX_HOME retained at {home} (rotated tokens may still be recoverable there)"
+            ),
+            Err(_) => eprintln!("mando: codex credential sync failed: {err}"),
+        }
+        return Err(err);
+    }
 
     if let Ok(home) = std::env::var("CODEX_HOME") {
         let path = std::path::PathBuf::from(home);
@@ -274,5 +363,32 @@ mod tests {
     #[test]
     fn shell_single_quote_empty() {
         assert_eq!(shell_single_quote(""), "''");
+    }
+
+    #[test]
+    fn build_pick_request_account_numeric_is_id() {
+        let req = build_pick_request(None, None, Some("3".into())).unwrap();
+        assert_eq!(req.id, Some(3));
+        assert!(req.label.is_none());
+    }
+
+    #[test]
+    fn build_pick_request_account_label() {
+        let req = build_pick_request(None, None, Some("b_gmail".into())).unwrap();
+        assert!(req.id.is_none());
+        assert_eq!(req.label.as_deref(), Some("b_gmail"));
+    }
+
+    #[test]
+    fn build_pick_request_explicit_id_and_label() {
+        let req = build_pick_request(Some(7), Some("Portugal".into()), None).unwrap();
+        assert_eq!(req.id, Some(7));
+        assert_eq!(req.label.as_deref(), Some("Portugal"));
+    }
+
+    #[test]
+    fn build_pick_request_rejects_empty_label() {
+        let err = build_pick_request(None, Some("   ".into()), None).unwrap_err();
+        assert!(err.to_string().contains("label must not be empty"));
     }
 }

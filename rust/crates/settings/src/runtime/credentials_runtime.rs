@@ -123,4 +123,44 @@ impl SettingsRuntime {
             .await
             .map_err(Into::into)
     }
+
+    /// Resolve an explicit pick target. Returns `None` when neither `id` nor
+    /// `label` is set (caller should auto-pick). Errors when both are set or
+    /// when `label` does not exist.
+    #[tracing::instrument(skip_all)]
+    pub async fn resolve_credential_pick_id(
+        &self,
+        id: Option<i64>,
+        label: Option<&str>,
+    ) -> SettingsResult<Option<i64>> {
+        match (id, label.map(str::trim).filter(|s| !s.is_empty())) {
+            (Some(_), Some(_)) => Err(SettingsError::Other(anyhow::anyhow!(
+                "specify only one of id or label"
+            ))),
+            (Some(id), None) => Ok(Some(id)),
+            (None, Some(label)) => self.find_credential_by_label(label).await,
+            (None, None) => Ok(None),
+        }
+    }
+
+    /// Pick a specific Claude credential by id or label. Honors the caller's
+    /// explicit choice even when the row is expired or rate-limited.
+    #[tracing::instrument(skip_all)]
+    pub async fn pick_claude_credential_explicit(
+        &self,
+        id: Option<i64>,
+        label: Option<&str>,
+    ) -> SettingsResult<Option<(i64, String, String)>> {
+        let Some(resolved_id) = self.resolve_credential_pick_id(id, label).await? else {
+            return Ok(None);
+        };
+        let row = self.get_credential_row(resolved_id).await?;
+        let Some(row) = row else {
+            return Ok(None);
+        };
+        if row.provider != "claude" {
+            return Ok(None);
+        }
+        Ok(Some((resolved_id, row.access_token, row.label)))
+    }
 }

@@ -197,9 +197,6 @@ async fn try_refresh_and_persist(
                 );
                 Err(ProbeError::Unauthorized)
             }
-            Err(codex_oauth_refresh::RefreshError::Unauthorized) => Err(ProbeError::Network(
-                "Codex OAuth refresh returned 401 (transient; not marking expired)".to_string(),
-            )),
             Err(codex_oauth_refresh::RefreshError::Network(msg)) => Err(ProbeError::Network(msg)),
             Err(codex_oauth_refresh::RefreshError::Http { status, body }) => {
                 // Map upstream OAuth HTTP error to ProbeError::Http so the
