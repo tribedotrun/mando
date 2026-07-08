@@ -79,6 +79,14 @@ pub fn sessions_query(query: impl Display) -> String {
     format!("{SESSIONS}?{query}")
 }
 
+pub fn credential_disable(id: impl Display) -> String {
+    format!("{CREDENTIALS}/{id}/disable")
+}
+
+pub fn credential_enable(id: impl Display) -> String {
+    format!("{CREDENTIALS}/{id}/enable")
+}
+
 pub fn session_cost(session_id: impl Display) -> String {
     format!("{SESSIONS}/{session_id}/cost")
 }

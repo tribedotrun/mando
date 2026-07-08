@@ -348,31 +348,6 @@ pub fn default_auth_json_path() -> std::path::PathBuf {
     home.join("auth.json")
 }
 
-/// Why we couldn't read an active account_id from the local auth file.
-/// Distinguishes "not logged in / no Codex" (returned to the UI as "no active
-/// account") from "file is corrupt or unreadable" (surfaced as a 500 so the
-/// user knows the badge can't be trusted, rather than silently disappearing).
-#[derive(Debug, thiserror::Error)]
-pub enum ReadActiveError {
-    #[error("auth.json read failed: {0}")]
-    Io(#[from] std::io::Error),
-    #[error(transparent)]
-    Parse(#[from] AuthJsonError),
-}
-
-/// Read the `account_id` currently in effect for the local Codex CLI/desktop.
-/// Returns `Ok(None)` only when the file is genuinely absent. Read errors,
-/// JSON parse errors, and `apikey`-mode files return `Err`.
-pub fn read_active_account_id(path: &std::path::Path) -> Result<Option<String>, ReadActiveError> {
-    let content = match std::fs::read_to_string(path) {
-        Ok(c) => c,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(err) => return Err(ReadActiveError::Io(err)),
-    };
-    let parsed = parse_auth_json(&content)?;
-    Ok(parsed.account_id)
-}
-
 /// Best-effort read of the ambient (non-pool) Codex login at
 /// `default_auth_json_path()` — the user's personal `~/.codex/auth.json`,
 /// honoring `CODEX_HOME` if set on the daemon's own environment. Used by
@@ -385,49 +360,6 @@ pub fn read_active_account_id(path: &std::path::Path) -> Result<Option<String>, 
 pub fn read_ambient_auth() -> Option<ParsedCodexAuth> {
     let content = std::fs::read_to_string(default_auth_json_path()).ok()?;
     parse_auth_json(&content).ok()
-}
-
-/// Atomically write `auth_json_text` to `path` with 0600 permissions. Uses
-/// a sibling per-call `.tmp.<pid>.<nanos>` file + rename to avoid leaving
-/// a partial file if the process crashes mid-write. The unique suffix
-/// also prevents two concurrent `activate_codex_credential` calls from
-/// interleaving writes into the same `.tmp` file (which would silently
-/// produce a blended `auth.json`). On rename failure the `.tmp` file is
-/// cleaned up so a permanent error (disk full, permissions) doesn't leave
-/// orphan files behind on every retry.
-pub fn write_auth_json_atomic(path: &std::path::Path, auth_json_text: &str) -> std::io::Result<()> {
-    use std::io::Write;
-    let nanos = time::OffsetDateTime::now_utc().unix_timestamp_nanos();
-    let pid = std::process::id();
-    let mut tmp = path.to_path_buf();
-    let file_name = path
-        .file_name()
-        .and_then(|f| f.to_str())
-        .unwrap_or("auth.json");
-    tmp.set_file_name(format!("{file_name}.tmp.{pid}.{nanos}"));
-    {
-        let mut f = std::fs::OpenOptions::new()
-            .create(true)
-            .truncate(true)
-            .write(true)
-            .open(&tmp)?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let perms = std::fs::Permissions::from_mode(0o600);
-            std::fs::set_permissions(&tmp, perms)?;
-        }
-        f.write_all(auth_json_text.as_bytes())?;
-        f.sync_all()?;
-    }
-    if let Err(err) = std::fs::rename(&tmp, path) {
-        global_infra::best_effort!(
-            std::fs::remove_file(&tmp),
-            "codex_credentials: cleanup auth.json.tmp after rename failure"
-        );
-        return Err(err);
-    }
-    Ok(())
 }
 
 /// Serialize a stored credential triple back into the `auth.json` shape

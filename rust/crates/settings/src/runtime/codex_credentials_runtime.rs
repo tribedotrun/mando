@@ -328,6 +328,9 @@ impl SettingsRuntime {
             if row.provider != "codex" {
                 return Err(CodexCredentialError::NotCodex);
             }
+            if row.disabled_at.is_some() {
+                continue;
+            }
 
             let final_access =
                 match refresh_codex_access_token_on_pick(&self.db_pool, id, &row, access_token)

@@ -1,10 +1,10 @@
 import React from 'react';
-import { KeyRound, Trash2 } from 'lucide-react';
+import { KeyRound } from 'lucide-react';
 import { Card, CardContent } from '#renderer/global/ui/primitives/card';
-import { Button } from '#renderer/global/ui/primitives/button';
 import { Skeleton } from '#renderer/global/ui/primitives/skeleton';
 import {
   AddCredentialForm,
+  CredentialActions,
   CredentialExpiry,
   ShowAddButton,
   StatusBadge,
@@ -19,7 +19,9 @@ interface ClaudeCredentialsSectionProps {
   showInput: boolean;
   setShowInput: (next: boolean) => void;
   onRemove: (id: number) => void;
+  onSetDisabled: (id: number, disabled: boolean) => void;
   removePending: boolean;
+  setDisabledPending: boolean;
 }
 
 export function ClaudeCredentialsSection({
@@ -28,7 +30,9 @@ export function ClaudeCredentialsSection({
   showInput,
   setShowInput,
   onRemove,
+  onSetDisabled,
   removePending,
+  setDisabledPending,
 }: ClaudeCredentialsSectionProps): React.ReactElement {
   return (
     <div data-testid="settings-credentials-claude" className="space-y-4">
@@ -69,15 +73,13 @@ export function ClaudeCredentialsSection({
                       </div>
                       <TokenDisplay cred={cred} />
                     </div>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="ml-2 shrink-0 text-muted-foreground hover:text-destructive"
-                      disabled={removePending}
-                      onClick={() => onRemove(cred.id)}
-                    >
-                      <Trash2 size={14} />
-                    </Button>
+                    <CredentialActions
+                      isDisabled={cred.isDisabled}
+                      onRemove={() => onRemove(cred.id)}
+                      onSetDisabled={(disabled) => onSetDisabled(cred.id, disabled)}
+                      removePending={removePending}
+                      setDisabledPending={setDisabledPending}
+                    />
                   </div>
                   <CredentialUsage cred={cred} />
                 </div>

@@ -1,21 +1,27 @@
 import React from 'react';
-import { Trash2 } from 'lucide-react';
 import { Badge } from '#renderer/global/ui/primitives/badge';
-import { Button } from '#renderer/global/ui/primitives/button';
-import { CredentialExpiry, StatusBadge } from '#renderer/domains/settings/ui/SettingsAccountsParts';
+import {
+  CredentialActions,
+  CredentialExpiry,
+  StatusBadge,
+} from '#renderer/domains/settings/ui/SettingsAccountsParts';
 import { CredentialUsage } from '#renderer/domains/settings/ui/CredentialUsage';
 import type { CredentialInfo } from '#renderer/domains/settings/runtime/hooks';
 
 interface CodexCredentialRowProps {
   cred: CredentialInfo;
   onRemove: () => void;
+  onSetDisabled: (disabled: boolean) => void;
   removePending: boolean;
+  setDisabledPending: boolean;
 }
 
 export function CodexCredentialRow({
   cred,
   onRemove,
+  onSetDisabled,
   removePending,
+  setDisabledPending,
 }: CodexCredentialRowProps): React.ReactElement {
   return (
     <div className="rounded-lg border border-border bg-background px-4 py-3">
@@ -33,15 +39,13 @@ export function CodexCredentialRow({
             </p>
           ) : null}
         </div>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="shrink-0 text-muted-foreground hover:text-destructive"
-          disabled={removePending}
-          onClick={onRemove}
-        >
-          <Trash2 size={14} />
-        </Button>
+        <CredentialActions
+          isDisabled={cred.isDisabled}
+          onRemove={onRemove}
+          onSetDisabled={onSetDisabled}
+          removePending={removePending}
+          setDisabledPending={setDisabledPending}
+        />
       </div>
       <CredentialUsage cred={cred} />
     </div>

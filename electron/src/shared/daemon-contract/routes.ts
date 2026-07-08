@@ -185,6 +185,24 @@ export interface Routes {
     params: Types.CredentialIdParams;
     res: Types.CredentialMutationResponse;
   };
+  postCredentialsByIdDisable: {
+    method: 'POST';
+    path: '/api/credentials/{id}/disable';
+    transport: 'json';
+    auth: 'protected';
+    body: Types.EmptyRequest;
+    params: Types.CredentialIdParams;
+    res: Types.CredentialMutationResponse;
+  };
+  postCredentialsByIdEnable: {
+    method: 'POST';
+    path: '/api/credentials/{id}/enable';
+    transport: 'json';
+    auth: 'protected';
+    body: Types.EmptyRequest;
+    params: Types.CredentialIdParams;
+    res: Types.CredentialMutationResponse;
+  };
   postCredentialsByIdProbe: {
     method: 'POST';
     path: '/api/credentials/{id}/probe';
@@ -773,14 +791,6 @@ export interface Routes {
     params: Types.TerminalIdParams;
     res: Types.BoolOkResponse;
   };
-  getTerminalById: {
-    method: 'GET';
-    path: '/api/terminal/{id}';
-    transport: 'json';
-    auth: 'protected';
-    params: Types.TerminalIdParams;
-    res: Types.TerminalSessionInfo;
-  };
   postTerminalByIdActivity: {
     method: 'POST';
     path: '/api/terminal/{id}/activity';
@@ -1128,6 +1138,18 @@ export const routes = {
   deleteCredentialsById: {
     method: 'DELETE',
     path: '/api/credentials/{id}',
+    transport: 'json',
+    auth: 'protected',
+  },
+  postCredentialsByIdDisable: {
+    method: 'POST',
+    path: '/api/credentials/{id}/disable',
+    transport: 'json',
+    auth: 'protected',
+  },
+  postCredentialsByIdEnable: {
+    method: 'POST',
+    path: '/api/credentials/{id}/enable',
     transport: 'json',
     auth: 'protected',
   },
@@ -1495,12 +1517,6 @@ export const routes = {
   postTerminal: { method: 'POST', path: '/api/terminal', transport: 'json', auth: 'protected' },
   deleteTerminalById: {
     method: 'DELETE',
-    path: '/api/terminal/{id}',
-    transport: 'json',
-    auth: 'protected',
-  },
-  getTerminalById: {
-    method: 'GET',
     path: '/api/terminal/{id}',
     transport: 'json',
     auth: 'protected',

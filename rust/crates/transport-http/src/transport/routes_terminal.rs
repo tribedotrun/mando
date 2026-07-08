@@ -32,15 +32,6 @@ pub(crate) fn routes() -> ApiRouter<AppState> {
     );
     let router = crate::api_route!(
         router,
-        GET "/api/terminal/{id}",
-        transport = Json,
-        auth = Protected,
-        handler = get_terminal_info,
-        params = api_types::TerminalIdParams,
-        res = api_types::TerminalSessionInfo
-    );
-    let router = crate::api_route!(
-        router,
         DELETE "/api/terminal/{id}",
         transport = Json,
         auth = Protected,
@@ -409,18 +400,6 @@ pub(crate) async fn get_terminal_stream(
     };
 
     Ok(Sse::new(stream).keep_alive(KeepAlive::default()))
-}
-
-#[crate::instrument_api(method = "GET", path = "/api/terminal/{id}")]
-pub(crate) async fn get_terminal_info(
-    State(state): State<AppState>,
-    Path(api_types::TerminalIdParams { id }): Path<api_types::TerminalIdParams>,
-) -> Result<Json<api_types::TerminalSessionInfo>, ApiError> {
-    let info = state
-        .terminal
-        .info(&id)
-        .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "terminal session not found"))?;
-    Ok(Json(terminal_info_from_session(info)?))
 }
 
 /// Callback endpoint hit by the Claude Code SessionStart hook. Records the

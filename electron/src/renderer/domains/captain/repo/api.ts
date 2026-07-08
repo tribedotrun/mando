@@ -244,6 +244,3 @@ export const mergePr = (prNumber: number, project: string) =>
 // PR Summary
 export const fetchPrSummary = (id: number) =>
   apiGetRouteR('getTasksByIdPrsummary', { params: { id } });
-
-// Used by error-mapping helpers; surface as a sibling export to keep the import surface tidy.
-export { errAsync as _errAsync };

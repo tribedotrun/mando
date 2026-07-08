@@ -21,46 +21,49 @@ describe('useInlineTaskCreate provider defaults', () => {
     const result = applyPlanningProviderChange({
       nextPlanning: true,
       wasPlanning: false,
-      provider: TASK_PROVIDER_DEFAULT,
-      prePlanningProvider: TASK_PROVIDER_DEFAULT,
+      selectedProvider: null,
+      prePlanningSelectedProvider: null,
     });
 
-    assert.equal(result.provider, TASK_PROVIDER_PLANNING);
-    assert.equal(result.prePlanningProvider, TASK_PROVIDER_DEFAULT);
+    assert.equal(result.selectedProvider, TASK_PROVIDER_PLANNING);
+    assert.equal(result.prePlanningSelectedProvider, null);
   });
 
   it('restores Codex after leaving planning mode when Codex was selected before planning', () => {
     const result = applyPlanningProviderChange({
       nextPlanning: false,
       wasPlanning: true,
-      provider: TASK_PROVIDER_PLANNING,
-      prePlanningProvider: TASK_PROVIDER_DEFAULT,
+      selectedProvider: TASK_PROVIDER_PLANNING,
+      prePlanningSelectedProvider: null,
     });
 
-    assert.equal(result.provider, TASK_PROVIDER_DEFAULT);
+    assert.equal(
+      displayedProvider(result.selectedProvider, TASK_PROVIDER_DEFAULT),
+      TASK_PROVIDER_DEFAULT,
+    );
   });
 
   it('restores an explicit Claude choice after leaving planning mode', () => {
     const result = applyPlanningProviderChange({
       nextPlanning: false,
       wasPlanning: true,
-      provider: TASK_PROVIDER_PLANNING,
-      prePlanningProvider: TASK_PROVIDER_PLANNING,
+      selectedProvider: TASK_PROVIDER_PLANNING,
+      prePlanningSelectedProvider: TASK_PROVIDER_PLANNING,
     });
 
-    assert.equal(result.provider, TASK_PROVIDER_PLANNING);
+    assert.equal(result.selectedProvider, TASK_PROVIDER_PLANNING);
   });
 
   it('does not overwrite the pre-planning provider on repeated planning-on calls', () => {
     const result = applyPlanningProviderChange({
       nextPlanning: true,
       wasPlanning: true,
-      provider: TASK_PROVIDER_PLANNING,
-      prePlanningProvider: TASK_PROVIDER_DEFAULT,
+      selectedProvider: TASK_PROVIDER_PLANNING,
+      prePlanningSelectedProvider: null,
     });
 
-    assert.equal(result.provider, TASK_PROVIDER_PLANNING);
-    assert.equal(result.prePlanningProvider, TASK_PROVIDER_DEFAULT);
+    assert.equal(result.selectedProvider, TASK_PROVIDER_PLANNING);
+    assert.equal(result.prePlanningSelectedProvider, null);
   });
 
   it('normalizes OpenCode back to the premium default', () => {

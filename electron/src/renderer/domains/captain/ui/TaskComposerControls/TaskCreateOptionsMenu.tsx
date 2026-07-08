@@ -96,6 +96,7 @@ export function TaskCreateOptionsMenu({
               <DropdownMenuRadioItem
                 key={item}
                 value={item}
+                disabled={planning && item !== 'claude'}
                 onSelect={(event) => event.preventDefault()}
               >
                 {taskProviderLabel(item)}

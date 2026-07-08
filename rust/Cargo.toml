@@ -38,7 +38,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.20-beta.15"
+version = "0.1.20"
 edition = "2021"
 license = "Apache-2.0"
 repository = "https://github.com/tribedotrun/mando"

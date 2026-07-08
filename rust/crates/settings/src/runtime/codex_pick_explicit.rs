@@ -13,7 +13,8 @@ use super::settings_runtime::SettingsRuntime;
 
 impl SettingsRuntime {
     /// Pick a specific Codex credential by id or label. Honors the caller's
-    /// explicit choice even when the row is expired or rate-limited.
+    /// explicit choice even when the row is expired or rate-limited, but never
+    /// selects a manually disabled credential.
     #[tracing::instrument(skip(self))]
     pub async fn pick_codex_credential_explicit(
         &self,
@@ -34,6 +35,9 @@ impl SettingsRuntime {
         if row.provider != "codex" {
             return Ok(None);
         }
+        if row.disabled_at.is_some() {
+            return Ok(None);
+        }
         let Some(account_id) = row.account_id.clone() else {
             return Ok(None);
         };
@@ -52,6 +56,9 @@ impl SettingsRuntime {
             .ok_or(CodexCredentialError::NotFound(id))?;
         if row.provider != "codex" {
             return Err(CodexCredentialError::NotCodex);
+        }
+        if row.disabled_at.is_some() {
+            return Ok(None);
         }
 
         let final_access = match refresh_codex_access_token_on_pick(
