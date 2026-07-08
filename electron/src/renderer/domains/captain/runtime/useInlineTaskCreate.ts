@@ -9,10 +9,12 @@ import { resolveEffectiveProject } from '#renderer/domains/captain/service/proje
 import { bulkTextareaRows } from '#renderer/global/service/utils';
 import { extractImageFromClipboard } from '#renderer/global/service/clipboardImage';
 import {
+  applyPlanningProviderChange,
   displayedProvider,
   loadedDefaultProvider,
   providerSelectionReady,
   submittedProvider,
+  TASK_PROVIDER_PLANNING,
   type PremiumTaskProvider,
 } from '#renderer/domains/captain/runtime/useInlineTaskCreate.helpers';
 
@@ -46,12 +48,27 @@ export function useInlineTaskCreate() {
   const [noAutoMerge, setNoAutoMerge] = useState(false);
   const [planning, setPlanning] = useState(false);
   const [selectedProvider, setSelectedProvider] = useState<PremiumTaskProvider | null>(null);
+  const [prePlanningSelectedProvider, setPrePlanningSelectedProvider] =
+    useState<PremiumTaskProvider | null>(null);
   // `null` means "follow the configured default"; a boolean is an explicit
   // per-task override the user set via the composer toggle.
   const [glmOverride, setGlmOverride] = useState<boolean | null>(null);
 
   const handleProviderChange = (next: PremiumTaskProvider) => {
+    if (planning && next !== TASK_PROVIDER_PLANNING) return;
     setSelectedProvider(next);
+  };
+
+  const handlePlanningChange = (nextPlanning: boolean) => {
+    const result = applyPlanningProviderChange({
+      nextPlanning,
+      wasPlanning: planning,
+      selectedProvider,
+      prePlanningSelectedProvider,
+    });
+    setPlanning(nextPlanning);
+    setSelectedProvider(result.selectedProvider);
+    setPrePlanningSelectedProvider(result.prePlanningSelectedProvider);
   };
 
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -86,6 +103,7 @@ export function useInlineTaskCreate() {
     setPlanning(false);
     setGlmOverride(null);
     setSelectedProvider(null);
+    setPrePlanningSelectedProvider(null);
   };
 
   const canSubmit =
@@ -141,7 +159,7 @@ export function useInlineTaskCreate() {
     autoMerge: { globalAutoMerge, noAutoMerge, setNoAutoMerge },
     routing: {
       planning,
-      setPlanning,
+      setPlanning: handlePlanningChange,
       provider,
       setProvider: handleProviderChange,
       useGlmWorker,

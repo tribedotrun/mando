@@ -39,10 +39,11 @@ pub async fn labels_by_ids(pool: &SqlitePool, ids: &[i64]) -> Result<HashMap<i64
 /// kept for compatibility with databases that were migrated while Codex
 /// account credentials existed.
 pub async fn has_any(pool: &SqlitePool) -> Result<bool> {
-    let count: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM credentials WHERE provider = 'claude'")
-            .fetch_one(pool)
-            .await?;
+    let count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM credentials WHERE provider = 'claude' AND disabled_at IS NULL",
+    )
+    .fetch_one(pool)
+    .await?;
     Ok(count > 0)
 }
 
@@ -121,6 +122,35 @@ pub async fn delete(pool: &SqlitePool, id: i64) -> Result<bool> {
         .await?;
     tx.commit().await?;
     Ok(result.rows_affected() > 0)
+}
+
+/// Set manual disabled state for one credential.
+pub async fn set_disabled(pool: &SqlitePool, id: i64, disabled: bool) -> Result<bool> {
+    let result = if disabled {
+        let now_secs = time::OffsetDateTime::now_utc().unix_timestamp();
+        sqlx::query(
+            "UPDATE credentials
+             SET disabled_at = ?1, updated_at = datetime('now')
+             WHERE id = ?2 AND disabled_at IS NULL",
+        )
+        .bind(now_secs)
+        .bind(id)
+        .execute(pool)
+        .await?
+    } else {
+        sqlx::query(
+            "UPDATE credentials
+             SET disabled_at = NULL, updated_at = datetime('now')
+             WHERE id = ?1 AND disabled_at IS NOT NULL",
+        )
+        .bind(id)
+        .execute(pool)
+        .await?
+    };
+    if result.rows_affected() > 0 {
+        return Ok(true);
+    }
+    Ok(get_row_by_id(pool, id).await?.is_some())
 }
 
 /// Set rate-limit cooldown on a credential.
@@ -274,6 +304,7 @@ pub async fn pick_for_worker(
              GROUP BY credential_id
          ) s ON s.credential_id = c.id
          WHERE c.provider = 'claude'
+           AND c.disabled_at IS NULL
            AND (c.expires_at IS NULL OR c.expires_at > ?1)
            AND (c.rate_limit_cooldown_until IS NULL OR c.rate_limit_cooldown_until <= ?2)
          ORDER BY
@@ -315,6 +346,7 @@ pub async fn pick_for_codex_candidates(pool: &SqlitePool) -> Result<Vec<(i64, St
          ) s ON s.credential_id = c.id
          WHERE c.provider = 'codex'
            AND c.account_id IS NOT NULL
+           AND c.disabled_at IS NULL
            AND (c.expires_at IS NULL OR c.expires_at > ?1)
            AND (c.rate_limit_cooldown_until IS NULL OR c.rate_limit_cooldown_until <= ?2)
          ORDER BY
@@ -375,6 +407,7 @@ pub async fn earliest_cooldown_remaining_secs(pool: &SqlitePool) -> anyhow::Resu
     let row: Option<(Option<i64>,)> = sqlx::query_as(
         "SELECT MIN(rate_limit_cooldown_until) FROM credentials
          WHERE provider = 'claude'
+           AND disabled_at IS NULL
            AND rate_limit_cooldown_until IS NOT NULL
            AND rate_limit_cooldown_until > ?",
     )
@@ -393,7 +426,7 @@ pub async fn earliest_cooldown_remaining_secs(pool: &SqlitePool) -> anyhow::Resu
 pub async fn clear_all_cooldowns(pool: &SqlitePool) -> Result<u64> {
     let result = sqlx::query(
         "UPDATE credentials SET rate_limit_cooldown_until = NULL, updated_at = datetime('now')
-         WHERE provider = 'claude' AND rate_limit_cooldown_until IS NOT NULL",
+         WHERE provider = 'claude' AND disabled_at IS NULL AND rate_limit_cooldown_until IS NOT NULL",
     )
     .execute(pool)
     .await?;
@@ -529,6 +562,102 @@ mod pick_codex_tests {
         assert_eq!(
             second.0, id_b,
             "must rotate to account-b when account-a has an active session"
+        );
+    }
+
+    #[tokio::test]
+    async fn disabled_claude_credentials_are_not_pickable() {
+        let db = global_db::Db::open_in_memory()
+            .await
+            .expect("in-memory db must init");
+        let pool = db.pool().clone();
+
+        let id_a = insert(&pool, "account-a", "tok-a", None)
+            .await
+            .expect("insert account-a");
+        let id_b = insert(&pool, "account-b", "tok-b", None)
+            .await
+            .expect("insert account-b");
+
+        assert!(has_any(&pool).await.expect("has credentials"));
+        set_disabled(&pool, id_a, true)
+            .await
+            .expect("disable account-a");
+
+        let picked = pick_for_worker(&pool, None)
+            .await
+            .expect("pick query")
+            .expect("account-b should remain pickable");
+        assert_eq!(picked.0, id_b);
+
+        set_disabled(&pool, id_b, true)
+            .await
+            .expect("disable account-b");
+        assert!(
+            !has_any(&pool).await.expect("has credentials"),
+            "disabled credentials should not count as an available pool"
+        );
+        assert!(
+            pick_for_worker(&pool, None)
+                .await
+                .expect("pick query")
+                .is_none(),
+            "all disabled credentials should be unpickable"
+        );
+
+        set_disabled(&pool, id_a, false)
+            .await
+            .expect("enable account-a");
+        let picked = pick_for_worker(&pool, None)
+            .await
+            .expect("pick query")
+            .expect("account-a should be pickable again");
+        assert_eq!(picked.0, id_a);
+    }
+
+    #[tokio::test]
+    async fn disabled_codex_credentials_are_not_pickable() {
+        let db = global_db::Db::open_in_memory()
+            .await
+            .expect("in-memory db must init");
+        let pool = db.pool().clone();
+
+        let id_a = codex_credentials::insert_codex(
+            &pool,
+            "account-a",
+            "tok-a",
+            "rt-a",
+            Some("id-a"),
+            "acct-a",
+            Some("pro"),
+            None,
+            time::OffsetDateTime::now_utc().unix_timestamp(),
+        )
+        .await
+        .expect("insert account-a");
+        let id_b = codex_credentials::insert_codex(
+            &pool,
+            "account-b",
+            "tok-b",
+            "rt-b",
+            Some("id-b"),
+            "acct-b",
+            Some("pro"),
+            None,
+            time::OffsetDateTime::now_utc().unix_timestamp(),
+        )
+        .await
+        .expect("insert account-b");
+
+        set_disabled(&pool, id_a, true)
+            .await
+            .expect("disable account-a");
+        let candidates = pick_for_codex_candidates(&pool)
+            .await
+            .expect("codex candidates");
+        assert_eq!(
+            candidates,
+            vec![(id_b, "tok-b".to_string(), "acct-b".to_string())]
         );
     }
 

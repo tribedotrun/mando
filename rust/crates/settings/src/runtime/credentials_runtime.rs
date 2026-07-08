@@ -81,6 +81,20 @@ impl SettingsRuntime {
     }
 
     #[tracing::instrument(skip_all)]
+    pub async fn set_credential_disabled(&self, id: i64, disabled: bool) -> SettingsResult<bool> {
+        let changed = crate::io::credentials::set_disabled(&self.db_pool, id, disabled).await?;
+        if changed {
+            tracing::info!(
+                module = "credentials",
+                id,
+                disabled,
+                "credential disabled state set"
+            );
+        }
+        Ok(changed)
+    }
+
+    #[tracing::instrument(skip_all)]
     pub async fn mark_credential_expired(&self, id: i64) -> SettingsResult<bool> {
         crate::io::credentials::mark_expired(&self.db_pool, id)
             .await
@@ -144,7 +158,8 @@ impl SettingsRuntime {
     }
 
     /// Pick a specific Claude credential by id or label. Honors the caller's
-    /// explicit choice even when the row is expired or rate-limited.
+    /// explicit choice even when the row is expired or rate-limited, but never
+    /// selects a manually disabled credential.
     #[tracing::instrument(skip_all)]
     pub async fn pick_claude_credential_explicit(
         &self,
@@ -159,6 +174,9 @@ impl SettingsRuntime {
             return Ok(None);
         };
         if row.provider != "claude" {
+            return Ok(None);
+        }
+        if row.disabled_at.is_some() {
             return Ok(None);
         }
         Ok(Some((resolved_id, row.access_token, row.label)))

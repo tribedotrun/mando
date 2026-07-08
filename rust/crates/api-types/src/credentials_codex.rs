@@ -126,7 +126,8 @@ pub struct SyncCodexCredentialResponse {
 ///
 /// All fields optional. When both `id` and `label` are absent, the daemon
 /// auto-picks the best-available credential. When one is set, that exact row
-/// is used (even if expired or rate-limited — the caller explicitly asked).
+/// is used even if expired or rate-limited; manually disabled rows are still
+/// excluded from explicit picks.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[ts(optional_fields)]

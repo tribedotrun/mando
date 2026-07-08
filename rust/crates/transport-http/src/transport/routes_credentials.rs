@@ -30,6 +30,26 @@ pub(crate) fn credential_routes() -> ApiRouter<AppState> {
     );
     let router = crate::api_route!(
         router,
+        POST "/api/credentials/{id}/disable",
+        transport = Json,
+        auth = Protected,
+        handler = disable_credential,
+        body = api_types::EmptyRequest,
+        params = api_types::CredentialIdParams,
+        res = api_types::CredentialMutationResponse
+    );
+    let router = crate::api_route!(
+        router,
+        POST "/api/credentials/{id}/enable",
+        transport = Json,
+        auth = Protected,
+        handler = enable_credential,
+        body = api_types::EmptyRequest,
+        params = api_types::CredentialIdParams,
+        res = api_types::CredentialMutationResponse
+    );
+    let router = crate::api_route!(
+        router,
         GET "/api/credentials/{id}/token",
         transport = Json,
         auth = Protected,
@@ -115,9 +135,11 @@ async fn list_credentials(
             provider: provider_to_api(&cred.provider),
             expires_at: cred.expires_at,
             rate_limit_cooldown_until: cred.rate_limit_cooldown_until,
+            disabled_at: cred.disabled_at,
             created_at: cred.created_at,
             is_expired: cred.is_expired,
             is_rate_limited: cred.is_rate_limited,
+            is_disabled: cred.is_disabled,
             five_hour: cred
                 .five_hour
                 .map(|window| api_types::CredentialWindowInfo {
@@ -180,6 +202,49 @@ async fn remove_credential(
         }
         Ok(false) => Err(error_response(StatusCode::NOT_FOUND, "not found")),
         Err(e) => Err(internal_error(e, "failed to remove credential")),
+    }
+}
+
+#[crate::instrument_api(method = "POST", path = "/api/credentials/{id}/disable")]
+async fn disable_credential(
+    State(state): State<AppState>,
+    axum::extract::Path(api_types::CredentialIdParams { id }): axum::extract::Path<
+        api_types::CredentialIdParams,
+    >,
+    Json(_body): Json<api_types::EmptyRequest>,
+) -> Result<Json<api_types::CredentialMutationResponse>, ApiError> {
+    set_credential_disabled(state, id, true).await
+}
+
+#[crate::instrument_api(method = "POST", path = "/api/credentials/{id}/enable")]
+async fn enable_credential(
+    State(state): State<AppState>,
+    axum::extract::Path(api_types::CredentialIdParams { id }): axum::extract::Path<
+        api_types::CredentialIdParams,
+    >,
+    Json(_body): Json<api_types::EmptyRequest>,
+) -> Result<Json<api_types::CredentialMutationResponse>, ApiError> {
+    set_credential_disabled(state, id, false).await
+}
+
+async fn set_credential_disabled(
+    state: AppState,
+    id: i64,
+    disabled: bool,
+) -> Result<Json<api_types::CredentialMutationResponse>, ApiError> {
+    match state.settings.set_credential_disabled(id, disabled).await {
+        Ok(true) => {
+            state.bus.send(global_bus::BusPayload::Credentials(None));
+            Ok(Json(api_types::CredentialMutationResponse {
+                ok: true,
+                error: None,
+            }))
+        }
+        Ok(false) => Err(error_response(StatusCode::NOT_FOUND, "not found")),
+        Err(e) => Err(internal_error(
+            e,
+            "failed to update credential disabled state",
+        )),
     }
 }
 

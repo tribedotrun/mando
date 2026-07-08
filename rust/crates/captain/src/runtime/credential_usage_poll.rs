@@ -302,6 +302,7 @@ mod tests {
             access_token: "x".into(),
             expires_at,
             rate_limit_cooldown_until: cooldown,
+            disabled_at: None,
             created_at: String::new(),
             updated_at: String::new(),
             five_hour_utilization: None,

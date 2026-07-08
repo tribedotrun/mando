@@ -5,6 +5,7 @@ import {
   useCredentialsList,
   useCredentialProbe as useCredentialProbeMutation,
   useCredentialRemove as useCredentialRemoveMutation,
+  useCredentialSetDisabled as useCredentialSetDisabledMutation,
   useCredentialReveal,
   type CredentialInfo,
   type CredentialRateLimitStatus,
@@ -34,6 +35,18 @@ export function useCredentialRemove() {
     },
     onError: () => {
       toast.error('Failed to remove credential');
+    },
+  });
+}
+
+export function useCredentialSetDisabled() {
+  const mutation = useCredentialSetDisabledMutation();
+  return useMutationFeedback(mutation, {
+    onSuccess: (_res, vars) => {
+      toast.success(vars.disabled ? 'Credential disabled' : 'Credential enabled');
+    },
+    onError: () => {
+      toast.error('Failed to update credential');
     },
   });
 }

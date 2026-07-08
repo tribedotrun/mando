@@ -1,10 +1,7 @@
 import { type ClarifyOutcome, type ItemStatus, type TaskItem } from '#renderer/global/types';
 
 export type { SidebarChild } from '#renderer/global/service/projectChildren';
-export {
-  sortProjectChildren,
-  assembleProjectChildren,
-} from '#renderer/global/service/projectChildren';
+export { assembleProjectChildren } from '#renderer/global/service/projectChildren';
 
 /** Extract the last path segment from a GitHub `owner/repo` string. */
 export function shortRepo(project?: string): string {
@@ -69,11 +66,6 @@ export function canRevisePlan(task: TaskItem): boolean {
   return task.status === 'plan-ready';
 }
 
-/** Whether a task can be asked a question in its terminal/review states (narrow). */
-export function canAskTerminal(task: TaskItem): boolean {
-  return ['awaiting-review', 'escalated'].includes(task.status);
-}
-
 /** Whether a task can be asked a question in any active or review state (broad). */
 export function canAskAny(task: TaskItem): boolean {
   return [
@@ -96,13 +88,6 @@ export function prState(status: ItemStatus): 'open' | 'merged' | 'closed' {
 /** Extract a human-readable message from an unknown error. */
 export function getErrorMessage(err: unknown, fallback: string): string {
   return err instanceof Error ? err.message : fallback;
-}
-
-/** Convert an ISO timestamp string to local time (e.g. "02:45:12 PM"). */
-export function localizeTimestamp(ts: string): string {
-  const date = new Date(ts);
-  if (Number.isNaN(date.getTime())) return ts;
-  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 
 /** Human-readable relative time from an ISO timestamp (e.g. "3m ago", "in 2h"). */

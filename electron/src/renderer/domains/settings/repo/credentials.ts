@@ -45,6 +45,21 @@ export function useCredentialRemove() {
   });
 }
 
+export function useCredentialSetDisabled() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, disabled }: { id: number; disabled: boolean }) =>
+      toReactQuery(
+        disabled
+          ? apiPostRouteR('postCredentialsByIdDisable', undefined, { params: { id } })
+          : apiPostRouteR('postCredentialsByIdEnable', undefined, { params: { id } }),
+      ),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: QUERY_KEY });
+    },
+  });
+}
+
 export function useCredentialReveal() {
   return useMutation({
     mutationFn: (id: number) =>

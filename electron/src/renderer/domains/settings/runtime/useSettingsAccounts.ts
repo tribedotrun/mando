@@ -3,6 +3,7 @@ import {
   useCodexCredentialAdd,
   useCredentialsList,
   useCredentialRemove,
+  useCredentialSetDisabled,
 } from '#renderer/domains/settings/runtime/hooks';
 
 export function useSettingsAccounts() {
@@ -11,6 +12,7 @@ export function useSettingsAccounts() {
 
   const { data, isLoading } = useCredentialsList();
   const removeMut = useCredentialRemove();
+  const setDisabledMut = useCredentialSetDisabled();
   const codexAddMut = useCodexCredentialAdd();
 
   const all = data?.credentials ?? [];
@@ -26,7 +28,7 @@ export function useSettingsAccounts() {
     },
     claude: { items: claudeItems, isLoading },
     codex: { items: codexItems, isLoading },
-    mutations: { removeMut, codexAddMut },
+    mutations: { removeMut, setDisabledMut, codexAddMut },
     /** Back-compat: existing UI reads `.credentials.items`. */
     credentials: { items: all, isLoading },
   };

@@ -8,13 +8,13 @@ export const TASK_PROVIDER_PLANNING: PremiumTaskProvider = 'claude';
 interface PlanningProviderChange {
   nextPlanning: boolean;
   wasPlanning: boolean;
-  provider: PremiumTaskProvider;
-  prePlanningProvider: PremiumTaskProvider;
+  selectedProvider: PremiumTaskProvider | null;
+  prePlanningSelectedProvider: PremiumTaskProvider | null;
 }
 
 interface PlanningProviderResult {
-  provider: PremiumTaskProvider;
-  prePlanningProvider: PremiumTaskProvider;
+  selectedProvider: PremiumTaskProvider | null;
+  prePlanningSelectedProvider: PremiumTaskProvider | null;
 }
 
 export function normalizePremiumProvider(
@@ -54,22 +54,22 @@ export function providerSelectionReady(
 export function applyPlanningProviderChange({
   nextPlanning,
   wasPlanning,
-  provider,
-  prePlanningProvider,
+  selectedProvider,
+  prePlanningSelectedProvider,
 }: PlanningProviderChange): PlanningProviderResult {
   if (nextPlanning === wasPlanning) {
-    return { provider, prePlanningProvider };
+    return { selectedProvider, prePlanningSelectedProvider };
   }
 
   if (nextPlanning) {
     return {
-      provider: TASK_PROVIDER_PLANNING,
-      prePlanningProvider: provider,
+      selectedProvider: TASK_PROVIDER_PLANNING,
+      prePlanningSelectedProvider: selectedProvider,
     };
   }
 
   return {
-    provider: prePlanningProvider,
-    prePlanningProvider,
+    selectedProvider: prePlanningSelectedProvider,
+    prePlanningSelectedProvider,
   };
 }

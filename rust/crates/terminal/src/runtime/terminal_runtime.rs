@@ -58,10 +58,6 @@ impl TerminalRuntime {
         self.host.list()
     }
 
-    pub fn info(&self, id: &str) -> Option<SessionInfo> {
-        self.host.get(id).map(|session| session.info())
-    }
-
     pub fn session(&self, id: &str) -> Option<Arc<crate::runtime::TerminalSession>> {
         self.host.get(id)
     }

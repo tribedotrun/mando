@@ -272,9 +272,11 @@ export type CredentialInfo = {
   provider: CredentialProvider;
   expiresAt: number | null;
   rateLimitCooldownUntil: number | null;
+  disabledAt: number | null;
   createdAt: string;
   isExpired: boolean;
   isRateLimited: boolean;
+  isDisabled: boolean;
   fiveHour?: CredentialWindowInfo | null;
   sevenDay?: CredentialWindowInfo | null;
   unifiedStatus?: CredentialRateLimitStatus | null;

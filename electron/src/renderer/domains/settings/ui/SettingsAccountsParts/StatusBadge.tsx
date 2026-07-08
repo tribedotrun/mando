@@ -2,6 +2,13 @@ import React from 'react';
 import type { CredentialInfo } from '#renderer/domains/settings/runtime/hooks';
 
 export function StatusBadge({ cred }: { cred: CredentialInfo }): React.ReactElement {
+  if (cred.isDisabled) {
+    return (
+      <span className="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
+        Disabled
+      </span>
+    );
+  }
   if (cred.isExpired) {
     return (
       <span className="inline-flex items-center rounded-full bg-destructive/10 px-2 py-0.5 text-xs text-destructive">

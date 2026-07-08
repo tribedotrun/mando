@@ -1,6 +1,7 @@
 export { StatusBadge } from '#renderer/domains/settings/ui/SettingsAccountsParts/StatusBadge';
 export { TokenDisplay } from '#renderer/domains/settings/ui/SettingsAccountsParts/TokenDisplay';
 export { CredentialExpiry } from '#renderer/domains/settings/ui/SettingsAccountsParts/CredentialExpiry';
+export { CredentialActions } from '#renderer/domains/settings/ui/SettingsAccountsParts/CredentialActions';
 export { AddCredentialForm } from '#renderer/domains/settings/ui/SettingsAccountsParts/AddCredentialForm';
 export { ShowAddButton } from '#renderer/domains/settings/ui/SettingsAccountsParts/ShowAddButton';
 export { ClaudeCredentialsSection } from '#renderer/domains/settings/ui/SettingsAccountsParts/ClaudeCredentialsSection';

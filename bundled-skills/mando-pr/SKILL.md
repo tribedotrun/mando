@@ -58,8 +58,8 @@ python3 ~/.claude/skills/mando-pr-summary/validate-pr-body.py --pr <pr_number>
 
 Post each trigger only if not already on the PR (idempotent):
 
-1. `@codex review this PR`
-2. `cursor review`
+1. `@codex review this PR` — always.
+2. `cursor review` — only when the PR is big or critical: a large or multi-domain diff, or one touching risky surfaces (auth, funds/payments, data migrations, deploy/infra). Skip it for routine PRs.
 
 ## Step 5 — Address feedback
 

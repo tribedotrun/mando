@@ -9,6 +9,7 @@ pub struct CredentialRow {
     pub access_token: String,
     pub expires_at: Option<i64>,
     pub rate_limit_cooldown_until: Option<i64>,
+    pub disabled_at: Option<i64>,
     pub created_at: String,
     pub updated_at: String,
     pub five_hour_utilization: Option<f64>,
@@ -60,9 +61,11 @@ pub struct CredentialInfo {
     pub provider: String,
     pub expires_at: Option<i64>,
     pub rate_limit_cooldown_until: Option<i64>,
+    pub disabled_at: Option<i64>,
     pub created_at: String,
     pub is_expired: bool,
     pub is_rate_limited: bool,
+    pub is_disabled: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub five_hour: Option<CredentialWindowInfo>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -100,11 +103,13 @@ impl CredentialRow {
             provider: self.provider.clone(),
             expires_at: self.expires_at,
             rate_limit_cooldown_until: self.rate_limit_cooldown_until,
+            disabled_at: self.disabled_at,
             created_at: self.created_at.clone(),
             is_expired: self.expires_at.is_some_and(|ea| ea <= now_ms),
             is_rate_limited: self
                 .rate_limit_cooldown_until
                 .is_some_and(|until| now_secs < until),
+            is_disabled: self.disabled_at.is_some(),
             five_hour: window_info(
                 self.five_hour_utilization,
                 self.five_hour_reset_at,

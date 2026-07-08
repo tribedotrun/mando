@@ -15,6 +15,7 @@ export {
   useCredentialsList,
   useCredentialAdd,
   useCredentialRemove,
+  useCredentialSetDisabled,
   useCredentialReveal,
   useCredentialProbe,
   type CredentialInfo,

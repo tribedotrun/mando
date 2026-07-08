@@ -19,9 +19,11 @@ pub struct CredentialInfo {
     pub provider: CredentialProvider,
     pub expires_at: Option<i64>,
     pub rate_limit_cooldown_until: Option<i64>,
+    pub disabled_at: Option<i64>,
     pub created_at: String,
     pub is_expired: bool,
     pub is_rate_limited: bool,
+    pub is_disabled: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional = nullable)]
     pub five_hour: Option<CredentialWindowInfo>,

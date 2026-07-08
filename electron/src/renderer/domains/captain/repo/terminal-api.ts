@@ -83,10 +83,6 @@ export function listTerminals(): ResultAsync<TerminalSessionInfo[], ApiError> {
   return apiGetRouteR('getTerminal');
 }
 
-export function getTerminal(id: string): ResultAsync<TerminalSessionInfo, ApiError> {
-  return apiGetRouteR('getTerminalById', { params: { id } });
-}
-
 export async function writeTerminalBytes(id: string, bytes: Uint8Array): Promise<void> {
   const binary = Array.from(bytes)
     .map((b) => String.fromCharCode(b))

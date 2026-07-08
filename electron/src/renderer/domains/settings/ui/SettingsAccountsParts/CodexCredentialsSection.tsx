@@ -15,7 +15,9 @@ interface CodexCredentialsSectionProps {
   showInput: boolean;
   setShowInput: (next: boolean) => void;
   onRemove: (id: number) => void;
+  onSetDisabled: (id: number, disabled: boolean) => void;
   removePending: boolean;
+  setDisabledPending: boolean;
 }
 
 export function CodexCredentialsSection(props: CodexCredentialsSectionProps): React.ReactElement {
@@ -50,7 +52,9 @@ export function CodexCredentialsSection(props: CodexCredentialsSectionProps): Re
                   key={cred.id}
                   cred={cred}
                   onRemove={() => props.onRemove(cred.id)}
+                  onSetDisabled={(disabled) => props.onSetDisabled(cred.id, disabled)}
                   removePending={props.removePending}
+                  setDisabledPending={props.setDisabledPending}
                 />
               ))}
             </div>

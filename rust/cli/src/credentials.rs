@@ -32,6 +32,16 @@ pub(crate) enum CredentialsCommand {
     /// List stored credentials (masked tokens, current rate-limit/cooldown).
     #[command(visible_alias = "ls")]
     List,
+    /// Disable a credential so automatic and explicit picks cannot select it.
+    Disable {
+        /// Credential database id.
+        id: i64,
+    },
+    /// Re-enable a disabled credential.
+    Enable {
+        /// Credential database id.
+        id: i64,
+    },
     /// Pick the best-available credential right now and emit shell exports
     /// (success) or unsets (any fallback path) so `eval "$(mando credentials pick)"`
     /// always leaves the shell in a correct state.
@@ -57,6 +67,8 @@ pub(crate) enum CredentialsCommand {
 pub(crate) async fn handle(args: CredentialsArgs) -> Result<()> {
     match args.command {
         CredentialsCommand::List => handle_list().await,
+        CredentialsCommand::Disable { id } => handle_set_disabled(id, true).await,
+        CredentialsCommand::Enable { id } => handle_set_disabled(id, false).await,
         CredentialsCommand::Pick {
             codex,
             id,
@@ -129,7 +141,9 @@ async fn handle_list() -> Result<()> {
         "ID", "PROVIDER", "LABEL", "STATE", "5H%"
     );
     for cred in &result.credentials {
-        let state = if cred.is_expired {
+        let state = if cred.is_disabled {
+            "disabled"
+        } else if cred.is_expired {
             "expired"
         } else if cred.is_rate_limited {
             "rate-limited"
@@ -149,6 +163,24 @@ async fn handle_list() -> Result<()> {
             "{:<4} {:<10} {:<24} {:<14} {:>6}  {}",
             cred.id, provider, cred.label, state, util, cred.token_masked
         );
+    }
+    Ok(())
+}
+
+async fn handle_set_disabled(id: i64, disabled: bool) -> Result<()> {
+    let client = DaemonClient::discover()?;
+    let path = if disabled {
+        paths::credential_disable(id)
+    } else {
+        paths::credential_enable(id)
+    };
+    client
+        .post_json::<api_types::CredentialMutationResponse, _>(&path, &api_types::EmptyRequest {})
+        .await?;
+    if disabled {
+        println!("Credential {id} disabled.");
+    } else {
+        println!("Credential {id} enabled.");
     }
     Ok(())
 }
@@ -349,6 +381,7 @@ fn shell_single_quote(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use clap::Parser;
 
     #[test]
     fn shell_single_quote_plain_token() {
@@ -390,5 +423,35 @@ mod tests {
     fn build_pick_request_rejects_empty_label() {
         let err = build_pick_request(None, Some("   ".into()), None).unwrap_err();
         assert!(err.to_string().contains("label must not be empty"));
+    }
+
+    #[derive(clap::Parser)]
+    struct TestCli {
+        #[command(subcommand)]
+        cmd: TestCommand,
+    }
+
+    #[derive(clap::Subcommand)]
+    enum TestCommand {
+        Credentials(CredentialsArgs),
+    }
+
+    #[test]
+    fn parse_disable_enable() {
+        let disable = TestCli::try_parse_from(["test", "credentials", "disable", "7"]).unwrap();
+        match disable.cmd {
+            TestCommand::Credentials(args) => match args.command {
+                CredentialsCommand::Disable { id } => assert_eq!(id, 7),
+                _ => panic!("expected disable"),
+            },
+        }
+
+        let enable = TestCli::try_parse_from(["test", "credentials", "enable", "7"]).unwrap();
+        match enable.cmd {
+            TestCommand::Credentials(args) => match args.command {
+                CredentialsCommand::Enable { id } => assert_eq!(id, 7),
+                _ => panic!("expected enable"),
+            },
+        }
     }
 }

@@ -22,7 +22,9 @@ export function SettingsAccounts(): React.ReactElement {
         showInput={accounts.visibility.showTokenInput}
         setShowInput={accounts.visibility.setShowTokenInput}
         onRemove={(id) => accounts.mutations.removeMut.mutate(id)}
+        onSetDisabled={(id, disabled) => accounts.mutations.setDisabledMut.mutate({ id, disabled })}
         removePending={accounts.mutations.removeMut.isPending}
+        setDisabledPending={accounts.mutations.setDisabledMut.isPending}
       />
       <CodexCredentialsSection
         items={accounts.codex.items}
@@ -30,7 +32,9 @@ export function SettingsAccounts(): React.ReactElement {
         showInput={accounts.visibility.showCodexInput}
         setShowInput={accounts.visibility.setShowCodexInput}
         onRemove={(id) => accounts.mutations.removeMut.mutate(id)}
+        onSetDisabled={(id, disabled) => accounts.mutations.setDisabledMut.mutate({ id, disabled })}
         removePending={accounts.mutations.removeMut.isPending}
+        setDisabledPending={accounts.mutations.setDisabledMut.isPending}
       />
     </div>
   );
