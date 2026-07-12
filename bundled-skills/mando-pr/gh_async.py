@@ -129,6 +129,17 @@ async def _paginated_items(endpoint: str) -> list:
     return items
 
 
+async def _paginated_object_items(endpoint: str, key: str) -> list:
+    """Flatten a paginated REST response whose items live under ``key``."""
+    try:
+        raw = await run_gh("api", "--paginate", "--jq", f".{key}[]", endpoint)
+    except GhError as exc:
+        if exc.is_not_found():
+            return []
+        raise
+    return [json.loads(line) for line in raw.splitlines() if line.strip()]
+
+
 _THREAD_QUERY = """
 query($owner: String!, $repo: String!, $pr: Int!, $cursor: String) {
   repository(owner: $owner, name: $repo) {
@@ -238,22 +249,68 @@ async def get_pr_head_sha(pr: int) -> str:
     return sha
 
 
-async def get_check_runs(owner: str, repo: str, sha: str) -> list[dict]:
-    try:
-        raw = await run_gh(
-            "api",
-            f"repos/{owner}/{repo}/commits/{sha}/check-runs?per_page=100",
-        )
-    except GhError as exc:
-        if exc.is_not_found():
-            return []
-        raise
-    if not raw.strip():
-        return []
+_PR_HEAD_QUERY = """
+query($owner: String!, $repo: String!, $pr: Int!) {
+  repository(owner: $owner, name: $repo) {
+    pullRequest(number: $pr) {
+      headRefOid
+    }
+  }
+}
+"""
+
+
+async def get_pr_head_info(owner: str, repo: str, pr: int) -> dict[str, str | None]:
+    """Return the PR head SHA.
+
+    GitHub does not expose a reliable PR head-ref update timestamp here.
+    ``pushed_at`` remains as ``None`` for caller compatibility; review windows
+    use an explicit timestamp or the watcher's first observation instead.
+    """
+    raw = await run_gh(
+        "api",
+        "graphql",
+        "-f",
+        f"query={_PR_HEAD_QUERY}",
+        "-f",
+        f"owner={owner}",
+        "-f",
+        f"repo={repo}",
+        "-F",
+        f"pr={pr}",
+    )
     payload = json.loads(raw)
-    if not isinstance(payload, dict):
+    pull = (
+        payload.get("data", {})
+        .get("repository", {})
+        .get("pullRequest")
+    ) or {}
+    sha = (pull.get("headRefOid") or "").strip()
+    if not sha:
+        raise RuntimeError(f"get_pr_head_info: empty head SHA for PR #{pr}")
+    return {"sha": sha, "pushed_at": None}
+
+
+async def get_workflow_runs(owner: str, repo: str, run_ids: list[int]) -> list[dict]:
+    """Fetch explicitly requested Actions workflow runs concurrently."""
+    if not run_ids:
         return []
-    return payload.get("check_runs", [])
+
+    async def fetch(run_id: int) -> dict:
+        raw = await run_gh("api", f"repos/{owner}/{repo}/actions/runs/{run_id}")
+        payload = json.loads(raw)
+        if not isinstance(payload, dict):
+            raise RuntimeError(f"workflow run {run_id}: invalid GitHub response")
+        return payload
+
+    return list(await asyncio.gather(*(fetch(run_id) for run_id in run_ids)))
+
+
+async def get_check_runs(owner: str, repo: str, sha: str) -> list[dict]:
+    return await _paginated_object_items(
+        f"repos/{owner}/{repo}/commits/{sha}/check-runs?per_page=100",
+        "check_runs",
+    )
 
 
 def check_timestamp(run: dict) -> datetime | None:

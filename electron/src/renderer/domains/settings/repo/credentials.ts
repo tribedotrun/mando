@@ -8,9 +8,11 @@ import type {
   CredentialListResponse,
   CredentialRateLimitStatus,
   CredentialWindowInfo,
+  UpdateCredentialTokenResponse,
 } from '#shared/daemon-contract';
 
 export type { CredentialInfo, CredentialRateLimitStatus, CredentialWindowInfo };
+export type { UpdateCredentialTokenResponse };
 
 const QUERY_KEY = queryKeys.credentials.all;
 
@@ -28,6 +30,17 @@ export function useCredentialAdd() {
   return useMutation({
     mutationFn: ({ label, token }: { label: string; token: string }) =>
       toReactQuery(apiPostRouteR('postCredentialsSetuptoken', { label, token })),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: QUERY_KEY });
+    },
+  });
+}
+
+export function useCredentialUpdateToken() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, token }: { id: number; token: string }) =>
+      toReactQuery(apiPostRouteR('postCredentialsByIdToken', { token }, { params: { id } })),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: QUERY_KEY });
     },

@@ -4,13 +4,9 @@ import { Card, CardContent } from '#renderer/global/ui/primitives/card';
 import { Skeleton } from '#renderer/global/ui/primitives/skeleton';
 import {
   AddCredentialForm,
-  CredentialActions,
-  CredentialExpiry,
+  ClaudeCredentialRow,
   ShowAddButton,
-  StatusBadge,
-  TokenDisplay,
 } from '#renderer/domains/settings/ui/SettingsAccountsParts';
-import { CredentialUsage } from '#renderer/domains/settings/ui/CredentialUsage';
 import type { CredentialInfo } from '#renderer/domains/settings/runtime/hooks';
 
 interface ClaudeCredentialsSectionProps {
@@ -58,31 +54,14 @@ export function ClaudeCredentialsSection({
           ) : (
             <div className="space-y-3">
               {items.map((cred) => (
-                <div
+                <ClaudeCredentialRow
                   key={cred.id}
-                  className="rounded-lg border border-border bg-background px-4 py-3"
-                >
-                  <div className="flex items-start justify-between">
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
-                        <span className="truncate text-sm font-medium text-foreground">
-                          {cred.label}
-                        </span>
-                        <StatusBadge cred={cred} />
-                        <CredentialExpiry expiresAt={cred.expiresAt} />
-                      </div>
-                      <TokenDisplay cred={cred} />
-                    </div>
-                    <CredentialActions
-                      isDisabled={cred.isDisabled}
-                      onRemove={() => onRemove(cred.id)}
-                      onSetDisabled={(disabled) => onSetDisabled(cred.id, disabled)}
-                      removePending={removePending}
-                      setDisabledPending={setDisabledPending}
-                    />
-                  </div>
-                  <CredentialUsage cred={cred} />
-                </div>
+                  cred={cred}
+                  onRemove={() => onRemove(cred.id)}
+                  onSetDisabled={(disabled) => onSetDisabled(cred.id, disabled)}
+                  removePending={removePending}
+                  setDisabledPending={setDisabledPending}
+                />
               ))}
             </div>
           )}

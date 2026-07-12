@@ -7,6 +7,7 @@ use arc_swap::ArcSwap;
 use sqlx::SqlitePool;
 use tokio::sync::{watch, Mutex};
 
+use super::codex_login_runtime::CodexLoginFlow;
 use super::runtime_helpers::{
     clamped_tick_duration, classify_change, hydrate_projects, load_workflows_for_mode,
     sync_process_env, validate_captain_workflow,
@@ -53,6 +54,9 @@ pub struct SettingsRuntime {
     workflow_mode: WorkflowRuntimeMode,
     write_mu: Arc<Mutex<()>>,
     tick_tx: watch::Sender<Duration>,
+    /// Single in-flight (or most-recently-finished) Codex browser login
+    /// flow. `None` until the first `start_codex_login` call.
+    pub(crate) codex_login: Arc<Mutex<Option<CodexLoginFlow>>>,
 }
 
 impl SettingsRuntime {
@@ -93,6 +97,7 @@ impl SettingsRuntime {
             workflow_mode,
             write_mu: Arc::new(Mutex::new(())),
             tick_tx,
+            codex_login: Arc::new(Mutex::new(None)),
         }
     }
 

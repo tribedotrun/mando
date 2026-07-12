@@ -56,7 +56,8 @@ python3 ~/.claude/skills/mando-pr-summary/validate-pr-body.py --pr <pr_number>
 
 **Do**
 
-Post each trigger only if not already on the PR (idempotent):
+Post each trigger after the final source push. A trigger from an older head does
+not cover the current diff; re-post it when the head changes:
 
 1. `@codex review this PR` — always.
 2. `cursor review` — only when the PR is big or critical: a large or multi-domain diff, or one touching risky surfaces (auth, funds/payments, data migrations, deploy/infra). Skip it for routine PRs.
@@ -65,15 +66,32 @@ Post each trigger only if not already on the PR (idempotent):
 
 **Do**
 
-- Run the wait-aware PR status gate:
+- Run the wait-aware PR ship gate. It owns the polling loop and prints only
+  state changes plus a one-minute heartbeat:
 
 ```bash
 python3 ~/.claude/skills/mando-pr/pr_status.py --watch <pr_number>
 ```
 
+- Add `--review-window-seconds 600` when the project requires a ten-minute
+  final-push review window. Prefer the exact ISO-8601 final-push time via
+  `--window-start`. Without it, GitHub does not expose a reliable PR ref-update
+  time, so `--watch` starts the window when it first observes the head. This can
+  wait longer, but never shortens the required window.
+- Add `--run-id <id>` once per GitHub Actions run that belongs to the ship
+  operation. Use `--max-wait-seconds <seconds>` when those runs can exceed the
+  default five-minute watch. The run must target the watched PR head SHA.
+- Add `--checks-policy informational` when the project's instructions say PR
+  checks are informational. Explicit `--run-id` workflows remain blocking.
+
 - For each review comment: verify against project context — fix when valid, push back when wrong, reply on every thread.
 - Ignore bot links to external apps (e.g. "see N more in …"); only act on findings posted inline on the PR.
 - Address anything `pr_status.py` reports. Commit, push fixes, rerun until `ALL CLEAR`. Do not wrap `pr_status.py` in manual shell delay or polling commands.
+- If a review bot reports quota, credits, plan exhaustion, or that the reviewer
+  is disabled, the watcher marks it `UNAVAILABLE`. Do not retry or wait.
+- A reviewer is `DONE` only after current-head terminal evidence: a submitted
+  review or that reviewer's top-level completion marker. Inline findings remain
+  actionable comments and never count as reviewer completion.
 - Reply on review *line* comments via `gh api repos/{owner}/{repo}/pulls/{pr}/comments` with `in_reply_to={comment_id}` (top-level `gh pr comment` won't thread). For top-level PR conversation comments (not anchored to a line), use `gh pr comment <pr> --body '...'`. A thread counts as addressed once the PR author has replied.
 
 ## Step 6 — Clean up

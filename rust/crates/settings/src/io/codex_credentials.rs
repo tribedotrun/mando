@@ -27,6 +27,9 @@ pub struct ParsedCodexAuth {
 pub struct CodexJwtClaims {
     pub plan_type: Option<String>,
     pub account_id: Option<String>,
+    /// The signed-in user's email, when the id_token carries one. Used as
+    /// a label fallback for the browser-login flow.
+    pub email: Option<String>,
     /// Unix seconds when the JWT expires.
     pub exp: Option<i64>,
 }
@@ -149,11 +152,17 @@ pub fn decode_id_token_claims(id_token: &str) -> Result<CodexJwtClaims, AuthJson
         .or_else(|| payload.get("chatgpt_account_id"))
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
+    let email = nested
+        .and_then(|n| n.get("email"))
+        .or_else(|| payload.get("email"))
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
     let exp = payload.get("exp").and_then(|v| v.as_i64());
 
     Ok(CodexJwtClaims {
         plan_type,
         account_id,
+        email,
         exp,
     })
 }
@@ -461,6 +470,28 @@ mod tests {
         let claims = decode_id_token_claims(&token).unwrap();
         assert_eq!(claims.plan_type.as_deref(), Some("plus"));
         assert_eq!(claims.account_id.as_deref(), Some("acct-flat"));
+    }
+
+    #[test]
+    fn jwt_claims_email_nested_and_top_level() {
+        let nested = serde_json::json!({
+            "exp": 1i64,
+            "https://api.openai.com/auth": {
+                "chatgpt_account_id": "acct-nested",
+            },
+            "email": "person@example.com",
+        });
+        let token = make_jwt(nested);
+        let claims = decode_id_token_claims(&token).unwrap();
+        assert_eq!(claims.email.as_deref(), Some("person@example.com"));
+
+        let flat = serde_json::json!({
+            "exp": 1i64,
+            "email": "flat@example.com",
+        });
+        let token = make_jwt(flat);
+        let claims = decode_id_token_claims(&token).unwrap();
+        assert_eq!(claims.email.as_deref(), Some("flat@example.com"));
     }
 
     #[test]

@@ -1,9 +1,10 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Badge } from '#renderer/global/ui/primitives/badge';
 import {
   CredentialActions,
   CredentialExpiry,
   StatusBadge,
+  UpdateCodexCredentialAuthForm,
 } from '#renderer/domains/settings/ui/SettingsAccountsParts';
 import { CredentialUsage } from '#renderer/domains/settings/ui/CredentialUsage';
 import type { CredentialInfo } from '#renderer/domains/settings/runtime/hooks';
@@ -23,6 +24,8 @@ export function CodexCredentialRow({
   removePending,
   setDisabledPending,
 }: CodexCredentialRowProps): React.ReactElement {
+  const [showAuthEditor, setShowAuthEditor] = useState(false);
+
   return (
     <div className="rounded-lg border border-border bg-background px-4 py-3">
       <div className="flex items-start justify-between gap-2">
@@ -43,11 +46,18 @@ export function CodexCredentialRow({
           isDisabled={cred.isDisabled}
           onRemove={onRemove}
           onSetDisabled={onSetDisabled}
+          onUpdateAuth={() => setShowAuthEditor((prev) => !prev)}
           removePending={removePending}
           setDisabledPending={setDisabledPending}
         />
       </div>
       <CredentialUsage cred={cred} />
+      {showAuthEditor ? (
+        <UpdateCodexCredentialAuthForm
+          credentialId={cred.id}
+          onClose={() => setShowAuthEditor(false)}
+        />
+      ) : null}
     </div>
   );
 }
