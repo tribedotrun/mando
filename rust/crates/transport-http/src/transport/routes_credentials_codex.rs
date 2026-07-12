@@ -42,6 +42,16 @@ pub(crate) fn codex_credential_routes() -> ApiRouter<AppState> {
         body = api_types::SyncCodexCredentialRequest,
         res = api_types::SyncCodexCredentialResponse
     );
+    let router = crate::api_route!(
+        router,
+        POST "/api/credentials/codex/{id}/auth",
+        transport = Json,
+        auth = Protected,
+        handler = update_codex_credential_auth,
+        body = api_types::UpdateCodexCredentialAuthRequest,
+        params = api_types::CredentialIdParams,
+        res = api_types::AddCodexCredentialResponse
+    );
     crate::api_route!(
         router,
         GET "/api/credentials/codex/{id}/reset-credits",
@@ -145,44 +155,106 @@ async fn add_codex_credential(
                 warning: stored.warning,
             }))
         }
-        Err(CodexCredentialError::AuthJson(e)) => Err(error_response(
-            StatusCode::BAD_REQUEST,
-            &format!("invalid auth.json: {e}"),
-        )),
-        Err(CodexCredentialError::NoAccountId) => Err(error_response(
+        Err(e) => Err(map_codex_store_error(e)),
+    }
+}
+
+/// Map [`CodexCredentialError`] variants from the shared validate-then-store
+/// pipeline to HTTP errors. Used by both the add endpoint and the row-scoped
+/// auth update endpoint.
+fn map_codex_store_error(e: CodexCredentialError) -> ApiError {
+    match e {
+        CodexCredentialError::AuthJson(e) => {
+            error_response(StatusCode::BAD_REQUEST, &format!("invalid auth.json: {e}"))
+        }
+        CodexCredentialError::NoAccountId => error_response(
             StatusCode::BAD_REQUEST,
             "auth.json has no account_id and the JWT carries no chatgpt_account_id claim",
-        )),
-        Err(CodexCredentialError::DuplicateLabel(label, _)) => Err(error_response(
+        ),
+        CodexCredentialError::DuplicateLabel(label, _) => error_response(
             StatusCode::CONFLICT,
             &format!("credential label {label:?} already exists"),
-        )),
-        Err(CodexCredentialError::DuplicateAccount(account, id)) => Err(error_response(
+        ),
+        CodexCredentialError::DuplicateAccount(account, id) => error_response(
             StatusCode::CONFLICT,
             &format!("a Codex credential for account {account} already exists (id={id})"),
-        )),
-        Err(CodexCredentialError::AmbientSessionConflict) => Err(error_response(
+        ),
+        CodexCredentialError::AmbientSessionConflict => error_response(
             StatusCode::BAD_REQUEST,
-            "this is your live personal Codex login session (~/.codex); capture a separate \
-             session instead: CODEX_HOME=$(mktemp -d) codex login, paste that auth.json, then \
-             delete the temp dir WITHOUT running `codex logout`",
-        )),
-        Err(CodexCredentialError::PermanentRefreshFailure(reason)) => Err(error_response(
+            "this is your live personal Codex login session (~/.codex); use Sign in with \
+             browser in Settings -> Accounts, or capture manually: d=$(mktemp -d); \
+             CODEX_HOME=\"$d\" codex login; then paste \"$d/auth.json\" and delete the dir \
+             WITHOUT running codex logout",
+        ),
+        CodexCredentialError::PermanentRefreshFailure(reason) => error_response(
             StatusCode::BAD_REQUEST,
             &format!(
-                "pasted session is invalid or revoked ({reason}); capture a fresh session: \
-                 CODEX_HOME=$(mktemp -d) codex login, paste that auth.json, then delete the \
-                 temp dir WITHOUT running `codex logout`"
+                "pasted session is invalid or revoked ({reason}); use Sign in with browser in \
+                 Settings -> Accounts, or capture manually: d=$(mktemp -d); CODEX_HOME=\"$d\" \
+                 codex login; then paste \"$d/auth.json\" and delete the dir WITHOUT running \
+                 codex logout"
             ),
-        )),
-        Err(CodexCredentialError::Probe(e)) => Err(error_response(
+        ),
+        CodexCredentialError::Probe(e) => error_response(
             StatusCode::BAD_GATEWAY,
             &format!("upstream usage probe failed: {e}"),
-        )),
-        Err(e) => Err(internal_error(
+        ),
+        e => internal_error(
             anyhow::Error::msg(e.to_string()),
             "failed to store codex credential",
+        ),
+    }
+}
+
+/// POST /api/credentials/codex/:id/auth — replace the stored session on an
+/// existing Codex credential with a freshly captured auth.json for the SAME
+/// ChatGPT account. Runs the full add pipeline against the row's existing
+/// label (validate, force-refresh, upsert same row, probe usage).
+#[crate::instrument_api(method = "POST", path = "/api/credentials/codex/{id}/auth")]
+async fn update_codex_credential_auth(
+    State(state): State<AppState>,
+    axum::extract::Path(api_types::CredentialIdParams { id }): axum::extract::Path<
+        api_types::CredentialIdParams,
+    >,
+    Json(body): Json<api_types::UpdateCodexCredentialAuthRequest>,
+) -> Result<Json<api_types::AddCodexCredentialResponse>, ApiError> {
+    let auth_json_text = body.auth_json.trim();
+    if auth_json_text.is_empty() {
+        return Err(error_response(
+            StatusCode::BAD_REQUEST,
+            "auth_json is required",
+        ));
+    }
+    match state
+        .settings
+        .update_codex_credential_auth(id, auth_json_text)
+        .await
+    {
+        Ok((label, stored)) => {
+            state.bus.send(global_bus::BusPayload::Credentials(None));
+            Ok(Json(api_types::AddCodexCredentialResponse {
+                ok: true,
+                id: stored.id,
+                label,
+                account_id: stored.account_id,
+                plan_type: stored.plan_type,
+                warning: stored.warning,
+            }))
+        }
+        Err(CodexCredentialError::NotFound(id)) => Err(error_response(
+            StatusCode::NOT_FOUND,
+            &format!("credential id={id} not found"),
         )),
+        Err(CodexCredentialError::NotCodex) => Err(error_response(
+            StatusCode::BAD_REQUEST,
+            "credential is not a Codex row",
+        )),
+        Err(CodexCredentialError::AccountMismatch { .. }) => Err(error_response(
+            StatusCode::BAD_REQUEST,
+            "pasted session belongs to a different ChatGPT account than this credential; add \
+             it as a new account instead",
+        )),
+        Err(e) => Err(map_codex_store_error(e)),
     }
 }
 

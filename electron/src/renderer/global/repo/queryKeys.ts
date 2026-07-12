@@ -95,6 +95,7 @@ export const queryKeys = {
     all: ['credentials'] as const,
     list: () => ['credentials', 'list'] as const,
     codexResetCredits: (id: number) => ['credentials', 'codex-reset-credits', id] as const,
+    codexLogin: () => ['credentials', 'codex-login'] as const,
   },
 
   // ── Highlighter ──

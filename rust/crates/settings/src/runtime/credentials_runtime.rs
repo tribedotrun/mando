@@ -64,6 +64,38 @@ impl SettingsRuntime {
         Ok(id)
     }
 
+    /// Replace the access token on an existing Claude credential in place
+    /// (same label, same row). `expires_at` is the new token's decoded JWT
+    /// expiry (Unix ms) when it carries one; it overwrites the stored value
+    /// wholesale, which also un-expires rows previously stamped by
+    /// `mark_credential_expired`. Returns the row's label, or `None` when
+    /// no Claude row has that id.
+    #[tracing::instrument(skip_all)]
+    pub async fn update_credential_token(
+        &self,
+        id: i64,
+        token: &str,
+        expires_at: Option<i64>,
+    ) -> SettingsResult<Option<String>> {
+        let token_updated_at = time::OffsetDateTime::now_utc().unix_timestamp();
+        let label = crate::io::credentials::update_access_token(
+            &self.db_pool,
+            id,
+            token,
+            expires_at,
+            token_updated_at,
+        )
+        .await?;
+        if label.is_some() {
+            tracing::info!(
+                module = "credentials",
+                id,
+                "updated credential token in place"
+            );
+        }
+        Ok(label)
+    }
+
     #[tracing::instrument(skip_all)]
     pub async fn find_credential_by_label(&self, label: &str) -> SettingsResult<Option<i64>> {
         crate::io::credentials::find_by_label(&self.db_pool, label)

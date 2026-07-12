@@ -29,6 +29,16 @@ export {
   type CodexResetCreditsResponse,
 } from '#renderer/domains/settings/runtime/useFeedbackCodexCredentials';
 
+export {
+  useCredentialUpdateToken,
+  useCodexCredentialUpdateAuth,
+} from '#renderer/domains/settings/runtime/useFeedbackUpdateCredentialAuth';
+
+export {
+  useFeedbackCodexLogin,
+  type UseFeedbackCodexLoginResult,
+} from '#renderer/domains/settings/runtime/useFeedbackCodexLogin';
+
 /**
  * Returns a stable callback that reads the latest config from the React Query cache.
  * Returns `null` when the cache hasn't loaded the config yet — callers should defend.

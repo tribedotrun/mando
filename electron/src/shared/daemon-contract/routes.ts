@@ -137,6 +137,29 @@ export interface Routes {
     body: Types.AddCodexCredentialRequest;
     res: Types.AddCodexCredentialResponse;
   };
+  postCredentialsCodexLoginCancel: {
+    method: 'POST';
+    path: '/api/credentials/codex/login/cancel';
+    transport: 'json';
+    auth: 'protected';
+    body: Types.EmptyRequest;
+    res: Types.CancelCodexLoginResponse;
+  };
+  getCredentialsCodexLoginCurrent: {
+    method: 'GET';
+    path: '/api/credentials/codex/login/current';
+    transport: 'json';
+    auth: 'protected';
+    res: Types.CodexLoginStatusResponse;
+  };
+  postCredentialsCodexLoginStart: {
+    method: 'POST';
+    path: '/api/credentials/codex/login/start';
+    transport: 'json';
+    auth: 'protected';
+    body: Types.StartCodexLoginRequest;
+    res: Types.StartCodexLoginResponse;
+  };
   postCredentialsCodexPick: {
     method: 'POST';
     path: '/api/credentials/codex/pick';
@@ -152,6 +175,15 @@ export interface Routes {
     auth: 'protected';
     body: Types.SyncCodexCredentialRequest;
     res: Types.SyncCodexCredentialResponse;
+  };
+  postCredentialsCodexByIdAuth: {
+    method: 'POST';
+    path: '/api/credentials/codex/{id}/auth';
+    transport: 'json';
+    auth: 'protected';
+    body: Types.UpdateCodexCredentialAuthRequest;
+    params: Types.CredentialIdParams;
+    res: Types.AddCodexCredentialResponse;
   };
   getCredentialsCodexByIdResetcredits: {
     method: 'GET';
@@ -219,6 +251,15 @@ export interface Routes {
     auth: 'protected';
     params: Types.CredentialIdParams;
     res: Types.CredentialTokenResponse;
+  };
+  postCredentialsByIdToken: {
+    method: 'POST';
+    path: '/api/credentials/{id}/token';
+    transport: 'json';
+    auth: 'protected';
+    body: Types.UpdateCredentialTokenRequest;
+    params: Types.CredentialIdParams;
+    res: Types.UpdateCredentialTokenResponse;
   };
   getEvents: {
     method: 'GET';
@@ -1105,6 +1146,24 @@ export const routes = {
     transport: 'json',
     auth: 'protected',
   },
+  postCredentialsCodexLoginCancel: {
+    method: 'POST',
+    path: '/api/credentials/codex/login/cancel',
+    transport: 'json',
+    auth: 'protected',
+  },
+  getCredentialsCodexLoginCurrent: {
+    method: 'GET',
+    path: '/api/credentials/codex/login/current',
+    transport: 'json',
+    auth: 'protected',
+  },
+  postCredentialsCodexLoginStart: {
+    method: 'POST',
+    path: '/api/credentials/codex/login/start',
+    transport: 'json',
+    auth: 'protected',
+  },
   postCredentialsCodexPick: {
     method: 'POST',
     path: '/api/credentials/codex/pick',
@@ -1114,6 +1173,12 @@ export const routes = {
   postCredentialsCodexSync: {
     method: 'POST',
     path: '/api/credentials/codex/sync',
+    transport: 'json',
+    auth: 'protected',
+  },
+  postCredentialsCodexByIdAuth: {
+    method: 'POST',
+    path: '/api/credentials/codex/{id}/auth',
     transport: 'json',
     auth: 'protected',
   },
@@ -1161,6 +1226,12 @@ export const routes = {
   },
   getCredentialsByIdToken: {
     method: 'GET',
+    path: '/api/credentials/{id}/token',
+    transport: 'json',
+    auth: 'protected',
+  },
+  postCredentialsByIdToken: {
+    method: 'POST',
     path: '/api/credentials/{id}/token',
     transport: 'json',
     auth: 'protected',

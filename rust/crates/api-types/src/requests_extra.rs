@@ -327,6 +327,14 @@ pub struct SetupTokenRequest {
     pub token: String,
 }
 
+/// POST /api/credentials/{id}/token — replace the stored access token on
+/// an existing Claude credential in place (same label, same row).
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct UpdateCredentialTokenRequest {
+    pub token: String,
+}
+
 /// POST /api/config/setup
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(optional_fields)]

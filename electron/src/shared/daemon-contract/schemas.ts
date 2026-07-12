@@ -169,6 +169,9 @@ export const boolTouchedResponseSchema = z
   .strict();
 export const bulkFailureSchema = z.object({ id: z.number(), error: z.string() }).strict();
 export const bulkResultStatusSchema = z.enum(['ok', 'partial', 'error']);
+export const cancelCodexLoginResponseSchema = z
+  .object({ ok: z.boolean(), cancelled: z.boolean() })
+  .strict();
 export const captainConfigSchema = z
   .object({
     autoSchedule: z.boolean(),
@@ -307,6 +310,21 @@ export const codexCredentialPickSchema = z
   .strict();
 export const codexCredentialPickResponseSchema = z
   .object({ pick: z.lazy(() => codexCredentialPickSchema).nullable() })
+  .strict();
+export const codexLoginFlowInfoSchema = z
+  .object({
+    loginId: z.string(),
+    status: z.lazy(() => codexLoginStatusSchema),
+    credentialId: z.number().nullable(),
+    authUrl: z.string().nullable(),
+    label: z.string().nullable(),
+    warning: z.lazy(() => codexCredentialAddWarningSchema).nullable(),
+    error: z.string().nullable(),
+  })
+  .strict();
+export const codexLoginStatusSchema = z.enum(['pending', 'success', 'failed', 'cancelled']);
+export const codexLoginStatusResponseSchema = z
+  .object({ flow: z.lazy(() => codexLoginFlowInfoSchema).nullable() })
   .strict();
 export const codexResetCreditSchema = z
   .object({
@@ -1238,6 +1256,15 @@ export const sseSnapshotDataSchema = z
 export const sseSnapshotErrorDataSchema = z
   .object({ message: z.string(), retry: z.boolean() })
   .strict();
+export const startCodexLoginRequestSchema = z
+  .object({
+    label: z.string().nullable().optional(),
+    credentialId: z.number().nullable().optional(),
+  })
+  .strict();
+export const startCodexLoginResponseSchema = z
+  .object({ ok: z.boolean(), loginId: z.string() })
+  .strict();
 export const statusEventDataSchema = z
   .object({ action: z.string().nullable(), affected_task_ids: z.array(z.number()).nullable() })
   .strict();
@@ -2115,6 +2142,11 @@ export const unknownEventSchema = z
     raw: z.string(),
   })
   .strict();
+export const updateCodexCredentialAuthRequestSchema = z.object({ authJson: z.string() }).strict();
+export const updateCredentialTokenRequestSchema = z.object({ token: z.string() }).strict();
+export const updateCredentialTokenResponseSchema = z
+  .object({ ok: z.boolean(), id: z.number(), label: z.string() })
+  .strict();
 export const userContentBlockSchema = z.union([
   z.object({ kind: z.literal('text'), data: z.lazy(() => userTextBlockSchema) }).strict(),
   z.object({ kind: z.literal('image'), data: z.lazy(() => userImageBlockSchema) }).strict(),
@@ -2254,6 +2286,7 @@ export const resSchemas = {
   getCredentials: credentialsListResponseSchema,
   getCredentialsByIdToken: credentialTokenResponseSchema,
   getCredentialsCodexByIdResetcredits: codexResetCreditsResponseSchema,
+  getCredentialsCodexLoginCurrent: codexLoginStatusResponseSchema,
   getHealth: healthResponseSchema,
   getHealthSystem: systemHealthResponseSchema,
   getHealthTelegram: telegramHealthSchema,
@@ -2300,7 +2333,11 @@ export const resSchemas = {
   postCredentialsByIdDisable: credentialMutationResponseSchema,
   postCredentialsByIdEnable: credentialMutationResponseSchema,
   postCredentialsByIdProbe: probeCredentialResponseSchema,
+  postCredentialsByIdToken: updateCredentialTokenResponseSchema,
   postCredentialsCodex: addCodexCredentialResponseSchema,
+  postCredentialsCodexByIdAuth: addCodexCredentialResponseSchema,
+  postCredentialsCodexLoginCancel: cancelCodexLoginResponseSchema,
+  postCredentialsCodexLoginStart: startCodexLoginResponseSchema,
   postCredentialsCodexPick: codexCredentialPickResponseSchema,
   postCredentialsCodexSync: syncCodexCredentialResponseSchema,
   postCredentialsPick: credentialPickResponseSchema,
@@ -2377,7 +2414,11 @@ export const bodySchemas = {
   postCredentialsByIdDisable: emptyRequestSchema,
   postCredentialsByIdEnable: emptyRequestSchema,
   postCredentialsByIdProbe: emptyRequestSchema,
+  postCredentialsByIdToken: updateCredentialTokenRequestSchema,
   postCredentialsCodex: addCodexCredentialRequestSchema,
+  postCredentialsCodexByIdAuth: updateCodexCredentialAuthRequestSchema,
+  postCredentialsCodexLoginCancel: emptyRequestSchema,
+  postCredentialsCodexLoginStart: startCodexLoginRequestSchema,
   postCredentialsCodexPick: credentialPickRequestSchema,
   postCredentialsCodexSync: syncCodexCredentialRequestSchema,
   postCredentialsPick: credentialPickRequestSchema,
@@ -2478,6 +2519,8 @@ export const paramsSchemas = {
   postCredentialsByIdDisable: credentialIdParamsSchema,
   postCredentialsByIdEnable: credentialIdParamsSchema,
   postCredentialsByIdProbe: credentialIdParamsSchema,
+  postCredentialsByIdToken: credentialIdParamsSchema,
+  postCredentialsCodexByIdAuth: credentialIdParamsSchema,
   postScoutItemsByIdAct: scoutItemIdParamsSchema,
   postScoutItemsByIdTelegraph: scoutItemIdParamsSchema,
   postTasksByIdAdvisor: taskIdParamsSchema,

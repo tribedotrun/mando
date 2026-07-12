@@ -106,6 +106,34 @@ pub async fn insert(
     Ok(id)
 }
 
+/// Replace the access token on an existing Claude credential row in place.
+/// Overwrites `expires_at` wholesale with the new token's decoded expiry
+/// (possibly NULL) — this deliberately un-expires rows that `mark_expired`
+/// stamped after a 401 probe — and clears any rate-limit cooldown.
+/// Returns the row's label, or `None` when no Claude row has that id.
+pub async fn update_access_token(
+    pool: &SqlitePool,
+    id: i64,
+    access_token: &str,
+    expires_at: Option<i64>,
+    token_updated_at: i64,
+) -> Result<Option<String>> {
+    let label: Option<String> = sqlx::query_scalar(
+        "UPDATE credentials
+         SET access_token = ?1, expires_at = ?2, token_updated_at = ?3,
+             rate_limit_cooldown_until = NULL, updated_at = datetime('now')
+         WHERE id = ?4 AND provider = 'claude'
+         RETURNING label",
+    )
+    .bind(access_token)
+    .bind(expires_at)
+    .bind(token_updated_at)
+    .bind(id)
+    .fetch_optional(pool)
+    .await?;
+    Ok(label)
+}
+
 /// Delete a credential by ID. Returns true if a row was deleted.
 /// Also nulls `credential_id` on any existing `cc_sessions` rows so there
 /// are no orphaned FK references (SQLite `ALTER TABLE` can't add ON DELETE

@@ -450,7 +450,7 @@ impl SettingsRuntime {
     }
 }
 
-fn claims_from_optional_id_token(
+pub(super) fn claims_from_optional_id_token(
     id_token: Option<&str>,
 ) -> Result<codex_credentials::CodexJwtClaims, CodexCredentialError> {
     match id_token {
@@ -458,6 +458,7 @@ fn claims_from_optional_id_token(
         None => Ok(codex_credentials::CodexJwtClaims {
             plan_type: None,
             account_id: None,
+            email: None,
             exp: None,
         }),
     }

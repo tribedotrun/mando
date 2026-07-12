@@ -3,6 +3,10 @@ import { FileUp } from 'lucide-react';
 import { Input } from '#renderer/global/ui/primitives/input';
 import { Label } from '#renderer/global/ui/primitives/label';
 import { Button } from '#renderer/global/ui/primitives/button';
+import {
+  CodexAuthCaptureHelp,
+  CodexBrowserLoginButton,
+} from '#renderer/domains/settings/ui/SettingsAccountsParts';
 import { useAddCodexCredentialForm } from '#renderer/domains/settings/runtime/useAddCodexCredentialForm';
 
 interface AddCodexCredentialFormProps {
@@ -27,25 +31,16 @@ export function AddCodexCredentialForm({
 
   return (
     <div className="space-y-3">
-      <div className="space-y-1.5 text-xs text-muted-foreground/70">
-        <p>
-          Run{' '}
-          <code className="rounded bg-muted px-1 py-0.5">CODEX_HOME=$(mktemp -d) codex login</code>{' '}
-          in a terminal, pick the ChatGPT account in the browser, then paste that directory&apos;s{' '}
-          <code className="rounded bg-muted px-1 py-0.5">auth.json</code> below (or pick the file).
-        </p>
-        <p>
-          Afterward, delete the temp directory, but don&apos;t run{' '}
-          <code className="rounded bg-muted px-1 py-0.5">codex logout</code> in it first: logout
-          revokes the session server-side, and any later login in that directory revokes whatever
-          was stored there before.
-        </p>
-        <p>
-          Adding your personal <code className="rounded bg-muted px-1 py-0.5">~/.codex</code>{' '}
-          account here is fine as a separate session, but it shares that account&apos;s rate limits
-          with your personal use.
-        </p>
+      <div className="space-y-1.5">
+        <CodexBrowserLoginButton />
+        <p className="text-xs text-muted-foreground/70">Easiest: sign in with your browser.</p>
       </div>
+      <div className="flex items-center gap-2 text-xs text-muted-foreground/70">
+        <div className="h-px flex-1 bg-border" />
+        or paste auth.json manually
+        <div className="h-px flex-1 bg-border" />
+      </div>
+      <CodexAuthCaptureHelp />
       <div>
         <Label className="mb-1.5 text-xs text-muted-foreground">Label</Label>
         <Input

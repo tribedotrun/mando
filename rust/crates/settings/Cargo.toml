@@ -12,6 +12,7 @@ global-infra = { path = "../global-infra" }
 global-git = { path = "../global-git" }
 global-net = { path = "../global-net" }
 global-claude = { path = "../global-claude" }
+global-bus = { path = "../global-bus" }
 serde.workspace = true
 serde_json.workspace = true
 serde_yaml.workspace = true
@@ -24,9 +25,11 @@ rustc-hash.workspace = true
 iana-time-zone = "0.1"
 sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite"] }
 tokio.workspace = true
+tokio-util.workspace = true
+futures-util.workspace = true
+regex.workspace = true
 reqwest.workspace = true
 arc-swap.workspace = true
 base64 = "0.22"
-
-[dev-dependencies]
+libc = "0.2"
 tempfile = "3"

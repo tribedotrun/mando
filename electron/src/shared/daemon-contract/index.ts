@@ -109,6 +109,7 @@ export type BoolOkResponse = { ok: boolean };
 export type BoolTouchedResponse = { ok: boolean; touched: boolean };
 export type BulkFailure = { id: number; error: string };
 export type BulkResultStatus = 'ok' | 'partial' | 'error';
+export type CancelCodexLoginResponse = { ok: boolean; cancelled: boolean };
 export type CaptainConfig = {
   autoSchedule: boolean;
   autoMerge: boolean;
@@ -210,6 +211,17 @@ export type CodexCredentialPick = {
   authJson: string;
 };
 export type CodexCredentialPickResponse = { pick: CodexCredentialPick | null };
+export type CodexLoginFlowInfo = {
+  loginId: string;
+  status: CodexLoginStatus;
+  credentialId: number | null;
+  authUrl: string | null;
+  label: string | null;
+  warning: CodexCredentialAddWarning | null;
+  error: string | null;
+};
+export type CodexLoginStatus = 'pending' | 'success' | 'failed' | 'cancelled';
+export type CodexLoginStatusResponse = { flow: CodexLoginFlowInfo | null };
 export type CodexResetCredit = {
   title: string;
   description: string | null;
@@ -857,6 +869,15 @@ export type SseSnapshotData = {
   daemon: SseDaemonInfo;
 };
 export type SseSnapshotErrorData = { message: string; retry: boolean };
+export type StartCodexLoginRequest = {
+  label?: string | null;
+  /**
+   * Row-scoped re-login: the captured session must belong to this
+   * existing credential's ChatGPT account, and the row's label is kept.
+   */
+  credentialId?: number | null;
+};
+export type StartCodexLoginResponse = { ok: boolean; loginId: string };
 export type StatusEventData = { action: string | null; affected_task_ids: Array<number> | null };
 export type StatusPayload = { ts: number; data: StatusEventData | null };
 export type StopWorkersResponse = { killed: number };
@@ -1463,6 +1484,14 @@ export type UnknownEvent = {
   rawSubtype: string | null;
   raw: string;
 };
+export type UpdateCodexCredentialAuthRequest = {
+  /**
+   * Raw contents of an OpenAI Codex `auth.json` file. Validated server-side.
+   */
+  authJson: string;
+};
+export type UpdateCredentialTokenRequest = { token: string };
+export type UpdateCredentialTokenResponse = { ok: boolean; id: number; label: string };
 export type UserContentBlock =
   | { kind: 'text'; data: UserTextBlock }
   | { kind: 'image'; data: UserImageBlock }

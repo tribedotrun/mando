@@ -107,6 +107,18 @@ pub struct CodexCredentialPick {
     pub auth_json: String,
 }
 
+/// POST /api/credentials/codex/{id}/auth — replace the stored session on
+/// an existing Codex credential with a freshly captured `auth.json` for the
+/// same ChatGPT account (same label, same row). Responds with the shared
+/// [`AddCodexCredentialResponse`] shape since it runs the same
+/// validate-then-store pipeline as the add endpoint.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct UpdateCodexCredentialAuthRequest {
+    /// Raw contents of an OpenAI Codex `auth.json` file. Validated server-side.
+    pub auth_json: String,
+}
+
 /// POST /api/credentials/codex/sync — persist refreshed tokens from a
 /// per-process `CODEX_HOME/auth.json` back into the credential row.
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -149,4 +161,88 @@ pub struct CredentialPickRequest {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CodexCredentialPickResponse {
     pub pick: Option<CodexCredentialPick>,
+}
+
+/// Status of a single-flight background `codex login` browser-OAuth flow.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum CodexLoginStatus {
+    Pending,
+    Success,
+    Failed,
+    Cancelled,
+}
+
+impl CodexLoginStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Pending => "pending",
+            Self::Success => "success",
+            Self::Failed => "failed",
+            Self::Cancelled => "cancelled",
+        }
+    }
+}
+
+impl std::fmt::Display for CodexLoginStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str((*self).as_str())
+    }
+}
+
+/// POST /api/credentials/codex/login/start — begin a 1-click browser OAuth
+/// login. Cancels and replaces any already-pending flow.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[ts(optional_fields)]
+pub struct StartCodexLoginRequest {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub label: Option<String>,
+    /// Row-scoped re-login: the captured session must belong to this
+    /// existing credential's ChatGPT account, and the row's label is kept.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub credential_id: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct StartCodexLoginResponse {
+    pub ok: bool,
+    pub login_id: String,
+}
+
+/// Snapshot of the single in-flight (or most-recently-finished) Codex
+/// browser login flow. `auth_url` populates once `codex login` prints the
+/// callback URL; `label` and `warning` populate on `Success`; `error`
+/// populates on `Failed`. `credential_id` is set for a row-scoped re-login
+/// so the UI can render the pending state on that specific row.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CodexLoginFlowInfo {
+    pub login_id: String,
+    pub status: CodexLoginStatus,
+    pub credential_id: Option<i64>,
+    pub auth_url: Option<String>,
+    pub label: Option<String>,
+    pub warning: Option<CodexCredentialAddWarning>,
+    pub error: Option<String>,
+}
+
+/// GET /api/credentials/codex/login/current — `flow` is `None` when no
+/// login flow has run since the daemon started.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CodexLoginStatusResponse {
+    pub flow: Option<CodexLoginFlowInfo>,
+}
+
+/// POST /api/credentials/codex/login/cancel — `cancelled` is `false` when
+/// there was no pending flow to cancel.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CancelCodexLoginResponse {
+    pub ok: bool,
+    pub cancelled: bool,
 }

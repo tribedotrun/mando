@@ -98,3 +98,12 @@ pub struct SetupTokenResponse {
     pub id: Option<i64>,
     pub label: Option<String>,
 }
+
+/// POST /api/credentials/{id}/token — response.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct UpdateCredentialTokenResponse {
+    pub ok: bool,
+    pub id: i64,
+    pub label: String,
+}
