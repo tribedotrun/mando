@@ -144,7 +144,7 @@ async fn run_captain_tick_inner(
             store.pool().clone(),
         )
     };
-    // Sync branch from worktrees before snapshotting (mando-pr renames branches).
+    // Sync branch from worktrees before snapshotting (x-pr renames branches).
     if !dry_run {
         super::tick_branch_sync::sync_branches(&mut items).await;
     }

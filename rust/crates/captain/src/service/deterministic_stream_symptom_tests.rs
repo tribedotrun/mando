@@ -177,7 +177,7 @@ fn tool_result_is_error_in_middle_does_not_route_to_broken_session() {
 
 #[test]
 fn skill_template_mentioning_rate_limit_does_not_trigger() {
-    // Regression guard for task 86 worker-86-2: the mando-pr-summary skill
+    // Regression guard for task 86 worker-86-2: the x-pr-summary skill
     // template contains the literal phrase "rate limit/cache info", injected
     // as a user message. Under the old substring matcher this triggered
     // RateLimitAborted. Structural detection must ignore user/assistant

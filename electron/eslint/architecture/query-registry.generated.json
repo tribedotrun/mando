@@ -4,6 +4,7 @@
     "useActivityStats",
     "useAppVersion",
     "useClaudeCodeCheck",
+    "useCodexDesktopAppStatusQuery",
     "useCodexLoginStatus",
     "useCodexResetCredits",
     "useConfig",

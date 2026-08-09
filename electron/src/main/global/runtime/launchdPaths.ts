@@ -2,37 +2,12 @@ import { app } from 'electron';
 import path from 'path';
 import fs from 'fs';
 import log from '#main/global/providers/logger';
-import { daemonInstallPath, cliInstallPath } from '#main/global/service/launchd';
-
-/** Resolve cargo target dir — respects env overrides, then walks upward to find rust/target. */
-function cargoTargetDir(): string {
-  const override = process.env.MANDO_RUST_TARGET_DIR || process.env.CARGO_TARGET_DIR;
-  if (override) {
-    return path.isAbsolute(override) ? override : path.resolve(process.cwd(), override);
-  }
-
-  let dir = path.resolve(__dirname);
-  for (let i = 0; i < 8; i++) {
-    for (const candidate of [
-      path.join(dir, 'rust', 'target', 'debug', 'mando-gw'),
-      path.join(dir, 'target', 'debug', 'mando-gw'),
-    ]) {
-      if (fs.existsSync(candidate)) {
-        return path.dirname(candidate);
-      }
-    }
-    const parent = path.dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
-  }
-
-  return path.resolve(__dirname, '../../../../rust/target/debug');
-}
-
-function cliSourcePath(): string {
-  if (app.isPackaged) return path.join(process.resourcesPath!, 'mando');
-  return path.join(cargoTargetDir(), 'mando');
-}
+import {
+  cargoTargetDir,
+  cliInstallPath,
+  cliSourcePath,
+  daemonInstallPath,
+} from '#main/global/service/launchd';
 
 /** Source daemon binary: app bundle or cargo build output. */
 function daemonSourcePath(): string {

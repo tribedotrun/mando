@@ -98,6 +98,13 @@ export const queryKeys = {
     codexLogin: () => ['credentials', 'codex-login'] as const,
   },
 
+  // ── Codex desktop app (native account swap) ──
+  codexDesktopApp: {
+    all: ['codexDesktopApp'] as const,
+    status: () => ['codexDesktopApp', 'status'] as const,
+    swap: () => ['codexDesktopApp', 'swap'] as const,
+  },
+
   // ── Highlighter ──
   highlighter: {
     all: ['shiki-highlight'] as const,

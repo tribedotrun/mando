@@ -1,6 +1,6 @@
 //! Sync branch names from worktrees into task items.
 //!
-//! The mando-pr skill renames branches for better PR titles, making the
+//! The x-pr skill renames branches for better PR titles, making the
 //! DB value stale. This module reads the live branch from each worktree
 //! and updates items so all downstream phases use the current name.
 

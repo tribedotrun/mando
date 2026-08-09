@@ -51,7 +51,7 @@ pub(crate) async fn cleanup_task(
     }
 
     // Read the live branch from the worktree before removing it — the DB
-    // value can be stale if mando-pr renamed the branch.
+    // value can be stale if x-pr renamed the branch.
     let live_branch = if let Some(ref wt) = item.worktree {
         let wt_path = global_infra::paths::expand_tilde(wt);
         if wt_path.exists() {

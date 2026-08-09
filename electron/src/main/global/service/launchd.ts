@@ -1,3 +1,5 @@
+import { app } from 'electron';
+import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
@@ -78,6 +80,45 @@ export function resolvePortFileName(): string {
   if (isPreview()) return 'daemon.port';
   if (isDev()) return 'daemon-dev.port';
   return 'daemon.port';
+}
+
+/** Resolve cargo target dir -- respects env overrides, then walks upward to
+ * find rust/target. Shared by `cliSourcePath` below and the daemon binary's
+ * dev-mode source path in `runtime/launchdPaths.ts`. */
+export function cargoTargetDir(): string {
+  const override = process.env.MANDO_RUST_TARGET_DIR || process.env.CARGO_TARGET_DIR;
+  if (override) {
+    return path.isAbsolute(override) ? override : path.resolve(process.cwd(), override);
+  }
+
+  let dir = path.resolve(__dirname);
+  for (let i = 0; i < 8; i++) {
+    for (const candidate of [
+      path.join(dir, 'rust', 'target', 'debug', 'mando-gw'),
+      path.join(dir, 'target', 'debug', 'mando-gw'),
+    ]) {
+      if (fs.existsSync(candidate)) {
+        return path.dirname(candidate);
+      }
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+
+  return path.resolve(__dirname, '../../../../rust/target/debug');
+}
+
+/** Source path of the bundled `mando` CLI: the packaged app's
+ * `resourcesPath` in production, or the cargo build output in dev. This is
+ * the same binary `copyCliBinary()` stages to `cliInstallPath()` -- but
+ * auto-update refreshes the app bundle without re-running that staging
+ * step, so `cliInstallPath()` can go stale after an update. Callers that
+ * must always match the running app's version (e.g.
+ * `codex/service/codexAppCli.ts`) spawn this path directly instead. */
+export function cliSourcePath(): string {
+  if (app.isPackaged) return path.join(process.resourcesPath!, 'mando');
+  return path.join(cargoTargetDir(), 'mando');
 }
 
 export function generateDaemonPlist(dataDir: string): string {

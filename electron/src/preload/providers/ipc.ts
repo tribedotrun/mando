@@ -31,6 +31,12 @@ const updatesApi = {
   setChannel: (channel: UpdateChannel) => invoke('updates:set-channel', channel),
 } as const;
 
+const codexAppApi = {
+  use: (label: string) => invoke('codex:app-use', label),
+  restore: () => invoke('codex:app-restore'),
+  status: () => invoke('codex:app-status'),
+} as const;
+
 export const ipcApi = {
   appMode: () => invoke('get-app-mode'),
   devGitInfo: () => invoke('get-dev-git-info'),
@@ -69,6 +75,7 @@ export const ipcApi = {
   },
   openInFinder: (dir: string) => invoke('open-in-finder', dir),
   openInCursor: (dir: string) => invoke('open-in-cursor', dir),
+  codexApp: codexAppApi,
 } as const;
 
 export type MandoAPI = typeof ipcApi;

@@ -33,3 +33,15 @@ export function setLoginItem(enabled: boolean) {
 export function subscribeShortcut(callback: (action: string) => void): () => void {
   return window.mandoAPI.onShortcut(callback);
 }
+
+export function useCodexInDesktopApp(label: string) {
+  return window.mandoAPI.codexApp.use(label);
+}
+
+export function restoreCodexDesktopApp() {
+  return window.mandoAPI.codexApp.restore();
+}
+
+export function getCodexDesktopAppStatus() {
+  return window.mandoAPI.codexApp.status();
+}

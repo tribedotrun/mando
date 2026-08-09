@@ -83,3 +83,18 @@ export const notificationClickPayloadSchema = z.object({
   kind: z.lazy(() => notificationKindSchema),
   item_id: z.string().optional(),
 });
+
+// Codex desktop-app (ChatGPT/Codex Electron app) account swap. Main shells out
+// to the bundled `mando` CLI (`codex app-use` / `app-restore` / `app-status`);
+// see rust CLI contract for the authoritative shape.
+export const codexAppLabelSchema = z.string().min(1);
+
+export const codexAppModeSchema = z.enum(['pool', 'ambient', 'none']);
+
+export const codexAppStatusSchema = z.object({
+  mode: codexAppModeSchema,
+  activeLabel: z.string().nullable(),
+  credentialId: z.number().nullable(),
+  slotAccountId: z.string().nullable(),
+  canRestore: z.boolean(),
+});

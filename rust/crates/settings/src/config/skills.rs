@@ -1,7 +1,7 @@
-//! Sync bundled prod skills to `~/.claude/skills/mando-*`.
+//! Sync optional bundled prod skills to `~/.claude/skills/<name>/`.
 //!
 //! Skills are compiled into the binary via `include_str!` and written to disk
-//! at daemon startup so Claude Code workers can invoke them as slash commands.
+//! at daemon startup. PR ship/summary skills live in b-skills (`x-pr*`), not here.
 
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
@@ -23,10 +23,10 @@ fn claude_skills_dir() -> PathBuf {
     PathBuf::from(home).join(".claude").join("skills")
 }
 
-/// Write all bundled prod skills to `~/.claude/skills/mando-*`.
+/// Write all bundled prod skills to `~/.claude/skills/<name>/`.
 ///
 /// Overwrites existing files to keep skills in sync with the daemon version.
-/// Skips if `~/.claude/skills/` cannot be created.
+/// No-op when `bundled-skills/` is empty. Skips if `~/.claude/skills/` cannot be created.
 pub fn sync_bundled_skills() {
     let base = claude_skills_dir();
     if let Err(e) = fs::create_dir_all(&base) {
