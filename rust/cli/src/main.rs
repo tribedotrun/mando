@@ -4,6 +4,9 @@
 //! Local repository inspection uses the shared global-git provider boundary.
 
 mod captain;
+mod codex_app;
+mod codex_app_process;
+mod codex_app_swap;
 mod credentials;
 mod credentials_codex_pick;
 mod gateway;
@@ -69,6 +72,8 @@ enum Commands {
     Health(HealthArgs),
     /// Manage and inspect Claude credentials (multi-account pool)
     Credentials(credentials::CredentialsArgs),
+    /// Codex desktop-app account swap (ChatGPT app shared auth.json slot)
+    Codex(codex_app::CodexArgs),
 }
 
 // -----------------------------------------------------------------------
@@ -179,6 +184,7 @@ async fn main() {
         Commands::Tasks(args) => handle_tasks(args).await,
         Commands::Health(_) => handle_health().await,
         Commands::Credentials(args) => credentials::handle(args).await,
+        Commands::Codex(args) => codex_app::handle(args).await,
     };
 
     if let Err(e) = result {
@@ -481,6 +487,24 @@ mod tests {
     fn cli_parse_credentials_pick() {
         let cli = Cli::try_parse_from(["mando", "credentials", "pick"]).unwrap();
         assert!(matches!(cli.command, Commands::Credentials(_)));
+    }
+
+    #[test]
+    fn cli_parse_codex_app_use() {
+        let cli = Cli::try_parse_from(["mando", "codex", "app-use", "PT"]).unwrap();
+        assert!(matches!(cli.command, Commands::Codex(_)));
+    }
+
+    #[test]
+    fn cli_parse_codex_app_restore() {
+        let cli = Cli::try_parse_from(["mando", "codex", "app-restore"]).unwrap();
+        assert!(matches!(cli.command, Commands::Codex(_)));
+    }
+
+    #[test]
+    fn cli_parse_codex_app_status() {
+        let cli = Cli::try_parse_from(["mando", "codex", "app-status", "--json"]).unwrap();
+        assert!(matches!(cli.command, Commands::Codex(_)));
     }
 
     #[test]

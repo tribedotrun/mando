@@ -6,6 +6,8 @@ import { z } from 'zod';
 import {
   appInfoResultSchema,
   checkClaudeCodeResultSchema,
+  codexAppLabelSchema,
+  codexAppStatusSchema,
   configJsonStringSchema,
   devGitInfoResultSchema,
   notificationClickPayloadSchema,
@@ -69,6 +71,11 @@ export const channels = {
   'setup-complete': invoke(setupConfigPayloadSchema, setupCompleteResultSchema),
   'check-claude-code': invoke(null, checkClaudeCodeResultSchema),
   'validate-telegram-token': invoke(z.string(), telegramValidateResultSchema),
+
+  // Codex desktop-app (ChatGPT/Codex Electron app) account swap
+  'codex:app-use': invoke(codexAppLabelSchema, null),
+  'codex:app-restore': invoke(null, null),
+  'codex:app-status': invoke(null, codexAppStatusSchema),
 
   // Updater
   'updates:install': invoke(null, z.void()),

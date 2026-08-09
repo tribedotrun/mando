@@ -5,6 +5,7 @@ import { Skeleton } from '#renderer/global/ui/primitives/skeleton';
 import {
   AddCodexCredentialForm,
   CodexCredentialRow,
+  CodexDesktopAppBanner,
   ShowAddButton,
 } from '#renderer/domains/settings/ui/SettingsAccountsParts';
 import type { CredentialInfo } from '#renderer/domains/settings/runtime/hooks';
@@ -34,6 +35,7 @@ export function CodexCredentialsSection(props: CodexCredentialsSectionProps): Re
           your personal login shares that account&apos;s rate limits).
         </p>
       </div>
+      <CodexDesktopAppBanner />
       <Card className="py-4">
         <CardContent>
           {props.isLoading ? (

@@ -272,7 +272,7 @@ pub(crate) fn classify_review_state(
 ) -> Option<(String, String)> {
     if is_draft {
         let issues_text =
-            "PR is still draft. Run `/mando-pr` to mark it ready for review before returning to human review.";
+            "PR is still draft. Run `/x-pr` to mark it ready for review before returning to human review.";
         let mut vars: FxHashMap<&str, &str> = FxHashMap::default();
         vars.insert("issues", issues_text);
         let message = match settings::render_prompt(

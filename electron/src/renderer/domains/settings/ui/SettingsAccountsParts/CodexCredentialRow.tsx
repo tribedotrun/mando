@@ -5,6 +5,7 @@ import {
   CredentialExpiry,
   StatusBadge,
   UpdateCodexCredentialAuthForm,
+  UseInDesktopAppButton,
 } from '#renderer/domains/settings/ui/SettingsAccountsParts';
 import { CredentialUsage } from '#renderer/domains/settings/ui/CredentialUsage';
 import type { CredentialInfo } from '#renderer/domains/settings/runtime/hooks';
@@ -42,14 +43,17 @@ export function CodexCredentialRow({
             </p>
           ) : null}
         </div>
-        <CredentialActions
-          isDisabled={cred.isDisabled}
-          onRemove={onRemove}
-          onSetDisabled={onSetDisabled}
-          onUpdateAuth={() => setShowAuthEditor((prev) => !prev)}
-          removePending={removePending}
-          setDisabledPending={setDisabledPending}
-        />
+        <div className="flex shrink-0 items-center gap-1">
+          <UseInDesktopAppButton credentialLabel={cred.label} />
+          <CredentialActions
+            isDisabled={cred.isDisabled}
+            onRemove={onRemove}
+            onSetDisabled={onSetDisabled}
+            onUpdateAuth={() => setShowAuthEditor((prev) => !prev)}
+            removePending={removePending}
+            setDisabledPending={setDisabledPending}
+          />
+        </div>
       </div>
       <CredentialUsage cred={cred} />
       {showAuthEditor ? (

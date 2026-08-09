@@ -234,7 +234,11 @@ prompts:
     - Update your workpad at `{{ workpad_path }}` with an implementation plan.
     - Implement the changes. Commit incrementally — small, logical commits.
     - If the repo needs local dependencies or tooling that are missing in the worktree (for example `node_modules` absent or `vite`/`pnpm`/`cargo-nextest` not found), install them in the repo first, record that in the workpad, and then continue. Missing local tooling is not a blocker by itself.
-    - Run {{ check_command }} after each change. Fix failures before moving on.
+    {% if no_pr %}
+    - During implementation, run only the smallest relevant scoped check for the area you changed. If code changed, run the full {{ check_command }} once after implementation stabilizes.
+    {% else %}
+    - During implementation, run only the smallest relevant scoped check for the area you changed. Do not run the full {{ check_command }} after each change; `/x-pr` owns the final full gate after review convergence.
+    {% endif %}
     {% if not no_pr %}
     - **Evidence requirements** — you MUST capture and save runtime proof:
        - Evidence must be **actual runtime output** you captured, NOT diagrams, ASCII art, mockups, or sample output you write by hand. Test results prove correctness but are NOT evidence — you need both.
@@ -251,7 +255,7 @@ prompts:
     {% if no_pr %}
     - This is a **research/audit task**. Do NOT create a PR. When your analysis is complete, write findings to your workpad at `{{ workpad_path }}` and stop.
     {% else %}
-    - When done, use `/mando-pr` to create or update the PR. Captain will monitor follow-up review/CI state after the handoff. Then update your workpad with the PR link.
+    - When done, use `/x-pr` to create or update the PR. Captain will monitor follow-up review/CI state after the handoff. Then update your workpad with the PR link.
     - **CI** — after creating a PR, ensure CI passes. Fix all CI failures even if the check is informational (not blocking merge). A clean CI is a quality gate, not optional.
     - Ensure your branch is ahead of origin/main.
     {% endif %}
@@ -294,16 +298,17 @@ prompts:
     - [ ] **Workpad** — update workpad at `{{ workpad_path }}` with your plan
     - [ ] **Implement** — follow the brief's approach steps
     - [ ] **Dependencies** — if local repo tooling is missing in the worktree (for example no `node_modules`, `vite` missing, package manager not installed), install what the repo needs before treating it as blocked
-    - [ ] **Quality gate** — run {{ check_command }}, verify changes work
     {% if no_pr %}
+    - [ ] **Quality gate** — if code changed, run {{ check_command }} once after implementation stabilizes
     - [ ] **Findings** — write results to workpad at `{{ workpad_path }}` and stop. No PR needed.
     {% else %}
-    - [ ] **PR** — use `/mando-pr` to create or update the PR. Captain will monitor follow-up review/CI state after the handoff. Update workpad with PR link.
+    - [ ] **Scoped verification** — run the smallest relevant checks while implementing; `/x-pr` owns the single full {{ check_command }} run after review convergence
+    - [ ] **PR** — use `/x-pr` to create or update the PR. Captain will monitor follow-up review/CI state after the handoff. Update workpad with PR link.
     - [ ] **Evidence** — capture runtime proof, then save in ONE final call. UI changes require THREE typed artifacts: a before screenshot (`--kind before`), an after screenshot (`--kind after`), and an after recording (`--kind after`). Net-new UI is NOT exempt — capture the prior state where the feature now lives. Canonical UI call: `mando todo evidence before.png after.png demo.webm --caption "before: ..." --caption "after: ..." --caption "after: ..." --kind before --kind after --kind after` (always use isolated/sandbox env, never `--visible`). Non-UI: terminal output saved to file. NOT diagrams or test-only results. Self-verify screenshots/frames. Recapture all artifacts if code changes after evidence.
     - [ ] **Cleanup** — stop ALL processes you started (dev servers, watchers, streaming commands like `tail -f` or `obs tail`). Run `ps --ppid $$ -o pid,command 2>/dev/null || true` and kill any orphans. Lingering subprocesses block session exit.
     - [ ] **CI** — fix all CI failures, even informational ones. A clean CI is a quality gate, not optional.
     - [ ] **Reviews** — address any reviewer comments
-    - [ ] **Diagram** — PR has summary diagram (`/mando-pr-summary`)
+    - [ ] **Diagram** — PR has summary diagram (`/x-pr-summary`)
     {% endif %}
 
     Only when ALL items above are done should you stop working. Captain will nudge you periodically — keep going until complete.
@@ -679,7 +684,7 @@ prompts:
     1. `git status` — see what's modified, staged, untracked
     2. `git log --oneline -10` — understand what's been committed
     3. `git diff --stat` — see uncommitted changes
-    4. Run {{ check_command }} — know what passes and what fails
+    4. Run the smallest relevant scoped checks for the touched area — do not launch the full {{ check_command }} merely to assess the handoff
 
     ## Step 2: Finish the Work
 
@@ -698,12 +703,13 @@ prompts:
        - **Self-verify**: read each screenshot or extract recording frames with ffmpeg. Fix → recapture if evidence doesn't show the change.
        - **Keep current**: recapture all three artifacts and update PR if code changes after evidence.
        - **Cleanup is required**: stop ALL processes you started (dev servers, watchers, streaming commands like `tail -f` or `obs tail`). Before finishing, run `ps --ppid $$ -o pid,command 2>/dev/null || true` and kill any orphans. Lingering subprocesses block session exit.
-    6. Create or update the PR using `/mando-pr`. Captain will monitor follow-up review/CI state after the handoff. Update workpad with PR link.
+    6. Create or update the PR using `/x-pr`. Captain will monitor follow-up review/CI state after the handoff. Update workpad with PR link.
     7. **CI** — fix all CI failures, even informational ones. A clean CI is a quality gate, not optional.
     8. Ensure your branch is ahead of origin/main
     {% endif %}
     {% if no_pr %}
-    5. Write findings to your workpad at `{{ workpad_path }}` and stop. No PR needed.
+    5. If code changed, run the full {{ check_command }} once after implementation stabilizes.
+    6. Write findings to your workpad at `{{ workpad_path }}` and stop. No PR needed.
     {% endif %}
     {% if worker_preamble %}
 
@@ -961,10 +967,10 @@ nudges:
     Do not stop until every comment has been addressed or replied to and the `[Mando]` comment is posted.
 
   missing_work_summary: |
-    Your task is missing a work summary. Run `/mando-pr-summary` to generate the diagram and save it via `mando todo summary`. Tasks cannot be marked done without a work summary.
+    Your task is missing a work summary. Run `/x-pr-summary` to generate the diagram and save it via `mando todo summary`. Tasks cannot be marked done without a work summary.
 
   draft_pr: |
-    Your PR is still a draft. Run `/mando-pr` to mark it ready for review, then continue until the task is ready for Captain review.
+    Your PR is still a draft. Run `/x-pr` to mark it ready for review, then continue until the task is ready for Captain review.
 
   missing_evidence: |
     Your task has no evidence.
@@ -988,7 +994,7 @@ nudges:
     Evidence must always match the latest code.
 
   stale_work_summary: |
-    Your work summary predates the latest reopen. Run `/mando-pr-summary` to regenerate the diagram and save it via `mando todo summary`.
+    Your work summary predates the latest reopen. Run `/x-pr-summary` to regenerate the diagram and save it via `mando todo summary`.
 
   stream_stale: |
     Your session has produced no output for {{ stale_s }}s. Resume your task from where you left off.
@@ -1023,11 +1029,11 @@ initial_prompts:
     Before updating the workpad, read {{ workpad_path }} first. Then maintain that workpad with your implementation plan. Update it after each milestone and when done.
     {% if not no_pr %}
 
-    Use /mando-pr to create or update the PR when done (not raw gh commands). Captain will monitor follow-up review/CI state after the handoff.
+    Use /x-pr to create or update the PR when done (not raw gh commands). Captain will monitor follow-up review/CI state after the handoff.
     {% endif %}
 
   adopted: |
-    Read {{ brief_path }} — a human was working here and handed off to you. Start by assessing current state: git status, git log, and the project's quality gate.
+    Read {{ brief_path }} — a human was working here and handed off to you. Start by assessing current state: git status, git log, and the smallest relevant scoped checks for the touched area. Do not launch the project's full quality gate merely to assess the handoff.
 
     Before updating the workpad, read {{ workpad_path }} first. Then update it with your assessment and plan.
 

@@ -10,6 +10,8 @@ export { CodexCredentialsSection } from '#renderer/domains/settings/ui/SettingsA
 export { CodexCredentialRow } from '#renderer/domains/settings/ui/SettingsAccountsParts/CodexCredentialRow';
 export { AddCodexCredentialForm } from '#renderer/domains/settings/ui/SettingsAccountsParts/AddCodexCredentialForm';
 export { CodexBrowserLoginButton } from '#renderer/domains/settings/ui/SettingsAccountsParts/CodexBrowserLoginButton';
+export { UseInDesktopAppButton } from '#renderer/domains/settings/ui/SettingsAccountsParts/UseInDesktopAppButton';
+export { CodexDesktopAppBanner } from '#renderer/domains/settings/ui/SettingsAccountsParts/CodexDesktopAppBanner';
 export { CodexAuthCaptureHelp } from '#renderer/domains/settings/ui/SettingsAccountsParts/CodexAuthCaptureHelp';
 export { UpdateCredentialTokenForm } from '#renderer/domains/settings/ui/SettingsAccountsParts/UpdateCredentialTokenForm';
 export { UpdateCodexCredentialAuthForm } from '#renderer/domains/settings/ui/SettingsAccountsParts/UpdateCodexCredentialAuthForm';

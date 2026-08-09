@@ -12,6 +12,7 @@ import { app, BrowserWindow, dialog, globalShortcut } from 'electron';
 import log from '#main/global/providers/logger';
 import { registerConfigHandlers } from '#main/onboarding/repo/config';
 import { registerSetupValidationHandlers } from '#main/onboarding/runtime/setupValidation';
+import { registerCodexAppHandlers } from '#main/codex/runtime/codexApp';
 import { getDevGitInfo } from '#main/global/runtime/devGitInfo';
 import { installTrustedGatewayAuth } from '#main/daemon/runtime/gatewayAuth';
 import {
@@ -127,6 +128,9 @@ registerSetupValidationHandlers();
 // Config read/write, onboarding setup-complete, launchd -- see config-handlers.ts
 registerConfigHandlers();
 registerTerminalBridgeHandlers();
+
+// Codex desktop-app account swap -- see codex/runtime/codexApp.ts
+registerCodexAppHandlers();
 
 // ---------------------------------------------------------------------------
 // App lifecycle
