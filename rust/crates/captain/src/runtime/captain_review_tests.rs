@@ -202,6 +202,89 @@ async fn test_spawn_review_preserves_existing_review_fail_count() {
     assert!(item.session_ids.review.is_some());
 }
 
+/// Regression for the Claude adapter rendering *after* the transition: a
+/// template error used to leave the task parked in `CaptainReviewing` with no
+/// review session and no way out, because the render ran inside the detached
+/// `tokio::spawn`. The render now happens first, so a bad template returns
+/// `Err` with the task exactly where it was.
+#[tokio::test]
+async fn test_unrenderable_prompt_leaves_task_untouched_and_errors() {
+    let db = global_db::Db::open_in_memory().await.unwrap();
+    let pool = db.pool().clone();
+    let notifier =
+        crate::runtime::notify::Notifier::new(std::sync::Arc::new(global_bus::EventBus::new()));
+
+    let mut workflow = settings::CaptainWorkflow::compiled_default();
+    // Syntactically broken Jinja: MiniJinja fails at template-add time, so
+    // `settings::render_prompt` returns Err.
+    workflow.prompts.insert(
+        "captain_review".to_string(),
+        "{% if trigger %}never closed".to_string(),
+    );
+
+    let worktree = std::env::temp_dir().join(format!(
+        "mando-captain-review-render-fail-{}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&worktree).unwrap();
+
+    let project_id = settings::projects::upsert(&pool, "test", "", None)
+        .await
+        .unwrap();
+    let wb_id = crate::io::test_support::seed_workbench(&pool, project_id).await;
+
+    let mut item = Task::new("render failure must not strand the task");
+    item.project_id = project_id;
+    item.project = "test".into();
+    item.workbench_id = wb_id;
+    item.provider = global_types::TaskProvider::Claude;
+    item.status = crate::ItemStatus::InProgress;
+    item.worktree = Some(worktree.to_string_lossy().to_string());
+
+    let store = crate::io::task_store::TaskStore::new(pool.clone());
+    let id = store.add(item.clone()).await.unwrap();
+    item.id = id;
+    store
+        .update(id, |t| t.status = crate::ItemStatus::InProgress)
+        .await
+        .unwrap();
+    item.status = crate::ItemStatus::InProgress;
+
+    let result = spawn_review(
+        &mut item,
+        "gates_pass",
+        None,
+        &settings::Config::default(),
+        &workflow,
+        &notifier,
+        &pool,
+    )
+    .await;
+
+    result.expect_err("an unrenderable prompt must fail the spawn");
+    assert_eq!(
+        item.status,
+        crate::ItemStatus::InProgress,
+        "task must not be committed to CaptainReviewing on a render failure"
+    );
+    assert!(
+        item.session_ids.review.is_none(),
+        "no review session should have been allocated"
+    );
+    assert!(item.captain_review_trigger.is_none());
+
+    let persisted = store
+        .find_by_id(id)
+        .await
+        .unwrap()
+        .expect("task still exists");
+    assert_eq!(
+        persisted.status,
+        crate::ItemStatus::InProgress,
+        "the DB row must not have moved either"
+    );
+}
+
 #[tokio::test]
 async fn test_review_failure_budget_moves_item_to_errored_on_fifth_attempt() {
     let db = global_db::Db::open_in_memory().await.unwrap();
@@ -247,9 +330,8 @@ async fn test_nudge_verdict_resets_worker_started_at() {
         feedback: "keep going".into(),
         ..Default::default()
     };
-    let config = settings::Config::default();
     let workflow = settings::CaptainWorkflow::compiled_default();
-    apply_verdict(&mut item, &verdict, &config, &workflow, &notifier, &pool)
+    apply_verdict(&mut item, &verdict, &workflow, &notifier, &pool)
         .await
         .unwrap();
 
@@ -290,9 +372,8 @@ async fn test_apply_verdict_nudge_preserves_review_context_on_failed_resume() {
         feedback: "try again".into(),
         ..Default::default()
     };
-    let config = settings::Config::default();
     let workflow = settings::CaptainWorkflow::compiled_default();
-    apply_verdict(&mut item, &verdict, &config, &workflow, &notifier, &pool)
+    apply_verdict(&mut item, &verdict, &workflow, &notifier, &pool)
         .await
         .unwrap();
 
@@ -320,9 +401,8 @@ async fn test_reset_budget_verdict_resets_intervention_count() {
         feedback: "try a different approach".into(),
         ..Default::default()
     };
-    let config = settings::Config::default();
     let workflow = settings::CaptainWorkflow::compiled_default();
-    apply_verdict(&mut item, &verdict, &config, &workflow, &notifier, &pool)
+    apply_verdict(&mut item, &verdict, &workflow, &notifier, &pool)
         .await
         .unwrap();
 
@@ -360,9 +440,8 @@ async fn test_respawn_verdict_preserves_worktree() {
         feedback: "session is broken, retry".into(),
         ..Default::default()
     };
-    let config = settings::Config::default();
     let workflow = settings::CaptainWorkflow::compiled_default();
-    apply_verdict(&mut item, &verdict, &config, &workflow, &notifier, &pool)
+    apply_verdict(&mut item, &verdict, &workflow, &notifier, &pool)
         .await
         .unwrap();
 
@@ -399,9 +478,8 @@ async fn test_reset_budget_preserves_review_fields_on_failed_resume() {
         feedback: "unblock this".into(),
         ..Default::default()
     };
-    let config = settings::Config::default();
     let workflow = settings::CaptainWorkflow::compiled_default();
-    apply_verdict(&mut item, &verdict, &config, &workflow, &notifier, &pool)
+    apply_verdict(&mut item, &verdict, &workflow, &notifier, &pool)
         .await
         .unwrap();
 

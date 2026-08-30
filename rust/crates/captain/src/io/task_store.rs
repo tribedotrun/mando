@@ -113,16 +113,6 @@ impl TaskStore {
         Ok(())
     }
 
-    pub(crate) async fn set_planning(&self, id: i64, planning: bool) -> Result<()> {
-        let mut task = self
-            .find_by_id(id)
-            .await?
-            .ok_or(TaskUpdateError::NotFound(id))?;
-        task.planning = planning;
-        tasks::update_task(&self.pool, &task).await?;
-        Ok(())
-    }
-
     /// Merge tick-changed items into the store, preserving concurrent human edits.
     ///
     /// For items with a pre-tick snapshot, uses 3-way merge (base vs tick-changed vs current DB).
@@ -260,6 +250,17 @@ async fn hydrate_rebase_state(pool: &SqlitePool, tasks: &mut [Task]) -> Result<(
     Ok(())
 }
 
+/// Task fields whose value is itself an object of independently-owned slots,
+/// merged one level deeper so a tick that touched one slot cannot revert a
+/// concurrent write to a sibling slot.
+///
+/// `session_ids` is the only such field: the tick writes the pre-allocated id
+/// into (say) `review`, while `session_retarget` concurrently re-points
+/// `merge` at the id CC actually adopted. A whole-object merge treats
+/// `session_ids` as one key, sees the tick changed it, and overwrites the
+/// retarget — leaving the poller watching a dead session id.
+const FIELDWISE_MERGE_KEYS: &[&str] = &["session_ids"];
+
 fn merge_task_changes(
     base_snapshot: &TaskSnapshotJson,
     changed: &Task,
@@ -278,13 +279,36 @@ fn merge_task_changes(
         .as_object()
         .ok_or_else(|| anyhow::anyhow!("current task snapshot must be a JSON object"))?;
 
+    let merged_obj = merge_json_objects(base_obj, changed_obj, current_obj);
+
+    serde_json::from_value(serde_json::Value::Object(merged_obj))
+        .map_err(|e| anyhow::anyhow!("failed to deserialize merged task: {e}"))
+}
+
+/// 3-way merge of one JSON object: start from `current` (the DB row, which
+/// carries any concurrent write), apply the keys the tick actually changed,
+/// then apply the keys the tick cleared.
+fn merge_json_objects(
+    base_obj: &serde_json::Map<String, serde_json::Value>,
+    changed_obj: &serde_json::Map<String, serde_json::Value>,
+    current_obj: &serde_json::Map<String, serde_json::Value>,
+) -> serde_json::Map<String, serde_json::Value> {
     let mut merged_obj = current_obj.clone();
 
     // Apply tick modifications: keys present in changed that differ from base.
     for (key, changed_value) in changed_obj {
-        if base_obj.get(key) != Some(changed_value) {
-            merged_obj.insert(key.clone(), changed_value.clone());
+        if base_obj.get(key) == Some(changed_value) {
+            continue;
         }
+        if FIELDWISE_MERGE_KEYS.contains(&key.as_str()) {
+            if let Some(nested) =
+                merge_nested_object(base_obj.get(key), changed_value, current_obj.get(key))
+            {
+                merged_obj.insert(key.clone(), serde_json::Value::Object(nested));
+                continue;
+            }
+        }
+        merged_obj.insert(key.clone(), changed_value.clone());
     }
 
     // Apply tick deletions: keys present in base but absent in changed were
@@ -301,8 +325,32 @@ fn merge_task_changes(
         }
     }
 
-    serde_json::from_value(serde_json::Value::Object(merged_obj))
-        .map_err(|e| anyhow::anyhow!("failed to deserialize merged task: {e}"))
+    merged_obj
+}
+
+/// Recurse one level for a [`FIELDWISE_MERGE_KEYS`] field. Returns `None`
+/// when any of the three sides is not an object, so the caller falls back to
+/// replacing the whole value.
+fn merge_nested_object(
+    base: Option<&serde_json::Value>,
+    changed: &serde_json::Value,
+    current: Option<&serde_json::Value>,
+) -> Option<serde_json::Map<String, serde_json::Value>> {
+    let empty = serde_json::Map::new();
+    let base_nested = match base {
+        Some(v) => v.as_object()?,
+        None => &empty,
+    };
+    let current_nested = match current {
+        Some(v) => v.as_object()?,
+        None => &empty,
+    };
+    let changed_nested = changed.as_object()?;
+    Some(merge_json_objects(
+        base_nested,
+        changed_nested,
+        current_nested,
+    ))
 }
 
 #[cfg(test)]
@@ -497,6 +545,78 @@ mod tests {
             "worker must be cleared, got {:?}",
             found.worker
         );
+    }
+
+    /// `session_ids` merges per slot. The tick writes a pre-allocated id into
+    /// one slot while `session_retarget` concurrently re-points another at the
+    /// id CC actually adopted; a whole-object merge would revert the retarget
+    /// and leave the poller watching a dead session.
+    #[tokio::test]
+    async fn merge_preserves_a_concurrent_retarget_of_another_session_slot() {
+        let (store, wb_id) = test_store().await;
+        let mut task = test_task("Concurrent retarget", wb_id);
+        task.session_ids.merge = Some("preallocated-merge".into());
+        let id = store.add(task).await.unwrap();
+        let original = store.find_by_id(id).await.unwrap().unwrap();
+        let snapshots = HashMap::from([(id, TaskSnapshotJson::from_task(&original).unwrap())]);
+
+        // The tick pre-allocates a review session id in its in-memory copy.
+        let mut tick_copy = original.clone();
+        tick_copy.session_ids.review = Some("preallocated-review".into());
+
+        // Meanwhile the detached merge session's retry hook re-points the
+        // merge slot at the id CC minted.
+        crate::io::queries::tasks::retarget_session_id(
+            store.pool(),
+            id,
+            crate::SessionSlot::Merge,
+            "preallocated-merge",
+            "cc-minted-merge",
+        )
+        .await
+        .unwrap();
+
+        store
+            .merge_changed_items(&snapshots, &[tick_copy])
+            .await
+            .unwrap();
+
+        let found = store.find_by_id(id).await.unwrap().unwrap();
+        assert_eq!(
+            found.session_ids.review.as_deref(),
+            Some("preallocated-review"),
+            "the tick's own slot write must land"
+        );
+        assert_eq!(
+            found.session_ids.merge.as_deref(),
+            Some("cc-minted-merge"),
+            "the concurrent retarget must survive the tick merge"
+        );
+    }
+
+    /// A slot the tick itself cleared still clears — per-slot merging must not
+    /// turn `apply_merge_result`'s `session_ids.merge = None` into a no-op.
+    #[tokio::test]
+    async fn merge_still_clears_a_session_slot_the_tick_cleared() {
+        let (store, wb_id) = test_store().await;
+        let mut task = test_task("Cleared slot", wb_id);
+        task.session_ids.merge = Some("merge-sid".into());
+        task.session_ids.worker = Some("worker-sid".into());
+        let id = store.add(task).await.unwrap();
+        let original = store.find_by_id(id).await.unwrap().unwrap();
+        let snapshots = HashMap::from([(id, TaskSnapshotJson::from_task(&original).unwrap())]);
+
+        let mut tick_copy = original.clone();
+        tick_copy.session_ids.merge = None;
+
+        store
+            .merge_changed_items(&snapshots, &[tick_copy])
+            .await
+            .unwrap();
+
+        let found = store.find_by_id(id).await.unwrap().unwrap();
+        assert!(found.session_ids.merge.is_none());
+        assert_eq!(found.session_ids.worker.as_deref(), Some("worker-sid"));
     }
 
     /// When the tick clears a field but a human concurrently set it to a

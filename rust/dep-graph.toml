@@ -43,14 +43,12 @@ settings = [
     "global-infra", "global-net", "global-git",
 ]
 
-# Terminal
-terminal = ["global-types", "global-infra", "settings"]
 
 # Transports
 transport-http = [
     "api-types", "captain", "global-bus", "global-claude", "global-db",
     "global-types", "global-infra", "scout", "sessions", "settings",
-    "terminal", "transport-tg", "transport-ui"
+    "transport-tg", "transport-ui"
 ]
 transport-tg = [
     "api-types", "gateway-client",
@@ -65,7 +63,7 @@ mando-gateway = [
     "global-types", "global-infra", "global-claude",
     "global-bus", "global-db",
     "captain", "scout", "sessions", "settings",
-    "transport-http", "transport-tg", "transport-ui", "terminal",
+    "transport-http", "transport-tg", "transport-ui",
 ]
 
 # CLI client (peer to Electron, HTTP-only)

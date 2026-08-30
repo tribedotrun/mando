@@ -17,28 +17,11 @@ pub(super) fn has_substantive_output(stream_tail: &str) -> bool {
     non_ws_count >= 20
 }
 
-/// Check if the worker is stuck on a CC image-dimension-limit error.
-///
-/// Structural: walks the stream file events and inspects the last
-/// `user/tool_result/is_error:true` content against the `ImageDimensionLimit`
-/// rule. Returns `false` when the stream path is missing — image-dimension
-/// nudges are recoverable and the classifier has other signals to route on.
-pub(super) fn is_image_dimension_blocked(
-    stream_path: Option<&Path>,
-    symptoms: &StreamSymptomMatcher,
-) -> bool {
-    let Some(path) = stream_path else {
-        return false;
-    };
-    global_claude::detect_image_dimension_blocked(path, symptoms)
-}
-
 /// Detect a broken-session CC signal in the worker's stream file.
 ///
 /// Returns a typed match when the structural detector fires — either a
 /// CC-reported abort (terminal `result/is_error:true`) or an externally-
-/// killed session (`SessionInterrupted`). The recoverable `ImageDimensionLimit`
-/// symptom stays on the nudge path and is never returned here.
+/// killed session (`SessionInterrupted`).
 ///
 /// Returns `None` when no stream path is available (the classifier's
 /// fallback for workers that never had a CC session). Other classifier

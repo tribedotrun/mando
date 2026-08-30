@@ -10,6 +10,7 @@ use crate::service::{lifecycle, spawn_logic};
 
 use super::{captain_review, notify::Notifier, spawner_lifecycle, timeline_emit};
 
+mod nudge_reason;
 mod reopen;
 
 pub use reopen::{reopen_item, ReopenOutcome};
@@ -65,24 +66,30 @@ pub async fn nudge_item(
         }
     };
 
-    // ── Circuit breaker: repeated identical nudge reason → captain review ──
+    // ── Circuit breaker: repeated nudge reason KIND → captain review ──
+    // Keyed on the stable kind, never the formatted text: reasons like
+    // `gates incomplete: <failures>` and `PR has <n> unresolved review
+    // thread(s)` embed live data, so exact-text comparison could never
+    // observe a repeat and the loop fell through to `max_interventions`.
+    let mut nudge_reason_key: Option<&str> = None;
     if let Some(reason_str) = reason {
         let health_path = crate::config::worker_health_path();
         let hstate = crate::io::health_store::load_health_state(&health_path)
             .with_context(|| format!("load health state from {}", health_path.display()))?;
-        let last_reason =
+        let last_key =
             crate::io::health_store::get_health_str(&hstate, &worker, "last_nudge_reason");
         let consecutive =
             crate::io::health_store::get_health_u32(&hstate, &worker, "nudge_reason_consecutive");
-        let same = last_reason.as_deref() == Some(reason_str);
-        let new_consecutive = if same { consecutive + 1 } else { 1 };
+        let step = nudge_reason::advance(last_key.as_deref(), reason_str, consecutive);
+        nudge_reason_key = Some(step.key);
 
-        if new_consecutive >= workflow.agent.max_repeated_nudges {
+        if step.consecutive >= workflow.agent.max_repeated_nudges {
             tracing::info!(
                 module = "captain",
                 worker = %worker,
                 reason = %reason_str,
-                consecutive = new_consecutive,
+                reason_kind = %step.key,
+                consecutive = step.consecutive,
                 "repeated-nudge circuit breaker: routing to captain review"
             );
             item.intervention_count = new_count as i64;
@@ -155,13 +162,15 @@ pub async fn nudge_item(
     .await
     {
         Ok(super::agent_runtime::AgentNudgeOutcome::Delivered(delivery)) => {
+            // Persist the stable kind, not the formatted reason, so the
+            // write side matches what the breaker above compares.
             persist_nudge_health(
                 &cc_sid,
                 &worker,
                 delivery.pid,
                 delivery.stream_size_before,
                 new_count,
-                reason,
+                nudge_reason_key,
             )?;
 
             // Clear AI feedback only after the nudge was successfully delivered.

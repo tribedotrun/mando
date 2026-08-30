@@ -27,7 +27,6 @@
     "useTaskPrSummary",
     "useTaskTimelineData",
     "useTelegramHealth",
-    "useTerminalList",
     "useTranscriptEventsCache",
     "useUpdateSystemInfo",
     "useWorkbenchList",

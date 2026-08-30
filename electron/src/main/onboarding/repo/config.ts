@@ -9,7 +9,12 @@ import log from '#main/global/providers/logger';
 import { handleChannel, sendChannel } from '#main/global/runtime/ipcSecurity';
 import { installCliAndPlists } from '#main/global/runtime/launchd';
 import { daemonRouteFetch, daemonRouteJsonR, ensureDaemon } from '#main/global/runtime/lifecycle';
-import { requireConfigJsonText, requireValidConfigJsonText } from '#shared/daemon-contract/json';
+import {
+  parseUpgradedConfigJsonText,
+  requireConfigJsonText,
+  requireValidConfigJsonText,
+} from '#shared/daemon-contract/json';
+import { apiErrorMessage } from '#result';
 import { hasParsableLocalConfig } from '#main/onboarding/repo/localConfigStatus';
 import { getDataDir, getConfigPath, getAppMode } from '#main/global/config/lifecycle';
 
@@ -43,10 +48,17 @@ export function registerConfigHandlers(): void {
       log.debug('read-config: daemon not ready, falling back to local file:', err);
     }
     try {
-      return requireValidConfigJsonText(
+      // Read the disk file the way the Rust loader does: keys retired by a
+      // newer build are dropped, not treated as corruption. Re-serialize so
+      // the string handed back up the IPC contract validates strictly.
+      const parsed = parseUpgradedConfigJsonText(
         fs.readFileSync(getConfigPath(), 'utf-8'),
         'ipc:read-config local',
       );
+      if (parsed.isErr()) {
+        throw new Error(apiErrorMessage(parsed.error), { cause: parsed.error });
+      }
+      return JSON.stringify(parsed.value);
     } catch (err: unknown) {
       log.error('read-config: both daemon and local file read failed:', err);
       throw new Error('Failed to load config from daemon and local file', { cause: err });

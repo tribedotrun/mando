@@ -19,7 +19,6 @@ fn item_status_label(status: api_types::ItemStatus) -> &'static str {
         api_types::ItemStatus::Errored => "errored",
         api_types::ItemStatus::Merged => "merged",
         api_types::ItemStatus::CompletedNoPr => "completed-no-pr",
-        api_types::ItemStatus::PlanReady => "plan-ready",
         api_types::ItemStatus::Canceled => "canceled",
         api_types::ItemStatus::Stopped => "stopped",
     }

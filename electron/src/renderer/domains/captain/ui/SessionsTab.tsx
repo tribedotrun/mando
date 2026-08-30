@@ -1,20 +1,17 @@
 import React from 'react';
-import type { SessionSummary, TaskProvider } from '#renderer/global/types';
+import type { SessionSummary } from '#renderer/global/types';
 import { fmtDuration, relativeTime } from '#renderer/global/service/utils';
 import { formatCallerLabel, buildSequenceFromSummaries } from '#renderer/domains/sessions';
 import { SessionDot } from '#renderer/global/ui/SessionDot';
-import { Button } from '#renderer/global/ui/primitives/button';
 import { taskProviderShortLabel } from '#renderer/global/service/providerDisplay';
 
 export function SessionsTab({
   sessions,
   onSessionClick,
-  onResumeSession,
   taskId,
 }: {
   sessions: SessionSummary[];
   onSessionClick: (s: SessionSummary) => void;
-  onResumeSession?: (sessionId: string, name?: string, provider?: TaskProvider) => void;
   taskId: number;
 }): React.ReactElement {
   if (sessions.length === 0) {
@@ -66,23 +63,7 @@ export function SessionsTab({
                   )}
                 </div>
               </div>
-              {onResumeSession && s.status !== 'running' && s.provider !== 'opencode' ? (
-                <Button
-                  variant="outline"
-                  size="xs"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    const displayName = title + (s.worker_name ? ` (${s.worker_name})` : '');
-                    onResumeSession(s.session_id, displayName, s.provider);
-                  }}
-                  className="opacity-0 transition-opacity group-hover:opacity-100"
-                  title="Resume this session in a terminal"
-                >
-                  Resume
-                </Button>
-              ) : (
-                <span className="text-[11px] text-text-4">{s.status}</span>
-              )}
+              <span className="text-[11px] text-text-4">{s.status}</span>
             </div>
           );
         })}

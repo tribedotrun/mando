@@ -6,7 +6,7 @@ import { fileURLToPath } from 'url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.resolve(__dirname, '../../../src');
 
-const DOMAIN_IMPORT_RE = /from\s+['"]#renderer\/domains\/([^/]+)\/(?!index['"])((?:types|config|repo|service|runtime|ui|terminal)\/[^'"]+)['"]/g;
+const DOMAIN_IMPORT_RE = /from\s+['"]#renderer\/domains\/([^/]+)\/(?!index['"])((?:types|config|repo|service|runtime|ui)\/[^'"]+)['"]/g;
 
 function allTsFiles(dir) {
   const results = [];

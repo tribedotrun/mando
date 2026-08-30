@@ -31,7 +31,6 @@ pub async fn start_runtime_services(state: &AppState, options: RuntimeStartOptio
 
     state.captain.start_background_loops();
     state.scout.resume_pending_items().await;
-    state.terminal.start_auto_resume();
 
     if options.start_telegram {
         let config = state.settings.load_config();
@@ -101,17 +100,17 @@ pub async fn bootstrap_gateway(
         }
     }
 
-    let terminal_default_model = if options.sandbox_mode || options.dev_mode {
+    let ops_default_model = if options.sandbox_mode || options.dev_mode {
         "haiku"
     } else {
-        "sonnet"
+        "fable"
     };
     let cc_state_dir = global_infra::paths::state_dir()
         .join("ops_sessions")
         .join("cc");
     let sessions_runtime = crate::session_backend::build_sessions_runtime(
         cc_state_dir,
-        terminal_default_model,
+        ops_default_model,
         db.pool().clone(),
     );
     let cc_recovered = sessions_runtime.recover();
@@ -129,9 +128,7 @@ pub async fn bootstrap_gateway(
     let auth_token = transport_http::ensure_auth_token();
     let task_tracker = TaskTracker::new();
     let cancellation_token = CancellationToken::new();
-    let terminal_host = Arc::new(terminal::TerminalHost::new(global_infra::paths::data_dir()));
     let scout_processing_semaphore = Arc::new(tokio::sync::Semaphore::new(4));
-    let auto_title_notify = Arc::new(tokio::sync::Notify::new());
     let telegram_runtime = Arc::new(transport_tg::TelegramRuntime::new(listen_port, auth_token));
     let ui_runtime = Arc::new(transport_ui::UiRuntime::new(
         global_infra::paths::state_dir().join("ui-state.json"),
@@ -147,7 +144,6 @@ pub async fn bootstrap_gateway(
         pool: db.pool().clone(),
         task_tracker: task_tracker.clone(),
         cancellation_token: cancellation_token.clone(),
-        auto_title_notify,
         cleanup_expired_sessions: cleanup_sessions,
     }));
     let scout_runtime = Arc::new(scout::ScoutRuntime::new(
@@ -159,15 +155,6 @@ pub async fn bootstrap_gateway(
         cancellation_token.clone(),
         qa_session_mgr.clone(),
     ));
-    let terminal_runtime = Arc::new(terminal::TerminalRuntime::new(
-        terminal_host,
-        settings.clone(),
-        listen_port,
-        task_tracker.clone(),
-        cancellation_token.clone(),
-        Arc::new(transport_http::ensure_auth_token),
-    ));
-
     let state = AppState {
         settings,
         runtime_paths,
@@ -175,7 +162,6 @@ pub async fn bootstrap_gateway(
         captain: captain_runtime,
         scout: scout_runtime,
         sessions: sessions_runtime,
-        terminal: terminal_runtime,
         start_time: options.start_time,
         listen_port,
         task_tracker,

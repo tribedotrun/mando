@@ -33,8 +33,6 @@ pub enum ItemStatus {
     Merged,
     #[serde(rename = "completed-no-pr")]
     CompletedNoPr,
-    #[serde(rename = "plan-ready")]
-    PlanReady,
     #[serde(rename = "canceled")]
     Canceled,
     #[serde(rename = "stopped")]
@@ -157,7 +155,6 @@ pub struct TaskItem {
     pub plan: Option<String>,
     pub no_pr: bool,
     pub no_auto_merge: bool,
-    pub planning: bool,
     /// Set by the clarifier when it identifies the task as fixing existing
     /// broken behavior (vs. a new feature, refactor, or research). Worker
     /// prompts use this to require reproduce-first + before-state evidence;
@@ -358,54 +355,19 @@ pub struct WorkbenchItem {
     pub worktree_exists: bool,
 }
 
+/// Which agent CLI implements a task.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "lowercase")]
-pub enum TerminalAgent {
+pub enum TaskAgent {
     #[default]
     Claude,
     Codex,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[serde(rename_all = "lowercase")]
-pub enum TerminalState {
-    Live,
-    Restored,
-    Exited,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "lowercase")]
 pub enum TelegramMode {
     Embedded,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[serde(deny_unknown_fields)]
-pub struct TerminalSessionInfo {
-    pub id: String,
-    pub rev: u64,
-    pub project: String,
-    pub cwd: String,
-    pub agent: TerminalAgent,
-    pub running: bool,
-    pub exit_code: Option<u32>,
-    pub state: Option<TerminalState>,
-    pub restored: Option<bool>,
-    #[serde(rename = "createdAt")]
-    pub created_at: Option<String>,
-    #[serde(rename = "endedAt")]
-    pub ended_at: Option<String>,
-    #[serde(rename = "terminalId")]
-    pub terminal_id: Option<String>,
-    pub name: Option<String>,
-    #[serde(rename = "ccSessionId")]
-    pub cc_session_id: Option<String>,
-    /// Workbench owning this session. The renderer scopes a workbench's
-    /// terminal tab bar by this id instead of the leaky `project + cwd`
-    /// heuristic.
-    #[serde(rename = "workbenchId")]
-    pub workbench_id: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]

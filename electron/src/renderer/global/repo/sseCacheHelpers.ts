@@ -3,7 +3,7 @@
  * used by useSseSync to keep the React Query cache in sync with SSE events.
  *
  * Two sync tiers:
- *   Tier 1 (tasks, scout, workbenches, terminals): SSE carries the changed
+ *   Tier 1 (tasks, scout, workbenches): SSE carries the changed
  *     item -- patched directly into the query cache via setQueryData,
  *     rev-guarded to reject out-of-order events.
  *   Tier 2 (status, sessions): SSE carries affected entity IDs -- triggers
@@ -25,7 +25,6 @@ import type {
   WorkbenchEventData,
   WorkersResponse,
   WorkbenchItem,
-  TerminalSessionInfo,
 } from '#renderer/global/types';
 
 // ── Tier 1: rev-guarded entity list patching ──
@@ -178,11 +177,6 @@ export function seedFromSnapshot(
   // Seed workbenches
   if (Array.isArray(snapshot.workbenches)) {
     qc.setQueryData(queryKeys.workbenches.list(), snapshot.workbenches as WorkbenchItem[]);
-  }
-
-  // Seed terminals
-  if (Array.isArray(snapshot.terminals)) {
-    qc.setQueryData(queryKeys.terminals.list(), snapshot.terminals as TerminalSessionInfo[]);
   }
 
   // Seed config

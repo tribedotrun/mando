@@ -1,39 +1,27 @@
 //! Evidence-listing computation for the captain review prompt.
 //!
-//! Walks fresh evidence artifacts on a task, builds the human-readable
-//! `evidence_files` listing the reviewer LLM sees, and computes the typed
-//! gate flags it routes on (`has_screenshot`, `has_recording`,
-//! `has_before_fix`, `has_after_fix`, `has_cannot_reproduce`).
+//! Walks fresh evidence artifacts on a task and builds the human-readable
+//! `evidence_images` listing the reviewer sees, plus the latest work summary.
+//!
+//! The typed gate flags that used to live here (`has_before_screenshot` and
+//! friends) are gone: the rewritten `captain_review` prompt no longer asks
+//! the reviewer to check evidence kinds, because
+//! `service::deterministic` now enforces them and nudges before a review can
+//! fire. `runtime::review_phase_artifacts` owns that computation.
 //!
 //! Lifted out of `captain_review.rs` to keep that file focused on the
 //! review-spawn orchestration.
 
 use crate::Task;
 
-use super::review_phase_artifacts::{RECORDING_EXTS, SCREENSHOT_EXTS};
-
 #[derive(Debug, Default)]
 pub(crate) struct EvidenceListing {
     pub listing: String,
     pub work_summary: String,
-    pub has_screenshot: bool,
-    pub has_recording: bool,
-    pub has_before_fix: bool,
-    pub has_after_fix: bool,
-    pub has_cannot_reproduce: bool,
-    /// Screenshot-extension media tagged `--kind before`. The intersection
-    /// stops a `--kind before` terminal log or a `--kind other` screenshot
-    /// from satisfying the universal UI before-screenshot rule.
-    pub has_before_screenshot: bool,
-    /// Screenshot-extension media tagged `--kind after`.
-    pub has_after_screenshot: bool,
-    /// Recording-extension media tagged `--kind after`. Recording is only
-    /// required on the after side per the universal UI rule.
-    pub has_after_recording: bool,
 }
 
 /// Load fresh evidence + work summary for `item` and produce the listing
-/// + typed-gate flags consumed by the captain review prompt.
+/// consumed by the captain review prompt.
 #[tracing::instrument(skip_all, fields(task_id = item.id))]
 pub(crate) async fn compute_evidence_listing(
     pool: &sqlx::SqlitePool,
@@ -43,46 +31,17 @@ pub(crate) async fn compute_evidence_listing(
         .await
         .unwrap_or_default();
     let data_dir = global_types::data_dir();
-    let freshness_threshold = item.reopened_at.as_deref().unwrap_or("");
-    let is_reopened = item.reopen_seq > 0 && item.reopened_at.is_some();
 
+    // Every registered evidence file is listed, fresh or not. Freshness is no
+    // longer this function's concern: a task whose evidence predates its
+    // latest reopen is nudged by `service::deterministic` and never reaches a
+    // review at all.
     let mut out = EvidenceListing::default();
     for artifact in &artifacts {
         if artifact.artifact_type != crate::ArtifactType::Evidence {
             continue;
         }
-        let is_fresh = !is_reopened || artifact.created_at.as_str() > freshness_threshold;
         for media in &artifact.media {
-            let ext_lower = media.ext.to_lowercase();
-            let is_screenshot_ext = SCREENSHOT_EXTS.contains(&ext_lower.as_str());
-            let is_recording_ext = RECORDING_EXTS.contains(&ext_lower.as_str());
-            if is_fresh && is_screenshot_ext {
-                out.has_screenshot = true;
-            }
-            if is_fresh && is_recording_ext {
-                out.has_recording = true;
-            }
-            if is_fresh {
-                match media.kind {
-                    Some(crate::EvidenceKind::BeforeFix) => {
-                        out.has_before_fix = true;
-                        if is_screenshot_ext {
-                            out.has_before_screenshot = true;
-                        }
-                    }
-                    Some(crate::EvidenceKind::AfterFix) => {
-                        out.has_after_fix = true;
-                        if is_screenshot_ext {
-                            out.has_after_screenshot = true;
-                        }
-                        if is_recording_ext {
-                            out.has_after_recording = true;
-                        }
-                    }
-                    Some(crate::EvidenceKind::CannotReproduce) => out.has_cannot_reproduce = true,
-                    Some(crate::EvidenceKind::Other) | None => {}
-                }
-            }
             if let Some(ref local) = media.local_path {
                 let caption = media.caption.as_deref().unwrap_or("(no caption)");
                 let kind_label = match media.kind {

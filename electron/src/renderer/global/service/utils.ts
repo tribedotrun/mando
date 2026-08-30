@@ -61,11 +61,6 @@ export function canAnswer(task: TaskItem): boolean {
   return task.status === 'needs-clarification';
 }
 
-/** Whether a task's plan can be revised (re-run planning with feedback). */
-export function canRevisePlan(task: TaskItem): boolean {
-  return task.status === 'plan-ready';
-}
-
 /** Whether a task can be asked a question in any active or review state (broad). */
 export function canAskAny(task: TaskItem): boolean {
   return [
@@ -204,11 +199,6 @@ export function round(value: number): number {
 export function pct(completed: number, total: number): number {
   if (total === 0) return 0;
   return Math.round((completed / total) * 100);
-}
-
-/** Compute textarea row count for bulk mode. */
-export function bulkTextareaRows(lineCount: number): number {
-  return Math.max(6, Math.min(12, lineCount));
 }
 
 const RATE_LIMITED_STATUSES: readonly ItemStatus[] = Object.freeze([

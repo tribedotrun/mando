@@ -357,7 +357,7 @@ pub fn session_cost(stream_path: &Path) -> SessionCost {
             // Grab the model from the message envelope so per-model
             // estimation in `estimated_cost_usd` can apply the right rate.
             // Absent / blank model names bucket under the empty string,
-            // which `rate_for_model` routes to its opus fallback.
+            // which `rate_for_model` routes to its fable fallback.
             let model = val
                 .pointer("/message/model")
                 .and_then(|m| m.as_str())

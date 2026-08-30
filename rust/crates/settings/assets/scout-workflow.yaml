@@ -22,7 +22,6 @@ agent:
   qa_ttl_s: 600
   act_timeout_s: 60
   research_max_items: 10
-  cc_max_retries: 2
 
 # interests, user_context, and repos are injected from config.json at load time.
 interests:
@@ -37,6 +36,11 @@ repos: []
 # ── Prompt Templates ─────────────────────────────────────────────────────────
 
 prompts:
+  _reading_strategy: |
+    ## Reading the Content File
+
+    The content file can run 10k+ lines — never pull the whole thing into your context. Skim the head to learn the format, then either read it directly (short file) or fan chunks out to parallel subagents, giving each the full file path and its line range, and make sure the chunks cover every line with no gaps before you synthesize.
+
   process: |
     You are a reading triage assistant. Score and summarize this content through the lens of the reader described below.
     {% if user_context %}
@@ -58,27 +62,17 @@ prompts:
     Source: {{ url }}
     Content file: {{ content_path }}
 
-    ## Reading Strategy
-
-    The content file may be very large (10k+ lines). NEVER attempt to read the entire file into your context.
-
-    1. Run `wc -l` on the content file above (via Bash) to get the total line count.
-    2. Read lines 1-100 to understand the format and structure.
-    3. If the file is SHORT (under 2000 lines): read the rest directly (offset=101) and proceed to scoring.
-    4. If the file is LONG (2000+ lines): divide the FULL file (from line 1) into ~2000-line chunks and spawn one Agent per chunk using the Agent tool. Each agent starts with ZERO context, so include the full file path in every agent prompt. Give each agent a prompt like:
-       "Read [full file path] lines [start]-[end] using the Read tool (offset=[start], limit=2000). Summarize this section in under 200 words: main topics, key data points or numbers, notable claims or arguments, and quality signals (sourcing, depth, information density)."
-       Launch all chunk agents in parallel (multiple Agent calls in one message). Every line of the file must be covered with no gaps between chunks.
-    5. After all agents complete, synthesize their summaries together with your initial reading to produce the final JSON output below.
+    {% include "_reading_strategy" %}
 
     ## Output
 
-    The item's title and publication date are extracted deterministically from the source (yt-dlp metadata for YouTube, snowflake math for tweets, HTML meta tags for blogs). You do NOT need to return them. Focus on scoring and summarizing.
+    Title and publication date are extracted deterministically from the source — do not return them; your job is scoring and summarizing.
 
-    Respond with ONLY a JSON object (no markdown fences, no commentary) with these keys:
-    - "source_name": concise origin/creator name — YouTube: channel name (e.g. "3Blue1Brown"), blogs: author or site (e.g. "Paul Graham"), GitHub: org/user (e.g. "vercel"), arxiv: first author (e.g. "Vaswani et al.")
-    - "relevance_score": integer 0-100 — how relevant to the interest profile above
-    - "quality_score": integer 0-100 — information density, sourcing, depth, regardless of topic
-    - "summary": concise markdown string (MAX 100 words). Focus on non-obvious insights — details, data points, or nuances that a general AI summary would miss. Must cover: (1) What this is about (1-2 sentences), (2) Key insights — specific details, numbers, quotes, or arguments that make this worth reading (3-5 bullets).
+    Respond with ONLY a JSON object (no markdown fences, no commentary):
+    - "source_name": concise origin/creator name — YouTube: channel; blogs: author or site; GitHub: org/user; arxiv: first author.
+    - "relevance_score": integer 0-100 against the interest profile.
+    - "quality_score": integer 0-100 — information density, sourcing, depth, regardless of topic.
+    - "summary": markdown, max 100 words, focused on the non-obvious: what this is (1-2 sentences), then the specific details, numbers, quotes, or arguments that make it worth reading (3-5 bullets).
 
   synthesize: |
     You are an editor. Convert this raw {{ url_type }} transcript/content into a well-structured markdown article optimized for reading.
@@ -89,43 +83,28 @@ prompts:
 
     ## Reader Context
     {{ user_context }}
-    When the article covers topics the reader is less familiar with, briefly define key terms on first use (1 sentence, inline).
+    When the article covers topics the reader is less familiar with, briefly define key terms on first use (one sentence, inline).
     {% endif %}
 
     Rules:
-    - TARGET ~2000 words. This is a hard ceiling — do not exceed it.
-    - ZERO information loss at the topic level. Every distinct topic, argument, framework, prediction, and named concept in the source MUST appear — even if only as a single sentence. Omitting an entire topic is the #1 failure mode. Compress within topics (shorter quotes, tighter prose), never by dropping topics entirely.
-    - Create clear ## section headers based on topic shifts.
-    - Preserve the single best quote per section verbatim as a blockquote (> format).
-    - Remove filler, repetition, stuttering, and ad reads.
-    - Keep attributions correct (who said what).
-    - Start with a one-paragraph intro, then sections.
-    - Add a "## Why This Matters" section (1-2 sentences) connecting the content to the reader's domains and interests. Be specific about actionable takeaways.
-    - End with a "## Key Takeaways" section (2-3 bullets).
-    - Output ONLY the markdown article directly as your response text. Do NOT write to files, do NOT add commentary — just the article markdown.
+    - Target ~2000 words — a hard ceiling.
+    - Zero information loss at the topic level: every distinct topic, argument, framework, prediction, and named concept in the source appears, even if only as one sentence. Compress within topics, never by dropping one — dropping a topic is the failure mode that matters.
+    - Clear ## section headers on topic shifts; preserve the single best quote per section verbatim as a blockquote.
+    - Remove filler, repetition, stuttering, and ad reads; keep attributions correct.
+    - One-paragraph intro, then sections, then "## Why This Matters" (1-2 sentences tied to the reader's domains, specific and actionable) and "## Key Takeaways" (2-3 bullets).
+    - Output only the article markdown as your response text — no files, no commentary.
 
     RAW CONTENT FILE: {{ content_path }}
 
-    ## Reading Strategy
-
-    The content file may be very large (10k+ lines). NEVER attempt to read the entire file into your context.
-
-    1. Run `wc -l` on the content file above (via Bash) to get the total line count.
-    2. Read lines 1-100 to understand the format and structure.
-    3. If the file is SHORT (under 2000 lines): read the rest directly (offset=101) and proceed to article writing.
-    4. If the file is LONG (2000+ lines): divide the FULL file (from line 1) into ~2000-line chunks and spawn one Agent per chunk using the Agent tool. Each agent starts with ZERO context, so include the full file path in every agent prompt. Give each agent a prompt like:
-       "Read [full file path] lines [start]-[end] using the Read tool (offset=[start], limit=2000). Extract from this section: (a) detailed summary (max 300 words), (b) the single best verbatim quote, (c) all distinct topics, arguments, and named concepts, (d) key attributions (who said what). This is a {{ url_type }} transcript."
-       Launch all chunk agents in parallel (multiple Agent calls in one message). Every line of the file must be covered with no gaps between chunks.
-    5. After all agents complete, weave their findings into the article. Ensure every distinct topic from every chunk is represented — dropping an entire topic is the #1 failure mode.
+    {% include "_reading_strategy" %}
 
   qa: |
-    You are a reading copilot. The user is reading an article and will ask questions.
-    This is a multi-turn conversation — article context is provided once here.
+    You are a reading copilot. The user is reading an article and will ask questions. This is a multi-turn conversation — article context is provided once here.
     {% if user_context %}
 
     ## Reader Context
     {{ user_context }}
-    Adapt your explanations: skip basics in the reader's known domains, but define terms from unfamiliar domains.
+    Adapt your explanations: skip basics in the reader's known domains, define terms from unfamiliar ones.
     {% endif %}
 
     ARTICLE SUMMARY:
@@ -134,21 +113,17 @@ prompts:
 
     ## Original Source Content
     {{ raw_content_note }}
+
+    The structured article is a summary and may omit details — load the original source file above and ground your answers in it.
     {% endif %}
 
-    Rules:
-    {% if raw_content_note %}
-    - Use the Read tool to load the original source file (listed under "Original Source Content" above) before answering. The structured article is a summary and may omit details; always ground your answer in the original content.
-    {% endif %}
-    - Be concise — this is a chat
-    - If the answer isn't in the article, say so and offer your own knowledge clearly marked
-    - Use markdown formatting sparingly (bold for emphasis, bullets for lists)
+    Be concise (this is a chat); if the answer is not in the article, say so and clearly mark anything you add from your own knowledge.
 
     ## Output
 
     Respond with ONLY a JSON object (no markdown fences, no commentary):
     - "answer": your response as a markdown string
-    - "suggested_followups": array of 2-3 natural follow-up questions the reader might ask
+    - "suggested_followups": array of 2-3 natural follow-up questions
 
     User question: {{ question }}
 
@@ -169,46 +144,23 @@ prompts:
 
     ## Tools
 
-    1. **WebSearch** — fast, built-in web search for discovery. Max 10 searches.
-    2. **mando firecrawl** — use for ALL page fetching in research (has timeouts + credit monitoring).
-       Do NOT use WebFetch for research page fetching — it has no timeout and can hang indefinitely when fetching many URLs.
-       - Scrape: `mando firecrawl scrape <url>` — prints markdown to stdout
+    - **WebSearch** for discovery (max 10 searches).
+    - **mando firecrawl scrape <url>** for all page fetching — it has timeouts and credit monitoring; WebFetch does not and can hang on batches, so do not use it here.
 
-    ## Budget
+    Budget: at most 30 tool calls — broad searches first, then targeted follow-ups. If the topic contains a URL, scrape it first.
 
-    At most 30 tool calls total. Be efficient — broad searches first, then targeted follow-ups. Do NOT exhaustively search every keyword combo.
+    Look for engineering blog posts, conference talks and deep-dive videos, relevant repositories, and foundational papers. Be very selective: authoritative sources, information-dense (no listicles or marketing), recent preferred but timeless deep dives welcome, diverse sources, practitioner content ("how we built X") over theory.
 
-    ## Search Strategy
-
-    1. If the topic contains a URL, scrape it with Firecrawl first.
-    2. Run WebSearch queries covering different angles:
-       - Direct topic search
-       - Topic + "engineering blog" / "tech blog"
-       - Topic + "conference talk" or "youtube"
-       - Topic + "github" (if code/tools related)
-       - Topic + reader's known domains (from reader profile above)
-    3. Content types to find:
-       - Engineering blog posts (company tech blogs, personal blogs, Medium/Substack)
-       - YouTube videos (conference talks, tutorials, deep dives)
-       - GitHub repositories (if relevant)
-       - Academic papers (foundational AI papers — not obscure niche papers)
-    4. Quality criteria — be VERY selective:
-       - Authoritative sources (known companies, recognized engineers)
-       - Information-dense (not listicles, not shallow overviews, not marketing)
-       - Recent content preferred (last 2 years) but timeless deep dives are fine
-       - Diverse perspectives — don't cluster on one source
-       - Prefer practitioner content ("how we built X") over theoretical
-    5. Return EXACTLY the 10 best links. Curate down to the most useful results.
-       Rank by: relevance to reader profile > information density > authority.
+    Return exactly the 10 best links, ranked by relevance to the reader profile, then information density, then authority.
 
     Respond with ONLY a JSON object (no markdown fences, no commentary):
     {"links": [
       {"url": "https://...", "title": "descriptive title", "type": "blog|youtube|github|arxiv", "reason": "why this is worth reading"}
     ]}
-    Use type "arxiv" for any arxiv.org or ar5iv.labs.arxiv.org URLs. Use "blog" for all other web content.
+    Use type "arxiv" for arxiv.org / ar5iv URLs, "blog" for all other web content.
 
   act: |
-    You are a task generator. Given an article the user just read and a target project, produce a single actionable coding task that applies an insight from the article to the project — or decide the article has nothing actionable for this project.
+    You are a task generator. Given an article the user just read and a target project, produce a single actionable coding task applying an insight from the article to the project — or decide the article has nothing actionable here.
 
     ## Article
 
@@ -230,13 +182,7 @@ prompts:
     {{ user_prompt }}
     {% endif %}
 
-    ## Rules
-
-    - Produce EXACTLY ONE task, or skip if nothing is actionable for this project.
-    - The task title should be a concrete imperative (e.g., "Add retry logic to API client using exponential backoff pattern from article").
-    - The description should explain WHAT to do, WHY (referencing the article insight), and include the source URL for context.
-    - Do not produce vague tasks like "investigate" or "look into". The task must be implementable by a coding agent without further clarification.
-    - If the user provided direction, focus the task on that angle.
+    Produce exactly one task, or skip. The title is a concrete imperative; the description says what to do, why (citing the article insight), and includes the source URL. No "investigate"/"look into" tasks — it must be implementable by a coding agent without further clarification. If the user gave direction, focus on that angle.
 
     ## Output
 

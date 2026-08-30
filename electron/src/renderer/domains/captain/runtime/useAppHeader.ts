@@ -11,7 +11,6 @@ import { useWorkbenchCtx } from '#renderer/domains/captain/runtime/useWorkbenchC
 export interface AppHeaderData {
   ctx: ReturnType<typeof useWorkbenchCtx>;
   pathname: string;
-  isTerminalTab: boolean;
   pageTitle: string;
   sessions: ReturnType<typeof buildSessionsFromTimeline>;
   taskIsRateLimited: boolean;
@@ -20,10 +19,6 @@ export interface AppHeaderData {
 export function useAppHeader(): AppHeaderData {
   const ctx = useWorkbenchCtx();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
-  const search = useRouterState({
-    select: (s) => s.location.search as Record<string, string | undefined>,
-  });
-  const isTerminalTab = pathname.startsWith('/wb/') && search.tab === 'terminal';
 
   // Cmd+Shift+C copies the worktree path (ref avoids stale closure)
   const worktreePathRef = useRef(ctx?.worktreePath);
@@ -63,7 +58,6 @@ export function useAppHeader(): AppHeaderData {
   return {
     ctx,
     pathname,
-    isTerminalTab,
     pageTitle,
     sessions,
     taskIsRateLimited,

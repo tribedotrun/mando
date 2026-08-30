@@ -333,64 +333,6 @@ pub async fn enqueue_task_effects(
     Ok(Some(transition_id))
 }
 
-pub async fn revert_orphaned_planning(pool: &SqlitePool) -> Result<u64> {
-    let mut tx = pool.begin().await?;
-    let now = global_types::now_rfc3339();
-    let command = crate::service::lifecycle::infer_transition_command(
-        crate::ItemStatus::InProgress,
-        crate::ItemStatus::Queued,
-        true,
-    )?;
-    let mut transition_ids = Vec::new();
-    let tasks: Vec<(i64, i64)> =
-        sqlx::query_as("SELECT id, rev FROM tasks WHERE status = 'in-progress' AND planning = 1")
-            .fetch_all(&mut *tx)
-            .await?;
-    for (task_id, rev) in &tasks {
-        let result = sqlx::query(
-            "UPDATE tasks
-             SET status = 'queued', worker = NULL, session_ids = '{}', worker_started_at = NULL,
-                 last_activity_at = ?, rev = rev + 1
-             WHERE id = ? AND rev = ?",
-        )
-        .bind(&now)
-        .bind(task_id)
-        .bind(rev)
-        .execute(&mut *tx)
-        .await?;
-        if result.rows_affected() == 0 {
-            continue;
-        }
-        let metadata = json!({"task_id": task_id, "reason": "orphaned_planning_recovery"});
-        let noop = super::noop_effect();
-        let aggregate_id = task_id.to_string();
-        let transition_id = record_transition(
-            &mut tx,
-            &LifecycleTransitionRecord {
-                aggregate_type: "task",
-                aggregate_id: &aggregate_id,
-                command,
-                from_state: Some("in-progress"),
-                to_state: "queued",
-                actor: "captain",
-                cause: Some("daemon_restart"),
-                metadata: &metadata,
-                rev_before: *rev,
-                rev_after: *rev + 1,
-                idempotency_key: None,
-            },
-            &[LifecycleEffect {
-                effect_kind: "lifecycle.transition.recorded",
-                payload: &noop,
-            }],
-        )
-        .await?;
-        transition_ids.push(transition_id);
-    }
-    tx.commit().await?;
-    Ok(transition_ids.len() as u64)
-}
-
 #[cfg(test)]
 mod tests {
     use sqlx::Row;

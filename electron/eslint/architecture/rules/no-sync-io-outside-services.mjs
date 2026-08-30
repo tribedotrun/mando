@@ -37,7 +37,7 @@ const ALLOWLIST_FRAGMENTS = [
   '/main/global/runtime/trayOwner.ts',
   '/main/onboarding/repo/config.ts',
   '/main/global/runtime/loginItemMigration.ts',
-  '/main/shell/runtime/terminalBridge.ts',
+  '/main/shell/runtime/shellBridge.ts',
   '/main/global/providers/logger.ts',
 ];
 

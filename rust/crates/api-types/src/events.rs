@@ -2,8 +2,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::{
-    CredentialRateLimitStatus, MandoConfig, ScoutItem, TaskItem, TerminalSessionInfo,
-    WorkbenchItem, WorkerDetail,
+    CredentialRateLimitStatus, MandoConfig, ScoutItem, TaskItem, WorkbenchItem, WorkerDetail,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, TS)]
@@ -117,7 +116,6 @@ pub struct SseSnapshotData {
     pub tasks: Vec<TaskItem>,
     pub workers: Vec<WorkerDetail>,
     pub workbenches: Vec<WorkbenchItem>,
-    pub terminals: Vec<TerminalSessionInfo>,
     pub config: MandoConfig,
     pub daemon: SseDaemonInfo,
 }
@@ -340,23 +338,4 @@ pub enum SseEnvelope {
     Research(Box<ResearchPayload>),
     Credentials(Box<CredentialsPayload>),
     Artifacts(Box<ArtifactsPayload>),
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct TerminalOutputPayload {
-    pub data_b64: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct TerminalExitPayload {
-    pub code: Option<u32>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[serde(rename_all = "snake_case", tag = "event", content = "data")]
-pub enum TerminalStreamEnvelope {
-    Output(TerminalOutputPayload),
-    Exit(TerminalExitPayload),
 }

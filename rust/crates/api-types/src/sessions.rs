@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -39,8 +39,6 @@ pub enum SessionCategory {
     CaptainReview,
     CaptainOps,
     Advisor,
-    Planning,
-    TodoParser,
     Scout,
     Rebase,
 }
@@ -53,8 +51,6 @@ impl SessionCategory {
             Self::CaptainReview => "captain-review",
             Self::CaptainOps => "captain-ops",
             Self::Advisor => "advisor",
-            Self::Planning => "planning",
-            Self::TodoParser => "todo-parser",
             Self::Scout => "scout",
             Self::Rebase => "rebase",
         }
@@ -178,18 +174,6 @@ pub struct SessionCostSummary {
 pub struct SessionJsonlPathResponse {
     pub session_id: String,
     pub path: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[serde(deny_unknown_fields)]
-pub struct SessionsResponse {
-    pub total: usize,
-    pub page: usize,
-    pub per_page: usize,
-    pub total_pages: usize,
-    pub categories: HashMap<String, usize>,
-    pub total_cost_usd: Option<f64>,
-    pub sessions: Vec<SessionEntry>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]

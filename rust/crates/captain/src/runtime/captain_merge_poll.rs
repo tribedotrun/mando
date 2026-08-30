@@ -5,7 +5,7 @@ use settings::CaptainWorkflow;
 use settings::Config;
 
 use super::captain_merge::{
-    apply_merge_result, check_merge, handle_merge_error, spawn_merge, MergeResult,
+    apply_merge_result, check_merge, handle_merge_error, spawn_merge, MergeAttempt, MergeResult,
 };
 use super::notify::Notifier;
 use crate::service::dispatch_logic;
@@ -166,7 +166,10 @@ pub(crate) async fn poll_merging_items(
             }
             item.last_activity_at = Some(global_types::now_rfc3339());
             match spawn_merge(item, config, workflow, notifier, pool).await {
-                Ok(()) => {
+                Ok(MergeAttempt::Merged(result)) => {
+                    apply_merge_result(item, &result, notifier, workflow, pool).await;
+                }
+                Ok(MergeAttempt::SessionSpawned) => {
                     merge_active += 1;
                 }
                 Err(e) => {
@@ -199,6 +202,17 @@ pub(crate) async fn poll_merging_items(
     for &idx in &has_session {
         let item = &mut items[idx];
         if let Some(result) = check_merge(item) {
+            // A merge session killed by a rate limit produces the same
+            // synthetic failure as any other crash. Excuse it before
+            // `handle_merge_error` charges it to the retry budget, exactly as
+            // the review poller does for its own failed sessions — otherwise
+            // a healthy PR escalates after `max_merge_retries` ticks of a
+            // cooldown nobody's merge session could have survived.
+            if result.action != "merged"
+                && excuse_rate_limited_merge(item, pool, false, "merge session failed").await
+            {
+                continue;
+            }
             apply_merge_result(item, &result, notifier, workflow, pool).await;
             continue;
         }
@@ -295,23 +309,7 @@ pub(crate) async fn poll_merging_items(
         };
 
         if is_timed_out {
-            let is_rl = match item.session_ids.merge.as_deref() {
-                Some(sid) => {
-                    super::credential_rate_limit::check_and_activate_from_stream(pool, sid).await
-                }
-                None => false,
-            };
-            if is_rl || rate_limited {
-                tracing::info!(
-                    module = "captain",
-                    item_id = item.id,
-                    "merge timeout during rate limit — not counting against retry budget"
-                );
-                global_infra::best_effort!(
-                    super::timeline_emit::emit_rate_limited(item, pool).await,
-                    "captain_merge_poll: super::timeline_emit::emit_rate_limited(item, pool).await"
-                );
-                item.session_ids.merge = None;
+            if excuse_rate_limited_merge(item, pool, rate_limited, "merge timeout").await {
                 continue;
             }
 
@@ -324,5 +322,169 @@ pub(crate) async fn poll_merging_items(
             )
             .await;
         }
+    }
+}
+
+/// Clear a merge session that a rate limit killed, without charging it to the
+/// retry budget. Returns true when the failure was excused, leaving the item
+/// in CaptainMerging with no session id so the next tick re-spawns it once the
+/// cooldown lifts.
+///
+/// `cooldown_active` excuses the item on the daemon-wide cooldown flag alone.
+/// The timeout path sets it — a session that produced nothing while every
+/// credential was cooling down learned nothing about this PR. A session that
+/// failed outright has its own stream to read, so that path relies on the
+/// stream check only.
+async fn excuse_rate_limited_merge(
+    item: &mut Task,
+    pool: &sqlx::SqlitePool,
+    cooldown_active: bool,
+    what: &str,
+) -> bool {
+    let stream_says_rate_limited = match item.session_ids.merge.clone() {
+        Some(sid) => super::credential_rate_limit::check_and_activate_from_stream(pool, &sid).await,
+        None => false,
+    };
+    if !stream_says_rate_limited && !cooldown_active {
+        return false;
+    }
+    tracing::info!(
+        module = "captain",
+        item_id = item.id,
+        "{what} during rate limit — not counting against retry budget"
+    );
+    global_infra::best_effort!(
+        super::timeline_emit::emit_rate_limited(item, pool).await,
+        "captain_merge_poll: super::timeline_emit::emit_rate_limited(item, pool).await"
+    );
+    item.session_ids.merge = None;
+    true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    async fn test_pool() -> sqlx::SqlitePool {
+        let db = global_db::Db::open_in_memory().await.unwrap();
+        db.pool().clone()
+    }
+
+    /// Write a stream file carrying the `rejected` rate-limit envelope CC
+    /// emits when the credential is exhausted, and register the session so
+    /// the provider lookup resolves.
+    async fn seed_rate_limited_session(
+        pool: &sqlx::SqlitePool,
+        data_dir: &std::path::Path,
+    ) -> String {
+        let session_id = global_infra::uuid::Uuid::v4().to_string();
+        crate::io::headless_cc::log_running_session(
+            pool,
+            &session_id,
+            std::path::Path::new("/tmp"),
+            "merge-model",
+            "captain-merge-async",
+            "",
+            Some(7),
+            false,
+            None,
+        )
+        .await
+        .unwrap();
+        let streams_dir = data_dir.join("state/cc-streams");
+        std::fs::create_dir_all(&streams_dir).unwrap();
+        std::fs::write(
+            streams_dir.join(format!("{session_id}.jsonl")),
+            "{\"type\":\"system\",\"subtype\":\"init\"}\n\
+             {\"type\":\"rate_limit_event\",\"rate_limit_info\":{\"status\":\"rejected\"}}\n",
+        )
+        .unwrap();
+        session_id
+    }
+
+    /// A merge session that failed because its credential was rate-limited
+    /// must not burn the retry budget: three such ticks used to exhaust
+    /// `max_merge_retries` and escalate a perfectly healthy PR.
+    #[tokio::test]
+    async fn a_rate_limited_merge_failure_does_not_burn_the_retry_budget() {
+        let _lock = global_infra::PROCESS_ENV_LOCK.lock().await;
+        let dir = std::env::temp_dir().join(format!(
+            "mando-merge-rl-test-{}",
+            global_infra::uuid::Uuid::v4()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let _guard = global_infra::EnvVarGuard::set("MANDO_DATA_DIR", &dir);
+        super::super::ambient_rate_limit::clear();
+
+        let pool = test_pool().await;
+        let session_id = seed_rate_limited_session(&pool, &dir).await;
+
+        let mut item = Task::new("Rate-limited merge");
+        item.id = 7;
+        item.status = ItemStatus::CaptainMerging;
+        item.merge_fail_count = 1;
+        item.session_ids.merge = Some(session_id);
+
+        assert!(
+            excuse_rate_limited_merge(&mut item, &pool, false, "merge session failed").await,
+            "a rate-limited failure must be excused"
+        );
+        assert_eq!(
+            item.merge_fail_count, 1,
+            "an excused failure must not increment merge_fail_count"
+        );
+        assert!(
+            item.session_ids.merge.is_none(),
+            "the dead session must be cleared so the next tick re-spawns"
+        );
+        assert!(
+            super::super::ambient_rate_limit::is_active(),
+            "the cooldown must be active so nothing re-spawns until it lifts"
+        );
+    }
+
+    /// A merge session that failed for any other reason still goes to
+    /// `handle_merge_error` — this must not become a blanket retry excuse.
+    #[tokio::test]
+    async fn an_ordinary_merge_failure_is_not_excused() {
+        let _lock = global_infra::PROCESS_ENV_LOCK.lock().await;
+        let dir = std::env::temp_dir().join(format!(
+            "mando-merge-ok-test-{}",
+            global_infra::uuid::Uuid::v4()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let _guard = global_infra::EnvVarGuard::set("MANDO_DATA_DIR", &dir);
+        super::super::ambient_rate_limit::clear();
+
+        let pool = test_pool().await;
+        let session_id = global_infra::uuid::Uuid::v4().to_string();
+        crate::io::headless_cc::log_running_session(
+            &pool,
+            &session_id,
+            std::path::Path::new("/tmp"),
+            "merge-model",
+            "captain-merge-async",
+            "",
+            Some(8),
+            false,
+            None,
+        )
+        .await
+        .unwrap();
+        let streams_dir = dir.join("state/cc-streams");
+        std::fs::create_dir_all(&streams_dir).unwrap();
+        std::fs::write(
+            streams_dir.join(format!("{session_id}.jsonl")),
+            "{\"type\":\"system\",\"subtype\":\"init\"}\n",
+        )
+        .unwrap();
+
+        let mut item = Task::new("Plain merge failure");
+        item.id = 8;
+        item.status = ItemStatus::CaptainMerging;
+        item.session_ids.merge = Some(session_id.clone());
+
+        assert!(!excuse_rate_limited_merge(&mut item, &pool, false, "merge session failed").await);
+        assert_eq!(item.session_ids.merge.as_deref(), Some(session_id.as_str()));
     }
 }

@@ -52,12 +52,6 @@ export const queryKeys = {
     jsonlPath: (sessionId: string) => ['sessions', 'jsonl-path', sessionId] as const,
   },
 
-  // ── Terminals ──
-  terminals: {
-    all: ['terminals'] as const,
-    list: () => ['terminals', 'list'] as const,
-  },
-
   // ── Workbenches ──
   workbenches: {
     all: ['workbenches'] as const,

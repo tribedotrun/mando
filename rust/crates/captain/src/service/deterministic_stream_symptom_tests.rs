@@ -245,31 +245,6 @@ fn mock_529_routes_to_broken_session() {
 }
 
 #[test]
-fn image_dimension_does_not_route_to_broken_session() {
-    // Recoverable: the worker can resize and retry, so it must stay on the
-    // nudge path and not get respawned by broken-session review.
-    //
-    // Shape: CC emits the dimension error as a `user/tool_result` content
-    // string with `is_error:true`. The synthesized-tail path used to read
-    // `[user]` markers and miss this entirely — structural detection
-    // restores the signal.
-    let path = write_test_stream(
-        "image_dimension",
-        &[
-            init_line(),
-            r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"Read","input":{}}]}}"#,
-            r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","is_error":true,"content":"API Error: image exceeds the dimension limit of 2000px × 2000px"}]}}"#,
-        ],
-    );
-    let mut ctx = base_ctx();
-    ctx.process_alive = false;
-    ctx.stream_stale_s = Some(STALE_F64 + 1.0);
-    let a = classify_with_path(&ctx, &base_item(), Some(false), &path);
-    assert_eq!(a.action, ActionKind::Nudge);
-    assert_eq!(a.reason.as_deref(), Some("image dimension blocked"));
-}
-
-#[test]
 fn broken_session_symptom_wins_over_active_rule() {
     // The watchdog's injected error line refreshes stream mtime, so a wedged
     // session looks "actively working" per Rule 2. The symptom check must

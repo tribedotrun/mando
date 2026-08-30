@@ -24,15 +24,6 @@ use api_types::{
 
 use crate::transcript_events::helpers::{parse_permission_mode, string_array};
 
-/// Parse every line in a JSONL stream file into typed transcript events.
-///
-/// Returns an empty vector if the file is missing or unreadable. Individual
-/// malformed lines become `TranscriptEvent::Unknown` variants so no history is
-/// silently dropped.
-pub fn parse_events(stream_path: &Path) -> Vec<TranscriptEvent> {
-    parse_events_with_size(stream_path).0
-}
-
 /// Parse the stream file once and return events alongside the byte length
 /// and the total number of input lines (including empty lines that the
 /// parser skipped). Callers tailing live sessions feed the byte length back
@@ -120,11 +111,6 @@ pub fn parse_events_from_offset(
     let complete_slice = &content[..complete_len];
     let events = parse_events_from_str(complete_slice, starting_line_number);
     (events, byte_offset + complete_len as u64)
-}
-
-/// Size of a file in bytes, or `0` when the file is missing/unreadable.
-pub fn stream_file_size(stream_path: &Path) -> u64 {
-    std::fs::metadata(stream_path).map(|m| m.len()).unwrap_or(0)
 }
 
 fn parse_events_from_str(content: &str, starting_line: u32) -> Vec<TranscriptEvent> {
@@ -356,6 +342,13 @@ fn parse_system_init(val: &serde_json::Value, meta: EventMeta) -> SystemInitEven
 mod tests {
     use super::*;
     use api_types::{AssistantContentBlock, ResultOutcome, ToolInput, ToolName, UserContentBlock};
+
+    /// Test-only convenience over [`parse_events_with_size`]: the whole-file
+    /// parse has no production caller, so it lives here rather than on the
+    /// crate's public surface.
+    fn parse_events(stream_path: &Path) -> Vec<TranscriptEvent> {
+        parse_events_with_size(stream_path).0
+    }
 
     fn temp_file(content: &str) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!("mando-events-{}", std::process::id()));

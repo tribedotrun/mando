@@ -1,8 +1,8 @@
 //! Typed symptoms detected in CC stream output.
 //!
 //! The Claude CLI emits human-readable error text into its stream when certain
-//! server-side conditions fire (rate limit, image dimension limit, watchdog
-//! abort, etc.). Downstream callers branch on a typed enum variant; the
+//! server-side conditions fire (rate limit, watchdog abort, context overflow,
+//! etc.). Downstream callers branch on a typed enum variant; the
 //! substring patterns that map each variant to stream text live in
 //! `captain-workflow.yaml` under `stream_symptoms`, not in code.
 //!
@@ -12,15 +12,12 @@
 
 use serde::{Deserialize, Serialize};
 
-/// Typed identifier for a stream symptom. Code paths branch on these names:
-/// `ImageDimensionLimit` stays on the nudge path, everything else routes to
-/// broken-session review. The name is the stable contract; its pattern list
-/// and response metadata come from workflow config.
+/// Typed identifier for a stream symptom. Code paths branch on these names to
+/// route a session to broken-session review. The name is the stable contract;
+/// its pattern list and response metadata come from workflow config.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[non_exhaustive]
 pub enum CcStreamSymptom {
-    /// Recoverable: worker can resize and retry. Nudge path.
-    ImageDimensionLimit,
     /// CC's stream watchdog aborted after idle timeout. Broken session.
     StreamIdleTimeout,
     /// Anthropic account hit rate/usage window. Broken session.
@@ -46,9 +43,7 @@ pub enum CcStreamSymptom {
 /// Matching semantics: AND across `clauses`, OR within each clause. A clause
 /// matches when any of its substrings appears in the (lowercased) text the
 /// detector hands it. All clauses must match for the rule to fire. A rule
-/// with a single clause is plain OR; multiple clauses compose into AND-of-OR
-/// (e.g. `ImageDimensionLimit` requires both "exceeds the dimension limit"
-/// and "2000px").
+/// with a single clause is plain OR; multiple clauses compose into AND-of-OR.
 ///
 /// **Scope (post-structural rewrite).** Clauses are never run against the
 /// whole JSONL stream tail anymore. The detector in
@@ -56,9 +51,7 @@ pub enum CcStreamSymptom {
 /// sourced text to the matcher:
 ///
 /// - most rules see the terminal `result` event's `result` + `error` + `errors[]` fields;
-/// - `SessionInterrupted` sees only the last non-system user `tool_result`'s content;
-/// - `ImageDimensionLimit` sees the last user `tool_result`'s content (via
-///   [`crate::stream::detect_image_dimension_blocked`]).
+/// - `SessionInterrupted` sees only the last non-system user `tool_result`'s content.
 ///
 /// Skill templates, user prompts, assistant thinking, and routine per-tool
 /// errors no longer reach any rule.
@@ -71,7 +64,7 @@ pub struct StreamSymptomRule {
     /// and captain reason strings key on this value.
     pub reason: String,
     /// True when the symptom routes to broken-session review; false when it
-    /// stays on the nudge path. `ImageDimensionLimit` is the only false.
+    /// stays on the nudge path. Every rule shipped today is `true`.
     pub broken_session: bool,
     /// AND-of-OR substring clauses. Match is case-insensitive; patterns
     /// should be written lowercase in yaml.
@@ -99,8 +92,8 @@ impl StreamSymptomMatcher {
 
     /// Find a rule by its typed variant. Returns `None` if the configured
     /// rule list omits that variant. Used by structural detector paths that
-    /// need clause data for one specific symptom (e.g. `SessionInterrupted`,
-    /// `ImageDimensionLimit`) without running the full matcher.
+    /// need clause data for one specific symptom (e.g. `SessionInterrupted`)
+    /// without running the full matcher.
     pub fn rule_by_name(&self, name: CcStreamSymptom) -> Option<&StreamSymptomRule> {
         self.rules.iter().find(|r| r.name == name)
     }
@@ -169,13 +162,10 @@ mod tests {
                 clauses: vec![vec!["Stream idle timeout".into()]],
             },
             StreamSymptomRule {
-                name: CcStreamSymptom::ImageDimensionLimit,
-                reason: "image_dimension_blocked".into(),
-                broken_session: false,
-                clauses: vec![
-                    vec!["exceeds the dimension limit".into()],
-                    vec!["2000px".into()],
-                ],
+                name: CcStreamSymptom::ContextLengthExceeded,
+                reason: "context_length_exceeded".into(),
+                broken_session: true,
+                clauses: vec![vec!["prompt is too long".into()], vec!["tokens".into()]],
             },
             StreamSymptomRule {
                 name: CcStreamSymptom::IsError,
@@ -194,14 +184,14 @@ mod tests {
     }
 
     #[test]
-    fn detects_image_dimension_limit_requires_both_phrases() {
+    fn multi_clause_rule_requires_every_clause() {
         let m = matcher();
         let hit = m
-            .detect("API Error: image exceeds the dimension limit of 2000px × 2000px")
+            .detect("API Error: prompt is too long: 235000 tokens > 200000 maximum")
             .expect("match");
-        assert_eq!(hit.name, CcStreamSymptom::ImageDimensionLimit);
-        // Missing the 2000px clause → no match.
-        assert!(m.detect("exceeds the dimension limit").is_none());
+        assert_eq!(hit.name, CcStreamSymptom::ContextLengthExceeded);
+        // Missing the "tokens" clause → no match.
+        assert!(m.detect("prompt is too long").is_none());
     }
 
     #[test]

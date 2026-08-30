@@ -5,14 +5,6 @@ export type RouteTransport = 'json' | 'multipart' | 'sse' | 'static' | 'ndjson';
 export type RouteAuth = 'public' | 'protected';
 
 export interface Routes {
-  postAiParsetodos: {
-    method: 'POST';
-    path: '/api/ai/parse-todos';
-    transport: 'json';
-    auth: 'protected';
-    body: Types.ParseTodosRequest;
-    res: Types.ParseTodosResponse;
-  };
   putArtifactsByIdMedia: {
     method: 'PUT';
     path: '/api/artifacts/{id}/media';
@@ -650,14 +642,6 @@ export interface Routes {
     body: Types.TaskIdRequest;
     res: Types.BoolOkResponse;
   };
-  postTasksImplement: {
-    method: 'POST';
-    path: '/api/tasks/implement';
-    transport: 'json';
-    auth: 'protected';
-    body: Types.TaskImplementRequest;
-    res: Types.BoolOkResponse;
-  };
   postTasksMerge: {
     method: 'POST';
     path: '/api/tasks/merge';
@@ -665,14 +649,6 @@ export interface Routes {
     auth: 'protected';
     body: Types.MergeRequest;
     res: Types.MergeResponse;
-  };
-  postTasksQueue: {
-    method: 'POST';
-    path: '/api/tasks/queue';
-    transport: 'json';
-    auth: 'protected';
-    body: Types.TaskIdRequest;
-    res: Types.BoolOkResponse;
   };
   postTasksReopen: {
     method: 'POST';
@@ -808,74 +784,6 @@ export interface Routes {
     auth: 'protected';
     params: Types.TaskIdParams;
     res: Types.TimelineResponse;
-  };
-  getTerminal: {
-    method: 'GET';
-    path: '/api/terminal';
-    transport: 'json';
-    auth: 'protected';
-    res: Array<Types.TerminalSessionInfo>;
-  };
-  postTerminal: {
-    method: 'POST';
-    path: '/api/terminal';
-    transport: 'json';
-    auth: 'protected';
-    body: Types.TerminalCreateRequest;
-    res: Types.TerminalSessionInfo;
-  };
-  deleteTerminalById: {
-    method: 'DELETE';
-    path: '/api/terminal/{id}';
-    transport: 'json';
-    auth: 'protected';
-    params: Types.TerminalIdParams;
-    res: Types.BoolOkResponse;
-  };
-  postTerminalByIdActivity: {
-    method: 'POST';
-    path: '/api/terminal/{id}/activity';
-    transport: 'json';
-    auth: 'protected';
-    body: Types.EmptyRequest;
-    params: Types.TerminalIdParams;
-    res: Types.BoolTouchedResponse;
-  };
-  postTerminalByIdCcsession: {
-    method: 'POST';
-    path: '/api/terminal/{id}/cc-session';
-    transport: 'json';
-    auth: 'protected';
-    body: Types.TerminalCcSessionRequest;
-    params: Types.TerminalIdParams;
-    res: Types.BoolOkResponse;
-  };
-  postTerminalByIdResize: {
-    method: 'POST';
-    path: '/api/terminal/{id}/resize';
-    transport: 'json';
-    auth: 'protected';
-    body: Types.TerminalSize;
-    params: Types.TerminalIdParams;
-    res: Types.BoolOkResponse;
-  };
-  getTerminalByIdStream: {
-    method: 'GET';
-    path: '/api/terminal/{id}/stream';
-    transport: 'sse';
-    auth: 'protected';
-    query: Types.TerminalStreamQuery;
-    params: Types.TerminalIdParams;
-    event: Types.TerminalStreamEnvelope;
-  };
-  postTerminalByIdWrite: {
-    method: 'POST';
-    path: '/api/terminal/{id}/write';
-    transport: 'json';
-    auth: 'protected';
-    body: Types.TerminalWriteRequest;
-    params: Types.TerminalIdParams;
-    res: Types.BoolOkResponse;
   };
   postUiLaunch: {
     method: 'POST';
@@ -1064,12 +972,6 @@ export type NdjsonRouteKey = {
 }[keyof Routes];
 
 export const routes = {
-  postAiParsetodos: {
-    method: 'POST',
-    path: '/api/ai/parse-todos',
-    transport: 'json',
-    auth: 'protected',
-  },
   putArtifactsByIdMedia: {
     method: 'PUT',
     path: '/api/artifacts/{id}/media',
@@ -1475,21 +1377,9 @@ export const routes = {
     transport: 'json',
     auth: 'protected',
   },
-  postTasksImplement: {
-    method: 'POST',
-    path: '/api/tasks/implement',
-    transport: 'json',
-    auth: 'protected',
-  },
   postTasksMerge: {
     method: 'POST',
     path: '/api/tasks/merge',
-    transport: 'json',
-    auth: 'protected',
-  },
-  postTasksQueue: {
-    method: 'POST',
-    path: '/api/tasks/queue',
     transport: 'json',
     auth: 'protected',
   },
@@ -1581,44 +1471,6 @@ export const routes = {
   getTasksByIdTimeline: {
     method: 'GET',
     path: '/api/tasks/{id}/timeline',
-    transport: 'json',
-    auth: 'protected',
-  },
-  getTerminal: { method: 'GET', path: '/api/terminal', transport: 'json', auth: 'protected' },
-  postTerminal: { method: 'POST', path: '/api/terminal', transport: 'json', auth: 'protected' },
-  deleteTerminalById: {
-    method: 'DELETE',
-    path: '/api/terminal/{id}',
-    transport: 'json',
-    auth: 'protected',
-  },
-  postTerminalByIdActivity: {
-    method: 'POST',
-    path: '/api/terminal/{id}/activity',
-    transport: 'json',
-    auth: 'protected',
-  },
-  postTerminalByIdCcsession: {
-    method: 'POST',
-    path: '/api/terminal/{id}/cc-session',
-    transport: 'json',
-    auth: 'protected',
-  },
-  postTerminalByIdResize: {
-    method: 'POST',
-    path: '/api/terminal/{id}/resize',
-    transport: 'json',
-    auth: 'protected',
-  },
-  getTerminalByIdStream: {
-    method: 'GET',
-    path: '/api/terminal/{id}/stream',
-    transport: 'sse',
-    auth: 'protected',
-  },
-  postTerminalByIdWrite: {
-    method: 'POST',
-    path: '/api/terminal/{id}/write',
     transport: 'json',
     auth: 'protected',
   },

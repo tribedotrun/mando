@@ -1,5 +1,5 @@
 use crate::transport::{
-    routes_ai, routes_channels, routes_projects, routes_scout, routes_scout_ai, routes_scout_bulk,
+    routes_channels, routes_projects, routes_scout, routes_scout_ai, routes_scout_bulk,
     routes_scout_telegraph, routes_task_router, routes_ui, routes_worktrees,
 };
 use crate::{ApiRouter, AppState};
@@ -291,18 +291,6 @@ pub(crate) fn project_routes() -> ApiRouter<AppState> {
         handler = routes_projects::delete_project,
         params = api_types::ProjectNameParams,
         res = api_types::ProjectDeleteResponse
-    )
-}
-
-pub(crate) fn ai_routes() -> ApiRouter<AppState> {
-    crate::api_route!(
-        ApiRouter::new(),
-        POST "/api/ai/parse-todos",
-        transport = Json,
-        auth = Protected,
-        handler = routes_ai::post_parse_todos,
-        body = api_types::ParseTodosRequest,
-        res = api_types::ParseTodosResponse
     )
 }
 

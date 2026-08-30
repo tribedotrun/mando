@@ -370,7 +370,7 @@ pub async fn act_on_scout_item(
     info!(id, %project_name, "act: calling AI");
 
     let model = crate::service::model_lookup::required_model(workflow, "act")?;
-    let credential = settings::credentials::pick_for_worker(pool, None)
+    let credential = settings::credentials::pick_for_worker(pool)
         .await
         .inspect_err(|e| warn!(error = %e, "scout-act: pick_for_worker failed"))
         .unwrap_or(None);

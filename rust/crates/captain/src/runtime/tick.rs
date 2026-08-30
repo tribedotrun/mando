@@ -221,7 +221,6 @@ async fn run_captain_tick_inner(
             workflow,
             &notifier,
             &mut alerts,
-            &health_state,
             &pool,
         )
         .await
@@ -273,9 +272,8 @@ async fn run_captain_tick_inner(
         .await;
     }
 
-    // Planning + CaptainMerging — poll for completed pipelines/merge sessions.
+    // CaptainMerging — poll for completed merge sessions.
     if !dry_run {
-        super::dispatch_planning::poll_planning_items(&mut items, &pool).await;
         super::captain_merge_poll::poll_merging_items(
             &mut items,
             config,
@@ -334,7 +332,7 @@ async fn run_captain_tick_inner(
     // Dispatch: Rework → Queued, then spawn workers for Queued/New items.
     let mut active_workers = items
         .iter()
-        .filter(|it| it.status == ItemStatus::InProgress && it.worker.is_some() && !it.planning)
+        .filter(|it| it.status == ItemStatus::InProgress && it.worker.is_some())
         .count();
 
     let mut dry_dispatch_actions: Vec<String> = Vec::new();

@@ -1,5 +1,4 @@
 import React, { useImperativeHandle } from 'react';
-import { ListChecks } from 'lucide-react';
 import { useInlineTaskCreate } from '#renderer/domains/captain/runtime/useInlineTaskCreate';
 import { Button } from '#renderer/global/ui/primitives/button';
 import {
@@ -18,7 +17,6 @@ interface InlineTaskCreateProps {
 
 export function InlineTaskCreate({ ref }: InlineTaskCreateProps): React.ReactElement {
   const form = useInlineTaskCreate();
-  const { bulk, setBulk } = form.draft;
 
   useImperativeHandle(ref, () => ({
     focus: () => form.draft.inputRef.current?.focus(),
@@ -34,17 +32,13 @@ export function InlineTaskCreate({ ref }: InlineTaskCreateProps): React.ReactEle
           onChange={(event) => form.draft.setTitle(event.target.value)}
           onKeyDown={form.events.handleKeyDown}
           onPaste={form.events.handlePaste}
-          placeholder={
-            bulk
-              ? 'Describe your tasks, one per line, or free-form.\nAI will parse individual items.'
-              : 'What needs to be done?'
-          }
-          rows={form.draft.textareaRows}
+          placeholder="What needs to be done?"
+          rows={3}
           className="w-full resize-none rounded-xl bg-transparent px-4 pb-2 pt-4 text-sm text-foreground placeholder:text-text-3 focus:outline-none"
           style={{ caretColor: 'var(--foreground)' }}
         />
 
-        {!bulk && form.image.preview && form.image.image && (
+        {form.image.preview && form.image.image && (
           <div className="flex items-center gap-3 px-4 pb-3">
             <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-secondary">
               <img
@@ -74,33 +68,17 @@ export function InlineTaskCreate({ ref }: InlineTaskCreateProps): React.ReactEle
             onValueChange={form.project.handleProjectChange}
             testId="inline-task-project"
           />
-          {!bulk && (
-            <TaskCreateOptionsMenu
-              provider={form.routing.provider}
-              onProviderChange={form.routing.setProvider}
-              planning={form.routing.planning}
-              onPlanningChange={form.routing.setPlanning}
-              useGlmWorker={form.routing.useGlmWorker}
-              defaultGlmWorker={form.routing.defaultGlmWorker}
-              onUseGlmWorkerChange={form.routing.setUseGlmWorker}
-              globalAutoMerge={form.autoMerge.globalAutoMerge}
-              noAutoMerge={form.autoMerge.noAutoMerge}
-              onNoAutoMergeChange={form.autoMerge.setNoAutoMerge}
-              onImageSelect={form.image.setImageFile}
-            />
-          )}
-          <Button
-            variant={bulk ? 'outline' : 'ghost'}
-            size="icon-sm"
-            onClick={() => setBulk(!bulk)}
-            className={bulk ? 'bg-accent text-foreground' : 'text-text-3'}
-            data-testid="inline-task-bulk-toggle"
-            aria-label={bulk ? 'Disable bulk task mode' : 'Enable bulk task mode'}
-            aria-pressed={bulk}
-            title={bulk ? 'Bulk mode on' : 'Bulk mode'}
-          >
-            <ListChecks size={16} />
-          </Button>
+          <TaskCreateOptionsMenu
+            provider={form.routing.provider}
+            onProviderChange={form.routing.setProvider}
+            useGlmWorker={form.routing.useGlmWorker}
+            defaultGlmWorker={form.routing.defaultGlmWorker}
+            onUseGlmWorkerChange={form.routing.setUseGlmWorker}
+            globalAutoMerge={form.autoMerge.globalAutoMerge}
+            noAutoMerge={form.autoMerge.noAutoMerge}
+            onNoAutoMergeChange={form.autoMerge.setNoAutoMerge}
+            onImageSelect={form.image.setImageFile}
+          />
 
           <span className="flex-1" />
 

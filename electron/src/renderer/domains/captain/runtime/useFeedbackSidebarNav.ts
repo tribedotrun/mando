@@ -41,19 +41,19 @@ export function useSidebarNav() {
   );
 
   const openWorktreeWorkbench = useCallback(
-    (workbenchId?: number, cwd?: string) => {
+    (workbenchId?: number, worktree?: string) => {
       if (workbenchId) {
-        navigateToWorkbench(workbenchId, 'terminal');
+        navigateToWorkbench(workbenchId);
         return;
       }
-      if (cwd) {
+      if (worktree) {
         const entries = qc.getQueriesData<WorkbenchItem[]>({
           queryKey: queryKeys.workbenches.all,
         });
         for (const [, list] of entries) {
-          const wb = list?.find((w) => w.worktree === cwd);
+          const wb = list?.find((w) => w.worktree === worktree);
           if (wb) {
-            navigateToWorkbench(wb.id, 'terminal');
+            navigateToWorkbench(wb.id);
             return;
           }
         }

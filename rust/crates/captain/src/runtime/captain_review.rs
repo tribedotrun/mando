@@ -25,10 +25,11 @@ pub use super::captain_review_verdict::apply_verdict;
 /// Structured verdict from a captain review CC session.
 ///
 /// When `action == "ship"`, the verdict MUST also carry `confidence` and
-/// `confidence_reason` fields graded against the three-principle Confidence
-/// Grading rubric in the `captain_review` prompt (evidence artifacts, code
-/// diff root cause, scope match). The mergeability tick consumes
-/// `confidence == "high"` as the sole auto-merge gate.
+/// `confidence_reason` fields graded against the Confidence section of the
+/// `captain_review` prompt: `high` only when every facet was verified against
+/// an artifact that was actually opened and a diff hunk that was actually
+/// read; anything resting on assumption is `mid`. The mergeability tick
+/// consumes `confidence == "high"` as the sole auto-merge gate.
 ///
 /// `Default` is exposed only for test construction via `..Default::default()`;
 /// it returns an empty-action verdict which would be rejected by
@@ -39,31 +40,17 @@ pub struct CaptainVerdict {
     pub feedback: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub report: Option<String>,
-    /// Set when action = ship. One of "high", "mid".
+    /// Set when action = ship. Exactly "high" or "mid" — the same closed set
+    /// the enforced JSON schema offers. Anything else coerces to "mid" in
+    /// `validate_verdict`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub confidence: Option<String>,
-    /// Set when action = ship. Structured justification per the Confidence
-    /// Grading rubric: each problem facet cites both the evidence artifact
-    /// that shows it solved and the diff hunk that delivers the fix.
+    /// Set when action = ship. Per problem facet, cites the evidence artifact
+    /// that shows it solved and the diff hunk that delivers the fix (or, on a
+    /// no-PR task, the workpad).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub confidence_reason: Option<String>,
 }
-
-/// All recognized captain review triggers; used to populate `is_<trigger>`
-/// template variables for the captain review prompt.
-pub(super) const TRIGGERS: &[&str] = &[
-    "gates_pass",
-    "degraded_context",
-    "timeout",
-    "broken_session",
-    "budget_exhausted",
-    "clarifier_fail",
-    "spawn_fail",
-    "rebase_fail",
-    "ci_failure",
-    "merge_fail",
-    "repeated_nudge",
-];
 
 /// Allowed actions for a given trigger, matching `is_verdict_allowed`.
 fn allowed_actions_for_trigger(trigger: &str) -> &'static [&'static str] {
@@ -108,11 +95,11 @@ fn verdict_json_schema(trigger: &str) -> serde_json::Value {
             "confidence": {
                 "type": "string",
                 "enum": ["high", "mid"],
-                "description": "Required when action = ship. Graded against the three-principle Confidence Grading rubric (evidence artifacts, code diff root cause, scope match)."
+                "description": "Required when action = ship. `high` auto-merges with no human look; `mid` stops for one."
             },
             "confidence_reason": {
                 "type": "string",
-                "description": "Required when action = ship. Per problem facet, cites the evidence artifact that shows it solved and the diff hunk that delivers the fix."
+                "description": "Required when action = ship. Per problem facet, cites the evidence artifact that shows it solved and the diff hunk that delivers the fix, then why the grade follows."
             }
         },
         "required": ["action", "feedback"]

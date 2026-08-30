@@ -26,6 +26,10 @@
 //! there is no other retry loop. Ambient-auth callers (no credential rows
 //! configured) get no failover and fall through to a single attempt.
 //!
+//! Credential picks balance against the **whole pool**: every running
+//! session on a credential counts toward its load, regardless of which
+//! caller opened it. There are no per-caller load-balancing buckets.
+//!
 //! See `captain::runtime::credential_rate_limit` for worker-stream
 //! cooldown activation; that path shares the `compute_cooldown_until`
 //! helper exported here.
@@ -175,21 +179,20 @@ pub async fn run_with_credential_failover<F>(
 where
     F: Fn(FailoverContext) -> CcConfig,
 {
-    // Coarsen caller into the load-balancing bucket `pick_for_worker`
-    // expects on its `caller_filter`. The DB `cc_sessions.caller` values
-    // are specific (e.g. "planning-cc-r1", "scout-research") but the
-    // picker wants coarse groups so concurrent sibling callers count
-    // against the same bucket — otherwise two workers on the same
-    // credential never see each other's load and pile onto the same
-    // account until one 429s.
-    let caller_bucket = caller_to_bucket(caller);
+    // Balance globally: `None` counts every running session on a
+    // credential, whatever produced it. The previous caller-bucket filter
+    // narrowed the count to sessions whose `cc_sessions.caller` matched a
+    // coarse bucket name, and most buckets matched nothing at all (the DB
+    // stores specific callers like "planning-cc-r1"/"scout-research", and
+    // captain-review/captain-merge pass no filter), so the active-session
+    // term collapsed to zero and every caller piled onto the same account.
     // Pick the first credential. `None` here means one of two things:
     //   (a) no credential rows are configured -> ambient auth, no
     //       failover possible.
     //   (b) rows exist but every one is in cooldown -> pool exhausted.
     // Distinguish with `has_any` so callers that expect ambient do not
     // misinterpret an exhaustion as "no credentials configured".
-    let mut credential = credentials::pick_for_worker(pool, caller_bucket)
+    let mut credential = credentials::pick_for_worker(pool)
         .await
         .map_err(|e| CcError::Other(anyhow::anyhow!("pick_for_worker failed: {e}")))?;
     let ambient = credential.is_none()
@@ -289,7 +292,7 @@ where
                 // still surface `AllCredentialsExhausted` once the last
                 // healthy credential returns None — otherwise callers see
                 // a raw 429 and fail to park the task.
-                credential = credentials::pick_for_worker(pool, caller_bucket)
+                credential = credentials::pick_for_worker(pool)
                     .await
                     .map_err(|e| CcError::Other(anyhow::anyhow!("pick_for_worker failed: {e}")))?;
 
@@ -318,34 +321,6 @@ where
                 );
             }
         }
-    }
-}
-
-/// Collapse a specific caller string (e.g. `planning-cc-r1`,
-/// `scout-research`) into the coarse bucket `pick_for_worker` expects
-/// on its `caller_filter`. `cc_sessions.caller` values are specific;
-/// the picker filters by exact match, so concurrent sibling callers
-/// must share a bucket to count against the same credential's active
-/// sessions for load balancing. `None` disables caller-bucket filtering
-/// when a caller does not fit any bucket.
-fn caller_to_bucket(caller: &str) -> Option<&'static str> {
-    if caller == "worker" || caller.starts_with("worker-") {
-        Some("worker")
-    } else if caller == "clarifier" {
-        Some("clarifier")
-    } else if caller.starts_with("captain-review") {
-        Some("captain-review")
-    } else if caller.starts_with("captain-merge") {
-        Some("captain-merge")
-    } else if caller.starts_with("planning-") {
-        Some("planning")
-    } else if caller.starts_with("scout-") {
-        Some("scout")
-    } else {
-        // Unknown caller: no bucket filter, count ALL active sessions
-        // toward load balancing. Safer than letting the specific caller
-        // string silently bypass cross-caller balance.
-        None
     }
 }
 
@@ -496,7 +471,7 @@ mod tests {
         // Both healthy — picker honours load-balance order (fewest active
         // sessions, lowest utilisation, then id). With clean state both
         // tie, so the lowest id wins.
-        let first = credentials::pick_for_worker(&pool, Some("worker"))
+        let first = credentials::pick_for_worker(&pool)
             .await
             .unwrap()
             .expect("at least one credential must be eligible");
@@ -505,7 +480,7 @@ mod tests {
         // Rate-limit credential 1 — same code path the failover wrapper
         // invokes on ApiError(429). Next pick must skip to credential 2.
         rate_limit_activate(&pool, id1, None, None).await;
-        let second = credentials::pick_for_worker(&pool, Some("worker"))
+        let second = credentials::pick_for_worker(&pool)
             .await
             .unwrap()
             .expect("healthy credential remaining");
@@ -516,9 +491,7 @@ mod tests {
 
         // Rate-limit credential 2 as well — pool is now exhausted.
         rate_limit_activate(&pool, id2, None, None).await;
-        let none = credentials::pick_for_worker(&pool, Some("worker"))
-            .await
-            .unwrap();
+        let none = credentials::pick_for_worker(&pool).await.unwrap();
         assert!(
             none.is_none(),
             "picker must return None once every credential is cooling down"
@@ -547,13 +520,10 @@ mod tests {
             .unwrap();
 
         rate_limit_activate(&pool, id, None, None).await;
-        assert!(credentials::pick_for_worker(&pool, Some("worker"))
-            .await
-            .unwrap()
-            .is_none());
+        assert!(credentials::pick_for_worker(&pool).await.unwrap().is_none());
 
         rate_limit_clear(&pool, id).await;
-        let back = credentials::pick_for_worker(&pool, Some("worker"))
+        let back = credentials::pick_for_worker(&pool)
             .await
             .unwrap()
             .expect("credential must be eligible after clear");
@@ -579,9 +549,7 @@ mod tests {
         .unwrap();
 
         // No Claude row yet — must return None despite the stale Codex row.
-        let pick = credentials::pick_for_worker(&pool, Some("worker"))
-            .await
-            .unwrap();
+        let pick = credentials::pick_for_worker(&pool).await.unwrap();
         assert!(
             pick.is_none(),
             "pick_for_worker must reject stale Codex rows; got {pick:?}"
@@ -591,7 +559,7 @@ mod tests {
         let claude_id = credentials::insert(&pool, "main", "claude-oauth", None)
             .await
             .unwrap();
-        let pick = credentials::pick_for_worker(&pool, Some("worker"))
+        let pick = credentials::pick_for_worker(&pool)
             .await
             .unwrap()
             .expect("claude row must be picked");
@@ -602,6 +570,111 @@ mod tests {
         assert_eq!(
             pick.1, "claude-oauth",
             "pick_for_worker returned the stale Codex JWT instead of the Claude OAuth token"
+        );
+    }
+
+    /// Load balancing is global: an active session counts against its
+    /// credential no matter which caller opened it. Before the bucket
+    /// concept was removed, a `scout-research` session was invisible to a
+    /// worker pick (and vice versa), so every caller stacked onto the
+    /// lowest-id credential. Each caller string below is a real
+    /// `cc_sessions.caller` value, and each must push the next pick away
+    /// from the loaded credential.
+    #[tokio::test]
+    async fn pick_balances_against_global_active_count_regardless_of_caller() {
+        let db = global_db::Db::open_in_memory()
+            .await
+            .expect("in-memory db must init");
+        let pool = db.pool().clone();
+
+        let id1 = credentials::insert(&pool, "primary", "tok1", None)
+            .await
+            .unwrap();
+        let id2 = credentials::insert(&pool, "secondary", "tok2", None)
+            .await
+            .unwrap();
+
+        // No load anywhere — tie broken by lowest id.
+        let pick = credentials::pick_for_worker(&pool)
+            .await
+            .unwrap()
+            .expect("a credential must be eligible");
+        assert_eq!(pick.0, id1);
+
+        // One running session per caller shape the daemon actually writes.
+        // Alternate credentials so the loaded one always flips: whichever
+        // credential just took a session must lose the next pick.
+        let callers = [
+            "scout-research",
+            "planning-cc-r1",
+            "captain-review",
+            "captain-merge",
+            "clarifier",
+            "worker",
+        ];
+        for (n, caller) in callers.iter().enumerate() {
+            let (loaded, expected_next) = if n % 2 == 0 { (id1, id2) } else { (id2, id1) };
+            sqlx::query(
+                "INSERT INTO cc_sessions (session_id, created_at, caller, cwd, status, credential_id)
+                 VALUES (?1, datetime('now'), ?2, '', 'running', ?3)",
+            )
+            .bind(format!("global-balance-{n}"))
+            .bind(*caller)
+            .bind(loaded)
+            .execute(&pool)
+            .await
+            .expect("insert running session");
+
+            let pick = credentials::pick_for_worker(&pool)
+                .await
+                .unwrap()
+                .expect("a credential must be eligible");
+            assert_eq!(
+                pick.0, expected_next,
+                "a running '{caller}' session on credential {loaded} must count toward \
+                 global load and push the next pick to credential {expected_next}"
+            );
+
+            // Retire it so the next iteration starts from a clean 0/0 tie
+            // and isolates the caller under test.
+            sqlx::query("UPDATE cc_sessions SET status = 'stopped' WHERE session_id = ?1")
+                .bind(format!("global-balance-{n}"))
+                .execute(&pool)
+                .await
+                .expect("retire running session");
+        }
+
+        // Finally: two sessions from two *different* callers on the same
+        // credential still add up, which the per-caller buckets could never
+        // observe.
+        for (n, caller) in ["scout-research", "captain-merge"].iter().enumerate() {
+            sqlx::query(
+                "INSERT INTO cc_sessions (session_id, created_at, caller, cwd, status, credential_id)
+                 VALUES (?1, datetime('now'), ?2, '', 'running', ?3)",
+            )
+            .bind(format!("cross-caller-{n}"))
+            .bind(*caller)
+            .bind(id2)
+            .execute(&pool)
+            .await
+            .expect("insert running session");
+        }
+        sqlx::query(
+            "INSERT INTO cc_sessions (session_id, created_at, caller, cwd, status, credential_id)
+             VALUES ('cross-caller-solo', datetime('now'), 'worker', '', 'running', ?1)",
+        )
+        .bind(id1)
+        .execute(&pool)
+        .await
+        .expect("insert running session");
+
+        let pick = credentials::pick_for_worker(&pool)
+            .await
+            .unwrap()
+            .expect("a credential must be eligible");
+        assert_eq!(
+            pick.0, id1,
+            "1 active session must beat 2 active sessions summed across different callers"
         );
     }
 }

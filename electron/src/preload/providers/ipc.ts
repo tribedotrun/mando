@@ -63,10 +63,8 @@ export const ipcApi = {
   openLogsFolder: () => {
     void invoke('open-logs-folder');
   },
-  openExternalUrl: (url: string) => invoke('terminal:open-external-url', url),
-  resolveLocalPath: (input: string, cwd: string) =>
-    invoke('terminal:resolve-local-path', [input, cwd]),
-  openLocalPath: (path: string) => invoke('terminal:open-local-path', path),
+  openExternalUrl: (url: string) => invoke('shell:open-external-url', url),
+  openLocalPath: (path: string) => invoke('shell:open-local-path', path),
   openDataDir: () => {
     void invoke('open-data-dir');
   },

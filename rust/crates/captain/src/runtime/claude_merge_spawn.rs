@@ -1,15 +1,12 @@
 //! Claude adapter for captain merge sessions.
 
-use std::panic::AssertUnwindSafe;
-
 use anyhow::Result;
-use futures::FutureExt;
 use settings::CaptainWorkflow;
-use tracing::{info, warn};
 
-use crate::{Task, TimelineEventPayload};
+use crate::Task;
 
-use super::captain_merge::merge_json_schema;
+use super::captain_merge::{merge_json_schema, merge_started_event, notify_merge_started};
+use super::claude_detached_session::DetachedClaudeSession;
 use super::notify::Notifier;
 
 #[allow(clippy::too_many_arguments)]
@@ -24,35 +21,18 @@ pub(super) async fn spawn_claude_merge(
     prompt: &str,
     workflow: &CaptainWorkflow,
 ) -> Result<()> {
-    let cwd = cwd.to_path_buf();
-    let prompt = prompt.to_string();
     item.last_activity_at = Some(global_types::now_rfc3339());
 
-    let task_id = item.id.to_string();
-    let task_id_num = item.id;
     let session_id = global_infra::uuid::Uuid::v4().to_string();
     item.session_ids.merge = Some(session_id.clone());
 
     // Persist status + timeline atomically so both survive tick interruption.
     // Items are already CaptainMerging when spawn_merge is called (categorized
     // in poll_merging_items). The guard ensures concurrent ticks don't double-spawn.
-    let title = global_infra::html::escape_html(&item.title);
-    let event = crate::TimelineEvent {
-        timestamp: global_types::now_rfc3339(),
-        actor: "captain".to_string(),
-        summary: "Captain merge session started".to_string(),
-        data: TimelineEventPayload::CaptainMergeStarted {
-            session_id: session_id.clone(),
-            pr: pr_url.to_string(),
-        },
-    };
+    let event = merge_started_event(&session_id, pr_url);
     match crate::io::queries::tasks::persist_merge_spawn(pool, item, &event).await {
         Ok(true) => {
-            notifier
-                .normal(&format!(
-                    "\u{1f680} Captain merging <b>{title}</b> (<a href=\"{pr_url}\">PR #{pr_number}</a>)"
-                ))
-                .await;
+            notify_merge_started(notifier, item, pr_url, pr_number).await;
         }
         Ok(false) => {
             tracing::info!(
@@ -71,149 +51,35 @@ pub(super) async fn spawn_claude_merge(
         }
     }
 
-    let captain_model = workflow.models.captain.clone();
-    let timeout = workflow.agent.captain_merge_timeout_s;
-    let cc_max_retries = workflow.agent.cc_max_retries;
-    let pool = pool.clone();
-    let credential = super::tick_spawn::pick_credential(&pool, None).await;
-    let cred_id = credential.as_ref().map(|c| c.0);
-    let merge_notifier = notifier.fork();
+    let credential = super::tick_spawn::pick_credential(pool).await;
 
-    let session_id_for_panic = session_id.clone();
-    // TRACKED: detached captain-merge CC session. Same rationale as
-    // captain_review::spawn_review -- library crate, no AppState dependency,
-    // external CC process is managed via the pid registry on shutdown.
-    tokio::spawn(async move {
-        let result = AssertUnwindSafe(async move {
-            let builder = global_claude::CcConfig::builder()
-                .model(&captain_model)
-                .timeout(timeout)
-                .caller("captain-merge-async")
-                .task_id(&task_id)
-                .cwd(cwd.clone())
-                .session_id(session_id.clone())
-                .allowed_tools(vec![
-                    "Read".into(),
-                    "Bash".into(),
-                    "Edit".into(),
-                    "Write".into(),
-                    "Grep".into(),
-                    "Glob".into(),
-                ])
-                .json_schema(merge_json_schema());
-            let config = global_claude::with_credential(builder, &credential).build();
-
-            // Log "running" session entry so cancel can find it immediately.
-            if let Err(e) = crate::io::headless_cc::log_running_session(
-                &pool,
-                &session_id,
-                &cwd,
-                &captain_model,
-                "captain-merge-async",
-                "",
-                Some(task_id_num),
-                false,
-                cred_id,
-            )
-            .await
-            {
-                warn!(module = "captain", %session_id, %e, "failed to log running session");
-            }
-
-            let sid_for_hook = session_id.clone();
-            match global_claude::CcOneShot::run_with_retry_pid_hook(
-                &prompt,
-                config,
-                cc_max_retries,
-                |pid| {
-                    if let Err(e) = crate::io::pid_registry::register(&sid_for_hook, pid) {
-                        warn!(module = "captain", sid = %sid_for_hook, %e, "pid_registry register failed");
-                    }
-                },
-            )
-            .await
-            {
-            Ok(result) => {
-                let stream_size = std::fs::metadata(&result.stream_path)
-                    .map(|m| m.len())
-                    .unwrap_or(u64::MAX);
-                info!(
-                    module = "captain",
-                    %session_id,
-                    cost_usd = result.cost_usd.unwrap_or(0.0),
-                    duration_ms = result.duration_ms.unwrap_or(0),
-                    stream_file_bytes = stream_size,
-                    "captain merge CC completed"
-                );
-                if let Err(e) = crate::io::pid_registry::unregister(&session_id) {
-                    warn!(module = "captain", %session_id, %e, "pid_registry unregister failed");
-                }
-                let cred_id = sessions_db::get_credential_id(&pool, &session_id)
-                    .await
-                    .unwrap_or(None);
-                merge_notifier
-                    .check_rate_limit(&result, &pool, cred_id)
-                    .await;
-                if let Err(e) = crate::io::headless_cc::log_cc_result(
-                    &pool,
-                    &result,
-                    &cwd,
-                    "captain-merge-async",
-                    Some(task_id_num),
-                )
-                .await {
-                    warn!(module = "captain", %session_id, %e, "log_cc_result failed");
-                }
-            }
-            Err(e) => {
-                let stream_path = global_infra::paths::stream_path_for_session(&session_id);
-                let stream_size = std::fs::metadata(&stream_path)
-                    .map(|m| m.len())
-                    .unwrap_or(u64::MAX);
-                warn!(
-                    module = "captain",
-                    %session_id,
-                    stream_file_bytes = stream_size,
-                    error = %e,
-                    "captain merge CC failed"
-                );
-                if let Err(e2) = crate::io::pid_registry::unregister(&session_id) {
-                    warn!(module = "captain", %session_id, %e2, "pid_registry unregister failed");
-                }
-                let error_text = format!("{e}");
-                let api_error_status = e.api_error_status();
-                if let Err(e2) = crate::io::headless_cc::log_cc_failure(
-                    &pool,
-                    &session_id,
-                    &cwd,
-                    "captain-merge-async",
-                    Some(task_id_num),
-                    Some(&error_text),
-                    api_error_status,
-                )
-                .await {
-                    warn!(module = "captain", %session_id, %e2, "log_cc_failure failed");
-                }
-            }
-        }
-        })
-        .catch_unwind()
-        .await;
-
-        if let Err(panic) = result {
-            tracing::error!(
-                module = "captain",
-                session_id = %session_id_for_panic,
-                "captain merge spawn panicked: {:?}",
-                panic
-            );
-            let stream_path = global_infra::paths::stream_path_for_session(&session_id_for_panic);
-            global_claude::write_error_result(
-                &stream_path,
-                &format!("captain merge spawn panicked: {:?}", panic),
-            );
-        }
-    });
+    super::claude_detached_session::spawn_detached_claude_session(DetachedClaudeSession {
+        caller: "captain-merge-async",
+        phase: "captain merge",
+        session_id,
+        task_id: item.id,
+        cwd: cwd.to_path_buf(),
+        prompt: prompt.to_string(),
+        model: workflow.models.captain.clone(),
+        timeout: workflow.agent.captain_merge_timeout_s,
+        cc_max_retries: workflow.agent.cc_max_retries,
+        effort: workflow.agent.cc_effort,
+        allowed_tools: vec![
+            "Read".into(),
+            "Bash".into(),
+            "Edit".into(),
+            "Write".into(),
+            "Grep".into(),
+            "Glob".into(),
+        ],
+        disallowed_tools: Vec::new(),
+        json_schema: merge_json_schema(),
+        slot: crate::SessionSlot::Merge,
+        credential,
+        notifier: notifier.fork(),
+        pool: pool.clone(),
+    })
+    .await;
 
     Ok(())
 }

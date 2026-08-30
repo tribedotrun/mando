@@ -23,7 +23,7 @@ const THROW_ALLOWED_FILES = [
   /\/main\/onboarding\/runtime\/setupValidation\.ts$/,
   /\/main\/updater\/runtime\/updater\.ts$/,
   /\/main\/shell\/runtime\/notifications\.ts$/,
-  /\/main\/shell\/runtime\/terminalBridge\.ts$/,
+  /\/main\/shell\/runtime\/shellBridge\.ts$/,
   /\/main\/shell\/runtime\/dock\.ts$/,
   /\/main\/index\.ts$/,
   /\/preload\/providers\/ipc\.ts$/,

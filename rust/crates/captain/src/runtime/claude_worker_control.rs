@@ -8,6 +8,15 @@ pub(super) struct ClaudeWorkerResume {
     pub(super) pid: crate::Pid,
 }
 
+/// How a Claude worker turn should run. Model and effort always travel
+/// together -- both come from the task's resolved implementation stage plus
+/// the workflow's `agent.cc_effort`.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct ClaudeRun<'a> {
+    pub(super) model: &'a str,
+    pub(super) effort: global_claude::Effort,
+}
+
 /// Resume an existing Claude Code worker session.
 ///
 /// This is the Claude adapter half of the provider-neutral AgentRuntime
@@ -21,7 +30,7 @@ pub(super) async fn resume_worker(
     cwd: &Path,
     prompt: &str,
     session_id: &str,
-    model: &str,
+    run: ClaudeRun<'_>,
 ) -> Result<ClaudeWorkerResume> {
     if let Some(pid) = crate::io::pid_lookup::resolve_pid(session_id, worker_name) {
         if pid.as_u32() > 0 {
@@ -40,16 +49,17 @@ pub(super) async fn resume_worker(
     let (mut env, credential_id) =
         super::spawner::credential_env_for_session(pool, session_id).await;
     env.insert("MANDO_TASK_ID".to_string(), item.id.to_string());
-    let (pid, _stream_path) =
-        crate::io::process_manager::resume_worker_process(prompt, cwd, model, session_id, &env)
-            .await?;
+    let (pid, _stream_path) = crate::io::process_manager::resume_worker_process(
+        prompt, cwd, run.model, run.effort, session_id, &env,
+    )
+    .await?;
     crate::io::pid_registry::register(session_id, pid)?;
 
     crate::io::headless_cc::log_running_session(
         pool,
         session_id,
         cwd,
-        model,
+        run.model,
         "worker",
         worker_name,
         Some(item.id),

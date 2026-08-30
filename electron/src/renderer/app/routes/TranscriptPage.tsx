@@ -1,6 +1,6 @@
 import React from 'react';
 import { useParams, useSearch } from '@tanstack/react-router';
-import { Copy, Check, FileText, Terminal as TerminalIcon } from 'lucide-react';
+import { Copy, Check, FileText } from 'lucide-react';
 import {
   formatCallerLabel,
   useSessionJsonlPath,
@@ -10,12 +10,10 @@ import {
 } from '#renderer/domains/sessions';
 import { TranscriptContent } from '#renderer/domains/sessions/ui/transcriptEvents/TranscriptContent';
 import { TranscriptTokenUsage } from '#renderer/domains/sessions/ui/transcriptEvents/TranscriptTokenUsage';
-import { useWorkbenchList } from '#renderer/domains/captain';
 import { useNativeActions } from '#renderer/global/runtime/useFeedbackNativeActions';
 import { copyToClipboard } from '#renderer/global/runtime/useFeedback';
 import { useCopyFeedback } from '#renderer/global/runtime/useCopyFeedback';
 import { Button } from '#renderer/global/ui/primitives/button';
-import { router } from '#renderer/app/router';
 
 export function TranscriptPage(): React.ReactElement {
   const { sessionId } = useParams({ strict: false }) as { sessionId: string };
@@ -39,21 +37,6 @@ export function TranscriptPage(): React.ReactElement {
     })();
   };
 
-  const { data: workbenches = [] } = useWorkbenchList();
-  const workbench = transcriptCwd ? workbenches.find((w) => w.worktree === transcriptCwd) : null;
-
-  const terminalProvider = provider === 'claude' || provider === 'codex' ? provider : null;
-  const canResumeInTerminal = terminalProvider !== null && workbench !== null;
-
-  const handleResumeInTerminal = () => {
-    if (workbench && terminalProvider) {
-      void router.navigate({
-        to: '/wb/$workbenchId',
-        params: { workbenchId: String(workbench.id) },
-        search: { tab: 'terminal', resume: sessionId, provider: terminalProvider },
-      });
-    }
-  };
   const { data: jsonl } = useSessionJsonlPath(sessionId);
   const jsonlPath = jsonl?.path ?? null;
   const { files } = useNativeActions();
@@ -111,17 +94,6 @@ export function TranscriptPage(): React.ReactElement {
             <FileText size={13} />
             Open JSONL
           </Button>
-          {canResumeInTerminal && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleResumeInTerminal}
-              className="gap-1.5"
-            >
-              <TerminalIcon size={13} />
-              Resume in terminal
-            </Button>
-          )}
         </div>
       </div>
 

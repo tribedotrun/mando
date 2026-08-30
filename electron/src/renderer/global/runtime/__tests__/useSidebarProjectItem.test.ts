@@ -8,8 +8,8 @@
 //   2. component re-renders, hasActiveWt is still true, render-body
 //      `if (hasActiveWt && !expanded) setExpanded(true)` snaps it back
 //      open immediately.
-// The fix gates the auto-expand on the active-cwd transition: only
-// re-expand when `state.activeTerminalCwd` actually changes into a
+// The fix gates the auto-expand on the active-worktree transition: only
+// re-expand when `state.activeWorktreePath` actually changes into a
 // workbench in this project, not on every render that finds it still in.
 //
 // The renderer has no JSX test harness (no vitest, no testing-library —
@@ -39,20 +39,20 @@ describe('useSidebarProjectItem auto-expand transition (regression #133)', () =>
     );
   });
 
-  it('tracks state.activeTerminalCwd in a ref to detect the transition', () => {
-    // The fix keys on the active-cwd transition so a manual collapse
+  it('tracks state.activeWorktreePath in a ref to detect the transition', () => {
+    // The fix keys on the active-worktree transition so a manual collapse
     // sticks while the same active workbench remains, but a switch into
     // a different workbench in this project still legitimately re-expands.
     assert.match(
       hookSrc,
-      /useRef\(\s*state\.activeTerminalCwd\s*\)/,
-      'must store the previous state.activeTerminalCwd in a ref so the ' +
+      /useRef\(\s*state\.activeWorktreePath\s*\)/,
+      'must store the previous state.activeWorktreePath in a ref so the ' +
         'auto-expand fires on the transition, not on every render',
     );
     assert.match(
       hookSrc,
-      /state\.activeTerminalCwd\s*!==\s*\w+\.current/,
-      'transition detection must compare state.activeTerminalCwd against ' +
+      /state\.activeWorktreePath\s*!==\s*\w+\.current/,
+      'transition detection must compare state.activeWorktreePath against ' +
         'the previous-value ref',
     );
   });
@@ -64,8 +64,8 @@ describe('useSidebarProjectItem auto-expand transition (regression #133)', () =>
     // user just collapsed.
     assert.match(
       hookSrc,
-      /state\.activeTerminalCwd\s*!==\s*\w+\.current[\s\S]{0,80}hasActiveWt/,
-      'auto-expand must require both an activeTerminalCwd transition AND ' +
+      /state\.activeWorktreePath\s*!==\s*\w+\.current[\s\S]{0,80}hasActiveWt/,
+      'auto-expand must require both an activeWorktreePath transition AND ' +
         'hasActiveWt — otherwise leaving the project would re-expand it',
     );
   });

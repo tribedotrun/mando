@@ -1,12 +1,11 @@
 use crate::static_files;
 use crate::transport::server_routes_features::{
-    ai_routes, channel_routes, project_routes, scout_routes, task_routes, ui_routes,
-    worktree_routes,
+    channel_routes, project_routes, scout_routes, task_routes, ui_routes, worktree_routes,
 };
 use crate::transport::{
     routes_captain, routes_captain_adopt, routes_client_logs, routes_config, routes_credentials,
     routes_credentials_codex, routes_credentials_codex_login, routes_credentials_update,
-    routes_sessions, routes_stats, routes_terminal, routes_workbenches, sse, sse_session_events,
+    routes_sessions, routes_stats, routes_workbenches, sse, sse_session_events,
 };
 use crate::{ApiRouter, AppState};
 
@@ -35,8 +34,6 @@ pub(crate) fn protected_routes() -> ApiRouter<AppState> {
         .merge(routes_credentials_update::credential_update_routes())
         .merge(routes_credentials_codex::codex_credential_routes())
         .merge(routes_credentials_codex_login::codex_login_routes())
-        .merge(ai_routes())
-        .merge(routes_terminal::routes())
         .merge(ui_routes())
         .merge(crate::api_route!(
             ApiRouter::new(),

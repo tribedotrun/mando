@@ -15,11 +15,10 @@ export type RenderableFeedItem =
  *  are not re-fused into the merged card. PR #1038's pairing case
  *  (two consecutive `mando todo evidence --kind` calls) still merges.
  *
- *  Suppressed timeline events (`evidence_updated`, `work_summary_updated`,
- *  `human_ask`) are dropped up front: FeedBlocks renders them as null but
- *  they still occupy slots in `feedItems`, and the daemon emits
- *  `evidence_updated` immediately after each upload — without filtering,
- *  it would always be the tail item and starve the last-pair check. */
+ *  Suppressed timeline events (`human_ask`) are dropped up front:
+ *  FeedBlocks renders them as null but they still occupy slots in
+ *  `feedItems`, so a suppressed tail item would otherwise starve the
+ *  last-pair check. */
 export function groupEvidenceArtifacts(feedItems: FeedItem[]): RenderableFeedItem[] {
   const visible = feedItems.filter(
     (fi) => !(fi.type === 'timeline' && shouldSuppressTimelineEvent(fi.data.data.event_type)),
@@ -56,10 +55,13 @@ export function groupEvidenceArtifacts(feedItems: FeedItem[]): RenderableFeedIte
 export const EVENT_ICON_MAP: Record<string, ItemStatus> = {
   created: 'queued',
   worker_spawned: 'in-progress',
+  // Plan mode was removed and nothing emits this any more, but timelines
+  // written before the removal still carry `planning_spawned` rows and should
+  // keep their icon. The map is string-keyed, so the retired wire variant
+  // costs nothing here.
   planning_spawned: 'in-progress',
   worker_nudged: 'in-progress',
   worker_nudge_failed: 'errored',
-  worker_completed: 'awaiting-review',
   captain_review_started: 'captain-reviewing',
   captain_review_merge_fail: 'captain-reviewing',
   captain_review_clarifier_fail: 'captain-reviewing',
@@ -72,8 +74,6 @@ export const EVENT_ICON_MAP: Record<string, ItemStatus> = {
   captain_merge_retry: 'captain-merging',
   awaiting_review: 'awaiting-review',
   auto_merge_triage: 'captain-reviewing',
-  auto_merge_triage_failed: 'errored',
-  auto_merge_triage_exhausted: 'escalated',
   merged: 'merged',
   accepted_no_pr: 'merged',
   escalated: 'escalated',
@@ -84,11 +84,6 @@ export const EVENT_ICON_MAP: Record<string, ItemStatus> = {
   human_reopen: 'queued',
   human_ask: 'awaiting-review',
   rework_requested: 'rework',
-  evidence_updated: 'awaiting-review',
-  work_summary_updated: 'awaiting-review',
-  planning_round: 'in-progress',
-  plan_completed: 'plan-ready',
-  plan_ready: 'plan-ready',
   clarify_timeout: 'captain-reviewing',
   clarifier_completed_no_pr: 'merged',
   status_changed_by_command: 'queued',
@@ -101,7 +96,7 @@ export const EVENT_ICON_MAP: Record<string, ItemStatus> = {
 /** Color-code any confidence-bearing event by its grade:
  *  high -> green check (merge-ready), low -> red x (forced ship), mid /
  *  absent -> default icon. Works for the captain verdict on awaiting_review
- *  (auto_merge_triage* variants carry no confidence on the current wire). */
+ *  (auto_merge_triage carries no confidence on the current wire). */
 export function confidenceIconOverride(event: TimelineEvent): ItemStatus | null {
   if (event.data.event_type !== 'awaiting_review') return null;
   const confidence = event.data.confidence.trim();
@@ -142,11 +137,7 @@ export function getNudgeReason(event: TimelineEvent): string | null {
 }
 
 export function shouldSuppressTimelineEvent(eventType: string): boolean {
-  return (
-    eventType === 'work_summary_updated' ||
-    eventType === 'evidence_updated' ||
-    eventType === 'human_ask'
-  );
+  return eventType === 'human_ask';
 }
 
 /** Finds the timestamp of the latest clarify_question event in a feed. */

@@ -40,13 +40,6 @@ pub struct DriftAware<T: Serialize> {
     value: T,
 }
 
-impl<T: Serialize> DriftAware<T> {
-    #[allow(dead_code)]
-    pub fn new(route_key: &'static str, value: T) -> Self {
-        Self { route_key, value }
-    }
-}
-
 impl<T: Serialize> axum::response::IntoResponse for DriftAware<T> {
     fn into_response(self) -> axum::response::Response {
         // Default path: no drift-test feature, no mutation, behaves as Json<T>.

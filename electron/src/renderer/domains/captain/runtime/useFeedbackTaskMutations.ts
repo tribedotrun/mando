@@ -6,7 +6,6 @@ import {
   useTaskAsk as useTaskAskMutation,
   useTaskAskReopen as useTaskAskReopenMutation,
   useTaskAdvisor as useTaskAdvisorMutation,
-  useTaskBulkCreate as useTaskBulkCreateMutation,
   useTaskCancel as useTaskCancelMutation,
   useTaskClarify as useTaskClarifyMutation,
   useTaskCreate as useTaskCreateMutation,
@@ -20,7 +19,6 @@ import {
   useTaskRetry as useTaskRetryMutation,
   useTaskSetIsBugFix as useTaskSetIsBugFixMutation,
   useResumeRateLimited as useResumeRateLimitedMutation,
-  useStartImplementation as useStartImplementationMutation,
 } from '#renderer/domains/captain/repo/mutations';
 import { useAddProject as useAddProjectMutation } from '#renderer/domains/captain/repo/mutations-extra';
 
@@ -32,18 +30,6 @@ export function useTaskCreate() {
     },
     onError: (err) => {
       toast.error(getErrorMessage(err, 'Failed to create task'));
-    },
-  });
-}
-
-export function useTaskBulkCreate() {
-  const mutation = useTaskBulkCreateMutation();
-  return useMutationFeedback(mutation, {
-    onSuccess: (results) => {
-      const ok = results.filter((result) => result.ok).length;
-      const failed = results.length - ok;
-      if (ok > 0) toast.success(`Created ${ok} task${ok > 1 ? 's' : ''}`);
-      if (failed > 0) toast.error(`${failed} task${failed > 1 ? 's' : ''} failed`);
     },
   });
 }
@@ -209,15 +195,6 @@ export function useTaskClarify() {
   return useMutationFeedback(mutation, {
     onError: () => {
       toast.error('Answer failed');
-    },
-  });
-}
-
-export function useStartImplementation() {
-  const mutation = useStartImplementationMutation();
-  return useMutationFeedback(mutation, {
-    onError: () => {
-      toast.error('Start implementation failed');
     },
   });
 }

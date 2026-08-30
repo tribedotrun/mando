@@ -51,7 +51,6 @@ pub async fn reconcile_on_startup(config: &Config, pool: &sqlx::SqlitePool) -> R
     // clarifier work and the HTTP path no longer nulling the session id,
     // the only way a task lands here is a daemon crash mid-inline-call.
     super::startup_session_reconcile::reconcile_stranded_clarifying_tasks(pool).await;
-    super::dispatch_planning::reconcile_orphaned_planning(pool).await;
 
     let log_path = ops_log::ops_log_path();
     let mut log = ops_log::load_ops_log(&log_path);

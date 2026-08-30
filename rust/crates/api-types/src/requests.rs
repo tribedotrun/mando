@@ -79,23 +79,6 @@ impl FromStr for TaskCreateProvider {
     }
 }
 
-/// POST /api/worktrees/cleanup
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(optional_fields)]
-#[serde(deny_unknown_fields)]
-pub struct CleanupWorktreesRequest {
-    pub dry_run: Option<bool>,
-}
-
-/// POST /api/tasks/bulk
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(optional_fields)]
-#[serde(deny_unknown_fields)]
-pub struct TaskBulkRequest {
-    pub ids: Vec<i64>,
-    pub updates: TaskBulkUpdates,
-}
-
 /// Patchable fields in a bulk-task update. All optional -- a field left `None`
 /// is not changed on any of the targeted tasks. `skip_serializing_if` is
 /// required: captain's `apply_json_updates` treats a JSON `null` as "clear
@@ -107,40 +90,6 @@ pub struct TaskBulkRequest {
 pub struct TaskBulkUpdates {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub worker: Option<String>,
-}
-
-/// POST /api/tasks/{id}/evidence
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[serde(deny_unknown_fields)]
-pub struct EvidenceFileInput {
-    pub filename: String,
-    pub ext: String,
-    pub caption: String,
-}
-
-/// POST /api/tasks/{id}/evidence
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[serde(deny_unknown_fields)]
-pub struct EvidenceFilesRequest {
-    pub files: Vec<EvidenceFileInput>,
-}
-
-/// POST /api/tasks/{id}/summary
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[serde(deny_unknown_fields)]
-pub struct WorkSummaryRequest {
-    pub content: String,
-}
-
-/// GET /api/sessions/{id}/messages
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(optional_fields)]
-#[serde(deny_unknown_fields)]
-pub struct MessagesQuery {
-    #[ts(type = "number | null")]
-    pub limit: Option<usize>,
-    #[ts(type = "number | null")]
-    pub offset: Option<usize>,
 }
 
 /// POST /api/captain/tick
@@ -236,19 +185,7 @@ pub struct CredentialIdParams {
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(deny_unknown_fields)]
-pub struct WorkerIdParams {
-    pub id: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[serde(deny_unknown_fields)]
 pub struct SessionIdParams {
-    pub id: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[serde(deny_unknown_fields)]
-pub struct TerminalIdParams {
     pub id: String,
 }
 
@@ -316,14 +253,6 @@ pub struct SessionStreamQuery {
 #[serde(deny_unknown_fields)]
 pub struct TaskListQuery {
     pub include_archived: Option<bool>,
-}
-
-/// POST /api/ai/parse-todos
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[serde(deny_unknown_fields)]
-pub struct ParseTodosRequest {
-    pub text: String,
-    pub project: String,
 }
 
 /// POST /api/tasks/delete

@@ -28,7 +28,7 @@ pub(super) async fn update_task_exec(
     task: &Task,
 ) -> Result<(bool, Option<i64>)> {
     if current.status != task.status {
-        let command = infer_transition_command(current.status, task.status, task.planning)?;
+        let command = infer_transition_command(current.status, task.status)?;
         let event = inferred_status_event(current, task, command);
         let bus_payload = super::super::tasks_persist::task_bus_effect(task.id, "updated");
         let touch_payload = super::super::tasks_persist::workbench_touch_effect(task.workbench_id);

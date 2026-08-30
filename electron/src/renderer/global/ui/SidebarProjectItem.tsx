@@ -42,7 +42,6 @@ export function SidebarProjectItem({
           logo={logo}
           expanded={project.expanded.value}
           menuOpen={project.menu.open}
-          actions={project.actions}
           onToggleExpand={() => project.expanded.setValue((v) => !v)}
           onContextMenu={() => project.menu.setOpen(true)}
           onMenuChange={project.menu.setOpen}
@@ -64,7 +63,6 @@ export function SidebarProjectItem({
           {items.map((child) => (
             <WorkbenchRow
               key={`wb:${child.wb.id}:${child.task?.id ?? 'none'}`}
-              projectName={name}
               wb={child.wb}
               task={child.task}
               renamingWbId={project.childRename.id}

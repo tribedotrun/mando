@@ -21,7 +21,6 @@ const taskAddMultipartInputSchema = z
     provider: z.enum(['claude', 'codex']).optional(),
     useGlmWorker: z.boolean().optional(),
     noAutoMerge: z.boolean().optional(),
-    planning: z.boolean().optional(),
     images: z.array(z.instanceof(File)).optional(),
   })
   .strict();
@@ -38,12 +37,8 @@ export interface AddTaskInput {
   provider?: Extract<TaskProvider, 'claude' | 'codex'>;
   useGlmWorker?: boolean;
   noAutoMerge?: boolean;
-  planning?: boolean;
   images?: File[];
 }
-
-export const parseTodos = (text: string, project: string) =>
-  apiPostRouteR('postAiParsetodos', { text, project });
 
 export function addTask(input: AddTaskInput): ResultAsync<TaskItem, ApiError> {
   const parsedInput = taskAddMultipartInputSchema.safeParse(input);
@@ -61,7 +56,6 @@ export function addTask(input: AddTaskInput): ResultAsync<TaskItem, ApiError> {
     form.append('use_glm_worker', data.useGlmWorker ? 'true' : 'false');
   }
   if (data.noAutoMerge) form.append('no_auto_merge', 'true');
-  if (data.planning) form.append('planning', 'true');
   if (data.images) {
     for (const img of data.images) {
       form.append('images', img, img.name);
@@ -108,10 +102,6 @@ export const fetchTimeline = (id: number) =>
   apiGetRouteR('getTasksByIdTimeline', { params: { id } });
 export const fetchItemSessions = (id: number) =>
   apiGetRouteR('getTasksByIdSessions', { params: { id } });
-
-/** Start implementation: inject the approved plan into context and queue the task. */
-export const startImplementation = (id: number, message: string): ResultAsync<void, ApiError> =>
-  apiPostRouteR('postTasksImplement', { id, message }).map(() => undefined);
 
 // Manual override for the clarifier's bug-fix classification. When the user
 // flips the toggle in the task editor we PATCH only the `is_bug_fix` field;

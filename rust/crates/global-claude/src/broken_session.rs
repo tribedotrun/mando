@@ -64,9 +64,7 @@ pub struct BrokenSessionMatch {
 /// Detect a broken session via structural signals.
 ///
 /// Returns `Some` when either the primary or secondary path fires; `None`
-/// otherwise. `ImageDimensionLimit` is deliberately excluded — that
-/// recoverable symptom stays on the nudge path and is surfaced by
-/// [`detect_image_dimension_blocked`].
+/// otherwise.
 ///
 /// See the module-level doc comment for the full decision tree.
 pub fn stream_broken_session_symptom(
@@ -237,76 +235,6 @@ fn detect_session_interrupted(
         return None;
     }
     None
-}
-
-/// Detect an image-dimension-limit error on the nudge path.
-///
-/// CC emits the dimension-limit error as a `user/tool_result` content
-/// string with `is_error:true`. This walks the current session's events
-/// from the tail, looks at the last such event, and matches its text
-/// against the configured `ImageDimensionLimit` rule. The rule is the only
-/// `broken_session: false` entry and stays on the nudge path.
-///
-/// Returns `true` when the last user `tool_result` carries the dimension
-/// error; `false` otherwise.
-pub fn detect_image_dimension_blocked(stream_path: &Path, symptoms: &StreamSymptomMatcher) -> bool {
-    let Some(rule) = symptoms.rule_by_name(CcStreamSymptom::ImageDimensionLimit) else {
-        return false;
-    };
-    let Some((content, last_init_idx)) = current_session_lines(stream_path) else {
-        return false;
-    };
-    let lines: Vec<&str> = content.lines().collect();
-    // Scan backward past non-user events (system/assistant/result) to find
-    // the most recent user event. Inspect ONLY that event — the dimension
-    // nudge must reflect the current state, not an earlier recovered-from
-    // block. Re-firing after a successful retry would leak a stale signal.
-    for line in lines[last_init_idx..].iter().rev() {
-        let val: serde_json::Value = match serde_json::from_str(line) {
-            Ok(v) => v,
-            Err(e) => {
-                tracing::debug!(
-                    module = "global-claude-broken-session",
-                    stream_path = %stream_path.display(),
-                    line_len = line.len(),
-                    %e,
-                    "skipping unparseable line during image-dimension scan"
-                );
-                continue;
-            }
-        };
-        if val.get("type").and_then(|t| t.as_str()) != Some("user") {
-            continue;
-        }
-        let Some(arr) = val.pointer("/message/content").and_then(|c| c.as_array()) else {
-            // Most recent user event has no content array (hook-only shape
-            // or schema drift). Bail — we commit to the *last* user event
-            // by design; earlier events do not count.
-            tracing::debug!(
-                module = "global-claude-broken-session",
-                stream_path = %stream_path.display(),
-                "image-dimension: last user event has no message.content array, bailing"
-            );
-            return false;
-        };
-        for block in arr {
-            if block.get("type").and_then(|t| t.as_str()) != Some("tool_result") {
-                continue;
-            }
-            if block.get("is_error").and_then(|v| v.as_bool()) != Some(true) {
-                continue;
-            }
-            let text = extract_tool_result_text(block.get("content"));
-            if rule.matches(&text) {
-                return true;
-            }
-        }
-        // Inspected the last user event; it did not carry a matching
-        // dimension error. Stop rather than walking further back, which
-        // would resurrect stale errors the worker already recovered from.
-        return false;
-    }
-    false
 }
 
 /// Flatten a tool_result's `content` field into a single string. CC writes

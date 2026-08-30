@@ -9,12 +9,15 @@ mod review_threads;
 mod types;
 
 use anyhow::{Context, Result};
-use command::{run_gh, run_gh_api_paginate, run_gh_in_dir};
+use command::{run_gh, run_gh_api_paginate, run_gh_capture, run_gh_in_dir};
 use serde::Deserialize;
 use std::path::Path;
 
 pub use review_threads::get_pr_review_threads;
-pub use types::{MergeableStatus, PrComment, PrState, PrStatus, ReviewThread, ThreadComment};
+pub use types::{
+    MergeBlockReason, MergeOutcome, MergeableStatus, PrComment, PrState, PrStatus, ReviewDecision,
+    ReviewThread, ThreadComment,
+};
 
 #[derive(Debug, Deserialize)]
 struct GhAuthor {
@@ -73,6 +76,12 @@ struct GhPrHeadResponse {
     head_ref_oid: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+struct GhPrReviewDecisionResponse {
+    #[serde(rename = "reviewDecision")]
+    review_decision: Option<String>,
+}
+
 pub async fn fetch_pr_status(repo: &str, pr_number: &str) -> Result<PrStatus> {
     let text = run_gh(&[
         "pr",
@@ -128,7 +137,6 @@ pub async fn fetch_pr_status(repo: &str, pr_number: &str) -> Result<PrStatus> {
         .unwrap_or_default();
 
     Ok(PrStatus {
-        number: pr_number.to_string(),
         author,
         ci_status,
         comments,
@@ -229,6 +237,161 @@ pub async fn check_pr_mergeable(pr: &str, repo: &str) -> Result<MergeableStatus>
     }
 }
 
+/// Squash-merge a pull request deterministically, without an agent session.
+///
+/// Runs `gh pr merge <pr_number> --repo <repo> --squash --subject <subject>`,
+/// appending `--admin` only when the caller asks for it — this crate never
+/// adds an unconditional administrator override. A refused merge returns
+/// [`MergeOutcome::Blocked`] with a classified [`MergeBlockReason`] plus gh's
+/// verbatim output; `Err` means gh itself could not be run.
+///
+/// `subject` is passed explicitly because GitHub only derives the
+/// `<title> (#<pr>)` squash subject for a multi-commit PR; a single-commit PR
+/// otherwise lands under the lone commit's own subject, dropping the PR
+/// reference the repo's history convention depends on.
+///
+/// Retry policy (including whether an `--admin` second attempt is warranted)
+/// belongs to the caller. See [`MergeBlockReason::admin_can_bypass`] for the
+/// capability hint and [`pr_review_decision`] for the check that must precede
+/// any override, and note that gh reports a merge of an already-merged PR
+/// as a failure — confirm with [`is_pr_merged`] before treating
+/// [`MergeBlockReason::Other`] as a real block.
+pub async fn merge_pr_squash(
+    repo: &str,
+    pr_number: &str,
+    subject: &str,
+    admin: bool,
+) -> Result<MergeOutcome> {
+    let mut args = vec![
+        "pr",
+        "merge",
+        pr_number,
+        "--repo",
+        repo,
+        "--squash",
+        "--subject",
+        subject,
+    ];
+    if admin {
+        args.push("--admin");
+    }
+    let output = run_gh_capture(&args).await.context("gh pr merge")?;
+
+    if output.success {
+        tracing::info!(module = "github", repo = %repo, pr = %pr_number, admin = admin, "squash-merged PR");
+        return Ok(MergeOutcome::Merged);
+    }
+
+    let detail = merge_block_detail(&output.stdout, &output.stderr);
+    let reason = classify_merge_block(&detail);
+    tracing::warn!(module = "github", repo = %repo, pr = %pr_number, admin = admin, reason = ?reason, detail = %detail, "squash-merge blocked");
+    Ok(MergeOutcome::Blocked { reason, detail })
+}
+
+/// Ask GitHub whether a human review still stands between this PR and a
+/// merge, via `gh pr view --json reviewDecision`.
+///
+/// This is the machine-readable answer [`classify_merge_block`] cannot give:
+/// gh's client-side precheck reports every branch-protection rule — required
+/// approvals included — through one umbrella "base branch policy prohibits
+/// the merge" message. Any caller about to retry with `--admin` must check
+/// [`ReviewDecision::blocks_admin_merge`] first.
+///
+/// An unrecognized value is [`ReviewDecision::ReviewRequired`], the
+/// conservative reading: an unknown decision is not proof that nothing is
+/// outstanding.
+pub async fn pr_review_decision(repo: &str, pr_number: &str) -> Result<ReviewDecision> {
+    let text = run_gh(&[
+        "pr",
+        "view",
+        pr_number,
+        "--repo",
+        repo,
+        "--json",
+        "reviewDecision",
+    ])
+    .await?;
+    let parsed: GhPrReviewDecisionResponse =
+        serde_json::from_str(&text).context("parse gh pr reviewDecision JSON")?;
+    Ok(classify_review_decision(parsed.review_decision.as_deref()))
+}
+
+/// GitHub returns an empty string (or omits the field) when the repository
+/// requires no review on this PR.
+fn classify_review_decision(raw: Option<&str>) -> ReviewDecision {
+    match raw.map(str::trim).unwrap_or("") {
+        "" | "null" => ReviewDecision::NotRequired,
+        "APPROVED" => ReviewDecision::Approved,
+        "CHANGES_REQUESTED" => ReviewDecision::ChangesRequested,
+        other => {
+            if other != "REVIEW_REQUIRED" {
+                tracing::warn!(
+                    module = "github",
+                    review_decision = %other,
+                    "unrecognized gh reviewDecision; treating as review required"
+                );
+            }
+            ReviewDecision::ReviewRequired
+        }
+    }
+}
+
+/// Phrases naming a missing human approving review. Checked first so a block
+/// that mentions review approval is never reported as administrator-clearable.
+const REVIEW_REQUIRED_PATTERNS: &[&str] = &[
+    "approving review",
+    "review is required",
+    "reviews are required",
+    "changes requested",
+];
+
+/// Phrases naming branch protection or required status checks.
+const BRANCH_PROTECTION_PATTERNS: &[&str] = &[
+    "protected branch rules",
+    "required status check",
+    "base branch policy",
+    "changes must be made through a pull request",
+];
+
+/// Phrases naming a pull request that cannot be merged as it stands.
+const NOT_MERGEABLE_PATTERNS: &[&str] = &[
+    "not mergeable",
+    "merge conflict",
+    "cannot be cleanly created",
+];
+
+/// Combine gh's streams into the text shown to humans and fed to the
+/// classifier. gh writes its refusal to stderr, but keep stdout so a future
+/// message shape is not silently dropped.
+fn merge_block_detail(stdout: &str, stderr: &str) -> String {
+    let parts: Vec<&str> = [stderr.trim(), stdout.trim()]
+        .into_iter()
+        .filter(|part| !part.is_empty())
+        .collect();
+    if parts.is_empty() {
+        return "gh pr merge failed with no output".to_string();
+    }
+    parts.join("\n")
+}
+
+/// Classify gh's refusal text. gh exposes no machine-readable failure code for
+/// `pr merge`, so its own wording is the only signal; anything unrecognized is
+/// [`MergeBlockReason::Other`] rather than a guess.
+fn classify_merge_block(detail: &str) -> MergeBlockReason {
+    let lower = detail.to_lowercase();
+    let matches_any = |patterns: &[&str]| patterns.iter().any(|p| lower.contains(p));
+
+    if matches_any(REVIEW_REQUIRED_PATTERNS) {
+        MergeBlockReason::ReviewRequired
+    } else if matches_any(BRANCH_PROTECTION_PATTERNS) {
+        MergeBlockReason::BranchProtection
+    } else if matches_any(NOT_MERGEABLE_PATTERNS) {
+        MergeBlockReason::NotMergeable
+    } else {
+        MergeBlockReason::Other
+    }
+}
+
 pub async fn current_pr_head_sha(repo: &str, pr_num: i64) -> Result<String> {
     let text = run_gh(&[
         "pr",
@@ -296,4 +459,221 @@ pub async fn get_pr_comments(repo: &str, pr: u32) -> Result<Vec<PrComment>> {
 
 fn parse_pr_number(url: &str) -> Option<i64> {
     url.rsplit('/').next()?.parse().ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        classify_merge_block, classify_review_decision, merge_block_detail, MergeBlockReason,
+        ReviewDecision,
+    };
+
+    #[test]
+    fn classifies_missing_approving_review() {
+        assert_eq!(
+            classify_merge_block(
+                "GraphQL: At least 1 approving review is required by reviewers with write access. (mergePullRequest)"
+            ),
+            MergeBlockReason::ReviewRequired
+        );
+    }
+
+    #[test]
+    fn classifies_multiple_required_reviews() {
+        assert_eq!(
+            classify_merge_block(
+                "GraphQL: At least 2 approving reviews are required by reviewers with write access. (mergePullRequest)"
+            ),
+            MergeBlockReason::ReviewRequired
+        );
+    }
+
+    #[test]
+    fn classifies_changes_requested() {
+        assert_eq!(
+            classify_merge_block("GraphQL: Changes requested by reviewers. (mergePullRequest)"),
+            MergeBlockReason::ReviewRequired
+        );
+    }
+
+    #[test]
+    fn classifies_protected_branch_rules() {
+        assert_eq!(
+            classify_merge_block("Protected branch rules not configured for this branch"),
+            MergeBlockReason::BranchProtection
+        );
+    }
+
+    #[test]
+    fn classifies_required_status_check() {
+        assert_eq!(
+            classify_merge_block(
+                "GraphQL: 2 of 3 required status checks are expected. (mergePullRequest)"
+            ),
+            MergeBlockReason::BranchProtection
+        );
+    }
+
+    #[test]
+    fn classifies_changes_must_be_made_through_a_pull_request() {
+        assert_eq!(
+            classify_merge_block(
+                "GraphQL: Changes must be made through a pull request. (mergePullRequest)"
+            ),
+            MergeBlockReason::BranchProtection
+        );
+    }
+
+    #[test]
+    fn base_branch_policy_outranks_the_generic_not_mergeable_wording() {
+        // gh's client-side precheck emits this one umbrella message for ANY
+        // protection rule — a required approving review included — so it
+        // classifies as the administrator-clearable class even when a human
+        // review is what is actually missing. That ambiguity is exactly why
+        // `admin_can_bypass` is a capability hint and callers must consult
+        // `pr_review_decision` before reaching for `--admin`.
+        assert_eq!(
+            classify_merge_block(
+                "X Pull request #12 is not mergeable: the base branch policy prohibits the merge."
+            ),
+            MergeBlockReason::BranchProtection
+        );
+    }
+
+    #[test]
+    fn a_message_naming_a_review_is_never_administrator_clearable() {
+        // gh emits either its own precheck refusal or the GraphQL server
+        // error, never both, so the classifier only ever sees one of these.
+        // Whichever wording arrives, text naming a review must outrank the
+        // branch-policy phrasing rather than come back clearable.
+        for detail in [
+            "GraphQL: At least 1 approving review is required by reviewers with write access. (mergePullRequest)",
+            "GraphQL: Changes requested by reviewers. (mergePullRequest)",
+        ] {
+            let reason = classify_merge_block(detail);
+            assert_eq!(reason, MergeBlockReason::ReviewRequired, "for {detail:?}");
+            assert!(!reason.admin_can_bypass(), "for {detail:?}");
+        }
+    }
+
+    #[test]
+    fn classifies_review_decision() {
+        assert_eq!(
+            classify_review_decision(Some("REVIEW_REQUIRED")),
+            ReviewDecision::ReviewRequired
+        );
+        assert_eq!(
+            classify_review_decision(Some("CHANGES_REQUESTED")),
+            ReviewDecision::ChangesRequested
+        );
+        assert_eq!(
+            classify_review_decision(Some("APPROVED")),
+            ReviewDecision::Approved
+        );
+    }
+
+    #[test]
+    fn an_absent_review_decision_means_no_review_is_required() {
+        // GitHub returns an empty string when the repository requires no
+        // review on this PR — the case that must still allow an --admin retry.
+        for raw in [None, Some(""), Some("  "), Some("null")] {
+            assert_eq!(
+                classify_review_decision(raw),
+                ReviewDecision::NotRequired,
+                "for {raw:?}"
+            );
+            assert!(!classify_review_decision(raw).blocks_admin_merge());
+        }
+    }
+
+    #[test]
+    fn an_unrecognized_review_decision_blocks_the_admin_retry() {
+        assert!(classify_review_decision(Some("SOMETHING_NEW")).blocks_admin_merge());
+    }
+
+    #[test]
+    fn only_an_outstanding_review_blocks_the_admin_retry() {
+        assert!(ReviewDecision::ReviewRequired.blocks_admin_merge());
+        assert!(ReviewDecision::ChangesRequested.blocks_admin_merge());
+        assert!(!ReviewDecision::Approved.blocks_admin_merge());
+        assert!(!ReviewDecision::NotRequired.blocks_admin_merge());
+    }
+
+    #[test]
+    fn classifies_dirty_merge_state() {
+        assert_eq!(
+            classify_merge_block(
+                "X Pull request #12 is not mergeable: the merge commit cannot be cleanly created."
+            ),
+            MergeBlockReason::NotMergeable
+        );
+    }
+
+    #[test]
+    fn classifies_bare_not_mergeable() {
+        assert_eq!(
+            classify_merge_block("Pull request is not mergeable"),
+            MergeBlockReason::NotMergeable
+        );
+        assert_eq!(
+            classify_merge_block("not mergeable"),
+            MergeBlockReason::NotMergeable
+        );
+    }
+
+    #[test]
+    fn classifies_merge_conflict() {
+        assert_eq!(
+            classify_merge_block("merge conflict between the head and base branches"),
+            MergeBlockReason::NotMergeable
+        );
+    }
+
+    #[test]
+    fn classification_is_case_insensitive() {
+        assert_eq!(
+            classify_merge_block("AT LEAST 1 APPROVING REVIEW IS REQUIRED"),
+            MergeBlockReason::ReviewRequired
+        );
+        assert_eq!(
+            classify_merge_block("REQUIRED STATUS CHECK \"ci\" IS EXPECTED"),
+            MergeBlockReason::BranchProtection
+        );
+    }
+
+    #[test]
+    fn unrecognized_text_is_other() {
+        for text in [
+            "",
+            "gh: command failed",
+            "HTTP 500: Internal Server Error",
+            "GraphQL: Base branch was modified. Review and try the merge again.",
+            "X Pull request #12 was already merged",
+        ] {
+            assert_eq!(
+                classify_merge_block(text),
+                MergeBlockReason::Other,
+                "unexpected classification for {text:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn only_branch_protection_is_admin_clearable() {
+        assert!(MergeBlockReason::BranchProtection.admin_can_bypass());
+        assert!(!MergeBlockReason::ReviewRequired.admin_can_bypass());
+        assert!(!MergeBlockReason::NotMergeable.admin_can_bypass());
+        assert!(!MergeBlockReason::Other.admin_can_bypass());
+    }
+
+    #[test]
+    fn detail_prefers_stderr_and_keeps_stdout() {
+        assert_eq!(merge_block_detail("", "  boom  \n"), "boom");
+        assert_eq!(merge_block_detail("out\n", "err\n"), "err\nout");
+        assert_eq!(merge_block_detail("out\n", ""), "out");
+        assert_eq!(
+            merge_block_detail("  ", "\n"),
+            "gh pr merge failed with no output"
+        );
+    }
 }

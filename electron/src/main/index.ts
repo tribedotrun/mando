@@ -29,7 +29,7 @@ import {
 import { getDataDir, getAppMode, isHeadless } from '#main/global/config/lifecycle';
 import { createDockIcon } from '#main/global/runtime/icons';
 import { registerNotificationHandlers } from '#main/shell/runtime/notifications';
-import { registerTerminalBridgeHandlers } from '#main/shell/runtime/terminalBridge';
+import { registerShellBridgeHandlers } from '#main/shell/runtime/shellBridge';
 import { setupAutoUpdate, applyPendingUpdateIfAny } from '#main/updater/runtime/updater';
 import { getAppInfo } from '#main/global/runtime/appInfo';
 import { announceUiRegistered } from '#main/global/runtime/uiLifecycle';
@@ -127,7 +127,7 @@ registerSetupValidationHandlers();
 
 // Config read/write, onboarding setup-complete, launchd -- see config-handlers.ts
 registerConfigHandlers();
-registerTerminalBridgeHandlers();
+registerShellBridgeHandlers();
 
 // Codex desktop-app account swap -- see codex/runtime/codexApp.ts
 registerCodexAppHandlers();

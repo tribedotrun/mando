@@ -75,15 +75,12 @@ pub(crate) fn risk_sort_value(risk: &str) -> u8 {
 // ── Core types ───────────────────────────────────────────────────────────
 
 /// Per-item triage assessment produced by deterministic pre-processing.
-#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct TriageItem {
     pub task_id: String,
     pub pr_number: i64,
     pub project: String,
     pub title: String,
-    pub files: Vec<String>,
-    pub file_categories: HashMap<String, Vec<String>>,
     pub fast_track: bool,
     pub cursor_risk: Option<String>,
     pub file_count: usize,
@@ -183,8 +180,6 @@ pub(crate) fn build_triage_item(
         pr_number,
         project: project_name.to_string(),
         title: title.to_string(),
-        files: files.to_vec(),
-        file_categories: categories,
         fast_track,
         cursor_risk: parse_cursor_risk(pr_body),
         file_count: files.len(),
@@ -634,9 +629,6 @@ mod tests {
         let item = build_triage_item("id1", 100, "my-project", "My PR", &files, "", &[]);
         assert_eq!(item.file_count, 3);
         assert!(!item.fast_track); // has a prod file
-        assert!(item.file_categories.get("test").unwrap().len() == 1);
-        assert!(item.file_categories.get("prod").unwrap().len() == 1);
-        assert!(item.file_categories.get("docs").unwrap().len() == 1);
     }
 
     #[test]
@@ -659,12 +651,6 @@ mod tests {
                 pr_number: 100,
                 project: "acme/widgets".into(),
                 title: "Prod change".into(),
-                files: vec!["src/main.rs".into()],
-                file_categories: {
-                    let mut m = HashMap::new();
-                    m.insert("prod".to_string(), vec!["src/main.rs".to_string()]);
-                    m
-                },
                 fast_track: false,
                 cursor_risk: Some("Medium".into()),
                 file_count: 1,
@@ -676,15 +662,6 @@ mod tests {
                 pr_number: 101,
                 project: "acme/widgets".into(),
                 title: "Test only".into(),
-                files: vec!["rust/crates/mando-types/src/tests.rs".into()],
-                file_categories: {
-                    let mut m = HashMap::new();
-                    m.insert(
-                        "test".to_string(),
-                        vec!["rust/crates/mando-types/src/tests.rs".to_string()],
-                    );
-                    m
-                },
                 fast_track: true,
                 cursor_risk: None,
                 file_count: 1,
@@ -716,15 +693,6 @@ mod tests {
             pr_number: 1,
             project: "acme/widgets".into(),
             title: "test only".into(),
-            files: vec!["rust/crates/mando-types/src/tests.rs".into()],
-            file_categories: {
-                let mut m = HashMap::new();
-                m.insert(
-                    "test".to_string(),
-                    vec!["rust/crates/mando-types/src/tests.rs".to_string()],
-                );
-                m
-            },
             fast_track: true,
             cursor_risk: None,
             file_count: 1,
@@ -741,8 +709,6 @@ mod tests {
             pr_number: 2,
             project: "x".into(),
             title: "fail".into(),
-            files: vec![],
-            file_categories: HashMap::new(),
             fast_track: false,
             cursor_risk: None,
             file_count: 0,
@@ -759,12 +725,6 @@ mod tests {
             pr_number: 3,
             project: "acme/widgets".into(),
             title: "big".into(),
-            files: vec!["src/a.rs".into()],
-            file_categories: {
-                let mut m = HashMap::new();
-                m.insert("prod".to_string(), vec!["src/a.rs".to_string()]);
-                m
-            },
             fast_track: false,
             cursor_risk: Some("Critical".into()),
             file_count: 1,
@@ -776,18 +736,11 @@ mod tests {
 
     #[test]
     fn score_large_changeset_penalty() {
-        let files: Vec<String> = (0..25).map(|i| format!("src/f{i}.rs")).collect();
         let item = TriageItem {
             task_id: "d".into(),
             pr_number: 4,
             project: "acme/widgets".into(),
             title: "big change".into(),
-            files: files.clone(),
-            file_categories: {
-                let mut m = HashMap::new();
-                m.insert("prod".to_string(), files);
-                m
-            },
             fast_track: false,
             cursor_risk: None,
             file_count: 25,

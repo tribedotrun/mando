@@ -11,7 +11,7 @@ use sqlx::SqlitePool;
 pub(crate) async fn detect_cooldown(pool: &SqlitePool) -> bool {
     let has_credentials = settings::credentials::has_any(pool).await.unwrap_or(false);
     let rate_limited = if has_credentials {
-        settings::credentials::pick_for_worker(pool, None)
+        settings::credentials::pick_for_worker(pool)
             .await
             .unwrap_or(None)
             .is_none()

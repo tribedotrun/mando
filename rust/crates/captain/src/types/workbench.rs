@@ -37,8 +37,7 @@ pub struct Workbench {
     pub worktree: String,
     pub title: String,
     pub created_at: String,
-    /// Updated on meaningful user interaction (terminal session start,
-    /// CC `UserPromptSubmit` hook). Drives sidebar sort ordering.
+    /// Updated on meaningful user interaction. Drives sidebar sort ordering.
     pub last_activity_at: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pinned_at: Option<String>,

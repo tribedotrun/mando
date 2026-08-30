@@ -307,15 +307,11 @@ pub async fn cost_since(pool: &SqlitePool, credential_id: i64, since_unix_secs: 
 /// Pick the best credential: not expired, not rate-limited, fewest active
 /// (running) sessions. Returns (id, access_token).
 ///
-/// `caller_filter` narrows which running sessions count toward the
-/// active-session tally. Pass `Some("worker")` when spawning a worker so
-/// only other worker sessions influence the pick (workers dominate token
-/// spend). Pass `None` to count all running sessions (default for
-/// lightweight callers).
-pub async fn pick_for_worker(
-    pool: &SqlitePool,
-    caller_filter: Option<&str>,
-) -> Result<Option<(i64, String)>> {
+/// The active-session tally is global across the pool: every running session
+/// on a credential counts, regardless of which caller opened it. There is one
+/// load-balancing bucket, so a clarifier, review, merge or rebase session
+/// weighs on a credential exactly as much as a worker session does.
+pub async fn pick_for_worker(pool: &SqlitePool) -> Result<Option<(i64, String)>> {
     let now_ms = time::OffsetDateTime::now_utc().unix_timestamp() * 1000;
     let now_secs = now_ms / 1000;
 
@@ -328,7 +324,6 @@ pub async fn pick_for_worker(
              SELECT credential_id, COUNT(*) AS active
              FROM cc_sessions
              WHERE status = 'running' AND credential_id IS NOT NULL
-               AND (?3 IS NULL OR caller = ?3)
              GROUP BY credential_id
          ) s ON s.credential_id = c.id
          WHERE c.provider = 'claude'
@@ -343,7 +338,6 @@ pub async fn pick_for_worker(
     )
     .bind(now_ms)
     .bind(now_secs)
-    .bind(caller_filter)
     .fetch_optional(pool)
     .await?;
     Ok(row)
@@ -612,7 +606,7 @@ mod pick_codex_tests {
             .await
             .expect("disable account-a");
 
-        let picked = pick_for_worker(&pool, None)
+        let picked = pick_for_worker(&pool)
             .await
             .expect("pick query")
             .expect("account-b should remain pickable");
@@ -626,21 +620,66 @@ mod pick_codex_tests {
             "disabled credentials should not count as an available pool"
         );
         assert!(
-            pick_for_worker(&pool, None)
-                .await
-                .expect("pick query")
-                .is_none(),
+            pick_for_worker(&pool).await.expect("pick query").is_none(),
             "all disabled credentials should be unpickable"
         );
 
         set_disabled(&pool, id_a, false)
             .await
             .expect("enable account-a");
-        let picked = pick_for_worker(&pool, None)
+        let picked = pick_for_worker(&pool)
             .await
             .expect("pick query")
             .expect("account-a should be pickable again");
         assert_eq!(picked.0, id_a);
+    }
+
+    /// One global load-balancing bucket: a running session opened by any
+    /// caller weighs on its credential. Before the collapse, a `clarifier`
+    /// session was invisible to worker picks and account-a would have been
+    /// handed out again.
+    #[tokio::test]
+    async fn active_session_count_is_global_across_callers() {
+        let db = global_db::Db::open_in_memory()
+            .await
+            .expect("in-memory db must init");
+        let pool = db.pool().clone();
+
+        let id_a = insert(&pool, "account-a", "tok-a", None)
+            .await
+            .expect("insert account-a");
+        let id_b = insert(&pool, "account-b", "tok-b", None)
+            .await
+            .expect("insert account-b");
+
+        assert_eq!(
+            pick_for_worker(&pool)
+                .await
+                .expect("pick query")
+                .expect("a credential must be pickable")
+                .0,
+            id_a,
+            "lowest id wins while both credentials are idle"
+        );
+
+        sqlx::query(
+            "INSERT INTO cc_sessions (session_id, created_at, caller, cwd, status, credential_id)
+             VALUES ('global-bucket-test', datetime('now'), 'clarifier', '', 'running', ?)",
+        )
+        .bind(id_a)
+        .execute(&pool)
+        .await
+        .expect("simulate a running clarifier session on account-a");
+
+        assert_eq!(
+            pick_for_worker(&pool)
+                .await
+                .expect("pick query")
+                .expect("a credential must be pickable")
+                .0,
+            id_b,
+            "a non-worker running session must still push the pick to account-b"
+        );
     }
 
     #[tokio::test]

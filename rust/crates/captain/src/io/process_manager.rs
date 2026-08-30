@@ -15,17 +15,21 @@ use anyhow::Result;
 /// Shared helper for spawn and resume. Builds a CcConfig, applies env
 /// overrides, spawns detached, wires up worker-exit watching, and returns
 /// `(pid, stream_path)`.
+///
+/// `effort` comes from `captain-workflow.yaml::agent.cc_effort`; this module
+/// sits in the `io` tier and never reads the workflow itself.
 async fn spawn_worker_impl(
     prompt: &str,
     cwd: &Path,
     model: &str,
+    effort: global_claude::Effort,
     session_or_resume_id: &str,
     env_overrides: &HashMap<String, String>,
     resume: bool,
 ) -> Result<(crate::Pid, PathBuf)> {
     let mut builder = global_claude::CcConfig::builder()
         .model(model)
-        .effort(global_claude::Effort::Max)
+        .effort(effort)
         .cwd(cwd);
     if resume {
         builder = builder.resume(session_or_resume_id);
@@ -50,10 +54,11 @@ pub(crate) async fn spawn_worker_process(
     prompt: &str,
     cwd: &Path,
     model: &str,
+    effort: global_claude::Effort,
     session_id: &str,
     env_overrides: &HashMap<String, String>,
 ) -> Result<(crate::Pid, PathBuf)> {
-    spawn_worker_impl(prompt, cwd, model, session_id, env_overrides, false).await
+    spawn_worker_impl(prompt, cwd, model, effort, session_id, env_overrides, false).await
 }
 
 /// Resume a worker with --resume instead of --session-id.
@@ -61,10 +66,20 @@ pub async fn resume_worker_process(
     message: &str,
     cwd: &Path,
     model: &str,
+    effort: global_claude::Effort,
     resume_session_id: &str,
     env_overrides: &HashMap<String, String>,
 ) -> Result<(crate::Pid, PathBuf)> {
-    spawn_worker_impl(message, cwd, model, resume_session_id, env_overrides, true).await
+    spawn_worker_impl(
+        message,
+        cwd,
+        model,
+        effort,
+        resume_session_id,
+        env_overrides,
+        true,
+    )
+    .await
 }
 
 /// Kill a worker process; delegates to `global_claude::kill_process`.

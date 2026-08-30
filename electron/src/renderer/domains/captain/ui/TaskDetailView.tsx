@@ -25,8 +25,6 @@ interface Props {
   }) => void;
   activeTab?: string;
   onTabChange?: (tab: string) => void;
-  onResumeInTerminal?: (sessionId: string, name?: string, provider?: TaskProvider) => void;
-  terminalSlot?: React.ReactNode;
 }
 
 export function TaskDetailView({
@@ -35,15 +33,12 @@ export function TaskDetailView({
   onOpenTranscript,
   activeTab: activeTabProp,
   onTabChange,
-  onResumeInTerminal,
-  terminalSlot,
 }: Props): React.ReactElement {
   const { ask } = useTaskAsk(item.id);
   const detail = useTaskDetailView({
     item,
     onBack,
     onOpenTranscript,
-    onResumeInTerminal,
     activeTabProp,
   });
   const effectiveTab = detail.tabs.effectiveTab;
@@ -56,7 +51,7 @@ export function TaskDetailView({
         <div
           className={cn(
             'min-h-0 min-w-0 flex-1 overflow-x-hidden',
-            effectiveTab === 'feed' || effectiveTab === 'terminal'
+            effectiveTab === 'feed'
               ? 'flex flex-col overflow-hidden'
               : 'scrollbar-on-hover overflow-y-auto',
           )}
@@ -64,11 +59,7 @@ export function TaskDetailView({
           <Tabs
             value={effectiveTab}
             onValueChange={(v) => onTabChange?.(v)}
-            className={cn(
-              'gap-0',
-              (effectiveTab === 'feed' || effectiveTab === 'terminal') &&
-                'flex flex-1 flex-col min-h-0',
-            )}
+            className={cn('gap-0', effectiveTab === 'feed' && 'flex flex-1 flex-col min-h-0')}
           >
             <TaskDetailTabBar
               tabs={detail.tabs.items}
@@ -82,42 +73,33 @@ export function TaskDetailView({
             />
 
             {/* Tab content */}
-            {effectiveTab !== 'terminal' && (
-              <div
-                className={cn(
-                  'break-words',
-                  effectiveTab === 'feed' ? 'flex-1 min-h-0' : 'px-3 pt-3',
-                )}
-              >
-                {effectiveTab === 'feed' && <TaskFeedView key={item.id} item={item} />}
-                {effectiveTab === 'pr' && (
-                  <PrTab item={item} prBody={detail.pr.body} prPending={detail.pr.pending} />
-                )}
-                {effectiveTab === 'more' && (
-                  <div className="space-y-6">
-                    <InfoTab item={item} />
-                    <SessionsTab
-                      sessions={detail.sessions.items}
-                      onSessionClick={detail.sessions.handleSessionClick}
-                      onResumeSession={detail.sessions.handleResumeSession}
-                      taskId={item.id}
-                    />
-                  </div>
-                )}
-              </div>
-            )}
-            {/* Terminal stays mounted (display:none) to keep xterm alive */}
-            {terminalSlot && (
-              <div className={cn(effectiveTab === 'terminal' ? 'flex-1 min-h-0' : 'hidden')}>
-                {terminalSlot}
-              </div>
-            )}
+            <div
+              className={cn(
+                'break-words',
+                effectiveTab === 'feed' ? 'flex-1 min-h-0' : 'px-3 pt-3',
+              )}
+            >
+              {effectiveTab === 'feed' && <TaskFeedView key={item.id} item={item} />}
+              {effectiveTab === 'pr' && (
+                <PrTab item={item} prBody={detail.pr.body} prPending={detail.pr.pending} />
+              )}
+              {effectiveTab === 'more' && (
+                <div className="space-y-6">
+                  <InfoTab item={item} />
+                  <SessionsTab
+                    sessions={detail.sessions.items}
+                    onSessionClick={detail.sessions.handleSessionClick}
+                    taskId={item.id}
+                  />
+                </div>
+              )}
+            </div>
           </Tabs>
         </div>
       </div>
 
-      {/* Action bar: only on PR and More tabs (feed has its own input, terminal doesn't need one) */}
-      {effectiveTab !== 'feed' && effectiveTab !== 'terminal' && (
+      {/* Action bar: only on PR and More tabs (feed has its own input) */}
+      {effectiveTab !== 'feed' && (
         <TaskComposer item={item} onAsk={(q, images) => void ask(q, images)} />
       )}
 

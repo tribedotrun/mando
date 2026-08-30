@@ -51,7 +51,7 @@ export type {
   SessionCategory,
   SessionIds,
   SessionSummary,
-  SessionsResponse,
+  SessionsListResponse,
   StatusEventData,
   TaskEventData,
   TaskArtifact,
@@ -61,8 +61,6 @@ export type {
   TaskListResponse,
   TaskProvider,
   TelegramHealth,
-  TerminalState,
-  TerminalSessionInfo,
   TickResult,
   TimelineEvent,
   TimelineResponse,
@@ -136,14 +134,6 @@ export const ACTION_NEEDED_STATUSES: readonly ItemStatus[] = [
   'awaiting-review',
   'escalated',
   'needs-clarification',
-  'plan-ready',
-];
-
-export const IN_PROGRESS_STATUSES: readonly ItemStatus[] = [
-  'clarifying',
-  'in-progress',
-  'captain-reviewing',
-  'captain-merging',
 ];
 
 export const WORKING_STATUSES: readonly ItemStatus[] = [

@@ -26,8 +26,8 @@ struct Args {
     #[arg(long, conflicts_with = "sandbox")]
     dev: bool,
 
-    /// Sandbox mode — forces all models (captain, worker, clarifier, scout,
-    /// terminal sessions) to haiku so tests are fast and cheap.
+    /// Sandbox mode — forces all models (captain, worker, clarifier, scout)
+    /// to haiku so tests are fast and cheap.
     /// Mutually exclusive with --dev.
     #[arg(long)]
     sandbox: bool,
@@ -131,9 +131,6 @@ async fn main() {
             std::process::exit(1);
         });
 
-    // Set up CC session hook (writes script + syncs settings.json).
-    mando_gateway::setup_session_hooks();
-
     mando_gateway::write_port_file(port, args.dev);
 
     // Auto-spawn Electron if env vars are set and UI is not disabled.
@@ -174,7 +171,6 @@ async fn main() {
     let qa_mgr = state.scout.qa_session_mgr().clone();
     let tg_rt = state.telegram_runtime.clone();
     let ui_rt = state.ui_runtime.clone();
-    let terminal = state.terminal.clone();
     let tracker = state.task_tracker.clone();
     let cancel = state.cancellation_token.clone();
     let app = mando_gateway::build_router(state);
@@ -221,7 +217,7 @@ async fn main() {
         ui_rt.shutdown().await;
     };
     // Capture any serve-side failure but don't short-circuit cleanup —
-    // we still need tracker/terminal/qa_mgr shutdown to flush state
+    // we still need tracker/qa_mgr shutdown to flush state
     // before the process leaves. The exit-code decision is deferred to
     // the very end so launchd / supervising processes still see a
     // non-zero status when the HTTP server errored unexpectedly.
@@ -237,9 +233,6 @@ async fn main() {
     // forget work gets a clean exit.
     tracker.close();
     tracker.wait().await;
-
-    // Kill all terminal PTY sessions.
-    terminal.shutdown();
 
     // Shut down persistent Q&A sessions (kills CC child processes).
     qa_mgr.shutdown().await;

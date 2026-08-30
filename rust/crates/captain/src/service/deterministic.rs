@@ -13,9 +13,11 @@ use rustc_hash::FxHashMap;
 
 use super::deterministic_helpers::{
     action, classify_unresolved_threads, detect_broken_session_symptom, has_substantive_output,
-    is_image_dimension_blocked, render_nudge,
+    render_nudge,
 };
-use super::worker_context::has_summary_diagram;
+use super::worker_context::{
+    bug_fix_evidence_gap, has_summary_diagram, touches_ui, ui_evidence_gap, EvidenceKindGap,
+};
 
 /// Deterministic classification. Every input shape produces exactly one
 /// `Action`; there is no fallthrough. Returns `Err` only when a required
@@ -110,21 +112,23 @@ pub(crate) fn classify_worker(
             "degraded_context",
         ));
     }
-    if quality_gates_pass(ctx, is_no_pr, stream_result_clean, no_pr_min_active_s) {
+    let is_bug_fix = item.is_some_and(|it| it.is_bug_fix);
+    if quality_gates_pass(
+        ctx,
+        is_no_pr,
+        is_bug_fix,
+        stream_result_clean,
+        no_pr_min_active_s,
+    ) {
         return Ok(action(ctx, ActionKind::CaptainReview, "", "gates_pass"));
     }
 
     // Rule 4: NUDGE. Worker needs a push.
 
     // Check specific gate failures first (work done but missing something).
-    if let Some(gate_nudge) = missing_gate_nudge(
-        ctx,
-        is_no_pr,
-        stream_result_clean,
-        stream_path,
-        nudges,
-        symptoms,
-    )? {
+    if let Some(gate_nudge) =
+        missing_gate_nudge(ctx, is_no_pr, is_bug_fix, stream_result_clean, nudges)?
+    {
         return Ok(gate_nudge);
     }
 
@@ -138,7 +142,13 @@ pub(crate) fn classify_worker(
     }
 
     // Process dead or alive fallback. Diagnose which gates are failing.
-    let diagnosis = diagnose_failing_gates(ctx, is_no_pr, stream_result_clean, no_pr_min_active_s);
+    let diagnosis = diagnose_failing_gates(
+        ctx,
+        is_no_pr,
+        is_bug_fix,
+        stream_result_clean,
+        no_pr_min_active_s,
+    );
     let mut vars: FxHashMap<&str, &str> = FxHashMap::default();
     vars.insert("failures", diagnosis.as_str());
     let msg = render_nudge(nudges, "gates_incomplete", &vars)?;
@@ -160,6 +170,7 @@ pub(crate) fn classify_worker(
 fn quality_gates_pass(
     ctx: &WorkerContext,
     is_no_pr: bool,
+    is_bug_fix: bool,
     stream_result_clean: Option<bool>,
     no_pr_min_active_s: f64,
 ) -> bool {
@@ -172,7 +183,10 @@ fn quality_gates_pass(
     if stream_result_clean != Some(true) {
         return false;
     }
-    // PR path.
+    // PR path. The typed evidence-kind gates are part of this conjunction so
+    // a `gates_pass` review can never fire on an incomplete deck — the new
+    // `captain_review` prompt states these gates already ran and tells the
+    // reviewer not to re-check them.
     if ctx.pr.is_some()
         && !ctx.pr_is_draft
         && ctx.branch_ahead
@@ -183,6 +197,7 @@ fn quality_gates_pass(
         && has_summary_diagram(ctx)
         && ctx.has_evidence
         && ctx.evidence_fresh
+        && evidence_kind_gap(ctx, is_bug_fix).is_none()
     {
         return true;
     }
@@ -197,10 +212,41 @@ fn quality_gates_pass(
     false
 }
 
+/// Which typed evidence-kind gate this task is failing, if any.
+///
+/// Two shapes, per the evidence contract in `captain-workflow.yaml`:
+/// - UI work needs a `before` screenshot, an `after` screenshot, and an
+///   `after` recording.
+/// - A bug fix needs a `before` and an `after`, or a `cannot-reproduce`
+///   write-up.
+///
+/// A backend-only, non-bug-fix change is held to neither: its deck is
+/// terminal output, which the coarse `has_evidence` gate already covers.
+fn evidence_kind_gap(
+    ctx: &WorkerContext,
+    is_bug_fix: bool,
+) -> Option<(EvidenceKindGap, &'static str)> {
+    if is_bug_fix {
+        if let Some(gap) = bug_fix_evidence_gap(ctx) {
+            return Some((gap, "before/after bug-fix evidence"));
+        }
+    }
+    if touches_ui(ctx) {
+        if let Some(gap) = ui_evidence_gap(ctx) {
+            return Some((
+                gap,
+                "before/after UI evidence (screenshots + after recording)",
+            ));
+        }
+    }
+    None
+}
+
 /// List every failing quality gate for the diagnostic nudge message.
 fn diagnose_failing_gates(
     ctx: &WorkerContext,
     is_no_pr: bool,
+    is_bug_fix: bool,
     stream_result_clean: Option<bool>,
     no_pr_min_active_s: f64,
 ) -> String {
@@ -227,6 +273,11 @@ fn diagnose_failing_gates(
         }
         if ctx.pr.is_some() && ctx.has_evidence && !ctx.evidence_fresh {
             failures.push("stale evidence -- recapture after reopen".into());
+        }
+        if ctx.pr.is_some() && ctx.has_evidence && ctx.evidence_fresh {
+            if let Some((gap, what)) = evidence_kind_gap(ctx, is_bug_fix) {
+                failures.push(gap.reason(what));
+            }
         }
         if ctx.unresolved_threads > 0 {
             failures.push(format!("{} unresolved thread(s)", ctx.unresolved_threads));
@@ -267,10 +318,9 @@ fn diagnose_failing_gates(
 fn missing_gate_nudge(
     ctx: &WorkerContext,
     is_no_pr: bool,
+    is_bug_fix: bool,
     stream_result_clean: Option<bool>,
-    stream_path: Option<&Path>,
     nudges: &HashMap<String, String>,
-    symptoms: &StreamSymptomMatcher,
 ) -> Result<Option<Action>> {
     // Only applies when we have a stream result (work reached a conclusion).
     if stream_result_clean.is_none() {
@@ -372,15 +422,20 @@ fn missing_gate_nudge(
             "work summary stale after reopen",
         )));
     }
-    // Image dimension blocked.
-    if is_image_dimension_blocked(stream_path, symptoms) {
-        let msg = render_nudge(nudges, "image_dimension_blocked", &vars)?;
-        return Ok(Some(action(
-            ctx,
-            ActionKind::Nudge,
-            &msg,
-            "image dimension blocked",
-        )));
+    // Typed evidence-kind gates. Evidence exists and is fresh, but the deck is
+    // missing a required kind (UI before/after/recording, or bug-fix
+    // before/after). Routes to the same `missing_evidence` / `stale_evidence`
+    // nudges rather than letting the reviewer discover the gap.
+    if !ctx.degraded && ctx.pr.is_some() {
+        if let Some((gap, what)) = evidence_kind_gap(ctx, is_bug_fix) {
+            let msg = render_nudge(nudges, gap.nudge_key(), &vars)?;
+            return Ok(Some(action(
+                ctx,
+                ActionKind::Nudge,
+                &msg,
+                &gap.reason(what),
+            )));
+        }
     }
     // No-PR insufficient output.
     if is_no_pr && !has_substantive_output(&ctx.stream_tail) {

@@ -58,6 +58,35 @@ pub struct WorkerContext {
     pub has_screenshot: bool,
     /// True when evidence contains at least one recording (gif/mp4/mov/webm).
     pub has_recording: bool,
+    /// Kind-tagged evidence gates, used by the deterministic classifier to
+    /// nudge for a missing `before` / `after` / after-recording before a
+    /// `gates_pass` captain review can fire.
+    pub evidence_kinds: EvidenceKindGates,
+}
+
+/// Evidence gates that intersect an artifact's `--kind` tag with its media
+/// type, computed over *fresh* evidence only (post-reopen when the task was
+/// reopened).
+///
+/// The intersection matters: a `--kind before` terminal log must not satisfy
+/// the UI before-screenshot rule, and a `--kind after` screenshot must not
+/// satisfy the after-recording rule.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EvidenceKindGates {
+    /// Screenshot-extension media tagged `--kind before`.
+    pub before_screenshot: bool,
+    /// Screenshot-extension media tagged `--kind after`.
+    pub after_screenshot: bool,
+    /// Recording-extension media tagged `--kind after`. Recording is required
+    /// only on the after side.
+    pub after_recording: bool,
+    /// Any media tagged `--kind before`, regardless of type.
+    pub before_fix: bool,
+    /// Any media tagged `--kind after`, regardless of type.
+    pub after_fix: bool,
+    /// Worker-registered `cannot-reproduce` write-up, which stands in for
+    /// before/after on a bug fix that could not be triggered.
+    pub cannot_reproduce: bool,
 }
 
 /// The kind of action the captain can take on a worker.

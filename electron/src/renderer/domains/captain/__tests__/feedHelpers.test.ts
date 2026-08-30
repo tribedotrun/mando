@@ -64,19 +64,19 @@ const timelineItem = (createdAt: string): FeedItem => ({
   data: {
     timestamp: createdAt,
     actor: 'captain',
-    summary: 'worker completed',
-    data: { event_type: 'worker_completed' },
+    summary: 'auto-merge triage',
+    data: { event_type: 'auto_merge_triage' },
   },
 });
 
-const evidenceUpdatedItem = (createdAt: string): FeedItem => ({
+const suppressedItem = (createdAt: string): FeedItem => ({
   type: 'timeline',
   timestamp: createdAt,
   data: {
     timestamp: createdAt,
     actor: 'captain',
-    summary: 'evidence updated',
-    data: { event_type: 'evidence_updated' },
+    summary: 'captain asked the human',
+    data: { event_type: 'human_ask', question: 'q', intent: 'i', ask_id: 'a1' },
   },
 });
 
@@ -242,19 +242,17 @@ describe('groupEvidenceArtifacts', () => {
     assert.equal(result[0].type, 'evidence-group');
   });
 
-  it('walks past suppressed evidence_updated timeline events (production tail shape)', () => {
-    // The daemon emits evidence_updated immediately after each evidence
-    // upload, so it lands at the tail of feedItems. FeedBlocks filters it
-    // out at render time, but the grouping helper sees it first. Without
-    // dropping these, the last-pair check looks at (after, evidence_updated)
-    // and never merges — meaning the pair-merge path wouldn't fire at all
-    // in production.
+  it('walks past suppressed timeline events at the tail', () => {
+    // A suppressed event landing after the evidence uploads sits at the
+    // tail of feedItems. FeedBlocks filters it out at render time, but the
+    // grouping helper sees it first. Without dropping it, the last-pair
+    // check looks at (after, suppressed) and never merges.
     const before = evidenceArtifact(244, '2026-04-29T16:05:00Z', 'before_fix');
     const after = evidenceArtifact(245, '2026-04-29T16:05:30Z', 'after_fix');
     const result = groupEvidenceArtifacts([
       evidenceItem(before),
       evidenceItem(after),
-      evidenceUpdatedItem('2026-04-29T16:05:31Z'),
+      suppressedItem('2026-04-29T16:05:31Z'),
     ]);
 
     assert.equal(result.length, 1, 'pair merges despite trailing suppressed event');
@@ -267,17 +265,17 @@ describe('groupEvidenceArtifacts', () => {
   });
 
   it('drops suppressed timeline events from the renderable list even when no pair merges', () => {
-    // task 103 in production: 5 untyped evidence rows, each followed by an
-    // evidence_updated event. After filtering, the renderable list is the
-    // 5 evidence cards — no merge, but the redundant timeline events also
-    // don't appear (they would have rendered as null anyway).
+    // Untyped evidence rows interleaved with suppressed events. After
+    // filtering, the renderable list is just the evidence cards — no merge,
+    // and the suppressed events also don't appear (they would have rendered
+    // as null anyway).
     const u1 = evidenceArtifact(239, '2026-04-27T00:22:00Z', null);
     const u2 = evidenceArtifact(240, '2026-04-27T00:23:00Z', null);
     const result = groupEvidenceArtifacts([
       evidenceItem(u1),
-      evidenceUpdatedItem('2026-04-27T00:22:01Z'),
+      suppressedItem('2026-04-27T00:22:01Z'),
       evidenceItem(u2),
-      evidenceUpdatedItem('2026-04-27T00:23:01Z'),
+      suppressedItem('2026-04-27T00:23:01Z'),
     ]);
 
     assert.equal(result.length, 2);

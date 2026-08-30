@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::TerminalAgent;
+use crate::TaskAgent;
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS, Default)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -91,11 +91,8 @@ pub struct CaptainConfig {
     pub max_concurrent_workers: Option<usize>,
     pub tick_interval_s: u64,
     pub tz: String,
-    pub default_task_agent: TerminalAgent,
-    pub default_terminal_agent: TerminalAgent,
+    pub default_task_agent: TaskAgent,
     pub default_glm_implementation: bool,
-    pub claude_terminal_args: String,
-    pub codex_terminal_args: String,
     pub projects: HashMap<String, ProjectConfig>,
 }
 

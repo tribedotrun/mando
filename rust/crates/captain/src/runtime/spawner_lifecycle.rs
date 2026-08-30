@@ -101,41 +101,19 @@ pub(crate) async fn reopen_worker(
 
     // Write reopen context (include image paths if any are attached).
     let reopen_seq = item.reopen_seq + 1;
-    let images_section = item
-        .images
-        .as_deref()
-        .filter(|s| !s.is_empty())
-        .map(|s| {
-            let dir = global_infra::paths::images_dir();
-            let lines: Vec<String> = s
-                .split(',')
-                .filter_map(|f| {
-                    let name = f.trim();
-                    let base = std::path::Path::new(name).file_name()?.to_str()?;
-                    (base == name && !name.contains(".."))
-                        .then(|| format!("- {}", dir.join(base).display()))
-                })
-                .collect();
-            if lines.is_empty() {
-                String::new()
-            } else {
-                format!("\n\n## Attached Images\n{}\n", lines.join("\n"))
-            }
-        })
-        .unwrap_or_default();
-    write_context_file(
-        &wt_expanded,
-        "captain-reopen-context.md",
-        &format!(
-            "# Captain Reopen (seq={})\n\nReview feedback:\n{}\n\nAddress the feedback, then post an ack comment: `[Mando] Reopen #{} addressed: <summary>`\n\nIf you make code changes, recapture and update PR evidence.\n{}",
-            reopen_seq, feedback, reopen_seq, images_section
-        ),
-    )
-    .await?;
+    let images_section = attached_image_lines(item.images.as_deref());
 
     let reopen_seq_str = reopen_seq.to_string();
     let mut vars: FxHashMap<&str, &str> = FxHashMap::default();
     vars.insert("reopen_seq", reopen_seq_str.as_str());
+    vars.insert("feedback", feedback);
+    vars.insert("images", images_section.as_str());
+    let reopen_context = settings::render_prompt("reopen_context", &workflow.prompts, &vars)
+        .map_err(|e| anyhow::anyhow!(e))?;
+    write_context_file(&wt_expanded, "captain-reopen-context.md", &reopen_context).await?;
+
+    vars.remove("feedback");
+    vars.remove("images");
     let resume_msg = settings::render_prompt("reopen_resume", &workflow.prompts, &vars)
         .map_err(|e| anyhow::anyhow!(e))?;
 
@@ -248,4 +226,56 @@ async fn write_context_file(worktree: &Path, filename: &str, content: &str) -> R
     tokio::fs::create_dir_all(&ai_dir).await?;
     tokio::fs::write(ai_dir.join(filename), content).await?;
     Ok(())
+}
+
+/// Absolute paths for the images attached to a task, one markdown bullet per
+/// line, for the reopen-context template. Empty when nothing is attached.
+/// Basenames only: a stored value with a directory component or `..` is
+/// dropped rather than resolved outside the images dir.
+fn attached_image_lines(images: Option<&str>) -> String {
+    let Some(images) = images.filter(|s| !s.is_empty()) else {
+        return String::new();
+    };
+    let dir = global_infra::paths::images_dir();
+    images
+        .split(',')
+        .filter_map(|entry| {
+            let name = entry.trim();
+            let base = std::path::Path::new(name).file_name()?.to_str()?;
+            (base == name && !name.contains(".."))
+                .then(|| format!("- {}", dir.join(base).display()))
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn attached_image_lines_is_empty_without_images() {
+        assert_eq!(attached_image_lines(None), "");
+        assert_eq!(attached_image_lines(Some("")), "");
+    }
+
+    #[test]
+    fn attached_image_lines_expands_basenames_to_the_images_dir() {
+        let dir = global_infra::paths::images_dir();
+        let rendered = attached_image_lines(Some("a.png, b.png"));
+        assert_eq!(
+            rendered,
+            format!(
+                "- {}\n- {}",
+                dir.join("a.png").display(),
+                dir.join("b.png").display()
+            )
+        );
+    }
+
+    #[test]
+    fn attached_image_lines_drops_path_traversal_and_directories() {
+        assert_eq!(attached_image_lines(Some("../secret.png")), "");
+        assert_eq!(attached_image_lines(Some("nested/a.png")), "");
+    }
 }

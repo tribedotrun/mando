@@ -6,7 +6,6 @@ use tracing::warn;
 use crate::{ItemStatus, Task};
 use global_types::SessionStatus;
 use settings::CaptainWorkflow;
-use settings::Config;
 
 use sqlx::SqlitePool;
 
@@ -22,7 +21,6 @@ use crate::service::{lifecycle, spawn_logic};
 pub async fn apply_verdict(
     item: &mut Task,
     verdict: &super::captain_review::CaptainVerdict,
-    _config: &Config,
     workflow: &CaptainWorkflow,
     notifier: &Notifier,
     pool: &SqlitePool,

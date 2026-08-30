@@ -30,7 +30,6 @@ pub const TASKS_ASK: &str = "/api/tasks/ask";
 pub const TASKS_ASK_END: &str = "/api/tasks/ask/end";
 pub const TASKS_DELETE: &str = "/api/tasks/delete";
 pub const TASKS_HANDOFF: &str = "/api/tasks/handoff";
-pub const TASKS_IMPLEMENT: &str = "/api/tasks/implement";
 pub const TASKS_MERGE: &str = "/api/tasks/merge";
 pub const TASKS_REOPEN: &str = "/api/tasks/reopen";
 pub const TASKS_RETRY: &str = "/api/tasks/retry";

@@ -105,52 +105,6 @@ function rendererDomainRules() {
   );
 }
 
-function rendererCaptainTerminalRules() {
-  return RENDERER_TIERS.map((tier) => {
-    const bans = [
-      BAN_RELATIVE,
-      BAN_MAIN,
-      ...bannedTiers(tier, RENDERER_ALLOWED, RENDERER_TIERS, '#renderer/domains/captain/terminal'),
-      group(['#renderer/app/**'], `Domains cannot import from app.${SKILL_REF}`),
-    ];
-
-    if (tier === 'service') {
-      bans.push(
-        group(
-          ['#renderer/global/providers/**', '#renderer/global/repo/**', '#renderer/global/runtime/**', '#renderer/global/ui/**'],
-          `Service files must be pure: no providers, no repo, no runtime, no UI from global.${SKILL_REF}`,
-        ),
-      );
-    }
-
-    if (tier === 'ui') {
-      bans.push(
-        group(['#renderer/global/providers/**'], `UI files cannot import providers directly. Use runtime hooks.${SKILL_REF}`),
-        group(['#renderer/global/repo/**'], `UI files cannot import repo directly. Use runtime hooks.${SKILL_REF}`),
-        group(['#renderer/global/config/**'], `UI files cannot import config directly. Use service or runtime.${SKILL_REF}`),
-      );
-    }
-
-    for (const other of RENDERER_DOMAINS) {
-      if (other === 'captain') continue;
-      bans.push(
-        group(
-          [`#renderer/domains/${other}/**`],
-          `captain/terminal cannot import "${other}" internals. Promote shared code to global.${SKILL_REF}`,
-        ),
-      );
-    }
-
-    return {
-      files: [
-        `src/renderer/domains/captain/terminal/${tier}/**/*.ts`,
-        `src/renderer/domains/captain/terminal/${tier}/**/*.tsx`,
-      ],
-      rules: restrictImports(...bans),
-    };
-  });
-}
-
 function rendererAppRules() {
   return [
     {
@@ -205,7 +159,6 @@ function mainDomainRules() {
 export default [
   ...rendererGlobalRules(),
   ...rendererDomainRules(),
-  ...rendererCaptainTerminalRules(),
   ...rendererAppRules(),
   ...mainGlobalRules(),
   ...mainDomainRules(),

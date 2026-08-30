@@ -51,10 +51,7 @@ fn parse_full_config() {
             "tickIntervalS": 60,
             "tz": "UTC",
             "defaultTaskAgent": "codex",
-            "defaultTerminalAgent": "claude",
             "defaultGlmImplementation": true,
-            "claudeTerminalArgs": "--dangerously-skip-permissions",
-            "codexTerminalArgs": "--sandbox danger-full-access --ask-for-approval never",
             "projects": {
                 "/code/repo": {
                     "name": "repo",
@@ -148,10 +145,6 @@ fn parse_config_partial_overrides_selected_fields() {
     // Sibling fields keep defaults
     let defaults = Config::default();
     assert_eq!(cfg.gateway.dashboard.host, defaults.gateway.dashboard.host);
-    assert_eq!(
-        cfg.captain.default_terminal_agent,
-        defaults.captain.default_terminal_agent
-    );
     assert_eq!(
         cfg.captain.default_task_agent,
         defaults.captain.default_task_agent

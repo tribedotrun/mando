@@ -16,13 +16,41 @@ use super::notify::Notifier;
 use super::timeline_emit;
 use crate::service::lifecycle;
 
-pub(crate) use super::captain_merge_spawn::spawn_merge;
+pub(crate) use super::captain_merge_spawn::{spawn_merge, MergeAttempt};
 
 /// Structured result from a captain merge CC session.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MergeResult {
     pub action: String,
     pub feedback: String,
+}
+
+/// The timeline event both merge adapters persist when a session starts.
+pub(super) fn merge_started_event(session_id: &str, pr_url: &str) -> crate::TimelineEvent {
+    crate::TimelineEvent {
+        timestamp: global_types::now_rfc3339(),
+        actor: "captain".to_string(),
+        summary: "Captain merge session started".to_string(),
+        data: TimelineEventPayload::CaptainMergeStarted {
+            session_id: session_id.to_string(),
+            pr: pr_url.to_string(),
+        },
+    }
+}
+
+#[tracing::instrument(skip_all, fields(task_id = item.id))]
+pub(super) async fn notify_merge_started(
+    notifier: &Notifier,
+    item: &Task,
+    pr_url: &str,
+    pr_number: &str,
+) {
+    let title = global_infra::html::escape_html(&item.title);
+    notifier
+        .normal(&format!(
+            "\u{1f680} Captain merging <b>{title}</b> (<a href=\"{pr_url}\">PR #{pr_number}</a>)"
+        ))
+        .await;
 }
 
 /// JSON Schema for the MergeResult structured output.

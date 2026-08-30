@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use anyhow::Result;
 use global_opencode::OpenCodeRunConfig;
@@ -15,7 +15,12 @@ pub(super) async fn spawn_worker(
     workflow: &CaptainWorkflow,
     pool: &sqlx::SqlitePool,
 ) -> Result<super::spawner::SpawnResult> {
-    let (branch, wt_path) = resolve_worker_checkout(project_config, item).await?;
+    let (branch, wt_path) = super::worker_checkout::resolve_worker_checkout(
+        project_config,
+        item,
+        "opencode_worker_spawn",
+    )
+    .await?;
     let session_name = format!("worker-{}-{}", item.id, item.worker_seq);
     let hook_env = HashMap::new();
     hooks::pre_spawn(&project_config.hooks, &wt_path, &hook_env).await?;
@@ -46,10 +51,8 @@ pub(super) async fn spawn_worker(
     Ok(super::spawner::SpawnResult {
         session_name,
         session_id: started.session_id,
-        pid: started.pid,
         branch,
         worktree: wt_path.to_string_lossy().into_owned(),
-        stream_path: started.stream_path,
         plan: item.plan.clone(),
         pr_number,
     })
@@ -102,7 +105,6 @@ pub(super) async fn terminate_worker_process(session_id: &str) -> Result<()> {
 struct StartedOpenCodeWorker {
     session_id: String,
     pid: Pid,
-    stream_path: PathBuf,
 }
 
 struct StartOpenCodeWorker<'a> {
@@ -234,17 +236,13 @@ async fn start_opencode_worker(request: &StartOpenCodeWorker<'_>) -> Result<Star
         started_run,
         request.pool.clone(),
         session_id.clone(),
-        stream_path.clone(),
+        stream_path,
         stream_state,
         pid_identity,
     );
     registration.keep_registered();
 
-    Ok(StartedOpenCodeWorker {
-        session_id,
-        pid,
-        stream_path,
-    })
+    Ok(StartedOpenCodeWorker { session_id, pid })
 }
 
 async fn kill_existing_worker(session_id: &str, worker_name: &str) {
@@ -281,119 +279,5 @@ async fn maybe_create_draft_pr(item: &Task, branch: &str, wt_path: &Path) -> Opt
             );
             None
         }
-    }
-}
-
-async fn resolve_worker_checkout(
-    project_config: &ProjectConfig,
-    item: &Task,
-) -> Result<(String, PathBuf)> {
-    let repo_path = global_infra::paths::expand_tilde(&project_config.path);
-    global_git::fetch_origin(&repo_path).await?;
-    let stored_wt = item
-        .worktree
-        .as_deref()
-        .map(global_infra::paths::expand_tilde);
-    let default_branch = global_git::default_branch(&repo_path).await?;
-
-    match super::spawner::plan_worktree(stored_wt.as_ref(), item.branch.as_deref()) {
-        super::spawner::WorktreePlan::Reuse { wt, branch } => Ok((branch, wt)),
-        super::spawner::WorktreePlan::Rework { wt } => {
-            let slug = new_slug(
-                item,
-                super::task_creation::next_worker_slot(&global_infra::paths::state_dir())?,
-            );
-            let branch = format!("mando/{}", slug);
-            global_git::reset_to_new_branch(&wt, &branch, &default_branch).await?;
-            Ok((branch, wt))
-        }
-        super::spawner::WorktreePlan::Recreate {
-            wt,
-            stored_branch: _,
-        } => {
-            let branch = recreate_worktree_at(item, &repo_path, &default_branch, &wt).await?;
-            Ok((branch, wt))
-        }
-        super::spawner::WorktreePlan::MissingBinding => {
-            anyhow::bail!(
-                "task {} reached OpenCode spawn without a worktree binding -- refusing to spawn",
-                item.id,
-            );
-        }
-    }
-}
-
-fn new_slug(item: &Task, slot: u64) -> String {
-    format!("todo-{}-{}", item.id, slot)
-}
-
-async fn recreate_worktree_at(
-    item: &Task,
-    repo_path: &Path,
-    default_branch: &str,
-    wt: &Path,
-) -> Result<String> {
-    const MAX_ATTEMPTS: usize = 20;
-
-    for attempt in 0..MAX_ATTEMPTS {
-        let slug = new_slug(
-            item,
-            super::task_creation::next_worker_slot(&global_infra::paths::state_dir())?,
-        );
-        let branch = format!("mando/{}", slug);
-        if let Err(e) = global_git::prune_worktrees(repo_path).await {
-            tracing::warn!(module = "opencode_worker_spawn", error = %e, "failed to prune stale git worktree metadata before recreate");
-        }
-        if let Err(e) = global_git::delete_local_branch(repo_path, &branch).await {
-            tracing::debug!(module = "opencode_worker_spawn", branch = %branch, error = %e, "stale branch cleanup before recreate");
-        }
-        match global_git::create_worktree(repo_path, &branch, wt, default_branch).await {
-            Ok(()) => {
-                crate::io::worktree_bootstrap::copy_local_files(repo_path, wt).await;
-                return Ok(branch);
-            }
-            Err(e)
-                if crate::find_git_error(&e).is_some_and(|g| {
-                    matches!(g, crate::GitError::WorktreeAlreadyExists { .. })
-                }) && attempt + 1 < MAX_ATTEMPTS => {}
-            Err(e) => return Err(e),
-        }
-    }
-
-    anyhow::bail!(
-        "failed to recreate OpenCode worktree at {} after {} attempts for task {}",
-        wt.display(),
-        MAX_ATTEMPTS,
-        item.id
-    );
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn isolate_data_dir() -> (std::path::PathBuf, global_infra::EnvVarGuard) {
-        let dir = std::env::temp_dir().join(format!(
-            "mando-opencode-spawn-{}",
-            global_infra::uuid::Uuid::v4()
-        ));
-        std::fs::create_dir_all(dir.join("state")).unwrap();
-        let guard = global_infra::EnvVarGuard::set("MANDO_DATA_DIR", &dir);
-        (dir, guard)
-    }
-
-    #[tokio::test]
-    async fn registered_pid_guard_cleans_up_on_setup_failure_drop() {
-        let _lock = global_infra::PROCESS_ENV_LOCK.lock().await;
-        let (_dir, _guard) = isolate_data_dir();
-        let session_id = "ses-opencode-startup-failure";
-        let pid = Pid::new(999_999_999);
-
-        {
-            let _registration = RegisteredOpenCodePid::register(session_id, pid).unwrap();
-            assert_eq!(pid_registry::get_pid(session_id), Some(pid));
-        }
-
-        assert_eq!(pid_registry::get_pid(session_id), None);
     }
 }

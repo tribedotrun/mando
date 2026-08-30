@@ -28,7 +28,7 @@ fn apply_lifecycle_result(item: &mut Task, result: LifecycleResult) {
 }
 
 fn validate_reopen_transition(item: &Task, to: ItemStatus) -> Result<()> {
-    lifecycle::decide_transition(item.status, item.planning, to).map_err(|_| {
+    lifecycle::decide_transition(item.status, to).map_err(|_| {
         crate::TaskActionError::InvalidTransition {
             command: "reopen",
             status: item.status.as_str(),

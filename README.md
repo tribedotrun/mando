@@ -33,7 +33,6 @@ Manage everything from the native macOS desktop app, the `mando` CLI, or Telegra
 mando-gw daemon (Rust, launchd / --foreground)
     ├── axum API on 127.0.0.1:{port}
     │   ├── JSON / multipart / static routes
-    │   ├── NDJSON terminal streams
     │   └── SSE /api/events live updates
     ├── typed API registry
     │   └── api_route! → api-types → generated Electron contracts
@@ -41,7 +40,7 @@ mando-gw daemon (Rust, launchd / --foreground)
     │   └── auto-tick, workers, review, merge, reopen/rework
     ├── scout runtime
     │   └── content fetch, article extraction, research, triage
-    ├── sessions + terminal runtimes
+    ├── sessions runtime
     ├── embedded Telegram transport
     │   └── Bot API polling + local daemon HTTP/SSE
     └── Electron UI supervisor
@@ -60,8 +59,7 @@ patches that cache from `/api/events`.
 
 Rust workspace layout:
 
-- **Domain crates:** `captain`, `scout`, `sessions`, `sessions-db`, `settings`,
-  `terminal`.
+- **Domain crates:** `captain`, `scout`, `sessions`, `sessions-db`, `settings`.
 - **Global providers:** `global-types`, `global-infra`, `global-db`,
   `global-bus`, `global-claude`, `global-net`.
 - **Contracts, transports, and binary:** `api-types`, `api-types-codegen`,

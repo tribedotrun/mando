@@ -11,7 +11,6 @@ import {
   reworkItem,
   askReopen,
   setTaskIsBugFix,
-  startImplementation,
 } from '#renderer/domains/captain/repo/api';
 import type { TaskListResponse } from '#renderer/global/types';
 import { queryKeys } from '#renderer/global/repo/queryKeys';
@@ -217,30 +216,6 @@ export function useTaskSetIsBugFix() {
     },
     onSettled: (_data, err, vars) => {
       if (err) log.warn('useTaskSetIsBugFix settled with error', err);
-      invalidateTaskDetail(qc, vars.id);
-    },
-  });
-}
-
-export function useStartImplementation() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (vars: { id: number; message: string }) =>
-      toReactQuery(startImplementation(vars.id, vars.message)),
-    onMutate: async (vars) => {
-      await qc.cancelQueries({ queryKey: queryKeys.tasks.list() });
-      const prev = qc.getQueryData<TaskListResponse>(queryKeys.tasks.list());
-      qc.setQueryData<TaskListResponse>(queryKeys.tasks.list(), (old) =>
-        updateTaskInList(old, vars.id, { status: 'queued' }),
-      );
-      return { prev };
-    },
-    onError: (err, _vars, context) => {
-      if (context?.prev) qc.setQueryData(queryKeys.tasks.list(), context.prev);
-      log.error('useStartImplementation', err);
-    },
-    onSettled: (_data, err, vars) => {
-      if (err) log.warn('useStartImplementation settled with error', err);
       invalidateTaskDetail(qc, vars.id);
     },
   });

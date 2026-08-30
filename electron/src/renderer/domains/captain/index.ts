@@ -23,9 +23,3 @@ export { fetchTimeline, fetchItemSessions } from '#renderer/domains/captain/runt
 
 // Timeline query hook re-exported for app-tier consumers
 export { useTaskTimelineData } from '#renderer/domains/captain/runtime/hooks';
-
-// Terminal runtime re-exported for app-tier consumers
-export { useWorktreeTerminal } from '#renderer/domains/captain/terminal/runtime/useWorktreeTerminal';
-
-// Worktree creation API re-exported for app-tier consumers
-export { createWorktree } from '#renderer/domains/captain/repo/terminal-api';

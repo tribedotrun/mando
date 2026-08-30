@@ -140,12 +140,11 @@ impl SettingsRuntime {
             .map_err(Into::into)
     }
 
+    /// Pick a Claude credential from the single global pool. Load balancing
+    /// counts every running session on a credential, whatever opened it.
     #[tracing::instrument(skip_all)]
-    pub async fn pick_worker_credential(
-        &self,
-        caller_filter: Option<&str>,
-    ) -> SettingsResult<Option<(i64, String)>> {
-        crate::io::credentials::pick_for_worker(&self.db_pool, caller_filter)
+    pub async fn pick_worker_credential(&self) -> SettingsResult<Option<(i64, String)>> {
+        crate::io::credentials::pick_for_worker(&self.db_pool)
             .await
             .map_err(Into::into)
     }

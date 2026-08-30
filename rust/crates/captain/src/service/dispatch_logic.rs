@@ -72,11 +72,10 @@ pub(crate) fn check_dispatch(
 }
 
 /// Count active resources across in-progress items.
-/// Planning-mode items are excluded (they don't consume worker/resource slots).
 pub(crate) fn count_resources(items: &[Task]) -> HashMap<String, usize> {
     let mut counts = HashMap::new();
     for item in items {
-        if item.status == ItemStatus::InProgress && !item.planning {
+        if item.status == ItemStatus::InProgress {
             if let Some(resource) = item.resource.as_deref() {
                 *counts.entry(resource.to_string()).or_insert(0) += 1;
             }
@@ -87,15 +86,15 @@ pub(crate) fn count_resources(items: &[Task]) -> HashMap<String, usize> {
 
 /// Count items currently occupying each per-state cap, keyed by kebab-case
 /// wire name. The `InProgress` predicate matches the existing global
-/// counter at `tick.rs::run_captain_tick_inner` (`worker.is_some() &&
-/// !planning`); the other three states mirror the same shape on their
+/// counter at `tick.rs::run_captain_tick_inner` (`worker.is_some()`);
+/// the other three states mirror the same shape on their
 /// own session id field. A candidate that already transitioned but
 /// hasn't spawned yet does not self-block because it has no session id.
 pub(crate) fn count_active_states(items: &[Task]) -> HashMap<String, usize> {
     let mut counts = HashMap::new();
     for item in items {
         let wire = match item.status {
-            ItemStatus::InProgress if item.worker.is_some() && !item.planning => IN_PROGRESS_WIRE,
+            ItemStatus::InProgress if item.worker.is_some() => IN_PROGRESS_WIRE,
             ItemStatus::Clarifying if item.session_ids.clarifier.is_some() => "clarifying",
             ItemStatus::CaptainReviewing if item.session_ids.review.is_some() => {
                 "captain-reviewing"
@@ -110,8 +109,7 @@ pub(crate) fn count_active_states(items: &[Task]) -> HashMap<String, usize> {
 
 /// Find items eligible for regular worker dispatch, in priority order.
 ///
-/// Items with status `ready` or `rework` are eligible. Planning-mode items
-/// are excluded (dispatched separately by `dispatch_planning`).
+/// Items with status `ready` or `rework` are eligible.
 /// Sorted by: rework first, then by creation order (position in list).
 pub(crate) fn dispatchable_items(items: &[Task]) -> Vec<usize> {
     let now = std::time::SystemTime::now()
@@ -121,9 +119,6 @@ pub(crate) fn dispatchable_items(items: &[Task]) -> Vec<usize> {
     let mut candidates: Vec<(usize, bool)> = Vec::new();
 
     for (i, item) in items.iter().enumerate() {
-        if item.planning {
-            continue;
-        }
         // Skip paused tasks (credential pool exhausted on a prior tick) —
         // they rejoin the candidate set once `paused_until` has passed.
         if item.paused_until.is_some_and(|until| until > now) {
@@ -308,22 +303,15 @@ mod tests {
     }
 
     #[test]
-    fn count_active_states_excludes_planning_and_sessionless() {
-        // InProgress with no session id (e.g. transitioning) shouldn't count.
+    fn count_active_states_excludes_sessionless() {
+        // InProgress with no worker (e.g. transitioning) shouldn't count.
         let mut a = Task::new("a");
         a.status = ItemStatus::InProgress;
-        // worker + session_ids.worker missing
-        // InProgress + planning excluded.
-        let mut b = Task::new("b");
-        b.status = ItemStatus::InProgress;
-        b.worker = Some("w".into());
-        b.session_ids.worker = Some("sess".into());
-        b.planning = true;
         // Captain reviewing without a session id (transitional).
         let mut c = Task::new("c");
         c.status = ItemStatus::CaptainReviewing;
 
-        let counts = count_active_states(&[a, b, c]);
+        let counts = count_active_states(&[a, c]);
         assert!(counts.is_empty(), "got {:?}", counts);
     }
 

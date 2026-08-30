@@ -1,4 +1,4 @@
-export { useTaskCreate, useTaskBulkCreate } from '#renderer/domains/captain/repo/mutations-create';
+export { useTaskCreate } from '#renderer/domains/captain/repo/mutations-create';
 
 export {
   useTaskAccept,
@@ -11,7 +11,6 @@ export {
   useTaskAskReopen,
   useTaskRework,
   useTaskSetIsBugFix,
-  useStartImplementation,
 } from '#renderer/domains/captain/repo/mutations-lifecycle';
 
 export {

@@ -18,7 +18,7 @@ export function AdvisorInputBar({
 }): React.ReactElement {
   const bar = useAdvisorInputBar({ item, onSend, isPending });
   const { text, events, intent } = bar;
-  const showSelect = intent.canReopen || intent.canRework || intent.canRevise;
+  const showSelect = intent.canReopen || intent.canRework;
 
   return (
     <div className="bg-background px-2 pb-1.5">
@@ -39,9 +39,7 @@ export function AdvisorInputBar({
               ? 'Describe what to fix (sends as reopen)...'
               : intent.value === 'rework'
                 ? 'Describe what to redo (fresh worker + new branch)...'
-                : intent.value === 'revise-plan'
-                  ? 'Describe what to change in the plan (re-runs planning)...'
-                  : 'Ask the advisor about this task...'
+                : 'Ask the advisor about this task...'
           }
           rows={2}
           className="min-h-[52px] max-h-[256px] w-full resize-none border-0 bg-transparent px-3.5 pt-3 pb-0 text-body leading-5 text-text-1 placeholder:text-text-3 focus:outline-none"
@@ -62,7 +60,6 @@ export function AdvisorInputBar({
                 <option value="ask">Ask</option>
                 {intent.canReopen && <option value="reopen">Reopen</option>}
                 {intent.canRework && <option value="rework">Rework</option>}
-                {intent.canRevise && <option value="revise-plan">Revise</option>}
               </select>
             ) : (
               <span className="py-1 pl-2 text-body text-text-4">Ask</span>

@@ -10,7 +10,10 @@ use crate::{
     TaskRouting,
 };
 
+mod session_slots;
 mod update_exec;
+
+pub use session_slots::retarget_session_id;
 
 use super::tasks_row::{RoutingRow, TaskRow};
 use update_exec::update_task_exec;
@@ -32,7 +35,7 @@ const SELECT_COLS: &str = "\
     t.worker, t.resource, t.context, t.original_prompt, \
     t.created_at, t.workbench_id, w.worktree, t.pr_number, t.worker_started_at, \
     t.intervention_count, t.captain_review_trigger, t.session_ids, t.last_activity_at, \
-    t.plan, t.no_pr, t.no_auto_merge, t.planning, t.is_bug_fix, t.worker_seq, t.reopen_seq, t.reopened_at, t.reopen_source, t.images, \
+    t.plan, t.no_pr, t.no_auto_merge, t.is_bug_fix, t.worker_seq, t.reopen_seq, t.reopened_at, t.reopen_source, t.images, \
     t.review_fail_count, t.clarifier_fail_count, t.spawn_fail_count, t.merge_fail_count, \
     t.escalation_report, t.source, t.rev, t.paused_until, p.github_repo";
 
@@ -106,7 +109,6 @@ const WRITE_COLS: &[&str] = &[
     "plan",
     "no_pr",
     "no_auto_merge",
-    "planning",
     "is_bug_fix",
     "worker_seq",
     "reopen_seq",
@@ -181,7 +183,6 @@ pub(crate) fn bind_task_write_fields<'q>(
         .bind(&task.plan)
         .bind(task.no_pr as i64)
         .bind(task.no_auto_merge as i64)
-        .bind(task.planning as i64)
         .bind(task.is_bug_fix as i64)
         .bind(task.worker_seq)
         .bind(task.reopen_seq)
@@ -315,13 +316,12 @@ pub async fn set_paused_until(
     Ok(result.rows_affected() > 0)
 }
 
-/// Count of active workers (excludes planning tasks, consistent with tick.rs).
+/// Count of active workers.
 pub async fn active_worker_count(pool: &SqlitePool) -> Result<usize> {
     let count: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM tasks t \
          LEFT JOIN workbenches w ON w.id = t.workbench_id \
          WHERE t.status='in-progress' AND t.worker IS NOT NULL \
-           AND t.planning = 0 \
            AND (w.archived_at IS NULL AND w.deleted_at IS NULL)",
     )
     .fetch_one(pool)
@@ -352,18 +352,6 @@ pub async fn daily_merge_counts(pool: &SqlitePool, days: u32) -> Result<Vec<(Str
     .fetch_all(pool)
     .await?;
     Ok(rows)
-}
-
-/// Check whether a workbench has any active (non-finalized) tasks.
-pub async fn has_active_for_workbench(pool: &SqlitePool, workbench_id: i64) -> Result<bool> {
-    let count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM tasks WHERE workbench_id = ? \
-         AND status NOT IN ('merged','completed-no-pr','canceled')",
-    )
-    .bind(workbench_id)
-    .fetch_one(pool)
-    .await?;
-    Ok(count > 0)
 }
 
 /// Replace all non-archived tasks atomically.

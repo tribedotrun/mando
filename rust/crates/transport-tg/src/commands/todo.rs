@@ -1,17 +1,16 @@
-//! `/todo` command -- add tasks with AI-powered parsing.
+//! `/todo` command -- add one task.
 //!
-//! All input (single or multi-line) goes through AI for title normalization.
-//! If project can't be inferred, user picks via inline keyboard first.
+//! One message is one task: the text is used verbatim, never split. If the
+//! project can't be inferred from a prefix or a single configured project,
+//! the user picks it via an inline keyboard first.
 
 use crate::bot::{TelegramBot, TodoItem};
-use crate::gateway_paths as paths;
 use anyhow::Result;
-use serde_json::json;
 
-/// Handle `/todo [items]`.
+/// Handle `/todo [text]`.
 ///
-/// If no items provided, sets pending state so next plain-text message
-/// is treated as todo input. If items given, parses and shows confirmation.
+/// If no text is provided, sets pending state so the next plain-text message
+/// is treated as todo input.
 pub async fn handle(bot: &TelegramBot, chat_id: &str, args: &str) -> Result<()> {
     if args.trim().is_empty() {
         // Send the prompt first so we can capture its message_id; the
@@ -19,7 +18,7 @@ pub async fn handle(bot: &TelegramBot, chat_id: &str, args: &str) -> Result<()> 
         let prompt = bot
             .send_html(
                 chat_id,
-                "Type your todo item(s) below (multi-line supported).\nReply to this prompt to disambiguate.",
+                "Type your todo below.\nReply to this prompt to disambiguate.",
             )
             .await?;
         let prompt_mid = prompt
@@ -34,26 +33,21 @@ pub async fn handle(bot: &TelegramBot, chat_id: &str, args: &str) -> Result<()> 
     execute_todo(bot, chat_id, args).await
 }
 
-/// Process todo text -- all input goes through AI parsing.
+/// Process todo text into exactly one task.
 pub async fn execute_todo(bot: &TelegramBot, chat_id: &str, raw_text: &str) -> Result<()> {
     execute_todo_with_photo(bot, chat_id, raw_text, None).await
 }
 
-/// Process todo text with optional photo attachment.
+/// Process todo text with an optional photo attachment.
 pub async fn execute_todo_with_photo(
     bot: &TelegramBot,
     chat_id: &str,
     raw_text: &str,
     photo_file_id: Option<String>,
 ) -> Result<()> {
-    let lines: Vec<&str> = raw_text
-        .lines()
-        .map(|l| l.trim())
-        .filter(|l| !l.is_empty())
-        .collect();
-
-    if lines.is_empty() {
-        bot.send_html(chat_id, "\u{26a0}\u{fe0f} No items extracted.")
+    let text = raw_text.trim();
+    if text.is_empty() {
+        bot.send_html(chat_id, "\u{26a0}\u{fe0f} Nothing to add.")
             .await?;
         return Ok(());
     }
@@ -73,171 +67,53 @@ pub async fn execute_todo_with_photo(
         None
     };
 
-    // --- Single line: AI-parse the title before creating ---
-    if lines.len() == 1 {
-        let (matched_slug, cleaned) = settings::match_project_by_prefix(lines[0], &projects);
-        let project = matched_slug.or(single_project);
-        let title = cleaned.to_string();
+    // A `<project> ...` prefix on the first line names the project and is
+    // stripped from the title; otherwise the text is used verbatim.
+    let (matched_slug, cleaned) = settings::match_project_by_prefix(text, &projects);
+    let title = cleaned.trim().to_string();
+    let project = matched_slug.or(single_project);
 
-        if project.is_none() && projects.len() > 1 {
-            // Need project picker for single item too.
-            let action_id = super::short_uuid();
-            let names: Vec<String> = projects
-                .values()
-                .map(|pc| pc.name.clone())
-                .filter(|n| !n.is_empty())
-                .collect();
-            let todo_items = vec![TodoItem {
-                title: title.clone(),
-                project: None,
-                photo_file_id,
-            }];
-            let keyboard = build_project_picker(&action_id, &names);
-            bot.store_todo_confirm(&action_id, chat_id, todo_items, names)
-                .await;
-            bot.api()
-                .send_message(
-                    chat_id,
-                    &format!(
-                        "\u{1f4cb} <b>{}</b>\n\nPick a project:",
-                        crate::telegram_format::escape_html(&title)
-                    ),
-                    Some("HTML"),
-                    Some(keyboard),
-                    true,
-                )
-                .await?;
-            return Ok(());
-        }
-
-        // Route through AI for title normalization.
-        let Some(project) = project else {
-            // Picker above returns early when project is unresolved; reaching
-            // this arm means no project is configured — tell the user.
-            bot.api()
-                .send_message(
-                    chat_id,
-                    "\u{274c} No project configured — run `mando project add` first.",
-                    Some("Markdown"),
-                    None,
-                    true,
-                )
-                .await?;
-            return Ok(());
-        };
-        ai_parse_and_create(bot, chat_id, &title, &project, photo_file_id).await?;
-        return Ok(());
-    }
-
-    // --- Multi-line: detect project, then AI parse ---
-
-    // Check first line for project prefix.
-    let (detected_project, _) = settings::match_project_by_prefix(lines[0], &projects);
-    let project = detected_project.or(single_project);
-
-    if project.is_none() && projects.len() > 1 {
-        // Store raw text + photo, show project picker. AI parse happens after pick.
+    let Some(project) = project else {
         let action_id = super::short_uuid();
         let names: Vec<String> = projects
             .values()
             .map(|pc| pc.name.clone())
             .filter(|n| !n.is_empty())
             .collect();
-
-        // Store the raw text as a single TodoItem — callbacks will AI-parse it.
         let todo_items = vec![TodoItem {
-            title: raw_text.trim().to_string(),
+            title: title.clone(),
             project: None,
             photo_file_id,
         }];
         let keyboard = build_project_picker(&action_id, &names);
         bot.store_todo_confirm(&action_id, chat_id, todo_items, names)
             .await;
-
-        let line_count = lines.len();
         bot.api()
             .send_message(
                 chat_id,
-                &format!("\u{1f4cb} {line_count} lines entered. Pick a project:"),
+                &format!(
+                    "\u{1f4cb} <b>{}</b>\n\nPick a project:",
+                    crate::telegram_format::escape_html(&first_line(&title))
+                ),
                 Some("HTML"),
                 Some(keyboard),
                 true,
             )
             .await?;
         return Ok(());
-    }
-
-    // Project known — None case returns early via the picker above.
-    let Some(project) = project else {
-        bot.api()
-            .send_message(
-                chat_id,
-                "\u{274c} No project configured — run `mando project add` first.",
-                Some("Markdown"),
-                None,
-                true,
-            )
-            .await?;
-        return Ok(());
     };
-    ai_parse_and_create(bot, chat_id, raw_text, &project, photo_file_id).await
+
+    let items = vec![TodoItem {
+        title,
+        project: Some(project),
+        photo_file_id,
+    }];
+    crate::callback_actions::add_todo_items(bot, chat_id, &items, None).await
 }
 
-/// Call gateway AI endpoint to parse text, then create tasks.
-pub(crate) async fn ai_parse_and_create(
-    bot: &TelegramBot,
-    chat_id: &str,
-    raw_text: &str,
-    project: &str,
-    photo_file_id: Option<String>,
-) -> Result<()> {
-    let mid = bot
-        .send_loading(chat_id, "\u{1f9e0} Parsing tasks\u{2026}")
-        .await?;
-
-    let body = json!({
-        "text": raw_text,
-        "project": project,
-    });
-    let result = bot
-        .gw()
-        .post_typed::<_, api_types::ParseTodosResponse>(paths::AI_PARSE_TODOS, &body)
-        .await;
-
-    let parsed_items: Vec<String> = match result {
-        Ok(resp) => {
-            if resp.items.is_empty() {
-                bot.edit_message(chat_id, mid, "\u{26a0}\u{fe0f} AI returned no tasks.")
-                    .await?;
-                return Ok(());
-            }
-            resp.items
-        }
-        Err(e) => {
-            bot.edit_message(
-                chat_id,
-                mid,
-                &format!(
-                    "\u{26a0}\u{fe0f} Failed to parse: {}",
-                    crate::telegram_format::escape_html(&e.to_string())
-                ),
-            )
-            .await?;
-            return Ok(());
-        }
-    };
-
-    let todo_items: Vec<TodoItem> = parsed_items
-        .into_iter()
-        .enumerate()
-        .map(|(i, title)| TodoItem {
-            title,
-            project: Some(project.to_string()),
-            photo_file_id: if i == 0 { photo_file_id.clone() } else { None },
-        })
-        .collect();
-
-    crate::callback_actions::add_todo_items(bot, chat_id, &todo_items, Some(mid)).await
+/// A one-line label for a task whose title may span several lines.
+pub(crate) fn first_line(title: &str) -> String {
+    title.lines().next().unwrap_or("").trim().to_string()
 }
 
 fn build_project_picker(action_id: &str, names: &[String]) -> api_types::TelegramReplyMarkup {
@@ -259,4 +135,16 @@ fn build_project_picker(action_id: &str, names: &[String]) -> api_types::Telegra
         url: None,
     }]);
     api_types::TelegramReplyMarkup::InlineKeyboard { rows }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn first_line_labels_a_multi_line_title() {
+        assert_eq!(first_line("Fix login\nmore detail"), "Fix login");
+        assert_eq!(first_line("  Fix login  "), "Fix login");
+        assert_eq!(first_line(""), "");
+    }
 }

@@ -86,8 +86,6 @@ pub async fn triage_pending_review(
                     pr_number: pr_num,
                     project: project_name.to_string(),
                     title: it.title.clone(),
-                    files: vec![],
-                    file_categories: std::collections::HashMap::new(),
                     fast_track: false,
                     cursor_risk: None,
                     file_count: 0,

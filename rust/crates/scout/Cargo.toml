@@ -2,7 +2,7 @@
 name = "scout"
 version.workspace = true
 edition = "2021"
-description = "GitHub integration — PRs, repo scanning, and webhook processing"
+description = "Scout research pipeline — link ingestion, fetching, LLM analysis, and publishing"
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true

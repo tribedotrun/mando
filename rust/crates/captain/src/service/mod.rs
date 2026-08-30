@@ -9,6 +9,5 @@ pub mod review_marshal;
 pub mod spawn_logic;
 pub(crate) mod text;
 pub mod tick_logic;
-pub mod tick_summary;
 pub mod triage;
 pub mod worker_context;

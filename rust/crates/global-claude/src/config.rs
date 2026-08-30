@@ -4,8 +4,13 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Duration;
 
-/// Effort level for thinking depth.
-#[derive(Debug, Clone, Copy)]
+use serde::{Deserialize, Serialize};
+
+/// Effort level for thinking depth. Sent as `--effort` on every spawn.
+/// Captain passes `captain-workflow.yaml::agent.cc_effort`; scout and ops
+/// spawns leave it at this type's default.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Effort {
     Low,
     Medium,
@@ -24,21 +29,6 @@ impl Effort {
             Self::Max => "max",
         }
     }
-}
-
-/// Thinking configuration.
-#[derive(Debug, Clone)]
-pub enum ThinkingConfig {
-    Adaptive,
-    Enabled { budget_tokens: u32 },
-}
-
-/// Task budget — API-side token budget that lets the model pace itself.
-///
-/// Sent as `--task-budget` with the `task-budgets-2026-03-13` beta header.
-#[derive(Debug, Clone, Copy)]
-pub struct TaskBudget {
-    pub total_tokens: u64,
 }
 
 /// Permission mode for tool execution.
@@ -72,7 +62,6 @@ impl PermissionMode {
 pub struct CcConfig {
     pub model: String,
     pub effort: Effort,
-    pub thinking: Option<ThinkingConfig>,
     pub tools: Option<Vec<String>>,
     pub allowed_tools: Option<Vec<String>>,
     pub disallowed_tools: Option<Vec<String>>,
@@ -95,8 +84,6 @@ pub struct CcConfig {
     pub settings: Option<String>,
     pub setting_sources: Option<Vec<String>>,
     pub mcp_config: Option<serde_json::Value>,
-    pub task_budget: Option<TaskBudget>,
-    pub betas: Vec<String>,
     pub timeout: Duration,
     pub caller: String,
     pub task_id: String,
@@ -108,9 +95,8 @@ pub struct CcConfig {
 impl Default for CcConfig {
     fn default() -> Self {
         Self {
-            model: "opus[1m]".into(),
+            model: "fable".into(),
             effort: Effort::Max,
-            thinking: None,
             tools: None,
             allowed_tools: None,
             disallowed_tools: None,
@@ -129,8 +115,6 @@ impl Default for CcConfig {
             settings: None,
             setting_sources: None,
             mcp_config: None,
-            task_budget: None,
-            betas: Vec::new(),
             timeout: Duration::from_secs(120),
             caller: String::new(),
             task_id: String::new(),
@@ -206,15 +190,6 @@ impl CcConfigBuilder {
         self.0.env.insert(key.into(), val.into());
         self
     }
-    pub fn task_budget(mut self, total_tokens: u64) -> Self {
-        self.0.task_budget = Some(TaskBudget { total_tokens });
-        // Auto-inject the required beta header.
-        let beta = "task-budgets-2026-03-13".to_string();
-        if !self.0.betas.contains(&beta) {
-            self.0.betas.push(beta);
-        }
-        self
-    }
     pub fn timeout(mut self, d: Duration) -> Self {
         self.0.timeout = d;
         self
@@ -265,18 +240,6 @@ impl CcConfig {
         if !self.model.is_empty() {
             args.push("--model".into());
             args.push(self.model.clone());
-        }
-        // Thinking.
-        if let Some(ref t) = self.thinking {
-            match t {
-                ThinkingConfig::Enabled { budget_tokens } => {
-                    args.push("--max-thinking-tokens".into());
-                    args.push(budget_tokens.to_string());
-                }
-                ThinkingConfig::Adaptive => {
-                    // Adaptive is the default — no CLI flag needed.
-                }
-            }
         }
 
         // Tools.
@@ -355,25 +318,6 @@ impl CcConfig {
         if let Some(ref ss) = self.setting_sources {
             args.push("--setting-sources".into());
             args.push(ss.join(","));
-        }
-
-        // Task budget.
-        if let Some(ref tb) = self.task_budget {
-            args.push("--task-budget".into());
-            args.push(tb.total_tokens.to_string());
-        }
-
-        // Betas — collect configured betas plus any auto-injected ones.
-        let mut betas = self.betas.clone();
-        if self.task_budget.is_some() {
-            let required = "task-budgets-2026-03-13".to_string();
-            if !betas.contains(&required) {
-                betas.push(required);
-            }
-        }
-        if !betas.is_empty() {
-            args.push("--betas".into());
-            args.push(betas.join(","));
         }
 
         // Extra args (forward compatibility).

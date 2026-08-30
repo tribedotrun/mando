@@ -134,7 +134,7 @@ pub(crate) fn load_workflows_for_mode(
         WorkflowRuntimeMode::Normal => {}
         WorkflowRuntimeMode::Dev => tracing::info!(
             module = "settings-runtime-settings_runtime",
-            "dev mode: all models forced to sonnet"
+            "dev mode: all models forced to haiku"
         ),
         WorkflowRuntimeMode::Sandbox => tracing::info!(
             module = "settings-runtime-settings_runtime",

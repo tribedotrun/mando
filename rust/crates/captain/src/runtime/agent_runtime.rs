@@ -11,9 +11,9 @@ pub(crate) use super::agent_session_result::{
 };
 
 pub(crate) use super::agent_worker_runtime::{
-    implementation_provider, interrupt_session_before_kill, persisted_session_provider,
-    persisted_worker_provider, resume_worker, spawn_structured_session, spawn_worker,
-    terminate_worker_process, uses_shared_process, worker_resume_replacement_reason,
+    claude_rebase_worker_model, implementation_provider, interrupt_session_before_kill,
+    persisted_session_provider, persisted_worker_provider, resume_worker, spawn_structured_session,
+    spawn_worker, terminate_worker_process, uses_shared_process, worker_resume_replacement_reason,
     AgentOutputSchema,
 };
 
@@ -185,6 +185,7 @@ pub(crate) async fn spawn_rebase_worker(
                 cwd,
                 prompt,
                 model,
+                workflow.agent.cc_effort,
             )
             .await?;
             Ok(AgentRebaseSession {

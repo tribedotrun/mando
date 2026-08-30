@@ -155,7 +155,6 @@ async fn handle_todo_project(
             tracing::warn!(module = "telegram", error = %e, "message send failed");
         }
 
-        // Route all items (single or multi-line) through AI for title normalization.
         let Some(first) = state.items.first() else {
             tracing::warn!(
                 module = "telegram",
@@ -163,9 +162,12 @@ async fn handle_todo_project(
             );
             return Ok(());
         };
-        let raw = &first.title;
-        let photo = first.photo_file_id.clone();
-        crate::commands::todo::ai_parse_and_create(bot, cid, raw, &name, photo).await?;
+        let items = vec![crate::bot::TodoItem {
+            title: first.title.clone(),
+            project: Some(name),
+            photo_file_id: first.photo_file_id.clone(),
+        }];
+        crate::callback_actions::add_todo_items(bot, cid, &items, Some(mid)).await?;
     } else {
         bot.api()
             .answer_callback_query(cb_id, Some("Expired"))

@@ -36,11 +36,7 @@ impl TaskLifecycleCommand {
     }
 }
 
-pub fn infer_transition_command(
-    from: ItemStatus,
-    to: ItemStatus,
-    planning: bool,
-) -> Result<&'static str> {
+pub fn infer_transition_command(from: ItemStatus, to: ItemStatus) -> Result<&'static str> {
     let command = match (from, to) {
         (ItemStatus::New, ItemStatus::Clarifying) => "start_clarifier",
         (ItemStatus::New, ItemStatus::Queued) => "queue",
@@ -59,11 +55,6 @@ pub fn infer_transition_command(
         (ItemStatus::NeedsClarification, ItemStatus::HandedOff) => "handoff",
         (ItemStatus::NeedsClarification, ItemStatus::Canceled) => "cancel",
 
-        (ItemStatus::PlanReady, ItemStatus::Queued) => "queue",
-        (ItemStatus::PlanReady, ItemStatus::CaptainReviewing) => "captain_review",
-        (ItemStatus::PlanReady, ItemStatus::HandedOff) => "handoff",
-        (ItemStatus::PlanReady, ItemStatus::Canceled) => "cancel",
-
         (ItemStatus::Queued, ItemStatus::InProgress) => "spawn_worker",
         (ItemStatus::Queued, ItemStatus::HandedOff) => "handoff",
         (ItemStatus::Queued, ItemStatus::CaptainReviewing) => "captain_review",
@@ -71,40 +62,11 @@ pub fn infer_transition_command(
 
         (ItemStatus::InProgress, ItemStatus::AwaitingReview) => "await_review",
         (ItemStatus::InProgress, ItemStatus::CompletedNoPr) => "complete_no_pr",
-        (ItemStatus::InProgress, ItemStatus::PlanReady) => {
-            if planning {
-                "planning_ready"
-            } else {
-                bail!(
-                    "illegal task transition {} -> {}",
-                    from.as_str(),
-                    to.as_str()
-                )
-            }
-        }
         (ItemStatus::InProgress, ItemStatus::HandedOff) => "handoff",
         (ItemStatus::InProgress, ItemStatus::Stopped) => "stop",
-        (ItemStatus::InProgress, ItemStatus::CaptainReviewing) => {
-            if planning {
-                "planning_review"
-            } else {
-                "captain_review"
-            }
-        }
-        (ItemStatus::InProgress, ItemStatus::Queued) => {
-            if planning {
-                "recover_orphaned_planning"
-            } else {
-                "requeue"
-            }
-        }
-        (ItemStatus::InProgress, ItemStatus::Errored) => {
-            if planning {
-                "planning_failed"
-            } else {
-                "worker_failed"
-            }
-        }
+        (ItemStatus::InProgress, ItemStatus::CaptainReviewing) => "captain_review",
+        (ItemStatus::InProgress, ItemStatus::Queued) => "requeue",
+        (ItemStatus::InProgress, ItemStatus::Errored) => "worker_failed",
         (ItemStatus::InProgress, ItemStatus::Canceled) => "cancel",
 
         (ItemStatus::AwaitingReview, ItemStatus::CaptainMerging) => "start_merge",
@@ -187,36 +149,25 @@ pub fn infer_transition_command(
     Ok(command)
 }
 
-/// Every `from` state that legally transitions into `to` (for non-planning
-/// tasks). The result is derived from `infer_transition_command` so the
-/// transition table stays the single source of truth — a new edge added
-/// there is automatically picked up here.
-///
-/// Callers that want the planning-only edges use `valid_predecessors_for`
-/// with `planning = true`.
+/// Every `from` state that legally transitions into `to`. The result is
+/// derived from `infer_transition_command` so the transition table stays the
+/// single source of truth — a new edge added there is automatically picked
+/// up here.
 pub fn valid_predecessors(to: ItemStatus) -> Vec<ItemStatus> {
-    valid_predecessors_for(to, false)
-}
-
-pub fn valid_predecessors_for(to: ItemStatus, planning: bool) -> Vec<ItemStatus> {
     ALL_STATUSES
         .iter()
         .copied()
-        .filter(|from| infer_transition_command(*from, to, planning).is_ok())
+        .filter(|from| infer_transition_command(*from, to).is_ok())
         .collect()
 }
 
-pub fn decide_transition(
-    from: ItemStatus,
-    planning: bool,
-    to: ItemStatus,
-) -> Result<TaskTransitionDecision> {
-    let command = infer_transition_command(from, to, planning)?;
+pub fn decide_transition(from: ItemStatus, to: ItemStatus) -> Result<TaskTransitionDecision> {
+    let command = infer_transition_command(from, to)?;
     Ok(TaskTransitionDecision { from, to, command })
 }
 
 pub fn apply_transition(task: &mut crate::Task, to: ItemStatus) -> Result<TaskTransitionDecision> {
-    let decision = decide_transition(task.status, task.planning, to)?;
+    let decision = decide_transition(task.status, to)?;
     task.status = decision.to;
     Ok(decision)
 }
@@ -228,7 +179,7 @@ pub fn apply_transition(task: &mut crate::Task, to: ItemStatus) -> Result<TaskTr
 /// causes the rollback; the happy follow-up path (new question asked)
 /// still uses `apply_transition` and preserves the session.
 pub fn apply_clarifier_failure(task: &mut crate::Task) -> Result<TaskTransitionDecision> {
-    let decision = decide_transition(task.status, task.planning, ItemStatus::NeedsClarification)?;
+    let decision = decide_transition(task.status, ItemStatus::NeedsClarification)?;
     task.status = decision.to;
     task.session_ids.clarifier = None;
     Ok(decision)
@@ -242,7 +193,7 @@ pub fn apply_escalation(
     task: &mut crate::Task,
     report: Option<String>,
 ) -> Result<TaskTransitionDecision> {
-    let decision = decide_transition(task.status, task.planning, ItemStatus::Escalated)?;
+    let decision = decide_transition(task.status, ItemStatus::Escalated)?;
     task.status = decision.to;
     task.escalation_report = report;
     Ok(decision)
@@ -265,7 +216,7 @@ pub fn apply_manual_transition(
     };
     let next = match command {
         TaskLifecycleCommand::Queue => match current {
-            ItemStatus::New | ItemStatus::PlanReady | ItemStatus::Rework => ItemStatus::Queued,
+            ItemStatus::New | ItemStatus::Rework => ItemStatus::Queued,
             _ => return Err(invalid()),
         },
         TaskLifecycleCommand::Accept => match current {
@@ -294,8 +245,7 @@ pub fn apply_manual_transition(
             | ItemStatus::NeedsClarification
             | ItemStatus::Escalated
             | ItemStatus::Errored
-            | ItemStatus::Rework
-            | ItemStatus::PlanReady => ItemStatus::HandedOff,
+            | ItemStatus::Rework => ItemStatus::HandedOff,
             _ => return Err(invalid()),
         },
         TaskLifecycleCommand::Stop => match current {
@@ -333,21 +283,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn infer_transition_command_allows_planning_ready() {
-        assert_eq!(
-            infer_transition_command(ItemStatus::InProgress, ItemStatus::PlanReady, true).unwrap(),
-            "planning_ready"
-        );
-        assert!(
-            infer_transition_command(ItemStatus::InProgress, ItemStatus::PlanReady, false).is_err()
-        );
-    }
-
-    #[test]
     fn infer_transition_command_allows_handoff_from_awaiting_review() {
         assert_eq!(
-            infer_transition_command(ItemStatus::AwaitingReview, ItemStatus::HandedOff, false)
-                .unwrap(),
+            infer_transition_command(ItemStatus::AwaitingReview, ItemStatus::HandedOff).unwrap(),
             "handoff"
         );
     }
@@ -360,7 +298,7 @@ mod tests {
             ItemStatus::CaptainMerging,
         ] {
             assert_eq!(
-                infer_transition_command(from, ItemStatus::Canceled, false).unwrap(),
+                infer_transition_command(from, ItemStatus::Canceled).unwrap(),
                 "cancel"
             );
         }
@@ -381,15 +319,10 @@ mod tests {
             "new must be a valid predecessor of clarifying"
         );
 
-        // Queued has several legal predecessors including Clarifying and
-        // PlanReady; spot check a handful so the full table stays wired up.
+        // Queued has several legal predecessors including Clarifying;
+        // spot check a handful so the full table stays wired up.
         let queued_preds = valid_predecessors(ItemStatus::Queued);
-        for expected in [
-            ItemStatus::New,
-            ItemStatus::Clarifying,
-            ItemStatus::PlanReady,
-            ItemStatus::Rework,
-        ] {
+        for expected in [ItemStatus::New, ItemStatus::Clarifying, ItemStatus::Rework] {
             assert!(
                 queued_preds.contains(&expected),
                 "{expected:?} must be a valid predecessor of queued"
@@ -400,7 +333,7 @@ mod tests {
         for &to in ALL_STATUSES.iter() {
             for from in valid_predecessors(to) {
                 assert!(
-                    infer_transition_command(from, to, false).is_ok(),
+                    infer_transition_command(from, to).is_ok(),
                     "{from:?} -> {to:?} should be legal"
                 );
             }
@@ -430,12 +363,8 @@ mod tests {
     #[test]
     fn infer_transition_command_allows_merge_spawn_self_transition() {
         assert_eq!(
-            infer_transition_command(
-                ItemStatus::CaptainMerging,
-                ItemStatus::CaptainMerging,
-                false
-            )
-            .unwrap(),
+            infer_transition_command(ItemStatus::CaptainMerging, ItemStatus::CaptainMerging)
+                .unwrap(),
             "merge_spawn"
         );
     }
@@ -447,7 +376,7 @@ mod tests {
     #[test]
     fn infer_transition_command_allows_stop_from_in_progress() {
         assert_eq!(
-            infer_transition_command(ItemStatus::InProgress, ItemStatus::Stopped, false).unwrap(),
+            infer_transition_command(ItemStatus::InProgress, ItemStatus::Stopped).unwrap(),
             "stop"
         );
     }
@@ -455,11 +384,11 @@ mod tests {
     #[test]
     fn infer_transition_command_allows_resume_from_stopped() {
         assert_eq!(
-            infer_transition_command(ItemStatus::Stopped, ItemStatus::InProgress, false).unwrap(),
+            infer_transition_command(ItemStatus::Stopped, ItemStatus::InProgress).unwrap(),
             "resume_worker"
         );
         assert_eq!(
-            infer_transition_command(ItemStatus::Stopped, ItemStatus::Queued, false).unwrap(),
+            infer_transition_command(ItemStatus::Stopped, ItemStatus::Queued).unwrap(),
             "reopen_queued"
         );
     }
@@ -500,8 +429,7 @@ mod tests {
     #[test]
     fn completed_no_pr_can_be_reopened_for_follow_up_work() {
         assert_eq!(
-            infer_transition_command(ItemStatus::CompletedNoPr, ItemStatus::InProgress, false)
-                .unwrap(),
+            infer_transition_command(ItemStatus::CompletedNoPr, ItemStatus::InProgress).unwrap(),
             "resume_worker"
         );
         assert!(
@@ -513,11 +441,11 @@ mod tests {
     #[test]
     fn canceled_can_be_reopened_for_follow_up_work() {
         assert_eq!(
-            infer_transition_command(ItemStatus::Canceled, ItemStatus::InProgress, false).unwrap(),
+            infer_transition_command(ItemStatus::Canceled, ItemStatus::InProgress).unwrap(),
             "resume_worker"
         );
         assert_eq!(
-            infer_transition_command(ItemStatus::Canceled, ItemStatus::Queued, false).unwrap(),
+            infer_transition_command(ItemStatus::Canceled, ItemStatus::Queued).unwrap(),
             "reopen_queued"
         );
         assert!(

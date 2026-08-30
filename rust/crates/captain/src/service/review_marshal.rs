@@ -379,7 +379,6 @@ mod tests {
 
     fn make_comment(author: &str, body: &str, created_at: &str) -> PrComment {
         PrComment {
-            id: 0,
             user: author.into(),
             body: body.into(),
             created_at: created_at.into(),
@@ -502,15 +501,12 @@ mod tests {
 
     fn make_thread(resolved: bool, comments: Vec<(&str, &str)>) -> ReviewThread {
         ReviewThread {
-            id: "t1".into(),
             is_resolved: resolved,
             comments: comments
                 .into_iter()
                 .map(|(author, body)| ThreadComment {
                     author: author.into(),
                     body: body.into(),
-                    path: None,
-                    line: None,
                 })
                 .collect(),
         }

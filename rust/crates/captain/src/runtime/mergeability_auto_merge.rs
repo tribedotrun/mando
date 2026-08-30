@@ -13,11 +13,50 @@
 //! was about the old diff, so we must not auto-merge the new diff on its
 //! authority.
 
-use crate::{ItemStatus, Task, TimelineEventPayload};
+use crate::{ItemStatus, Task, TimelineEvent, TimelineEventPayload};
 use settings::Config;
 
 use super::notify::Notifier;
 use crate::service::lifecycle;
+
+/// The three verdict fields the auto-merge gate consumes, read off a stored
+/// `awaiting_review` timeline event.
+///
+/// Split out of `try_auto_merge_from_verdict` so the read is testable without
+/// a GitHub round-trip: the captain-review verdict path writes these fields,
+/// and this is the only place that interprets them.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(super) struct ShipVerdictGateFields {
+    pub confidence: String,
+    pub confidence_reason: String,
+    pub reviewed_head_sha: String,
+}
+
+impl ShipVerdictGateFields {
+    /// `high` is the sole auto-merge grade. `mid` (and the empty sentinel
+    /// written by reviews that predate the field) stays for human review.
+    pub(super) fn is_high_confidence(&self) -> bool {
+        self.confidence == "high"
+    }
+}
+
+/// Extract the gate fields from a ship verdict event. A non-`AwaitingReview`
+/// payload yields all-empty, which never passes the gate.
+pub(super) fn ship_verdict_gate_fields(event: &TimelineEvent) -> ShipVerdictGateFields {
+    match &event.data {
+        TimelineEventPayload::AwaitingReview {
+            confidence,
+            confidence_reason,
+            reviewed_head_sha,
+            ..
+        } => ShipVerdictGateFields {
+            confidence: confidence.clone(),
+            confidence_reason: confidence_reason.clone(),
+            reviewed_head_sha: reviewed_head_sha.clone(),
+        },
+        _ => ShipVerdictGateFields::default(),
+    }
+}
 
 /// Try to transition a mergeable item to CaptainMerging based on the
 /// captain review's confidence verdict. See module doc for gates.
@@ -59,19 +98,13 @@ pub(crate) async fn try_auto_merge_from_verdict(
             }
         };
 
-    let (confidence, reviewed_sha) = match &verdict_event.data {
-        TimelineEventPayload::AwaitingReview {
-            confidence,
-            reviewed_head_sha,
-            ..
-        } => (confidence.as_str(), reviewed_head_sha.clone()),
-        _ => ("", String::new()),
-    };
-    if confidence != "high" {
+    let gate = ship_verdict_gate_fields(&verdict_event);
+    let reviewed_sha = gate.reviewed_head_sha.clone();
+    if !gate.is_high_confidence() {
         tracing::debug!(
             module = "captain",
             item_id = item.id,
-            confidence = %confidence,
+            confidence = %gate.confidence,
             "ship verdict not high-confidence; leaving for human review"
         );
         return;
@@ -131,12 +164,7 @@ pub(crate) async fn try_auto_merge_from_verdict(
     // picks it up on the next tick. Build the event first; only mutate item
     // fields after persist succeeds so a failed / idempotent-skip persist
     // leaves the in-memory task untouched for the next tick to re-evaluate.
-    let confidence_reason = match &verdict_event.data {
-        TimelineEventPayload::AwaitingReview {
-            confidence_reason, ..
-        } => confidence_reason.clone(),
-        _ => String::new(),
-    };
+    let confidence_reason = gate.confidence_reason;
     let pr_url = format!("https://github.com/{repo}/pull/{pr_num}");
     let prev_status = item.status;
     let prev_session_merge = item.session_ids.merge.clone();
@@ -208,5 +236,152 @@ pub(crate) async fn try_auto_merge_from_verdict(
                 "failed to persist auto-merge transition"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::runtime::captain_review::{apply_verdict, CaptainVerdict};
+
+    /// End-to-end plumbing proof for the confidence chain:
+    /// verdict(ship, high) -> `apply_verdict` -> persisted `awaiting_review`
+    /// timeline payload -> the field read the auto-merge gate performs.
+    ///
+    /// Context: an audit reported "all 72 historical ship verdicts recorded an
+    /// empty confidence". Those 72 rows are `captain_review_verdict` events
+    /// (nudge / respawn / retry_clarifier), which carry no confidence by
+    /// design. Ship verdicts land as `awaiting_review`, and this test pins the
+    /// field actually surviving the write.
+    #[tokio::test]
+    async fn ship_high_confidence_reaches_the_auto_merge_gate() {
+        let db = global_db::Db::open_in_memory().await.unwrap();
+        let pool = db.pool().clone();
+        let notifier =
+            crate::runtime::notify::Notifier::new(std::sync::Arc::new(global_bus::EventBus::new()));
+        let workflow = settings::CaptainWorkflow::compiled_default();
+
+        let project_id = settings::projects::upsert(&pool, "test", "", None)
+            .await
+            .unwrap();
+        let wb_id = crate::io::test_support::seed_workbench(&pool, project_id).await;
+
+        let mut item = crate::Task::new("confidence plumbing");
+        item.project_id = project_id;
+        item.project = "test".into();
+        item.workbench_id = wb_id;
+        item.pr_number = Some(7);
+        let store = crate::io::task_store::TaskStore::new(pool.clone());
+        let id = store.add(item.clone()).await.unwrap();
+        item.id = id;
+        store
+            .update(id, |t| t.status = ItemStatus::CaptainReviewing)
+            .await
+            .unwrap();
+        item.status = ItemStatus::CaptainReviewing;
+
+        let verdict = CaptainVerdict {
+            action: "ship".into(),
+            feedback: "done".into(),
+            confidence: Some("high".into()),
+            confidence_reason: Some("deck 7-0.png plus the diff hunk in foo.rs".into()),
+            ..Default::default()
+        };
+        apply_verdict(&mut item, &verdict, &workflow, &notifier, &pool)
+            .await
+            .unwrap();
+        assert_eq!(item.status, ItemStatus::AwaitingReview);
+
+        // `persist_status_transition` enqueues the timeline row as a lifecycle
+        // outbox effect; the captain tick drains it. Drain it here so the read
+        // below sees what production would see on the next tick.
+        let task_store = std::sync::Arc::new(tokio::sync::RwLock::new(
+            crate::io::task_store::TaskStore::new(pool.clone()),
+        ));
+        crate::runtime::lifecycle_effects::drain_pending(&pool, None, &task_store)
+            .await
+            .unwrap();
+
+        let event = crate::io::queries::timeline::load_latest_ship_verdict(&pool, id)
+            .await
+            .unwrap()
+            .expect("ship verdict persisted an awaiting_review event");
+
+        // The payload itself carries the verdict's confidence — not an empty
+        // sentinel — and the gate reads it as high.
+        let gate = ship_verdict_gate_fields(&event);
+        assert_eq!(gate.confidence, "high");
+        assert_eq!(
+            gate.confidence_reason,
+            "deck 7-0.png plus the diff hunk in foo.rs"
+        );
+        assert!(gate.is_high_confidence());
+    }
+
+    /// Same chain on a `mid` verdict: it persists honestly and the gate
+    /// refuses to auto-merge.
+    #[tokio::test]
+    async fn ship_mid_confidence_does_not_pass_the_gate() {
+        let event = crate::TimelineEvent {
+            timestamp: global_types::now_rfc3339(),
+            actor: "captain".into(),
+            summary: "Captain approved (confidence: mid)".into(),
+            data: TimelineEventPayload::AwaitingReview {
+                action: "ship".into(),
+                feedback: "done".into(),
+                confidence: "mid".into(),
+                confidence_reason: "one facet rests on the worker's claim".into(),
+                reviewed_head_sha: "a".repeat(40),
+            },
+        };
+        let gate = ship_verdict_gate_fields(&event);
+        assert_eq!(gate.confidence, "mid");
+        assert!(!gate.is_high_confidence());
+    }
+
+    /// A non-ship payload yields all-empty fields, which can never auto-merge.
+    #[test]
+    fn non_ship_payload_yields_empty_gate_fields() {
+        let event = crate::TimelineEvent {
+            timestamp: global_types::now_rfc3339(),
+            actor: "captain".into(),
+            summary: "Captain nudge".into(),
+            data: TimelineEventPayload::CaptainReviewVerdict {
+                action: "nudge".into(),
+                feedback: "add the after recording".into(),
+                confidence: String::new(),
+                confidence_reason: String::new(),
+                reviewed_head_sha: super::super::captain_review_payload::UNKNOWN_SHA.into(),
+            },
+        };
+        let gate = ship_verdict_gate_fields(&event);
+        assert_eq!(gate, ShipVerdictGateFields::default());
+        assert!(!gate.is_high_confidence());
+    }
+
+    /// `reviewed_head_sha` legitimately falls back to the `unknown` sentinel
+    /// when the task has no worktree; the freshness gate then refuses to
+    /// auto-merge, which is the correct conservative outcome.
+    #[test]
+    fn unknown_sha_sentinel_blocks_auto_merge_even_at_high_confidence() {
+        let event = crate::TimelineEvent {
+            timestamp: global_types::now_rfc3339(),
+            actor: "captain".into(),
+            summary: "Captain approved (confidence: high)".into(),
+            data: TimelineEventPayload::AwaitingReview {
+                action: "ship".into(),
+                feedback: "done".into(),
+                confidence: "high".into(),
+                confidence_reason: "verified".into(),
+                reviewed_head_sha: super::super::captain_review_payload::UNKNOWN_SHA.into(),
+            },
+        };
+        let gate = ship_verdict_gate_fields(&event);
+        assert!(gate.is_high_confidence());
+        assert_eq!(
+            gate.reviewed_head_sha,
+            super::super::captain_review_payload::UNKNOWN_SHA,
+            "the sentinel must survive to the freshness check that rejects it"
+        );
     }
 }

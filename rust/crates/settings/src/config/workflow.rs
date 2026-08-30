@@ -26,8 +26,6 @@ pub struct CaptainWorkflow {
     pub models: ModelsConfig,
     pub stages: StageRoutingConfig,
     pub agent: AgentConfig,
-    pub planning: PlanningConfig,
-    pub auto_title: AutoTitleConfig,
     pub sandbox: SandboxOverrides,
     pub prompts: HashMap<String, String>,
     pub nudges: HashMap<String, String>,
@@ -85,16 +83,12 @@ pub struct ModelsConfig {
     pub worker: String,
     pub captain: String,
     pub clarifier: String,
-    pub todo_parse: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum WorkflowStage {
-    TaskParse,
     Clarification,
-    Planning,
-    PlanReview,
     Implementation,
     CaptainReview,
     CaptainMerge,
@@ -105,10 +99,7 @@ pub enum WorkflowStage {
 impl WorkflowStage {
     pub fn label(self) -> &'static str {
         match self {
-            Self::TaskParse => "task_parse",
             Self::Clarification => "clarification",
-            Self::Planning => "planning",
-            Self::PlanReview => "plan_review",
             Self::Implementation => "implementation",
             Self::CaptainReview => "captain_review",
             Self::CaptainMerge => "captain_merge",
@@ -182,38 +173,6 @@ impl CodexReasoningEffort {
             Self::XHigh => "xhigh",
         }
     }
-}
-
-/// Configuration for the autonomous planning pipeline.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PlanningConfig {
-    pub feedback_rounds: u32,
-    #[serde(with = "duration_seconds")]
-    pub cc_timeout_s: std::time::Duration,
-    #[serde(with = "duration_seconds")]
-    pub codex_timeout_s: std::time::Duration,
-    pub planner_max_turns: u32,
-    pub feedback_max_turns: u32,
-    pub synthesizer_max_turns: u32,
-    pub final_max_turns: u32,
-}
-
-/// Configuration for auto-generating terminal workbench titles.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AutoTitleConfig {
-    pub model: String,
-    pub prompt: String,
-    /// Timeout for the `claude -p` subprocess.
-    #[serde(with = "duration_seconds")]
-    pub timeout_s: std::time::Duration,
-    /// How often the background loop checks for pending titles.
-    #[serde(with = "duration_seconds")]
-    pub poll_interval_s: std::time::Duration,
-    /// Give up if the workbench is older than this.
-    #[serde(with = "duration_seconds")]
-    pub expiry_s: std::time::Duration,
-    /// Truncate the user's first message to this many characters.
-    pub max_input_chars: usize,
 }
 
 /// Serde adapter that reads/writes a `Duration` as a floating-point seconds value.
@@ -348,11 +307,6 @@ pub struct AgentConfig {
     pub worker_timeout_s: std::time::Duration,
     #[serde(with = "duration_seconds")]
     pub clarifier_timeout_s: std::time::Duration,
-    #[serde(with = "duration_seconds")]
-    pub todo_parse_timeout_s: std::time::Duration,
-    #[serde(with = "duration_seconds")]
-    pub todo_parse_idle_ttl_s: std::time::Duration,
-    pub todo_parse_max_turns: u32,
     /// How long an item can sit in NeedsClarification (waiting for human) before
     /// escalating to CaptainReviewing. Much larger than clarifier_timeout_s
     /// because humans respond in hours/days, not seconds.
@@ -380,9 +334,11 @@ pub struct AgentConfig {
     pub codex_sandbox_policy: CodexSandboxPolicy,
     /// Codex model/runtime settings sent to app-server for Mando-owned turns.
     pub codex: Option<CodexAgentConfig>,
-    /// Idle TTL for ops CC sessions.
-    #[serde(with = "duration_seconds")]
-    pub ops_idle_ttl_s: std::time::Duration,
+    /// Thinking effort sent as `--effort` on every Mando-owned Claude Code
+    /// spawn. No serde default: the compiled workflow asset supplies it, and
+    /// an override that drops the key is a configuration error, not a silent
+    /// downgrade.
+    pub cc_effort: global_claude::Effort,
     /// Minimum worker runtime before a no-PR task's quality gates can pass.
     /// Prevents a worker from shipping research / audit tasks the moment it
     /// produces any substantive output. Sandbox overrides to 0 so e2e tests
@@ -582,7 +538,6 @@ agent:
   qa_ttl_s: 600
   act_timeout_s: 60
   research_max_items: 10
-  cc_max_retries: 2
 prompts:
   process: "process"
   synthesize: "synthesize"
@@ -602,7 +557,7 @@ prompts:
     }
 
     #[test]
-    fn render_worker_initial_prompt() {
+    fn render_worker_prompt() {
         let wf = CaptainWorkflow::compiled_default();
         let mut vars: FxHashMap<&str, &str> = FxHashMap::default();
         vars.insert("title", "Fix the login bug");
@@ -612,15 +567,57 @@ prompts:
         vars.insert("no_pr", "false");
         vars.insert("original_prompt", "");
         vars.insert("worker_preamble", "");
-        vars.insert("check_command", "`mando-dev check`");
+        vars.insert("plan", "");
+        vars.insert("is_handoff", "false");
         vars.insert("workpad_path", "/tmp/mando/plans/42/workpad.md");
 
-        let result = render_prompt("worker_initial", &wf.prompts, &vars);
+        let result = render_prompt("worker", &wf.prompts, &vars);
         assert!(result.is_ok());
         let rendered = result.unwrap();
         assert!(rendered.contains("Fix the login bug"));
         assert!(rendered.contains("mando/fix-login-1"));
         assert!(rendered.contains("/tmp/mando/plans/42/workpad.md"));
+    }
+
+    #[test]
+    fn compiled_default_supplies_cc_effort() {
+        // The asset carries the knob; no serde default backstops a missing
+        // key, so a dropped `agent.cc_effort` fails to deserialize instead
+        // of silently downgrading every spawn's thinking budget.
+        let wf = CaptainWorkflow::compiled_default();
+        assert_eq!(wf.agent.cc_effort, global_claude::Effort::Max);
+        assert_eq!(wf.agent.cc_effort.as_str(), "max");
+    }
+
+    #[test]
+    fn cc_effort_parses_every_level_from_yaml_override() {
+        for (yaml, expected) in [
+            ("low", global_claude::Effort::Low),
+            ("medium", global_claude::Effort::Medium),
+            ("high", global_claude::Effort::High),
+            ("xhigh", global_claude::Effort::XHigh),
+            ("max", global_claude::Effort::Max),
+        ] {
+            let wf = parse_captain_workflow_or_default(
+                Some(&format!("agent:\n  cc_effort: \"{yaml}\"\n")),
+                Path::new("workflow.yaml"),
+            )
+            .unwrap();
+            assert_eq!(wf.agent.cc_effort, expected, "cc_effort: {yaml}");
+        }
+    }
+
+    #[test]
+    fn unknown_cc_effort_is_rejected() {
+        let err = parse_captain_workflow_or_default(
+            Some("agent:\n  cc_effort: \"turbo\"\n"),
+            Path::new("workflow.yaml"),
+        )
+        .expect_err("unknown effort level must not parse");
+        assert!(
+            err.to_string().contains("cc_effort") || err.to_string().contains("turbo"),
+            "unhelpful error: {err}"
+        );
     }
 
     #[test]
@@ -636,7 +633,7 @@ prompts:
         let rendered = render_initial_prompt("worker", &wf.initial_prompts, &vars).unwrap();
         assert!(rendered.contains("/tmp/mando/.ai/briefs/brief.md"));
         assert!(rendered.contains("42"));
-        assert!(rendered.contains("Before updating the workpad, read"));
+        assert!(rendered.contains("before writing to it"));
         assert!(rendered.contains("/tmp/mando/plans/42/workpad.md"));
     }
 
@@ -652,7 +649,7 @@ prompts:
 
         let rendered = render_prompt("rebase_worker", &wf.prompts, &vars).unwrap();
         assert!(rendered.contains("attempt 2/5"));
-        assert!(rendered.contains("prior rebase attempt failed"));
+        assert!(rendered.contains("the prior attempt failed"));
     }
 
     #[test]
@@ -666,9 +663,9 @@ prompts:
 
         let rendered = render_prompt("captain_merge", &wf.prompts, &vars).unwrap();
 
-        assert!(rendered.contains("CI is informational only"));
+        assert!(rendered.contains("CI is informational here"));
         assert!(rendered.contains("gh pr merge 334 --repo tribedotrun/mando --squash"));
-        assert!(rendered.contains("gh pr merge 334 --repo tribedotrun/mando --squash --admin"));
+        assert!(rendered.contains("retry with `--admin`"));
 
         assert!(!rendered.contains("--required --watch --fail-fast"));
         assert!(!rendered.contains("15 minutes"));
@@ -691,7 +688,7 @@ prompts:
     #[should_panic(expected = "captain workflow missing required template keys")]
     fn validate_captain_missing_key_panics() {
         let mut wf = CaptainWorkflow::compiled_default();
-        wf.prompts.remove("worker_initial");
+        wf.prompts.remove("worker");
         crate::config::workflow_validate::validate_captain_workflow(&wf);
     }
 
@@ -707,9 +704,9 @@ prompts:
     #[should_panic(expected = "missing:")]
     fn validate_reports_missing_and_syntax_together() {
         let mut wf = CaptainWorkflow::compiled_default();
-        wf.prompts.remove("worker_initial");
+        wf.prompts.remove("worker");
         wf.prompts
-            .insert("worker_briefed".into(), "{% if unclosed %}".into());
+            .insert("clarifier".into(), "{% if unclosed %}".into());
         crate::config::workflow_validate::validate_captain_workflow(&wf);
     }
 }

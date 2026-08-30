@@ -1,5 +1,5 @@
 //! Action-path helpers for the task advisor route: synthesize the reopen /
-//! rework / revise-plan message via a single agent call and apply the resulting
+//! rework message via a single agent call and apply the resulting
 //! transition. Kept separate so `routes_task_advisor.rs` stays under the
 //! file-length limit.
 
@@ -17,7 +17,7 @@ use crate::AppState;
 
 const PENDING_SESSION: &str = "pending";
 
-/// Entry point for the `reopen` / `rework` / `revise-plan` branch of the
+/// Entry point for the `reopen` / `rework` branch of the
 /// advisor endpoint. Runs one agent call for synthesis and applies the
 /// transition. Persists a `persist_task_error` entry if the call fails.
 #[allow(clippy::too_many_arguments)]
@@ -69,7 +69,7 @@ pub(crate) async fn post_task_advisor_action(
 }
 
 /// Synthesize a single action-message via the selected agent and apply the reopen / rework /
-/// revise-plan transition. Runs exactly one provider-backed session call: resume when the
+/// transition. Runs exactly one provider-backed session call: resume when the
 /// advisor session from a prior Ask is still live, start with the full-context
 /// direct prompt otherwise.
 #[allow(clippy::too_many_arguments)]
@@ -137,21 +137,7 @@ async fn handle_advisor_action(
     let mut reopen_event: Option<captain::TimelineEvent> = None;
     let mut follow_up_effects: Vec<EffectRequest> = Vec::new();
 
-    if intent == "revise-plan" && item.status() == captain::ItemStatus::PlanReady {
-        let existing_ctx = item.context.as_deref().unwrap_or("");
-        item.context = Some(format!(
-            "{existing_ctx}\n\n## Revision feedback\n{synthesized_feedback}"
-        ));
-        item.planning = true;
-        let _ignored = captain::apply_transition(&mut item, captain::ItemStatus::Queued)
-            .map_err(|e| internal_error(e, "failed to revise plan transition"))?;
-        item.last_activity_at = Some(global_types::now_rfc3339());
-        state
-            .captain
-            .write_task(&item)
-            .await
-            .map_err(|e| internal_error(e, "failed to save task"))?;
-    } else if intent == "rework" {
+    if intent == "rework" {
         state
             .captain
             .rework_item(task_id, &synthesized_feedback)

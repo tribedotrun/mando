@@ -1,6 +1,5 @@
 mod binary;
 mod broken_session;
-mod codex_exec;
 mod config;
 mod credentials;
 mod error;
@@ -19,12 +18,8 @@ mod transcript_events;
 pub use binary::{
     apply_codex_binary_env, resolve_claude_binary, resolve_codex_binary, ResolvedCodexBinary,
 };
-pub use broken_session::{
-    detect_image_dimension_blocked, stream_broken_session_symptom, BrokenSessionMatch,
-    BrokenSessionOrigin,
-};
-pub use codex_exec::{codex_exec, codex_exec_with_config, CodexExecConfig};
-pub use config::{CcConfig, CcConfigBuilder, Effort, PermissionMode, TaskBudget, ThinkingConfig};
+pub use broken_session::{stream_broken_session_symptom, BrokenSessionMatch, BrokenSessionOrigin};
+pub use config::{CcConfig, CcConfigBuilder, Effort, PermissionMode};
 pub use credentials::{credential_id, with_credential};
 pub use error::{CcError, ErrorClass};
 pub use json_parse::{parse_llm_json, parse_llm_json_as};
@@ -47,9 +42,7 @@ pub use transcript::{
     parse_messages, session_cost, session_cost_or_estimate, tool_usage, ModelUsage, SessionCost,
     ToolUsageSummary, TranscriptMessage,
 };
-pub use transcript_events::{
-    parse_events, parse_events_from_offset, parse_events_with_size, stream_file_size,
-};
+pub use transcript_events::{parse_events_from_offset, parse_events_with_size};
 
 /// Opaque wrapper for the raw Claude session JSON envelope.
 /// Kept as a named type so callers cannot accidentally inspect internals

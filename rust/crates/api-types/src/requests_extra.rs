@@ -13,14 +13,6 @@ pub struct TaskAskRequest {
     pub ask_id: Option<String>,
 }
 
-/// POST /api/tasks/implement
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[serde(deny_unknown_fields)]
-pub struct TaskImplementRequest {
-    pub id: i64,
-    pub message: String,
-}
-
 /// PATCH /api/tasks/{id}. `skip_serializing_if` on every Option is required:
 /// captain's `apply_json_updates` treats a JSON `null` as "clear this field",
 /// so unset fields must disappear from the serialized payload.
@@ -253,54 +245,6 @@ pub struct WorkbenchPatchRequest {
     pub title: Option<String>,
     pub archived: Option<bool>,
     pub pinned: Option<bool>,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, TS)]
-#[serde(deny_unknown_fields)]
-pub struct TerminalSize {
-    pub rows: u16,
-    pub cols: u16,
-}
-
-/// POST /api/terminal
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(optional_fields)]
-#[serde(deny_unknown_fields)]
-pub struct TerminalCreateRequest {
-    pub project: String,
-    pub cwd: String,
-    pub agent: crate::TerminalAgent,
-    pub resume_session_id: Option<String>,
-    pub size: Option<TerminalSize>,
-    pub terminal_id: Option<String>,
-    pub name: Option<String>,
-    /// Workbench that should own this terminal session. The renderer
-    /// resolves this from `useWorkbenchPage` and the server stamps it
-    /// onto the resulting `TerminalSessionInfo` so the renderer can
-    /// scope its tab bar by identity instead of cwd.
-    #[serde(rename = "workbenchId")]
-    pub workbench_id: i64,
-}
-
-/// POST /api/terminal/{id}/write
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[serde(deny_unknown_fields)]
-pub struct TerminalWriteRequest {
-    pub data: String,
-}
-
-/// GET /api/terminal/{id}/stream
-#[derive(Debug, Clone, Default, Serialize, Deserialize, TS)]
-#[serde(deny_unknown_fields)]
-pub struct TerminalStreamQuery {
-    pub replay: Option<u8>,
-}
-
-/// POST /api/terminal/{id}/cc-session
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct TerminalCcSessionRequest {
-    pub cc_session_id: String,
 }
 
 /// POST /api/worktrees

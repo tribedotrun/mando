@@ -1,5 +1,5 @@
 import React from 'react';
-import { MoreHorizontal, Pencil, Trash2, SquarePen, ChevronRight } from 'lucide-react';
+import { MoreHorizontal, Pencil, Trash2, ChevronRight } from 'lucide-react';
 import { projectLogoUrl } from '#renderer/global/runtime/useApi';
 import {
   DropdownMenu,
@@ -8,7 +8,6 @@ import {
   DropdownMenuItem,
 } from '#renderer/global/ui/primitives/dropdown-menu';
 import { Button } from '#renderer/global/ui/primitives/button';
-import type { SidebarActions } from '#renderer/global/runtime/SidebarContext';
 
 function ProjectLogo({ logo }: { logo: string }): React.ReactElement {
   return (
@@ -31,7 +30,6 @@ interface ProjectHeaderButtonProps {
   logo?: string | null;
   expanded: boolean;
   menuOpen: boolean;
-  actions: SidebarActions;
   onToggleExpand: () => void;
   onContextMenu: () => void;
   onMenuChange: (open: boolean) => void;
@@ -44,7 +42,6 @@ export function ProjectHeaderButton({
   logo,
   expanded,
   menuOpen,
-  actions,
   onToggleExpand,
   onContextMenu,
   onMenuChange,
@@ -84,19 +81,6 @@ export function ProjectHeaderButton({
               <MoreHorizontal size={14} />
             </span>
           </DropdownMenuTrigger>
-          <span
-            role="button"
-            tabIndex={-1}
-            onClick={(e) => {
-              e.stopPropagation();
-              actions.newTerminal(name);
-            }}
-            title="New terminal"
-            className="flex size-5 items-center justify-center rounded text-text-3 transition-colors hover:bg-muted-foreground/10 hover:text-text-2"
-            style={{ cursor: 'pointer' }}
-          >
-            <SquarePen size={14} />
-          </span>
         </span>
       </Button>
       <DropdownMenuContent align="end" className="min-w-[130px]">

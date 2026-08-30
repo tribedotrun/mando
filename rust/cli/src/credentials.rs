@@ -249,7 +249,7 @@ async fn handle_pick_codex(request: api_types::CredentialPickRequest) -> Result<
     };
 
     if let Some(pick) = result.pick {
-        match crate::credentials_codex_pick::materialize_codex_home(&pick.auth_json) {
+        match crate::credentials_codex_pick::materialize_codex_home(&pick.auth_json).await {
             Ok(codex_home) => {
                 let account_id = shell_single_quote(&pick.account_id);
                 let label = shell_single_quote(&pick.label);
@@ -354,7 +354,7 @@ async fn handle_sync_codex() -> Result<()> {
     if let Ok(home) = std::env::var("CODEX_HOME") {
         let path = std::path::PathBuf::from(home);
         if crate::credentials_codex_pick::is_managed_codex_home(&path) {
-            crate::credentials_codex_pick::cleanup_managed_codex_home(&path)?;
+            crate::credentials_codex_pick::cleanup_managed_codex_home(&path).await?;
         }
     }
     eprintln!("mando: synced Codex credential #{credential_id}");

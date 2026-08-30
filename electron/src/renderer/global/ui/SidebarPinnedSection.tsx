@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { PinOff, Terminal } from 'lucide-react';
+import { GitBranch, PinOff } from 'lucide-react';
 import { compactRelativeTime } from '#renderer/global/service/utils';
 import { commitWorkbenchRename } from '#renderer/global/service/workbenchHelpers';
 import { StatusIndicator } from '#renderer/global/ui/StatusIndicator';
@@ -24,12 +24,12 @@ export function SidebarPinnedSection({
 
   return (
     <div className="flex flex-col gap-0.5">
-      {items.map(({ wb, task, project }) => {
+      {items.map(({ wb, task }) => {
         const ts = task
           ? task.last_activity_at || task.created_at
           : wb.lastActivityAt || wb.createdAt;
         const isActive =
-          state.activeTerminalCwd === wb.worktree ||
+          state.activeWorktreePath === wb.worktree ||
           (task != null && state.activeTaskId === task.id);
         // Archive is gated on task status so a running task can't be hidden mid-flight.
         const canArchive = task == null || FINALIZED_STATUSES.includes(task.status);
@@ -56,7 +56,7 @@ export function SidebarPinnedSection({
               if (task) {
                 actions.openTask(task.id, task.workbench_id ?? wb.id);
               } else {
-                actions.openTerminalSession({ id: wb.id, project, cwd: wb.worktree });
+                actions.openWorkbench({ id: wb.id, worktree: wb.worktree });
               }
             }}
             className={`group flex w-full items-center gap-2 rounded-md px-1.5 py-1.5 text-left text-[13px] transition-colors hover:bg-muted ${isActive ? 'bg-muted font-medium text-foreground' : 'text-muted-foreground'}`}
@@ -67,7 +67,7 @@ export function SidebarPinnedSection({
                   <StatusIndicator status={task.status} />
                 ) : (
                   <span className="inline-flex w-4 items-center justify-center">
-                    <Terminal size={14} className="text-text-3" />
+                    <GitBranch size={14} className="text-text-3" />
                   </span>
                 )}
               </span>

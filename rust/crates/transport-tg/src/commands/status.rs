@@ -26,7 +26,6 @@ const STATUS_ORDER: &[ItemStatus] = &[
     ItemStatus::Errored,
     ItemStatus::Merged,
     ItemStatus::CompletedNoPr,
-    ItemStatus::PlanReady,
     ItemStatus::Stopped,
     ItemStatus::Canceled,
 ];
@@ -47,7 +46,6 @@ fn status_label(s: &ItemStatus) -> &'static str {
         ItemStatus::Errored => "errored",
         ItemStatus::Merged => "merged",
         ItemStatus::CompletedNoPr => "completed_no_pr",
-        ItemStatus::PlanReady => "plan_ready",
         ItemStatus::Canceled => "canceled",
         ItemStatus::Stopped => "stopped",
     }

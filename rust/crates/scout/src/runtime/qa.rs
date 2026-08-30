@@ -74,7 +74,7 @@ impl QaSessionManager {
     ) -> Result<QaResult> {
         self.expire_stale().await;
 
-        let credential = settings::credentials::pick_for_worker(pool, None)
+        let credential = settings::credentials::pick_for_worker(pool)
             .await
             .inspect_err(|e| warn!(error = %e, "scout-qa: pick_for_worker failed"))
             .unwrap_or(None);

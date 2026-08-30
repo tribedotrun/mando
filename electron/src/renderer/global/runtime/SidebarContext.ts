@@ -12,10 +12,9 @@ export interface SidebarActions {
   // Navigation
   changeTab: (tab: Tab) => void;
   openTask: (taskId: number, workbenchId?: number) => void;
-  openTerminalSession: (session: { id?: number; project: string; cwd: string }) => void;
+  openWorkbench: (workbench: { id?: number; worktree: string }) => void;
   openSettings: () => void;
   newTask: () => void;
-  newTerminal: (project: string) => void;
   goBack: () => void;
   goForward: () => void;
   toggleSidebar: () => void;
@@ -43,7 +42,8 @@ export interface SidebarActions {
 export interface SidebarState {
   activeTab: Tab;
   projectFilter: string | null;
-  activeTerminalCwd: string | null;
+  /** Worktree path of the workbench the user is currently viewing, if any. */
+  activeWorktreePath: string | null;
   activeTaskId: number | null;
   setupProgress: SetupProgress | null;
   setupActive: boolean;

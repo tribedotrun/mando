@@ -4,10 +4,6 @@ import {
   type RenderableFeedItem,
 } from '#renderer/domains/captain/service/feedHelpers';
 import { getUnansweredQuestions } from '#renderer/domains/captain/service/clarifyHelpers';
-import {
-  CompletedPlanBlock,
-  ReadyPlanBlock,
-} from '#renderer/domains/captain/ui/PlanCompletedBlock';
 import { MessageBlock } from '#renderer/domains/captain/ui/MessageBlock';
 import { EvidenceBlock, WorkSummaryBlock } from '#renderer/domains/captain/ui/ArtifactBlocks';
 import {
@@ -57,13 +53,6 @@ export function FeedBlocks({
           <ClarifierAnsweredBlock event={event} taskContext={task.context ?? ''} />
         ) : (
           <TimelineBlock event={event} />
-        );
-      }
-      if (payload.event_type === 'plan_completed') {
-        return task.status === 'plan-ready' ? (
-          <ReadyPlanBlock event={event} taskId={task.id} />
-        ) : (
-          <CompletedPlanBlock event={event} />
         );
       }
       if (shouldSuppressTimelineEvent(payload.event_type)) return null;

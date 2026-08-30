@@ -13,7 +13,6 @@ export { buildResumeCmd } from '#renderer/domains/sessions/service/resumeCommand
 /** Maps timeline event types to a caller label used when the session_id has no row in the session map. */
 const CALLER_MAP: Record<string, string> = Object.freeze({
   worker_spawned: 'worker',
-  worker_completed: 'worker',
   worker_nudged: 'worker',
   session_resumed: 'worker',
   captain_review_started: 'captain-review-async',
@@ -59,7 +58,7 @@ export function buildSessionsFromTimeline(
     });
   }
   // Merge DB-sourced sessions not referenced by any timeline event (e.g.
-  // advisor, planning, auto-merge-triage sessions that have task_id set
+  // advisor, auto-merge-triage sessions that have task_id set
   // but no timeline event carries their session_id).
   for (const [sid, s] of Object.entries(sessionMap)) {
     if (!seen.has(sid)) {
@@ -101,18 +100,11 @@ export function buildSessionSequence(sessions: SessionEntry[]): Map<string, numb
 const CALLER_LABELS: Record<string, string> = Object.freeze({
   worker: 'worker',
   clarifier: 'clarifier',
-  'deep-clarifier': 'deep clarifier',
-  'clarifier-retry': 'clarifier retry',
   'captain-review-async': 'captain review',
   'captain-merge-async': 'captain merge',
-  'exhaustion-report': 'exhaustion',
   'task-ask': 'ask',
   advisor: 'advisor',
   'auto-merge-triage': 'merge triage',
-  'planning-planner': 'planner',
-  'planning-cc-feedback': 'planning feedback',
-  'planning-synth': 'planning synthesis',
-  'planning-final': 'planning final',
   'scout-process': 'scout',
   'scout-article': 'article',
   'scout-qa': 'Q&A',
@@ -125,9 +117,6 @@ const CALLER_LABELS: Record<string, string> = Object.freeze({
 const CALLER_PREFIXES: readonly (readonly [string, string])[] = Object.freeze([
   ['advisor:', 'advisor'],
   ['task-ask:', 'task-ask'],
-  ['parse-todos-', 'parse-todos'],
-  ['planning-cc-r', 'planning-cc-feedback'],
-  ['planning-synth-r', 'planning-synth'],
 ] as const);
 
 export function formatCallerLabel(caller: string): string {

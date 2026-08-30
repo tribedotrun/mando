@@ -30,6 +30,7 @@ pub(super) async fn answer_and_reclarify_claude(
         |ctx| {
             let mut builder = CcConfig::builder()
                 .model(model)
+                .effort(workflow.agent.cc_effort)
                 .timeout(timeout)
                 .caller("clarifier")
                 .task_id(task_id_ref)

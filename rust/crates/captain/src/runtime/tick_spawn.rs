@@ -29,24 +29,21 @@ const PRE_SPAWN_STALE_SECS: i64 = 300;
 /// five-hour utilization.
 /// Returns `(id, access_token)` or `None` if no credentials are configured.
 ///
-/// `caller_filter` narrows which running sessions count toward load
-/// balancing. Pass `Some("worker")` for worker spawns so only other
-/// workers influence the pick. Pass `None` to count all sessions.
+/// The pool is one global load-balancing bucket — every running session on a
+/// credential counts toward its tally, whichever caller opened it. There is
+/// no per-caller bucket to select.
 ///
 /// When the chosen credential's last probe is older than
 /// [`PRE_SPAWN_STALE_SECS`] this also fires a fresh probe. A `Rejected`
 /// probe result trips the existing rate-limit cooldown path and the
 /// function re-picks, returning `None` if no healthy credential remains.
 #[tracing::instrument(skip_all)]
-pub async fn pick_credential(
-    pool: &sqlx::SqlitePool,
-    caller_filter: Option<&str>,
-) -> Option<(i64, String)> {
+pub async fn pick_credential(pool: &sqlx::SqlitePool) -> Option<(i64, String)> {
     // Up to 2 pick attempts: if the first pick probes out as `Rejected`,
     // that credential enters cooldown and we try once more.
     let mut any_rejected = false;
     for _ in 0..2 {
-        let picked = match settings::credentials::pick_for_worker(pool, caller_filter).await {
+        let picked = match settings::credentials::pick_for_worker(pool).await {
             Ok(pick) => pick,
             Err(e) => {
                 tracing::warn!(

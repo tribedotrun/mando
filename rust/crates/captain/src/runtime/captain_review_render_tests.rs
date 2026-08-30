@@ -1,396 +1,466 @@
-//! Render-phase assertions for the `captain_review` prompt. The
-//! `Available Verdicts` section is trigger-gated, so each test sets exactly
-//! one `is_*` flag and verifies the rendered bullet list matches the branch
-//! in `captain-workflow.yaml`.
+//! Render-phase assertions for the `captain_review` prompt.
+//!
+//! The prompt was rewritten to one shared verdict list (the enforced JSON
+//! schema, not the prose, gates which verdicts a trigger may return) with no
+//! evidence checklists (typed gates fire deterministically before review).
+//! These tests hold the Rust-side variable contract to that template: exactly
+//! ten variables, each reaching the section that consumes it.
 
+use crate::runtime::captain_review_helpers::review_template_vars;
+
+/// The exact key set both spawn paths insert, read off the shared builder
+/// itself rather than a hand-maintained list.
+fn builder_var_keys() -> std::collections::BTreeSet<String> {
+    let item = crate::Task::new("var contract");
+    review_template_vars(
+        &item,
+        "gates_pass",
+        crate::ReviewTrigger::GatesPass,
+        String::new(),
+        String::new(),
+        String::new(),
+        String::new(),
+    )
+    .keys()
+    .map(|k| k.to_string())
+    .collect()
+}
+
+/// Every variable the template consumes, with a benign value. Individual
+/// tests override the one they are exercising.
 fn base_vars() -> rustc_hash::FxHashMap<&'static str, &'static str> {
     let mut vars: rustc_hash::FxHashMap<&str, &str> = rustc_hash::FxHashMap::default();
-    vars.insert("title", "Test");
-    vars.insert("item_id", "1");
+    vars.insert("trigger", "gates_pass");
+    vars.insert("problem_statement", "");
     vars.insert("worker_contexts", "");
+    vars.insert("work_summary", "");
     vars.insert("knowledge_base", "");
     vars.insert("evidence_images", "");
-    vars.insert("intervention_count", "0");
-    vars.insert("is_gates_pass", "");
-    vars.insert("is_degraded_context", "");
-    vars.insert("is_timeout", "");
-    vars.insert("is_broken_session", "");
-    vars.insert("is_budget_exhausted", "");
-    vars.insert("is_clarifier_fail", "");
-    vars.insert("is_spawn_fail", "");
-    vars.insert("is_rebase_fail", "");
+    vars.insert("is_no_pr", "");
+    vars.insert("is_bug_fix", "");
     vars.insert("is_ci_failure", "");
-    vars.insert("is_merge_fail", "");
-    vars.insert("is_repeated_nudge", "");
+    vars.insert("workpad_path", "/data/plans/1/workpad.md");
     vars
+}
+
+fn template() -> String {
+    settings::CaptainWorkflow::compiled_default()
+        .prompts
+        .get("captain_review")
+        .expect("captain_review template exists")
+        .clone()
 }
 
 fn render(vars: &rustc_hash::FxHashMap<&str, &str>) -> String {
     let workflow = settings::CaptainWorkflow::compiled_default();
-    settings::render_prompt("captain_review", &workflow.prompts, vars).unwrap()
+    settings::render_prompt("captain_review", &workflow.prompts, vars)
+        .expect("captain_review renders with the declared variable set")
+}
+
+/// Identifiers the template actually references, from `{{ name }}` and
+/// `{% if name %}`. Hand-rolled rather than regex so the test carries no new
+/// dependency; the template uses only these two forms.
+fn template_variables(src: &str) -> std::collections::BTreeSet<String> {
+    let mut found = std::collections::BTreeSet::new();
+    let bytes: Vec<char> = src.chars().collect();
+    let mut i = 0;
+    while i + 1 < bytes.len() {
+        let opener: Option<&str> = match (bytes[i], bytes[i + 1]) {
+            ('{', '{') => Some("expr"),
+            ('{', '%') => Some("tag"),
+            _ => None,
+        };
+        let Some(kind) = opener else {
+            i += 1;
+            continue;
+        };
+        let close = if kind == "expr" {
+            ('}', '}')
+        } else {
+            ('%', '}')
+        };
+        let mut j = i + 2;
+        let mut body = String::new();
+        while j + 1 < bytes.len() && !(bytes[j] == close.0 && bytes[j + 1] == close.1) {
+            body.push(bytes[j]);
+            j += 1;
+        }
+        let body = body.trim();
+        if kind == "expr" {
+            if body.chars().all(|c| c.is_alphanumeric() || c == '_') && !body.is_empty() {
+                found.insert(body.to_string());
+            }
+        } else if let Some(cond) = body.strip_prefix("if ") {
+            let cond = cond.trim();
+            if cond.chars().all(|c| c.is_alphanumeric() || c == '_') && !cond.is_empty() {
+                found.insert(cond.to_string());
+            }
+        }
+        i = j + 2;
+    }
+    found
+}
+
+// ── The variable contract (work item A) ──
+
+#[test]
+fn declared_vars_exactly_match_the_template() {
+    let inserted = builder_var_keys();
+    let referenced = template_variables(&template());
+
+    let missing: Vec<_> = referenced.difference(&inserted).collect();
+    assert!(
+        missing.is_empty(),
+        "template references variables the spawn paths never insert: {missing:?}"
+    );
+    let unused: Vec<_> = inserted.difference(&referenced).collect();
+    assert!(
+        unused.is_empty(),
+        "spawn paths insert variables the template never uses: {unused:?}"
+    );
 }
 
 #[test]
-fn test_template_renders_gates_pass_verdicts() {
+fn base_vars_mirror_the_builder() {
+    // These render tests drive the template through `base_vars()`. If it
+    // drifts from the real insert set, every assertion below stops testing
+    // what production actually renders.
+    let from_base: std::collections::BTreeSet<String> =
+        base_vars().keys().map(|k| k.to_string()).collect();
+    assert_eq!(from_base, builder_var_keys());
+}
+
+#[test]
+fn is_ci_failure_tracks_the_parsed_trigger() {
+    let item = crate::Task::new("ci flag");
+    for trigger in crate::ALL_REVIEW_TRIGGERS {
+        let vars = review_template_vars(
+            &item,
+            trigger.as_str(),
+            trigger,
+            String::new(),
+            String::new(),
+            String::new(),
+            String::new(),
+        );
+        let expected = if trigger == crate::ReviewTrigger::CiFailure {
+            "true"
+        } else {
+            ""
+        };
+        assert_eq!(
+            vars["is_ci_failure"],
+            expected,
+            "trigger {}",
+            trigger.as_str()
+        );
+    }
+}
+
+#[test]
+fn workpad_path_is_the_data_dir_workpad_for_the_task() {
+    let mut item = crate::Task::new("workpad path");
+    item.id = 4242;
+    let vars = review_template_vars(
+        &item,
+        "gates_pass",
+        crate::ReviewTrigger::GatesPass,
+        String::new(),
+        String::new(),
+        String::new(),
+        String::new(),
+    );
+    let expected = global_infra::paths::data_dir()
+        .join("plans")
+        .join("4242")
+        .join("workpad.md")
+        .display()
+        .to_string();
+    assert_eq!(vars["workpad_path"], expected);
+}
+
+#[test]
+fn dropped_variables_are_gone_from_the_template() {
+    // These fed the old checklist-style prompt. Each one cost a per-review DB
+    // read or file read; none survives the rewrite.
+    let src = template();
+    for dead in [
+        "title",
+        "item_id",
+        "evidence_files",
+        "intervention_count",
+        "has_screenshot",
+        "has_recording",
+        "has_before_fix",
+        "has_after_fix",
+        "has_cannot_reproduce",
+        "has_before_screenshot",
+        "has_after_screenshot",
+        "has_after_recording",
+    ] {
+        assert!(
+            !src.contains(&format!("{{{{ {dead} }}}}")),
+            "template still reads dead variable {dead}"
+        );
+    }
+    assert!(
+        !src.contains("| default("),
+        "dead `| default(...)` companion filters must be gone"
+    );
+}
+
+// ── Variables reach their sections ──
+
+#[test]
+fn trigger_renders_in_the_header() {
     let mut vars = base_vars();
     vars.insert("trigger", "gates_pass");
-    vars.insert("title", "Test task");
-    vars.insert("item_id", "42");
-    vars.insert(
-        "worker_contexts",
-        "### Worker: test-worker\n- Status: in-progress",
-    );
-    vars.insert("intervention_count", "3");
-    vars.insert("is_gates_pass", "true");
+    assert!(render(&vars).contains("Trigger: **gates_pass**"));
+}
 
+#[test]
+fn every_review_trigger_renders_its_own_name() {
+    // `ReviewTrigger::Retry` is produced in code (`unwrap_or(Retry)` in
+    // tick_review and the dashboard action path) but was absent from the old
+    // string allowlist that fed the prompt. The header now reads the trigger
+    // string directly, so every variant renders.
+    for trigger in crate::ALL_REVIEW_TRIGGERS {
+        let name = trigger.as_str();
+        let mut vars = base_vars();
+        vars.insert("trigger", name);
+        let rendered = render(&vars);
+        assert!(
+            rendered.contains(&format!("Trigger: **{name}**")),
+            "trigger {name} must render in the header"
+        );
+    }
+}
+
+#[test]
+fn retry_trigger_renders() {
+    let mut vars = base_vars();
+    vars.insert("trigger", "retry");
     let rendered = render(&vars);
+    assert!(rendered.contains("Trigger: **retry**"));
+    // A retry review is a normal-tier review: the full verdict list applies.
+    assert!(rendered.contains("**ship**"));
+    assert!(rendered.contains("**nudge**"));
+}
+
+#[test]
+fn problem_statement_renders_under_a_task_heading() {
+    let mut vars = base_vars();
+    vars.insert("problem_statement", "Fix the scrolling bug in the feed");
+    let rendered = render(&vars);
+    assert!(rendered.contains("## Task"));
+    assert!(rendered.contains("Fix the scrolling bug in the feed"));
+}
+
+#[test]
+fn empty_problem_statement_drops_the_task_heading() {
+    assert!(!render(&base_vars()).contains("## Task"));
+}
+
+#[test]
+fn worker_contexts_always_render() {
+    let mut vars = base_vars();
+    vars.insert("worker_contexts", "### Worker: mando-worker-0");
+    let rendered = render(&vars);
+    assert!(rendered.contains("## Worker Context"));
+    assert!(rendered.contains("### Worker: mando-worker-0"));
+}
+
+#[test]
+fn work_summary_renders_when_present_and_is_dropped_when_empty() {
+    let mut vars = base_vars();
+    vars.insert("work_summary", "Replaced the poller with an SSE patch");
+    let rendered = render(&vars);
+    assert!(rendered.contains("## Work Summary"));
+    assert!(rendered.contains("Replaced the poller with an SSE patch"));
 
     assert!(
-        rendered.contains("test-worker"),
-        "should contain worker context"
-    );
-    assert!(rendered.contains("**ship**"), "should have ship verdict");
-    assert!(rendered.contains("**nudge**"), "should have nudge verdict");
-    assert!(
-        rendered.contains("**respawn**"),
-        "should have respawn verdict"
-    );
-    assert!(
-        rendered.contains("**reset_budget**"),
-        "should have reset_budget verdict"
-    );
-    assert!(
-        rendered.contains("**escalate**"),
-        "gates_pass now includes escalate as an escape hatch"
-    );
-    assert!(
-        !rendered.contains("**retry_clarifier**"),
-        "no retry_clarifier for gates_pass"
+        !render(&base_vars()).contains("## Work Summary"),
+        "an empty work summary must not render a bare heading"
     );
 }
 
 #[test]
-fn test_template_renders_timeout_verdicts() {
+fn knowledge_base_renders_when_present_and_is_dropped_when_empty() {
     let mut vars = base_vars();
-    vars.insert("trigger", "timeout");
-    vars.insert("is_timeout", "true");
-
+    vars.insert("knowledge_base", "Prefer respawn over escalate on 429s");
     let rendered = render(&vars);
+    assert!(rendered.contains("## Knowledge Base"));
+    assert!(rendered.contains("Prefer respawn over escalate on 429s"));
+    assert!(!render(&base_vars()).contains("## Knowledge Base"));
+}
 
-    assert!(rendered.contains("**ship**"), "timeout should have ship");
-    assert!(rendered.contains("**nudge**"), "timeout should have nudge");
+#[test]
+fn evidence_section_lists_files_and_points_at_the_deck() {
+    let mut vars = base_vars();
+    vars.insert("evidence_images", "- /data/evidence/before.png (before)");
+    let rendered = render(&vars);
+    assert!(rendered.contains("## Evidence"));
+    assert!(rendered.contains("- /data/evidence/before.png (before)"));
     assert!(
-        rendered.contains("**respawn**"),
-        "timeout should have respawn"
+        rendered.contains(".ai/evidence/deck.html"),
+        "the reviewer must be pointed at the worker's evidence deck"
     );
     assert!(
-        rendered.contains("**reset_budget**"),
-        "timeout should have reset_budget"
-    );
-    assert!(
-        rendered.contains("**escalate**"),
-        "timeout now includes escalate as an escape hatch"
+        rendered.contains("ffmpeg"),
+        "video sampling instruction must survive"
     );
 }
 
 #[test]
-fn test_template_renders_broken_session_verdicts() {
-    // broken_session gets its own tier: ship if the work is already done,
-    // respawn if a fresh worker can recover, escalate if respawn would hit
-    // the same wall. It must not offer in-place resume actions.
+fn evidence_section_drops_entirely_when_there_are_no_files() {
+    assert!(!render(&base_vars()).contains("## Evidence"));
+}
+
+// ── Verdict list is no longer trigger-gated ──
+
+#[test]
+fn all_six_verdicts_render_for_every_trigger() {
+    // The prompt states one list and defers the per-trigger narrowing to the
+    // enforced schema (see captain_review_schema_tests). The old five
+    // trigger-specific enumerations are gone.
+    for trigger in [
+        "gates_pass",
+        "broken_session",
+        "spawn_fail",
+        "clarifier_fail",
+    ] {
+        let mut vars = base_vars();
+        vars.insert("trigger", trigger);
+        let rendered = render(&vars);
+        for verdict in [
+            "**ship**",
+            "**nudge**",
+            "**respawn**",
+            "**reset_budget**",
+            "**retry_clarifier**",
+            "**escalate**",
+        ] {
+            assert!(
+                rendered.contains(verdict),
+                "{trigger} should render the shared verdict list entry {verdict}"
+            );
+        }
+        assert!(
+            rendered.contains("The enforced schema limits which of these this trigger allows."),
+            "{trigger} must say the schema does the gating"
+        );
+    }
+}
+
+#[test]
+fn old_trigger_gated_prose_is_gone() {
+    let rendered = render(&base_vars());
+    for stale in [
+        "Available Verdicts",
+        "Escalation is not available at this tier",
+        "Bug-fix evidence",
+        "has_before_screenshot",
+        "has_after_recording",
+        "Confidence Grading",
+    ] {
+        assert!(
+            !rendered.contains(stale),
+            "stale prose {stale:?} still renders"
+        );
+    }
+}
+
+// ── Confidence ──
+
+#[test]
+fn confidence_section_offers_high_and_mid_only() {
+    let rendered = render(&base_vars());
+    assert!(rendered.contains("## Confidence (ship only)"));
+    assert!(rendered.contains("`high` auto-merges with no human look; `mid` stops for one."));
+    assert!(
+        !rendered.contains("`low`"),
+        "the prompt must not offer a `low` grade the schema rejects"
+    );
+    assert!(rendered.contains("confidence_reason"));
+}
+
+#[test]
+fn confidence_cites_the_workpad_instead_of_a_diff_on_no_pr_tasks() {
     let mut vars = base_vars();
-    vars.insert("trigger", "broken_session");
-    vars.insert("is_broken_session", "true");
-
+    vars.insert("is_no_pr", "true");
+    vars.insert("workpad_path", "/data/plans/42/workpad.md");
     let rendered = render(&vars);
+    assert!(
+        rendered.contains("no diff on this task — cite the workpad at `/data/plans/42/workpad.md`"),
+        "the no-PR confidence branch must inject the real workpad path"
+    );
+}
 
+// ── Special cases ──
+
+#[test]
+fn no_pr_case_renders_the_workpad_path() {
+    let mut vars = base_vars();
+    vars.insert("is_no_pr", "true");
+    vars.insert("workpad_path", "/data/plans/42/workpad.md");
+    let rendered = render(&vars);
+    assert!(rendered.contains("No-PR task"));
     assert!(
-        rendered.contains("**ship**"),
-        "broken_session should have ship"
+        rendered.contains("/data/plans/42/workpad.md"),
+        "the no-PR reviewer must be given the data-dir workpad path, which \
+         lives outside the review cwd"
     );
+    assert!(rendered.contains("screenshots are not required"));
+}
+
+#[test]
+fn no_pr_case_and_its_workpad_path_drop_for_pr_tasks() {
+    let rendered = render(&base_vars());
+    assert!(!rendered.contains("No-PR task"));
     assert!(
-        rendered.contains("**respawn**"),
-        "broken_session should have respawn"
-    );
-    assert!(
-        rendered.contains("**escalate**"),
-        "broken_session should have escalate"
-    );
-    assert!(
-        !rendered.contains("**nudge** —"),
-        "broken_session must not offer nudge"
-    );
-    assert!(
-        !rendered.contains("**reset_budget** —"),
-        "broken_session must not offer reset_budget"
-    );
-    assert!(
-        !rendered.contains("Escalation is not available at this tier"),
-        "the old escalation-blocked prose must be gone"
+        !rendered.contains("/data/plans/1/workpad.md"),
+        "workpad_path is inserted for every review but must only surface on no-PR tasks"
     );
 }
 
 #[test]
-fn test_template_renders_repeated_nudge_verdicts() {
-    // repeated_nudge also rides the else tier. Same escape-hatch rationale.
+fn bug_fix_case_renders_only_for_bug_fixes() {
     let mut vars = base_vars();
-    vars.insert("trigger", "repeated_nudge");
-    vars.insert("is_repeated_nudge", "true");
-
-    let rendered = render(&vars);
-
-    assert!(
-        rendered.contains("**escalate**"),
-        "repeated_nudge should have escalate"
-    );
-    assert!(
-        !rendered.contains("Escalation is not available at this tier"),
-        "repeated_nudge no longer blocks escalate"
-    );
-}
-
-#[test]
-fn test_template_renders_spawn_fail_verdicts() {
-    let mut vars = base_vars();
-    vars.insert("trigger", "spawn_fail");
-    vars.insert("is_spawn_fail", "true");
-
-    let rendered = render(&vars);
-
-    // Available-Verdicts is trigger-gated. For spawn_fail the bullet list must
-    // offer respawn + escalate only. Match each branch's unique bullet copy so
-    // mentions of ship/nudge/reset_budget elsewhere in shared sections
-    // (confidence grading, evidence guidance, etc.) don't produce false
-    // positives.
-    assert!(
-        rendered.contains(
-            "**respawn** — Start a fresh worktree and try again; \
-             transient spawn failures often clear on retry."
-        ),
-        "spawn_fail must render its respawn bullet"
-    );
-    assert!(
-        rendered.contains(
-            "**escalate** — Spawn continues to fail after respawn attempts; \
-             surface the underlying error to a human."
-        ),
-        "spawn_fail must render its escalate bullet"
-    );
-    assert!(
-        !rendered.contains("**ship** — Work is complete, evidence type matches"),
-        "spawn_fail must NOT render the default-branch ship bullet"
-    );
-    assert!(
-        !rendered.contains("**ship** — Work is actually complete despite the budget warning"),
-        "spawn_fail must NOT render the budget-exhausted ship bullet"
-    );
-    assert!(
-        !rendered.contains("**reset_budget** —"),
-        "spawn_fail must NOT render any reset_budget bullet"
-    );
-    assert!(
-        !rendered.contains("**retry_clarifier** —"),
-        "spawn_fail must NOT render retry_clarifier"
-    );
-}
-
-#[test]
-fn bug_fix_evidence_rule_uses_typed_flags() {
-    // Bug-fix tasks must surface the typed gate values to the reviewer
-    // and instruct it to nudge when either flag is false. The gate replaces
-    // the old caption-prefix heuristic.
-    let mut vars = base_vars();
-    vars.insert("trigger", "gates_pass");
-    vars.insert("is_gates_pass", "true");
     vars.insert("is_bug_fix", "true");
-    vars.insert("has_before_fix", "false");
-    vars.insert("has_after_fix", "true");
-    vars.insert("has_cannot_reproduce", "false");
-
     let rendered = render(&vars);
-
-    assert!(
-        rendered.contains("Bug-fix evidence"),
-        "bug-fix evidence section must render when is_bug_fix is true"
-    );
-    assert!(
-        rendered.contains("`has_before_fix`: false"),
-        "the typed before-fix flag must be threaded through to the prompt"
-    );
-    assert!(
-        rendered.contains("`has_after_fix`: true"),
-        "the typed after-fix flag must be threaded through to the prompt"
-    );
-    assert!(
-        rendered.contains("--kind before"),
-        "nudge instructions must reference the typed --kind flag"
-    );
-    assert!(
-        rendered.contains("--kind after"),
-        "nudge instructions must reference the typed --kind flag"
-    );
+    assert!(rendered.contains("Bug fix:"));
+    assert!(rendered.contains("cannot-reproduce"));
+    assert!(!render(&base_vars()).contains("Bug fix:"));
 }
 
 #[test]
-fn cannot_reproduce_routes_to_escalate() {
-    // When the worker tagged an evidence file `cannot_reproduce`, the rule
-    // must instruct the reviewer to escalate, NOT to nudge for before/after.
+fn ci_failure_case_renders_only_for_ci_failures() {
     let mut vars = base_vars();
-    vars.insert("trigger", "gates_pass");
-    vars.insert("is_gates_pass", "true");
-    vars.insert("is_bug_fix", "true");
-    vars.insert("has_before_fix", "false");
-    vars.insert("has_after_fix", "false");
-    vars.insert("has_cannot_reproduce", "true");
-
+    vars.insert("trigger", "ci_failure");
+    vars.insert("is_ci_failure", "true");
     let rendered = render(&vars);
+    assert!(rendered.contains("CI failure:"));
+    assert!(rendered.contains("gh pr checks"));
 
-    assert!(
-        rendered.contains("`has_cannot_reproduce`: true"),
-        "cannot_reproduce flag must be surfaced to the prompt"
-    );
-    assert!(
-        rendered.contains("**escalate**: \"Worker reported the bug cannot be reproduced"),
-        "cannot_reproduce must route deterministically to escalate"
-    );
+    let mut other = base_vars();
+    other.insert("trigger", "timeout");
+    assert!(!render(&other).contains("CI failure:"));
+}
+
+// ── Deterministic-gate framing ──
+
+#[test]
+fn prompt_states_typed_gates_already_fired() {
+    // Rust owns the kind/freshness/motion gates now (see
+    // service::worker_context + service::deterministic). The prompt must say
+    // so, or the reviewer re-litigates checks it has no data for.
+    let rendered = render(&base_vars());
+    assert!(rendered.contains("enforced deterministically before this review"));
+    assert!(rendered.contains("missing-gate nudges have already fired"));
 }
 
 #[test]
-fn bug_fix_section_omitted_when_not_a_bug_fix() {
-    let mut vars = base_vars();
-    vars.insert("trigger", "gates_pass");
-    vars.insert("is_gates_pass", "true");
-    vars.insert("is_bug_fix", "");
-    vars.insert("has_before_fix", "false");
-    vars.insert("has_after_fix", "false");
-    vars.insert("has_cannot_reproduce", "false");
-
-    let rendered = render(&vars);
-
-    assert!(
-        !rendered.contains("Bug-fix evidence"),
-        "bug-fix section must not render when the task is not a bug fix"
-    );
-}
-
-#[test]
-fn ui_evidence_rule_surfaces_typed_screenshot_recording_gates() {
-    // Universal UI rule: every UI change requires a typed before screenshot,
-    // a typed after screenshot, and a typed after recording. The reviewer
-    // prompt must surface each new gate value and instruct nudges that name
-    // the missing artifact AND the `--kind` tag the worker must use. This
-    // applies regardless of `is_bug_fix` — the rule lives outside the bug-fix
-    // branch.
-    let mut vars = base_vars();
-    vars.insert("trigger", "gates_pass");
-    vars.insert("is_gates_pass", "true");
-    vars.insert("is_bug_fix", "");
-    vars.insert("has_screenshot", "false");
-    vars.insert("has_recording", "false");
-    vars.insert("has_before_screenshot", "false");
-    vars.insert("has_after_screenshot", "false");
-    vars.insert("has_after_recording", "false");
-
-    let rendered = render(&vars);
-
-    assert!(
-        rendered.contains("`has_before_screenshot`: false"),
-        "before-screenshot gate must be threaded through to the prompt"
-    );
-    assert!(
-        rendered.contains("`has_after_screenshot`: false"),
-        "after-screenshot gate must be threaded through to the prompt"
-    );
-    assert!(
-        rendered.contains("`has_after_recording`: false"),
-        "after-recording gate must be threaded through to the prompt"
-    );
-    assert!(
-        rendered.contains("before-state screenshot"),
-        "nudge wording must call out the missing before screenshot"
-    );
-    assert!(
-        rendered.contains("after-state screenshot"),
-        "nudge wording must call out the missing after screenshot"
-    );
-    assert!(
-        rendered.contains("after-state screen recording"),
-        "nudge wording must call out the missing after recording"
-    );
-    assert!(
-        rendered.contains("--kind before"),
-        "nudge instructions must reference the typed --kind before flag"
-    );
-    assert!(
-        rendered.contains("--kind after"),
-        "nudge instructions must reference the typed --kind after flag"
-    );
-    assert!(
-        !rendered.contains("Bug-fix evidence"),
-        "bug-fix branch must stay out when is_bug_fix is empty"
-    );
-}
-
-#[test]
-fn ui_evidence_rule_drops_satisfied_gates() {
-    // When all three new typed gates are true, the prompt still surfaces
-    // their values (so the reviewer can verify them) but the rendered
-    // output should report each as satisfied.
-    let mut vars = base_vars();
-    vars.insert("trigger", "gates_pass");
-    vars.insert("is_gates_pass", "true");
-    vars.insert("is_bug_fix", "");
-    vars.insert("has_screenshot", "true");
-    vars.insert("has_recording", "true");
-    vars.insert("has_before_screenshot", "true");
-    vars.insert("has_after_screenshot", "true");
-    vars.insert("has_after_recording", "true");
-
-    let rendered = render(&vars);
-
-    assert!(
-        rendered.contains("`has_before_screenshot`: true"),
-        "satisfied before-screenshot gate must surface as true"
-    );
-    assert!(
-        rendered.contains("`has_after_screenshot`: true"),
-        "satisfied after-screenshot gate must surface as true"
-    );
-    assert!(
-        rendered.contains("`has_after_recording`: true"),
-        "satisfied after-recording gate must surface as true"
-    );
-}
-
-#[test]
-fn ui_evidence_rule_renders_alongside_bug_fix_branch() {
-    // A bug-fix UI task triggers BOTH the universal UI gates and the
-    // bug-fix protocol section. The two branches are independent — the
-    // universal section sits outside `{% if is_bug_fix %}` so flipping
-    // the bug-fix flag doesn't drop the UI gate enforcement.
-    let mut vars = base_vars();
-    vars.insert("trigger", "gates_pass");
-    vars.insert("is_gates_pass", "true");
-    vars.insert("is_bug_fix", "true");
-    vars.insert("has_before_fix", "true");
-    vars.insert("has_after_fix", "true");
-    vars.insert("has_cannot_reproduce", "false");
-    vars.insert("has_before_screenshot", "false");
-    vars.insert("has_after_screenshot", "false");
-    vars.insert("has_after_recording", "false");
-
-    let rendered = render(&vars);
-
-    assert!(
-        rendered.contains("Bug-fix evidence"),
-        "bug-fix branch must still render when is_bug_fix is true"
-    );
-    assert!(
-        rendered.contains("`has_before_screenshot`: false"),
-        "universal UI gate must still be threaded through alongside the bug-fix branch"
-    );
-    assert!(
-        rendered.contains("`has_after_recording`: false"),
-        "after-recording gate must still surface for a bug-fix UI task"
-    );
+fn prompt_forbids_delegating_the_review() {
+    let rendered = render(&base_vars());
+    assert!(rendered.contains("Do not spawn subagents or delegate to review skills"));
 }

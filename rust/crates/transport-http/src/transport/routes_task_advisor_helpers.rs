@@ -93,7 +93,6 @@ pub(crate) fn action_eligible(intent: &str, status: &captain::ItemStatus) -> boo
                 | ItemStatus::Errored
                 | ItemStatus::HandedOff
         ),
-        "revise-plan" => matches!(status, ItemStatus::PlanReady),
         _ => matches!(
             status,
             ItemStatus::AwaitingReview
@@ -101,7 +100,6 @@ pub(crate) fn action_eligible(intent: &str, status: &captain::ItemStatus) -> boo
                 | ItemStatus::Errored
                 | ItemStatus::HandedOff
                 | ItemStatus::CompletedNoPr
-                | ItemStatus::PlanReady
         ),
     }
 }

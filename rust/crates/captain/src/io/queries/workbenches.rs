@@ -85,21 +85,6 @@ pub(crate) async fn insert_in_tx(
     Ok(id)
 }
 
-/// Increment `rev` only (no activity touch). The renderer's SSE cache
-/// patcher rejects same-or-older `rev`, so any out-of-band broadcast
-/// that carries a fresh derived field (e.g. `worktreeExists` flipping
-/// after the filesystem changed) must persist a higher rev first.
-pub async fn bump_rev(pool: &SqlitePool, id: i64) -> Result<bool> {
-    let result = sqlx::query(
-        "UPDATE workbenches SET rev = rev + 1 \
-         WHERE id = ? AND archived_at IS NULL AND deleted_at IS NULL",
-    )
-    .bind(id)
-    .execute(pool)
-    .await?;
-    Ok(result.rows_affected() > 0)
-}
-
 /// Bump `last_activity_at` to now and increment `rev`. Returns `true` if a row
 /// was updated. Skips archived/deleted rows so stale hook callbacks can't
 /// resurrect them in the sidebar.
@@ -119,15 +104,6 @@ pub async fn touch_activity(pool: &SqlitePool, id: i64) -> Result<bool> {
 pub async fn find_by_id(pool: &SqlitePool, id: i64) -> Result<Option<Workbench>> {
     let sql = format!("{} WHERE w.id = ?", select_sql());
     let row: Option<Row> = sqlx::query_as(&sql).bind(id).fetch_optional(pool).await?;
-    Ok(row.map(|r| r.into_workbench()))
-}
-
-pub async fn find_by_worktree(pool: &SqlitePool, worktree: &str) -> Result<Option<Workbench>> {
-    let sql = format!("{} WHERE w.worktree = ?", select_sql());
-    let row: Option<Row> = sqlx::query_as(&sql)
-        .bind(worktree)
-        .fetch_optional(pool)
-        .await?;
     Ok(row.map(|r| r.into_workbench()))
 }
 
@@ -214,58 +190,6 @@ pub async fn update_title(pool: &SqlitePool, id: i64, title: &str) -> Result<boo
         .execute(pool)
         .await?;
     Ok(result.rows_affected() > 0)
-}
-
-// ── Pending auto-title ──────────────────────────────────────────────
-
-/// Row returned by the pending-title query. Carries the CC session ID
-/// needed for auto-titling without leaking it into the public Workbench type.
-#[derive(Debug, sqlx::FromRow)]
-pub struct PendingTitleRow {
-    pub id: i64,
-    pub worktree: String,
-    pub title: String,
-    pub created_at: String,
-    pub pending_title_session: String,
-}
-
-/// Mark a workbench as needing auto-title generation for the given CC session.
-pub async fn set_pending_title_session(
-    pool: &SqlitePool,
-    id: i64,
-    session_id: &str,
-) -> Result<bool> {
-    let result =
-        sqlx::query("UPDATE workbenches SET pending_title_session = ?, rev = rev + 1 WHERE id = ?")
-            .bind(session_id)
-            .bind(id)
-            .execute(pool)
-            .await?;
-    Ok(result.rows_affected() > 0)
-}
-
-/// Clear the pending auto-title flag after success or permanent failure.
-pub async fn clear_pending_title_session(pool: &SqlitePool, id: i64) -> Result<bool> {
-    let result = sqlx::query(
-        "UPDATE workbenches SET pending_title_session = NULL, rev = rev + 1 WHERE id = ?",
-    )
-    .bind(id)
-    .execute(pool)
-    .await?;
-    Ok(result.rows_affected() > 0)
-}
-
-/// List workbenches that have a pending auto-title request.
-pub async fn list_pending_title(pool: &SqlitePool) -> Result<Vec<PendingTitleRow>> {
-    let rows: Vec<PendingTitleRow> = sqlx::query_as(
-        "SELECT id, worktree, title, created_at, pending_title_session \
-         FROM workbenches \
-         WHERE pending_title_session IS NOT NULL \
-           AND archived_at IS NULL AND deleted_at IS NULL",
-    )
-    .fetch_all(pool)
-    .await?;
-    Ok(rows)
 }
 
 pub async fn stale_archived(pool: &SqlitePool, older_than_days: i64) -> Result<Vec<Workbench>> {

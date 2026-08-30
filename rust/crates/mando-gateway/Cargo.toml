@@ -23,7 +23,6 @@ scout.workspace = true
 transport-http = { path = "../transport-http" }
 transport-tg = { path = "../transport-tg" }
 transport-ui = { path = "../transport-ui" }
-terminal.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 axum.workspace = true

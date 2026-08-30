@@ -95,13 +95,6 @@ pub struct ScoutAgentConfig {
     pub act_timeout_s: Duration,
     /// Max links to accept from a single research run.
     pub research_max_items: usize,
-    /// Retries for transient Anthropic errors (429/502/503/504/529) in
-    /// scout CC turns. Fatal statuses never retry. See `CcOneShot::run_with_retry`.
-    pub cc_max_retries: u32,
-}
-
-fn default_cc_max_retries() -> u32 {
-    2
 }
 
 fn default_research_max_items() -> usize {
@@ -118,7 +111,6 @@ impl Default for ScoutAgentConfig {
             qa_ttl_s: Duration::from_secs(600),
             act_timeout_s: Duration::from_secs(60),
             research_max_items: default_research_max_items(),
-            cc_max_retries: default_cc_max_retries(),
         }
     }
 }
