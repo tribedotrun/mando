@@ -454,7 +454,7 @@ async fn effective_rate_limit_remaining_secs(state: &AppState) -> anyhow::Result
     }
     let available = state
         .settings
-        .pick_worker_credential(None)
+        .pick_worker_credential()
         .await
         .unwrap_or(None)
         .is_some();

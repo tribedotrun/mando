@@ -38,7 +38,7 @@ use std::time::Duration;
 use anyhow::Result;
 use tracing::{info, warn};
 
-use global_claude::{CcConfig, CcResult};
+use global_claude::{CcConfig, CcConfigBuilder, CcResult};
 use global_types::now_rfc3339;
 
 /// Build a completed (Stopped) session log entry from a CcResult.
@@ -69,6 +69,45 @@ fn make_session_entry<'a>(
     }
 }
 
+/// Build the in-memory/persisted state for a session that just started.
+///
+/// `model` is the already-resolved effective model, stamped onto the session
+/// so follow-up turns reuse it instead of re-deriving one from the
+/// manager-wide default.
+fn new_session_state(
+    session_id: String,
+    model: String,
+    idle_ttl: Duration,
+    call_timeout: Duration,
+) -> CcSession {
+    let now = now_rfc3339();
+    CcSession {
+        session_id,
+        started_at: now.clone(),
+        idle_ttl_s: idle_ttl.as_secs(),
+        call_timeout_s: call_timeout.as_secs(),
+        last_active: now,
+        model: Some(model),
+    }
+}
+
+/// Builder for a follow-up (`--resume`) turn. Split out of `follow_up` so the
+/// model carried across turns is assertable without invoking CC.
+fn follow_up_builder(
+    model: &str,
+    cwd: &Path,
+    call_timeout: Duration,
+    caller: &str,
+    resume_sid: &str,
+) -> CcConfigBuilder {
+    CcConfig::builder()
+        .model(model)
+        .cwd(cwd.to_path_buf())
+        .timeout(call_timeout)
+        .caller(caller)
+        .resume(resume_sid)
+}
+
 /// A persistent multi-turn CC session.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct CcSession {
@@ -77,6 +116,16 @@ pub struct CcSession {
     pub idle_ttl_s: u64,
     pub call_timeout_s: u64,
     pub last_active: String,
+    /// Model this session was started with (already resolved: the caller's
+    /// explicit choice, else the manager default). Every follow-up turn
+    /// reuses it so a session opened on `models.captain` / `models.clarifier`
+    /// does not silently drop to the manager-wide default mid-conversation.
+    ///
+    /// `None` only for sessions persisted by a build that predates this
+    /// field; those fall back to the manager default via
+    /// [`CcSessionManager::turn_model`]. `Option` (rather than a serde
+    /// default) keeps those files recoverable without a fallback attribute.
+    pub model: Option<String>,
 }
 
 /// Summary of a CcSessionManager recover pass.
@@ -107,6 +156,16 @@ impl CcSessionManager {
             default_model: default_model.to_string(),
             pool,
         }
+    }
+
+    /// Model every turn of `session` must run on.
+    ///
+    /// Sessions started by this build always carry their resolved model, so
+    /// this returns it verbatim. The `default_model` fallback exists only for
+    /// sessions recovered from disk that were written before the model was
+    /// persisted.
+    fn turn_model<'a>(&'a self, session: &'a CcSession) -> &'a str {
+        session.model.as_deref().unwrap_or(&self.default_model)
     }
 
     /// Briefly lock the sessions map. The caller MUST NOT `.await` while the
@@ -221,6 +280,8 @@ impl CcSessionManager {
         task_id: Option<i64>,
         max_turns: Option<u32>,
     ) -> Result<CcResult<serde_json::Value>> {
+        // Resolve once. This exact string is what the CC run uses, what the
+        // `cc_sessions` row records, and what every follow-up turn reuses.
         let resolved_model = model.unwrap_or(&self.default_model).to_string();
         let model_ref = resolved_model.as_str();
         let cwd_ref = cwd;
@@ -255,28 +316,13 @@ impl CcSessionManager {
 
         crate::io::headless_cc::log_cc_session(
             &self.pool,
-            &make_session_entry(
-                &result,
-                cwd,
-                model.unwrap_or(&self.default_model),
-                key,
-                task_id,
-                false,
-                cred_id,
-            ),
+            &make_session_entry(&result, cwd, model_ref, key, task_id, false, cred_id),
         )
         .await?;
 
         let session_id = result.session_id.clone();
 
-        let now = now_rfc3339();
-        let session = CcSession {
-            session_id: session_id.clone(),
-            started_at: now.clone(),
-            idle_ttl_s: idle_ttl.as_secs(),
-            call_timeout_s: call_timeout.as_secs(),
-            last_active: now,
-        };
+        let session = new_session_state(session_id.clone(), resolved_model, idle_ttl, call_timeout);
 
         {
             let mut sessions = self.sessions_lock();
@@ -312,7 +358,12 @@ impl CcSessionManager {
         let key_ref = key;
         let session_sid = session.session_id.clone();
         let session_sid_ref = session_sid.as_str();
-        let model_ref = self.default_model.as_str();
+        // Reuse the model the session started with. Falling back to
+        // `default_model` here would silently move an /ops or clarifier
+        // session off `models.captain` / `models.clarifier` on turn two and
+        // record the wrong model in `cc_sessions`.
+        let turn_model = self.turn_model(&session).to_string();
+        let model_ref = turn_model.as_str();
         let call_timeout = Duration::from_secs(session.call_timeout_s);
         let result = settings::cc_failover::run_with_credential_failover(
             &self.pool,
@@ -325,14 +376,9 @@ impl CcSessionManager {
                 // path is the same id anyway since CC keeps the sid on
                 // --resume).
                 let resume_sid = ctx.resume_session_id.as_deref().unwrap_or(session_sid_ref);
-                let mut builder = CcConfig::builder()
-                    .model(model_ref)
-                    .cwd(cwd_ref.to_path_buf())
-                    .timeout(call_timeout)
-                    .caller(key_ref)
-                    .resume(resume_sid);
-                builder = global_claude::with_credential(builder, &ctx.credential);
-                builder.build()
+                let builder =
+                    follow_up_builder(model_ref, cwd_ref, call_timeout, key_ref, resume_sid);
+                global_claude::with_credential(builder, &ctx.credential).build()
             },
         )
         .await?;
@@ -340,7 +386,7 @@ impl CcSessionManager {
 
         crate::io::headless_cc::log_cc_session(
             &self.pool,
-            &make_session_entry(&result, cwd, &self.default_model, key, None, true, cred_id),
+            &make_session_entry(&result, cwd, model_ref, key, None, true, cred_id),
         )
         .await?;
 
@@ -399,5 +445,141 @@ impl CcSessionManager {
         let json = serde_json::to_string_pretty(session)?;
         std::fs::write(path, json)?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const DEFAULT_MODEL: &str = "sonnet";
+    const SESSION_MODEL: &str = "opus";
+
+    async fn manager(state_dir: PathBuf) -> CcSessionManager {
+        let pool = global_db::Db::open_in_memory()
+            .await
+            .expect("in-memory db")
+            .pool()
+            .clone();
+        CcSessionManager::new(state_dir, DEFAULT_MODEL, pool)
+    }
+
+    fn cc_result(session_id: &str) -> CcResult<serde_json::Value> {
+        CcResult {
+            text: String::new(),
+            structured: None,
+            session_id: session_id.to_string(),
+            cost_usd: Some(0.5),
+            duration_ms: Some(10),
+            duration_api_ms: None,
+            num_turns: Some(1),
+            errors: Vec::new(),
+            envelope: global_claude::CcEnvelope(serde_json::Value::Null),
+            stream_path: PathBuf::new(),
+            rate_limit: None,
+            pid: global_types::Pid::new(0),
+            credential_id: None,
+        }
+    }
+
+    /// A session opened on an explicit non-default model (`models.captain` /
+    /// `models.clarifier`) must run its follow-up turns on that same model and
+    /// record it — not fall back to the manager-wide default.
+    #[tokio::test]
+    async fn follow_up_reuses_and_records_the_starting_model() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mgr = manager(dir.path().to_path_buf()).await;
+
+        // What `start_locked` stamps onto the session for an explicit model.
+        let session = new_session_state(
+            "sid-1".to_string(),
+            SESSION_MODEL.to_string(),
+            Duration::from_secs(600),
+            Duration::from_secs(120),
+        );
+        assert_eq!(session.model.as_deref(), Some(SESSION_MODEL));
+
+        // What `follow_up` resolves for turn two.
+        let turn_model = mgr.turn_model(&session).to_string();
+        assert_eq!(turn_model, SESSION_MODEL);
+        assert_ne!(turn_model, DEFAULT_MODEL);
+
+        // The CC invocation actually carries it.
+        let config = follow_up_builder(
+            &turn_model,
+            Path::new("/tmp/wt"),
+            Duration::from_secs(session.call_timeout_s),
+            "ops",
+            &session.session_id,
+        )
+        .build();
+        assert_eq!(config.model, SESSION_MODEL);
+        assert_eq!(config.resume_session_id.as_deref(), Some("sid-1"));
+
+        // And the `cc_sessions` row records the same model.
+        let result = cc_result("sid-1");
+        let entry = make_session_entry(
+            &result,
+            Path::new("/tmp/wt"),
+            &turn_model,
+            "ops",
+            None,
+            true,
+            None,
+        );
+        assert_eq!(entry.model, SESSION_MODEL);
+        assert!(entry.resumed);
+    }
+
+    /// Persist/recover keeps the model, so a daemon restart mid-conversation
+    /// does not knock the session back to the default.
+    #[tokio::test]
+    async fn recovered_session_keeps_its_model() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mgr = manager(dir.path().to_path_buf()).await;
+        let session = new_session_state(
+            "sid-2".to_string(),
+            SESSION_MODEL.to_string(),
+            Duration::from_secs(600),
+            Duration::from_secs(120),
+        );
+        mgr.persist_session("ops", &session).expect("persist");
+
+        let restarted = manager(dir.path().to_path_buf()).await;
+        let stats = restarted.recover();
+        assert_eq!(stats.recovered, 1);
+        assert_eq!(stats.corrupt, 0);
+
+        let recovered = restarted
+            .sessions_lock()
+            .get("ops")
+            .cloned()
+            .expect("recovered session");
+        assert_eq!(restarted.turn_model(&recovered), SESSION_MODEL);
+    }
+
+    /// Session files written before the model was persisted still load, and
+    /// only those fall back to the manager default.
+    #[tokio::test]
+    async fn legacy_session_file_without_model_falls_back_to_default() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(
+            dir.path().join("ops.json"),
+            r#"{"session_id":"sid-3","started_at":"2026-08-29T00:00:00Z","idle_ttl_s":600,"call_timeout_s":120,"last_active":"2026-08-29T00:00:00Z"}"#,
+        )
+        .expect("write legacy session file");
+
+        let mgr = manager(dir.path().to_path_buf()).await;
+        let stats = mgr.recover();
+        assert_eq!(stats.recovered, 1);
+        assert_eq!(stats.corrupt, 0);
+
+        let recovered = mgr
+            .sessions_lock()
+            .get("ops")
+            .cloned()
+            .expect("recovered session");
+        assert_eq!(recovered.model, None);
+        assert_eq!(mgr.turn_model(&recovered), DEFAULT_MODEL);
     }
 }

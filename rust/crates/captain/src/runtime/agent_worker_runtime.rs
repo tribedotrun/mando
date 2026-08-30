@@ -139,6 +139,21 @@ fn implementation_worker_model(
         .unwrap_or_else(|| legacy_model.to_string())
 }
 
+/// Model a Claude rebase worker runs on: the same resolution the initial
+/// worker spawn uses, so a task pinned to a non-default implementation model
+/// keeps it. No persisted model — rebase mints a fresh session id. Provider is
+/// pinned to Claude because only the Claude arm of
+/// `agent_runtime::spawn_rebase_worker` consumes this model.
+pub(crate) fn claude_rebase_worker_model(item: &Task, workflow: &CaptainWorkflow) -> String {
+    implementation_worker_model(
+        item,
+        workflow,
+        global_types::TaskProvider::Claude,
+        &workflow.models.worker,
+        None,
+    )
+}
+
 fn codex_agent_config_for_worker(
     item: &Task,
     workflow: &CaptainWorkflow,
@@ -229,7 +244,7 @@ async fn spawn_claude_worker(
         }
     }
 
-    let credential = super::tick_spawn::pick_credential(pool, Some("worker")).await;
+    let credential = super::tick_spawn::pick_credential(pool).await;
     if credential.is_none() {
         if let Ok(true) = settings::credentials::has_any(pool).await {
             let remaining = settings::credentials::earliest_cooldown_remaining_secs(pool)
@@ -377,7 +392,10 @@ pub(crate) async fn resume_worker(
                 cwd,
                 prompt,
                 session_id,
-                &worker_model,
+                super::claude_worker_control::ClaudeRun {
+                    model: &worker_model,
+                    effort: workflow.agent.cc_effort,
+                },
             )
             .await?;
             Ok(AgentWorkerResume {
@@ -614,6 +632,47 @@ stages:
         assert_eq!(
             agent_config.ops_timeout_s,
             std::time::Duration::from_secs(9)
+        );
+    }
+
+    /// Rebase must land on the same implementation model the initial worker
+    /// spawn resolved, not the raw `workflow.models.worker` default.
+    #[test]
+    fn rebase_worker_reuses_the_implementation_stage_model() {
+        let workflow = workflow_with_implementation_stage("claude", "stage-claude-model");
+        let mut item = Task::new("worker");
+        item.provider = TaskProvider::Claude;
+        item.use_glm_worker = true;
+
+        assert_eq!(
+            claude_rebase_worker_model(&item, &workflow),
+            "stage-claude-model"
+        );
+        assert_eq!(
+            claude_rebase_worker_model(&item, &workflow),
+            implementation_worker_model(
+                &item,
+                &workflow,
+                TaskProvider::Claude,
+                &workflow.models.worker,
+                None,
+            ),
+            "rebase must mirror the initial worker spawn's model resolution"
+        );
+    }
+
+    /// A Codex implementation stage must not leak its model into a Claude
+    /// rebase spawn.
+    #[test]
+    fn rebase_worker_ignores_a_non_claude_stage_model() {
+        let workflow = workflow_with_implementation_stage("codex", "stage-codex-model");
+        let mut item = Task::new("worker");
+        item.provider = TaskProvider::Claude;
+        item.use_glm_worker = true;
+
+        assert_eq!(
+            claude_rebase_worker_model(&item, &workflow),
+            workflow.models.worker
         );
     }
 

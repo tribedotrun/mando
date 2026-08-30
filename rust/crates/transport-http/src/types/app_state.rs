@@ -12,7 +12,6 @@ pub struct AppState {
     pub captain: Arc<captain::CaptainRuntime>,
     pub scout: Arc<scout::ScoutRuntime>,
     pub sessions: Arc<sessions::SessionsRuntime>,
-    pub terminal: Arc<terminal::TerminalRuntime>,
     pub start_time: Instant,
     pub listen_port: u16,
     pub task_tracker: TaskTracker,

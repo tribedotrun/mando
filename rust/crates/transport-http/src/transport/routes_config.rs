@@ -221,10 +221,7 @@ mod tests {
             "autoMerge": false,
             "maxConcurrentWorkers": null,
             "tickIntervalS": 30,
-            "tz": "UTC",
-            "defaultTerminalAgent": "claude",
-            "claudeTerminalArgs": "--dangerously-skip-permissions",
-            "codexTerminalArgs": "--sandbox danger-full-access --ask-for-approval never"
+            "tz": "UTC"
           },
           "scout": {
             "interests": { "high": [], "low": [] },

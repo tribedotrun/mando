@@ -13,30 +13,17 @@ use crate::response::{
 };
 use crate::AppState;
 
-pub(crate) fn task_create_provider_from_terminal(
-    terminal_agent: api_types::TerminalAgent,
+pub(crate) fn task_create_provider_from_agent(
+    task_agent: api_types::TaskAgent,
 ) -> api_types::TaskCreateProvider {
-    match terminal_agent {
-        api_types::TerminalAgent::Claude => api_types::TaskCreateProvider::Claude,
-        api_types::TerminalAgent::Codex => api_types::TaskCreateProvider::Codex,
+    match task_agent {
+        api_types::TaskAgent::Claude => api_types::TaskCreateProvider::Claude,
+        api_types::TaskAgent::Codex => api_types::TaskCreateProvider::Codex,
     }
 }
 
 pub(crate) fn default_task_provider(config: &settings::Config) -> api_types::TaskProvider {
-    task_create_provider_from_terminal(config.captain.default_task_agent).as_task_provider()
-}
-
-fn validate_task_create_planning_provider(
-    planning: Option<&str>,
-    provider: api_types::TaskProvider,
-) -> Result<(), ApiError> {
-    if planning == Some("true") && provider == api_types::TaskProvider::Codex {
-        return Err(error_response(
-            StatusCode::BAD_REQUEST,
-            "planning mode currently requires Claude Code",
-        ));
-    }
-    Ok(())
+    task_create_provider_from_agent(config.captain.default_task_agent).as_task_provider()
 }
 
 /// Extract a text field from a multipart part, returning `Ok(None)` if empty.
@@ -58,7 +45,6 @@ struct TaskAddMultipartFields {
     plan: Option<String>,
     no_pr: Option<String>,
     no_auto_merge: Option<String>,
-    planning: Option<String>,
     source: Option<String>,
     saved_images: Vec<String>,
 }
@@ -93,7 +79,6 @@ async fn extract_task_add_multipart(
                 "no_auto_merge" => {
                     fields.no_auto_merge = field_text(field).await?.or(fields.no_auto_merge.take())
                 }
-                "planning" => fields.planning = field_text(field).await?.or(fields.planning.take()),
                 "source" => fields.source = field_text(field).await?.or(fields.source.take()),
                 "images" => {
                     fields
@@ -162,7 +147,6 @@ pub(crate) async fn post_task_add(
         plan,
         no_pr,
         no_auto_merge,
-        planning,
         source,
         saved_images,
     } = extract_task_add_multipart(multipart).await?;
@@ -173,7 +157,7 @@ pub(crate) async fn post_task_add(
     }
 
     let config = state.settings.load_config();
-    let default_provider = task_create_provider_from_terminal(config.captain.default_task_agent);
+    let default_provider = task_create_provider_from_agent(config.captain.default_task_agent);
     let provider = match provider
         .as_deref()
         .unwrap_or(default_provider.as_str())
@@ -193,11 +177,6 @@ pub(crate) async fn post_task_add(
         Some("false") => false,
         _ => config.captain.default_glm_implementation,
     };
-    if let Err(err) = validate_task_create_planning_provider(planning.as_deref(), provider) {
-        crate::image_upload::cleanup_saved_images(&saved_images).await;
-        return Err(err);
-    }
-
     // Validate project name before calling add_task so the client gets a 400
     // with the helpful message instead of a generic 500.
     if let Some(ref name) = repo {
@@ -274,21 +253,7 @@ pub(crate) async fn post_task_add(
             }
         }
 
-        if let Some(ref value) = planning {
-            state
-                .captain
-                .set_task_planning(task_id, value == "true")
-                .await
-                .map_err(|e| {
-                    crate::response::internal_error_with(
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        e,
-                        "failed to update task planning",
-                    )
-                })?;
-        }
-
-        if plan.is_some() || planning.is_some() {
+        if plan.is_some() {
             state
                 .captain
                 .queue_item(task_id, "task_add")
@@ -490,7 +455,7 @@ mod tests {
     #[test]
     fn default_task_provider_honors_codex_setting() {
         let mut config = settings::Config::default();
-        config.captain.default_task_agent = api_types::TerminalAgent::Codex;
+        config.captain.default_task_agent = api_types::TaskAgent::Codex;
 
         assert_eq!(
             default_task_provider(&config),
@@ -501,31 +466,12 @@ mod tests {
     #[test]
     fn default_task_provider_honors_claude_setting() {
         let mut config = settings::Config::default();
-        config.captain.default_task_agent = api_types::TerminalAgent::Claude;
+        config.captain.default_task_agent = api_types::TaskAgent::Claude;
 
         assert_eq!(
             default_task_provider(&config),
             api_types::TaskProvider::Claude
         );
-    }
-
-    #[test]
-    fn planning_mode_rejects_codex_task_provider() {
-        let err =
-            validate_task_create_planning_provider(Some("true"), api_types::TaskProvider::Codex)
-                .unwrap_err();
-
-        assert_eq!(err.0, StatusCode::BAD_REQUEST);
-        assert_eq!(
-            err.1 .0.error,
-            "planning mode currently requires Claude Code"
-        );
-    }
-
-    #[test]
-    fn planning_mode_accepts_claude_task_provider() {
-        validate_task_create_planning_provider(Some("true"), api_types::TaskProvider::Claude)
-            .unwrap();
     }
 
     #[tokio::test]

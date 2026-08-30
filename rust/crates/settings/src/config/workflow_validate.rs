@@ -13,7 +13,6 @@ use global_claude::CcStreamSymptom;
 /// would silently disable broken-session detection for that failure mode.
 /// Keep this list in sync with the enum.
 const REQUIRED_STREAM_SYMPTOMS: &[CcStreamSymptom] = &[
-    CcStreamSymptom::ImageDimensionLimit,
     CcStreamSymptom::StreamIdleTimeout,
     CcStreamSymptom::RateLimitAborted,
     CcStreamSymptom::IsError,
@@ -22,11 +21,11 @@ const REQUIRED_STREAM_SYMPTOMS: &[CcStreamSymptom] = &[
     CcStreamSymptom::SessionInterrupted,
 ];
 
-/// Required prompt keys for captain workflow.
+/// Required prompt keys for captain workflow. Shared partials (`_`-prefixed)
+/// are not listed — they are reached through `{% include %}`, so a missing one
+/// surfaces as a render error on the prompt that includes it.
 const REQUIRED_CAPTAIN_PROMPTS: &[&str] = &[
-    "worker_initial",
-    "worker_briefed",
-    "worker_continue",
+    "worker",
     "clarifier",
     "interactive_clarifier",
     "captain_review",
@@ -37,25 +36,23 @@ const REQUIRED_CAPTAIN_PROMPTS: &[&str] = &[
     "advisor_reopen_synthesis",
     "advisor_reopen_direct",
     "reopen_resume",
+    "reopen_context",
     "review_reopen_message",
+    "mergeability_issue_draft",
+    "mergeability_issue_missing_evidence",
+    "mergeability_issue_stale_evidence",
     "captain_merge",
-    "todo_parse",
-    "planning_initial",
-    "planning_cc_feedback",
-    "planning_codex_feedback",
-    "planning_synthesize",
-    "planning_final",
 ];
 
 /// Required nudge keys for captain workflow.
 const REQUIRED_CAPTAIN_NUDGES: &[&str] = &[
     "unresolved_threads",
     "missing_work_summary",
+    "draft_pr",
     "missing_evidence",
     "stale_evidence",
     "stale_work_summary",
     "stream_stale",
-    "image_dimension_blocked",
     "reopen_ack",
     "nudge_default",
     "nopr_insufficient_output",

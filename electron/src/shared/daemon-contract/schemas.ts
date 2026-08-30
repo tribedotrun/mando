@@ -179,11 +179,8 @@ export const captainConfigSchema = z
     maxConcurrentWorkers: z.number().nullable(),
     tickIntervalS: z.number(),
     tz: z.string(),
-    defaultTaskAgent: z.lazy(() => terminalAgentSchema),
-    defaultTerminalAgent: z.lazy(() => terminalAgentSchema),
+    defaultTaskAgent: z.lazy(() => taskAgentSchema),
     defaultGlmImplementation: z.boolean(),
-    claudeTerminalArgs: z.string(),
-    codexTerminalArgs: z.string(),
     projects: z.record(
       z.string(),
       z.lazy(() => projectConfigSchema),
@@ -261,7 +258,6 @@ export const clarifyResponseSchema = z
 export const classifyRuleSchema = z
   .object({ category: z.string(), patterns: z.array(z.string()) })
   .strict();
-export const cleanupWorktreesRequestSchema = z.object({ dry_run: z.boolean().optional() }).strict();
 export const clientLogBatchRequestSchema = z
   .object({ entries: z.array(z.lazy(() => clientLogEntrySchema)) })
   .strict();
@@ -344,15 +340,6 @@ export const codexResetCreditsResponseSchema = z
 export const configPayloadSchema = z
   .object({ ts: z.number(), data: z.lazy(() => mandoConfigSchema).nullable() })
   .strict();
-export const configSaveResponseSchema = z
-  .object({
-    ok: z.boolean(),
-    restartRequired: z.boolean(),
-    taskDbPath: z.string(),
-    workerHealthPath: z.string(),
-    lockfilePath: z.string(),
-  })
-  .strict();
 export const configSetupRequestSchema = z
   .object({ config: z.lazy(() => mandoConfigSchema).optional() })
   .strict();
@@ -427,9 +414,6 @@ export const credentialInfoSchema = z
       .optional(),
   })
   .strict();
-export const credentialListResponseSchema = z
-  .object({ credentials: z.array(z.lazy(() => credentialInfoSchema)) })
-  .strict();
 export const credentialMutationResponseSchema = z
   .object({ ok: z.boolean(), error: z.string().nullable() })
   .strict();
@@ -441,9 +425,6 @@ export const credentialPickRequestSchema = z
   .strict();
 export const credentialPickResponseSchema = z
   .object({ pick: z.lazy(() => credentialPickSchema).nullable() })
-  .strict();
-export const credentialProbeResponseSchema = z
-  .object({ ok: z.boolean(), snapshot: z.lazy(() => credentialUsageSnapshotSchema) })
   .strict();
 export const credentialProviderSchema = z.enum(['claude', 'codex']);
 export const credentialRateLimitStatusSchema = z.enum(['allowed', 'allowed_warning', 'rejected']);
@@ -518,16 +499,6 @@ export const eventMetaSchema = z
     isSidechain: z.boolean().nullable(),
   })
   .strict();
-export const evidenceCreatedResponseSchema = z
-  .object({
-    artifact_id: z.number(),
-    task_id: z.number(),
-    media: z.array(z.lazy(() => artifactMediaSchema)),
-  })
-  .strict();
-export const evidenceFileInputSchema = z
-  .object({ filename: z.string(), ext: z.string(), caption: z.string() })
-  .strict();
 export const evidenceFileRequestSchema = z
   .object({
     filename: z.string(),
@@ -535,9 +506,6 @@ export const evidenceFileRequestSchema = z
     caption: z.string(),
     kind: z.lazy(() => evidenceKindSchema).nullable(),
   })
-  .strict();
-export const evidenceFilesRequestSchema = z
-  .object({ files: z.array(z.lazy(() => evidenceFileInputSchema)) })
   .strict();
 export const evidenceKindSchema = z.enum(['before_fix', 'after_fix', 'cannot_reproduce', 'other']);
 export const featuresConfigSchema = z
@@ -621,7 +589,6 @@ export const itemStatusSchema = z.enum([
   'errored',
   'merged',
   'completed-no-pr',
-  'plan-ready',
   'canceled',
   'stopped',
 ]);
@@ -642,9 +609,6 @@ export const mcpToolNameSchema = z.object({ server: z.string(), tool: z.string()
 export const mergeRequestSchema = z.object({ pr_number: z.number(), project: z.string() }).strict();
 export const mergeResponseSchema = z
   .object({ status: z.lazy(() => itemStatusSchema), item_id: z.number(), pr: z.number() })
-  .strict();
-export const messagesQuerySchema = z
-  .object({ limit: z.number().nullable(), offset: z.number().nullable() })
   .strict();
 export const modelUsageBreakdownSchema = z
   .object({
@@ -739,8 +703,6 @@ export const nudgeResponseSchema = z
   .strict();
 export const opaqueInputSchema = z.object({ raw: z.string() }).strict();
 export const otherToolNameSchema = z.object({ name: z.string() }).strict();
-export const parseTodosRequestSchema = z.object({ text: z.string(), project: z.string() }).strict();
-export const parseTodosResponseSchema = z.object({ items: z.array(z.string()) }).strict();
 export const permissionDenialSchema = z
   .object({
     toolName: z.string().nullable(),
@@ -763,15 +725,6 @@ export const probeCredentialResponseSchema = z
   })
   .strict();
 export const processResponseSchema = z.object({ ok: z.boolean(), processed: z.number() }).strict();
-export const projectAddResponseSchema = z
-  .object({
-    ok: z.boolean(),
-    name: z.string(),
-    path: z.string(),
-    githubRepo: z.string().nullable(),
-    logo: z.string().nullable(),
-  })
-  .strict();
 export const projectConfigSchema = z
   .object({
     name: z.string(),
@@ -790,9 +743,6 @@ export const projectDeleteResponseSchema = z
   .object({ ok: z.boolean(), deleted_tasks: z.number() })
   .strict();
 export const projectNameParamsSchema = z.object({ name: z.string() }).strict();
-export const projectPatchResponseSchema = z
-  .object({ ok: z.boolean(), logo: z.string().nullable() })
-  .strict();
 export const projectSummarySchema = z
   .object({
     key: z.string(),
@@ -1071,8 +1021,6 @@ export const sessionCategorySchema = z.enum([
   'captain-review',
   'captain-ops',
   'advisor',
-  'planning',
-  'todo-parser',
   'scout',
   'rebase',
 ]);
@@ -1189,17 +1137,6 @@ export const sessionsQuerySchema = z
     status: z.lazy(() => sessionStatusSchema).nullable(),
   })
   .strict();
-export const sessionsResponseSchema = z
-  .object({
-    total: z.number(),
-    page: z.number(),
-    per_page: z.number(),
-    total_pages: z.number(),
-    categories: z.record(z.string(), z.number()),
-    total_cost_usd: z.number().nullable(),
-    sessions: z.array(z.lazy(() => sessionEntrySchema)),
-  })
-  .strict();
 export const setupTokenRequestSchema = z.object({ label: z.string(), token: z.string() }).strict();
 export const setupTokenResponseSchema = z
   .object({ ok: z.boolean(), id: z.number().nullable(), label: z.string().nullable() })
@@ -1248,7 +1185,6 @@ export const sseSnapshotDataSchema = z
     tasks: z.array(z.lazy(() => taskItemSchema)),
     workers: z.array(z.lazy(() => workerDetailSchema)),
     workbenches: z.array(z.lazy(() => workbenchItemSchema)),
-    terminals: z.array(z.lazy(() => terminalSessionInfoSchema)),
     config: z.lazy(() => mandoConfigSchema),
     daemon: z.lazy(() => sseDaemonInfoSchema),
   })
@@ -1273,9 +1209,6 @@ export const statusPayloadSchema = z
   .strict();
 export const stopWorkersResponseSchema = z.object({ killed: z.number() }).strict();
 export const structuredOutputInputSchema = z.object({ raw: z.string() }).strict();
-export const summaryCreatedResponseSchema = z
-  .object({ artifact_id: z.number(), task_id: z.number() })
-  .strict();
 export const syncCodexCredentialRequestSchema = z
   .object({ credentialId: z.number(), authJson: z.string() })
   .strict();
@@ -1368,6 +1301,7 @@ export const taskAddRequestSchema = z
     no_pr: z.boolean(),
   })
   .strict();
+export const taskAgentSchema = z.enum(['claude', 'codex']);
 export const taskArtifactSchema = z
   .object({
     id: z.number(),
@@ -1380,9 +1314,6 @@ export const taskArtifactSchema = z
   .strict();
 export const taskAskRequestSchema = z
   .object({ id: z.number(), question: z.string(), ask_id: z.string().optional() })
-  .strict();
-export const taskBulkRequestSchema = z
-  .object({ ids: z.array(z.number()), updates: z.lazy(() => taskBulkUpdatesSchema) })
   .strict();
 export const taskBulkUpdateRequestSchema = z
   .object({ ids: z.array(z.number()), updates: z.lazy(() => taskBulkUpdatesSchema) })
@@ -1420,9 +1351,6 @@ export const taskFeedbackRequestSchema = z
   .strict();
 export const taskIdParamsSchema = z.object({ id: z.number() }).strict();
 export const taskIdRequestSchema = z.object({ id: z.number() }).strict();
-export const taskImplementRequestSchema = z
-  .object({ id: z.number(), message: z.string() })
-  .strict();
 export const taskInputSchema = z
   .object({ description: z.string(), prompt: z.string(), subagentType: z.string().nullable() })
   .strict();
@@ -1451,7 +1379,6 @@ export const taskItemSchema = z
     plan: z.string().nullable(),
     no_pr: z.boolean(),
     no_auto_merge: z.boolean(),
-    planning: z.boolean(),
     is_bug_fix: z.boolean(),
     resource: z.string().nullable(),
     images: z.string().nullable(),
@@ -1525,52 +1452,6 @@ export const telegramReplyMarkupSchema = z.union([
 export const telegraphPublishResponseSchema = z
   .object({ ok: z.boolean(), url: z.string() })
   .strict();
-export const terminalAgentSchema = z.enum(['claude', 'codex']);
-export const terminalCcSessionRequestSchema = z.object({ ccSessionId: z.string() }).strict();
-export const terminalCreateRequestSchema = z
-  .object({
-    project: z.string(),
-    cwd: z.string(),
-    agent: z.lazy(() => terminalAgentSchema),
-    resume_session_id: z.string().optional(),
-    size: z.lazy(() => terminalSizeSchema).optional(),
-    terminal_id: z.string().optional(),
-    name: z.string().optional(),
-    workbenchId: z.number(),
-  })
-  .strict();
-export const terminalExitPayloadSchema = z.object({ code: z.number().nullable() }).strict();
-export const terminalIdParamsSchema = z.object({ id: z.string() }).strict();
-export const terminalOutputPayloadSchema = z.object({ dataB64: z.string() }).strict();
-export const terminalSessionInfoSchema = z
-  .object({
-    id: z.string(),
-    rev: z.number(),
-    project: z.string(),
-    cwd: z.string(),
-    agent: z.lazy(() => terminalAgentSchema),
-    running: z.boolean(),
-    exit_code: z.number().nullable(),
-    state: z.lazy(() => terminalStateSchema).nullable(),
-    restored: z.boolean().nullable(),
-    createdAt: z.string().nullable(),
-    endedAt: z.string().nullable(),
-    terminalId: z.string().nullable(),
-    name: z.string().nullable(),
-    ccSessionId: z.string().nullable(),
-    workbenchId: z.number(),
-  })
-  .strict();
-export const terminalSizeSchema = z.object({ rows: z.number(), cols: z.number() }).strict();
-export const terminalStateSchema = z.enum(['live', 'restored', 'exited']);
-export const terminalStreamEnvelopeSchema = z.union([
-  z
-    .object({ event: z.literal('output'), data: z.lazy(() => terminalOutputPayloadSchema) })
-    .strict(),
-  z.object({ event: z.literal('exit'), data: z.lazy(() => terminalExitPayloadSchema) }).strict(),
-]);
-export const terminalStreamQuerySchema = z.object({ replay: z.number().nullable() }).strict();
-export const terminalWriteRequestSchema = z.object({ data: z.string() }).strict();
 export const tickActionSchema = z
   .object({
     worker: z.string(),
@@ -1669,7 +1550,6 @@ export const timelineEventPayloadSchema = z.union([
       session_id: z.string(),
     })
     .strict(),
-  z.object({ event_type: z.literal('worker_completed') }).strict(),
   z
     .object({
       event_type: z.literal('captain_review_started'),
@@ -1745,8 +1625,6 @@ export const timelineEventPayloadSchema = z.union([
     })
     .strict(),
   z.object({ event_type: z.literal('auto_merge_triage') }).strict(),
-  z.object({ event_type: z.literal('auto_merge_triage_failed') }).strict(),
-  z.object({ event_type: z.literal('auto_merge_triage_exhausted') }).strict(),
   z
     .object({
       event_type: z.literal('awaiting_review'),
@@ -1911,20 +1789,6 @@ export const timelineEventPayloadSchema = z.union([
   z
     .object({ event_type: z.literal('human_ask_failed'), question: z.string(), error: z.string() })
     .strict(),
-  z.object({ event_type: z.literal('evidence_updated') }).strict(),
-  z.object({ event_type: z.literal('work_summary_updated') }).strict(),
-  z
-    .object({
-      event_type: z.literal('planning_round'),
-      round: z.number(),
-      cc_feedback_len: z.number(),
-      codex_feedback_len: z.number(),
-    })
-    .strict(),
-  z
-    .object({ event_type: z.literal('plan_completed'), diagram: z.string(), plan: z.string() })
-    .strict(),
-  z.object({ event_type: z.literal('plan_ready') }).strict(),
 ]);
 export const timelineResponseSchema = z
   .object({ id: z.string(), events: z.array(z.lazy(() => timelineEventSchema)), count: z.number() })
@@ -1932,7 +1796,6 @@ export const timelineResponseSchema = z
 export const todoWriteInputSchema = z
   .object({ todos: z.array(z.lazy(() => ccTodoItemSchema)) })
   .strict();
-export const tokenResponseSchema = z.object({ token: z.string() }).strict();
 export const toolInputSchema = z.union([
   z.object({ kind: z.literal('bash'), data: z.lazy(() => bashInputSchema) }).strict(),
   z.object({ kind: z.literal('read'), data: z.lazy(() => readInputSchema) }).strict(),
@@ -2186,7 +2049,6 @@ export const webSearchInputSchema = z
     blockedDomains: z.array(z.string()).nullable(),
   })
   .strict();
-export const workSummaryRequestSchema = z.object({ content: z.string() }).strict();
 export const workbenchEventDataSchema = z
   .object({ action: z.string().nullable(), item: z.lazy(() => workbenchItemSchema).nullable() })
   .strict();
@@ -2246,7 +2108,6 @@ export const workerDetailSchema = z
     is_stale: z.boolean().nullable(),
   })
   .strict();
-export const workerIdParamsSchema = z.object({ id: z.string() }).strict();
 export const workersResponseSchema = z
   .object({
     workers: z.array(z.lazy(() => workerDetailSchema)),
@@ -2279,7 +2140,6 @@ export const resSchemas = {
   deleteProjectsByName: projectDeleteResponseSchema,
   deleteScoutItemsById: scoutDeleteResponseSchema,
   deleteTasks: deleteTasksResponseSchema,
-  deleteTerminalById: boolOkResponseSchema,
   getChannels: channelsResponseSchema,
   getConfig: mandoConfigSchema,
   getConfigStatus: configStatusResponseSchema,
@@ -2313,7 +2173,6 @@ export const resSchemas = {
   getTasksByIdPrsummary: prSummaryResponseSchema,
   getTasksByIdSessions: itemSessionsResponseSchema,
   getTasksByIdTimeline: timelineResponseSchema,
-  getTerminal: z.array(terminalSessionInfoSchema),
   getWorkbenches: workbenchesResponseSchema,
   getWorkers: workersResponseSchema,
   getWorktrees: worktreeListResponseSchema,
@@ -2321,7 +2180,6 @@ export const resSchemas = {
   patchScoutItemsById: boolOkResponseSchema,
   patchTasksById: boolOkResponseSchema,
   patchWorkbenchesById: workbenchItemSchema,
-  postAiParsetodos: parseTodosResponseSchema,
   postCaptainAdopt: taskCreateResponseSchema,
   postCaptainNudge: nudgeResponseSchema,
   postCaptainStop: stopWorkersResponseSchema,
@@ -2366,19 +2224,12 @@ export const resSchemas = {
   postTasksCancel: boolOkResponseSchema,
   postTasksDelete: deleteTasksResponseSchema,
   postTasksHandoff: boolOkResponseSchema,
-  postTasksImplement: boolOkResponseSchema,
   postTasksMerge: mergeResponseSchema,
-  postTasksQueue: boolOkResponseSchema,
   postTasksReopen: boolOkResponseSchema,
   postTasksResumeratelimited: boolOkResponseSchema,
   postTasksRetry: boolOkResponseSchema,
   postTasksRework: boolOkResponseSchema,
   postTasksStop: boolOkResponseSchema,
-  postTerminal: terminalSessionInfoSchema,
-  postTerminalByIdActivity: boolTouchedResponseSchema,
-  postTerminalByIdCcsession: boolOkResponseSchema,
-  postTerminalByIdResize: boolOkResponseSchema,
-  postTerminalByIdWrite: boolOkResponseSchema,
   postUiLaunch: boolOkResponseSchema,
   postUiQuitting: boolOkResponseSchema,
   postUiRegister: boolOkResponseSchema,
@@ -2394,7 +2245,6 @@ export const resSchemas = {
 export const eventSchemas = {
   getEvents: sseEnvelopeSchema,
   getSessionsByIdEventsStream: transcriptEventEnvelopeSchema,
-  getTerminalByIdStream: terminalStreamEnvelopeSchema,
 } as const;
 export const bodySchemas = {
   deleteTasks: taskDeleteRequestSchema,
@@ -2402,7 +2252,6 @@ export const bodySchemas = {
   patchScoutItemsById: scoutLifecycleCommandRequestSchema,
   patchTasksById: taskPatchRequestSchema,
   patchWorkbenchesById: workbenchPatchRequestSchema,
-  postAiParsetodos: parseTodosRequestSchema,
   postCaptainAdopt: adoptRequestSchema,
   postCaptainNudge: nudgeRequestSchema,
   postCaptainStop: emptyRequestSchema,
@@ -2447,19 +2296,12 @@ export const bodySchemas = {
   postTasksCancel: taskIdRequestSchema,
   postTasksDelete: taskDeleteRequestSchema,
   postTasksHandoff: taskIdRequestSchema,
-  postTasksImplement: taskImplementRequestSchema,
   postTasksMerge: mergeRequestSchema,
-  postTasksQueue: taskIdRequestSchema,
   postTasksReopen: taskFeedbackRequestSchema,
   postTasksResumeratelimited: taskIdRequestSchema,
   postTasksRetry: taskIdRequestSchema,
   postTasksRework: taskFeedbackRequestSchema,
   postTasksStop: taskIdRequestSchema,
-  postTerminal: terminalCreateRequestSchema,
-  postTerminalByIdActivity: emptyRequestSchema,
-  postTerminalByIdCcsession: terminalCcSessionRequestSchema,
-  postTerminalByIdResize: terminalSizeSchema,
-  postTerminalByIdWrite: terminalWriteRequestSchema,
   postUiLaunch: emptyRequestSchema,
   postUiQuitting: emptyRequestSchema,
   postUiRegister: uiRegisterRequestSchema,
@@ -2479,7 +2321,6 @@ export const querySchemas = {
   getSessionsByIdStream: sessionStreamQuerySchema,
   getTasks: taskListQuerySchema,
   getTasksByIdSessions: sessionsQuerySchema,
-  getTerminalByIdStream: terminalStreamQuerySchema,
   getWorkbenches: workbenchListQuerySchema,
   postTasksByIdClarify: clarifyQuerySchema,
 } as const;
@@ -2487,7 +2328,6 @@ export const paramsSchemas = {
   deleteCredentialsById: credentialIdParamsSchema,
   deleteProjectsByName: projectNameParamsSchema,
   deleteScoutItemsById: scoutItemIdParamsSchema,
-  deleteTerminalById: terminalIdParamsSchema,
   getArtifactsByIdMediaByIndex: artifactMediaParamsSchema,
   getCredentialsByIdToken: credentialIdParamsSchema,
   getCredentialsCodexByIdResetcredits: credentialIdParamsSchema,
@@ -2511,7 +2351,6 @@ export const paramsSchemas = {
   getTasksByIdPrsummary: taskIdParamsSchema,
   getTasksByIdSessions: taskIdParamsSchema,
   getTasksByIdTimeline: taskIdParamsSchema,
-  getTerminalByIdStream: terminalIdParamsSchema,
   patchProjectsByName: projectNameParamsSchema,
   patchScoutItemsById: scoutItemIdParamsSchema,
   patchTasksById: taskIdParamsSchema,
@@ -2527,9 +2366,5 @@ export const paramsSchemas = {
   postTasksByIdClarify: taskIdParamsSchema,
   postTasksByIdEvidence: taskIdParamsSchema,
   postTasksByIdSummary: taskIdParamsSchema,
-  postTerminalByIdActivity: terminalIdParamsSchema,
-  postTerminalByIdCcsession: terminalIdParamsSchema,
-  postTerminalByIdResize: terminalIdParamsSchema,
-  postTerminalByIdWrite: terminalIdParamsSchema,
   putArtifactsByIdMedia: artifactIdParamsSchema,
 } as const;

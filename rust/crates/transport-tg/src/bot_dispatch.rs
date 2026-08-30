@@ -141,7 +141,7 @@ pub(crate) const REGISTERED_COMMANDS: &[CommandSpec] = &[
     CommandSpec {
         name: "todo",
         aliases: &[],
-        help_short: "Add tasks",
+        help_short: "Add a task",
         visibility: CommandVisibility::Public,
         feature_gate: FeatureGate::Always,
         section: HelpSection::Tasks,

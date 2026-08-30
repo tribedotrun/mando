@@ -55,13 +55,34 @@ impl ModelRate {
 }
 
 /// Rate table keyed by model family. Unknown models fall back to
-/// [`fallback_rate`], which uses opus rates on the principle that
+/// [`fallback_rate`], which uses fable rates on the principle that
 /// overestimating cost is safer than silently hiding token spend.
+///
+/// Id-specific arms run first: a generation whose price differs from its
+/// family's older members has to win before the family substring match
+/// catches it. Sonnet 5 is cheaper than Sonnet 4.x, so `claude-sonnet-5`
+/// must be tested before the plain `sonnet` arm.
 pub fn rate_for_model(model: &str) -> ModelRate {
     // Match on a lowercased copy so CC's mixed casing across versions
     // (`claude-opus-4-7`, `claude-sonnet-4-6`) lands in the same bucket
     // regardless of source.
     let lower = model.to_ascii_lowercase();
+
+    // Fable: top tier, and its own family — the alias `fable` and the full
+    // id `claude-fable-5` both land here.
+    if lower.contains("fable") {
+        return fable_rate();
+    }
+
+    // Sonnet 5 is priced below the 4.x sonnets; check the id before family.
+    if lower.contains("claude-sonnet-5") {
+        return ModelRate {
+            input_per_mtok: 2.0,
+            output_per_mtok: 10.0,
+            cache_creation_per_mtok: 2.5,
+            cache_read_per_mtok: 0.2,
+        };
+    }
 
     // Haiku: cheapest tier.
     if lower.contains("haiku") {
@@ -99,10 +120,20 @@ fn opus_rate() -> ModelRate {
     }
 }
 
+fn fable_rate() -> ModelRate {
+    ModelRate {
+        input_per_mtok: 10.0,
+        output_per_mtok: 50.0,
+        cache_creation_per_mtok: 12.5,
+        cache_read_per_mtok: 1.0,
+    }
+}
+
 /// Conservative default when the model string is missing or unrecognized.
-/// Uses opus rates so unknown models do not silently underreport cost.
+/// Uses fable rates — the most expensive tier we run — so unknown models do
+/// not silently underreport cost.
 pub fn fallback_rate() -> ModelRate {
-    opus_rate()
+    fable_rate()
 }
 
 #[cfg(test)]
@@ -149,11 +180,39 @@ mod tests {
     }
 
     #[test]
-    fn unknown_model_defaults_to_opus() {
-        // Rationale: overestimating cost is safer than hiding token spend.
+    fn fable_rate_matches_public_pricing() {
+        for id in ["fable", "claude-fable-5"] {
+            let rate = rate_for_model(id);
+            assert!((rate.input_per_mtok - 10.0).abs() < 0.01, "{id}");
+            assert!((rate.output_per_mtok - 50.0).abs() < 0.01, "{id}");
+            assert!((rate.cache_creation_per_mtok - 12.5).abs() < 0.01, "{id}");
+            assert!((rate.cache_read_per_mtok - 1.0).abs() < 0.01, "{id}");
+        }
+    }
+
+    #[test]
+    fn sonnet_5_id_beats_the_sonnet_family_arm() {
+        // Sonnet 5 is cheaper than the 4.x sonnets; sessions report the full
+        // id back, so the id arm has to win over the `sonnet` substring.
+        let five = rate_for_model("claude-sonnet-5");
+        assert!((five.input_per_mtok - 2.0).abs() < 0.01);
+        assert!((five.output_per_mtok - 10.0).abs() < 0.01);
+        assert!((five.cache_creation_per_mtok - 2.5).abs() < 0.01);
+        assert!((five.cache_read_per_mtok - 0.2).abs() < 0.01);
+
+        let four = rate_for_model("claude-sonnet-4-6");
+        assert!((four.input_per_mtok - 3.0).abs() < 0.01);
+        assert!((four.output_per_mtok - 15.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn unknown_model_defaults_to_fable() {
+        // Rationale: overestimating cost is safer than hiding token spend,
+        // and fable is the most expensive tier Mando runs.
         let unknown = rate_for_model("some-future-model-2027");
-        let opus = rate_for_model("claude-opus-4-7");
-        assert!((unknown.input_per_mtok - opus.input_per_mtok).abs() < 0.0001);
+        let fable = rate_for_model("claude-fable-5");
+        assert!((unknown.input_per_mtok - fable.input_per_mtok).abs() < 0.0001);
+        assert!((unknown.output_per_mtok - fable.output_per_mtok).abs() < 0.0001);
     }
 
     #[test]

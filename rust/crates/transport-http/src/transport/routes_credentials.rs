@@ -329,9 +329,9 @@ async fn probe_credential(
 ///
 /// Reuses the same `pick_for_worker` selection that captain uses: ordered by
 /// fewest active sessions, then lowest five-hour utilization, then id;
-/// expired and cooling-down credentials are excluded. `caller_filter = None`
-/// counts all running sessions when ranking, since terminal use is
-/// "lightweight" and should balance against worker load.
+/// expired and cooling-down credentials are excluded. Ranking counts every
+/// running session on a credential, so terminal use balances against worker
+/// load out of the one global pool.
 ///
 /// Returns `{ pick: null }` (HTTP 200) when nothing is usable — the caller is
 /// expected to fall back to its ambient login rather than treat that as an
@@ -371,7 +371,7 @@ async fn pick_credential(
     } else {
         match state
             .settings
-            .pick_worker_credential(None)
+            .pick_worker_credential()
             .await
             .map_err(|e| internal_error(e, "failed to pick credential"))?
         {

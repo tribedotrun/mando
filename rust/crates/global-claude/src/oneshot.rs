@@ -21,7 +21,7 @@ impl CcOneShot {
         prompt: &str,
         config: CcConfig,
     ) -> Result<CcResult<serde_json::Value>, CcError> {
-        Self::run_with_pid_hook(prompt, config, |_| {}).await
+        Self::run_with_pid_hook(prompt, config, |_, _| {}).await
     }
 
     /// Run a one-shot CC invocation, retrying transient API failures up to
@@ -36,15 +36,15 @@ impl CcOneShot {
         config: CcConfig,
         max_retries: u32,
     ) -> Result<CcResult<serde_json::Value>, CcError> {
-        Self::run_with_retry_pid_hook(prompt, config, max_retries, |_| {}).await
+        Self::run_with_retry_pid_hook(prompt, config, max_retries, |_, _| {}).await
     }
 
-    /// Like `run_with_retry`, but forwards each attempt's spawned PID to
-    /// `on_spawn`. The hook fires once per attempt (so it observes the PID
-    /// of the *final* attempt, plus any retried attempts along the way).
-    /// Callers that track liveness per-attempt (worker spawn, captain
-    /// review, captain merge) can use this; simple callers should use
-    /// `run_with_retry`.
+    /// Like `run_with_retry`, but forwards each attempt's spawned PID and
+    /// the session id CC actually adopted to `on_spawn`. The hook fires once
+    /// per attempt, so a caller that polls a stream file by session id can
+    /// re-point at the attempt that is really running — a retry drops the
+    /// caller's pre-allocated id and CC mints its own, which would otherwise
+    /// leave the poller watching a stream nothing writes to.
     pub async fn run_with_retry_pid_hook<F>(
         prompt: &str,
         config: CcConfig,
@@ -52,11 +52,11 @@ impl CcOneShot {
         on_spawn: F,
     ) -> Result<CcResult<serde_json::Value>, CcError>
     where
-        F: Fn(global_types::Pid),
+        F: Fn(global_types::Pid, &str),
     {
         let caller = config.caller.clone();
         retry_loop(&caller, max_retries, |attempt| {
-            let per_attempt_hook = |pid| on_spawn(pid);
+            let per_attempt_hook = |pid, sid: &str| on_spawn(pid, sid);
             // The first attempt keeps the caller's pre-allocated
             // `session_id` so callers that pre-register the id (captain
             // review, captain merge) and then poll that exact stream /
@@ -257,17 +257,19 @@ mod tests {
 }
 
 impl CcOneShot {
-    /// Run with a callback fired immediately after the CC process spawns.
+    /// Run with a callback fired immediately after the CC process spawns,
+    /// carrying the PID and the session id CC adopted.
     ///
     /// Use this when you need to register the PID before waiting for the result
-    /// (e.g., for liveness tracking in a PID registry).
+    /// (e.g., for liveness tracking in a PID registry), or when you poll the
+    /// session's stream file and therefore need its real id.
     pub async fn run_with_pid_hook<F>(
         prompt: &str,
         config: CcConfig,
         on_spawn: F,
     ) -> Result<CcResult<serde_json::Value>, CcError>
     where
-        F: FnOnce(global_types::Pid),
+        F: FnOnce(global_types::Pid, &str),
     {
         let timeout = config.timeout;
         let caller = config.caller.clone();
@@ -275,7 +277,7 @@ impl CcOneShot {
         let mut session = crate::CcSession::spawn(config).await?;
         let pid = session.pid();
         let sid = session.session_id().to_string();
-        on_spawn(pid);
+        on_spawn(pid, &sid);
 
         // Send the prompt. Internal helpers still use anyhow::Result;
         // normalize into CcError::Other at the public boundary.

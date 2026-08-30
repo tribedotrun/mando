@@ -1,10 +1,5 @@
 import { useCallback, useState } from 'react';
-import { z } from 'zod';
-import {
-  defineJsonKeyspace,
-  defineKeyspace,
-  defineSlot,
-} from '#renderer/global/providers/persistence';
+import { defineKeyspace, defineSlot } from '#renderer/global/providers/persistence';
 
 const lastProjectSlot = defineSlot(
   'mando:lastProject',
@@ -12,27 +7,17 @@ const lastProjectSlot = defineSlot(
 );
 
 const formProjectStore = defineKeyspace('', 'domains/captain/runtime/useTaskFormPersistence');
-const formBulkStore = defineJsonKeyspace(
-  '',
-  z.boolean(),
-  'domains/captain/runtime/useTaskFormPersistence',
-);
 
 /**
- * Encapsulates draft persistence for task creation forms.
- * Handles project selection memory and optional bulk-mode flag.
+ * Encapsulates draft persistence for task creation forms:
+ * remembers the selected project across sessions.
  */
 export function useTaskFormPersistence(opts: {
   draftProjectKey: string;
-  draftBulkKey?: string;
   hasDraft: boolean;
   initialProject?: string | null;
 }) {
-  const { draftProjectKey, draftBulkKey, hasDraft, initialProject } = opts;
-
-  const [bulk, setBulkState] = useState(() =>
-    draftBulkKey ? hasDraft && formBulkStore.for(draftBulkKey).read() === true : false,
-  );
+  const { draftProjectKey, hasDraft, initialProject } = opts;
 
   const [project, setProjectState] = useState(() => {
     if (hasDraft) {
@@ -41,17 +26,6 @@ export function useTaskFormPersistence(opts: {
     }
     return initialProject ?? lastProjectSlot.read() ?? '';
   });
-
-  const setBulk = useCallback(
-    (next: boolean) => {
-      setBulkState(next);
-      if (draftBulkKey) {
-        if (next) formBulkStore.for(draftBulkKey).write(true);
-        else formBulkStore.for(draftBulkKey).clear();
-      }
-    },
-    [draftBulkKey],
-  );
 
   const setProject = useCallback(
     (value: string) => {
@@ -69,24 +43,19 @@ export function useTaskFormPersistence(opts: {
   );
 
   const resetDrafts = useCallback(() => {
-    setBulkState(false);
-    if (draftBulkKey) formBulkStore.for(draftBulkKey).clear();
     formProjectStore.for(draftProjectKey).clear();
-  }, [draftBulkKey, draftProjectKey]);
+  }, [draftProjectKey]);
 
   const cleanupIfEmpty = useCallback(
     (titleEmpty: boolean) => {
-      if (titleEmpty) {
-        if (draftBulkKey) formBulkStore.for(draftBulkKey).clear();
-        formProjectStore.for(draftProjectKey).clear();
-      }
+      if (titleEmpty) formProjectStore.for(draftProjectKey).clear();
     },
-    [draftBulkKey, draftProjectKey],
+    [draftProjectKey],
   );
 
   const persistProject = useCallback((proj: string) => {
     if (proj) lastProjectSlot.write(proj);
   }, []);
 
-  return { bulk, setBulk, project, setProject, resetDrafts, cleanupIfEmpty, persistProject };
+  return { project, setProject, resetDrafts, cleanupIfEmpty, persistProject };
 }

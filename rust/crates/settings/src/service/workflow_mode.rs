@@ -55,7 +55,6 @@ fn apply_model_overrides(
     captain_workflow.models.worker = model.into();
     captain_workflow.models.captain = model.into();
     captain_workflow.models.clarifier = model.into();
-    captain_workflow.models.todo_parse = model.into();
     for scout_model in scout_workflow.models.values_mut() {
         *scout_model = model.into();
     }

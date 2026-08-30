@@ -18,7 +18,6 @@ pub use api::{
     enqueue_task_effects, persist_clarify_result, persist_clarify_start, persist_merge_spawn,
     persist_resume_clarifier, persist_spawn, persist_status_transition,
     persist_status_transition_with_command, persist_status_transition_with_command_and_effects,
-    revert_orphaned_planning,
 };
 
 async fn load_status_and_rev(
@@ -138,11 +137,7 @@ pub(crate) async fn persist_task_transition_in_tx(
     let from_status: crate::ItemStatus = current_status.parse().map_err(|e: String| {
         anyhow::anyhow!("invalid persisted task status {current_status}: {e}")
     })?;
-    let _ = crate::service::lifecycle::infer_transition_command(
-        from_status,
-        task.status,
-        task.planning,
-    )?;
+    let _ = crate::service::lifecycle::infer_transition_command(from_status, task.status)?;
 
     let set_clause = update_set_clause();
     let result = bind_task_write_fields(

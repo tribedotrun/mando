@@ -36,16 +36,14 @@ pub enum ItemStatus {
     Merged,
     #[serde(rename = "completed-no-pr")]
     CompletedNoPr,
-    #[serde(rename = "plan-ready")]
-    PlanReady,
     #[serde(rename = "canceled")]
     Canceled,
     #[serde(rename = "stopped")]
     Stopped,
 }
 
-/// All 17 item statuses.
-pub const ALL_STATUSES: [ItemStatus; 17] = [
+/// All 16 item statuses.
+pub const ALL_STATUSES: [ItemStatus; 16] = [
     ItemStatus::New,
     ItemStatus::Clarifying,
     ItemStatus::NeedsClarification,
@@ -60,7 +58,6 @@ pub const ALL_STATUSES: [ItemStatus; 17] = [
     ItemStatus::Errored,
     ItemStatus::Merged,
     ItemStatus::CompletedNoPr,
-    ItemStatus::PlanReady,
     ItemStatus::Canceled,
     ItemStatus::Stopped,
 ];
@@ -126,7 +123,6 @@ impl ItemStatus {
             Self::Errored => "errored",
             Self::Merged => "merged",
             Self::CompletedNoPr => "completed-no-pr",
-            Self::PlanReady => "plan-ready",
             Self::Canceled => "canceled",
             Self::Stopped => "stopped",
         }
@@ -156,7 +152,6 @@ impl From<ItemStatus> for api_types::ItemStatus {
             ItemStatus::Errored => Self::Errored,
             ItemStatus::Merged => Self::Merged,
             ItemStatus::CompletedNoPr => Self::CompletedNoPr,
-            ItemStatus::PlanReady => Self::PlanReady,
             ItemStatus::Canceled => Self::Canceled,
             ItemStatus::Stopped => Self::Stopped,
         }
@@ -182,7 +177,6 @@ impl FromStr for ItemStatus {
             "errored" => Ok(Self::Errored),
             "merged" => Ok(Self::Merged),
             "completed-no-pr" => Ok(Self::CompletedNoPr),
-            "plan-ready" => Ok(Self::PlanReady),
             "canceled" => Ok(Self::Canceled),
             "stopped" => Ok(Self::Stopped),
             _ => Err(format!("unknown status: {s}")),

@@ -44,9 +44,6 @@ async fn apply_task_lifecycle_command(
         .ok_or(crate::TaskActionError::NotFound(id))?;
     let from_status = task.status;
     let _ = apply_manual_command(&mut task, command)?;
-    if command == TaskLifecycleCommand::Queue && from_status == ItemStatus::PlanReady {
-        task.planning = false;
-    }
     task.last_activity_at = Some(global_types::now_rfc3339());
     let event = TimelineEvent {
         timestamp: global_types::now_rfc3339(),
@@ -287,11 +284,6 @@ pub async fn cancel_item(store: &TaskStore, id: i64, pool: &sqlx::SqlitePool) ->
         },
     )
     .await
-}
-
-#[tracing::instrument(skip_all)]
-pub async fn set_task_planning(store: &TaskStore, id: i64, planning: bool) -> Result<()> {
-    store.set_planning(id, planning).await
 }
 
 #[tracing::instrument(skip_all)]

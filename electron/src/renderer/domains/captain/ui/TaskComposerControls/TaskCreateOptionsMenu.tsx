@@ -18,8 +18,6 @@ import {
 interface TaskCreateOptionsMenuProps {
   provider: PremiumTaskProvider;
   onProviderChange: (provider: PremiumTaskProvider) => void;
-  planning: boolean;
-  onPlanningChange: (planning: boolean) => void;
   useGlmWorker: boolean;
   defaultGlmWorker: boolean;
   onUseGlmWorkerChange: (useGlmWorker: boolean) => void;
@@ -32,8 +30,6 @@ interface TaskCreateOptionsMenuProps {
 export function TaskCreateOptionsMenu({
   provider,
   onProviderChange,
-  planning,
-  onPlanningChange,
   useGlmWorker,
   defaultGlmWorker,
   onUseGlmWorkerChange,
@@ -45,8 +41,7 @@ export function TaskCreateOptionsMenu({
   const fileRef = useRef<HTMLInputElement>(null);
   // "Active" means any non-default choice — including turning GLM off when the
   // configured default is on, so the comparison is against `defaultGlmWorker`.
-  const optionsActive =
-    planning || noAutoMerge || provider !== 'codex' || useGlmWorker !== defaultGlmWorker;
+  const optionsActive = noAutoMerge || provider !== 'codex' || useGlmWorker !== defaultGlmWorker;
   const providers: PremiumTaskProvider[] = ['codex', 'claude'];
 
   return (
@@ -96,7 +91,6 @@ export function TaskCreateOptionsMenu({
               <DropdownMenuRadioItem
                 key={item}
                 value={item}
-                disabled={planning && item !== 'claude'}
                 onSelect={(event) => event.preventDefault()}
               >
                 {taskProviderLabel(item)}
@@ -110,20 +104,16 @@ export function TaskCreateOptionsMenu({
             onCheckedChange={onUseGlmWorkerChange}
           />
 
-          <DropdownMenuSeparator />
-          <TaskCreateOptionSwitchRow
-            label="Plan first"
-            description="Review the plan before any code"
-            checked={planning}
-            onCheckedChange={onPlanningChange}
-          />
           {globalAutoMerge && (
-            <TaskCreateOptionSwitchRow
-              label="Auto-merge"
-              description="Merge high-confidence PRs automatically"
-              checked={!noAutoMerge}
-              onCheckedChange={(checked) => onNoAutoMergeChange(!checked)}
-            />
+            <>
+              <DropdownMenuSeparator />
+              <TaskCreateOptionSwitchRow
+                label="Auto-merge"
+                description="Merge high-confidence PRs automatically"
+                checked={!noAutoMerge}
+                onCheckedChange={(checked) => onNoAutoMergeChange(!checked)}
+              />
+            </>
           )}
         </DropdownMenuContent>
       </DropdownMenu>

@@ -5,9 +5,7 @@ const BUS_CAPACITY: usize = 256;
 /// Typed payload for every bus event variant.
 ///
 /// Replaces the old untyped tuple so the broadcast channel carries fully
-/// typed data end-to-end. The `event()` helper recovers the corresponding
-/// `BusEvent` discriminant for callers that still need it (e.g. logging,
-/// routing in sse.rs).
+/// typed data end-to-end. Subscribers pattern-match the variant directly.
 // Tasks carries TaskItem which is a large struct (~760 bytes); the broadcast
 // channel clones on every send so keeping variants inline is the right
 // tradeoff — subscribers pattern-match and discard the unused variants
@@ -25,23 +23,6 @@ pub enum BusPayload {
     Research(Option<api_types::ResearchEventData>),
     Credentials(Option<api_types::CredentialsEventData>),
     Artifacts(Option<api_types::ArtifactEventData>),
-}
-
-impl BusPayload {
-    pub fn event(&self) -> global_types::BusEvent {
-        match self {
-            BusPayload::Tasks(_) => global_types::BusEvent::Tasks,
-            BusPayload::Scout(_) => global_types::BusEvent::Scout,
-            BusPayload::Status(_) => global_types::BusEvent::Status,
-            BusPayload::Sessions(_) => global_types::BusEvent::Sessions,
-            BusPayload::Notification(_) => global_types::BusEvent::Notification,
-            BusPayload::Workbenches(_) => global_types::BusEvent::Workbenches,
-            BusPayload::Config(_) => global_types::BusEvent::Config,
-            BusPayload::Research(_) => global_types::BusEvent::Research,
-            BusPayload::Credentials(_) => global_types::BusEvent::Credentials,
-            BusPayload::Artifacts(_) => global_types::BusEvent::Artifacts,
-        }
-    }
 }
 
 #[derive(Clone)]
@@ -91,7 +72,6 @@ mod tests {
             cleared_by: None,
         })));
         let payload = rx.recv().await.unwrap();
-        assert!(matches!(payload.event(), global_types::BusEvent::Tasks));
         match payload {
             BusPayload::Tasks(Some(data)) => assert_eq!(data.id, Some(5)),
             other => panic!("unexpected payload: {other:?}"),
@@ -106,8 +86,8 @@ mod tests {
         bus.send(BusPayload::Status(None));
         let p1 = rx1.recv().await.unwrap();
         let p2 = rx2.recv().await.unwrap();
-        assert!(matches!(p1.event(), global_types::BusEvent::Status));
-        assert!(matches!(p2.event(), global_types::BusEvent::Status));
+        assert!(matches!(p1, BusPayload::Status(None)));
+        assert!(matches!(p2, BusPayload::Status(None)));
     }
 
     #[tokio::test]

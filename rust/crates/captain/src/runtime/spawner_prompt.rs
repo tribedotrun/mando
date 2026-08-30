@@ -7,6 +7,16 @@ use settings::{CaptainWorkflow, ProjectConfig};
 
 use crate::Task;
 
+/// Template-bool convention: `"true"` is truthy, `""` is falsy. Jinja
+/// coercion happens in `settings::render_template`.
+fn flag(value: bool) -> &'static str {
+    if value {
+        "true"
+    } else {
+        ""
+    }
+}
+
 pub(crate) fn prepare_initial_worker_prompt(
     item: &Task,
     slot: u64,
@@ -16,41 +26,29 @@ pub(crate) fn prepare_initial_worker_prompt(
     workflow: &CaptainWorkflow,
 ) -> Result<String> {
     let plan = resolve_worker_plan_path(item, wt_path)?;
-    let is_adopted = is_adopted_handoff(item, plan.as_deref(), wt_path);
-    let prompt_name = if is_adopted {
-        "worker_continue"
-    } else if plan.is_some() {
-        "worker_briefed"
-    } else {
-        "worker_initial"
-    };
-    let initial_prompt_name = if is_adopted { "adopted" } else { "worker" };
+    let is_handoff = is_adopted_handoff(item, plan.as_deref(), wt_path);
+    let initial_prompt_name = if is_handoff { "adopted" } else { "worker" };
 
     let context = item.context.as_deref().unwrap_or("");
     let original_prompt = item.original_prompt.as_deref().unwrap_or("");
     let task_id_str = item.id.to_string();
-    let no_pr = if item.no_pr { "true" } else { "" };
-    let is_bug_fix = if item.is_bug_fix { "true" } else { "" };
+    let no_pr = flag(item.no_pr);
     let workpad_path = ensure_workpad_path(item)?;
-
-    let check_command = check_command_or_fallback(project_config);
 
     let mut brief_vars: FxHashMap<&str, String> = FxHashMap::default();
     brief_vars.insert("title", item.title.clone());
     brief_vars.insert("context", context.to_string());
     brief_vars.insert("branch", branch.to_string());
-    brief_vars.insert("id", task_id_str.clone());
+    brief_vars.insert("id", task_id_str);
     brief_vars.insert("original_prompt", original_prompt.to_string());
     brief_vars.insert("worker_preamble", project_config.worker_preamble.clone());
-    brief_vars.insert("check_command", check_command.clone());
     brief_vars.insert("no_pr", no_pr.to_string());
-    brief_vars.insert("is_bug_fix", is_bug_fix.to_string());
+    brief_vars.insert("is_bug_fix", flag(item.is_bug_fix).to_string());
     brief_vars.insert("workpad_path", workpad_path.clone());
-    if let Some(ref plan_path) = plan {
-        brief_vars.insert("plan", plan_path.clone());
-    }
+    brief_vars.insert("plan", plan.unwrap_or_default());
+    brief_vars.insert("is_handoff", flag(is_handoff).to_string());
 
-    let rendered_brief = settings::render_prompt(prompt_name, &workflow.prompts, &brief_vars)
+    let rendered_brief = settings::render_prompt("worker", &workflow.prompts, &brief_vars)
         .map_err(anyhow::Error::msg)?;
 
     let brief_filename = worker_brief_filename(item, slot);
@@ -60,9 +58,7 @@ pub(crate) fn prepare_initial_worker_prompt(
     std::fs::write(&brief_path, rendered_brief)?;
 
     let mut vars: FxHashMap<&str, String> = FxHashMap::default();
-    vars.insert("brief_filename", brief_filename.clone());
     vars.insert("brief_path", brief_path.display().to_string());
-    vars.insert("id", task_id_str);
     vars.insert("no_pr", no_pr.to_string());
     vars.insert("workpad_path", workpad_path);
 
@@ -128,17 +124,6 @@ pub(crate) fn is_adopted_handoff(
         && wt_path.exists()
 }
 
-const CHECK_COMMAND_FALLBACK: &str =
-    "the project's quality gate (formatting, linting, tests — check CLAUDE.md for the exact command)";
-
-fn check_command_or_fallback(project_config: &ProjectConfig) -> String {
-    if project_config.check_command.is_empty() {
-        CHECK_COMMAND_FALLBACK.to_string()
-    } else {
-        format!("`{}`", project_config.check_command)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -150,8 +135,9 @@ mod tests {
         path
     }
 
+    /// The unified `worker` prompt: no plan, no handoff, PR expected.
     #[test]
-    fn generic_items_render_worker_initial_brief() {
+    fn generic_items_render_the_worker_brief() {
         let wt = temp_worktree();
         let mut item = Task::new("Fix auth redirect");
         item.context = Some("Auth redirect loop in login callback".into());
@@ -162,29 +148,31 @@ mod tests {
             prepare_initial_worker_prompt(&item, 1, "mando/fix-auth-1", &wt, &project, &workflow)
                 .unwrap();
 
+        let workpad = global_infra::paths::data_dir()
+            .join("plans/0/workpad.md")
+            .display()
+            .to_string();
         assert!(initial.contains(&wt.join(".ai/briefs/todo-0-1.md").display().to_string()));
-        assert!(initial.contains("Before updating the workpad, read"));
-        assert!(initial.contains(
-            &global_infra::paths::data_dir()
-                .join("plans/0/workpad.md")
-                .display()
-                .to_string()
-        ));
+        assert!(initial.contains(&workpad));
+        // no_pr = false, so the initial prompt keeps the /x-pr handoff line.
+        assert!(initial.contains("/x-pr"));
+
         let brief = std::fs::read_to_string(wt.join(".ai/briefs/todo-0-1.md")).unwrap();
         assert!(brief.contains("Captain Brief"));
         assert!(brief.contains("Auth redirect loop in login callback"));
-        assert!(brief.contains(
-            &global_infra::paths::data_dir()
-                .join("plans/0/workpad.md")
-                .display()
-                .to_string()
-        ));
-        assert!(brief.contains("Out-of-Scope Discoveries"));
-        assert!(brief.contains("do NOT create a Mando task"));
+        assert!(brief.contains(&workpad));
+        assert!(brief.contains("## Evidence Deck"));
+        assert!(brief.contains("## Out-of-Scope Discoveries"));
+        // Neither optional branch fires without a plan or a handoff.
+        assert!(!brief.contains("## Brief"));
+        assert!(!brief.contains("## Handoff"));
     }
 
+    /// A human-authored brief (`mando todo add --plan <path>`) lands on
+    /// `task.plan`, is copied into the worktree, and reaches the worker
+    /// prompt's plan branch.
     #[test]
-    fn planned_items_render_worker_briefed_flow() {
+    fn plan_path_reaches_the_worker_prompts_plan_branch() {
         let wt = temp_worktree();
         let plan_source = wt.join("source-brief.md");
         std::fs::write(&plan_source, "# Brief").unwrap();
@@ -198,11 +186,12 @@ mod tests {
         prepare_initial_worker_prompt(&item, 2, "mando/todo-0", &wt, &project, &workflow).unwrap();
 
         let brief = std::fs::read_to_string(wt.join(".ai/briefs/todo-0-2.md")).unwrap();
-        assert!(brief.contains("Human-Curated Plan"));
-        assert!(brief.contains(&wt.join(".ai/briefs/source-brief.md").display().to_string()));
-        assert!(wt.join(".ai/briefs/source-brief.md").exists());
-        assert!(brief.contains("Out-of-Scope Discoveries"));
-        assert!(brief.contains("do NOT create a Mando task"));
+        let copied = wt.join(".ai/briefs/source-brief.md");
+        assert!(brief.contains("## Brief"), "plan branch missing: {brief}");
+        assert!(brief.contains("Read the plan file first"));
+        assert!(brief.contains(&copied.display().to_string()));
+        assert!(copied.exists());
+        assert!(!brief.contains("## Handoff"));
     }
 
     #[test]
@@ -240,7 +229,7 @@ mod tests {
     }
 
     #[test]
-    fn adopted_items_render_worker_continue_flow() {
+    fn adopted_items_render_the_handoff_branch() {
         let wt = temp_worktree();
         let adopt_brief = wt.join(".ai/briefs/adopt-handoff.md");
         std::fs::create_dir_all(adopt_brief.parent().unwrap()).unwrap();
@@ -258,18 +247,58 @@ mod tests {
             prepare_initial_worker_prompt(&item, 3, "feature/adopt", &wt, &project, &workflow)
                 .unwrap();
 
-        assert!(initial.contains("handed off"));
-        assert!(initial.contains("Before updating the workpad, read"));
+        // The `adopted` initial prompt, not the plain `worker` one.
+        assert!(initial.contains("handed off to you"));
         assert!(initial.contains(
             &global_infra::paths::data_dir()
                 .join("plans/0/workpad.md")
                 .display()
                 .to_string()
         ));
+
         let brief = std::fs::read_to_string(wt.join(".ai/briefs/todo-0-3.md")).unwrap();
-        assert!(brief.contains("Mid-Implementation Handoff"));
-        assert!(brief.contains("Out-of-Scope Discoveries"));
-        assert!(brief.contains("do NOT create a Mando task"));
+        assert!(brief.contains("## Handoff"));
+        assert!(brief.contains("handed off mid-implementation"));
+        assert!(brief.contains("## Out-of-Scope Discoveries"));
+    }
+
+    #[test]
+    fn no_pr_items_drop_the_evidence_and_pr_sections() {
+        let wt = temp_worktree();
+        let mut item = Task::new("Audit the pricing table");
+        item.no_pr = true;
+
+        let workflow = CaptainWorkflow::compiled_default();
+        let project = ProjectConfig::default();
+
+        let initial =
+            prepare_initial_worker_prompt(&item, 5, "mando/audit-0", &wt, &project, &workflow)
+                .unwrap();
+        assert!(
+            !initial.contains("/x-pr"),
+            "no-PR task must not be told to open a PR"
+        );
+
+        let brief = std::fs::read_to_string(wt.join(".ai/briefs/todo-0-5.md")).unwrap();
+        assert!(!brief.contains("## Evidence Deck"));
+        assert!(!brief.contains("## Finishing"));
+        assert!(brief.contains("This is a research/audit task: no PR."));
+    }
+
+    #[test]
+    fn bug_fix_items_render_the_reproduce_first_protocol() {
+        let wt = temp_worktree();
+        let mut item = Task::new("Login button overflows on mobile");
+        item.is_bug_fix = true;
+
+        let workflow = CaptainWorkflow::compiled_default();
+        let project = ProjectConfig::default();
+
+        prepare_initial_worker_prompt(&item, 6, "mando/bug-0", &wt, &project, &workflow).unwrap();
+
+        let brief = std::fs::read_to_string(wt.join(".ai/briefs/todo-0-6.md")).unwrap();
+        assert!(brief.contains("## Bug Fix Protocol"));
+        assert!(brief.contains("Reproduce the bug before changing code."));
     }
 
     #[test]

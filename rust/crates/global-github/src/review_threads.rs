@@ -47,8 +47,6 @@ struct GhReviewCommentsConnection {
 struct GhReviewCommentNode {
     author: Option<GhAuthorLogin>,
     body: Option<String>,
-    path: Option<String>,
-    line: Option<u32>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -73,8 +71,6 @@ pub async fn get_pr_review_threads(repo: &str, pr: u32) -> Result<Vec<ReviewThre
             nodes {{
               author {{ login }}
               body
-              path
-              line
             }}
           }}
         }}
@@ -106,13 +102,10 @@ pub async fn get_pr_review_threads(repo: &str, pr: u32) -> Result<Vec<ReviewThre
             .map(|c| ThreadComment {
                 author: c.author.and_then(|a| a.login).unwrap_or_default(),
                 body: c.body.unwrap_or_default(),
-                path: c.path,
-                line: c.line,
             })
             .collect();
 
         result.push(ReviewThread {
-            id,
             is_resolved,
             comments,
         });

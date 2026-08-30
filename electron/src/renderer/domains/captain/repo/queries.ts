@@ -14,12 +14,10 @@ import {
   fetchPrSummary,
 } from '#renderer/domains/captain/repo/api';
 import {
-  listTerminals,
   fetchWorkbenches,
-  type TerminalSessionInfo,
   type WorkbenchItem,
   type WorkbenchStatusFilter,
-} from '#renderer/domains/captain/repo/terminal-api';
+} from '#renderer/domains/captain/repo/workbench-api';
 import log from '#renderer/global/service/logger';
 import { prSummaryResponseSchema } from '#shared/daemon-contract/schemas';
 import { toReactQuery } from '#result';
@@ -32,8 +30,6 @@ import type {
   ActivityStatsResponse,
   SessionSummary,
 } from '#renderer/global/types';
-
-export type { TerminalSessionInfo };
 
 // ---------------------------------------------------------------------------
 // Tasks
@@ -87,16 +83,8 @@ export function useTaskArtifacts(id: number) {
 }
 
 // ---------------------------------------------------------------------------
-// Terminals & Workbenches
+// Workbenches
 // ---------------------------------------------------------------------------
-
-export function useTerminalList() {
-  return useQuery<TerminalSessionInfo[]>({
-    queryKey: queryKeys.terminals.list(),
-    meta: daemonSyncMeta('mutation-invalidated', 'terminal mutations refresh terminal list'),
-    queryFn: () => toReactQuery(listTerminals()),
-  });
-}
 
 export function useWorkbenchList(status?: WorkbenchStatusFilter) {
   return useQuery<WorkbenchItem[]>({

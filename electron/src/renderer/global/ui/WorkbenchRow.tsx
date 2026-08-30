@@ -1,5 +1,5 @@
 import React from 'react';
-import { Terminal, Pin } from 'lucide-react';
+import { GitBranch, Pin } from 'lucide-react';
 import { FINALIZED_STATUSES, type TaskItem } from '#renderer/global/types';
 import { commitWorkbenchRename } from '#renderer/global/service/workbenchHelpers';
 import { StatusIndicator } from '#renderer/global/ui/StatusIndicator';
@@ -15,13 +15,11 @@ import { useSidebar } from '#renderer/global/runtime/SidebarContext';
 import { ProviderLogo } from '#renderer/global/ui/ProviderLogo';
 
 export function WorkbenchRow({
-  projectName,
   wb,
   task,
   renamingWbId,
   setRenamingWbId,
 }: {
-  projectName: string;
   wb: import('#renderer/global/types').WorkbenchItem;
   task?: TaskItem;
   renamingWbId: number | null;
@@ -29,7 +27,7 @@ export function WorkbenchRow({
 }): React.ReactElement {
   const { state, actions } = useSidebar();
   const isActive =
-    state.activeTerminalCwd === wb.worktree || (task != null && state.activeTaskId === task.id);
+    state.activeWorktreePath === wb.worktree || (task != null && state.activeTaskId === task.id);
   // wb.id <= 0 is a synthetic placeholder for a task with no backing workbench --
   // pin/archive/rename all target real workbench IDs, so suppress them here.
   const hasRealWorkbench = wb.id > 0;
@@ -67,7 +65,7 @@ export function WorkbenchRow({
     if (task) {
       actions.openTask(task.id, wb.id || undefined);
     } else {
-      actions.openTerminalSession({ id: wb.id, project: projectName, cwd: wb.worktree });
+      actions.openWorkbench({ id: wb.id, worktree: wb.worktree });
     }
   };
 
@@ -91,7 +89,7 @@ export function WorkbenchRow({
             <StatusIndicator status={task.status} />
           </span>
         ) : (
-          <Terminal size={11} className={`text-text-3 ${canPin ? 'group-hover:invisible' : ''}`} />
+          <GitBranch size={11} className={`text-text-3 ${canPin ? 'group-hover:invisible' : ''}`} />
         )}
         {canPin && (
           <span

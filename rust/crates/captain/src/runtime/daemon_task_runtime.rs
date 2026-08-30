@@ -21,12 +21,6 @@ impl CaptainRuntime {
     }
 
     #[tracing::instrument(skip_all)]
-    pub async fn set_task_planning(&self, id: i64, planning: bool) -> anyhow::Result<()> {
-        let store = self.task_store.read().await;
-        crate::runtime::dashboard::set_task_planning(&store, id, planning).await
-    }
-
-    #[tracing::instrument(skip_all)]
     pub async fn task_json(&self, id: i64) -> anyhow::Result<Option<api_types::TaskItem>> {
         self.load_task(id)
             .await?
@@ -100,7 +94,6 @@ impl CaptainRuntime {
                 .parse()
                 .map_err(|e: String| anyhow::anyhow!(e))?,
             task.status,
-            task.planning,
         )?;
         let applied =
             crate::io::queries::tasks_persist::persist_status_transition_with_command_and_effects(

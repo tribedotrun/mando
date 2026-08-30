@@ -76,15 +76,12 @@ pub(crate) async fn check_done_review_threads(
 
         let draft_decision = if pr_data.is_draft {
             classify_review_state(
-                pr_data.ci_status.as_deref(),
                 true,
                 pr_data.unresolved_threads,
                 pr_data.unreplied_threads,
                 pr_data.unaddressed_issue_comments,
-                &pr_data.body,
                 workflow,
                 items[idx].reopen_seq,
-                &pr_data.head_sha,
                 true,
                 true,
             )
@@ -162,15 +159,12 @@ pub(crate) async fn check_done_review_threads(
                 };
 
             classify_review_state(
-                pr_data.ci_status.as_deref(),
                 false,
                 pr_data.unresolved_threads,
                 pr_data.unreplied_threads,
                 pr_data.unaddressed_issue_comments,
-                &pr_data.body,
                 workflow,
                 items[idx].reopen_seq,
-                &pr_data.head_sha,
                 has_evidence_db,
                 evidence_fresh_db,
             )
@@ -258,34 +252,18 @@ pub(crate) async fn check_done_review_threads(
 /// and missing evidence.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn classify_review_state(
-    _ci_status: Option<&str>,
     is_draft: bool,
     unresolved: i64,
     unreplied: i64,
     unaddressed: i64,
-    _pr_body: &str,
     workflow: &CaptainWorkflow,
     reopen_seq: i64,
-    _pr_head_sha: &str,
     has_evidence_db: bool,
     evidence_fresh_db: bool,
 ) -> Option<(String, String)> {
     if is_draft {
-        let issues_text =
-            "PR is still draft. Run `/x-pr` to mark it ready for review before returning to human review.";
-        let mut vars: FxHashMap<&str, &str> = FxHashMap::default();
-        vars.insert("issues", issues_text);
-        let message = match settings::render_prompt(
-            "review_reopen_message",
-            &workflow.prompts,
-            &vars,
-        ) {
-            Ok(m) => m,
-            Err(e) => {
-                tracing::error!(module = "captain", error = %e, "failed to render review_reopen_message");
-                return None;
-            }
-        };
+        let issues_text = issue_text(workflow, "mergeability_issue_draft")?;
+        let message = reopen_message(workflow, &issues_text)?;
         return Some(("draft".to_string(), message));
     }
 
@@ -323,33 +301,40 @@ pub(crate) fn classify_review_state(
     };
 
     if missing_evidence {
-        parts.push(
-            "Task is missing runtime evidence. Capture evidence (screenshot for UI, \
-             terminal output for non-UI) and save with `mando todo evidence <file> \
-             --caption \"...\"`."
-                .to_string(),
-        );
+        parts.push(issue_text(workflow, "mergeability_issue_missing_evidence")?);
     }
 
     if stale_evidence {
-        parts.push(
-            "Evidence is stale -- it was captured before the last reopen and no longer \
-             reflects the current code. Recapture and save with `mando todo evidence`."
-                .to_string(),
-        );
+        parts.push(issue_text(workflow, "mergeability_issue_stale_evidence")?);
     }
 
     let issues_text = parts.join("\n");
+    let message = reopen_message(workflow, &issues_text)?;
+    Some((reopen_source, message))
+}
+
+/// One of the `mergeability_issue_*` bodies from the workflow YAML.
+fn issue_text(workflow: &CaptainWorkflow, key: &'static str) -> Option<String> {
+    let vars: FxHashMap<&str, &str> = FxHashMap::default();
+    match settings::render_prompt(key, &workflow.prompts, &vars) {
+        Ok(text) => Some(text.trim().to_string()),
+        Err(e) => {
+            tracing::error!(module = "captain", prompt = key, error = %e, "failed to render mergeability issue text");
+            None
+        }
+    }
+}
+
+fn reopen_message(workflow: &CaptainWorkflow, issues: &str) -> Option<String> {
     let mut vars: FxHashMap<&str, &str> = FxHashMap::default();
-    vars.insert("issues", issues_text.as_str());
-    let message = match settings::render_prompt("review_reopen_message", &workflow.prompts, &vars) {
-        Ok(m) => m,
+    vars.insert("issues", issues);
+    match settings::render_prompt("review_reopen_message", &workflow.prompts, &vars) {
+        Ok(message) => Some(message),
         Err(e) => {
             tracing::error!(module = "captain", error = %e, "failed to render review_reopen_message");
-            return None;
+            None
         }
-    };
-    Some((reopen_source, message))
+    }
 }
 
 #[cfg(test)]
@@ -362,7 +347,6 @@ mod tests {
 
     // Helper: call classify_review_state with DB-backed evidence flags.
     fn classify(
-        ci: Option<&str>,
         unresolved: i64,
         unreplied: i64,
         unaddressed: i64,
@@ -371,15 +355,12 @@ mod tests {
         evidence_fresh: bool,
     ) -> Option<(String, String)> {
         classify_review_state(
-            ci,
             false,
             unresolved,
             unreplied,
             unaddressed,
-            "",
             &wf(),
             reopen_seq,
-            "",
             has_evidence,
             evidence_fresh,
         )
@@ -387,25 +368,15 @@ mod tests {
 
     #[test]
     fn clean_pr_returns_none() {
-        assert!(classify(Some("success"), 0, 0, 0, 0, true, true).is_none());
+        // No unresolved threads, no unaddressed comments, evidence present.
+        // CI state is not an input here — a CI failure is routed upstream in
+        // `mergeability`, which is why no CI-shaped case appears in this suite.
+        assert!(classify(0, 0, 0, 0, true, true).is_none());
     }
 
     #[test]
     fn draft_pr_triggers_reopen_before_ci_comments_or_evidence() {
-        let (source, msg) = classify_review_state(
-            Some("failure"),
-            true,
-            2,
-            1,
-            3,
-            "",
-            &wf(),
-            1,
-            "",
-            false,
-            false,
-        )
-        .unwrap();
+        let (source, msg) = classify_review_state(true, 2, 1, 3, &wf(), 1, false, false).unwrap();
         assert_eq!(source, "draft");
         assert!(msg.contains("PR is still draft"));
         assert!(!msg.contains("unresolved threads"));
@@ -413,86 +384,66 @@ mod tests {
     }
 
     #[test]
-    fn pending_ci_returns_none() {
-        assert!(classify(Some("pending"), 0, 0, 0, 0, true, true).is_none());
-    }
-
-    #[test]
-    fn no_ci_no_comments_returns_none() {
-        assert!(classify(None, 0, 0, 0, 0, true, true).is_none());
-    }
-
-    #[test]
     fn unresolved_threads_trigger_review_reopen() {
-        let (source, msg) = classify(Some("success"), 3, 0, 0, 0, true, true).unwrap();
+        let (source, msg) = classify(3, 0, 0, 0, true, true).unwrap();
         assert_eq!(source, "review");
         assert!(msg.contains("3 unresolved threads"));
     }
 
     #[test]
     fn unreplied_threads_trigger_review_reopen() {
-        let (source, msg) = classify(Some("success"), 0, 2, 0, 0, true, true).unwrap();
+        let (source, msg) = classify(0, 2, 0, 0, true, true).unwrap();
         assert_eq!(source, "review");
         assert!(msg.contains("2 unreplied threads"));
     }
 
     #[test]
     fn unaddressed_issue_comments_trigger_review_reopen() {
-        let (source, msg) = classify(Some("success"), 0, 0, 1, 0, true, true).unwrap();
+        let (source, msg) = classify(0, 0, 1, 0, true, true).unwrap();
         assert_eq!(source, "review");
         assert!(msg.contains("1 unaddressed issue comments"));
     }
 
     #[test]
-    fn ci_failure_alone_returns_none_handled_upstream() {
-        assert!(classify(Some("failure"), 0, 0, 0, 0, true, true).is_none());
-    }
-
-    #[test]
     fn comments_with_ci_failure_still_triggers_review_reopen() {
-        let (source, msg) = classify(Some("failure"), 1, 0, 2, 0, true, true).unwrap();
+        let (source, msg) = classify(1, 0, 2, 0, true, true).unwrap();
         assert_eq!(source, "review");
         assert!(msg.contains("1 unresolved threads"));
         assert!(msg.contains("2 unaddressed issue comments"));
     }
 
     #[test]
-    fn no_ci_data_no_comments_returns_none() {
-        assert!(classify(None, 0, 0, 0, 0, true, true).is_none());
-    }
-
-    #[test]
     fn missing_evidence_triggers_reopen() {
-        let (source, msg) = classify(Some("success"), 0, 0, 0, 0, false, false).unwrap();
+        let (source, msg) = classify(0, 0, 0, 0, false, false).unwrap();
         assert_eq!(source, "evidence");
-        assert!(msg.contains("missing runtime evidence"));
+        assert!(msg.contains("no registered evidence"));
     }
 
     #[test]
     fn missing_evidence_with_threads_uses_review_source() {
-        let (source, msg) = classify(Some("success"), 1, 0, 0, 0, false, false).unwrap();
+        let (source, msg) = classify(1, 0, 0, 0, false, false).unwrap();
         assert_eq!(source, "review");
-        assert!(msg.contains("missing runtime evidence"));
+        assert!(msg.contains("no registered evidence"));
         assert!(msg.contains("1 unresolved threads"));
     }
 
     #[test]
     fn stale_evidence_triggers_reopen() {
-        let (source, msg) = classify(Some("success"), 0, 0, 0, 1, true, false).unwrap();
+        let (source, msg) = classify(0, 0, 0, 1, true, false).unwrap();
         assert_eq!(source, "evidence");
-        assert!(msg.contains("stale"));
+        assert!(msg.contains("predates the latest reopen"));
     }
 
     #[test]
     fn fresh_evidence_after_reopen_returns_none() {
-        assert!(classify(Some("success"), 0, 0, 0, 1, true, true).is_none());
+        assert!(classify(0, 0, 0, 1, true, true).is_none());
     }
 
     #[test]
     fn stale_evidence_with_threads_uses_review_source() {
-        let (source, msg) = classify(Some("success"), 1, 0, 0, 1, true, false).unwrap();
+        let (source, msg) = classify(1, 0, 0, 1, true, false).unwrap();
         assert_eq!(source, "review");
-        assert!(msg.contains("stale"));
+        assert!(msg.contains("predates the latest reopen"));
         assert!(msg.contains("1 unresolved threads"));
     }
 

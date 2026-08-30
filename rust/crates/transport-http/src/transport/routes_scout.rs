@@ -211,6 +211,10 @@ pub(crate) async fn post_scout_act(
 
     let config = state.settings.load_config();
     let provider = super::routes_tasks::default_task_provider(&config);
+    // Scout-created tasks route to the default worker like any other task:
+    // there is no scout opt-in, so fall back to `captain.defaultGlmImplementation`
+    // exactly as `POST /api/tasks/add` does when the caller omits the field.
+    let use_glm_worker = config.captain.default_glm_implementation;
     let created = state
         .captain
         .add_task_with_context(
@@ -219,7 +223,7 @@ pub(crate) async fn post_scout_act(
             Some(task_description.as_str()),
             Some("scout"),
             provider,
-            true,
+            use_glm_worker,
         )
         .await
         .map_err(map_task_create_error)?;

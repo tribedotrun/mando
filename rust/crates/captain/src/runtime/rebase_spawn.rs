@@ -159,13 +159,16 @@ pub(super) async fn handle_conflict(
         "spawning rebase worker"
     );
 
-    let rebase_tmpl = workflow
-        .prompts
-        .get("rebase_worker")
-        .cloned()
-        .unwrap_or_else(|| {
-            "Rebase {{ branch }} onto origin/{{ default_branch }}. PR #{{ pr_num }}.".into()
-        });
+    // `rebase_worker` is in REQUIRED_CAPTAIN_PROMPTS, so config load rejects a
+    // workflow without it. Refuse rather than substituting a stub prompt that
+    // would ignore whatever the operator configured.
+    let Some(rebase_tmpl) = workflow.prompts.get("rebase_worker") else {
+        tracing::error!(
+            module = "captain",
+            "rebase_worker prompt missing from the loaded workflow"
+        );
+        return;
+    };
     let attempt_str = (rebase_retries + 1).to_string();
     let max_retries_str = max_rebase_retries.to_string();
     let rebase_vars: rustc_hash::FxHashMap<&str, &str> = [
@@ -177,7 +180,7 @@ pub(super) async fn handle_conflict(
     ]
     .into_iter()
     .collect();
-    let prompt = match settings::render_template(&rebase_tmpl, &rebase_vars) {
+    let prompt = match settings::render_template(rebase_tmpl, &rebase_vars) {
         Ok(p) => p,
         Err(e) => {
             tracing::error!(module = "captain", error = %e, "failed to render rebase_worker template");
@@ -217,13 +220,15 @@ pub(super) async fn handle_conflict(
 
     let session_name = format!("mando-rebase-{}", pr_num);
 
+    let rebase_model = super::agent_runtime::claude_rebase_worker_model(item, workflow);
+
     let session = match super::agent_runtime::spawn_rebase_worker(
         item,
         pool,
         &session_name,
         &wt_path,
         &prompt,
-        &workflow.models.worker,
+        &rebase_model,
         workflow,
     )
     .await

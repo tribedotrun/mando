@@ -388,7 +388,14 @@ fn write_private_atomic(path: &Path, content: &str) -> Result<()> {
     let tmp = path.with_file_name(format!("{file_name}.tmp.{}", std::process::id()));
     // Clear any stale temp so the create_new below always makes a fresh
     // 0600 file rather than reusing one with looser permissions.
-    let _ = std::fs::remove_file(&tmp);
+    match std::fs::remove_file(&tmp) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(error)
+                .with_context(|| format!("failed to remove stale temp file {}", tmp.display()));
+        }
+    }
 
     {
         use std::io::Write;

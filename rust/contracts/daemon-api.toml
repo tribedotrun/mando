@@ -75,29 +75,12 @@ transitions = [
 ]
 
 [[producer]]
-path = "POST /api/tasks/implement"
-handler = "post_task_implement"
-transitions = [
-  "plan-ready -> queued",
-]
-
-[[producer]]
-path = "POST /api/tasks/queue"
-handler = "post_task_queue"
-transitions = [
-  "new -> queued",
-  "plan-ready -> queued",
-  "rework -> queued",
-]
-
-[[producer]]
 path = "POST /api/tasks/cancel"
 handler = "post_task_cancel"
 transitions = [
   "new -> canceled",
   "clarifying -> canceled",
   "needs-clarification -> canceled",
-  "plan-ready -> canceled",
   "queued -> canceled",
   "in-progress -> canceled",
   "awaiting-review -> canceled",
@@ -120,7 +103,6 @@ transitions = [
   "needs-clarification -> handed-off",
   "escalated -> handed-off",
   "errored -> handed-off",
-  "plan-ready -> handed-off",
 ]
 
 [[producer]]
@@ -134,7 +116,6 @@ transitions = [
 path = "POST /api/tasks/{id}/advisor"
 handler = "post_task_advisor"
 transitions = [
-  "plan-ready -> queued",
   "awaiting-review -> in-progress",
   "awaiting-review -> queued",
   "awaiting-review -> captain-reviewing",

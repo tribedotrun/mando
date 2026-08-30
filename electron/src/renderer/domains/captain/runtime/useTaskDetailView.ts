@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useMountEffect } from '#renderer/global/runtime/useMountEffect';
 import { subscribeViewTaskBrief } from '#renderer/global/providers/viewBriefBus';
@@ -18,7 +18,7 @@ import { buildSessionsFromTimeline } from '#renderer/domains/sessions';
 
 const REFRESH_INDICATOR_MS = 1500;
 
-type DetailTab = 'feed' | 'pr' | 'terminal' | 'more';
+type DetailTab = 'feed' | 'pr' | 'more';
 
 interface Args {
   item: TaskItem;
@@ -31,17 +31,10 @@ interface Args {
     project?: string;
     taskTitle?: string;
   }) => void;
-  onResumeInTerminal?: (sessionId: string, name?: string, provider?: TaskProvider) => void;
   activeTabProp: string | undefined;
 }
 
-export function useTaskDetailView({
-  item,
-  onBack,
-  onOpenTranscript,
-  onResumeInTerminal,
-  activeTabProp,
-}: Args) {
+export function useTaskDetailView({ item, onBack, onOpenTranscript, activeTabProp }: Args) {
   const activeTab: DetailTab = (activeTabProp as DetailTab) || 'feed';
   const [prRefreshing, setPrRefreshing] = useState(false);
   const [contextModalOpen, setContextModalOpen] = useState(false);
@@ -113,13 +106,6 @@ export function useTaskDetailView({
     );
   };
 
-  const handleResumeSession = useCallback(
-    (sessionId: string, name?: string, provider?: TaskProvider) => {
-      onResumeInTerminal?.(sessionId, name, provider);
-    },
-    [onResumeInTerminal],
-  );
-
   const handleStop = async () => {
     try {
       await stopMut.mutateAsync({ id: item.id });
@@ -145,7 +131,6 @@ export function useTaskDetailView({
   const tabs: { key: DetailTab; label: string }[] = [
     { key: 'feed', label: 'Feed' },
     { key: 'pr', label: 'PR' },
-    { key: 'terminal', label: 'Terminal' },
     { key: 'more', label: 'More' },
   ];
 
@@ -161,7 +146,7 @@ export function useTaskDetailView({
       handleRefresh: handlePrRefresh,
     },
     context: { open: contextModalOpen, setOpen: setContextModalOpen },
-    sessions: { items: sessions, handleSessionClick, handleResumeSession },
+    sessions: { items: sessions, handleSessionClick },
     stop: { pending: stopMut.isPending, handle: handleStop },
   };
 }

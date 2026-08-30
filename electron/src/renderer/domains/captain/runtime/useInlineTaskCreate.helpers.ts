@@ -3,19 +3,6 @@ import type { TaskProvider } from '#renderer/global/types';
 export type PremiumTaskProvider = Extract<TaskProvider, 'claude' | 'codex'>;
 
 export const TASK_PROVIDER_DEFAULT: PremiumTaskProvider = 'codex';
-export const TASK_PROVIDER_PLANNING: PremiumTaskProvider = 'claude';
-
-interface PlanningProviderChange {
-  nextPlanning: boolean;
-  wasPlanning: boolean;
-  selectedProvider: PremiumTaskProvider | null;
-  prePlanningSelectedProvider: PremiumTaskProvider | null;
-}
-
-interface PlanningProviderResult {
-  selectedProvider: PremiumTaskProvider | null;
-  prePlanningSelectedProvider: PremiumTaskProvider | null;
-}
 
 export function normalizePremiumProvider(
   provider: TaskProvider | null | undefined,
@@ -49,27 +36,4 @@ export function providerSelectionReady(
   configLoaded: boolean,
 ): boolean {
   return selectedProvider !== null || configLoaded;
-}
-
-export function applyPlanningProviderChange({
-  nextPlanning,
-  wasPlanning,
-  selectedProvider,
-  prePlanningSelectedProvider,
-}: PlanningProviderChange): PlanningProviderResult {
-  if (nextPlanning === wasPlanning) {
-    return { selectedProvider, prePlanningSelectedProvider };
-  }
-
-  if (nextPlanning) {
-    return {
-      selectedProvider: TASK_PROVIDER_PLANNING,
-      prePlanningSelectedProvider: selectedProvider,
-    };
-  }
-
-  return {
-    selectedProvider: prePlanningSelectedProvider,
-    prePlanningSelectedProvider,
-  };
 }

@@ -44,13 +44,10 @@ const workbenchRoute = createRoute({
   path: '/wb/$workbenchId',
   validateSearch: z.object({
     tab: z.string().optional().catch(undefined),
-    resume: z.string().optional().catch(undefined),
-    name: z.string().optional().catch(undefined),
-    provider: z.enum(['claude', 'codex']).optional().catch(undefined),
     project: z.string().optional().catch(undefined),
   }),
   beforeLoad: ({ params }) => {
-    if (params.workbenchId !== 'new' && Number.isNaN(Number(params.workbenchId))) {
+    if (Number.isNaN(Number(params.workbenchId))) {
       log.warn('[wb-route] invalid workbenchId', params.workbenchId);
     }
   },

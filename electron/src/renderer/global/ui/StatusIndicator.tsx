@@ -40,7 +40,6 @@ const ICON_MAP: Readonly<Record<ItemStatus, () => React.ReactElement>> = Object.
   errored: () => <CircleX size={S} color="var(--destructive)" />,
   merged: () => <CircleCheck size={S} color="var(--text-3)" />,
   'completed-no-pr': () => <CircleCheck size={S} color="var(--text-3)" />,
-  'plan-ready': () => <CircleDot size={S} color="var(--review)" />,
   canceled: () => <Ban size={S} color="var(--text-4)" />,
   stopped: () => <CircleStop size={S} color="var(--text-3)" />,
 });

@@ -20,12 +20,12 @@ pub use artifact::{
     TaskArtifact, UpdateArtifactMediaOutcome,
 };
 pub use ask_history::AskHistoryEntry;
-pub use captain::{Action, ActionKind, TickMode, TickResult, WorkerContext};
+pub use captain::{Action, ActionKind, EvidenceKindGates, TickMode, TickResult, WorkerContext};
 pub use effect_request::EffectRequest;
 pub use git_error::{find_git_error, GitError};
 pub use pid::Pid;
 pub use rebase_state::{RebaseState, RebaseStatus};
-pub use session_ids::SessionIds;
+pub use session_ids::{SessionIds, SessionSlot};
 pub use task::{
     parse_pr_number, pr_label, pr_url, ItemStatus, ReviewTrigger, Task, TaskRouting,
     TaskUpdateError, UpdateTaskInput, ACTIONABLE_TERMINAL, ALL_REVIEW_TRIGGERS, ALL_STATUSES,

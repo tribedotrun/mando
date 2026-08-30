@@ -505,9 +505,9 @@ mod tests {
         let workflow = CaptainWorkflow::compiled_default();
         let item = Task::new("Fix bug");
         let prompt = build_clarifier_prompt(&item, None, &workflow).unwrap();
-        assert!(prompt.contains("Phrasing the questions you ask the human"));
+        assert!(prompt.contains("## Phrasing Questions"));
         assert!(prompt.contains("plain English"));
-        assert!(prompt.contains("Avoid code identifiers"));
+        assert!(prompt.contains("avoid code identifiers and never paste code"));
         assert!(prompt.contains("unanswered human-facing questions only"));
     }
 
@@ -518,8 +518,8 @@ mod tests {
         let prompt =
             build_interactive_clarifier_turn_prompt(&item, &workflow, "the answer", None).unwrap();
         assert!(prompt.contains("plain English"));
-        assert!(prompt.contains("Avoid code identifiers"));
-        assert!(prompt.contains("Do not repeat answered questions"));
+        assert!(prompt.contains("no code identifiers, no pasted code"));
+        assert!(prompt.contains("only new unanswered follow-ups"));
     }
 
     #[test]

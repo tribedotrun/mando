@@ -33,19 +33,6 @@ pub(crate) async fn dispatch_new_work(
     bus: Option<&EventBus>,
     task_tracker: &TaskTracker,
 ) -> usize {
-    // Dispatch planning-mode items first (they don't consume worker slots).
-    super::dispatch_planning::dispatch_planning_items(
-        items,
-        config,
-        workflow,
-        pool,
-        bus,
-        dry_run,
-        dry_actions,
-        task_tracker,
-    )
-    .await;
-
     let mut resource_counts = dispatch_logic::count_resources(items);
     let mut state_counts = dispatch_logic::count_active_states(items);
     let per_state_limits = &workflow.agent.per_state_limits;

@@ -45,7 +45,6 @@ where
     .await;
     state.captain.drain_pending_lifecycle_effects().await?;
 
-    let terminal = state.terminal.clone();
     let tracker = state.task_tracker.clone();
     let cancel = state.cancellation_token.clone();
     let app = build_router(state);
@@ -61,7 +60,6 @@ where
         .with_graceful_shutdown(graceful)
         .await?;
 
-    terminal.shutdown();
     tracker.close();
     tracker.wait().await;
     Ok(())

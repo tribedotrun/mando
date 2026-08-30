@@ -31,9 +31,6 @@ pub(crate) enum TodoCommand {
         /// Disable auto-merge for this task even if global auto-merge is on
         #[arg(long)]
         no_auto_merge: bool,
-        /// Planning/discussion mode -- autonomous plan refinement, no implementation
-        #[arg(long)]
-        discuss: bool,
     },
     /// Bulk-add items (one per line or via --stdin)
     Bulk {
@@ -137,7 +134,6 @@ pub(crate) async fn handle(args: TodoArgs) -> anyhow::Result<()> {
             plan,
             no_pr,
             no_auto_merge,
-            discuss,
         } => {
             handle_add(
                 &title,
@@ -145,7 +141,6 @@ pub(crate) async fn handle(args: TodoArgs) -> anyhow::Result<()> {
                 plan.as_deref(),
                 no_pr,
                 no_auto_merge,
-                discuss,
             )
             .await
         }
@@ -193,7 +188,6 @@ async fn handle_add(
     plan: Option<&str>,
     no_pr: bool,
     no_auto_merge: bool,
-    discuss: bool,
 ) -> anyhow::Result<()> {
     let client = DaemonClient::discover()?;
     let mut form = reqwest::multipart::Form::new()
@@ -210,9 +204,6 @@ async fn handle_add(
     }
     if no_auto_merge {
         form = form.text("no_auto_merge", "true");
-    }
-    if discuss {
-        form = form.text("planning", "true");
     }
     let result: api_types::TaskItem = client.post_multipart_json(paths::TASKS_ADD, form).await?;
     println!("Added item #{}: {title}", result.id);
@@ -341,18 +332,6 @@ async fn handle_input(item_id: &str, message: &str) -> anyhow::Result<()> {
         api_types::ItemStatus::InProgress => {
             anyhow::bail!("item #{item_id} has an active worker — use `captain nudge` instead");
         }
-        api_types::ItemStatus::PlanReady => {
-            client
-                .post_json::<api_types::BoolOkResponse, _>(
-                    paths::TASKS_IMPLEMENT,
-                    &api_types::TaskImplementRequest {
-                        id: id_num,
-                        message: message.to_string(),
-                    },
-                )
-                .await?;
-            println!("Re-queued item #{item_id} for implementation with plan.");
-        }
         api_types::ItemStatus::Merged
         | api_types::ItemStatus::CompletedNoPr
         | api_types::ItemStatus::Canceled
@@ -472,14 +451,12 @@ mod tests {
                     plan,
                     no_pr,
                     no_auto_merge,
-                    discuss,
                 } => {
                     assert_eq!(title, "Fix bug");
                     assert!(project.is_none());
                     assert!(plan.is_none());
                     assert!(!no_pr);
                     assert!(!no_auto_merge);
-                    assert!(!discuss);
                 }
                 _ => panic!("expected Add"),
             },

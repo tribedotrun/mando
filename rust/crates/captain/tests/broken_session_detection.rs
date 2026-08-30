@@ -9,8 +9,7 @@
 use std::path::{Path, PathBuf};
 
 use global_claude::{
-    detect_image_dimension_blocked, stream_broken_session_symptom, BrokenSessionOrigin,
-    CcStreamSymptom, StreamSymptomMatcher,
+    stream_broken_session_symptom, BrokenSessionOrigin, CcStreamSymptom, StreamSymptomMatcher,
 };
 
 fn fixture(name: &str) -> PathBuf {
@@ -151,28 +150,4 @@ fn worker_thinking_rate_limit_does_not_trigger() {
         &matcher(),
     );
     assert!(m.is_none(), "assistant-text FP regression: {m:?}");
-}
-
-#[test]
-fn image_dimension_detects_via_tool_result_content() {
-    // The old synthesized-tail check on ctx.stream_tail stripped user text
-    // to `[user]` and missed this entirely. Structural detection walks the
-    // JSONL events and finds the dimension-limit tool_result.
-    let hit = detect_image_dimension_blocked(&fixture("image_dimension.jsonl"), &matcher());
-    assert!(
-        hit,
-        "dimension-limit regression — guard was dead before PR #960"
-    );
-}
-
-#[test]
-fn image_dimension_does_not_trigger_broken_session() {
-    // The recoverable symptom stays on the nudge path: broken-session detector
-    // must ignore it. Secondary path fails because the kill signature is
-    // absent; primary path fails because there's no terminal result event.
-    let m = stream_broken_session_symptom(&fixture("image_dimension.jsonl"), &matcher());
-    assert!(
-        m.is_none(),
-        "image dimension must NOT route to broken-session: {m:?}"
-    );
 }

@@ -44,6 +44,7 @@ pub(crate) async fn run_clarification(
         |ctx| {
             let mut builder = CcConfig::builder()
                 .model(model)
+                .effort(workflow.agent.cc_effort)
                 .timeout(timeout)
                 .caller("clarifier")
                 .task_id(task_id_ref)

@@ -138,7 +138,7 @@ pub(crate) fn check_review_failed(item: &Task) -> Option<String> {
 /// Validate a parsed verdict against the trigger's allowed actions.
 ///
 /// Also normalizes confidence fields on `ship`:
-/// - If `confidence` is missing or not one of high/mid/low, default to "mid"
+/// - If `confidence` is missing or not one of high/mid, default to "mid"
 ///   so the verdict still ships to AwaitingReview but does not auto-merge.
 ///   A missing confidence means the model forgot the rubric; we should not
 ///   auto-merge in that case, but we also should not block shipping and burn
@@ -215,31 +215,21 @@ pub(crate) fn validate_verdict(verdict: CaptainVerdict, item: &Task) -> CaptainV
 
     if verdict.action == "ship" {
         let mut out = verdict;
-        let confidence_valid = matches!(
-            out.confidence.as_deref(),
-            Some("high") | Some("mid") | Some("low")
-        );
+        let confidence_valid = matches!(out.confidence.as_deref(), Some("high") | Some("mid"));
         if !confidence_valid {
-            // Under `budget_exhausted`, the rubric reserves `low` for forced
-            // ships on weak evidence — align the default with that intent so
-            // the timeline label reads honestly. Everywhere else, default to
-            // `mid` (ships to AwaitingReview, skips auto-merge). Both land in
-            // the same auto-merge decision (anything other than `high` stays
-            // for human review); only the displayed label differs.
-            let fallback = if trigger == "budget_exhausted" {
-                "low"
-            } else {
-                "mid"
-            };
+            // The enforced JSON schema offers exactly `high` / `mid`, and the
+            // prompt grades against those two. Anything else — missing, or a
+            // value the model invented outside the schema — coerces to `mid`:
+            // the verdict still ships to AwaitingReview but skips auto-merge,
+            // which is the safe read of "we don't actually know".
             warn!(
                 module = "captain",
                 item_id = item.id,
                 confidence = ?out.confidence,
                 trigger,
-                fallback,
-                "ship verdict missing or invalid confidence; defaulting (no auto-merge)"
+                "ship verdict missing or invalid confidence; defaulting to mid (no auto-merge)"
             );
-            out.confidence = Some(fallback.into());
+            out.confidence = Some("mid".into());
         }
         if out
             .confidence_reason

@@ -10,7 +10,7 @@
 //!   that answers free-form questions about the task.
 //! - **advisor** (`session_ids.advisor`): the feed view's advisor button
 //!   (`TaskFeedView`). Same Q&A capability, plus action-synthesis verdicts
-//!   that feed `reopen` / `rework` / `revise-plan` transitions directly.
+//!   that feed `reopen` / `rework` transitions directly.
 //!
 //! Consolidating into a single endpoint would require migrating both
 //! persistence schemes and merging two distinct UI flows -- out of scope for
@@ -62,7 +62,7 @@ fn pick_initial_session_id(should_resume: bool, existing: Option<&str>) -> &str 
 /// - `ask` intent: conversational Q&A. Lazily spawns an agent session on first
 ///   message, resumes the same session for follow-ups, and persists the
 ///   assistant reply as an `ask_history` `assistant` row.
-/// - `reopen` / `rework` / `revise-plan`: single synthesis call whose output
+/// - `reopen` / `rework`: single synthesis call whose output
 ///   feeds directly into the transition. No conversational answer is stored,
 ///   so the feed shows only the user's message plus the resulting timeline
 ///   event (HumanReopen etc.). Prevents confusing "Want me to draft...?"
@@ -131,7 +131,7 @@ pub(crate) async fn post_task_advisor(
         .map_err(|e| internal_error(e, "failed to persist advisor question"))?;
     broadcast_task_update(&state, task_id).await;
 
-    if matches!(body.intent.as_str(), "reopen" | "rework" | "revise-plan") {
+    if matches!(body.intent.as_str(), "reopen" | "rework") {
         return post_task_advisor_action(
             &state,
             &sessions,

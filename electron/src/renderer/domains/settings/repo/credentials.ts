@@ -5,8 +5,8 @@ import { queryKeys } from '#renderer/global/repo/queryKeys';
 import { daemonSyncMeta } from '#renderer/global/repo/syncPolicy';
 import type {
   CredentialInfo,
-  CredentialListResponse,
   CredentialRateLimitStatus,
+  CredentialsListResponse,
   CredentialWindowInfo,
   UpdateCredentialTokenResponse,
 } from '#shared/daemon-contract';
@@ -17,7 +17,7 @@ export type { UpdateCredentialTokenResponse };
 const QUERY_KEY = queryKeys.credentials.all;
 
 export function useCredentialsList() {
-  return useQuery<CredentialListResponse>({
+  return useQuery<CredentialsListResponse>({
     queryKey: QUERY_KEY,
     meta: daemonSyncMeta('polling', 'credential rate-limit state changes over time'),
     queryFn: () => toReactQuery(apiGetRouteR('getCredentials')),

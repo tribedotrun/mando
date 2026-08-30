@@ -23,7 +23,6 @@ export const STATUS_TOOLTIP: Record<ItemStatus, string> = {
   errored: 'Errored',
   merged: 'Merged',
   'completed-no-pr': 'Done',
-  'plan-ready': 'Plan ready',
   canceled: 'Canceled',
   stopped: 'Stopped',
 };

@@ -2,11 +2,10 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
-use serde_json::json;
 use tokio::time::sleep;
 
-use super::codex_app_server::{start_codex_turn, watch_codex_turn, CodexOutputMode};
-use super::codex_stream::{append_jsonl, CodexStreamLine};
+use super::codex_app_server::{start_codex_turn, CodexOutputMode};
+use super::codex_session::{begin_codex_session, CodexSessionSpec};
 use crate::Task;
 
 const POLL_INTERVAL: Duration = Duration::from_millis(250);
@@ -32,86 +31,30 @@ pub(super) async fn run_text_session(
         agent_config,
     )
     .await?;
-    let stream_path =
-        global_infra::paths::codex_derived_stream_path_for_session(&started.thread_id);
-    let session_id = started.thread_id.clone();
-    let pid = started.pid;
+    let session = begin_codex_session(
+        pool,
+        started,
+        CodexSessionSpec {
+            caller,
+            task_id: item.id,
+            project: &item.project,
+            worker_name: None,
+            cwd,
+            prompt,
+            resumed: resume_thread_id.is_some(),
+            alias: None,
+            abort_reason: "text session setup failed",
+        },
+    )
+    .await?;
 
-    let setup_result: Result<()> = async {
-        append_jsonl(
-            &stream_path,
-            CodexStreamLine(json!({
-                "type": "system",
-                "subtype": "init",
-                "session_id": &session_id,
-                "provider": "codex",
-                "cwd": cwd.display().to_string(),
-            })),
-        )
-        .await?;
-        append_jsonl(
-            &stream_path,
-            CodexStreamLine(json!({
-                "type": "user",
-                "message": {"content": [{"type": "text", "text": prompt}]},
-            })),
-        )
-        .await?;
-
-        crate::io::pid_registry::register(&session_id, pid)?;
-        let resumed_at = resume_thread_id.map(|_| global_types::now_rfc3339());
-        let created_at = if resume_thread_id.is_some() {
-            String::new()
-        } else {
-            global_types::now_rfc3339()
-        };
-        sessions_db::upsert_session(
-            pool,
-            &sessions_db::SessionUpsert {
-                provider: global_types::TaskProvider::Codex,
-                session_id: &session_id,
-                created_at: &created_at,
-                caller,
-                cwd: &cwd.display().to_string(),
-                model: &started.model,
-                status: global_types::SessionStatus::Running,
-                cost_usd: None,
-                duration_ms: None,
-                resumed: resume_thread_id.is_some(),
-                task_id: Some(item.id),
-                scout_item_id: None,
-                worker_name: None,
-                resumed_at: resumed_at.as_deref(),
-                credential_id: None,
-                error: None,
-                api_error_status: None,
-            },
-        )
-        .await?;
-        global_claude::write_stream_meta_at(
-            &global_infra::paths::codex_derived_stream_meta_path_for_session(&session_id),
-            &global_claude::SessionMeta {
-                session_id: &session_id,
-                caller,
-                task_id: &item.id.to_string(),
-                worker_name: "",
-                project: &item.project,
-                cwd: &cwd.display().to_string(),
-            },
-            "running",
-        );
-        Ok(())
-    }
-    .await;
-    if let Err(e) = setup_result {
-        super::codex_app_server::abort_started_turn(started, None, "text session setup failed")
-            .await;
-        return Err(e);
-    }
-
-    watch_codex_turn(started, pool.clone(), stream_path.clone());
-
-    wait_for_text_result(&session_id, &stream_path, pid, call_timeout).await
+    wait_for_text_result(
+        &session.session_id,
+        &session.stream_path,
+        session.pid,
+        call_timeout,
+    )
+    .await
 }
 
 async fn wait_for_text_result(

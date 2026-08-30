@@ -34,10 +34,7 @@ export interface CaptainConfig {
   tickIntervalS?: number;
   tz?: string;
   defaultTaskAgent?: 'claude' | 'codex';
-  defaultTerminalAgent?: 'claude' | 'codex';
   defaultGlmImplementation?: boolean;
-  claudeTerminalArgs?: string;
-  codexTerminalArgs?: string;
   projects?: Record<string, ProjectConfig>;
 }
 

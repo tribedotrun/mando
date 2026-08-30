@@ -64,6 +64,9 @@ pub enum TimelineEventPayload {
         worker: String,
         session_id: String,
     },
+    // Plan mode was removed; this variant has no producer. It stays because
+    // decoding an unknown `event_type` is a hard error and existing task
+    // timelines still carry `planning_spawned` rows.
     PlanningSpawned {
         worker: String,
         session_id: String,
@@ -86,7 +89,6 @@ pub enum TimelineEventPayload {
         worker: String,
         session_id: String,
     },
-    WorkerCompleted {},
     CaptainReviewStarted {
         trigger: String,
         session_id: String,
@@ -137,8 +139,6 @@ pub enum TimelineEventPayload {
         fail_count: i64,
     },
     AutoMergeTriage {},
-    AutoMergeTriageFailed {},
-    AutoMergeTriageExhausted {},
     AwaitingReview {
         action: String,
         feedback: String,
@@ -274,18 +274,6 @@ pub enum TimelineEventPayload {
         question: String,
         error: String,
     },
-    EvidenceUpdated {},
-    WorkSummaryUpdated {},
-    PlanningRound {
-        round: i64,
-        cc_feedback_len: i64,
-        codex_feedback_len: i64,
-    },
-    PlanCompleted {
-        diagram: String,
-        plan: String,
-    },
-    PlanReady {},
 }
 
 impl TimelineEventPayload {
@@ -319,7 +307,6 @@ impl TimelineEventPayload {
             Self::WorkerNudged { .. } => "worker_nudged",
             Self::WorkerNudgeFailed { .. } => "worker_nudge_failed",
             Self::SessionResumed { .. } => "session_resumed",
-            Self::WorkerCompleted { .. } => "worker_completed",
             Self::CaptainReviewStarted { .. } => "captain_review_started",
             Self::CaptainReviewMergeFail { .. } => "captain_review_merge_fail",
             Self::CaptainReviewClarifierFail { .. } => "captain_review_clarifier_fail",
@@ -331,8 +318,6 @@ impl TimelineEventPayload {
             Self::CaptainMergeQueued { .. } => "captain_merge_queued",
             Self::CaptainMergeRetry { .. } => "captain_merge_retry",
             Self::AutoMergeTriage { .. } => "auto_merge_triage",
-            Self::AutoMergeTriageFailed { .. } => "auto_merge_triage_failed",
-            Self::AutoMergeTriageExhausted { .. } => "auto_merge_triage_exhausted",
             Self::AwaitingReview { .. } => "awaiting_review",
             Self::HumanReopen { .. } => "human_reopen",
             Self::HumanAsk { .. } => "human_ask",
@@ -358,11 +343,6 @@ impl TimelineEventPayload {
             Self::RateLimitCleared { .. } => "rate_limit_cleared",
             Self::WorkerReopened { .. } => "worker_reopened",
             Self::HumanAskFailed { .. } => "human_ask_failed",
-            Self::EvidenceUpdated { .. } => "evidence_updated",
-            Self::WorkSummaryUpdated { .. } => "work_summary_updated",
-            Self::PlanningRound { .. } => "planning_round",
-            Self::PlanCompleted { .. } => "plan_completed",
-            Self::PlanReady { .. } => "plan_ready",
         }
     }
 }

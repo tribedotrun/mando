@@ -11,6 +11,88 @@ pub(crate) fn has_summary_diagram(ctx: &WorkerContext) -> bool {
     ctx.has_work_summary && ctx.work_summary_fresh
 }
 
+/// Which typed-evidence gate a task is failing, and therefore which existing
+/// nudge template answers it.
+///
+/// The `captain_review` prompt no longer asks the reviewer to check evidence
+/// kinds — it states that typed gates fire deterministically before review.
+/// These predicates are that determinism: they run on the classifier's nudge
+/// path so a `gates_pass` review cannot fire on an incomplete deck.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum EvidenceKindGap {
+    /// No kind-tagged capture of the required sort exists at all.
+    Missing,
+    /// Kind-tagged captures exist but predate the latest reopen.
+    Stale,
+}
+
+impl EvidenceKindGap {
+    /// The `nudges:` key in `captain-workflow.yaml` that addresses this gap.
+    /// Both keys already exist; no new nudge template is introduced.
+    pub(crate) fn nudge_key(self) -> &'static str {
+        match self {
+            Self::Missing => "missing_evidence",
+            Self::Stale => "stale_evidence",
+        }
+    }
+
+    pub(crate) fn reason(self, what: &str) -> String {
+        match self {
+            Self::Missing => format!("missing {what}"),
+            Self::Stale => format!("stale {what} — recapture after reopen"),
+        }
+    }
+}
+
+/// UI work needs all three artifact kinds: a `before` screenshot, an `after`
+/// screenshot, and an `after` recording. Returns `None` once all three are
+/// present and fresh.
+///
+/// `evidence_fresh` distinguishes "never captured" from "captured before the
+/// reopen": when the task has evidence that simply went stale, the stale-
+/// evidence nudge is the honest message.
+pub(crate) fn ui_evidence_gap(ctx: &WorkerContext) -> Option<EvidenceKindGap> {
+    let gates = ctx.evidence_kinds;
+    if gates.before_screenshot && gates.after_screenshot && gates.after_recording {
+        return None;
+    }
+    Some(gap_kind(ctx))
+}
+
+/// Bug fixes need a `before` and an `after` capture, OR a `cannot-reproduce`
+/// write-up. Returns `None` when either shape is satisfied.
+pub(crate) fn bug_fix_evidence_gap(ctx: &WorkerContext) -> Option<EvidenceKindGap> {
+    let gates = ctx.evidence_kinds;
+    if gates.cannot_reproduce || (gates.before_fix && gates.after_fix) {
+        return None;
+    }
+    Some(gap_kind(ctx))
+}
+
+/// A task that registered evidence which then went stale gets the stale nudge;
+/// anything else gets the missing nudge.
+fn gap_kind(ctx: &WorkerContext) -> EvidenceKindGap {
+    if ctx.has_evidence && !ctx.evidence_fresh {
+        EvidenceKindGap::Stale
+    } else {
+        EvidenceKindGap::Missing
+    }
+}
+
+/// True when the task's diff touches UI. The kind gates only bind UI work, so
+/// a backend-only change is not held to before/after/recording.
+///
+/// Conservative on purpose: `changed_files` is empty when the PR fetch
+/// degraded or no PR exists yet, and an empty list must not manufacture a UI
+/// requirement out of nothing.
+pub(crate) fn touches_ui(ctx: &WorkerContext) -> bool {
+    const UI_EXTS: &[&str] = &[".tsx", ".jsx", ".vue", ".svelte", ".css", ".scss", ".html"];
+    ctx.changed_files.iter().any(|f| {
+        let lower = f.to_lowercase();
+        UI_EXTS.iter().any(|ext| lower.ends_with(ext))
+    })
+}
+
 /// Classify evidence status for captain review context (DB-backed).
 pub(crate) fn evidence_status(ctx: &WorkerContext) -> &'static str {
     if !ctx.has_evidence {
@@ -102,6 +184,7 @@ pub(crate) fn format_context(ctx: &WorkerContext) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::EvidenceKindGates;
 
     fn make_ctx() -> WorkerContext {
         WorkerContext {
@@ -138,6 +221,7 @@ mod tests {
             work_summary_fresh: false,
             has_screenshot: false,
             has_recording: false,
+            evidence_kinds: EvidenceKindGates::default(),
         }
     }
 
@@ -207,5 +291,140 @@ mod tests {
         let formatted = format_context(&ctx);
         assert!(formatted.contains("### Worker: mando-worker-0"));
         assert!(formatted.contains("Item: Test task"));
+    }
+
+    // ── Typed evidence-kind gates ──
+
+    fn ctx_with_kinds(kinds: EvidenceKindGates) -> WorkerContext {
+        let mut ctx = make_ctx();
+        ctx.has_evidence = true;
+        ctx.evidence_fresh = true;
+        ctx.evidence_kinds = kinds;
+        ctx
+    }
+
+    const FULL_UI_DECK: EvidenceKindGates = EvidenceKindGates {
+        before_screenshot: true,
+        after_screenshot: true,
+        after_recording: true,
+        before_fix: true,
+        after_fix: true,
+        cannot_reproduce: false,
+    };
+
+    #[test]
+    fn ui_gap_none_when_all_three_kinds_present() {
+        let ctx = ctx_with_kinds(FULL_UI_DECK);
+        assert_eq!(ui_evidence_gap(&ctx), None);
+    }
+
+    #[test]
+    fn ui_gap_flags_each_missing_kind() {
+        for drop_field in ["before_screenshot", "after_screenshot", "after_recording"] {
+            let mut kinds = FULL_UI_DECK;
+            match drop_field {
+                "before_screenshot" => kinds.before_screenshot = false,
+                "after_screenshot" => kinds.after_screenshot = false,
+                _ => kinds.after_recording = false,
+            }
+            let ctx = ctx_with_kinds(kinds);
+            assert_eq!(
+                ui_evidence_gap(&ctx),
+                Some(EvidenceKindGap::Missing),
+                "dropping {drop_field} must open a UI evidence gap"
+            );
+        }
+    }
+
+    #[test]
+    fn ui_gap_after_screenshot_alone_does_not_satisfy_recording() {
+        // A `--kind after` png sets after_screenshot but not after_recording;
+        // the deck still owes a recording.
+        let ctx = ctx_with_kinds(EvidenceKindGates {
+            before_screenshot: true,
+            after_screenshot: true,
+            after_recording: false,
+            before_fix: true,
+            after_fix: true,
+            cannot_reproduce: false,
+        });
+        assert_eq!(ui_evidence_gap(&ctx), Some(EvidenceKindGap::Missing));
+    }
+
+    #[test]
+    fn gap_reads_stale_when_evidence_predates_reopen() {
+        let mut ctx = ctx_with_kinds(EvidenceKindGates::default());
+        ctx.has_evidence = true;
+        ctx.evidence_fresh = false;
+        assert_eq!(ui_evidence_gap(&ctx), Some(EvidenceKindGap::Stale));
+        assert_eq!(ui_evidence_gap(&ctx).unwrap().nudge_key(), "stale_evidence");
+    }
+
+    #[test]
+    fn gap_reads_missing_when_no_evidence_at_all() {
+        let mut ctx = make_ctx();
+        ctx.has_evidence = false;
+        ctx.evidence_fresh = false;
+        assert_eq!(ui_evidence_gap(&ctx), Some(EvidenceKindGap::Missing));
+        assert_eq!(
+            ui_evidence_gap(&ctx).unwrap().nudge_key(),
+            "missing_evidence"
+        );
+    }
+
+    #[test]
+    fn bug_fix_gap_satisfied_by_before_and_after() {
+        let ctx = ctx_with_kinds(EvidenceKindGates {
+            before_fix: true,
+            after_fix: true,
+            ..EvidenceKindGates::default()
+        });
+        assert_eq!(bug_fix_evidence_gap(&ctx), None);
+    }
+
+    #[test]
+    fn bug_fix_gap_satisfied_by_cannot_reproduce_alone() {
+        let ctx = ctx_with_kinds(EvidenceKindGates {
+            cannot_reproduce: true,
+            ..EvidenceKindGates::default()
+        });
+        assert_eq!(bug_fix_evidence_gap(&ctx), None);
+    }
+
+    #[test]
+    fn bug_fix_gap_open_with_only_one_side() {
+        for kinds in [
+            EvidenceKindGates {
+                before_fix: true,
+                ..EvidenceKindGates::default()
+            },
+            EvidenceKindGates {
+                after_fix: true,
+                ..EvidenceKindGates::default()
+            },
+        ] {
+            let ctx = ctx_with_kinds(kinds);
+            assert_eq!(bug_fix_evidence_gap(&ctx), Some(EvidenceKindGap::Missing));
+        }
+    }
+
+    #[test]
+    fn touches_ui_detects_frontend_extensions() {
+        let mut ctx = make_ctx();
+        ctx.changed_files = vec!["electron/src/renderer/ui/Panel.tsx".into()];
+        assert!(touches_ui(&ctx));
+        ctx.changed_files = vec!["electron/src/renderer/ui/panel.CSS".into()];
+        assert!(touches_ui(&ctx), "extension match is case-insensitive");
+    }
+
+    #[test]
+    fn touches_ui_false_for_backend_only_and_empty_diffs() {
+        let mut ctx = make_ctx();
+        ctx.changed_files = vec!["rust/crates/captain/src/service/deterministic.rs".into()];
+        assert!(!touches_ui(&ctx));
+        // Degraded / pre-PR fetches produce an empty list; it must not
+        // manufacture a UI evidence requirement.
+        ctx.changed_files = vec![];
+        assert!(!touches_ui(&ctx));
     }
 }

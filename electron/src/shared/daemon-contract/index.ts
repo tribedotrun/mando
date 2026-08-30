@@ -116,11 +116,8 @@ export type CaptainConfig = {
   maxConcurrentWorkers: number | null;
   tickIntervalS: number;
   tz: string;
-  defaultTaskAgent: TerminalAgent;
-  defaultTerminalAgent: TerminalAgent;
+  defaultTaskAgent: TaskAgent;
   defaultGlmImplementation: boolean;
-  claudeTerminalArgs: string;
-  codexTerminalArgs: string;
   projects: { [key in string]: ProjectConfig };
 };
 export type CcPermissionMode =
@@ -168,7 +165,6 @@ export type ClarifyResponse = {
   error: string | null;
 };
 export type ClassifyRule = { category: string; patterns: Array<string> };
-export type CleanupWorktreesRequest = { dry_run?: boolean };
 export type ClientLogBatchRequest = { entries: Array<ClientLogEntry> };
 export type ClientLogBatchResponse = { accepted: number };
 export type ClientLogContext = {
@@ -240,13 +236,6 @@ export type CodexResetCreditsResponse = {
   credits: Array<CodexResetCredit>;
 };
 export type ConfigPayload = { ts: number; data: MandoConfig | null };
-export type ConfigSaveResponse = {
-  ok: boolean;
-  restartRequired: boolean;
-  taskDbPath: string;
-  workerHealthPath: string;
-  lockfilePath: string;
-};
 export type ConfigSetupRequest = { config?: MandoConfig };
 export type ConfigSetupResponse = { ok: boolean };
 export type ConfigStatusResponse = {
@@ -300,12 +289,10 @@ export type CredentialInfo = {
    */
   codex?: CodexCredentialDetails | null;
 };
-export type CredentialListResponse = { credentials: Array<CredentialInfo> };
 export type CredentialMutationResponse = { ok: boolean; error: string | null };
 export type CredentialPick = { id: number; label: string; token: string };
 export type CredentialPickRequest = { id?: number | null; label?: string | null };
 export type CredentialPickResponse = { pick: CredentialPick | null };
-export type CredentialProbeResponse = { ok: boolean; snapshot: CredentialUsageSnapshot };
 export type CredentialProvider = 'claude' | 'codex';
 export type CredentialRateLimitStatus = 'allowed' | 'allowed_warning' | 'rejected';
 export type CredentialTokenResponse = { token: string };
@@ -357,12 +344,6 @@ export type EventMeta = {
   timestamp: string | null;
   isSidechain: boolean | null;
 };
-export type EvidenceCreatedResponse = {
-  artifact_id: number;
-  task_id: number;
-  media: Array<ArtifactMedia>;
-};
-export type EvidenceFileInput = { filename: string; ext: string; caption: string };
 export type EvidenceFileRequest = {
   filename: string;
   ext: string;
@@ -373,7 +354,6 @@ export type EvidenceFileRequest = {
    */
   kind: EvidenceKind | null;
 };
-export type EvidenceFilesRequest = { files: Array<EvidenceFileInput> };
 export type EvidenceKind = 'before_fix' | 'after_fix' | 'cannot_reproduce' | 'other';
 export type FeaturesConfig = {
   scout: boolean;
@@ -425,7 +405,6 @@ export type ItemStatus =
   | 'errored'
   | 'merged'
   | 'completed-no-pr'
-  | 'plan-ready'
   | 'canceled'
   | 'stopped';
 export type MandoConfig = {
@@ -442,7 +421,6 @@ export type McpServerStatus = { name: string; status: string };
 export type McpToolName = { server: string; tool: string };
 export type MergeRequest = { pr_number: number; project: string };
 export type MergeResponse = { status: ItemStatus; item_id: number; pr: number };
-export type MessagesQuery = { limit: number | null; offset: number | null };
 export type ModelUsageBreakdown = {
   model: string;
   usage: TranscriptUsageInfo;
@@ -504,8 +482,6 @@ export type NudgeResponse = {
 };
 export type OpaqueInput = { raw: string };
 export type OtherToolName = { name: string };
-export type ParseTodosRequest = { text: string; project: string };
-export type ParseTodosResponse = { items: Array<string> };
 export type PermissionDenial = {
   toolName: string | null;
   toolUseId: string | null;
@@ -522,13 +498,6 @@ export type ProbeCredentialResponse = {
   error: string | null;
 };
 export type ProcessResponse = { ok: boolean; processed: number };
-export type ProjectAddResponse = {
-  ok: boolean;
-  name: string;
-  path: string;
-  githubRepo: string | null;
-  logo: string | null;
-};
 export type ProjectConfig = {
   name: string;
   path: string;
@@ -543,7 +512,6 @@ export type ProjectConfig = {
 };
 export type ProjectDeleteResponse = { ok: boolean; deleted_tasks: number };
 export type ProjectNameParams = { name: string };
-export type ProjectPatchResponse = { ok: boolean; logo: string | null };
 export type ProjectSummary = {
   key: string;
   name: string;
@@ -738,8 +706,6 @@ export type SessionCategory =
   | 'captain-review'
   | 'captain-ops'
   | 'advisor'
-  | 'planning'
-  | 'todo-parser'
   | 'scout'
   | 'rebase';
 export type SessionCostResponse = { cost: SessionCostSummary };
@@ -830,15 +796,6 @@ export type SessionsQuery = {
   caller: SessionCategory | null;
   status: SessionStatus | null;
 };
-export type SessionsResponse = {
-  total: number;
-  page: number;
-  per_page: number;
-  total_pages: number;
-  categories: { [key in string]: number };
-  total_cost_usd: number | null;
-  sessions: Array<SessionEntry>;
-};
 export type SetupTokenRequest = { label: string; token: string };
 export type SetupTokenResponse = { ok: boolean; id: number | null; label: string | null };
 export type SkillInput = { skill: string; args: string | null };
@@ -864,7 +821,6 @@ export type SseSnapshotData = {
   tasks: Array<TaskItem>;
   workers: Array<WorkerDetail>;
   workbenches: Array<WorkbenchItem>;
-  terminals: Array<TerminalSessionInfo>;
   config: MandoConfig;
   daemon: SseDaemonInfo;
 };
@@ -882,7 +838,6 @@ export type StatusEventData = { action: string | null; affected_task_ids: Array<
 export type StatusPayload = { ts: number; data: StatusEventData | null };
 export type StopWorkersResponse = { killed: number };
 export type StructuredOutputInput = { raw: string };
-export type SummaryCreatedResponse = { artifact_id: number; task_id: number };
 export type SyncCodexCredentialRequest = { credentialId: number; authJson: string };
 export type SyncCodexCredentialResponse = { ok: boolean };
 export type SystemApiRetryEvent = {
@@ -949,6 +904,7 @@ export type TaskAddRequest = {
   plan: boolean;
   no_pr: boolean;
 };
+export type TaskAgent = 'claude' | 'codex';
 export type TaskArtifact = {
   id: number;
   task_id: number;
@@ -958,7 +914,6 @@ export type TaskArtifact = {
   created_at: string;
 };
 export type TaskAskRequest = { id: number; question: string; ask_id?: string };
-export type TaskBulkRequest = { ids: Array<number>; updates: TaskBulkUpdates };
 export type TaskBulkUpdateRequest = { ids: Array<number>; updates: TaskBulkUpdates };
 export type TaskBulkUpdates = { worker?: string };
 export type TaskCreateProvider = 'claude' | 'codex';
@@ -979,7 +934,6 @@ export type TaskEvidenceResponse = {
 export type TaskFeedbackRequest = { id: number; feedback: string };
 export type TaskIdParams = { id: number };
 export type TaskIdRequest = { id: number };
-export type TaskImplementRequest = { id: number; message: string };
 export type TaskInput = { description: string; prompt: string; subagentType: string | null };
 export type TaskItem = {
   id: number;
@@ -1005,7 +959,6 @@ export type TaskItem = {
   plan: string | null;
   no_pr: boolean;
   no_auto_merge: boolean;
-  planning: boolean;
   /**
    * Set by the clarifier when it identifies the task as fixing existing
    * broken behavior (vs. a new feature, refactor, or research). Worker
@@ -1077,56 +1030,6 @@ export type TelegramReplyMarkup =
   | { kind: 'forceReply' }
   | { kind: 'removeKeyboard' };
 export type TelegraphPublishResponse = { ok: boolean; url: string };
-export type TerminalAgent = 'claude' | 'codex';
-export type TerminalCcSessionRequest = { ccSessionId: string };
-export type TerminalCreateRequest = {
-  project: string;
-  cwd: string;
-  agent: TerminalAgent;
-  resume_session_id?: string;
-  size?: TerminalSize;
-  terminal_id?: string;
-  name?: string;
-  /**
-   * Workbench that should own this terminal session. The renderer
-   * resolves this from `useWorkbenchPage` and the server stamps it
-   * onto the resulting `TerminalSessionInfo` so the renderer can
-   * scope its tab bar by identity instead of cwd.
-   */
-  workbenchId: number;
-};
-export type TerminalExitPayload = { code: number | null };
-export type TerminalIdParams = { id: string };
-export type TerminalOutputPayload = { dataB64: string };
-export type TerminalSessionInfo = {
-  id: string;
-  rev: number;
-  project: string;
-  cwd: string;
-  agent: TerminalAgent;
-  running: boolean;
-  exit_code: number | null;
-  state: TerminalState | null;
-  restored: boolean | null;
-  createdAt: string | null;
-  endedAt: string | null;
-  terminalId: string | null;
-  name: string | null;
-  ccSessionId: string | null;
-  /**
-   * Workbench owning this session. The renderer scopes a workbench's
-   * terminal tab bar by this id instead of the leaky `project + cwd`
-   * heuristic.
-   */
-  workbenchId: number;
-};
-export type TerminalSize = { rows: number; cols: number };
-export type TerminalState = 'live' | 'restored' | 'exited';
-export type TerminalStreamEnvelope =
-  | { event: 'output'; data: TerminalOutputPayload }
-  | { event: 'exit'; data: TerminalExitPayload };
-export type TerminalStreamQuery = { replay: number | null };
-export type TerminalWriteRequest = { data: string };
 export type TickAction = {
   worker: string;
   action: ActionKind;
@@ -1222,7 +1125,6 @@ export type TimelineEventPayload =
       error: string;
     }
   | { event_type: 'session_resumed'; worker: string; session_id: string }
-  | { event_type: 'worker_completed' }
   | { event_type: 'captain_review_started'; trigger: string; session_id: string }
   | {
       event_type: 'captain_review_merge_fail';
@@ -1259,8 +1161,6 @@ export type TimelineEventPayload =
   | { event_type: 'captain_merge_queued'; pr: string; source: string; confidence_reason: string }
   | { event_type: 'captain_merge_retry'; error: string; fail_count: number }
   | { event_type: 'auto_merge_triage' }
-  | { event_type: 'auto_merge_triage_failed' }
-  | { event_type: 'auto_merge_triage_exhausted' }
   | {
       event_type: 'awaiting_review';
       action: string;
@@ -1340,20 +1240,9 @@ export type TimelineEventPayload =
       worker: string;
       session_id: string;
     }
-  | { event_type: 'human_ask_failed'; question: string; error: string }
-  | { event_type: 'evidence_updated' }
-  | { event_type: 'work_summary_updated' }
-  | {
-      event_type: 'planning_round';
-      round: number;
-      cc_feedback_len: number;
-      codex_feedback_len: number;
-    }
-  | { event_type: 'plan_completed'; diagram: string; plan: string }
-  | { event_type: 'plan_ready' };
+  | { event_type: 'human_ask_failed'; question: string; error: string };
 export type TimelineResponse = { id: string; events: Array<TimelineEvent>; count: number };
 export type TodoWriteInput = { todos: Array<CcTodoItem> };
-export type TokenResponse = { token: string };
 export type ToolInput =
   | { kind: 'bash'; data: BashInput }
   | { kind: 'read'; data: ReadInput }
@@ -1515,7 +1404,6 @@ export type WebSearchInput = {
   allowedDomains: Array<string> | null;
   blockedDomains: Array<string> | null;
 };
-export type WorkSummaryRequest = { content: string };
 export type WorkbenchEventData = { action: string | null; item: WorkbenchItem | null };
 export type WorkbenchIdParams = { id: number };
 export type WorkbenchItem = {
@@ -1563,7 +1451,6 @@ export type WorkerDetail = {
   pid: number | null;
   is_stale: boolean | null;
 };
-export type WorkerIdParams = { id: string };
 export type WorkersResponse = {
   workers: Array<WorkerDetail>;
   rate_limit_remaining_secs: number | null;

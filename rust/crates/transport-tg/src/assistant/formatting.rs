@@ -2,9 +2,7 @@
 
 use api_types::{InlineKeyboardButton, TelegramReplyMarkup};
 
-use crate::telegram_format::{
-    escape_html, markdown_to_telegram_html, render_markdown_reply_html, TELEGRAM_TEXT_MAX_LEN,
-};
+use crate::telegram_format::{escape_html, render_markdown_reply_html, TELEGRAM_TEXT_MAX_LEN};
 use serde_json::Value;
 
 fn callback_btn(text: impl Into<String>, data: impl Into<String>) -> InlineKeyboardButton {
@@ -162,29 +160,6 @@ pub fn format_swipe_card(item: &Value, summary: Option<&str>) -> String {
     }
 
     text
-}
-
-/// Render the summary preview used by list surfaces.
-#[allow(dead_code)]
-pub fn render_summary_preview(summary: &str) -> String {
-    let preview = summary
-        .lines()
-        .filter_map(|line| {
-            let trimmed = line.trim();
-            if trimmed.is_empty()
-                || trimmed.starts_with('#')
-                || trimmed.starts_with("**") && trimmed.contains("**:")
-            {
-                None
-            } else {
-                Some(trimmed)
-            }
-        })
-        .take(4)
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    markdown_to_telegram_html(&preview)
 }
 
 /// Build the inline keyboard for a scout swipe card.
@@ -402,19 +377,6 @@ mod tests {
         let row = row_array(&rows[0], "qa session row");
         assert_eq!(row.len(), 2);
         assert!(field_str(&row[1]["callback_data"], "qa end button callback").contains("endqa"));
-    }
-
-    #[test]
-    fn render_summary_preview_converts_markdown() {
-        let preview = render_summary_preview(
-            "# Heading\n**bold**\n- item one\nUse `code`\nhttps://example.com/docs",
-        );
-
-        assert!(preview.contains("<b>bold</b>"));
-        assert!(preview.contains("\u{2022} item one"));
-        assert!(preview.contains("<code>code</code>"));
-        assert!(preview.contains("<a href=\"https://example.com/docs\">"));
-        assert!(!preview.contains("# Heading"));
     }
 
     #[test]

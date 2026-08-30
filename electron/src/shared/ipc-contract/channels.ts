@@ -93,9 +93,8 @@ export const channels = {
   'open-config-file': invoke(null, z.void()),
   'open-in-finder': invoke(z.string(), z.void()),
   'open-in-cursor': invoke(z.string(), z.void()),
-  'terminal:open-external-url': invoke(z.string(), z.void()),
-  'terminal:resolve-local-path': invoke(z.tuple([z.string(), z.string()]), z.string().nullable()),
-  'terminal:open-local-path': invoke(z.string(), z.void()),
+  'shell:open-external-url': invoke(z.string(), z.void()),
+  'shell:open-local-path': invoke(z.string(), z.void()),
 
   // Notifications: renderer pushes a payload to main; main pushes click events back.
   'show-notification': subscribe(notificationPayloadSchema),

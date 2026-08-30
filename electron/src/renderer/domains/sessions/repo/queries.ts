@@ -9,7 +9,7 @@ import {
 import type {
   SessionCategory,
   SessionEntry,
-  SessionsResponse,
+  SessionsListResponse,
   SessionStatus,
   TranscriptEventsResponse,
 } from '#renderer/global/types';
@@ -21,7 +21,7 @@ export function useSessionsList(
   status?: SessionStatus,
   perPage = 50,
 ) {
-  return useQuery<SessionsResponse>({
+  return useQuery<SessionsListResponse>({
     queryKey: queryKeys.sessions.list(page, category, status, perPage),
     meta: daemonSyncMeta('sse-invalidated', 'session events invalidate session lists'),
     queryFn: () => toReactQuery(fetchSessions(page, perPage, category, status)),

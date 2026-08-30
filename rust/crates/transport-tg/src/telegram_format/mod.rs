@@ -2,14 +2,12 @@
 //!
 //! Converts tasks and messages into Telegram-safe HTML.
 //!
-//! The markdown converter and visible-length truncating renderer live in
+//! The visible-length truncating markdown renderer lives in
 //! `global_infra::tg_markdown` so the captain biz tier can render LLM
 //! markdown without depending on the transport tier. Re-exported here so
 //! existing call sites keep their imports.
 
-pub use global_infra::tg_markdown::{
-    markdown_to_telegram_html, render_markdown_reply_html, TELEGRAM_TEXT_MAX_LEN,
-};
+pub use global_infra::tg_markdown::{render_markdown_reply_html, TELEGRAM_TEXT_MAX_LEN};
 
 // ── PR / issue linkification ────────────────────────────────────────
 
@@ -94,7 +92,6 @@ pub fn status_icon(status: &str) -> &'static str {
         "handed-off" | "handed_off" => "\u{1f91d}",                  // handshake
         "merged" => "\u{1f389}",                                     // party popper
         "completed-no-pr" | "completed_no_pr" => "\u{2714}",         // heavy check mark
-        "plan-ready" | "plan_ready" => "\u{1f4cb}",                  // clipboard
         "canceled" => "\u{274c}",                                    // cross mark
         _ => "\u{2022}",                                             // bullet
     }

@@ -24,7 +24,7 @@ export function SidebarProvider({ children }: SidebarProviderProps): React.React
 
   const wbCtx = useWorkbenchCtx();
   const activeTaskId = wbCtx?.task?.id ?? null;
-  const activeTerminalCwd = wbCtx?.worktreePath ?? null;
+  const activeWorktreePath = wbCtx?.worktreePath ?? null;
 
   const activeTab = useSidebarActiveTab();
 
@@ -34,12 +34,12 @@ export function SidebarProvider({ children }: SidebarProviderProps): React.React
     () => ({
       activeTab,
       projectFilter,
-      activeTerminalCwd,
+      activeWorktreePath,
       activeTaskId,
       setupProgress,
       setupActive,
     }),
-    [activeTab, projectFilter, activeTerminalCwd, activeTaskId, setupProgress, setupActive],
+    [activeTab, projectFilter, activeWorktreePath, activeTaskId, setupProgress, setupActive],
   );
 
   const value: SidebarContextValue = useMemo(() => ({ state, actions }), [state, actions]);

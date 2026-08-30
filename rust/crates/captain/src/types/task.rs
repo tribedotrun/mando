@@ -94,7 +94,6 @@ pub struct Task {
     pub plan: Option<String>,
     pub no_pr: bool,
     pub no_auto_merge: bool,
-    pub planning: bool,
     /// Set by the clarifier when it identifies the task as fixing existing
     /// broken behavior (vs. a feature/refactor/research task). Drives the
     /// reproduce-first + before-evidence requirement on workers and the
@@ -215,7 +214,6 @@ impl Task {
             plan: None,
             no_pr: false,
             no_auto_merge: false,
-            planning: false,
             is_bug_fix: false,
             worker_seq: 0,
             reopen_seq: 0,

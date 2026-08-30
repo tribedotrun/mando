@@ -25,9 +25,9 @@ pub use skills::sync_bundled_skills;
 pub use workflow::{
     captain_workflow_path, parse_captain_workflow_or_default, parse_scout_workflow_or_default,
     render_initial_prompt, render_nudge, render_prompt, render_template, scout_workflow_path,
-    validate_template_syntax, AgentConfig, AutoTitleConfig, CaptainWorkflow, CodexAgentConfig,
-    CodexReasoningEffort, CodexSandboxPolicy, ModelsConfig, SandboxOverrides, StageAgentConfig,
-    StageRoutingConfig, WorkflowStage,
+    validate_template_syntax, AgentConfig, CaptainWorkflow, CodexAgentConfig, CodexReasoningEffort,
+    CodexSandboxPolicy, ModelsConfig, SandboxOverrides, StageAgentConfig, StageRoutingConfig,
+    WorkflowStage,
 };
 pub use workflow_scout::{
     InterestsConfig, ScoutAgentConfig, ScoutRepo, ScoutWorkflow, ScoutWorkflowOverride,

@@ -1,9 +1,9 @@
 import { useCallback, useRef, useState } from 'react';
 import type { TaskItem } from '#renderer/global/types';
 import { useTextImageDraft } from '#renderer/global/runtime/useTextImageDraft';
-import { canReopen, canRework, canRevisePlan, clamp } from '#renderer/global/service/utils';
+import { canReopen, canRework, clamp } from '#renderer/global/service/utils';
 
-export type AdvisorIntent = 'ask' | 'reopen' | 'rework' | 'revise-plan';
+export type AdvisorIntent = 'ask' | 'reopen' | 'rework';
 
 interface Args {
   item: TaskItem;
@@ -54,7 +54,6 @@ export function useAdvisorInputBar({ item, onSend, isPending }: Args) {
       canAsk: true,
       canReopen: canReopen(item),
       canRework: canRework(item),
-      canRevise: canRevisePlan(item),
     },
     canSubmit: input.trim().length > 0 && !isPending,
   };

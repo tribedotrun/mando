@@ -75,7 +75,7 @@ impl TaskUpdateError {
 /// - `Some(None)` → field is cleared (set to NULL)
 /// - `Some(Some(v))` → field is set to `v`
 ///
-/// Lifecycle fields (`status`, `planning`) are intentionally absent —
+/// The lifecycle `status` field is intentionally absent —
 /// they must go through the lifecycle API.
 #[derive(Debug, Default, Clone)]
 pub struct UpdateTaskInput {

@@ -13,7 +13,7 @@ ruleTester.run('architecture/no-raw-boundary-json-parse', rule, {
     },
     {
       code: `const parsed = parseSseMessage(message.data, schema);`,
-      filename: 'src/renderer/domains/captain/repo/terminal-api.ts',
+      filename: 'src/renderer/domains/captain/repo/workbench-api.ts',
     },
     {
       code: `const parsed = parseJsonTextWith(raw, schema, 'persistence:test');`,

@@ -39,8 +39,6 @@ fn session_category(group: sessions::CallerGroup) -> api_types::SessionCategory 
         sessions::CallerGroup::CaptainReview => api_types::SessionCategory::CaptainReview,
         sessions::CallerGroup::CaptainOps => api_types::SessionCategory::CaptainOps,
         sessions::CallerGroup::Advisor => api_types::SessionCategory::Advisor,
-        sessions::CallerGroup::Planning => api_types::SessionCategory::Planning,
-        sessions::CallerGroup::TodoParser => api_types::SessionCategory::TodoParser,
         sessions::CallerGroup::Scout => api_types::SessionCategory::Scout,
         sessions::CallerGroup::Rebase => api_types::SessionCategory::Rebase,
     }

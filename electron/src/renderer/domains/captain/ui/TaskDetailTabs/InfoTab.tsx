@@ -4,6 +4,7 @@ import { shortenPath } from '#renderer/global/service/utils';
 import { taskImageUrl } from '#renderer/global/runtime/useApi';
 import { ImageLightbox } from '#renderer/global/ui/ImageLightbox';
 import { CopyValue } from '#renderer/domains/captain/ui/CopyValue';
+import { EvidenceDeckButton } from '#renderer/domains/captain/ui/TaskDetailParts';
 import { useTaskSetIsBugFix } from '#renderer/domains/captain/runtime/hooks';
 import { taskProviderLabel } from '#renderer/global/service/providerDisplay';
 
@@ -33,6 +34,9 @@ export function InfoTab({ item }: { item: TaskItem }): React.ReactElement {
           <>
             <span className="text-caption text-text-4">Worktree</span>
             <CopyValue value={item.worktree} display={shortenPath(item.worktree)} />
+
+            <span className="text-caption text-text-4">Evidence deck</span>
+            <EvidenceDeckButton worktree={item.worktree} />
           </>
         )}
 
@@ -54,13 +58,6 @@ export function InfoTab({ item }: { item: TaskItem }): React.ReactElement {
           <>
             <span className="text-caption text-text-4">Auto-merge</span>
             <span className="text-caption text-text-2">Disabled</span>
-          </>
-        )}
-
-        {item.planning && (
-          <>
-            <span className="text-caption text-text-4">Mode</span>
-            <span className="text-caption text-text-2">Plan</span>
           </>
         )}
 

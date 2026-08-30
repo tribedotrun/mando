@@ -2,9 +2,11 @@
 
 use sqlx::SqlitePool;
 
-/// Clean up stale state on startup: dead PIDs, stuck scout items, and
-/// orphan research runs from interrupted daemon runs.
+/// Clean up stale state on startup: dead PIDs, stuck scout items, orphan
+/// research runs from interrupted daemon runs, and Claude Code hooks left
+/// behind by a build that still installed them.
 pub async fn startup_reconciliation(pool: &SqlitePool) {
+    crate::legacy_hooks::prune_legacy_session_hooks();
     if let Err(e) = captain::cleanup_pid_on_startup().await {
         // Escalated to error: a failure here means orphan subprocesses
         // from a prior daemon may still be running, which downstream

@@ -28,12 +28,6 @@ pub struct BoolOkResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(deny_unknown_fields)]
-pub struct ParseTodosResponse {
-    pub items: Vec<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[serde(deny_unknown_fields)]
 pub struct TaskCreateResponse {
     pub id: i64,
     pub title: String,
@@ -333,17 +327,6 @@ pub struct CreateWorktreeResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(deny_unknown_fields)]
-pub struct ProjectAddResponse {
-    pub ok: bool,
-    pub name: String,
-    pub path: String,
-    #[serde(rename = "githubRepo")]
-    pub github_repo: Option<String>,
-    pub logo: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[serde(deny_unknown_fields)]
 pub struct ProjectsListResponse {
     pub projects: Vec<ProjectSummary>,
 }
@@ -356,13 +339,6 @@ pub struct ProjectUpsertResponse {
     pub path: String,
     #[serde(rename = "githubRepo")]
     pub github_repo: Option<String>,
-    pub logo: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[serde(deny_unknown_fields)]
-pub struct ProjectPatchResponse {
-    pub ok: bool,
     pub logo: Option<String>,
 }
 
@@ -400,20 +376,6 @@ pub struct ConfigStatusResponse {
 #[serde(deny_unknown_fields)]
 pub struct ConfigSetupResponse {
     pub ok: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[serde(deny_unknown_fields)]
-pub struct ConfigSaveResponse {
-    pub ok: bool,
-    #[serde(rename = "restartRequired")]
-    pub restart_required: bool,
-    #[serde(rename = "taskDbPath")]
-    pub task_db_path: String,
-    #[serde(rename = "workerHealthPath")]
-    pub worker_health_path: String,
-    #[serde(rename = "lockfilePath")]
-    pub lockfile_path: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]

@@ -3,14 +3,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use sqlx::SqlitePool;
-use tokio::sync::{Notify, RwLock};
+use tokio::sync::RwLock;
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 
 use crate::io::task_store::TaskStore;
 
-#[path = "daemon_auto_title.rs"]
-mod daemon_auto_title;
 #[path = "daemon_background.rs"]
 mod daemon_background;
 #[path = "daemon_control_runtime.rs"]
@@ -37,7 +35,6 @@ pub struct CaptainRuntimeDeps {
     pub pool: SqlitePool,
     pub task_tracker: TaskTracker,
     pub cancellation_token: CancellationToken,
-    pub auto_title_notify: Arc<Notify>,
     pub cleanup_expired_sessions: Arc<dyn Fn() -> usize + Send + Sync>,
 }
 
@@ -49,7 +46,6 @@ pub struct CaptainRuntime {
     pool: SqlitePool,
     task_tracker: TaskTracker,
     cancellation_token: CancellationToken,
-    auto_title_notify: Arc<Notify>,
     cleanup_expired_sessions: Arc<dyn Fn() -> usize + Send + Sync>,
     degraded: Arc<AtomicBool>,
 }
@@ -63,7 +59,6 @@ impl CaptainRuntime {
             pool: deps.pool,
             task_tracker: deps.task_tracker,
             cancellation_token: deps.cancellation_token,
-            auto_title_notify: deps.auto_title_notify,
             cleanup_expired_sessions: deps.cleanup_expired_sessions,
             degraded: Arc::new(AtomicBool::new(false)),
         }
@@ -73,7 +68,6 @@ impl CaptainRuntime {
         daemon_background::spawn_auto_tick(self);
         daemon_background::spawn_workbench_cleanup(self);
         daemon_background::spawn_credential_usage_poll(self);
-        daemon_auto_title::spawn(self);
     }
 
     pub fn settings(&self) -> &Arc<settings::SettingsRuntime> {
@@ -108,10 +102,6 @@ impl CaptainRuntime {
 
     pub fn cancellation_token(&self) -> &CancellationToken {
         &self.cancellation_token
-    }
-
-    pub fn auto_title_notify(&self) -> &Arc<Notify> {
-        &self.auto_title_notify
     }
 
     pub(crate) fn cleanup_expired_sessions(&self) -> usize {
@@ -209,38 +199,6 @@ impl CaptainRuntime {
     ) -> anyhow::Result<crate::io::health_store::HealthState> {
         let health_path = crate::config::worker_health_path();
         crate::io::health_store::load_health_state_async(&health_path).await
-    }
-
-    #[tracing::instrument(skip_all)]
-    pub async fn bind_terminal_workbench(
-        &self,
-        workbench_id: i64,
-        project_name: &str,
-    ) -> Result<(), workbench_runtime::BindTerminalError> {
-        workbench_runtime::bind_terminal_workbench(self, workbench_id, project_name).await
-    }
-
-    /// Re-probe a workbench and broadcast its current wire state without
-    /// mutating activity. Route handlers call this on rejection paths
-    /// (e.g. cwd-missing 400 on terminal-create) so the renderer sees
-    /// the fresh `worktreeExists` value immediately.
-    #[tracing::instrument(skip_all)]
-    pub async fn refresh_workbench_broadcast(&self, workbench_id: i64) {
-        workbench_runtime::refresh_workbench_broadcast(self, workbench_id).await
-    }
-
-    #[tracing::instrument(skip_all)]
-    pub async fn record_terminal_cc_session(
-        &self,
-        cwd: &str,
-        cc_session_id: &str,
-    ) -> anyhow::Result<()> {
-        workbench_runtime::record_terminal_cc_session(self, cwd, cc_session_id).await
-    }
-
-    #[tracing::instrument(skip_all)]
-    pub async fn notify_terminal_activity(&self, cwd: &str) -> anyhow::Result<bool> {
-        workbench_runtime::notify_terminal_activity(self, cwd).await
     }
 
     #[tracing::instrument(skip_all)]

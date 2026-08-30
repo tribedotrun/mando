@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import { useUIStore } from '#renderer/global/runtime/useUIStore';
 import type { TaskProvider } from '#renderer/global/types';
@@ -12,7 +12,7 @@ type OpenTranscriptOpts = {
   taskTitle?: string;
 };
 
-export function useWorkbenchNav(workbenchId: string, search: { tab?: string; resume?: string }) {
+export function useWorkbenchNav(workbenchId: string) {
   const navigate = useNavigate();
 
   const handleBack = useCallback(() => {
@@ -37,21 +37,8 @@ export function useWorkbenchNav(workbenchId: string, search: { tab?: string; res
     [navigate],
   );
 
-  // Track whether the terminal tab has been visited so we can lazy-mount
-  // TerminalPage and avoid eagerly creating terminal sessions.
-  // Reset when TanStack Router reuses the component for a different workbench.
-  const [terminalVisited, setTerminalVisited] = useState(
-    search.tab === 'terminal' || !!search.resume,
-  );
-  const prevWbRef = useRef(workbenchId);
-  if (prevWbRef.current !== workbenchId) {
-    prevWbRef.current = workbenchId;
-    setTerminalVisited(search.tab === 'terminal' || !!search.resume);
-  }
-
   const handleTabChange = useCallback(
     (newTab: string) => {
-      if (newTab === 'terminal') setTerminalVisited(true);
       void navigate({
         to: '/wb/$workbenchId',
         params: { workbenchId },
@@ -62,36 +49,9 @@ export function useWorkbenchNav(workbenchId: string, search: { tab?: string; res
     [navigate, workbenchId],
   );
 
-  const handleResumeInTerminal = useCallback(
-    (sessionId: string, name?: string, provider?: TaskProvider) => {
-      if (provider === 'opencode') return;
-      setTerminalVisited(true);
-      void navigate({
-        to: '/wb/$workbenchId',
-        params: { workbenchId },
-        search: { tab: 'terminal', resume: sessionId, name, provider },
-        replace: true,
-      });
-    },
-    [navigate, workbenchId],
-  );
-
-  const handleResumeConsumed = useCallback(() => {
-    // Clear resume/name from URL
-    void navigate({
-      to: '/wb/$workbenchId',
-      params: { workbenchId },
-      search: { tab: 'terminal' },
-      replace: true,
-    });
-  }, [navigate, workbenchId]);
-
   return {
-    terminalVisited,
     handleBack,
     handleOpenTranscript,
     handleTabChange,
-    handleResumeInTerminal,
-    handleResumeConsumed,
   };
 }

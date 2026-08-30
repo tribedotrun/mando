@@ -5,13 +5,11 @@ export {
   useTaskAskHistory,
   useTaskFeed,
   useTaskArtifacts,
-  useTerminalList,
   useWorkbenchList,
   useActivityStats,
   useWorkers,
   useTaskTimelineData,
   useTaskPrSummary,
-  type TerminalSessionInfo,
 } from '#renderer/domains/captain/repo/queries';
 
 // Mutation hooks
@@ -32,27 +30,20 @@ export {
   useTaskNudge,
   useTaskDelete,
   useTaskClarify,
-  useTaskBulkCreate,
   useTaskSetIsBugFix,
-  useStartImplementation,
 } from '#renderer/domains/captain/runtime/useFeedbackTaskMutations';
 
 // Extra mutation hooks (split for file-length compliance)
 export { useEndAskSession } from '#renderer/domains/captain/repo/mutations-extra';
 export { useAddProject } from '#renderer/domains/captain/runtime/useFeedbackTaskMutations';
 
-// Terminal mutation hooks
+// Workbench mutation hooks
 export {
-  useTerminalCreate,
-  useTerminalDelete,
   useWorkbenchPin,
   useWorkbenchRename,
   useWorkbenchArchive,
   useWorkbenchUnarchive,
-} from '#renderer/domains/captain/terminal/runtime/useFeedbackTerminalMutations';
+} from '#renderer/domains/captain/runtime/useFeedbackWorkbenchMutations';
 
 // Activity strip data hook (runtime, not repo)
 export { useActivityStripData } from '#renderer/domains/captain/runtime/useActivityStripData';
-
-// Query key re-export for imperative cache access in terminal UI
-export { queryKeys } from '#renderer/global/repo/queryKeys';

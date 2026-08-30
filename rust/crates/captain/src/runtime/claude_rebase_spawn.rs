@@ -17,20 +17,27 @@ pub(super) async fn spawn_rebase_worker(
     cwd: &std::path::Path,
     prompt: &str,
     model: &str,
+    effort: global_claude::Effort,
 ) -> Result<ClaudeRebaseSession> {
     let session_id = global_infra::uuid::Uuid::v4().to_string();
 
     // Pick credential so the rebase worker participates in load balancing.
-    let credential = super::tick_spawn::pick_credential(pool, None).await;
+    let credential = super::tick_spawn::pick_credential(pool).await;
     let cred_id = global_claude::credential_id(&credential);
     let mut env: std::collections::HashMap<String, String> = std::collections::HashMap::new();
     if let Some((_id, token)) = &credential {
         env.insert("CLAUDE_CODE_OAUTH_TOKEN".into(), token.clone());
     }
 
-    let (pid, _) =
-        crate::io::process_manager::spawn_worker_process(prompt, cwd, model, &session_id, &env)
-            .await?;
+    let (pid, _) = crate::io::process_manager::spawn_worker_process(
+        prompt,
+        cwd,
+        model,
+        effort,
+        &session_id,
+        &env,
+    )
+    .await?;
 
     // Register under both session_name (for reap_dead_rebase_workers
     // lifecycle) and session_id (for session reconciler + terminator).

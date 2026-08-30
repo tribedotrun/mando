@@ -10,7 +10,6 @@ members = [
     "crates/sessions",
     "crates/sessions-db",
     "crates/settings",
-    "crates/terminal",
 
     # Global providers
     "crates/global-types",
@@ -38,7 +37,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.21-beta.1"
+version = "0.1.21-beta.3"
 edition = "2021"
 license = "Apache-2.0"
 repository = "https://github.com/tribedotrun/mando"
@@ -77,15 +76,12 @@ inventory = "0.3.24"
 metrics = "0.24"
 metrics-exporter-prometheus = { version = "0.17", default-features = false }
 
-# Internal crates
-mando-terminal = { path = "crates/terminal" }
 
 # Domain crates
 captain = { path = "crates/captain" }
 scout = { path = "crates/scout" }
 sessions = { path = "crates/sessions" }
 settings = { path = "crates/settings" }
-terminal = { path = "crates/terminal" }
 
 # Global crates
 global-types = { path = "crates/global-types" }

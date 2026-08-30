@@ -191,9 +191,6 @@ async fn build_snapshot(state: &AppState) -> anyhow::Result<api_types::SseSnapsh
             },
         )
         .collect::<Vec<_>>();
-    let terminals =
-        roundtrip::<Vec<api_types::TerminalSessionInfo>>(state.terminal.list(), "terminals")?;
-
     let config = {
         let cfg = state.settings.load_config();
         crate::runtime::config_support::config_to_api(&cfg)
@@ -206,7 +203,6 @@ async fn build_snapshot(state: &AppState) -> anyhow::Result<api_types::SseSnapsh
         tasks,
         workers,
         workbenches,
-        terminals,
         config,
         daemon: api_types::SseDaemonInfo {
             version: env!("CARGO_PKG_VERSION").to_string(),

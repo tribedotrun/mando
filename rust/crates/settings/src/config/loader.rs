@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use serde_json::Value;
 
 use super::error::ConfigError;
-use super::settings::{Config, DEFAULT_CODEX_TERMINAL_ARGS, LEGACY_CODEX_TERMINAL_ARGS};
+use super::settings::Config;
 use global_infra::paths::expand_tilde;
 
 /// Return the config file path (`MANDO_CONFIG` env or `~/.mando/config.json`).
@@ -37,8 +37,7 @@ pub fn parse_config(content: &str, path: &std::path::Path) -> Result<Config, Con
         path: path.to_path_buf(),
         source: e,
     })?;
-    let mut merged = merge_into(defaults, user);
-    migrate_legacy_values(&mut merged);
+    let merged = merge_into(defaults, user);
     let mut config =
         serde_json::from_value::<Config>(merged).map_err(|e| ConfigError::JsonParse {
             path: path.to_path_buf(),
@@ -46,18 +45,6 @@ pub fn parse_config(content: &str, path: &std::path::Path) -> Result<Config, Con
         })?;
     config.populate_runtime_fields();
     Ok(config)
-}
-
-fn migrate_legacy_values(config: &mut Value) {
-    if config
-        .pointer("/captain/codexTerminalArgs")
-        .and_then(Value::as_str)
-        == Some(LEGACY_CODEX_TERMINAL_ARGS)
-    {
-        if let Some(slot) = config.pointer_mut("/captain/codexTerminalArgs") {
-            *slot = Value::String(DEFAULT_CODEX_TERMINAL_ARGS.to_string());
-        }
-    }
 }
 
 /// Serialize a `Config` struct to pretty-printed JSON.
@@ -105,17 +92,19 @@ mod tests {
     }
 
     #[test]
-    fn parse_config_migrates_legacy_codex_terminal_args() {
+    fn parse_config_ignores_retired_terminal_keys() {
+        // Configs written before the in-app terminal was removed still carry
+        // `defaultTerminalAgent` / `claudeTerminalArgs` / `codexTerminalArgs`.
+        // `Config` is not `deny_unknown_fields`, so those keys are dropped on
+        // read and disappear from disk on the next write — no migration step
+        // is needed. This test is the guard on that assumption.
         let parsed = parse_config(
-            r#"{"captain":{"codexTerminalArgs":"--full-auto"}}"#,
+            r#"{"captain":{"defaultTerminalAgent":"claude","claudeTerminalArgs":"--x","codexTerminalArgs":"--full-auto","tickIntervalS":99}}"#,
             std::path::Path::new("config.json"),
         )
-        .expect("config parses");
+        .expect("config with retired terminal keys still parses");
 
-        assert_eq!(
-            parsed.captain.codex_terminal_args,
-            DEFAULT_CODEX_TERMINAL_ARGS
-        );
+        assert_eq!(parsed.captain.tick_interval_s, 99);
     }
 
     #[test]

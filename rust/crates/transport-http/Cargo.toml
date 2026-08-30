@@ -15,7 +15,6 @@ global-infra = { path = "../global-infra" }
 scout = { path = "../scout" }
 sessions = { path = "../sessions" }
 settings = { path = "../settings" }
-terminal = { path = "../terminal" }
 transport-http-macros = { path = "../transport-http-macros" }
 transport-tg = { path = "../transport-tg" }
 transport-ui = { path = "../transport-ui" }

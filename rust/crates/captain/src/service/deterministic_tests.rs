@@ -52,6 +52,14 @@ fn base_ctx() -> WorkerContext {
         work_summary_fresh: true,
         has_screenshot: true,
         has_recording: true,
+        evidence_kinds: crate::EvidenceKindGates {
+            before_screenshot: true,
+            after_screenshot: true,
+            after_recording: true,
+            before_fix: true,
+            after_fix: true,
+            cannot_reproduce: false,
+        },
     }
 }
 
@@ -355,29 +363,6 @@ fn reopen_ack_missing_nudge() {
 }
 
 #[test]
-fn image_dimension_blocked_nudge() {
-    // Dimension errors show up as `user/tool_result/is_error:true` content —
-    // structural detection walks the stream events, finds this shape, and
-    // routes the nudge. Previously ctx.stream_tail carried a `[user]` marker
-    // and the substring check missed the error entirely (dead code).
-    let path = write_test_stream(
-        "image_dimension_nudge",
-        &[
-            r#"{"type":"system","subtype":"init"}"#,
-            r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"Read","input":{}}]}}"#,
-            r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","is_error":true,"content":"Error: image exceeds the dimension limit of 2000px"}]}}"#,
-        ],
-    );
-    let mut ctx = base_ctx();
-    ctx.process_alive = false;
-    // Use Some(false) — errored stream so gates don't pass, but stream result
-    // exists so missing_gate_nudge kicks in and finds image blocking.
-    let a = classify_with_path(&ctx, &base_item(), Some(false), &path);
-    assert_eq!(a.action, ActionKind::Nudge);
-    assert!(a.reason.unwrap().contains("image"));
-}
-
-#[test]
 fn nopr_insufficient_output_nudge() {
     let mut ctx = base_ctx();
     ctx.process_alive = false;
@@ -392,36 +377,8 @@ fn nopr_insufficient_output_nudge() {
     assert!(a.reason.unwrap().contains("insufficient"));
 }
 
-// ── Stale evidence after reopen ──
-
-#[test]
-fn stale_evidence_blocks_gates_pass() {
-    let mut ctx = base_ctx();
-    // Evidence exists but is stale after reopen.
-    ctx.has_evidence = true;
-    ctx.evidence_fresh = false;
-    ctx.reopen_seq = 1;
-    let a = classify(&ctx, &base_item(), Some(true));
-    assert_eq!(a.action, ActionKind::Nudge);
-    assert!(
-        a.reason.unwrap().contains("stale"),
-        "expected stale evidence nudge"
-    );
-}
-
-#[test]
-fn fresh_evidence_after_reopen_passes_gates() {
-    let mut ctx = base_ctx();
-    // DB-backed gates: evidence and summary exist and are fresh.
-    ctx.has_evidence = true;
-    ctx.evidence_fresh = true;
-    ctx.has_work_summary = true;
-    ctx.work_summary_fresh = true;
-    ctx.reopen_seq = 1;
-    let a = classify(&ctx, &base_item(), Some(true));
-    assert_eq!(a.action, ActionKind::CaptainReview);
-    assert_eq!(a.reason.as_deref(), Some("gates_pass"));
-}
+#[path = "deterministic_evidence_tests.rs"]
+mod evidence;
 
 // ── ABR-999 regression: broken session with error result ──
 

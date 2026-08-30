@@ -5,7 +5,6 @@ use anyhow::Result;
 use settings::CaptainWorkflow;
 use settings::Config;
 
-use crate::io::health_store::HealthState;
 use crate::runtime::mergeability_rebase::{
     check_pr_mergeable, handle_conflict, reap_dead_rebase_workers, MergeStatus,
 };
@@ -23,7 +22,6 @@ pub(crate) async fn check_done_mergeability(
     workflow: &CaptainWorkflow,
     notifier: &Notifier,
     alerts: &mut Vec<String>,
-    _health_state: &HealthState,
     pool: &sqlx::SqlitePool,
 ) -> Result<()> {
     // Discover PRs for pending-review and handed-off items — parallel discovery.
@@ -110,10 +108,10 @@ pub(crate) async fn check_done_mergeability(
         let idx = *idx;
         match result {
             Ok(MergeStatus::Merged) => {
-                apply_merged(&mut items[idx], pr, config, notifier, pool).await;
+                apply_merged(&mut items[idx], pr, notifier, pool).await;
             }
             Ok(MergeStatus::Closed) => {
-                apply_closed(&mut items[idx], pr, config, notifier, pool).await;
+                apply_closed(&mut items[idx], pr, notifier, pool).await;
             }
             Ok(MergeStatus::Mergeable) => {
                 if config.captain.auto_merge {
@@ -168,10 +166,10 @@ pub(crate) async fn check_done_mergeability(
         let idx = *idx;
         match result {
             Ok(MergeStatus::Merged) => {
-                apply_merged(&mut items[idx], pr, config, notifier, pool).await;
+                apply_merged(&mut items[idx], pr, notifier, pool).await;
             }
             Ok(MergeStatus::Closed) => {
-                apply_closed(&mut items[idx], pr, config, notifier, pool).await;
+                apply_closed(&mut items[idx], pr, notifier, pool).await;
             }
             Ok(_) => {} // Mergeable, Conflicted, Unknown — human owns it, no action
             Err(e) => {
@@ -275,13 +273,7 @@ async fn apply_terminal_from_github(
     }
 }
 
-async fn apply_merged(
-    item: &mut Task,
-    pr: &str,
-    _config: &Config,
-    notifier: &Notifier,
-    pool: &sqlx::SqlitePool,
-) {
+async fn apply_merged(item: &mut Task, pr: &str, notifier: &Notifier, pool: &sqlx::SqlitePool) {
     apply_terminal_from_github(
         item,
         pr,
@@ -300,13 +292,7 @@ async fn apply_merged(
     .await;
 }
 
-async fn apply_closed(
-    item: &mut Task,
-    pr: &str,
-    _config: &Config,
-    notifier: &Notifier,
-    pool: &sqlx::SqlitePool,
-) {
+async fn apply_closed(item: &mut Task, pr: &str, notifier: &Notifier, pool: &sqlx::SqlitePool) {
     apply_terminal_from_github(
         item,
         pr,

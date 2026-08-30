@@ -41,7 +41,7 @@ pub(crate) async fn gather_worker_contexts(
     let mut work: Vec<GatherWork> = Vec::new();
 
     for (idx, item) in items.iter().enumerate() {
-        if item.status != crate::ItemStatus::InProgress || item.planning {
+        if item.status != crate::ItemStatus::InProgress {
             continue;
         }
         let worker_name = match &item.worker {
@@ -182,6 +182,7 @@ pub(crate) async fn gather_worker_contexts(
             work_summary_fresh: artifact_gate.work_summary_fresh,
             has_screenshot: artifact_gate.has_screenshot,
             has_recording: artifact_gate.has_recording,
+            evidence_kinds: artifact_gate.evidence_kinds,
         });
     }
 
@@ -479,6 +480,7 @@ pub(crate) async fn build_single_context(
         work_summary_fresh: false,
         has_screenshot: false,
         has_recording: false,
+        evidence_kinds: crate::EvidenceKindGates::default(),
     };
     let formatted = worker_context::format_context(&ctx);
     Ok((ctx, formatted))

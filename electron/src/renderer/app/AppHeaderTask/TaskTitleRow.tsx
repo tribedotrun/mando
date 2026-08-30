@@ -13,7 +13,6 @@ interface TaskTitleRowProps {
   ctx: NonNullable<ReturnType<typeof useWorkbenchCtx>>;
   sidebarCollapsed: boolean | undefined;
   navIcons: React.ReactNode;
-  isTerminalTab: boolean;
   taskIsRateLimited: boolean;
 }
 
@@ -21,7 +20,6 @@ export function TaskTitleRow({
   ctx,
   sidebarCollapsed,
   navIcons,
-  isTerminalTab,
   taskIsRateLimited,
 }: TaskTitleRowProps): React.ReactElement {
   const taskActions = useTaskActions();
@@ -60,7 +58,7 @@ export function TaskTitleRow({
         <AppHeaderOpenMenu worktreePath={ctx.worktreePath} />
         <DetailOverflowMenu
           item={ctx.task!}
-          onViewContext={isTerminalTab ? undefined : () => requestViewTaskBrief()}
+          onViewContext={() => requestViewTaskBrief()}
           onResumeRateLimited={
             taskIsRateLimited ? () => taskActions.flow.handleResumeRateLimited(taskId) : undefined
           }
