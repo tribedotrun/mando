@@ -1,8 +1,8 @@
 /**
  * React Query wrappers for the Codex desktop-app (ChatGPT/Codex Electron
  * app) account-swap status and actions. These call native IPC wrappers in
- * `global/providers/native/app.ts`, not a daemon route, but the query and
- * mutations still belong in repo/ per R6/R12: every consumer (the
+ * `global/providers/native/app.ts`; Electron main forwards them through the
+ * generated daemon contract. The query and mutations belong in repo/: every consumer (the
  * credential row's "use in desktop app" button, the active-swap warning
  * banner) needs to share one cache entry and one in-flight signal instead
  * of each mounting its own local status poll and pending flag.

@@ -25,16 +25,10 @@ pub const LUMA_DIFF_THRESHOLD: u8 = 5;
 pub const MIN_CHANGED_FRACTION: f64 = 0.001;
 
 /// Outcome of the motion check.
-///
-/// `mean_diff` and per-pair indices are part of the public surface so future
-/// callers (e.g. the `mando-dev evidence verify` audit) can render a richer
-/// table than `handle_evidence` needs today.
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub struct MotionVerdict {
     pub verdict: Verdict,
     pub changed_fraction: f64,
-    pub mean_diff: f64,
     pub sampled_pairs: Vec<PairStats>,
     pub reason: String,
 }
@@ -46,12 +40,8 @@ pub enum Verdict {
 }
 
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub struct PairStats {
-    pub a_index: usize,
-    pub b_index: usize,
     pub changed_fraction: f64,
-    pub mean_diff: f64,
 }
 
 /// Inspect a video file (mp4/mov/webm) and decide whether the clip is
@@ -64,7 +54,6 @@ pub fn check_video(video_path: &Path) -> Result<MotionVerdict, MotionCheckError>
         return Ok(MotionVerdict {
             verdict: Verdict::Degenerate,
             changed_fraction: 0.0,
-            mean_diff: 0.0,
             sampled_pairs: vec![],
             reason: format!(
                 "recording has {} sample frame(s); need at least 2 to detect motion",
@@ -78,10 +67,7 @@ pub fn check_video(video_path: &Path) -> Result<MotionVerdict, MotionCheckError>
     for (a, b) in &pair_indices {
         let stats = diff_stats(&frames[*a], &frames[*b])?;
         pair_stats.push(PairStats {
-            a_index: *a,
-            b_index: *b,
             changed_fraction: stats.changed_fraction,
-            mean_diff: stats.mean_diff,
         });
     }
 
@@ -89,11 +75,6 @@ pub fn check_video(video_path: &Path) -> Result<MotionVerdict, MotionCheckError>
         .iter()
         .map(|p| p.changed_fraction)
         .fold(0.0_f64, f64::max);
-    let max_mean = pair_stats
-        .iter()
-        .map(|p| p.mean_diff)
-        .fold(0.0_f64, f64::max);
-
     if max_changed < MIN_CHANGED_FRACTION {
         let reason = format!(
             "recording rejected: changed_fraction={:.4}% across {} sampled frame pair(s) \
@@ -106,7 +87,6 @@ pub fn check_video(video_path: &Path) -> Result<MotionVerdict, MotionCheckError>
         return Ok(MotionVerdict {
             verdict: Verdict::Degenerate,
             changed_fraction: max_changed,
-            mean_diff: max_mean,
             sampled_pairs: pair_stats,
             reason,
         });
@@ -120,7 +100,6 @@ pub fn check_video(video_path: &Path) -> Result<MotionVerdict, MotionCheckError>
     Ok(MotionVerdict {
         verdict: Verdict::Ok,
         changed_fraction: max_changed,
-        mean_diff: max_mean,
         sampled_pairs: pair_stats,
         reason,
     })
@@ -282,7 +261,6 @@ fn pick_pair_indices(n: usize) -> Vec<(usize, usize)> {
 #[derive(Debug, Clone)]
 struct DiffStats {
     changed_fraction: f64,
-    mean_diff: f64,
 }
 
 /// Compute mean luma difference and fraction of changed pixels between two
@@ -290,14 +268,11 @@ struct DiffStats {
 /// of the difference image), one for changed fraction (geq-thresholded plane
 /// then mean luma / 255 = fraction).
 fn diff_stats(a: &Path, b: &Path) -> Result<DiffStats, MotionCheckError> {
-    let mean_diff = signalstats_yavg(a, b, /* thresholded */ false)?;
+    signalstats_yavg(a, b, /* thresholded */ false)?;
     let yavg_thresh = signalstats_yavg(a, b, /* thresholded */ true)?;
     // YAVG over a {0,255}-thresholded plane = 255 * fraction_changed.
     let changed_fraction = (yavg_thresh / 255.0).clamp(0.0, 1.0);
-    Ok(DiffStats {
-        changed_fraction,
-        mean_diff,
-    })
+    Ok(DiffStats { changed_fraction })
 }
 
 fn signalstats_yavg(a: &Path, b: &Path, thresholded: bool) -> Result<f64, MotionCheckError> {

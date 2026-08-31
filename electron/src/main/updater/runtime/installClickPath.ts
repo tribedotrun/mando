@@ -1,4 +1,4 @@
-export interface QuitForPendingUpdateDeps {
+interface QuitForPendingUpdateDeps {
   announceUiUpdating: () => Promise<unknown>;
   relaunch: () => void;
   exit: (code: number) => void;

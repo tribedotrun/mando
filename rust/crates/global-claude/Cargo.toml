@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+agent-runtime-core = { path = "../agent-runtime-core" }
 api-types = { path = "../api-types" }
 global-types = { path = "../global-types" }
 global-infra = { path = "../global-infra" }
@@ -15,5 +16,7 @@ anyhow.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 regex.workspace = true
-libc = "0.2"
 tempfile = "3"
+
+[lints]
+workspace = true

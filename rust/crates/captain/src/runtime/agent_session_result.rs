@@ -33,9 +33,23 @@ pub(crate) fn poll_structured_session_output(
     provider: global_types::TaskProvider,
     session_id: &str,
 ) -> AgentSessionPoll {
-    let stream_path = stream_path(provider, session_id);
-    if let Some(result) = global_claude::get_stream_result(&stream_path) {
-        if result.get("is_error").and_then(|v| v.as_bool()) == Some(true) {
+    super::agent_runtime::Adapter::new(provider).poll(session_id)
+}
+
+pub(super) fn poll_for_adapter(
+    adapter: super::agent_runtime::Adapter,
+    session_id: &str,
+) -> AgentSessionPoll {
+    let stream_path = adapter.stream_path(session_id);
+    if let Some(result) = adapter.result(&stream_path) {
+        let result = result.0;
+        let outcome = agent_runtime_core::result_outcome(&result);
+        if outcome == api_types::ResultOutcome::Interrupted {
+            return AgentSessionPoll::UnusableOutput(
+                "agent session was interrupted before completion".to_string(),
+            );
+        }
+        if outcome.is_error() {
             return AgentSessionPoll::Failed(
                 result
                     .get("error")
@@ -47,20 +61,17 @@ pub(crate) fn poll_structured_session_output(
         }
 
         if let Some(structured) = result.get("structured_output").filter(|v| !v.is_null()) {
-            let fallback_text = match provider {
-                global_types::TaskProvider::Claude => fallback_text(&result, &stream_path),
-                global_types::TaskProvider::Codex | global_types::TaskProvider::OpenCode => None,
-            };
+            let fallback_text = adapter
+                .is_claude()
+                .then(|| fallback_text(&result, &stream_path))
+                .flatten();
             return AgentSessionPoll::Completed(AgentSessionOutput::Structured {
                 value: structured.clone(),
                 fallback_text,
             });
         }
 
-        if matches!(
-            provider,
-            global_types::TaskProvider::Codex | global_types::TaskProvider::OpenCode
-        ) {
+        if adapter.requires_structured_output() {
             let reason = result
                 .get("structured_output_error")
                 .and_then(|v| v.as_str())
@@ -77,16 +88,13 @@ pub(crate) fn poll_structured_session_output(
         );
     }
 
-    if is_session_finished(provider, session_id) {
-        if matches!(
-            provider,
-            global_types::TaskProvider::Codex | global_types::TaskProvider::OpenCode
-        ) {
+    if adapter.is_finished(session_id) {
+        if adapter.requires_structured_output() {
             return AgentSessionPoll::UnusableOutput(
                 "structured-output agent session finished without result".to_string(),
             );
         }
-        if let Some(text) = global_claude::get_last_assistant_text(&stream_path) {
+        if let Some(text) = agent_runtime_core::get_last_assistant_text(&stream_path) {
             return AgentSessionPoll::Completed(AgentSessionOutput::Text(text));
         }
         return AgentSessionPoll::UnusableOutput(
@@ -108,50 +116,32 @@ pub(crate) fn stream_path(
     provider: global_types::TaskProvider,
     session_id: &str,
 ) -> std::path::PathBuf {
-    match provider {
-        global_types::TaskProvider::Claude => {
-            global_infra::paths::stream_path_for_session(session_id)
-        }
-        global_types::TaskProvider::Codex => {
-            global_infra::paths::codex_derived_stream_path_for_session(session_id)
-        }
-        global_types::TaskProvider::OpenCode => {
-            global_infra::paths::opencode_stream_path_for_session(session_id)
-        }
-    }
+    super::agent_runtime::Adapter::new(provider).stream_path(session_id)
 }
 
 pub(crate) fn stream_meta_path(
     provider: global_types::TaskProvider,
     session_id: &str,
 ) -> std::path::PathBuf {
-    match provider {
-        global_types::TaskProvider::Claude => {
-            global_infra::paths::stream_meta_path_for_session(session_id)
-        }
-        global_types::TaskProvider::Codex => {
-            global_infra::paths::codex_derived_stream_meta_path_for_session(session_id)
-        }
-        global_types::TaskProvider::OpenCode => {
-            global_infra::paths::opencode_stream_meta_path_for_session(session_id)
-        }
-    }
-}
-
-pub(crate) fn is_session_finished(provider: global_types::TaskProvider, session_id: &str) -> bool {
-    match provider {
-        global_types::TaskProvider::Claude => global_claude::is_session_finished(session_id),
-        global_types::TaskProvider::Codex => {
-            global_claude::is_stream_meta_finished_at(&stream_meta_path(provider, session_id))
-        }
-        global_types::TaskProvider::OpenCode => {
-            global_claude::is_stream_meta_finished_at(&stream_meta_path(provider, session_id))
-        }
-    }
+    super::agent_runtime::Adapter::new(provider).stream_meta_path(session_id)
 }
 
 pub(crate) fn stream_file_size(provider: global_types::TaskProvider, session_id: &str) -> u64 {
-    global_claude::get_stream_file_size(&stream_path(provider, session_id))
+    agent_runtime_core::get_stream_file_size(&stream_path(provider, session_id))
+}
+
+pub(crate) fn record_interrupted_result(
+    provider: global_types::TaskProvider,
+    stream_path: &std::path::Path,
+) {
+    super::agent_runtime::Adapter::new(provider).record_interrupted_result(stream_path);
+}
+
+pub(crate) fn should_record_interrupted_result(
+    provider: global_types::TaskProvider,
+    stream_path: &std::path::Path,
+) -> bool {
+    super::agent_runtime::Adapter::new(provider).should_record_interrupted_result(stream_path)
 }
 
 fn fallback_text(result: &Value, stream_path: &std::path::Path) -> Option<String> {
@@ -160,12 +150,53 @@ fn fallback_text(result: &Value, stream_path: &std::path::Path) -> Option<String
         .and_then(|v| v.as_str())
         .map(String::from)
         .filter(|s| !s.is_empty())
-        .or_else(|| global_claude::get_last_assistant_text(stream_path))
+        .or_else(|| agent_runtime_core::get_last_assistant_text(stream_path))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn claude_stop_overrides_a_provider_error_with_interrupted() {
+        let temp = tempfile::tempdir().unwrap();
+        let stream_path = temp.path().join("claude-stream.jsonl");
+        std::fs::write(
+            &stream_path,
+            concat!(
+                "{\"type\":\"system\",\"subtype\":\"init\"}\n",
+                "{\"type\":\"result\",\"subtype\":\"error_during_execution\",\"is_error\":true}\n"
+            ),
+        )
+        .unwrap();
+
+        record_interrupted_result(global_types::TaskProvider::Claude, &stream_path);
+
+        let result = agent_runtime_core::get_stream_result(&stream_path).unwrap();
+        assert_eq!(
+            agent_runtime_core::result_outcome(&result),
+            api_types::ResultOutcome::Interrupted
+        );
+    }
+
+    #[test]
+    fn completed_claude_session_is_not_rewritten_as_interrupted() {
+        let temp = tempfile::tempdir().unwrap();
+        let stream_path = temp.path().join("claude-stream.jsonl");
+        std::fs::write(
+            &stream_path,
+            concat!(
+                "{\"type\":\"system\",\"subtype\":\"init\"}\n",
+                "{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false}\n"
+            ),
+        )
+        .unwrap();
+
+        assert!(!should_record_interrupted_result(
+            global_types::TaskProvider::Claude,
+            &stream_path
+        ));
+    }
 
     async fn isolated_stream(session_id: &str, result: serde_json::Value) {
         let stream_path = global_infra::paths::codex_derived_stream_path_for_session(session_id);
@@ -230,6 +261,31 @@ mod tests {
                 assert!(reason.contains("structured_output"));
             }
             other => panic!("expected Codex text-only result to be rejected, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn structured_poller_does_not_complete_interrupted_result() {
+        let _lock = global_infra::PROCESS_ENV_LOCK.lock().await;
+        let temp = tempfile::tempdir().unwrap();
+        let _guard = global_infra::EnvVarGuard::set("MANDO_DATA_DIR", temp.path());
+        let session_id = "codex-interrupted-result";
+        isolated_stream(
+            session_id,
+            serde_json::json!({
+                "type": "result",
+                "subtype": "interrupted",
+                "is_error": false,
+                "structured_output": {"action": "ship"}
+            }),
+        )
+        .await;
+
+        match poll_structured_session_output(global_types::TaskProvider::Codex, session_id) {
+            AgentSessionPoll::UnusableOutput(reason) => {
+                assert!(reason.contains("interrupted"));
+            }
+            other => panic!("expected interrupted result to be unusable, got {other:?}"),
         }
     }
 }

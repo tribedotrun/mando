@@ -154,11 +154,6 @@ pub enum TimelineEventPayload {
         to: ItemStatus,
         source: String,
     },
-    HumanAsk {
-        question: String,
-        intent: String,
-        ask_id: String,
-    },
     RebaseTriggered {
         worker: String,
         session_id: String,
@@ -270,10 +265,6 @@ pub enum TimelineEventPayload {
         worker: String,
         session_id: String,
     },
-    HumanAskFailed {
-        question: String,
-        error: String,
-    },
 }
 
 impl TimelineEventPayload {
@@ -320,7 +311,6 @@ impl TimelineEventPayload {
             Self::AutoMergeTriage { .. } => "auto_merge_triage",
             Self::AwaitingReview { .. } => "awaiting_review",
             Self::HumanReopen { .. } => "human_reopen",
-            Self::HumanAsk { .. } => "human_ask",
             Self::RebaseTriggered { .. } => "rebase_triggered",
             Self::ReworkRequested { .. } => "rework_requested",
             Self::Merged { .. } => "merged",
@@ -342,7 +332,6 @@ impl TimelineEventPayload {
             Self::RateLimited { .. } => "rate_limited",
             Self::RateLimitCleared { .. } => "rate_limit_cleared",
             Self::WorkerReopened { .. } => "worker_reopened",
-            Self::HumanAskFailed { .. } => "human_ask_failed",
         }
     }
 }

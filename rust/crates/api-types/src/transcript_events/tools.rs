@@ -22,6 +22,8 @@ pub enum ToolName {
     TodoWrite,
     WebFetch,
     WebSearch,
+    FileChange,
+    ImageView,
     Task,
     NotebookEdit,
     Skill,
@@ -61,6 +63,8 @@ pub enum ToolInput {
     TodoWrite(TodoWriteInput),
     WebFetch(WebFetchInput),
     WebSearch(WebSearchInput),
+    FileChange(FileChangeInput),
+    ImageView(ImageViewInput),
     Task(TaskInput),
     NotebookEdit(NotebookEditInput),
     Skill(SkillInput),
@@ -172,6 +176,37 @@ pub struct WebSearchInput {
     pub query: String,
     pub allowed_domains: Option<Vec<String>>,
     pub blocked_domains: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct FileChangeInput {
+    pub changes: Vec<FileChangeEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct FileChangeEntry {
+    pub path: String,
+    pub kind: FileChangeKind,
+    pub move_path: Option<String>,
+    pub diff: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ImageViewInput {
+    pub path: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum FileChangeKind {
+    Add,
+    Update,
+    Delete,
+    Move,
+    Other,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]

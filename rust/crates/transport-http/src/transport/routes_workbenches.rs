@@ -37,7 +37,6 @@ fn wire_workbench(workbench: &captain::Workbench) -> Result<api_types::Workbench
         .map_err(|e| internal_error(e, "failed to convert workbench to api type"))
 }
 
-#[crate::instrument_api(method = "GET", path = "/api/workbenches")]
 pub(crate) async fn get_workbenches(
     State(state): State<AppState>,
     Query(query): Query<api_types::WorkbenchListQuery>,
@@ -60,7 +59,6 @@ pub(crate) async fn get_workbenches(
 
 // ── PATCH /api/workbenches/:id ─────────────────────────────────────────
 
-#[crate::instrument_api(method = "PATCH", path = "/api/workbenches/{id}")]
 pub(crate) async fn patch_workbench(
     State(state): State<AppState>,
     Path(api_types::WorkbenchIdParams { id }): Path<api_types::WorkbenchIdParams>,

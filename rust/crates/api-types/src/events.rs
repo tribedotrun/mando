@@ -13,17 +13,6 @@ pub enum NotifyLevel {
     Critical,
 }
 
-impl NotifyLevel {
-    pub const fn value(self) -> u8 {
-        match self {
-            NotifyLevel::Low => 10,
-            NotifyLevel::Normal => 20,
-            NotifyLevel::High => 30,
-            NotifyLevel::Critical => 40,
-        }
-    }
-}
-
 #[cfg(test)]
 mod notify_level_order_tests {
     use super::NotifyLevel;
@@ -84,10 +73,6 @@ pub enum NotificationKind {
         scout_id: i64,
         url: String,
         error: String,
-    },
-    AdvisorAnswered {
-        item_id: String,
-        title: String,
     },
     Generic,
 }

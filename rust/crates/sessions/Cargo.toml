@@ -7,15 +7,18 @@ license.workspace = true
 [dependencies]
 api-types = { path = "../api-types" }
 global-types = { path = "../global-types" }
-global-db = { path = "../global-db" }
 sessions-db = { path = "../sessions-db" }
-global-bus = { path = "../global-bus" }
 global-infra = { path = "../global-infra" }
 global-claude = { path = "../global-claude" }
 serde.workspace = true
 serde_json.workspace = true
 anyhow.workspace = true
 tracing.workspace = true
-time.workspace = true
 sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite"] }
 tokio.workspace = true
+
+[dev-dependencies]
+global-db = { path = "../global-db" }
+
+[lints]
+workspace = true

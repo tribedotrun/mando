@@ -9,16 +9,6 @@ export {
   type PayloadOf,
 } from './channels.ts';
 
-export {
-  argsSchema,
-  resultSchema,
-  payloadSchema,
-  invoke,
-  subscribe,
-  send,
-  type InvokeApi,
-  type SubscribeApi,
-  type InferIpcApi,
-} from './runtime.ts';
+export { argsSchema, invoke, subscribe, send } from './runtime.ts';
 
 export * from './schemas.ts';

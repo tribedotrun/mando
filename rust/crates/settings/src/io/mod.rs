@@ -1,6 +1,7 @@
 //! I/O layer for the settings domain.
 
 pub mod cc_failover;
+pub(crate) mod codex_app_process;
 pub mod codex_credentials;
 pub mod codex_login;
 pub mod codex_oauth_refresh;

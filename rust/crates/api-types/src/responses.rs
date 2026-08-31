@@ -4,9 +4,9 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::{
-    AskHistoryEntry, ClarifierQuestion, DailyMerge, FeedItem, ItemStatus, ProjectSummary,
-    ScoutItem, ScoutItemStatus, SessionSummary, TaskArtifact, TaskItem, TimelineEvent,
-    WorkbenchItem, WorkerDetail,
+    ClarifierQuestion, DailyMerge, FeedItem, ItemStatus, ProjectSummary, ScoutItem,
+    ScoutItemStatus, SessionSummary, TaskArtifact, TaskItem, TimelineEvent, WorkbenchItem,
+    WorkerDetail,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -159,26 +159,6 @@ pub struct AskResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(deny_unknown_fields)]
-pub struct AskEndResponse {
-    pub ok: bool,
-    pub ended: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[serde(deny_unknown_fields)]
-pub struct AskReopenResponse {
-    pub ok: bool,
-    pub feedback: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[serde(deny_unknown_fields)]
-pub struct AskHistoryResponse {
-    pub history: Vec<AskHistoryEntry>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[serde(deny_unknown_fields)]
 pub struct TimelineResponse {
     pub id: String,
     pub events: Vec<TimelineEvent>,
@@ -204,34 +184,6 @@ pub struct FeedResponse {
     pub id: String,
     pub feed: Vec<FeedItem>,
     pub count: usize,
-}
-
-// Inner variants of `AdvisorResponse` below. `#[serde(deny_unknown_fields)]`
-// is intentionally omitted: serde's internally-tagged enum deserialization
-// passes the `kind` discriminator into the inner deserializer, so a strict
-// inner struct would reject it as an unknown field. Strictness is enforced
-// at the enum level (no extra keys can appear outside the declared variants).
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-pub struct AdvisorAskResponse {
-    pub id: i64,
-    pub ask_id: String,
-    pub message: String,
-    pub answer: String,
-    pub session_id: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-pub struct AdvisorActionResponse {
-    pub ok: bool,
-    pub intent: String,
-    pub feedback: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum AdvisorResponse {
-    Ask(AdvisorAskResponse),
-    Action(AdvisorActionResponse),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]

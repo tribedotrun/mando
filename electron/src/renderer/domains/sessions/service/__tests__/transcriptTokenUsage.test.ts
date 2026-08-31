@@ -76,39 +76,25 @@ describe('summarizeTranscriptTokenUsage', () => {
     });
   });
 
-  it('reads exact live Codex thread token usage totals preserved as raw unknown events', () => {
+  it('reads exact live Codex thread token usage from its typed progress event', () => {
     const events: TranscriptEvent[] = [
       {
-        kind: 'unknown',
+        kind: 'system_token_usage',
         data: {
           meta: meta(1),
-          rawType: 'thread/tokenUsage/updated',
-          rawSubtype: null,
-          raw: JSON.stringify({
-            method: 'thread/tokenUsage/updated',
-            params: {
-              tokenUsage: {
-                total: {
-                  totalTokens: 13,
-                  inputTokens: 10,
-                  outputTokens: 3,
-                  cachedInputTokens: 2,
-                  cacheCreationInputTokens: 1,
-                },
-              },
-            },
-          }),
+          usage: usage(7, 3, 2, 1),
+          contextWindow: 200000,
         },
       },
     ];
 
     assert.deepEqual(summarizeTranscriptTokenUsage(events), {
-      input_tokens: 10,
+      input_tokens: 7,
       output_tokens: 3,
       cache_read_tokens: 2,
       cache_creation_tokens: 1,
       totalTokens: 13,
-      source: 'token_usage_event',
+      source: 'system_token_usage',
     });
   });
 

@@ -38,7 +38,6 @@ pub enum SessionCategory {
     Clarifier,
     CaptainReview,
     CaptainOps,
-    Advisor,
     Scout,
     Rebase,
 }
@@ -50,7 +49,6 @@ impl SessionCategory {
             Self::Clarifier => "clarifier",
             Self::CaptainReview => "captain-review",
             Self::CaptainOps => "captain-ops",
-            Self::Advisor => "advisor",
             Self::Scout => "scout",
             Self::Rebase => "rebase",
         }

@@ -82,7 +82,6 @@ fn serialize_map(m: &HashMap<String, PickerState>) -> serde_json::Value {
                 serde_json::json!({
                     "chat_id": ps.chat_id,
                     "items": ps.items,
-                    "selected": ps.selected.iter().copied().collect::<Vec<usize>>(),
                 }),
             )
         })
@@ -114,22 +113,7 @@ fn restore_map(v: &serde_json::Value) -> HashMap<String, PickerState> {
                         .collect()
                 })
                 .unwrap_or_default();
-            let selected: std::collections::HashSet<usize> = entry["selected"]
-                .as_array()
-                .map(|arr| {
-                    arr.iter()
-                        .filter_map(|v| v.as_u64().map(|n| n as usize))
-                        .collect()
-                })
-                .unwrap_or_default();
-            m.insert(
-                k.clone(),
-                PickerState {
-                    chat_id,
-                    items,
-                    selected,
-                },
-            );
+            m.insert(k.clone(), PickerState { chat_id, items });
         }
     }
     m

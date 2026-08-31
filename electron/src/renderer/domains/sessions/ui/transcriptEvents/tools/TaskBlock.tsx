@@ -11,12 +11,18 @@ interface TaskBlockProps {
 }
 
 export function TaskBlock({ id, input, result, isError }: TaskBlockProps): React.ReactElement {
-  const summary = input.subagentType
-    ? `${input.description} · ${input.subagentType}`
-    : input.description;
+  const isExploration = input.prompt.trim() === '';
+  const summary = input.description || input.subagentType || 'subagent';
   return (
-    <ToolFrame id={id} name="Task" summary={summary} isError={isError}>
-      <p className="mt-2 whitespace-pre-wrap text-label text-muted-foreground">{input.prompt}</p>
+    <ToolFrame
+      id={id}
+      name={isExploration ? 'Explored' : 'Task'}
+      summary={summary}
+      isError={isError}
+    >
+      {input.prompt && (
+        <p className="mt-2 whitespace-pre-wrap text-label text-muted-foreground">{input.prompt}</p>
+      )}
       <ToolResultBody result={result} />
     </ToolFrame>
   );

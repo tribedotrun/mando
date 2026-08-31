@@ -20,11 +20,6 @@ export function AssistantMessage({
   const items = groupAssistantBlocks(event, eventIndex);
   return (
     <div className="py-2">
-      {event.model && (
-        <div className="mb-1 text-label uppercase tracking-wide text-muted-foreground">
-          {event.model}
-        </div>
-      )}
       <div className="space-y-1">
         {items.map((item) => {
           if (item.kind === 'group') {
@@ -52,18 +47,13 @@ export function AssistantMessage({
           }
           if (block.kind === 'thinking') {
             return (
-              <ThinkingBlock
-                key={`${item.eventIndex}-${item.blockIndex}`}
-                id={`${item.eventIndex}-${item.blockIndex}`}
-                text={block.data.text}
-              />
+              <ThinkingBlock key={`${item.eventIndex}-${item.blockIndex}`} text={block.data.text} />
             );
           }
           if (block.kind === 'advisor_tool_result') {
             return (
               <ThinkingBlock
                 key={`${item.eventIndex}-${item.blockIndex}`}
-                id={`advisor-${item.eventIndex}-${item.blockIndex}`}
                 text={block.data.text}
                 label="advisor"
               />

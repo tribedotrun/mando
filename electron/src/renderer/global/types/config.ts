@@ -1,4 +1,4 @@
-export interface ClassifyRule {
+interface ClassifyRule {
   category: string;
   patterns: string[];
 }
@@ -43,7 +43,7 @@ export interface ScoutConfig {
   userContext?: { role?: string; knownDomains?: string[]; explainDomains?: string[] };
 }
 
-export interface UiConfig {
+interface UiConfig {
   openAtLogin?: boolean;
 }
 

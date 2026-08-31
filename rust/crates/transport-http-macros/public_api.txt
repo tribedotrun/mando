@@ -1,2 +1,0 @@
-pub fn instrument_api
-pub const #marker_ident: &str

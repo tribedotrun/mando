@@ -9,5 +9,7 @@ global-types = { path = "../global-types" }
 inventory.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-time.workspace = true
 ts-rs = "=12.0.1"
+
+[lints]
+workspace = true

@@ -9,7 +9,6 @@ use serde_json::json;
 use crate::AppState;
 
 /// GET /api/config — read current config.
-#[crate::instrument_api(method = "GET", path = "/api/config")]
 pub(crate) async fn get_config(
     State(state): State<AppState>,
 ) -> Result<Json<api_types::MandoConfig>, StatusCode> {
@@ -22,26 +21,11 @@ pub(crate) async fn get_config(
 }
 
 /// PUT /api/config — write config.json, hot-reload into daemon.
-#[crate::instrument_api(method = "PUT", path = "/api/config")]
 pub(crate) async fn put_config(
     State(state): State<AppState>,
     Json(body): Json<api_types::MandoConfig>,
 ) -> Result<Json<api_types::ConfigWriteResponse>, axum::response::Response> {
-    let new_config: settings::Config =
-        serde_json::from_value(serde_json::to_value(body).map_err(|err| {
-            (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": format!("invalid config: {err}")})),
-            )
-                .into_response()
-        })?)
-        .map_err(|err| {
-            (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": format!("invalid config: {err}")})),
-            )
-                .into_response()
-        })?;
+    let new_config = crate::runtime::config_support::config_from_api(body);
 
     let outcome = match state.settings.apply_api_config(new_config).await {
         Ok(outcome) => outcome,
@@ -74,7 +58,6 @@ pub(crate) async fn put_config(
 }
 
 /// GET /api/config/status — returns whether config exists and setup is complete.
-#[crate::instrument_api(method = "GET", path = "/api/config/status")]
 pub(crate) async fn get_config_status(
     State(state): State<AppState>,
 ) -> Json<api_types::ConfigStatusResponse> {
@@ -124,27 +107,12 @@ pub(crate) async fn get_config_status(
 }
 
 /// POST /api/config/setup — mark first-launch setup complete.
-#[crate::instrument_api(method = "POST", path = "/api/config/setup")]
 pub(crate) async fn post_config_setup(
     State(state): State<AppState>,
     Json(body): Json<api_types::ConfigSetupRequest>,
 ) -> Result<Json<api_types::ConfigSetupResponse>, axum::response::Response> {
     if let Some(config_body) = body.config {
-        let new_config: settings::Config =
-            serde_json::from_value(serde_json::to_value(config_body).map_err(|err| {
-                (
-                    StatusCode::BAD_REQUEST,
-                    Json(json!({"error": format!("invalid config: {err}")})),
-                )
-                    .into_response()
-            })?)
-            .map_err(|err| {
-                (
-                    StatusCode::BAD_REQUEST,
-                    Json(json!({"error": format!("invalid config: {err}")})),
-                )
-                    .into_response()
-            })?;
+        let new_config = crate::runtime::config_support::config_from_api(config_body);
 
         let outcome = match state.settings.apply_api_config(new_config).await {
             Ok(outcome) => outcome,

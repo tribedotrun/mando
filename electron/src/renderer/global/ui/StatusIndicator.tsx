@@ -21,7 +21,7 @@ import {
   IconHandedOff,
 } from '#renderer/global/ui/primitives/icons';
 
-export { ACTION_LABELS, STATUS_TOOLTIP } from '#renderer/global/service/statusDisplay';
+export { STATUS_TOOLTIP } from '#renderer/global/service/statusDisplay';
 
 const S = 16;
 

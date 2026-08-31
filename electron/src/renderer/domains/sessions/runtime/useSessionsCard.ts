@@ -16,7 +16,7 @@ interface UseSessionsCardOptions {
   onOpenSession?: (s: SessionEntry) => void;
 }
 
-export interface SessionsCardState {
+interface SessionsCardState {
   pagination: {
     page: number;
     setPage: React.Dispatch<React.SetStateAction<number>>;

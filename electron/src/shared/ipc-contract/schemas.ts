@@ -4,6 +4,7 @@
 import { z } from 'zod';
 import { parseConfigJsonText } from '#shared/daemon-contract/json';
 import {
+  codexDesktopAppStatusResponseSchema,
   notificationKindSchema,
   notificationPayloadSchema as wireNotificationPayloadSchema,
 } from '#shared/daemon-contract/schemas';
@@ -75,6 +76,22 @@ export const updateCheckDonePayloadSchema = z.object({
   found: z.boolean(),
 });
 
+const evidenceDeckAssetSchema = z
+  .object({
+    path: z.string(),
+    mime: z.string(),
+    base64: z.string(),
+  })
+  .strict();
+
+export const evidenceDeckDocumentSchema = z
+  .object({
+    html: z.string(),
+    modifiedAtMs: z.number().nonnegative(),
+    assets: z.array(evidenceDeckAssetSchema),
+  })
+  .strict();
+
 // Notifications carry the wire NotificationPayload; we re-export it so the IPC
 // contract has a stable identity even if the wire shape evolves.
 export const notificationPayloadSchema = wireNotificationPayloadSchema;
@@ -84,17 +101,7 @@ export const notificationClickPayloadSchema = z.object({
   item_id: z.string().optional(),
 });
 
-// Codex desktop-app (ChatGPT/Codex Electron app) account swap. Main shells out
-// to the bundled `mando` CLI (`codex app-use` / `app-restore` / `app-status`);
-// see rust CLI contract for the authoritative shape.
+// Codex desktop-app account swap. Main calls the typed daemon routes; reuse
+// their generated response schema at the remaining renderer/main IPC edge.
 export const codexAppLabelSchema = z.string().min(1);
-
-export const codexAppModeSchema = z.enum(['pool', 'ambient', 'none']);
-
-export const codexAppStatusSchema = z.object({
-  mode: codexAppModeSchema,
-  activeLabel: z.string().nullable(),
-  credentialId: z.number().nullable(),
-  slotAccountId: z.string().nullable(),
-  canRestore: z.boolean(),
-});
+export const codexAppStatusSchema = codexDesktopAppStatusResponseSchema;

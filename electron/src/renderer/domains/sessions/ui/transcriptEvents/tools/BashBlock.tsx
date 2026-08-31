@@ -2,6 +2,7 @@ import React from 'react';
 import type { BashInput, UserToolResultBlock } from '#renderer/global/types';
 import { ToolFrame } from '#renderer/domains/sessions/ui/transcriptEvents/ToolFrame';
 import { ToolResultBody } from '#renderer/domains/sessions/ui/transcriptEvents/ToolResultBody';
+import { bashSummary } from '#renderer/domains/sessions/service/transcriptRenderHelpers';
 
 interface BashBlockProps {
   id: string;
@@ -11,9 +12,9 @@ interface BashBlockProps {
 }
 
 export function BashBlock({ id, input, result, isError }: BashBlockProps): React.ReactElement {
-  const summary = input.description ?? input.command;
+  const summary = input.description ?? bashSummary(input.command);
   return (
-    <ToolFrame id={id} name="Bash" summary={summary} isError={isError}>
+    <ToolFrame id={id} name="Ran" summary={summary} isError={isError}>
       <pre className="mt-2 overflow-auto rounded bg-black/40 p-2 font-mono text-label text-foreground">
         {input.command}
       </pre>

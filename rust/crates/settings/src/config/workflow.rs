@@ -7,7 +7,7 @@
 //! Binary ships a compiled-in default; user can override at `~/.mando/workflow.yaml`
 //! (captain) or `~/.mando/scout-workflow.yaml` (scout).
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
@@ -22,13 +22,17 @@ use super::error::ConfigError;
 // ── Types ────────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CaptainWorkflow {
     pub models: ModelsConfig,
     pub stages: StageRoutingConfig,
     pub agent: AgentConfig,
     pub sandbox: SandboxOverrides,
+    #[serde(deserialize_with = "super::workflow_typed::deserialize_captain_prompts")]
     pub prompts: HashMap<String, String>,
+    #[serde(deserialize_with = "super::workflow_typed::deserialize_captain_nudges")]
     pub nudges: HashMap<String, String>,
+    #[serde(deserialize_with = "super::workflow_typed::deserialize_captain_initial_prompts")]
     pub initial_prompts: HashMap<String, String>,
     /// Stream-symptom classifier rules. Order matters (first match wins).
     /// See `captain-workflow.yaml::stream_symptoms` for wire format.
@@ -38,6 +42,7 @@ pub struct CaptainWorkflow {
 /// Timing overrides applied on top of `AgentConfig` + `Config.captain.tick_interval_s`
 /// when the daemon runs with `--sandbox`. Any `None` field keeps the prod value.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SandboxOverrides {
     pub tick_interval_s: Option<u64>,
     pub stale_threshold_s: Option<u64>,
@@ -45,7 +50,6 @@ pub struct SandboxOverrides {
     pub captain_merge_timeout_s: Option<u64>,
     pub clarifier_timeout_s: Option<u64>,
     pub worker_timeout_s: Option<u64>,
-    pub task_ask_timeout_s: Option<u64>,
     pub ops_timeout_s: Option<u64>,
     pub no_pr_min_active_s: Option<u64>,
     /// Sandbox-only Codex model/runtime overrides. Each field is optional
@@ -79,60 +83,21 @@ pub use super::workflow_scout::{
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ModelsConfig {
     pub worker: String,
     pub captain: String,
     pub clarifier: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum WorkflowStage {
-    Clarification,
-    Implementation,
-    CaptainReview,
-    CaptainMerge,
-    Rebase,
-    TaskAsk,
-}
-
-impl WorkflowStage {
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Clarification => "clarification",
-            Self::Implementation => "implementation",
-            Self::CaptainReview => "captain_review",
-            Self::CaptainMerge => "captain_merge",
-            Self::Rebase => "rebase",
-            Self::TaskAsk => "task_ask",
-        }
-    }
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StageRoutingConfig {
+    pub implementation: StageAgentConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(transparent)]
-pub struct StageRoutingConfig(BTreeMap<WorkflowStage, StageAgentConfig>);
-
-impl StageRoutingConfig {
-    pub fn get(&self, stage: WorkflowStage) -> Option<&StageAgentConfig> {
-        self.0.get(&stage)
-    }
-
-    pub fn require(&self, stage: WorkflowStage) -> &StageAgentConfig {
-        self.get(stage).unwrap_or_else(|| {
-            global_infra::unrecoverable!(format!(
-                "captain workflow missing required stage routing: {}",
-                stage.label()
-            ))
-        })
-    }
-
-    pub fn iter(&self) -> impl Iterator<Item = (WorkflowStage, &StageAgentConfig)> {
-        self.0.iter().map(|(stage, config)| (*stage, config))
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct StageAgentConfig {
     pub adapter: api_types::TaskProvider,
     pub model: String,
@@ -142,6 +107,7 @@ pub struct StageAgentConfig {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CodexAgentConfig {
     /// Codex app-server model id. `None` leaves the user's Codex default.
     pub model: Option<String>,
@@ -272,6 +238,7 @@ impl CodexSandboxPolicy {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AgentConfig {
     pub max_concurrent: usize,
     pub resource_limits: HashMap<String, usize>,
@@ -279,6 +246,7 @@ pub struct AgentConfig {
     /// (kebab-case). Restricted to states with a live CC/Codex session:
     /// `in-progress`, `clarifying`, `captain-reviewing`, `captain-merging`.
     /// Empty map disables all per-state limits (today's behaviour).
+    #[serde(deserialize_with = "super::workflow_typed::deserialize_per_state_limits")]
     pub per_state_limits: HashMap<String, usize>,
     pub max_interventions: u32,
     /// Seconds a stream can go without activity before workers are nudged.
@@ -292,7 +260,6 @@ pub struct AgentConfig {
     pub max_merge_retries: u32,
     pub max_clarifier_retries: u32,
     pub max_rebase_retries: u32,
-    pub max_advisor_retries: u32,
     /// Max retries for a single CC turn on transient Anthropic errors
     /// (429/502/503/504/529). Exponential backoff starts at 500ms.
     /// Fatal API errors (400/401/403/404/422) never retry. Used by
@@ -315,12 +282,6 @@ pub struct AgentConfig {
     /// Circuit breaker: route to captain review after this many consecutive
     /// nudges with the identical reason.
     pub max_repeated_nudges: u32,
-    /// Timeout for task-ask CC sessions (user Q&A with worktree access).
-    #[serde(with = "duration_seconds")]
-    pub task_ask_timeout_s: std::time::Duration,
-    /// Idle TTL for task-ask CC sessions before they are reaped.
-    #[serde(with = "duration_seconds")]
-    pub task_ask_idle_ttl_s: std::time::Duration,
     /// Timeout for ops CC sessions (generic ephemeral sessions) and short
     /// Codex app-server request/response handshakes such as initialize,
     /// thread start/resume, turn start, steer, and interrupt.
@@ -458,7 +419,7 @@ mod tests {
     }
 
     #[test]
-    fn captain_workflow_override_merges_missing_stages_from_default() {
+    fn captain_workflow_override_preserves_default_implementation_stage() {
         let wf = parse_captain_workflow_or_default(
             Some(
                 r#"
@@ -472,7 +433,7 @@ models:
 
         assert_eq!(wf.models.worker, "sonnet-override");
         assert_eq!(
-            wf.stages.require(WorkflowStage::Implementation).adapter,
+            wf.stages.implementation.adapter,
             api_types::TaskProvider::OpenCode
         );
     }
@@ -491,9 +452,99 @@ stages:
         .unwrap();
 
         assert_eq!(
-            wf.stages.require(WorkflowStage::Implementation).adapter,
+            wf.stages.implementation.adapter,
             api_types::TaskProvider::OpenCode
         );
+    }
+
+    #[test]
+    fn captain_workflow_rejects_non_implementation_stage() {
+        let err = parse_captain_workflow_or_default(
+            Some(
+                r#"
+stages:
+  clarification:
+    adapter: "claude"
+    model: "default"
+    session_start_timeout_s: 20
+    variant: null
+"#,
+            ),
+            Path::new("workflow.yaml"),
+        )
+        .expect_err("only implementation stage routing is supported");
+
+        assert!(
+            err.to_string().contains("clarification"),
+            "unhelpful error: {err}"
+        );
+    }
+
+    #[test]
+    fn captain_workflow_rejects_unknown_top_level_key() {
+        let err = parse_captain_workflow_or_default(
+            Some("retired_section: true\n"),
+            Path::new("workflow.yaml"),
+        )
+        .expect_err("unknown workflow key must fail at load");
+
+        assert!(
+            err.to_string().contains("retired_section"),
+            "unhelpful error: {err}"
+        );
+    }
+
+    #[test]
+    fn captain_workflow_rejects_unknown_nested_key() {
+        let err = parse_captain_workflow_or_default(
+            Some("agent:\n  retired_timeout_s: 1\n"),
+            Path::new("workflow.yaml"),
+        )
+        .expect_err("unknown nested workflow key must fail at load");
+
+        assert!(
+            err.to_string().contains("retired_timeout_s"),
+            "unhelpful error: {err}"
+        );
+    }
+
+    #[test]
+    fn captain_workflow_rejects_unknown_role_prompt() {
+        let err = parse_captain_workflow_or_default(
+            Some("prompts:\n  worker_typo: typo\n"),
+            Path::new("workflow.yaml"),
+        )
+        .expect_err("unknown role prompt must fail at load");
+
+        assert!(
+            err.to_string().contains("worker_typo"),
+            "unhelpful error: {err}"
+        );
+    }
+
+    #[test]
+    fn captain_workflow_rejects_unknown_nudge() {
+        let err = parse_captain_workflow_or_default(
+            Some("nudges:\n  retired_nudge: retired\n"),
+            Path::new("workflow.yaml"),
+        )
+        .expect_err("unknown nudge must fail at load");
+
+        assert!(
+            err.to_string().contains("retired_nudge"),
+            "unhelpful error: {err}"
+        );
+    }
+
+    #[test]
+    fn captain_workflow_rejects_inactive_per_state_limit() {
+        let err = parse_captain_workflow_or_default(
+            Some("agent:\n  per_state_limits:\n    queued: 1\n"),
+            Path::new("workflow.yaml"),
+        )
+        .expect_err("inactive status must fail at load");
+
+        assert!(err.to_string().contains("queued"), "unhelpful error: {err}");
     }
 
     #[test]
@@ -502,6 +553,25 @@ stages:
         assert!(!wf.prompts.is_empty(), "should have prompts");
         assert!(wf.interests.high.is_empty());
         assert!(wf.user_context.role.is_empty());
+    }
+
+    #[test]
+    fn scout_workflow_rejects_unknown_top_level_key() {
+        let override_yaml = format!(
+            "{}\nretired_section: true\n",
+            include_str!("../../assets/scout-workflow.yaml")
+        );
+        let err = parse_scout_workflow_or_default(
+            Some(&override_yaml),
+            Path::new("scout-workflow.yaml"),
+            &crate::config::Config::default(),
+        )
+        .expect_err("unknown scout workflow key must fail at load");
+
+        assert!(
+            err.to_string().contains("retired_section"),
+            "unhelpful error: {err}"
+        );
     }
 
     #[test]
@@ -685,11 +755,23 @@ prompts:
     }
 
     #[test]
-    #[should_panic(expected = "captain workflow missing required template keys")]
-    fn validate_captain_missing_key_panics() {
-        let mut wf = CaptainWorkflow::compiled_default();
-        wf.prompts.remove("worker");
-        crate::config::workflow_validate::validate_captain_workflow(&wf);
+    fn captain_workflow_missing_required_templates_are_load_errors() {
+        for (section, key) in [
+            ("prompts", "worker"),
+            ("nudges", "draft_pr"),
+            ("initial_prompts", "adopted"),
+        ] {
+            let mut yaml: serde_yaml::Value =
+                serde_yaml::from_str(DEFAULT_CAPTAIN_WORKFLOW).unwrap();
+            yaml[section]
+                .as_mapping_mut()
+                .unwrap()
+                .remove(serde_yaml::Value::String(key.into()));
+
+            let err = serde_yaml::from_value::<CaptainWorkflow>(yaml)
+                .expect_err("missing typed template must fail at load");
+            assert!(err.to_string().contains(key), "unhelpful error: {err}");
+        }
     }
 
     #[test]
@@ -701,10 +783,9 @@ prompts:
     }
 
     #[test]
-    #[should_panic(expected = "missing:")]
-    fn validate_reports_missing_and_syntax_together() {
+    #[should_panic(expected = "syntax: prompts.clarifier")]
+    fn validate_reports_template_syntax() {
         let mut wf = CaptainWorkflow::compiled_default();
-        wf.prompts.remove("worker");
         wf.prompts
             .insert("clarifier".into(), "{% if unclosed %}".into());
         crate::config::workflow_validate::validate_captain_workflow(&wf);

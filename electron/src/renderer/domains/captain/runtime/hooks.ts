@@ -2,7 +2,6 @@
 export {
   useTaskList,
   useTaskListWithArchived,
-  useTaskAskHistory,
   useTaskFeed,
   useTaskArtifacts,
   useWorkbenchList,
@@ -22,20 +21,13 @@ export {
   useTaskHandoff,
   useTaskStop,
   useTaskReopen,
-  useTaskAskReopen,
   useTaskRework,
   useTaskMerge,
-  useTaskAsk,
-  useTaskAdvisor,
   useTaskNudge,
   useTaskDelete,
   useTaskClarify,
   useTaskSetIsBugFix,
 } from '#renderer/domains/captain/runtime/useFeedbackTaskMutations';
-
-// Extra mutation hooks (split for file-length compliance)
-export { useEndAskSession } from '#renderer/domains/captain/repo/mutations-extra';
-export { useAddProject } from '#renderer/domains/captain/runtime/useFeedbackTaskMutations';
 
 // Workbench mutation hooks
 export {

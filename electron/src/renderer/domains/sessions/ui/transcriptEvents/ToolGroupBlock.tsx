@@ -1,5 +1,5 @@
 import React from 'react';
-import { ChevronDown, ChevronRight } from 'lucide-react';
+import { ChevronDown, ChevronRight, ListTree } from 'lucide-react';
 import {
   Collapsible,
   CollapsibleContent,
@@ -22,21 +22,29 @@ interface ToolGroupBlockProps {
 export function ToolGroupBlock({ id, tools, results }: ToolGroupBlockProps): React.ReactElement {
   const userOverride = useTranscriptUi(selectToolOpenState(id));
   const setToolExpanded = useTranscriptUi((s) => s.setToolExpanded);
-  const expanded = userOverride ?? false;
+  const failedCount = tools.filter((tool) => results.get(tool.id)?.isError === true).length;
+  const expanded = userOverride ?? failedCount > 0;
+  const summary = toolGroupSummary(tools);
 
   return (
     <Collapsible open={expanded} onOpenChange={(v) => setToolExpanded(id, v)} className="my-0.5">
       <CollapsibleTrigger asChild>
-        <button className="flex w-full items-center gap-1.5 rounded px-2 py-1 text-left text-label text-muted-foreground hover:bg-muted">
-          <span className="font-medium text-foreground">✻</span>
-          <span className="min-w-0 truncate opacity-80">{toolGroupSummary(tools)}</span>
-          <span className="ml-auto">
+        <button
+          data-testid="tool-activity-group"
+          className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-label text-muted-foreground hover:bg-muted/70"
+        >
+          <span className="shrink-0 text-text-3">
+            <ListTree size={14} />
+          </span>
+          <span className="min-w-0 truncate font-medium text-foreground">{summary}</span>
+          <span className="ml-auto flex items-center gap-2">
+            {failedCount > 0 && <span className="text-destructive">{failedCount} failed</span>}
             {expanded ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
           </span>
         </button>
       </CollapsibleTrigger>
       <CollapsibleContent>
-        <div className="pb-1 pl-2">
+        <div className="ml-4 border-l border-border/60 pb-1 pl-2">
           {tools.map((t) => (
             <ToolCallBlock key={t.id} toolUse={t} result={results.get(t.id)} />
           ))}

@@ -1,7 +1,7 @@
 import type { TaskItem, WorkbenchItem } from '#renderer/global/types';
 import { useTaskList, useTaskListWithArchived } from '#renderer/domains/captain/runtime/hooks';
 
-export interface TaskForWorkbench {
+interface TaskForWorkbench {
   task: TaskItem | null;
   isLoading: boolean;
 }

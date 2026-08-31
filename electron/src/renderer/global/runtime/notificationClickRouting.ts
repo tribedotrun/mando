@@ -1,6 +1,6 @@
 import type { NotificationKind } from '#shared/notifications';
 
-export type NotificationClickTarget =
+type NotificationClickTarget =
   | { type: 'workbench'; workbenchId: number }
   | { type: 'workbench-miss'; taskId: number }
   | { type: 'scout'; scoutId: number }
@@ -13,8 +13,7 @@ export function resolveNotificationClickTarget(
 ): NotificationClickTarget {
   switch (kind.type) {
     case 'Escalated':
-    case 'NeedsClarification':
-    case 'AdvisorAnswered': {
+    case 'NeedsClarification': {
       const taskId = Number(kind.item_id);
       if (Number.isNaN(taskId)) return { type: 'home' };
       const workbenchId = lookupTaskWorkbench(taskId);

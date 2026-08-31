@@ -34,18 +34,6 @@ export type AdoptRequest = {
   note?: string;
   project?: string;
 };
-export type AdvisorActionResponse = { ok: boolean; intent: string; feedback: string };
-export type AdvisorAskResponse = {
-  id: number;
-  ask_id: string;
-  message: string;
-  answer: string;
-  session_id: string;
-};
-export type AdvisorRequest = { message: string; intent: string };
-export type AdvisorResponse =
-  | ({ kind: 'ask' } & AdvisorAskResponse)
-  | ({ kind: 'action' } & AdvisorActionResponse);
 export type AdvisorToolResultBlock = { toolUseId: string; text: string };
 export type ArtifactEventData = { action: string; task_id: number; artifact_id: number };
 export type ArtifactIdParams = { id: number };
@@ -64,17 +52,6 @@ export type ArtifactRemoteUrlPatch = { index: number; remote_url: string };
 export type ArtifactType = 'evidence' | 'work_summary';
 export type ArtifactsPayload = { ts: number; data: ArtifactEventData | null };
 export type ArtifactsResponse = { artifacts: Array<TaskArtifact> };
-export type AskEndResponse = { ok: boolean; ended: string };
-export type AskHistoryEntry = {
-  ask_id: string;
-  session_id: string;
-  role: string;
-  content: string;
-  timestamp: string;
-  intent: string | null;
-};
-export type AskHistoryResponse = { history: Array<AskHistoryEntry> };
-export type AskReopenResponse = { ok: boolean; feedback: string };
 export type AskResponse = {
   id: number | null;
   ask_id: string;
@@ -207,6 +184,31 @@ export type CodexCredentialPick = {
   authJson: string;
 };
 export type CodexCredentialPickResponse = { pick: CodexCredentialPick | null };
+export type CodexDesktopAppMode = 'pool' | 'ambient' | 'none';
+export type CodexDesktopAppOperationResponse = { message: string; warnings: Array<string> };
+export type CodexDesktopAppRestoreRequest = { codexHome?: string | null };
+export type CodexDesktopAppStatusQuery = { codexHome?: string | null };
+export type CodexDesktopAppStatusResponse = {
+  mode: CodexDesktopAppMode;
+  activeLabel: string | null;
+  credentialId: number | null;
+  slotAccountId: string | null;
+  canRestore: boolean;
+};
+export type CodexDesktopAppUseRequest = {
+  label: string;
+  /**
+   * Optional caller-side `CODEX_HOME`. The CLI forwards its environment
+   * so moving orchestration into the daemon does not change that override.
+   */
+  codexHome?: string | null;
+  /**
+   * Process id of a thin CLI caller. The daemon excludes that process
+   * from the external-Codex warning scan, matching the former in-process
+   * CLI behavior without trusting it for any process termination.
+   */
+  callerPid?: number | null;
+};
 export type CodexLoginFlowInfo = {
   loginId: string;
   status: CodexLoginStatus;
@@ -362,9 +364,16 @@ export type FeaturesConfig = {
 };
 export type FeedItem =
   | { type: 'timeline'; timestamp: string; data: TimelineEvent }
-  | { type: 'artifact'; timestamp: string; data: TaskArtifact }
-  | { type: 'message'; timestamp: string; data: AskHistoryEntry };
+  | { type: 'artifact'; timestamp: string; data: TaskArtifact };
 export type FeedResponse = { id: string; feed: Array<FeedItem>; count: number };
+export type FileChangeEntry = {
+  path: string;
+  kind: FileChangeKind;
+  movePath: string | null;
+  diff: string;
+};
+export type FileChangeInput = { changes: Array<FileChangeEntry> };
+export type FileChangeKind = 'add' | 'update' | 'delete' | 'move' | 'other';
 export type FirecrawlScrapeRequest = { url: string };
 export type FirecrawlScrapeResponse = { ok: boolean; content: string };
 export type GatewayConfig = { dashboard: DashboardConfig };
@@ -383,6 +392,7 @@ export type GrepOutputMode = 'content' | 'files_with_matches' | 'count';
 export type HealthResponse = { healthy: boolean; version: string; pid: number; uptime: number };
 export type HookPhase = 'started' | 'response';
 export type ImageFilenameParams = { filename: string };
+export type ImageViewInput = { path: string };
 export type InlineKeyboardButton = {
   text: string;
   callbackData: string | null;
@@ -460,7 +470,6 @@ export type NotificationKind =
       telegraph_url: string | null;
     }
   | { type: 'ScoutProcessFailed'; scout_id: number; url: string; error: string }
-  | { type: 'AdvisorAnswered'; item_id: string; title: string }
   | { type: 'Generic' };
 export type NotificationPayload = {
   message: string;
@@ -563,6 +572,7 @@ export type ResearchStartResponse = { run_id: number };
 export type ResultEvent = { meta: EventMeta; outcome: ResultOutcome; summary: ResultSummary };
 export type ResultOutcome =
   | 'success'
+  | 'interrupted'
   | 'error_during_execution'
   | 'error_max_turns'
   | 'error_max_budget_usd'
@@ -705,7 +715,6 @@ export type SessionCategory =
   | 'clarifier'
   | 'captain-review'
   | 'captain-ops'
-  | 'advisor'
   | 'scout'
   | 'rebase';
 export type SessionCostResponse = { cost: SessionCostSummary };
@@ -752,8 +761,6 @@ export type SessionIds = {
   review: string | null;
   clarifier: string | null;
   merge: string | null;
-  ask: string | null;
-  advisor: string | null;
 };
 export type SessionJsonlPathResponse = { session_id: string; path: string | null };
 export type SessionMessagesQuery = { limit: number | null; offset: number | null };
@@ -896,6 +903,11 @@ export type SystemLocalCommandOutputEvent = {
 export type SystemRateLimitEvent = { meta: EventMeta; info: string };
 export type SystemStatusEvent = { meta: EventMeta; status: string | null; message: string | null };
 export type SystemThinkingTokensEvent = { meta: EventMeta };
+export type SystemTokenUsageEvent = {
+  meta: EventMeta;
+  usage: TranscriptUsageInfo;
+  contextWindow: number | null;
+};
 export type TaskAddRequest = {
   title: string;
   project: string | null;
@@ -913,7 +925,6 @@ export type TaskArtifact = {
   media: Array<ArtifactMedia>;
   created_at: string;
 };
-export type TaskAskRequest = { id: number; question: string; ask_id?: string };
 export type TaskBulkUpdateRequest = { ids: Array<number>; updates: TaskBulkUpdates };
 export type TaskBulkUpdates = { worker?: string };
 export type TaskCreateProvider = 'claude' | 'codex';
@@ -1178,7 +1189,6 @@ export type TimelineEventPayload =
       to: ItemStatus;
       source: string;
     }
-  | { event_type: 'human_ask'; question: string; intent: string; ask_id: string }
   | {
       event_type: 'rebase_triggered';
       worker: string;
@@ -1239,8 +1249,7 @@ export type TimelineEventPayload =
       feedback: string;
       worker: string;
       session_id: string;
-    }
-  | { event_type: 'human_ask_failed'; question: string; error: string };
+    };
 export type TimelineResponse = { id: string; events: Array<TimelineEvent>; count: number };
 export type TodoWriteInput = { todos: Array<CcTodoItem> };
 export type ToolInput =
@@ -1253,6 +1262,8 @@ export type ToolInput =
   | { kind: 'todo_write'; data: TodoWriteInput }
   | { kind: 'web_fetch'; data: WebFetchInput }
   | { kind: 'web_search'; data: WebSearchInput }
+  | { kind: 'file_change'; data: FileChangeInput }
+  | { kind: 'image_view'; data: ImageViewInput }
   | { kind: 'task'; data: TaskInput }
   | { kind: 'notebook_edit'; data: NotebookEditInput }
   | { kind: 'skill'; data: SkillInput }
@@ -1268,6 +1279,8 @@ export type ToolName =
   | { kind: 'todo_write' }
   | { kind: 'web_fetch' }
   | { kind: 'web_search' }
+  | { kind: 'file_change' }
+  | { kind: 'image_view' }
   | { kind: 'task' }
   | { kind: 'notebook_edit' }
   | { kind: 'skill' }
@@ -1300,6 +1313,7 @@ export type TranscriptEvent =
   | { kind: 'system_hook'; data: SystemHookEvent }
   | { kind: 'system_rate_limit'; data: SystemRateLimitEvent }
   | { kind: 'system_thinking_tokens'; data: SystemThinkingTokensEvent }
+  | { kind: 'system_token_usage'; data: SystemTokenUsageEvent }
   | { kind: 'user'; data: UserEvent }
   | { kind: 'assistant'; data: AssistantEvent }
   | { kind: 'tool_progress'; data: ToolProgressEvent }

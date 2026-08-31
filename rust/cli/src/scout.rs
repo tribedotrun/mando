@@ -2,7 +2,6 @@
 
 use clap::{Args, Subcommand};
 
-use crate::gateway_paths as paths;
 use crate::http::DaemonClient;
 
 #[derive(Args)]
@@ -145,12 +144,7 @@ pub(crate) async fn handle(args: ScoutArgs) -> anyhow::Result<()> {
 
 async fn handle_list(status: Option<&str>) -> anyhow::Result<()> {
     let client = DaemonClient::discover()?;
-    let mut params = vec!["per_page=10000".to_string()];
-    if let Some(s) = status {
-        params.push(format!("status={s}"));
-    }
-    let path = paths::scout_items_query(params.join("&"));
-    let result: api_types::ScoutResponse = client.get_json(&path).await?;
+    let result = client.get_scout_items(&scout_query(status)?).await?;
 
     println!("{:>4}  {:<10}  {:<12}  TITLE", "ID", "STATUS", "TYPE");
     println!("{}", "-".repeat(70));
@@ -172,14 +166,11 @@ async fn handle_list(status: Option<&str>) -> anyhow::Result<()> {
 
 async fn handle_add(url: &str, title: Option<&str>) -> anyhow::Result<()> {
     let client = DaemonClient::discover()?;
-    let result: api_types::ScoutAddResponse = client
-        .post_json(
-            paths::SCOUT_ITEMS,
-            &api_types::ScoutAddRequest {
-                url: url.to_string(),
-                title: title.map(str::to_string),
-            },
-        )
+    let result = client
+        .post_scout_items(&api_types::ScoutAddRequest {
+            url: url.to_string(),
+            title: title.map(str::to_string),
+        })
         .await?;
     println!("Added scout item #{}: {url}", result.id);
     Ok(())
@@ -187,7 +178,9 @@ async fn handle_add(url: &str, title: Option<&str>) -> anyhow::Result<()> {
 
 async fn handle_show(id: i64) -> anyhow::Result<()> {
     let client = DaemonClient::discover()?;
-    let result: api_types::ScoutItem = client.get_json(&paths::scout_item(id)).await?;
+    let result = client
+        .get_scout_items_by_id(&api_types::ScoutItemIdParams { id })
+        .await?;
 
     println!(
         "Item #{id}: {}",
@@ -217,10 +210,39 @@ fn lifecycle_command_for_status(
     }
 }
 
+fn status_filter(status: Option<&str>) -> anyhow::Result<Option<api_types::ScoutItemStatusFilter>> {
+    let Some(status) = status else {
+        return Ok(None);
+    };
+    let value = match status {
+        "all" => api_types::ScoutItemStatusFilter::All,
+        "pending" => api_types::ScoutItemStatusFilter::Pending,
+        "fetched" => api_types::ScoutItemStatusFilter::Fetched,
+        "processed" => api_types::ScoutItemStatusFilter::Processed,
+        "saved" => api_types::ScoutItemStatusFilter::Saved,
+        "archived" => api_types::ScoutItemStatusFilter::Archived,
+        "error" => api_types::ScoutItemStatusFilter::Error,
+        other => anyhow::bail!(
+            "unsupported scout status filter '{other}' (use all, pending, fetched, processed, saved, archived, error)"
+        ),
+    };
+    Ok(Some(value))
+}
+
+fn scout_query(status: Option<&str>) -> anyhow::Result<api_types::ScoutQuery> {
+    Ok(api_types::ScoutQuery {
+        status: status_filter(status)?,
+        q: None,
+        item_type: None,
+        page: None,
+        per_page: Some(10_000),
+    })
+}
+
 async fn handle_delete(id: i64) -> anyhow::Result<()> {
     let client = DaemonClient::discover()?;
     client
-        .delete_json::<api_types::ScoutDeleteResponse>(&paths::scout_item(id))
+        .delete_scout_items_by_id(&api_types::ScoutItemIdParams { id })
         .await?;
     println!("Deleted scout item #{id}.");
     Ok(())
@@ -231,11 +253,8 @@ async fn handle_bulk_delete(ids: &[i64]) -> anyhow::Result<()> {
         anyhow::bail!("provide at least one item ID");
     }
     let client = DaemonClient::discover()?;
-    let result: api_types::ScoutBulkDeleteResponse = client
-        .post_json(
-            paths::SCOUT_BULK_DELETE,
-            &api_types::ScoutBulkDeleteRequest { ids: ids.to_vec() },
-        )
+    let result = client
+        .post_scout_bulkdelete(&api_types::ScoutBulkDeleteRequest { ids: ids.to_vec() })
         .await?;
     println!("Deleted {} scout item(s).", result.deleted);
     Ok(())
@@ -245,8 +264,8 @@ async fn handle_status(id: i64, status: &str) -> anyhow::Result<()> {
     let client = DaemonClient::discover()?;
     let command = lifecycle_command_for_status(status)?;
     client
-        .patch_json::<api_types::BoolOkResponse, _>(
-            &paths::scout_item(id),
+        .patch_scout_items_by_id(
+            &api_types::ScoutItemIdParams { id },
             &api_types::ScoutLifecycleCommandRequest { command },
         )
         .await?;
@@ -260,14 +279,11 @@ async fn handle_bulk_status(status: &str, ids: &[i64]) -> anyhow::Result<()> {
     }
     let client = DaemonClient::discover()?;
     let command = lifecycle_command_for_status(status)?;
-    let result: api_types::ScoutBulkUpdateResponse = client
-        .post_json(
-            paths::SCOUT_BULK,
-            &api_types::ScoutBulkCommandRequest {
-                ids: ids.to_vec(),
-                command,
-            },
-        )
+    let result = client
+        .post_scout_bulk(&api_types::ScoutBulkCommandRequest {
+            ids: ids.to_vec(),
+            command,
+        })
         .await?;
     println!("Updated {} scout item(s) to '{status}'.", result.updated);
     Ok(())
@@ -275,12 +291,7 @@ async fn handle_bulk_status(status: &str, ids: &[i64]) -> anyhow::Result<()> {
 
 async fn handle_list_with_summaries(status: Option<&str>) -> anyhow::Result<()> {
     let client = DaemonClient::discover()?;
-    let mut params = vec!["per_page=10000".to_string()];
-    if let Some(s) = status {
-        params.push(format!("status={s}"));
-    }
-    let path = paths::scout_items_query(params.join("&"));
-    let result: api_types::ScoutResponse = client.get_json(&path).await?;
+    let result = client.get_scout_items(&scout_query(status)?).await?;
 
     for item in &result.items {
         let scores = match (item.relevance, item.quality) {
@@ -290,19 +301,9 @@ async fn handle_list_with_summaries(status: Option<&str>) -> anyhow::Result<()> 
         let title = item.title.as_deref().unwrap_or(item.url.as_str());
         println!("#{} [{}] {title}{scores}", item.id, item.status);
 
-        match client
-            .get_json::<api_types::ScoutItem>(&paths::scout_item(item.id))
-            .await
-        {
-            Ok(full) => {
-                if let Some(summary) = full.summary.as_deref() {
-                    for line in summary.lines().take(3) {
-                        println!("  {line}");
-                    }
-                }
-            }
-            Err(e) => {
-                eprintln!("  (summary unavailable: {e})");
+        if let Some(summary) = item.summary.as_deref() {
+            for line in summary.lines().take(3) {
+                println!("  {line}");
             }
         }
         println!();
@@ -314,8 +315,9 @@ async fn handle_list_with_summaries(status: Option<&str>) -> anyhow::Result<()> 
 
 async fn handle_read(id: i64) -> anyhow::Result<()> {
     let client = DaemonClient::discover()?;
-    let result: api_types::ScoutArticleResponse =
-        client.get_json(&paths::scout_article(id)).await?;
+    let result = client
+        .get_scout_items_by_id_article(&api_types::ScoutItemIdParams { id })
+        .await?;
 
     println!("# {}\n", result.title.as_deref().unwrap_or("(no title)"));
     if let Some(article) = result.article.as_deref() {
@@ -331,15 +333,12 @@ async fn handle_read(id: i64) -> anyhow::Result<()> {
 
 async fn handle_ask(id: i64, session: Option<&str>, question: &str) -> anyhow::Result<()> {
     let client = DaemonClient::discover()?;
-    let result: api_types::AskResponse = client
-        .post_json(
-            paths::SCOUT_ASK,
-            &api_types::ScoutAskRequest {
-                id,
-                question: question.to_string(),
-                session_id: session.map(str::to_string),
-            },
-        )
+    let result = client
+        .post_scout_ask(&api_types::ScoutAskRequest {
+            id,
+            question: question.to_string(),
+            session_id: session.map(str::to_string),
+        })
         .await?;
 
     if result.answer.is_empty() {
@@ -356,22 +355,20 @@ async fn handle_ask(id: i64, session: Option<&str>, question: &str) -> anyhow::R
 async fn handle_research(topic: &str) -> anyhow::Result<()> {
     let client = DaemonClient::discover()?;
     println!("Researching: {topic}...");
-    let result: api_types::ResearchStartResponse = client
-        .post_json(
-            paths::SCOUT_RESEARCH,
-            &api_types::ScoutResearchRequest {
-                topic: topic.to_string(),
-                process: Some(true),
-            },
-        )
+    let result = client
+        .post_scout_research(&api_types::ScoutResearchRequest {
+            topic: topic.to_string(),
+            process: Some(true),
+        })
         .await?;
     let run_id = result.run_id;
     println!("Research started (run #{run_id})\n");
 
     loop {
         tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-        let run: api_types::ScoutResearchRun =
-            client.get_json(&paths::scout_research_run(run_id)).await?;
+        let run = client
+            .get_scout_research_by_id(&api_types::ScoutResearchIdParams { id: run_id })
+            .await?;
         match run.status.as_str() {
             "done" => {
                 println!("Research complete: {} link(s) added.", run.added_count);
@@ -392,9 +389,9 @@ async fn handle_research(topic: &str) -> anyhow::Result<()> {
 
 async fn handle_act(id: i64, project: &str, prompt: &str) -> anyhow::Result<()> {
     let client = DaemonClient::discover()?;
-    let result: api_types::ActResponse = client
-        .post_json(
-            &paths::scout_act(id),
+    let result = client
+        .post_scout_items_by_id_act(
+            &api_types::ScoutItemIdParams { id },
             &api_types::ScoutActRequest {
                 project: project.to_string(),
                 prompt: (!prompt.is_empty()).then(|| prompt.to_string()),
@@ -407,16 +404,18 @@ async fn handle_act(id: i64, project: &str, prompt: &str) -> anyhow::Result<()> 
 
 async fn handle_publish(id: i64) -> anyhow::Result<()> {
     let client = DaemonClient::discover()?;
-    let result: api_types::TelegraphPublishResponse =
-        client.post_no_body(&paths::scout_telegraph(id)).await?;
+    let result = client
+        .post_scout_items_by_id_telegraph(&api_types::ScoutItemIdParams { id })
+        .await?;
     println!("{}", result.url);
     Ok(())
 }
 
 async fn handle_sessions(id: i64) -> anyhow::Result<()> {
     let client = DaemonClient::discover()?;
-    let result: Vec<api_types::ScoutItemSession> =
-        client.get_json(&paths::scout_sessions(id)).await?;
+    let result = client
+        .get_scout_items_by_id_sessions(&api_types::ScoutItemIdParams { id })
+        .await?;
     if result.is_empty() {
         println!("No sessions linked to scout item #{id}.");
         return Ok(());
@@ -430,141 +429,4 @@ async fn handle_sessions(id: i64) -> anyhow::Result<()> {
         );
     }
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use clap::Parser;
-
-    #[derive(Parser)]
-    struct TestCli {
-        #[command(subcommand)]
-        cmd: TestCmd,
-    }
-
-    #[derive(clap::Subcommand)]
-    enum TestCmd {
-        Scout(ScoutArgs),
-    }
-
-    #[test]
-    fn parse_scout_simplelist() {
-        let cli = TestCli::try_parse_from(["test", "scout", "simplelist"]).unwrap();
-        match cli.cmd {
-            TestCmd::Scout(args) => match args.command {
-                ScoutCommand::SimpleList { status } => assert!(status.is_none()),
-                _ => panic!("expected SimpleList"),
-            },
-        }
-    }
-
-    #[test]
-    fn parse_scout_simplelist_status() {
-        let cli = TestCli::try_parse_from(["test", "scout", "simplelist", "--status", "pending"])
-            .unwrap();
-        match cli.cmd {
-            TestCmd::Scout(args) => match args.command {
-                ScoutCommand::SimpleList { status } => {
-                    assert_eq!(status.as_deref(), Some("pending"));
-                }
-                _ => panic!("expected SimpleList"),
-            },
-        }
-    }
-
-    #[test]
-    fn parse_scout_add() {
-        let cli = TestCli::try_parse_from([
-            "test",
-            "scout",
-            "add",
-            "https://example.com",
-            "-t",
-            "Example",
-        ])
-        .unwrap();
-        match cli.cmd {
-            TestCmd::Scout(args) => match args.command {
-                ScoutCommand::Add { url, title } => {
-                    assert_eq!(url, "https://example.com");
-                    assert_eq!(title.as_deref(), Some("Example"));
-                }
-                _ => panic!("expected Add"),
-            },
-        }
-    }
-
-    #[test]
-    fn parse_scout_bulk_delete() {
-        let cli = TestCli::try_parse_from(["test", "scout", "bulk-delete", "7", "8"]).unwrap();
-        match cli.cmd {
-            TestCmd::Scout(args) => match args.command {
-                ScoutCommand::BulkDelete { ids } => assert_eq!(ids, vec![7, 8]),
-                _ => panic!("expected BulkDelete"),
-            },
-        }
-    }
-
-    #[test]
-    fn parse_scout_ask_with_session() {
-        let cli = TestCli::try_parse_from([
-            "test",
-            "scout",
-            "ask",
-            "42",
-            "--session",
-            "sess-1",
-            "What",
-            "changed?",
-        ])
-        .unwrap();
-        match cli.cmd {
-            TestCmd::Scout(args) => match args.command {
-                ScoutCommand::Ask {
-                    id,
-                    session,
-                    question,
-                } => {
-                    assert_eq!(id, 42);
-                    assert_eq!(session.as_deref(), Some("sess-1"));
-                    assert_eq!(question.join(" "), "What changed?");
-                }
-                _ => panic!("expected Ask"),
-            },
-        }
-    }
-
-    #[test]
-    fn parse_scout_act() {
-        let cli = TestCli::try_parse_from([
-            "test", "scout", "act", "42", "sandbox", "Focus", "on", "tests",
-        ])
-        .unwrap();
-        match cli.cmd {
-            TestCmd::Scout(args) => match args.command {
-                ScoutCommand::Act {
-                    id,
-                    project,
-                    prompt,
-                } => {
-                    assert_eq!(id, 42);
-                    assert_eq!(project, "sandbox");
-                    assert_eq!(prompt.join(" "), "Focus on tests");
-                }
-                _ => panic!("expected Act"),
-            },
-        }
-    }
-
-    #[test]
-    fn parse_scout_sessions() {
-        let cli = TestCli::try_parse_from(["test", "scout", "sessions", "9"]).unwrap();
-        match cli.cmd {
-            TestCmd::Scout(args) => match args.command {
-                ScoutCommand::Sessions { id } => assert_eq!(id, 9),
-                _ => panic!("expected Sessions"),
-            },
-        }
-    }
 }

@@ -12,6 +12,7 @@ members = [
     "crates/settings",
 
     # Global providers
+    "crates/agent-runtime-core",
     "crates/global-types",
     "crates/global-infra",
     "crates/global-db",
@@ -28,7 +29,6 @@ members = [
     "crates/api-types-codegen",
     "crates/gateway-client",
     "crates/transport-http",
-    "crates/transport-http-macros",
     "crates/transport-tg",
     "crates/transport-ui",
     "crates/mando-gateway",
@@ -37,11 +37,16 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.21-beta.3"
+version = "0.1.21-beta.4"
 edition = "2021"
 license = "Apache-2.0"
 repository = "https://github.com/tribedotrun/mando"
 homepage = "https://mando.build"
+
+[workspace.lints.clippy]
+print_stdout = "deny"
+print_stderr = "deny"
+dbg_macro = "deny"
 
 [workspace.dependencies]
 tokio = { version = "1", features = ["full"] }
@@ -80,26 +85,10 @@ metrics-exporter-prometheus = { version = "0.17", default-features = false }
 # Domain crates
 captain = { path = "crates/captain" }
 scout = { path = "crates/scout" }
-sessions = { path = "crates/sessions" }
-settings = { path = "crates/settings" }
 
 # Global crates
 global-types = { path = "crates/global-types" }
 global-infra = { path = "crates/global-infra" }
-global-db = { path = "crates/global-db" }
-global-bus = { path = "crates/global-bus" }
-global-claude = { path = "crates/global-claude" }
-global-codex-app-server = { path = "crates/global-codex-app-server" }
-global-net = { path = "crates/global-net" }
-global-git = { path = "crates/global-git" }
-global-github = { path = "crates/global-github" }
-global-opencode = { path = "crates/global-opencode" }
-api-types = { path = "crates/api-types" }
-gateway-client = { path = "crates/gateway-client" }
-transport-http = { path = "crates/transport-http" }
-transport-http-macros = { path = "crates/transport-http-macros" }
-transport-tg = { path = "crates/transport-tg" }
-transport-ui = { path = "crates/transport-ui" }
 
 [profile.dev]
 debug = 1
@@ -116,6 +105,8 @@ debug = 0
 # `cargo clippy --workspace` (no --all-targets) only applies them to
 # library builds; #[cfg(test)] modules and integration tests are not
 # linted, matching the plan's carve-out for test code.
+# Raw stdout, stderr, and dbg macros are denied through workspace Clippy
+# lints; every workspace package opts in through its Cargo manifest.
 
 # ts-rs 12.0.1's `Serde<EnumAttr>` does not recognize `#[serde(deny_unknown_fields)]`
 # and emits a cosmetic "failed to parse serde attribute" warning on every

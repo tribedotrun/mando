@@ -21,7 +21,7 @@ import {
 const execFileAsync = promisify(execFile);
 
 /** Load a launchd service: bootout first if already loaded, then bootstrap. */
-export async function launchctlLoad(plistPath: string, label: string): Promise<void> {
+async function launchctlLoad(plistPath: string, label: string): Promise<void> {
   if (await isServiceLoaded(label)) {
     await launchctlBootout(label);
     await waitForServiceUnloaded(label);

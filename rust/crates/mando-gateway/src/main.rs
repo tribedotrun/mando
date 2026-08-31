@@ -8,7 +8,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use clap::Parser;
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 
 #[derive(Parser)]
 #[command(name = "mando-gw", about = "Mando daemon — HTTP API + captain")]
@@ -62,7 +62,7 @@ async fn main() {
     // HTTP router is built — the `/metrics` handler reads the resulting
     // handle from a OnceLock.
     if let Err(e) = transport_http::install_metrics_recorder() {
-        eprintln!("fatal: failed to install metrics recorder: {e:#}");
+        error!(error = ?e, "failed to install metrics recorder");
         std::process::exit(1);
     }
 
@@ -70,7 +70,7 @@ async fn main() {
 
     // Load config.
     let config = settings::config_fs::load_config(None).unwrap_or_else(|e| {
-        eprintln!("fatal: failed to load config: {e:#}");
+        error!(error = ?e, "failed to load config");
         std::process::exit(1);
     });
     // Inject env vars from config into process environment.
@@ -82,12 +82,9 @@ async fn main() {
     let port = args.port.unwrap_or(config.gateway.dashboard.port);
 
     if let Err(e) = mando_gateway::check_and_write_pid(port) {
-        eprintln!("error: {e}");
+        error!(error = ?e, port, "failed to claim gateway process id");
         std::process::exit(1);
     }
-
-    // Sync bundled prod skills to ~/.claude/skills/mando-*.
-    settings::sync_bundled_skills();
 
     // Refuse to start if reconciliation fails — booting with an unreconciled
     // WAL can silently duplicate or lose external work. Set MANDO_UNSAFE_START=1
@@ -109,10 +106,10 @@ async fn main() {
     )
     .await
     .unwrap_or_else(|e| {
-        eprintln!("fatal: bootstrap failed: {e:#}");
+        error!(error = ?e, "gateway bootstrap failed");
         std::process::exit(1);
     });
-    let mando_gateway::GatewayBootstrap { state, .. } = bootstrap;
+    let mando_gateway::GatewayBootstrap { state } = bootstrap;
 
     mando_gateway::start_runtime_services(
         &state,
@@ -127,7 +124,7 @@ async fn main() {
         .drain_pending_lifecycle_effects()
         .await
         .unwrap_or_else(|e| {
-            eprintln!("fatal: failed to drain lifecycle effects: {e:#}");
+            error!(error = ?e, "failed to drain pending lifecycle effects");
             std::process::exit(1);
         });
 
@@ -273,8 +270,12 @@ async fn bind_with_retry(addr: SocketAddr) -> tokio::net::TcpListener {
                 Ok(listener) => return listener,
                 Err(e) => {
                     if attempt == MAX_ATTEMPTS {
-                        eprintln!(
-                            "fatal: listen failed on {addr} after {MAX_ATTEMPTS} attempts: {e}"
+                        error!(
+                            %addr,
+                            attempt,
+                            max_attempts = MAX_ATTEMPTS,
+                            error = ?e,
+                            "listen failed"
                         );
                         std::process::exit(1);
                     }
@@ -290,7 +291,13 @@ async fn bind_with_retry(addr: SocketAddr) -> tokio::net::TcpListener {
             },
             Err(e) => {
                 if attempt == MAX_ATTEMPTS {
-                    eprintln!("fatal: bind to {addr} failed after {MAX_ATTEMPTS} attempts: {e}");
+                    error!(
+                        %addr,
+                        attempt,
+                        max_attempts = MAX_ATTEMPTS,
+                        error = ?e,
+                        "bind failed"
+                    );
                     std::process::exit(1);
                 }
                 let backoff_s = 1u64 << (attempt - 1);

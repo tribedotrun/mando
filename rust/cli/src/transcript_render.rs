@@ -35,6 +35,7 @@ pub fn events_to_markdown(events: &[TranscriptEvent]) -> String {
             | TranscriptEvent::SystemHook(_)
             | TranscriptEvent::SystemRateLimit(_)
             | TranscriptEvent::SystemThinkingTokens(_)
+            | TranscriptEvent::SystemTokenUsage(_)
             | TranscriptEvent::ToolProgress(_)
             | TranscriptEvent::Unknown(_) => {}
             TranscriptEvent::User(user) => {
@@ -231,6 +232,22 @@ fn render_tool_use(out: &mut String, tu: &AssistantToolUseBlock) {
             out.push('\n');
         }
         ToolInput::Edit(e) => render_edit(out, e),
+        ToolInput::FileChange(file_change) => {
+            for change in &file_change.changes {
+                out.push_str(&format!("`{}`\n", change.path));
+                if !change.diff.is_empty() {
+                    out.push_str("```diff\n");
+                    out.push_str(&change.diff);
+                    if !change.diff.ends_with('\n') {
+                        out.push('\n');
+                    }
+                    out.push_str("```\n");
+                }
+            }
+        }
+        ToolInput::ImageView(image) => {
+            out.push_str(&format!("`{}`\n", image.path));
+        }
         ToolInput::Write(w) => {
             let line_count = w.content.lines().count();
             out.push_str(&format!("`{}` · {line_count} line(s)\n", w.file_path));
@@ -310,7 +327,14 @@ fn render_edit(out: &mut String, e: &EditInput) {
 
 fn render_result(out: &mut String, r: &ResultEvent) {
     let mut footer = String::from("\n---\n## *Result*");
-    let status = if r.summary.is_error { "error" } else { "ok" };
+    let status = match r.outcome {
+        api_types::ResultOutcome::Success => "ok",
+        api_types::ResultOutcome::Interrupted => "interrupted",
+        api_types::ResultOutcome::ErrorDuringExecution
+        | api_types::ResultOutcome::ErrorMaxTurns
+        | api_types::ResultOutcome::ErrorMaxBudgetUsd
+        | api_types::ResultOutcome::ErrorMaxStructuredOutputRetries => "error",
+    };
     footer.push_str(&format!("  `{status}`"));
     if let Some(cost) = r.summary.total_cost_usd {
         footer.push_str(&format!("  `${cost:.4}`"));
@@ -339,6 +363,8 @@ fn tool_name_label(name: &ToolName) -> String {
         ToolName::TodoWrite => "TodoWrite".into(),
         ToolName::WebFetch => "WebFetch".into(),
         ToolName::WebSearch => "WebSearch".into(),
+        ToolName::FileChange => "FileChange".into(),
+        ToolName::ImageView => "ImageView".into(),
         ToolName::Task => "Task".into(),
         ToolName::NotebookEdit => "NotebookEdit".into(),
         ToolName::Skill => "Skill".into(),
@@ -439,5 +465,31 @@ mod tests {
         assert!(md.contains("## *Result*"));
         assert!(md.contains("`ok`"));
         assert!(md.contains("3 turns"));
+    }
+
+    #[test]
+    fn renders_interrupted_result_without_calling_it_ok_or_error() {
+        let events = vec![TranscriptEvent::Result(ResultEvent {
+            meta: meta(),
+            outcome: ResultOutcome::Interrupted,
+            summary: ResultSummary {
+                duration_ms: Some(100),
+                duration_api_ms: None,
+                num_turns: Some(1),
+                total_cost_usd: None,
+                stop_reason: Some("interrupted".into()),
+                permission_denials: Vec::new(),
+                errors: Vec::new(),
+                usage: None,
+                model_usage: Vec::new(),
+                is_error: false,
+            },
+        })];
+
+        let md = events_to_markdown(&events);
+
+        assert!(md.contains("`interrupted`"));
+        assert!(!md.contains("`ok`"));
+        assert!(!md.contains("`error`"));
     }
 }

@@ -1,11 +1,11 @@
-//! Session ID container — stores worker, review, clarifier, and ask CC session IDs as JSON.
+//! Session ID container for task-owned agent sessions.
 
 use serde::{Deserialize, Serialize};
 
 /// Session IDs for CC sessions a task can have.
 /// Stored as a JSON TEXT column in SQLite. Any unknown fields in historical
-/// rows (e.g. `triage` from the retired auto-merge-triage session) are
-/// silently ignored by serde's default behavior.
+/// rows (including retired slots) are silently ignored by serde's default
+/// behavior.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SessionIds {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -16,10 +16,6 @@ pub struct SessionIds {
     pub clarifier: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub merge: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub ask: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub advisor: Option<String>,
 }
 
 /// Which session id a write targets. Used by callers that learn the real
@@ -30,8 +26,6 @@ pub enum SessionSlot {
     Review,
     Clarifier,
     Merge,
-    Ask,
-    Advisor,
 }
 
 impl SessionIds {
@@ -49,8 +43,6 @@ impl SessionIds {
             SessionSlot::Review => &self.review,
             SessionSlot::Clarifier => &self.clarifier,
             SessionSlot::Merge => &self.merge,
-            SessionSlot::Ask => &self.ask,
-            SessionSlot::Advisor => &self.advisor,
         };
         value.as_deref()
     }
@@ -64,8 +56,6 @@ impl SessionIds {
             SessionSlot::Review => &mut self.review,
             SessionSlot::Clarifier => &mut self.clarifier,
             SessionSlot::Merge => &mut self.merge,
-            SessionSlot::Ask => &mut self.ask,
-            SessionSlot::Advisor => &mut self.advisor,
         };
         *target = Some(session_id);
     }
@@ -82,8 +72,6 @@ mod tests {
             SessionSlot::Review,
             SessionSlot::Clarifier,
             SessionSlot::Merge,
-            SessionSlot::Ask,
-            SessionSlot::Advisor,
         ] {
             let mut ids = SessionIds::default();
             assert_eq!(ids.get(slot), None);
@@ -101,5 +89,22 @@ mod tests {
         ids.set(SessionSlot::Review, "old".into());
         ids.set(SessionSlot::Review, "new".into());
         assert_eq!(ids.get(SessionSlot::Review), Some("new"));
+    }
+
+    #[test]
+    fn retired_slots_are_ignored_when_decoding_legacy_rows() {
+        let ids = SessionIds::from_json(
+            r#"{"worker":"worker-1","review":"review-1","clarifier":"clarifier-1","merge":"merge-1","retired_one":"old-1","retired_two":"old-2"}"#,
+        )
+        .expect("legacy session ids should decode");
+
+        assert_eq!(ids.worker.as_deref(), Some("worker-1"));
+        assert_eq!(ids.review.as_deref(), Some("review-1"));
+        assert_eq!(ids.clarifier.as_deref(), Some("clarifier-1"));
+        assert_eq!(ids.merge.as_deref(), Some("merge-1"));
+        assert_eq!(
+            ids.to_json(),
+            r#"{"worker":"worker-1","review":"review-1","clarifier":"clarifier-1","merge":"merge-1"}"#
+        );
     }
 }

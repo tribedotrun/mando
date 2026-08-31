@@ -194,8 +194,6 @@ pub async fn apply_verdict(
             }
             // Snapshot fields that will be cleared, so we can rollback on error.
             let saved_worker_sid = item.session_ids.worker.clone();
-            let saved_ask_sid = item.session_ids.ask.clone();
-            let saved_advisor_sid = item.session_ids.advisor.clone();
             let saved_worker = item.worker.clone();
             let saved_branch = item.branch.clone();
             let saved_pr = item.pr_number;
@@ -204,7 +202,6 @@ pub async fn apply_verdict(
 
             let _ = lifecycle::apply_transition(item, ItemStatus::Queued)?;
             item.session_ids.worker = None;
-            super::clear_task_interaction_sessions(item);
             item.worker = None;
             // worktree and workbench_id are permanent — respawn reuses the
             // existing worktree directory and workbench, only creating a new
@@ -250,8 +247,6 @@ pub async fn apply_verdict(
                     // Full rollback of all cleared fields.
                     lifecycle::restore_status(item, prev_status);
                     item.session_ids.worker = saved_worker_sid;
-                    item.session_ids.ask = saved_ask_sid;
-                    item.session_ids.advisor = saved_advisor_sid;
                     item.worker = saved_worker;
                     item.branch = saved_branch;
                     item.pr_number = saved_pr;

@@ -5,7 +5,7 @@
 //! existing `NotificationHandler`. No `serde_json::Value` hop, no
 //! hand-rolled wire mirror, no `from_value::<T>` escape.
 
-use api_types::{ResearchEventData, SseEnvelope};
+use api_types::SseEnvelope;
 use gateway_client::{SseConsumer, SseSignal};
 
 pub async fn run_notification_loop(
@@ -74,12 +74,6 @@ async fn dispatch(handler: &mut crate::notifications::NotificationHandler, env: 
         | SseEnvelope::Artifacts(_) => {}
     }
 }
-
-// Ensure ResearchEventData stays in scope (referenced via payload.data above
-// as a typed shape; kept as an import so future changes to the handler
-// signature fail at compile time rather than at runtime).
-#[allow(dead_code)]
-fn _assert_research_typed(_: ResearchEventData) {}
 
 #[cfg(test)]
 mod tests {

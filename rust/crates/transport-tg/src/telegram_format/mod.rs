@@ -9,42 +9,6 @@
 
 pub use global_infra::tg_markdown::{render_markdown_reply_html, TELEGRAM_TEXT_MAX_LEN};
 
-// ── PR / issue linkification ────────────────────────────────────────
-
-#[cfg(test)]
-use regex::Regex;
-#[cfg(test)]
-use std::sync::LazyLock;
-
-/// Matches `PR #123` or `PR#123` (case-insensitive, requires PR prefix).
-#[cfg(test)]
-static PR_REF_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)\bPR\s*#(\d+)").unwrap());
-
-/// Extract `owner/repo` from a git remote URL (SSH or HTTPS).
-///
-/// Delegates to `settings::parse_github_slug` — single implementation.
-#[cfg(test)]
-pub fn repo_slug_from_remote(remote_url: &str) -> Option<String> {
-    settings::parse_github_slug(remote_url)
-}
-
-/// Scan `text` for PR references (`#123`, `PR #123`) and replace each with
-/// a clickable Telegram hyperlink pointing at the GitHub PR.
-#[cfg(test)]
-pub fn linkify_pr_refs(text: &str, repo_slug: &str) -> String {
-    let repo_name = repo_slug.rsplit('/').next().unwrap_or(repo_slug);
-    PR_REF_RE
-        .replace_all(text, |caps: &regex::Captures| {
-            let num = &caps[1];
-            let url = format!("https://github.com/{repo_slug}/pull/{num}");
-            format!(
-                "<a href=\"{url}\">{repo} PR #{num}</a>",
-                repo = escape_html(repo_name),
-            )
-        })
-        .into_owned()
-}
-
 // ── Core formatting ─────────────────────────────────────────────────
 
 /// Resolve the paused-state display for a task. Returns
@@ -112,82 +76,11 @@ pub fn escape_html(text: &str) -> String {
     result
 }
 
-/// Generate a Telegram HTML hyperlink: `<a href="url">label</a>`.
-#[allow(dead_code)]
-pub fn hyperlink(label: &str, url: &str) -> String {
-    format!(
-        "<a href=\"{}\">{}</a>",
-        escape_html(url),
-        escape_html(label),
-    )
-}
-
-#[cfg(test)]
-use captain::Task;
-
-/// Format a task as a single Telegram line.
-///
-/// Includes Worker and PR columns.
-/// Example: `[hammer] #42 Fix the bug | mando-w-12 | PR #396`
-///
-/// `github_repo`: optional GitHub slug (e.g. "owner/repo") for constructing
-/// PR links when the PR reference is not a full URL. Pass `None` if unknown.
-#[cfg(test)]
-fn format_item_line(item: &Task, include_repo: bool) -> String {
-    format_item_line_with_repo(item, include_repo, None)
-}
-
-/// Format a task with an explicit GitHub repo for PR link construction.
-#[cfg(test)]
-fn format_item_line_with_repo(
-    item: &Task,
-    include_repo: bool,
-    github_repo: Option<&str>,
-) -> String {
-    let status_str = item.status().as_str();
-    let icon = status_icon(status_str);
-    let id_display = format!("#{} ", item.id);
-    let title = escape_html(&item.title);
-
-    let repo_suffix = if include_repo {
-        let p = &item.project;
-        if p.is_empty() {
-            String::new()
-        } else {
-            format!(" ({})", escape_html(p))
-        }
-    } else {
-        String::new()
-    };
-
-    let worker_part = item
-        .worker
-        .as_deref()
-        .filter(|w| !w.is_empty())
-        .map(|w| format!(" | {}", escape_html(w)))
-        .unwrap_or_default();
-
-    let pr_link = item
-        .pr_number
-        .map(|num| {
-            let label = format!("PR #{num}");
-            if let Some(repo) = github_repo {
-                let url = captain::pr_url(repo, num);
-                format!(" | {}", hyperlink(&label, &url))
-            } else {
-                format!(" | {label}")
-            }
-        })
-        .unwrap_or_default();
-
-    format!("{icon} {id_display}{title}{repo_suffix}{worker_part}{pr_link}")
-}
-
 /// Build a clickable Telegram HTML hyperlink for a PR number.
 pub fn pr_html_link(pr_number: i64, github_repo: Option<&str>) -> String {
     let label = escape_html(&format!("PR #{pr_number}"));
     if let Some(repo) = github_repo {
-        let url = captain::pr_url(repo, pr_number);
+        let url = format!("https://github.com/{repo}/pull/{pr_number}");
         return format!("<a href=\"{}\">{label}</a>", escape_html(&url),);
     }
     label
@@ -231,25 +124,12 @@ pub fn split_message(text: &str, max_len: usize) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use captain::ItemStatus;
 
     #[test]
     fn escape_html_special_chars() {
         assert_eq!(escape_html("<b>bold</b>"), "&lt;b&gt;bold&lt;/b&gt;");
         assert_eq!(escape_html("A & B"), "A &amp; B");
         assert_eq!(escape_html("a=\"1\""), "a=&quot;1&quot;");
-    }
-
-    #[test]
-    fn hyperlink_produces_correct_html() {
-        let link = hyperlink("Click me", "https://example.com");
-        assert_eq!(link, "<a href=\"https://example.com\">Click me</a>");
-    }
-
-    #[test]
-    fn hyperlink_escapes_label() {
-        let link = hyperlink("A<B", "https://example.com");
-        assert_eq!(link, "<a href=\"https://example.com\">A&lt;B</a>");
     }
 
     #[test]
@@ -293,58 +173,6 @@ mod tests {
     }
 
     #[test]
-    fn format_item_line_basic() {
-        let mut item = Task::new("Fix the bug");
-        item.set_status_for_tests(ItemStatus::InProgress);
-        item.id = 42;
-        let line = format_item_line(&item, false);
-        assert!(line.contains("#42"));
-        assert!(line.contains("Fix the bug"));
-        assert!(line.contains("\u{1f528}"));
-    }
-
-    #[test]
-    fn format_item_line_with_repo() {
-        let mut item = Task::new("Add feature");
-        item.set_status_for_tests(ItemStatus::Queued);
-        item.project = "mando".into();
-        let line = format_item_line(&item, true);
-        assert!(line.contains("(mando)"));
-    }
-
-    #[test]
-    fn format_item_line_with_worker_and_pr() {
-        let mut item = Task::new("Fix auth flow");
-        item.set_status_for_tests(ItemStatus::InProgress);
-        item.id = 12;
-        item.worker = Some("mando-w-12".into());
-        item.pr_number = Some(396);
-        let line = super::format_item_line_with_repo(&item, false, Some("acme/widgets"));
-        assert!(line.contains("mando-w-12"), "should include worker name");
-        assert!(line.contains("PR #396"), "should include PR number");
-        assert!(
-            line.contains("| mando-w-12"),
-            "worker should be pipe-separated"
-        );
-        assert!(
-            line.contains("| <a href="),
-            "PR should be pipe-separated hyperlink"
-        );
-    }
-
-    #[test]
-    fn format_item_line_without_worker_or_pr() {
-        let mut item = Task::new("Refactor config");
-        item.set_status_for_tests(ItemStatus::Queued);
-        item.id = 15;
-        let line = format_item_line(&item, false);
-        assert!(
-            !line.contains(" | "),
-            "should not have pipe separators when no worker/PR"
-        );
-    }
-
-    #[test]
     fn split_message_short() {
         let text = "short message";
         let parts = split_message(text, 100);
@@ -376,56 +204,5 @@ mod tests {
         assert!(!parts.is_empty());
         let rejoined: String = parts.join("");
         assert_eq!(rejoined, text);
-    }
-
-    // ── PR / issue linkification ────────────────────────────────────
-
-    #[test]
-    fn repo_slug_from_ssh_remote() {
-        assert_eq!(
-            repo_slug_from_remote("git@github.com:acme/widgets.git"),
-            Some("acme/widgets".into()),
-        );
-    }
-
-    #[test]
-    fn repo_slug_from_https_remote() {
-        assert_eq!(
-            repo_slug_from_remote("https://github.com/acme/widgets.git"),
-            Some("acme/widgets".into()),
-        );
-        assert_eq!(
-            repo_slug_from_remote("https://github.com/acme/widgets"),
-            Some("acme/widgets".into()),
-        );
-    }
-
-    #[test]
-    fn repo_slug_from_invalid_remote() {
-        assert_eq!(repo_slug_from_remote("not-a-url"), None);
-    }
-
-    #[test]
-    fn linkify_pr_refs_replaces_all() {
-        let text = "Fixed PR #10 and PR #20";
-        let result = linkify_pr_refs(text, "acme/widgets");
-        assert!(result.contains("widgets PR #10"));
-        assert!(result.contains("widgets PR #20"));
-        assert!(result.contains("https://github.com/acme/widgets/pull/10"));
-    }
-
-    #[test]
-    fn linkify_pr_refs_ignores_bare_hash() {
-        let text = "See item #42 for details";
-        let result = linkify_pr_refs(text, "acme/widgets");
-        assert_eq!(result, text, "bare #N should not be linkified");
-    }
-
-    #[test]
-    fn linkify_pr_refs_with_pr_prefix() {
-        let text = "See PR #446 for details";
-        let result = linkify_pr_refs(text, "acme/widgets");
-        assert!(result.contains("widgets PR #446"));
-        assert!(!result.contains("See PR #446"));
     }
 }

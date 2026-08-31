@@ -176,11 +176,7 @@ impl Task {
     /// the full state machine. Every other write path must go through
     /// `service::lifecycle::apply_transition`.
     ///
-    /// Gated by `cfg(any(test, feature = "testing"))` so production code
-    /// paths in this crate and every downstream crate are compiled
-    /// without the shim, preserving the type-level "status is read-only
-    /// publicly" guarantee.
-    #[cfg(any(test, feature = "testing"))]
+    #[cfg(test)]
     #[doc(hidden)]
     pub fn set_status_for_tests(&mut self, status: ItemStatus) {
         self.status = status;

@@ -11,7 +11,6 @@ export {
   timeoutError,
   ipcError,
   ioError,
-  invariantError,
 } from './errors.ts';
 
 export { type Result, Ok, Err, ok, err, combine, isOk, isErr } from './result.ts';
@@ -24,7 +23,6 @@ export {
   fromSafePromise,
   fromThrowable,
   combineAsync,
-  sequence,
 } from './async-result.ts';
 
 export {
@@ -39,6 +37,6 @@ export {
   toReactQuery,
 } from './helpers.ts';
 
-export { type SseParseResult, type SseParseFailure, parseSseMessage } from './sse-parse-handler.ts';
+export { parseSseMessage } from './sse-parse-handler.ts';
 
 export { SchemaParseError } from './schema-parse-error.ts';

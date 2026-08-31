@@ -3,6 +3,21 @@
 version = 4
 
 [[package]]
+name = "agent-runtime-core"
+version = "0.1.21-beta.4"
+dependencies = [
+ "anyhow",
+ "api-types",
+ "global-infra",
+ "global-types",
+ "libc",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "aho-corasick"
 version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -84,19 +99,18 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
 name = "api-types"
-version = "0.1.21-beta.3"
+version = "0.1.21-beta.4"
 dependencies = [
  "global-types",
  "inventory",
  "serde",
  "serde_json",
- "time",
  "ts-rs",
 ]
 
 [[package]]
 name = "api-types-codegen"
-version = "0.1.21-beta.3"
+version = "0.1.21-beta.4"
 dependencies = [
  "anyhow",
  "api-types",
@@ -111,28 +125,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c049c0be4daef0b145cb3555416b3b8ef5b7888a38aea1a3a155801fe7b0810b"
 dependencies = [
  "rustversion",
-]
-
-[[package]]
-name = "async-stream"
-version = "0.3.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0b5a71a6f37880a80d1d7f19efd781e4b5de42c88f0722cc13bcb6cc2cfe8476"
-dependencies = [
- "async-stream-impl",
- "futures-core",
- "pin-project-lite",
-]
-
-[[package]]
-name = "async-stream-impl"
-version = "0.3.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c7c24de15d275a1ecfd47a380fb4d5ec9bfe0933f309ed5e705b775596a3574d"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.119",
 ]
 
 [[package]]
@@ -270,8 +262,9 @@ checksum = "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04"
 
 [[package]]
 name = "captain"
-version = "0.1.21-beta.3"
+version = "0.1.21-beta.4"
 dependencies = [
+ "agent-runtime-core",
  "anyhow",
  "api-types",
  "futures",
@@ -286,16 +279,13 @@ dependencies = [
  "global-types",
  "libc",
  "regex",
- "reqwest",
  "rustc-hash",
  "serde",
  "serde_json",
- "serde_yaml",
  "sessions-db",
  "settings",
  "sqlx",
  "tempfile",
- "thiserror",
  "time",
  "tokio",
  "tokio-util",
@@ -740,7 +730,7 @@ dependencies = [
 
 [[package]]
 name = "gateway-client"
-version = "0.1.21-beta.3"
+version = "0.1.21-beta.4"
 dependencies = [
  "anyhow",
  "api-types",
@@ -751,6 +741,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tracing",
+ "urlencoding",
 ]
 
 [[package]]
@@ -799,24 +790,21 @@ dependencies = [
 
 [[package]]
 name = "global-bus"
-version = "0.1.21-beta.3"
+version = "0.1.21-beta.4"
 dependencies = [
  "api-types",
- "global-types",
- "serde",
  "tokio",
- "tracing",
 ]
 
 [[package]]
 name = "global-claude"
-version = "0.1.21-beta.3"
+version = "0.1.21-beta.4"
 dependencies = [
+ "agent-runtime-core",
  "anyhow",
  "api-types",
  "global-infra",
  "global-types",
- "libc",
  "regex",
  "serde",
  "serde_json",
@@ -828,13 +816,12 @@ dependencies = [
 
 [[package]]
 name = "global-codex-app-server"
-version = "0.1.21-beta.3"
+version = "0.1.21-beta.4"
 dependencies = [
+ "agent-runtime-core",
  "anyhow",
- "global-claude",
  "global-infra",
  "global-types",
- "libc",
  "serde_json",
  "tokio",
  "tracing",
@@ -842,22 +829,20 @@ dependencies = [
 
 [[package]]
 name = "global-db"
-version = "0.1.21-beta.3"
+version = "0.1.21-beta.4"
 dependencies = [
  "anyhow",
  "global-infra",
  "global-types",
- "serde",
  "serde_json",
  "sqlx",
- "time",
  "tokio",
  "tracing",
 ]
 
 [[package]]
 name = "global-git"
-version = "0.1.21-beta.3"
+version = "0.1.21-beta.4"
 dependencies = [
  "anyhow",
  "global-infra",
@@ -869,7 +854,7 @@ dependencies = [
 
 [[package]]
 name = "global-github"
-version = "0.1.21-beta.3"
+version = "0.1.21-beta.4"
 dependencies = [
  "anyhow",
  "global-infra",
@@ -881,9 +866,8 @@ dependencies = [
 
 [[package]]
 name = "global-infra"
-version = "0.1.21-beta.3"
+version = "0.1.21-beta.4"
 dependencies = [
- "anyhow",
  "getrandom 0.2.17",
  "regex",
  "serde",
@@ -896,38 +880,31 @@ dependencies = [
 
 [[package]]
 name = "global-net"
-version = "0.1.21-beta.3"
+version = "0.1.21-beta.4"
 dependencies = [
- "anyhow",
  "global-infra",
- "global-types",
- "html5ever",
  "reqwest",
- "serde",
- "serde_json",
- "tokio",
  "tracing",
 ]
 
 [[package]]
 name = "global-opencode"
-version = "0.1.21-beta.3"
+version = "0.1.21-beta.4"
 dependencies = [
+ "agent-runtime-core",
  "anyhow",
- "global-claude",
+ "api-types",
  "global-types",
- "libc",
  "serde_json",
  "tokio",
 ]
 
 [[package]]
 name = "global-types"
-version = "0.1.21-beta.3"
+version = "0.1.21-beta.4"
 dependencies = [
  "global-infra",
  "serde",
- "serde_json",
  "ts-rs",
 ]
 
@@ -1436,36 +1413,31 @@ checksum = "c41e0c4fef86961ac6d6f8a82609f55f31b05e4fce149ac5710e439df7619ba4"
 
 [[package]]
 name = "mando-cli"
-version = "0.1.21-beta.3"
+version = "0.1.21-beta.4"
 dependencies = [
  "anyhow",
  "api-types",
  "clap",
+ "gateway-client",
  "global-git",
  "global-infra",
  "global-types",
  "reqwest",
- "serde",
  "serde_json",
  "sqlx",
  "thiserror",
  "tokio",
  "tracing",
  "tracing-subscriber",
- "urlencoding",
 ]
 
 [[package]]
 name = "mando-gateway"
-version = "0.1.21-beta.3"
+version = "0.1.21-beta.4"
 dependencies = [
  "anyhow",
  "api-types",
- "arc-swap",
- "async-stream",
  "axum",
- "base64",
- "bytes",
  "captain",
  "clap",
  "futures-util",
@@ -1474,25 +1446,19 @@ dependencies = [
  "global-db",
  "global-infra",
  "global-types",
- "inventory",
  "opentelemetry",
  "opentelemetry-otlp",
  "opentelemetry_sdk",
  "reqwest",
- "rustc-hash",
  "scout",
  "serde",
  "serde_json",
  "sessions",
  "settings",
- "shell-words",
  "sqlx",
- "time",
  "tokio",
- "tokio-stream",
  "tokio-util",
  "toml",
- "tower-http",
  "tracing",
  "tracing-appender",
  "tracing-opentelemetry",
@@ -1500,7 +1466,6 @@ dependencies = [
  "transport-http",
  "transport-tg",
  "transport-ui",
- "uuid",
 ]
 
 [[package]]
@@ -2419,7 +2384,7 @@ checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 
 [[package]]
 name = "scout"
-version = "0.1.21-beta.3"
+version = "0.1.21-beta.4"
 dependencies = [
  "anyhow",
  "api-types",
@@ -2430,6 +2395,7 @@ dependencies = [
  "global-infra",
  "global-net",
  "global-types",
+ "html5ever",
  "regex",
  "reqwest",
  "rustc-hash",
@@ -2439,7 +2405,6 @@ dependencies = [
  "settings",
  "sha2",
  "sqlx",
- "thiserror",
  "time",
  "tokio",
  "tokio-util",
@@ -2560,11 +2525,10 @@ dependencies = [
 
 [[package]]
 name = "sessions"
-version = "0.1.21-beta.3"
+version = "0.1.21-beta.4"
 dependencies = [
  "anyhow",
  "api-types",
- "global-bus",
  "global-claude",
  "global-db",
  "global-infra",
@@ -2573,14 +2537,13 @@ dependencies = [
  "serde_json",
  "sessions-db",
  "sqlx",
- "time",
  "tokio",
  "tracing",
 ]
 
 [[package]]
 name = "sessions-db"
-version = "0.1.21-beta.3"
+version = "0.1.21-beta.4"
 dependencies = [
  "anyhow",
  "global-db",
@@ -2589,12 +2552,11 @@ dependencies = [
  "serde_json",
  "sqlx",
  "tokio",
- "tracing",
 ]
 
 [[package]]
 name = "settings"
-version = "0.1.21-beta.3"
+version = "0.1.21-beta.4"
 dependencies = [
  "anyhow",
  "api-types",
@@ -2656,12 +2618,6 @@ checksum = "f40ca3c46823713e0d4209592e8d6e826aa57e928f09752619fc696c499637f6"
 dependencies = [
  "lazy_static",
 ]
-
-[[package]]
-name = "shell-words"
-version = "1.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dc6fe69c597f9c37bfeeeeeb33da3530379845f10be461a66d16d03eca2ded77"
 
 [[package]]
 name = "shlex"
@@ -3483,68 +3439,48 @@ dependencies = [
 
 [[package]]
 name = "transport-http"
-version = "0.1.21-beta.3"
+version = "0.1.21-beta.4"
 dependencies = [
  "anyhow",
  "api-types",
- "async-stream",
  "axum",
  "base64",
  "captain",
  "futures-util",
  "global-bus",
  "global-claude",
- "global-db",
  "global-infra",
  "global-types",
  "inventory",
  "metrics",
  "metrics-exporter-prometheus",
- "reqwest",
  "rustc-hash",
  "scout",
  "serde",
  "serde_json",
  "sessions",
  "settings",
- "shell-words",
- "sqlx",
- "time",
  "tokio",
  "tokio-stream",
  "tokio-util",
  "toml",
  "tower-http",
  "tracing",
- "transport-http-macros",
  "transport-tg",
  "transport-ui",
 ]
 
 [[package]]
-name = "transport-http-macros"
-version = "0.1.21-beta.3"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.119",
-]
-
-[[package]]
 name = "transport-tg"
-version = "0.1.21-beta.3"
+version = "0.1.21-beta.4"
 dependencies = [
  "anyhow",
  "api-types",
  "axum",
- "captain",
- "clap",
  "gateway-client",
  "global-infra",
  "global-net",
  "global-types",
- "html5ever",
- "regex",
  "reqwest",
  "serde",
  "serde_json",
@@ -3552,13 +3488,11 @@ dependencies = [
  "time",
  "tokio",
  "tracing",
- "tracing-appender",
- "tracing-subscriber",
 ]
 
 [[package]]
 name = "transport-ui"
-version = "0.1.21-beta.3"
+version = "0.1.21-beta.4"
 dependencies = [
  "anyhow",
  "libc",
@@ -3683,17 +3617,6 @@ name = "utf8parse"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821"
-
-[[package]]
-name = "uuid"
-version = "1.26.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b5772d71c9be8a8a6ac2117d949c5b224c1b72241bb611d9a3012edcf8af7812"
-dependencies = [
- "getrandom 0.4.3",
- "js-sys",
- "wasm-bindgen",
-]
 
 [[package]]
 name = "valuable"

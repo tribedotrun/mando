@@ -4,6 +4,7 @@ import { shell } from 'electron';
 import { handleChannel } from '#main/global/runtime/ipcSecurity';
 import log from '#main/global/providers/logger';
 import { isSafeExternalUrl } from '#main/shell/service/shellBridge';
+import { evidenceDeckExists, readEvidenceDeck } from '#main/shell/runtime/evidenceDeck';
 
 function resolveAbsoluteExistingFile(input: string): string | null {
   if (!input || !path.isAbsolute(input)) return null;
@@ -30,5 +31,13 @@ export function registerShellBridgeHandlers(): void {
       log.warn(`Failed to open local path ${existing}: ${result}`);
       throw new Error(result);
     }
+  });
+
+  handleChannel('shell:evidence-deck-exists', async (_event, worktree) => {
+    return evidenceDeckExists(worktree);
+  });
+
+  handleChannel('shell:read-evidence-deck', async (_event, worktree) => {
+    return readEvidenceDeck(worktree);
   });
 }

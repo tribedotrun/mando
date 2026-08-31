@@ -9,6 +9,11 @@
 //! the default Rust backtrace still prints to stderr for the interactive
 //! terminal that spawned the daemon.
 
+#![allow(
+    clippy::print_stderr,
+    reason = "the panic hook may need stderr when the structured logger itself has failed"
+)]
+
 use std::backtrace::Backtrace;
 use std::panic::{self, PanicHookInfo};
 use std::sync::Once;

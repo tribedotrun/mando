@@ -1,17 +1,14 @@
 // Ban toast imports outside:
 // - `**/ui/**`,
-// - the single feedback adapter,
-// - runtime feedback hooks (`**/runtime/useFeedback*.ts[x]`,
-//   `**/runtime/useError*.ts[x]`).
+// - renderer runtime hooks (`**/runtime/use*.ts[x]`).
 //
-// Repo/service/providers tiers return data or errors; UI and dedicated runtime
-// feedback hooks decide how to surface them. Prevents duplicate toasts and
-// keeps the feedback funnel explicit.
+// Repo/service/providers tiers return data or errors; UI and runtime hooks
+// decide how to surface them. Prevents duplicate toasts while authorizing by
+// architectural tier instead of a feedback-oriented filename convention.
 //
 // Codifies invariant R9 in .claude/skills/s-arch/invariants.md.
 
-const ADAPTER_SUFFIX = '/renderer/global/runtime/useFeedback.ts';
-const FEEDBACK_HOOK_RE = /\/runtime\/use(?:Error|Feedback)[^/]*\.tsx?$/;
+const RENDERER_RUNTIME_HOOK_RE = /\/renderer\/.*\/runtime\/use[^/]*\.tsx?$/;
 const TOAST_SOURCES = new Set(['sonner', '#renderer/global/runtime/useFeedback']);
 
 function normalizeFilename(filename) {
@@ -21,8 +18,7 @@ function normalizeFilename(filename) {
 function isAllowed(filename) {
   const normalized = normalizeFilename(filename);
   if (normalized.includes('/ui/')) return true;
-  if (normalized.endsWith(ADAPTER_SUFFIX)) return true;
-  return FEEDBACK_HOOK_RE.test(normalized);
+  return RENDERER_RUNTIME_HOOK_RE.test(normalized);
 }
 
 function isToastSpecifier(spec) {
@@ -41,11 +37,11 @@ export default {
   meta: {
     type: 'problem',
     docs: {
-      description: 'Ban toast imports outside ui/ and dedicated runtime feedback hooks.',
+      description: 'Ban toast imports outside renderer ui/ and runtime use-hooks.',
     },
     messages: {
       noToastOutsideUi:
-        'Banned: toast imports belong in `ui/`, `global/runtime/useFeedback.ts`, or runtime hooks named `useFeedback*` / `useError*`. Repo/runtime/service/providers tiers must return the result and let those feedback hooks decide how to surface it. See .claude/skills/s-arch/invariants.md#r9.',
+        'Banned: toast imports belong in renderer `ui/` or `runtime/use*` hooks. Repo, service, providers, and non-hook runtime modules must return errors for those surfaces to render. See .claude/skills/s-arch/invariants.md#r9.',
     },
   },
   create(context) {

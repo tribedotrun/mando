@@ -33,7 +33,6 @@ fn build_scout_ask_response(
 }
 
 /// POST /api/scout/research - kick off async research, return run_id immediately.
-#[crate::instrument_api(method = "POST", path = "/api/scout/research")]
 pub(crate) async fn post_scout_research(
     State(state): State<AppState>,
     Json(body): Json<api_types::ScoutResearchRequest>,
@@ -48,7 +47,6 @@ pub(crate) async fn post_scout_research(
 }
 
 /// GET /api/scout/research - list recent research runs.
-#[crate::instrument_api(method = "GET", path = "/api/scout/research")]
 pub(crate) async fn get_scout_research_runs(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<api_types::ScoutResearchRun>>, ApiError> {
@@ -66,7 +64,6 @@ pub(crate) async fn get_scout_research_runs(
 }
 
 /// GET /api/scout/research/{id}/items - items discovered by a research run.
-#[crate::instrument_api(method = "GET", path = "/api/scout/research/{id}/items")]
 pub(crate) async fn get_scout_research_run_items(
     State(state): State<AppState>,
     Path(api_types::ScoutResearchIdParams { id }): Path<api_types::ScoutResearchIdParams>,
@@ -85,7 +82,6 @@ pub(crate) async fn get_scout_research_run_items(
 }
 
 /// GET /api/scout/research/{id} - poll research run status.
-#[crate::instrument_api(method = "GET", path = "/api/scout/research/{id}")]
 pub(crate) async fn get_scout_research_run(
     State(state): State<AppState>,
     Path(api_types::ScoutResearchIdParams { id }): Path<api_types::ScoutResearchIdParams>,
@@ -110,7 +106,6 @@ pub(crate) async fn get_scout_research_run(
 }
 
 /// POST /api/scout/ask (JSON or multipart with optional images)
-#[crate::instrument_api(method = "POST", path = "/api/scout/ask")]
 pub(crate) async fn post_scout_ask(
     State(state): State<AppState>,
     request: axum::extract::Request,

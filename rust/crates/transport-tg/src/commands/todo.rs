@@ -80,14 +80,13 @@ pub async fn execute_todo_with_photo(
             .map(|pc| pc.name.clone())
             .filter(|n| !n.is_empty())
             .collect();
-        let todo_items = vec![TodoItem {
+        let item = TodoItem {
             title: title.clone(),
             project: None,
             photo_file_id,
-        }];
+        };
         let keyboard = build_project_picker(&action_id, &names);
-        bot.store_todo_confirm(&action_id, chat_id, todo_items, names)
-            .await;
+        bot.store_todo_project(&action_id, item, names).await;
         bot.api()
             .send_message(
                 chat_id,
@@ -103,12 +102,12 @@ pub async fn execute_todo_with_photo(
         return Ok(());
     };
 
-    let items = vec![TodoItem {
+    let item = TodoItem {
         title,
         project: Some(project),
         photo_file_id,
-    }];
-    crate::callback_actions::add_todo_items(bot, chat_id, &items, None).await
+    };
+    crate::callback_actions::add_todo_item(bot, chat_id, &item, None).await
 }
 
 /// A one-line label for a task whose title may span several lines.
@@ -131,7 +130,7 @@ fn build_project_picker(action_id: &str, names: &[String]) -> api_types::Telegra
         buttons.chunks(2).map(|chunk| chunk.to_vec()).collect();
     rows.push(vec![InlineKeyboardButton {
         text: "Cancel".into(),
-        callback_data: Some(format!("todo_confirm:cancel:{action_id}")),
+        callback_data: Some(format!("todo_project:{action_id}:cancel")),
         url: None,
     }]);
     api_types::TelegramReplyMarkup::InlineKeyboard { rows }
@@ -146,5 +145,29 @@ mod tests {
         assert_eq!(first_line("Fix login\nmore detail"), "Fix login");
         assert_eq!(first_line("  Fix login  "), "Fix login");
         assert_eq!(first_line(""), "");
+    }
+
+    #[test]
+    fn project_picker_routes_selection_and_cancel_through_one_prefix() {
+        let names = vec!["mando".to_string(), "hyper-tribe".to_string()];
+        let api_types::TelegramReplyMarkup::InlineKeyboard { rows } =
+            build_project_picker("abc", &names)
+        else {
+            panic!("project picker must use an inline keyboard");
+        };
+        let callbacks: Vec<&str> = rows
+            .iter()
+            .flatten()
+            .filter_map(|button| button.callback_data.as_deref())
+            .collect();
+
+        assert_eq!(
+            callbacks,
+            [
+                "todo_project:abc:0",
+                "todo_project:abc:1",
+                "todo_project:abc:cancel",
+            ],
+        );
     }
 }

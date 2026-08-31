@@ -7,7 +7,6 @@ use crate::telegram_format::escape_html;
 use anyhow::Result;
 
 use crate::bot::TelegramBot;
-use crate::gateway_paths as paths;
 use crate::PendingMessages;
 
 // ── Scout add with processing progress ─────────────────────────────
@@ -21,15 +20,11 @@ pub(crate) async fn add_and_track(
     url: &str,
     title: Option<&str>,
 ) -> Result<()> {
-    let body = match title {
-        Some(t) => serde_json::json!({"url": url, "title": t}),
-        None => serde_json::json!({"url": url}),
+    let body = api_types::ScoutAddRequest {
+        url: url.to_string(),
+        title: title.map(str::to_string),
     };
-    let result = match bot
-        .gw
-        .post_typed::<_, api_types::ScoutAddResponse>(paths::SCOUT_ITEMS, &body)
-        .await
-    {
+    let result = match bot.gw.post_scout_items(&body).await {
         Ok(r) => r,
         Err(e) => {
             let msg = format!("\u{274c} Failed: {}", escape_html(&e.to_string()));
@@ -127,10 +122,12 @@ pub(crate) async fn handle_implicit_addlink(
     let mut lines = Vec::new();
 
     for url in &urls {
-        let body = serde_json::json!({"url": url});
         match bot
             .gw
-            .post_typed::<_, api_types::ScoutAddResponse>(paths::SCOUT_ITEMS, &body)
+            .post_scout_items(&api_types::ScoutAddRequest {
+                url: (*url).to_string(),
+                title: None,
+            })
             .await
         {
             Ok(result) => {

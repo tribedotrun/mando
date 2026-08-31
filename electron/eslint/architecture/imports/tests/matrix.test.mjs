@@ -206,6 +206,13 @@ describe('main process: tier isolation', () => {
     );
   });
 
+  it('filesystem-derived main registry includes codex', () => {
+    expectMessage(
+      lint('src/main/codex/service/foo.ts', `import { x } from '#main/updater/runtime/updater';`),
+      'Promote shared code to global',
+    );
+  });
+
   it('main domain can import global', () => {
     expectClean(
       lint('src/main/daemon/runtime/foo.ts', `import { x } from '#main/global/providers/logger';`),

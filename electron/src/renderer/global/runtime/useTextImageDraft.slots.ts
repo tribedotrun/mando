@@ -25,7 +25,7 @@ const OWNER = 'global/runtime/useTextImageDraft';
 const draftStore = defineJsonKeyspace(V2_PREFIX, draftSchema, OWNER);
 const legacyTextStore = defineKeyspace(V1_PREFIX, OWNER);
 
-export function draftSlotFor(suffix: string): PersistedJsonSlot<TextImageDraft> {
+function draftSlotFor(suffix: string): PersistedJsonSlot<TextImageDraft> {
   return draftStore.for(suffix);
 }
 
@@ -33,7 +33,7 @@ function legacyTextSlotFor(suffix: string): PersistedSlot {
   return legacyTextStore.for(suffix);
 }
 
-export function reconstructFile(image: TextImageDraftImage): File {
+function reconstructFile(image: TextImageDraftImage): File {
   const bytes = decodeBase64ToBytes(image.base64);
   const copy = new Uint8Array(bytes.byteLength);
   copy.set(bytes);
@@ -41,7 +41,7 @@ export function reconstructFile(image: TextImageDraftImage): File {
 }
 
 // invariant: native Promise is required here — callers wrap in IIFE + try/catch.
-export async function readFileAsBase64(file: File) {
+async function readFileAsBase64(file: File) {
   const buffer = await file.arrayBuffer();
   return encodeBytesToBase64(new Uint8Array(buffer));
 }
@@ -156,7 +156,7 @@ export function resetDraftSlot(
   draftSlotFor(keyRef.current).clear();
 }
 
-export interface HydratedImage {
+interface HydratedImage {
   file: File;
   preview: string;
 }

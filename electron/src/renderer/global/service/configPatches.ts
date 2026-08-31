@@ -6,10 +6,10 @@ import type {
   FeaturesConfig,
 } from '#renderer/global/types';
 
-export type ConfigTransform = (current: MandoConfig) => MandoConfig;
+type ConfigTransform = (current: MandoConfig) => MandoConfig;
 
 /** Patches the scout sub-tree. */
-export function scoutPatch(patch: Partial<ScoutConfig>): ConfigTransform {
+function scoutPatch(patch: Partial<ScoutConfig>): ConfigTransform {
   return (c) => ({ ...c, scout: { ...(c.scout || {}), ...patch } });
 }
 

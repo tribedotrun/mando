@@ -1,4 +1,5 @@
 import React from 'react';
+import { AlertTriangle } from 'lucide-react';
 import type {
   SystemApiRetryEvent,
   SystemCompactBoundaryEvent,
@@ -45,8 +46,14 @@ export function SystemMessage({ event }: { event: SystemEventPayload }): React.R
       );
     case 'status':
       return (
-        <div className="py-1 text-label italic text-muted-foreground">
-          {event.data.status ?? 'status'} {event.data.message ? `· ${event.data.message}` : ''}
+        <div className="flex items-start gap-2 rounded px-2 py-1.5 text-label text-amber-700 dark:text-amber-300">
+          <AlertTriangle className="mt-0.5 shrink-0 opacity-70" size={13} />
+          <span className="font-medium uppercase tracking-wider">
+            {event.data.status ?? 'status'}
+          </span>
+          {event.data.message && (
+            <span className="min-w-0 text-muted-foreground">{event.data.message}</span>
+          )}
         </div>
       );
     case 'retry':

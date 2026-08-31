@@ -6,7 +6,7 @@ import {
   type ItemStatus,
 } from '#renderer/global/types';
 
-export interface StatCounts {
+interface StatCounts {
   queued: number;
   working: number;
   actionNeeded: number;

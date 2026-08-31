@@ -7,7 +7,7 @@ use serde_json::{json, Value};
 use tokio::time::{sleep, Duration};
 
 use super::codex_stream::{
-    append_jsonl, append_result, collect_agent_text, handle_notification, turn_status,
+    append_jsonl, append_result, collect_agent_text, handle_notification, turn_completion,
     CodexNotification, CodexStreamLine, CodexStreamState, CodexStructuredOutput,
 };
 
@@ -38,6 +38,7 @@ async fn run_watch_loop(
 ) {
     let mut stream_state = CodexStreamState::default();
     let mut status = global_types::SessionStatus::Failed;
+    let mut outcome = api_types::ResultOutcome::ErrorDuringExecution;
     let mut agent_text = String::new();
     let mut final_agent_text: Option<String> = None;
     let mut io_failure_text: Option<String> = None;
@@ -52,7 +53,9 @@ async fn run_watch_loop(
                 if handle_notification(stream_path, CodexNotification(&value), &mut stream_state)
                     .await
                 {
-                    status = turn_status(CodexNotification(&value));
+                    let completion = turn_completion(CodexNotification(&value));
+                    status = completion.status;
+                    outcome = completion.outcome;
                     break;
                 }
             }
@@ -72,6 +75,7 @@ async fn run_watch_loop(
         &started.stderr_tail,
         &stream_state,
         status,
+        outcome,
         agent_text,
         final_agent_text,
         io_failure_text,
@@ -90,6 +94,7 @@ async fn finalize_turn(
     stderr_tail: &global_codex_app_server::StderrTail,
     stream_state: &CodexStreamState,
     mut status: global_types::SessionStatus,
+    mut outcome: api_types::ResultOutcome,
     agent_text: String,
     final_agent_text: Option<String>,
     io_failure_text: Option<String>,
@@ -117,12 +122,13 @@ async fn finalize_turn(
             .await
     {
         status = global_types::SessionStatus::Stopped;
+        outcome = api_types::ResultOutcome::Interrupted;
     }
     let duration_ms = stream_state.duration_ms();
     let cost_usd = stream_state.estimated_cost_usd(model);
     if let Err(e) = append_result(
         stream_path,
-        status,
+        outcome,
         stream_state,
         cost_usd,
         result_text,
@@ -164,7 +170,7 @@ async fn update_session_status_with_retry(
     duration_ms: Option<i64>,
 ) -> Result<()> {
     for attempt in 1..=SESSION_STATUS_UPDATE_ATTEMPTS {
-        match sessions_db::update_session_status_with_cost(
+        match sessions_db::update_session_status_with_absolute_cost(
             pool,
             thread_id,
             status,
@@ -213,8 +219,16 @@ async fn finalize_watcher_panic(
         "Codex watcher panicked"
     );
     let state = CodexStreamState::default();
-    if let Err(e) =
-        append_result(stream_path, status, &state, None, Some(message), None, None).await
+    if let Err(e) = append_result(
+        stream_path,
+        api_types::ResultOutcome::ErrorDuringExecution,
+        &state,
+        None,
+        Some(message),
+        None,
+        None,
+    )
+    .await
     {
         tracing::error!(module = "codex_app_server", thread_id, error = %e, "failed to append Codex panic result");
     }

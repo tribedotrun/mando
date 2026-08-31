@@ -10,7 +10,6 @@ use tracing::{debug, warn};
 use super::act;
 use super::formatting::{format_swipe_card, swipe_card_kb, telegraph_read_kb};
 use crate::bot::TelegramBot;
-use crate::gateway_paths as paths;
 use crate::permissions;
 
 /// Handle an incoming callback query on the assistant bot.
@@ -171,9 +170,13 @@ pub async fn handle_callback(bot: &TelegramBot, cb: &Value) -> Result<()> {
             bot.api
                 .answer_callback_query(cb_id, Some("Saving\u{2026}"))
                 .await?;
-            let body = serde_json::json!({"command": "save"});
             bot.gw()
-                .patch_typed::<_, api_types::BoolOkResponse>(&paths::scout_item(id), &body)
+                .patch_scout_items_by_id(
+                    &api_types::ScoutItemIdParams { id },
+                    &api_types::ScoutLifecycleCommandRequest {
+                        command: api_types::ScoutItemLifecycleCommand::Save,
+                    },
+                )
                 .await?;
             swipe_next(bot, &chat_id, message_id, id).await
         }
@@ -181,9 +184,13 @@ pub async fn handle_callback(bot: &TelegramBot, cb: &Value) -> Result<()> {
             bot.api
                 .answer_callback_query(cb_id, Some("Archiving\u{2026}"))
                 .await?;
-            let body = serde_json::json!({"command": "archive"});
             bot.gw()
-                .patch_typed::<_, api_types::BoolOkResponse>(&paths::scout_item(id), &body)
+                .patch_scout_items_by_id(
+                    &api_types::ScoutItemIdParams { id },
+                    &api_types::ScoutLifecycleCommandRequest {
+                        command: api_types::ScoutItemLifecycleCommand::Archive,
+                    },
+                )
                 .await?;
             swipe_next(bot, &chat_id, message_id, id).await
         }
@@ -192,7 +199,7 @@ pub async fn handle_callback(bot: &TelegramBot, cb: &Value) -> Result<()> {
                 .answer_callback_query(cb_id, Some("Removing\u{2026}"))
                 .await?;
             bot.gw()
-                .delete_typed::<api_types::ScoutDeleteResponse>(&paths::scout_item(id))
+                .delete_scout_items_by_id(&api_types::ScoutItemIdParams { id })
                 .await?;
             swipe_next(bot, &chat_id, message_id, id).await
         }
@@ -200,9 +207,8 @@ pub async fn handle_callback(bot: &TelegramBot, cb: &Value) -> Result<()> {
             bot.api
                 .answer_callback_query(cb_id, Some("Reprocessing\u{2026}"))
                 .await?;
-            let body = serde_json::json!({"id": id});
             bot.gw()
-                .post_typed::<_, api_types::ProcessResponse>(paths::SCOUT_PROCESS, &body)
+                .post_scout_process(&api_types::ScoutProcessRequest { id: Some(id) })
                 .await?;
             bot.api
                 .edit_message_text(
@@ -222,7 +228,7 @@ pub async fn handle_callback(bot: &TelegramBot, cb: &Value) -> Result<()> {
             let title = {
                 let item = bot
                     .gw()
-                    .get_typed::<api_types::ScoutItem>(&paths::scout_item(id))
+                    .get_scout_items_by_id(&api_types::ScoutItemIdParams { id })
                     .await?;
                 item.title.unwrap_or_else(|| "item".to_string())
             };
@@ -253,7 +259,7 @@ pub async fn handle_callback(bot: &TelegramBot, cb: &Value) -> Result<()> {
                 .await?;
             let item = bot
                 .gw()
-                .get_typed::<api_types::ScoutItem>(&paths::scout_item(id))
+                .get_scout_items_by_id(&api_types::ScoutItemIdParams { id })
                 .await?;
             let item_val = serde_json::to_value(&item).unwrap_or_default();
             let summary = item.summary.as_deref();
@@ -283,7 +289,7 @@ async fn cb_show(
     bot.api.answer_callback_query(cb_id, None).await?;
     let item = bot
         .gw()
-        .get_typed::<api_types::ScoutItem>(&paths::scout_item(id))
+        .get_scout_items_by_id(&api_types::ScoutItemIdParams { id })
         .await?;
     let item_val = serde_json::to_value(&item).unwrap_or_default();
     let summary = item.summary.as_deref();
@@ -311,12 +317,12 @@ async fn cb_read(bot: &TelegramBot, cb_id: &str, chat_id: &str, id: i64) -> Resu
 
     let item = bot
         .gw()
-        .get_typed::<api_types::ScoutItem>(&paths::scout_item(id))
+        .get_scout_items_by_id(&api_types::ScoutItemIdParams { id })
         .await?;
     let title = item.title.as_deref().unwrap_or("Untitled").to_string();
     let article = bot
         .gw()
-        .get_typed::<api_types::ScoutArticleResponse>(&paths::scout_article(id))
+        .get_scout_items_by_id_article(&api_types::ScoutItemIdParams { id })
         .await?;
 
     let telegraph_url = match article.telegraph_url {
@@ -325,10 +331,7 @@ async fn cb_read(bot: &TelegramBot, cb_id: &str, chat_id: &str, id: i64) -> Resu
             // No cached URL — publish now via gateway
             let result = bot
                 .gw()
-                .post_typed::<_, api_types::TelegraphPublishResponse>(
-                    &paths::scout_telegraph(id),
-                    &serde_json::json!({}),
-                )
+                .post_scout_items_by_id_telegraph(&api_types::ScoutItemIdParams { id })
                 .await?;
             result.url
         }
@@ -369,7 +372,13 @@ async fn swipe_next(
 ) -> Result<()> {
     let result = bot
         .gw()
-        .get_typed::<api_types::ScoutResponse>(&paths::processed_scout_items(10000))
+        .get_scout_items(&api_types::ScoutQuery {
+            status: Some(api_types::ScoutItemStatusFilter::Processed),
+            q: None,
+            item_type: None,
+            page: None,
+            per_page: Some(10_000),
+        })
         .await?;
 
     // Items are DESC (newest first); "next" = next lower ID
@@ -383,7 +392,7 @@ async fn swipe_next(
         Some(id) => {
             let full_item = bot
                 .gw()
-                .get_typed::<api_types::ScoutItem>(&paths::scout_item(id))
+                .get_scout_items_by_id(&api_types::ScoutItemIdParams { id })
                 .await?;
             let full_item_val = serde_json::to_value(&full_item).unwrap_or_default();
             let summary = full_item.summary.as_deref();

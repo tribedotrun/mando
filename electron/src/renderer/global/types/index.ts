@@ -6,18 +6,13 @@ import type {
   TaskItem,
   WorkbenchStatusFilter,
 } from '#shared/daemon-contract';
-import { itemStatusSchema, workbenchStatusFilterSchema } from '#shared/daemon-contract/schemas';
+import { workbenchStatusFilterSchema } from '#shared/daemon-contract/schemas';
 
 export type {
   ActResponse,
   ActivityStatsResponse,
-  AdvisorActionResponse,
-  AdvisorAskResponse,
-  AdvisorResponse,
   ArtifactMedia,
   ArtifactsResponse,
-  AskHistoryEntry,
-  AskHistoryResponse,
   AskResponse,
   BulkResultStatus,
   ClarifyOutcome,
@@ -83,6 +78,7 @@ export type {
   SystemHookEvent,
   SystemRateLimitEvent,
   SystemThinkingTokensEvent,
+  SystemTokenUsageEvent,
   HookPhase,
   AssistantEvent,
   AssistantToolUseBlock,
@@ -103,6 +99,10 @@ export type {
   TodoWriteInput,
   WebFetchInput,
   WebSearchInput,
+  FileChangeInput,
+  FileChangeEntry,
+  FileChangeKind,
+  ImageViewInput,
   TaskInput,
   NotebookEditInput,
   SkillInput,
@@ -125,7 +125,6 @@ export type {
   ProjectConfig,
   ScoutConfig,
   TelegramConfig,
-  UiConfig,
 } from '#renderer/global/types/config';
 
 export const FINALIZED_STATUSES: readonly ItemStatus[] = ['merged', 'completed-no-pr', 'canceled'];
@@ -145,13 +144,9 @@ export const WORKING_STATUSES: readonly ItemStatus[] = [
   'captain-merging',
 ];
 
-export const ALL_STATUSES: readonly ItemStatus[] = itemStatusSchema.options;
-
 export type SSEConnectionStatus = 'connected' | 'connecting' | 'disconnected';
 
 export type SSEEvent = SseEnvelope;
-
-export type SseAction = 'created' | 'updated' | 'deleted';
 
 export interface SseEntityPayload<T> {
   action?: string | null;
@@ -162,7 +157,7 @@ export interface SseEntityPayload<T> {
 export type SseStatusPayload = StatusEventData;
 export type SseSessionsPayload = SessionsEventData;
 
-export interface PinnedWorkbench {
+interface PinnedWorkbench {
   id: number;
   worktree: string;
   title: string;

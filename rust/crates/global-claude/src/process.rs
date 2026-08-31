@@ -2,38 +2,28 @@
 
 use std::path::PathBuf;
 
+use agent_runtime_core::ChildLifetime;
 use anyhow::{Context, Result};
 
 use crate::config::CcConfig;
 use crate::error::CcError;
 
-/// Daemon env vars stripped from worker processes so they don't inherit mode
-/// state that would silently change mando-dev behavior (e.g. MANDO_PROD_MODE
-/// turning `start dev` into prod-local).
-pub const DAEMON_ENV_STRIP: &[&str] = &[
-    "MANDO_PROD_MODE",
-    "MANDO_APP_MODE",
-    "MANDO_SANDBOX",
-    "MANDO_ELECTRON_BIN",
-    "MANDO_ELECTRON_ENTRYPOINT",
-    "MANDO_ELECTRON_INSPECT_PORT",
-    "MANDO_ELECTRON_CDP_PORT",
-    "MANDO_EXTERNAL_GATEWAY",
-];
-
-/// Spawn a claude subprocess with stream-json input/output.
-///
-/// Returns `(child, pid, stream_path, stderr_path)`.
-/// Stdin is piped for bidirectional communication.
-/// Stdout is piped for reading messages.
-/// Stderr goes to a file.
 /// Spawn a Claude Code process attached to the parent (stdin/stdout piped for
-/// interactive streaming). Returns the child handle, its `Pid`, and the paths
-/// to the stream and stderr log files.
+/// interactive streaming). Returns the child handle, its `Pid`, the stream
+/// path, and the already-open stream file used to tee stdout. Stderr goes
+/// directly to its log file.
 pub(crate) async fn spawn_process(
     config: &CcConfig,
     session_id: &str,
-) -> Result<(tokio::process::Child, global_types::Pid, PathBuf, PathBuf), CcError> {
+) -> Result<
+    (
+        tokio::process::Child,
+        global_types::Pid,
+        PathBuf,
+        std::fs::File,
+    ),
+    CcError,
+> {
     let claude = crate::resolve_claude_binary();
     let stream_dir = global_infra::paths::cc_streams_dir();
     tokio::fs::create_dir_all(&stream_dir).await?;
@@ -48,7 +38,7 @@ pub(crate) async fn spawn_process(
     let stream_path_clone = stream_path.clone();
     let stderr_path_clone = stderr_path.clone();
     let resume = config.resume_session_id.is_some();
-    let (_stream_file, stderr_file) = tokio::task::spawn_blocking(move || -> Result<_> {
+    let (stream_file, stderr_file) = tokio::task::spawn_blocking(move || -> Result<_> {
         let stream_file = if resume {
             std::fs::File::options()
                 .create(true)
@@ -83,24 +73,13 @@ pub(crate) async fn spawn_process(
     cmd.args(&args)
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::from(stderr_file))
-        // Interactive sessions: kill the subprocess when the `Child` handle is
-        // dropped. Prevents Claude subprocess leaks when `CcSession` errors out
-        // before its explicit `close()` path runs.
-        .kill_on_drop(true);
+        .stderr(std::process::Stdio::from(stderr_file));
 
-    // Tee stdout to stream file via a background task (handled by caller).
-    // For now, stdout is piped directly — caller reads from it and writes to file.
+    // Stdout stays piped; the caller reads it and tees each line into stream_file.
 
     // Environment.
     cmd.env("CLAUDE_CODE_EXIT_AFTER_STOP_DELAY", "5000");
     cmd.env_remove("CLAUDECODE");
-    // Strip daemon-specific env vars so workers don't inherit state that
-    // causes mando-dev commands to silently change mode (e.g. start dev
-    // becoming prod-local when MANDO_PROD_MODE is set).
-    for key in DAEMON_ENV_STRIP {
-        cmd.env_remove(key);
-    }
     if config.caller.starts_with("scout-") {
         cmd.env("DISABLE_LANG_GUARD", "1");
     }
@@ -113,24 +92,16 @@ pub(crate) async fn spawn_process(
         cmd.current_dir(&config.cwd);
     }
 
-    // Process group independence.
-    #[cfg(unix)]
-    unsafe {
-        cmd.pre_exec(|| {
-            if libc::setsid() == -1 {
-                return Err(std::io::Error::last_os_error());
+    let child =
+        agent_runtime_core::spawn_isolated(cmd, ChildLifetime::KillOnDrop).map_err(|e| {
+            CcError::SpawnFailed {
+                binary: claude.clone(),
+                source: e,
             }
-            Ok(())
-        });
-    }
-
-    let child = cmd.spawn().map_err(|e| CcError::SpawnFailed {
-        binary: claude.clone(),
-        source: e,
-    })?;
+        })?;
     let pid = global_types::Pid::new(child.id().ok_or(CcError::StreamClosed)?);
 
-    Ok((child, pid, stream_path, stderr_path))
+    Ok((child, pid, stream_path, stream_file))
 }
 
 /// Spawn a detached worker process — fire-and-forget with stdout to file.
@@ -220,9 +191,6 @@ pub async fn spawn_detached(
     // Environment.
     cmd.env("CLAUDE_CODE_EXIT_AFTER_STOP_DELAY", "5000");
     cmd.env_remove("CLAUDECODE");
-    for key in DAEMON_ENV_STRIP {
-        cmd.env_remove(key);
-    }
     if config.caller.starts_with("scout-") {
         cmd.env("DISABLE_LANG_GUARD", "1");
     }
@@ -234,126 +202,13 @@ pub async fn spawn_detached(
         cmd.current_dir(&config.cwd);
     }
 
-    #[cfg(unix)]
-    unsafe {
-        cmd.pre_exec(|| {
-            if libc::setsid() == -1 {
-                return Err(std::io::Error::last_os_error());
-            }
-            Ok(())
-        });
-    }
-
-    let child = cmd.spawn().map_err(|e| CcError::SpawnFailed {
-        binary: claude.clone(),
-        source: e,
+    let child = agent_runtime_core::spawn_isolated(cmd, ChildLifetime::Managed).map_err(|e| {
+        CcError::SpawnFailed {
+            binary: claude.clone(),
+            source: e,
+        }
     })?;
     let pid = global_types::Pid::new(child.id().ok_or(CcError::StreamClosed)?);
 
     Ok((child, pid, stream_path))
-}
-
-/// Kill a process: SIGTERM → poll 5s → SIGKILL.
-///
-/// Detached workers are owned by captain via a stream file + PID, not a
-/// `Child` handle, so we can't `.wait()` on them. We poll `is_process_alive`
-/// with tokio::time::sleep inside a bounded `tokio::time::timeout` instead of
-/// a hand-rolled loop counter.
-pub async fn kill_process(pid: global_types::Pid) -> Result<()> {
-    if pid.as_u32() == 0 {
-        tracing::warn!(
-            module = "mando-cc",
-            "kill_process called with pid=0, skipping"
-        );
-        return Ok(());
-    }
-
-    #[cfg(unix)]
-    unsafe {
-        libc::kill(-pid.as_i32(), libc::SIGTERM);
-    }
-
-    let wait_exit = async {
-        while is_process_alive(pid) {
-            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-        }
-    };
-    if tokio::time::timeout(std::time::Duration::from_secs(5), wait_exit)
-        .await
-        .is_ok()
-    {
-        return Ok(());
-    }
-
-    #[cfg(unix)]
-    unsafe {
-        libc::kill(-pid.as_i32(), libc::SIGKILL);
-    }
-    Ok(())
-}
-
-/// Check if a process is alive.
-pub fn is_process_alive(pid: global_types::Pid) -> bool {
-    if pid.as_u32() == 0 {
-        return false;
-    }
-    #[cfg(unix)]
-    {
-        unsafe { libc::kill(pid.as_i32(), 0) == 0 }
-    }
-    #[cfg(not(unix))]
-    {
-        false
-    }
-}
-
-/// Get CPU time in seconds for a process via `ps -o cputime=`.
-pub async fn get_cpu_time(pid: global_types::Pid) -> Result<f64> {
-    let output = tokio::process::Command::new("ps")
-        .arg("-p")
-        .arg(pid.to_string())
-        .arg("-o")
-        .arg("cputime=")
-        .output()
-        .await?;
-    let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    parse_cputime(&text)
-}
-
-fn parse_cputime(s: &str) -> Result<f64> {
-    let parts: Vec<&str> = s.split(':').collect();
-    match parts.len() {
-        3 => {
-            let h: f64 = parts[0].parse()?;
-            let m: f64 = parts[1].parse()?;
-            let s: f64 = parts[2].parse()?;
-            Ok(h * 3600.0 + m * 60.0 + s)
-        }
-        2 => {
-            let m: f64 = parts[0].parse()?;
-            let s: f64 = parts[1].parse()?;
-            Ok(m * 60.0 + s)
-        }
-        _ => anyhow::bail!("invalid cputime format: {s}"),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parse_cputime_hhmmss() {
-        assert!((parse_cputime("01:30:45").unwrap() - 5445.0).abs() < 0.1);
-    }
-
-    #[test]
-    fn parse_cputime_mmss() {
-        assert!((parse_cputime("05:30").unwrap() - 330.0).abs() < 0.1);
-    }
-
-    #[test]
-    fn pid_zero_not_alive() {
-        assert!(!is_process_alive(global_types::Pid::new(0)));
-    }
 }

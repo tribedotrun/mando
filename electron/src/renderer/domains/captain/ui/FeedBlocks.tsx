@@ -1,10 +1,6 @@
 import React from 'react';
-import {
-  shouldSuppressTimelineEvent,
-  type RenderableFeedItem,
-} from '#renderer/domains/captain/service/feedHelpers';
+import type { RenderableFeedItem } from '#renderer/domains/captain/service/feedHelpers';
 import { getUnansweredQuestions } from '#renderer/domains/captain/service/clarifyHelpers';
-import { MessageBlock } from '#renderer/domains/captain/ui/MessageBlock';
 import { EvidenceBlock, WorkSummaryBlock } from '#renderer/domains/captain/ui/ArtifactBlocks';
 import {
   ActiveClarificationBlock,
@@ -14,7 +10,7 @@ import {
   TimelineBlock,
 } from '#renderer/domains/captain/ui/FeedBlocksParts';
 import { ClarifierFailedRow } from '#renderer/domains/captain/ui/ClarifierFailedCard';
-import type { TaskItem, AskHistoryEntry } from '#renderer/global/types';
+import type { TaskItem } from '#renderer/global/types';
 
 export function FeedBlocks({
   item,
@@ -55,7 +51,6 @@ export function FeedBlocks({
           <TimelineBlock event={event} />
         );
       }
-      if (shouldSuppressTimelineEvent(payload.event_type)) return null;
       return <TimelineBlock event={event} />;
     }
     case 'artifact': {
@@ -71,8 +66,6 @@ export function FeedBlocks({
       const expanded = item.artifacts.some((a) => isArtifactExpanded(a.id));
       return <EvidenceBlock artifacts={item.artifacts} initialExpanded={expanded} />;
     }
-    case 'message':
-      return <MessageBlock entry={item.data as AskHistoryEntry} />;
     default:
       return null;
   }

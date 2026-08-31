@@ -69,17 +69,6 @@ const timelineItem = (createdAt: string): FeedItem => ({
   },
 });
 
-const suppressedItem = (createdAt: string): FeedItem => ({
-  type: 'timeline',
-  timestamp: createdAt,
-  data: {
-    timestamp: createdAt,
-    actor: 'captain',
-    summary: 'captain asked the human',
-    data: { event_type: 'human_ask', question: 'q', intent: 'i', ask_id: 'a1' },
-  },
-});
-
 describe('groupEvidenceArtifacts', () => {
   it('merges two consecutive evidence artifacts into one evidence-group', () => {
     const before = evidenceArtifact(244, '2026-04-29T16:05:00Z', 'before_fix');
@@ -240,48 +229,5 @@ describe('groupEvidenceArtifacts', () => {
 
     assert.equal(result.length, 1);
     assert.equal(result[0].type, 'evidence-group');
-  });
-
-  it('walks past suppressed timeline events at the tail', () => {
-    // A suppressed event landing after the evidence uploads sits at the
-    // tail of feedItems. FeedBlocks filters it out at render time, but the
-    // grouping helper sees it first. Without dropping it, the last-pair
-    // check looks at (after, suppressed) and never merges.
-    const before = evidenceArtifact(244, '2026-04-29T16:05:00Z', 'before_fix');
-    const after = evidenceArtifact(245, '2026-04-29T16:05:30Z', 'after_fix');
-    const result = groupEvidenceArtifacts([
-      evidenceItem(before),
-      evidenceItem(after),
-      suppressedItem('2026-04-29T16:05:31Z'),
-    ]);
-
-    assert.equal(result.length, 1, 'pair merges despite trailing suppressed event');
-    assert.equal(result[0].type, 'evidence-group');
-    if (result[0].type !== 'evidence-group') return;
-    assert.deepEqual(
-      result[0].artifacts.map((x) => x.id),
-      [244, 245],
-    );
-  });
-
-  it('drops suppressed timeline events from the renderable list even when no pair merges', () => {
-    // Untyped evidence rows interleaved with suppressed events. After
-    // filtering, the renderable list is just the evidence cards — no merge,
-    // and the suppressed events also don't appear (they would have rendered
-    // as null anyway).
-    const u1 = evidenceArtifact(239, '2026-04-27T00:22:00Z', null);
-    const u2 = evidenceArtifact(240, '2026-04-27T00:23:00Z', null);
-    const result = groupEvidenceArtifacts([
-      evidenceItem(u1),
-      suppressedItem('2026-04-27T00:22:01Z'),
-      evidenceItem(u2),
-      suppressedItem('2026-04-27T00:23:01Z'),
-    ]);
-
-    assert.equal(result.length, 2);
-    assert.deepEqual(
-      result.map((r) => r.type),
-      ['artifact', 'artifact'],
-    );
   });
 });

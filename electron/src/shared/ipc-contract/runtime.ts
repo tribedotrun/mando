@@ -4,27 +4,6 @@
 import { ipcRenderer, type IpcRendererEvent } from 'electron';
 import { channels, type ChannelName, type ArgsOf, type ResultOf, type PayloadOf } from './channels';
 
-// inferIpcApi: maps the channel registry into the renderer-facing API shape.
-// MandoAPI in preload/providers/ipc.ts is `type MandoAPI = inferIpcApi<typeof channels>`,
-// eliminating the duplicate type definition that previously drifted from runtime.
-
-export type InvokeApi = {
-  [K in ChannelName as IsInvokeChannel<K> extends true ? K : never]: ArgsOf<K> extends void
-    ? () => Promise<ResultOf<K>>
-    : (args: ArgsOf<K>) => Promise<ResultOf<K>>;
-};
-
-export type SubscribeApi = {
-  [K in ChannelName as IsSubscribeChannel<K> extends true ? K : never]: (
-    cb: (payload: PayloadOf<K>) => void,
-  ) => () => void;
-};
-
-export type InferIpcApi = InvokeApi & SubscribeApi;
-
-type IsInvokeChannel<K extends ChannelName> = (typeof channels)[K] extends { kind: 'invoke' }
-  ? true
-  : false;
 type IsSubscribeChannel<K extends ChannelName> = (typeof channels)[K] extends {
   kind: 'subscribe';
 }
@@ -34,20 +13,10 @@ type SubscribeChannelName = {
   [K in ChannelName]: IsSubscribeChannel<K> extends true ? K : never;
 }[ChannelName];
 
-// Schema lookup helpers (runtime).
+// Schema lookup helper (runtime).
 export function argsSchema<K extends ChannelName>(name: K) {
   const def = channels[name];
   return def.kind === 'invoke' ? def.args : null;
-}
-
-export function resultSchema<K extends ChannelName>(name: K) {
-  const def = channels[name];
-  return def.kind === 'invoke' ? def.result : null;
-}
-
-export function payloadSchema<K extends ChannelName>(name: K) {
-  const def = channels[name];
-  return def.kind === 'subscribe' ? def.payload : null;
 }
 
 // Preload-side runtime helpers. `invoke` parses the result against the channel's

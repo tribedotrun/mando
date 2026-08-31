@@ -16,18 +16,6 @@ const positiveIntegerTextSchema = z
   .regex(/^[1-9]\d*$/, 'Expected positive integer text')
   .transform((value) => Number(value))
   .refine((value) => Number.isSafeInteger(value), 'Expected safe integer');
-const launchctlPidTextSchema = z.string().transform((text, ctx) => {
-  const match = text.match(/"PID"\s*=\s*(\d+)/);
-  if (!match) return null;
-
-  const pid = Number(match[1]);
-  if (!Number.isSafeInteger(pid) || pid < 0) {
-    ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Expected safe integer PID' });
-    return z.NEVER;
-  }
-  return pid === 0 ? null : pid;
-});
-
 function unwrapOrThrow<T>(rawText: string, schema: ZodType<T>, where: string): T {
   const parsed = parseTextWith(rawText, schema, where);
   return parsed.match(
@@ -61,13 +49,6 @@ export function mustParsePositiveIntegerText(rawText: string, where: string): nu
 
 export function parseNonEmptyText(rawText: string, where: string): string | null {
   return parseTextWith(rawText, nonEmptyTrimmedTextSchema, where).match(
-    (value) => value,
-    () => null,
-  );
-}
-
-export function parseLaunchctlPidText(rawText: string, where: string): number | null {
-  return parseTextWith(rawText, launchctlPidTextSchema, where).match(
     (value) => value,
     () => null,
   );

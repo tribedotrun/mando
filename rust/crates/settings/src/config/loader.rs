@@ -92,19 +92,20 @@ mod tests {
     }
 
     #[test]
-    fn parse_config_ignores_retired_terminal_keys() {
-        // Configs written before the in-app terminal was removed still carry
-        // `defaultTerminalAgent` / `claudeTerminalArgs` / `codexTerminalArgs`.
-        // `Config` is not `deny_unknown_fields`, so those keys are dropped on
-        // read and disappear from disk on the next write — no migration step
-        // is needed. This test is the guard on that assumption.
-        let parsed = parse_config(
-            r#"{"captain":{"defaultTerminalAgent":"claude","claudeTerminalArgs":"--x","codexTerminalArgs":"--full-auto","tickIntervalS":99}}"#,
-            std::path::Path::new("config.json"),
-        )
-        .expect("config with retired terminal keys still parses");
-
-        assert_eq!(parsed.captain.tick_interval_s, 99);
+    fn parse_config_rejects_retired_terminal_keys_with_the_key_name() {
+        for key in [
+            "defaultTerminalAgent",
+            "claudeTerminalArgs",
+            "codexTerminalArgs",
+        ] {
+            let content = format!(r#"{{"captain":{{"{key}":"retired"}}}}"#);
+            let error = parse_config(&content, std::path::Path::new("config.json"))
+                .expect_err("retired config key must fail at load");
+            assert!(
+                error.to_string().contains(key),
+                "error did not name {key}: {error}"
+            );
+        }
     }
 
     #[test]

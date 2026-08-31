@@ -32,7 +32,6 @@ pub(crate) fn credential_update_routes() -> ApiRouter<AppState> {
 /// Overwrites `expires_at` with the new token's decoded expiry — which
 /// un-expires rows previously stamped expired after a 401 probe — and
 /// clears any rate-limit cooldown.
-#[crate::instrument_api(method = "POST", path = "/api/credentials/{id}/token")]
 async fn update_credential_token(
     State(state): State<AppState>,
     axum::extract::Path(api_types::CredentialIdParams { id }): axum::extract::Path<

@@ -4,6 +4,7 @@ kind        = "owned"
 types-crate = "rust/crates/api-types"
 transports  = ["http", "sse"]
 base-url    = "http://127.0.0.1:{port}/api"
+hosts       = ["127.0.0.1"]
 docs        = "rust/crates/api-types/README.md"
 
 # -----------------------------------------------------------------------------
@@ -50,7 +51,6 @@ path        = "rust/cli/src/http.rs"
 transports  = ["http"]
 role        = "CLI daemon HTTP client"
 enforcement = "scanner"
-allow-value = false
 
 [[consumer]]
 name        = "mando-cli-gateway"
@@ -58,7 +58,6 @@ path        = "rust/cli/src/gateway.rs"
 transports  = ["http"]
 role        = "CLI gateway helper calls"
 enforcement = "scanner"
-allow-value = false
 
 [[consumer]]
 name        = "transport-tg-http"
@@ -66,7 +65,6 @@ path        = "rust/crates/transport-tg/src/http.rs"
 transports  = ["http"]
 role        = "Telegram-bot process daemon HTTP client"
 enforcement = "scanner"
-allow-value = false
 
 [[consumer]]
 name        = "transport-tg-sse"
@@ -74,7 +72,6 @@ path        = "rust/crates/transport-tg/src/sse.rs"
 transports  = ["sse"]
 role        = "Telegram-bot SSE notification consumer"
 enforcement = "scanner"
-allow-value = false
 
 [[consumer]]
 name        = "gateway-client"
@@ -82,7 +79,6 @@ path        = "rust/crates/gateway-client/src"
 transports  = ["http", "sse"]
 role        = "Reusable typed daemon client — parse_sse_block + SseConsumer"
 enforcement = "scanner"
-allow-value = false
 
 [[consumer]]
 name        = "electron-renderer"
@@ -90,7 +86,6 @@ path        = "electron/src/renderer"
 transports  = ["http", "sse"]
 role        = "Electron renderer React Query daemon consumer"
 enforcement = "ts-rs-codegen"
-allow-value = false
 
 [[consumer]]
 name        = "electron-main-daemon-transport"
@@ -98,4 +93,3 @@ path        = "electron/src/main/global/runtime/daemonTransport.ts"
 transports  = ["http"]
 role        = "Electron main-process daemon HTTP funnel — schema-validates every request/response against daemon-contract"
 enforcement = "ts-rs-codegen"
-allow-value = false

@@ -8,7 +8,7 @@ import { TableRow, TableCell } from '#renderer/global/ui/primitives/table';
 import { Checkbox } from '#renderer/global/ui/primitives/checkbox';
 import { ExpandedSummaryRow, StatusCell } from '#renderer/domains/scout/ui/ScoutTableRowParts';
 
-export interface ScoutTableRowCallbacks {
+interface ScoutTableRowCallbacks {
   onToggleSelect: (id: number) => void;
   onSelect: (id: number) => void;
   onToggleExpand: (id: number) => void;

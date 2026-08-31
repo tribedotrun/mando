@@ -30,7 +30,6 @@ const MAX_STREAM_DURATION: Duration = Duration::from_secs(60 * 60 * 4);
 const SNAPSHOT_MISSING_REASON: &str = "session not found";
 
 /// GET /api/sessions/{id}/events/stream
-#[crate::instrument_api(method = "GET", path = "/api/sessions/{id}/events/stream")]
 pub(crate) async fn get_session_events_stream(
     State(state): State<AppState>,
     Path(api_types::SessionIdParams { id }): Path<api_types::SessionIdParams>,
@@ -200,7 +199,7 @@ async fn poll_loop(
             continue;
         }
         // Session meta says finished — drain one more read and close.
-        let (final_events, final_offset) = tokio::task::spawn_blocking({
+        let (final_events, _) = tokio::task::spawn_blocking({
             let source = source.clone();
             let offset = *byte_offset;
             let line = *next_line;
@@ -209,13 +208,11 @@ async fn poll_loop(
         .await
         .unwrap_or_else(|_| (Vec::new(), *byte_offset));
         for event in final_events {
-            *next_line = next_line.saturating_add(1);
             let envelope = api_types::TranscriptEventEnvelope::Event(Box::new(event));
             if tx.send(encode_envelope(&envelope)).is_err() {
                 return;
             }
         }
-        *byte_offset = final_offset;
         global_infra::best_effort!(
             tx.send(encode_closed("session finished")),
             "send session-finished close to SSE client",

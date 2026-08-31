@@ -509,6 +509,21 @@ mod tests {
     }
 
     #[test]
+    fn parse_interrupted_result_as_non_error_outcome() {
+        let line = r#"{"type":"result","subtype":"interrupted","is_error":false}"#;
+        let path = temp_file(line);
+
+        let events = parse_events(&path);
+
+        let TranscriptEvent::Result(evt) = &events[0] else {
+            panic!("expected Result");
+        };
+        assert_eq!(evt.outcome, ResultOutcome::Interrupted);
+        assert!(!evt.summary.is_error);
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
     fn parse_malformed_line_becomes_unknown_event() {
         let line = "not-json\n";
         let path = temp_file(line);

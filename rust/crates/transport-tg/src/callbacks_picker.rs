@@ -1,11 +1,9 @@
 //! `/action` callback handlers — picker and action execution.
 
 use anyhow::Result;
-use serde_json::json;
 
 use crate::bot::TelegramBot;
 use crate::commands::action;
-use crate::gateway_paths as paths;
 
 /// Handle all `act:*` callbacks.
 pub(crate) async fn handle_action_callback(
@@ -31,36 +29,6 @@ pub(crate) async fn handle_action_callback(
         }
         "pick" => handle_pick(bot, parts, cb_id, cid, mid).await?,
         "do" => handle_do(bot, parts, cb_id, cid, mid).await?,
-        "ask_end" => {
-            if let Some(task_id) = bot.ask_session_task_id(cid).await {
-                if let Err(e) = bot
-                    .gw()
-                    .post_typed::<_, api_types::AskEndResponse>(
-                        paths::TASKS_ASK_END,
-                        &json!({"id": task_id}),
-                    )
-                    .await
-                {
-                    tracing::debug!(
-                        target: "transport-tg",
-                        %e,
-                        "best-effort: ask/end post failed",
-                    );
-                }
-            }
-            bot.close_ask_session(cid).await;
-            bot.api()
-                .answer_callback_query(cb_id, Some("Session ended"))
-                .await?;
-            global_infra::best_effort!(
-                bot.remove_keyboard(cid, mid).await,
-                "callbacks_picker: remove keyboard on ask-end"
-            );
-            global_infra::best_effort!(
-                bot.send_html(cid, "Ask session ended.").await,
-                "callbacks_picker: send 'Ask session ended.'"
-            );
-        }
         "noop" => {
             bot.api()
                 .answer_callback_query(cb_id, Some("No actions available"))
@@ -95,11 +63,7 @@ async fn handle_pick(
             let item = &p.items[idx];
             let task_id = &item.id;
             let title = crate::telegram_format::escape_html(&item.title);
-            let status: captain::ItemStatus = item
-                .status
-                .as_deref()
-                .and_then(|s| serde_json::from_value(json!(s)).ok())
-                .unwrap_or(captain::ItemStatus::New);
+            let status = item.status.unwrap_or(api_types::ItemStatus::New);
 
             bot.api()
                 .answer_callback_query(cb_id, Some("Choose action"))
@@ -107,14 +71,16 @@ async fn handle_pick(
 
             let buttons = action::action_buttons(task_id, status, item.has_pr);
             let msg = format!("\u{2699}\u{fe0f} <b>#{task_id}</b> {title}\n\nChoose an action:");
-            let _ignored = bot
-                .edit_message_with_markup(
+            global_infra::best_effort!(
+                bot.edit_message_with_markup(
                     cid,
                     mid,
                     &msg,
                     Some(api_types::TelegramReplyMarkup::InlineKeyboard { rows: buttons }),
                 )
-                .await;
+                .await,
+                "callbacks_picker: show task actions"
+            );
         }
         Some(_) => {
             bot.api()
@@ -155,34 +121,39 @@ async fn handle_do(
             crate::callback_actions::merge(bot, cid, task_id, Some(mid)).await?;
         }
         "accept" => {
-            let _ignored = bot
-                .edit_message(cid, mid, "\u{23f3} Accepting\u{2026}")
-                .await;
+            global_infra::best_effort!(
+                bot.edit_message(cid, mid, "\u{23f3} Accepting\u{2026}")
+                    .await,
+                "callbacks_picker: show accept progress"
+            );
             crate::callback_actions::accept(bot, cid, task_id, Some(mid)).await?;
         }
         "handoff" => {
-            let _ignored = bot
-                .edit_message(cid, mid, "\u{23f3} Handing off\u{2026}")
-                .await;
+            global_infra::best_effort!(
+                bot.edit_message(cid, mid, "\u{23f3} Handing off\u{2026}")
+                    .await,
+                "callbacks_picker: show handoff progress"
+            );
             crate::callback_actions::handoff(bot, cid, task_id, "").await?;
         }
         "stop" => {
-            let _ignored = bot
-                .edit_message(cid, mid, "\u{23f3} Stopping\u{2026}")
-                .await;
+            global_infra::best_effort!(
+                bot.edit_message(cid, mid, "\u{23f3} Stopping\u{2026}")
+                    .await,
+                "callbacks_picker: show stop progress"
+            );
             crate::callback_actions::stop(bot, cid, task_id).await?;
         }
         "cancel" => {
-            let _ignored = bot
-                .edit_message(cid, mid, "\u{23f3} Cancelling\u{2026}")
-                .await;
+            global_infra::best_effort!(
+                bot.edit_message(cid, mid, "\u{23f3} Cancelling\u{2026}")
+                    .await,
+                "callbacks_picker: show cancel progress"
+            );
             let id_num: i64 = task_id.parse().unwrap_or(0);
             match bot
                 .gw()
-                .post_typed::<_, api_types::BoolOkResponse>(
-                    crate::gateway_paths::TASKS_BULK,
-                    &json!({"ids": [id_num], "updates": {"status": "canceled"}}),
-                )
+                .post_tasks_cancel(&api_types::TaskIdRequest { id: id_num })
                 .await
             {
                 Ok(_) => {
@@ -212,8 +183,8 @@ async fn handle_do(
         // quote-reply routes back here under concurrent dispatch.
         "reopen" => {
             let title = fetch_task_title(bot, task_id).await;
-            let _ignored = bot
-                .edit_message(
+            global_infra::best_effort!(
+                bot.edit_message(
                     cid,
                     mid,
                     &format!(
@@ -221,13 +192,15 @@ async fn handle_do(
                         crate::telegram_format::escape_html(&title)
                     ),
                 )
-                .await;
+                .await,
+                "callbacks_picker: show reopen prompt"
+            );
             bot.set_pending_reopen(cid, task_id, &title, mid).await;
         }
         "rework" => {
             let title = fetch_task_title(bot, task_id).await;
-            let _ignored = bot
-                .edit_message(
+            global_infra::best_effort!(
+                bot.edit_message(
                     cid,
                     mid,
                     &format!(
@@ -235,13 +208,15 @@ async fn handle_do(
                         crate::telegram_format::escape_html(&title)
                     ),
                 )
-                .await;
+                .await,
+                "callbacks_picker: show rework prompt"
+            );
             bot.set_pending_rework(cid, task_id, &title, mid).await;
         }
         "nudge" => {
             let title = fetch_task_title(bot, task_id).await;
-            let _ignored = bot
-                .edit_message(
+            global_infra::best_effort!(
+                bot.edit_message(
                     cid,
                     mid,
                     &format!(
@@ -249,11 +224,15 @@ async fn handle_do(
                         crate::telegram_format::escape_html(&title)
                     ),
                 )
-                .await;
+                .await,
+                "callbacks_picker: show nudge prompt"
+            );
             bot.set_pending_nudge(cid, task_id, &title, mid).await;
         }
         // Session-based actions
         "input" => {
+            let id_num =
+                global_types::parse_i64_id(task_id, "task").map_err(|e| anyhow::anyhow!(e))?;
             let title = fetch_task_title(bot, task_id).await;
             let questions = action::fetch_clarifier_questions(bot, task_id).await;
             let msg = if let Some(ref q) = questions {
@@ -272,22 +251,7 @@ async fn handle_do(
                 bot.edit_message(cid, mid, &msg).await,
                 "callbacks_picker: edit on input prompt"
             );
-            bot.open_input_session(cid, &title, mid).await;
-        }
-        "ask" => {
-            let id_num: i64 = task_id.parse().unwrap_or(0);
-            let title = fetch_task_title(bot, task_id).await;
-            let _ignored = bot
-                .edit_message(
-                    cid,
-                    mid,
-                    &format!(
-                        "\u{1f4ac} Ask: {}\n\nReply to this prompt with your question.",
-                        crate::telegram_format::escape_html(&title)
-                    ),
-                )
-                .await;
-            bot.open_ask_session(cid, id_num, mid).await;
+            bot.open_input_session(cid, id_num, &title, mid).await;
         }
         _ => {}
     }
@@ -299,7 +263,9 @@ async fn handle_do(
 async fn fetch_task_title(bot: &TelegramBot, task_id: &str) -> String {
     let id_num: i64 = task_id.parse().unwrap_or(0);
     bot.gw()
-        .get_typed::<api_types::TaskListResponse>(crate::gateway_paths::TASKS)
+        .get_tasks(&api_types::TaskListQuery {
+            include_archived: None,
+        })
         .await
         .ok()
         .and_then(|r| {

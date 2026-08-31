@@ -13,8 +13,10 @@ global-db = { path = "../global-db" }
 serde.workspace = true
 serde_json.workspace = true
 anyhow.workspace = true
-tracing.workspace = true
 sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite"] }
 
 [dev-dependencies]
 tokio.workspace = true
+
+[lints]
+workspace = true

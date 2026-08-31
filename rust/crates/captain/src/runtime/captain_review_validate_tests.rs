@@ -36,7 +36,7 @@ fn test_validate_verdict_accepts_escalate_with_non_empty_report() {
         let verdict = CaptainVerdict {
             action: "escalate".into(),
             feedback: "beyond recovery".into(),
-            report: Some("Tried respawn 3 times, each run wedged on advisor".into()),
+            report: Some("Tried respawn 3 times, each run wedged on startup".into()),
             ..Default::default()
         };
         let result = validate_verdict(verdict.clone(), &item);
@@ -44,7 +44,7 @@ fn test_validate_verdict_accepts_escalate_with_non_empty_report() {
         assert_eq!(result.feedback, "beyond recovery");
         assert_eq!(
             result.report.as_deref(),
-            Some("Tried respawn 3 times, each run wedged on advisor"),
+            Some("Tried respawn 3 times, each run wedged on startup"),
             "non-empty report must pass through unchanged",
         );
     }
@@ -61,7 +61,7 @@ fn test_validate_verdict_synthesizes_report_when_escalate_has_none() {
     };
     let verdict = CaptainVerdict {
         action: "escalate".into(),
-        feedback: "wedged on advisor".into(),
+        feedback: "wedged on startup".into(),
         report: None,
         ..Default::default()
     };
@@ -73,7 +73,7 @@ fn test_validate_verdict_synthesizes_report_when_escalate_has_none() {
         "report should name the trigger: {report}",
     );
     assert!(
-        report.contains("wedged on advisor"),
+        report.contains("wedged on startup"),
         "report should preserve the feedback text: {report}",
     );
     assert!(

@@ -129,6 +129,30 @@ export interface Routes {
     body: Types.AddCodexCredentialRequest;
     res: Types.AddCodexCredentialResponse;
   };
+  postCredentialsCodexAppRestore: {
+    method: 'POST';
+    path: '/api/credentials/codex/app/restore';
+    transport: 'json';
+    auth: 'protected';
+    body: Types.CodexDesktopAppRestoreRequest;
+    res: Types.CodexDesktopAppOperationResponse;
+  };
+  getCredentialsCodexAppStatus: {
+    method: 'GET';
+    path: '/api/credentials/codex/app/status';
+    transport: 'json';
+    auth: 'protected';
+    query: Types.CodexDesktopAppStatusQuery;
+    res: Types.CodexDesktopAppStatusResponse;
+  };
+  postCredentialsCodexAppUse: {
+    method: 'POST';
+    path: '/api/credentials/codex/app/use';
+    transport: 'json';
+    auth: 'protected';
+    body: Types.CodexDesktopAppUseRequest;
+    res: Types.CodexDesktopAppOperationResponse;
+  };
   postCredentialsCodexLoginCancel: {
     method: 'POST';
     path: '/api/credentials/codex/login/cancel';
@@ -586,30 +610,6 @@ export interface Routes {
     body: Types.TaskAddRequest;
     res: Types.TaskItem;
   };
-  postTasksAsk: {
-    method: 'POST';
-    path: '/api/tasks/ask';
-    transport: 'multipart';
-    auth: 'protected';
-    body: Types.TaskAskRequest;
-    res: Types.AskResponse;
-  };
-  postTasksAskEnd: {
-    method: 'POST';
-    path: '/api/tasks/ask/end';
-    transport: 'json';
-    auth: 'protected';
-    body: Types.TaskIdRequest;
-    res: Types.AskEndResponse;
-  };
-  postTasksAskReopen: {
-    method: 'POST';
-    path: '/api/tasks/ask/reopen';
-    transport: 'json';
-    auth: 'protected';
-    body: Types.TaskIdRequest;
-    res: Types.AskReopenResponse;
-  };
   postTasksBulk: {
     method: 'POST';
     path: '/api/tasks/bulk';
@@ -699,15 +699,6 @@ export interface Routes {
     params: Types.TaskIdParams;
     res: Types.BoolOkResponse;
   };
-  postTasksByIdAdvisor: {
-    method: 'POST';
-    path: '/api/tasks/{id}/advisor';
-    transport: 'json';
-    auth: 'protected';
-    body: Types.AdvisorRequest;
-    params: Types.TaskIdParams;
-    res: Types.AdvisorResponse;
-  };
   getTasksByIdArtifacts: {
     method: 'GET';
     path: '/api/tasks/{id}/artifacts';
@@ -742,14 +733,6 @@ export interface Routes {
     auth: 'protected';
     params: Types.TaskIdParams;
     res: Types.FeedResponse;
-  };
-  getTasksByIdHistory: {
-    method: 'GET';
-    path: '/api/tasks/{id}/history';
-    transport: 'json';
-    auth: 'protected';
-    params: Types.TaskIdParams;
-    res: Types.AskHistoryResponse;
   };
   getTasksByIdPrsummary: {
     method: 'GET';
@@ -1048,6 +1031,24 @@ export const routes = {
     transport: 'json',
     auth: 'protected',
   },
+  postCredentialsCodexAppRestore: {
+    method: 'POST',
+    path: '/api/credentials/codex/app/restore',
+    transport: 'json',
+    auth: 'protected',
+  },
+  getCredentialsCodexAppStatus: {
+    method: 'GET',
+    path: '/api/credentials/codex/app/status',
+    transport: 'json',
+    auth: 'protected',
+  },
+  postCredentialsCodexAppUse: {
+    method: 'POST',
+    path: '/api/credentials/codex/app/use',
+    transport: 'json',
+    auth: 'protected',
+  },
   postCredentialsCodexLoginCancel: {
     method: 'POST',
     path: '/api/credentials/codex/login/cancel',
@@ -1340,24 +1341,6 @@ export const routes = {
     transport: 'multipart',
     auth: 'protected',
   },
-  postTasksAsk: {
-    method: 'POST',
-    path: '/api/tasks/ask',
-    transport: 'multipart',
-    auth: 'protected',
-  },
-  postTasksAskEnd: {
-    method: 'POST',
-    path: '/api/tasks/ask/end',
-    transport: 'json',
-    auth: 'protected',
-  },
-  postTasksAskReopen: {
-    method: 'POST',
-    path: '/api/tasks/ask/reopen',
-    transport: 'json',
-    auth: 'protected',
-  },
   postTasksBulk: { method: 'POST', path: '/api/tasks/bulk', transport: 'json', auth: 'protected' },
   postTasksCancel: {
     method: 'POST',
@@ -1414,12 +1397,6 @@ export const routes = {
     transport: 'json',
     auth: 'protected',
   },
-  postTasksByIdAdvisor: {
-    method: 'POST',
-    path: '/api/tasks/{id}/advisor',
-    transport: 'json',
-    auth: 'protected',
-  },
   getTasksByIdArtifacts: {
     method: 'GET',
     path: '/api/tasks/{id}/artifacts',
@@ -1441,12 +1418,6 @@ export const routes = {
   getTasksByIdFeed: {
     method: 'GET',
     path: '/api/tasks/{id}/feed',
-    transport: 'json',
-    auth: 'protected',
-  },
-  getTasksByIdHistory: {
-    method: 'GET',
-    path: '/api/tasks/{id}/history',
     transport: 'json',
     auth: 'protected',
   },

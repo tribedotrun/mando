@@ -1,7 +1,7 @@
 import { useSession } from '#renderer/domains/sessions/repo/queries';
 import type { TaskProvider } from '#renderer/global/types';
 
-export interface TranscriptRouteContext {
+interface TranscriptRouteContext {
   provider: TaskProvider | undefined;
   cwd: string | undefined;
   isLoading: boolean;

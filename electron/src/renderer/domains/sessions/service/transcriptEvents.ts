@@ -3,7 +3,6 @@ import type {
   AssistantEvent,
   AssistantToolUseBlock,
   TranscriptEvent,
-  ToolName,
   UserToolResultBlock,
 } from '#renderer/global/types';
 
@@ -32,10 +31,15 @@ export function indexToolResults(
  * that shape to ferry results back without an actual human turn. These are
  * rendered inline on the matching tool call instead of as standalone rows.
  */
-export function isCarrierUserEvent(event: TranscriptEvent): boolean {
+function isCarrierUserEvent(event: TranscriptEvent): boolean {
   if (event.kind !== 'user') return false;
   if (event.data.blocks.length === 0) return false;
   return event.data.blocks.every((block) => block.kind === 'tool_result');
+}
+
+/** Search typed event content rather than opaque React component props. */
+export function transcriptEventSearchText(event: TranscriptEvent): string {
+  return JSON.stringify(event.data);
 }
 
 const SKILL_PROMPT_PREFIX = 'Base directory for this skill:';
@@ -47,6 +51,31 @@ const SKILL_PROMPT_PREFIX = 'Base directory for this skill:';
  */
 export function isSkillPromptBody(body: string): boolean {
   return body.startsWith(SKILL_PROMPT_PREFIX);
+}
+
+/** Identify prompts injected by Mando's captain rather than written by a human. */
+export function mandoPromptLabel(body: string): string | null {
+  if (
+    /^Read \/.*\/\.ai\/briefs\/[^\n]+ and implement the task described there\./.test(body) &&
+    body.includes('/workpad.md')
+  ) {
+    return 'Task instructions';
+  }
+  if (
+    body.startsWith('You are the task clarifier.') ||
+    body.startsWith('You are the clarifier continuing a conversation about a task.')
+  ) {
+    return 'Clarifier instructions';
+  }
+  if (body.startsWith("You are the Captain reviewing a worker's output.")) {
+    return 'Review instructions';
+  }
+  if (body.startsWith('You are the Captain merging PR ')) return 'Merge instructions';
+  return null;
+}
+
+export function isMandoTaskPromptBody(body: string): boolean {
+  return mandoPromptLabel(body) !== null;
 }
 
 /**
@@ -63,37 +92,21 @@ export function extractSkillName(body: string): string | null {
   return last ?? null;
 }
 
-/**
- * Tools whose usage is read-only/search and collapses cleanly when grouped
- * with its neighbors. Mirrors CC's `getToolSearchOrReadInfo` — Write / Edit /
- * Bash are intentionally excluded (they mutate state and need explicit UI).
- */
-export function isCollapsibleTool(name: ToolName): boolean {
-  switch (name.kind) {
-    case 'read':
-    case 'grep':
-    case 'glob':
-      return true;
-    default:
-      return false;
-  }
-}
-
-export interface ToolGroup {
+interface ToolGroup {
   kind: 'group';
   id: string;
   tools: AssistantToolUseBlock[];
   parentEventIndex: number;
 }
 
-export type AssistantRenderItem =
+type AssistantRenderItem =
   | { kind: 'block'; block: AssistantContentBlock; eventIndex: number; blockIndex: number }
   | { kind: 'group'; group: ToolGroup };
 
 /**
- * Walk an assistant event's content blocks and collapse consecutive
- * collapsible tool uses into `ToolGroup` entries. Non-collapsible blocks
- * (text, thinking, write/edit/bash tool uses, unknowns) surface one-per-row.
+ * Walk an assistant event's content blocks and collapse every consecutive
+ * tool run into a `ToolGroup`. Thought and text blocks remain the visual
+ * boundaries that explain why the actions happened.
  */
 export function groupAssistantBlocks(
   event: AssistantEvent,
@@ -117,7 +130,7 @@ export function groupAssistantBlocks(
         kind: 'group',
         group: {
           kind: 'group',
-          id: `${eventIndex}-${groupStart}`,
+          id: `activity-${pendingGroup[0]!.id}`,
           tools: pendingGroup,
           parentEventIndex: eventIndex,
         },
@@ -127,7 +140,7 @@ export function groupAssistantBlocks(
   };
 
   event.blocks.forEach((block, blockIndex) => {
-    if (block.kind === 'tool_use' && isCollapsibleTool(block.data.name)) {
+    if (block.kind === 'tool_use') {
       if (pendingGroup.length === 0) {
         groupStart = blockIndex;
       }
@@ -140,6 +153,110 @@ export function groupAssistantBlocks(
 
   flushGroup();
   return out;
+}
+
+export type TranscriptRenderRow =
+  | {
+      kind: 'event';
+      id: string;
+      event: TranscriptEvent;
+      eventIndex: number;
+      searchEvents: TranscriptEvent[];
+    }
+  | {
+      kind: 'tool_group';
+      id: string;
+      group: ToolGroup;
+      searchEvents: TranscriptEvent[];
+    };
+
+/**
+ * Group tool-only assistant events across the protocol carrier rows Codex
+ * inserts between them. A thought, assistant text, human turn, or visible
+ * system event closes the group so actions stay attached to their intent.
+ */
+export function buildTranscriptRenderRows(
+  events: readonly TranscriptEvent[],
+): TranscriptRenderRow[] {
+  const rows: TranscriptRenderRow[] = [];
+  let pendingEvents: Array<{ event: TranscriptEvent; eventIndex: number }> = [];
+  let pendingSearchEvents: TranscriptEvent[] = [];
+  let pendingTools: AssistantToolUseBlock[] = [];
+
+  const flushTools = () => {
+    if (pendingTools.length === 0) return;
+    const first = pendingEvents[0]!;
+    if (pendingTools.length === 1) {
+      rows.push({
+        kind: 'event',
+        id: `event-${first.eventIndex}`,
+        event: first.event,
+        eventIndex: first.eventIndex,
+        searchEvents: pendingSearchEvents,
+      });
+    } else {
+      const id = `activity-${pendingTools[0]!.id}`;
+      rows.push({
+        kind: 'tool_group',
+        id,
+        group: {
+          kind: 'group',
+          id,
+          tools: pendingTools,
+          parentEventIndex: first.eventIndex,
+        },
+        searchEvents: pendingSearchEvents,
+      });
+    }
+    pendingEvents = [];
+    pendingSearchEvents = [];
+    pendingTools = [];
+  };
+
+  events.forEach((event, eventIndex) => {
+    const tools = toolOnlyAssistantBlocks(event);
+    if (tools) {
+      pendingEvents.push({ event, eventIndex });
+      pendingSearchEvents.push(event);
+      pendingTools.push(...tools);
+      return;
+    }
+    if (isTransparentActivityEvent(event)) {
+      if (pendingTools.length > 0 && isCarrierUserEvent(event)) {
+        pendingSearchEvents.push(event);
+      }
+      return;
+    }
+    flushTools();
+    rows.push({
+      kind: 'event',
+      id: `event-${eventIndex}`,
+      event,
+      eventIndex,
+      searchEvents: [event],
+    });
+  });
+
+  flushTools();
+  return rows;
+}
+
+function toolOnlyAssistantBlocks(event: TranscriptEvent): AssistantToolUseBlock[] | null {
+  if (event.kind !== 'assistant' || event.data.blocks.length === 0) return null;
+  const tools: AssistantToolUseBlock[] = [];
+  for (const block of event.data.blocks) {
+    if (block.kind !== 'tool_use') return null;
+    tools.push(block.data);
+  }
+  return tools;
+}
+
+function isTransparentActivityEvent(event: TranscriptEvent): boolean {
+  return (
+    isCarrierUserEvent(event) ||
+    event.kind === 'system_token_usage' ||
+    event.kind === 'tool_progress'
+  );
 }
 
 /**
@@ -165,6 +282,7 @@ function metaOf(event: TranscriptEvent) {
     case 'system_hook':
     case 'system_rate_limit':
     case 'system_thinking_tokens':
+    case 'system_token_usage':
     case 'user':
     case 'assistant':
     case 'tool_progress':
@@ -240,43 +358,4 @@ function mergeAssistantDelta(left: TranscriptEvent, right: TranscriptEvent): Tra
 export function unknownEventTitle(event: { rawType: string | null; rawSubtype: string | null }) {
   const base = event.rawType ?? 'app-server event';
   return event.rawSubtype ? `${base} · ${event.rawSubtype}` : base;
-}
-
-/**
- * Friendly label for a `ToolName` — used by every per-tool block header so
- * the casing stays consistent between MCP variants and built-ins.
- */
-export function toolLabel(name: ToolName): string {
-  switch (name.kind) {
-    case 'bash':
-      return 'Bash';
-    case 'read':
-      return 'Read';
-    case 'edit':
-      return 'Edit';
-    case 'write':
-      return 'Write';
-    case 'grep':
-      return 'Grep';
-    case 'glob':
-      return 'Glob';
-    case 'todo_write':
-      return 'Todo';
-    case 'web_fetch':
-      return 'WebFetch';
-    case 'web_search':
-      return 'WebSearch';
-    case 'task':
-      return 'Task';
-    case 'notebook_edit':
-      return 'NotebookEdit';
-    case 'skill':
-      return 'Skill';
-    case 'structured_output':
-      return 'StructuredOutput';
-    case 'mcp':
-      return `${name.data.server}/${name.data.tool}`;
-    case 'other':
-      return name.data.name;
-  }
 }

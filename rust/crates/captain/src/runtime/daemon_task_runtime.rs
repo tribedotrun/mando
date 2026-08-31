@@ -4,7 +4,6 @@ use api_types::TaskCreateResponse;
 use global_db::lifecycle::LifecycleEffect;
 use serde_json::Value;
 use sessions_db::SessionRow;
-use settings::CaptainWorkflow;
 
 use crate::types::EffectRequest;
 
@@ -110,56 +109,8 @@ impl CaptainRuntime {
     }
 
     #[tracing::instrument(skip_all)]
-    pub async fn set_task_ask_session(
-        &self,
-        task_id: i64,
-        session_id: Option<String>,
-    ) -> anyhow::Result<()> {
-        self.set_task_session_id(
-            task_id,
-            "task vanished while updating ask session id",
-            |ids| {
-                ids.ask = session_id;
-            },
-        )
-        .await
-    }
-
-    #[tracing::instrument(skip_all)]
-    pub async fn set_task_advisor_session(
-        &self,
-        task_id: i64,
-        session_id: Option<String>,
-    ) -> anyhow::Result<()> {
-        self.set_task_session_id(
-            task_id,
-            "task vanished while updating advisor session id",
-            |ids| {
-                ids.advisor = session_id;
-            },
-        )
-        .await
-    }
-
-    #[tracing::instrument(skip_all)]
     pub async fn task_artifacts(&self, task_id: i64) -> anyhow::Result<Vec<crate::TaskArtifact>> {
         crate::io::queries::artifacts::list_for_task(&self.pool, task_id).await
-    }
-
-    #[tracing::instrument(skip_all)]
-    pub async fn task_ask_history(
-        &self,
-        task_id: i64,
-    ) -> anyhow::Result<Vec<crate::AskHistoryEntry>> {
-        crate::io::queries::ask_history::load(&self.pool, task_id).await
-    }
-
-    #[tracing::instrument(skip_all)]
-    pub async fn latest_clarifier_questions(
-        &self,
-        task_id: i64,
-    ) -> anyhow::Result<Option<Vec<api_types::ClarifierQuestionPayload>>> {
-        crate::io::queries::timeline::latest_clarifier_questions(&self.pool, task_id).await
     }
 
     #[tracing::instrument(skip_all)]
@@ -175,118 +126,6 @@ impl CaptainRuntime {
     #[tracing::instrument(skip_all)]
     pub async fn fetch_pr_body(&self, repo: &str, pr_number: u32) -> anyhow::Result<String> {
         global_github::get_pr_body(repo, pr_number).await
-    }
-
-    #[tracing::instrument(skip_all)]
-    pub async fn build_task_timeline_text(&self, task_id: i64) -> anyhow::Result<String> {
-        crate::runtime::task_ask::build_timeline_text(&self.pool, task_id).await
-    }
-
-    #[tracing::instrument(skip_all)]
-    pub async fn build_task_ask_initial_prompt(
-        &self,
-        item: &crate::Task,
-        question: &str,
-        workflow: &CaptainWorkflow,
-    ) -> anyhow::Result<String> {
-        let timeline_text = self.build_task_timeline_text(item.id).await?;
-        crate::runtime::task_ask::build_initial_prompt(
-            item,
-            &item.id.to_string(),
-            question,
-            workflow,
-            &timeline_text,
-        )
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    #[tracing::instrument(skip_all)]
-    pub async fn run_task_text_session(
-        &self,
-        item: &crate::Task,
-        caller: &str,
-        cwd: &std::path::Path,
-        prompt: &str,
-        resume_session_id: Option<&str>,
-        call_timeout: std::time::Duration,
-        agent_config: &settings::AgentConfig,
-    ) -> anyhow::Result<crate::runtime::agent_text_session::AgentTextSessionResult> {
-        crate::runtime::agent_text_session::run_text_session(
-            &self.pool,
-            item,
-            caller,
-            cwd,
-            prompt,
-            resume_session_id,
-            call_timeout,
-            agent_config,
-        )
-        .await
-    }
-
-    #[tracing::instrument(skip_all)]
-    pub async fn persist_task_question(
-        &self,
-        task_id: i64,
-        ask_id: &str,
-        session_id: &str,
-        question: &str,
-    ) -> anyhow::Result<()> {
-        crate::runtime::task_ask::persist_question(
-            &self.pool, task_id, ask_id, session_id, question,
-        )
-        .await
-    }
-
-    #[tracing::instrument(skip_all)]
-    pub async fn persist_task_answer(
-        &self,
-        task_id: i64,
-        ask_id: &str,
-        session_id: &str,
-        question: &str,
-        answer: &str,
-        intent: &str,
-    ) -> anyhow::Result<()> {
-        crate::runtime::task_ask::persist_answer(
-            &self.pool, task_id, ask_id, session_id, question, answer, intent,
-        )
-        .await
-    }
-
-    #[tracing::instrument(skip_all)]
-    pub async fn persist_task_error(
-        &self,
-        task_id: i64,
-        ask_id: &str,
-        session_id: &str,
-        question: &str,
-        error: &str,
-    ) -> anyhow::Result<()> {
-        crate::runtime::task_ask::persist_error(
-            &self.pool, task_id, ask_id, session_id, question, error,
-        )
-        .await
-    }
-
-    /// Replace the `'pending'` placeholder on every row in the
-    /// `(task_id, ask_id)` group with the real agent session id. Called from
-    /// the success path of the ask / advisor HTTP routes once the agent call
-    /// returns and the question + assistant rows can be tied together.
-    #[tracing::instrument(skip_all)]
-    pub async fn backfill_ask_pending_session_id(
-        &self,
-        task_id: i64,
-        ask_id: &str,
-        real_session_id: &str,
-    ) -> anyhow::Result<()> {
-        crate::runtime::task_ask::backfill_pending_session_id(
-            &self.pool,
-            task_id,
-            ask_id,
-            real_session_id,
-        )
-        .await
     }
 
     pub fn append_task_note(
@@ -433,25 +272,5 @@ impl CaptainRuntime {
         }
         self.drain_pending_lifecycle_effects().await?;
         Ok(value)
-    }
-
-    async fn set_task_session_id(
-        &self,
-        task_id: i64,
-        missing_task_log: &'static str,
-        update: impl FnOnce(&mut crate::SessionIds),
-    ) -> anyhow::Result<()> {
-        match self.load_task(task_id).await? {
-            Some(mut task) => {
-                update(&mut task.session_ids);
-                self.write_task(&task).await?;
-            }
-            None => tracing::warn!(
-                module = "captain-runtime-daemon_task_runtime",
-                task_id,
-                "{missing_task_log}"
-            ),
-        }
-        Ok(())
     }
 }

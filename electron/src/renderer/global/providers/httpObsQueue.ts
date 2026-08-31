@@ -72,12 +72,6 @@ function createHttpObsQueue() {
   }
 
   return {
-    getBatch(): readonly ClientLogEntry[] {
-      return errorBatch;
-    },
-    clearBatch(): void {
-      errorBatch = [];
-    },
     queueError(level: string, message: string, context?: unknown): void {
       if (errorBatch.length >= MAX_ERROR_BATCH) return;
       errorBatch.push({
@@ -95,14 +89,6 @@ function createHttpObsQueue() {
 }
 
 const httpObsQueue = createHttpObsQueue();
-
-export function __testGetErrorBatch(): readonly ClientLogEntry[] {
-  return httpObsQueue.getBatch();
-}
-
-export function __testClearErrorBatch(): void {
-  httpObsQueue.clearBatch();
-}
 
 export function queueError(level: string, message: string, context?: unknown): void {
   httpObsQueue.queueError(level, message, context);

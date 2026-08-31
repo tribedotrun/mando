@@ -5,8 +5,6 @@
  * No state held here: every lifecycle flow (window, tray, quit, daemon
  * connection, renderer server, login-item migration) lives in its own
  * owner module under `#main/global/runtime/`.
- *
- * Enforced by `architecture/main-composition-only`.
  */
 import { app, BrowserWindow, dialog, globalShortcut } from 'electron';
 import log from '#main/global/providers/logger';

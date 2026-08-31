@@ -2,7 +2,7 @@ import { z } from 'zod';
 
 export type UpdateChannel = 'stable' | 'beta';
 
-export const updateChannelSchema = z.enum(['stable', 'beta']);
+const updateChannelSchema = z.enum(['stable', 'beta']);
 
 export const channelConfigSchema = z.object({
   channel: updateChannelSchema.optional(),
@@ -19,7 +19,7 @@ export const feedResponseSchema = z.object({
   notes: z.string(),
   pub_date: z.string(),
 });
-export type FeedResponse = z.infer<typeof feedResponseSchema>;
+type FeedResponse = z.infer<typeof feedResponseSchema>;
 
 // File boundary: pending-update.json on disk. appPath is later passed to
 // codesign --verify and renameSync, so we require an absolute path.

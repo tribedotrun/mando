@@ -3,8 +3,6 @@
 //! Extracted from `bot.rs` for file length and to keep `bot.rs` focused on
 //! the polling/dispatch surface.
 
-use std::collections::HashSet;
-
 use time::OffsetDateTime;
 
 /// Records when (and against which outgoing message) a pending session was
@@ -36,29 +34,14 @@ pub struct PendingAction {
     pub prompt: PromptMeta,
 }
 
-/// Active task-clarify input session; the title is shown back to the human.
+/// Active task-clarify input session.
 #[derive(Debug, Clone)]
 pub struct InputSession {
+    /// Stable task identity used for every follow-up mutation.
+    pub task_id: i64,
+    /// Display title shown back to the human.
     pub title: String,
     pub prompt: PromptMeta,
-}
-
-/// Lightweight session tracker for `/ask` (per-task Q&A).
-#[derive(Debug, Clone)]
-pub struct Session {
-    pub task_id: i64,
-    pub rounds: u32,
-    pub prompt: PromptMeta,
-}
-
-impl Session {
-    pub fn new(task_id: i64, prompt: PromptMeta) -> Self {
-        Self {
-            task_id,
-            rounds: 0,
-            prompt,
-        }
-    }
 }
 
 /// Active scout-item Q&A session.
@@ -84,8 +67,6 @@ pub struct ActSession {
 pub struct PickerState {
     pub chat_id: String,
     pub items: Vec<PickerItem>,
-    /// Indices of selected items (for multi-select pickers).
-    pub selected: HashSet<usize>,
 }
 
 /// One item in a picker.
@@ -93,9 +74,9 @@ pub struct PickerState {
 pub struct PickerItem {
     pub id: String,
     pub title: String,
-    /// Item status string (e.g. "needs-clarification").
+    /// Typed item status captured when the picker is rendered.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub status: Option<String>,
+    pub status: Option<api_types::ItemStatus>,
     /// Whether this task has a PR attached.
     pub has_pr: bool,
 }
@@ -106,22 +87,21 @@ pub struct TodoItem {
     pub title: String,
     /// Project slug resolved via prefix match or single-project auto-select.
     pub project: Option<String>,
-    /// Telegram photo file_id (highest-res) — only set on first item.
+    /// Telegram photo file_id (highest-res) when the message has a photo.
     pub photo_file_id: Option<String>,
 }
 
-/// Pending /todo confirmation state.
+/// Pending project selection for a single `/todo` task.
 #[derive(Debug)]
-pub struct TodoConfirmState {
-    pub chat_id: String,
-    pub items: Vec<TodoItem>,
+pub struct TodoProjectState {
+    pub item: TodoItem,
     /// Ordered project slugs for the picker (indices used in callback_data).
     pub picker_slugs: Vec<String>,
 }
 
-/// One of the chat_id-keyed pending session maps.
+/// One of the chat-scoped slots in the pending session registry.
 ///
-/// Used by the reply-disambiguation lookup to identify which map's entry
+/// Used by the reply-disambiguation lookup to identify which slot's entry
 /// matches the user's reply target (`reply_to_message.message_id`) or
 /// most-recent-wins fallback.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -133,7 +113,6 @@ pub(crate) enum SessionKind {
     PendingReopen,
     PendingRework,
     PendingNudge,
-    AskSession,
     InputSession,
     QaSession,
     ActSession,

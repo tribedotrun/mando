@@ -9,8 +9,9 @@ sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite"] }
 anyhow.workspace = true
 tokio.workspace = true
 tracing.workspace = true
-serde.workspace = true
 serde_json.workspace = true
-time.workspace = true
 global-infra.workspace = true
 global-types.workspace = true
+
+[lints]
+workspace = true

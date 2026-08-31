@@ -45,7 +45,6 @@ pub(crate) fn codex_login_routes() -> ApiRouter<AppState> {
 /// the caller polls `GET .../login/current` for progress. When
 /// `credential_id` is set (row-scoped re-login), the target row is
 /// validated before anything spawns.
-#[crate::instrument_api(method = "POST", path = "/api/credentials/codex/login/start")]
 async fn start_codex_login(
     State(state): State<AppState>,
     Json(body): Json<api_types::StartCodexLoginRequest>,
@@ -86,7 +85,6 @@ async fn start_codex_login(
 /// GET /api/credentials/codex/login/current — snapshot of the single
 /// in-flight (or most-recently-finished) login flow. `flow` is `None` when
 /// no flow has run since the daemon started.
-#[crate::instrument_api(method = "GET", path = "/api/credentials/codex/login/current")]
 async fn get_codex_login_status(
     State(state): State<AppState>,
 ) -> Json<api_types::CodexLoginStatusResponse> {
@@ -96,7 +94,6 @@ async fn get_codex_login_status(
 
 /// POST /api/credentials/codex/login/cancel — cancel the pending flow, if
 /// any. `cancelled` is `false` when there was nothing pending.
-#[crate::instrument_api(method = "POST", path = "/api/credentials/codex/login/cancel")]
 async fn cancel_codex_login(
     State(state): State<AppState>,
     Json(_body): Json<api_types::EmptyRequest>,

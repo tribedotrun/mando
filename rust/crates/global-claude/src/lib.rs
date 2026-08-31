@@ -15,9 +15,13 @@ mod stream_symptoms;
 mod transcript;
 mod transcript_events;
 
-pub use binary::{
-    apply_codex_binary_env, resolve_claude_binary, resolve_codex_binary, ResolvedCodexBinary,
+pub use agent_runtime_core::{
+    apply_codex_binary_env, get_cpu_time, is_process_alive, is_stream_meta_finished_at,
+    kill_process, resolve_codex_binary, update_stream_meta_status_at, write_stream_meta_at,
+    ResolvedCodexBinary, SessionMeta, DAEMON_ENV_STRIP,
 };
+pub use api_types::ResultOutcome;
+pub use binary::resolve_claude_binary;
 pub use broken_session::{stream_broken_session_symptom, BrokenSessionMatch, BrokenSessionOrigin};
 pub use config::{CcConfig, CcConfigBuilder, Effort, PermissionMode};
 pub use credentials::{credential_id, with_credential};
@@ -25,17 +29,17 @@ pub use error::{CcError, ErrorClass};
 pub use json_parse::{parse_llm_json, parse_llm_json_as};
 pub use message::{
     AssistantMessage, CcMessage, ContentBlock, InitMessage, RateLimitEvent, RateLimitStatus,
-    ResultMessage, ResultSubtype,
+    ResultMessage,
 };
 pub use oneshot::CcOneShot;
 pub use pricing::{fallback_rate, rate_for_model, ModelRate};
-pub use process::{get_cpu_time, is_process_alive, kill_process, spawn_detached, DAEMON_ENV_STRIP};
+pub use process::spawn_detached;
 pub use session::CcSession;
 pub use stream::{
     get_last_assistant_text, get_stream_cost, get_stream_file_size, get_stream_result,
-    has_rate_limit_rejection, is_clean_result, last_rate_limit_status, stream_has_broken_session,
-    stream_stale_seconds, write_error_result, RateLimitRejection, StreamCostInfo,
-    StreamRateLimitInfo,
+    has_rate_limit_rejection, is_clean_result, last_rate_limit_status, result_outcome,
+    stream_has_broken_session, stream_stale_seconds, write_error_result, write_interrupted_result,
+    RateLimitRejection, StreamCostInfo, StreamRateLimitInfo,
 };
 pub use stream_symptoms::{CcStreamSymptom, StreamSymptomMatcher, StreamSymptomRule};
 pub use transcript::{
@@ -72,105 +76,17 @@ pub struct CcResult<T> {
     pub credential_id: Option<i64>,
 }
 
-pub struct SessionMeta<'a> {
-    pub session_id: &'a str,
-    pub caller: &'a str,
-    pub task_id: &'a str,
-    pub worker_name: &'a str,
-    pub project: &'a str,
-    pub cwd: &'a str,
-}
-
 pub fn write_stream_meta(meta: &SessionMeta<'_>, status: &str) {
     let meta_path = global_infra::paths::stream_meta_path_for_session(meta.session_id);
-    write_stream_meta_at(&meta_path, meta, status);
-}
-
-pub fn write_stream_meta_at(meta_path: &std::path::Path, meta: &SessionMeta<'_>, status: &str) {
-    if let Some(parent) = meta_path.parent() {
-        if let Err(e) = std::fs::create_dir_all(parent) {
-            tracing::warn!(module = "global-claude-lib", session_id = meta.session_id, path = %parent.display(), %e, "failed to create stream meta dir");
-            return;
-        }
-    }
-    let now = global_infra::clock::now_rfc3339();
-    let val = serde_json::json!({
-        "session_id": meta.session_id,
-        "caller": meta.caller,
-        "task_id": meta.task_id,
-        "worker_name": null_if_empty(meta.worker_name),
-        "project": null_if_empty(meta.project),
-        "started_at": now,
-        "status": status,
-        "cwd": meta.cwd,
-    });
-    if let Err(e) = std::fs::write(
-        meta_path,
-        serde_json::to_string_pretty(&val).unwrap_or_default(),
-    ) {
-        tracing::warn!(module = "global-claude-lib", session_id = meta.session_id, %e, "failed to write stream meta");
-    }
+    agent_runtime_core::write_stream_meta_at(&meta_path, meta, status);
 }
 
 pub fn update_stream_meta_status(session_id: &str, status: &str, cost_usd: Option<f64>) {
     let meta_path = global_infra::paths::stream_meta_path_for_session(session_id);
-    update_stream_meta_status_at(&meta_path, session_id, status, cost_usd);
-}
-
-pub fn update_stream_meta_status_at(
-    meta_path: &std::path::Path,
-    session_id: &str,
-    status: &str,
-    cost_usd: Option<f64>,
-) {
-    let data = match std::fs::read_to_string(meta_path) {
-        Ok(d) => d,
-        Err(e) => {
-            tracing::warn!(module = "global-claude-lib", session_id, %e, "failed to read stream meta for status update");
-            return;
-        }
-    };
-    let mut val: serde_json::Value = match serde_json::from_str(&data) {
-        Ok(v) => v,
-        Err(e) => {
-            tracing::warn!(module = "global-claude-lib", session_id, %e, "corrupt stream meta sidecar");
-            return;
-        }
-    };
-    val["status"] = serde_json::json!(status);
-    val["finished_at"] = serde_json::json!(global_infra::clock::now_rfc3339());
-    if let Some(cost) = cost_usd {
-        val["cost_usd"] = serde_json::json!(cost);
-    }
-    if let Err(e) = std::fs::write(
-        meta_path,
-        serde_json::to_string_pretty(&val).unwrap_or_default(),
-    ) {
-        tracing::warn!(module = "global-claude-lib", session_id, %e, "failed to write updated stream meta");
-    }
+    agent_runtime_core::update_stream_meta_status_at(&meta_path, session_id, status, cost_usd);
 }
 
 pub fn is_session_finished(session_id: &str) -> bool {
     let meta_path = global_infra::paths::stream_meta_path_for_session(session_id);
-    is_stream_meta_finished_at(&meta_path)
-}
-
-pub fn is_stream_meta_finished_at(meta_path: &std::path::Path) -> bool {
-    let data = match std::fs::read_to_string(meta_path) {
-        Ok(d) => d,
-        Err(_) => return false,
-    };
-    let val: serde_json::Value = match serde_json::from_str(&data) {
-        Ok(v) => v,
-        Err(_) => return false,
-    };
-    val.get("finished_at").and_then(|v| v.as_str()).is_some()
-}
-
-fn null_if_empty(s: &str) -> serde_json::Value {
-    if s.is_empty() {
-        serde_json::Value::Null
-    } else {
-        serde_json::json!(s)
-    }
+    agent_runtime_core::is_stream_meta_finished_at(&meta_path)
 }

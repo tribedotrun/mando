@@ -24,15 +24,54 @@ pub struct ResultEvent {
     pub summary: ResultSummary,
 }
 
-/// Why CC stopped. Mirrors CC's `result.subtype` but with named variants.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, TS)]
+/// Why an agent session stopped, normalized across providers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum ResultOutcome {
     Success,
+    Interrupted,
     ErrorDuringExecution,
     ErrorMaxTurns,
     ErrorMaxBudgetUsd,
     ErrorMaxStructuredOutputRetries,
+}
+
+impl ResultOutcome {
+    pub fn from_subtype(subtype: Option<&str>, is_error: bool) -> Self {
+        match subtype {
+            Some("error_max_turns") => Self::ErrorMaxTurns,
+            Some("error_max_budget_usd") => Self::ErrorMaxBudgetUsd,
+            Some("error_max_structured_output_retries") => Self::ErrorMaxStructuredOutputRetries,
+            Some("interrupted") if !is_error => Self::Interrupted,
+            Some("success") if !is_error => Self::Success,
+            _ => Self::ErrorDuringExecution,
+        }
+    }
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Success => "success",
+            Self::Interrupted => "interrupted",
+            Self::ErrorDuringExecution => "error_during_execution",
+            Self::ErrorMaxTurns => "error_max_turns",
+            Self::ErrorMaxBudgetUsd => "error_max_budget_usd",
+            Self::ErrorMaxStructuredOutputRetries => "error_max_structured_output_retries",
+        }
+    }
+
+    pub const fn is_clean(self) -> bool {
+        matches!(self, Self::Success)
+    }
+
+    pub const fn is_error(self) -> bool {
+        matches!(
+            self,
+            Self::ErrorDuringExecution
+                | Self::ErrorMaxTurns
+                | Self::ErrorMaxBudgetUsd
+                | Self::ErrorMaxStructuredOutputRetries
+        )
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -82,4 +121,32 @@ pub struct UnknownEvent {
     pub raw_type: Option<String>,
     pub raw_subtype: Option<String>,
     pub raw: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ResultOutcome;
+
+    #[test]
+    fn canonical_outcome_distinguishes_success_interruption_and_error() {
+        assert_eq!(
+            ResultOutcome::from_subtype(Some("success"), false),
+            ResultOutcome::Success
+        );
+        assert_eq!(
+            ResultOutcome::from_subtype(Some("interrupted"), false),
+            ResultOutcome::Interrupted
+        );
+        assert_eq!(
+            ResultOutcome::from_subtype(Some("success"), true),
+            ResultOutcome::ErrorDuringExecution
+        );
+        assert_eq!(
+            ResultOutcome::from_subtype(None, false),
+            ResultOutcome::ErrorDuringExecution
+        );
+        assert!(ResultOutcome::Success.is_clean());
+        assert!(!ResultOutcome::Interrupted.is_clean());
+        assert!(!ResultOutcome::Interrupted.is_error());
+    }
 }

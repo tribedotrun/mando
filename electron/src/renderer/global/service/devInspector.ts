@@ -1,13 +1,13 @@
 import { round } from '#renderer/global/service/utils';
 
-export interface FiberNode {
+interface FiberNode {
   type: string | { name?: string; displayName?: string } | null;
   _debugSource?: { fileName: string; lineNumber: number; columnNumber: number };
   return: FiberNode | null;
   memoizedProps?: Record<string, unknown>;
 }
 
-export interface InspectResult {
+interface InspectResult {
   component: string;
   file: string | null;
   line: number | null;
@@ -25,7 +25,7 @@ export function getFiber(el: HTMLElement): FiberNode | null {
   return key ? (el as never)[key] : null;
 }
 
-export function getComponentName(fiber: FiberNode): string | null {
+function getComponentName(fiber: FiberNode): string | null {
   if (!fiber.type) return null;
   if (typeof fiber.type === 'string') return null;
   return fiber.type.displayName || fiber.type.name || null;
@@ -51,7 +51,7 @@ export function findOwnerComponent(fiber: FiberNode): {
   return null;
 }
 
-export function getParentChain(fiber: FiberNode, limit = 5): string[] {
+function getParentChain(fiber: FiberNode, limit = 5): string[] {
   const chain: string[] = [];
   let current = fiber.return;
   while (current && chain.length < limit) {
@@ -62,14 +62,14 @@ export function getParentChain(fiber: FiberNode, limit = 5): string[] {
   return chain;
 }
 
-export function truncateElement(el: HTMLElement): string {
+function truncateElement(el: HTMLElement): string {
   const tag = el.tagName.toLowerCase();
   const cls = el.className ? ` class="${String(el.className).slice(0, 60)}"` : '';
   const text = el.textContent?.slice(0, 50) ?? '';
   return `<${tag}${cls}>${text}</${tag}>`;
 }
 
-export function findNearbyText(el: HTMLElement): string | null {
+function findNearbyText(el: HTMLElement): string | null {
   let current: HTMLElement | null = el;
   for (let i = 0; i < 4; i++) {
     current = current.parentElement;
@@ -102,7 +102,7 @@ const SKIP_PROPS = Object.freeze([
 ] as const);
 
 /** Write `val` into `ctx[key]` if it is a primitive string/number worth surfacing. */
-export function collectPrimitive(ctx: Record<string, string>, key: string, val: unknown): void {
+function collectPrimitive(ctx: Record<string, string>, key: string, val: unknown): void {
   if ((SKIP_PROPS as readonly string[]).includes(key) || key in ctx || key.startsWith('on')) {
     return;
   }
@@ -113,7 +113,7 @@ export function collectPrimitive(ctx: Record<string, string>, key: string, val: 
   }
 }
 
-export function extractContext(fiber: FiberNode): Record<string, string> {
+function extractContext(fiber: FiberNode): Record<string, string> {
   const ctx: Record<string, string> = {};
   let current: FiberNode | null = fiber;
   let depth = 0;
@@ -152,7 +152,7 @@ export function buildInspectResult(el: HTMLElement): InspectResult | null {
   };
 }
 
-export function buildComponentMap(): Array<{
+function buildComponentMap(): Array<{
   component: string;
   file: string | null;
   line: number | null;

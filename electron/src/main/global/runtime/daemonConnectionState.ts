@@ -10,14 +10,14 @@
  */
 import type { ConnectionState } from '#main/global/types/lifecycle';
 
-export interface DaemonConnectionSnapshot {
+interface DaemonConnectionSnapshot {
   readonly phase: ConnectionState;
   readonly reconnectAttempts: number;
   readonly reconnectDelay: number;
   readonly healthCheckFailureStreak: number;
 }
 
-export type DaemonConnectionAction =
+type DaemonConnectionAction =
   | { type: 'connected' }
   | { type: 'disconnected' }
   | { type: 'reconnect_failed' }
@@ -25,12 +25,12 @@ export type DaemonConnectionAction =
   | { type: 'health_check_ok' }
   | { type: 'updating' };
 
-export interface ReduceConfig {
+interface ReduceConfig {
   initialDelay: number;
   maxDelay: number;
 }
 
-export function initialSnapshot(cfg: ReduceConfig): DaemonConnectionSnapshot {
+function initialSnapshot(cfg: ReduceConfig): DaemonConnectionSnapshot {
   return {
     phase: 'connecting',
     reconnectAttempts: 0,
@@ -39,7 +39,7 @@ export function initialSnapshot(cfg: ReduceConfig): DaemonConnectionSnapshot {
   };
 }
 
-export function reduce(
+function reduce(
   state: DaemonConnectionSnapshot,
   action: DaemonConnectionAction,
   cfg: ReduceConfig,

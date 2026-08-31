@@ -47,13 +47,6 @@ pub enum MergeOutcome {
     },
 }
 
-impl MergeOutcome {
-    #[must_use]
-    pub fn is_merged(&self) -> bool {
-        matches!(self, Self::Merged)
-    }
-}
-
 /// Why a squash-merge was refused, classified from gh's own output.
 ///
 /// Deliberately coarse: anything this crate does not positively recognize is

@@ -2,8 +2,10 @@ import React from 'react';
 import type { AssistantToolUseBlock, UserToolResultBlock } from '#renderer/global/types';
 import { BashBlock } from '#renderer/domains/sessions/ui/transcriptEvents/tools/BashBlock';
 import { EditDiffBlock } from '#renderer/domains/sessions/ui/transcriptEvents/tools/EditDiffBlock';
+import { FileChangeBlock } from '#renderer/domains/sessions/ui/transcriptEvents/tools/FileChangeBlock';
 import { GlobBlock } from '#renderer/domains/sessions/ui/transcriptEvents/tools/GlobBlock';
 import { GrepBlock } from '#renderer/domains/sessions/ui/transcriptEvents/tools/GrepBlock';
+import { ImageViewBlock } from '#renderer/domains/sessions/ui/transcriptEvents/tools/ImageViewBlock';
 import { McpToolBlock } from '#renderer/domains/sessions/ui/transcriptEvents/tools/McpToolBlock';
 import { NotebookEditBlock } from '#renderer/domains/sessions/ui/transcriptEvents/tools/NotebookEditBlock';
 import { OtherToolBlock } from '#renderer/domains/sessions/ui/transcriptEvents/tools/OtherToolBlock';
@@ -51,6 +53,12 @@ export function ToolCallBlock({ toolUse, result }: ToolCallBlockProps): React.Re
   }
   if (name.kind === 'web_search' && input.kind === 'web_search') {
     return <WebSearchBlock id={id} input={input.data} result={result} isError={isError} />;
+  }
+  if (name.kind === 'file_change' && input.kind === 'file_change') {
+    return <FileChangeBlock id={id} input={input.data} />;
+  }
+  if (name.kind === 'image_view' && input.kind === 'image_view') {
+    return <ImageViewBlock id={id} input={input.data} />;
   }
   if (name.kind === 'task' && input.kind === 'task') {
     return <TaskBlock id={id} input={input.data} result={result} isError={isError} />;

@@ -52,22 +52,6 @@ describe('resolveNotificationClickTarget', () => {
       });
     });
 
-    it('AdvisorAnswered → workbench when lookup hits', () => {
-      const kind: NotificationKind = { type: 'AdvisorAnswered', item_id: '5', title: 'why' };
-      assert.deepEqual(resolveNotificationClickTarget(kind, lookupHit(11)), {
-        type: 'workbench',
-        workbenchId: 11,
-      });
-    });
-
-    it('AdvisorAnswered → workbench-miss when lookup returns null', () => {
-      const kind: NotificationKind = { type: 'AdvisorAnswered', item_id: '5', title: 'why' };
-      assert.deepEqual(resolveNotificationClickTarget(kind, lookupMiss), {
-        type: 'workbench-miss',
-        taskId: 5,
-      });
-    });
-
     it('falls back to home when item_id is not numeric', () => {
       const kind: NotificationKind = { type: 'Escalated', item_id: 'not-a-number', summary: null };
       assert.deepEqual(resolveNotificationClickTarget(kind, lookupHit(99)), { type: 'home' });

@@ -11,7 +11,7 @@ export interface SidebarChild {
 }
 
 /** Sort sidebar children descending by last activity (task activity preferred when present). */
-export function sortProjectChildren(items: SidebarChild[]): SidebarChild[] {
+function sortProjectChildren(items: SidebarChild[]): SidebarChild[] {
   const activity = (c: SidebarChild): string =>
     c.task?.last_activity_at || c.task?.created_at || c.wb.lastActivityAt || c.wb.createdAt || '';
   return [...items].sort((a, b) => activity(b).localeCompare(activity(a)));

@@ -78,7 +78,7 @@ pub(super) async fn update_task_exec(
     let result = bind_task_write_fields(
         sqlx::query(&format!("{} AND rev = ?", update_task_sql())),
         task,
-    )
+    )?
     .bind(task.id)
     .bind(current.rev)
     .execute(&mut **tx)

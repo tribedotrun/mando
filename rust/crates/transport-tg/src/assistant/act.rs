@@ -6,7 +6,6 @@ use settings::Config;
 
 use super::formatting::{act_project_picker_kb, act_prompt_kb};
 use crate::bot::TelegramBot;
-use crate::gateway_paths as paths;
 
 /// Act button — show project picker or act directly if single project.
 pub(super) async fn cb_act(
@@ -93,13 +92,13 @@ pub(crate) async fn execute_act(
         .await?;
     let sent_mid = sent["message_id"].as_i64().unwrap_or(0);
 
-    let body = match prompt {
-        Some(p) => serde_json::json!({"project": project, "prompt": p}),
-        None => serde_json::json!({"project": project}),
+    let body = api_types::ScoutActRequest {
+        project: project.to_string(),
+        prompt: prompt.map(str::to_string),
     };
     let result_msg = match bot
         .gw()
-        .post_typed::<_, api_types::ActResponse>(&paths::scout_act(id), &body)
+        .post_scout_items_by_id_act(&api_types::ScoutItemIdParams { id }, &body)
         .await
     {
         Ok(result) if result.skipped == Some(true) => {

@@ -2,6 +2,7 @@ use std::collections::VecDeque;
 use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 
+use agent_runtime_core::ChildLifetime;
 use anyhow::{Context, Result};
 use tokio::io::{AsyncBufReadExt, BufReader, Lines};
 use tokio::process::{Child, ChildStderr, ChildStdin, ChildStdout};
@@ -36,31 +37,17 @@ pub(crate) fn stderr_tail_text(tail: &StderrTail) -> String {
 
 #[tracing::instrument]
 pub(crate) fn spawn_app_server() -> Result<SpawnedAppServer> {
-    let codex = global_claude::resolve_codex_binary();
+    let codex = agent_runtime_core::resolve_codex_binary();
     let mut command = tokio::process::Command::new(codex.path());
     command
         .arg("app-server")
         .arg("--listen")
         .arg("stdio://")
-        .kill_on_drop(true)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    for key in global_claude::DAEMON_ENV_STRIP {
-        command.env_remove(key);
-    }
-    global_claude::apply_codex_binary_env(&mut command, &codex);
-    #[cfg(unix)]
-    unsafe {
-        command.pre_exec(|| {
-            if libc::setsid() == -1 {
-                return Err(std::io::Error::last_os_error());
-            }
-            Ok(())
-        });
-    }
-    let mut child = command
-        .spawn()
+    agent_runtime_core::apply_codex_binary_env(&mut command, &codex);
+    let mut child = agent_runtime_core::spawn_isolated(command, ChildLifetime::KillOnDrop)
         .with_context(|| format!("spawn codex app-server at {}", codex.path().display()))?;
     let pid = global_types::Pid::new(child.id().context("codex app-server child had no pid")?);
     let stdin = child
@@ -87,7 +74,7 @@ pub(crate) fn spawn_app_server() -> Result<SpawnedAppServer> {
 #[tracing::instrument(skip(child), fields(reason))]
 pub(crate) async fn cleanup_child_process(mut child: Child, reason: &'static str) {
     if let Some(pid) = child.id().map(global_types::Pid::new) {
-        if let Err(e) = global_claude::kill_process(pid).await {
+        if let Err(e) = agent_runtime_core::kill_process(pid).await {
             tracing::warn!(module = "codex_app_server", pid = %pid, reason, error = %e, "failed to kill Codex app-server process group");
         }
     } else if let Err(e) = child.start_kill() {

@@ -3,14 +3,17 @@
 //! All domain operations are proxied through HTTP to the running daemon.
 //! Local repository inspection uses the shared global-git provider boundary.
 
+#![allow(
+    clippy::print_stdout,
+    clippy::print_stderr,
+    reason = "CLI stdout and stderr are the user-facing shell and JSON protocol"
+)]
+
 mod captain;
 mod codex_app;
-mod codex_app_process;
-mod codex_app_swap;
 mod credentials;
 mod credentials_codex_pick;
 mod gateway;
-mod gateway_paths;
 mod http;
 mod motion_check;
 mod project;
@@ -22,10 +25,12 @@ mod todo_display;
 mod transcript_render;
 mod worktree;
 
+#[cfg(test)]
+mod cli_contract_tests;
+
 use clap::{Args, Parser, Subcommand};
 
-use crate::gateway_paths as paths;
-use crate::http::{find_daemon_error, DaemonClient};
+use crate::http::{daemon_friendly_message, DaemonClient};
 
 #[derive(Parser)]
 #[command(name = "mando", about = "Mando — AI-powered development automation")]
@@ -187,8 +192,8 @@ async fn main() {
     };
 
     if let Err(e) = result {
-        if let Some(daemon_err) = find_daemon_error(&e) {
-            eprintln!("{}", daemon_err.friendly_message());
+        if let Some(message) = daemon_friendly_message(&e) {
+            eprintln!("{message}");
         } else {
             eprintln!("error: {e:#}");
         }
@@ -202,7 +207,7 @@ async fn main() {
 
 async fn handle_channels() -> anyhow::Result<()> {
     let client = DaemonClient::discover()?;
-    let result: api_types::ChannelsResponse = client.get_json(paths::CHANNELS).await?;
+    let result = client.get_channels().await?;
     println!("Channels:");
     println!("{}", serde_json::to_string_pretty(&result)?);
     Ok(())
@@ -215,13 +220,10 @@ async fn handle_merge(args: MergeArgs) -> anyhow::Result<()> {
 async fn handle_notify(args: NotifyArgs) -> anyhow::Result<()> {
     let client = DaemonClient::discover()?;
     client
-        .post_json::<api_types::NotifyResponse, _>(
-            paths::NOTIFY,
-            &api_types::NotifyRequest {
-                message: args.message,
-                chat_id: args.chat_id,
-            },
-        )
+        .post_notify(&api_types::NotifyRequest {
+            message: args.message,
+            chat_id: args.chat_id,
+        })
         .await?;
     println!("Notification sent.");
     Ok(())
@@ -231,11 +233,8 @@ async fn handle_firecrawl(args: FirecrawlArgs) -> anyhow::Result<()> {
     let client = DaemonClient::discover()?;
     match args.command {
         FirecrawlCommand::Scrape { url } => {
-            let result: api_types::FirecrawlScrapeResponse = client
-                .post_json(
-                    paths::FIRECRAWL_SCRAPE,
-                    &api_types::FirecrawlScrapeRequest { url },
-                )
+            let result = client
+                .post_firecrawl_scrape(&api_types::FirecrawlScrapeRequest { url })
                 .await?;
             println!("{}", result.content);
         }
@@ -248,13 +247,11 @@ async fn handle_tasks(args: TasksArgs) -> anyhow::Result<()> {
 
     let client = DaemonClient::discover()?;
 
-    let api_path = if args.all {
-        paths::TASKS_WITH_ARCHIVED
-    } else {
-        paths::TASKS
-    };
-
-    let result: api_types::TaskListResponse = client.get_json(api_path).await?;
+    let result = client
+        .get_tasks(&api_types::TaskListQuery {
+            include_archived: args.all.then_some(true),
+        })
+        .await?;
     if result.items.is_empty() {
         println!("No tasks.");
         return Ok(());
@@ -351,8 +348,9 @@ async fn handle_tasks(args: TasksArgs) -> anyhow::Result<()> {
 
 async fn handle_health() -> anyhow::Result<()> {
     let client = DaemonClient::discover()?;
-    let health: api_types::SystemHealthResponse = client
-        .get_json_with_body_on_5xx(paths::HEALTH_SYSTEM)
+    let health = client
+        .accepting_server_error_bodies()
+        .get_health_system()
         .await?;
     let version = health.version;
     let pid = health.pid;
@@ -377,9 +375,7 @@ async fn handle_health() -> anyhow::Result<()> {
 
 async fn handle_ui_launch() -> anyhow::Result<()> {
     let client = DaemonClient::discover()?;
-    client
-        .post_no_body::<api_types::BoolOkResponse>(paths::UI_LAUNCH)
-        .await?;
+    client.post_ui_launch().await?;
     println!("UI launch requested");
     Ok(())
 }
@@ -397,114 +393,6 @@ mod tests {
     use super::*;
     use clap::CommandFactory;
     use serde_json::Value;
-
-    #[test]
-    fn cli_parse_todo_list() {
-        let cli = Cli::try_parse_from(["mando", "todo", "list"]).unwrap();
-        assert!(matches!(cli.command, Commands::Todo(_)));
-    }
-
-    #[test]
-    fn cli_parse_todo_list_all() {
-        let cli = Cli::try_parse_from(["mando", "todo", "list", "--all"]).unwrap();
-        assert!(matches!(cli.command, Commands::Todo(_)));
-    }
-
-    #[test]
-    fn cli_parse_captain_tick() {
-        let cli = Cli::try_parse_from(["mando", "captain", "tick", "--dry-run"]).unwrap();
-        assert!(matches!(cli.command, Commands::Captain(_)));
-    }
-
-    #[test]
-    fn cli_parse_daemon_start() {
-        let cli = Cli::try_parse_from(["mando", "daemon", "start", "-p", "9999"]).unwrap();
-        assert!(matches!(cli.command, Commands::Daemon(_)));
-    }
-
-    #[test]
-    fn cli_parse_daemon_stop() {
-        let cli = Cli::try_parse_from(["mando", "daemon", "stop"]).unwrap();
-        assert!(matches!(cli.command, Commands::Daemon(_)));
-    }
-
-    #[test]
-    fn cli_parse_daemon_health() {
-        let cli = Cli::try_parse_from(["mando", "daemon", "health"]).unwrap();
-        assert!(matches!(cli.command, Commands::Daemon(_)));
-    }
-
-    #[test]
-    fn cli_parse_merge() {
-        let cli = Cli::try_parse_from(["mando", "merge", "123", "-p", "mando"]).unwrap();
-        assert!(matches!(cli.command, Commands::Merge(_)));
-    }
-
-    #[test]
-    fn cli_parse_sessions() {
-        let cli = Cli::try_parse_from(["mando", "sessions"]).unwrap();
-        assert!(matches!(cli.command, Commands::Sessions(_)));
-    }
-
-    #[test]
-    fn cli_parse_worktree_list() {
-        let cli = Cli::try_parse_from(["mando", "worktree", "list"]).unwrap();
-        assert!(matches!(cli.command, Commands::Worktree(_)));
-    }
-
-    #[test]
-    fn cli_parse_scout_list() {
-        let cli = Cli::try_parse_from(["mando", "scout", "list"]).unwrap();
-        assert!(matches!(cli.command, Commands::Scout(_)));
-    }
-
-    #[test]
-    fn cli_parse_channels() {
-        let cli = Cli::try_parse_from(["mando", "channels"]).unwrap();
-        assert!(matches!(cli.command, Commands::Channels(_)));
-    }
-
-    #[test]
-    fn cli_parse_tasks() {
-        let cli = Cli::try_parse_from(["mando", "tasks"]).unwrap();
-        assert!(matches!(cli.command, Commands::Tasks(_)));
-    }
-
-    #[test]
-    fn cli_parse_health() {
-        let cli = Cli::try_parse_from(["mando", "health"]).unwrap();
-        assert!(matches!(cli.command, Commands::Health(_)));
-    }
-
-    #[test]
-    fn cli_parse_credentials_list() {
-        let cli = Cli::try_parse_from(["mando", "credentials", "list"]).unwrap();
-        assert!(matches!(cli.command, Commands::Credentials(_)));
-    }
-
-    #[test]
-    fn cli_parse_credentials_pick() {
-        let cli = Cli::try_parse_from(["mando", "credentials", "pick"]).unwrap();
-        assert!(matches!(cli.command, Commands::Credentials(_)));
-    }
-
-    #[test]
-    fn cli_parse_codex_app_use() {
-        let cli = Cli::try_parse_from(["mando", "codex", "app-use", "PT"]).unwrap();
-        assert!(matches!(cli.command, Commands::Codex(_)));
-    }
-
-    #[test]
-    fn cli_parse_codex_app_restore() {
-        let cli = Cli::try_parse_from(["mando", "codex", "app-restore"]).unwrap();
-        assert!(matches!(cli.command, Commands::Codex(_)));
-    }
-
-    #[test]
-    fn cli_parse_codex_app_status() {
-        let cli = Cli::try_parse_from(["mando", "codex", "app-status", "--json"]).unwrap();
-        assert!(matches!(cli.command, Commands::Codex(_)));
-    }
 
     #[test]
     fn capability_contract_matches_cli_captain_and_scout_surfaces() {

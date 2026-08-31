@@ -4,6 +4,7 @@ kind        = "external"
 types-crate = "rust/crates/transport-tg"
 transports  = ["http", "multipart"]
 base-url    = "https://api.telegram.org"
+hosts       = ["api.telegram.org"]
 docs        = "https://core.telegram.org/bots/api"
 
 # Per-contract translator module: the single sanctioned boundary between our
@@ -16,22 +17,6 @@ path        = "rust/crates/transport-tg/src/api.rs"
 transports  = ["http", "multipart"]
 role        = "Raw Bot API HTTP + multipart client"
 enforcement = "scanner"
-# Bot API responses are schema we do not own. `serde_json::Value` is
-# permitted contract-wide for the raw request/response plumbing here.
-allow-value = true
-allow-value-reason = "Bot API responses are upstream schema we do not own; translator converts our typed markup to/from Value at this boundary only."
-
-[[consumer]]
-name        = "transport-tg-notifications"
-path        = "rust/crates/transport-tg/src/notifications.rs"
-transports  = ["http"]
-role        = "Notification handler + edit-in-place; consumes api_types::NotificationPayload and builds typed keyboards"
-enforcement = "scanner"
-# Notifications handler sends Bot-API requests through transport-tg-api;
-# keyboards are built typed (api_types::TelegramReplyMarkup) but research
-# payload parsing still touches upstream Value fields.
-allow-value = true
-allow-value-reason = "Research SSE payload fields arrive as opaque JSON until the lifecycle-event schema is tightened; outgoing markup is typed via api_types::TelegramReplyMarkup."
 
 [[consumer]]
 name        = "electron-onboarding-validation"
@@ -39,4 +24,3 @@ path        = "electron/src/main/onboarding/runtime/setupValidation.ts"
 transports  = ["http"]
 role        = "Onboarding token-validation probe — hits getMe with a user-supplied bot token and zod-parses the response"
 enforcement = "zod-schema"
-allow-value = false

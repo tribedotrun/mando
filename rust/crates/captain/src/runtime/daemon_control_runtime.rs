@@ -59,11 +59,6 @@ impl CaptainRuntime {
     }
 
     #[tracing::instrument(skip_all)]
-    pub async fn kill_worker_process(&self, pid: u32) -> anyhow::Result<()> {
-        crate::io::process_manager::kill_worker_process(crate::Pid::new(pid)).await
-    }
-
-    #[tracing::instrument(skip_all)]
     pub async fn workers_dashboard(
         &self,
         workflow: &settings::CaptainWorkflow,
@@ -158,6 +153,7 @@ fn worker_is_stale(
         (crate::runtime::agent_runtime::AgentLivenessStatus::Active, None) => false,
         (crate::runtime::agent_runtime::AgentLivenessStatus::Inactive, _) => true,
         (crate::runtime::agent_runtime::AgentLivenessStatus::Completed, _)
+        | (crate::runtime::agent_runtime::AgentLivenessStatus::Interrupted, _)
         | (crate::runtime::agent_runtime::AgentLivenessStatus::Failed, _) => false,
     }
 }

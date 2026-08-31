@@ -205,20 +205,20 @@ pub fn result_stream_line(
     } else {
         state.result_text.as_str()
     };
-    let is_error = !expected_termination && final_status == global_types::SessionStatus::Failed;
-    let subtype = if expected_termination {
-        "interrupted"
-    } else if is_error {
-        "error"
+    let outcome = if expected_termination {
+        api_types::ResultOutcome::Interrupted
+    } else if final_status == global_types::SessionStatus::Failed {
+        api_types::ResultOutcome::ErrorDuringExecution
     } else {
-        "success"
+        api_types::ResultOutcome::Success
     };
+    let is_error = outcome.is_error();
     OpenCodeCompletion {
         final_status,
         cost_usd: state.cost_usd,
         result_line: json!({
             "type": "result",
-            "subtype": subtype,
+            "subtype": outcome.as_str(),
             "is_error": is_error,
             "duration_ms": duration_ms,
             "num_turns": 1,

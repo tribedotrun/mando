@@ -97,7 +97,6 @@ export function patchTaskList(qc: QueryClient, payload: TaskEventData): void {
   const id = payload.item?.id ?? (payload.id as number | undefined);
   if (id != null) {
     void qc.invalidateQueries({ queryKey: queryKeys.tasks.timeline(id) });
-    void qc.invalidateQueries({ queryKey: queryKeys.tasks.askHistory(id) });
     void qc.invalidateQueries({ queryKey: queryKeys.tasks.feed(id) });
     void qc.invalidateQueries({ queryKey: queryKeys.tasks.artifacts(id) });
   }
@@ -145,7 +144,7 @@ export function handleSessionsEvent(qc: QueryClient, data: SseSessionsPayload | 
 
 // ── Snapshot seeding ──
 
-export interface SnapshotCounts {
+interface SnapshotCounts {
   tasks: number;
   workers: number;
 }

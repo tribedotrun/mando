@@ -52,9 +52,7 @@ export function SessionFooter({ event }: { event: ResultEvent }): React.ReactEle
           {summary.modelUsage.map((m) => (
             <div key={m.model}>
               <span className="font-medium">{m.model}</span>
-              <span className="ml-2 opacity-70">
-                {m.usage.input_tokens + m.usage.output_tokens} tok
-              </span>
+              <span className="ml-2 opacity-70">{formatTotalUsage(m.usage)}</span>
             </div>
           ))}
         </div>

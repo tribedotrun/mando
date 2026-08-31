@@ -1,8 +1,8 @@
 //! Task route tree -- extracted to respect file length limits.
 
 use crate::{
-    routes_artifacts, routes_clarifier, routes_task_actions, routes_task_advisor, routes_task_ask,
-    routes_task_detail, routes_tasks, ApiRouter, AppState,
+    routes_artifacts, routes_clarifier, routes_task_actions, routes_task_detail, routes_tasks,
+    ApiRouter, AppState,
 };
 
 pub(crate) fn task_routes() -> ApiRouter<AppState> {
@@ -129,33 +129,6 @@ pub(crate) fn task_routes() -> ApiRouter<AppState> {
     );
     let router = crate::api_route!(
         router,
-        POST "/api/tasks/ask",
-        transport = Multipart,
-        auth = Protected,
-        handler = routes_task_ask::post_task_ask,
-        body = api_types::TaskAskRequest,
-        res = api_types::AskResponse
-    );
-    let router = crate::api_route!(
-        router,
-        POST "/api/tasks/ask/end",
-        transport = Json,
-        auth = Protected,
-        handler = routes_task_ask::post_task_ask_end,
-        body = api_types::TaskIdRequest,
-        res = api_types::AskEndResponse
-    );
-    let router = crate::api_route!(
-        router,
-        POST "/api/tasks/ask/reopen",
-        transport = Json,
-        auth = Protected,
-        handler = routes_task_ask::post_task_ask_reopen,
-        body = api_types::TaskIdRequest,
-        res = api_types::AskReopenResponse
-    );
-    let router = crate::api_route!(
-        router,
         POST "/api/tasks/retry",
         transport = Json,
         auth = Protected,
@@ -187,15 +160,6 @@ pub(crate) fn task_routes() -> ApiRouter<AppState> {
 
 fn task_detail_routes() -> ApiRouter<AppState> {
     let router = ApiRouter::new();
-    let router = crate::api_route!(
-        router,
-        GET "/api/tasks/{id}/history",
-        transport = Json,
-        auth = Protected,
-        handler = routes_task_detail::get_task_history,
-        params = api_types::TaskIdParams,
-        res = api_types::AskHistoryResponse
-    );
     let router = crate::api_route!(
         router,
         GET "/api/tasks/{id}/timeline",
@@ -233,7 +197,7 @@ fn task_detail_routes() -> ApiRouter<AppState> {
         params = api_types::TaskIdParams,
         res = api_types::ArtifactsResponse
     );
-    let router = crate::api_route!(
+    crate::api_route!(
         router,
         GET "/api/tasks/{id}/feed",
         transport = Json,
@@ -241,16 +205,6 @@ fn task_detail_routes() -> ApiRouter<AppState> {
         handler = routes_task_detail::get_task_feed,
         params = api_types::TaskIdParams,
         res = api_types::FeedResponse
-    );
-    crate::api_route!(
-        router,
-        POST "/api/tasks/{id}/advisor",
-        transport = Json,
-        auth = Protected,
-        handler = routes_task_advisor::post_task_advisor,
-        body = api_types::AdvisorRequest,
-        params = api_types::TaskIdParams,
-        res = api_types::AdvisorResponse
     )
 }
 

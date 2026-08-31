@@ -1,6 +1,6 @@
 import type { ItemStatus } from '#renderer/global/types';
 
-export interface StatusBadge {
+interface StatusBadge {
   label: string;
   color: string;
   pulse?: boolean;

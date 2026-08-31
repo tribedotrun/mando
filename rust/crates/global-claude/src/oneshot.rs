@@ -299,7 +299,7 @@ impl CcOneShot {
                 let stream_size = std::fs::metadata(session.stream_path())
                     .map(|m| m.len())
                     .unwrap_or(u64::MAX);
-                let pid_alive = crate::process::is_process_alive(pid);
+                let pid_alive = crate::is_process_alive(pid);
                 warn!(
                     module = "mando-cc",
                     caller = %caller,
@@ -310,10 +310,10 @@ impl CcOneShot {
                     error = %e,
                     "oneshot recv_result failed"
                 );
-                // build_result has already updated the meta status for an
-                // ApiError envelope; for every other variant we still mark
-                // the session as failed so obs reflects the outcome.
-                if !matches!(e, CcError::ApiError { .. }) {
+                // build_result has already updated meta for API errors and
+                // explicit interruptions. Only remaining variants are
+                // failures that still need a terminal meta update here.
+                if !matches!(e, CcError::ApiError { .. } | CcError::Interrupted { .. }) {
                     crate::update_stream_meta_status(session.session_id(), "failed", None);
                 }
                 // Close cleanly before propagating. Close errors are
@@ -336,7 +336,7 @@ impl CcOneShot {
                 let stream_size = std::fs::metadata(&stream_path)
                     .map(|m| m.len())
                     .unwrap_or(u64::MAX);
-                let pid_alive = crate::process::is_process_alive(pid);
+                let pid_alive = crate::is_process_alive(pid);
                 crate::update_stream_meta_status(&session_id, "timeout", None);
 
                 warn!(
@@ -350,9 +350,7 @@ impl CcOneShot {
                     "oneshot timed out"
                 );
 
-                crate::process::kill_process(pid)
-                    .await
-                    .map_err(CcError::Other)?;
+                crate::kill_process(pid).await.map_err(CcError::Other)?;
 
                 return Err(CcError::Other(anyhow::anyhow!(
                     "oneshot timed out after {}s (session={}, stream={})",

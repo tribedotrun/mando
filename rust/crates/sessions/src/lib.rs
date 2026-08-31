@@ -1,7 +1,5 @@
-mod config;
 mod io;
 mod runtime;
-mod service;
 mod types;
 
 pub use io::queries;

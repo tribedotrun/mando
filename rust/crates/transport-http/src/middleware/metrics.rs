@@ -17,6 +17,9 @@ use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use metrics::{counter, histogram};
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
+use tracing::Instrument;
+
+use super::request_id::RequestId;
 
 static HANDLE: OnceLock<PrometheusHandle> = OnceLock::new();
 
@@ -79,10 +82,10 @@ pub async fn render_metrics() -> Response {
     }
 }
 
-/// Axum middleware — increments `http_requests_total` and records
-/// `http_request_duration_seconds` for every request.
+/// Router-owned observability middleware for every matched request.
 ///
-/// Labels: `method` (GET/POST/…), `route` (matched path pattern like
+/// Creates the single matched-route tracing span and records Prometheus
+/// request count/duration. Labels: `method` (GET/POST/…), `route` (matched path pattern like
 /// `/api/tasks/:id` from the axum `MatchedPath` extension), `status`
 /// (3-digit HTTP status code). Must be installed via
 /// `Router::route_layer` so it runs after route matching — otherwise
@@ -95,11 +98,32 @@ pub async fn record_http_metrics(request: Request, next: Next) -> Response {
         .get::<MatchedPath>()
         .map(|p| p.as_str().to_owned())
         .unwrap_or_else(|| "unmatched".to_owned());
+    let request_id = request
+        .extensions()
+        .get::<RequestId>()
+        .map(|id| id.0.as_str())
+        .unwrap_or("missing");
 
+    let span = tracing::info_span!(
+        "http_route",
+        module = "transport-http-middleware-metrics",
+        request_id = %request_id,
+        method = %method,
+        route = %route,
+    );
     let start = Instant::now();
-    let response = next.run(request).await;
+    let response = next.run(request).instrument(span.clone()).await;
     let duration = start.elapsed();
     let status = response.status().as_u16().to_string();
+
+    span.in_scope(|| {
+        tracing::info!(
+            module = "transport-http-middleware-metrics",
+            status = %status,
+            duration_ms = duration.as_millis() as u64,
+            "request completed"
+        );
+    });
 
     counter!(
         "http_requests_total",

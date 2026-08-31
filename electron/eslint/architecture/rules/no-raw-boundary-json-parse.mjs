@@ -74,10 +74,6 @@ function isJsonParseReference(node) {
   );
 }
 
-function isJsonParseCall(node) {
-  return node?.type === 'CallExpression' && isJsonParseReference(node.callee);
-}
-
 function isResponseJsonCall(node) {
   const call = unwrapExpression(node);
   return (

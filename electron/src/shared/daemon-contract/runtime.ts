@@ -4,7 +4,6 @@ import {
   routes,
   type JsonRouteKey,
   type MultipartRouteKey,
-  type NdjsonRouteKey,
   type Routes,
   type SseRouteKey,
   type StaticRouteKey,
@@ -37,8 +36,6 @@ export type JsonRouteOptions<K extends JsonRouteKey> = RouteResolveOptions<K>;
 export type MultipartRouteOptions<K extends MultipartRouteKey> = RouteResolveOptions<K>;
 export type SseRouteOptions<K extends SseRouteKey> = RouteResolveOptions<K>;
 export type StaticRouteOptions<K extends StaticRouteKey> = RouteResolveOptions<K>;
-export type NdjsonRouteOptions<K extends NdjsonRouteKey> = RouteResolveOptions<K>;
-
 type SchemaMap = Record<string, ZodType<unknown> | undefined>;
 
 function parseIssues(message: string) {

@@ -81,13 +81,3 @@ pub async fn resume_worker_process(
     )
     .await
 }
-
-/// Kill a worker process; delegates to `global_claude::kill_process`.
-///
-/// Kept as a wrapper only because gateway routes call it via
-/// `mando_captain::io::process_manager::kill_worker_process` for API
-/// visibility. Direct `global_claude::kill_process` is used inside the
-/// captain crate itself.
-pub async fn kill_worker_process(pid: crate::Pid) -> Result<()> {
-    global_claude::kill_process(pid).await
-}

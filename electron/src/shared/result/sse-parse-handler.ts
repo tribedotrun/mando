@@ -4,14 +4,14 @@
 
 import type { ZodType } from 'zod';
 
-export interface SseParseResult<T> {
+interface SseParseResult<T> {
   /** Successfully parsed event data, or null when the message was rejected. */
   data: T | null;
   /** Reason the message was rejected; null on success. */
   failure: SseParseFailure | null;
 }
 
-export interface SseParseFailure {
+interface SseParseFailure {
   /** Always `'parse_failed'` — the obs event type emitted to VictoriaLogs. */
   event: 'parse_failed';
   /** Schema issues when the JSON parsed but the shape didn't match. */

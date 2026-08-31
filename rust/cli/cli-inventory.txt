@@ -1,0 +1,82 @@
+mando	--verbose
+mando captain	
+mando captain accept	
+mando captain adopt	-n/--note,-p/--project,-w/--worktree
+mando captain handoff	
+mando captain merge	-p/--project
+mando captain nudge	
+mando captain reopen	
+mando captain retry	
+mando captain rework	
+mando captain stop	
+mando captain tick	--dry-run
+mando captain triage	
+mando captain workers	-n,-w
+mando channels	
+mando codex	
+mando codex app-restore	
+mando codex app-status	--json
+mando codex app-use	
+mando credentials	
+mando credentials disable	
+mando credentials enable	
+mando credentials list	
+mando credentials pick	--codex,--id,--label,-a/--account
+mando credentials sync-codex	
+mando daemon	
+mando daemon health	
+mando daemon logs	-f,-n
+mando daemon start	-p,-v
+mando daemon stop	
+mando firecrawl	
+mando firecrawl scrape	
+mando health	
+mando merge	-p/--project
+mando notify	--chat-id
+mando project	
+mando project add	-a/--alias,-p/--path
+mando project edit	--check-command,--clear-github-repo,--github-repo,--preamble,--rename,-a/--alias
+mando project list	
+mando project remove	
+mando scout	
+mando scout act	
+mando scout add	-t
+mando scout archive	
+mando scout ask	--session
+mando scout bulk-delete	
+mando scout bulk-status	
+mando scout delete	
+mando scout list	--status
+mando scout publish	
+mando scout read	
+mando scout research	
+mando scout save	
+mando scout sessions	
+mando scout show	
+mando scout simplelist	--status
+mando scout status	
+mando sessions	--caller,--json,--last,--task
+mando sessions cost	
+mando sessions messages	--last
+mando sessions stream	--type
+mando sessions tools	
+mando sessions transcript	
+mando tasks	--all
+mando todo	
+mando todo add	--no-auto-merge,--no-pr,--plan,-p/--project
+mando todo bulk	--stdin,-p/--project
+mando todo delete	
+mando todo evidence	--allow-static,--caption,--kind,--task
+mando todo input	
+mando todo list	--all
+mando todo show	
+mando todo summary	--file
+mando todo timeline	--last
+mando triage	
+mando ui	
+mando worktree	
+mando worktree cleanup	--dry-run
+mando worktree list	
+mando worktree open	-p/--project
+mando worktree prune	
+mando worktree remove	

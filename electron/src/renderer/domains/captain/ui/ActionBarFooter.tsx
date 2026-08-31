@@ -13,10 +13,9 @@ import {
 import { Button } from '#renderer/global/ui/primitives/button';
 import { TaskAttachmentButton } from '#renderer/domains/captain/ui/TaskAttachmentButton';
 import { TaskSubmitButton } from '#renderer/domains/captain/ui/TaskComposerControls';
-import { AskReopenButton, ImageChip } from '#renderer/domains/captain/ui/ActionBarToolbarParts';
+import { ImageChip } from '#renderer/domains/captain/ui/ActionBarToolbarParts';
 
-export type ActionBarSubmitState = 'idle' | 'ready' | 'pending';
-export type ActionBarAskReopenState = 'hidden' | 'ready' | 'pending';
+type ActionBarSubmitState = 'idle' | 'ready' | 'pending';
 
 interface ActionBarFooterProps {
   available: ActionBarAction[];
@@ -25,8 +24,6 @@ interface ActionBarFooterProps {
   onImageSelect: (file: File) => void;
   isLoading: boolean;
   submitState: ActionBarSubmitState;
-  askReopenState: ActionBarAskReopenState;
-  onAskReopen: () => void;
   onSubmit: () => void;
 }
 
@@ -37,8 +34,6 @@ export function ActionBarFooter({
   onImageSelect,
   isLoading,
   submitState,
-  askReopenState,
-  onAskReopen,
   onSubmit,
 }: ActionBarFooterProps): React.ReactElement {
   const hasMultipleActions = available.length > 1;
@@ -80,8 +75,6 @@ export function ActionBarFooter({
         disabled={isLoading}
         className="shrink-0 text-muted-foreground"
       />
-
-      <AskReopenButton state={askReopenState} onAskReopen={onAskReopen} />
 
       <div className="flex-1" />
 

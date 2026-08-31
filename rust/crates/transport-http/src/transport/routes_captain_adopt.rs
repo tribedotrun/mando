@@ -55,14 +55,11 @@ fn resolve_adopt_project(
 
     match matched.first() {
         Some((project, _)) => Ok(project.clone()),
-        None if config.captain.projects.len() == 1 => match config.captain.projects.values().next()
-        {
-            Some(p) => Ok(p.name.clone()),
-            None => Err(error_response(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "projects map length == 1 but values().next() returned None",
-            )),
-        },
+        None if config.captain.projects.len() == 1 => Ok(config
+            .captain
+            .projects
+            .values()
+            .fold(String::new(), |_, project| project.name.clone())),
         None => Err(error_response(
             StatusCode::BAD_REQUEST,
             "project is required when the worktree path does not match a configured project",
@@ -93,7 +90,6 @@ async fn detect_checked_out_branch(state: &AppState, wt_path: &Path) -> Result<S
 }
 
 /// POST /api/captain/adopt
-#[crate::instrument_api(method = "POST", path = "/api/captain/adopt")]
 pub(crate) async fn post_captain_adopt(
     State(state): State<AppState>,
     Json(body): Json<api_types::AdoptRequest>,

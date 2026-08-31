@@ -21,7 +21,7 @@ function useAnyCodexSwapInFlight(): boolean {
   return useIsMutating({ mutationKey: queryKeys.codexDesktopApp.swap() }) > 0;
 }
 
-export interface UseCodexDesktopAppStatusResult {
+interface UseCodexDesktopAppStatusResult {
   status: CodexDesktopAppStatus | null;
   restorePersonal: () => void;
   restoring: boolean;
@@ -61,7 +61,7 @@ export function useCodexDesktopAppStatus(): UseCodexDesktopAppStatusResult {
   };
 }
 
-export interface UseUseInDesktopAppResult {
+interface UseUseInDesktopAppResult {
   useInDesktopApp: (label: string) => Promise<void>;
   pending: boolean;
   anySwapInFlight: boolean;

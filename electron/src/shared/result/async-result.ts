@@ -122,6 +122,3 @@ export function combineAsync<T, E>(items: Array<ResultAsync<T, E>>): ResultAsync
     Promise.all(items.map((it) => it.toPromise())).then((results) => combineSync(results)),
   );
 }
-
-// Sequence: same as combineAsync but for clarity at call sites that semantically iterate.
-export const sequence = combineAsync;

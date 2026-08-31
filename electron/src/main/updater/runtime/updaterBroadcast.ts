@@ -1,7 +1,7 @@
 import { BrowserWindow } from 'electron';
 import { sendChannel } from '#main/global/runtime/ipcSecurity';
 
-export type UpdateBroadcastChannel =
+type UpdateBroadcastChannel =
   | 'update-ready'
   | 'update-checking'
   | 'update-no-update'

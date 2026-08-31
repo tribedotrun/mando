@@ -1,6 +1,5 @@
 //! Display-only task subcommands (show, list).
 
-use crate::gateway_paths as paths;
 use crate::http::{parse_id, DaemonClient};
 
 fn item_status_label(status: api_types::ItemStatus) -> &'static str {
@@ -31,7 +30,11 @@ pub(crate) async fn fetch_task_by_id(
     client: &DaemonClient,
     id_num: i64,
 ) -> anyhow::Result<api_types::TaskItem> {
-    let resp: api_types::TaskListResponse = client.get_json(paths::TASKS_WITH_ARCHIVED).await?;
+    let resp = client
+        .get_tasks(&api_types::TaskListQuery {
+            include_archived: Some(true),
+        })
+        .await?;
     resp.items
         .into_iter()
         .find(|item| item.id == id_num)
@@ -72,8 +75,18 @@ pub(crate) async fn handle_show(item_id: &str) -> anyhow::Result<()> {
     println!("  Interventions: {intervention}");
 
     // Fetch sessions for this task.
-    let sessions_result: api_types::ItemSessionsResponse =
-        client.get_json(&paths::task_sessions(item_id)).await?;
+    let sessions_result = client
+        .get_tasks_by_id_sessions(
+            &api_types::TaskIdParams { id: id_num },
+            &api_types::SessionsQuery {
+                page: None,
+                per_page: None,
+                category: None,
+                caller: None,
+                status: None,
+            },
+        )
+        .await?;
     if !sessions_result.sessions.is_empty() {
         println!("\n  Sessions ({}):", sessions_result.sessions.len());
         for s in sessions_result.sessions {
@@ -101,12 +114,11 @@ pub(crate) async fn handle_show(item_id: &str) -> anyhow::Result<()> {
 
 pub(crate) async fn handle_list(all: bool) -> anyhow::Result<()> {
     let client = DaemonClient::discover()?;
-    let path = if all {
-        paths::TASKS_WITH_ARCHIVED
-    } else {
-        paths::TASKS
-    };
-    let resp: api_types::TaskListResponse = client.get_json(path).await?;
+    let resp = client
+        .get_tasks(&api_types::TaskListQuery {
+            include_archived: all.then_some(true),
+        })
+        .await?;
 
     println!(
         "{:>4}  {:<15}  {:<20}  {:<14}  {:<8}  TITLE",

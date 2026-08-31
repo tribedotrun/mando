@@ -58,7 +58,6 @@ fn map_scout_error(
 // ---------------------------------------------------------------
 
 /// GET /api/scout/items?status=pending
-#[crate::instrument_api(method = "GET", path = "/api/scout/items")]
 pub(crate) async fn get_scout_items(
     State(state): State<AppState>,
     Query(params): Query<api_types::ScoutQuery>,
@@ -78,7 +77,6 @@ pub(crate) async fn get_scout_items(
 }
 
 /// GET /api/scout/items/{id}
-#[crate::instrument_api(method = "GET", path = "/api/scout/items/{id}")]
 pub(crate) async fn get_scout_item(
     State(state): State<AppState>,
     Path(api_types::ScoutItemIdParams { id }): Path<api_types::ScoutItemIdParams>,
@@ -92,7 +90,6 @@ pub(crate) async fn get_scout_item(
 }
 
 /// GET /api/scout/items/{id}/article
-#[crate::instrument_api(method = "GET", path = "/api/scout/items/{id}/article")]
 pub(crate) async fn get_scout_article(
     State(state): State<AppState>,
     Path(api_types::ScoutItemIdParams { id }): Path<api_types::ScoutItemIdParams>,
@@ -105,7 +102,6 @@ pub(crate) async fn get_scout_article(
 }
 
 /// POST /api/scout/items
-#[crate::instrument_api(method = "POST", path = "/api/scout/items")]
 pub(crate) async fn post_scout_items(
     State(state): State<AppState>,
     Json(body): Json<api_types::ScoutAddRequest>,
@@ -138,7 +134,6 @@ pub(crate) async fn post_scout_items(
 }
 
 /// POST /api/scout/process
-#[crate::instrument_api(method = "POST", path = "/api/scout/process")]
 pub(crate) async fn post_scout_process(
     State(state): State<AppState>,
     Json(body): Json<api_types::ScoutProcessRequest>,
@@ -179,7 +174,6 @@ pub(crate) async fn post_scout_process(
 }
 
 /// POST /api/scout/items/{id}/act — generate a task from a scout item.
-#[crate::instrument_api(method = "POST", path = "/api/scout/items/{id}/act")]
 pub(crate) async fn post_scout_act(
     State(state): State<AppState>,
     Path(api_types::ScoutItemIdParams { id }): Path<api_types::ScoutItemIdParams>,
@@ -259,7 +253,6 @@ pub(crate) async fn post_scout_act(
 // ---------------------------------------------------------------
 
 /// PATCH /api/scout/items/{id}
-#[crate::instrument_api(method = "PATCH", path = "/api/scout/items/{id}")]
 pub(crate) async fn patch_scout_item(
     State(state): State<AppState>,
     Path(api_types::ScoutItemIdParams { id }): Path<api_types::ScoutItemIdParams>,
@@ -296,7 +289,6 @@ pub(crate) async fn patch_scout_item(
 // ---------------------------------------------------------------
 
 /// DELETE /api/scout/items/{id}
-#[crate::instrument_api(method = "DELETE", path = "/api/scout/items/{id}")]
 pub(crate) async fn delete_scout_item(
     State(state): State<AppState>,
     Path(api_types::ScoutItemIdParams { id }): Path<api_types::ScoutItemIdParams>,
@@ -316,7 +308,6 @@ pub(crate) async fn delete_scout_item(
 }
 
 /// GET /api/scout/items/{id}/sessions — list CC sessions for a scout item.
-#[crate::instrument_api(method = "GET", path = "/api/scout/items/{id}/sessions")]
 pub(crate) async fn get_scout_item_sessions(
     State(state): State<AppState>,
     Path(api_types::ScoutItemIdParams { id }): Path<api_types::ScoutItemIdParams>,

@@ -20,10 +20,24 @@ struct TelegramRuntimeState {
     pending: PendingMessages,
     bot_abort: Option<tokio::task::AbortHandle>,
     notification_abort: Option<tokio::task::AbortHandle>,
+    #[cfg(test)]
+    notification_spawn_count: u32,
     failure_count: u32,
     first_failure_at: Option<Instant>,
     degraded: bool,
     restart_count: u32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ConfigureReason {
+    Manual,
+    AutomaticRestart,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum FailureDisposition {
+    RestartAfter(std::time::Duration),
+    Degraded,
 }
 
 #[derive(Clone)]
@@ -44,6 +58,14 @@ impl TelegramRuntime {
 
     #[tracing::instrument(skip_all)]
     pub async fn configure(&self, config: &settings::Config) -> Result<()> {
+        self.configure_for(config, ConfigureReason::Manual).await
+    }
+
+    async fn configure_for(
+        &self,
+        config: &settings::Config,
+        reason: ConfigureReason,
+    ) -> Result<()> {
         let enabled = telegram_enabled(config);
         let owner = config.channels.telegram.owner.clone();
 
@@ -56,9 +78,7 @@ impl TelegramRuntime {
             state.owner = owner.clone();
             state.last_error = None;
             state.running = false;
-            state.failure_count = 0;
-            state.first_failure_at = None;
-            state.degraded = false;
+            reset_failure_state_if_manual(&mut state, reason);
 
             if !enabled {
                 return Ok(());
@@ -82,7 +102,7 @@ impl TelegramRuntime {
 
         let runtime = self.clone();
         let bot_handle = tokio::spawn(async move {
-            match crate::start_bot(cfg, Some(gw), pending).await {
+            match crate::start_bot(cfg, gw, pending).await {
                 Ok(()) => {
                     runtime.handle_task_exit(generation, "telegram bot exited cleanly".to_string());
                 }
@@ -99,8 +119,10 @@ impl TelegramRuntime {
         }
 
         if start_notification {
-            self.spawn_notification_loop(generation, &token, &owner)
-                .await?;
+            let mut state = self.inner.lock().await;
+            if state.generation == generation && state.notification_abort.is_none() {
+                self.spawn_notification_loop_locked(&mut state, generation, &token, &owner)?;
+            }
         }
 
         Ok(())
@@ -129,38 +151,33 @@ impl TelegramRuntime {
 
     #[tracing::instrument(skip_all)]
     pub async fn register_owner(&self, owner: String) -> Result<()> {
-        let token = {
-            let mut state = self.inner.lock().await;
-            state.owner = owner.clone();
-            if let Some(cfg) = state.last_config.as_mut() {
-                cfg.channels.telegram.owner = owner.clone();
-                cfg.channels.telegram.enabled = telegram_enabled(cfg);
-                cfg.channels.telegram.token = cfg
-                    .env
-                    .get("TELEGRAM_MANDO_BOT_TOKEN")
-                    .cloned()
-                    .unwrap_or_default();
-            }
-            if !state.enabled || state.notification_abort.is_some() {
-                return Ok(());
-            }
-            state
-                .last_config
-                .as_ref()
-                .map(|cfg| cfg.channels.telegram.token.clone())
-                .unwrap_or_default()
-        };
+        let mut state = self.inner.lock().await;
+        if !state.enabled || state.notification_abort.is_some() {
+            return Ok(());
+        }
+
+        state.owner = owner.clone();
+        if let Some(cfg) = state.last_config.as_mut() {
+            cfg.channels.telegram.owner = owner.clone();
+            cfg.channels.telegram.enabled = telegram_enabled(cfg);
+            cfg.channels.telegram.token = cfg
+                .env
+                .get("TELEGRAM_MANDO_BOT_TOKEN")
+                .cloned()
+                .unwrap_or_default();
+        }
+        let token = state
+            .last_config
+            .as_ref()
+            .map(|cfg| cfg.channels.telegram.token.clone())
+            .unwrap_or_default();
 
         if token.is_empty() || owner.is_empty() {
             return Ok(());
         }
 
-        let generation = {
-            let state = self.inner.lock().await;
-            state.generation
-        };
-        self.spawn_notification_loop(generation, &token, &owner)
-            .await
+        let generation = state.generation;
+        self.spawn_notification_loop_locked(&mut state, generation, &token, &owner)
     }
 
     #[tracing::instrument(skip_all)]
@@ -177,12 +194,17 @@ impl TelegramRuntime {
         }
     }
 
-    async fn spawn_notification_loop(
+    fn spawn_notification_loop_locked(
         &self,
+        state: &mut TelegramRuntimeState,
         generation: u64,
         token: &str,
         owner: &str,
     ) -> Result<()> {
+        if state.generation != generation || state.notification_abort.is_some() {
+            return Ok(());
+        }
+
         let api_base_url = resolve_api_base_url();
         let api = match &api_base_url {
             Some(url) => TelegramApi::with_base_url(token, url)?,
@@ -192,20 +214,23 @@ impl TelegramRuntime {
         let base_url = format!("http://127.0.0.1:{}", self.port);
         let gw_token = Some(self.auth_token.clone());
         let gw = GatewayClient::new(self.port, Some(self.auth_token.clone()));
-        let pending = {
-            let state = self.inner.lock().await;
-            state.pending.clone()
-        };
+        let pending = state.pending.clone();
         let owner_chat_id = owner.to_string();
+        #[cfg(test)]
+        {
+            state.notification_spawn_count += 1;
+        }
         let notif_handle = tokio::spawn(async move {
-            sse::run_notification_loop(base_url, gw_token, api, owner_chat_id, gw, pending).await;
-            runtime.handle_task_exit(generation, "telegram notifications stopped".to_string());
+            if cfg!(test) {
+                std::future::pending::<()>().await;
+            } else {
+                sse::run_notification_loop(base_url, gw_token, api, owner_chat_id, gw, pending)
+                    .await;
+                runtime.handle_task_exit(generation, "telegram notifications stopped".to_string());
+            }
         });
 
-        let mut state = self.inner.lock().await;
-        if state.generation == generation {
-            state.notification_abort = Some(notif_handle.abort_handle());
-        }
+        state.notification_abort = Some(notif_handle.abort_handle());
         Ok(())
     }
 
@@ -223,38 +248,19 @@ impl TelegramRuntime {
                 state.generation += 1;
                 let post_bump_gen = state.generation;
 
-                let now = Instant::now();
-                state.failure_count += 1;
-                if state.first_failure_at.is_none() {
-                    state.first_failure_at = Some(now);
-                }
-
-                if degraded_window_exhausted(
-                    state.failure_count,
-                    state.first_failure_at,
-                    now,
-                    DEGRADED_WINDOW,
-                ) {
-                    state.degraded = true;
-                    tracing::error!(
+                let backoff = match record_failure(&mut state, Instant::now()) {
+                    FailureDisposition::Degraded => {
+                        tracing::error!(
                         module = "telegram",
                         failures = state.failure_count,
                         "telegram entered degraded mode after {} failures -- manual restart or config change required",
                         state.failure_count
                     );
-                    return;
-                }
-
-                if state.failure_count > 1
-                    && state
-                        .first_failure_at
-                        .is_some_and(|first| now.duration_since(first) >= DEGRADED_WINDOW)
-                {
-                    state.failure_count = 1;
-                    state.first_failure_at = Some(now);
-                }
-
-                let backoff_secs = restart_backoff_secs(state.failure_count);
+                        return;
+                    }
+                    FailureDisposition::RestartAfter(backoff) => backoff,
+                };
+                let backoff_secs = backoff.as_secs();
 
                 tracing::warn!(
                     module = "telegram",
@@ -264,11 +270,7 @@ impl TelegramRuntime {
                 );
 
                 let cfg = state.last_config.clone().filter(telegram_enabled);
-                (
-                    cfg,
-                    std::time::Duration::from_secs(backoff_secs),
-                    post_bump_gen,
-                )
+                (cfg, backoff, post_bump_gen)
             };
 
             if cfg.is_some() {
@@ -292,7 +294,10 @@ impl TelegramRuntime {
                     state.last_config.clone().filter(telegram_enabled)
                 };
                 if let Some(cfg) = fresh_cfg {
-                    if let Err(err) = runtime.configure(&cfg).await {
+                    if let Err(err) = runtime
+                        .configure_for(&cfg, ConfigureReason::AutomaticRestart)
+                        .await
+                    {
                         let mut state = runtime.inner.lock().await;
                         state.last_error = Some(format!("telegram restart failed: {err}"));
                     }
@@ -302,11 +307,205 @@ impl TelegramRuntime {
     }
 }
 
+fn reset_failure_state_if_manual(state: &mut TelegramRuntimeState, reason: ConfigureReason) {
+    if reason == ConfigureReason::Manual {
+        state.failure_count = 0;
+        state.first_failure_at = None;
+        state.degraded = false;
+    }
+}
+
+fn record_failure(state: &mut TelegramRuntimeState, now: Instant) -> FailureDisposition {
+    state.failure_count += 1;
+    if state.first_failure_at.is_none() {
+        state.first_failure_at = Some(now);
+    }
+
+    if degraded_window_exhausted(
+        state.failure_count,
+        state.first_failure_at,
+        now,
+        DEGRADED_WINDOW,
+    ) {
+        state.degraded = true;
+        return FailureDisposition::Degraded;
+    }
+
+    if state.failure_count > 1
+        && state
+            .first_failure_at
+            .is_some_and(|first| now.duration_since(first) >= DEGRADED_WINDOW)
+    {
+        state.failure_count = 1;
+        state.first_failure_at = Some(now);
+    }
+
+    FailureDisposition::RestartAfter(std::time::Duration::from_secs(restart_backoff_secs(
+        state.failure_count,
+    )))
+}
+
 fn abort_locked(state: &mut TelegramRuntimeState) {
     if let Some(handle) = state.bot_abort.take() {
         handle.abort();
     }
     if let Some(handle) = state.notification_abort.take() {
         handle.abort();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn automatic_reconfiguration_preserves_failure_window() {
+        let first_failure = Instant::now();
+        let runtime = TelegramRuntime::new(0, "test-token".to_string());
+        {
+            let mut state = runtime.inner.lock().await;
+            state.failure_count = 3;
+            state.first_failure_at = Some(first_failure);
+            state.restart_count = 2;
+        }
+
+        runtime
+            .configure_for(
+                &settings::Config::default(),
+                ConfigureReason::AutomaticRestart,
+            )
+            .await
+            .expect("automatic reconfiguration");
+
+        let state = runtime.inner.lock().await;
+        assert_eq!(state.failure_count, 3);
+        assert_eq!(state.first_failure_at, Some(first_failure));
+        assert_eq!(state.restart_count, 2);
+    }
+
+    #[tokio::test]
+    async fn manual_reconfiguration_clears_failure_window_and_degraded_state() {
+        let runtime = TelegramRuntime::new(0, "test-token".to_string());
+        {
+            let mut state = runtime.inner.lock().await;
+            state.failure_count = 5;
+            state.first_failure_at = Some(Instant::now());
+            state.degraded = true;
+            state.restart_count = 2;
+        }
+
+        runtime
+            .configure(&settings::Config::default())
+            .await
+            .expect("manual reconfiguration");
+
+        let state = runtime.inner.lock().await;
+        assert_eq!(state.failure_count, 0);
+        assert_eq!(state.first_failure_at, None);
+        assert!(!state.degraded);
+        assert_eq!(state.restart_count, 2);
+    }
+
+    // Holding the state lock through the start barrier queues both registrations
+    // at the same precondition before either caller can create a listener.
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
+    async fn concurrent_owner_registration_spawns_one_notification_listener() {
+        let runtime = TelegramRuntime::new(0, "gateway-token".to_string());
+        let mut config = settings::Config::default();
+        config.env.insert(
+            "TELEGRAM_MANDO_BOT_TOKEN".to_string(),
+            "telegram-token".to_string(),
+        );
+        let mut state = runtime.inner.lock().await;
+        state.enabled = true;
+        state.generation = 1;
+        state.last_config = Some(config);
+
+        let barrier = Arc::new(tokio::sync::Barrier::new(3));
+        let first_runtime = runtime.clone();
+        let first_barrier = barrier.clone();
+        let first = tokio::spawn(async move {
+            first_barrier.wait().await;
+            first_runtime.register_owner("owner-a".to_string()).await
+        });
+        let second_runtime = runtime.clone();
+        let second_barrier = barrier.clone();
+        let second = tokio::spawn(async move {
+            second_barrier.wait().await;
+            second_runtime.register_owner("owner-b".to_string()).await
+        });
+        barrier.wait().await;
+        tokio::task::yield_now().await;
+        drop(state);
+
+        first
+            .await
+            .expect("first task")
+            .expect("first registration");
+        second
+            .await
+            .expect("second task")
+            .expect("second registration");
+
+        let state = runtime.inner.lock().await;
+        assert_eq!(state.notification_spawn_count, 1);
+    }
+
+    #[test]
+    fn repeated_failures_back_off_then_enter_degraded_state() {
+        let mut state = TelegramRuntimeState::default();
+        let first_failure = Instant::now();
+
+        for (offset_secs, expected_backoff_secs) in [(0, 1), (1, 2), (2, 4), (3, 8)] {
+            assert_eq!(
+                record_failure(
+                    &mut state,
+                    first_failure + std::time::Duration::from_secs(offset_secs),
+                ),
+                FailureDisposition::RestartAfter(std::time::Duration::from_secs(
+                    expected_backoff_secs,
+                )),
+            );
+        }
+
+        assert_eq!(
+            record_failure(
+                &mut state,
+                first_failure + std::time::Duration::from_secs(4),
+            ),
+            FailureDisposition::Degraded,
+        );
+        assert_eq!(state.failure_count, 5);
+        assert!(state.degraded);
+    }
+
+    #[test]
+    fn failure_after_window_starts_a_new_backoff_sequence() {
+        let mut state = TelegramRuntimeState::default();
+        let first_failure = Instant::now();
+
+        assert_eq!(
+            record_failure(&mut state, first_failure),
+            FailureDisposition::RestartAfter(std::time::Duration::from_secs(1)),
+        );
+        assert_eq!(
+            record_failure(&mut state, first_failure + DEGRADED_WINDOW),
+            FailureDisposition::RestartAfter(std::time::Duration::from_secs(1)),
+        );
+        assert_eq!(state.failure_count, 1);
+        assert_eq!(
+            state.first_failure_at,
+            Some(first_failure + DEGRADED_WINDOW)
+        );
+    }
+
+    #[test]
+    fn notification_listener_has_no_bot_owned_spawn_path() {
+        let bot_source = include_str!("../bot.rs");
+        assert!(
+            !bot_source.contains("run_notification_loop"),
+            "TelegramRuntime must remain the sole notification-listener owner",
+        );
     }
 }

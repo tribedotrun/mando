@@ -13,7 +13,7 @@
 
 import { invoke, send, subscribe, type PayloadOf, type ResultOf } from '#shared/ipc-contract';
 
-export type UpdateChannel = ResultOf<'updates:get-channel'>;
+type UpdateChannel = ResultOf<'updates:get-channel'>;
 
 const updatesApi = {
   onUpdateReady: (callback: (info: { version: string; notes: string }) => void) =>
@@ -65,6 +65,8 @@ export const ipcApi = {
   },
   openExternalUrl: (url: string) => invoke('shell:open-external-url', url),
   openLocalPath: (path: string) => invoke('shell:open-local-path', path),
+  evidenceDeckExists: (worktree: string) => invoke('shell:evidence-deck-exists', worktree),
+  readEvidenceDeck: (worktree: string) => invoke('shell:read-evidence-deck', worktree),
   openDataDir: () => {
     void invoke('open-data-dir');
   },

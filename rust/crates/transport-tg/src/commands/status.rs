@@ -1,10 +1,9 @@
 //! `/tasks [all]` — task overview grouped by repo → workflow state, with merge/accept buttons.
 
 use crate::bot::TelegramBot;
-use crate::gateway_paths as paths;
 use crate::telegram_format::{escape_html, split_message, status_icon};
 use anyhow::Result;
-use captain::ItemStatus;
+use api_types::ItemStatus;
 
 /// How long finalized tasks (merged/completed/canceled) remain visible in the
 /// default `/tasks` view before being hidden. `tasks all` bypasses this.
@@ -54,13 +53,7 @@ fn status_label(s: &ItemStatus) -> &'static str {
 /// Handle `/tasks [all]`.
 pub async fn handle(bot: &TelegramBot, chat_id: &str, args: &str) -> Result<()> {
     let show_all = args.trim().eq_ignore_ascii_case("all");
-    // When show_all, fetch including archived items from the gateway.
-    let api_path = if show_all {
-        paths::TASKS_WITH_ARCHIVED
-    } else {
-        paths::TASKS
-    };
-    let items = match super::load_tasks_with_path(bot.gw(), api_path).await {
+    let items = match super::load_tasks_with_archived(bot.gw(), show_all).await {
         Ok(items) => items,
         Err(e) => {
             if let Err(e) = bot
@@ -85,7 +78,7 @@ pub async fn handle(bot: &TelegramBot, chat_id: &str, args: &str) -> Result<()> 
     }
 
     // In the default view, hide finalized tasks older than the visibility window.
-    let display: Vec<&captain::Task> = if show_all {
+    let display: Vec<&api_types::TaskItem> = if show_all {
         items.iter().collect()
     } else {
         let cutoff =
@@ -93,7 +86,7 @@ pub async fn handle(bot: &TelegramBot, chat_id: &str, args: &str) -> Result<()> 
         items
             .iter()
             .filter(|t| {
-                if !t.status().is_finalized() {
+                if !super::status_is_finalized(t.status) {
                     return true;
                 }
                 // Use last_activity_at, fall back to created_at. If neither
@@ -113,7 +106,7 @@ pub async fn handle(bot: &TelegramBot, chat_id: &str, args: &str) -> Result<()> 
     let mut status_counts: std::collections::HashMap<&str, usize> =
         std::collections::HashMap::new();
     for item in &display {
-        let label = status_label(&item.status());
+        let label = status_label(&item.status);
         *status_counts.entry(label).or_default() += 1;
     }
     let summary_parts: Vec<String> = STATUS_ORDER
@@ -133,14 +126,10 @@ pub async fn handle(bot: &TelegramBot, chat_id: &str, args: &str) -> Result<()> 
     let mut view_ids: Vec<i64> = Vec::new();
 
     // Group by repo
-    let mut by_repo: std::collections::BTreeMap<String, Vec<&captain::Task>> =
+    let mut by_repo: std::collections::BTreeMap<String, Vec<&api_types::TaskItem>> =
         std::collections::BTreeMap::new();
     for item in &display {
-        let project = if item.project.is_empty() {
-            "unknown"
-        } else {
-            &item.project
-        };
+        let project = item.project.as_deref().unwrap_or("unknown");
         by_repo.entry(project.to_string()).or_default().push(item);
     }
 
@@ -149,10 +138,7 @@ pub async fn handle(bot: &TelegramBot, chat_id: &str, args: &str) -> Result<()> 
 
         // Group by status within repo
         for &status in STATUS_ORDER {
-            let status_items: Vec<_> = repo_items
-                .iter()
-                .filter(|it| it.status() == status)
-                .collect();
+            let status_items: Vec<_> = repo_items.iter().filter(|it| it.status == status).collect();
             if status_items.is_empty() {
                 continue;
             }

@@ -113,36 +113,6 @@ transitions = [
 ]
 
 [[producer]]
-path = "POST /api/tasks/{id}/advisor"
-handler = "post_task_advisor"
-transitions = [
-  "awaiting-review -> in-progress",
-  "awaiting-review -> queued",
-  "awaiting-review -> captain-reviewing",
-  "escalated -> in-progress",
-  "escalated -> queued",
-  "escalated -> captain-reviewing",
-  "errored -> in-progress",
-  "errored -> queued",
-  "errored -> captain-reviewing",
-  "handed-off -> in-progress",
-  "handed-off -> queued",
-  "handed-off -> captain-reviewing",
-]
-
-[[producer]]
-path = "POST /api/tasks/ask/reopen"
-handler = "post_task_ask_reopen"
-transitions = [
-  "awaiting-review -> in-progress",
-  "awaiting-review -> queued",
-  "awaiting-review -> captain-reviewing",
-  "escalated -> in-progress",
-  "escalated -> queued",
-  "escalated -> captain-reviewing",
-]
-
-[[producer]]
 path = "POST /api/captain/nudge"
 handler = "post_captain_nudge"
 transitions = []
@@ -182,16 +152,6 @@ transitions = [
 [[producer]]
 path = "POST /api/tasks/resume-rate-limited"
 handler = "post_task_resume_rate_limited"
-transitions = []
-
-[[producer]]
-path = "POST /api/tasks/ask"
-handler = "post_task_ask"
-transitions = []
-
-[[producer]]
-path = "POST /api/tasks/ask/end"
-handler = "post_task_ask_end"
 transitions = []
 
 [[producer]]

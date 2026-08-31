@@ -39,29 +39,6 @@ export const adoptRequestSchema = z
     project: z.string().optional(),
   })
   .strict();
-export const advisorActionResponseSchema = z
-  .object({ ok: z.boolean(), intent: z.string(), feedback: z.string() })
-  .strict();
-export const advisorAskResponseSchema = z
-  .object({
-    id: z.number(),
-    ask_id: z.string(),
-    message: z.string(),
-    answer: z.string(),
-    session_id: z.string(),
-  })
-  .strict();
-export const advisorRequestSchema = z.object({ message: z.string(), intent: z.string() }).strict();
-export const advisorResponseSchema = z.union([
-  z
-    .object({ kind: z.literal('ask') })
-    .strict()
-    .and(z.lazy(() => advisorAskResponseSchema)),
-  z
-    .object({ kind: z.literal('action') })
-    .strict()
-    .and(z.lazy(() => advisorActionResponseSchema)),
-]);
 export const advisorToolResultBlockSchema = z
   .object({ toolUseId: z.string(), text: z.string() })
   .strict();
@@ -94,21 +71,6 @@ export const artifactsPayloadSchema = z
 export const artifactsResponseSchema = z
   .object({ artifacts: z.array(z.lazy(() => taskArtifactSchema)) })
   .strict();
-export const askEndResponseSchema = z.object({ ok: z.boolean(), ended: z.string() }).strict();
-export const askHistoryEntrySchema = z
-  .object({
-    ask_id: z.string(),
-    session_id: z.string(),
-    role: z.string(),
-    content: z.string(),
-    timestamp: z.string(),
-    intent: z.string().nullable(),
-  })
-  .strict();
-export const askHistoryResponseSchema = z
-  .object({ history: z.array(z.lazy(() => askHistoryEntrySchema)) })
-  .strict();
-export const askReopenResponseSchema = z.object({ ok: z.boolean(), feedback: z.string() }).strict();
 export const askResponseSchema = z
   .object({
     id: z.number().nullable(),
@@ -306,6 +268,32 @@ export const codexCredentialPickSchema = z
   .strict();
 export const codexCredentialPickResponseSchema = z
   .object({ pick: z.lazy(() => codexCredentialPickSchema).nullable() })
+  .strict();
+export const codexDesktopAppModeSchema = z.enum(['pool', 'ambient', 'none']);
+export const codexDesktopAppOperationResponseSchema = z
+  .object({ message: z.string(), warnings: z.array(z.string()) })
+  .strict();
+export const codexDesktopAppRestoreRequestSchema = z
+  .object({ codexHome: z.string().nullable().optional() })
+  .strict();
+export const codexDesktopAppStatusQuerySchema = z
+  .object({ codexHome: z.string().nullable().optional() })
+  .strict();
+export const codexDesktopAppStatusResponseSchema = z
+  .object({
+    mode: z.lazy(() => codexDesktopAppModeSchema),
+    activeLabel: z.string().nullable(),
+    credentialId: z.number().nullable(),
+    slotAccountId: z.string().nullable(),
+    canRestore: z.boolean(),
+  })
+  .strict();
+export const codexDesktopAppUseRequestSchema = z
+  .object({
+    label: z.string(),
+    codexHome: z.string().nullable().optional(),
+    callerPid: z.number().nullable().optional(),
+  })
   .strict();
 export const codexLoginFlowInfoSchema = z
   .object({
@@ -526,17 +514,22 @@ export const feedItemSchema = z.union([
       data: z.lazy(() => taskArtifactSchema),
     })
     .strict(),
-  z
-    .object({
-      type: z.literal('message'),
-      timestamp: z.string(),
-      data: z.lazy(() => askHistoryEntrySchema),
-    })
-    .strict(),
 ]);
 export const feedResponseSchema = z
   .object({ id: z.string(), feed: z.array(z.lazy(() => feedItemSchema)), count: z.number() })
   .strict();
+export const fileChangeEntrySchema = z
+  .object({
+    path: z.string(),
+    kind: z.lazy(() => fileChangeKindSchema),
+    movePath: z.string().nullable(),
+    diff: z.string(),
+  })
+  .strict();
+export const fileChangeInputSchema = z
+  .object({ changes: z.array(z.lazy(() => fileChangeEntrySchema)) })
+  .strict();
+export const fileChangeKindSchema = z.enum(['add', 'update', 'delete', 'move', 'other']);
 export const firecrawlScrapeRequestSchema = z.object({ url: z.string() }).strict();
 export const firecrawlScrapeResponseSchema = z
   .object({ ok: z.boolean(), content: z.string() })
@@ -565,6 +558,7 @@ export const healthResponseSchema = z
   .strict();
 export const hookPhaseSchema = z.enum(['started', 'response']);
 export const imageFilenameParamsSchema = z.object({ filename: z.string() }).strict();
+export const imageViewInputSchema = z.object({ path: z.string() }).strict();
 export const inlineKeyboardButtonSchema = z
   .object({ text: z.string(), callbackData: z.string().nullable(), url: z.string().nullable() })
   .strict();
@@ -674,7 +668,6 @@ export const notificationKindSchema = z.union([
       error: z.string(),
     })
     .strict(),
-  z.object({ type: z.literal('AdvisorAnswered'), item_id: z.string(), title: z.string() }).strict(),
   z.object({ type: z.literal('Generic') }).strict(),
 ]);
 export const notificationPayloadSchema = z
@@ -814,6 +807,7 @@ export const resultEventSchema = z
   .strict();
 export const resultOutcomeSchema = z.enum([
   'success',
+  'interrupted',
   'error_during_execution',
   'error_max_turns',
   'error_max_budget_usd',
@@ -1020,7 +1014,6 @@ export const sessionCategorySchema = z.enum([
   'clarifier',
   'captain-review',
   'captain-ops',
-  'advisor',
   'scout',
   'rebase',
 ]);
@@ -1075,8 +1068,6 @@ export const sessionIdsSchema = z
     review: z.string().nullable(),
     clarifier: z.string().nullable(),
     merge: z.string().nullable(),
-    ask: z.string().nullable(),
-    advisor: z.string().nullable(),
   })
   .strict();
 export const sessionJsonlPathResponseSchema = z
@@ -1291,6 +1282,13 @@ export const systemStatusEventSchema = z
 export const systemThinkingTokensEventSchema = z
   .object({ meta: z.lazy(() => eventMetaSchema) })
   .strict();
+export const systemTokenUsageEventSchema = z
+  .object({
+    meta: z.lazy(() => eventMetaSchema),
+    usage: z.lazy(() => transcriptUsageInfoSchema),
+    contextWindow: z.number().nullable(),
+  })
+  .strict();
 export const taskAddRequestSchema = z
   .object({
     title: z.string(),
@@ -1311,9 +1309,6 @@ export const taskArtifactSchema = z
     media: z.array(z.lazy(() => artifactMediaSchema)),
     created_at: z.string(),
   })
-  .strict();
-export const taskAskRequestSchema = z
-  .object({ id: z.number(), question: z.string(), ask_id: z.string().optional() })
   .strict();
 export const taskBulkUpdateRequestSchema = z
   .object({ ids: z.array(z.number()), updates: z.lazy(() => taskBulkUpdatesSchema) })
@@ -1648,14 +1643,6 @@ export const timelineEventPayloadSchema = z.union([
     .strict(),
   z
     .object({
-      event_type: z.literal('human_ask'),
-      question: z.string(),
-      intent: z.string(),
-      ask_id: z.string(),
-    })
-    .strict(),
-  z
-    .object({
       event_type: z.literal('rebase_triggered'),
       worker: z.string(),
       session_id: z.string(),
@@ -1786,9 +1773,6 @@ export const timelineEventPayloadSchema = z.union([
       session_id: z.string(),
     })
     .strict(),
-  z
-    .object({ event_type: z.literal('human_ask_failed'), question: z.string(), error: z.string() })
-    .strict(),
 ]);
 export const timelineResponseSchema = z
   .object({ id: z.string(), events: z.array(z.lazy(() => timelineEventSchema)), count: z.number() })
@@ -1806,6 +1790,8 @@ export const toolInputSchema = z.union([
   z.object({ kind: z.literal('todo_write'), data: z.lazy(() => todoWriteInputSchema) }).strict(),
   z.object({ kind: z.literal('web_fetch'), data: z.lazy(() => webFetchInputSchema) }).strict(),
   z.object({ kind: z.literal('web_search'), data: z.lazy(() => webSearchInputSchema) }).strict(),
+  z.object({ kind: z.literal('file_change'), data: z.lazy(() => fileChangeInputSchema) }).strict(),
+  z.object({ kind: z.literal('image_view'), data: z.lazy(() => imageViewInputSchema) }).strict(),
   z.object({ kind: z.literal('task'), data: z.lazy(() => taskInputSchema) }).strict(),
   z
     .object({ kind: z.literal('notebook_edit'), data: z.lazy(() => notebookEditInputSchema) })
@@ -1829,6 +1815,8 @@ export const toolNameSchema = z.union([
   z.object({ kind: z.literal('todo_write') }).strict(),
   z.object({ kind: z.literal('web_fetch') }).strict(),
   z.object({ kind: z.literal('web_search') }).strict(),
+  z.object({ kind: z.literal('file_change') }).strict(),
+  z.object({ kind: z.literal('image_view') }).strict(),
   z.object({ kind: z.literal('task') }).strict(),
   z.object({ kind: z.literal('notebook_edit') }).strict(),
   z.object({ kind: z.literal('skill') }).strict(),
@@ -1892,6 +1880,12 @@ export const transcriptEventSchema = z.union([
     .object({
       kind: z.literal('system_thinking_tokens'),
       data: z.lazy(() => systemThinkingTokensEventSchema),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('system_token_usage'),
+      data: z.lazy(() => systemTokenUsageEventSchema),
     })
     .strict(),
   z.object({ kind: z.literal('user'), data: z.lazy(() => userEventSchema) }).strict(),
@@ -2145,6 +2139,7 @@ export const resSchemas = {
   getConfigStatus: configStatusResponseSchema,
   getCredentials: credentialsListResponseSchema,
   getCredentialsByIdToken: credentialTokenResponseSchema,
+  getCredentialsCodexAppStatus: codexDesktopAppStatusResponseSchema,
   getCredentialsCodexByIdResetcredits: codexResetCreditsResponseSchema,
   getCredentialsCodexLoginCurrent: codexLoginStatusResponseSchema,
   getHealth: healthResponseSchema,
@@ -2169,7 +2164,6 @@ export const resSchemas = {
   getTasks: taskListResponseSchema,
   getTasksByIdArtifacts: artifactsResponseSchema,
   getTasksByIdFeed: feedResponseSchema,
-  getTasksByIdHistory: askHistoryResponseSchema,
   getTasksByIdPrsummary: prSummaryResponseSchema,
   getTasksByIdSessions: itemSessionsResponseSchema,
   getTasksByIdTimeline: timelineResponseSchema,
@@ -2193,6 +2187,8 @@ export const resSchemas = {
   postCredentialsByIdProbe: probeCredentialResponseSchema,
   postCredentialsByIdToken: updateCredentialTokenResponseSchema,
   postCredentialsCodex: addCodexCredentialResponseSchema,
+  postCredentialsCodexAppRestore: codexDesktopAppOperationResponseSchema,
+  postCredentialsCodexAppUse: codexDesktopAppOperationResponseSchema,
   postCredentialsCodexByIdAuth: addCodexCredentialResponseSchema,
   postCredentialsCodexLoginCancel: cancelCodexLoginResponseSchema,
   postCredentialsCodexLoginStart: startCodexLoginResponseSchema,
@@ -2213,11 +2209,7 @@ export const resSchemas = {
   postScoutResearch: researchStartResponseSchema,
   postTasksAccept: boolOkResponseSchema,
   postTasksAdd: taskItemSchema,
-  postTasksAsk: askResponseSchema,
-  postTasksAskEnd: askEndResponseSchema,
-  postTasksAskReopen: askReopenResponseSchema,
   postTasksBulk: boolOkResponseSchema,
-  postTasksByIdAdvisor: advisorResponseSchema,
   postTasksByIdClarify: clarifyResponseSchema,
   postTasksByIdEvidence: taskEvidenceResponseSchema,
   postTasksByIdSummary: taskSummaryResponseSchema,
@@ -2265,6 +2257,8 @@ export const bodySchemas = {
   postCredentialsByIdProbe: emptyRequestSchema,
   postCredentialsByIdToken: updateCredentialTokenRequestSchema,
   postCredentialsCodex: addCodexCredentialRequestSchema,
+  postCredentialsCodexAppRestore: codexDesktopAppRestoreRequestSchema,
+  postCredentialsCodexAppUse: codexDesktopAppUseRequestSchema,
   postCredentialsCodexByIdAuth: updateCodexCredentialAuthRequestSchema,
   postCredentialsCodexLoginCancel: emptyRequestSchema,
   postCredentialsCodexLoginStart: startCodexLoginRequestSchema,
@@ -2285,11 +2279,7 @@ export const bodySchemas = {
   postScoutResearch: scoutResearchRequestSchema,
   postTasksAccept: taskIdRequestSchema,
   postTasksAdd: taskAddRequestSchema,
-  postTasksAsk: taskAskRequestSchema,
-  postTasksAskEnd: taskIdRequestSchema,
-  postTasksAskReopen: taskIdRequestSchema,
   postTasksBulk: taskBulkUpdateRequestSchema,
-  postTasksByIdAdvisor: advisorRequestSchema,
   postTasksByIdClarify: clarifyRequestSchema,
   postTasksByIdEvidence: taskEvidenceRequestSchema,
   postTasksByIdSummary: taskSummaryRequestSchema,
@@ -2315,6 +2305,7 @@ export const bodySchemas = {
   putConfig: mandoConfigSchema,
 } as const;
 export const querySchemas = {
+  getCredentialsCodexAppStatus: codexDesktopAppStatusQuerySchema,
   getScoutItems: scoutQuerySchema,
   getSessions: sessionsQuerySchema,
   getSessionsByIdMessages: sessionMessagesQuerySchema,
@@ -2347,7 +2338,6 @@ export const paramsSchemas = {
   getSessionsByIdTools: sessionIdParamsSchema,
   getTasksByIdArtifacts: taskIdParamsSchema,
   getTasksByIdFeed: taskIdParamsSchema,
-  getTasksByIdHistory: taskIdParamsSchema,
   getTasksByIdPrsummary: taskIdParamsSchema,
   getTasksByIdSessions: taskIdParamsSchema,
   getTasksByIdTimeline: taskIdParamsSchema,
@@ -2362,7 +2352,6 @@ export const paramsSchemas = {
   postCredentialsCodexByIdAuth: credentialIdParamsSchema,
   postScoutItemsByIdAct: scoutItemIdParamsSchema,
   postScoutItemsByIdTelegraph: scoutItemIdParamsSchema,
-  postTasksByIdAdvisor: taskIdParamsSchema,
   postTasksByIdClarify: taskIdParamsSchema,
   postTasksByIdEvidence: taskIdParamsSchema,
   postTasksByIdSummary: taskIdParamsSchema,

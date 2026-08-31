@@ -114,7 +114,6 @@ fn task_update_error_status(err: &anyhow::Error) -> StatusCode {
 }
 
 /// GET /api/tasks
-#[crate::instrument_api(method = "GET", path = "/api/tasks")]
 pub(crate) async fn get_tasks(
     State(state): State<AppState>,
     Query(query): Query<api_types::TaskListQuery>,
@@ -133,7 +132,6 @@ pub(crate) async fn get_tasks(
 }
 
 /// POST /api/tasks/add (multipart: title, project/repo, optional context/plan/no_pr, images)
-#[crate::instrument_api(method = "POST", path = "/api/tasks/add")]
 pub(crate) async fn post_task_add(
     State(state): State<AppState>,
     multipart: Multipart,
@@ -312,7 +310,6 @@ pub(crate) async fn post_task_add(
 }
 
 /// POST /api/tasks/bulk
-#[crate::instrument_api(method = "POST", path = "/api/tasks/bulk")]
 pub(crate) async fn post_task_bulk(
     State(state): State<AppState>,
     Json(body): Json<api_types::TaskBulkUpdateRequest>,
@@ -343,7 +340,6 @@ pub(crate) async fn post_task_bulk(
 }
 
 /// POST /api/tasks/delete
-#[crate::instrument_api(method = "POST", path = "/api/tasks/delete")]
 pub(crate) async fn post_task_delete(
     State(state): State<AppState>,
     Json(body): Json<api_types::TaskDeleteRequest>,
@@ -388,7 +384,6 @@ fn emit_task_delete_events(bus: &global_bus::EventBus, ids: &[i64]) {
 }
 
 /// DELETE /api/tasks  (same logic as POST /api/tasks/delete)
-#[crate::instrument_api(method = "DELETE", path = "/api/tasks")]
 pub(crate) async fn delete_task_items(
     State(state): State<AppState>,
     Json(body): Json<api_types::TaskDeleteRequest>,
@@ -397,7 +392,6 @@ pub(crate) async fn delete_task_items(
 }
 
 /// POST /api/tasks/merge
-#[crate::instrument_api(method = "POST", path = "/api/tasks/merge")]
 pub(crate) async fn post_task_merge(
     State(state): State<AppState>,
     Json(body): Json<api_types::MergeRequest>,
@@ -411,7 +405,6 @@ pub(crate) async fn post_task_merge(
 }
 
 /// PATCH /api/tasks/{id}
-#[crate::instrument_api(method = "PATCH", path = "/api/tasks/{id}")]
 pub(crate) async fn patch_task_item(
     State(state): State<AppState>,
     Path(api_types::TaskIdParams { id: id_num }): Path<api_types::TaskIdParams>,

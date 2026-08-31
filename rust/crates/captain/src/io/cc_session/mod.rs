@@ -1,6 +1,6 @@
 //! CC Session Manager — persistent multi-turn sessions via `claude --resume`.
 //!
-//! Used by: clarifier (B6), /ops (C1), /ask (C2).
+//! Used by persistent multi-turn daemon sessions.
 //!
 //! ## Locking
 //!

@@ -4,7 +4,6 @@ use crate::telegram_format::escape_html;
 use anyhow::Result;
 
 use crate::bot::TelegramBot;
-use crate::gateway_paths as paths;
 
 pub async fn handle(bot: &TelegramBot, chat_id: &str, args: &str) -> Result<()> {
     let trimmed = args.trim();
@@ -28,11 +27,7 @@ pub async fn handle(bot: &TelegramBot, chat_id: &str, args: &str) -> Result<()> 
 }
 
 async fn stop_all(bot: &TelegramBot, chat_id: &str) -> Result<()> {
-    match bot
-        .gw()
-        .post_no_body::<api_types::StopWorkersResponse>(paths::CAPTAIN_STOP)
-        .await
-    {
+    match bot.gw().post_captain_stop().await {
         Ok(resp) => {
             bot.send_html(chat_id, &format!("🛑 Stopped {} worker(s).", resp.killed))
                 .await?;
@@ -51,10 +46,7 @@ async fn stop_all(bot: &TelegramBot, chat_id: &str) -> Result<()> {
 async fn stop_one(bot: &TelegramBot, chat_id: &str, id: i64) -> Result<()> {
     match bot
         .gw()
-        .post_typed::<api_types::TaskIdRequest, api_types::BoolOkResponse>(
-            paths::TASKS_STOP,
-            &api_types::TaskIdRequest { id },
-        )
+        .post_tasks_stop(&api_types::TaskIdRequest { id })
         .await
     {
         Ok(_) => {

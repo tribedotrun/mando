@@ -1,17 +1,11 @@
 import React, { useState, useCallback, useRef } from 'react';
-import {
-  useTaskAskHistory,
-  useTaskAskReopen,
-  useTaskReopen,
-  useTaskRework,
-} from '#renderer/domains/captain/runtime/hooks';
+import { useTaskReopen, useTaskRework } from '#renderer/domains/captain/runtime/hooks';
 import {
   type ActionBarAction,
   ACTION_CONFIG,
   getAvailableActions,
   getDefaultAction,
   isActionBarHidden,
-  shouldShowAskReopen,
 } from '#renderer/domains/captain/service/actionBarHelpers';
 import { useTextImageDraft } from '#renderer/global/runtime/useTextImageDraft';
 import { extractImageFromClipboard } from '#renderer/global/service/clipboardImage';
@@ -19,12 +13,7 @@ import type { TaskItem } from '#renderer/global/types';
 import { Textarea } from '#renderer/global/ui/primitives/textarea';
 import { ActionBarFooter, ImageChip } from '#renderer/domains/captain/ui/ActionBarFooter';
 
-interface Props {
-  item: TaskItem;
-  onAsk?: (question: string, images?: File[]) => void;
-}
-
-export function TaskComposer({ item, onAsk }: Props): React.ReactElement | null {
+export function TaskComposer({ item }: { item: TaskItem }): React.ReactElement | null {
   const available = getAvailableActions(item);
   const defaultAction = getDefaultAction(item);
   const [selectedAction, setSelectedAction] = useState<ActionBarAction>(defaultAction);
@@ -32,7 +21,6 @@ export function TaskComposer({ item, onAsk }: Props): React.ReactElement | null 
     useTextImageDraft(`action:${item.id}`, { legacyTextSuffix: `action:${item.id}` });
   const [pendingAction, setPendingAction] = useState<ActionBarAction | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const askReopenMut = useTaskAskReopen();
   const reopenMut = useTaskReopen();
   const reworkMut = useTaskRework();
 
@@ -47,16 +35,10 @@ export function TaskComposer({ item, onAsk }: Props): React.ReactElement | null 
 
   const handleSubmit = useCallback(async () => {
     const trimmed = text.trim();
-    if (!trimmed || askReopenMut.isPending || reopenMut.isPending || reworkMut.isPending) return;
+    if (!trimmed || reopenMut.isPending || reworkMut.isPending) return;
     const images = image ? [image] : undefined;
     setPendingAction(selectedAction);
     try {
-      if (selectedAction === 'ask') {
-        onAsk?.(trimmed, images);
-        resetInput();
-        setPendingAction(null);
-        return;
-      }
       if (selectedAction === 'reopen')
         await reopenMut.mutateAsync({ id: item.id, feedback: trimmed, images });
       else if (selectedAction === 'rework')
@@ -67,7 +49,7 @@ export function TaskComposer({ item, onAsk }: Props): React.ReactElement | null 
     } finally {
       setPendingAction(null);
     }
-  }, [text, image, selectedAction, item.id, onAsk, resetInput, askReopenMut, reopenMut, reworkMut]);
+  }, [text, image, selectedAction, item.id, resetInput, reopenMut, reworkMut]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -90,14 +72,9 @@ export function TaskComposer({ item, onAsk }: Props): React.ReactElement | null 
   const hidden = isActionBarHidden(item);
 
   const config = ACTION_CONFIG[selectedAction];
-  const isLoading =
-    !!pendingAction || askReopenMut.isPending || reopenMut.isPending || reworkMut.isPending;
+  const isLoading = !!pendingAction || reopenMut.isPending || reworkMut.isPending;
   const canSubmit = !hidden && text.trim().length > 0 && !isLoading;
   const submitState = isLoading ? 'pending' : canSubmit ? 'ready' : 'idle';
-
-  const { data: askHistoryData } = useTaskAskHistory(item.id);
-  const showAskReopen = shouldShowAskReopen(item, selectedAction, askHistoryData?.history);
-  const askReopenState = askReopenMut.isPending ? 'pending' : showAskReopen ? 'ready' : 'hidden';
 
   return (
     <div
@@ -132,8 +109,6 @@ export function TaskComposer({ item, onAsk }: Props): React.ReactElement | null 
             onImageSelect={setImageFile}
             isLoading={isLoading}
             submitState={submitState}
-            askReopenState={askReopenState}
-            onAskReopen={() => askReopenMut.mutate({ id: item.id })}
             onSubmit={() => void handleSubmit()}
           />
         </div>

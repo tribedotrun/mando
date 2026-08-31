@@ -9,3 +9,11 @@ anyhow.workspace = true
 api-types = { path = "../api-types" }
 mando-gateway = { path = "../mando-gateway", default-features = false }
 ts-rs = "=12.0.1"
+
+[build-dependencies]
+anyhow.workspace = true
+api-types = { path = "../api-types" }
+mando-gateway = { path = "../mando-gateway", default-features = false }
+
+[lints]
+workspace = true

@@ -4,7 +4,7 @@ import { validateTelegramToken } from '#renderer/global/providers/native/onboard
 import log from '#renderer/global/service/logger';
 import { getErrorMessage } from '#renderer/global/service/utils';
 
-export type TGValidationResult = { botUsername?: string; error?: string } | null;
+type TGValidationResult = { botUsername?: string; error?: string } | null;
 
 /**
  * Shared Telegram token validation state machine used by the onboarding

@@ -170,10 +170,6 @@ impl TaskStore {
         tasks::status_counts(&self.pool).await
     }
 
-    pub async fn has_active_with_source(&self, source: &str) -> Result<bool> {
-        tasks::has_active_with_source(&self.pool, source).await
-    }
-
     pub async fn active_worker_count(&self) -> Result<usize> {
         tasks::active_worker_count(&self.pool).await
     }

@@ -1,10 +1,10 @@
 import { z } from 'zod';
 
 export const TTL_MS = 14 * 24 * 60 * 60 * 1000;
-export const QUOTA_BYTES = 4 * 1024 * 1024;
+const QUOTA_BYTES = 4 * 1024 * 1024;
 export const DEBOUNCE_MS = 400;
 
-export const draftImageSchema = z.object({
+const draftImageSchema = z.object({
   base64: z.string(),
   name: z.string(),
   mime: z.string(),

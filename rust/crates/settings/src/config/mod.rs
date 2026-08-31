@@ -3,11 +3,11 @@ pub mod loader;
 pub mod logo;
 pub mod paths;
 pub mod settings;
-pub mod skills;
 pub mod workflow;
 mod workflow_merge;
 pub mod workflow_render;
 pub mod workflow_scout;
+mod workflow_typed;
 pub mod workflow_validate;
 
 pub use error::ConfigError;
@@ -21,13 +21,11 @@ pub use settings::{
     CaptainConfig, ChannelsConfig, ClassifyRule, Config, DashboardConfig, FeaturesConfig,
     GatewayConfig, ProjectConfig, ScoutConfig, TelegramConfig, UiConfig,
 };
-pub use skills::sync_bundled_skills;
 pub use workflow::{
     captain_workflow_path, parse_captain_workflow_or_default, parse_scout_workflow_or_default,
     render_initial_prompt, render_nudge, render_prompt, render_template, scout_workflow_path,
     validate_template_syntax, AgentConfig, CaptainWorkflow, CodexAgentConfig, CodexReasoningEffort,
     CodexSandboxPolicy, ModelsConfig, SandboxOverrides, StageAgentConfig, StageRoutingConfig,
-    WorkflowStage,
 };
 pub use workflow_scout::{
     InterestsConfig, ScoutAgentConfig, ScoutRepo, ScoutWorkflow, ScoutWorkflowOverride,

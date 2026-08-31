@@ -2,10 +2,16 @@
 
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
-use crate::gateway_paths as paths;
+use anyhow::Context;
+use sqlx::sqlite::{SqliteConnectOptions, SqliteConnection};
+use sqlx::Connection;
+
 use crate::http::{parse_id, DaemonClient};
 use crate::motion_check::{check_video, Verdict};
+
+static EVIDENCE_STAGING_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 fn parse_evidence_kind(raw: &str) -> anyhow::Result<Option<api_types::EvidenceKind>> {
     match raw {
@@ -97,7 +103,11 @@ async fn resolve_task_id(
 
     let cwd = std::env::current_dir()?;
     let suffix_id = todo_suffix_task_id(&cwd);
-    let resp: api_types::TaskListResponse = client.get_json(paths::TASKS_WITH_ARCHIVED).await?;
+    let resp = client
+        .get_tasks(&api_types::TaskListQuery {
+            include_archived: Some(true),
+        })
+        .await?;
     let task_refs: Vec<TaskWorktreeRef> = resp.items.iter().map(TaskWorktreeRef::from).collect();
     if let Some(task_id) = task_id_for_matching_worktree(&task_refs, &cwd)? {
         return Ok(task_id);
@@ -130,7 +140,11 @@ pub(crate) fn resolve_task_id_from_env(explicit: Option<&str>) -> anyhow::Result
 }
 
 async fn ensure_task_exists(client: &DaemonClient, task_id: i64) -> anyhow::Result<()> {
-    let resp: api_types::TaskListResponse = client.get_json(paths::TASKS_WITH_ARCHIVED).await?;
+    let resp = client
+        .get_tasks(&api_types::TaskListQuery {
+            include_archived: Some(true),
+        })
+        .await?;
     if resp.items.iter().any(|item| item.id == task_id) {
         Ok(())
     } else {
@@ -195,15 +209,253 @@ pub(crate) async fn handle_summary(
         anyhow::bail!("summary content is empty");
     }
 
-    let result: api_types::TaskSummaryResponse = client
-        .post_json(
-            &paths::task_summary(task_id),
+    let result = client
+        .post_tasks_by_id_summary(
+            &api_types::TaskIdParams { id: task_id },
             &api_types::TaskSummaryRequest { content },
         )
         .await?;
     let artifact_id = result.artifact_id;
     println!("Saved work summary for task #{task_id} (artifact #{artifact_id})");
     Ok(())
+}
+
+fn preflight_evidence_sources(files: &[String]) -> anyhow::Result<()> {
+    for source_path in files {
+        let path = Path::new(source_path);
+        let file = std::fs::File::open(path)
+            .with_context(|| format!("evidence file is not readable: {}", path.display()))?;
+        if !file.metadata()?.is_file() {
+            anyhow::bail!("evidence source is not a regular file: {}", path.display());
+        }
+        if path.file_name().is_none_or(|name| name.is_empty()) {
+            anyhow::bail!("evidence path has no filename: {}", path.display());
+        }
+    }
+    Ok(())
+}
+
+#[derive(Debug)]
+struct StagedEvidence {
+    directory: PathBuf,
+    files: Vec<PathBuf>,
+}
+
+impl StagedEvidence {
+    fn cleanup(&self) -> anyhow::Result<()> {
+        match std::fs::remove_dir_all(&self.directory) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(error).with_context(|| {
+                format!(
+                    "failed to remove staged evidence at {}",
+                    self.directory.display()
+                )
+            }),
+        }
+    }
+}
+
+fn staging_directory(artifacts_dir: &Path) -> PathBuf {
+    let sequence = EVIDENCE_STAGING_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    artifacts_dir.join(format!(
+        ".evidence-staging-{}-{sequence}",
+        std::process::id()
+    ))
+}
+
+fn stage_evidence_sources(
+    artifacts_dir: &Path,
+    files: &[String],
+) -> anyhow::Result<StagedEvidence> {
+    let directory = staging_directory(artifacts_dir);
+    std::fs::create_dir(&directory).with_context(|| {
+        format!(
+            "failed to create evidence staging directory {}",
+            directory.display()
+        )
+    })?;
+
+    let mut staged_files = Vec::with_capacity(files.len());
+    for (index, source) in files.iter().enumerate() {
+        let extension = Path::new(source)
+            .extension()
+            .filter(|extension| !extension.is_empty())
+            .map(|extension| format!(".{}", extension.to_string_lossy()))
+            .unwrap_or_default();
+        let destination = directory.join(format!("{index}{extension}"));
+        if let Err(copy_error) = std::fs::copy(source, &destination) {
+            let staged = StagedEvidence {
+                directory,
+                files: staged_files,
+            };
+            if let Err(cleanup_error) = staged.cleanup() {
+                tracing::error!(
+                    error = %cleanup_error,
+                    "failed to clean partial evidence staging batch"
+                );
+            }
+            return Err(copy_error).with_context(|| {
+                format!(
+                    "failed to stage evidence file {} at {}",
+                    source,
+                    destination.display()
+                )
+            });
+        }
+        staged_files.push(destination);
+    }
+
+    Ok(StagedEvidence {
+        directory,
+        files: staged_files,
+    })
+}
+
+async fn register_staged_evidence<T, F, Fut>(
+    staged: StagedEvidence,
+    register: F,
+) -> anyhow::Result<(StagedEvidence, T)>
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = anyhow::Result<T>>,
+{
+    match register().await {
+        Ok(result) => Ok((staged, result)),
+        Err(register_error) => match staged.cleanup() {
+            Ok(()) => Err(register_error.context("evidence metadata registration failed")),
+            Err(cleanup_error) => {
+                tracing::error!(
+                    error = %cleanup_error,
+                    "evidence metadata registration and staged-file cleanup both failed"
+                );
+                Err(register_error.context(format!(
+                    "evidence metadata registration failed and staged-file cleanup also failed: {cleanup_error:#}"
+                )))
+            }
+        },
+    }
+}
+
+fn move_staged_evidence(
+    data_dir: &Path,
+    media: &[api_types::ArtifactMedia],
+    staged: &StagedEvidence,
+) -> anyhow::Result<()> {
+    if media.len() != staged.files.len() {
+        anyhow::bail!(
+            "daemon registered {} media entries for {} evidence files",
+            media.len(),
+            staged.files.len()
+        );
+    }
+    for (source, media_item) in staged.files.iter().zip(media) {
+        let local_path = media_item
+            .local_path
+            .as_deref()
+            .filter(|path| !path.is_empty())
+            .ok_or_else(|| {
+                anyhow::anyhow!("daemon omitted the local path for {}", source.display())
+            })?;
+        let destination = data_dir.join(local_path);
+        std::fs::rename(source, &destination).with_context(|| {
+            format!(
+                "failed to move staged evidence file {} to {}",
+                source.display(),
+                destination.display()
+            )
+        })?;
+    }
+    Ok(())
+}
+
+fn remove_registered_media(data_dir: &Path, media: &[api_types::ArtifactMedia]) {
+    for local_path in media.iter().filter_map(|item| item.local_path.as_deref()) {
+        let destination = data_dir.join(local_path);
+        match std::fs::remove_file(&destination) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => tracing::warn!(
+                path = %destination.display(),
+                error = %error,
+                "failed to remove evidence media after copy failure"
+            ),
+        }
+    }
+}
+
+async fn rollback_evidence_artifact(
+    data_dir: &Path,
+    task_id: i64,
+    artifact_id: i64,
+) -> anyhow::Result<()> {
+    let db_path = data_dir.join("mando.db");
+    let options = SqliteConnectOptions::new()
+        .filename(&db_path)
+        .create_if_missing(false);
+    let mut connection = SqliteConnection::connect_with(&options)
+        .await
+        .with_context(|| format!("failed to open artifact database at {}", db_path.display()))?;
+    let result = sqlx::query(
+        "DELETE FROM task_artifacts
+         WHERE id = ?1 AND task_id = ?2 AND artifact_type = 'evidence'",
+    )
+    .bind(artifact_id)
+    .bind(task_id)
+    .execute(&mut connection)
+    .await
+    .with_context(|| format!("failed to roll back evidence artifact #{artifact_id}"))?;
+    if result.rows_affected() != 1 {
+        anyhow::bail!(
+            "evidence artifact rollback affected {} rows for artifact #{artifact_id}",
+            result.rows_affected()
+        );
+    }
+    Ok(())
+}
+
+async fn finalize_registered_evidence(
+    data_dir: &Path,
+    task_id: i64,
+    result: &api_types::TaskEvidenceResponse,
+    staged: &StagedEvidence,
+) -> anyhow::Result<()> {
+    let Err(move_error) = move_staged_evidence(data_dir, &result.media, staged) else {
+        if let Err(cleanup_error) = staged.cleanup() {
+            tracing::warn!(
+                error = %cleanup_error,
+                "failed to remove empty evidence staging directory"
+            );
+        }
+        return Ok(());
+    };
+
+    remove_registered_media(data_dir, &result.media);
+    if let Err(cleanup_error) = staged.cleanup() {
+        tracing::error!(
+            error = %cleanup_error,
+            "failed to remove evidence staging files after finalization failure"
+        );
+    }
+    match rollback_evidence_artifact(data_dir, task_id, result.artifact_id).await {
+        Ok(()) => Err(move_error.context(format!(
+            "evidence finalization failed; rolled back artifact #{}",
+            result.artifact_id
+        ))),
+        Err(rollback_error) => {
+            tracing::error!(
+                task_id,
+                artifact_id = result.artifact_id,
+                move_error = %move_error,
+                rollback_error = %rollback_error,
+                "evidence finalization and metadata rollback both failed"
+            );
+            Err(move_error.context(format!(
+                "evidence finalization failed and artifact #{} rollback also failed: {rollback_error:#}",
+                result.artifact_id
+            )))
+        }
+    }
 }
 
 pub(crate) async fn handle_evidence(
@@ -238,6 +490,7 @@ pub(crate) async fn handle_evidence(
             .map(|k| parse_evidence_kind(k))
             .collect::<anyhow::Result<Vec<_>>>()?
     };
+    preflight_evidence_sources(files)?;
 
     // Reject visually static recordings before registering anything with the
     // daemon. Captain enforces "UI changes need a recording", but a recording
@@ -284,54 +537,51 @@ pub(crate) async fn handle_evidence(
 
     let (client, task_id) = create_client_and_resolve_task(item_id, true).await?;
     let data_dir = crate::http::data_dir();
+    let artifacts_dir = data_dir.join("artifacts").join(task_id.to_string());
+    std::fs::create_dir_all(&artifacts_dir).with_context(|| {
+        format!(
+            "failed to create evidence directory {}",
+            artifacts_dir.display()
+        )
+    })?;
 
     let file_inputs: Vec<api_types::EvidenceFileRequest> = files
         .iter()
         .zip(captions.iter())
         .zip(parsed_kinds.iter())
         .map(|((path, caption), kind)| {
-            let p = std::path::Path::new(path);
-            let filename = p
-                .file_name()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .to_string();
-            let ext = p
-                .extension()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .to_string();
+            let path = Path::new(path);
             api_types::EvidenceFileRequest {
-                filename,
-                ext,
+                filename: path
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .into_owned(),
+                ext: path
+                    .extension()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .into_owned(),
                 caption: caption.clone(),
                 kind: *kind,
             }
         })
         .collect();
 
-    let result: api_types::TaskEvidenceResponse = client
-        .post_json(
-            &paths::task_evidence(task_id),
-            &api_types::TaskEvidenceRequest { files: file_inputs },
-        )
-        .await?;
+    let staged = stage_evidence_sources(&artifacts_dir, files)?;
+    let (staged, result) = register_staged_evidence(staged, || async {
+        client
+            .post_tasks_by_id_evidence(
+                &api_types::TaskIdParams { id: task_id },
+                &api_types::TaskEvidenceRequest { files: file_inputs },
+            )
+            .await
+            .map_err(anyhow::Error::from)
+    })
+    .await?;
     let artifact_id = result.artifact_id;
 
-    let artifacts_dir = data_dir.join("artifacts").join(task_id.to_string());
-    std::fs::create_dir_all(&artifacts_dir)?;
-
-    for (i, source_path) in files.iter().enumerate() {
-        let local_path = result
-            .media
-            .get(i)
-            .and_then(|m| m.local_path.as_deref())
-            .unwrap_or("");
-        if !local_path.is_empty() {
-            let dest = data_dir.join(local_path);
-            std::fs::copy(source_path, &dest)?;
-        }
-    }
+    finalize_registered_evidence(&data_dir, task_id, &result, &staged).await?;
 
     // Extract video frames for any video files.
     for (i, source_path) in files.iter().enumerate() {
@@ -421,6 +671,10 @@ fn extract_video_frames(
         }
     }
 }
+
+#[cfg(test)]
+#[path = "todo_artifacts_m10_tests.rs"]
+mod m10_tests;
 
 #[cfg(test)]
 mod tests {

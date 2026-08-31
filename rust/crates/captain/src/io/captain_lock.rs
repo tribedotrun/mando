@@ -1,6 +1,6 @@
 //! Tick-level file lock for captain execution.
 //!
-//! The `CaptainTickLock` guard releases the advisory BSD lock on drop.
+//! The `CaptainTickLock` guard releases the cooperative BSD lock on drop.
 //! `flock(2)` locks are associated with the open file description (not the
 //! acquiring thread), so releasing from a different thread is sound — the
 //! lock owner from the kernel's perspective is the fd, which is valid for

@@ -145,7 +145,7 @@ pub(crate) async fn persist_task_transition_in_tx(
             "UPDATE tasks SET {set_clause} WHERE id = ? AND status = ? AND rev = ?"
         )),
         task,
-    )
+    )?
     .bind(task.id)
     .bind(expected_status)
     .bind(current_rev)

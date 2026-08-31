@@ -1,18 +1,21 @@
 import type {
   AssistantToolUseBlock,
+  FileChangeEntry,
+  FileChangeInput,
   GrepInput,
   ReadInput,
   ResultOutcome,
   TranscriptUsageInfo,
   UserToolResultBlock,
 } from '#renderer/global/types';
-import { toolLabel } from '#renderer/domains/sessions/service/transcriptEvents';
 import { parseJsonText } from '#result';
 
 export function humanOutcome(outcome: ResultOutcome): string {
   switch (outcome) {
     case 'success':
       return 'success';
+    case 'interrupted':
+      return 'interrupted';
     case 'error_max_turns':
       return 'max turns';
     case 'error_max_budget_usd':
@@ -68,13 +71,127 @@ export function buildReadSummary(input: ReadInput): string {
   return parts.join(' · ');
 }
 
-export function toolGroupSummary(tools: AssistantToolUseBlock[]): string {
-  const counts = new Map<string, number>();
-  for (const t of tools) {
-    const label = toolLabel(t.name);
-    counts.set(label, (counts.get(label) ?? 0) + 1);
+export function cleanThinkingText(text: string): string {
+  const trimmed = text.trim();
+  const withoutStrong = trimmed.replace(/^\*\*(.*?)\*\*$/s, '$1').trim();
+  const segments = withoutStrong
+    .split(/\*{4}/)
+    .map((segment) => segment.replace(/\*\*/g, '').trim())
+    .filter(Boolean);
+  if (segments.length > 1 && segments.every((segment) => segment === segments[0])) {
+    return segments[0]!;
   }
-  return [...counts.entries()].map(([k, v]) => (v > 1 ? `${v} ${k}` : k)).join(' · ');
+  const normalized = segments.join(' · ');
+  const midpoint = Math.floor(normalized.length / 2);
+  if (normalized.length % 2 === 0 && normalized.slice(0, midpoint) === normalized.slice(midpoint)) {
+    return normalized.slice(0, midpoint).trim();
+  }
+  return normalized;
+}
+
+export function bashSummary(command: string): string {
+  const trimmed = command.trim();
+  const match = trimmed.match(/^\/(?:bin|usr\/bin)\/(?:zsh|bash|sh)\s+-lc\s+(["'])([\s\S]*)\1$/);
+  return match?.[2]?.trim() || trimmed;
+}
+
+export function fileChangeSummary(input: FileChangeInput): string {
+  if (input.changes.length === 0) return 'No files changed';
+  if (input.changes.length === 1) {
+    const change = input.changes[0]!;
+    return `${fileChangeVerb(change)} ${compactDisplayPath(change.path)}`;
+  }
+  return `Changed ${input.changes.length} files`;
+}
+
+export function compactDisplayPath(path: string): string {
+  if (!path.startsWith('/')) return path;
+  const parts = path.split('/').filter(Boolean);
+  return parts.length > 3 ? `…/${parts.slice(-3).join('/')}` : path;
+}
+
+export function fileChangeVerb(change: FileChangeEntry): string {
+  switch (change.kind) {
+    case 'add':
+      return 'Created';
+    case 'delete':
+      return 'Deleted';
+    case 'move':
+      return 'Moved';
+    case 'update':
+    case 'other':
+      return 'Edited';
+  }
+}
+
+export function diffLineTone(line: string): string {
+  if (line.startsWith('+') && !line.startsWith('+++')) return 'text-success';
+  if (line.startsWith('-') && !line.startsWith('---')) return 'text-destructive';
+  if (line.startsWith('@@')) return 'text-primary';
+  return 'text-muted-foreground';
+}
+
+export function toolGroupSummary(tools: AssistantToolUseBlock[]): string {
+  let commands = 0;
+  let reads = 0;
+  let searches = 0;
+  let changedFiles = 0;
+  let viewedImages = 0;
+  let delegatedTasks = 0;
+  let otherTools = 0;
+
+  for (const tool of tools) {
+    switch (tool.name.kind) {
+      case 'bash':
+        commands++;
+        break;
+      case 'read':
+        reads++;
+        break;
+      case 'grep':
+      case 'glob':
+      case 'web_fetch':
+      case 'web_search':
+        searches++;
+        break;
+      case 'edit':
+      case 'write':
+      case 'notebook_edit':
+        changedFiles++;
+        break;
+      case 'file_change':
+        changedFiles +=
+          tool.input.kind === 'file_change' ? Math.max(tool.input.data.changes.length, 1) : 1;
+        break;
+      case 'image_view':
+        viewedImages++;
+        break;
+      case 'task':
+        delegatedTasks++;
+        break;
+      case 'todo_write':
+      case 'skill':
+      case 'structured_output':
+      case 'mcp':
+      case 'other':
+        otherTools++;
+        break;
+    }
+  }
+
+  const parts: string[] = [];
+  if (commands > 0) parts.push(`Ran ${countNoun(commands, 'command')}`);
+  if (reads > 0) parts.push(`Read ${countNoun(reads, 'file')}`);
+  if (searches > 0) parts.push(`Searched ${countNoun(searches, 'source')}`);
+  if (changedFiles > 0) parts.push(`Changed ${countNoun(changedFiles, 'file')}`);
+  if (viewedImages > 0) parts.push(`Viewed ${countNoun(viewedImages, 'image')}`);
+  if (delegatedTasks > 0) parts.push(`Delegated ${countNoun(delegatedTasks, 'task')}`);
+  if (otherTools > 0) parts.push(`Used ${countNoun(otherTools, 'tool')}`);
+  return parts.join(' · ');
+}
+
+function countNoun(count: number, noun: string): string {
+  return `${count} ${noun}${count === 1 ? '' : 's'}`;
 }
 
 export function todoMarker(status: 'pending' | 'in_progress' | 'completed'): string {

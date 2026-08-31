@@ -1,5 +1,4 @@
 pub mod artifact;
-pub mod ask_history;
 pub mod captain;
 pub mod effect_request;
 pub mod git_error;
@@ -19,7 +18,6 @@ pub use artifact::{
     ArtifactMedia, ArtifactType, EvidenceArtifactCreated, EvidenceFileSpec, EvidenceKind,
     TaskArtifact, UpdateArtifactMediaOutcome,
 };
-pub use ask_history::AskHistoryEntry;
 pub use captain::{Action, ActionKind, EvidenceKindGates, TickMode, TickResult, WorkerContext};
 pub use effect_request::EffectRequest;
 pub use git_error::{find_git_error, GitError};

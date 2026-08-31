@@ -14,6 +14,8 @@
 //! - No `cc_sessions` row remains in `running` state.
 //! - Sessions whose stream ends with a clean `result` event are marked
 //!   `Stopped` with cost/duration backfilled.
+//! - Interrupted results are also marked `Stopped`, but are not considered
+//!   clean or salvageable task output.
 //! - Sessions whose stream has an error or no result at all are marked
 //!   `Failed`.
 //! - First captain tick (<=60s later) salvages stopped-with-result
@@ -54,13 +56,20 @@ pub async fn reconcile_startup_sessions(pool: &SqlitePool) -> Result<()> {
     }
 
     let mut salvaged = 0u32;
+    let mut interrupted = 0u32;
     let mut failed = 0u32;
     for row in &running {
         let sid = row.session_id.as_str();
         let stream_path = super::agent_runtime::stream_path(row.provider, sid);
-        let status = match global_claude::get_stream_result(&stream_path) {
-            Some(result) if global_claude::is_clean_result(&result) => {
+        let status = match global_claude::get_stream_result(&stream_path)
+            .map(|result| global_claude::result_outcome(&result))
+        {
+            Some(global_claude::ResultOutcome::Success) => {
                 salvaged += 1;
+                SessionStatus::Stopped
+            }
+            Some(global_claude::ResultOutcome::Interrupted) => {
+                interrupted += 1;
                 SessionStatus::Stopped
             }
             _ => {
@@ -75,6 +84,7 @@ pub async fn reconcile_startup_sessions(pool: &SqlitePool) -> Result<()> {
         module = "startup",
         total = running.len(),
         salvaged,
+        interrupted,
         failed,
         "reconciled in-flight sessions from prior daemon"
     );
@@ -327,6 +337,28 @@ mod tests {
 
         let row = load_session(&pool, "s-err").await;
         assert_eq!(row.status, "failed");
+    }
+
+    #[tokio::test]
+    async fn interrupted_result_marks_stopped_without_being_clean() {
+        let _lock = global_infra::PROCESS_ENV_LOCK.lock().await;
+        let (_dir, _guard) = isolate_data_dir();
+        let pool = test_pool().await;
+        insert_running(&pool, "s-interrupted", "worker", Some(4)).await;
+        write_stream(
+            "s-interrupted",
+            concat!(
+                r#"{"type":"system","subtype":"init"}"#,
+                "\n",
+                r#"{"type":"result","subtype":"interrupted","is_error":false}"#,
+                "\n",
+            ),
+        );
+
+        reconcile_startup_sessions(&pool).await.unwrap();
+
+        let row = load_session(&pool, "s-interrupted").await;
+        assert_eq!(row.status, "stopped");
     }
 
     #[tokio::test]

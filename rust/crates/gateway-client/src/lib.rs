@@ -1,14 +1,13 @@
-//! Reusable typed daemon client.
+//! Generated typed client for the Mando daemon.
 //!
-//! Every Rust caller that speaks to the mando daemon uses this crate:
-//! - `parse_sse_block` — decodes a single SSE `data:` block into the typed
-//!   `api_types::SseEnvelope` (no `serde_json::Value` hops).
-//! - [`SseConsumer`] — end-to-end SSE subscriber with reconnect/backoff.
-//!
-//! The #882 drift (wire consumer parsing nested envelopes by hand) is
-//! prevented structurally: there is exactly one decode path and it returns
-//! the `api_types` envelope directly.
+//! Route descriptors and methods are generated from the server's
+//! `api_route!` registry. Rust callers choose a generated method rather than
+//! supplying an HTTP method, path, request type, or response type themselves.
 
+mod generated;
+mod http;
 mod sse;
 
+pub use generated::routes;
+pub use http::{ClientError, GatewayClient, Result, RouteDescriptor};
 pub use sse::{parse_sse_block, ParseError, SseConsumer, SseSignal};

@@ -32,7 +32,6 @@ const viteUrl = process.env.VITE_DEV_SERVER_URL;
 
 // Alias map: keep in sync with tsconfig.json `paths` and vite.renderer.config.mts.
 const alias = {
-  '#renderer': resolve(root, 'src/renderer'),
   '#main': resolve(root, 'src/main'),
   '#preload': resolve(root, 'src/preload'),
   '#shared': resolve(root, 'src/shared'),

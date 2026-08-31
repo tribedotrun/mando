@@ -98,4 +98,4 @@ function SelectItem({
   );
 }
 
-export { SelectScrollUpButton, SelectScrollDownButton, SelectContent, SelectItem };
+export { SelectContent, SelectItem };

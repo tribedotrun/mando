@@ -9,7 +9,6 @@ use serde_json::Value;
 use crate::telegram_format::escape_html;
 
 use crate::bot::TelegramBot;
-use crate::gateway_paths as paths;
 
 // Re-export scout commands used by the dispatcher.
 pub use super::scout_commands::{cmd_research, cmd_scout, execute_research};
@@ -96,10 +95,12 @@ async fn addlink_batch(bot: &TelegramBot, chat_id: &str, urls: &[&str]) -> Resul
 
     let mut lines = Vec::new();
     for url in urls {
-        let body = serde_json::json!({"url": url});
         match bot
             .gw()
-            .post_typed::<_, api_types::ScoutAddResponse>(paths::SCOUT_ITEMS, &body)
+            .post_scout_items(&api_types::ScoutAddRequest {
+                url: (*url).to_string(),
+                title: None,
+            })
             .await
         {
             Ok(result) => {
@@ -155,10 +156,13 @@ async fn render_compact_list(
 ) -> Result<Option<(String, Option<api_types::TelegramReplyMarkup>)>> {
     let result = bot
         .gw()
-        .get_typed::<api_types::ScoutResponse>(&paths::scout_items_with_status(
-            Some(status_filter),
-            10000,
-        ))
+        .get_scout_items(&api_types::ScoutQuery {
+            status: Some(parse_status_filter(status_filter)?),
+            q: None,
+            item_type: None,
+            page: None,
+            per_page: Some(10_000),
+        })
         .await?;
     let total = result.total;
 
@@ -213,6 +217,19 @@ async fn render_compact_list(
         start,
     );
     Ok(Some((text, kb)))
+}
+
+fn parse_status_filter(value: &str) -> Result<api_types::ScoutItemStatusFilter> {
+    match value.trim() {
+        "" | "all" => Ok(api_types::ScoutItemStatusFilter::All),
+        "pending" => Ok(api_types::ScoutItemStatusFilter::Pending),
+        "fetched" => Ok(api_types::ScoutItemStatusFilter::Fetched),
+        "processed" => Ok(api_types::ScoutItemStatusFilter::Processed),
+        "saved" => Ok(api_types::ScoutItemStatusFilter::Saved),
+        "archived" => Ok(api_types::ScoutItemStatusFilter::Archived),
+        "error" => Ok(api_types::ScoutItemStatusFilter::Error),
+        other => anyhow::bail!("unsupported scout status filter '{other}'"),
+    }
 }
 
 /// Render a paginated compact list page.
