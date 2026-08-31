@@ -1,10 +1,11 @@
 //! Startup validation for workflow YAML templates.
 //!
-//! Ensures all required prompt/nudge keys exist at gateway startup.
+//! Typed deserialization guarantees required workflow keys; this module checks
+//! template syntax and semantic constraints at gateway startup.
 
 use super::workflow::{
     AgentConfig, CaptainWorkflow, CodexApprovalPolicy, CodexApprovalsReviewer, ScoutWorkflow,
-    StageAgentConfig, WorkflowStage,
+    StageAgentConfig,
 };
 use global_claude::CcStreamSymptom;
 
@@ -21,61 +22,8 @@ const REQUIRED_STREAM_SYMPTOMS: &[CcStreamSymptom] = &[
     CcStreamSymptom::SessionInterrupted,
 ];
 
-/// Required prompt keys for captain workflow. Shared partials (`_`-prefixed)
-/// are not listed — they are reached through `{% include %}`, so a missing one
-/// surfaces as a render error on the prompt that includes it.
-const REQUIRED_CAPTAIN_PROMPTS: &[&str] = &[
-    "worker",
-    "clarifier",
-    "interactive_clarifier",
-    "captain_review",
-    "rebase_worker",
-    "task_ask",
-    "task_ask_reopen_synthesis",
-    "advisor",
-    "advisor_reopen_synthesis",
-    "advisor_reopen_direct",
-    "reopen_resume",
-    "reopen_context",
-    "review_reopen_message",
-    "mergeability_issue_draft",
-    "mergeability_issue_missing_evidence",
-    "mergeability_issue_stale_evidence",
-    "captain_merge",
-];
-
-/// Required nudge keys for captain workflow.
-const REQUIRED_CAPTAIN_NUDGES: &[&str] = &[
-    "unresolved_threads",
-    "missing_work_summary",
-    "draft_pr",
-    "missing_evidence",
-    "stale_evidence",
-    "stale_work_summary",
-    "stream_stale",
-    "reopen_ack",
-    "nudge_default",
-    "nopr_insufficient_output",
-    "gates_incomplete",
-];
-
-/// Required initial prompt keys for captain workflow.
-const REQUIRED_CAPTAIN_INITIAL_PROMPTS: &[&str] = &["worker", "adopted"];
-
 /// Required prompt keys for scout workflow.
 const REQUIRED_SCOUT_PROMPTS: &[&str] = &["process", "synthesize", "qa", "research", "act"];
-
-/// Allowed keys for `AgentConfig.per_state_limits`. These are the kebab-case
-/// wire names of `ItemStatus` variants with a live CC/Codex session — the
-/// only states where a per-instance concurrency cap makes sense. Mirrors
-/// `captain::ItemStatus::is_active` (kept in sync by hand because the
-/// `settings` crate does not depend on `captain`).
-pub const ALLOWED_PER_STATE_LIMIT_KEYS: &[&str] = &[
-    "in-progress",
-    "clarifying",
-    "captain-reviewing",
-    "captain-merging",
-];
 
 /// Check required keys exist in a template map and collect syntax errors.
 fn validate_template_map(
@@ -92,33 +40,23 @@ fn validate_template_map(
     collect_template_errors(scope, templates, errors);
 }
 
-/// Validate that a captain workflow has all required template keys and valid syntax.
+/// Validate captain template syntax and semantic workflow rules.
+/// Required and unknown keys are enforced while deserializing the typed shape.
 /// Panics on any errors — call at startup to fail fast.
 pub fn validate_captain_workflow(wf: &CaptainWorkflow) {
     let mut errors = Vec::new();
-    validate_template_map(
-        "prompts",
-        REQUIRED_CAPTAIN_PROMPTS,
-        &wf.prompts,
-        &mut errors,
-    );
-    validate_template_map("nudges", REQUIRED_CAPTAIN_NUDGES, &wf.nudges, &mut errors);
-    validate_template_map(
-        "initial_prompts",
-        REQUIRED_CAPTAIN_INITIAL_PROMPTS,
-        &wf.initial_prompts,
-        &mut errors,
-    );
+    collect_template_errors("prompts", &wf.prompts, &mut errors);
+    collect_template_errors("nudges", &wf.nudges, &mut errors);
+    collect_template_errors("initial_prompts", &wf.initial_prompts, &mut errors);
     validate_stream_symptoms(&wf.stream_symptoms, &mut errors);
-    if wf.stages.get(WorkflowStage::Implementation).is_none() {
-        errors.push("stages.implementation is required".to_string());
-    }
-    for (stage, config) in wf.stages.iter() {
-        validate_stage_agent(&format!("stages.{}", stage.label()), config, &mut errors);
-    }
+    validate_stage_agent(
+        "stages.implementation",
+        &wf.stages.implementation,
+        &mut errors,
+    );
     if !errors.is_empty() {
         global_infra::unrecoverable!(format!(
-            "captain workflow missing required template keys: {}",
+            "captain workflow validation failed: {}",
             errors.join(", ")
         ));
     }
@@ -241,12 +179,8 @@ pub fn try_validate_agent_config(agent: &AgentConfig, tick_interval_s: u64) -> R
     }
 
     for (key, value) in &agent.per_state_limits {
-        if !ALLOWED_PER_STATE_LIMIT_KEYS.contains(&key.as_str()) {
-            errors.push(format!(
-                "per_state_limits: unknown state '{}' (allowed: {})",
-                key,
-                ALLOWED_PER_STATE_LIMIT_KEYS.join(", ")
-            ));
+        if let Err(error) = super::workflow_typed::validate_per_state_limit_key(key) {
+            errors.push(error);
         }
         if *value == 0 {
             errors.push(format!(
@@ -402,19 +336,25 @@ mod tests {
     }
 
     #[test]
-    fn known_per_state_keys_are_valid() {
+    fn known_active_per_state_key_is_valid() {
         let mut ac = default_agent();
-        for key in ALLOWED_PER_STATE_LIMIT_KEYS {
-            ac.per_state_limits.insert((*key).into(), 1);
-        }
+        ac.per_state_limits.insert("in-progress".into(), 1);
         validate_agent_config(&ac, 30);
     }
 
     #[test]
-    #[should_panic(expected = "per_state_limits: unknown state 'queued'")]
-    fn unknown_per_state_key_rejected() {
+    #[should_panic(expected = "per_state_limits: state 'queued' has no live agent session")]
+    fn inactive_per_state_key_rejected() {
         let mut ac = default_agent();
         ac.per_state_limits.insert("queued".into(), 1);
+        validate_agent_config(&ac, 30);
+    }
+
+    #[test]
+    #[should_panic(expected = "per_state_limits: unknown state 'invented'")]
+    fn unknown_per_state_key_rejected() {
+        let mut ac = default_agent();
+        ac.per_state_limits.insert("invented".into(), 1);
         validate_agent_config(&ac, 30);
     }
 

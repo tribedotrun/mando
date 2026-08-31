@@ -2,7 +2,6 @@ use anyhow::{bail, Result};
 use settings::CaptainWorkflow;
 use settings::Config;
 
-use crate::runtime::clear_task_interaction_sessions;
 use crate::runtime::spawner_lifecycle::LifecycleResult;
 use crate::runtime::task_notes::append_tagged_note;
 use crate::service::{lifecycle, spawn_logic};
@@ -139,7 +138,6 @@ pub async fn reopen_item(
         item.branch = None;
         item.worker_started_at = None;
         item.session_ids.worker = None;
-        clear_task_interaction_sessions(item);
         item.last_activity_at = Some(global_types::now_rfc3339());
         try_unarchive_workbench(item, "during queued fallback", pool).await;
         emit_reopen_event(item, reopen_source, feedback, "queued", pool).await;
@@ -157,7 +155,6 @@ pub async fn reopen_item(
             // either via resume (same path) or clean_and_spawn_fresh (Rework
             // arm, in-place reset). No workbench swap needed.
             apply_lifecycle_result(item, result);
-            clear_task_interaction_sessions(item);
             item.worker_started_at = Some(global_types::now_rfc3339());
             item.last_activity_at = item.worker_started_at.clone();
 
@@ -190,7 +187,6 @@ pub async fn reopen_item(
                 item.branch = None;
                 item.worker_started_at = None;
                 item.session_ids.worker = None;
-                clear_task_interaction_sessions(item);
                 try_unarchive_workbench(item, "during reopen fallback", pool).await;
                 Ok(ReopenOutcome::QueuedFallback)
             } else {

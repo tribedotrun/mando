@@ -4,9 +4,10 @@
 //! raw `name` to a `ToolName` variant and dispatches per-tool input parsing.
 
 use api_types::{
-    BashInput, CcTodoItem, CcTodoItemStatus, EditInput, GlobInput, GrepInput, GrepOutputMode,
-    McpToolName, NotebookCellType, NotebookEditInput, NotebookEditMode, OpaqueInput, OtherToolName,
-    ReadInput, SkillInput, StructuredOutputInput, TaskInput, TodoWriteInput, ToolInput, ToolName,
+    BashInput, CcTodoItem, CcTodoItemStatus, EditInput, FileChangeEntry, FileChangeInput,
+    FileChangeKind, GlobInput, GrepInput, GrepOutputMode, ImageViewInput, McpToolName,
+    NotebookCellType, NotebookEditInput, NotebookEditMode, OpaqueInput, OtherToolName, ReadInput,
+    SkillInput, StructuredOutputInput, TaskInput, TodoWriteInput, ToolInput, ToolName,
     WebFetchInput, WebSearchInput, WriteInput,
 };
 
@@ -96,6 +97,16 @@ pub(super) fn parse_tool_input(name: &ToolName, input: &serde_json::Value) -> To
             allowed_domains: opt_string_array(input.get("allowed_domains")),
             blocked_domains: opt_string_array(input.get("blocked_domains")),
         }),
+        ToolName::FileChange => ToolInput::FileChange(FileChangeInput {
+            changes: input
+                .get("changes")
+                .and_then(|value| value.as_array())
+                .map(|changes| changes.iter().filter_map(parse_file_change).collect())
+                .unwrap_or_default(),
+        }),
+        ToolName::ImageView => ToolInput::ImageView(ImageViewInput {
+            path: str_field(input, "path"),
+        }),
         ToolName::Task => ToolInput::Task(TaskInput {
             description: str_field(input, "description"),
             prompt: str_field(input, "prompt"),
@@ -125,6 +136,25 @@ pub(super) fn parse_tool_input(name: &ToolName, input: &serde_json::Value) -> To
             raw: serde_json::to_string(input).unwrap_or_default(),
         }),
     }
+}
+
+fn parse_file_change(value: &serde_json::Value) -> Option<FileChangeEntry> {
+    let kind = match value.pointer("/kind/type").and_then(|entry| entry.as_str()) {
+        Some("add" | "create") => FileChangeKind::Add,
+        Some("update") => FileChangeKind::Update,
+        Some("delete") => FileChangeKind::Delete,
+        Some("move" | "rename") => FileChangeKind::Move,
+        _ => FileChangeKind::Other,
+    };
+    Some(FileChangeEntry {
+        path: value.get("path")?.as_str()?.to_string(),
+        kind,
+        move_path: value
+            .pointer("/kind/move_path")
+            .and_then(|entry| entry.as_str())
+            .map(str::to_string),
+        diff: str_field(value, "diff"),
+    })
 }
 
 fn parse_grep_output_mode(s: &str) -> Option<GrepOutputMode> {

@@ -115,7 +115,7 @@ async fn run_captain_tick_inner(
     let mut alerts: Vec<String> = Vec::new();
     let mut dry_actions: Vec<crate::Action> = Vec::new();
 
-    // Create notifier — emits BusEvent::Notification for any subscriber (TG, Electron).
+    // Create notifier — emits BusPayload::Notification for any subscriber (TG, Electron).
     let default_slug = if captain.projects.len() == 1 {
         captain
             .projects

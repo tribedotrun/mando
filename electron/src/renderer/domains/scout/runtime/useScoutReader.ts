@@ -14,7 +14,7 @@ interface UseScoutReaderOptions {
   itemId: number;
 }
 
-export interface ScoutReaderState {
+interface ScoutReaderState {
   item: {
     value: ScoutItem | null;
     loading: boolean;

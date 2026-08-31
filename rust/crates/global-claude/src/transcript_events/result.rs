@@ -11,13 +11,11 @@ pub(super) fn parse_result(
     meta: EventMeta,
     raw_subtype: Option<&str>,
 ) -> ResultEvent {
-    let outcome = match raw_subtype.unwrap_or("success") {
-        "success" => ResultOutcome::Success,
-        "error_max_turns" => ResultOutcome::ErrorMaxTurns,
-        "error_max_budget_usd" => ResultOutcome::ErrorMaxBudgetUsd,
-        "error_max_structured_output_retries" => ResultOutcome::ErrorMaxStructuredOutputRetries,
-        _ => ResultOutcome::ErrorDuringExecution,
-    };
+    let reported_error = val
+        .get("is_error")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false);
+    let outcome = ResultOutcome::from_subtype(raw_subtype, reported_error);
     let usage = val.get("usage").map(parse_usage);
     let model_usage = val
         .get("modelUsage")
@@ -52,13 +50,7 @@ pub(super) fn parse_result(
     let is_error = val
         .get("is_error")
         .and_then(|v| v.as_bool())
-        .unwrap_or(matches!(
-            outcome,
-            ResultOutcome::ErrorDuringExecution
-                | ResultOutcome::ErrorMaxTurns
-                | ResultOutcome::ErrorMaxBudgetUsd
-                | ResultOutcome::ErrorMaxStructuredOutputRetries
-        ));
+        .unwrap_or_else(|| outcome.is_error());
     let summary = ResultSummary {
         duration_ms: val.get("duration_ms").and_then(|v| v.as_u64()),
         duration_api_ms: val.get("duration_api_ms").and_then(|v| v.as_u64()),

@@ -7,7 +7,6 @@ use crate::telegram_format::escape_html;
 use super::commands::send_html;
 use super::formatting::{format_swipe_card, swipe_card_kb};
 use crate::bot::TelegramBot;
-use crate::gateway_paths as paths;
 
 // ── /scout (swipe flow only) ────────────────────────────────────────
 
@@ -20,7 +19,13 @@ pub async fn cmd_scout(bot: &TelegramBot, chat_id: &str) -> Result<()> {
 async fn swipe_start(bot: &TelegramBot, chat_id: &str) -> Result<()> {
     let result = match bot
         .gw()
-        .get_typed::<api_types::ScoutResponse>(&paths::processed_scout_items(10000))
+        .get_scout_items(&api_types::ScoutQuery {
+            status: Some(api_types::ScoutItemStatusFilter::Processed),
+            q: None,
+            item_type: None,
+            page: None,
+            per_page: Some(10_000),
+        })
         .await
     {
         Ok(r) => r,
@@ -56,7 +61,7 @@ async fn swipe_start(bot: &TelegramBot, chat_id: &str) -> Result<()> {
 pub async fn show_card(bot: &TelegramBot, chat_id: &str, id: i64) -> Result<()> {
     let item = bot
         .gw()
-        .get_typed::<api_types::ScoutItem>(&paths::scout_item(id))
+        .get_scout_items_by_id(&api_types::ScoutItemIdParams { id })
         .await?;
     let item_val = serde_json::to_value(&item).unwrap_or_default();
     let summary = item.summary.as_deref();
@@ -117,10 +122,12 @@ pub async fn execute_research(bot: &TelegramBot, chat_id: &str, args: &str) -> R
     .await?;
     let message_id = sent["message_id"].as_i64().unwrap_or(0);
 
-    let body = serde_json::json!({"topic": topic, "process": true});
     let post_result = bot
         .gw()
-        .post_typed::<_, api_types::ResearchStartResponse>(paths::SCOUT_RESEARCH, &body)
+        .post_scout_research(&api_types::ScoutResearchRequest {
+            topic: topic.to_string(),
+            process: Some(true),
+        })
         .await;
 
     let error_text: Option<String> = match post_result {

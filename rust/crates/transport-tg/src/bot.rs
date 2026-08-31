@@ -5,8 +5,9 @@
 //!
 //! `TelegramBot` is held behind `Arc` so each incoming update can be
 //! dispatched on its own task without blocking the polling loop. All
-//! pending-session state moves through `tokio::sync::Mutex`-guarded maps so
-//! handlers take `&TelegramBot` rather than `&mut TelegramBot`.
+//! pending-session and task-scoped append state moves through one typed
+//! `tokio::sync::Mutex` registry so handlers take `&TelegramBot` rather than
+//! `&mut TelegramBot`.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -20,9 +21,9 @@ use settings::Config;
 
 use crate::api::TelegramApi;
 use crate::bot_helpers::{extract_chat_id, extract_photo_todo, extract_user_id, parse_command};
+use crate::bot_sessions::PendingSessionRegistry;
 use crate::callbacks;
 use crate::commands;
-use crate::gateway_paths as paths;
 use crate::http::GatewayClient;
 use crate::permissions;
 use crate::PendingMessages;
@@ -30,7 +31,7 @@ use crate::PendingMessages;
 pub(crate) use crate::bot_types::SessionKind;
 pub use crate::bot_types::{
     ActSession, InputSession, PendingAction, PickerItem, PickerState, PromptMeta, QaSession,
-    Session, TodoConfirmState, TodoItem,
+    TodoItem, TodoProjectState,
 };
 
 // ── Macro for repetitive picker store/take ───────────────────────────
@@ -40,7 +41,7 @@ pub use crate::bot_types::{
 /// payload), not chat_id, so it does not participate in reply-disambiguation.
 macro_rules! picker_methods {
     ($store:ident, $take:ident, $field:ident) => {
-        pub async fn $store(&self, action_id: &str, chat_id: &str, items: &[&captain::Task]) {
+        pub async fn $store(&self, action_id: &str, chat_id: &str, items: &[&api_types::TaskItem]) {
             let mut map = self.$field.lock().await;
             map.insert(
                 action_id.to_string(),
@@ -63,32 +64,22 @@ macro_rules! picker_methods {
 /// The Telegram bot — owns session state and the raw API clients.
 ///
 /// Held behind `Arc` so each incoming update can run on its own tokio task
-/// without blocking the polling loop. Eight chat_id-keyed pending-session
-/// maps and two callback-id-keyed picker maps are wrapped in `tokio::Mutex`
-/// for shared interior mutability.
+/// without blocking the polling loop. One pending-session registry owns both
+/// chat-scoped flows and task-scoped context-append locks; two callback-id-keyed
+/// picker maps remain separate.
 pub struct TelegramBot {
     pub(crate) api: TelegramApi,
     config: Arc<RwLock<Config>>,
     pub(crate) gw: GatewayClient,
 
-    // Chat_id-keyed pending-session maps. Every entry carries a
+    // Chat_id-keyed pending-session registry. Every entry carries a
     // `PromptMeta` so plain-text replies can be routed by reply target
     // (`reply_to_message.message_id`) or by most-recent-wins fallback.
-    pub(crate) pending_todo: Mutex<HashMap<String, PromptMeta>>,
-    pub(crate) pending_timeline: Mutex<HashMap<String, PromptMeta>>,
-    pub(crate) pending_scout_add: Mutex<HashMap<String, PromptMeta>>,
-    pub(crate) pending_scout_research: Mutex<HashMap<String, PromptMeta>>,
-    pub(crate) ask_sessions: Mutex<HashMap<String, Session>>,
-    pub(crate) input_sessions: Mutex<HashMap<String, InputSession>>,
-    pub(crate) pending_reopen: Mutex<HashMap<String, PendingAction>>,
-    pub(crate) pending_rework: Mutex<HashMap<String, PendingAction>>,
-    pub(crate) pending_nudge: Mutex<HashMap<String, PendingAction>>,
-    pub(crate) qa_sessions: Mutex<HashMap<String, QaSession>>,
-    pub(crate) act_sessions: Mutex<HashMap<String, ActSession>>,
+    pub(crate) pending_sessions: Mutex<PendingSessionRegistry>,
 
     // Callback-id-keyed pickers; not chat_id-scoped, so out of scope for
     // reply-disambiguation.
-    todo_confirm: Mutex<HashMap<String, TodoConfirmState>>,
+    todo_projects: Mutex<HashMap<String, TodoProjectState>>,
     action_pickers: Mutex<HashMap<String, PickerState>>,
 
     /// Shared with `NotificationHandler` — scout "processing..." message IDs
@@ -97,12 +88,6 @@ pub struct TelegramBot {
 }
 
 impl TelegramBot {
-    pub fn new(config: Arc<RwLock<Config>>, token: &str, gw: GatewayClient) -> Self {
-        let pending = std::sync::Arc::new(std::sync::Mutex::new(HashMap::new()));
-        Self::with_base_url(config, token, None, gw, pending)
-            .unwrap_or_else(|e| global_infra::unrecoverable!("default TelegramApi creation", e))
-    }
-
     pub fn with_base_url(
         config: Arc<RwLock<Config>>,
         token: &str,
@@ -118,18 +103,8 @@ impl TelegramBot {
             api,
             config,
             gw,
-            pending_todo: Mutex::new(HashMap::new()),
-            pending_timeline: Mutex::new(HashMap::new()),
-            pending_scout_add: Mutex::new(HashMap::new()),
-            pending_scout_research: Mutex::new(HashMap::new()),
-            ask_sessions: Mutex::new(HashMap::new()),
-            input_sessions: Mutex::new(HashMap::new()),
-            pending_reopen: Mutex::new(HashMap::new()),
-            pending_rework: Mutex::new(HashMap::new()),
-            pending_nudge: Mutex::new(HashMap::new()),
-            qa_sessions: Mutex::new(HashMap::new()),
-            act_sessions: Mutex::new(HashMap::new()),
-            todo_confirm: Mutex::new(HashMap::new()),
+            pending_sessions: Mutex::new(PendingSessionRegistry::default()),
+            todo_projects: Mutex::new(HashMap::new()),
             action_pickers: Mutex::new(HashMap::new()),
             pending_scout_msgs,
         })
@@ -162,18 +137,14 @@ impl TelegramBot {
         let tg_config = self.config.read().await.channels.telegram.clone();
 
         // Owner-only (auto-register on first message when no owner configured)
-        let just_registered = if tg_config.owner.is_empty() {
+        if tg_config.owner.is_empty() {
             self.auto_register_owner(&user_id, &chat_id).await?;
-            true
-        } else {
-            if !permissions::is_owner(&tg_config, &user_id) {
-                return Ok(());
-            }
-            false
-        };
+        } else if !permissions::is_owner(&tg_config, &user_id) {
+            return Ok(());
+        }
 
         // Photo + /todo caption — extract before text-only dispatch
-        let result = if let Some(photo_fid) = extract_photo_todo(message) {
+        if let Some(photo_fid) = extract_photo_todo(message) {
             let caption = message
                 .get("caption")
                 .and_then(|c| c.as_str())
@@ -187,41 +158,7 @@ impl TelegramBot {
             }
         } else {
             self.dispatch_text(message, &chat_id).await
-        };
-
-        // Spawn SSE notification listener now that we have an owner.
-        if just_registered {
-            info!("Owner registered — starting SSE notification listener");
-            let base_url = self.gw.base_url().to_string();
-            let gw_token = self.gw.token().map(String::from);
-            let config = self.config.read().await;
-            let tg = &config.channels.telegram;
-            let api_base_url = crate::resolve_api_base_url();
-            let api = match &api_base_url {
-                Some(url) => TelegramApi::with_base_url(&tg.token, url)?,
-                None => TelegramApi::new(&tg.token),
-            };
-            let owner_chat_id = chat_id.clone();
-            let sse_gw = self.gw.clone();
-            let sse_pending = self.pending_scout_msgs.clone();
-            // TRACKED: SSE notification loop for the telegram bot process.
-            // mando-tg runs as a separate OS process from the gateway, so it
-            // has no access to the gateway's TaskTracker. The loop exits when
-            // the SSE mpsc receiver drops on bot shutdown.
-            tokio::spawn(async move {
-                crate::sse::run_notification_loop(
-                    base_url,
-                    gw_token,
-                    api,
-                    owner_chat_id,
-                    sse_gw,
-                    sse_pending,
-                )
-                .await;
-            });
         }
-
-        result
     }
 
     /// Dispatch a text message to the appropriate command handler.
@@ -237,7 +174,7 @@ impl TelegramBot {
             let (command, args) = parse_command(text);
             // Re-issuing the same text-command resets its own pending entry
             // so the user can restart a flow. Unrelated pendings (especially
-            // callback-opened reopen/rework/nudge/ask/input/qa/act) survive,
+            // callback-opened reopen/rework/nudge/input/qa/act) survive,
             // which is the concurrency-correct behavior.
             self.reset_same_command_pending(chat_id, &command).await;
             return self.dispatch_command(chat_id, &command, args).await;
@@ -252,16 +189,15 @@ impl TelegramBot {
     ///
     /// Called when `config.channels.telegram.owner` is empty and a user
     /// sends any message in a direct chat. Persists the owner to config.json.
-    /// The caller is responsible for restarting the process after the current
-    /// command finishes so the SSE notification listener picks up the new owner.
+    /// The gateway's `TelegramRuntime` starts the sole SSE notification listener
+    /// while handling the owner-registration request.
     async fn auto_register_owner(&self, user_id: &str, chat_id: &str) -> Result<()> {
         info!(user_id, chat_id, "Auto-registering bot owner");
         let save_result = self
             .gw
-            .post_typed::<_, api_types::BoolOkResponse>(
-                paths::CHANNELS_TELEGRAM_OWNER,
-                &serde_json::json!({ "owner": user_id }),
-            )
+            .post_channels_telegram_owner(&api_types::TelegramOwnerRequest {
+                owner: user_id.to_string(),
+            })
             .await;
         if let Err(e) = save_result {
             error!("Failed to persist owner to config: {e}");
@@ -374,27 +310,14 @@ impl TelegramBot {
             .await
     }
 
-    // ── Todo confirm ─────────────────────────────────────────────────
+    // ── Todo project selection ───────────────────────────────────────
 
-    pub async fn store_todo_confirm(
-        &self,
-        aid: &str,
-        cid: &str,
-        items: Vec<TodoItem>,
-        picker_slugs: Vec<String>,
-    ) {
-        let mut map = self.todo_confirm.lock().await;
-        map.insert(
-            aid.to_string(),
-            TodoConfirmState {
-                chat_id: cid.to_string(),
-                items,
-                picker_slugs,
-            },
-        );
+    pub async fn store_todo_project(&self, aid: &str, item: TodoItem, picker_slugs: Vec<String>) {
+        let mut map = self.todo_projects.lock().await;
+        map.insert(aid.to_string(), TodoProjectState { item, picker_slugs });
     }
-    pub async fn take_todo_confirm(&self, aid: &str) -> Option<TodoConfirmState> {
-        let mut map = self.todo_confirm.lock().await;
+    pub async fn take_todo_project(&self, aid: &str) -> Option<TodoProjectState> {
+        let mut map = self.todo_projects.lock().await;
         map.remove(aid)
     }
 
@@ -415,6 +338,6 @@ impl TelegramBot {
         }
     }
 
-    // Session helpers (input/ask/qa/act/pending_*) live in `bot_sessions.rs`.
+    // Session helpers (input/qa/act/pending_*) live in `bot_sessions.rs`.
     // Disambiguation lookup helpers live in `bot_sessions.rs` as well.
 }

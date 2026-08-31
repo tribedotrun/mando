@@ -1,18 +1,31 @@
 [contract]
 name        = "github-api"
 kind        = "external"
-# GitHub access is centralized in the global-github provider boundary, which
-# parses `gh` CLI JSON output into typed provider structs.
+# GitHub access crosses three surfaces: the centralized Rust `gh` provider,
+# the landing-page release lookup, and the update worker's release API client.
 types-crate = "rust/crates/global-github"
-transports  = ["cli"]
+transports  = ["http", "cli"]
 base-url    = "https://api.github.com"
+hosts       = ["api.github.com"]
 docs        = "https://docs.github.com/en/rest"
 
 [[consumer]]
-name        = "global-github-provider"
-path        = "rust/crates/global-github/src/lib.rs"
+name        = "global-github-cli"
+path        = "rust/crates/global-github/src/command.rs"
 transports  = ["cli"]
 role        = "GitHub CLI PR, review thread, mergeability, state, and PR creation queries"
 enforcement = "scanner"
-allow-value = true
-allow-value-reason = "GitHub REST/GraphQL and gh CLI responses are upstream schema; the provider parses boundary JSON into typed structs before returning to domains."
+
+[[consumer]]
+name        = "landing-page-release-client"
+path        = "landing-page/app/download-button.tsx"
+transports  = ["http"]
+role        = "Fetches the latest public GitHub release and architecture-specific DMG URLs"
+enforcement = "scanner"
+
+[[consumer]]
+name        = "update-worker-release-client"
+path        = "infra/update-worker/src/index.ts"
+transports  = ["http"]
+role        = "Fetches GitHub releases and resolves signed release-asset download URLs"
+enforcement = "scanner"

@@ -56,6 +56,10 @@ pub enum CcError {
     #[error("all credentials rate-limited (earliest reset {earliest_reset})")]
     AllCredentialsExhausted { earliest_reset: i64 },
 
+    /// Mando or the provider stopped the session before successful completion.
+    #[error("CC session {session_id} was interrupted")]
+    Interrupted { session_id: String },
+
     /// The CC stream closed unexpectedly (stdin/stdout pipe broke, process
     /// exited without emitting a result envelope).
     #[error("CC stream closed before result")]
@@ -104,6 +108,7 @@ impl CcError {
                 api_error_status, ..
             } => classify_status(*api_error_status),
             CcError::AllCredentialsExhausted { .. }
+            | CcError::Interrupted { .. }
             | CcError::SpawnFailed { .. }
             | CcError::StreamClosed
             | CcError::InvalidConfig(_)

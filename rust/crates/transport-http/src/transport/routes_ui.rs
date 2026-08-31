@@ -6,7 +6,6 @@ use crate::response::{error_response, internal_error, ApiError};
 use crate::AppState;
 use transport_ui::UiLaunchSpec;
 
-#[crate::instrument_api(method = "POST", path = "/api/ui/register")]
 pub(crate) async fn post_ui_register(
     State(state): State<AppState>,
     Json(body): Json<api_types::UiRegisterRequest>,
@@ -28,7 +27,6 @@ pub(crate) async fn post_ui_register(
     Ok(Json(api_types::BoolOkResponse { ok: true }))
 }
 
-#[crate::instrument_api(method = "POST", path = "/api/ui/quitting")]
 pub(crate) async fn post_ui_quitting(
     State(state): State<AppState>,
     Json(_body): Json<api_types::EmptyRequest>,
@@ -41,7 +39,6 @@ pub(crate) async fn post_ui_quitting(
     Ok(Json(api_types::BoolOkResponse { ok: true }))
 }
 
-#[crate::instrument_api(method = "POST", path = "/api/ui/updating")]
 pub(crate) async fn post_ui_updating(
     State(state): State<AppState>,
     Json(_body): Json<api_types::EmptyRequest>,
@@ -54,7 +51,6 @@ pub(crate) async fn post_ui_updating(
     Ok(Json(api_types::BoolOkResponse { ok: true }))
 }
 
-#[crate::instrument_api(method = "POST", path = "/api/ui/launch")]
 pub(crate) async fn post_ui_launch(
     State(state): State<AppState>,
     Json(_body): Json<api_types::EmptyRequest>,
@@ -67,7 +63,6 @@ pub(crate) async fn post_ui_launch(
     Ok(Json(api_types::BoolOkResponse { ok: true }))
 }
 
-#[crate::instrument_api(method = "POST", path = "/api/ui/restart")]
 pub(crate) async fn post_ui_restart(
     State(state): State<AppState>,
     Json(_body): Json<api_types::EmptyRequest>,

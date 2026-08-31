@@ -33,3 +33,6 @@ arc-swap.workspace = true
 base64 = "0.22"
 libc = "0.2"
 tempfile = "3"
+
+[lints]
+workspace = true

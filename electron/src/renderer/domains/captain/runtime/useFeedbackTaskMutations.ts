@@ -3,9 +3,6 @@ import { useMutationFeedback } from '#renderer/global/runtime/useMutationFeedbac
 import { getErrorMessage } from '#renderer/global/service/utils';
 import {
   useTaskAccept as useTaskAcceptMutation,
-  useTaskAsk as useTaskAskMutation,
-  useTaskAskReopen as useTaskAskReopenMutation,
-  useTaskAdvisor as useTaskAdvisorMutation,
   useTaskCancel as useTaskCancelMutation,
   useTaskClarify as useTaskClarifyMutation,
   useTaskCreate as useTaskCreateMutation,
@@ -20,7 +17,6 @@ import {
   useTaskSetIsBugFix as useTaskSetIsBugFixMutation,
   useResumeRateLimited as useResumeRateLimitedMutation,
 } from '#renderer/domains/captain/repo/mutations';
-import { useAddProject as useAddProjectMutation } from '#renderer/domains/captain/repo/mutations-extra';
 
 export function useTaskCreate() {
   const mutation = useTaskCreateMutation();
@@ -89,15 +85,6 @@ export function useTaskStop() {
   });
 }
 
-export function useAddProject() {
-  const mutation = useAddProjectMutation();
-  return useMutationFeedback(mutation, {
-    onError: () => {
-      toast.error('Add project failed');
-    },
-  });
-}
-
 export function useTaskReopen() {
   const mutation = useTaskReopenMutation();
   return useMutationFeedback(mutation, {
@@ -106,18 +93,6 @@ export function useTaskReopen() {
     },
     onError: () => {
       toast.error('Reopen failed');
-    },
-  });
-}
-
-export function useTaskAskReopen() {
-  const mutation = useTaskAskReopenMutation();
-  return useMutationFeedback(mutation, {
-    onSuccess: () => {
-      toast.success('Task reopened from Q&A');
-    },
-    onError: () => {
-      toast.error('Reopen from Q&A failed');
     },
   });
 }
@@ -142,24 +117,6 @@ export function useTaskMerge() {
     },
     onError: () => {
       toast.error('Merge failed');
-    },
-  });
-}
-
-export function useTaskAsk() {
-  const mutation = useTaskAskMutation();
-  return useMutationFeedback(mutation, {
-    onError: () => {
-      toast.error('Ask failed');
-    },
-  });
-}
-
-export function useTaskAdvisor() {
-  const mutation = useTaskAdvisorMutation();
-  return useMutationFeedback(mutation, {
-    onError: () => {
-      toast.error('Advisor message failed');
     },
   });
 }

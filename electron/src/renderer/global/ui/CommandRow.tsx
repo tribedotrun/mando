@@ -13,7 +13,7 @@ import {
 import { CommandItem, CommandShortcut } from '#renderer/global/ui/primitives/command';
 import { Kbd, KbdGroup } from '#renderer/global/ui/primitives/kbd';
 
-export interface CommandDef {
+interface CommandDef {
   id: string;
   name: string;
   shortcut?: string;

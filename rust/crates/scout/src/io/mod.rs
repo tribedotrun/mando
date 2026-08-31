@@ -6,6 +6,7 @@ pub mod file_store;
 pub mod firecrawl;
 pub mod metadata_probe;
 pub mod queries;
+mod readability;
 pub mod telegraph;
 pub mod youtube;
 pub mod yt_dlp;

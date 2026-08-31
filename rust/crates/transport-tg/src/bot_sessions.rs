@@ -1,38 +1,145 @@
 //! Pending-session helpers and reply-disambiguation lookup.
 //!
-//! Each of the eight chat_id-keyed maps on [`TelegramBot`] stores a
-//! `PromptMeta` so a plain-text reply can be routed to the matching session
-//! either via `reply_to_message.message_id` or by the most-recent-wins
-//! fallback. `pick_session_for_text` is the single disambiguation entry point.
+//! One typed registry owns every chat-scoped pending flow plus task-scoped
+//! context-append serialization. A single outer lock makes registry changes
+//! atomic; per-task locks preserve concurrency across different tasks.
+//! `pick_session_for_text` is the disambiguation entry point.
 
 use std::collections::HashMap;
-use std::hash::Hash;
+use std::sync::{Arc, Weak};
 
 use anyhow::Result;
-use tokio::sync::Mutex;
 use tracing::{debug, warn};
 
 use crate::bot::{
-    ActSession, InputSession, PendingAction, PromptMeta, QaSession, Session, SessionKind,
-    TelegramBot,
+    ActSession, InputSession, PendingAction, PromptMeta, QaSession, SessionKind, TelegramBot,
 };
-use crate::gateway_paths as paths;
 use crate::telegram_format::{escape_html, render_markdown_reply_html};
 
-/// Generates a `set_pending_*` / `take_pending_*` pair for a
-/// `Mutex<HashMap<String, PromptMeta>>` field. Each text-command that opens
-/// a no-args follow-up gets one — `/todo`, `/timeline`, `/scout_add`,
-/// `/scout_research`.
+#[derive(Default)]
+pub(crate) struct PendingSessionRegistry {
+    chats: HashMap<String, ChatPendingSessions>,
+    context_append_locks: HashMap<i64, Weak<tokio::sync::Mutex<()>>>,
+}
+
+#[derive(Default)]
+struct ChatPendingSessions {
+    todo: Option<PromptMeta>,
+    timeline: Option<PromptMeta>,
+    scout_add: Option<PromptMeta>,
+    scout_research: Option<PromptMeta>,
+    reopen: Option<PendingAction>,
+    rework: Option<PendingAction>,
+    nudge: Option<PendingAction>,
+    input: Option<InputSession>,
+    qa: Option<QaSession>,
+    act: Option<ActSession>,
+}
+
+impl PendingSessionRegistry {
+    fn chat_mut(&mut self, chat_id: &str) -> &mut ChatPendingSessions {
+        self.chats.entry(chat_id.to_string()).or_default()
+    }
+
+    fn cleanup_chat(&mut self, chat_id: &str) {
+        if self
+            .chats
+            .get(chat_id)
+            .is_some_and(ChatPendingSessions::is_empty)
+        {
+            self.chats.remove(chat_id);
+        }
+    }
+
+    fn context_append_lock(&mut self, task_id: i64) -> Arc<tokio::sync::Mutex<()>> {
+        self.context_append_locks
+            .retain(|_, lock| lock.strong_count() > 0);
+        if let Some(lock) = self
+            .context_append_locks
+            .get(&task_id)
+            .and_then(Weak::upgrade)
+        {
+            return lock;
+        }
+
+        let lock = Arc::new(tokio::sync::Mutex::new(()));
+        self.context_append_locks
+            .insert(task_id, Arc::downgrade(&lock));
+        lock
+    }
+}
+
+impl ChatPendingSessions {
+    fn is_empty(&self) -> bool {
+        self.todo.is_none()
+            && self.timeline.is_none()
+            && self.scout_add.is_none()
+            && self.scout_research.is_none()
+            && self.reopen.is_none()
+            && self.rework.is_none()
+            && self.nudge.is_none()
+            && self.input.is_none()
+            && self.qa.is_none()
+            && self.act.is_none()
+    }
+
+    fn prompt_candidates(&self) -> Vec<(SessionKind, PromptMeta)> {
+        let mut candidates = Vec::new();
+        let mut push = |kind, meta: Option<&PromptMeta>| {
+            if let Some(meta) = meta {
+                candidates.push((kind, meta.clone()));
+            }
+        };
+        push(SessionKind::PendingTodo, self.todo.as_ref());
+        push(SessionKind::PendingTimeline, self.timeline.as_ref());
+        push(SessionKind::PendingScoutAdd, self.scout_add.as_ref());
+        push(
+            SessionKind::PendingScoutResearch,
+            self.scout_research.as_ref(),
+        );
+        push(
+            SessionKind::PendingReopen,
+            self.reopen.as_ref().map(|session| &session.prompt),
+        );
+        push(
+            SessionKind::PendingRework,
+            self.rework.as_ref().map(|session| &session.prompt),
+        );
+        push(
+            SessionKind::PendingNudge,
+            self.nudge.as_ref().map(|session| &session.prompt),
+        );
+        push(
+            SessionKind::InputSession,
+            self.input.as_ref().map(|session| &session.prompt),
+        );
+        push(
+            SessionKind::QaSession,
+            self.qa.as_ref().map(|session| &session.prompt),
+        );
+        push(
+            SessionKind::ActSession,
+            self.act.as_ref().map(|session| &session.prompt),
+        );
+        candidates
+    }
+}
+
+/// Generates a `set_pending_*` / `take_pending_*` pair for one typed slot.
 macro_rules! prompt_pending_methods {
     ($set:ident, $take:ident, $field:ident) => {
         pub async fn $set(&self, chat_id: &str, prompt_message_id: i64) {
-            self.$field
-                .lock()
-                .await
-                .insert(chat_id.to_string(), PromptMeta::new(prompt_message_id));
+            self.pending_sessions.lock().await.chat_mut(chat_id).$field =
+                Some(PromptMeta::new(prompt_message_id));
         }
         pub async fn $take(&self, chat_id: &str) -> Option<PromptMeta> {
-            self.$field.lock().await.remove(chat_id)
+            let mut registry = self.pending_sessions.lock().await;
+            let result = registry
+                .chats
+                .get_mut(chat_id)
+                .and_then(|sessions| sessions.$field.take());
+            registry.cleanup_chat(chat_id);
+            result
         }
     };
 }
@@ -40,26 +147,18 @@ macro_rules! prompt_pending_methods {
 impl TelegramBot {
     // ── Text-command follow-ups (send args inline, or reply to prompt) ─
 
-    prompt_pending_methods!(set_pending_todo, take_pending_todo, pending_todo);
-    prompt_pending_methods!(
-        set_pending_timeline,
-        take_pending_timeline,
-        pending_timeline
-    );
-    prompt_pending_methods!(
-        set_pending_scout_add,
-        take_pending_scout_add,
-        pending_scout_add
-    );
+    prompt_pending_methods!(set_pending_todo, take_pending_todo, todo);
+    prompt_pending_methods!(set_pending_timeline, take_pending_timeline, timeline);
+    prompt_pending_methods!(set_pending_scout_add, take_pending_scout_add, scout_add);
     prompt_pending_methods!(
         set_pending_scout_research,
         take_pending_scout_research,
-        pending_scout_research
+        scout_research
     );
 
     /// Reset only the pending entry that this `/command` re-opens. Other
     /// chat-scoped pendings (especially callback-opened ones — reopen,
-    /// rework, nudge, ask, input, qa, act) survive concurrent dispatch.
+    /// rework, nudge, input, qa, act) survive concurrent dispatch.
     /// `/timeline` ↔ `/history` count as the same command.
     pub(crate) async fn reset_same_command_pending(&self, chat_id: &str, command: &str) {
         match command {
@@ -88,18 +187,21 @@ impl TelegramBot {
         title: &str,
         prompt_message_id: i64,
     ) {
-        self.pending_reopen.lock().await.insert(
-            chat_id.to_string(),
-            PendingAction {
-                item_id: item_id.to_string(),
-                title: title.to_string(),
-                prompt: PromptMeta::new(prompt_message_id),
-            },
-        );
+        self.pending_sessions.lock().await.chat_mut(chat_id).reopen = Some(PendingAction {
+            item_id: item_id.to_string(),
+            title: title.to_string(),
+            prompt: PromptMeta::new(prompt_message_id),
+        });
     }
 
     pub async fn take_pending_reopen(&self, chat_id: &str) -> Option<PendingAction> {
-        self.pending_reopen.lock().await.remove(chat_id)
+        let mut registry = self.pending_sessions.lock().await;
+        let result = registry
+            .chats
+            .get_mut(chat_id)
+            .and_then(|sessions| sessions.reopen.take());
+        registry.cleanup_chat(chat_id);
+        result
     }
 
     pub async fn set_pending_rework(
@@ -109,18 +211,21 @@ impl TelegramBot {
         title: &str,
         prompt_message_id: i64,
     ) {
-        self.pending_rework.lock().await.insert(
-            chat_id.to_string(),
-            PendingAction {
-                item_id: item_id.to_string(),
-                title: title.to_string(),
-                prompt: PromptMeta::new(prompt_message_id),
-            },
-        );
+        self.pending_sessions.lock().await.chat_mut(chat_id).rework = Some(PendingAction {
+            item_id: item_id.to_string(),
+            title: title.to_string(),
+            prompt: PromptMeta::new(prompt_message_id),
+        });
     }
 
     pub async fn take_pending_rework(&self, chat_id: &str) -> Option<PendingAction> {
-        self.pending_rework.lock().await.remove(chat_id)
+        let mut registry = self.pending_sessions.lock().await;
+        let result = registry
+            .chats
+            .get_mut(chat_id)
+            .and_then(|sessions| sessions.rework.take());
+        registry.cleanup_chat(chat_id);
+        result
     }
 
     pub async fn set_pending_nudge(
@@ -130,89 +235,102 @@ impl TelegramBot {
         title: &str,
         prompt_message_id: i64,
     ) {
-        self.pending_nudge.lock().await.insert(
-            chat_id.to_string(),
-            PendingAction {
-                item_id: item_id.to_string(),
-                title: title.to_string(),
-                prompt: PromptMeta::new(prompt_message_id),
-            },
-        );
+        self.pending_sessions.lock().await.chat_mut(chat_id).nudge = Some(PendingAction {
+            item_id: item_id.to_string(),
+            title: title.to_string(),
+            prompt: PromptMeta::new(prompt_message_id),
+        });
     }
 
     pub async fn take_pending_nudge(&self, chat_id: &str) -> Option<PendingAction> {
-        self.pending_nudge.lock().await.remove(chat_id)
+        let mut registry = self.pending_sessions.lock().await;
+        let result = registry
+            .chats
+            .get_mut(chat_id)
+            .and_then(|sessions| sessions.nudge.take());
+        registry.cleanup_chat(chat_id);
+        result
     }
 
     // ── Input sessions ───────────────────────────────────────────────
 
     pub async fn has_input_session(&self, cid: &str) -> bool {
-        self.input_sessions.lock().await.contains_key(cid)
+        self.pending_sessions
+            .lock()
+            .await
+            .chats
+            .get(cid)
+            .is_some_and(|sessions| sessions.input.is_some())
     }
     pub async fn input_session_title(&self, cid: &str) -> Option<String> {
-        let map = self.input_sessions.lock().await;
-        map.get(cid).map(|s| s.title.clone())
+        self.pending_sessions
+            .lock()
+            .await
+            .chats
+            .get(cid)
+            .and_then(|sessions| sessions.input.as_ref())
+            .map(|session| session.title.clone())
     }
-    pub async fn open_input_session(&self, cid: &str, title: &str, prompt_message_id: i64) {
-        self.input_sessions.lock().await.insert(
-            cid.to_string(),
-            InputSession {
-                title: title.to_string(),
-                prompt: PromptMeta::new(prompt_message_id),
-            },
-        );
+    pub async fn input_session(&self, cid: &str) -> Option<InputSession> {
+        self.pending_sessions
+            .lock()
+            .await
+            .chats
+            .get(cid)
+            .and_then(|sessions| sessions.input.clone())
+    }
+    pub async fn open_input_session(
+        &self,
+        cid: &str,
+        task_id: i64,
+        title: &str,
+        prompt_message_id: i64,
+    ) {
+        self.pending_sessions.lock().await.chat_mut(cid).input = Some(InputSession {
+            task_id,
+            title: title.to_string(),
+            prompt: PromptMeta::new(prompt_message_id),
+        });
     }
     pub async fn close_input_session(&self, cid: &str) {
-        self.input_sessions.lock().await.remove(cid);
-    }
-
-    // ── Ask sessions ─────────────────────────────────────────────────
-
-    pub async fn has_ask_session(&self, cid: &str) -> bool {
-        self.ask_sessions.lock().await.contains_key(cid)
-    }
-    pub async fn ask_session_rounds(&self, cid: &str) -> u32 {
-        let map = self.ask_sessions.lock().await;
-        map.get(cid).map(|s| s.rounds).unwrap_or(0)
-    }
-    pub async fn open_ask_session(&self, cid: &str, task_id: i64, prompt_message_id: i64) {
-        // Close conflicting scout QA session so task-ask wins plain-text routing.
-        self.qa_sessions.lock().await.remove(cid);
-        self.ask_sessions.lock().await.insert(
-            cid.to_string(),
-            Session::new(task_id, PromptMeta::new(prompt_message_id)),
-        );
-    }
-    pub async fn ask_session_task_id(&self, cid: &str) -> Option<i64> {
-        self.ask_sessions.lock().await.get(cid).map(|s| s.task_id)
-    }
-    pub async fn close_ask_session(&self, cid: &str) {
-        self.ask_sessions.lock().await.remove(cid);
-    }
-    pub async fn increment_ask_rounds(&self, cid: &str) {
-        if let Some(s) = self.ask_sessions.lock().await.get_mut(cid) {
-            s.rounds += 1;
+        let mut registry = self.pending_sessions.lock().await;
+        if let Some(sessions) = registry.chats.get_mut(cid) {
+            sessions.input = None;
         }
+        registry.cleanup_chat(cid);
+    }
+
+    pub(crate) async fn lock_context_append(
+        &self,
+        task_id: i64,
+    ) -> tokio::sync::OwnedMutexGuard<()> {
+        let lock = self
+            .pending_sessions
+            .lock()
+            .await
+            .context_append_lock(task_id);
+        lock.lock_owned().await
     }
 
     // ── Scout QA sessions ───────────────────────────────────────────
 
     pub async fn open_qa_session(&self, cid: &str, item_id: i64, prompt_message_id: i64) {
-        // Close conflicting task-ask session so scout QA wins plain-text routing.
-        self.ask_sessions.lock().await.remove(cid);
-        self.qa_sessions.lock().await.insert(
-            cid.to_string(),
-            QaSession {
-                item_id,
-                rounds: 0,
-                cc_session_id: None,
-                prompt: PromptMeta::new(prompt_message_id),
-            },
-        );
+        let mut registry = self.pending_sessions.lock().await;
+        let sessions = registry.chat_mut(cid);
+        sessions.qa = Some(QaSession {
+            item_id,
+            rounds: 0,
+            cc_session_id: None,
+            prompt: PromptMeta::new(prompt_message_id),
+        });
     }
 
     pub async fn close_qa_session(&self, cid: &str) {
-        self.qa_sessions.lock().await.remove(cid);
+        let mut registry = self.pending_sessions.lock().await;
+        if let Some(sessions) = registry.chats.get_mut(cid) {
+            sessions.qa = None;
+        }
+        registry.cleanup_chat(cid);
     }
 
     /// Returns `Ok(true)` when the QA session was found and the question
@@ -223,9 +341,13 @@ impl TelegramBot {
     pub(crate) async fn handle_qa_text(&self, chat_id: &str, question: &str) -> Result<bool> {
         // Snapshot under lock, then release before any HTTP call.
         let (item_id, cc_session_id) = {
-            let map = self.qa_sessions.lock().await;
-            match map.get(chat_id) {
-                Some(s) => (s.item_id, s.cc_session_id.clone()),
+            let registry = self.pending_sessions.lock().await;
+            match registry
+                .chats
+                .get(chat_id)
+                .and_then(|sessions| sessions.qa.as_ref())
+            {
+                Some(session) => (session.item_id, session.cc_session_id.clone()),
                 None => return Ok(false),
             }
         };
@@ -236,21 +358,24 @@ impl TelegramBot {
             .await?;
         let ack_mid = ack.get("message_id").and_then(|v| v.as_i64()).unwrap_or(0);
 
-        let body = serde_json::json!({
-            "id": item_id,
-            "question": question,
-            "session_id": cc_session_id,
-        });
         let result = self
             .gw
-            .post_typed::<_, api_types::AskResponse>(paths::SCOUT_ASK, &body)
+            .post_scout_ask(&api_types::ScoutAskRequest {
+                id: item_id,
+                question: question.to_string(),
+                session_id: cc_session_id,
+            })
             .await;
 
         let answer = match result {
             Ok(resp) => {
                 if let Some(ref sid) = resp.session_id {
-                    let mut map = self.qa_sessions.lock().await;
-                    if let Some(session) = map.get_mut(chat_id) {
+                    let mut registry = self.pending_sessions.lock().await;
+                    if let Some(session) = registry
+                        .chats
+                        .get_mut(chat_id)
+                        .and_then(|sessions| sessions.qa.as_mut())
+                    {
                         session.cc_session_id = Some(sid.clone());
                     }
                 } else {
@@ -273,8 +398,12 @@ impl TelegramBot {
         };
 
         {
-            let mut map = self.qa_sessions.lock().await;
-            if let Some(session) = map.get_mut(chat_id) {
+            let mut registry = self.pending_sessions.lock().await;
+            if let Some(session) = registry
+                .chats
+                .get_mut(chat_id)
+                .and_then(|sessions| sessions.qa.as_mut())
+            {
                 session.rounds += 1;
             }
         }
@@ -304,18 +433,21 @@ impl TelegramBot {
         project: &str,
         prompt_message_id: i64,
     ) {
-        self.act_sessions.lock().await.insert(
-            cid.to_string(),
-            ActSession {
-                item_id,
-                project: project.to_string(),
-                prompt: PromptMeta::new(prompt_message_id),
-            },
-        );
+        self.pending_sessions.lock().await.chat_mut(cid).act = Some(ActSession {
+            item_id,
+            project: project.to_string(),
+            prompt: PromptMeta::new(prompt_message_id),
+        });
     }
 
     pub async fn take_act_session(&self, cid: &str) -> Option<ActSession> {
-        self.act_sessions.lock().await.remove(cid)
+        let mut registry = self.pending_sessions.lock().await;
+        let result = registry
+            .chats
+            .get_mut(cid)
+            .and_then(|sessions| sessions.act.take());
+        registry.cleanup_chat(cid);
+        result
     }
 
     // ── Reply-disambiguation lookup ─────────────────────────────────
@@ -339,135 +471,13 @@ impl TelegramBot {
     }
 
     async fn snapshot_prompt_meta(&self, chat_id: &str) -> Vec<(SessionKind, PromptMeta)> {
-        let mut out: Vec<(SessionKind, PromptMeta)> = Vec::new();
-        push_meta(
-            &mut out,
-            &self.pending_todo,
-            chat_id,
-            SessionKind::PendingTodo,
-        )
-        .await;
-        push_meta(
-            &mut out,
-            &self.pending_timeline,
-            chat_id,
-            SessionKind::PendingTimeline,
-        )
-        .await;
-        push_meta(
-            &mut out,
-            &self.pending_scout_add,
-            chat_id,
-            SessionKind::PendingScoutAdd,
-        )
-        .await;
-        push_meta(
-            &mut out,
-            &self.pending_scout_research,
-            chat_id,
-            SessionKind::PendingScoutResearch,
-        )
-        .await;
-        push_meta(
-            &mut out,
-            &self.pending_reopen,
-            chat_id,
-            SessionKind::PendingReopen,
-        )
-        .await;
-        push_meta(
-            &mut out,
-            &self.pending_rework,
-            chat_id,
-            SessionKind::PendingRework,
-        )
-        .await;
-        push_meta(
-            &mut out,
-            &self.pending_nudge,
-            chat_id,
-            SessionKind::PendingNudge,
-        )
-        .await;
-        push_meta(
-            &mut out,
-            &self.ask_sessions,
-            chat_id,
-            SessionKind::AskSession,
-        )
-        .await;
-        push_meta(
-            &mut out,
-            &self.input_sessions,
-            chat_id,
-            SessionKind::InputSession,
-        )
-        .await;
-        push_meta(&mut out, &self.qa_sessions, chat_id, SessionKind::QaSession).await;
-        push_meta(
-            &mut out,
-            &self.act_sessions,
-            chat_id,
-            SessionKind::ActSession,
-        )
-        .await;
-        out
-    }
-}
-
-/// Trait that exposes a `PromptMeta` from each session-map value. Implemented
-/// for every session value type so the snapshot helper is generic.
-trait HasPromptMeta {
-    fn prompt_meta(&self) -> &PromptMeta;
-}
-
-impl HasPromptMeta for PromptMeta {
-    fn prompt_meta(&self) -> &PromptMeta {
-        self
-    }
-}
-impl HasPromptMeta for PendingAction {
-    fn prompt_meta(&self) -> &PromptMeta {
-        &self.prompt
-    }
-}
-impl HasPromptMeta for InputSession {
-    fn prompt_meta(&self) -> &PromptMeta {
-        &self.prompt
-    }
-}
-impl HasPromptMeta for Session {
-    fn prompt_meta(&self) -> &PromptMeta {
-        &self.prompt
-    }
-}
-impl HasPromptMeta for QaSession {
-    fn prompt_meta(&self) -> &PromptMeta {
-        &self.prompt
-    }
-}
-impl HasPromptMeta for ActSession {
-    fn prompt_meta(&self) -> &PromptMeta {
-        &self.prompt
-    }
-}
-
-async fn push_meta<K, V>(
-    out: &mut Vec<(SessionKind, PromptMeta)>,
-    map: &Mutex<HashMap<K, V>>,
-    chat_id: &str,
-    kind: SessionKind,
-) where
-    K: Eq + Hash + std::borrow::Borrow<str>,
-    V: HasPromptMeta,
-{
-    if let Some(meta) = map
-        .lock()
-        .await
-        .get(chat_id)
-        .map(|v| v.prompt_meta().clone())
-    {
-        out.push((kind, meta));
+        self.pending_sessions
+            .lock()
+            .await
+            .chats
+            .get(chat_id)
+            .map(ChatPendingSessions::prompt_candidates)
+            .unwrap_or_default()
     }
 }
 
@@ -516,7 +526,7 @@ mod tests {
         let candidates = vec![
             (SessionKind::PendingTodo, meta_at(100, 30)),
             (SessionKind::QaSession, meta_at(200, 5)),
-            (SessionKind::AskSession, meta_at(300, 60)),
+            (SessionKind::PendingNudge, meta_at(300, 60)),
         ];
         // Reply targets the older PendingTodo prompt, not the newer QaSession.
         let chosen = pick_kind(&candidates, Some(100));
@@ -528,7 +538,7 @@ mod tests {
         let candidates = vec![
             (SessionKind::PendingTodo, meta_at(100, 30)),
             (SessionKind::QaSession, meta_at(200, 5)),
-            (SessionKind::AskSession, meta_at(300, 60)),
+            (SessionKind::PendingNudge, meta_at(300, 60)),
         ];
         // Reply id 999 matches nothing — fall back to most-recent (QaSession at 5s ago).
         let chosen = pick_kind(&candidates, Some(999));
@@ -539,7 +549,7 @@ mod tests {
     fn pick_kind_returns_most_recent_when_no_reply_target() {
         let candidates = vec![
             (SessionKind::PendingTodo, meta_at(100, 30)),
-            (SessionKind::AskSession, meta_at(300, 60)),
+            (SessionKind::PendingNudge, meta_at(300, 60)),
             (SessionKind::QaSession, meta_at(200, 5)),
         ];
         // No reply context — pick the most recently created session.
@@ -564,6 +574,21 @@ mod tests {
             "reply mismatch on lone candidate still routes to that candidate"
         );
     }
+
+    #[tokio::test]
+    async fn context_append_registry_reuses_task_lock_and_isolates_other_tasks() {
+        let mut registry = PendingSessionRegistry::default();
+        let first = registry.context_append_lock(42);
+        let same_task = registry.context_append_lock(42);
+        let other_task = registry.context_append_lock(43);
+
+        assert!(Arc::ptr_eq(&first, &same_task));
+        let guard = first.lock().await;
+        assert!(same_task.try_lock().is_err());
+        assert!(other_task.try_lock().is_ok());
+        drop(guard);
+        assert!(same_task.try_lock().is_ok());
+    }
 }
 
 #[cfg(test)]
@@ -576,26 +601,50 @@ mod pending_command_tests {
     fn test_bot() -> TelegramBot {
         let config = Arc::new(RwLock::new(settings::Config::default()));
         let gw = GatewayClient::new(0, None);
-        TelegramBot::new(config, "test-token", gw)
+        let pending = Arc::new(std::sync::Mutex::new(HashMap::new()));
+        TelegramBot::with_base_url(config, "test-token", None, gw, pending)
+            .expect("construct test bot")
     }
 
     async fn pending_timeline_has(bot: &TelegramBot, chat_id: &str) -> bool {
-        bot.pending_timeline.lock().await.contains_key(chat_id)
-    }
-    async fn pending_todo_has(bot: &TelegramBot, chat_id: &str) -> bool {
-        bot.pending_todo.lock().await.contains_key(chat_id)
-    }
-    async fn pending_scout_add_has(bot: &TelegramBot, chat_id: &str) -> bool {
-        bot.pending_scout_add.lock().await.contains_key(chat_id)
-    }
-    async fn pending_scout_research_has(bot: &TelegramBot, chat_id: &str) -> bool {
-        bot.pending_scout_research
+        bot.pending_sessions
             .lock()
             .await
-            .contains_key(chat_id)
+            .chats
+            .get(chat_id)
+            .is_some_and(|sessions| sessions.timeline.is_some())
+    }
+    async fn pending_todo_has(bot: &TelegramBot, chat_id: &str) -> bool {
+        bot.pending_sessions
+            .lock()
+            .await
+            .chats
+            .get(chat_id)
+            .is_some_and(|sessions| sessions.todo.is_some())
+    }
+    async fn pending_scout_add_has(bot: &TelegramBot, chat_id: &str) -> bool {
+        bot.pending_sessions
+            .lock()
+            .await
+            .chats
+            .get(chat_id)
+            .is_some_and(|sessions| sessions.scout_add.is_some())
+    }
+    async fn pending_scout_research_has(bot: &TelegramBot, chat_id: &str) -> bool {
+        bot.pending_sessions
+            .lock()
+            .await
+            .chats
+            .get(chat_id)
+            .is_some_and(|sessions| sessions.scout_research.is_some())
     }
     async fn pending_reopen_has(bot: &TelegramBot, chat_id: &str) -> bool {
-        bot.pending_reopen.lock().await.contains_key(chat_id)
+        bot.pending_sessions
+            .lock()
+            .await
+            .chats
+            .get(chat_id)
+            .is_some_and(|sessions| sessions.reopen.is_some())
     }
 
     #[tokio::test]
@@ -609,9 +658,13 @@ mod pending_command_tests {
         assert!(pending_scout_add_has(&bot, "chat-2").await);
         assert!(pending_scout_research_has(&bot, "chat-3").await);
 
-        let timeline_entry = bot.pending_timeline.lock().await;
+        let registry = bot.pending_sessions.lock().await;
         assert_eq!(
-            timeline_entry.get("chat-1").map(|m| m.prompt_message_id),
+            registry
+                .chats
+                .get("chat-1")
+                .and_then(|sessions| sessions.timeline.as_ref())
+                .map(|meta| meta.prompt_message_id),
             Some(100)
         );
     }
@@ -660,7 +713,7 @@ mod pending_command_tests {
     async fn reset_same_command_pending_does_not_touch_callback_pendings() {
         // The concurrency-correct invariant: a fresh /command must not wipe
         // pendings that were opened by a callback (reopen / rework / nudge /
-        // act / ask / input / qa). Pre-fix, dispatch_text wiped these, which
+        // act / input / qa). Pre-fix, dispatch_text wiped these, which
         // killed in-flight follow-ups when a slow command was running.
         let bot = test_bot();
         bot.set_pending_reopen("chat-1", "42", "Fix bug", 500).await;

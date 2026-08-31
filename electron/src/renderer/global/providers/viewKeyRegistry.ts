@@ -4,7 +4,7 @@
 
 type ViewKeyHandler = (key: string, e: KeyboardEvent) => void;
 
-export interface ViewEntry {
+interface ViewEntry {
   handler: ViewKeyHandler;
   activeRef: React.RefObject<boolean>;
 }

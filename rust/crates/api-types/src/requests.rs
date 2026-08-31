@@ -3,7 +3,7 @@ use std::fmt;
 use std::str::FromStr;
 use ts_rs::TS;
 
-use crate::{SessionCategory, SessionStatus, TaskProvider};
+use crate::{SessionCategory, SessionStatus, TaskOwnerProvider, TaskProvider};
 
 /// Standard JSON error envelope returned by all error responses.
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -54,9 +54,13 @@ impl TaskCreateProvider {
     }
 
     pub fn as_task_provider(self) -> TaskProvider {
+        self.as_task_owner_provider().into()
+    }
+
+    pub fn as_task_owner_provider(self) -> TaskOwnerProvider {
         match self {
-            Self::Claude => TaskProvider::Claude,
-            Self::Codex => TaskProvider::Codex,
+            Self::Claude => TaskOwnerProvider::Claude,
+            Self::Codex => TaskOwnerProvider::Codex,
         }
     }
 }

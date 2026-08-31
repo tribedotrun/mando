@@ -4,7 +4,6 @@ import { getErrorMessage } from '#renderer/global/service/utils';
 import {
   useScoutAct as useScoutActMutation,
   useScoutAdd as useScoutAddMutation,
-  useScoutAsk as useScoutAskMutation,
   useScoutBulkDelete as useScoutBulkDeleteMutation,
   useScoutBulkUpdate as useScoutBulkUpdateMutation,
   useScoutPublishTelegraph as useScoutPublishTelegraphMutation,
@@ -62,10 +61,6 @@ export function useScoutResearch() {
       toast.error(getErrorMessage(err, 'Research failed'));
     },
   });
-}
-
-export function useScoutAsk() {
-  return useScoutAskMutation();
 }
 
 export function useScoutPublishTelegraph() {

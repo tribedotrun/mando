@@ -10,7 +10,6 @@ use crate::response::{error_response, internal_error, ApiError};
 use crate::AppState;
 
 /// POST /api/worktrees — create a worktree.
-#[crate::instrument_api(method = "POST", path = "/api/worktrees")]
 pub(crate) async fn post_worktrees(
     State(state): State<AppState>,
     Json(body): Json<api_types::CreateWorktreeRequest>,
@@ -46,7 +45,6 @@ pub(crate) async fn post_worktrees(
 }
 
 /// GET /api/worktrees — list all worktrees across projects.
-#[crate::instrument_api(method = "GET", path = "/api/worktrees")]
 pub(crate) async fn get_worktrees(
     State(state): State<AppState>,
 ) -> Result<Json<api_types::WorktreeListResponse>, ApiError> {
@@ -66,7 +64,6 @@ pub(crate) async fn get_worktrees(
 }
 
 /// POST /api/worktrees/prune — prune stale worktrees for all projects.
-#[crate::instrument_api(method = "POST", path = "/api/worktrees/prune")]
 pub(crate) async fn post_worktrees_prune(
     State(state): State<AppState>,
     Json(_body): Json<api_types::EmptyRequest>,
@@ -80,7 +77,6 @@ pub(crate) async fn post_worktrees_prune(
 }
 
 /// POST /api/worktrees/remove — remove a specific worktree by full path.
-#[crate::instrument_api(method = "POST", path = "/api/worktrees/remove")]
 pub(crate) async fn post_worktrees_remove(
     State(state): State<AppState>,
     Json(body): Json<api_types::RemoveWorktreeRequest>,
@@ -100,7 +96,6 @@ pub(crate) async fn post_worktrees_remove(
 }
 
 /// POST /api/worktrees/cleanup — find and optionally remove orphan worktree dirs.
-#[crate::instrument_api(method = "POST", path = "/api/worktrees/cleanup")]
 pub(crate) async fn post_worktrees_cleanup(
     State(state): State<AppState>,
     Json(body): Json<api_types::WorktreeCleanupRequest>,

@@ -56,55 +56,25 @@ pub(crate) async fn nudge_worker(
     }
 
     let stream_size_before = super::agent_session_result::stream_file_size(provider, session_id);
-    match provider {
-        global_types::TaskProvider::Codex => {
-            match super::agent_runtime::steer(provider, session_id, prompt.to_string()).await {
-                Ok(true) => Ok(AgentNudgeOutcome::Delivered(AgentNudgeDelivery {
-                    pid: current_pid,
-                    stream_size_before,
-                })),
-                Ok(false) => {
-                    tracing::info!(
-                        module = "captain",
-                        worker = %worker_name,
-                        session_id,
-                        "Codex turn is inactive; resuming thread for nudge delivery"
-                    );
-                    let resume = super::agent_runtime::resume_worker(
-                        pool,
-                        item,
-                        worker_name,
-                        cwd,
-                        prompt,
-                        session_id,
-                        model,
-                        workflow,
-                    )
-                    .await?;
-                    Ok(AgentNudgeOutcome::Delivered(AgentNudgeDelivery {
-                        pid: resume.pid,
-                        stream_size_before,
-                    }))
-                }
-                Err(e) => Err(e),
-            }
-        }
-        global_types::TaskProvider::Claude | global_types::TaskProvider::OpenCode => {
-            let resume = super::agent_runtime::resume_worker(
-                pool,
-                item,
-                worker_name,
-                cwd,
-                prompt,
-                session_id,
-                model,
-                workflow,
-            )
-            .await?;
-            Ok(AgentNudgeOutcome::Delivered(AgentNudgeDelivery {
-                pid: resume.pid,
-                stream_size_before,
-            }))
-        }
+    if super::agent_runtime::steer(provider, session_id, prompt.to_string()).await? {
+        return Ok(AgentNudgeOutcome::Delivered(AgentNudgeDelivery {
+            pid: current_pid,
+            stream_size_before,
+        }));
     }
+    let resume = super::agent_runtime::resume_worker(
+        pool,
+        item,
+        worker_name,
+        cwd,
+        prompt,
+        session_id,
+        model,
+        workflow,
+    )
+    .await?;
+    Ok(AgentNudgeOutcome::Delivered(AgentNudgeDelivery {
+        pid: resume.pid,
+        stream_size_before,
+    }))
 }

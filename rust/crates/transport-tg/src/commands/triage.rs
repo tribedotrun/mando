@@ -5,7 +5,6 @@ use anyhow::Result;
 use crate::telegram_format::escape_html;
 
 use crate::bot::TelegramBot;
-use crate::gateway_paths as paths;
 
 /// Handle `/triage`.
 pub async fn handle(bot: &TelegramBot, chat_id: &str, _args: &str) -> Result<()> {
@@ -16,10 +15,7 @@ pub async fn handle(bot: &TelegramBot, chat_id: &str, _args: &str) -> Result<()>
 
     match bot
         .gw()
-        .post_typed::<api_types::TriageRequest, api_types::TriageResponse>(
-            paths::CAPTAIN_TRIAGE,
-            &api_types::TriageRequest { item_id: None },
-        )
+        .post_captain_triage(&api_types::TriageRequest { item_id: None })
         .await
     {
         Ok(resp) => {

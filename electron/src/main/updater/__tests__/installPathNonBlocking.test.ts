@@ -40,14 +40,7 @@ const REPO_ROOT = path.resolve(import.meta.dirname, '..', '..', '..', '..', '..'
 const INSTALL_PATH_FILES: ReadonlyArray<InstallPathFile> = [
   {
     relPath: 'electron/src/main/global/runtime/portCheck.ts',
-    allowedSyncCalls: [
-      {
-        enclosingFunction: 'getDaemonStatus',
-        call: 'execSync',
-        reason:
-          'dead-code reexport with no install-path caller; not on the sidebar Update click path',
-      },
-    ],
+    allowedSyncCalls: [],
   },
   {
     relPath: 'electron/src/main/global/runtime/launchdServices.ts',

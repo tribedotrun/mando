@@ -14,27 +14,20 @@ export type RenderableFeedItem =
  *  re-shoots (task 103) and exploratory untyped uploads preceding a pair
  *  are not re-fused into the merged card. PR #1038's pairing case
  *  (two consecutive `mando todo evidence --kind` calls) still merges.
- *
- *  Suppressed timeline events (`human_ask`) are dropped up front:
- *  FeedBlocks renders them as null but they still occupy slots in
- *  `feedItems`, so a suppressed tail item would otherwise starve the
- *  last-pair check. */
+ */
 export function groupEvidenceArtifacts(feedItems: FeedItem[]): RenderableFeedItem[] {
-  const visible = feedItems.filter(
-    (fi) => !(fi.type === 'timeline' && shouldSuppressTimelineEvent(fi.data.data.event_type)),
-  );
-  const n = visible.length;
-  if (n < 2) return visible;
+  const n = feedItems.length;
+  if (n < 2) return feedItems;
 
-  const last = visible[n - 1];
-  const prev = visible[n - 2];
+  const last = feedItems[n - 1];
+  const prev = feedItems[n - 2];
   if (
     last.type !== 'artifact' ||
     last.data.artifact_type !== 'evidence' ||
     prev.type !== 'artifact' ||
     prev.data.artifact_type !== 'evidence'
   ) {
-    return visible;
+    return feedItems;
   }
 
   const lastKinds = new Set((last.data.media ?? []).map((m) => m.kind));
@@ -42,12 +35,12 @@ export function groupEvidenceArtifacts(feedItems: FeedItem[]): RenderableFeedIte
   const isPair =
     (lastKinds.has('before_fix') && prevKinds.has('after_fix')) ||
     (lastKinds.has('after_fix') && prevKinds.has('before_fix'));
-  if (!isPair) return visible;
+  if (!isPair) return feedItems;
 
   const latest =
     last.data.created_at > prev.data.created_at ? last.data.created_at : prev.data.created_at;
   return [
-    ...visible.slice(0, n - 2),
+    ...feedItems.slice(0, n - 2),
     { type: 'evidence-group', timestamp: latest, artifacts: [prev.data, last.data] },
   ];
 }
@@ -82,7 +75,6 @@ export const EVENT_ICON_MAP: Record<string, ItemStatus> = {
   canceled: 'canceled',
   canceled_by_human: 'canceled',
   human_reopen: 'queued',
-  human_ask: 'awaiting-review',
   rework_requested: 'rework',
   clarify_timeout: 'captain-reviewing',
   clarifier_completed_no_pr: 'merged',
@@ -109,7 +101,7 @@ export function confidenceIconOverride(event: TimelineEvent): ItemStatus | null 
  *  optional LLM-authored reason. Caller composes the rendered line so it
  *  can render the LLM `reason` through markdown without letting the
  *  fixed `Confidence:` prefix or the grade get parsed as syntax. */
-export interface ConfidencePreview {
+interface ConfidencePreview {
   confidence: string;
   reason: string;
 }
@@ -136,10 +128,6 @@ export function getNudgeReason(event: TimelineEvent): string | null {
   return content ? firstLine(content, 140) : null;
 }
 
-export function shouldSuppressTimelineEvent(eventType: string): boolean {
-  return eventType === 'human_ask';
-}
-
 /** Finds the timestamp of the latest clarify_question event in a feed. */
 export function latestClarifyTimestamp(feedItems: FeedItem[]): string | null {
   for (let i = feedItems.length - 1; i >= 0; i--) {
@@ -151,7 +139,7 @@ export function latestClarifyTimestamp(feedItems: FeedItem[]): string | null {
   return null;
 }
 
-export function firstLine(s: string, max: number): string {
+function firstLine(s: string, max: number): string {
   const line = s.split('\n').find((l) => l.trim().length > 0) ?? s;
   const trimmed = line.trim();
   return trimmed.length > max ? `${trimmed.slice(0, max).trimEnd()}…` : trimmed;

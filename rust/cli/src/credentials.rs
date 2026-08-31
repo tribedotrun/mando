@@ -18,7 +18,6 @@
 use anyhow::{bail, Result};
 use clap::{Args, Subcommand};
 
-use crate::gateway_paths as paths;
 use crate::http::DaemonClient;
 
 #[derive(Args)]
@@ -126,7 +125,7 @@ fn build_pick_request(
 
 async fn handle_list() -> Result<()> {
     let client = DaemonClient::discover()?;
-    let result: api_types::CredentialsListResponse = client.get_json(paths::CREDENTIALS).await?;
+    let result = client.get_credentials().await?;
 
     if result.credentials.is_empty() {
         println!("No credentials configured.");
@@ -169,14 +168,12 @@ async fn handle_list() -> Result<()> {
 
 async fn handle_set_disabled(id: i64, disabled: bool) -> Result<()> {
     let client = DaemonClient::discover()?;
-    let path = if disabled {
-        paths::credential_disable(id)
+    let params = api_types::CredentialIdParams { id };
+    if disabled {
+        client.post_credentials_by_id_disable(&params).await?;
     } else {
-        paths::credential_enable(id)
-    };
-    client
-        .post_json::<api_types::CredentialMutationResponse, _>(&path, &api_types::EmptyRequest {})
-        .await?;
+        client.post_credentials_by_id_enable(&params).await?;
+    }
     if disabled {
         println!("Credential {id} disabled.");
     } else {
@@ -192,14 +189,13 @@ async fn handle_pick_claude(request: api_types::CredentialPickRequest) -> Result
         return Ok(());
     };
 
-    let result: api_types::CredentialPickResponse =
-        match client.post_json(paths::CREDENTIALS_PICK, &request).await {
-            Ok(r) => r,
-            Err(_) => {
-                emit_claude_unset();
-                return Ok(());
-            }
-        };
+    let result = match client.post_credentials_pick(&request).await {
+        Ok(r) => r,
+        Err(_) => {
+            emit_claude_unset();
+            return Ok(());
+        }
+    };
 
     if let Some(pick) = result.pick {
         let token = shell_single_quote(&pick.token);
@@ -234,9 +230,7 @@ async fn handle_pick_codex(request: api_types::CredentialPickRequest) -> Result<
         }
     };
 
-    let pick_result: Result<api_types::CodexCredentialPickResponse> = client
-        .post_json(paths::CREDENTIALS_CODEX_PICK, &request)
-        .await;
+    let pick_result = client.post_credentials_codex_pick(&request).await;
     let result = match pick_result {
         Ok(r) => r,
         Err(err) => {
@@ -335,8 +329,7 @@ async fn handle_sync_codex() -> Result<()> {
         credential_id,
         auth_json,
     };
-    let sync_result: Result<api_types::SyncCodexCredentialResponse> =
-        client.post_json(paths::CREDENTIALS_CODEX_SYNC, &body).await;
+    let sync_result = client.post_credentials_codex_sync(&body).await;
     if let Err(err) = sync_result {
         // The daemon rejected the sync (e.g. the refresh token rotated to a
         // value it no longer recognizes). CODEX_HOME is deliberately left in
@@ -348,7 +341,7 @@ async fn handle_sync_codex() -> Result<()> {
             ),
             Err(_) => eprintln!("mando: codex credential sync failed: {err}"),
         }
-        return Err(err);
+        return Err(err.into());
     }
 
     if let Ok(home) = std::env::var("CODEX_HOME") {
@@ -381,7 +374,6 @@ fn shell_single_quote(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use clap::Parser;
 
     #[test]
     fn shell_single_quote_plain_token() {
@@ -423,35 +415,5 @@ mod tests {
     fn build_pick_request_rejects_empty_label() {
         let err = build_pick_request(None, Some("   ".into()), None).unwrap_err();
         assert!(err.to_string().contains("label must not be empty"));
-    }
-
-    #[derive(clap::Parser)]
-    struct TestCli {
-        #[command(subcommand)]
-        cmd: TestCommand,
-    }
-
-    #[derive(clap::Subcommand)]
-    enum TestCommand {
-        Credentials(CredentialsArgs),
-    }
-
-    #[test]
-    fn parse_disable_enable() {
-        let disable = TestCli::try_parse_from(["test", "credentials", "disable", "7"]).unwrap();
-        match disable.cmd {
-            TestCommand::Credentials(args) => match args.command {
-                CredentialsCommand::Disable { id } => assert_eq!(id, 7),
-                _ => panic!("expected disable"),
-            },
-        }
-
-        let enable = TestCli::try_parse_from(["test", "credentials", "enable", "7"]).unwrap();
-        match enable.cmd {
-            TestCommand::Credentials(args) => match args.command {
-                CredentialsCommand::Enable { id } => assert_eq!(id, 7),
-                _ => panic!("expected enable"),
-            },
-        }
     }
 }

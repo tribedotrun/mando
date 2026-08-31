@@ -1,22 +1,30 @@
+mod tools;
+
 use std::collections::HashSet;
 
 use api_types::{
-    AssistantContentBlock, AssistantEvent, AssistantTextBlock, AssistantThinkingBlock,
-    AssistantToolUseBlock, BashInput, EventMeta, McpToolName, OpaqueInput, OtherToolName,
-    SystemStatusEvent, ToolInput, ToolName, ToolResultContent, ToolResultText, TranscriptEvent,
-    TranscriptUsageInfo, UserContentBlock, UserEvent, UserImageBlock, UserTextBlock,
-    UserToolResultBlock, WebSearchInput,
+    AssistantContentBlock, AssistantEvent, AssistantTextBlock, AssistantThinkingBlock, EventMeta,
+    SystemStatusEvent, TranscriptEvent, TranscriptUsageInfo, UserContentBlock, UserEvent,
+    UserImageBlock, UserTextBlock,
 };
 use serde_json::Value;
+
+use self::tools::{
+    command_events, file_change_events, image_view_events, mcp_tool_events, opaque_tool_events,
+    subagent_events, web_search_events,
+};
 
 pub(super) struct CodexValue<'a>(pub(super) &'a Value);
 
 #[derive(Default)]
 pub(super) struct CodexParseState {
     agent_message_delta_items: HashSet<String>,
+    reasoning_delta_items: HashSet<String>,
+    content_items: HashSet<String>,
     tool_started_items: HashSet<String>,
     last_usage: Option<TranscriptUsageInfo>,
     model: Option<String>,
+    cwd: Option<String>,
     context_window: Option<u64>,
 }
 
@@ -27,21 +35,29 @@ impl CodexParseState {
         }
     }
 
+    pub(super) fn record_reasoning_delta(&mut self, item_id: Option<&str>) {
+        if let Some(item_id) = item_id.filter(|item_id| !item_id.is_empty()) {
+            self.reasoning_delta_items.insert(item_id.to_string());
+        }
+    }
+
     pub(super) fn record_model_from_value(&mut self, value: CodexValue<'_>) {
         let value = value.0;
-        if self.model.is_some() {
-            return;
+        if self.model.is_none() {
+            self.model = string_at(
+                value,
+                &[
+                    "/result/model",
+                    "/result/thread/model",
+                    "/params/model",
+                    "/params/thread/model",
+                    "/params/turn/model",
+                ],
+            );
         }
-        self.model = string_at(
-            value,
-            &[
-                "/result/model",
-                "/result/thread/model",
-                "/params/model",
-                "/params/thread/model",
-                "/params/turn/model",
-            ],
-        );
+        if self.cwd.is_none() {
+            self.cwd = string_at(value, &["/result/cwd", "/result/thread/cwd", "/params/cwd"]);
+        }
     }
 
     pub(super) fn record_usage_from_value(&mut self, value: CodexValue<'_>) {
@@ -76,19 +92,33 @@ impl CodexParseState {
     pub(super) fn context_window(&self) -> Option<u64> {
         self.context_window
     }
+
+    fn relative_path(&self, path: String) -> String {
+        self.cwd
+            .as_deref()
+            .and_then(|cwd| path.strip_prefix(cwd))
+            .map(|relative| relative.trim_start_matches('/').to_string())
+            .filter(|relative| !relative.is_empty())
+            .unwrap_or(path)
+    }
 }
 
 pub(super) fn usage_info(value: Option<CodexValue<'_>>) -> Option<TranscriptUsageInfo> {
     let usage = value?.0;
     let total = usage.get("total").unwrap_or(usage);
+    let total_input = token_count(total, &["inputTokens", "input_tokens"]);
+    let cache_read = token_count(total, &["cachedInputTokens", "cache_read_input_tokens"]);
+    let cache_creation = token_count(
+        total,
+        &["cacheCreationInputTokens", "cache_creation_input_tokens"],
+    );
     Some(TranscriptUsageInfo {
-        input_tokens: token_count(total, &["inputTokens", "input_tokens"]),
+        // Codex reports cached input as a subset of inputTokens. Normalize it
+        // to the disjoint shape shared with Claude before pricing/rendering.
+        input_tokens: total_input.saturating_sub(cache_read.saturating_add(cache_creation)),
         output_tokens: token_count(total, &["outputTokens", "output_tokens"]),
-        cache_read_tokens: token_count(total, &["cachedInputTokens", "cache_read_input_tokens"]),
-        cache_creation_tokens: token_count(
-            total,
-            &["cacheCreationInputTokens", "cache_creation_input_tokens"],
-        ),
+        cache_read_tokens: cache_read,
+        cache_creation_tokens: cache_creation,
     })
 }
 
@@ -128,6 +158,28 @@ pub(super) fn item_notification_events(
     item_events(item, base_meta, state, source)
 }
 
+pub(super) fn is_known_item_notification(value: CodexValue<'_>) -> bool {
+    matches!(
+        value.0.pointer("/params/item/type").and_then(Value::as_str),
+        Some(
+            "userMessage"
+                | "agentMessage"
+                | "plan"
+                | "reasoning"
+                | "commandExecution"
+                | "fileChange"
+                | "imageView"
+                | "mcpToolCall"
+                | "dynamicToolCall"
+                | "collabAgentToolCall"
+                | "subAgentActivity"
+                | "webSearch"
+                | "imageGeneration"
+                | "error"
+        )
+    )
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum ItemSource {
     Started,
@@ -143,26 +195,38 @@ fn item_events(
 ) -> Vec<TranscriptEvent> {
     let meta = item_meta(base_meta, item);
     match item.get("type").and_then(Value::as_str) {
-        Some("userMessage") => user_message_event(item, meta).into_iter().collect(),
+        Some("userMessage") => user_message_event(item, meta, state).into_iter().collect(),
         Some("agentMessage") => agent_message_event(item, meta, state).into_iter().collect(),
-        Some("plan") | Some("reasoning") => thinking_event(item, meta).into_iter().collect(),
-        Some("commandExecution") => command_events(item, meta, state, source),
-        Some("fileChange") => opaque_tool_events(item, meta, state, source, "fileChange"),
-        Some("mcpToolCall") => mcp_tool_events(item, meta, state, source),
-        Some("dynamicToolCall") => opaque_tool_events(item, meta, state, source, "dynamicToolCall"),
-        Some("collabAgentToolCall") => {
-            opaque_tool_events(item, meta, state, source, "collabAgentToolCall")
+        Some("plan") | Some("reasoning") => thinking_event(item, meta, state).into_iter().collect(),
+        Some("commandExecution") => command_events(CodexValue(item), meta, state, source),
+        Some("fileChange") => file_change_events(CodexValue(item), meta, state, source),
+        Some("imageView") => image_view_events(CodexValue(item), meta, state, source),
+        Some("mcpToolCall") => mcp_tool_events(CodexValue(item), meta, state, source),
+        Some("dynamicToolCall") => {
+            opaque_tool_events(CodexValue(item), meta, state, source, "dynamicToolCall")
         }
-        Some("webSearch") => web_search_events(item, meta, state, source),
-        Some("imageGeneration") => opaque_tool_events(item, meta, state, source, "imageGeneration"),
+        Some("collabAgentToolCall") => {
+            opaque_tool_events(CodexValue(item), meta, state, source, "collabAgentToolCall")
+        }
+        Some("subAgentActivity") => subagent_events(CodexValue(item), meta, state, source),
+        Some("webSearch") => web_search_events(CodexValue(item), meta, state, source),
+        Some("imageGeneration") => {
+            opaque_tool_events(CodexValue(item), meta, state, source, "imageGeneration")
+        }
         Some("error") => error_item_event(item, meta).into_iter().collect(),
         _ => Vec::new(),
     }
 }
 
-fn user_message_event(item: &Value, meta: EventMeta) -> Option<TranscriptEvent> {
+fn user_message_event(
+    item: &Value,
+    meta: EventMeta,
+    state: &mut CodexParseState,
+) -> Option<TranscriptEvent> {
     let blocks = user_blocks(item);
-    (!blocks.is_empty()).then_some(TranscriptEvent::User(UserEvent { meta, blocks }))
+    let id = item_id(item)?;
+    (!blocks.is_empty() && state.content_items.insert(id))
+        .then_some(TranscriptEvent::User(UserEvent { meta, blocks }))
 }
 
 fn user_blocks(item: &Value) -> Vec<UserContentBlock> {
@@ -196,167 +260,47 @@ fn user_block(value: &Value) -> Option<UserContentBlock> {
 fn agent_message_event(
     item: &Value,
     meta: EventMeta,
-    state: &CodexParseState,
+    state: &mut CodexParseState,
 ) -> Option<TranscriptEvent> {
-    let item_id = item_id(item);
-    if item_id
-        .as_deref()
-        .is_some_and(|id| state.agent_message_delta_items.contains(id))
-    {
+    let id = item_id(item)?;
+    if state.agent_message_delta_items.contains(&id) || state.content_items.contains(&id) {
         return None;
     }
     let text = string_at(item, &["/text"])?;
-    (!text.is_empty()).then_some(TranscriptEvent::Assistant(AssistantEvent {
-        meta,
-        model: state.model(),
-        blocks: vec![AssistantContentBlock::Text(AssistantTextBlock { text })],
-        usage: None,
-        stop_reason: None,
-    }))
+    (!text.is_empty() && state.content_items.insert(id)).then_some(TranscriptEvent::Assistant(
+        AssistantEvent {
+            meta,
+            model: state.model(),
+            blocks: vec![AssistantContentBlock::Text(AssistantTextBlock { text })],
+            usage: None,
+            stop_reason: None,
+        },
+    ))
 }
 
-fn thinking_event(item: &Value, meta: EventMeta) -> Option<TranscriptEvent> {
+fn thinking_event(
+    item: &Value,
+    meta: EventMeta,
+    state: &mut CodexParseState,
+) -> Option<TranscriptEvent> {
+    let id = item_id(item)?;
+    if state.reasoning_delta_items.contains(&id) || state.content_items.contains(&id) {
+        return None;
+    }
     let text = string_at(item, &["/text"])
         .or_else(|| string_array_text(item.get("summary")))
         .or_else(|| string_array_text(item.get("content")))?;
-    (!text.is_empty()).then_some(TranscriptEvent::Assistant(AssistantEvent {
-        meta,
-        model: None,
-        blocks: vec![AssistantContentBlock::Thinking(AssistantThinkingBlock {
-            text,
-        })],
-        usage: None,
-        stop_reason: None,
-    }))
-}
-
-fn command_events(
-    item: &Value,
-    meta: EventMeta,
-    state: &mut CodexParseState,
-    source: ItemSource,
-) -> Vec<TranscriptEvent> {
-    let name = ToolName::Bash;
-    let input = ToolInput::Bash(BashInput {
-        command: string_at(item, &["/command"]).unwrap_or_default(),
-        description: None,
-        timeout: None,
-        run_in_background: None,
-    });
-    tool_events(item, meta, state, source, name, input, command_result_text)
-}
-
-fn mcp_tool_events(
-    item: &Value,
-    meta: EventMeta,
-    state: &mut CodexParseState,
-    source: ItemSource,
-) -> Vec<TranscriptEvent> {
-    let server = string_at(item, &["/server"]).unwrap_or_else(|| "mcp".into());
-    let tool = string_at(item, &["/tool"]).unwrap_or_else(|| "tool".into());
-    let name = ToolName::Mcp(McpToolName { server, tool });
-    let input = ToolInput::Opaque(OpaqueInput {
-        raw: item
-            .get("arguments")
-            .and_then(|value| serde_json::to_string(value).ok())
-            .unwrap_or_else(|| "{}".into()),
-    });
-    tool_events(item, meta, state, source, name, input, generic_result_text)
-}
-
-fn web_search_events(
-    item: &Value,
-    meta: EventMeta,
-    state: &mut CodexParseState,
-    source: ItemSource,
-) -> Vec<TranscriptEvent> {
-    let name = ToolName::WebSearch;
-    let input = ToolInput::WebSearch(WebSearchInput {
-        query: string_at(item, &["/query"]).unwrap_or_default(),
-        allowed_domains: None,
-        blocked_domains: None,
-    });
-    tool_events(item, meta, state, source, name, input, generic_result_text)
-}
-
-fn opaque_tool_events(
-    item: &Value,
-    meta: EventMeta,
-    state: &mut CodexParseState,
-    source: ItemSource,
-    fallback_name: &str,
-) -> Vec<TranscriptEvent> {
-    let name = ToolName::Other(OtherToolName {
-        name: string_at(item, &["/tool"]).unwrap_or_else(|| fallback_name.into()),
-    });
-    let input = ToolInput::Opaque(OpaqueInput {
-        raw: serde_json::to_string(item).unwrap_or_else(|_| "{}".into()),
-    });
-    tool_events(item, meta, state, source, name, input, generic_result_text)
-}
-
-fn tool_events(
-    item: &Value,
-    meta: EventMeta,
-    state: &mut CodexParseState,
-    source: ItemSource,
-    name: ToolName,
-    input: ToolInput,
-    result_text: fn(&Value) -> Option<String>,
-) -> Vec<TranscriptEvent> {
-    let Some(id) = item_id(item) else {
-        return Vec::new();
-    };
-    let mut events = Vec::new();
-    if !state.tool_started_items.contains(&id) {
-        state.tool_started_items.insert(id.clone());
-        events.push(TranscriptEvent::Assistant(AssistantEvent {
-            meta: meta.clone(),
-            model: state.model(),
-            blocks: vec![AssistantContentBlock::ToolUse(AssistantToolUseBlock {
-                id: id.clone(),
-                name,
-                input,
+    (!text.is_empty() && state.content_items.insert(id)).then_some(TranscriptEvent::Assistant(
+        AssistantEvent {
+            meta,
+            model: None,
+            blocks: vec![AssistantContentBlock::Thinking(AssistantThinkingBlock {
+                text,
             })],
             usage: None,
             stop_reason: None,
-        }));
-    }
-    if source != ItemSource::Started {
-        if let Some(text) = result_text(item) {
-            events.push(TranscriptEvent::User(UserEvent {
-                meta,
-                blocks: vec![UserContentBlock::ToolResult(UserToolResultBlock {
-                    tool_use_id: id,
-                    content: ToolResultContent::Text(ToolResultText { text }),
-                    is_error: Some(item_failed(item)),
-                })],
-            }));
-        }
-    }
-    events
-}
-
-fn command_result_text(item: &Value) -> Option<String> {
-    string_at(item, &["/aggregatedOutput"]).or_else(|| {
-        terminal_status(item).map(|status| {
-            let command = string_at(item, &["/command"]).unwrap_or_default();
-            if command.is_empty() {
-                status
-            } else {
-                format!("{command}\n{status}")
-            }
-        })
-    })
-}
-
-fn generic_result_text(item: &Value) -> Option<String> {
-    item.get("result")
-        .or_else(|| item.get("error"))
-        .or_else(|| item.get("changes"))
-        .or_else(|| item.get("contentItems"))
-        .and_then(|value| serde_json::to_string(value).ok())
-        .or_else(|| terminal_status(item))
+        },
+    ))
 }
 
 fn error_item_event(item: &Value, meta: EventMeta) -> Option<TranscriptEvent> {
@@ -365,22 +309,6 @@ fn error_item_event(item: &Value, meta: EventMeta) -> Option<TranscriptEvent> {
         status: Some("error".into()),
         message: string_at(item, &["/message"]).or_else(|| serde_json::to_string(item).ok()),
     }))
-}
-
-fn item_failed(item: &Value) -> bool {
-    matches!(
-        item.get("status").and_then(Value::as_str),
-        Some("failed" | "error" | "errored")
-    ) || item.get("error").is_some()
-        || item
-            .get("exitCode")
-            .and_then(Value::as_i64)
-            .is_some_and(|code| code != 0)
-}
-
-fn terminal_status(item: &Value) -> Option<String> {
-    let status = item.get("status").and_then(Value::as_str)?;
-    (status != "inProgress" && status != "in_progress").then(|| format!("status: {status}"))
 }
 
 fn item_meta(base: &EventMeta, item: &Value) -> EventMeta {

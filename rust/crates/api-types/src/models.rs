@@ -125,8 +125,6 @@ pub struct SessionIds {
     pub review: Option<String>,
     pub clarifier: Option<String>,
     pub merge: Option<String>,
-    pub ask: Option<String>,
-    pub advisor: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -270,17 +268,6 @@ pub struct TimelineEvent {
     pub data: crate::TimelineEventPayload,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[serde(deny_unknown_fields)]
-pub struct AskHistoryEntry {
-    pub ask_id: String,
-    pub session_id: String,
-    pub role: String,
-    pub content: String,
-    pub timestamp: String,
-    pub intent: Option<String>,
-}
-
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, TS)]
 pub enum ArtifactType {
     #[serde(rename = "evidence")]
@@ -315,9 +302,9 @@ pub struct TaskArtifact {
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 // TimelineEvent carries the big TimelineEventPayload union; keeping it inline
-// on the Timeline variant makes the enum ~400 bytes vs. ~40 for Artifact /
-// Message. Expected: the timeline is the dominant feed entry, so inlining is
-// the right tradeoff.
+// on the Timeline variant makes the enum ~400 bytes vs. ~40 for Artifact.
+// Expected: the timeline is the dominant feed entry, so inlining is the right
+// tradeoff.
 #[allow(clippy::large_enum_variant)]
 pub enum FeedItem {
     Timeline {
@@ -327,10 +314,6 @@ pub enum FeedItem {
     Artifact {
         timestamp: String,
         data: TaskArtifact,
-    },
-    Message {
-        timestamp: String,
-        data: AskHistoryEntry,
     },
 }
 

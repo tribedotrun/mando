@@ -4,7 +4,7 @@ import path from 'path';
 import log from '#main/global/providers/logger';
 import { mustParseNonEmptyText, mustParseTrimmedText } from '#main/global/service/boundaryText';
 
-export interface DevGitInfo {
+interface DevGitInfo {
   branch: string;
   commit: string;
   worktree: string | null;

@@ -10,7 +10,7 @@ use std::collections::HashMap;
 
 /// Root configuration for Mando.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Config {
     pub workspace: String,
     pub ui: UiConfig,
@@ -50,7 +50,7 @@ impl Config {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct UiConfig {
     pub open_at_login: bool,
 }
@@ -61,7 +61,7 @@ pub struct UiConfig {
 
 /// Feature flags.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct FeaturesConfig {
     pub scout: bool,
     pub setup_dismissed: bool,
@@ -75,7 +75,7 @@ pub struct FeaturesConfig {
 /// Per-user scout configuration — interests, user context, and repo summaries.
 /// Stored in config.json so it's per-user and gitignored.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ScoutConfig {
     pub interests: super::workflow_scout::InterestsConfig,
     pub user_context: super::workflow_scout::UserContextConfig,
@@ -86,13 +86,13 @@ pub struct ScoutConfig {
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ChannelsConfig {
     pub telegram: TelegramConfig,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct TelegramConfig {
     pub enabled: bool,
     /// Runtime-only: populated from env.TELEGRAM_*_BOT_TOKEN, not serialized.
@@ -106,13 +106,13 @@ pub struct TelegramConfig {
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct GatewayConfig {
     pub dashboard: DashboardConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct DashboardConfig {
     pub host: String,
     pub port: u16,
@@ -132,7 +132,7 @@ impl Default for DashboardConfig {
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CaptainConfig {
     pub auto_schedule: bool,
     pub auto_merge: bool,
@@ -203,7 +203,7 @@ impl CaptainConfig {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ProjectConfig {
     pub name: String,
     pub path: String,
@@ -223,7 +223,7 @@ pub struct ProjectConfig {
 
 /// A single file classification rule: category name + glob patterns.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ClassifyRule {
     pub category: String,
     pub patterns: Vec<String>,

@@ -8,7 +8,7 @@ use crate::transport::server_routes_core;
 use crate::types::AppState;
 
 pub fn build_router(state: AppState) -> Router {
-    server_routes_core::public_routes()
+    let router = server_routes_core::public_routes()
         .into_router()
         // Public, unauthenticated Prometheus scrape endpoint. Bound to
         // the daemon's loopback-only listener, so exposure is local-only.
@@ -20,7 +20,18 @@ pub fn build_router(state: AppState) -> Router {
                 .into_router()
                 .route_layer(middleware::from_fn(auth::require_auth)),
         )
-        // `.route_layer` (not `.layer`) — metrics middleware must run
+        .with_state(state);
+    with_route_observability(router)
+        .layer(middleware::from_fn(request_id::inject_request_id))
+        .layer(cors_layer())
+}
+
+fn with_route_observability<S>(router: Router<S>) -> Router<S>
+where
+    S: Clone + Send + Sync + 'static,
+{
+    router
+        // `.route_layer` (not `.layer`) — observability middleware must run
         // *inside* the Router's route-matching step so that the axum
         // `MatchedPath` extension is populated. With `.layer()` the
         // middleware runs before matching, and every request would
@@ -29,7 +40,15 @@ pub fn build_router(state: AppState) -> Router {
         // this also skips metrics for bare-miss 404s — fine, since
         // those URIs have no bounded label anyway.
         .route_layer(middleware::from_fn(metrics::record_http_metrics))
-        .layer(middleware::from_fn(request_id::inject_request_id))
-        .layer(cors_layer())
-        .with_state(state)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn matched_route_observability_is_mounted_by_the_router_helper() {
+        let router = Router::<()>::new().route("/test", get(|| async { "ok" }));
+        let _: Router<()> = with_route_observability(router);
+    }
 }

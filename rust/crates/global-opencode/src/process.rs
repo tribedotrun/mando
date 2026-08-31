@@ -2,6 +2,7 @@ use std::path::Path;
 use std::process::Stdio;
 use std::time::Duration;
 
+use agent_runtime_core::ChildLifetime;
 use anyhow::{Context, Result};
 use global_types::Pid;
 use tokio::io::{AsyncBufReadExt, BufReader, Lines};
@@ -34,9 +35,9 @@ pub async fn spawn_run(
     session_start_timeout: Duration,
 ) -> Result<StartedOpenCodeRun> {
     ensure_binary_available().await?;
-    let mut child = opencode_command(config)
-        .spawn()
-        .context("spawn opencode run")?;
+    let mut child =
+        agent_runtime_core::spawn_isolated(opencode_command(config), ChildLifetime::KillOnDrop)
+            .context("spawn opencode run")?;
     let pid = child.id().map(Pid::new).unwrap_or_else(|| Pid::new(0));
     let stdout = child
         .stdout
@@ -75,8 +76,8 @@ pub async fn ensure_binary_available() -> Result<()> {
 }
 
 pub async fn terminate_process(pid: Pid) -> Result<()> {
-    if pid.as_u32() > 0 && global_claude::is_process_alive(pid) {
-        global_claude::kill_process(pid).await?;
+    if pid.as_u32() > 0 && agent_runtime_core::is_process_alive(pid) {
+        agent_runtime_core::kill_process(pid).await?;
     }
     Ok(())
 }
@@ -103,19 +104,6 @@ fn opencode_command(config: &OpenCodeRunConfig<'_>) -> Command {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .stdin(Stdio::null())
-        .current_dir(config.cwd)
-        .kill_on_drop(true);
-    for key in global_claude::DAEMON_ENV_STRIP {
-        command.env_remove(key);
-    }
-    #[cfg(unix)]
-    unsafe {
-        command.pre_exec(|| {
-            if libc::setsid() == -1 {
-                return Err(std::io::Error::last_os_error());
-            }
-            Ok(())
-        });
-    }
+        .current_dir(config.cwd);
     command
 }

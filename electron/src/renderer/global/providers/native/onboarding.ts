@@ -1,9 +1,3 @@
-export type ClaudeCodeCheckResult = {
-  installed: boolean;
-  version: string | null;
-  works: boolean;
-};
-
 export function checkClaudeCode() {
   return window.mandoAPI.checkClaudeCode();
 }

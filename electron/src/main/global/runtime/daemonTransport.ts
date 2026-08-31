@@ -11,7 +11,7 @@ import {
   type JsonRouteWithResKey,
   type Routes,
 } from '#shared/daemon-contract/routes';
-import { resSchemas } from '#shared/daemon-contract/schemas';
+import { errorResponseSchema, resSchemas } from '#shared/daemon-contract/schemas';
 import type { ZodType } from 'zod';
 import {
   type ApiError,
@@ -30,7 +30,7 @@ import {
 import { parseNonEmptyText } from '#main/global/service/boundaryText';
 import { readPort, readToken } from '#main/global/service/daemonDiscovery';
 
-export type DaemonRouteFetchOptions<K extends JsonRouteWithResKey> = Omit<
+type DaemonRouteFetchOptions<K extends JsonRouteWithResKey> = Omit<
   RequestInit,
   'body' | 'method'
 > & {
@@ -93,8 +93,20 @@ export function daemonRouteJsonR<K extends JsonRouteWithResKey>(
   }).andThen(async (response): Promise<Result<RouteRes<K>, ApiError>> => {
     if (!response.ok) {
       const detailText = await responseTextOr(response, response.statusText);
-      const detail = parseNonEmptyText(detailText, `route:${String(key)} error`);
-      return err(makeHttpError(response.status, detail || null, `HTTP ${response.status}`));
+      const parsedError = parseJsonText(detailText, `route:${String(key)} error`);
+      const envelope = parsedError.isOk()
+        ? errorResponseSchema.safeParse(parsedError.value)
+        : undefined;
+      const detail = envelope?.success
+        ? envelope.data.error
+        : parseNonEmptyText(detailText, `route:${String(key)} error`);
+      return err(
+        makeHttpError(
+          response.status,
+          envelope?.success ? envelope.data : null,
+          detail ?? `HTTP ${response.status}`,
+        ),
+      );
     }
     const rawText = await responseTextOr(response, '');
     const rawResult = parseJsonText(rawText, `daemon:${String(key)}`);

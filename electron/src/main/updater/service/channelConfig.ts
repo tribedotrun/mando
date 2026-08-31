@@ -25,7 +25,7 @@ export function writeChannel(channel: UpdateChannel): void {
   writeFileSync(configPath, JSON.stringify({ channel }), 'utf-8');
 }
 
-export function resolveUpdateServer(): string {
+function resolveUpdateServer(): string {
   return process.env.MANDO_UPDATE_SERVER || UPDATE_SERVER;
 }
 

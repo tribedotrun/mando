@@ -19,7 +19,7 @@ export interface TelegramHealth {
   mode: string;
 }
 
-export type UpdateSystemInfo = {
+type UpdateSystemInfo = {
   appVersion: string;
   channel: Awaited<ReturnType<typeof getUpdateChannel>>;
 };

@@ -51,7 +51,6 @@ pub async fn start_runtime_services(state: &AppState, options: RuntimeStartOptio
 
 pub struct GatewayBootstrap {
     pub state: AppState,
-    pub host: String,
 }
 
 pub async fn bootstrap_gateway(
@@ -59,7 +58,6 @@ pub async fn bootstrap_gateway(
     bus: Arc<global_bus::EventBus>,
     options: BootstrapOptions,
 ) -> anyhow::Result<GatewayBootstrap> {
-    let host = config.gateway.dashboard.host.clone();
     let listen_port = options
         .port_override
         .unwrap_or(config.gateway.dashboard.port);
@@ -170,7 +168,7 @@ pub async fn bootstrap_gateway(
         ui_runtime,
     };
 
-    Ok(GatewayBootstrap { state, host })
+    Ok(GatewayBootstrap { state })
 }
 
 fn workflow_mode_for(options: &BootstrapOptions) -> settings::WorkflowRuntimeMode {

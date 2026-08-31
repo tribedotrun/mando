@@ -1,13 +1,13 @@
 import type { QueryClient } from '@tanstack/react-query';
 
-export type DaemonSyncMode =
+type DaemonSyncMode =
   | 'sse-patched'
   | 'sse-invalidated'
   | 'mutation-invalidated'
   | 'polling'
   | 'manual';
 
-export type DaemonResyncReason =
+type DaemonResyncReason =
   | 'snapshot-error'
   | 'explicit-resync'
   | 'unexpected-event'

@@ -136,7 +136,6 @@ pub(crate) async fn get_health_system(
 ///
 /// The response is always `TickDrainResult` — a single-tick call is just
 /// drain-with-`iterations=1`, `stopped_reason=max-ticks`.
-#[crate::instrument_api(method = "POST", path = "/api/captain/tick")]
 pub(crate) async fn post_captain_tick(
     State(state): State<AppState>,
     Json(body): Json<api_types::TickRequest>,
@@ -295,7 +294,6 @@ fn empty_tick_result() -> api_types::TickResult {
 }
 
 /// POST /api/captain/triage
-#[crate::instrument_api(method = "POST", path = "/api/captain/triage")]
 pub(crate) async fn post_captain_triage(
     State(state): State<AppState>,
     Json(body): Json<api_types::TriageRequest>,
@@ -311,7 +309,6 @@ pub(crate) async fn post_captain_triage(
 }
 
 /// POST /api/captain/stop
-#[crate::instrument_api(method = "POST", path = "/api/captain/stop")]
 pub(crate) async fn post_captain_stop(
     State(state): State<AppState>,
     Json(_body): Json<api_types::EmptyRequest>,
@@ -325,7 +322,6 @@ pub(crate) async fn post_captain_stop(
 }
 
 /// POST /api/captain/nudge (JSON or multipart with optional images)
-#[crate::instrument_api(method = "POST", path = "/api/captain/nudge")]
 pub(crate) async fn post_captain_nudge(
     State(state): State<AppState>,
     request: axum::extract::Request,
@@ -421,7 +417,6 @@ async fn post_captain_nudge_inner(
 }
 
 /// GET /api/workers
-#[crate::instrument_api(method = "GET", path = "/api/workers")]
 pub(crate) async fn get_workers(
     State(state): State<AppState>,
 ) -> Result<Json<api_types::WorkersResponse>, ApiError> {

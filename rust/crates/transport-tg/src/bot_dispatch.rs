@@ -195,7 +195,7 @@ pub(crate) const REGISTERED_COMMANDS: &[CommandSpec] = &[
     CommandSpec {
         name: "timeline",
         aliases: &["history"],
-        help_short: "Task timeline + Q&A history",
+        help_short: "Task lifecycle timeline",
         visibility: CommandVisibility::Public,
         feature_gate: FeatureGate::Always,
         section: HelpSection::System,
@@ -372,12 +372,6 @@ impl TelegramBot {
                 // Session vanished between snapshot and consume — fall through.
                 crate::assistant::helpers::handle_implicit_addlink(self, chat_id, message).await
             }
-            Some(SessionKind::AskSession) => {
-                if commands::action::handle_ask_text(self, chat_id, text).await? {
-                    return Ok(());
-                }
-                crate::assistant::helpers::handle_implicit_addlink(self, chat_id, message).await
-            }
             Some(SessionKind::ActSession) => {
                 if !text.is_empty() {
                     if let Some(session) = self.take_act_session(chat_id).await {
@@ -445,10 +439,10 @@ async fn handle_nudge_text(
         .await?;
     match bot
         .gw()
-        .post_typed::<_, api_types::NudgeResponse>(
-            crate::gateway_paths::CAPTAIN_NUDGE,
-            &serde_json::json!({"item_id": item_id, "message": text}),
-        )
+        .post_captain_nudge(&api_types::NudgeRequest {
+            item_id: item_id.to_string(),
+            message: text.to_string(),
+        })
         .await
     {
         Ok(resp) => {

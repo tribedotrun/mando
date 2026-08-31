@@ -5,15 +5,10 @@ import { cn } from '#renderer/global/service/cn';
 import {
   DialogChromeCloseButton,
   DialogContentFrame,
-  DialogFooterCloseButton,
 } from '#renderer/global/ui/primitives/dialog-parts';
 
 function Dialog({ ...props }: React.ComponentProps<typeof DialogPrimitive.Root>) {
   return <DialogPrimitive.Root data-slot="dialog" {...props} />;
-}
-
-function DialogTrigger({ ...props }: React.ComponentProps<typeof DialogPrimitive.Trigger>) {
-  return <DialogPrimitive.Trigger data-slot="dialog-trigger" {...props} />;
 }
 
 function DialogPortal({ ...props }: React.ComponentProps<typeof DialogPrimitive.Portal>) {
@@ -98,10 +93,8 @@ export {
   DialogContentPlain,
   DialogDescription,
   DialogFooter,
-  DialogFooterCloseButton,
   DialogHeader,
   DialogOverlay,
   DialogPortal,
   DialogTitle,
-  DialogTrigger,
 };

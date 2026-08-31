@@ -3,6 +3,7 @@
 mod codex_add_guardrails;
 mod codex_add_persist;
 mod codex_add_refresh;
+mod codex_app_runtime;
 mod codex_auth_update_runtime;
 mod codex_credentials_runtime;
 mod codex_login_rules;
@@ -15,6 +16,7 @@ mod credentials_runtime;
 mod runtime_helpers;
 mod settings_runtime;
 
+pub use codex_app_runtime::CodexDesktopAppError;
 pub use codex_credentials_runtime::{
     CodexCredentialError, CodexPickOutcome, PickedCodexCredential,
 };

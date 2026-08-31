@@ -1,1 +1,3 @@
+pub use generated::routes;
+pub use http::{ClientError, GatewayClient, Result, RouteDescriptor};
 pub use sse::{parse_sse_block, ParseError, SseConsumer, SseSignal};

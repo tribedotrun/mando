@@ -24,12 +24,19 @@ describe('daemon-contract runtime', () => {
   });
 
   it('rejects multipart FormData routes without a shadow body', () => {
-    assert.throws(() => assertMultipartRouteBody('postTasksAsk', new FormData()), SchemaParseError);
+    assert.throws(() => assertMultipartRouteBody('postTasksAdd', new FormData()), SchemaParseError);
   });
 
   it('accepts multipart FormData routes when the shadow body is valid', () => {
     assert.doesNotThrow(() =>
-      assertMultipartRouteBody('postTasksAsk', new FormData(), { id: 1, question: 'hello' }),
+      assertMultipartRouteBody('postTasksAdd', new FormData(), {
+        title: 'Task',
+        project: null,
+        provider: null,
+        use_glm_worker: false,
+        plan: false,
+        no_pr: false,
+      }),
     );
   });
 

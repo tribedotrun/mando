@@ -119,14 +119,30 @@ pub(super) async fn handle_notification(
     false
 }
 
-pub(super) fn turn_status(notification: CodexNotification<'_>) -> global_types::SessionStatus {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct CodexTurnCompletion {
+    pub(super) status: global_types::SessionStatus,
+    pub(super) outcome: api_types::ResultOutcome,
+}
+
+pub(super) fn turn_completion(notification: CodexNotification<'_>) -> CodexTurnCompletion {
     match notification
         .0
         .pointer("/params/turn/status")
         .and_then(Value::as_str)
     {
-        Some("completed" | "interrupted") => global_types::SessionStatus::Stopped,
-        _ => global_types::SessionStatus::Failed,
+        Some("completed") => CodexTurnCompletion {
+            status: global_types::SessionStatus::Stopped,
+            outcome: api_types::ResultOutcome::Success,
+        },
+        Some("interrupted") => CodexTurnCompletion {
+            status: global_types::SessionStatus::Stopped,
+            outcome: api_types::ResultOutcome::Interrupted,
+        },
+        _ => CodexTurnCompletion {
+            status: global_types::SessionStatus::Failed,
+            outcome: api_types::ResultOutcome::ErrorDuringExecution,
+        },
     }
 }
 
@@ -208,19 +224,19 @@ fn item_key(params: &Value) -> String {
 #[tracing::instrument(skip(stream_path, state, result_text, structured_output))]
 pub(super) async fn append_result(
     stream_path: &Path,
-    status: global_types::SessionStatus,
+    outcome: api_types::ResultOutcome,
     state: &CodexStreamState,
     total_cost_usd: Option<f64>,
     result_text: Option<&str>,
     structured_output: Option<CodexStructuredOutput>,
     structured_output_error: Option<&str>,
 ) -> Result<()> {
-    let is_error = status == global_types::SessionStatus::Failed;
+    let is_error = outcome.is_error();
     append_jsonl(
         stream_path,
         CodexStreamLine(json!({
             "type": "result",
-            "subtype": if is_error { "error" } else { "success" },
+            "subtype": outcome.as_str(),
             "is_error": is_error,
             "duration_ms": state.duration_ms,
             "num_turns": 1,
@@ -237,13 +253,21 @@ pub(super) async fn append_result(
 fn normalize_usage(usage: Option<&Value>) -> Option<Value> {
     let usage = usage?;
     let total = usage.get("total").unwrap_or(usage);
-    let input_tokens = token_count(total, &["inputTokens", "input_tokens"]);
+    let total_input_tokens = token_count(total, &["inputTokens", "input_tokens"]);
     let output_tokens = token_count(total, &["outputTokens", "output_tokens"]);
     let cache_read_tokens = token_count(total, &["cachedInputTokens", "cache_read_input_tokens"]);
     let cache_creation_tokens = token_count(
         total,
-        &["cacheCreationInputTokens", "cache_creation_input_tokens"],
+        &[
+            "cacheWriteInputTokens",
+            "cacheCreationInputTokens",
+            "cache_creation_input_tokens",
+        ],
     );
+    // Codex reports cache reads and writes as subsets of inputTokens. Convert
+    // that cumulative total into the disjoint buckets expected by ModelRate.
+    let input_tokens =
+        total_input_tokens.saturating_sub(cache_read_tokens.saturating_add(cache_creation_tokens));
 
     Some(json!({
         "input_tokens": input_tokens,
@@ -279,6 +303,9 @@ pub(super) async fn append_jsonl(path: &Path, line: CodexStreamLine) -> Result<(
     file.write_all(format!("{line}\n").as_bytes())
         .await
         .with_context(|| format!("append stream {}", path.display()))?;
+    file.flush()
+        .await
+        .with_context(|| format!("flush stream {}", path.display()))?;
     Ok(())
 }
 
@@ -370,22 +397,43 @@ mod tests {
     }
 
     #[test]
-    fn normalize_usage_preserves_cache_creation_tokens() {
+    fn normalize_usage_makes_camel_case_input_buckets_disjoint() {
         let usage = json!({
             "total": {
                 "inputTokens": 10,
                 "outputTokens": 20,
                 "cachedInputTokens": 3,
-                "cacheCreationInputTokens": 4,
+                "cacheWriteInputTokens": 4,
             }
         });
 
         let normalized = normalize_usage(Some(&usage)).unwrap();
 
-        assert_eq!(normalized["input_tokens"], 10);
+        assert_eq!(normalized["input_tokens"], 3);
         assert_eq!(normalized["output_tokens"], 20);
         assert_eq!(normalized["cache_read_input_tokens"], 3);
         assert_eq!(normalized["cache_creation_input_tokens"], 4);
+    }
+
+    #[test]
+    fn estimated_cost_does_not_double_charge_cached_input() {
+        let state = CodexStreamState {
+            last_usage: Some(json!({
+                "total": {
+                    "inputTokens": 10_000_000,
+                    "outputTokens": 2_000_000,
+                    "cachedInputTokens": 3_000_000,
+                    "cacheWriteInputTokens": 4_000_000,
+                }
+            })),
+            ..CodexStreamState::default()
+        };
+        let rate = global_claude::rate_for_model("gpt-5.6-sol");
+        let expected = rate.cost_for(3_000_000, 2_000_000, 4_000_000, 3_000_000);
+
+        let actual = state.estimated_cost_usd("gpt-5.6-sol").unwrap();
+
+        assert!((actual - expected).abs() < f64::EPSILON);
     }
 
     #[test]
@@ -400,6 +448,41 @@ mod tests {
         let normalized = normalize_usage(Some(&usage)).unwrap();
 
         assert_eq!(normalized["cache_creation_input_tokens"], 4);
+    }
+
+    #[test]
+    fn interrupted_turn_has_stopped_status_and_interrupted_outcome() {
+        let notification = json!({
+            "params": {"turn": {"status": "interrupted"}}
+        });
+
+        let completion = turn_completion(CodexNotification(&notification));
+
+        assert_eq!(completion.status, global_types::SessionStatus::Stopped);
+        assert_eq!(completion.outcome, api_types::ResultOutcome::Interrupted);
+    }
+
+    #[tokio::test]
+    async fn interrupted_result_is_not_serialized_as_success() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("codex.jsonl");
+
+        append_result(
+            &path,
+            api_types::ResultOutcome::Interrupted,
+            &CodexStreamState::default(),
+            None,
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+
+        let result: Value =
+            serde_json::from_str(tokio::fs::read_to_string(path).await.unwrap().trim()).unwrap();
+        assert_eq!(result["subtype"], json!("interrupted"));
+        assert_eq!(result["is_error"], json!(false));
     }
 
     async fn read_stream_until(path: &std::path::Path, predicate: impl Fn(&str) -> bool) -> String {

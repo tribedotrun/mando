@@ -1,5 +1,6 @@
 // Central IPC channel registry. Single source of truth for the renderer<->main boundary.
-// MandoAPI in preload/providers/ipc.ts is derived from `inferIpcApi<typeof channels>`.
+// The authored bridge in preload/providers/ipc.ts uses this registry through validated runtime
+// helpers and exports MandoAPI directly as `typeof ipcApi`.
 
 import { z } from 'zod';
 
@@ -10,6 +11,7 @@ import {
   codexAppStatusSchema,
   configJsonStringSchema,
   devGitInfoResultSchema,
+  evidenceDeckDocumentSchema,
   notificationClickPayloadSchema,
   notificationPayloadSchema,
   pendingUpdateInfoSchema,
@@ -26,18 +28,18 @@ import {
 // Internal helpers that capture both Zod schema (runtime) and inferred TS type (compile).
 type Schema = z.ZodType<unknown>;
 
-export interface InvokeChannelDef<A extends Schema | null, R extends Schema | null> {
+interface InvokeChannelDef<A extends Schema | null, R extends Schema | null> {
   kind: 'invoke';
   args: A;
   result: R;
 }
 
-export interface SubscribeChannelDef<P extends Schema | null> {
+interface SubscribeChannelDef<P extends Schema | null> {
   kind: 'subscribe';
   payload: P;
 }
 
-export type ChannelDef =
+type ChannelDef =
   | InvokeChannelDef<Schema | null, Schema | null>
   | SubscribeChannelDef<Schema | null>;
 
@@ -95,6 +97,8 @@ export const channels = {
   'open-in-cursor': invoke(z.string(), z.void()),
   'shell:open-external-url': invoke(z.string(), z.void()),
   'shell:open-local-path': invoke(z.string(), z.void()),
+  'shell:evidence-deck-exists': invoke(z.string(), z.boolean()),
+  'shell:read-evidence-deck': invoke(z.string(), evidenceDeckDocumentSchema.nullable()),
 
   // Notifications: renderer pushes a payload to main; main pushes click events back.
   'show-notification': subscribe(notificationPayloadSchema),
@@ -110,7 +114,7 @@ export const channels = {
   'update-check-done': subscribe(updateCheckDonePayloadSchema),
 } as const satisfies Record<string, ChannelDef>;
 
-export type Channels = typeof channels;
+type Channels = typeof channels;
 export type ChannelName = keyof Channels;
 
 // Helper inference types

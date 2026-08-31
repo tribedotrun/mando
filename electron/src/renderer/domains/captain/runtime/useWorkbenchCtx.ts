@@ -4,7 +4,7 @@ import type { TaskItem } from '#renderer/global/types';
 import { useWorkbenchList } from '#renderer/domains/captain/runtime/hooks';
 import { useTaskForWorkbench } from '#renderer/domains/captain/runtime/useTaskForWorkbench';
 
-export interface WorkbenchCtx {
+interface WorkbenchCtx {
   worktreeName: string | null;
   worktreePath: string | null;
   projectName: string | null;

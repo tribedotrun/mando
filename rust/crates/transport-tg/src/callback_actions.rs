@@ -4,11 +4,9 @@
 //! then reports success/failure back to the Telegram chat.
 
 use anyhow::Result;
-use serde_json::json;
 use tracing::{error, info};
 
 use crate::bot::TelegramBot;
-use crate::gateway_paths as paths;
 use crate::http::GatewayClient;
 
 fn parse_item_id(item_id: &str) -> Result<i64> {
@@ -18,33 +16,21 @@ fn parse_item_id(item_id: &str) -> Result<i64> {
 /// Look up a task by ID via the gateway HTTP API.
 ///
 /// Fail-fast: `Err` on infrastructure failure (invalid id, gateway
-/// error, wire-type conversion failure). `Ok(None)` means the task
-/// genuinely doesn't exist. Collapsing the two under `Option<_>`
+/// error). `Ok(None)` means the task genuinely doesn't exist. Collapsing
+/// the two under `Option<_>`
 /// previously made live tasks appear deleted whenever serde drift or a
 /// transient gateway hiccup happened.
-async fn find_task(gw: &GatewayClient, id: &str) -> anyhow::Result<Option<captain::Task>> {
+async fn find_task(gw: &GatewayClient, id: &str) -> anyhow::Result<Option<api_types::TaskItem>> {
     let id_num: i64 = id
         .parse()
         .map_err(|e| anyhow::anyhow!("invalid task id {id}: {e}"))?;
     let resp = gw
-        .get_typed::<api_types::TaskListResponse>(paths::TASKS)
+        .get_tasks(&api_types::TaskListQuery {
+            include_archived: None,
+        })
         .await
         .map_err(|e| anyhow::anyhow!("gateway failed to fetch task list: {e}"))?;
-    for item in resp.items {
-        if item.id != id_num {
-            continue;
-        }
-        let value = serde_json::to_value(&item).map_err(|e| {
-            anyhow::anyhow!("failed to serialize TaskItem {id_num} for TG callback: {e}")
-        })?;
-        let task = serde_json::from_value(value).map_err(|e| {
-            anyhow::anyhow!(
-                "failed to convert TaskItem {id_num} to Task (api-types schema drift): {e}"
-            )
-        })?;
-        return Ok(Some(task));
-    }
-    Ok(None)
+    Ok(resp.items.into_iter().find(|item| item.id == id_num))
 }
 
 // ── Merge ────────────────────────────────────────────────────────────
@@ -69,6 +55,10 @@ pub(crate) async fn merge(
     let pr_num = item
         .pr_number
         .ok_or_else(|| anyhow::anyhow!("item #{item_id} has no PR"))?;
+    let project = item
+        .project
+        .as_ref()
+        .ok_or_else(|| anyhow::anyhow!("item #{item_id} has no project"))?;
 
     let mid = match loading_mid {
         Some(m) => m,
@@ -76,10 +66,10 @@ pub(crate) async fn merge(
     };
 
     match gw
-        .post_typed::<_, api_types::MergeResponse>(
-            paths::TASKS_MERGE,
-            &json!({"pr_number": pr_num, "project": &item.project}),
-        )
+        .post_tasks_merge(&api_types::MergeRequest {
+            pr_number: pr_num,
+            project: project.clone(),
+        })
         .await
     {
         Ok(_) => {
@@ -121,10 +111,7 @@ pub(crate) async fn accept(
 
     match bot
         .gw()
-        .post_typed::<api_types::TaskIdRequest, api_types::BoolOkResponse>(
-            paths::TASKS_ACCEPT,
-            &api_types::TaskIdRequest { id: id_num },
-        )
+        .post_tasks_accept(&api_types::TaskIdRequest { id: id_num })
         .await
     {
         Ok(_) => {
@@ -159,10 +146,10 @@ pub(crate) async fn reopen_with_feedback(
 
     match bot
         .gw()
-        .post_typed::<_, api_types::BoolOkResponse>(
-            paths::TASKS_REOPEN,
-            &json!({"id": id_num, "feedback": feedback}),
-        )
+        .post_tasks_reopen(&api_types::TaskFeedbackRequest {
+            id: id_num,
+            feedback: feedback.to_string(),
+        })
         .await
     {
         Ok(_) => {
@@ -197,10 +184,10 @@ pub(crate) async fn rework_with_feedback(
 
     match bot
         .gw()
-        .post_typed::<_, api_types::BoolOkResponse>(
-            paths::TASKS_REWORK,
-            &json!({"id": id_num, "feedback": feedback}),
-        )
+        .post_tasks_rework(&api_types::TaskFeedbackRequest {
+            id: id_num,
+            feedback: feedback.to_string(),
+        })
         .await
     {
         Ok(_) => {
@@ -231,10 +218,7 @@ pub(crate) async fn handoff(
 
     match bot
         .gw()
-        .post_typed::<api_types::TaskIdRequest, api_types::BoolOkResponse>(
-            paths::TASKS_HANDOFF,
-            &api_types::TaskIdRequest { id: id_num },
-        )
+        .post_tasks_handoff(&api_types::TaskIdRequest { id: id_num })
         .await
     {
         Ok(_) => {
@@ -259,10 +243,7 @@ pub(crate) async fn stop(bot: &TelegramBot, cid: &str, item_id: &str) -> Result<
     let id_num = parse_item_id(item_id)?;
     match bot
         .gw()
-        .post_typed::<api_types::TaskIdRequest, api_types::BoolOkResponse>(
-            paths::TASKS_STOP,
-            &api_types::TaskIdRequest { id: id_num },
-        )
+        .post_tasks_stop(&api_types::TaskIdRequest { id: id_num })
         .await
     {
         Ok(_) => {
@@ -279,137 +260,119 @@ pub(crate) async fn stop(bot: &TelegramBot, cid: &str, item_id: &str) -> Result<
     Ok(())
 }
 
-// ── Cancel (multi-select) ────────────────────────────────────────────
+// ── Todo add ─────────────────────────────────────────────────────────
 
-// ── Todo confirm ─────────────────────────────────────────────────────
-
-/// Write confirmed todo items to the task list via multipart POST.
+/// Write one todo task via multipart POST.
 ///
 /// If `loading_mid` is `Some`, the final summary edits that message in-place.
 /// If `None`, the summary is sent as a new message.
-pub(crate) async fn add_todo_items(
+pub(crate) async fn add_todo_item(
     bot: &TelegramBot,
     cid: &str,
-    items: &[crate::bot::TodoItem],
+    item: &crate::bot::TodoItem,
     loading_mid: Option<i64>,
 ) -> Result<()> {
-    let mut ok_titles: Vec<String> = Vec::new();
+    let mut fields = vec![("title", item.title.as_str()), ("source", "telegram")];
+    if let Some(ref project) = item.project {
+        fields.push(("project", project.as_str()));
+    }
 
-    for item in items {
-        let mut fields = vec![("title", item.title.as_str()), ("source", "telegram")];
-        if let Some(ref p) = item.project {
-            fields.push(("project", p.as_str()));
-        }
-
-        // Download photo from Telegram if present
-        let photo_data = if let Some(ref fid) = item.photo_file_id {
-            match bot.api().get_file(fid).await {
-                Ok(file_path) => match bot.api().download_file(&file_path).await {
-                    Ok(bytes) => {
-                        let ext = file_path.rsplit('.').next().unwrap_or("jpg");
-                        Some((bytes, format!("photo.{ext}")))
-                    }
-                    Err(e) => {
-                        error!("photo download failed: {e}");
-                        if let Err(e) = bot
-                            .send_html(cid, &format!("\u{26a0}\u{fe0f} Photo download failed: {e}"))
-                            .await
-                        {
-                            tracing::warn!(module = "telegram", error = %e, "message send failed");
-                        }
-                        None
-                    }
-                },
+    let photo_data = if let Some(ref file_id) = item.photo_file_id {
+        match bot.api().get_file(file_id).await {
+            Ok(file_path) => match bot.api().download_file(&file_path).await {
+                Ok(bytes) => {
+                    let ext = file_path.rsplit('.').next().unwrap_or("jpg");
+                    Some((bytes, format!("photo.{ext}")))
+                }
                 Err(e) => {
-                    error!("getFile failed: {e}");
+                    error!("photo download failed: {e}");
                     if let Err(e) = bot
-                        .send_html(cid, &format!("\u{26a0}\u{fe0f} Photo fetch failed: {e}"))
+                        .send_html(cid, &format!("\u{26a0}\u{fe0f} Photo download failed: {e}"))
                         .await
                     {
                         tracing::warn!(module = "telegram", error = %e, "message send failed");
                     }
                     None
                 }
-            }
-        } else {
-            None
-        };
-
-        let file_part = photo_data
-            .as_ref()
-            .map(|(bytes, name)| ("images", bytes.clone(), name.as_str()));
-        match bot
-            .gw()
-            .post_multipart_with_file::<api_types::TaskItem>(paths::TASKS_ADD, &fields, file_part)
-            .await
-        {
-            Ok(result) => {
-                info!("todo: added '{}' -> {:?}", item.title, item.project);
-                ok_titles.push(item.title.clone());
-                let id = result.id.to_string();
-                let updates = api_types::TaskPatchRequest {
-                    context: None,
-                    original_prompt: Some(item.title.clone()),
-                    is_bug_fix: None,
-                };
+            },
+            Err(e) => {
+                error!("getFile failed: {e}");
                 if let Err(e) = bot
-                    .gw()
-                    .patch_typed::<_, api_types::BoolOkResponse>(&paths::task_item(&id), &updates)
+                    .send_html(cid, &format!("\u{26a0}\u{fe0f} Photo fetch failed: {e}"))
                     .await
                 {
-                    error!("todo: failed to set metadata for #{id}: {e}");
-                    if let Err(e) = bot
-                        .send_html(
-                            cid,
-                            &format!("\u{26a0}\u{fe0f} Item #{id} added but metadata failed: {e}"),
-                        )
-                        .await
-                    {
-                        tracing::warn!(module = "telegram", error = %e, "message send failed");
-                    }
+                    tracing::warn!(module = "telegram", error = %e, "message send failed");
                 }
+                None
             }
-            Err(e) => {
-                error!("todo: failed to add '{}': {e}", item.title);
+        }
+    } else {
+        None
+    };
+
+    let file_part = photo_data
+        .as_ref()
+        .map(|(bytes, name)| ("images", bytes.clone(), name.as_str()));
+    let added = match bot.gw().post_task_add_with_file(&fields, file_part).await {
+        Ok(result) => {
+            info!("todo: added '{}' -> {:?}", item.title, item.project);
+            let id = result.id;
+            let updates = api_types::TaskPatchRequest {
+                context: None,
+                original_prompt: Some(item.title.clone()),
+                is_bug_fix: None,
+            };
+            if let Err(e) = bot
+                .gw()
+                .patch_tasks_by_id(&api_types::TaskIdParams { id }, &updates)
+                .await
+            {
+                error!("todo: failed to set metadata for #{id}: {e}");
                 if let Err(e) = bot
                     .send_html(
                         cid,
-                        &format!(
-                            "\u{274c} Failed to add '{}': {e}",
-                            crate::telegram_format::escape_html(&item.title),
-                        ),
+                        &format!("\u{26a0}\u{fe0f} Item #{id} added but metadata failed: {e}"),
                     )
                     .await
                 {
                     tracing::warn!(module = "telegram", error = %e, "message send failed");
                 }
             }
+            true
         }
-    }
+        Err(e) => {
+            error!("todo: failed to add '{}': {e}", item.title);
+            if let Err(e) = bot
+                .send_html(
+                    cid,
+                    &format!(
+                        "\u{274c} Failed to add '{}': {e}",
+                        crate::telegram_format::escape_html(&item.title),
+                    ),
+                )
+                .await
+            {
+                tracing::warn!(module = "telegram", error = %e, "message send failed");
+            }
+            false
+        }
+    };
 
-    if !ok_titles.is_empty() {
-        let list: String = ok_titles
-            .iter()
-            .enumerate()
-            .map(|(i, t)| format!("{}. {}", i + 1, crate::telegram_format::escape_html(t)))
-            .collect::<Vec<_>>()
-            .join("\n");
-        let project_label = items
-            .iter()
-            .find_map(|i| i.project.as_deref())
+    if added {
+        let project_label = item
+            .project
+            .as_deref()
             .map(|p| format!(" to <b>{}</b>", crate::telegram_format::escape_html(p)))
             .unwrap_or_default();
-        let text = format!(
-            "\u{2705} Added {} task(s){project_label}:\n\n{list}",
-            ok_titles.len()
-        );
+        let title = crate::telegram_format::escape_html(&item.title);
+        let text = format!("\u{2705} Added 1 task(s){project_label}:\n\n1. {title}");
         if let Some(mid) = loading_mid {
             bot.edit_message(cid, mid, &text).await?;
         } else {
             bot.send_html(cid, &text).await?;
         }
     } else if let Some(mid) = loading_mid {
-        bot.edit_message(cid, mid, "\u{274c} All tasks failed to add.")
+        bot.edit_message(cid, mid, "\u{274c} Task failed to add.")
             .await?;
     }
     Ok(())

@@ -1,5 +1,4 @@
 import type {
-  AskResponse,
   ClarifyResponse,
   NudgeResponse,
   TaskItem,
@@ -187,45 +186,11 @@ export const fetchWorkers = () => apiGetRouteR('getWorkers');
 // Stats
 export const fetchActivityStats = () => apiGetRouteR('getStatsActivity');
 
-// Task Ask (multi-turn: first ask creates session, follow-ups resume)
-export function askTask(
-  id: number,
-  question: string,
-  askId?: string,
-  images?: File[],
-): ResultAsync<AskResponse, ApiError> {
-  if (images?.length) {
-    const form = new FormData();
-    form.append('id', String(id));
-    form.append('question', question);
-    if (askId) form.append('ask_id', askId);
-    for (const img of images) form.append('images', img, img.name);
-    return apiMultipartRouteR('postTasksAsk', form, undefined, {
-      id,
-      question,
-      ask_id: askId,
-    });
-  }
-  return apiMultipartRouteR('postTasksAsk', { id, question, ask_id: askId });
-}
-
-// End ask session
-export const endAskSession = (id: number) => apiPostRouteR('postTasksAskEnd', { id });
-// Reopen from Q&A — synthesize conversation into reopen feedback
-export const askReopen = (id: number) => apiPostRouteR('postTasksAskReopen', { id });
-
-// Task Ask History
-export const fetchAskHistory = (id: number) =>
-  apiGetRouteR('getTasksByIdHistory', { params: { id } });
 // Task Artifacts
 export const fetchArtifacts = (id: number) =>
   apiGetRouteR('getTasksByIdArtifacts', { params: { id } });
-// Task Feed (unified timeline + artifacts + messages)
+// Task Feed (unified timeline + artifacts)
 export const fetchFeed = (id: number) => apiGetRouteR('getTasksByIdFeed', { params: { id } });
-
-// Task Advisor
-export const sendAdvisorMessage = (id: number, message: string, intent: string = 'ask') =>
-  apiPostRouteR('postTasksByIdAdvisor', { message, intent }, { params: { id } });
 
 // Merge PR
 export const mergePr = (prNumber: number, project: string) =>

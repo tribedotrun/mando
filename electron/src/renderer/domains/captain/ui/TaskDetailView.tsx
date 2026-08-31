@@ -1,6 +1,5 @@
 import React from 'react';
 import { useTaskDetailView } from '#renderer/domains/captain/runtime/useTaskDetailView';
-import { useTaskAsk } from '#renderer/domains/captain/runtime/useTaskAsk';
 import { canStop } from '#renderer/global/service/utils';
 import type { TaskItem, TaskProvider } from '#renderer/global/types';
 import { TaskComposer } from '#renderer/domains/captain/ui/TaskComposer';
@@ -11,6 +10,7 @@ import { TaskFeedView } from '#renderer/domains/captain/ui/TaskFeedView';
 import { TaskDetailTabBar } from '#renderer/domains/captain/ui/TaskDetailTabBar';
 import { cn } from '#renderer/global/service/cn';
 import { Tabs } from '#renderer/global/ui/primitives/tabs';
+import { EvidenceDeckTab } from '#renderer/domains/captain/ui/EvidenceDeckTab';
 
 interface Props {
   item: TaskItem;
@@ -34,7 +34,6 @@ export function TaskDetailView({
   activeTab: activeTabProp,
   onTabChange,
 }: Props): React.ReactElement {
-  const { ask } = useTaskAsk(item.id);
   const detail = useTaskDetailView({
     item,
     onBack,
@@ -42,6 +41,7 @@ export function TaskDetailView({
     activeTabProp,
   });
   const effectiveTab = detail.tabs.effectiveTab;
+  const fullHeightTab = effectiveTab === 'feed' || effectiveTab === 'deck';
 
   return (
     <div className="flex h-full flex-col">
@@ -51,15 +51,13 @@ export function TaskDetailView({
         <div
           className={cn(
             'min-h-0 min-w-0 flex-1 overflow-x-hidden',
-            effectiveTab === 'feed'
-              ? 'flex flex-col overflow-hidden'
-              : 'scrollbar-on-hover overflow-y-auto',
+            fullHeightTab ? 'flex flex-col overflow-hidden' : 'scrollbar-on-hover overflow-y-auto',
           )}
         >
           <Tabs
             value={effectiveTab}
             onValueChange={(v) => onTabChange?.(v)}
-            className={cn('gap-0', effectiveTab === 'feed' && 'flex flex-1 flex-col min-h-0')}
+            className={cn('gap-0', fullHeightTab && 'flex flex-1 flex-col min-h-0')}
           >
             <TaskDetailTabBar
               tabs={detail.tabs.items}
@@ -73,19 +71,17 @@ export function TaskDetailView({
             />
 
             {/* Tab content */}
-            <div
-              className={cn(
-                'break-words',
-                effectiveTab === 'feed' ? 'flex-1 min-h-0' : 'px-3 pt-3',
-              )}
-            >
+            <div className={cn('break-words', fullHeightTab ? 'flex-1 min-h-0' : 'px-3 pt-3')}>
               {effectiveTab === 'feed' && <TaskFeedView key={item.id} item={item} />}
               {effectiveTab === 'pr' && (
                 <PrTab item={item} prBody={detail.pr.body} prPending={detail.pr.pending} />
               )}
+              {effectiveTab === 'deck' && (
+                <EvidenceDeckTab deck={detail.deck.document} pending={detail.deck.pending} />
+              )}
               {effectiveTab === 'more' && (
                 <div className="space-y-6">
-                  <InfoTab item={item} />
+                  <InfoTab item={item} hasEvidenceDeck={detail.deck.available} />
                   <SessionsTab
                     sessions={detail.sessions.items}
                     onSessionClick={detail.sessions.handleSessionClick}
@@ -99,9 +95,7 @@ export function TaskDetailView({
       </div>
 
       {/* Action bar: only on PR and More tabs (feed has its own input) */}
-      {effectiveTab !== 'feed' && (
-        <TaskComposer item={item} onAsk={(q, images) => void ask(q, images)} />
-      )}
+      {effectiveTab !== 'feed' && effectiveTab !== 'deck' && <TaskComposer item={item} />}
 
       {/* Context modal */}
       {detail.context.open && item.context && (

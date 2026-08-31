@@ -38,7 +38,6 @@ export function useStepStates() {
     [config?.features?.claudeCodeVerified, saveMut, getConfig],
   );
 
-  // eslint-disable-next-line no-restricted-syntax -- reason: reacting to async query data requires an effect; persist runs exactly when claudeResult transitions to ok
   useEffect(() => {
     if (claudeResult) persistClaudeOk(claudeResult);
   }, [claudeResult, persistClaudeOk]);

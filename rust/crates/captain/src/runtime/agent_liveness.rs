@@ -5,6 +5,7 @@ pub(crate) enum AgentLivenessStatus {
     Active,
     Inactive,
     Completed,
+    Interrupted,
     Failed,
 }
 
@@ -14,7 +15,7 @@ impl AgentLivenessStatus {
     }
 
     pub(crate) fn is_terminal(self) -> bool {
-        matches!(self, Self::Completed | Self::Failed)
+        matches!(self, Self::Completed | Self::Interrupted | Self::Failed)
     }
 }
 
@@ -25,17 +26,9 @@ pub(crate) async fn session_liveness(
     pid: crate::Pid,
     stream_path: &Path,
 ) -> AgentLivenessStatus {
-    let provider_active = match provider {
-        global_types::TaskProvider::Codex => {
-            super::codex_app_server::is_turn_active(session_id).await
-        }
-        global_types::TaskProvider::Claude => {
-            pid.as_u32() > 0 && global_claude::is_process_alive(pid)
-        }
-        global_types::TaskProvider::OpenCode => {
-            pid.as_u32() > 0 && global_claude::is_process_alive(pid)
-        }
-    };
+    let provider_active = super::agent_runtime::Adapter::new(provider)
+        .is_active(session_id, pid)
+        .await;
     if provider_active {
         return AgentLivenessStatus::Active;
     }
@@ -59,10 +52,10 @@ pub(crate) async fn is_session_active(
 
 fn stream_terminal_status(stream_path: &Path) -> Option<AgentLivenessStatus> {
     let result = global_claude::get_stream_result(stream_path)?;
-    if global_claude::is_clean_result(&result) {
-        Some(AgentLivenessStatus::Completed)
-    } else {
-        Some(AgentLivenessStatus::Failed)
+    match global_claude::result_outcome(&result) {
+        global_claude::ResultOutcome::Success => Some(AgentLivenessStatus::Completed),
+        global_claude::ResultOutcome::Interrupted => Some(AgentLivenessStatus::Interrupted),
+        _ => Some(AgentLivenessStatus::Failed),
     }
 }
 
@@ -88,6 +81,27 @@ mod tests {
         .await;
 
         assert_eq!(status, AgentLivenessStatus::Inactive);
+    }
+
+    #[tokio::test]
+    async fn interrupted_result_is_terminal_without_becoming_completed() {
+        let file = write_stream(concat!(
+            r#"{"type":"system","subtype":"init"}"#,
+            "\n",
+            r#"{"type":"result","subtype":"interrupted","is_error":false}"#,
+            "\n"
+        ));
+
+        let status = session_liveness(
+            global_types::TaskProvider::OpenCode,
+            "opencode-interrupted",
+            crate::Pid::new(0),
+            file.path(),
+        )
+        .await;
+
+        assert_eq!(status, AgentLivenessStatus::Interrupted);
+        assert!(status.is_terminal());
     }
 
     #[tokio::test]

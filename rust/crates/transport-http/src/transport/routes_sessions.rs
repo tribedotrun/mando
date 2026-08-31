@@ -10,7 +10,6 @@ use crate::response::{error_response, internal_error, ApiError};
 use crate::AppState;
 
 /// GET /api/sessions?page=1&per_page=50&category=worker
-#[crate::instrument_api(method = "GET", path = "/api/sessions")]
 pub(crate) async fn get_sessions(
     State(state): State<AppState>,
     Query(params): Query<api_types::SessionsQuery>,
@@ -52,7 +51,6 @@ pub(crate) async fn get_sessions(
 }
 
 /// GET /api/sessions/{id}
-#[crate::instrument_api(method = "GET", path = "/api/sessions/{id}")]
 pub(crate) async fn get_session(
     State(state): State<AppState>,
     Path(api_types::SessionIdParams { id }): Path<api_types::SessionIdParams>,
@@ -84,7 +82,6 @@ fn cwd_to_project(cwd: &str) -> Option<String> {
 /// Snapshot of every typed transcript event currently on disk for this
 /// session. Used by the CLI and by the renderer's first-paint load; the
 /// live-tail `/events/stream` route consumes the same underlying parser.
-#[crate::instrument_api(method = "GET", path = "/api/sessions/{id}/events")]
 pub(crate) async fn get_session_events(
     State(state): State<AppState>,
     Path(api_types::SessionIdParams { id }): Path<api_types::SessionIdParams>,
@@ -116,7 +113,6 @@ pub(crate) async fn get_session_events(
 /// while Claude Code sessions prefer `cc-streams` with the CC-native fallback.
 /// Returns `{ path: null }` when no file exists so the UI can disable the
 /// action.
-#[crate::instrument_api(method = "GET", path = "/api/sessions/{id}/jsonl-path")]
 pub(crate) async fn get_session_jsonl_path(
     State(state): State<AppState>,
     Path(api_types::SessionIdParams { id }): Path<api_types::SessionIdParams>,
@@ -134,7 +130,6 @@ pub(crate) async fn get_session_jsonl_path(
 }
 
 /// GET /api/sessions/{id}/messages?limit=N&offset=M
-#[crate::instrument_api(method = "GET", path = "/api/sessions/{id}/messages")]
 pub(crate) async fn get_session_messages(
     State(state): State<AppState>,
     Path(api_types::SessionIdParams { id }): Path<api_types::SessionIdParams>,
@@ -158,7 +153,6 @@ pub(crate) async fn get_session_messages(
 }
 
 /// GET /api/sessions/{id}/tools
-#[crate::instrument_api(method = "GET", path = "/api/sessions/{id}/tools")]
 pub(crate) async fn get_session_tools(
     State(state): State<AppState>,
     Path(api_types::SessionIdParams { id }): Path<api_types::SessionIdParams>,
@@ -181,7 +175,6 @@ pub(crate) async fn get_session_tools(
 }
 
 /// GET /api/sessions/{id}/cost
-#[crate::instrument_api(method = "GET", path = "/api/sessions/{id}/cost")]
 pub(crate) async fn get_session_cost(
     State(state): State<AppState>,
     Path(api_types::SessionIdParams { id }): Path<api_types::SessionIdParams>,
@@ -199,15 +192,35 @@ pub(crate) async fn get_session_cost(
         })?;
 
     Ok(Json(api_types::SessionCostResponse {
-        cost: roundtrip(cost, "session cost")?,
+        cost: session_cost_summary(cost),
     }))
+}
+
+fn session_cost_summary(cost: global_claude::SessionCost) -> api_types::SessionCostSummary {
+    let global_claude::SessionCost {
+        total_input_tokens,
+        total_output_tokens,
+        total_cache_read_tokens,
+        total_cache_creation_tokens,
+        turn_count,
+        total_cost_usd,
+        per_model_usage: _,
+    } = cost;
+
+    api_types::SessionCostSummary {
+        total_input_tokens,
+        total_output_tokens,
+        total_cache_read_tokens,
+        total_cache_creation_tokens,
+        turn_count,
+        total_cost_usd,
+    }
 }
 
 /// GET /api/sessions/{id}/stream?types=user,assistant,result
 ///
 /// Returns the raw JSONL stream for a session as newline-delimited JSON.
 /// When `types` is supplied only lines whose `"type"` field matches are included.
-#[crate::instrument_api(method = "GET", path = "/api/sessions/{id}/stream")]
 pub(crate) async fn get_session_stream(
     State(state): State<AppState>,
     Path(api_types::SessionIdParams { id }): Path<api_types::SessionIdParams>,
@@ -255,4 +268,54 @@ fn roundtrip<T: DeserializeOwned>(
             .map_err(|e| internal_error(e, &format!("failed to serialize {label}")))?,
     )
     .map_err(|e| internal_error(e, &format!("failed to decode {label}")))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use super::*;
+
+    #[test]
+    fn populated_session_cost_serializes_to_wire_response() {
+        let cost = global_claude::SessionCost {
+            total_input_tokens: 120,
+            total_output_tokens: 34,
+            total_cache_read_tokens: 56,
+            total_cache_creation_tokens: 78,
+            turn_count: 2,
+            total_cost_usd: Some(0.42),
+            per_model_usage: HashMap::from([(
+                "claude-sonnet-4-6".to_string(),
+                global_claude::ModelUsage {
+                    input_tokens: 120,
+                    output_tokens: 34,
+                    cache_read_tokens: 56,
+                    cache_creation_tokens: 78,
+                },
+            )]),
+        };
+
+        let response = api_types::SessionCostResponse {
+            cost: session_cost_summary(cost),
+        };
+        let serialized = serde_json::to_value(response);
+        assert!(serialized.is_ok(), "populated session cost must serialize");
+        let Ok(serialized) = serialized else {
+            return;
+        };
+        assert_eq!(
+            serialized,
+            serde_json::json!({
+                "cost": {
+                    "total_input_tokens": 120,
+                    "total_output_tokens": 34,
+                    "total_cache_read_tokens": 56,
+                    "total_cache_creation_tokens": 78,
+                    "turn_count": 2,
+                    "total_cost_usd": 0.42,
+                }
+            })
+        );
+    }
 }

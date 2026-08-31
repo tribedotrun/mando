@@ -8,4 +8,6 @@ license.workspace = true
 global-infra = { path = "../global-infra" }
 serde.workspace = true
 ts-rs = "=12.0.1"
-serde_json.workspace = true
+
+[lints]
+workspace = true

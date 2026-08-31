@@ -10,6 +10,7 @@ import { PrMarkdown } from '#renderer/global/ui/PrMarkdown';
 import {
   extractSkillName,
   isSkillPromptBody,
+  mandoPromptLabel,
 } from '#renderer/domains/sessions/service/transcriptEvents';
 import {
   selectToolOpenState,
@@ -22,8 +23,8 @@ interface UserMessageProps {
 }
 
 export function UserMessage({ event, eventIndex }: UserMessageProps): React.ReactElement | null {
-  const skillId = `${eventIndex}-skill-prompt`;
-  const userOverride = useTranscriptUi(selectToolOpenState(skillId));
+  const promptId = `${eventIndex}-injected-prompt`;
+  const userOverride = useTranscriptUi(selectToolOpenState(promptId));
   const setToolExpanded = useTranscriptUi((s) => s.setToolExpanded);
 
   const texts: string[] = [];
@@ -42,15 +43,22 @@ export function UserMessage({ event, eventIndex }: UserMessageProps): React.Reac
     return null;
   }
 
-  if (isSkillPromptBody(body)) {
+  const skillPrompt = isSkillPromptBody(body);
+  const mandoLabel = mandoPromptLabel(body);
+  if (skillPrompt || mandoLabel) {
     const open = userOverride ?? false;
-    const skillName = extractSkillName(body);
+    const detail = skillPrompt ? extractSkillName(body) : null;
+    const label = skillPrompt ? 'Skill instructions' : mandoLabel;
     return (
-      <Collapsible open={open} onOpenChange={(v) => setToolExpanded(skillId, v)} className="my-0.5">
+      <Collapsible
+        open={open}
+        onOpenChange={(v) => setToolExpanded(promptId, v)}
+        className="my-0.5"
+      >
         <CollapsibleTrigger asChild>
           <button className="flex w-full items-center gap-1.5 rounded px-2 py-1 text-left text-label text-muted-foreground hover:bg-muted">
-            <span className="font-medium text-foreground">skill prompt</span>
-            {skillName && <span className="opacity-60">{skillName}</span>}
+            <span className="font-medium text-foreground">{label}</span>
+            {detail && <span className="opacity-60">{detail}</span>}
             <span className="ml-auto">
               {open ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
             </span>

@@ -34,4 +34,4 @@ pub use sessions::*;
 pub use timeline_payload::*;
 pub use transcript_events::*;
 
-pub use global_types::TaskProvider;
+pub use global_types::{ExecutionAdapter, TaskOwnerProvider, TaskProvider};

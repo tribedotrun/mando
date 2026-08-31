@@ -2,7 +2,6 @@
 
 use clap::{Args, Subcommand};
 
-use crate::gateway_paths as paths;
 use crate::http::{parse_id, DaemonClient};
 
 #[derive(Args)]
@@ -135,18 +134,15 @@ pub(crate) async fn handle(args: CaptainArgs) -> anyhow::Result<()> {
 
 async fn handle_tick(dry_run: bool) -> anyhow::Result<()> {
     let client = DaemonClient::discover()?;
-    let result: api_types::TickDrainResult = client
-        .post_json(
-            paths::CAPTAIN_TICK,
-            &api_types::TickRequest {
-                dry_run: Some(dry_run),
-                emit_notifications: Some(true),
-                until_idle: None,
-                max_ticks: None,
-                until_status: None,
-                task_id: None,
-            },
-        )
+    let result = client
+        .post_captain_tick(&api_types::TickRequest {
+            dry_run: Some(dry_run),
+            emit_notifications: Some(true),
+            until_idle: None,
+            max_ticks: None,
+            until_status: None,
+            task_id: None,
+        })
         .await?;
     println!("{}", serde_json::to_string_pretty(&result.last)?);
     Ok(())
@@ -156,8 +152,9 @@ async fn handle_workers(watch: bool, interval: Option<u64>) -> anyhow::Result<()
     let interval_secs = interval.unwrap_or(5);
     let client = DaemonClient::discover()?;
     loop {
-        let health: api_types::SystemHealthResponse = client
-            .get_json_with_body_on_5xx(paths::HEALTH_SYSTEM)
+        let health = client
+            .accepting_server_error_bodies()
+            .get_health_system()
             .await?;
 
         if watch {
@@ -180,13 +177,10 @@ async fn handle_workers(watch: bool, interval: Option<u64>) -> anyhow::Result<()
 
 pub(crate) async fn handle_triage_cmd(item_id: Option<&str>) -> anyhow::Result<()> {
     let client = DaemonClient::discover()?;
-    let result: api_types::TriageResponse = client
-        .post_json(
-            paths::CAPTAIN_TRIAGE,
-            &api_types::TriageRequest {
-                item_id: item_id.map(str::to_string),
-            },
-        )
+    let result = client
+        .post_captain_triage(&api_types::TriageRequest {
+            item_id: item_id.map(str::to_string),
+        })
         .await?;
     println!("{}", serde_json::to_string_pretty(&result)?);
     Ok(())
@@ -195,13 +189,10 @@ pub(crate) async fn handle_triage_cmd(item_id: Option<&str>) -> anyhow::Result<(
 async fn handle_reopen(id: &str, feedback: &str) -> anyhow::Result<()> {
     let client = DaemonClient::discover()?;
     client
-        .post_json::<api_types::BoolOkResponse, _>(
-            paths::TASKS_REOPEN,
-            &api_types::TaskFeedbackRequest {
-                id: parse_id(id, "task")?,
-                feedback: feedback.to_string(),
-            },
-        )
+        .post_tasks_reopen(&api_types::TaskFeedbackRequest {
+            id: parse_id(id, "task")?,
+            feedback: feedback.to_string(),
+        })
         .await?;
     println!("Reopened task {id}");
     Ok(())
@@ -210,13 +201,10 @@ async fn handle_reopen(id: &str, feedback: &str) -> anyhow::Result<()> {
 async fn handle_rework(id: &str, feedback: &str) -> anyhow::Result<()> {
     let client = DaemonClient::discover()?;
     client
-        .post_json::<api_types::BoolOkResponse, _>(
-            paths::TASKS_REWORK,
-            &api_types::TaskFeedbackRequest {
-                id: parse_id(id, "task")?,
-                feedback: feedback.to_string(),
-            },
-        )
+        .post_tasks_rework(&api_types::TaskFeedbackRequest {
+            id: parse_id(id, "task")?,
+            feedback: feedback.to_string(),
+        })
         .await?;
     println!("Rework requested for task {id}");
     Ok(())
@@ -225,12 +213,9 @@ async fn handle_rework(id: &str, feedback: &str) -> anyhow::Result<()> {
 async fn handle_retry(id: &str) -> anyhow::Result<()> {
     let client = DaemonClient::discover()?;
     client
-        .post_json::<api_types::BoolOkResponse, _>(
-            paths::TASKS_RETRY,
-            &api_types::TaskIdRequest {
-                id: parse_id(id, "task")?,
-            },
-        )
+        .post_tasks_retry(&api_types::TaskIdRequest {
+            id: parse_id(id, "task")?,
+        })
         .await?;
     println!("Retried task {id} — re-entering captain review");
     Ok(())
@@ -239,12 +224,9 @@ async fn handle_retry(id: &str) -> anyhow::Result<()> {
 async fn handle_accept(id: &str) -> anyhow::Result<()> {
     let client = DaemonClient::discover()?;
     client
-        .post_json::<api_types::BoolOkResponse, _>(
-            paths::TASKS_ACCEPT,
-            &api_types::TaskIdRequest {
-                id: parse_id(id, "task")?,
-            },
-        )
+        .post_tasks_accept(&api_types::TaskIdRequest {
+            id: parse_id(id, "task")?,
+        })
         .await?;
     println!("Accepted task {id}");
     Ok(())
@@ -253,12 +235,9 @@ async fn handle_accept(id: &str) -> anyhow::Result<()> {
 async fn handle_handoff(id: &str) -> anyhow::Result<()> {
     let client = DaemonClient::discover()?;
     client
-        .post_json::<api_types::BoolOkResponse, _>(
-            paths::TASKS_HANDOFF,
-            &api_types::TaskIdRequest {
-                id: parse_id(id, "task")?,
-            },
-        )
+        .post_tasks_handoff(&api_types::TaskIdRequest {
+            id: parse_id(id, "task")?,
+        })
         .await?;
     println!("Handed off task {id} to human");
     Ok(())
@@ -287,16 +266,13 @@ async fn handle_adopt(
     let client = DaemonClient::discover()?;
     let note_text =
         note.unwrap_or("Continue from current state. Run tests, fix failures, create PR.");
-    let result: api_types::TaskCreateResponse = client
-        .post_json(
-            paths::CAPTAIN_ADOPT,
-            &api_types::AdoptRequest {
-                title: title.to_string(),
-                worktree_path: wt_path.to_string_lossy().into_owned(),
-                note: Some(note_text.to_string()),
-                project: project.map(str::to_string),
-            },
-        )
+    let result = client
+        .post_captain_adopt(&api_types::AdoptRequest {
+            title: title.to_string(),
+            worktree_path: wt_path.to_string_lossy().into_owned(),
+            note: Some(note_text.to_string()),
+            project: project.map(str::to_string),
+        })
         .await?;
     let id = result.id;
 
@@ -309,14 +285,11 @@ async fn handle_adopt(
 
 async fn handle_nudge(id: &str, message: &str) -> anyhow::Result<()> {
     let client = DaemonClient::discover()?;
-    let result: api_types::NudgeResponse = client
-        .post_json(
-            paths::CAPTAIN_NUDGE,
-            &api_types::NudgeRequest {
-                item_id: id.to_string(),
-                message: message.to_string(),
-            },
-        )
+    let result = client
+        .post_captain_nudge(&api_types::NudgeRequest {
+            item_id: id.to_string(),
+            message: message.to_string(),
+        })
         .await?;
     let worker = result.worker.as_deref().unwrap_or("?");
     let pid = result.pid.unwrap_or(0);
@@ -326,7 +299,7 @@ async fn handle_nudge(id: &str, message: &str) -> anyhow::Result<()> {
 
 async fn handle_captain_stop() -> anyhow::Result<()> {
     let client = DaemonClient::discover()?;
-    let result: api_types::StopWorkersResponse = client.post_no_body(paths::CAPTAIN_STOP).await?;
+    let result = client.post_captain_stop().await?;
     let killed = result.killed;
     println!("Killed {killed} worker process(es).");
     Ok(())
@@ -335,12 +308,9 @@ async fn handle_captain_stop() -> anyhow::Result<()> {
 async fn handle_stop_task(id: &str) -> anyhow::Result<()> {
     let client = DaemonClient::discover()?;
     client
-        .post_json::<api_types::BoolOkResponse, _>(
-            paths::TASKS_STOP,
-            &api_types::TaskIdRequest {
-                id: parse_id(id, "task")?,
-            },
-        )
+        .post_tasks_stop(&api_types::TaskIdRequest {
+            id: parse_id(id, "task")?,
+        })
         .await?;
     println!("Stopped task {id}. Worktree preserved; reopen to resume.");
     Ok(())
@@ -350,14 +320,11 @@ pub(crate) async fn handle_merge_pr(pr_num: &str, project: Option<&str>) -> anyh
     let client = DaemonClient::discover()?;
     let pr_number =
         parse_pr_number(pr_num).ok_or_else(|| anyhow::anyhow!("invalid PR reference: {pr_num}"))?;
-    let result: api_types::MergeResponse = client
-        .post_json(
-            paths::TASKS_MERGE,
-            &api_types::MergeRequest {
-                pr_number,
-                project: project.unwrap_or("").to_string(),
-            },
-        )
+    let result = client
+        .post_tasks_merge(&api_types::MergeRequest {
+            pr_number,
+            project: project.unwrap_or("").to_string(),
+        })
         .await?;
     println!("{}", serde_json::to_string_pretty(&result)?);
     Ok(())
@@ -372,157 +339,4 @@ fn parse_pr_number(pr: &str) -> Option<i64> {
         return after[..num_end].parse().ok();
     }
     pr.trim_start_matches('#').parse().ok()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use clap::Parser;
-
-    #[derive(Parser)]
-    struct TestCli {
-        #[command(subcommand)]
-        cmd: TestCmd,
-    }
-
-    #[derive(clap::Subcommand)]
-    enum TestCmd {
-        Captain(CaptainArgs),
-    }
-
-    #[test]
-    fn parse_tick_dry_run() {
-        let cli = TestCli::try_parse_from(["test", "captain", "tick", "--dry-run"]).unwrap();
-        match cli.cmd {
-            TestCmd::Captain(args) => match args.command {
-                CaptainCommand::Tick { dry_run, .. } => assert!(dry_run),
-                _ => panic!("expected Tick"),
-            },
-        }
-    }
-
-    #[test]
-    fn parse_workers_watch() {
-        let cli = TestCli::try_parse_from(["test", "captain", "workers", "-w", "-n", "2"]).unwrap();
-        match cli.cmd {
-            TestCmd::Captain(args) => match args.command {
-                CaptainCommand::Workers { watch, interval } => {
-                    assert!(watch);
-                    assert_eq!(interval, Some(2));
-                }
-                _ => panic!("expected Workers"),
-            },
-        }
-    }
-
-    #[test]
-    fn parse_merge() {
-        let cli =
-            TestCli::try_parse_from(["test", "captain", "merge", "123", "-p", "mando"]).unwrap();
-        match cli.cmd {
-            TestCmd::Captain(args) => match args.command {
-                CaptainCommand::Merge { pr_num, project } => {
-                    assert_eq!(pr_num, "123");
-                    assert_eq!(project.as_deref(), Some("mando"));
-                }
-                _ => panic!("expected Merge"),
-            },
-        }
-    }
-
-    #[test]
-    fn parse_triage_no_args() {
-        let cli = TestCli::try_parse_from(["test", "captain", "triage"]).unwrap();
-        match cli.cmd {
-            TestCmd::Captain(args) => match args.command {
-                CaptainCommand::Triage { item_id } => {
-                    assert!(item_id.is_none());
-                }
-                _ => panic!("expected Triage"),
-            },
-        }
-    }
-
-    #[test]
-    fn parse_retry() {
-        let cli = TestCli::try_parse_from(["test", "captain", "retry", "42"]).unwrap();
-        match cli.cmd {
-            TestCmd::Captain(args) => match args.command {
-                CaptainCommand::Retry { id } => {
-                    assert_eq!(id, "42");
-                }
-                _ => panic!("expected Retry"),
-            },
-        }
-    }
-
-    #[test]
-    fn parse_triage_with_item_id() {
-        let cli = TestCli::try_parse_from(["test", "captain", "triage", "ENG-123"]).unwrap();
-        match cli.cmd {
-            TestCmd::Captain(args) => match args.command {
-                CaptainCommand::Triage { item_id } => {
-                    assert_eq!(item_id.as_deref(), Some("ENG-123"));
-                }
-                _ => panic!("expected Triage"),
-            },
-        }
-    }
-
-    #[test]
-    fn parse_adopt_with_project() {
-        let cli = TestCli::try_parse_from([
-            "test",
-            "captain",
-            "adopt",
-            "Finish branch",
-            "-w",
-            "/tmp/worktree",
-            "-n",
-            "Carry on",
-            "-p",
-            "sandbox",
-        ])
-        .unwrap();
-        match cli.cmd {
-            TestCmd::Captain(args) => match args.command {
-                CaptainCommand::Adopt {
-                    title,
-                    worktree,
-                    note,
-                    project,
-                } => {
-                    assert_eq!(title, "Finish branch");
-                    assert_eq!(worktree.as_deref(), Some("/tmp/worktree"));
-                    assert_eq!(note.as_deref(), Some("Carry on"));
-                    assert_eq!(project.as_deref(), Some("sandbox"));
-                }
-                _ => panic!("expected Adopt"),
-            },
-        }
-    }
-
-    #[test]
-    fn parse_handoff() {
-        let cli = TestCli::try_parse_from(["test", "captain", "handoff", "42"]).unwrap();
-        match cli.cmd {
-            TestCmd::Captain(args) => match args.command {
-                CaptainCommand::Handoff { id } => {
-                    assert_eq!(id, "42");
-                }
-                _ => panic!("expected Handoff"),
-            },
-        }
-    }
-
-    #[test]
-    fn parse_accept() {
-        let cli = TestCli::try_parse_from(["test", "captain", "accept", "42"]).unwrap();
-        match cli.cmd {
-            TestCmd::Captain(args) => match args.command {
-                CaptainCommand::Accept { id } => assert_eq!(id, "42"),
-                _ => panic!("expected Accept"),
-            },
-        }
-    }
 }

@@ -1,7 +1,6 @@
 //! Task detail card — rich inline view triggered by tapping a task in `/tasks`.
 
 use crate::bot::TelegramBot;
-use crate::gateway_paths as paths;
 use crate::telegram_format::{escape_html, paused_badge, render_markdown_reply_html, status_icon};
 use anyhow::Result;
 use tracing::warn;
@@ -17,7 +16,7 @@ fn render_prompt_block(prompt_text: &str) -> String {
 
 /// Render a task detail card by editing the given message in place.
 pub async fn handle_view(bot: &TelegramBot, chat_id: &str, mid: i64, task_id: &str) -> Result<()> {
-    let tasks = super::load_tasks_with_path(bot.gw(), paths::TASKS_WITH_ARCHIVED).await?;
+    let tasks = super::load_tasks_with_archived(bot.gw(), true).await?;
     let task = tasks.iter().find(|t| t.id.to_string() == task_id);
 
     let Some(task) = task else {
@@ -30,14 +29,22 @@ pub async fn handle_view(bot: &TelegramBot, chat_id: &str, mid: i64, task_id: &s
         return Ok(());
     };
 
-    let pr_path = paths::task_pr_summary(task_id);
-    let tl_path = paths::task_timeline(task_id);
-    let sess_path = paths::task_sessions(task_id);
+    let task_params = api_types::TaskIdParams {
+        id: global_types::parse_i64_id(task_id, "task").map_err(anyhow::Error::msg)?,
+    };
     let (pr_res, timeline_res, sessions_res) = tokio::join!(
-        bot.gw().get_typed::<api_types::PrSummaryResponse>(&pr_path),
-        bot.gw().get_typed::<api_types::TimelineResponse>(&tl_path),
-        bot.gw()
-            .get_typed::<api_types::ItemSessionsResponse>(&sess_path),
+        bot.gw().get_tasks_by_id_prsummary(&task_params),
+        bot.gw().get_tasks_by_id_timeline(&task_params),
+        bot.gw().get_tasks_by_id_sessions(
+            &task_params,
+            &api_types::SessionsQuery {
+                page: None,
+                per_page: None,
+                category: None,
+                caller: None,
+                status: None,
+            },
+        ),
     );
 
     let mut lines = Vec::new();
@@ -52,8 +59,8 @@ pub async fn handle_view(bot: &TelegramBot, chat_id: &str, mid: i64, task_id: &s
     let (icon, status_display): (&str, String) = match &paused {
         Some((paused_icon, label)) => (paused_icon, label.clone()),
         None => (
-            status_icon(task.status().as_str()),
-            task.status().as_str().to_string(),
+            status_icon(super::status_wire_name(task.status)),
+            super::status_wire_name(task.status).to_string(),
         ),
     };
     lines.push(format!(
@@ -64,8 +71,8 @@ pub async fn handle_view(bot: &TelegramBot, chat_id: &str, mid: i64, task_id: &s
 
     // -- Meta line: status | project | worker --
     let mut meta = vec![format!("<b>{}</b>", escape_html(&status_display))];
-    if !task.project.is_empty() {
-        meta.push(escape_html(&task.project));
+    if let Some(project) = task.project.as_deref() {
+        meta.push(escape_html(project));
     }
     if let Some(ref w) = task.worker {
         meta.push(escape_html(w));
@@ -109,7 +116,7 @@ pub async fn handle_view(bot: &TelegramBot, chat_id: &str, mid: i64, task_id: &s
     }
 
     // -- Evidence --
-    let evidence = collect_evidence(pr_res.as_ref().ok(), task);
+    let evidence = collect_evidence(pr_res.as_ref().ok(), task.escalation_report.as_deref());
     let evidence_image_urls = match &evidence {
         EvidenceKind::PrEvidence { text, image_urls } => {
             lines.push(String::new());
@@ -139,11 +146,12 @@ pub async fn handle_view(bot: &TelegramBot, chat_id: &str, mid: i64, task_id: &s
                 .iter()
                 .filter_map(|s| s.duration_ms.map(|ms| ms as u64))
                 .sum();
-            let last_status_str = serde_json::to_value(sessions[0].status)
-                .ok()
-                .and_then(|v| v.as_str().map(|s| s.to_string()))
-                .unwrap_or_else(|| "?".to_string());
-            let last_status = escape_html(&last_status_str);
+            let last_status_str = match sessions[0].status {
+                api_types::SessionStatus::Running => "running",
+                api_types::SessionStatus::Stopped => "stopped",
+                api_types::SessionStatus::Failed => "failed",
+            };
+            let last_status = escape_html(last_status_str);
             lines.push(String::new());
             lines.push(format!(
                 "<b>Sessions</b>: {count} | {} | last: {last_status}",
@@ -176,7 +184,7 @@ pub async fn handle_view(bot: &TelegramBot, chat_id: &str, mid: i64, task_id: &s
     // -- Keyboard --
     let has_pr = task.pr_number.is_some();
     let mut buttons =
-        crate::commands::action::action_buttons(&task.id.to_string(), task.status(), has_pr);
+        crate::commands::action::action_buttons(&task.id.to_string(), task.status, has_pr);
     buttons.push(vec![
         api_types::InlineKeyboardButton {
             text: "\u{1f4c5} Full Timeline".into(),
@@ -202,7 +210,7 @@ pub async fn handle_view(bot: &TelegramBot, chat_id: &str, mid: i64, task_id: &s
     .await?;
 
     // -- Inline photos (sent as separate messages after the card) --
-    send_inline_photos(bot, chat_id, &evidence_image_urls, task).await;
+    send_inline_photos(bot, chat_id, &evidence_image_urls, task.images.as_deref()).await;
 
     Ok(())
 }
@@ -223,7 +231,7 @@ enum EvidenceKind {
 
 fn collect_evidence(
     pr_res: Option<&api_types::PrSummaryResponse>,
-    task: &captain::Task,
+    escalation_report: Option<&str>,
 ) -> EvidenceKind {
     if let Some(pr) = pr_res {
         let summary = pr.summary.as_deref().unwrap_or("");
@@ -238,7 +246,7 @@ fn collect_evidence(
         }
     }
 
-    if let Some(ref report) = task.escalation_report {
+    if let Some(report) = escalation_report {
         return EvidenceKind::Escalation(render_markdown_reply_html(
             report,
             ESCALATION_REPORT_VISIBLE_BUDGET,
@@ -312,7 +320,7 @@ async fn send_inline_photos(
     bot: &TelegramBot,
     chat_id: &str,
     evidence_urls: &[String],
-    task: &captain::Task,
+    images: Option<&str>,
 ) {
     let mut sent = 0usize;
 
@@ -333,7 +341,7 @@ async fn send_inline_photos(
 
     // 2. Task images (local files fetched from gateway)
     if sent < MAX_INLINE_PHOTOS {
-        if let Some(ref images_str) = task.images {
+        if let Some(images_str) = images {
             let filenames: Vec<&str> = images_str
                 .split(',')
                 .map(str::trim)
@@ -366,22 +374,14 @@ async fn send_inline_photos(
     }
 }
 
-/// Fetch image bytes from the gateway's `/api/images/{filename}` endpoint.
+/// Fetch image bytes through the generated static-route descriptor.
 async fn fetch_image_bytes(bot: &TelegramBot, filename: &str) -> Result<Vec<u8>> {
-    let gw = bot.gw();
-    let url = format!("{}/api/images/{}", gw.base_url(), filename);
-    let mut req = gw.client().get(&url);
-    if let Some(token) = gw.token() {
-        req = req.header("Authorization", format!("Bearer {token}"));
-    }
-    let resp = req.send().await?;
-    anyhow::ensure!(
-        resp.status().is_success(),
-        "image fetch returned {}",
-        resp.status()
-    );
-    let bytes = resp.bytes().await?;
-    Ok(bytes.to_vec())
+    Ok(bot
+        .gw()
+        .get_images_by_filename(&api_types::ImageFilenameParams {
+            filename: filename.to_string(),
+        })
+        .await?)
 }
 
 // -- Formatting helpers --
@@ -496,17 +496,13 @@ fn truncate_for_telegram(text: &str, max: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use captain::Task;
 
     /// Regression test for #125: the escalation report card showed raw
     /// markdown (`## Header`, `- bullet`, `` `code` ``) instead of rendered
     /// HTML. `collect_evidence` now routes the body through the renderer.
     #[test]
     fn collect_evidence_renders_escalation_report_markdown() {
-        let mut task = Task::new("anything");
-        task.escalation_report = Some("## Header\n- bullet one\n`code`".into());
-
-        let rendered = match collect_evidence(None, &task) {
+        let rendered = match collect_evidence(None, Some("## Header\n- bullet one\n`code`")) {
             EvidenceKind::Escalation(s) => s,
             other => panic!("expected Escalation evidence, got: {:?}", kind_name(&other)),
         };
@@ -532,8 +528,7 @@ mod tests {
 
     #[test]
     fn collect_evidence_returns_none_when_no_evidence() {
-        let task = Task::new("nothing to see");
-        match collect_evidence(None, &task) {
+        match collect_evidence(None, None) {
             EvidenceKind::None => {}
             other => panic!("expected None, got: {:?}", kind_name(&other)),
         }

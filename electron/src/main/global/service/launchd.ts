@@ -111,11 +111,7 @@ export function cargoTargetDir(): string {
 
 /** Source path of the bundled `mando` CLI: the packaged app's
  * `resourcesPath` in production, or the cargo build output in dev. This is
- * the same binary `copyCliBinary()` stages to `cliInstallPath()` -- but
- * auto-update refreshes the app bundle without re-running that staging
- * step, so `cliInstallPath()` can go stale after an update. Callers that
- * must always match the running app's version (e.g.
- * `codex/service/codexAppCli.ts`) spawn this path directly instead. */
+ * the binary `copyCliBinary()` stages to `cliInstallPath()`. */
 export function cliSourcePath(): string {
   if (app.isPackaged) return path.join(process.resourcesPath!, 'mando');
   return path.join(cargoTargetDir(), 'mando');

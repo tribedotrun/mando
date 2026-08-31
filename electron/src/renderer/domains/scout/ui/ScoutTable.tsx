@@ -9,7 +9,7 @@ import { EmptyState } from '#renderer/domains/scout/ui/EmptyState';
 import { Table, TableBody } from '#renderer/global/ui/primitives/table';
 import { ScoutTableRow } from '#renderer/domains/scout/ui/ScoutTableRow';
 
-export interface ScoutTableCallbacks {
+interface ScoutTableCallbacks {
   onToggleSelect: (id: number) => void;
   onSelect: (id: number) => void;
 }

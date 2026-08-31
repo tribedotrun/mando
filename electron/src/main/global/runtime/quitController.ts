@@ -19,7 +19,7 @@ import { cleanupDaemon, setIsQuitting } from '#main/global/runtime/lifecycle';
 import { cleanupAutoUpdate } from '#main/updater/runtime/updater';
 import { announceUiQuittingSync } from '#main/global/runtime/uiLifecycle';
 
-export type QuitPhase = 'idle' | 'requested' | 'announcing' | 'finalizing';
+type QuitPhase = 'idle' | 'requested' | 'announcing' | 'finalizing';
 
 interface QuitRuntime {
   phase: QuitPhase;
@@ -39,7 +39,7 @@ export function requestQuit(): void {
   app.quit();
 }
 
-export interface BeforeQuitHandlers {
+interface BeforeQuitHandlers {
   stopRendererServer: () => void;
 }
 

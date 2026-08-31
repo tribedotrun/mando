@@ -119,7 +119,7 @@ fn load() -> Result<PidMap> {
     if !path.exists() {
         return Ok(PidMap::default());
     }
-    Ok(load_json_file(&path, "pid_registry")?)
+    Ok(load_json_file(&path)?)
 }
 
 /// Atomic save (temp file + rename). Assumes the caller already holds the
@@ -206,7 +206,7 @@ pub fn unregister_entry_if_current(session_id: &str, expected: &PidEntry) -> Res
 
 /// Look up the full process identity for a session. No lock needed for a single
 /// read, but the view may race with a concurrent writer; callers should treat
-/// the result as advisory.
+/// the result as a potentially stale snapshot.
 pub fn get_entry(session_id: &str) -> Option<PidEntry> {
     match load() {
         Ok(map) => map.get(session_id).cloned(),
@@ -219,7 +219,7 @@ pub fn get_entry(session_id: &str) -> Option<PidEntry> {
 
 /// Look up the PID for a session. No lock needed for a single read, but the
 /// view may race with a concurrent writer; callers should treat the result
-/// as advisory. On load failure logs at error level and returns None so
+/// as a potentially stale snapshot. On load failure logs at error level and returns None so
 /// callers can decide to fail the operation that needed the PID.
 pub fn get_pid(session_id: &str) -> Option<Pid> {
     match load() {
@@ -492,7 +492,7 @@ mod tests {
         std::fs::write(&path, serde_json::to_string_pretty(&map).unwrap()).unwrap();
 
         // Read back.
-        let loaded: PidMap = load_json_file(&path, "test").unwrap_or_default();
+        let loaded: PidMap = load_json_file(&path).unwrap_or_default();
         assert_eq!(loaded.get("s1").map(|e| e.pid), Some(Pid::new(42)));
         assert_eq!(loaded.get("s2").map(|e| e.pid), Some(Pid::new(99)));
         assert_eq!(

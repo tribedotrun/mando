@@ -33,3 +33,11 @@ export function openExternalUrl(url: string) {
 export function openLocalPath(path: string) {
   return window.mandoAPI.openLocalPath(path);
 }
+
+export function evidenceDeckExists(worktree: string) {
+  return window.mandoAPI.evidenceDeckExists(worktree);
+}
+
+export function readEvidenceDeck(worktree: string) {
+  return window.mandoAPI.readEvidenceDeck(worktree);
+}

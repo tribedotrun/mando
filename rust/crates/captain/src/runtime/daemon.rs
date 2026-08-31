@@ -1,4 +1,3 @@
-use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
@@ -117,11 +116,6 @@ impl CaptainRuntime {
     }
 
     #[tracing::instrument(skip_all)]
-    pub async fn active_worker_count(&self) -> anyhow::Result<usize> {
-        self.task_store.read().await.active_worker_count().await
-    }
-
-    #[tracing::instrument(skip_all)]
     pub async fn routing(&self) -> anyhow::Result<Vec<crate::TaskRouting>> {
         self.task_store.read().await.routing().await
     }
@@ -186,19 +180,6 @@ impl CaptainRuntime {
         let opts = crate::io::task_cleanup::CleanupOptions { close_pr, force };
         let store = self.task_store.read().await;
         crate::runtime::dashboard::delete_tasks(config, &store, ids, &opts).await
-    }
-
-    pub fn load_health_state(&self) -> anyhow::Result<crate::io::health_store::HealthState> {
-        let health_path = crate::config::worker_health_path();
-        crate::io::health_store::load_health_state(&health_path)
-    }
-
-    #[tracing::instrument(skip_all)]
-    pub async fn load_health_state_async(
-        &self,
-    ) -> anyhow::Result<crate::io::health_store::HealthState> {
-        let health_path = crate::config::worker_health_path();
-        crate::io::health_store::load_health_state_async(&health_path).await
     }
 
     #[tracing::instrument(skip_all)]
@@ -287,30 +268,6 @@ impl CaptainRuntime {
                 }
             }
         }
-    }
-
-    pub fn resolve_task_cwd(&self, item: &crate::Task) -> anyhow::Result<PathBuf> {
-        // Fail-fast: no fallback. Running an ask/advisor session inside
-        // the wrong directory (previously: `first_project_path`, i.e.
-        // whichever project hashes first) is worse than a clean error.
-        // The caller turns this into a 4xx the user can act on by
-        // reopening the task, which recovers the worktree via spawn's
-        // WorktreePlan::Recreate path.
-        let Some(stored) = item
-            .worktree
-            .as_deref()
-            .map(global_infra::paths::expand_tilde)
-        else {
-            anyhow::bail!("task {} has no worktree assigned", item.id);
-        };
-        if !stored.is_dir() {
-            anyhow::bail!(
-                "task {} worktree missing on disk: {} — reopen the task to recover",
-                item.id,
-                stored.display()
-            );
-        }
-        Ok(stored)
     }
 }
 

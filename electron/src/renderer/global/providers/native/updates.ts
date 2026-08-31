@@ -1,4 +1,4 @@
-export type UpdateChannel = 'stable' | 'beta';
+type UpdateChannel = 'stable' | 'beta';
 
 export function subscribeUpdateReady(
   callback: (info: { version: string; notes: string }) => void,

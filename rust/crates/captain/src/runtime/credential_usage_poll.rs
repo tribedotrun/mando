@@ -13,7 +13,7 @@
 //!    `unified_status == Rejected`, calls
 //!    [`credential_rate_limit::activate`] so `pick_for_worker` filtering
 //!    keeps one source of truth.
-//! 5. Emits `BusEvent::Credentials` so the Electron UI refetches live.
+//! 5. Emits `BusPayload::Credentials` so the Electron UI refetches live.
 //!
 //! Cadence is a flat 10 minutes regardless of utilization. A per-credential
 //! throttle prevents redundant back-to-back probes when the manual refresh

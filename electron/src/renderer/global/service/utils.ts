@@ -41,36 +41,9 @@ export function canRework(task: TaskItem): boolean {
   return ['awaiting-review', 'handed-off', 'escalated', 'errored', 'stopped'].includes(task.status);
 }
 
-/** Whether a task can be handed off to a human. */
-export function canHandoff(task: TaskItem): boolean {
-  return ['awaiting-review', 'escalated'].includes(task.status);
-}
-
 /** Whether a task's worker can be stopped (user-initiated halt of in-progress work). */
 export function canStop(task: TaskItem): boolean {
   return task.status === 'in-progress';
-}
-
-/** Whether a task can be retried after error. */
-export function canRetry(task: TaskItem): boolean {
-  return task.status === 'errored';
-}
-
-/** Whether a task needs clarification answers. */
-export function canAnswer(task: TaskItem): boolean {
-  return task.status === 'needs-clarification';
-}
-
-/** Whether a task can be asked a question in any active or review state (broad). */
-export function canAskAny(task: TaskItem): boolean {
-  return [
-    'awaiting-review',
-    'escalated',
-    'in-progress',
-    'captain-reviewing',
-    'captain-merging',
-    'clarifying',
-  ].includes(task.status);
 }
 
 /** Derive PR icon state from task status. */

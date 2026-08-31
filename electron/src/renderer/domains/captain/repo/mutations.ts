@@ -8,15 +8,12 @@ export {
   useTaskHandoff,
   useTaskStop,
   useTaskReopen,
-  useTaskAskReopen,
   useTaskRework,
   useTaskSetIsBugFix,
 } from '#renderer/domains/captain/repo/mutations-lifecycle';
 
 export {
   useTaskMerge,
-  useTaskAsk,
-  useTaskAdvisor,
   useTaskNudge,
   useTaskDelete,
   useTaskClarify,

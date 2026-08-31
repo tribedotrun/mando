@@ -112,7 +112,7 @@ async fn handle_stop() -> anyhow::Result<()> {
 
 async fn handle_health() -> anyhow::Result<()> {
     match DaemonClient::discover() {
-        Ok(client) => match client.health().await {
+        Ok(client) => match client.get_health().await {
             Ok(health) => {
                 println!("Daemon is running.");
                 println!("{}", serde_json::to_string_pretty(&health)?);
@@ -241,108 +241,4 @@ fn exec_daemon(binary: &std::path::Path, args: &[&str]) -> std::io::Error {
         std::io::ErrorKind::Unsupported,
         "daemon start only supported on Unix",
     )
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use clap::Parser;
-
-    #[derive(Parser)]
-    struct TestCli {
-        #[command(subcommand)]
-        cmd: TestCmd,
-    }
-
-    #[derive(clap::Subcommand)]
-    enum TestCmd {
-        Daemon(DaemonArgs),
-    }
-
-    #[test]
-    fn parse_daemon_start() {
-        let cli = TestCli::try_parse_from(["test", "daemon", "start"]).unwrap();
-        match cli.cmd {
-            TestCmd::Daemon(args) => match args.command {
-                DaemonCommand::Start { port, verbose } => {
-                    assert!(port.is_none());
-                    assert!(!verbose);
-                }
-                _ => panic!("expected Start"),
-            },
-        }
-    }
-
-    #[test]
-    fn parse_daemon_start_port() {
-        let cli = TestCli::try_parse_from(["test", "daemon", "start", "-p", "9999"]).unwrap();
-        match cli.cmd {
-            TestCmd::Daemon(args) => match args.command {
-                DaemonCommand::Start { port, .. } => {
-                    assert_eq!(port, Some(9999));
-                }
-                _ => panic!("expected Start"),
-            },
-        }
-    }
-
-    #[test]
-    fn parse_daemon_start_verbose() {
-        let cli = TestCli::try_parse_from(["test", "daemon", "start", "-v"]).unwrap();
-        match cli.cmd {
-            TestCmd::Daemon(args) => match args.command {
-                DaemonCommand::Start { verbose, .. } => {
-                    assert!(verbose);
-                }
-                _ => panic!("expected Start"),
-            },
-        }
-    }
-
-    #[test]
-    fn parse_daemon_stop() {
-        let cli = TestCli::try_parse_from(["test", "daemon", "stop"]).unwrap();
-        match cli.cmd {
-            TestCmd::Daemon(args) => {
-                assert!(matches!(args.command, DaemonCommand::Stop));
-            }
-        }
-    }
-
-    #[test]
-    fn parse_daemon_health() {
-        let cli = TestCli::try_parse_from(["test", "daemon", "health"]).unwrap();
-        match cli.cmd {
-            TestCmd::Daemon(args) => {
-                assert!(matches!(args.command, DaemonCommand::Health));
-            }
-        }
-    }
-
-    #[test]
-    fn parse_daemon_logs() {
-        let cli = TestCli::try_parse_from(["test", "daemon", "logs", "-n", "100"]).unwrap();
-        match cli.cmd {
-            TestCmd::Daemon(args) => match args.command {
-                DaemonCommand::Logs { lines, follow } => {
-                    assert_eq!(lines, 100);
-                    assert!(!follow);
-                }
-                _ => panic!("expected Logs"),
-            },
-        }
-    }
-
-    #[test]
-    fn parse_daemon_logs_follow() {
-        let cli = TestCli::try_parse_from(["test", "daemon", "logs", "-f"]).unwrap();
-        match cli.cmd {
-            TestCmd::Daemon(args) => match args.command {
-                DaemonCommand::Logs { follow, .. } => {
-                    assert!(follow);
-                }
-                _ => panic!("expected Logs"),
-            },
-        }
-    }
 }

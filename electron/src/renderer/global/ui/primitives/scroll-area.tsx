@@ -14,12 +14,10 @@ function ScrollArea({
       className={cn('relative', className)}
       {...props}
     >
-      {/* eslint-disable design-system/no-off-grid-radius -- Radix pattern: inherit parent border-radius */}
       <ScrollAreaPrimitive.Viewport
         data-slot="scroll-area-viewport"
         className="size-full rounded-[inherit] transition-[color,box-shadow] outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-1"
       >
-        {/* eslint-enable design-system/no-off-grid-radius */}
         {children}
       </ScrollAreaPrimitive.Viewport>
       <ScrollBar />
@@ -53,4 +51,4 @@ function ScrollBar({
   );
 }
 
-export { ScrollArea, ScrollBar };
+export { ScrollArea };

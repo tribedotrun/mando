@@ -9,7 +9,6 @@ import {
   stopItem,
   reopenItem,
   reworkItem,
-  askReopen,
   setTaskIsBugFix,
 } from '#renderer/domains/captain/repo/api';
 import type { TaskListResponse } from '#renderer/global/types';
@@ -146,29 +145,6 @@ export function useTaskReopen() {
     onSettled: (_data, err, vars) => {
       if (err) log.warn('useTaskReopen settled with error', err);
       invalidateTaskDetail(qc, vars.id);
-    },
-  });
-}
-
-export function useTaskAskReopen() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (vars: { id: number }) => toReactQuery(askReopen(vars.id)),
-    onMutate: async (vars) => {
-      await qc.cancelQueries({ queryKey: queryKeys.tasks.list() });
-      const prev = qc.getQueryData<TaskListResponse>(queryKeys.tasks.list());
-      qc.setQueryData<TaskListResponse>(queryKeys.tasks.list(), (old) =>
-        updateTaskInList(old, vars.id, { status: 'queued' }),
-      );
-      return { prev };
-    },
-    onError: (err, _vars, context) => {
-      if (context?.prev) qc.setQueryData(queryKeys.tasks.list(), context.prev);
-      log.error('useTaskAskReopen', err);
-    },
-    onSettled: (_data, err, vars) => {
-      if (err) log.warn('useTaskAskReopen settled with error', err);
-      void qc.invalidateQueries({ queryKey: queryKeys.tasks.askHistory(vars.id) });
     },
   });
 }

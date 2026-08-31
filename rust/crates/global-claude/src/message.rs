@@ -76,21 +76,10 @@ pub enum ContentBlock {
     },
 }
 
-/// Result subtypes — why the loop ended.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ResultSubtype {
-    Success,
-    ErrorMaxTurns,
-    ErrorMaxBudgetUsd,
-    ErrorDuringExecution,
-    ErrorMaxStructuredOutputRetries,
-    Unknown(String),
-}
-
 /// Final result message — always the last message.
 #[derive(Debug, Clone)]
 pub struct ResultMessage {
-    pub subtype: ResultSubtype,
+    pub subtype: api_types::ResultOutcome,
     pub is_error: bool,
     pub result_text: String,
     pub structured_output: Option<serde_json::Value>,
@@ -200,16 +189,14 @@ impl CcMessage {
                 if subtype_str.is_empty() {
                     tracing::warn!(module = "cc-message", "result message missing subtype");
                 }
-                let subtype = match subtype_str {
-                    "success" => ResultSubtype::Success,
-                    "error_max_turns" => ResultSubtype::ErrorMaxTurns,
-                    "error_max_budget_usd" => ResultSubtype::ErrorMaxBudgetUsd,
-                    "error_during_execution" => ResultSubtype::ErrorDuringExecution,
-                    "error_max_structured_output_retries" => {
-                        ResultSubtype::ErrorMaxStructuredOutputRetries
-                    }
-                    other => ResultSubtype::Unknown(other.to_string()),
-                };
+                let is_error = val
+                    .get("is_error")
+                    .and_then(|value| value.as_bool())
+                    .unwrap_or(false);
+                let subtype = api_types::ResultOutcome::from_subtype(
+                    (!subtype_str.is_empty()).then_some(subtype_str),
+                    is_error,
+                );
                 let errors = val
                     .get("errors")
                     .and_then(|v| v.as_array())
@@ -235,10 +222,7 @@ impl CcMessage {
                     .cloned();
                 CcMessage::Result(ResultMessage {
                     subtype,
-                    is_error: val
-                        .get("is_error")
-                        .and_then(|e| e.as_bool())
-                        .unwrap_or(false),
+                    is_error,
                     result_text: str_field(&val, "result"),
                     structured_output: val
                         .get("structured_output")
@@ -416,7 +400,7 @@ mod tests {
         });
         match CcMessage::parse(val) {
             CcMessage::Result(r) => {
-                assert_eq!(r.subtype, ResultSubtype::Success);
+                assert_eq!(r.subtype, api_types::ResultOutcome::Success);
                 assert!(!r.is_error);
                 assert_eq!(r.result_text, "done");
                 assert!(r.structured_output.is_some());

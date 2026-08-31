@@ -7,16 +7,19 @@ kind        = "external"
 types-crate = "electron/src/main/updater"
 transports  = ["http"]
 base-url    = "https://mando-update.gm-e6e.workers.dev"
+hosts       = ["mando-update.gm-e6e.workers.dev"]
 docs        = "electron/src/main/updater/runtime/updater.ts"
 
 # Cloudflare Worker that serves the signed-bundle update feed consumed
 # by the DIY Electron auto-updater. Response is a small JSON manifest
 # (zod-validated via `feedResponseSchema`); binaries are streamed
 # straight to disk, so no wire types cross the daemon boundary.
+# The default feed host has the exact grant above. An environment-selected
+# server and response-provided asset URLs are dynamic at the call site; D6 can
+# prove their single consumer ownership but cannot infer those runtime hosts.
 [[consumer]]
 name        = "electron-update-feed-client"
 path        = "electron/src/main/updater/service/feedClient.ts"
 transports  = ["http"]
 role        = "DIY auto-updater feed client — fetches signed update manifest and streams the bundle download"
 enforcement = "zod-schema"
-allow-value = false

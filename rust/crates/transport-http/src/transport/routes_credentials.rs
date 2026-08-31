@@ -119,7 +119,6 @@ fn api_probe_rate_limit_status(
 }
 
 /// GET /api/credentials -- list all stored credentials (no secrets).
-#[crate::instrument_api(method = "GET", path = "/api/credentials")]
 async fn list_credentials(
     State(state): State<AppState>,
 ) -> Json<api_types::CredentialsListResponse> {
@@ -170,7 +169,6 @@ async fn list_credentials(
 }
 
 /// GET /api/credentials/:id/token -- reveal the full token.
-#[crate::instrument_api(method = "GET", path = "/api/credentials/{id}/token")]
 async fn get_credential_token(
     State(state): State<AppState>,
     axum::extract::Path(api_types::CredentialIdParams { id }): axum::extract::Path<
@@ -185,7 +183,6 @@ async fn get_credential_token(
 }
 
 /// DELETE /api/credentials/:id -- remove a credential.
-#[crate::instrument_api(method = "DELETE", path = "/api/credentials/{id}")]
 async fn remove_credential(
     State(state): State<AppState>,
     axum::extract::Path(api_types::CredentialIdParams { id }): axum::extract::Path<
@@ -205,7 +202,6 @@ async fn remove_credential(
     }
 }
 
-#[crate::instrument_api(method = "POST", path = "/api/credentials/{id}/disable")]
 async fn disable_credential(
     State(state): State<AppState>,
     axum::extract::Path(api_types::CredentialIdParams { id }): axum::extract::Path<
@@ -216,7 +212,6 @@ async fn disable_credential(
     set_credential_disabled(state, id, true).await
 }
 
-#[crate::instrument_api(method = "POST", path = "/api/credentials/{id}/enable")]
 async fn enable_credential(
     State(state): State<AppState>,
     axum::extract::Path(api_types::CredentialIdParams { id }): axum::extract::Path<
@@ -251,11 +246,10 @@ async fn set_credential_disabled(
 /// POST /api/credentials/:id/probe -- force an immediate usage probe.
 ///
 /// Returns the fresh snapshot. On 401 the credential is marked expired.
-/// Emits `BusEvent::Credentials` on every outcome (success, 401, and
+/// Emits `BusPayload::Credentials` on every outcome (success, 401, and
 /// transient probe failure) so the UI always refetches — transient
 /// failures still advance `last_probed_at` elsewhere and users benefit
 /// from seeing the current snapshot even when the probe itself errors.
-#[crate::instrument_api(method = "POST", path = "/api/credentials/{id}/probe")]
 async fn probe_credential(
     State(state): State<AppState>,
     axum::extract::Path(api_types::CredentialIdParams { id }): axum::extract::Path<
@@ -336,7 +330,6 @@ async fn probe_credential(
 /// Returns `{ pick: null }` (HTTP 200) when nothing is usable — the caller is
 /// expected to fall back to its ambient login rather than treat that as an
 /// error.
-#[crate::instrument_api(method = "POST", path = "/api/credentials/pick")]
 async fn pick_credential(
     State(state): State<AppState>,
     Json(body): Json<api_types::CredentialPickRequest>,
@@ -392,7 +385,6 @@ async fn pick_credential(
 }
 
 /// POST /api/credentials/setup-token -- add a setup-token credential.
-#[crate::instrument_api(method = "POST", path = "/api/credentials/setup-token")]
 async fn add_setup_token(
     State(state): State<AppState>,
     Json(body): Json<api_types::SetupTokenRequest>,

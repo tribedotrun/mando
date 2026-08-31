@@ -255,7 +255,7 @@ async fn try_readability(url: &str) -> Result<FetchedContent> {
         title,
         date_published,
     } = metadata_probe::probe_html(&html);
-    let article = global_net::readability::extract(&html)
+    let article = super::readability::extract(&html)
         .map_err(|e| anyhow::anyhow!("readability extraction failed: {e}"))?;
     if article.text_content.len() < MIN_CONTENT_CHARS {
         info!(

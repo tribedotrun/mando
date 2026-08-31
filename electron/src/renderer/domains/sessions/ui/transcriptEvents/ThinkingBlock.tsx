@@ -1,45 +1,25 @@
 import React from 'react';
-import { ChevronDown, ChevronRight } from 'lucide-react';
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from '#renderer/global/ui/primitives/collapsible';
-import {
-  selectIsThinkingOpen,
-  useTranscriptUi,
-} from '#renderer/domains/sessions/runtime/useTranscriptUi';
+import { Brain } from 'lucide-react';
+import { cleanThinkingText } from '#renderer/domains/sessions/service/transcriptRenderHelpers';
+import { PrMarkdown } from '#renderer/global/ui/PrMarkdown';
 
 interface ThinkingBlockProps {
-  id: string;
   text: string;
   label?: string;
 }
 
-export function ThinkingBlock({
-  id,
-  text,
-  label = 'thinking',
-}: ThinkingBlockProps): React.ReactElement {
-  const open = useTranscriptUi(selectIsThinkingOpen(id));
-  const toggle = useTranscriptUi((s) => s.toggleThinking);
-  const preview = text.trim().slice(0, 120);
+export function ThinkingBlock({ text, label }: ThinkingBlockProps): React.ReactElement {
+  const cleaned = cleanThinkingText(text);
   return (
-    <Collapsible open={open} onOpenChange={() => toggle(id)} className="my-0.5">
-      <CollapsibleTrigger asChild>
-        <button className="flex w-full items-center gap-1.5 rounded px-2 py-1 text-left text-label italic text-muted-foreground hover:bg-muted">
-          <span className="font-medium">{label}</span>
-          {!open && <span className="min-w-0 truncate opacity-70">{preview}…</span>}
-          <span className="ml-auto">
-            {open ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
-          </span>
-        </button>
-      </CollapsibleTrigger>
-      <CollapsibleContent>
-        <pre className="mt-1 whitespace-pre-wrap rounded bg-muted/40 px-3 py-2 text-label italic text-muted-foreground">
-          {text}
-        </pre>
-      </CollapsibleContent>
-    </Collapsible>
+    <div
+      data-testid="thinking-block"
+      className="my-0.5 flex items-start gap-2 px-2.5 py-1 text-muted-foreground [&_.text-foreground]:text-muted-foreground"
+    >
+      <Brain size={14} aria-hidden="true" className="mt-1.5 shrink-0 text-text-3" />
+      <div className="min-w-0 flex-1">
+        {label && <div className="pt-1 text-label text-text-3">{label}</div>}
+        <PrMarkdown text={cleaned} />
+      </div>
+    </div>
   );
 }

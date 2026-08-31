@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 
 /// Scout workflow configuration loaded from `scout-workflow.yaml`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ScoutWorkflow {
     pub models: HashMap<String, String>,
     pub agent: ScoutAgentConfig,
@@ -34,6 +35,7 @@ impl Default for ScoutWorkflow {
 /// overrides omit injected data while `ScoutWorkflow` stays fully populated at
 /// runtime.
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ScoutWorkflowOverride {
     pub models: HashMap<String, String>,
     pub agent: ScoutAgentConfig,
@@ -80,6 +82,7 @@ mod duration_seconds {
 
 /// Timeout configuration for scout CC sessions.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ScoutAgentConfig {
     #[serde(with = "duration_seconds")]
     pub process_timeout_s: Duration,
@@ -131,7 +134,7 @@ impl ScoutWorkflow {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct InterestsConfig {
     pub high: Vec<String>,
     pub low: Vec<String>,
@@ -139,7 +142,7 @@ pub struct InterestsConfig {
 
 /// User context for scout prompts — adapts explanations to the reader's background.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct UserContextConfig {
     /// Reader's role/background.
     pub role: String,
@@ -178,6 +181,7 @@ impl UserContextConfig {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ScoutRepo {
     pub name: String,
     pub path: String,

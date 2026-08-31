@@ -1,35 +1,23 @@
 use anyhow::Result;
-use settings::{CaptainWorkflow, ProjectConfig, StageAgentConfig, WorkflowStage};
+use settings::{CaptainWorkflow, ProjectConfig, StageAgentConfig};
 
 use crate::Task;
-
-pub(crate) fn stage_provider(
-    item: &Task,
-    workflow: &CaptainWorkflow,
-    stage: WorkflowStage,
-) -> global_types::TaskProvider {
-    if stage == WorkflowStage::Implementation && !item.use_glm_worker {
-        return item.provider;
-    }
-    workflow
-        .stages
-        .get(stage)
-        .map(|config| config.adapter)
-        .unwrap_or(item.provider)
-}
 
 pub(crate) fn implementation_provider(
     item: &Task,
     workflow: &CaptainWorkflow,
-) -> global_types::TaskProvider {
-    stage_provider(item, workflow, WorkflowStage::Implementation)
+) -> global_types::ExecutionAdapter {
+    if !item.use_glm_worker {
+        return item.provider;
+    }
+    workflow.stages.implementation.adapter
 }
 
 #[tracing::instrument(skip(pool, item), fields(task_id = item.id))]
 pub(crate) async fn persisted_worker_provider(
     pool: &sqlx::SqlitePool,
     item: &Task,
-) -> global_types::TaskProvider {
+) -> global_types::ExecutionAdapter {
     let Some(session_id) = item
         .session_ids
         .worker
@@ -46,8 +34,8 @@ pub(crate) async fn persisted_worker_provider(
 pub(crate) async fn persisted_session_provider(
     pool: &sqlx::SqlitePool,
     session_id: &str,
-    fallback: global_types::TaskProvider,
-) -> global_types::TaskProvider {
+    fallback: global_types::ExecutionAdapter,
+) -> global_types::ExecutionAdapter {
     match sessions_db::session_by_id(pool, session_id).await {
         Ok(Some(row)) => row.provider,
         Ok(None) => {
@@ -100,14 +88,14 @@ pub(crate) async fn persisted_session_model(
 }
 
 fn usable_persisted_session_model(
-    provider: global_types::TaskProvider,
+    provider: global_types::ExecutionAdapter,
     model: &str,
 ) -> Option<String> {
     let trimmed = model.trim();
     if trimmed.is_empty() {
         return None;
     }
-    if provider == global_types::TaskProvider::Claude && trimmed == "default" {
+    if provider == global_types::ExecutionAdapter::Claude && trimmed == "default" {
         return None;
     }
     Some(trimmed.to_string())
@@ -116,18 +104,17 @@ fn usable_persisted_session_model(
 fn implementation_stage_applies<'a>(
     item: &Task,
     workflow: &'a CaptainWorkflow,
-    provider: global_types::TaskProvider,
+    provider: global_types::ExecutionAdapter,
 ) -> Option<&'a StageAgentConfig> {
     item.use_glm_worker
-        .then(|| workflow.stages.get(WorkflowStage::Implementation))
-        .flatten()
+        .then_some(&workflow.stages.implementation)
         .filter(|stage| stage.adapter == provider)
 }
 
-fn implementation_worker_model(
+pub(super) fn implementation_worker_model(
     item: &Task,
     workflow: &CaptainWorkflow,
-    provider: global_types::TaskProvider,
+    provider: global_types::ExecutionAdapter,
     legacy_model: &str,
     persisted_model: Option<&str>,
 ) -> String {
@@ -142,24 +129,24 @@ fn implementation_worker_model(
 /// Model a Claude rebase worker runs on: the same resolution the initial
 /// worker spawn uses, so a task pinned to a non-default implementation model
 /// keeps it. No persisted model — rebase mints a fresh session id. Provider is
-/// pinned to Claude because only the Claude arm of
-/// `agent_runtime::spawn_rebase_worker` consumes this model.
+/// pinned to Claude because only the Claude owner branch in the rebase phase
+/// runner consumes this model.
 pub(crate) fn claude_rebase_worker_model(item: &Task, workflow: &CaptainWorkflow) -> String {
     implementation_worker_model(
         item,
         workflow,
-        global_types::TaskProvider::Claude,
+        global_types::ExecutionAdapter::Claude,
         &workflow.models.worker,
         None,
     )
 }
 
-fn codex_agent_config_for_worker(
+pub(super) fn codex_agent_config_for_worker(
     item: &Task,
     workflow: &CaptainWorkflow,
     persisted_model: Option<&str>,
 ) -> settings::AgentConfig {
-    let stage = implementation_stage_applies(item, workflow, global_types::TaskProvider::Codex);
+    let stage = implementation_stage_applies(item, workflow, global_types::ExecutionAdapter::Codex);
     let model = persisted_model
         .map(str::to_string)
         .or_else(|| stage.map(|stage_config| stage_config.model.clone()));
@@ -193,35 +180,13 @@ pub async fn spawn_worker(
     pool: &sqlx::SqlitePool,
 ) -> Result<super::spawner::SpawnResult> {
     let provider = implementation_provider(item, workflow);
-    match provider {
-        api_types::TaskProvider::Claude => {
-            let worker_model = implementation_worker_model(
-                item,
-                workflow,
-                provider,
-                &workflow.models.worker,
-                None,
-            );
-            spawn_claude_worker(project_config, item, workflow, pool, &worker_model).await
-        }
-        api_types::TaskProvider::Codex => {
-            let agent_config = codex_agent_config_for_worker(item, workflow, None);
-            super::codex_worker_spawn::spawn_worker(
-                project_config,
-                item,
-                workflow,
-                pool,
-                &agent_config,
-            )
-            .await
-        }
-        api_types::TaskProvider::OpenCode => {
-            super::opencode_worker_spawn::spawn_worker(project_config, item, workflow, pool).await
-        }
-    }
+    super::agent_runtime::Adapter::new(provider)
+        .start_worker(project_config, item, workflow, pool)
+        .await
 }
 
-async fn spawn_claude_worker(
+#[tracing::instrument(skip_all, fields(provider = "claude", task_id = item.id))]
+pub(super) async fn spawn_claude_worker(
     project_config: &ProjectConfig,
     item: &Task,
     workflow: &CaptainWorkflow,
@@ -306,7 +271,7 @@ pub(crate) struct AgentWorkerResume {
 #[allow(clippy::too_many_arguments)]
 #[tracing::instrument(skip(pool, prompt, output_schema), fields(provider = %provider.as_str(), task_id, caller))]
 pub(crate) async fn spawn_structured_session(
-    provider: global_types::TaskProvider,
+    provider: global_types::ExecutionAdapter,
     pool: &sqlx::SqlitePool,
     caller: &str,
     task_id: i64,
@@ -318,32 +283,20 @@ pub(crate) async fn spawn_structured_session(
     resume_thread_id: Option<&str>,
     agent_config: &settings::AgentConfig,
 ) -> Result<AgentStructuredSession> {
-    match provider {
-        global_types::TaskProvider::Codex => {
-            let session = super::codex_structured::spawn_structured_session(
-                pool,
-                caller,
-                task_id,
-                project,
-                worker_name,
-                cwd,
-                prompt,
-                super::codex_output_schema::CodexOutputSchema(output_schema.0),
-                resume_thread_id,
-                agent_config,
-            )
-            .await?;
-            Ok(AgentStructuredSession {
-                session_id: session.session_id,
-            })
-        }
-        global_types::TaskProvider::Claude => {
-            anyhow::bail!("structured AgentRuntime sessions are not enabled for Claude")
-        }
-        global_types::TaskProvider::OpenCode => {
-            anyhow::bail!("structured AgentRuntime sessions are not enabled for OpenCode")
-        }
-    }
+    super::agent_runtime::Adapter::new(provider)
+        .start_structured(
+            pool,
+            caller,
+            task_id,
+            project,
+            worker_name,
+            cwd,
+            prompt,
+            output_schema,
+            resume_thread_id,
+            agent_config,
+        )
+        .await
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -361,137 +314,51 @@ pub(crate) async fn resume_worker(
     let fallback_provider = implementation_provider(item, workflow);
     let provider = persisted_session_provider(pool, session_id, fallback_provider).await;
     let persisted_model = persisted_session_model(pool, session_id).await;
-    match provider {
-        global_types::TaskProvider::Codex => {
-            let agent_config =
-                codex_agent_config_for_worker(item, workflow, persisted_model.as_deref());
-            let (pid, _stream_path, session_id) = super::codex_worker_control::resume_worker(
-                pool,
-                item,
-                worker_name,
-                cwd,
-                prompt,
-                session_id,
-                &agent_config,
-            )
-            .await?;
-            Ok(AgentWorkerResume { pid, session_id })
-        }
-        global_types::TaskProvider::Claude => {
-            let worker_model = implementation_worker_model(
-                item,
-                workflow,
-                global_types::TaskProvider::Claude,
-                model,
-                persisted_model.as_deref(),
-            );
-            let resume = super::claude_worker_control::resume_worker(
-                pool,
-                item,
-                worker_name,
-                cwd,
-                prompt,
-                session_id,
-                super::claude_worker_control::ClaudeRun {
-                    model: &worker_model,
-                    effort: workflow.agent.cc_effort,
-                },
-            )
-            .await?;
-            Ok(AgentWorkerResume {
-                pid: resume.pid,
-                session_id: session_id.to_string(),
-            })
-        }
-        global_types::TaskProvider::OpenCode => {
-            let resume = super::opencode_worker_spawn::resume_worker(
-                pool,
-                item,
-                worker_name,
-                cwd,
-                prompt,
-                session_id,
-                workflow.stages.require(WorkflowStage::Implementation),
-            )
-            .await?;
-            Ok(AgentWorkerResume {
-                pid: resume.pid,
-                session_id: resume.session_id,
-            })
-        }
-    }
+    super::agent_runtime::Adapter::new(provider)
+        .resume_worker(
+            pool,
+            item,
+            worker_name,
+            cwd,
+            prompt,
+            session_id,
+            model,
+            workflow,
+            persisted_model.as_deref(),
+        )
+        .await
 }
 
 pub(crate) fn worker_resume_replacement_reason(
-    provider: global_types::TaskProvider,
+    provider: global_types::ExecutionAdapter,
     stream_path: &std::path::Path,
     workflow: &CaptainWorkflow,
 ) -> Option<String> {
-    match provider {
-        global_types::TaskProvider::Claude => {
-            super::claude_worker_control::broken_resume_reason(stream_path, workflow)
-        }
-        global_types::TaskProvider::Codex => None,
-        global_types::TaskProvider::OpenCode => None,
-    }
+    super::agent_runtime::Adapter::new(provider).resume_replacement_reason(stream_path, workflow)
 }
 
-pub(crate) fn uses_shared_process(provider: global_types::TaskProvider) -> bool {
-    matches!(provider, global_types::TaskProvider::Codex)
+pub(crate) fn uses_shared_process(provider: global_types::ExecutionAdapter) -> bool {
+    super::agent_runtime::Adapter::new(provider).uses_shared_process()
 }
 
 #[tracing::instrument(skip_all, fields(provider = %provider.as_str(), session_id))]
 pub(crate) async fn interrupt_session_before_kill(
-    provider: global_types::TaskProvider,
+    provider: global_types::ExecutionAdapter,
     session_id: &str,
 ) -> Result<()> {
-    match provider {
-        global_types::TaskProvider::Codex => {
-            match super::codex_app_server::interrupt(session_id).await {
-                Ok(true) => tokio::time::sleep(std::time::Duration::from_millis(500)).await,
-                Ok(false) => {}
-                Err(e) => tracing::warn!(
-                    module = "agent_runtime",
-                    session_id,
-                    error = %e,
-                    "failed to interrupt agent turn before kill"
-                ),
-            }
-        }
-        global_types::TaskProvider::Claude | global_types::TaskProvider::OpenCode => {}
-    }
-    Ok(())
+    super::agent_runtime::Adapter::new(provider)
+        .interrupt(session_id)
+        .await
 }
 
 #[tracing::instrument(skip_all, fields(provider = %provider.as_str(), session_id))]
 pub(crate) async fn terminate_worker_process(
-    provider: global_types::TaskProvider,
+    provider: global_types::ExecutionAdapter,
     session_id: &str,
 ) -> Result<()> {
-    match provider {
-        global_types::TaskProvider::Codex => {
-            match super::codex_app_server::interrupt(session_id).await {
-                Ok(true) => tokio::time::sleep(std::time::Duration::from_millis(500)).await,
-                Ok(false) => {}
-                Err(e) => tracing::warn!(
-                    module = "agent_runtime",
-                    session_id,
-                    error = %e,
-                    "failed to interrupt Codex session before process termination"
-                ),
-            }
-            if let Err(e) = crate::io::pid_registry::unregister(session_id) {
-                tracing::warn!(module = "agent_runtime", session_id, error = %e, "failed to unregister Codex session pid");
-            }
-            Ok(())
-        }
-        global_types::TaskProvider::Claude => {
-            super::claude_worker_control::terminate_worker_process(session_id).await
-        }
-        global_types::TaskProvider::OpenCode => {
-            super::opencode_worker_spawn::terminate_worker_process(session_id).await
-        }
-    }
+    super::agent_runtime::Adapter::new(provider)
+        .terminate(session_id)
+        .await
 }
 
 #[cfg(test)]
@@ -618,7 +485,7 @@ stages:
         let model = implementation_worker_model(
             &item,
             &workflow,
-            TaskProvider::Codex,
+            TaskProvider::Codex.into(),
             "legacy-worker-model",
             None,
         );
@@ -653,7 +520,7 @@ stages:
             implementation_worker_model(
                 &item,
                 &workflow,
-                TaskProvider::Claude,
+                TaskProvider::Claude.into(),
                 &workflow.models.worker,
                 None,
             ),
@@ -685,7 +552,7 @@ stages:
         let model = implementation_worker_model(
             &item,
             &workflow,
-            TaskProvider::Codex,
+            TaskProvider::Codex.into(),
             "legacy-worker-model",
             None,
         );

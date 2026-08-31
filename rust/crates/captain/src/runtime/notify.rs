@@ -1,4 +1,4 @@
-//! Captain notification delivery — emits `BusEvent::Notification` on the EventBus.
+//! Captain notification delivery — emits `BusPayload::Notification` on the EventBus.
 //!
 //! Supports edit-in-place: repeated updates for the same task_key carry the
 //! key in the payload so SSE consumers can edit their previous message.
@@ -126,7 +126,7 @@ impl Notifier {
         self
     }
 
-    /// Toggle whether BusEvent::Notification should be emitted at all.
+    /// Toggle whether BusPayload::Notification should be emitted at all.
     pub fn with_notifications_enabled(mut self, enabled: bool) -> Self {
         self.notifications_enabled = enabled;
         self

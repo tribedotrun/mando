@@ -22,7 +22,6 @@ fn scout_item_command(command: api_types::ScoutItemLifecycleCommand) -> scout::S
 /// response reports how many items succeeded and which ids failed, letting
 /// the UI surface partial progress instead of the whole request appearing
 /// to fail after the first bad id.
-#[crate::instrument_api(method = "POST", path = "/api/scout/bulk")]
 pub(crate) async fn post_scout_bulk_update(
     State(state): State<AppState>,
     Json(body): Json<api_types::ScoutBulkCommandRequest>,
@@ -41,7 +40,6 @@ pub(crate) async fn post_scout_bulk_update(
 ///
 /// Per-item failures are reported alongside the success count (see
 /// post_scout_bulk_update for rationale).
-#[crate::instrument_api(method = "POST", path = "/api/scout/bulk-delete")]
 pub(crate) async fn post_scout_bulk_delete(
     State(state): State<AppState>,
     Json(body): Json<api_types::ScoutBulkDeleteRequest>,

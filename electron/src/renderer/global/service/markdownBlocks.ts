@@ -1,5 +1,3 @@
-import { indentDepth } from '#renderer/global/service/markdownHelpers';
-
 export type MarkdownBlock =
   | { kind: 'code'; language: string; code: string }
   | { kind: 'details'; summaryText: string; body: string }
@@ -14,6 +12,11 @@ export type MarkdownBlock =
   | { kind: 'empty' }
   | { kind: 'paragraph'; text: string }
   | { kind: 'plain'; text: string };
+
+/** Convert leading whitespace length to nesting depth (2-space indent). */
+function indentDepth(indent: string): number {
+  return (indent.length / 2) | 0;
+}
 
 /** Parse markdown text into a flat list of block descriptors. */
 export function parseMarkdownBlocks(text: string): MarkdownBlock[] {

@@ -15,7 +15,7 @@ fn section_header(section: HelpSection) -> &'static str {
 
 fn format_line(spec: &CommandSpec) -> String {
     let args = match spec.name {
-        "todo" => " [items]",
+        "todo" => " [text]",
         "tasks" => " [all]",
         "timeline" => " [id]",
         "stop" => " [id]",

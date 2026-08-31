@@ -5,7 +5,7 @@ use serde_json::Value;
 use crate::bot::{PickerItem, PickerState};
 pub(crate) use crate::message_helpers::{bc, extract_chat_id, extract_user_id, parse_command};
 
-pub(crate) fn to_picker_state(chat_id: &str, items: &[&captain::Task]) -> PickerState {
+pub(crate) fn to_picker_state(chat_id: &str, items: &[&api_types::TaskItem]) -> PickerState {
     PickerState {
         chat_id: chat_id.to_string(),
         items: items
@@ -13,16 +13,10 @@ pub(crate) fn to_picker_state(chat_id: &str, items: &[&captain::Task]) -> Picker
             .map(|it| PickerItem {
                 id: it.id.to_string(),
                 title: it.title.clone(),
-                status: Some(
-                    serde_json::to_value(it.status())
-                        .ok()
-                        .and_then(|v| v.as_str().map(String::from))
-                        .unwrap_or_else(|| format!("{:?}", it.status())),
-                ),
+                status: Some(it.status),
                 has_pr: it.pr_number.is_some(),
             })
             .collect(),
-        selected: std::collections::HashSet::new(),
     }
 }
 

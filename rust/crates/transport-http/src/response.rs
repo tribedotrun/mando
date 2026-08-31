@@ -68,24 +68,6 @@ pub fn map_task_create_error(e: anyhow::Error) -> ApiError {
     internal_error(e, "failed to create task")
 }
 
-pub async fn broadcast_task_update(state: &AppState, id: i64) {
-    state.captain.broadcast_task_update(id).await;
-}
-
 pub async fn touch_workbench_activity(state: &AppState, workbench_id: i64) {
     state.captain.touch_workbench_activity(workbench_id).await;
-}
-
-pub fn resolve_task_cwd(
-    item: &captain::Task,
-    state: &AppState,
-) -> Result<std::path::PathBuf, ApiError> {
-    // Surface the captain's error text verbatim — it already distinguishes
-    // "no worktree assigned" from "worktree missing on disk" so the user
-    // sees actionable detail (reopen the task, etc.) instead of a generic
-    // message that masks the real state.
-    state
-        .captain
-        .resolve_task_cwd(item)
-        .map_err(|e| error_response(StatusCode::CONFLICT, &format!("{e}")))
 }

@@ -83,9 +83,6 @@ fn apply_sandbox_overrides(
     if let Some(v) = overrides.worker_timeout_s {
         agent.worker_timeout_s = Duration::from_secs(v);
     }
-    if let Some(v) = overrides.task_ask_timeout_s {
-        agent.task_ask_timeout_s = Duration::from_secs(v);
-    }
     if let Some(v) = overrides.ops_timeout_s {
         agent.ops_timeout_s = Duration::from_secs(v);
     }
@@ -131,11 +128,10 @@ mod tests {
             captain_merge_timeout_s: Some(180),
             clarifier_timeout_s: Some(120),
             worker_timeout_s: Some(600),
-            task_ask_timeout_s: Some(60),
             ops_timeout_s: Some(30),
             no_pr_min_active_s: Some(0),
             codex: Some(CodexAgentConfig {
-                model: Some("gpt-5.4".into()),
+                model: Some("gpt-5.6-luna".into()),
                 reasoning_effort: Some(crate::config::workflow::CodexReasoningEffort::Medium),
                 service_tier: Some("default".into()),
             }),
@@ -176,11 +172,10 @@ mod tests {
         );
         assert_eq!(captain.agent.clarifier_timeout_s, Duration::from_secs(120));
         assert_eq!(captain.agent.worker_timeout_s, Duration::from_secs(600));
-        assert_eq!(captain.agent.task_ask_timeout_s, Duration::from_secs(60));
         assert_eq!(captain.agent.ops_timeout_s, Duration::from_secs(30));
         assert_eq!(captain.agent.no_pr_min_active_s, Duration::from_secs(0));
         let codex = captain.agent.codex.as_ref().expect("sandbox codex config");
-        assert_eq!(codex.model.as_deref(), Some("gpt-5.4"));
+        assert_eq!(codex.model.as_deref(), Some("gpt-5.6-luna"));
         assert_eq!(
             codex
                 .reasoning_effort

@@ -1,20 +1,16 @@
 //! `/action` — unified task action picker.
 //!
 //! Replaces individual reopen, rework, accept, handoff, cancel, nudge, input,
-//! answer, and ask commands with a single picker → state-aware action buttons.
+//! and answer commands with a single picker → state-aware action buttons.
 
 use crate::telegram_format::escape_html;
 use anyhow::Result;
-use captain::ItemStatus;
-use serde_json::json;
+use api_types::ItemStatus;
 
 use crate::bot::TelegramBot;
 use crate::commands;
-use crate::gateway_paths as paths;
 
-pub(crate) use super::action_sessions::{
-    fetch_clarifier_questions, handle_ask_text, handle_input_text,
-};
+pub(crate) use super::action_sessions::{fetch_clarifier_questions, handle_input_text};
 
 // ── Command handler ─────────────────────────────────────────────────
 
@@ -24,25 +20,10 @@ pub async fn handle(bot: &TelegramBot, chat_id: &str, args: &str) -> Result<()> 
 
     if subcmd == "cancel" {
         let had_input = bot.has_input_session(chat_id).await;
-        let had_ask = bot.has_ask_session(chat_id).await;
         if had_input {
             bot.close_input_session(chat_id).await;
         }
-        if had_ask {
-            if let Some(task_id) = bot.ask_session_task_id(chat_id).await {
-                global_infra::best_effort!(
-                    bot.gw()
-                        .post_typed::<_, api_types::AskEndResponse>(
-                            paths::TASKS_ASK_END,
-                            &json!({"id": task_id}),
-                        )
-                        .await,
-                    "action: ask/end gateway POST"
-                );
-            }
-            bot.close_ask_session(chat_id).await;
-        }
-        if had_input || had_ask {
+        if had_input {
             bot.send_html(chat_id, "\u{2705} Session cancelled.")
                 .await?;
         } else {
@@ -65,19 +46,6 @@ pub async fn handle(bot: &TelegramBot, chat_id: &str, args: &str) -> Result<()> 
         .await?;
         return Ok(());
     }
-    if bot.has_ask_session(chat_id).await {
-        let rounds = bot.ask_session_rounds(chat_id).await;
-        bot.send_html(
-            chat_id,
-            &format!(
-                "Ask session active ({rounds} turns).\n\
-                 Reply to continue, or /action cancel to exit."
-            ),
-        )
-        .await?;
-        return Ok(());
-    }
-
     show_picker(bot, chat_id).await
 }
 
@@ -96,9 +64,8 @@ async fn show_picker(bot: &TelegramBot, chat_id: &str) -> Result<()> {
 
     let mut sorted = items;
     sorted.sort_by(|a, b| {
-        a.status()
-            .is_finalized()
-            .cmp(&b.status().is_finalized())
+        super::status_is_finalized(a.status)
+            .cmp(&super::status_is_finalized(b.status))
             .then(b.id.cmp(&a.id))
     });
 
@@ -112,7 +79,7 @@ async fn show_picker(bot: &TelegramBot, chat_id: &str) -> Result<()> {
     let mut buttons: Vec<Vec<InlineKeyboardButton>> = Vec::new();
 
     for (i, it) in display.iter().enumerate() {
-        let status_tag = status_short(it.status());
+        let status_tag = status_short(it.status);
         let title = commands::truncate(&it.title, 35);
         lines.push(format!(
             "{}. <b>#{}</b> {} {}",
@@ -171,7 +138,6 @@ pub(crate) fn action_buttons(
 
     match status {
         ItemStatus::Clarifying => {
-            actions.push(("\u{1f4ac} Ask", "ask"));
             actions.push(("\u{270d}\u{fe0f} Input", "input"));
             actions.push(("\u{274c} Cancel", "cancel"));
         }
@@ -180,21 +146,18 @@ pub(crate) fn action_buttons(
             actions.push(("\u{274c} Cancel", "cancel"));
         }
         ItemStatus::InProgress => {
-            actions.push(("\u{1f4ac} Ask", "ask"));
             actions.push(("\u{1f4e3} Nudge", "nudge"));
             actions.push(("\u{1f91d} Handoff", "handoff"));
             actions.push(("\u{1f6d1} Stop", "stop"));
             actions.push(("\u{274c} Cancel", "cancel"));
         }
         ItemStatus::CaptainReviewing | ItemStatus::CaptainMerging => {
-            actions.push(("\u{1f4ac} Ask", "ask"));
             actions.push(("\u{274c} Cancel", "cancel"));
         }
         ItemStatus::Rework => {
             actions.push(("\u{274c} Cancel", "cancel"));
         }
         ItemStatus::AwaitingReview => {
-            actions.push(("\u{1f4ac} Ask", "ask"));
             if has_pr {
                 actions.push(("\u{1f500} Merge", "merge"));
             } else {
@@ -204,7 +167,6 @@ pub(crate) fn action_buttons(
             actions.push(("\u{274c} Cancel", "cancel"));
         }
         ItemStatus::Escalated | ItemStatus::Errored => {
-            actions.push(("\u{1f4ac} Ask", "ask"));
             actions.push(("\u{1f504} Reopen", "reopen"));
             actions.push(("\u{1f501} Rework", "rework"));
             actions.push(("\u{274c} Cancel", "cancel"));
@@ -214,7 +176,6 @@ pub(crate) fn action_buttons(
             actions.push(("\u{1f501} Rework", "rework"));
         }
         ItemStatus::Merged | ItemStatus::CompletedNoPr => {
-            actions.push(("\u{1f4ac} Ask", "ask"));
             actions.push(("\u{1f504} Reopen", "reopen"));
             actions.push(("\u{1f501} Rework", "rework"));
         }
@@ -223,19 +184,10 @@ pub(crate) fn action_buttons(
             actions.push(("\u{1f501} Rework", "rework"));
         }
         ItemStatus::Stopped => {
-            actions.push(("\u{1f4ac} Ask", "ask"));
             actions.push(("\u{1f504} Reopen", "reopen"));
             actions.push(("\u{1f501} Rework", "rework"));
             actions.push(("\u{274c} Cancel", "cancel"));
         }
-    }
-
-    if actions.is_empty() {
-        return vec![vec![InlineKeyboardButton {
-            text: "No actions available".into(),
-            callback_data: Some("act:noop".into()),
-            url: None,
-        }]];
     }
 
     actions
@@ -274,4 +226,4 @@ pub(crate) fn status_short(s: ItemStatus) -> &'static str {
     }
 }
 
-// Session text handlers (input, ask, clarifier fetch) are in action_sessions.rs.
+// Session text handlers (input and clarifier fetch) are in action_sessions.rs.

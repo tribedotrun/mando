@@ -4,6 +4,7 @@ kind        = "external"
 types-crate = "rust/crates/scout"
 transports  = ["http"]
 base-url    = "https://api.telegra.ph"
+hosts       = ["api.telegra.ph"]
 docs        = "https://telegra.ph/api"
 
 [[consumer]]
@@ -12,5 +13,3 @@ path        = "rust/crates/scout/src/io/telegraph.rs"
 transports  = ["http"]
 role        = "Publishes scout articles to Telegra.ph"
 enforcement = "scanner"
-allow-value = true
-allow-value-reason = "Telegra.ph API responses are upstream-owned; we pass HTML content through without modeling the full response schema."

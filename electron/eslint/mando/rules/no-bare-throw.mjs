@@ -24,11 +24,9 @@ const THROW_ALLOWED_FILES = [
   /\/main\/updater\/runtime\/updater\.ts$/,
   /\/main\/shell\/runtime\/notifications\.ts$/,
   /\/main\/shell\/runtime\/shellBridge\.ts$/,
-  /\/main\/shell\/runtime\/dock\.ts$/,
   /\/main\/index\.ts$/,
   /\/preload\/providers\/ipc\.ts$/,
   /\/preload\/ipc\/expose\.ts$/,
-  /\/renderer\/global\/runtime\/useConfig\.ts$/,
   /\/renderer\/domains\/captain\/repo\/api\.ts$/,
 ];
 

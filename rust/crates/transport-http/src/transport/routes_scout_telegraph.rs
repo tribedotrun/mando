@@ -9,7 +9,6 @@ use crate::response::{error_response, internal_error, ApiError};
 use crate::AppState;
 
 /// POST /api/scout/items/{id}/telegraph — publish article to Telegraph, return URL.
-#[crate::instrument_api(method = "POST", path = "/api/scout/items/{id}/telegraph")]
 pub(crate) async fn publish_telegraph(
     State(state): State<AppState>,
     Path(api_types::ScoutItemIdParams { id }): Path<api_types::ScoutItemIdParams>,

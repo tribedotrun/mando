@@ -25,7 +25,6 @@ export default [
       '@typescript-eslint/no-misused-promises': 'error',
       '@typescript-eslint/await-thenable': 'error',
       // Throw must be a real Error subclass, not strings or plain values.
-      // Pairs with mando/no-throw-string.
       '@typescript-eslint/only-throw-error': 'error',
       // Boundary discipline: unknown values must be parsed (Zod) before access.
       // Forces parse-don't-validate at every JSON.parse / IPC return / SSE event.

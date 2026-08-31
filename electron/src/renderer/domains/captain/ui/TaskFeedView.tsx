@@ -1,8 +1,9 @@
 import React, { useCallback, useMemo, useRef } from 'react';
-import { useTaskFeed, useTaskAdvisor } from '#renderer/domains/captain/runtime/hooks';
+import { useTaskFeed, useTaskReopen, useTaskRework } from '#renderer/domains/captain/runtime/hooks';
 import { useExpandedArtifactIds } from '#renderer/domains/captain/runtime/useExpandedArtifactIds';
 import { FeedBlocks } from '#renderer/domains/captain/ui/FeedBlocks';
-import { AdvisorInputBar } from '#renderer/domains/captain/ui/AdvisorInputBar';
+import { ReopenReworkComposer } from '#renderer/domains/captain/ui/ReopenReworkComposer';
+import type { ReopenReworkIntent } from '#renderer/domains/captain/runtime/useReopenReworkComposer';
 import {
   groupEvidenceArtifacts,
   latestClarifyTimestamp,
@@ -17,7 +18,8 @@ interface TaskFeedViewProps {
 export function TaskFeedView({ item }: TaskFeedViewProps): React.ReactElement {
   const feedEndRef = useRef<HTMLDivElement>(null);
   const { data: feedData } = useTaskFeed(item.id);
-  const advisorMutation = useTaskAdvisor();
+  const reopenMutation = useTaskReopen();
+  const reworkMutation = useTaskRework();
 
   const feedItems = feedData?.feed ?? [];
 
@@ -44,10 +46,14 @@ export function TaskFeedView({ item }: TaskFeedViewProps): React.ReactElement {
   );
 
   const handleSend = useCallback(
-    (message: string, intent: string) => {
-      advisorMutation.mutate({ id: item.id, message, intent });
+    (message: string, intent: ReopenReworkIntent) => {
+      if (intent === 'reopen') {
+        reopenMutation.mutate({ id: item.id, feedback: message });
+      } else {
+        reworkMutation.mutate({ id: item.id, feedback: message });
+      }
     },
-    [advisorMutation, item.id],
+    [item.id, reopenMutation, reworkMutation],
   );
 
   return (
@@ -85,7 +91,11 @@ export function TaskFeedView({ item }: TaskFeedViewProps): React.ReactElement {
         )}
       </div>
 
-      <AdvisorInputBar item={item} onSend={handleSend} isPending={advisorMutation.isPending} />
+      <ReopenReworkComposer
+        item={item}
+        onSend={handleSend}
+        isPending={reopenMutation.isPending || reworkMutation.isPending}
+      />
     </div>
   );
 }

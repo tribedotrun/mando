@@ -8,7 +8,7 @@ import { copyToClipboard } from '#renderer/global/runtime/useFeedback';
 import { getPageTitle } from '#renderer/global/service/routeHelpers';
 import { useWorkbenchCtx } from '#renderer/domains/captain/runtime/useWorkbenchCtx';
 
-export interface AppHeaderData {
+interface AppHeaderData {
   ctx: ReturnType<typeof useWorkbenchCtx>;
   pathname: string;
   pageTitle: string;

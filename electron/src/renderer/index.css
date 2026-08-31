@@ -339,12 +339,6 @@ select {
   margin: 1.25em 0;
 }
 
-/* ── Status icon tooltip ── */
-.status-icon-wrapper:hover .status-tooltip {
-  opacity: 1 !important;
-  transition-delay: 400ms;
-}
-
 /* ── Sidebar new-task CTA ── */
 .sidebar-new-task {
   transition:

@@ -26,12 +26,12 @@ const enabledSlot = defineJsonSlot(
 const DEDUP_WINDOW_MS = 5000;
 
 /** Check if the user has enabled desktop notifications (default: true). */
-export function getNotificationsEnabled(): boolean {
+function getNotificationsEnabled(): boolean {
   return enabledSlot.read() ?? true;
 }
 
 /** Set the desktop notifications preference. */
-export function setNotificationsEnabled(enabled: boolean): void {
+function setNotificationsEnabled(enabled: boolean): void {
   enabledSlot.write(enabled);
 }
 

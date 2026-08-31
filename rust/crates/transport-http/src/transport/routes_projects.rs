@@ -41,7 +41,6 @@ async fn reload_config_from_db(state: &AppState) -> Result<(), ApiError> {
 }
 
 /// GET /api/projects — list all projects.
-#[crate::instrument_api(method = "GET", path = "/api/projects")]
 pub(crate) async fn get_projects(
     State(state): State<AppState>,
 ) -> Result<Json<api_types::ProjectsListResponse>, ApiError> {
@@ -74,7 +73,6 @@ pub(crate) async fn get_projects(
 }
 
 /// POST /api/projects — add a new project.
-#[crate::instrument_api(method = "POST", path = "/api/projects")]
 pub(crate) async fn post_projects(
     State(state): State<AppState>,
     Json(body): Json<api_types::AddProjectRequest>,
@@ -189,7 +187,6 @@ pub(crate) async fn post_projects(
 }
 
 /// PATCH /api/projects/{name} — edit a project.
-#[crate::instrument_api(method = "PATCH", path = "/api/projects/{name}")]
 pub(crate) async fn patch_project(
     State(state): State<AppState>,
     Path(api_types::ProjectNameParams { name }): Path<api_types::ProjectNameParams>,
@@ -259,7 +256,6 @@ pub(crate) async fn patch_project(
 }
 
 /// DELETE /api/projects/{name} — remove a project and cascade-delete its tasks.
-#[crate::instrument_api(method = "DELETE", path = "/api/projects/{name}")]
 pub(crate) async fn delete_project(
     State(state): State<AppState>,
     Path(api_types::ProjectNameParams { name }): Path<api_types::ProjectNameParams>,

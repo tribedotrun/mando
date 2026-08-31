@@ -134,6 +134,74 @@ pub struct SyncCodexCredentialResponse {
     pub ok: bool,
 }
 
+/// POST /api/credentials/codex/app/use — swap a stored pool account into
+/// the ChatGPT desktop app's shared Codex auth slot.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[ts(optional_fields)]
+pub struct CodexDesktopAppUseRequest {
+    pub label: String,
+    /// Optional caller-side `CODEX_HOME`. The CLI forwards its environment
+    /// so moving orchestration into the daemon does not change that override.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub codex_home: Option<String>,
+    /// Process id of a thin CLI caller. The daemon excludes that process
+    /// from the external-Codex warning scan, matching the former in-process
+    /// CLI behavior without trusting it for any process termination.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub caller_pid: Option<u32>,
+}
+
+/// POST /api/credentials/codex/app/restore.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[ts(optional_fields)]
+pub struct CodexDesktopAppRestoreRequest {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub codex_home: Option<String>,
+}
+
+/// GET /api/credentials/codex/app/status query parameters.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[ts(optional_fields)]
+pub struct CodexDesktopAppStatusQuery {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub codex_home: Option<String>,
+}
+
+/// Result of a successful use/restore operation. Warnings preserve the CLI's
+/// best-effort process and recovery messages without making them fatal.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CodexDesktopAppOperationResponse {
+    pub message: String,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum CodexDesktopAppMode {
+    Pool,
+    Ambient,
+    None,
+}
+
+/// GET /api/credentials/codex/app/status.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CodexDesktopAppStatusResponse {
+    pub mode: CodexDesktopAppMode,
+    pub active_label: Option<String>,
+    pub credential_id: Option<i64>,
+    pub slot_account_id: Option<String>,
+    pub can_restore: bool,
+}
+
 /// POST /api/credentials/pick and POST /api/credentials/codex/pick.
 ///
 /// All fields optional. When both `id` and `label` are absent, the daemon

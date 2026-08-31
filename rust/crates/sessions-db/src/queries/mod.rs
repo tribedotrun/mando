@@ -156,11 +156,29 @@ async fn update_session_status_row(
     .rows_affected())
 }
 
+#[derive(Clone, Copy)]
+enum CostUpdate {
+    Accumulate(Option<f64>),
+    Replace(Option<f64>),
+}
+
+impl CostUpdate {
+    fn amount(self) -> Option<f64> {
+        match self {
+            Self::Accumulate(amount) | Self::Replace(amount) => amount,
+        }
+    }
+
+    fn replaces_existing(self) -> bool {
+        matches!(self, Self::Replace(_))
+    }
+}
+
 async fn update_session_status_with_cost_row(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     session_id: &str,
     status: SessionStatus,
-    cost_usd: Option<f64>,
+    cost_update: CostUpdate,
     duration_ms: Option<i64>,
     num_turns: Option<i64>,
     expected_rev: i64,
@@ -169,24 +187,26 @@ async fn update_session_status_with_cost_row(
         "UPDATE cc_sessions SET
             status = ?1,
             cost_usd = CASE
-                WHEN ?2 IS NOT NULL AND cost_usd IS NOT NULL THEN cost_usd + ?2
-                WHEN ?2 IS NOT NULL THEN ?2
-                ELSE cost_usd
+                WHEN ?2 IS NULL THEN cost_usd
+                WHEN ?3 THEN ?2
+                WHEN cost_usd IS NOT NULL THEN cost_usd + ?2
+                ELSE ?2
             END,
             duration_ms = CASE
-                WHEN ?3 IS NOT NULL AND duration_ms IS NOT NULL THEN duration_ms + ?3
-                WHEN ?3 IS NOT NULL THEN ?3
+                WHEN ?4 IS NOT NULL AND duration_ms IS NOT NULL THEN duration_ms + ?4
+                WHEN ?4 IS NOT NULL THEN ?4
                 ELSE duration_ms
             END,
             turn_count = CASE
-                WHEN ?4 IS NOT NULL THEN turn_count + ?4
+                WHEN ?5 IS NOT NULL THEN turn_count + ?5
                 ELSE turn_count
             END,
             rev = CASE WHEN ?1 != status THEN rev + 1 ELSE rev END
-         WHERE session_id = ?5 AND rev = ?6",
+         WHERE session_id = ?6 AND rev = ?7",
     )
     .bind(status.as_str())
-    .bind(cost_usd)
+    .bind(cost_update.amount())
+    .bind(cost_update.replaces_existing())
     .bind(duration_ms)
     .bind(num_turns)
     .bind(session_id)
@@ -194,6 +214,66 @@ async fn update_session_status_with_cost_row(
     .execute(&mut **tx)
     .await?
     .rows_affected())
+}
+
+async fn update_session_status_with_cost_mode(
+    pool: &SqlitePool,
+    session_id: &str,
+    status: SessionStatus,
+    cost_update: CostUpdate,
+    duration_ms: Option<i64>,
+    num_turns: Option<i64>,
+) -> Result<()> {
+    let mut tx = pool.begin().await?;
+    let Some((current_status, current_rev)) =
+        load_session_status_and_rev(&mut tx, session_id).await?
+    else {
+        return Ok(());
+    };
+    let rows_affected = update_session_status_with_cost_row(
+        &mut tx,
+        session_id,
+        status,
+        cost_update,
+        duration_ms,
+        num_turns,
+        current_rev,
+    )
+    .await?;
+    if rows_affected == 0 {
+        tx.rollback().await?;
+        return Ok(());
+    }
+    if current_status != status.as_str() {
+        let command = crate::lifecycle::infer_command(
+            Some(current_status.parse::<SessionStatus>()?),
+            status,
+            false,
+        )?;
+        let metadata = json!({
+            "session_id": session_id,
+            "from": current_status.clone(),
+            "to": status.as_str(),
+            "cost_usd": cost_update.amount(),
+            "duration_ms": duration_ms,
+            "num_turns": num_turns,
+        });
+        let transition_id = record_session_transition(
+            &mut tx,
+            session_id,
+            command,
+            Some(current_status.as_str()),
+            status.as_str(),
+            current_rev,
+            &metadata,
+        )
+        .await?;
+        tx.commit().await?;
+        drain_record_only_outbox(pool, transition_id).await?;
+    } else {
+        tx.commit().await?;
+    }
+    Ok(())
 }
 
 pub use result_applied::{mark_session_result_applied, mark_session_result_applied_in_tx};
@@ -347,56 +427,38 @@ pub async fn update_session_status_with_cost(
     duration_ms: Option<i64>,
     num_turns: Option<i64>,
 ) -> Result<()> {
-    let mut tx = pool.begin().await?;
-    let Some((current_status, current_rev)) =
-        load_session_status_and_rev(&mut tx, session_id).await?
-    else {
-        return Ok(());
-    };
-    let rows_affected = update_session_status_with_cost_row(
-        &mut tx,
+    update_session_status_with_cost_mode(
+        pool,
         session_id,
         status,
-        cost_usd,
+        CostUpdate::Accumulate(cost_usd),
         duration_ms,
         num_turns,
-        current_rev,
     )
-    .await?;
-    if rows_affected == 0 {
-        tx.rollback().await?;
-        return Ok(());
-    }
-    if current_status != status.as_str() {
-        let command = crate::lifecycle::infer_command(
-            Some(current_status.parse::<SessionStatus>()?),
-            status,
-            false,
-        )?;
-        let metadata = json!({
-            "session_id": session_id,
-            "from": current_status.clone(),
-            "to": status.as_str(),
-            "cost_usd": cost_usd,
-            "duration_ms": duration_ms,
-            "num_turns": num_turns,
-        });
-        let transition_id = record_session_transition(
-            &mut tx,
-            session_id,
-            command,
-            Some(current_status.as_str()),
-            status.as_str(),
-            current_rev,
-            &metadata,
-        )
-        .await?;
-        tx.commit().await?;
-        drain_record_only_outbox(pool, transition_id).await?;
-    } else {
-        tx.commit().await?;
-    }
-    Ok(())
+    .await
+}
+
+/// Update status and replace cost with an absolute provider total.
+///
+/// Duration and turn count still accumulate per completed segment. Use this
+/// for providers such as Codex whose token usage is cumulative for the thread.
+pub async fn update_session_status_with_absolute_cost(
+    pool: &SqlitePool,
+    session_id: &str,
+    status: SessionStatus,
+    cost_usd: Option<f64>,
+    duration_ms: Option<i64>,
+    num_turns: Option<i64>,
+) -> Result<()> {
+    update_session_status_with_cost_mode(
+        pool,
+        session_id,
+        status,
+        CostUpdate::Replace(cost_usd),
+        duration_ms,
+        num_turns,
+    )
+    .await
 }
 
 #[cfg(test)]
@@ -504,5 +566,84 @@ mod tests {
         assert_eq!(rows[0].duration_ms, Some(15000)); // 10000 + 5000
         assert_eq!(rows[0].turn_count, 1);
         assert_eq!(rows[0].resumed, 1);
+    }
+
+    #[tokio::test]
+    async fn absolute_cost_replaces_previous_provider_total() {
+        let pool = test_pool().await;
+        upsert_session(
+            &pool,
+            &SessionUpsert {
+                provider: global_types::TaskProvider::Codex,
+                session_id: "s1",
+                created_at: "2026-03-26T00:00:00Z",
+                caller: "worker",
+                cwd: "/tmp",
+                model: "gpt-5.6-sol",
+                status: SessionStatus::Running,
+                cost_usd: None,
+                duration_ms: None,
+                resumed: false,
+                task_id: Some(1),
+                scout_item_id: None,
+                worker_name: None,
+                resumed_at: None,
+                credential_id: None,
+                error: None,
+                api_error_status: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        update_session_status_with_absolute_cost(
+            &pool,
+            "s1",
+            SessionStatus::Stopped,
+            Some(1.0),
+            Some(10_000),
+            Some(1),
+        )
+        .await
+        .unwrap();
+        upsert_session(
+            &pool,
+            &SessionUpsert {
+                provider: global_types::TaskProvider::Codex,
+                session_id: "s1",
+                created_at: "",
+                caller: "worker",
+                cwd: "",
+                model: "",
+                status: SessionStatus::Running,
+                cost_usd: None,
+                duration_ms: None,
+                resumed: true,
+                task_id: None,
+                scout_item_id: None,
+                worker_name: None,
+                resumed_at: None,
+                credential_id: None,
+                error: None,
+                api_error_status: None,
+            },
+        )
+        .await
+        .unwrap();
+        update_session_status_with_absolute_cost(
+            &pool,
+            "s1",
+            SessionStatus::Stopped,
+            Some(1.5),
+            Some(5_000),
+            Some(1),
+        )
+        .await
+        .unwrap();
+
+        let row = session_by_id(&pool, "s1").await.unwrap().unwrap();
+        assert_eq!(row.cost_usd, Some(1.5));
+        assert_eq!(row.duration_ms, Some(15_000));
+        assert_eq!(row.turn_count, 2);
     }
 }

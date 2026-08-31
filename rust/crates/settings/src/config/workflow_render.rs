@@ -855,45 +855,4 @@ mod tests {
             "non-bug-fix captain_review should NOT include the bug-fix evidence rule"
         );
     }
-
-    #[test]
-    fn task_header_partial_substitutes_in_advisor_family() {
-        let prompts = captain_prompts();
-        let mut vars: FxHashMap<&str, &str> = FxHashMap::default();
-        vars.insert("title", "Login button overflow");
-        vars.insert("id", "42");
-        vars.insert("status", "AwaitingReview");
-        vars.insert("project", "mando");
-        vars.insert("pr", "123");
-        vars.insert("branch", "mando/login-fix-42");
-        vars.insert("context", "Worker fixed flex layout");
-        vars.insert(
-            "timeline",
-            "[2026-04-25T10:00] captain — gates_pass\n[2026-04-25T10:05] captain — ship",
-        );
-        vars.insert("question", "Why was this shipped at mid?");
-        vars.insert("intent", "rework");
-
-        for name in ["task_ask", "advisor", "advisor_reopen_direct"] {
-            let rendered = render_prompt(name, &prompts, &vars)
-                .unwrap_or_else(|e| panic!("{name} render failed: {e}"));
-            assert_no_triple_blanks(&rendered, name);
-            assert!(
-                rendered.contains("- Title: Login button overflow"),
-                "{name}: title row missing"
-            );
-            assert!(
-                rendered.contains("- PR: 123"),
-                "{name}: pr row missing (var substitution failed)"
-            );
-            assert!(
-                rendered.contains("## Recent Timeline"),
-                "{name}: timeline section missing"
-            );
-            assert!(
-                rendered.contains("[2026-04-25T10:00] captain"),
-                "{name}: timeline body missing"
-            );
-        }
-    }
 }

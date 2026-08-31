@@ -24,7 +24,6 @@ mod callback_actions;
 mod callbacks;
 mod callbacks_picker;
 mod commands;
-mod gateway_paths;
 mod http;
 mod message_helpers;
 mod notifications;
@@ -60,13 +59,10 @@ pub fn resolve_api_base_url() -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
-/// Start the main Telegram bot (blocking — runs the polling loop).
-///
-/// If `gw` is provided, it is used as-is (preserving CLI `--port`).
-/// Otherwise falls back to `GatewayClient::discover()`.
+/// Start the embedded Telegram bot (blocking — runs the polling loop).
 pub async fn start_bot(
     config: Arc<RwLock<Config>>,
-    gw: Option<http::GatewayClient>,
+    gw: http::GatewayClient,
     pending: PendingMessages,
 ) -> Result<()> {
     let (token, base_url) = {
@@ -96,10 +92,6 @@ pub async fn start_bot(
             "Telegram bot using custom API base URL: {url}"
         );
     }
-    let gw = match gw {
-        Some(g) => g,
-        None => http::GatewayClient::discover()?,
-    };
     let bot = TelegramBot::with_base_url(config, &token, base_url.as_deref(), gw, pending)?;
     bot_runtime::run_polling_loop(Arc::new(bot)).await
 }

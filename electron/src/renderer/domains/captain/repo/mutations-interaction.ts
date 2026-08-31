@@ -3,12 +3,10 @@ import log from '#renderer/global/service/logger';
 import {
   mergePr,
   triggerTick,
-  askTask,
   nudgeWorker,
   deleteItems,
   answerClarification,
   answerClarificationText,
-  sendAdvisorMessage,
 } from '#renderer/domains/captain/repo/api';
 import type { TaskListResponse } from '#renderer/global/types';
 import { queryKeys } from '#renderer/global/repo/queryKeys';
@@ -45,38 +43,6 @@ export function useTaskMerge() {
     onError: (err, _vars, context) => {
       if (context?.prev) qc.setQueryData(queryKeys.tasks.list(), context.prev);
       log.error('useTaskMerge', err);
-    },
-  });
-}
-
-export function useTaskAsk() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (vars: { id: number; question: string; askId?: string; images?: File[] }) =>
-      toReactQuery(askTask(vars.id, vars.question, vars.askId, vars.images)),
-    onError: (err) => {
-      log.error('useTaskAsk', err);
-    },
-    onSettled: (_data, err, vars) => {
-      if (err) log.warn('useTaskAsk settled with error', err);
-      void qc.invalidateQueries({ queryKey: queryKeys.tasks.feed(vars.id) });
-      void qc.invalidateQueries({ queryKey: queryKeys.tasks.askHistory(vars.id) });
-    },
-  });
-}
-
-export function useTaskAdvisor() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (vars: { id: number; message: string; intent?: string }) =>
-      toReactQuery(sendAdvisorMessage(vars.id, vars.message, vars.intent)),
-    onError: (err) => {
-      log.error('useTaskAdvisor', err);
-    },
-    onSettled: (_data, err, vars) => {
-      if (err) log.warn('useTaskAdvisor settled with error', err);
-      void qc.invalidateQueries({ queryKey: queryKeys.tasks.feed(vars.id) });
-      void qc.invalidateQueries({ queryKey: queryKeys.tasks.askHistory(vars.id) });
     },
   });
 }

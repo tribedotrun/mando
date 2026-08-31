@@ -10,7 +10,7 @@ interface UseScoutListHeaderOptions {
   onResearchModalOpenChange: (open: boolean) => void;
 }
 
-export interface ScoutListHeaderState {
+interface ScoutListHeaderState {
   search: {
     input: string;
     handleChange: (value: string) => void;

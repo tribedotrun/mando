@@ -3,16 +3,6 @@ use ts_rs::TS;
 
 use crate::MandoConfig;
 
-/// POST /api/tasks/ask
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(optional_fields)]
-#[serde(deny_unknown_fields)]
-pub struct TaskAskRequest {
-    pub id: i64,
-    pub question: String,
-    pub ask_id: Option<String>,
-}
-
 /// PATCH /api/tasks/{id}. `skip_serializing_if` on every Option is required:
 /// captain's `apply_json_updates` treats a JSON `null` as "clear this field",
 /// so unset fields must disappear from the serialized payload.
@@ -285,14 +275,6 @@ pub struct UpdateCredentialTokenRequest {
 #[serde(deny_unknown_fields)]
 pub struct ConfigSetupRequest {
     pub config: Option<MandoConfig>,
-}
-
-/// POST /api/tasks/{id}/advisor
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[serde(deny_unknown_fields)]
-pub struct AdvisorRequest {
-    pub message: String,
-    pub intent: String,
 }
 
 /// POST /api/ui/register

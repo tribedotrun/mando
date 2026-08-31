@@ -144,17 +144,18 @@ pub(crate) async fn check_done_review_threads(
             let artifacts = crate::io::queries::artifacts::list_for_task(pool, items[idx].id)
                 .await
                 .unwrap_or_default();
+            let data_dir = global_infra::paths::data_dir();
             let has_evidence_db = artifacts
                 .iter()
-                .any(|a| a.artifact_type == crate::ArtifactType::Evidence);
+                .any(|artifact| evidence_media_exists(artifact, &data_dir));
             let evidence_fresh_db =
                 if items[idx].reopen_seq == 0 || items[idx].reopened_at.is_none() {
                     has_evidence_db
                 } else {
                     let threshold = items[idx].reopened_at.as_deref().unwrap_or("");
-                    artifacts.iter().any(|a| {
-                        a.artifact_type == crate::ArtifactType::Evidence
-                            && a.created_at.as_str() > threshold
+                    artifacts.iter().any(|artifact| {
+                        evidence_media_exists(artifact, &data_dir)
+                            && artifact.created_at.as_str() > threshold
                     })
                 };
 
@@ -243,6 +244,21 @@ pub(crate) async fn check_done_review_threads(
             }
         }
     }
+}
+
+fn evidence_media_exists(artifact: &crate::TaskArtifact, data_dir: &std::path::Path) -> bool {
+    artifact.artifact_type == crate::ArtifactType::Evidence
+        && !artifact.media.is_empty()
+        && artifact.media.iter().all(|media| {
+            media.local_path.as_deref().is_some_and(|local_path| {
+                let relative = std::path::Path::new(local_path);
+                !relative.is_absolute()
+                    && !relative
+                        .components()
+                        .any(|part| matches!(part, std::path::Component::ParentDir))
+                    && data_dir.join(relative).is_file()
+            })
+        })
 }
 
 /// Decide whether a pending-review item needs reopening based on PR state.
@@ -417,6 +433,37 @@ mod tests {
         let (source, msg) = classify(0, 0, 0, 0, false, false).unwrap();
         assert_eq!(source, "evidence");
         assert!(msg.contains("no registered evidence"));
+    }
+
+    #[test]
+    fn evidence_row_with_absent_media_does_not_satisfy_gate() {
+        let data_dir = tempfile::tempdir().expect("create data dir");
+        let local_path = "artifacts/42/7-0.png";
+        let artifact = crate::TaskArtifact {
+            id: 7,
+            task_id: 42,
+            artifact_type: crate::ArtifactType::Evidence,
+            content: "Evidence (1 files)".to_string(),
+            media: vec![crate::ArtifactMedia {
+                index: 0,
+                filename: "proof.png".to_string(),
+                ext: "png".to_string(),
+                local_path: Some(local_path.to_string()),
+                remote_url: None,
+                caption: Some("proof".to_string()),
+                kind: Some(crate::EvidenceKind::AfterFix),
+            }],
+            created_at: "2026-08-30T00:00:00Z".to_string(),
+        };
+
+        assert!(!evidence_media_exists(&artifact, data_dir.path()));
+
+        let stored_file = data_dir.path().join(local_path);
+        std::fs::create_dir_all(stored_file.parent().expect("artifact parent"))
+            .expect("create artifact directory");
+        std::fs::write(stored_file, b"png").expect("write stored evidence");
+
+        assert!(evidence_media_exists(&artifact, data_dir.path()));
     }
 
     #[test]

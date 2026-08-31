@@ -8,9 +8,12 @@ repository.workspace = true
 homepage.workspace = true
 
 [dependencies]
+agent-runtime-core = { path = "../agent-runtime-core" }
+api-types = { path = "../api-types" }
 global-types = { path = "../global-types" }
-global-claude = { path = "../global-claude" }
 tokio.workspace = true
 serde_json.workspace = true
 anyhow.workspace = true
-libc = "0.2"
+
+[lints]
+workspace = true

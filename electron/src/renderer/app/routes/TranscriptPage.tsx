@@ -10,7 +10,7 @@ import {
 } from '#renderer/domains/sessions';
 import { TranscriptContent } from '#renderer/domains/sessions/ui/transcriptEvents/TranscriptContent';
 import { TranscriptTokenUsage } from '#renderer/domains/sessions/ui/transcriptEvents/TranscriptTokenUsage';
-import { useNativeActions } from '#renderer/global/runtime/useFeedbackNativeActions';
+import { useNativeActions } from '#renderer/global/runtime/useNativeActions';
 import { copyToClipboard } from '#renderer/global/runtime/useFeedback';
 import { useCopyFeedback } from '#renderer/global/runtime/useCopyFeedback';
 import { Button } from '#renderer/global/ui/primitives/button';

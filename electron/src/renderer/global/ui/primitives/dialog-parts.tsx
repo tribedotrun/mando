@@ -3,7 +3,6 @@ import { XIcon } from 'lucide-react';
 import { Dialog as DialogPrimitive } from 'radix-ui';
 
 import { cn } from '#renderer/global/service/cn';
-import { Button } from '#renderer/global/ui/primitives/button';
 import { DialogOverlay, DialogPortal } from '#renderer/global/ui/primitives/dialog';
 
 function DialogChromeCloseButton(): React.ReactElement {
@@ -44,14 +43,4 @@ function DialogContentFrame({
   );
 }
 
-function DialogFooterCloseButton({ children = 'Close' }: { children?: React.ReactNode }) {
-  return (
-    <DialogPrimitive.Close asChild>
-      <Button type="button" variant="outline">
-        {children}
-      </Button>
-    </DialogPrimitive.Close>
-  );
-}
-
-export { DialogChromeCloseButton, DialogContentFrame, DialogFooterCloseButton };
+export { DialogChromeCloseButton, DialogContentFrame };

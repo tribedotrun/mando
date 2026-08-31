@@ -12,8 +12,6 @@ pub enum SessionCaller {
     Clarifier,
     CaptainReviewAsync,
     CaptainMergeAsync,
-    TaskAsk,
-    Advisor,
     ScoutProcess,
     ScoutArticle,
     ScoutQa,
@@ -29,7 +27,6 @@ pub enum CallerGroup {
     Clarifier,
     CaptainReview,
     CaptainOps,
-    Advisor,
     Scout,
     Rebase,
 }
@@ -42,8 +39,6 @@ impl SessionCaller {
             Self::Clarifier => "clarifier",
             Self::CaptainReviewAsync => "captain-review-async",
             Self::CaptainMergeAsync => "captain-merge-async",
-            Self::TaskAsk => "task-ask",
-            Self::Advisor => "advisor",
             Self::ScoutProcess => "scout-process",
             Self::ScoutArticle => "scout-article",
             Self::ScoutQa => "scout-qa",
@@ -60,18 +55,12 @@ impl SessionCaller {
             "clarifier" => Some(Self::Clarifier),
             "captain-review-async" => Some(Self::CaptainReviewAsync),
             "captain-merge-async" => Some(Self::CaptainMergeAsync),
-            "task-ask" => Some(Self::TaskAsk),
-            "advisor" => Some(Self::Advisor),
             "scout-process" => Some(Self::ScoutProcess),
             "scout-article" => Some(Self::ScoutArticle),
             "scout-qa" => Some(Self::ScoutQa),
             "scout-research" => Some(Self::ScoutResearch),
             "scout-act" => Some(Self::ScoutAct),
             "rebase" => Some(Self::Rebase),
-            // Prefixed callers: session key includes an embedded ID but maps
-            // to the same logical caller for grouping/display.
-            s if s.starts_with("task-ask:") => Some(Self::TaskAsk),
-            s if s.starts_with("advisor:") => Some(Self::Advisor),
             _ => None,
         }
     }
@@ -82,8 +71,7 @@ impl SessionCaller {
             Self::Worker => CallerGroup::Workers,
             Self::Clarifier => CallerGroup::Clarifier,
             Self::CaptainReviewAsync => CallerGroup::CaptainReview,
-            Self::CaptainMergeAsync | Self::TaskAsk => CallerGroup::CaptainOps,
-            Self::Advisor => CallerGroup::Advisor,
+            Self::CaptainMergeAsync => CallerGroup::CaptainOps,
             Self::ScoutProcess
             | Self::ScoutArticle
             | Self::ScoutQa
@@ -100,8 +88,6 @@ impl SessionCaller {
             Self::Clarifier,
             Self::CaptainReviewAsync,
             Self::CaptainMergeAsync,
-            Self::TaskAsk,
-            Self::Advisor,
             Self::ScoutProcess,
             Self::ScoutArticle,
             Self::ScoutQa,
@@ -112,13 +98,9 @@ impl SessionCaller {
     }
 
     /// SQL LIKE prefix for callers that use key-embedded IDs.
-    /// Returns `None` for callers stored with their canonical name only.
+    /// No current callers use that form.
     pub fn like_prefix(&self) -> Option<&'static str> {
-        match self {
-            Self::TaskAsk => Some("task-ask:%"),
-            Self::Advisor => Some("advisor:%"),
-            _ => None,
-        }
+        None
     }
 
     /// Whether this caller requires a scout_item_id.
@@ -141,7 +123,6 @@ impl CallerGroup {
             Self::Clarifier => "clarifier",
             Self::CaptainReview => "captain-review",
             Self::CaptainOps => "captain-ops",
-            Self::Advisor => "advisor",
             Self::Scout => "scout",
             Self::Rebase => "rebase",
         }
@@ -176,21 +157,10 @@ mod tests {
     }
 
     #[test]
-    fn prefixed_callers_parse() {
-        // Advisor with embedded task ID
-        assert_eq!(
-            SessionCaller::parse("advisor:42"),
-            Some(SessionCaller::Advisor)
-        );
-        assert_eq!(
-            SessionCaller::parse("advisor:999"),
-            Some(SessionCaller::Advisor)
-        );
-        // Task-ask with embedded task ID
-        assert_eq!(
-            SessionCaller::parse("task-ask:7"),
-            Some(SessionCaller::TaskAsk)
-        );
+    fn unknown_callers_degrade_to_none() {
+        for caller in ["unknown", "retired-session", "retired-session:42"] {
+            assert_eq!(SessionCaller::parse(caller), None);
+        }
     }
 
     #[test]

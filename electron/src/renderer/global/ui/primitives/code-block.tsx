@@ -3,8 +3,18 @@ import { Check, Copy } from 'lucide-react';
 import { useHighlight } from '#renderer/global/runtime/useHighlight';
 import { useCopyFeedback } from '#renderer/global/runtime/useCopyFeedback';
 import { cn } from '#renderer/global/service/cn';
-import { normalizeLang } from '#renderer/global/service/codeBlockHelpers';
 import { copyToClipboard } from '#renderer/global/runtime/useFeedback';
+
+const LANG_ALIASES: Record<string, string> = Object.freeze({
+  ts: 'typescript',
+  js: 'javascript',
+  py: 'python',
+  sh: 'bash',
+  shell: 'bash',
+  yml: 'yaml',
+  md: 'markdown',
+  rs: 'rust',
+});
 
 interface CodeBlockProps {
   code: string;
@@ -18,7 +28,7 @@ export function CodeBlock({
   className,
 }: CodeBlockProps): React.ReactElement {
   const { copied, markCopied } = useCopyFeedback(1500);
-  const resolvedLang = normalizeLang(language);
+  const resolvedLang = LANG_ALIASES[language] ?? language;
 
   const { data: html } = useHighlight(code, resolvedLang);
 

@@ -8,11 +8,14 @@
 //! increasing, and gap-free starting from 1.  Any filename that doesn't match
 //! `<NNN>_<name>.sql` causes a build failure.
 //!
-//! PR #883 note: build scripts are compile-time utilities, not production
-//! code. `panic!`, `unwrap`, and `expect` are the correct failure mode —
-//! they abort the build with a visible error. The workspace-wide clippy
-//! denies for those macros are relaxed here at file scope.
+//! Build scripts are compile-time utilities, not production code. `panic!`,
+//! `unwrap`, and `expect` abort the build with a visible error, while stdout
+//! carries Cargo build-script directives.
 #![allow(clippy::panic, clippy::unwrap_used, clippy::expect_used)]
+#![allow(
+    clippy::print_stdout,
+    reason = "Cargo build-script directives must be emitted on stdout"
+)]
 
 use std::fs;
 use std::path::{Path, PathBuf};

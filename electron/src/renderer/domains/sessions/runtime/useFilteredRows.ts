@@ -1,28 +1,25 @@
-import { Children, isValidElement, useMemo, type ReactNode } from 'react';
+import { useMemo, type ReactNode } from 'react';
+import {
+  transcriptEventSearchText,
+  type TranscriptRenderRow,
+} from '#renderer/domains/sessions/service/transcriptEvents';
 
-/**
- * Extract visible text content from a React node tree by walking children
- * recursively. Ignores element types, prop names, and className strings —
- * matching those by accident is the `JSON.stringify(row)` trap.
- */
-function extractText(node: ReactNode): string {
-  if (node == null || typeof node === 'boolean') return '';
-  if (typeof node === 'string' || typeof node === 'number') return String(node);
-  if (Array.isArray(node)) return node.map(extractText).join(' ');
-  if (isValidElement(node)) {
-    const children = (node.props as { children?: ReactNode })?.children;
-    return Children.toArray(children).map(extractText).join(' ');
-  }
-  return '';
-}
-
-export function useFilteredTranscriptRows(rows: ReactNode[], query: string): ReactNode[] {
+export function useFilteredTranscriptRows(
+  rows: ReactNode[],
+  sourceRows: readonly TranscriptRenderRow[],
+  query: string,
+): ReactNode[] {
   return useMemo(() => {
     const trimmed = query.trim().toLowerCase();
     if (!trimmed) return rows;
-    return rows.filter((row) => {
+    return rows.filter((row, index) => {
       if (row == null) return false;
-      return extractText(row).toLowerCase().includes(trimmed);
+      const source = sourceRows[index];
+      return source
+        ? source.searchEvents.some((event) =>
+            transcriptEventSearchText(event).toLowerCase().includes(trimmed),
+          )
+        : false;
     });
-  }, [rows, query]);
+  }, [rows, sourceRows, query]);
 }

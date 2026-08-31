@@ -443,7 +443,7 @@ impl CodexAppServerManager {
     async fn process_info(&self) -> Option<(global_types::Pid, StderrTail)> {
         let mut state = self.inner.state.lock().await;
         let process = state.as_mut()?;
-        if process.pid.as_u32() == 0 || !global_claude::is_process_alive(process.pid) {
+        if process.pid.as_u32() == 0 || !agent_runtime_core::is_process_alive(process.pid) {
             return None;
         }
         Some((process.pid, process.stderr_tail.clone()))
@@ -458,7 +458,8 @@ impl CodexAppServerManager {
         let mut state = self.inner.state.lock().await;
         match state.as_ref() {
             Some(process)
-                if process.pid.as_u32() == 0 || !global_claude::is_process_alive(process.pid) =>
+                if process.pid.as_u32() == 0
+                    || !agent_runtime_core::is_process_alive(process.pid) =>
             {
                 state.take()
             }

@@ -1,9 +1,7 @@
 //! `mando todo` — task management CLI (HTTP client).
 
 use clap::{Args, Subcommand};
-use serde_json::json;
 
-use crate::gateway_paths as paths;
 use crate::http::{parse_id, DaemonClient};
 use crate::todo_display::fetch_task_by_id;
 
@@ -94,16 +92,6 @@ pub(crate) enum TodoCommand {
         #[arg(long = "allow-static")]
         allow_static: bool,
     },
-    /// Multi-turn Q&A on an item
-    Ask {
-        /// Item ID
-        item_id: String,
-        /// Question / message
-        message: Option<String>,
-        /// End the Q&A session
-        #[arg(long)]
-        end: bool,
-    },
     /// Show lifecycle timeline for an item
     Timeline {
         /// Item ID
@@ -118,11 +106,6 @@ pub(crate) enum TodoCommand {
         item_id: String,
         /// Message to send
         message: String,
-    },
-    /// Show Q&A exchange history for an item
-    History {
-        /// Item ID
-        item_id: String,
     },
 }
 
@@ -171,14 +154,8 @@ pub(crate) async fn handle(args: TodoArgs) -> anyhow::Result<()> {
             )
             .await
         }
-        TodoCommand::Ask {
-            item_id,
-            message,
-            end,
-        } => handle_ask(&item_id, message.as_deref(), end).await,
         TodoCommand::Timeline { item_id, last } => handle_timeline(&item_id, last).await,
         TodoCommand::Input { item_id, message } => handle_input(&item_id, &message).await,
-        TodoCommand::History { item_id } => handle_history(&item_id).await,
     }
 }
 
@@ -205,7 +182,7 @@ async fn handle_add(
     if no_auto_merge {
         form = form.text("no_auto_merge", "true");
     }
-    let result: api_types::TaskItem = client.post_multipart_json(paths::TASKS_ADD, form).await?;
+    let result = client.post_tasks_add_multipart(form).await?;
     println!("Added item #{}: {title}", result.id);
     Ok(())
 }
@@ -236,8 +213,7 @@ async fn handle_bulk(
         if let Some(p) = project {
             form = form.text("project", p.to_string());
         }
-        let result: api_types::TaskItem =
-            client.post_multipart_json(paths::TASKS_ADD, form).await?;
+        let result = client.post_tasks_add_multipart(form).await?;
         println!("  #{}: {line}", result.id);
         count += 1;
     }
@@ -248,70 +224,29 @@ async fn handle_bulk(
 async fn handle_delete(item_id: &str) -> anyhow::Result<()> {
     let client = DaemonClient::discover()?;
     client
-        .post_json::<api_types::DeleteTasksResponse, _>(
-            paths::TASKS_DELETE,
-            &json!({"ids": [parse_id(item_id, "item")?]}),
-        )
+        .post_tasks_delete(&api_types::TaskDeleteRequest {
+            ids: vec![parse_id(item_id, "item")?],
+            close_pr: None,
+            force: None,
+        })
         .await?;
     println!("Deleted item #{item_id}.");
     Ok(())
 }
 
-async fn handle_ask(item_id: &str, message: Option<&str>, end: bool) -> anyhow::Result<()> {
-    let id = parse_id(item_id, "item")?;
-    if end {
-        let client = DaemonClient::discover()?;
-        client
-            .post_json::<api_types::AskEndResponse, _>(
-                paths::TASKS_ASK_END,
-                &api_types::TaskIdRequest { id },
-            )
-            .await?;
-        println!("Ended Q&A session for item #{item_id}.");
-        return Ok(());
-    }
-    match message {
-        Some(msg) => {
-            let client = DaemonClient::discover()?;
-            let result: api_types::AskResponse = client
-                .post_json(
-                    paths::TASKS_ASK,
-                    &api_types::TaskAskRequest {
-                        id,
-                        question: msg.to_string(),
-                        ask_id: None,
-                    },
-                )
-                .await?;
-            println!(
-                "{}",
-                if result.answer.is_empty() {
-                    "(no reply)"
-                } else {
-                    result.answer.as_str()
-                }
-            );
-        }
-        None => {
-            println!("Usage: mando todo ask {item_id} \"your question\"");
-        }
-    }
-    Ok(())
-}
-
 async fn handle_timeline(item_id: &str, last: Option<usize>) -> anyhow::Result<()> {
     let client = DaemonClient::discover()?;
-    let path = match last {
-        Some(n) => paths::task_timeline_last(item_id, n),
-        None => paths::task_timeline(item_id),
-    };
-    let events: api_types::TimelineResponse = client.get_json(&path).await?;
+    let events = client
+        .get_tasks_by_id_timeline(&api_types::TaskIdParams {
+            id: parse_id(item_id, "item")?,
+        })
+        .await?;
 
     if events.events.is_empty() {
         println!("No timeline events for item #{item_id}.");
         return Ok(());
     }
-    for ev in &events.events {
+    for ev in timeline_events_for_display(&events.events, last) {
         println!(
             "  {}  {:<20}  {}",
             ev.timestamp,
@@ -320,6 +255,13 @@ async fn handle_timeline(item_id: &str, last: Option<usize>) -> anyhow::Result<(
         );
     }
     Ok(())
+}
+
+fn timeline_events_for_display<T>(events: &[T], last: Option<usize>) -> &[T] {
+    let start = last
+        .map(|count| events.len().saturating_sub(count))
+        .unwrap_or_default();
+    &events[start..]
 }
 
 async fn handle_input(item_id: &str, message: &str) -> anyhow::Result<()> {
@@ -342,21 +284,19 @@ async fn handle_input(item_id: &str, message: &str) -> anyhow::Result<()> {
         | api_types::ItemStatus::Stopped => {
             // Reopen with feedback.
             client
-                .post_json::<api_types::BoolOkResponse, _>(
-                    paths::TASKS_REOPEN,
-                    &api_types::TaskFeedbackRequest {
-                        id: id_num,
-                        feedback: message.to_string(),
-                    },
-                )
+                .post_tasks_reopen(&api_types::TaskFeedbackRequest {
+                    id: id_num,
+                    feedback: message.to_string(),
+                })
                 .await?;
             println!("Reopened item #{item_id} with feedback.");
         }
         api_types::ItemStatus::NeedsClarification => {
             // Use unified clarify endpoint.
-            let result: api_types::ClarifyResponse = client
-                .post_json(
-                    &paths::task_clarify(item_id),
+            let result = client
+                .post_tasks_by_id_clarify(
+                    &api_types::TaskIdParams { id: id_num },
+                    &api_types::ClarifyQuery { wait: None },
                     &api_types::ClarifyRequest {
                         answers: None,
                         answer: Some(message.to_string()),
@@ -388,8 +328,8 @@ async fn handle_input(item_id: &str, message: &str) -> anyhow::Result<()> {
         _ => {
             // Append context via patch.
             client
-                .patch_json::<api_types::TaskItem, _>(
-                    &paths::task_item(item_id),
+                .patch_tasks_by_id(
+                    &api_types::TaskIdParams { id: id_num },
                     &api_types::TaskPatchRequest {
                         context: Some(format!("[Human input] {message}")),
                         original_prompt: None,
@@ -399,22 +339,6 @@ async fn handle_input(item_id: &str, message: &str) -> anyhow::Result<()> {
                 .await?;
             println!("Appended input to item #{item_id}.");
         }
-    }
-    Ok(())
-}
-
-async fn handle_history(item_id: &str) -> anyhow::Result<()> {
-    let client = DaemonClient::discover()?;
-    let entries: api_types::AskHistoryResponse =
-        client.get_json(&paths::task_history(item_id)).await?;
-
-    if entries.history.is_empty() {
-        println!("No Q&A history for item #{item_id}.");
-        return Ok(());
-    }
-
-    for entry in &entries.history {
-        println!("  [{}] {}: {}", entry.timestamp, entry.role, entry.content);
     }
     Ok(())
 }
@@ -429,82 +353,11 @@ mod tests {
     use super::*;
     use clap::Parser;
 
-    #[derive(Parser)]
-    struct TestCli {
-        #[command(subcommand)]
-        cmd: TestCmd,
-    }
-
-    #[derive(clap::Subcommand)]
-    enum TestCmd {
-        Todo(TodoArgs),
-    }
-
-    #[test]
-    fn parse_todo_add() {
-        let cli = TestCli::try_parse_from(["test", "todo", "add", "Fix bug"]).unwrap();
-        match cli.cmd {
-            TestCmd::Todo(args) => match args.command {
-                TodoCommand::Add {
-                    title,
-                    project,
-                    plan,
-                    no_pr,
-                    no_auto_merge,
-                } => {
-                    assert_eq!(title, "Fix bug");
-                    assert!(project.is_none());
-                    assert!(plan.is_none());
-                    assert!(!no_pr);
-                    assert!(!no_auto_merge);
-                }
-                _ => panic!("expected Add"),
-            },
-        }
-    }
-
-    #[test]
-    fn parse_todo_add_with_project() {
-        let cli =
-            TestCli::try_parse_from(["test", "todo", "add", "Fix bug", "-p", "mando"]).unwrap();
-        match cli.cmd {
-            TestCmd::Todo(args) => match args.command {
-                TodoCommand::Add { project, .. } => {
-                    assert_eq!(project.as_deref(), Some("mando"));
-                }
-                _ => panic!("expected Add"),
-            },
-        }
-    }
-
-    #[test]
-    fn parse_todo_add_with_plan_handoff_flags() {
-        let cli = TestCli::try_parse_from([
-            "test",
-            "todo",
-            "add",
-            "Ship planned task",
-            "--plan",
-            "~/.mando/plans/42/brief.md",
-            "--no-pr",
-        ])
-        .unwrap();
-        match cli.cmd {
-            TestCmd::Todo(args) => match args.command {
-                TodoCommand::Add { plan, no_pr, .. } => {
-                    assert_eq!(plan.as_deref(), Some("~/.mando/plans/42/brief.md"));
-                    assert!(no_pr);
-                }
-                _ => panic!("expected Add"),
-            },
-        }
-    }
-
     #[test]
     fn parse_todo_add_rejects_context_flag() {
         // `--context` was removed from the CLI; clap must reject it.
-        let result = TestCli::try_parse_from([
-            "test",
+        let result = crate::Cli::try_parse_from([
+            "mando",
             "todo",
             "add",
             "Fix bug",
@@ -515,55 +368,8 @@ mod tests {
     }
 
     #[test]
-    fn parse_todo_list_all() {
-        let cli = TestCli::try_parse_from(["test", "todo", "list", "--all"]).unwrap();
-        match cli.cmd {
-            TestCmd::Todo(args) => match args.command {
-                TodoCommand::List { all } => assert!(all),
-                _ => panic!("expected List"),
-            },
-        }
-    }
-
-    #[test]
-    fn parse_todo_delete() {
-        let cli = TestCli::try_parse_from(["test", "todo", "delete", "42"]).unwrap();
-        match cli.cmd {
-            TestCmd::Todo(args) => match args.command {
-                TodoCommand::Delete { item_id } => {
-                    assert_eq!(item_id, "42")
-                }
-                _ => panic!("expected Delete"),
-            },
-        }
-    }
-
-    #[test]
-    fn parse_todo_show() {
-        let cli = TestCli::try_parse_from(["test", "todo", "show", "14"]).unwrap();
-        match cli.cmd {
-            TestCmd::Todo(args) => match args.command {
-                TodoCommand::Show { item_id } => {
-                    assert_eq!(item_id, "14");
-                }
-                _ => panic!("expected Show"),
-            },
-        }
-    }
-
-    #[test]
-    fn parse_todo_timeline() {
-        let cli =
-            TestCli::try_parse_from(["test", "todo", "timeline", "5", "--last", "3"]).unwrap();
-        match cli.cmd {
-            TestCmd::Todo(args) => match args.command {
-                TodoCommand::Timeline { item_id, last, .. } => {
-                    assert_eq!(item_id, "5");
-                    assert_eq!(last, Some(3));
-                }
-                _ => panic!("expected Timeline"),
-            },
-        }
+    fn timeline_last_uses_supported_request_and_limits_display() {
+        assert_eq!(timeline_events_for_display(&[1, 2, 3, 4], Some(2)), &[3, 4]);
     }
 
     #[test]

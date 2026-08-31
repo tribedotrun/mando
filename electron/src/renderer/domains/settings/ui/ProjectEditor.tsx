@@ -7,7 +7,7 @@ import { ProjectEditorFields } from '#renderer/domains/settings/ui/ProjectEditor
 import type { ProjectConfig } from '#renderer/global/types';
 import { useProjectEditor } from '#renderer/domains/settings/runtime/useProjectEditor';
 
-export interface ProjectEditorProps {
+interface ProjectEditorProps {
   pathKey: string;
   project: ProjectConfig;
   existingProjects: Record<string, ProjectConfig>;

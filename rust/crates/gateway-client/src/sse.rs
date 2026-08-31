@@ -1,41 +1,16 @@
 //! Typed SSE consumer for the gateway `/api/events` endpoint.
 //!
 //! The decode path is a single `serde_json::from_str::<SseEnvelope>(...)` —
-//! no `Value` hop, no hand-rolled mirrors. Envelope variants drop at this
-//! boundary when unknown, courtesy of `deny_unknown_fields` on every
-//! api_types struct.
+//! no `Value` hop and no hand-rolled mirrors. Unsupported envelopes fail the
+//! typed decode and are surfaced for the caller to log.
 
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use serde::Deserialize;
 use thiserror::Error;
 use tokio::sync::mpsc;
 
 use api_types::SseEnvelope;
-
-/// Every `event` tag SseEnvelope currently carries. Gateway emits only
-/// these; a future variant shows up here before the strict decode runs.
-const KNOWN_EVENT_TAGS: &[&str] = &[
-    "snapshot",
-    "snapshot_error",
-    "resync",
-    "tasks",
-    "scout",
-    "status",
-    "sessions",
-    "notification",
-    "workbenches",
-    "config",
-    "research",
-    "credentials",
-    "artifacts",
-];
-
-#[derive(Debug, Deserialize)]
-struct EnvelopeTagProbe<'a> {
-    event: &'a str,
-}
 
 /// Parse failures from a single SSE `data:` block.
 #[derive(Debug, Error)]
@@ -48,7 +23,7 @@ pub enum ParseError {
 /// Parse one SSE block.
 ///
 /// - `Ok(Some(env))` — a valid SSE envelope worth forwarding.
-/// - `Ok(None)` — heartbeat, unknown event, or empty block.
+/// - `Ok(None)` — heartbeat, non-JSON payload, or empty block.
 /// - `Err(e)` — the block held JSON-shaped data that failed to decode.
 pub fn parse_sse_block(block: &str) -> Result<Option<SseEnvelope>, ParseError> {
     let mut data_parts: Vec<&str> = Vec::new();
@@ -71,15 +46,6 @@ pub fn parse_sse_block(block: &str) -> Result<Option<SseEnvelope>, ParseError> {
     let looks_like_json = matches!(first, Some('{' | '['));
     if !looks_like_json {
         return Ok(None);
-    }
-
-    // Pre-check the `event` tag against the known set so unknown variants
-    // drop silently (matches the design intent that new variants roll out
-    // producer-first). Typed-probe deserialize — not substring matching.
-    if let Ok(probe) = serde_json::from_str::<EnvelopeTagProbe>(&data_str) {
-        if !KNOWN_EVENT_TAGS.contains(&probe.event) {
-            return Ok(None);
-        }
     }
 
     match serde_json::from_str::<SseEnvelope>(&data_str) {
@@ -107,14 +73,14 @@ impl SseConsumer {
     /// Subscribe to the gateway SSE stream.
     ///
     /// Yields typed `api_types::SseEnvelope`. `None`-returning blocks
-    /// (heartbeats, unknown variants) are filtered out at this layer so
+    /// (heartbeats and non-JSON payloads) are filtered out at this layer so
     /// callers see only valid events. Reconnection is signaled by a
     /// channel-level `SseEvent::Reconnected` style — handled by forwarding
     /// an extra [`SseSignal::Reconnected`] through the receiver.
     pub async fn subscribe(&self) -> Result<mpsc::Receiver<SseSignal>> {
         let (tx, rx) = mpsc::channel::<SseSignal>(256);
 
-        let url = format!("{}/api/events", self.base_url);
+        let url = format!("{}{}", self.base_url, crate::routes::GET_EVENTS.path);
         let client = self.client.clone();
         let token = self.token.clone();
 
@@ -273,10 +239,9 @@ mod tests {
     }
 
     #[test]
-    fn unknown_variant_returns_none() {
+    fn unknown_variant_returns_error() {
         let block = r#"data: {"event":"no_such_event","ts":0,"data":null}"#;
-        let r = parse_sse_block(block).unwrap();
-        assert!(r.is_none());
+        assert!(parse_sse_block(block).is_err());
     }
 
     #[test]

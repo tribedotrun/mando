@@ -16,7 +16,7 @@ use crate::service::tick_logic;
 ///
 /// `changed_task_ids` are the task ids that the tick actually mutated; one
 /// typed `Tasks(Some(..))` event is emitted per id so renderer detail caches
-/// (`tasks.feed`, `tasks.timeline`, `tasks.askHistory`, `tasks.artifacts`)
+/// (`tasks.feed`, `tasks.timeline`, `tasks.artifacts`)
 /// invalidate without waiting for a remount. The bare `Tasks(None)` catch-all
 /// only invalidates the list, leaving per-task caches stale.
 #[allow(clippy::too_many_arguments)]
@@ -360,7 +360,7 @@ mod tests {
 
     /// Regression for the bug where the captain tick emitted only `Tasks(None)`
     /// after every tick — list-only invalidation that left per-task feed,
-    /// timeline, askHistory, and artifacts caches stale until the user
+    /// timeline, and artifacts caches stale until the user
     /// remounted the workbench page. This test pins the typed broadcast.
     #[tokio::test]
     async fn broadcast_changed_tasks_emits_typed_event_per_id() {

@@ -241,6 +241,14 @@ async fn run_session(session: DetachedClaudeSession, spawned: SpawnedSessionIds)
                 warn!(module = "captain", session_id = %effective_sid, %e, "log_cc_result failed");
             }
         }
+        Err(global_claude::CcError::Interrupted { .. }) => {
+            info!(
+                module = "captain",
+                session_id = %effective_sid,
+                preallocated_session_id = %session_id,
+                "{phase} CC interrupted"
+            );
+        }
         Err(e) => {
             let stream_path = global_infra::paths::stream_path_for_session(&effective_sid);
             warn!(

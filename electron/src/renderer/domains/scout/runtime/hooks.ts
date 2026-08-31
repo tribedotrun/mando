@@ -17,7 +17,6 @@ export {
   useScoutStatusUpdate,
   useScoutAct,
   useScoutResearch,
-  useScoutAsk,
   useScoutPublishTelegraph,
 } from '#renderer/domains/scout/runtime/useFeedbackMutations';
 export { useScoutQASession } from '#renderer/domains/scout/runtime/useScoutQASession';

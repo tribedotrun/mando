@@ -157,14 +157,16 @@ fn update_task_sql() -> &'static str {
 pub(crate) fn bind_task_write_fields<'q>(
     query: SqliteQuery<'q>,
     task: &'q Task,
-) -> SqliteQuery<'q> {
+) -> Result<SqliteQuery<'q>> {
+    let owner =
+        global_types::TaskOwnerProvider::try_from(task.provider).map_err(anyhow::Error::msg)?;
     let trigger_str = task
         .captain_review_trigger
         .map(|trigger| trigger.as_str().to_string());
 
-    query
+    Ok(query
         .bind(&task.title)
-        .bind(task.provider.as_str())
+        .bind(owner.as_str())
         .bind(task.use_glm_worker as i64)
         .bind(task.status.as_str())
         .bind(task.project_id)
@@ -195,7 +197,7 @@ pub(crate) fn bind_task_write_fields<'q>(
         .bind(task.merge_fail_count)
         .bind(&task.escalation_report)
         .bind(&task.source)
-        .bind(task.paused_until)
+        .bind(task.paused_until))
 }
 
 /// Insert a new task (auto-ID).
@@ -215,7 +217,7 @@ pub(crate) async fn insert_task_in_tx(
     actor: &str,
     source: Option<String>,
 ) -> Result<i64> {
-    let result = bind_task_write_fields(sqlx::query(insert_task_sql()), task)
+    let result = bind_task_write_fields(sqlx::query(insert_task_sql()), task)?
         .execute(&mut **tx)
         .await?;
     let id = result.last_insert_rowid();
@@ -243,17 +245,13 @@ pub async fn update_task(pool: &SqlitePool, task: &Task) -> Result<bool> {
     Ok(true)
 }
 
-/// Delete a task and its dependent rows (timeline_events, ask_history).
+/// Delete a task and its dependent timeline rows.
 ///
 /// `task_rebase_state` cascades via FK; `cc_sessions` are cleaned up by
 /// `task_cleanup::cleanup_task` before this function is called.
 pub async fn remove(pool: &SqlitePool, id: i64) -> Result<bool> {
     let mut tx = pool.begin().await?;
     sqlx::query("DELETE FROM timeline_events WHERE task_id = ?")
-        .bind(id)
-        .execute(&mut *tx)
-        .await?;
-    sqlx::query("DELETE FROM ask_history WHERE task_id = ?")
         .bind(id)
         .execute(&mut *tx)
         .await?;
@@ -276,22 +274,6 @@ pub async fn status_counts(pool: &SqlitePool) -> Result<HashMap<String, usize>> 
     .fetch_all(pool)
     .await?;
     Ok(rows.into_iter().map(|(s, c)| (s, c as usize)).collect())
-}
-
-/// Check if an active (non-terminal) task exists with the given source.
-pub async fn has_active_with_source(pool: &SqlitePool, source: &str) -> Result<bool> {
-    let exists: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM tasks t \
-         LEFT JOIN workbenches w ON w.id = t.workbench_id \
-         WHERE t.source = ? \
-           AND t.status NOT IN ('merged','completed-no-pr','canceled') \
-           AND (w.archived_at IS NULL AND w.deleted_at IS NULL) \
-         LIMIT 1)",
-    )
-    .bind(source)
-    .fetch_one(pool)
-    .await?;
-    Ok(exists)
 }
 
 /// Pause a task until `until_epoch_secs`. Used when the failover layer
@@ -434,7 +416,7 @@ pub async fn merge_changed_items(
 }
 
 async fn insert_task_tx(tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>, task: &Task) -> Result<()> {
-    bind_task_write_fields(sqlx::query(insert_task_sql()), task)
+    bind_task_write_fields(sqlx::query(insert_task_sql()), task)?
         .execute(&mut **tx)
         .await?;
     Ok(())
@@ -444,7 +426,7 @@ async fn insert_task_with_id_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     task: &Task,
 ) -> Result<()> {
-    bind_task_write_fields(sqlx::query(insert_task_with_id_sql()).bind(task.id), task)
+    bind_task_write_fields(sqlx::query(insert_task_with_id_sql()).bind(task.id), task)?
         .execute(&mut **tx)
         .await?;
     Ok(())
@@ -457,4 +439,20 @@ async fn find_by_id_exec<'e>(
     let sql = format!("{} WHERE t.id = ?", select_tasks_sql());
     let row: Option<TaskRow> = sqlx::query_as(&sql).bind(id).fetch_optional(exec).await?;
     row.map(|r| r.into_task()).transpose()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn task_write_rejects_execution_only_adapter() {
+        let mut task = Task::new("owner boundary");
+        task.provider = global_types::TaskProvider::OpenCode;
+
+        match bind_task_write_fields(sqlx::query(insert_task_sql()), &task) {
+            Ok(_) => panic!("OpenCode cannot own a persisted task"),
+            Err(error) => assert!(error.to_string().contains("cannot own a persisted task")),
+        }
+    }
 }

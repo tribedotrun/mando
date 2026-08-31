@@ -9,12 +9,12 @@ export const VIDEO_EXTS = ['mp4', 'mov', 'webm'];
  *  Grouped evidence cards flatten media across multiple artifacts but the
  *  artifact-media static route still resolves per artifact, so each item
  *  must remember its origin id. */
-export interface MediaWithArtifactId {
+interface MediaWithArtifactId {
   artifactId: number;
   media: ArtifactMedia;
 }
 
-export interface ArtifactMediaDerived {
+interface ArtifactMediaDerived {
   hasVideo: boolean;
   imageUrls: string[];
   imageCaptions: string[];
@@ -30,7 +30,7 @@ export const lightboxKey = (artifactId: number, mediaIndex: number): string =>
 /** Header summary for an evidence card. Covers single-artifact and grouped
  *  cases identically; the grouped case sums counts and takes the latest
  *  timestamp / OR's `hasVideo` across the group. */
-export interface ArtifactGroupSummary {
+interface ArtifactGroupSummary {
   mediaCount: number;
   latestTimestamp: string;
   hasVideo: boolean;

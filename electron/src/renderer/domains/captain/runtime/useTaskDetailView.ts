@@ -15,10 +15,13 @@ import {
   type TaskProvider,
 } from '#renderer/global/types';
 import { buildSessionsFromTimeline } from '#renderer/domains/sessions';
+import { useEvidenceDeck } from '#renderer/domains/captain/runtime/useEvidenceDeck';
+import {
+  buildTaskDetailTabs,
+  resolveTaskDetailTab,
+} from '#renderer/domains/captain/service/taskDetailTabs';
 
 const REFRESH_INDICATOR_MS = 1500;
-
-type DetailTab = 'feed' | 'pr' | 'more';
 
 interface Args {
   item: TaskItem;
@@ -35,11 +38,11 @@ interface Args {
 }
 
 export function useTaskDetailView({ item, onBack, onOpenTranscript, activeTabProp }: Args) {
-  const activeTab: DetailTab = (activeTabProp as DetailTab) || 'feed';
   const [prRefreshing, setPrRefreshing] = useState(false);
   const [contextModalOpen, setContextModalOpen] = useState(false);
   const queryClient = useQueryClient();
   const stopMut = useTaskStop();
+  const deck = useEvidenceDeck(item, activeTabProp);
 
   // Open the modal whenever the header overflow menu requests "View brief"
   // via the typed view-brief bus. The bus returns an unsubscribe function.
@@ -128,14 +131,8 @@ export function useTaskDetailView({ item, onBack, onOpenTranscript, activeTabPro
     }
   };
 
-  const tabs: { key: DetailTab; label: string }[] = [
-    { key: 'feed', label: 'Feed' },
-    { key: 'pr', label: 'PR' },
-    { key: 'more', label: 'More' },
-  ];
-
-  const validKeys = tabs.map((t) => t.key);
-  const effectiveTab = validKeys.includes(activeTab) ? activeTab : 'feed';
+  const tabs = buildTaskDetailTabs(deck.available);
+  const effectiveTab = resolveTaskDetailTab(activeTabProp, tabs);
 
   return {
     tabs: { items: tabs, effectiveTab },
@@ -146,6 +143,7 @@ export function useTaskDetailView({ item, onBack, onOpenTranscript, activeTabPro
       handleRefresh: handlePrRefresh,
     },
     context: { open: contextModalOpen, setOpen: setContextModalOpen },
+    deck,
     sessions: { items: sessions, handleSessionClick },
     stop: { pending: stopMut.isPending, handle: handleStop },
   };

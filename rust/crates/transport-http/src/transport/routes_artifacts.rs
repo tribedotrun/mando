@@ -35,9 +35,8 @@ async fn ensure_task_exists(state: &AppState, task_id: i64) -> Result<(), ApiErr
 
 // ── POST /api/tasks/{id}/evidence ───────────────────────────────────
 
-/// Register evidence artifact -- metadata only. CLI copies files to disk
-/// using the returned artifact_id, then the media local_paths are deterministic.
-#[crate::instrument_api(method = "POST", path = "/api/tasks/{id}/evidence")]
+/// Register evidence artifact metadata after the CLI has staged every source file.
+/// The returned local paths let the CLI move that batch to its final names.
 pub(crate) async fn post_task_evidence(
     State(state): State<AppState>,
     Path(api_types::TaskIdParams { id: task_id }): Path<api_types::TaskIdParams>,
@@ -81,7 +80,6 @@ pub(crate) async fn post_task_evidence(
 // ── POST /api/tasks/{id}/summary ────────────────────────────────────
 
 /// Save a work summary artifact (diagram + "What changed").
-#[crate::instrument_api(method = "POST", path = "/api/tasks/{id}/summary")]
 pub(crate) async fn post_task_summary(
     State(state): State<AppState>,
     Path(api_types::TaskIdParams { id: task_id }): Path<api_types::TaskIdParams>,
@@ -104,7 +102,6 @@ pub(crate) async fn post_task_summary(
 
 /// Serve a local media file with correct Content-Type.
 /// Required because Electron CSP blocks file:// URLs.
-#[crate::instrument_api(method = "GET", path = "/api/artifacts/{id}/media/{index}")]
 pub(crate) async fn get_artifact_media(
     State(state): State<AppState>,
     Path((id, index)): Path<(String, String)>,
@@ -171,7 +168,6 @@ pub(crate) async fn get_artifact_media(
 /// Backfill `remote_url` on existing media entries after GCS upload.
 /// Only `remote_url` is writable — filename, ext, and local_path are
 /// set at creation time and must not be mutable (path-traversal guard).
-#[crate::instrument_api(method = "PUT", path = "/api/artifacts/{id}/media")]
 pub(crate) async fn put_artifact_media(
     State(state): State<AppState>,
     Path(api_types::ArtifactIdParams { id: artifact_id }): Path<api_types::ArtifactIdParams>,

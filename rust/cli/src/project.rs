@@ -3,7 +3,6 @@
 use anyhow::Result;
 use clap::{Args, Subcommand};
 
-use crate::gateway_paths as paths;
 use crate::http::DaemonClient;
 
 #[derive(Args)]
@@ -87,15 +86,12 @@ pub(crate) async fn handle(args: ProjectArgs) -> Result<()> {
 
 async fn handle_add(name: &str, path: &str, aliases: &[String]) -> Result<()> {
     let client = DaemonClient::discover()?;
-    let result: api_types::ProjectUpsertResponse = client
-        .post_json(
-            paths::PROJECTS,
-            &api_types::AddProjectRequest {
-                name: Some(name.to_string()),
-                path: path.to_string(),
-                aliases: aliases.to_vec(),
-            },
-        )
+    let result = client
+        .post_projects(&api_types::AddProjectRequest {
+            name: Some(name.to_string()),
+            path: path.to_string(),
+            aliases: aliases.to_vec(),
+        })
         .await?;
 
     let abs_path = result.path.as_str();
@@ -118,10 +114,11 @@ async fn handle_edit(
     check_command: Option<&str>,
 ) -> Result<()> {
     let client = DaemonClient::discover()?;
-    let encoded = urlencoding::encode(name);
     client
-        .patch_json::<api_types::BoolOkResponse, _>(
-            &paths::project(&encoded),
+        .patch_projects_by_name(
+            &api_types::ProjectNameParams {
+                name: name.to_string(),
+            },
             &api_types::EditProjectRequest {
                 rename: rename.map(str::to_string),
                 github_repo: github_repo.map(str::to_string),
@@ -141,7 +138,7 @@ async fn handle_edit(
 
 async fn handle_list() -> Result<()> {
     let client = DaemonClient::discover()?;
-    let result: api_types::ProjectsListResponse = client.get_json(paths::PROJECTS).await?;
+    let result = client.get_projects().await?;
 
     if result.projects.is_empty() {
         println!("No projects configured.");
@@ -168,9 +165,10 @@ async fn handle_list() -> Result<()> {
 
 async fn handle_remove(name: &str) -> Result<()> {
     let client = DaemonClient::discover()?;
-    let encoded = urlencoding::encode(name);
     client
-        .delete_json::<api_types::BoolOkResponse>(&paths::project(&encoded))
+        .delete_projects_by_name(&api_types::ProjectNameParams {
+            name: name.to_string(),
+        })
         .await?;
     println!("Removed project: {name}");
     Ok(())

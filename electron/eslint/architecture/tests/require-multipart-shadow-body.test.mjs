@@ -4,15 +4,15 @@ import rule from '../rules/require-multipart-shadow-body.mjs';
 ruleTester.run('architecture/require-multipart-shadow-body', rule, {
   valid: [
     {
-      code: `apiMultipartRouteR('postTasksAsk', { id: 1, question: 'hi' });`,
+      code: `apiMultipartRouteR('postTasksAdd', { title: 'Task' });`,
       filename: 'src/renderer/domains/captain/repo/api.ts',
     },
     {
-      code: `const form = new FormData(); apiMultipartRouteR('postTasksAsk', form, undefined, { id: 1, question: 'hi' });`,
+      code: `const form = new FormData(); apiMultipartRouteR('postTasksAdd', form, undefined, { title: 'Task' });`,
       filename: 'src/renderer/domains/captain/repo/api.ts',
     },
     {
-      code: `apiMultipartRouteR('postTasksAsk', new FormData(), undefined, { id: 1, question: 'hi' });`,
+      code: `apiMultipartRouteR('postTasksAdd', new FormData(), undefined, { title: 'Task' });`,
       filename: 'src/renderer/domains/captain/repo/api.ts',
     },
   ],
@@ -23,7 +23,7 @@ ruleTester.run('architecture/require-multipart-shadow-body', rule, {
       errors: [{ messageId: 'requireShadowBody' }],
     },
     {
-      code: `apiMultipartRouteR('postTasksAsk', new FormData(), { params: { id: 1 } });`,
+      code: `apiMultipartRouteR('postTasksAdd', new FormData(), { params: { id: 1 } });`,
       filename: 'src/renderer/domains/captain/repo/api.ts',
       errors: [{ messageId: 'requireShadowBody' }],
     },

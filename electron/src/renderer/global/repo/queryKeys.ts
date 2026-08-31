@@ -19,9 +19,11 @@ export const queryKeys = {
     list: () => ['tasks', 'list'] as const,
     timeline: (id: number) => ['tasks', 'timeline', id] as const,
     pr: (id: number) => ['tasks', 'pr', id] as const,
-    askHistory: (id: number) => ['tasks', 'ask-history', id] as const,
     feed: (id: number) => ['tasks', 'feed', id] as const,
     artifacts: (id: number) => ['tasks', 'artifacts', id] as const,
+    evidenceDeckAvailability: (id: number, version: string) =>
+      ['tasks', 'evidence-deck-availability', id, version] as const,
+    evidenceDeck: (id: number, version: string) => ['tasks', 'evidence-deck', id, version] as const,
   },
 
   // ── Scout ──

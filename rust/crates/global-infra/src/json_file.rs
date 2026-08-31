@@ -11,7 +11,6 @@ pub fn sanitize_path_id(id: &str) -> String {
 /// on any other failure (IO error or parse error).
 pub fn load_json_file<T: serde::de::DeserializeOwned + Default>(
     path: &std::path::Path,
-    _module: &str,
 ) -> Result<T, crate::json_error::SharedError> {
     use crate::json_error::SharedError;
     match std::fs::read_to_string(path) {

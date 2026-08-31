@@ -2,16 +2,14 @@ import React, { useMemo, useState } from 'react';
 import { ArrowDown } from 'lucide-react';
 import type { TranscriptEvent } from '#renderer/global/types';
 import {
+  buildTranscriptRenderRows,
   indexToolResults,
-  isCarrierUserEvent,
   resolveActiveBranch,
 } from '#renderer/domains/sessions/service/transcriptEvents';
 import { useFilteredTranscriptRows } from '#renderer/domains/sessions/runtime/useFilteredRows';
 import { useStickyScroll } from '#renderer/domains/sessions/runtime/useStickyScroll';
-import { AssistantMessage } from '#renderer/domains/sessions/ui/transcriptEvents/AssistantMessage';
-import { SessionFooter } from '#renderer/domains/sessions/ui/transcriptEvents/SessionFooter';
-import { SystemMessage } from '#renderer/domains/sessions/ui/transcriptEvents/SystemMessage';
-import { UserMessage } from '#renderer/domains/sessions/ui/transcriptEvents/UserMessage';
+import { ToolGroupBlock } from '#renderer/domains/sessions/ui/transcriptEvents/ToolGroupBlock';
+import { TranscriptEventRow } from '#renderer/domains/sessions/ui/transcriptEvents/TranscriptEventRow';
 import { TranscriptSearchBar } from '#renderer/domains/sessions/ui/transcriptEvents/TranscriptSearchBar';
 
 interface TranscriptMessageListProps {
@@ -25,68 +23,35 @@ export function TranscriptMessageList({
 }: TranscriptMessageListProps): React.ReactElement {
   const active = useMemo(() => resolveActiveBranch(events), [events]);
   const toolResults = useMemo(() => indexToolResults(active), [active]);
+  const renderRows = useMemo(() => buildTranscriptRenderRows(active), [active]);
   const [searchQuery, setSearchQuery] = useState('');
   const { scrollRef, isAtBottom, scrollToBottom } = useStickyScroll(active.length);
 
   let initSeen = 0;
-  const rows: React.ReactNode[] = active.map((event, index) => {
-    if (isCarrierUserEvent(event)) return null;
-    if (event.kind === 'system_init') {
-      initSeen++;
+  const rows: React.ReactNode[] = renderRows.map((row) => {
+    if (row.kind === 'tool_group') {
       return (
-        <SystemMessage
-          key={index}
-          event={{ kind: 'init', data: event.data, isBoundary: initSeen > 1 }}
+        <ToolGroupBlock
+          key={row.id}
+          id={row.group.id}
+          tools={row.group.tools}
+          results={toolResults}
         />
       );
     }
-    if (event.kind === 'system_compact_boundary') {
-      return <SystemMessage key={index} event={{ kind: 'compact', data: event.data }} />;
-    }
-    if (event.kind === 'system_status') {
-      return <SystemMessage key={index} event={{ kind: 'status', data: event.data }} />;
-    }
-    if (event.kind === 'system_api_retry') {
-      return <SystemMessage key={index} event={{ kind: 'retry', data: event.data }} />;
-    }
-    if (event.kind === 'system_local_command_output') {
-      return <SystemMessage key={index} event={{ kind: 'local', data: event.data }} />;
-    }
-    if (event.kind === 'system_hook') {
-      return <SystemMessage key={index} event={{ kind: 'hook', data: event.data }} />;
-    }
-    if (event.kind === 'system_rate_limit') {
-      return <SystemMessage key={index} event={{ kind: 'ratelimit', data: event.data }} />;
-    }
-    if (event.kind === 'system_thinking_tokens') {
-      return <SystemMessage key={index} event={{ kind: 'thinking_tokens', data: event.data }} />;
-    }
-    if (event.kind === 'unknown') {
-      return <SystemMessage key={index} event={{ kind: 'unknown', data: event.data }} />;
-    }
-    if (event.kind === 'user') {
-      return <UserMessage key={index} event={event.data} eventIndex={index} />;
-    }
-    if (event.kind === 'assistant') {
-      return (
-        <AssistantMessage
-          key={index}
-          event={event.data}
-          eventIndex={index}
-          toolResults={toolResults}
-        />
-      );
-    }
-    if (event.kind === 'tool_progress') {
-      return null;
-    }
-    if (event.kind === 'result') {
-      return <SessionFooter key={index} event={event.data} />;
-    }
-    return null;
+    if (row.event.kind === 'system_init') initSeen++;
+    return (
+      <TranscriptEventRow
+        key={row.id}
+        event={row.event}
+        eventIndex={row.eventIndex}
+        initBoundary={initSeen > 1}
+        toolResults={toolResults}
+      />
+    );
   });
 
-  const filtered = useFilteredTranscriptRows(rows, searchQuery);
+  const filtered = useFilteredTranscriptRows(rows, renderRows, searchQuery);
 
   return (
     <div className="relative flex h-full min-h-0 flex-col">

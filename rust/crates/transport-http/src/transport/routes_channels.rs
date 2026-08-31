@@ -7,7 +7,6 @@ use axum::http::StatusCode;
 use axum::Json;
 
 /// GET /api/channels — show configured channels and their status.
-#[crate::instrument_api(method = "GET", path = "/api/channels")]
 pub(crate) async fn get_channels(
     State(state): State<AppState>,
 ) -> Json<api_types::ChannelsResponse> {
@@ -39,7 +38,6 @@ pub(crate) async fn get_channels(
     })
 }
 
-#[crate::instrument_api(method = "POST", path = "/api/channels/telegram/owner")]
 pub(crate) async fn post_telegram_owner(
     State(state): State<AppState>,
     Json(body): Json<api_types::TelegramOwnerRequest>,
@@ -66,7 +64,6 @@ pub(crate) async fn post_telegram_owner(
 ///
 /// The daemon itself doesn't hold a Telegram connection (that's mando-tg),
 /// so we emit a bus event that TG subscribers can pick up.
-#[crate::instrument_api(method = "POST", path = "/api/notify")]
 pub(crate) async fn post_notify(
     State(state): State<AppState>,
     Json(body): Json<api_types::NotifyRequest>,
@@ -105,7 +102,6 @@ pub(crate) async fn post_notify(
 }
 
 /// POST /api/firecrawl/scrape — scrape a URL using Firecrawl API.
-#[crate::instrument_api(method = "POST", path = "/api/firecrawl/scrape")]
 pub(crate) async fn post_firecrawl_scrape(
     Json(body): Json<api_types::FirecrawlScrapeRequest>,
 ) -> Result<Json<api_types::FirecrawlScrapeResponse>, ApiError> {

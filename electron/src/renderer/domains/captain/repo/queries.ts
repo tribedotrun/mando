@@ -2,9 +2,9 @@ import { useQuery } from '@tanstack/react-query';
 import { queryKeys } from '#renderer/global/repo/queryKeys';
 import { daemonSyncMeta } from '#renderer/global/repo/syncPolicy';
 import { defineJsonKeyspace } from '#renderer/global/providers/persistence';
+import { evidenceDeckExists, readEvidenceDeck } from '#renderer/global/providers/native/shell';
 import {
   fetchTasks,
-  fetchAskHistory,
   fetchFeed,
   fetchArtifacts,
   fetchWorkers,
@@ -21,9 +21,9 @@ import {
 import log from '#renderer/global/service/logger';
 import { prSummaryResponseSchema } from '#shared/daemon-contract/schemas';
 import { toReactQuery } from '#result';
+import type { ResultOf } from '#shared/ipc-contract';
 import type {
   TaskListResponse,
-  AskHistoryResponse,
   FeedResponse,
   ArtifactsResponse,
   WorkersResponse,
@@ -55,15 +55,6 @@ export function useTaskListWithArchived(enabled: boolean) {
   });
 }
 
-export function useTaskAskHistory(id: number) {
-  return useQuery<AskHistoryResponse>({
-    queryKey: queryKeys.tasks.askHistory(id),
-    meta: daemonSyncMeta('sse-invalidated', 'task detail events invalidate ask history'),
-    queryFn: () => toReactQuery(fetchAskHistory(id)),
-    enabled: id > 0,
-  });
-}
-
 export function useTaskFeed(id: number) {
   return useQuery<FeedResponse>({
     queryKey: queryKeys.tasks.feed(id),
@@ -79,6 +70,51 @@ export function useTaskArtifacts(id: number) {
     meta: daemonSyncMeta('sse-invalidated', 'artifact events invalidate artifacts'),
     queryFn: () => toReactQuery(fetchArtifacts(id)),
     enabled: id > 0,
+  });
+}
+
+export function useEvidenceDeckAvailability(
+  id: number,
+  version: string,
+  worktree: string | null | undefined,
+) {
+  return useQuery<boolean>({
+    queryKey: queryKeys.tasks.evidenceDeckAvailability(id, version),
+    queryFn: async (): Promise<boolean> => {
+      if (!worktree) return false;
+      try {
+        return await evidenceDeckExists(worktree);
+      } catch (error: unknown) {
+        log.warn('[useEvidenceDeckAvailability] failed to check deck:', error);
+        return false;
+      }
+    },
+    enabled: Boolean(worktree),
+    staleTime: Infinity,
+  });
+}
+
+type EvidenceDeckSource = NonNullable<ResultOf<'shell:read-evidence-deck'>>;
+
+export function useEvidenceDeckSource(
+  id: number,
+  version: string,
+  worktree: string | null | undefined,
+  enabled: boolean,
+) {
+  return useQuery<EvidenceDeckSource | null>({
+    queryKey: queryKeys.tasks.evidenceDeck(id, version),
+    queryFn: async (): Promise<EvidenceDeckSource | null> => {
+      if (!worktree) return null;
+      try {
+        return await readEvidenceDeck(worktree);
+      } catch (error: unknown) {
+        log.warn('[useEvidenceDeckSource] failed to load deck:', error);
+        return null;
+      }
+    },
+    enabled: Boolean(worktree) && enabled,
+    staleTime: 0,
   });
 }
 

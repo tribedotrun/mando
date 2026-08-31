@@ -53,7 +53,22 @@ pub async fn terminate_session(
         }
     }
 
-    // 2. Kill provider-owned process via pid_registry. Codex sessions share one
+    let stream_provider = provider.unwrap_or_default();
+    let stream_path = crate::runtime::agent_runtime::stream_path(stream_provider, session_id);
+    let record_interruption = new_status == SessionStatus::Stopped
+        && crate::runtime::agent_runtime::should_record_interrupted_result(
+            stream_provider,
+            &stream_path,
+        );
+
+    // 2. Publish the canonical stop outcome before killing Claude. Its waiter
+    // can otherwise observe the process-kill error first and turn an explicit
+    // stop into a failed clarifier/review/merge session.
+    if record_interruption {
+        crate::runtime::agent_runtime::record_interrupted_result(stream_provider, &stream_path);
+    }
+
+    // 3. Kill provider-owned process via pid_registry. Codex sessions share one
     // daemon-scoped app-server, so per-session termination only interrupts the
     // active turn and must not signal that shared process group.
     if should_kill_provider_process(provider) {
@@ -78,7 +93,9 @@ pub async fn terminate_session(
         );
     }
 
-    // 3. Read cost/duration from stream file before updating DB.
+    // 4. Re-assert Interrupted after the process is gone so a provider error
+    // emitted during shutdown cannot become the newest rendered outcome, then
+    // read cost/duration from the stream file before updating DB.
     //
     // Two tiers of cost recovery:
     //   a. `get_stream_cost` reads the `type:result` envelope — authoritative
@@ -93,8 +110,9 @@ pub async fn terminate_session(
     //      stay `None` here — we don't reconstruct those without the result
     //      envelope, and a stale/missing duration is less harmful than a
     //      silently-zero cost.
-    let stream_provider = provider.unwrap_or_default();
-    let stream_path = crate::runtime::agent_runtime::stream_path(stream_provider, session_id);
+    if record_interruption {
+        crate::runtime::agent_runtime::record_interrupted_result(stream_provider, &stream_path);
+    }
     let cost_info = global_claude::get_stream_cost(&stream_path);
     let (mut cost_usd, duration_ms, num_turns, denials, model_usage) = match &cost_info {
         Some(info) => (
@@ -121,7 +139,7 @@ pub async fn terminate_session(
         }
     }
 
-    // 4. Update cc_sessions status + cost. DB failure must not block local
+    // 5. Update cc_sessions status + cost. DB failure must not block local
     //    cleanup -- a stale DB row is recoverable via reconciliation, but a
     //    leaked PID or health entry is not.
     let db_ok = match sessions_db::update_session_status_with_cost(
@@ -146,7 +164,7 @@ pub async fn terminate_session(
         }
     };
 
-    // 5. Update stream meta.
+    // 6. Update stream meta.
     global_claude::update_stream_meta_status_at(
         &crate::runtime::agent_runtime::stream_meta_path(stream_provider, session_id),
         session_id,
@@ -154,7 +172,7 @@ pub async fn terminate_session(
         cost_usd,
     );
 
-    // 6. Unregister PID. Always, even if DB update failed.
+    // 7. Unregister PID. Always, even if DB update failed.
     if let Err(e) = super::pid_registry::unregister(session_id) {
         tracing::warn!(
             module = "session_terminate",
@@ -164,7 +182,7 @@ pub async fn terminate_session(
         );
     }
 
-    // 7. Remove health entry by worker_name if health_state provided.
+    // 8. Remove health entry by worker_name if health_state provided.
     if let Some(hs) = health_state {
         if let Ok(Some(row)) = sessions_db::session_by_id(pool, session_id).await {
             if let Some(ref wn) = row.worker_name {

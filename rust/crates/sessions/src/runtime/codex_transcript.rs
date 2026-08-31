@@ -1,20 +1,22 @@
 //! Typed-event projection of Mando-owned Codex app-server JSONL.
 //!
-//! Raw stdout JSONL is captured under `state/session-jsonl/codex/`; unknown
-//! lines become `Unknown` events so the renderer never silently drops data.
+//! Raw stdout JSONL is captured under `state/session-jsonl/codex/`. App-server
+//! lifecycle plumbing is recognized and suppressed; genuinely unknown lines
+//! remain `Unknown` events for inspection through the renderer or raw JSONL.
 
 use std::io::Read;
 use std::path::Path;
 
 use api_types::{
     AssistantContentBlock, AssistantEvent, AssistantTextBlock, AssistantThinkingBlock, EventIndex,
-    EventMeta, ModelUsageBreakdown, ResultEvent, ResultOutcome, ResultSummary,
-    SystemLocalCommandOutputEvent, SystemStatusEvent, TranscriptEvent, UnknownEvent,
+    EventMeta, ModelUsageBreakdown, ResultEvent, ResultOutcome, ResultSummary, SystemStatusEvent,
+    SystemTokenUsageEvent, TranscriptEvent, UnknownEvent,
 };
 use serde_json::Value;
 
 use super::codex_item_events::{
-    item_notification_events, turn_item_events, usage_info, CodexParseState, CodexValue,
+    is_known_item_notification, item_notification_events, turn_item_events, usage_info,
+    CodexParseState, CodexValue,
 };
 
 pub fn parse_events_with_size(stream_path: &Path) -> (Vec<TranscriptEvent>, u64, u32) {
@@ -120,32 +122,25 @@ fn parse_line_events(
     let meta = build_meta(value, line_number);
     state.record_model_from_value(CodexValue(value));
     state.record_usage_from_value(CodexValue(value));
-    if value.get("id").and_then(Value::as_u64).is_some() {
-        let mut events = turn_item_events(CodexValue(value), &meta, state);
-        events.push(unknown(
-            meta,
-            Some("response".into()),
-            response_status(value),
-            raw_line,
-        ));
-        return events;
+    let method = value.get("method").and_then(Value::as_str);
+    if method.is_none() && value.get("id").is_some() {
+        return turn_item_events(CodexValue(value), &meta, state);
     }
 
-    let method = value.get("method").and_then(Value::as_str);
     match method {
         Some("item/agentMessage/delta") => vec![assistant_text(value, meta, raw_line, state)],
         Some("item/reasoning/summaryTextDelta" | "item/reasoning/textDelta") => {
-            vec![assistant_thinking(value, meta, raw_line)]
+            vec![assistant_thinking(value, meta, raw_line, state)]
         }
         Some(
             "item/commandExecution/outputDelta"
             | "item/fileChange/outputDelta"
             | "item/commandExecution/output/delta"
             | "item/fileChange/output/delta",
-        ) => vec![local_output(value, meta, raw_line)],
+        ) => Vec::new(),
         Some("item/started" | "item/completed") => {
             let mut events = item_notification_events(CodexValue(value), &meta, state);
-            if events.is_empty() {
+            if events.is_empty() && !is_known_item_notification(CodexValue(value)) {
                 events.push(unknown(
                     meta,
                     method.map(str::to_string),
@@ -161,19 +156,20 @@ fn parse_line_events(
             events
         }
         Some("error") => vec![error_status(value, meta)],
+        Some("warning") => vec![warning_status(value, meta)],
+        Some("mcpServer/startupStatus/updated") => mcp_startup_status(value, meta),
+        Some("thread/status/changed") => terminal_thread_status(value, meta),
+        Some("thread/tokenUsage/updated") => token_usage_event(meta, state),
         Some(
-            "turn/started" | "thread/started" | "thread/status/changed" | "thread/settings/updated",
-        ) => {
-            let mut events = turn_item_events(CodexValue(value), &meta, state);
-            events.push(status_event(value, meta));
-            events
-        }
-        Some("thread/tokenUsage/updated") => vec![unknown(
-            meta,
-            method.map(str::to_string),
-            raw_subtype(value),
-            raw_line,
-        )],
+            "turn/started"
+            | "thread/started"
+            | "thread/settings/updated"
+            | "turn/diff/updated"
+            | "item/reasoning/summaryPartAdded"
+            | "item/commandExecution/terminalInteraction"
+            | "hook/started"
+            | "hook/completed",
+        ) => Vec::new(),
         _ => vec![unknown(
             meta,
             method.map(str::to_string),
@@ -216,7 +212,12 @@ fn assistant_text(
     })
 }
 
-fn assistant_thinking(value: &Value, meta: EventMeta, raw_line: &str) -> TranscriptEvent {
+fn assistant_thinking(
+    value: &Value,
+    meta: EventMeta,
+    raw_line: &str,
+    state: &mut CodexParseState,
+) -> TranscriptEvent {
     let Some(text) = string_at(value, &["/params/delta"]) else {
         tracing::warn!(
             module = "sessions",
@@ -233,6 +234,9 @@ fn assistant_thinking(value: &Value, meta: EventMeta, raw_line: &str) -> Transcr
             raw_line,
         );
     };
+    state.record_reasoning_delta(
+        string_at(value, &["/params/itemId", "/params/item/id"]).as_deref(),
+    );
     TranscriptEvent::Assistant(AssistantEvent {
         model: string_at(value, &["/params/model", "/params/item/model"]),
         blocks: vec![AssistantContentBlock::Thinking(AssistantThinkingBlock {
@@ -244,59 +248,63 @@ fn assistant_thinking(value: &Value, meta: EventMeta, raw_line: &str) -> Transcr
     })
 }
 
-fn local_output(value: &Value, meta: EventMeta, raw_line: &str) -> TranscriptEvent {
-    let Some(output) = string_at(value, &["/params/delta"]) else {
-        tracing::warn!(
-            module = "sessions",
-            line_number = meta.index.line_number,
-            "Codex app-server output delta missing params.delta",
-        );
-        return unknown(
-            meta,
-            value
-                .get("method")
-                .and_then(Value::as_str)
-                .map(str::to_string),
-            raw_subtype(value),
-            raw_line,
-        );
-    };
-    TranscriptEvent::SystemLocalCommandOutput(SystemLocalCommandOutputEvent {
-        command: string_at(value, &["/params/item/command", "/params/item/path"]),
-        output,
+fn token_usage_event(meta: EventMeta, state: &CodexParseState) -> Vec<TranscriptEvent> {
+    state
+        .last_usage()
+        .map(|usage| {
+            vec![TranscriptEvent::SystemTokenUsage(SystemTokenUsageEvent {
+                meta,
+                usage,
+                context_window: state.context_window(),
+            })]
+        })
+        .unwrap_or_default()
+}
+
+fn warning_status(value: &Value, meta: EventMeta) -> TranscriptEvent {
+    TranscriptEvent::SystemStatus(SystemStatusEvent {
         meta,
+        status: Some("warning".into()),
+        message: string_at(value, &["/params/message", "/params/warning"]),
     })
 }
 
-fn status_event(value: &Value, meta: EventMeta) -> TranscriptEvent {
-    let status = string_at(
+fn mcp_startup_status(value: &Value, meta: EventMeta) -> Vec<TranscriptEvent> {
+    if !matches!(
+        value.pointer("/params/status").and_then(Value::as_str),
+        Some("failed")
+    ) {
+        return Vec::new();
+    }
+    let name = string_at(value, &["/params/name"]).unwrap_or_else(|| "MCP server".into());
+    let reason = string_at(
         value,
         &[
-            "/params/status",
-            "/params/thread/status",
-            "/params/turn/status",
-        ],
-    )
-    .or_else(|| {
-        value
-            .get("method")
-            .and_then(Value::as_str)
-            .map(str::to_string)
-    });
-    let message = string_at(
-        value,
-        &[
-            "/params/message",
-            "/params/thread/title",
-            "/params/title",
-            "/params/thread/name",
+            "/params/failureReason",
+            "/params/error/message",
+            "/params/error",
         ],
     );
-    TranscriptEvent::SystemStatus(SystemStatusEvent {
+    vec![TranscriptEvent::SystemStatus(SystemStatusEvent {
+        meta,
+        status: Some("warning".into()),
+        message: Some(match reason {
+            Some(reason) => format!("{name} failed to start: {reason}"),
+            None => format!("{name} failed to start"),
+        }),
+    })]
+}
+
+fn terminal_thread_status(value: &Value, meta: EventMeta) -> Vec<TranscriptEvent> {
+    let status = string_at(value, &["/params/status", "/params/thread/status"]);
+    if !matches!(status.as_deref(), Some("failed" | "error" | "interrupted")) {
+        return Vec::new();
+    }
+    vec![TranscriptEvent::SystemStatus(SystemStatusEvent {
         meta,
         status,
-        message,
-    })
+        message: string_at(value, &["/params/message", "/params/thread/title"]),
+    })]
 }
 
 fn error_status(value: &Value, meta: EventMeta) -> TranscriptEvent {
@@ -313,7 +321,12 @@ fn result_event(value: &Value, meta: EventMeta, state: &CodexParseState) -> Tran
     let turn = params.get("turn").unwrap_or(params);
     let status = turn.get("status").and_then(Value::as_str);
     let error = turn.get("error").filter(|value| !value.is_null());
-    let is_error = error.is_some() || !matches!(status, Some("completed" | "interrupted"));
+    let outcome = match status {
+        Some("completed") if error.is_none() => ResultOutcome::Success,
+        Some("interrupted") if error.is_none() => ResultOutcome::Interrupted,
+        _ => ResultOutcome::ErrorDuringExecution,
+    };
+    let is_error = outcome.is_error();
     let usage = usage_info(
         params
             .get("tokenUsage")
@@ -340,11 +353,7 @@ fn result_event(value: &Value, meta: EventMeta, state: &CodexParseState) -> Tran
         .collect();
     TranscriptEvent::Result(ResultEvent {
         meta,
-        outcome: if is_error {
-            ResultOutcome::ErrorDuringExecution
-        } else {
-            ResultOutcome::Success
-        },
+        outcome,
         summary: ResultSummary {
             duration_ms: u64_at(turn, &["/durationMs", "/duration_ms"]),
             duration_api_ms: None,
@@ -434,15 +443,6 @@ fn raw_subtype(value: &Value) -> Option<String> {
     )
 }
 
-fn response_status(value: &Value) -> Option<String> {
-    if value.get("error").is_some() {
-        Some("error".into())
-    } else {
-        string_at(value, &["/result/thread/status", "/result/turn/status"])
-            .or_else(|| Some("ok".into()))
-    }
-}
-
 fn string_at(value: &Value, pointers: &[&str]) -> Option<String> {
     pointers
         .iter()
@@ -502,17 +502,78 @@ mod tests {
     }
 
     #[test]
-    fn json_rpc_response_becomes_unknown_raw_event() {
+    fn json_rpc_response_is_protocol_metadata_not_a_transcript_row() {
         let path =
             temp_file(r#"{"id":101,"result":{"thread":{"id":"thread-1","status":"ready"}}}"#);
 
         let events = parse_events_with_size(&path).0;
 
-        let TranscriptEvent::Unknown(event) = &events[0] else {
-            panic!("expected unknown response event");
+        assert!(events.is_empty());
+        std::fs::remove_file(path).ok();
+    }
+
+    #[test]
+    fn protocol_progress_is_suppressed_but_token_usage_remains_typed() {
+        let path = temp_file(
+            r#"{"method":"turn/started","params":{"threadId":"thread-1","turn":{"id":"turn-1"}}}
+{"method":"turn/diff/updated","params":{"threadId":"thread-1","turnId":"turn-1","diff":"x"}}
+{"method":"item/reasoning/summaryPartAdded","params":{"threadId":"thread-1","itemId":"r1","summaryIndex":0}}
+{"method":"mcpServer/startupStatus/updated","params":{"threadId":"thread-1","name":"argent","status":"ready"}}
+{"method":"thread/tokenUsage/updated","params":{"threadId":"thread-1","tokenUsage":{"total":{"inputTokens":7,"outputTokens":3}}}}"#,
+        );
+
+        let events = parse_events_with_size(&path).0;
+
+        assert_eq!(events.len(), 1);
+        assert!(matches!(
+            &events[0],
+            TranscriptEvent::SystemTokenUsage(event) if event.usage.input_tokens == 7
+        ));
+        std::fs::remove_file(path).ok();
+    }
+
+    #[test]
+    fn streaming_reasoning_and_item_lifecycle_emit_one_clean_thought() {
+        let path = temp_file(
+            r#"{"method":"item/started","params":{"threadId":"thread-1","item":{"id":"r1","type":"reasoning","summary":[],"content":[]}}}
+{"method":"item/reasoning/summaryPartAdded","params":{"threadId":"thread-1","itemId":"r1","summaryIndex":0}}
+{"method":"item/reasoning/summaryTextDelta","params":{"threadId":"thread-1","itemId":"r1","delta":"Inspecting files"}}
+{"method":"item/completed","params":{"threadId":"thread-1","item":{"id":"r1","type":"reasoning","summary":["Inspecting files"],"content":[]}}}"#,
+        );
+
+        let events = parse_events_with_size(&path).0;
+
+        assert_eq!(events.len(), 1);
+        assert!(matches!(
+            &events[0],
+            TranscriptEvent::Assistant(event)
+                if matches!(&event.blocks[0], AssistantContentBlock::Thinking(block) if block.text == "Inspecting files")
+        ));
+        std::fs::remove_file(path).ok();
+    }
+
+    #[test]
+    fn file_change_is_typed_relative_and_not_duplicated_on_completion() {
+        let path = temp_file(
+            r#"{"id":101,"result":{"cwd":"/tmp/project","model":"gpt-5.6-luna","thread":{"id":"thread-1"}}}
+{"method":"item/started","params":{"threadId":"thread-1","item":{"id":"edit-1","type":"fileChange","changes":[{"path":"/tmp/project/src/App.tsx","kind":{"type":"update","move_path":null},"diff":"@@ -1 +1 @@\n-old\n+new"}],"status":"inProgress"}}}
+{"method":"item/completed","params":{"threadId":"thread-1","item":{"id":"edit-1","type":"fileChange","changes":[{"path":"/tmp/project/src/App.tsx","kind":{"type":"update","move_path":null},"diff":"@@ -1 +1 @@\n-old\n+new"}],"status":"completed"}}}"#,
+        );
+
+        let events = parse_events_with_size(&path).0;
+
+        assert_eq!(events.len(), 1);
+        let TranscriptEvent::Assistant(event) = &events[0] else {
+            panic!("expected typed file change");
         };
-        assert_eq!(event.raw_type.as_deref(), Some("response"));
-        assert_eq!(event.meta.session_id.as_deref(), Some("thread-1"));
+        let AssistantContentBlock::ToolUse(tool) = &event.blocks[0] else {
+            panic!("expected tool use");
+        };
+        let api_types::ToolInput::FileChange(input) = &tool.input else {
+            panic!("expected file-change input");
+        };
+        assert!(matches!(tool.name, api_types::ToolName::FileChange));
+        assert_eq!(input.changes[0].path, "src/App.tsx");
         std::fs::remove_file(path).ok();
     }
 
@@ -559,10 +620,60 @@ mod tests {
                 .usage
                 .as_ref()
                 .map(|usage| usage.input_tokens),
-            Some(7)
+            Some(4)
+        );
+        assert_eq!(
+            result
+                .summary
+                .usage
+                .as_ref()
+                .map(|usage| usage.cache_read_tokens),
+            Some(2)
         );
         assert!(result.summary.total_cost_usd.is_some());
         assert_eq!(result.summary.model_usage[0].context_window, Some(1000));
+        std::fs::remove_file(path).ok();
+    }
+
+    #[test]
+    fn interrupted_turn_is_not_rendered_as_success_or_error() {
+        let path = temp_file(
+            r#"{"method":"turn/completed","params":{"threadId":"thread-1","turn":{"id":"turn-1","status":"interrupted"}}}"#,
+        );
+
+        let events = parse_events_with_size(&path).0;
+        let result = events.iter().find_map(|event| match event {
+            TranscriptEvent::Result(event) => Some(event),
+            _ => None,
+        });
+
+        assert_eq!(
+            result.map(|event| event.outcome),
+            Some(ResultOutcome::Interrupted)
+        );
+        assert_eq!(result.map(|event| event.summary.is_error), Some(false));
+        std::fs::remove_file(path).ok();
+    }
+
+    #[test]
+    fn image_view_is_a_typed_single_activity_row() {
+        let path = temp_file(
+            r#"{"method":"item/started","params":{"threadId":"thread-1","item":{"id":"image-1","type":"imageView","path":"/tmp/deck.png"}}}
+{"method":"item/completed","params":{"threadId":"thread-1","item":{"id":"image-1","type":"imageView","path":"/tmp/deck.png"}}}"#,
+        );
+
+        let events = parse_events_with_size(&path).0;
+
+        assert_eq!(events.len(), 1);
+        assert!(matches!(
+            &events[0],
+            TranscriptEvent::Assistant(event)
+                if matches!(
+                    &event.blocks[0],
+                    AssistantContentBlock::ToolUse(tool)
+                        if matches!(tool.name, api_types::ToolName::ImageView)
+                )
+        ));
         std::fs::remove_file(path).ok();
     }
 

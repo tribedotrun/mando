@@ -1,7 +1,5 @@
 //! GET /api/tasks/{id}/* detail route handlers.
 
-use std::collections::HashMap;
-
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::Json;
@@ -17,7 +15,6 @@ fn feed_timestamp(item: &api_types::FeedItem) -> &str {
     match item {
         api_types::FeedItem::Timeline { timestamp, .. } => timestamp,
         api_types::FeedItem::Artifact { timestamp, .. } => timestamp,
-        api_types::FeedItem::Message { timestamp, .. } => timestamp,
     }
 }
 
@@ -35,7 +32,6 @@ fn wire<T: DeserializeOwned>(
 }
 
 /// GET /api/tasks/{id}/artifacts
-#[crate::instrument_api(method = "GET", path = "/api/tasks/{id}/artifacts")]
 pub(crate) async fn get_task_artifacts(
     State(state): State<AppState>,
     Path(api_types::TaskIdParams { id: task_id }): Path<api_types::TaskIdParams>,
@@ -52,9 +48,8 @@ pub(crate) async fn get_task_artifacts(
 
 /// GET /api/tasks/{id}/feed
 ///
-/// Unified feed: merges timeline events, artifacts, and ask history into
-/// a single chronologically-ordered stream.
-#[crate::instrument_api(method = "GET", path = "/api/tasks/{id}/feed")]
+/// Unified feed: merges timeline events and artifacts into a single
+/// chronologically-ordered stream.
 pub(crate) async fn get_task_feed(
     State(state): State<AppState>,
     Path(api_types::TaskIdParams { id: task_id }): Path<api_types::TaskIdParams>,
@@ -72,12 +67,11 @@ pub(crate) async fn get_task_feed(
         ));
     }
 
-    // Load all three data sources in parallel.
+    // Load both data sources in parallel.
     let task_id_str = task_id.to_string();
-    let (timeline_result, artifacts_result, history_result) = tokio::join!(
+    let (timeline_result, artifacts_result) = tokio::join!(
         state.captain.task_timeline(&task_id_str),
         state.captain.task_artifacts(task_id),
-        state.captain.task_ask_history(task_id),
     );
 
     let timeline_events: Vec<api_types::TimelineEvent> = wire(
@@ -88,27 +82,8 @@ pub(crate) async fn get_task_feed(
         artifacts_result.map_err(|e| internal_error(e, "failed to load task artifacts"))?,
         "failed to serialize task artifacts",
     )?;
-    let history: Vec<api_types::AskHistoryEntry> = wire(
-        history_result.map_err(|e| internal_error(e, "failed to load ask history"))?,
-        "failed to serialize ask history",
-    )?;
-
     // Build unified feed items with a type discriminator.
     let mut feed: Vec<api_types::FeedItem> = Vec::new();
-
-    // Build lookup for labeling human messages as reopen/rework via ask_id.
-    // Scope to `human_ask` events only and skip the default "ask" intent
-    // (normal Q&A); only reopen/rework intents should surface as feed badges.
-    let mut intent_by_ask: HashMap<String, String> = HashMap::new();
-    for event in &timeline_events {
-        let api_types::TimelineEventPayload::HumanAsk { intent, ask_id, .. } = &event.data else {
-            continue;
-        };
-        if intent.is_empty() || intent == "ask" {
-            continue;
-        }
-        intent_by_ask.insert(ask_id.clone(), intent.clone());
-    }
 
     // Timeline events.
     for event in &timeline_events {
@@ -126,21 +101,6 @@ pub(crate) async fn get_task_feed(
         });
     }
 
-    // Ask history / advisor messages. Inject intent on human entries whose
-    // ask_id matches a reopen/rework HumanAsk timeline event.
-    for entry in history {
-        let mut entry = entry;
-        if entry.role == "human" {
-            if let Some(intent) = intent_by_ask.get(&entry.ask_id).cloned() {
-                entry.intent = Some(intent);
-            }
-        }
-        feed.push(api_types::FeedItem::Message {
-            timestamp: entry.timestamp.clone(),
-            data: entry,
-        });
-    }
-
     // Sort by timestamp.
     feed.sort_by(|a, b| feed_timestamp(a).cmp(feed_timestamp(b)));
 
@@ -151,25 +111,7 @@ pub(crate) async fn get_task_feed(
     }))
 }
 
-/// GET /api/tasks/{id}/history
-#[crate::instrument_api(method = "GET", path = "/api/tasks/{id}/history")]
-pub(crate) async fn get_task_history(
-    State(state): State<AppState>,
-    Path(api_types::TaskIdParams { id: task_id }): Path<api_types::TaskIdParams>,
-) -> Result<Json<api_types::AskHistoryResponse>, ApiError> {
-    let entries = state
-        .captain
-        .task_ask_history(task_id)
-        .await
-        .map_err(|e| internal_error(e, "failed to load ask history"))?;
-
-    Ok(Json(api_types::AskHistoryResponse {
-        history: wire(entries, "failed to serialize ask history")?,
-    }))
-}
-
 /// GET /api/tasks/{id}/timeline
-#[crate::instrument_api(method = "GET", path = "/api/tasks/{id}/timeline")]
 pub(crate) async fn get_task_timeline(
     State(state): State<AppState>,
     Path(api_types::TaskIdParams { id: task_id }): Path<api_types::TaskIdParams>,
@@ -187,7 +129,6 @@ pub(crate) async fn get_task_timeline(
 }
 
 /// GET /api/tasks/{id}/sessions?caller=workers
-#[crate::instrument_api(method = "GET", path = "/api/tasks/{id}/sessions")]
 pub(crate) async fn get_task_sessions(
     State(state): State<AppState>,
     Path(api_types::TaskIdParams { id: id_num }): Path<api_types::TaskIdParams>,
@@ -244,7 +185,6 @@ pub(crate) async fn get_task_sessions(
 }
 
 /// GET /api/tasks/{id}/pr-summary
-#[crate::instrument_api(method = "GET", path = "/api/tasks/{id}/pr-summary")]
 pub(crate) async fn get_task_pr_summary(
     State(state): State<AppState>,
     Path(api_types::TaskIdParams { id: id_num }): Path<api_types::TaskIdParams>,

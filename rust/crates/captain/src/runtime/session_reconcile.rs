@@ -87,8 +87,17 @@ pub(crate) async fn reconcile_running_sessions(
                 });
                 continue;
             }
+            super::agent_runtime::AgentLivenessStatus::Interrupted => {
+                jobs.push(TermJob {
+                    session_id: sid.clone(),
+                    provider: row.provider,
+                    status: SessionStatus::Stopped,
+                    reason: "terminal_interrupted_result",
+                });
+                continue;
+            }
             super::agent_runtime::AgentLivenessStatus::Failed => {
-                if row.provider == global_types::TaskProvider::Claude
+                if super::agent_runtime::Adapter::new(row.provider).is_claude()
                     && super::credential_rate_limit::check_and_activate_from_stream(pool, sid).await
                 {
                     tracing::info!(
@@ -110,7 +119,7 @@ pub(crate) async fn reconcile_running_sessions(
                 // process. Codex uses a daemon-scoped shared app-server, so a
                 // live Codex turn must finish through turn/completed or timeout
                 // handling rather than process-level cleanup.
-                if row.provider == global_types::TaskProvider::Claude
+                if super::agent_runtime::Adapter::new(row.provider).is_claude()
                     && global_claude::has_rate_limit_rejection(&stream_path).is_some()
                     && super::credential_rate_limit::check_and_activate_from_stream(pool, sid).await
                 {
@@ -140,8 +149,8 @@ pub(crate) async fn reconcile_running_sessions(
             super::agent_runtime::AgentLivenessStatus::Inactive => {}
         }
 
-        match row.provider {
-            global_types::TaskProvider::Codex | global_types::TaskProvider::OpenCode => {
+        match super::agent_runtime::Adapter::new(row.provider).inactive_session_policy() {
+            super::agent_runtime::InactiveSessionPolicy::Stream => {
                 match stream_freshness(&stream_path) {
                     StreamFreshness::Missing => {
                         tracing::info!(
@@ -194,7 +203,7 @@ pub(crate) async fn reconcile_running_sessions(
                     }
                 }
             }
-            global_types::TaskProvider::Claude => {
+            super::agent_runtime::InactiveSessionPolicy::Process => {
                 if pid.as_u32() > 0 {
                     jobs.push(TermJob {
                         session_id: sid.clone(),
@@ -356,6 +365,32 @@ mod tests {
         let row = load_session(&pool, sid).await;
         assert_eq!(row.status, "stopped");
         assert_eq!(row.cost_usd, Some(0.01));
+        assert!(alerts.is_empty());
+    }
+
+    #[tokio::test]
+    async fn interrupted_terminal_result_stays_stopped_during_reconciliation() {
+        let _lock = global_infra::PROCESS_ENV_LOCK.lock().await;
+        let (_dir, _guard) = isolate_data_dir();
+        let pool = test_pool().await;
+        let sid = "opencode-interrupted";
+        insert_running(&pool, global_types::TaskProvider::OpenCode, sid).await;
+        write_stream(
+            global_types::TaskProvider::OpenCode,
+            sid,
+            concat!(
+                r#"{"type":"system","subtype":"init"}"#,
+                "\n",
+                r#"{"type":"result","subtype":"interrupted","is_error":false}"#,
+                "\n"
+            ),
+        );
+        let mut alerts = Vec::new();
+
+        reconcile_running_sessions(&pool, std::time::Duration::from_secs(60), &mut alerts).await;
+
+        let row = load_session(&pool, sid).await;
+        assert_eq!(row.status, "stopped");
         assert!(alerts.is_empty());
     }
 

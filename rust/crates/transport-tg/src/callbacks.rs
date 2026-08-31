@@ -31,7 +31,6 @@ pub async fn handle_callback(bot: &TelegramBot, callback: &Value) -> Result<()> 
     let prefix = parts.first().copied().unwrap_or("");
 
     match prefix {
-        "todo_confirm" => handle_todo_confirm(bot, &parts, cb_id, &chat_id, mid).await,
         "todo_project" => handle_todo_project(bot, &parts, cb_id, &chat_id, mid).await,
         "act" => callbacks_picker::handle_action_callback(bot, &parts, cb_id, &chat_id, mid).await,
         "merge" => handle_action(bot, "Merge", &parts, cb_id, &chat_id).await,
@@ -51,65 +50,6 @@ pub async fn handle_callback(bot: &TelegramBot, callback: &Value) -> Result<()> 
     }
 }
 
-// ── Todo confirm ─────────────────────────────────────────────────────
-
-async fn handle_todo_confirm(
-    bot: &TelegramBot,
-    parts: &[&str],
-    cb_id: &str,
-    cid: &str,
-    mid: i64,
-) -> Result<()> {
-    let action = parts.get(1).copied().unwrap_or("");
-    let aid = parts.get(2).copied().unwrap_or("");
-    match action {
-        "confirm" => {
-            // Confirm is only shown when all items already have a project
-            // (prefix match or single project). Multi-project uses todo_project directly.
-            if let Some(state) = bot.take_todo_confirm(aid).await {
-                bot.api()
-                    .answer_callback_query(cb_id, Some("Writing\u{2026}"))
-                    .await?;
-                if let Err(e) = bot
-                    .edit_message(cid, mid, "\u{23f3} Writing to task list\u{2026}")
-                    .await
-                {
-                    tracing::warn!(module = "telegram", error = %e, "message send failed");
-                }
-                crate::callback_actions::add_todo_items(bot, cid, &state.items, Some(mid)).await?;
-            } else {
-                bot.api()
-                    .answer_callback_query(cb_id, Some("Expired"))
-                    .await?;
-            }
-        }
-        "edit" => {
-            bot.api()
-                .answer_callback_query(cb_id, Some("Send your edits"))
-                .await?;
-            if let Err(e) = bot
-                .edit_message(cid, mid, "\u{270f}\u{fe0f} Send your edit instructions:")
-                .await
-            {
-                tracing::warn!(module = "telegram", error = %e, "message send failed");
-            }
-        }
-        "cancel" => {
-            bot.take_todo_confirm(aid).await;
-            bot.api()
-                .answer_callback_query(cb_id, Some("Cancelled"))
-                .await?;
-            if let Err(e) = bot.edit_message(cid, mid, "\u{23ed} Cancelled").await {
-                tracing::warn!(module = "telegram", error = %e, "message send failed");
-            }
-        }
-        _ => {
-            bot.api().answer_callback_query(cb_id, None).await?;
-        }
-    }
-    Ok(())
-}
-
 // ── Todo project picker ──────────────────────────────────────────────
 
 async fn handle_todo_project(
@@ -122,7 +62,7 @@ async fn handle_todo_project(
     let aid = parts.get(1).copied().unwrap_or("");
     let sel = parts.get(2).copied().unwrap_or("");
     if sel == "cancel" {
-        bot.take_todo_confirm(aid).await;
+        bot.take_todo_project(aid).await;
         bot.api()
             .answer_callback_query(cb_id, Some("Cancelled"))
             .await?;
@@ -131,7 +71,7 @@ async fn handle_todo_project(
         }
         return Ok(());
     }
-    if let Some(state) = bot.take_todo_confirm(aid).await {
+    if let Some(state) = bot.take_todo_project(aid).await {
         let idx: usize = sel.parse().unwrap_or(usize::MAX);
         let name = state.picker_slugs.get(idx).cloned().unwrap_or_default();
         if name.is_empty() {
@@ -155,19 +95,12 @@ async fn handle_todo_project(
             tracing::warn!(module = "telegram", error = %e, "message send failed");
         }
 
-        let Some(first) = state.items.first() else {
-            tracing::warn!(
-                module = "telegram",
-                "todo_project callback: empty items state"
-            );
-            return Ok(());
-        };
-        let items = vec![crate::bot::TodoItem {
-            title: first.title.clone(),
+        let item = crate::bot::TodoItem {
+            title: state.item.title,
             project: Some(name),
-            photo_file_id: first.photo_file_id.clone(),
-        }];
-        crate::callback_actions::add_todo_items(bot, cid, &items, Some(mid)).await?;
+            photo_file_id: state.item.photo_file_id,
+        };
+        crate::callback_actions::add_todo_item(bot, cid, &item, Some(mid)).await?;
     } else {
         bot.api()
             .answer_callback_query(cb_id, Some("Expired"))
@@ -274,7 +207,6 @@ mod tests {
     #[test]
     fn callback_prefix_dispatch() {
         let prefixes = [
-            "todo_confirm",
             "todo_project",
             "act",
             "merge",
@@ -283,6 +215,6 @@ mod tests {
             "dtl",
             "dg",
         ];
-        assert_eq!(prefixes.len(), 8);
+        assert_eq!(prefixes.len(), 7);
     }
 }

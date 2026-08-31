@@ -43,7 +43,6 @@ where
 }
 
 /// POST /api/tasks/accept
-#[crate::instrument_api(method = "POST", path = "/api/tasks/accept")]
 pub(crate) async fn post_task_accept(
     State(state): State<AppState>,
     Json(body): Json<api_types::TaskIdRequest>,
@@ -79,7 +78,6 @@ async fn load_task_pr_close_info(state: &AppState, id: i64) -> Option<(String, S
 }
 
 /// POST /api/tasks/cancel
-#[crate::instrument_api(method = "POST", path = "/api/tasks/cancel")]
 pub(crate) async fn post_task_cancel(
     State(state): State<AppState>,
     Json(body): Json<api_types::TaskIdRequest>,
@@ -106,7 +104,6 @@ pub(crate) async fn post_task_cancel(
 }
 
 /// POST /api/tasks/reopen (JSON or multipart with optional images)
-#[crate::instrument_api(method = "POST", path = "/api/tasks/reopen")]
 pub(crate) async fn post_task_reopen(
     State(state): State<AppState>,
     request: axum::extract::Request,
@@ -143,8 +140,6 @@ async fn post_task_reopen_inner(
     }
 
     let previous_status = item.status();
-
-    crate::runtime::task_sessions::close_ask_session(state, id).await;
 
     let old_session_id = item.session_ids.worker.clone();
     let outcome = state
@@ -243,7 +238,6 @@ async fn post_task_reopen_inner(
             .enqueue_task_effects(item.id, Some("human_reopen_review"), effects)
             .await
             .map_err(|e| internal_error(e, "failed to publish reopen side effects"))?;
-        crate::runtime::task_sessions::clear_advisor_session(state, id).await;
         return Ok(Json(api_types::BoolOkResponse { ok: true }));
     }
 
@@ -259,12 +253,10 @@ async fn post_task_reopen_inner(
         ));
     }
 
-    crate::runtime::task_sessions::clear_advisor_session(state, id).await;
     Ok(Json(api_types::BoolOkResponse { ok: true }))
 }
 
 /// POST /api/tasks/rework (JSON or multipart with optional images)
-#[crate::instrument_api(method = "POST", path = "/api/tasks/rework")]
 pub(crate) async fn post_task_rework(
     State(state): State<AppState>,
     request: axum::extract::Request,
@@ -283,8 +275,6 @@ async fn post_task_rework_inner(
 ) -> Result<Json<api_types::BoolOkResponse>, ApiError> {
     let id = body.id;
 
-    crate::runtime::task_sessions::close_ask_session(state, id).await;
-
     let old_pr_info: Option<(String, String)> = load_task_pr_close_info(state, id).await;
 
     state
@@ -292,8 +282,6 @@ async fn post_task_rework_inner(
         .rework_item(id, &body.feedback)
         .await
         .map_err(|e| map_task_action_error(e, "failed to rework task"))?;
-    crate::runtime::task_sessions::clear_advisor_session(state, id).await;
-
     if !body.saved_images.is_empty() {
         if let Err(e) = state
             .captain
@@ -320,7 +308,6 @@ async fn post_task_rework_inner(
 }
 
 /// POST /api/tasks/retry — re-trigger CaptainReviewing for Errored items.
-#[crate::instrument_api(method = "POST", path = "/api/tasks/retry")]
 pub(crate) async fn post_task_retry(
     State(state): State<AppState>,
     Json(body): Json<api_types::TaskIdRequest>,
@@ -337,7 +324,6 @@ pub(crate) async fn post_task_retry(
 /// POST /api/tasks/resume-rate-limited — clear global rate-limit cooldown and
 /// trigger a captain tick so that the identified task (and any others blocked
 /// by the cooldown) are picked up immediately.
-#[crate::instrument_api(method = "POST", path = "/api/tasks/resume-rate-limited")]
 pub(crate) async fn post_task_resume_rate_limited(
     State(state): State<AppState>,
     Json(body): Json<api_types::TaskIdRequest>,
@@ -389,7 +375,6 @@ pub(crate) async fn post_task_resume_rate_limited(
 }
 
 /// POST /api/tasks/handoff
-#[crate::instrument_api(method = "POST", path = "/api/tasks/handoff")]
 pub(crate) async fn post_task_handoff(
     State(state): State<AppState>,
     Json(body): Json<api_types::TaskIdRequest>,
@@ -401,7 +386,6 @@ pub(crate) async fn post_task_handoff(
 /// POST /api/tasks/stop — per-task stop. Kills the worker for this task only,
 /// transitions status to `stopped`, preserves the worktree for inspection.
 /// Reopen resumes the existing session in the existing worktree.
-#[crate::instrument_api(method = "POST", path = "/api/tasks/stop")]
 pub(crate) async fn post_task_stop(
     State(state): State<AppState>,
     Json(body): Json<api_types::TaskIdRequest>,

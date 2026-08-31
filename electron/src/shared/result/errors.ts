@@ -9,8 +9,7 @@ export type ApiError =
   | { code: 'network'; cause: string; where: string }
   | { code: 'timeout'; ms: number; where: string }
   | { code: 'ipc'; channel: string; cause: string }
-  | { code: 'io'; path: string; cause: string }
-  | { code: 'invariant'; message: string };
+  | { code: 'io'; path: string; cause: string };
 
 export function httpError(status: number, body: unknown, message: string): ApiError {
   return { code: 'http', status, body, message };
@@ -36,10 +35,6 @@ export function ioError(path: string, cause: unknown): ApiError {
   return { code: 'io', path, cause: errorMessage(cause) };
 }
 
-export function invariantError(message: string): ApiError {
-  return { code: 'invariant', message };
-}
-
 export function apiErrorMessage(err: ApiError): string {
   switch (err.code) {
     case 'http':
@@ -54,8 +49,6 @@ export function apiErrorMessage(err: ApiError): string {
       return `IPC ${err.channel} failed: ${err.cause}`;
     case 'io':
       return `IO error at ${err.path}: ${err.cause}`;
-    case 'invariant':
-      return `Invariant violated: ${err.message}`;
   }
 }
 

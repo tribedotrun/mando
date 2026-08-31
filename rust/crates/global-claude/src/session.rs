@@ -5,7 +5,7 @@
 
 use std::path::PathBuf;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tracing::{info, warn};
 
@@ -35,22 +35,8 @@ impl CcSession {
     pub async fn spawn(config: CcConfig) -> Result<Self, CcError> {
         let session_id = config.effective_session_id();
 
-        let (mut child, pid, stream_path, _stderr_path) =
+        let (mut child, pid, stream_path, stream_file) =
             crate::process::spawn_process(&config, &session_id).await?;
-
-        // Open stream file for tee-writing stdout lines.
-        let stream_file = if config.resume_session_id.is_some() {
-            std::fs::File::options()
-                .create(true)
-                .append(true)
-                .open(&stream_path)
-                .with_context(|| format!("open stream for tee: {}", stream_path.display()))
-                .map_err(CcError::Other)?
-        } else {
-            std::fs::File::create(&stream_path)
-                .with_context(|| format!("create stream for tee: {}", stream_path.display()))
-                .map_err(CcError::Other)?
-        };
 
         // Write meta sidecar.
         crate::write_stream_meta(
@@ -267,7 +253,7 @@ impl CcSession {
         let stream_size = std::fs::metadata(&self.stream_path)
             .map(|m| m.len())
             .unwrap_or(u64::MAX);
-        let pid_alive = crate::process::is_process_alive(self.pid);
+        let pid_alive = crate::is_process_alive(self.pid);
         tracing::warn!(
             module = "mando-cc",
             session_id = %self.session_id,
@@ -331,8 +317,14 @@ impl CcSession {
     ) -> Result<CcResult<serde_json::Value>, CcError> {
         let cost = result.total_cost_usd;
         let duration = result.duration_ms.or(Some(elapsed.as_millis() as u64));
+        let interruption_was_requested = stream_has_interrupted_result(&self.stream_path);
 
-        match Self::classify_result_message(result, &self.session_id, self.config.credential_id) {
+        match Self::classify_result_message_after_stop(
+            result,
+            &self.session_id,
+            self.config.credential_id,
+            interruption_was_requested,
+        ) {
             Ok(mut classified) => {
                 crate::update_stream_meta_status(&classified.session_id, "done", cost);
                 info!(
@@ -351,23 +343,34 @@ impl CcSession {
                 Ok(classified)
             }
             Err(err) => {
-                if let CcError::ApiError {
-                    api_error_status,
-                    message,
-                    session_id,
-                    credential_id,
-                } = &err
-                {
-                    warn!(
-                        module = "mando-cc",
-                        caller = %self.config.caller,
-                        session_id = %session_id,
-                        api_error_status = ?api_error_status,
-                        credential_id = ?credential_id,
-                        error = %message,
-                        "session ended with is_error=true — failing closed"
-                    );
-                    crate::update_stream_meta_status(session_id, "failed", None);
+                match &err {
+                    CcError::Interrupted { session_id } => {
+                        info!(
+                            module = "mando-cc",
+                            caller = %self.config.caller,
+                            %session_id,
+                            "session interrupted before successful completion"
+                        );
+                        crate::update_stream_meta_status(session_id, "stopped", None);
+                    }
+                    CcError::ApiError {
+                        api_error_status,
+                        message,
+                        session_id,
+                        credential_id,
+                    } => {
+                        warn!(
+                            module = "mando-cc",
+                            caller = %self.config.caller,
+                            session_id = %session_id,
+                            api_error_status = ?api_error_status,
+                            credential_id = ?credential_id,
+                            error = %message,
+                            "session ended with is_error=true — failing closed"
+                        );
+                        crate::update_stream_meta_status(session_id, "failed", None);
+                    }
+                    _ => {}
                 }
                 Err(err)
             }
@@ -390,20 +393,36 @@ impl CcSession {
     }
 
     /// Classify a parsed `ResultMessage` into either a successful `CcResult`
-    /// envelope or a typed `CcError::ApiError`. Pulled out of `build_result`
-    /// so the fixture test can exercise it without constructing a real CC
-    /// subprocess. `fallback_sid` is used when the envelope omits a session
-    /// id (recovered streams sometimes do this).
+    /// envelope or a typed terminal error. Pulled out of `build_result` so the
+    /// fixture test can exercise it without constructing a real CC subprocess.
+    /// `fallback_sid` is used when the envelope omits a session id (recovered
+    /// streams sometimes do this).
+    #[cfg(test)]
     pub(crate) fn classify_result_message(
         result: ResultMessage,
         fallback_sid: &str,
         credential_id: Option<i64>,
+    ) -> Result<CcResult<serde_json::Value>, CcError> {
+        Self::classify_result_message_after_stop(result, fallback_sid, credential_id, false)
+    }
+
+    fn classify_result_message_after_stop(
+        result: ResultMessage,
+        fallback_sid: &str,
+        credential_id: Option<i64>,
+        interruption_was_requested: bool,
     ) -> Result<CcResult<serde_json::Value>, CcError> {
         let actual_sid = if result.session_id.is_empty() {
             fallback_sid.to_string()
         } else {
             result.session_id.clone()
         };
+
+        if interruption_was_requested || result.subtype == api_types::ResultOutcome::Interrupted {
+            return Err(CcError::Interrupted {
+                session_id: actual_sid,
+            });
+        }
 
         if result.is_error {
             let api_error_status = result
@@ -455,11 +474,26 @@ impl CcSession {
             Ok(Err(e)) => warn!(module = "mando-cc", %e, "wait error on close"),
             Err(_) => {
                 // Timeout — kill.
-                crate::process::kill_process(self.pid).await?;
+                crate::kill_process(self.pid).await?;
             }
         }
         Ok(())
     }
+}
+
+fn stream_has_interrupted_result(stream_path: &std::path::Path) -> bool {
+    let Some((content, last_init_index)) = crate::stream::current_session_lines(stream_path) else {
+        return false;
+    };
+    content.lines().skip(last_init_index).any(|line| {
+        serde_json::from_str::<serde_json::Value>(line)
+            .ok()
+            .is_some_and(|value| {
+                value.get("type").and_then(|kind| kind.as_str()) == Some("result")
+                    && crate::stream::result_outcome(&value)
+                        == api_types::ResultOutcome::Interrupted
+            })
+    })
 }
 
 #[cfg(test)]
@@ -545,6 +579,46 @@ mod tests {
             .expect("success envelope should decode to CcResult");
         assert_eq!(ok.session_id, "sess-ok");
         assert_eq!(ok.text, "done");
+    }
+
+    #[test]
+    fn returns_interrupted_error_on_interrupted_envelope() {
+        let val = serde_json::json!({
+            "type": "result",
+            "subtype": "interrupted",
+            "is_error": false,
+            "result": "stopped",
+            "session_id": "sess-interrupted"
+        });
+        let result = parse_result_value(val);
+
+        let err = CcSession::classify_result_message(result, "fallback", None)
+            .expect_err("interrupted envelope must not become a successful CcResult");
+
+        assert!(matches!(
+            err,
+            CcError::Interrupted { session_id } if session_id == "sess-interrupted"
+        ));
+    }
+
+    #[test]
+    fn requested_interruption_wins_over_later_provider_error() {
+        let val = serde_json::json!({
+            "type": "result",
+            "subtype": "error_during_execution",
+            "is_error": true,
+            "result": "process exited while being terminated",
+            "session_id": "sess-stopped"
+        });
+        let result = parse_result_value(val);
+
+        let err = CcSession::classify_result_message_after_stop(result, "fallback", None, true)
+            .expect_err("an explicit stop must supersede the provider shutdown error");
+
+        assert!(matches!(
+            err,
+            CcError::Interrupted { session_id } if session_id == "sess-stopped"
+        ));
     }
 
     #[test]

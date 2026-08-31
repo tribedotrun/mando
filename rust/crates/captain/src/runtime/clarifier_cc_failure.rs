@@ -70,6 +70,14 @@ pub(super) async fn log_reclarify_failure(
     cwd: &std::path::Path,
     e: &global_claude::CcError,
 ) {
+    if matches!(e, global_claude::CcError::Interrupted { .. }) {
+        tracing::info!(
+            module = "clarifier",
+            task_id = item.id,
+            "reclarify session interrupted"
+        );
+        return;
+    }
     let (session_id, api_error_status) = match e {
         global_claude::CcError::ApiError {
             session_id,

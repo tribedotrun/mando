@@ -4,7 +4,7 @@ import { assembleProjectChildren, type SidebarChild } from '#renderer/global/ser
 import { useConfig } from '#renderer/global/repo/queries';
 import { useTaskList, useWorkbenchList } from '#renderer/domains/captain/runtime/hooks';
 
-export interface SidebarData {
+interface SidebarData {
   pinnedItems: PinnedEntry[];
   projectCounts: Record<string, number>;
   projectChildren: Record<string, SidebarChild[]>;

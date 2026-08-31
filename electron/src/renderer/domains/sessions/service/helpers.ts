@@ -20,7 +20,6 @@ const CALLER_MAP: Record<string, string> = Object.freeze({
   clarify_started: 'clarifier',
   clarify_resolved: 'clarifier',
   clarify_question: 'clarifier',
-  human_ask: 'task-ask',
   rebase_triggered: 'rebase',
 });
 
@@ -58,7 +57,7 @@ export function buildSessionsFromTimeline(
     });
   }
   // Merge DB-sourced sessions not referenced by any timeline event (e.g.
-  // advisor, auto-merge-triage sessions that have task_id set
+  // auto-merge-triage sessions that have task_id set
   // but no timeline event carries their session_id).
   for (const [sid, s] of Object.entries(sessionMap)) {
     if (!seen.has(sid)) {
@@ -102,8 +101,6 @@ const CALLER_LABELS: Record<string, string> = Object.freeze({
   clarifier: 'clarifier',
   'captain-review-async': 'captain review',
   'captain-merge-async': 'captain merge',
-  'task-ask': 'ask',
-  advisor: 'advisor',
   'auto-merge-triage': 'merge triage',
   'scout-process': 'scout',
   'scout-article': 'article',
@@ -113,26 +110,9 @@ const CALLER_LABELS: Record<string, string> = Object.freeze({
   rebase: 'rebase',
 });
 
-/** Prefix-to-canonical mapping for callers with embedded IDs. */
-const CALLER_PREFIXES: readonly (readonly [string, string])[] = Object.freeze([
-  ['advisor:', 'advisor'],
-  ['task-ask:', 'task-ask'],
-] as const);
-
 export function formatCallerLabel(caller: string): string {
-  let label: string;
   const direct = CALLER_LABELS[caller];
-  if (direct) {
-    label = direct;
-  } else {
-    label = caller;
-    for (const [prefix, canonical] of CALLER_PREFIXES) {
-      if (caller.startsWith(prefix)) {
-        label = CALLER_LABELS[canonical] ?? canonical;
-        break;
-      }
-    }
-  }
+  const label = direct ?? caller;
   return label.charAt(0).toUpperCase() + label.slice(1);
 }
 

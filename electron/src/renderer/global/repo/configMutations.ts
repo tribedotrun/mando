@@ -50,7 +50,7 @@ export function useProjectAdd() {
 // useProjectEdit
 // ---------------------------------------------------------------------------
 
-export interface ProjectEditInput {
+interface ProjectEditInput {
   /** Current project name (used in the URL path). */
   currentName: string;
   rename?: string;

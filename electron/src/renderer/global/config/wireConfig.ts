@@ -13,7 +13,7 @@ export const DEFAULT_DASHBOARD_HOST = '127.0.0.1';
 export const DEFAULT_DASHBOARD_PORT = 18791;
 export const DEFAULT_TICK_INTERVAL_S = 30;
 export const DEFAULT_TASK_AGENT = 'codex';
-export const DEFAULT_GLM_IMPLEMENTATION = false;
+const DEFAULT_GLM_IMPLEMENTATION = false;
 
 export interface OnboardingConfigOpts {
   tgToken?: string;

@@ -11,7 +11,7 @@ interface UseScoutTableRowOptions {
   isExpanded: boolean;
 }
 
-export interface ScoutTableRowData {
+interface ScoutTableRowData {
   summaryContent: string | null | undefined;
   summaryLoading: boolean;
   summaryError: string | undefined;

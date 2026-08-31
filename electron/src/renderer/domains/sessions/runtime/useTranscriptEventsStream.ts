@@ -13,7 +13,7 @@ import type {
 import { queryKeys } from '#renderer/global/repo/queryKeys';
 import log from '#renderer/global/service/logger';
 
-export interface TranscriptEventsFeed {
+interface TranscriptEventsFeed {
   data: TranscriptEventsResponse | undefined;
   isLoading: boolean;
   error: Error | null;

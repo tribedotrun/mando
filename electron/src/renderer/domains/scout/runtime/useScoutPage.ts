@@ -40,7 +40,7 @@ interface ScoutPageOptions {
   onBackToList?: () => void;
 }
 
-export interface ScoutPageState {
+interface ScoutPageState {
   query: {
     params: ScoutQueryParams;
     set: (params: Partial<ScoutQueryParams>) => void;

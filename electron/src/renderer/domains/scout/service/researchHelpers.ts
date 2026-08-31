@@ -77,7 +77,7 @@ export function scoutItemTitle(item: Pick<ScoutItem, 'title' | 'status'>): strin
   return item.title || (item.status === 'pending' ? 'Pending processing\u2026' : 'Untitled');
 }
 
-export interface StatusBadgeConfig {
+interface StatusBadgeConfig {
   variant: 'outline' | 'secondary' | 'destructive';
   label: string;
   spinning: boolean;

@@ -2,6 +2,7 @@
 
 use super::loader::parse_config;
 use super::settings::Config;
+use super::ConfigError;
 use global_infra::ids::slugify;
 use global_infra::paths::expand_tilde;
 use std::path::Path;
@@ -51,17 +52,7 @@ fn parse_full_config() {
             "tickIntervalS": 60,
             "tz": "UTC",
             "defaultTaskAgent": "codex",
-            "defaultGlmImplementation": true,
-            "projects": {
-                "/code/repo": {
-                    "name": "repo",
-                    "path": "/code/repo",
-                    "githubRepo": "org/repo",
-                    "aliases": ["rp", "repo"],
-                    "hooks": { "pre_spawn": "echo hi" },
-                    "workerPreamble": "be careful"
-                }
-            }
+            "defaultGlmImplementation": true
         },
         "env": {
             "TELEGRAM_MANDO_BOT_TOKEN": "tok-123",
@@ -86,7 +77,7 @@ fn parse_full_config() {
     assert_eq!(cfg.gateway.dashboard.host, "0.0.0.0");
     assert_eq!(cfg.gateway.dashboard.port, 8080);
 
-    // Captain (projects are serde(skip) -- loaded from DB, not config.json)
+    // Captain (projects are runtime-only and loaded from DB, not config.json)
     assert!(cfg.captain.auto_schedule);
     assert_eq!(cfg.captain.tick_interval_s, 60);
     assert!(cfg.captain.default_glm_implementation);
@@ -154,16 +145,31 @@ fn parse_config_partial_overrides_selected_fields() {
 }
 
 #[test]
-fn parse_config_unknown_keys_in_top_level_ignored() {
-    // Fields not present on Config silently drop (no deny_unknown_fields on
-    // settings structs). Kept loose on purpose so old fields from prior
-    // versions don't break boot.
+fn parse_config_rejects_unknown_top_level_key_with_its_name() {
     let json = r#"{ "legacyField": 42 }"#;
-    let cfg = parse_config(json, Path::new("test.json"));
+    let error = parse_config(json, Path::new("test.json"))
+        .expect_err("unknown top-level key must fail at load");
+    assert_unknown_json_key(error, "legacyField");
+}
+
+#[test]
+fn parse_config_rejects_unknown_nested_key_with_its_name() {
+    let json = r#"{ "ui": { "openAtLoginTypo": true } }"#;
+    let error =
+        parse_config(json, Path::new("test.json")).expect_err("unknown nested key must fail");
+    assert_unknown_json_key(error, "openAtLoginTypo");
+}
+
+fn assert_unknown_json_key(error: ConfigError, key: &str) {
+    let ConfigError::JsonParse {
+        source: json_parse, ..
+    } = error
+    else {
+        panic!("expected JSON parse error for {key}");
+    };
     assert!(
-        cfg.is_ok(),
-        "unknown top-level key should not error: {:?}",
-        cfg.err()
+        json_parse.to_string().contains(key),
+        "JSON parse error did not name {key}: {json_parse}"
     );
 }
 

@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use super::EventMeta;
+use crate::TranscriptUsageInfo;
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -113,4 +114,15 @@ pub struct SystemRateLimitEvent {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SystemThinkingTokensEvent {
     pub meta: EventMeta,
+}
+
+/// Codex app-server running token totals. The transcript viewer hides this
+/// progress event from the message flow while using it for the session header.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SystemTokenUsageEvent {
+    pub meta: EventMeta,
+    pub usage: TranscriptUsageInfo,
+    #[ts(type = "number | null")]
+    pub context_window: Option<u64>,
 }

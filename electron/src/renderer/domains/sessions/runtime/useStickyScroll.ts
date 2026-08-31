@@ -12,7 +12,7 @@ const BOTTOM_EPSILON_PX = 24;
  * scroll listener only calls `setIsAtBottom` when the boolean actually
  * flips, so keeping state instead of a ref costs nothing on the hot path.
  */
-export interface StickyScrollHandle {
+interface StickyScrollHandle {
   scrollRef: React.RefObject<HTMLDivElement | null>;
   isAtBottom: boolean;
   scrollToBottom: (smooth?: boolean) => void;

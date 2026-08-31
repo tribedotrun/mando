@@ -1,7 +1,6 @@
 import { useCallback } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { queryKeys } from '#renderer/global/repo/queryKeys';
-import type { MandoConfig } from '#renderer/global/types';
 
 export { useConfig } from '#renderer/global/repo/queries';
 export {
@@ -34,22 +33,7 @@ export {
   useCodexCredentialUpdateAuth,
 } from '#renderer/domains/settings/runtime/useFeedbackUpdateCredentialAuth';
 
-export {
-  useFeedbackCodexLogin,
-  type UseFeedbackCodexLoginResult,
-} from '#renderer/domains/settings/runtime/useFeedbackCodexLogin';
-
-/**
- * Returns a stable callback that reads the latest config from the React Query cache.
- * Returns `null` when the cache hasn't loaded the config yet — callers should defend.
- */
-export function useConfigSnapshot() {
-  const qc = useQueryClient();
-  return useCallback(
-    (): MandoConfig | null => qc.getQueryData<MandoConfig>(queryKeys.config.current()) ?? null,
-    [qc],
-  );
-}
+export { useFeedbackCodexLogin } from '#renderer/domains/settings/runtime/useFeedbackCodexLogin';
 
 export { useConfigPatch } from '#renderer/global/runtime/useConfigPatch';
 export { useLoginItemToggle } from '#renderer/domains/settings/runtime/useLoginItemToggle';
@@ -58,7 +42,6 @@ export {
   useUpdateSystemInfo,
   useTelegramHealth,
   type TelegramHealth,
-  type UpdateSystemInfo,
 } from '#renderer/domains/settings/repo/queries';
 
 /** Invalidates all config queries. Wraps queryKeys so UI never imports repo. */

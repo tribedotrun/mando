@@ -15,7 +15,7 @@ import {
   writeDraftToSlot,
 } from '#renderer/global/runtime/useTextImageDraft.slots';
 
-export interface TextImageDraftState {
+interface TextImageDraftState {
   text: string;
   setText: (v: string) => void;
   image: File | null;
@@ -31,7 +31,7 @@ export interface TextImageDraftState {
   clearDraftStorage: () => void;
 }
 
-export interface TextImageDraftOptions {
+interface TextImageDraftOptions {
   /**
    * Legacy `mando:draft:<suffix>` text-only key to seed from on first v2 read.
    * Cleared after seeding so the two draft systems never run in parallel.

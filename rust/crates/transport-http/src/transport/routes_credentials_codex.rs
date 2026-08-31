@@ -65,7 +65,6 @@ pub(crate) fn codex_credential_routes() -> ApiRouter<AppState> {
 
 /// GET /api/credentials/codex/:id/reset-credits — return available Codex
 /// rate-limit reset credits for one stored OAuth credential.
-#[crate::instrument_api(method = "GET", path = "/api/credentials/codex/{id}/reset-credits")]
 async fn get_codex_reset_credits(
     State(state): State<AppState>,
     axum::extract::Path(api_types::CredentialIdParams { id }): axum::extract::Path<
@@ -123,7 +122,6 @@ async fn get_codex_reset_credits(
 
 /// POST /api/credentials/codex — paste an auth.json blob, validate, probe,
 /// store. Returns 201 with the new credential id, account_id, plan_type.
-#[crate::instrument_api(method = "POST", path = "/api/credentials/codex")]
 async fn add_codex_credential(
     State(state): State<AppState>,
     Json(body): Json<api_types::AddCodexCredentialRequest>,
@@ -210,7 +208,6 @@ fn map_codex_store_error(e: CodexCredentialError) -> ApiError {
 /// existing Codex credential with a freshly captured auth.json for the SAME
 /// ChatGPT account. Runs the full add pipeline against the row's existing
 /// label (validate, force-refresh, upsert same row, probe usage).
-#[crate::instrument_api(method = "POST", path = "/api/credentials/codex/{id}/auth")]
 async fn update_codex_credential_auth(
     State(state): State<AppState>,
     axum::extract::Path(api_types::CredentialIdParams { id }): axum::extract::Path<
@@ -263,7 +260,6 @@ async fn update_codex_credential_auth(
 /// tokens before returning; never writes `~/.codex/auth.json`. Fix 5: also
 /// notifies (the same message the usage-poll poller uses) for every
 /// candidate the pick walk itself marked expired.
-#[crate::instrument_api(method = "POST", path = "/api/credentials/codex/pick")]
 async fn pick_codex_credential(
     State(state): State<AppState>,
     Json(body): Json<api_types::CredentialPickRequest>,
@@ -346,7 +342,6 @@ async fn pick_codex_credential(
 
 /// POST /api/credentials/codex/sync — read refreshed tokens from a temp
 /// `CODEX_HOME/auth.json` and persist them on the picked credential row.
-#[crate::instrument_api(method = "POST", path = "/api/credentials/codex/sync")]
 async fn sync_codex_credential(
     State(state): State<AppState>,
     Json(body): Json<api_types::SyncCodexCredentialRequest>,

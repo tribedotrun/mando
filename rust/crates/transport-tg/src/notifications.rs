@@ -10,13 +10,10 @@ use std::collections::HashMap;
 use anyhow::Result;
 use tracing::{debug, warn};
 
-use api_types::{
-    InlineKeyboardButton, NotificationKind, NotificationPayload, NotifyLevel, TelegramReplyMarkup,
-};
+use api_types::{InlineKeyboardButton, NotificationKind, NotificationPayload, TelegramReplyMarkup};
 
 use crate::api::TelegramApi;
 use crate::assistant::formatting::{format_swipe_card, swipe_card_kb};
-use crate::gateway_paths as paths;
 use crate::http::GatewayClient;
 use crate::PendingMessages;
 
@@ -31,8 +28,6 @@ pub struct NotificationHandler {
     /// imports them into `task_messages` so it edits the "processing..."
     /// message instead of creating a duplicate.
     pending: PendingMessages,
-    /// Minimum level to actually send. Below this we log and skip.
-    min_level: NotifyLevel,
 }
 
 impl NotificationHandler {
@@ -49,31 +44,14 @@ impl NotificationHandler {
             gw,
             task_messages: HashMap::new(),
             pending,
-            min_level: NotifyLevel::Normal,
         }
-    }
-
-    /// Set the minimum notification level (quiet mode threshold).
-    #[allow(dead_code)]
-    pub fn set_min_level(&mut self, level: NotifyLevel) {
-        self.min_level = level;
     }
 
     /// Handle an incoming notification payload.
     ///
     /// Sends a new message or edits an existing one (if `task_key` matches a
-    /// previously-sent message). Respects quiet-mode by filtering on `min_level`.
+    /// previously-sent message).
     pub async fn handle(&mut self, payload: NotificationPayload) {
-        // Quiet-mode filter.
-        if payload.level < self.min_level {
-            debug!(
-                level = ?payload.level,
-                min = ?self.min_level,
-                "notification below threshold, skipping"
-            );
-            return;
-        }
-
         // Import any pre-registered message from add_and_track so we can
         // edit the "processing..." message instead of duplicating it.
         if let Some(task_key) = &payload.task_key {
@@ -235,7 +213,7 @@ impl NotificationHandler {
     async fn handle_scout_processed(&mut self, scout_id: i64, task_key: &Option<String>) {
         let item = match self
             .gw
-            .get_typed::<api_types::ScoutItem>(&paths::scout_item(scout_id))
+            .get_scout_items_by_id(&api_types::ScoutItemIdParams { id: scout_id })
             .await
         {
             Ok(v) => v,
@@ -340,9 +318,6 @@ impl NotificationHandler {
             NotificationKind::ScoutProcessFailed { scout_id, .. } => {
                 Some(single_button("Retry", format!("dg:process:{scout_id}")))
             }
-            NotificationKind::AdvisorAnswered { item_id, .. } => {
-                Some(single_button("View", format!("view:{item_id}")))
-            }
             _ => None,
         }
     }
@@ -363,6 +338,7 @@ fn single_button(text: impl Into<String>, callback_data: impl Into<String>) -> T
 #[cfg(test)]
 mod tests {
     use super::*;
+    use api_types::NotifyLevel;
     use std::sync::{Arc, Mutex};
 
     fn test_handler() -> NotificationHandler {
@@ -466,12 +442,5 @@ mod tests {
         }
         assert_eq!(handler.task_messages.get("scout:42"), Some(&99999));
         assert!(pending.lock().unwrap().is_empty());
-    }
-
-    #[test]
-    fn below_threshold_filtered() {
-        let mut handler = test_handler();
-        handler.set_min_level(NotifyLevel::High);
-        assert!(NotifyLevel::Normal < NotifyLevel::High);
     }
 }

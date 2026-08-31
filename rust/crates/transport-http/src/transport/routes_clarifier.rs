@@ -9,8 +9,6 @@ use axum::http::StatusCode;
 use axum::Json;
 use futures_util::FutureExt;
 
-use captain::ClarifierStatus;
-
 use crate::response::{error_response, internal_error, ApiError};
 use crate::AppState;
 
@@ -28,7 +26,6 @@ use crate::AppState;
 /// state arrives via SSE for the renderer and via typed notification for
 /// TG; rollback after async failure also emits a `NeedsClarification`
 /// notification so TG can re-prompt.
-#[crate::instrument_api(method = "POST", path = "/api/tasks/{id}/clarify")]
 pub(crate) async fn post_task_clarify(
     State(state): State<AppState>,
     Path(api_types::TaskIdParams { id }): Path<api_types::TaskIdParams>,
@@ -200,8 +197,6 @@ async fn post_task_clarify_inner(
         .await
     {
         Ok(result) => {
-            let response_outcome = result.status.clone();
-            let response_context = Some(result.context.clone());
             let response_session_id = result.session_id.clone();
             let questions = match result.questions.as_ref() {
                 Some(questions) => Some(
@@ -224,12 +219,12 @@ async fn post_task_clarify_inner(
                 captain::ItemStatus::NeedsClarification => api_types::ClarifyOutcome::Clarifying,
                 captain::ItemStatus::CaptainReviewing => api_types::ClarifyOutcome::Escalate,
                 captain::ItemStatus::CompletedNoPr => api_types::ClarifyOutcome::Answered,
-                _ => match response_outcome {
-                    ClarifierStatus::Ready => api_types::ClarifyOutcome::Ready,
-                    ClarifierStatus::Clarifying => api_types::ClarifyOutcome::Clarifying,
-                    ClarifierStatus::Escalate => api_types::ClarifyOutcome::Escalate,
-                    ClarifierStatus::Answered => api_types::ClarifyOutcome::Answered,
-                },
+                status => {
+                    return Err(internal_error(
+                        anyhow::anyhow!("unexpected post-clarifier status: {status}"),
+                        "failed to apply clarification result",
+                    ));
+                }
             };
 
             state.captain.broadcast_task_update(id).await;
@@ -237,7 +232,7 @@ async fn post_task_clarify_inner(
             Ok(Json(api_types::ClarifyResponse {
                 ok: true,
                 status,
-                context: item.context.clone().or(response_context),
+                context: item.context.clone(),
                 questions,
                 session_id: response_session_id,
                 error: None,

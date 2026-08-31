@@ -32,6 +32,10 @@ fn make_filter() -> EnvFilter {
 /// Initialize the tracing subscriber.
 ///
 /// - `foreground`: if true, fmt layer writes to stderr; otherwise to a rolling file.
+#[allow(
+    clippy::print_stderr,
+    reason = "telemetry setup failures occur before the tracing subscriber is installed"
+)]
 pub fn init_tracing(foreground: bool) {
     let mut layers: Vec<BoxLayer> = Vec::new();
 
@@ -127,11 +131,20 @@ mod otlp {
     pub(super) fn shutdown() {
         if let Some(provider) = TRACER_PROVIDER.get() {
             if let Err(e) = provider.shutdown() {
-                eprintln!("OTLP tracer shutdown error: {e}");
+                tracing::error!(
+                    target: "mando.telemetry",
+                    module = "telemetry",
+                    error = ?e,
+                    "OTLP tracer shutdown failed"
+                );
             }
         }
     }
 
+    #[allow(
+        clippy::print_stderr,
+        reason = "the OTLP layer is built before the tracing subscriber is installed"
+    )]
     pub(super) fn init_otel_layer() -> Option<BoxLayer> {
         let endpoint = std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT").ok()?;
         if endpoint.is_empty() {

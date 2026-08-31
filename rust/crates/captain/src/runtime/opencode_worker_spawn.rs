@@ -41,9 +41,7 @@ pub(super) async fn spawn_worker(
         cwd: &wt_path,
         prompt: &prompt,
         resume_session_id: None,
-        stage: workflow
-            .stages
-            .require(settings::WorkflowStage::Implementation),
+        stage: &workflow.stages.implementation,
         resumed: false,
     })
     .await?;

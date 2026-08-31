@@ -9,7 +9,7 @@ import {
   type CodexLoginFlowInfo,
 } from '#renderer/domains/settings/repo/credentialsCodex';
 
-export interface UseFeedbackCodexLoginResult {
+interface UseFeedbackCodexLoginResult {
   flow: CodexLoginFlowInfo | null;
   actions: {
     start: (opts?: { credentialId?: number }) => void;

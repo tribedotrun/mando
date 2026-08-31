@@ -110,7 +110,7 @@ export function defineJsonSlot<T>(
   };
 }
 
-export interface PersistedKeyspace {
+interface PersistedKeyspace {
   readonly prefix: string;
   for(suffix: string): PersistedSlot;
 }
@@ -124,7 +124,7 @@ export function defineKeyspace(prefix: string, owner: string): PersistedKeyspace
   };
 }
 
-export interface PersistedJsonKeyspace<T> {
+interface PersistedJsonKeyspace<T> {
   readonly prefix: string;
   for(suffix: string): PersistedJsonSlot<T>;
 }
@@ -152,7 +152,7 @@ export function defineJsonKeyspace<T>(
  * were already persisted without a prefix. Callers introducing a fresh
  * integration should pass a real prefix (e.g., `'panel:'`).
  */
-export interface PrefixedStorage {
+interface PrefixedStorage {
   getItem(key: string): string | null;
   setItem(key: string, value: string): void;
   removeItem(key: string): void;
@@ -161,7 +161,7 @@ export interface PrefixedStorage {
   clear(): void;
 }
 
-export function createPrefixedStorage(prefix: string, owner: string): PrefixedStorage {
+function createPrefixedStorage(prefix: string, owner: string): PrefixedStorage {
   const full = (k: string) => `${prefix}${k}`;
   return {
     getItem(key: string): string | null {

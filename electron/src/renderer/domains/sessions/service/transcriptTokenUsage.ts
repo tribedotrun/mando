@@ -1,21 +1,26 @@
 import type { TranscriptEvent, TranscriptUsageInfo } from '#renderer/global/types';
 import { parseJsonText } from '#result';
 
-export interface TranscriptTokenUsageSummary extends TranscriptUsageInfo {
+interface TranscriptTokenUsageSummary extends TranscriptUsageInfo {
   totalTokens: number;
-  source: 'result' | 'token_usage_event' | 'assistant_sum';
+  source: 'result' | 'system_token_usage' | 'token_usage_event' | 'assistant_sum';
 }
 
 export function summarizeTranscriptTokenUsage(
   events: readonly TranscriptEvent[],
 ): TranscriptTokenUsageSummary | null {
   let resultUsage: TranscriptUsageInfo | null = null;
+  let systemTokenUsage: TranscriptUsageInfo | null = null;
   let tokenUsageEvent: TranscriptTokenUsageSummary | null = null;
   let assistantSum: TranscriptUsageInfo | null = null;
 
   for (const event of events) {
     if (event.kind === 'result' && event.data.summary.usage) {
       resultUsage = event.data.summary.usage;
+      continue;
+    }
+    if (event.kind === 'system_token_usage') {
+      systemTokenUsage = event.data.usage;
       continue;
     }
     if (event.kind === 'unknown') {
@@ -28,7 +33,10 @@ export function summarizeTranscriptTokenUsage(
   }
 
   return (
-    tokenUsageEvent ?? withTotal(resultUsage, 'result') ?? withTotal(assistantSum, 'assistant_sum')
+    withTotal(systemTokenUsage, 'system_token_usage') ??
+    tokenUsageEvent ??
+    withTotal(resultUsage, 'result') ??
+    withTotal(assistantSum, 'assistant_sum')
   );
 }
 
@@ -45,7 +53,7 @@ export function formatUsageBreakdown(usage: TranscriptUsageInfo): string {
   ].join(' · ');
 }
 
-export function totalUsageTokens(usage: TranscriptUsageInfo): number {
+function totalUsageTokens(usage: TranscriptUsageInfo): number {
   return (
     usage.input_tokens + usage.output_tokens + usage.cache_read_tokens + usage.cache_creation_tokens
   );
@@ -102,6 +110,10 @@ function summaryFromUsageRecord(
       'cache_creation_input_tokens',
     ]),
   };
+  info.input_tokens = Math.max(
+    0,
+    info.input_tokens - info.cache_read_tokens - info.cache_creation_tokens,
+  );
   const totalTokens = tokenCount(usage, ['totalTokens', 'total_tokens']) || totalUsageTokens(info);
   if (totalTokens <= 0) return null;
   return { ...info, totalTokens, source: 'token_usage_event' };
